@@ -8,12 +8,18 @@
 //!
 //! The block model here is complete — typed block parameters, `Jump` and
 //! `Branch` terminators, a verifier, and three backends that emit real
-//! branches for it — but nothing outside the tests that qualify it builds a
-//! multi-block program yet. The shipped route is still the postfix lift and
-//! its select form of a conditional, so the items marked
-//! `cfg_attr(not(test), allow(dead_code))` below are the ones whose only
-//! constructor today is a test. W-C3 (digital process control flow) and
-//! W-D/W-F (the flip) are what give them a shipped one.
+//! branches for it — and since W-F3c the shipped route builds multi-block
+//! programs with it: the default plan's residual, Jacobian and
+//! reactive-Jacobian entries come off the CFG through [`ProgramBuilder`], so
+//! `Terminator`, `Edge` and the whole builder are shipped constructors now.
+//!
+//! What remains marked `cfg_attr(not(test), allow(dead_code))` below is the
+//! *other* way to a block program: [`Program::with_branching_conditionals`] and
+//! its splitter re-express a postfix lift's select form as a diamond, and only
+//! the branch-agreement census builds one. W-C3 (digital process control flow)
+//! is what gives that a shipped constructor. The three small accessors marked
+//! the same way — a block parameter's value, a terminator's edge count, a
+//! program's block-parameter count — are read by the verifier's own tests.
 
 #![cfg_attr(not(feature = "native"), allow(dead_code))]
 
@@ -118,7 +124,6 @@ pub(crate) struct Edge {
     arguments: Box<[ValueId]>,
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 impl Edge {
     pub(crate) fn new(target: BlockId, arguments: impl Into<Box<[ValueId]>>) -> Self {
         Self {
@@ -139,7 +144,6 @@ impl Edge {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) enum Terminator {
     Return(ValueId),
     Jump(Edge),
@@ -1479,8 +1483,8 @@ impl DominatorTree {
 }
 
 /// Which conditional arm exclusively consumes an instruction's result.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(not(test), allow(dead_code))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct ArmOwner {
     conditional: usize,
     taken: bool,
@@ -2063,7 +2067,6 @@ impl AssignmentProgram {
 /// resolving both in [`ProgramBuilder::finish`] keeps that rule in the one
 /// module that owns it, rather than obliging every producer to reproduce it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) enum BuilderValue {
     Instruction(usize),
     Parameter(usize),
@@ -2071,7 +2074,6 @@ pub(crate) enum BuilderValue {
 
 /// How a block under construction ends.
 #[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) enum BuilderTerminator {
     Return(BuilderValue),
     Jump {
@@ -2088,7 +2090,6 @@ pub(crate) enum BuilderTerminator {
 }
 
 #[derive(Debug)]
-#[cfg_attr(not(test), allow(dead_code))]
 struct BuilderBlock {
     parameter_start: usize,
     parameter_end: usize,
@@ -2098,7 +2099,6 @@ struct BuilderBlock {
 }
 
 #[derive(Debug)]
-#[cfg_attr(not(test), allow(dead_code))]
 struct BuilderInstruction {
     op: NativeOp,
     operands: Box<[BuilderValue]>,
@@ -2114,7 +2114,6 @@ struct BuilderInstruction {
 /// is laid out in the same order. Filling the blocks afterwards, in order, is
 /// what keeps those two facts true by construction instead of by assertion.
 #[derive(Debug)]
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) struct ProgramBuilder {
     blocks: Vec<BuilderBlock>,
     parameter_types: Vec<ValueType>,
@@ -2122,7 +2121,6 @@ pub(crate) struct ProgramBuilder {
     open: Option<usize>,
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 impl ProgramBuilder {
     /// Open a builder over `blocks` blocks, the n-th taking the parameter
     /// types in `parameters[n]`.

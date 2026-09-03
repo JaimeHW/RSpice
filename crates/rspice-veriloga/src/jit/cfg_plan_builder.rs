@@ -1,15 +1,17 @@
-//! The CFG route's model plan.
+//! The CFG route's model plan, and the plan production compiles.
 //!
 //! [`build_model_plan_with_canonical_ir`] lowers every value entry from MIR's
 //! flat postfix stream. This is the second constructor: the same
-//! [`NativeModelPlan`], with `stamp_values`, `jacobians`, `reactive_jacobians`,
-//! `noise_psd` and `noise_exponents` lowered instead from the canonical CFG
-//! through [`lower_cfg_function`] and [`scalarize_lanes`], adopted as
+//! [`NativeModelPlan`], with `stamp_values`, `jacobians`, `reactive_jacobians`
+//! and — when [`CfgNoiseScope::Cfg`] is asked for — `noise_psd` and
+//! `noise_exponents` lowered instead from the canonical CFG through
+//! [`lower_cfg_function`] and [`scalarize_lanes`], adopted as
 //! [`PlanProgram::Blocks`].
 //!
-//! It is not the default. Production still builds the postfix plan; this one is
-//! reached by the CFG-versus-MIR census (`native::cfg_mir_census`), which is
-//! the evidence the flip is decided on.
+//! [`build_default_model_plan`] is what x64, AArch64 and the WASM JIT now all
+//! call. It asks for the CFG form of a module's residual, Jacobian and
+//! reactive-Jacobian entries, keeps every other field postfix, and falls the
+//! whole module back to the postfix plan when the CFG route refuses it.
 //!
 //! # What stays postfix, and why that is not a half measure
 //!
@@ -21,6 +23,21 @@
 //! therefore what makes the two plans comparable at all: both fill `variables`
 //! by the same code, and the value entries then have to agree about what that
 //! operating point evaluates to.
+//!
+//! # Why noise stays postfix in the default plan
+//!
+//! Not conservatism: the two routes hold *different quantities* there, and the
+//! difference is measured rather than argued. `noise_process_schema >= 1` on
+//! thirty-four of the forty-three shipped modules, and under that schema the
+//! routing amplitude is folded into the grouped complex injection instead of
+//! into the PSD, so the shipped `psd_program` and the CFG process's `psd` stop
+//! being the same number — `angelov`'s `noise_exponents[9]` reads 2.0 through
+//! MIR and 0.0 through the CFG, `bsimsoi_va`'s `noise_psd[1]` reads 7.19e-28
+//! against 0.0. Taking the CFG's noise today would change what the runtime
+//! injects across most of the corpus, which is exactly the silently-wrong class
+//! this program refuses. Closing the CFG noise slice is its own lane; until it
+//! lands, production asks for [`CfgNoiseScope::Postfix`] and the CFG-versus-MIR
+//! census asks for [`CfgNoiseScope::Cfg`] so the gap stays measured.
 //!
 //! # All or nothing, per module
 //!
@@ -39,18 +56,16 @@
 //! refusing it would refuse thirty-four of the forty-three shipped modules and
 //! take every entry they *do* agree on down with them.
 //!
-//! # Why this module is `allow(dead_code)` outside `cfg(test)`
+//! # The fallback is loud
 //!
-//! Because it is: production compiles the postfix plan, and the only caller of
-//! this one is the CFG-versus-MIR census. That is the whole point of a
-//! non-default constructor, and the attribute is the honest statement of it
-//! rather than a silenced warning — W-F3c is what gives it a production caller,
-//! and this attribute comes off with the same commit that flips the default.
-//! Its reach is deliberately this module and the three items in
-//! [`crate::jit::plan_program`] that nothing *else* constructs; anything with a
-//! shipped caller is warned about normally.
-
-#![cfg_attr(not(test), allow(dead_code))]
+//! A refused module still compiles: [`build_default_model_plan`] returns the
+//! postfix plan for it, which is the plan every backend shipped before the
+//! flip, so a refusal costs accuracy nowhere and coverage nothing. What it must
+//! not do is happen quietly — a module that stops taking the CFG route because
+//! a pass regressed would otherwise look exactly like one that never took it.
+//! So the refusal goes to the same `[JIT]` seam a failed native compile uses,
+//! naming the module and the refusal class, and
+//! [`build_default_model_plan_reported`] hands it back so a test can pin it.
 //!
 //! # The one place a program is built rather than lowered
 //!
@@ -200,6 +215,12 @@ pub(crate) struct CfgPlanReport {
     /// the whole shipped corpus — measured: thirty-four of the forty-three
     /// modules carry schema 1 — and the entries that *are* the same quantity on
     /// those modules would go unmeasured with them.
+    ///
+    /// Written on every build and read only by the census, because production
+    /// asks for [`CfgNoiseScope::Postfix`] and so takes no noise from the CFG
+    /// to classify. The lane that closes the CFG noise slice is what gives this
+    /// a production reader.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) grouped_noise: bool,
     /// Shipped Jacobian and reactive-Jacobian entries the CFG route's liveness
     /// found no value for, given the constant zero its analysis implies. Keyed
@@ -240,6 +261,9 @@ impl std::fmt::Display for CfgPlanEntry {
 #[derive(Debug)]
 pub(crate) struct CfgModelPlan {
     pub(crate) plan: NativeModelPlan,
+    /// Read by the CFG-versus-MIR census, which is what the figures are for.
+    /// [`build_default_model_plan`] takes the plan and drops this.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) report: CfgPlanReport,
 }
 
@@ -290,15 +314,38 @@ fn constant_zero_program() -> JitResult<Program> {
     builder.finish(entry, entry)
 }
 
+/// Where a CFG-built plan's `noise_psd` and `noise_exponents` come from.
+///
+/// The one field of the plan the two routes are known to disagree about, so it
+/// is the one the caller chooses rather than the builder. See the module
+/// documentation for the measurement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CfgNoiseScope {
+    /// Lower them from the CFG with everything else. What the CFG-versus-MIR
+    /// census asks for, because measuring the gap is how it closes.
+    ///
+    /// Constructed only there until that lane lands; the attribute is the
+    /// honest statement of it rather than a silenced warning.
+    #[cfg_attr(not(test), allow(dead_code))]
+    Cfg,
+    /// Keep the postfix plan's. What production asks for.
+    ///
+    /// [`CfgPlanRefusal::NoiseUnpaired`] cannot fire under this scope: a
+    /// shipped source with no CFG process is not a disagreement about a value
+    /// nobody is taking from the CFG.
+    Postfix,
+}
+
 /// Build the CFG route's plan for `model`, or say why it cannot be built.
 ///
 /// The postfix plan is built first and kept: it validates the canonical
 /// artifact against the compiled model, and its assignment passes, parameter
 /// defaults, static conditions and published current pairs are the CFG plan's
-/// too. Only the five program-bearing value fields are replaced.
+/// too. Only the program-bearing value fields `noise` names are replaced.
 pub(crate) fn build_model_plan_from_canonical_cfg(
     model: &CompiledModel,
     artifact: &CanonicalIrArtifact,
+    noise: CfgNoiseScope,
 ) -> Result<CfgModelPlan, CfgPlanRefused> {
     let module = model.name.to_string();
     let refuse = |class: CfgPlanRefusal, detail: String| CfgPlanRefused {
@@ -565,73 +612,83 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
     // primal; the shipped emitter's two-pass rule is kept because six shipped
     // models read a `ddx` inside a noise power and only the AD pass resolves
     // one.
-    let processes: HashMap<usize, &CfgNoiseProcess> = cfg
-        .noise_processes
-        .iter()
-        .filter_map(|process| {
-            usize::try_from(process.process_id)
-                .ok()
-                .map(|id| (id, process))
-        })
-        .collect();
-    let mut noise_psd = Vec::with_capacity(model.noise_sources.len());
-    let mut noise_exponents = Vec::with_capacity(model.noise_sources.len());
-    for (source_index, source) in model.noise_sources.iter().enumerate() {
-        let process = processes.get(&source.process_id).ok_or_else(|| {
-            refuse(
-                CfgPlanRefusal::NoiseUnpaired,
-                format!(
-                    "shipped source {source_index} names process {}",
-                    source.process_id
-                ),
-            )
-        })?;
-        let lower_noise = |value: ValueId,
-                           entry: CfgPlanEntry,
-                           report: &mut CfgPlanReport|
-         -> Result<PlanProgram, CfgPlanRefused> {
-            match lower(&cfg.function, value, entry, report) {
-                Ok(program) => Ok(program),
-                Err(primal) if primal.class == CfgPlanRefusal::Lowering => {
-                    let Some(resolved) = scalarized.scalar(value) else {
-                        return Err(primal);
-                    };
-                    let program = lower(&scalarized.function, resolved, entry, report)?;
-                    report.noise_from_differentiated += 1;
-                    Ok(program)
-                }
-                Err(other) => Err(other),
-            }
-        };
-        noise_psd.push(lower_noise(
-            process.psd,
-            CfgPlanEntry::NoisePsd(source_index),
-            &mut report,
-        )?);
-        report.noise_values += 1;
-        let exponent = match (process.exponent, source.exponent_program.as_ref()) {
-            (Some(exponent), Some(_)) => {
-                report.noise_values += 1;
-                Some(lower_noise(
-                    exponent,
-                    CfgPlanEntry::NoiseExponent(source_index),
+    //
+    // Skipped entirely under `CfgNoiseScope::Postfix`: nothing here would be
+    // kept, and running it would only let a noise-only refusal take a module's
+    // residual and Jacobian entries down with it.
+    let cfg_noise = match noise {
+        CfgNoiseScope::Postfix => None,
+        CfgNoiseScope::Cfg => {
+            let processes: HashMap<usize, &CfgNoiseProcess> = cfg
+                .noise_processes
+                .iter()
+                .filter_map(|process| {
+                    usize::try_from(process.process_id)
+                        .ok()
+                        .map(|id| (id, process))
+                })
+                .collect();
+            let mut noise_psd = Vec::with_capacity(model.noise_sources.len());
+            let mut noise_exponents = Vec::with_capacity(model.noise_sources.len());
+            for (source_index, source) in model.noise_sources.iter().enumerate() {
+                let process = processes.get(&source.process_id).ok_or_else(|| {
+                    refuse(
+                        CfgPlanRefusal::NoiseUnpaired,
+                        format!(
+                            "shipped source {source_index} names process {}",
+                            source.process_id
+                        ),
+                    )
+                })?;
+                let lower_noise = |value: ValueId,
+                                   entry: CfgPlanEntry,
+                                   report: &mut CfgPlanReport|
+                 -> Result<PlanProgram, CfgPlanRefused> {
+                    match lower(&cfg.function, value, entry, report) {
+                        Ok(program) => Ok(program),
+                        Err(primal) if primal.class == CfgPlanRefusal::Lowering => {
+                            let Some(resolved) = scalarized.scalar(value) else {
+                                return Err(primal);
+                            };
+                            let program = lower(&scalarized.function, resolved, entry, report)?;
+                            report.noise_from_differentiated += 1;
+                            Ok(program)
+                        }
+                        Err(other) => Err(other),
+                    }
+                };
+                noise_psd.push(lower_noise(
+                    process.psd,
+                    CfgPlanEntry::NoisePsd(source_index),
                     &mut report,
-                )?)
+                )?);
+                report.noise_values += 1;
+                let exponent = match (process.exponent, source.exponent_program.as_ref()) {
+                    (Some(exponent), Some(_)) => {
+                        report.noise_values += 1;
+                        Some(lower_noise(
+                            exponent,
+                            CfgPlanEntry::NoiseExponent(source_index),
+                            &mut report,
+                        )?)
+                    }
+                    (None, None) => None,
+                    (canonical, shipped) => {
+                        return Err(refuse(
+                            CfgPlanRefusal::NoiseUnpaired,
+                            format!(
+                                "source {source_index} exponent: canonical={} shipped={}",
+                                canonical.is_some(),
+                                shipped.is_some()
+                            ),
+                        ));
+                    }
+                };
+                noise_exponents.push(exponent);
             }
-            (None, None) => None,
-            (canonical, shipped) => {
-                return Err(refuse(
-                    CfgPlanRefusal::NoiseUnpaired,
-                    format!(
-                        "source {source_index} exponent: canonical={} shipped={}",
-                        canonical.is_some(),
-                        shipped.is_some()
-                    ),
-                ));
-            }
-        };
-        noise_exponents.push(exponent);
-    }
+            Some((noise_psd, noise_exponents))
+        }
+    };
 
     // ---- the read-sets the runtime validates a dispatch against ---------
     //
@@ -657,26 +714,86 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
         &reactive_jacobians,
         PlanProgram::branch_unknown_dependencies,
     );
-    dependencies.noise_psd = read_set(&noise_psd, PlanProgram::current_pair_dependencies);
-    dependencies.noise_psd_prior_currents =
-        read_set(&noise_psd, PlanProgram::prior_current_dependencies);
-    dependencies.noise_psd_branch_unknowns =
-        read_set(&noise_psd, PlanProgram::branch_unknown_dependencies);
-    dependencies.noise_exponents =
-        read_set_optional(&noise_exponents, PlanProgram::current_pair_dependencies);
-    dependencies.noise_exponent_prior_currents =
-        read_set_optional(&noise_exponents, PlanProgram::prior_current_dependencies);
-    dependencies.noise_exponent_branch_unknowns =
-        read_set_optional(&noise_exponents, PlanProgram::branch_unknown_dependencies);
+    // The noise read-sets stay the postfix plan's whenever its noise programs
+    // do: a recomputed set would then describe programs this plan does not
+    // carry, which is the same defect in the other direction.
+    if let Some((noise_psd, noise_exponents)) = &cfg_noise {
+        dependencies.noise_psd = read_set(noise_psd, PlanProgram::current_pair_dependencies);
+        dependencies.noise_psd_prior_currents =
+            read_set(noise_psd, PlanProgram::prior_current_dependencies);
+        dependencies.noise_psd_branch_unknowns =
+            read_set(noise_psd, PlanProgram::branch_unknown_dependencies);
+        dependencies.noise_exponents =
+            read_set_optional(noise_exponents, PlanProgram::current_pair_dependencies);
+        dependencies.noise_exponent_prior_currents =
+            read_set_optional(noise_exponents, PlanProgram::prior_current_dependencies);
+        dependencies.noise_exponent_branch_unknowns =
+            read_set_optional(noise_exponents, PlanProgram::branch_unknown_dependencies);
+    }
 
     plan.stamp_values = stamp_values;
     plan.jacobians = jacobians;
     plan.reactive_jacobians = reactive_jacobians;
-    plan.noise_psd = noise_psd;
-    plan.noise_exponents = noise_exponents;
+    if let Some((noise_psd, noise_exponents)) = cfg_noise {
+        plan.noise_psd = noise_psd;
+        plan.noise_exponents = noise_exponents;
+    }
     plan.validate_shape(model)
         .map_err(|error| refuse(CfgPlanRefusal::EquationsUnpaired, error.to_string()))?;
     Ok(CfgModelPlan { plan, report })
+}
+
+/// The plan every backend compiles.
+///
+/// The CFG route for `stamp_values`, `jacobians` and `reactive_jacobians`; the
+/// postfix route for everything else, noise included; and the postfix plan
+/// entire for a module the CFG route refuses.
+///
+/// The refusal reaches the `[JIT]` log seam a failed native compile already
+/// uses, so a module that quietly stopped taking the CFG route is visible in
+/// the same place a module that quietly stopped compiling would be.
+pub(crate) fn build_default_model_plan(
+    model: &CompiledModel,
+    artifact: &CanonicalIrArtifact,
+) -> JitResult<NativeModelPlan> {
+    let (plan, refused) = build_default_model_plan_reported(model, artifact)?;
+    if let Some(refused) = refused {
+        log::warn!(
+            "[JIT] Model '{}' takes the postfix plan: {} ({})",
+            refused.module,
+            refused.class.name(),
+            refused.detail
+        );
+        #[cfg(debug_assertions)]
+        eprintln!(
+            "[JIT] Model '{}' takes the postfix plan: {} ({})",
+            refused.module,
+            refused.class.name(),
+            refused.detail
+        );
+    }
+    Ok(plan)
+}
+
+/// [`build_default_model_plan`], handing the refusal back instead of logging
+/// it, so a test can pin which modules fall back and why.
+///
+/// The fallback rebuilds the postfix plan rather than recovering the one the
+/// CFG builder started from and threw away. That is one extra plan build, on
+/// the refusal path only, once per module per process — the native cache in
+/// [`crate::device`] keys on the module, so no model pays it twice — against a
+/// constructor whose refusals stay a single `?` each.
+pub(crate) fn build_default_model_plan_reported(
+    model: &CompiledModel,
+    artifact: &CanonicalIrArtifact,
+) -> JitResult<(NativeModelPlan, Option<CfgPlanRefused>)> {
+    match build_model_plan_from_canonical_cfg(model, artifact, CfgNoiseScope::Postfix) {
+        Ok(built) => Ok((built.plan, None)),
+        Err(refused) => {
+            let plan = build_model_plan_with_canonical_ir(model, artifact)?;
+            Ok((plan, Some(refused)))
+        }
+    }
 }
 
 fn read_set(entries: &[PlanProgram], read: fn(&PlanProgram) -> &[usize]) -> Vec<Vec<usize>> {
@@ -702,4 +819,157 @@ fn read_set_optional(
                 .map_or_else(Vec::new, |entry| read(entry).to_vec())
         })
         .collect()
+}
+
+#[cfg(all(test, feature = "native"))]
+mod tests {
+    use super::{CfgPlanRefusal, build_default_model_plan_reported};
+    use crate::canonical_ir::CanonicalIrArtifact;
+    use crate::codegen::CompiledModel;
+    use crate::jit::model_plan::NativeModelPlan;
+    use crate::jit::plan_builder::build_model_plan_with_canonical_ir;
+    use crate::{CompilerOptions, VerilogACompiler};
+
+    /// A resistor, a capacitor and a thermal noise source: one module carrying
+    /// all four kinds of value entry the flip decides between.
+    const RESISTOR_WITH_CHARGE_AND_NOISE: &str = r#"
+module cfg_default_plan(p, n);
+  inout p, n;
+  electrical p, n;
+  parameter real r = 2.0;
+  parameter real c = 1.0e-12;
+  // An expression default, so `parameter_defaults` carries a program at all.
+  parameter real g = 1.0 / r;
+  analog begin
+    I(p, n) <+ V(p, n) * g;
+    I(p, n) <+ ddt(c * V(p, n));
+    I(p, n) <+ white_noise(4.0 * 1.3806505e-23 * $temperature / r, "thermal");
+  end
+endmodule
+"#;
+
+    /// A `ddt` inside a `case` selector, which is one of the sites
+    /// `HirExecutedCorrespondence` does not cover: the canonical operator has no
+    /// executed counterpart, so [`CfgStateAllocation`](crate::canonical_ir::CfgStateAllocation)
+    /// cannot name its state record and the CFG route refuses the module.
+    ///
+    /// A real refusal from a real source, not an injected one. If a later lane
+    /// covers that site the CFG route will start building this module, and this
+    /// test will say so rather than going quietly green.
+    const OPERATOR_IN_A_CASE_SELECTOR: &str = r#"
+module cfg_plan_fallback(p, n);
+  inout p, n;
+  electrical p, n;
+  analog begin
+    case (ddt(V(p, n)) > 0.0)
+      1: I(p, n) <+ V(p, n);
+      default: I(p, n) <+ 2.0 * V(p, n);
+    endcase
+  end
+endmodule
+"#;
+
+    fn compile(source: &str) -> (CompiledModel, CanonicalIrArtifact) {
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler.compile(source).expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        (model, artifact)
+    }
+
+    fn forms(plan: &NativeModelPlan) -> Vec<(&'static str, &'static str)> {
+        let mut forms = Vec::new();
+        for entry in &plan.stamp_values {
+            forms.push(("stamp_values", entry.borrow().form_name()));
+        }
+        for entry in plan.jacobians.iter().flatten() {
+            forms.push(("jacobians", entry.borrow().form_name()));
+        }
+        for entry in plan.reactive_jacobians.iter().flatten() {
+            forms.push(("reactive_jacobians", entry.borrow().form_name()));
+        }
+        for entry in &plan.noise_psd {
+            forms.push(("noise_psd", entry.borrow().form_name()));
+        }
+        for entry in plan.noise_exponents.iter().flatten() {
+            forms.push(("noise_exponents", entry.borrow().form_name()));
+        }
+        for entry in plan.parameter_defaults.iter().flatten() {
+            forms.push(("parameter_defaults", entry.borrow().form_name()));
+        }
+        for entry in plan.static_conditions.iter().flatten() {
+            forms.push(("static_conditions", entry.borrow().form_name()));
+        }
+        forms
+    }
+
+    /// The flip, stated as the shape of one plan: the CFG route owns the
+    /// residual and both Jacobians, the MIR route owns everything else.
+    #[test]
+    fn the_default_plan_takes_its_values_from_the_cfg_and_its_noise_from_mir() {
+        let (model, artifact) = compile(RESISTOR_WITH_CHARGE_AND_NOISE);
+        let (plan, refused) =
+            build_default_model_plan_reported(&model, &artifact).expect("the default plan builds");
+        assert!(
+            refused.is_none(),
+            "a resistor with a charge and a noise source is not a module the CFG route refuses: \
+             {refused:?}"
+        );
+
+        // Not vacuous: the module really does carry an entry of each kind.
+        assert_eq!(plan.stamp_values.len(), 3);
+        assert!(plan.jacobians.iter().flatten().count() > 0);
+        assert!(plan.reactive_jacobians.iter().flatten().count() > 0);
+        assert_eq!(plan.noise_psd.len(), 1);
+        assert!(plan.parameter_defaults.iter().flatten().count() > 0);
+
+        for (field, form) in forms(&plan) {
+            let expected = match field {
+                "stamp_values" | "jacobians" | "reactive_jacobians" => "block",
+                _ => "postfix",
+            };
+            assert_eq!(
+                form, expected,
+                "the default plan's {field} entries are {expected} programs"
+            );
+        }
+    }
+
+    /// A module the CFG route refuses takes the postfix plan whole — every
+    /// field, not the fields that happened to lower — and says which class
+    /// refused it.
+    #[test]
+    fn a_module_the_cfg_route_refuses_takes_the_postfix_plan_whole() {
+        let (model, artifact) = compile(OPERATOR_IN_A_CASE_SELECTOR);
+        let (plan, refused) =
+            build_default_model_plan_reported(&model, &artifact).expect("the default plan builds");
+        let refused = refused.expect(
+            "a canonical operator in a case selector has no executed counterpart, so the CFG \
+             route cannot name its state record",
+        );
+        assert_eq!(refused.class, CfgPlanRefusal::StateAllocation);
+        assert_eq!(refused.module, "cfg_plan_fallback");
+
+        for (field, form) in forms(&plan) {
+            assert_eq!(
+                form, "postfix",
+                "a refused module's {field} entries come from the postfix plan"
+            );
+        }
+
+        // The fallback is the postfix plan, not a plan that resembles it: the
+        // same constructor, over the same artifact, produces the same shape.
+        let postfix = build_model_plan_with_canonical_ir(&model, &artifact)
+            .expect("the postfix plan builds for a module the CFG route refuses");
+        assert_eq!(forms(&plan), forms(&postfix));
+        assert_eq!(
+            plan.current_dependencies.stamp_values,
+            postfix.current_dependencies.stamp_values,
+        );
+        assert_eq!(
+            plan.current_dependencies.jacobians,
+            postfix.current_dependencies.jacobians,
+        );
+    }
 }

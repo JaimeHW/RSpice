@@ -18,11 +18,14 @@ use crate::codegen::CompiledModel;
 /// Every value entry is a [`PlanProgram`]: canonical lowering has two routes to
 /// an expression and the plan carries whichever form the route produced, so a
 /// backend dispatches on the form rather than the plan pretending there is only
-/// one. Every shipped model's entries are still the postfix form.
+/// one. Since W-F3c the default plan's `stamp_values`, `jacobians` and
+/// `reactive_jacobians` are the CFG route's block form on every module that
+/// route builds; the rest stay postfix.
 ///
-/// The assignment passes are deliberately not part of that yet: they carry
-/// `NativeProgram` directly, and moving them is the flip's (W-F3) job together
-/// with the constructor that produces block entries in the first place.
+/// The assignment passes are deliberately not part of that: they carry
+/// `NativeProgram` directly, and the CFG route recomputes what they write
+/// inline rather than reading their variable slots, so leaving them postfix is
+/// what keeps both routes filling `variables` by the same code.
 #[derive(Debug)]
 pub(crate) struct NativeModelPlan {
     pub(crate) assignments: Vec<NativeAssignment>,

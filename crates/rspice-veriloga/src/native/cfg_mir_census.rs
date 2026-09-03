@@ -58,7 +58,7 @@ use std::collections::HashSet;
 use super::census_models::{CensusModel, shipped_census_models_matching};
 use super::cfg_census::{OperatingPoint, deviation};
 use crate::jit::cfg_plan_builder::{
-    CfgPlanEntry, CfgPlanRefusal, build_model_plan_from_canonical_cfg,
+    CfgNoiseScope, CfgPlanEntry, CfgPlanRefusal, build_model_plan_from_canonical_cfg,
 };
 use crate::jit::plan_builder::build_model_plan_with_canonical_ir;
 use crate::jit::plan_program::PlanProgram;
@@ -430,7 +430,10 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
     let model = &shipped.model;
     let artifact = &shipped.canonical_ir;
 
-    let cfg_plan = match build_model_plan_from_canonical_cfg(model, artifact) {
+    // `Cfg`, not the `Postfix` scope production takes: the whole point of this
+    // census is to measure the noise slice the default plan declines to use, so
+    // narrowing it here would make the gap invisible on the day it closes.
+    let cfg_plan = match build_model_plan_from_canonical_cfg(model, artifact, CfgNoiseScope::Cfg) {
         Ok(plan) => plan,
         Err(refused) => {
             tally.refused += 1;

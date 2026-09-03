@@ -174,7 +174,7 @@ pub(crate) fn compile_model_with_canonical_ir(
     model: &CompiledModel,
     artifact: &CanonicalIrArtifact,
 ) -> JitResult<NativeModel> {
-    let plan = crate::jit::plan_builder::build_model_plan_with_canonical_ir(model, artifact)?;
+    let plan = crate::jit::cfg_plan_builder::build_default_model_plan(model, artifact)?;
     compile_model_plan(model, &plan)
 }
 

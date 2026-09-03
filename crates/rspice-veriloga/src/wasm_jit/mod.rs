@@ -291,7 +291,7 @@ pub fn qualify_model_plan(
     model: &CompiledModel,
     artifact: &CanonicalIrArtifact,
 ) -> WasmJitResult<WasmJitPlanSummary> {
-    let plan = crate::jit::plan_builder::build_model_plan_with_canonical_ir(model, artifact)
+    let plan = crate::jit::cfg_plan_builder::build_default_model_plan(model, artifact)
         .map_err(|error| WasmJitError::Planning(error.to_string()))?;
     summarize_model_plan(artifact, &plan)
 }
@@ -303,7 +303,7 @@ pub fn compile_model_value_module(
     model: &CompiledModel,
     artifact: &CanonicalIrArtifact,
 ) -> WasmJitResult<WasmJitModelArtifact> {
-    let plan = crate::jit::plan_builder::build_model_plan_with_canonical_ir(model, artifact)
+    let plan = crate::jit::cfg_plan_builder::build_default_model_plan(model, artifact)
         .map_err(|error| WasmJitError::Planning(error.to_string()))?;
     emit_model_value_module(artifact, &plan)
 }
