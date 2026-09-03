@@ -373,6 +373,7 @@ mod residual;
 mod restart;
 mod startup;
 mod state;
+use state::{TransientCompanionStamp, TransientDeviceHistories};
 mod xyce_dae;
 use state::{
     AcceptedJunctionHistoryRestart, MosfetCompanionBranchTerms, MosfetGateCompanionCharges,
@@ -4711,15 +4712,17 @@ impl Engine {
                         &solution,
                         0.0,
                         AcceptedJunctionHistoryRestart::Preserve,
-                        &mut bjt_history,
-                        &mut jfet_history,
-                        &mut diode_history,
-                        &mut mosfet_history,
-                        &mut vdmos_history,
-                        &mut b3soi_history,
-                        &mut bsim3_history,
-                        &mut bsim4_history,
-                        &mut ekv26_history,
+                        TransientDeviceHistories {
+                            bjt: &mut bjt_history,
+                            jfet: &mut jfet_history,
+                            diode: &mut diode_history,
+                            mosfet: &mut mosfet_history,
+                            vdmos: &mut vdmos_history,
+                            b3soi: &mut b3soi_history,
+                            bsim3: &mut bsim3_history,
+                            bsim4: &mut bsim4_history,
+                            ekv26: &mut ekv26_history,
+                        },
                     );
                     vbic_snapshot_cache.fill(None);
                     xyce_static_history = None;
@@ -4780,15 +4783,17 @@ impl Engine {
                         &solution,
                         hinted_max_step,
                         AcceptedJunctionHistoryRestart::Reinitialize,
-                        &mut bjt_history,
-                        &mut jfet_history,
-                        &mut diode_history,
-                        &mut mosfet_history,
-                        &mut vdmos_history,
-                        &mut b3soi_history,
-                        &mut bsim3_history,
-                        &mut bsim4_history,
-                        &mut ekv26_history,
+                        TransientDeviceHistories {
+                            bjt: &mut bjt_history,
+                            jfet: &mut jfet_history,
+                            diode: &mut diode_history,
+                            mosfet: &mut mosfet_history,
+                            vdmos: &mut vdmos_history,
+                            b3soi: &mut b3soi_history,
+                            bsim3: &mut bsim3_history,
+                            bsim4: &mut bsim4_history,
+                            ekv26: &mut ekv26_history,
+                        },
                     );
                     if lte_estimator.uses_accepted_solution_reference() {
                         lte_estimator.restart_history_from(&solution);

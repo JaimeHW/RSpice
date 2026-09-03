@@ -336,12 +336,14 @@ impl Engine {
     ) {
         debug_assert!(!compact_slots.is_empty());
         if Self::stamp_mosfet_transient_compact_companions_for_pattern(
-            circuit,
-            matrix,
-            rhs,
-            solution,
-            coeff,
-            dt,
+            TransientCompanionStamp {
+                circuit: circuit,
+                matrix: matrix,
+                rhs: rhs,
+                voltages: solution,
+                coeff: coeff,
+                dt: dt,
+            },
             ctx.mosfet_history,
             ctx.suppress_gate_charge,
             use_verified_cached_bias,
@@ -354,12 +356,14 @@ impl Engine {
 
         let checked_slots = Self::link_mosfet_companion_slots(circuit, matrix);
         Self::stamp_mosfet_transient_companions(
-            circuit,
-            matrix,
-            rhs,
-            solution,
-            coeff,
-            dt,
+            TransientCompanionStamp {
+                circuit: circuit,
+                matrix: matrix,
+                rhs: rhs,
+                voltages: solution,
+                coeff: coeff,
+                dt: dt,
+            },
             ctx.mosfet_history,
             ctx.suppress_gate_charge,
             use_verified_cached_bias,
@@ -427,12 +431,14 @@ impl Engine {
             circuit.diodes.update_all(solution);
         }
         Self::stamp_diode_transient_companions(
-            circuit,
-            matrix,
-            rhs,
-            solution,
-            companion_coeff,
-            dt,
+            TransientCompanionStamp {
+                circuit: circuit,
+                matrix: matrix,
+                rhs: rhs,
+                voltages: solution,
+                coeff: companion_coeff,
+                dt: dt,
+            },
             ctx.diode_history,
             ctx.diode_companion_slots,
         );
@@ -786,12 +792,14 @@ impl Engine {
         } else {
             if cache.compact_companion_slots.is_empty() {
                 Self::stamp_mosfet_transient_companions(
-                    circuit,
-                    matrix,
-                    rhs,
-                    solution,
-                    &companion_coeff,
-                    dt,
+                    TransientCompanionStamp {
+                        circuit: circuit,
+                        matrix: matrix,
+                        rhs: rhs,
+                        voltages: solution,
+                        coeff: &companion_coeff,
+                        dt: dt,
+                    },
                     ctx.mosfet_history,
                     ctx.suppress_gate_charge,
                     !static_probe || physical_cache_matches_probe,
@@ -1514,12 +1522,14 @@ impl Engine {
         circuit.stamp_multi_winding_transformers_transient(matrix, rhs, dt, &companion_coeff);
 
         Self::stamp_bjt_transient_companions(
-            circuit,
-            matrix,
-            rhs,
-            solution,
-            &companion_coeff,
-            dt,
+            TransientCompanionStamp {
+                circuit: circuit,
+                matrix: matrix,
+                rhs: rhs,
+                voltages: solution,
+                coeff: &companion_coeff,
+                dt: dt,
+            },
             ctx.bjt_history,
             vbic_snapshot_cache,
             vbic_reuse,
@@ -1527,22 +1537,26 @@ impl Engine {
             self.voltage_reltol(),
         );
         Self::stamp_jfet_transient_companions(
-            circuit,
-            matrix,
-            rhs,
-            solution,
-            &companion_coeff,
-            dt,
+            TransientCompanionStamp {
+                circuit: circuit,
+                matrix: matrix,
+                rhs: rhs,
+                voltages: solution,
+                coeff: &companion_coeff,
+                dt: dt,
+            },
             ctx.jfet_history,
             ctx.suppress_gate_charge,
         );
         Self::stamp_diode_transient_companions(
-            circuit,
-            matrix,
-            rhs,
-            solution,
-            &companion_coeff,
-            dt,
+            TransientCompanionStamp {
+                circuit: circuit,
+                matrix: matrix,
+                rhs: rhs,
+                voltages: solution,
+                coeff: &companion_coeff,
+                dt: dt,
+            },
             ctx.diode_history,
             ctx.diode_companion_slots,
         );
@@ -1556,12 +1570,14 @@ impl Engine {
             &relinked_mosfet_companion_slots
         };
         Self::stamp_mosfet_transient_companions(
-            circuit,
-            matrix,
-            rhs,
-            solution,
-            &companion_coeff,
-            dt,
+            TransientCompanionStamp {
+                circuit: circuit,
+                matrix: matrix,
+                rhs: rhs,
+                voltages: solution,
+                coeff: &companion_coeff,
+                dt: dt,
+            },
             ctx.mosfet_history,
             ctx.suppress_gate_charge,
             false,
@@ -1569,12 +1585,14 @@ impl Engine {
             None,
         );
         Self::stamp_vdmos_transient_companions(
-            circuit,
-            matrix,
-            rhs,
-            solution,
-            &companion_coeff,
-            dt,
+            TransientCompanionStamp {
+                circuit: circuit,
+                matrix: matrix,
+                rhs: rhs,
+                voltages: solution,
+                coeff: &companion_coeff,
+                dt: dt,
+            },
             ctx.vdmos_history,
             ctx.vdmos_companion_slots,
         );

@@ -1570,6 +1570,16 @@ fn xspice_meter_kind(model_name: &str) -> Option<XspiceMeterKind> {
     }
 }
 
+/// The XTRADEV meter instance being resolved: which element and model card
+/// named it, the ports it was given, and which quantity it measures.
+#[derive(Clone, Copy)]
+struct XspiceMeterProbe<'a> {
+    element_name: &'a str,
+    model_name: &'a str,
+    ports: &'a [XspicePort],
+    kind: XspiceMeterKind,
+}
+
 fn xspice_meter_input_node<'a>(
     element_name: &str,
     model_name: &str,
@@ -1818,13 +1828,16 @@ fn xspice_meter_equivalent_inductance(
 fn xspice_meter_measured_value(
     netlist: &Netlist,
     flat_elements: &[Element],
-    element_name: &str,
-    model_name: &str,
-    ports: &[XspicePort],
-    kind: XspiceMeterKind,
+    probe: XspiceMeterProbe<'_>,
     temperature: f64,
     spice_dialect: SpiceDialect,
 ) -> Result<f64, SimulationError> {
+    let XspiceMeterProbe {
+        element_name,
+        model_name,
+        ports,
+        kind,
+    } = probe;
     let input_node = xspice_meter_input_node(element_name, model_name, ports)?;
     match kind {
         XspiceMeterKind::Capacitance => xspice_meter_equivalent_capacitance(
@@ -3590,16 +3603,41 @@ fn add_generated_xspice_auto_bridge_inductor(
     Ok(())
 }
 
+/// Everything an auto-bridge instantiation needs besides the bridge itself:
+/// where the generated deck came from, the analysis temperature and the
+/// digital ramp, the delay-type selector, the dialect whose defaults apply,
+/// whether the family is enabled and whether its generated deck is echoed, the
+/// node names to label diagnostics with, and the resource ceilings the
+/// generated deck is held to. One record threads the whole instantiation
+/// chain, so a step of it cannot be reached with a different temperature or a
+/// different ceiling than the step above it.
+#[derive(Clone, Copy)]
+struct XspiceAutoBridgeContext<'a> {
+    source_path: Option<&'a Path>,
+    temperature: crate::Value,
+    ramptime: crate::Value,
+    digital_delay_type: Option<i64>,
+    spice_dialect: SpiceDialect,
+    family_enabled: bool,
+    show_generated: bool,
+    node_names: Option<&'a [String]>,
+    resource_limits: ResourceLimits,
+}
+
 fn add_generated_xspice_auto_bridge_instance(
     circuit: &mut CircuitData,
     generated: &Netlist,
     element: &Element,
     template_key: &str,
-    temperature: crate::Value,
-    ramptime: crate::Value,
-    digital_delay_type: Option<i64>,
-    resource_limits: ResourceLimits,
+    context: XspiceAutoBridgeContext<'_>,
 ) -> Result<(), SimulationError> {
+    let XspiceAutoBridgeContext {
+        temperature,
+        ramptime,
+        digital_delay_type,
+        resource_limits,
+        ..
+    } = context;
     let ElementKind::Xspice {
         model,
         ports,
@@ -3686,12 +3724,16 @@ fn add_generated_xspice_auto_bridge_subcircuit(
     circuit: &mut CircuitData,
     generated: &Netlist,
     template: &XspiceAutoBridgeTemplate,
-    temperature: crate::Value,
-    ramptime: crate::Value,
-    digital_delay_type: Option<i64>,
-    spice_dialect: SpiceDialect,
-    resource_limits: ResourceLimits,
+    context: XspiceAutoBridgeContext<'_>,
 ) -> Result<(), SimulationError> {
+    let XspiceAutoBridgeContext {
+        temperature,
+        ramptime,
+        digital_delay_type,
+        spice_dialect,
+        resource_limits,
+        ..
+    } = context;
     let flattened = flatten_netlist_with_models(generated).map_err(|e| {
         SimulationError::Circuit(format!(
             "Failed to flatten generated XSPICE auto-bridge template '{}': {}",
@@ -3750,10 +3792,7 @@ fn add_generated_xspice_auto_bridge_subcircuit(
                     generated,
                     element,
                     &template.key,
-                    temperature,
-                    ramptime,
-                    digital_delay_type,
-                    resource_limits,
+                    context,
                 )?;
                 added_xspice = true;
             }
@@ -3779,15 +3818,19 @@ fn add_template_xspice_auto_bridge(
     circuit: &mut CircuitData,
     bridges: &[&PlannedXspiceAutoBridge],
     template: &XspiceAutoBridgeTemplate,
-    source_path: Option<&Path>,
-    temperature: crate::Value,
-    ramptime: crate::Value,
-    digital_delay_type: Option<i64>,
-    spice_dialect: SpiceDialect,
-    node_names: Option<&[String]>,
-    resource_limits: ResourceLimits,
+    context: XspiceAutoBridgeContext<'_>,
     abort: &dyn AbortSignal,
 ) -> Result<(), SimulationError> {
+    let XspiceAutoBridgeContext {
+        source_path,
+        temperature,
+        ramptime,
+        digital_delay_type,
+        spice_dialect,
+        node_names,
+        resource_limits,
+        ..
+    } = context;
     check_build_abort(abort)?;
     let Some(first_bridge) = bridges.first().copied() else {
         return Ok(());
@@ -3880,16 +3923,7 @@ fn add_template_xspice_auto_bridge(
         )),
     })?;
     if device_is_subcircuit {
-        add_generated_xspice_auto_bridge_subcircuit(
-            circuit,
-            &generated,
-            template,
-            temperature,
-            ramptime,
-            digital_delay_type,
-            spice_dialect,
-            resource_limits,
-        )?;
+        add_generated_xspice_auto_bridge_subcircuit(circuit, &generated, template, context)?;
         log::debug!(
             "Generated XSPICE subcircuit auto-bridge on nodes {} from template {}",
             node_list,
@@ -3914,10 +3948,7 @@ fn add_template_xspice_auto_bridge(
         &generated,
         element,
         &template.key,
-        temperature,
-        ramptime,
-        digital_delay_type,
-        resource_limits,
+        context,
     )?;
 
     log::debug!(
@@ -3936,16 +3967,15 @@ fn add_planned_xspice_auto_bridges(
     circuit: &mut CircuitData,
     bridges: &[PlannedXspiceAutoBridge],
     templates: &[XspiceAutoBridgeTemplate],
-    source_path: Option<&Path>,
-    family_enabled: bool,
-    temperature: crate::Value,
-    ramptime: crate::Value,
-    digital_delay_type: Option<i64>,
-    spice_dialect: SpiceDialect,
-    show_generated: bool,
-    resource_limits: ResourceLimits,
+    context: XspiceAutoBridgeContext<'_>,
     abort: &dyn AbortSignal,
 ) -> Result<(), SimulationError> {
+    let XspiceAutoBridgeContext {
+        source_path,
+        family_enabled,
+        show_generated,
+        ..
+    } = context;
     check_build_abort(abort)?;
     let node_names = show_generated.then(|| circuit.node_names_sorted());
     let effective_templates =
@@ -3967,14 +3997,10 @@ fn add_planned_xspice_auto_bridges(
                 circuit,
                 bridge,
                 &[],
-                source_path,
-                family_enabled,
-                temperature,
-                ramptime,
-                digital_delay_type,
-                spice_dialect,
-                node_names.as_deref(),
-                resource_limits,
+                XspiceAutoBridgeContext {
+                    node_names: node_names.as_deref(),
+                    ..context
+                },
                 abort,
             )?;
             continue;
@@ -4026,13 +4052,10 @@ fn add_planned_xspice_auto_bridges(
             circuit,
             &group,
             template,
-            source_path,
-            temperature,
-            ramptime,
-            digital_delay_type,
-            spice_dialect,
-            node_names.as_deref(),
-            resource_limits,
+            XspiceAutoBridgeContext {
+                node_names: node_names.as_deref(),
+                ..context
+            },
             abort,
         )?;
     }
@@ -4059,33 +4082,25 @@ fn add_planned_xspice_auto_bridge(
     circuit: &mut CircuitData,
     bridge: &PlannedXspiceAutoBridge,
     templates: &[XspiceAutoBridgeTemplate],
-    source_path: Option<&Path>,
-    family_enabled: bool,
-    temperature: crate::Value,
-    ramptime: crate::Value,
-    digital_delay_type: Option<i64>,
-    spice_dialect: SpiceDialect,
-    node_names: Option<&[String]>,
-    resource_limits: ResourceLimits,
+    context: XspiceAutoBridgeContext<'_>,
     abort: &dyn AbortSignal,
 ) -> Result<(), SimulationError> {
     use crate::xspice::PortConnection;
 
+    let XspiceAutoBridgeContext {
+        temperature,
+        ramptime,
+        digital_delay_type,
+        spice_dialect,
+        family_enabled,
+        node_names,
+        resource_limits,
+        ..
+    } = context;
+
     if let Some(template) = find_xspice_auto_bridge_template(templates, bridge, family_enabled) {
         let bridges = [bridge];
-        return add_template_xspice_auto_bridge(
-            circuit,
-            &bridges,
-            template,
-            source_path,
-            temperature,
-            ramptime,
-            digital_delay_type,
-            spice_dialect,
-            node_names,
-            resource_limits,
-            abort,
-        );
+        return add_template_xspice_auto_bridge(circuit, &bridges, template, context, abort);
     }
 
     let vcc = bridge.vcc;
@@ -8172,10 +8187,12 @@ impl Engine {
                         let measured = xspice_meter_measured_value(
                             netlist,
                             &flat_elements,
-                            &element.name,
-                            model,
-                            ports,
-                            kind,
+                            XspiceMeterProbe {
+                                element_name: &element.name,
+                                model_name: model,
+                                ports,
+                                kind,
+                            },
                             self.config.temperature,
                             self.config.spice_dialect,
                         )?;
@@ -8349,14 +8366,17 @@ impl Engine {
                     &mut circuit,
                     &auto_bridges,
                     &netlist.options.auto_bridge_templates,
-                    netlist.source_path.as_deref(),
-                    netlist.options.auto_bridge_family.unwrap_or(true),
-                    self.config.temperature,
-                    self.config.ramptime,
-                    self.config.digital_delay_type,
-                    self.config.spice_dialect,
-                    netlist.options.auto_bridge_show_generated.unwrap_or(false),
-                    self.config.resource_limits,
+                    XspiceAutoBridgeContext {
+                        source_path: netlist.source_path.as_deref(),
+                        temperature: self.config.temperature,
+                        ramptime: self.config.ramptime,
+                        digital_delay_type: self.config.digital_delay_type,
+                        spice_dialect: self.config.spice_dialect,
+                        family_enabled: netlist.options.auto_bridge_family.unwrap_or(true),
+                        show_generated: netlist.options.auto_bridge_show_generated.unwrap_or(false),
+                        node_names: None,
+                        resource_limits: self.config.resource_limits,
+                    },
                     abort,
                 )?;
             } else {

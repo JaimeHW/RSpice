@@ -2,6 +2,36 @@
 
 use super::*;
 
+/// One transient companion stamp: the circuit being stamped, the matrix and
+/// right-hand side it writes into, the trial node voltages it linearizes at,
+/// and the companion coefficients and step that turn a charge into a
+/// conductance and an equivalent current. The coefficients are derived for the
+/// step, so a stamp handed one without the other would be linearizing against
+/// an integration nobody asked for.
+pub(super) struct TransientCompanionStamp<'a, 'b> {
+    pub circuit: &'a crate::circuit::CircuitData,
+    pub matrix: &'a mut crate::solver::StaticMatrix,
+    pub rhs: &'a mut [Value],
+    pub voltages: &'b [Value],
+    pub coeff: &'a CompanionCoefficients,
+    pub dt: Value,
+}
+
+/// Every per-family reactive history a transient step carries. A restart
+/// reseeds all of them from one accepted solution, and reseeding a subset
+/// would leave the families disagreeing about which step they are on.
+pub(super) struct TransientDeviceHistories<'a> {
+    pub bjt: &'a mut BjtTransientHistory,
+    pub jfet: &'a mut JfetTransientHistory,
+    pub diode: &'a mut DiodeTransientHistory,
+    pub mosfet: &'a mut MosfetTransientHistory,
+    pub vdmos: &'a mut VdmosTransientHistory,
+    pub b3soi: &'a mut B3SoiTransientHistory,
+    pub bsim3: &'a mut Bsim3TransientHistory,
+    pub bsim4: &'a mut Bsim4TransientHistory,
+    pub ekv26: &'a mut Ekv26TransientHistory,
+}
+
 /// Which startup a reactive history is being seeded for.
 ///
 /// `.TRAN ... UIC` has no operating point to seed from, so ngspice replaces it
@@ -149,16 +179,19 @@ impl Engine {
         solution: &[Value],
         hinted_max_step: Value,
         accepted_junction_history_restart: AcceptedJunctionHistoryRestart,
-        bjt_history: &mut BjtTransientHistory,
-        jfet_history: &mut JfetTransientHistory,
-        diode_history: &mut DiodeTransientHistory,
-        mosfet_history: &mut MosfetTransientHistory,
-        vdmos_history: &mut VdmosTransientHistory,
-        b3soi_history: &mut B3SoiTransientHistory,
-        bsim3_history: &mut Bsim3TransientHistory,
-        bsim4_history: &mut Bsim4TransientHistory,
-        ekv26_history: &mut Ekv26TransientHistory,
+        histories: TransientDeviceHistories<'_>,
     ) {
+        let TransientDeviceHistories {
+            bjt: bjt_history,
+            jfet: jfet_history,
+            diode: diode_history,
+            mosfet: mosfet_history,
+            vdmos: vdmos_history,
+            b3soi: b3soi_history,
+            bsim3: bsim3_history,
+            bsim4: bsim4_history,
+            ekv26: ekv26_history,
+        } = histories;
         for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
             let v = Self::differential_voltage(solution, cap.pp.row, cap.nn.row);
             circuit.capacitors.v_prev[cap_idx] = v;
@@ -835,18 +868,21 @@ impl Engine {
 
     #[inline]
     pub(super) fn stamp_bjt_transient_companions(
-        circuit: &crate::circuit::CircuitData,
-        matrix: &mut crate::solver::StaticMatrix,
-        rhs: &mut [Value],
-        voltages: &[Value],
-        coeff: &CompanionCoefficients,
-        dt: Value,
+        stamp: TransientCompanionStamp<'_, '_>,
         history: &BjtTransientHistory,
         vbic_snapshot_cache: &mut [Option<BjtChargeSnapshot>],
         cache_reuse: VbicCachedSnapshotReuse,
         voltage_abstol: Value,
         reltol: Value,
     ) {
+        let TransientCompanionStamp {
+            circuit,
+            matrix,
+            rhs,
+            voltages,
+            coeff,
+            dt,
+        } = stamp;
         let charge_factor = Self::jfet_companion_geq(coeff, 1.0, dt);
         for (idx, bjt) in circuit.bjts.devices.iter().enumerate() {
             let vc = Self::node_voltage(voltages, bjt.node_collector);
@@ -1048,15 +1084,18 @@ impl Engine {
 
     #[inline]
     pub(super) fn stamp_jfet_transient_companions(
-        circuit: &crate::circuit::CircuitData,
-        matrix: &mut crate::solver::StaticMatrix,
-        rhs: &mut [Value],
-        voltages: &[Value],
-        coeff: &CompanionCoefficients,
-        dt: Value,
+        stamp: TransientCompanionStamp<'_, '_>,
         history: &JfetTransientHistory,
         suppress_gate_charge: bool,
     ) {
+        let TransientCompanionStamp {
+            circuit,
+            matrix,
+            rhs,
+            voltages,
+            coeff,
+            dt,
+        } = stamp;
         for (idx, jfet) in circuit.jfets.iter().enumerate() {
             let (vgs_eval, vgd_eval) = Self::jfet_branch_voltages(jfet, voltages);
             let (vgs_charge, vgd_charge) = Self::jfet_charge_branch_voltages(jfet, voltages);
@@ -1245,15 +1284,18 @@ impl Engine {
     /// charge-form companion (`nonlinear_charge_companion_terms`) needs the
     /// charge history tracked against one consistent voltage.
     pub(super) fn stamp_diode_transient_companions(
-        circuit: &crate::circuit::CircuitData,
-        matrix: &mut crate::solver::StaticMatrix,
-        rhs: &mut [Value],
-        voltages: &[Value],
-        coeff: &CompanionCoefficients,
-        dt: Value,
+        stamp: TransientCompanionStamp<'_, '_>,
         history: &DiodeTransientHistory,
         slots: &[TwoTerminalStampSlots],
     ) {
+        let TransientCompanionStamp {
+            circuit,
+            matrix,
+            rhs,
+            voltages,
+            coeff,
+            dt,
+        } = stamp;
         for (idx, diode) in circuit.diodes.devices.iter().enumerate() {
             let vd_raw = Self::differential_voltage(voltages, diode.node_anode, diode.node_cathode);
             let vd = diode.transient_charge_voltage(vd_raw);
@@ -1277,18 +1319,21 @@ impl Engine {
 
     #[inline]
     pub(super) fn stamp_mosfet_transient_companions(
-        circuit: &crate::circuit::CircuitData,
-        matrix: &mut crate::solver::StaticMatrix,
-        rhs: &mut [Value],
-        voltages: &[Value],
-        coeff: &CompanionCoefficients,
-        dt: Value,
+        stamp: TransientCompanionStamp<'_, '_>,
         history: &MosfetTransientHistory,
         suppress_gate_charge: bool,
         use_verified_cached_bias: bool,
         slots: &[[TwoTerminalStampSlots; 5]],
         caps_cache_out: Option<&mut Vec<(Value, Value, Value)>>,
     ) {
+        let TransientCompanionStamp {
+            circuit,
+            matrix,
+            rhs,
+            voltages,
+            coeff,
+            dt,
+        } = stamp;
         // NOTE (M3.2, measured 2026-06-12 on mos_array_4096): evaluating
         // these per-device terms on the rayon pool — par_chunks(256) with a
         // serial in-order apply, bit-identical to this loop at any thread
@@ -1396,12 +1441,7 @@ impl Engine {
     #[inline(never)]
     #[allow(clippy::too_many_arguments)]
     pub(super) fn stamp_mosfet_transient_compact_companions_for_pattern(
-        circuit: &crate::circuit::CircuitData,
-        matrix: &mut crate::solver::StaticMatrix,
-        rhs: &mut [Value],
-        voltages: &[Value],
-        coeff: &CompanionCoefficients,
-        dt: Value,
+        stamp: TransientCompanionStamp<'_, '_>,
         history: &MosfetTransientHistory,
         suppress_gate_charge: bool,
         use_verified_cached_bias: bool,
@@ -1409,6 +1449,14 @@ impl Engine {
         slots: &[[CompactTwoTerminalStampSlots; 5]],
         caps_cache_out: Option<&mut Vec<(Value, Value, Value)>>,
     ) -> bool {
+        let TransientCompanionStamp {
+            circuit,
+            matrix,
+            rhs,
+            voltages,
+            coeff,
+            dt,
+        } = stamp;
         if slots.len() != circuit.mosfets.devices.len() {
             return false;
         }
@@ -1629,15 +1677,18 @@ impl Engine {
 
     #[inline]
     pub(super) fn stamp_vdmos_transient_companions(
-        circuit: &crate::circuit::CircuitData,
-        matrix: &mut crate::solver::StaticMatrix,
-        rhs: &mut [Value],
-        voltages: &[Value],
-        coeff: &CompanionCoefficients,
-        dt: Value,
+        stamp: TransientCompanionStamp<'_, '_>,
         history: &VdmosTransientHistory,
         slots: &[[TwoTerminalStampSlots; 7]],
     ) {
+        let TransientCompanionStamp {
+            circuit,
+            matrix,
+            rhs,
+            voltages,
+            coeff,
+            dt,
+        } = stamp;
         for (idx, vdmos) in circuit.vdmoses.devices.iter().enumerate() {
             let terms =
                 Self::vdmos_companion_branch_terms(vdmos, idx, voltages, coeff, dt, history);
