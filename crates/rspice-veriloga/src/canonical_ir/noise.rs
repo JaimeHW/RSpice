@@ -664,8 +664,6 @@ fn expression_kind_label(kind: &HirExprKind) -> &'static str {
         HirExprKind::ArrayAccess { .. } => "array_access",
         HirExprKind::ArrayLiteral { .. } => "array_literal",
         HirExprKind::AnalogOperator { .. } => "analog_operator",
-        HirExprKind::Laplace { .. } => "laplace",
-        HirExprKind::Zi { .. } => "zi",
         HirExprKind::NoiseSource { .. } => "noise_source",
     }
 }
@@ -704,19 +702,6 @@ pub(super) fn contains_noise(hir: &HirModel, root: ExprId) -> bool {
             }
             HirExprKind::ArrayAccess { index, .. } => stack.push(*index),
             HirExprKind::AnalogOperator { op } => push_analog_children(op, &mut stack),
-            HirExprKind::Laplace { expr, .. } => stack.push(*expr),
-            HirExprKind::Zi {
-                expr,
-                kind,
-                period,
-                transition,
-                first_transition,
-            } => {
-                stack.extend([*expr, *period]);
-                stack.extend(transition.iter().copied());
-                stack.extend(first_transition.iter().copied());
-                push_zi_children(kind, &mut stack);
-            }
             HirExprKind::NullArgument
             | HirExprKind::Number { .. }
             | HirExprKind::StringLiteral { .. }
@@ -791,30 +776,6 @@ pub(super) fn string_literal(hir: &HirModel, id: ExprId) -> Option<SmolStr> {
     }
 }
 
-fn push_zi_children(kind: &super::HirZiKind, stack: &mut Vec<ExprId>) {
-    match kind {
-        super::HirZiKind::ZeroPole { zeros, poles } => {
-            stack.extend(zeros.iter().copied());
-            stack.extend(poles.iter().copied());
-        }
-        super::HirZiKind::ZeroDenominator { zeros, denominator } => {
-            stack.extend(zeros.iter().copied());
-            stack.extend(denominator.iter().copied());
-        }
-        super::HirZiKind::NumeratorPole { numerator, poles } => {
-            stack.extend(numerator.iter().copied());
-            stack.extend(poles.iter().copied());
-        }
-        super::HirZiKind::NumeratorDenominator {
-            numerator,
-            denominator,
-        } => {
-            stack.extend(numerator.iter().copied());
-            stack.extend(denominator.iter().copied());
-        }
-    }
-}
-
 fn push_analog_children(op: &HirAnalogOperator, stack: &mut Vec<ExprId>) {
     match op {
         HirAnalogOperator::Limit {
@@ -827,55 +788,6 @@ fn push_analog_children(op: &HirAnalogOperator, stack: &mut Vec<ExprId>) {
             stack.extend(type_metadata.iter().copied());
         }
         HirAnalogOperator::LimiterArgument { .. } => {}
-        HirAnalogOperator::Ddt { expr, abstol } => {
-            stack.push(*expr);
-            stack.extend(abstol.iter().copied());
-        }
-        HirAnalogOperator::Idt {
-            expr,
-            ic,
-            assert,
-            abstol,
-        } => {
-            stack.push(*expr);
-            stack.extend(ic.iter().chain(assert).chain(abstol).copied());
-        }
-        HirAnalogOperator::IdtMod {
-            expr,
-            ic,
-            modulus,
-            offset,
-            abstol,
-        } => {
-            stack.push(*expr);
-            stack.extend(
-                ic.iter()
-                    .chain(modulus)
-                    .chain(offset)
-                    .chain(abstol)
-                    .copied(),
-            );
-        }
-        HirAnalogOperator::Ddx { expr, probe } => stack.extend([*expr, *probe]),
-        HirAnalogOperator::Limexp { expr } | HirAnalogOperator::LastCrossing { expr, .. } => {
-            stack.push(*expr);
-        }
-        HirAnalogOperator::Absdelay {
-            expr,
-            delay,
-            max_delay,
-        } => {
-            stack.extend([*expr, *delay]);
-            stack.extend(max_delay.iter().copied());
-        }
-        HirAnalogOperator::Slew {
-            expr,
-            max_rise,
-            max_fall,
-        } => {
-            stack.push(*expr);
-            stack.extend(max_rise.iter().chain(max_fall).copied());
-        }
     }
 }
 

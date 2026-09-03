@@ -489,8 +489,7 @@ pub enum CfgValueKind {
     /// `direction` is a value rather than a compile-time edge, matching
     /// [`Self::Cross`] and the JIT's own lowering: the same runtime encoding
     /// (`+1` rising, `-1` falling, `0` either) and the same freedom for a model
-    /// to compute it. The operator spelling's edge keyword lowers to the
-    /// corresponding constant, so the two source forms produce one node.
+    /// to compute it.
     ///
     /// Its value is a *time*, not an event level, which is why this is not a
     /// case of `Cross`: an omitted answer here is "no crossing yet" and reads

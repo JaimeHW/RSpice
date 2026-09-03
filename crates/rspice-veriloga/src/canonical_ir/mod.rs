@@ -69,9 +69,9 @@ pub use digital_eval::{
 pub use digital_value::FourStateValue;
 pub use hir::{
     CanonicalValueType, HirAnalogOperator, HirArray, HirAssignment, HirBranch, HirContribution,
-    HirContributionKind, HirCrossDirection, HirExprKind, HirExprRef, HirExpression,
-    HirInternalNode, HirLaplaceKind, HirLimiterArgument, HirLoop, HirModel, HirParamRange,
-    HirParameter, HirParameterDimension, HirPort, HirStatement, HirVariable, HirZiKind,
+    HirContributionKind, HirExprKind, HirExprRef, HirExpression, HirInternalNode,
+    HirLimiterArgument, HirLoop, HirModel, HirParamRange, HirParameter, HirParameterDimension,
+    HirPort, HirStatement, HirVariable,
 };
 pub use ids::{
     ArrayId, BlockId, BranchId, BranchUnknownId, ContributionId, DigitalLocalId, DigitalProcessId,

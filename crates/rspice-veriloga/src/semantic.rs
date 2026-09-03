@@ -3415,10 +3415,6 @@ impl SemanticAnalyzer {
                     self.validate_direct_zi_contribution(argument, span)?;
                 }
             }
-            Expression::AnalogOperator(AnalogOperator::Zi { transition, .. }) => {
-                self.validate_direct_zi_site("zi operator", transition.as_deref(), span)?;
-                self.validate_direct_zi_analog_children(expression, span)?;
-            }
             Expression::AnalogOperator(_) => {
                 self.validate_direct_zi_analog_children(expression, span)?;
             }
@@ -3514,107 +3510,6 @@ impl SemanticAnalyzer {
                 }
             }
             AnalogOperator::LimiterArgument { .. } => {}
-            AnalogOperator::Ddt { expr, abstol, .. } => {
-                visit(expr)?;
-                if let Some(value) = abstol {
-                    visit(value)?;
-                }
-            }
-            AnalogOperator::Idt {
-                expr,
-                ic,
-                assert_val,
-                abstol,
-                ..
-            } => {
-                visit(expr)?;
-                for value in [ic, assert_val, abstol].into_iter().flatten() {
-                    visit(value)?;
-                }
-            }
-            AnalogOperator::IdtMod {
-                expr,
-                ic,
-                modulus,
-                offset,
-                abstol,
-                ..
-            } => {
-                visit(expr)?;
-                for value in [ic, modulus, offset, abstol].into_iter().flatten() {
-                    visit(value)?;
-                }
-            }
-            AnalogOperator::Ddx { expr, .. }
-            | AnalogOperator::Limexp { expr, .. }
-            | AnalogOperator::LastCrossing { expr, .. } => visit(expr)?,
-            AnalogOperator::Absdelay {
-                expr,
-                delay,
-                max_delay,
-                ..
-            } => {
-                visit(expr)?;
-                visit(delay)?;
-                if let Some(value) = max_delay {
-                    visit(value)?;
-                }
-            }
-            AnalogOperator::Slew {
-                expr,
-                max_rise,
-                max_fall,
-                ..
-            } => {
-                visit(expr)?;
-                for value in [max_rise, max_fall].into_iter().flatten() {
-                    visit(value)?;
-                }
-            }
-            AnalogOperator::Laplace { expr, kind, .. } => {
-                visit(expr)?;
-                let (first, second) = match kind {
-                    LaplaceKind::ZeroPole { zeros, poles } => (zeros, poles),
-                    LaplaceKind::ZeroDenominator { zeros, denominator } => (zeros, denominator),
-                    LaplaceKind::NumeratorPole { numerator, poles } => (numerator, poles),
-                    LaplaceKind::NumeratorDenominator {
-                        numerator,
-                        denominator,
-                    } => (numerator, denominator),
-                };
-                for value in first.iter().chain(second) {
-                    visit(value)?;
-                }
-            }
-            AnalogOperator::Zi {
-                expr,
-                kind,
-                period,
-                transition,
-                first_transition,
-                ..
-            } => {
-                visit(expr)?;
-                let (first, second) = match kind {
-                    ZiKind::ZeroPole { zeros, poles } => (zeros, poles),
-                    ZiKind::ZeroDenominator { zeros, denominator } => (zeros, denominator),
-                    ZiKind::NumeratorPole { numerator, poles } => (numerator, poles),
-                    ZiKind::NumeratorDenominator {
-                        numerator,
-                        denominator,
-                    } => (numerator, denominator),
-                };
-                for value in first.iter().chain(second) {
-                    visit(value)?;
-                }
-                visit(period)?;
-                if let Some(value) = transition {
-                    visit(value)?;
-                }
-                if let Some(value) = first_transition {
-                    visit(value)?;
-                }
-            }
         }
         Ok(())
     }
@@ -4674,102 +4569,6 @@ impl SemanticAnalyzer {
                 argument: *argument,
                 span: *span,
             },
-            AnalogOperator::Ddt { expr, abstol, span } => AnalogOperator::Ddt {
-                expr: self.materialize_output_function_calls_box(expr, module, sink)?,
-                abstol: self.materialize_output_function_calls_opt_box(abstol, module, sink)?,
-                span: *span,
-            },
-            AnalogOperator::Idt {
-                expr,
-                ic,
-                assert_val,
-                abstol,
-                span,
-            } => AnalogOperator::Idt {
-                expr: self.materialize_output_function_calls_box(expr, module, sink)?,
-                ic: self.materialize_output_function_calls_opt_box(ic, module, sink)?,
-                assert_val: self
-                    .materialize_output_function_calls_opt_box(assert_val, module, sink)?,
-                abstol: self.materialize_output_function_calls_opt_box(abstol, module, sink)?,
-                span: *span,
-            },
-            AnalogOperator::IdtMod {
-                expr,
-                ic,
-                modulus,
-                offset,
-                abstol,
-                span,
-            } => AnalogOperator::IdtMod {
-                expr: self.materialize_output_function_calls_box(expr, module, sink)?,
-                ic: self.materialize_output_function_calls_opt_box(ic, module, sink)?,
-                modulus: self.materialize_output_function_calls_opt_box(modulus, module, sink)?,
-                offset: self.materialize_output_function_calls_opt_box(offset, module, sink)?,
-                abstol: self.materialize_output_function_calls_opt_box(abstol, module, sink)?,
-                span: *span,
-            },
-            AnalogOperator::Ddx { expr, probe, span } => AnalogOperator::Ddx {
-                expr: self.materialize_output_function_calls_box(expr, module, sink)?,
-                probe: probe.clone(),
-                span: *span,
-            },
-            AnalogOperator::Limexp { expr, span } => AnalogOperator::Limexp {
-                expr: self.materialize_output_function_calls_box(expr, module, sink)?,
-                span: *span,
-            },
-            AnalogOperator::Absdelay {
-                expr,
-                delay,
-                max_delay,
-                span,
-            } => AnalogOperator::Absdelay {
-                expr: self.materialize_output_function_calls_box(expr, module, sink)?,
-                delay: self.materialize_output_function_calls_box(delay, module, sink)?,
-                max_delay: self
-                    .materialize_output_function_calls_opt_box(max_delay, module, sink)?,
-                span: *span,
-            },
-            AnalogOperator::Slew {
-                expr,
-                max_rise,
-                max_fall,
-                span,
-            } => AnalogOperator::Slew {
-                expr: self.materialize_output_function_calls_box(expr, module, sink)?,
-                max_rise: self.materialize_output_function_calls_opt_box(max_rise, module, sink)?,
-                max_fall: self.materialize_output_function_calls_opt_box(max_fall, module, sink)?,
-                span: *span,
-            },
-            AnalogOperator::LastCrossing { expr, edge, span } => AnalogOperator::LastCrossing {
-                expr: self.materialize_output_function_calls_box(expr, module, sink)?,
-                edge: *edge,
-                span: *span,
-            },
-            AnalogOperator::Laplace { kind, expr, span } => AnalogOperator::Laplace {
-                kind: self.materialize_output_function_calls_in_laplace_kind(kind, module, sink)?,
-                expr: self.materialize_output_function_calls_box(expr, module, sink)?,
-                span: *span,
-            },
-            AnalogOperator::Zi {
-                kind,
-                expr,
-                period,
-                transition,
-                first_transition,
-                span,
-            } => AnalogOperator::Zi {
-                kind: self.materialize_output_function_calls_in_zi_kind(kind, module, sink)?,
-                expr: self.materialize_output_function_calls_box(expr, module, sink)?,
-                period: self.materialize_output_function_calls_box(period, module, sink)?,
-                transition: self
-                    .materialize_output_function_calls_opt_box(transition, module, sink)?,
-                first_transition: self.materialize_output_function_calls_opt_box(
-                    first_transition,
-                    module,
-                    sink,
-                )?,
-                span: *span,
-            },
         })
     }
 
@@ -4793,84 +4592,6 @@ impl SemanticAnalyzer {
         expr.as_deref()
             .map(|expr| self.materialize_output_function_calls_box(expr, module, sink))
             .transpose()
-    }
-
-    fn materialize_output_function_calls_in_laplace_kind(
-        &mut self,
-        kind: &LaplaceKind,
-        module: &mut AnalyzedModule,
-        sink: &mut Vec<AnalyzedStatement>,
-    ) -> CompileResult<LaplaceKind> {
-        Ok(match kind {
-            LaplaceKind::ZeroPole { zeros, poles } => LaplaceKind::ZeroPole {
-                zeros: self.materialize_output_function_calls_in_expr_list(zeros, module, sink)?,
-                poles: self.materialize_output_function_calls_in_expr_list(poles, module, sink)?,
-            },
-            LaplaceKind::ZeroDenominator { zeros, denominator } => LaplaceKind::ZeroDenominator {
-                zeros: self.materialize_output_function_calls_in_expr_list(zeros, module, sink)?,
-                denominator: self.materialize_output_function_calls_in_expr_list(
-                    denominator,
-                    module,
-                    sink,
-                )?,
-            },
-            LaplaceKind::NumeratorPole { numerator, poles } => LaplaceKind::NumeratorPole {
-                numerator: self
-                    .materialize_output_function_calls_in_expr_list(numerator, module, sink)?,
-                poles: self.materialize_output_function_calls_in_expr_list(poles, module, sink)?,
-            },
-            LaplaceKind::NumeratorDenominator {
-                numerator,
-                denominator,
-            } => LaplaceKind::NumeratorDenominator {
-                numerator: self
-                    .materialize_output_function_calls_in_expr_list(numerator, module, sink)?,
-                denominator: self.materialize_output_function_calls_in_expr_list(
-                    denominator,
-                    module,
-                    sink,
-                )?,
-            },
-        })
-    }
-
-    fn materialize_output_function_calls_in_zi_kind(
-        &mut self,
-        kind: &ZiKind,
-        module: &mut AnalyzedModule,
-        sink: &mut Vec<AnalyzedStatement>,
-    ) -> CompileResult<ZiKind> {
-        Ok(match kind {
-            ZiKind::ZeroPole { zeros, poles } => ZiKind::ZeroPole {
-                zeros: self.materialize_output_function_calls_in_expr_list(zeros, module, sink)?,
-                poles: self.materialize_output_function_calls_in_expr_list(poles, module, sink)?,
-            },
-            ZiKind::ZeroDenominator { zeros, denominator } => ZiKind::ZeroDenominator {
-                zeros: self.materialize_output_function_calls_in_expr_list(zeros, module, sink)?,
-                denominator: self.materialize_output_function_calls_in_expr_list(
-                    denominator,
-                    module,
-                    sink,
-                )?,
-            },
-            ZiKind::NumeratorPole { numerator, poles } => ZiKind::NumeratorPole {
-                numerator: self
-                    .materialize_output_function_calls_in_expr_list(numerator, module, sink)?,
-                poles: self.materialize_output_function_calls_in_expr_list(poles, module, sink)?,
-            },
-            ZiKind::NumeratorDenominator {
-                numerator,
-                denominator,
-            } => ZiKind::NumeratorDenominator {
-                numerator: self
-                    .materialize_output_function_calls_in_expr_list(numerator, module, sink)?,
-                denominator: self.materialize_output_function_calls_in_expr_list(
-                    denominator,
-                    module,
-                    sink,
-                )?,
-            },
-        })
     }
 
     fn materialize_output_function_calls_in_noise_source(
@@ -5016,126 +4737,7 @@ impl SemanticAnalyzer {
                     || contains_opt(type_metadata)
             }
             AnalogOperator::LimiterArgument { .. } => false,
-            AnalogOperator::Ddt { expr, abstol, .. } => {
-                self.expression_contains_output_function_call(expr) || contains_opt(abstol)
-            }
-            AnalogOperator::Idt {
-                expr,
-                ic,
-                assert_val,
-                abstol,
-                ..
-            } => {
-                self.expression_contains_output_function_call(expr)
-                    || contains_opt(ic)
-                    || contains_opt(assert_val)
-                    || contains_opt(abstol)
-            }
-            AnalogOperator::IdtMod {
-                expr,
-                ic,
-                modulus,
-                offset,
-                abstol,
-                ..
-            } => {
-                self.expression_contains_output_function_call(expr)
-                    || contains_opt(ic)
-                    || contains_opt(modulus)
-                    || contains_opt(offset)
-                    || contains_opt(abstol)
-            }
-            AnalogOperator::Ddx { expr, .. }
-            | AnalogOperator::Limexp { expr, .. }
-            | AnalogOperator::LastCrossing { expr, .. } => {
-                self.expression_contains_output_function_call(expr)
-            }
-            AnalogOperator::Laplace { kind, expr, .. } => {
-                self.expression_contains_output_function_call(expr)
-                    || self.laplace_kind_contains_output_function_call(kind)
-            }
-            AnalogOperator::Zi {
-                kind, expr, period, ..
-            } => {
-                self.expression_contains_output_function_call(expr)
-                    || self.expression_contains_output_function_call(period)
-                    || self.zi_kind_contains_output_function_call(kind)
-            }
-            AnalogOperator::Absdelay {
-                expr,
-                delay,
-                max_delay,
-                ..
-            } => {
-                self.expression_contains_output_function_call(expr)
-                    || self.expression_contains_output_function_call(delay)
-                    || contains_opt(max_delay)
-            }
-            AnalogOperator::Slew {
-                expr,
-                max_rise,
-                max_fall,
-                ..
-            } => {
-                self.expression_contains_output_function_call(expr)
-                    || contains_opt(max_rise)
-                    || contains_opt(max_fall)
-            }
         }
-    }
-
-    fn laplace_kind_contains_output_function_call(&self, kind: &LaplaceKind) -> bool {
-        match kind {
-            LaplaceKind::ZeroPole { zeros, poles } => {
-                self.expr_list_contains_output_function_call(zeros)
-                    || self.expr_list_contains_output_function_call(poles)
-            }
-            LaplaceKind::ZeroDenominator { zeros, denominator } => {
-                self.expr_list_contains_output_function_call(zeros)
-                    || self.expr_list_contains_output_function_call(denominator)
-            }
-            LaplaceKind::NumeratorPole { numerator, poles } => {
-                self.expr_list_contains_output_function_call(numerator)
-                    || self.expr_list_contains_output_function_call(poles)
-            }
-            LaplaceKind::NumeratorDenominator {
-                numerator,
-                denominator,
-            } => {
-                self.expr_list_contains_output_function_call(numerator)
-                    || self.expr_list_contains_output_function_call(denominator)
-            }
-        }
-    }
-
-    fn zi_kind_contains_output_function_call(&self, kind: &ZiKind) -> bool {
-        match kind {
-            ZiKind::ZeroPole { zeros, poles } => {
-                self.expr_list_contains_output_function_call(zeros)
-                    || self.expr_list_contains_output_function_call(poles)
-            }
-            ZiKind::ZeroDenominator { zeros, denominator } => {
-                self.expr_list_contains_output_function_call(zeros)
-                    || self.expr_list_contains_output_function_call(denominator)
-            }
-            ZiKind::NumeratorPole { numerator, poles } => {
-                self.expr_list_contains_output_function_call(numerator)
-                    || self.expr_list_contains_output_function_call(poles)
-            }
-            ZiKind::NumeratorDenominator {
-                numerator,
-                denominator,
-            } => {
-                self.expr_list_contains_output_function_call(numerator)
-                    || self.expr_list_contains_output_function_call(denominator)
-            }
-        }
-    }
-
-    fn expr_list_contains_output_function_call(&self, exprs: &[Expression]) -> bool {
-        exprs
-            .iter()
-            .any(|expr| self.expression_contains_output_function_call(expr))
     }
 
     fn noise_source_contains_output_function_call(&self, noise: &NoiseSource) -> bool {
@@ -5527,14 +5129,6 @@ impl SemanticAnalyzer {
                     span: a.span,
                 })
             }
-            Expression::AnalogOperator(operator)
-                if stateful_public_analog_operator_name(operator).is_some() =>
-            {
-                let operator_name = stateful_public_analog_operator_name(operator)
-                    .expect("guard requires a classified stateful analog operator");
-                self.validate_stateful_analog_operator_placement(operator_name, operator.span())?;
-                self.lower_stateful_public_analog_operator(operator)?
-            }
             Expression::AnalogOperator(_) => expr.clone(),
             Expression::NoiseSource(noise) => {
                 Expression::NoiseSource(self.lower_typed_noise_source(noise)?)
@@ -5716,189 +5310,6 @@ impl SemanticAnalyzer {
         )))
     }
 
-    /// Lower all operands of the public typed stateful representation. Parsed
-    /// source normally reaches this pass as [`Expression::Call`], but API
-    /// callers may submit these nodes directly; they must receive the same
-    /// substitution, access validation, and nested-placement checks.
-    fn lower_stateful_public_analog_operator(
-        &mut self,
-        operator: &AnalogOperator,
-    ) -> CompileResult<Expression> {
-        let lower_optional = |this: &mut Self, value: &Option<Box<Expression>>| {
-            value
-                .as_ref()
-                .map(|value| this.lower_expression(value).map(Box::new))
-                .transpose()
-        };
-        Ok(Expression::AnalogOperator(match operator {
-            AnalogOperator::Ddt { expr, abstol, span } => AnalogOperator::Ddt {
-                expr: Box::new(self.lower_expression(expr)?),
-                abstol: lower_optional(self, abstol)?,
-                span: *span,
-            },
-            AnalogOperator::Idt {
-                expr,
-                ic,
-                assert_val,
-                abstol,
-                span,
-            } => AnalogOperator::Idt {
-                expr: Box::new(self.lower_expression(expr)?),
-                ic: lower_optional(self, ic)?,
-                assert_val: lower_optional(self, assert_val)?,
-                abstol: lower_optional(self, abstol)?,
-                span: *span,
-            },
-            AnalogOperator::IdtMod {
-                expr,
-                ic,
-                modulus,
-                offset,
-                abstol,
-                span,
-            } => AnalogOperator::IdtMod {
-                expr: Box::new(self.lower_expression(expr)?),
-                ic: lower_optional(self, ic)?,
-                modulus: lower_optional(self, modulus)?,
-                offset: lower_optional(self, offset)?,
-                abstol: lower_optional(self, abstol)?,
-                span: *span,
-            },
-            AnalogOperator::Absdelay {
-                expr,
-                delay,
-                max_delay,
-                span,
-            } => {
-                if let Some(max_delay) = max_delay
-                    && !self.expression_is_simulation_invariant(max_delay)
-                {
-                    return Err(CompileError::Semantic(SemanticError::new(
-                        SemanticErrorKind::InvalidAnalogOperator(
-                            "absdelay maxdelay must be constant for the duration of an analysis"
-                                .into(),
-                        ),
-                        max_delay.span(),
-                    )));
-                }
-                AnalogOperator::Absdelay {
-                    expr: Box::new(self.lower_expression(expr)?),
-                    delay: Box::new(self.lower_expression(delay)?),
-                    max_delay: lower_optional(self, max_delay)?,
-                    span: *span,
-                }
-            }
-            AnalogOperator::Slew {
-                expr,
-                max_rise,
-                max_fall,
-                span,
-            } => AnalogOperator::Slew {
-                expr: Box::new(self.lower_expression(expr)?),
-                max_rise: lower_optional(self, max_rise)?,
-                max_fall: lower_optional(self, max_fall)?,
-                span: *span,
-            },
-            AnalogOperator::LastCrossing { expr, edge, span } => AnalogOperator::LastCrossing {
-                expr: Box::new(self.lower_expression(expr)?),
-                edge: *edge,
-                span: *span,
-            },
-            AnalogOperator::Laplace { kind, expr, span } => AnalogOperator::Laplace {
-                kind: self.lower_public_laplace_kind(kind)?,
-                expr: Box::new(self.lower_expression(expr)?),
-                span: *span,
-            },
-            AnalogOperator::Zi {
-                kind,
-                expr,
-                period,
-                transition,
-                first_transition,
-                span,
-            } => {
-                self.validate_public_zi_operand_budget(kind, *span)?;
-                AnalogOperator::Zi {
-                    kind: self.lower_public_zi_kind(kind)?,
-                    expr: Box::new(self.lower_expression(expr)?),
-                    period: Box::new(self.lower_expression(period)?),
-                    transition: Some(Box::new(match transition {
-                        Some(transition) => self.lower_expression(transition)?,
-                        None => Self::number_expr(self.current_default_transition, *span),
-                    })),
-                    first_transition: lower_optional(self, first_transition)?,
-                    span: *span,
-                }
-            }
-            AnalogOperator::Limit { .. }
-            | AnalogOperator::LimiterArgument { .. }
-            | AnalogOperator::Ddx { .. }
-            | AnalogOperator::Limexp { .. } => {
-                unreachable!("only classified stateful operators enter this lowering path")
-            }
-        }))
-    }
-
-    fn lower_public_laplace_kind(&mut self, kind: &LaplaceKind) -> CompileResult<LaplaceKind> {
-        let lower = |this: &mut Self, values: &[Expression]| {
-            values
-                .iter()
-                .map(|value| this.lower_expression(value))
-                .collect::<CompileResult<Vec<_>>>()
-        };
-        Ok(match kind {
-            LaplaceKind::ZeroPole { zeros, poles } => LaplaceKind::ZeroPole {
-                zeros: lower(self, zeros)?,
-                poles: lower(self, poles)?,
-            },
-            LaplaceKind::ZeroDenominator { zeros, denominator } => LaplaceKind::ZeroDenominator {
-                zeros: lower(self, zeros)?,
-                denominator: lower(self, denominator)?,
-            },
-            LaplaceKind::NumeratorPole { numerator, poles } => LaplaceKind::NumeratorPole {
-                numerator: lower(self, numerator)?,
-                poles: lower(self, poles)?,
-            },
-            LaplaceKind::NumeratorDenominator {
-                numerator,
-                denominator,
-            } => LaplaceKind::NumeratorDenominator {
-                numerator: lower(self, numerator)?,
-                denominator: lower(self, denominator)?,
-            },
-        })
-    }
-
-    fn lower_public_zi_kind(&mut self, kind: &ZiKind) -> CompileResult<ZiKind> {
-        let lower = |this: &mut Self, values: &[Expression]| {
-            values
-                .iter()
-                .map(|value| this.lower_expression(value))
-                .collect::<CompileResult<Vec<_>>>()
-        };
-        Ok(match kind {
-            ZiKind::ZeroPole { zeros, poles } => ZiKind::ZeroPole {
-                zeros: lower(self, zeros)?,
-                poles: lower(self, poles)?,
-            },
-            ZiKind::ZeroDenominator { zeros, denominator } => ZiKind::ZeroDenominator {
-                zeros: lower(self, zeros)?,
-                denominator: lower(self, denominator)?,
-            },
-            ZiKind::NumeratorPole { numerator, poles } => ZiKind::NumeratorPole {
-                numerator: lower(self, numerator)?,
-                poles: lower(self, poles)?,
-            },
-            ZiKind::NumeratorDenominator {
-                numerator,
-                denominator,
-            } => ZiKind::NumeratorDenominator {
-                numerator: lower(self, numerator)?,
-                denominator: lower(self, denominator)?,
-            },
-        })
-    }
-
     fn validate_zi_definition_purity(&self, call: &CallExpr) -> CompileResult<()> {
         for (index, argument) in call.args.iter().enumerate() {
             if matches!(index, 1 | 2 | 3 | 5) {
@@ -5920,21 +5331,6 @@ impl SemanticAnalyzer {
             scalar_count(&call.args[2]),
             call.span,
         )
-    }
-
-    fn validate_public_zi_operand_budget(&self, kind: &ZiKind, span: Span) -> CompileResult<()> {
-        let (operator, numerator, denominator) = match kind {
-            ZiKind::ZeroPole { zeros, poles } => ("zi_zp", zeros.len(), poles.len()),
-            ZiKind::ZeroDenominator { zeros, denominator } => {
-                ("zi_zd", zeros.len(), denominator.len())
-            }
-            ZiKind::NumeratorPole { numerator, poles } => ("zi_np", numerator.len(), poles.len()),
-            ZiKind::NumeratorDenominator {
-                numerator,
-                denominator,
-            } => ("zi_nd", numerator.len(), denominator.len()),
-        };
-        self.validate_zi_scalar_budget(operator, numerator, denominator, span)
     }
 
     fn validate_zi_scalar_budget(
@@ -6069,9 +5465,6 @@ impl SemanticAnalyzer {
                     Self::validate_zi_freeze_expression(argument, operator, argument_index)?;
                 }
                 Ok(())
-            }
-            Expression::AnalogOperator(AnalogOperator::Limexp { expr, .. }) => {
-                Self::validate_zi_freeze_expression(expr, operator, argument_index)
             }
             Expression::AnalogOperator(analog) => reject(
                 format!("nested analog operator at {:?} is stateful", analog.span()),
@@ -9011,37 +8404,6 @@ fn stateful_analog_operator_call_name(name: &str) -> Option<&'static str> {
         "zi_np" => "zi_np",
         "zi_nd" => "zi_nd",
         _ => return None,
-    })
-}
-
-/// Canonical name of a public typed analog-operator node with per-evaluation
-/// state. Event-control `cross`, `above`, and `timer` use [`EventExpr`] rather
-/// than this enum and are intentionally validated by their enclosing event
-/// semantics instead of being rejected as conditional calls.
-fn stateful_public_analog_operator_name(operator: &AnalogOperator) -> Option<&'static str> {
-    Some(match operator {
-        AnalogOperator::Ddt { .. } => "ddt",
-        AnalogOperator::Idt { .. } => "idt",
-        AnalogOperator::IdtMod { .. } => "idtmod",
-        AnalogOperator::Absdelay { .. } => "absdelay",
-        AnalogOperator::Slew { .. } => "slew",
-        AnalogOperator::LastCrossing { .. } => "last_crossing",
-        AnalogOperator::Laplace { kind, .. } => match kind {
-            LaplaceKind::ZeroPole { .. } => "laplace_zp",
-            LaplaceKind::ZeroDenominator { .. } => "laplace_zd",
-            LaplaceKind::NumeratorPole { .. } => "laplace_np",
-            LaplaceKind::NumeratorDenominator { .. } => "laplace_nd",
-        },
-        AnalogOperator::Zi { kind, .. } => match kind {
-            ZiKind::ZeroPole { .. } => "zi_zp",
-            ZiKind::ZeroDenominator { .. } => "zi_zd",
-            ZiKind::NumeratorPole { .. } => "zi_np",
-            ZiKind::NumeratorDenominator { .. } => "zi_nd",
-        },
-        AnalogOperator::Limit { .. }
-        | AnalogOperator::LimiterArgument { .. }
-        | AnalogOperator::Ddx { .. }
-        | AnalogOperator::Limexp { .. } => return None,
     })
 }
 

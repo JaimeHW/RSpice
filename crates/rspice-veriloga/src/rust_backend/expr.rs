@@ -247,52 +247,6 @@ impl ExprEmitter<'_> {
                 self.lower_intrinsic_value(name.as_str(), args.as_slice(), &base)?
             }
             HirExprKind::NoiseSource { .. } => "0.0".to_string(),
-            HirExprKind::AnalogOperator {
-                op: HirAnalogOperator::Ddt { expr, abstol },
-            } => {
-                if abstol.is_some() {
-                    return Err(self.unsupported("ddt abstol argument"));
-                }
-                self.lower_ddt_value(id, &[*expr], &base)?
-            }
-            HirExprKind::AnalogOperator {
-                op:
-                    HirAnalogOperator::Idt {
-                        expr,
-                        ic,
-                        assert,
-                        abstol,
-                    },
-            } => {
-                if assert.is_some() || abstol.is_some() {
-                    return Err(self.unsupported("idt assert/abstol argument"));
-                }
-                self.lower_idt_value(id, *expr, *ic, &base)?
-            }
-            HirExprKind::AnalogOperator {
-                op: HirAnalogOperator::Ddx { expr, probe },
-            } => self.lower_ddx_value(*expr, *probe, &base)?,
-            HirExprKind::AnalogOperator {
-                op: HirAnalogOperator::Limexp { expr },
-            } => {
-                let arg = self.lower(*expr)?;
-                self.emit_value(&base, limexp_value_expr(&arg.value))
-            }
-            HirExprKind::AnalogOperator {
-                op:
-                    HirAnalogOperator::Slew {
-                        expr,
-                        max_rise: None,
-                        max_fall: None,
-                    },
-            } => self.lower(*expr)?.value,
-            HirExprKind::AnalogOperator {
-                op: HirAnalogOperator::Slew { .. },
-            } => {
-                return Err(self.unsupported(
-                    "rate-limited slew analog operator is unsupported by generated Rust; rate limiting cannot be degraded to a passthrough",
-                ));
-            }
             other => {
                 return Err(self.unsupported(format!("expression kind {other:?}")));
             }
@@ -392,20 +346,6 @@ impl ExprEmitter<'_> {
             {
                 Ok(true)
             }
-            HirExprKind::AnalogOperator {
-                op:
-                    HirAnalogOperator::Slew {
-                        max_rise, max_fall, ..
-                    },
-            } if max_rise.is_some() || max_fall.is_some() => Ok(true),
-            HirExprKind::AnalogOperator {
-                op:
-                    HirAnalogOperator::Ddt { .. }
-                    | HirAnalogOperator::Idt { .. }
-                    | HirAnalogOperator::IdtMod { .. }
-                    | HirAnalogOperator::Absdelay { .. }
-                    | HirAnalogOperator::LastCrossing { .. },
-            } => Ok(true),
             _ => expression_children(&expression.kind).into_iter().try_fold(
                 false,
                 |has_side_effects, child| {
@@ -1221,23 +1161,6 @@ fn expression_children(kind: &HirExprKind) -> Vec<ExprId> {
             children.extend(elements.iter().copied());
         }
         HirExprKind::AnalogOperator { op } => push_analog_operator_children(op, &mut children),
-        HirExprKind::Laplace { expr, kind } => {
-            children.push(*expr);
-            push_laplace_children(kind, &mut children);
-        }
-        HirExprKind::Zi {
-            expr,
-            kind,
-            period,
-            transition,
-            first_transition,
-        } => {
-            children.push(*expr);
-            children.push(*period);
-            children.extend(transition.iter().copied());
-            children.extend(first_transition.iter().copied());
-            push_zi_children(kind, &mut children);
-        }
         HirExprKind::NoiseSource { operands, .. } => {
             children.extend(operands.iter().copied());
         }
@@ -1257,98 +1180,6 @@ fn push_analog_operator_children(op: &HirAnalogOperator, children: &mut Vec<Expr
             children.extend(type_metadata.iter().copied());
         }
         HirAnalogOperator::LimiterArgument { .. } => {}
-        HirAnalogOperator::Ddt { expr, abstol } => {
-            children.push(*expr);
-            children.extend(abstol.iter().copied());
-        }
-        HirAnalogOperator::Idt {
-            expr,
-            ic,
-            assert,
-            abstol,
-        } => {
-            children.push(*expr);
-            children.extend([*ic, *assert, *abstol].into_iter().flatten());
-        }
-        HirAnalogOperator::IdtMod {
-            expr,
-            ic,
-            modulus,
-            offset,
-            abstol,
-        } => {
-            children.push(*expr);
-            children.extend([*ic, *modulus, *offset, *abstol].into_iter().flatten());
-        }
-        HirAnalogOperator::Ddx { expr, probe } => {
-            children.push(*expr);
-            children.push(*probe);
-        }
-        HirAnalogOperator::Limexp { expr } => {
-            children.push(*expr);
-        }
-        HirAnalogOperator::Absdelay {
-            expr,
-            delay,
-            max_delay,
-        } => {
-            children.push(*expr);
-            children.push(*delay);
-            children.extend(max_delay.iter().copied());
-        }
-        HirAnalogOperator::Slew {
-            expr,
-            max_rise,
-            max_fall,
-        } => {
-            children.push(*expr);
-            children.extend([*max_rise, *max_fall].into_iter().flatten());
-        }
-        HirAnalogOperator::LastCrossing { expr, .. } => {
-            children.push(*expr);
-        }
-    }
-}
-
-fn push_laplace_children(kind: &crate::canonical_ir::HirLaplaceKind, children: &mut Vec<ExprId>) {
-    match kind {
-        crate::canonical_ir::HirLaplaceKind::ZeroPole { zeros, poles }
-        | crate::canonical_ir::HirLaplaceKind::NumeratorPole {
-            numerator: zeros,
-            poles,
-        } => {
-            children.extend(zeros.iter().copied());
-            children.extend(poles.iter().copied());
-        }
-        crate::canonical_ir::HirLaplaceKind::ZeroDenominator { zeros, denominator }
-        | crate::canonical_ir::HirLaplaceKind::NumeratorDenominator {
-            numerator: zeros,
-            denominator,
-        } => {
-            children.extend(zeros.iter().copied());
-            children.extend(denominator.iter().copied());
-        }
-    }
-}
-
-fn push_zi_children(kind: &crate::canonical_ir::HirZiKind, children: &mut Vec<ExprId>) {
-    match kind {
-        crate::canonical_ir::HirZiKind::ZeroPole { zeros, poles }
-        | crate::canonical_ir::HirZiKind::NumeratorPole {
-            numerator: zeros,
-            poles,
-        } => {
-            children.extend(zeros.iter().copied());
-            children.extend(poles.iter().copied());
-        }
-        crate::canonical_ir::HirZiKind::ZeroDenominator { zeros, denominator }
-        | crate::canonical_ir::HirZiKind::NumeratorDenominator {
-            numerator: zeros,
-            denominator,
-        } => {
-            children.extend(zeros.iter().copied());
-            children.extend(denominator.iter().copied());
-        }
     }
 }
 

@@ -322,23 +322,6 @@ impl CanonicalStateOperator {
     pub fn matches_operator(self, op: &HirAnalogOperator) -> bool {
         match (self, op) {
             (Self::Limit, HirAnalogOperator::Limit { .. }) => true,
-            (Self::Ddt, HirAnalogOperator::Ddt { .. }) => true,
-            (Self::Idt, HirAnalogOperator::Idt { .. }) => true,
-            (Self::Idt, HirAnalogOperator::IdtMod { modulus: None, .. }) => true,
-            (
-                Self::IdtMod,
-                HirAnalogOperator::IdtMod {
-                    modulus: Some(_), ..
-                },
-            ) => true,
-            (
-                Self::Slew,
-                HirAnalogOperator::Slew {
-                    max_rise: Some(_), ..
-                },
-            ) => true,
-            (Self::Absdelay, HirAnalogOperator::Absdelay { .. }) => true,
-            (Self::Cross, HirAnalogOperator::LastCrossing { .. }) => true,
             _ => false,
         }
     }
@@ -354,8 +337,6 @@ fn normalized_intrinsic_name(name: &str) -> String {
 /// which is what lets one walk serve every family instead of one walk each.
 pub fn classify(kind: &HirExprKind) -> Option<CanonicalStateOperator> {
     match kind {
-        HirExprKind::Laplace { .. } => Some(CanonicalStateOperator::Laplace),
-        HirExprKind::Zi { .. } => Some(CanonicalStateOperator::Zi),
         HirExprKind::SystemFunction { name, args } | HirExprKind::Call { name, args } => {
             CanonicalStateOperator::ALL
                 .into_iter()
@@ -430,34 +411,6 @@ pub fn visit_state_sites(
         HirExprKind::AnalogOperator { op } => {
             visit_analog_operator_children(expressions, op, visit)?;
         }
-        HirExprKind::Laplace { expr, kind } => {
-            visit_state_sites(expressions, *expr, visit)?;
-            let (numerator, denominator) = kind.polynomials();
-            visit_list(expressions, numerator, visit)?;
-            visit_list(expressions, denominator, visit)?;
-        }
-        HirExprKind::Zi {
-            expr,
-            kind,
-            period,
-            transition,
-            first_transition,
-        } => {
-            // This walk order predates the layout and is NOT the generator's
-            // emission order (numerator, denominator, period, first_transition,
-            // expr, transition). A state-bearing operator nested inside a zi
-            // operand would be numbered differently by the two; no shipped or
-            // corpus module nests one there, and reordering would move slot
-            // numbers, so the divergence stands until the layout allocates.
-            visit_state_sites(expressions, *expr, visit)?;
-            visit_state_sites(expressions, *period, visit)?;
-            for child in [*transition, *first_transition].into_iter().flatten() {
-                visit_state_sites(expressions, child, visit)?;
-            }
-            let (numerator, denominator) = kind.polynomials();
-            visit_list(expressions, numerator, visit)?;
-            visit_list(expressions, denominator, visit)?;
-        }
     }
 
     if let Some(operator) = classify(&expression.kind) {
@@ -497,63 +450,6 @@ fn visit_analog_operator_children(
             }
         }
         HirAnalogOperator::LimiterArgument { .. } => {}
-        HirAnalogOperator::Ddt { expr, abstol } => {
-            visit_state_sites(expressions, *expr, visit)?;
-            for child in [*abstol].into_iter().flatten() {
-                visit_state_sites(expressions, child, visit)?;
-            }
-        }
-        HirAnalogOperator::Idt {
-            expr,
-            ic,
-            assert,
-            abstol,
-        } => {
-            visit_state_sites(expressions, *expr, visit)?;
-            for child in [*ic, *assert, *abstol].into_iter().flatten() {
-                visit_state_sites(expressions, child, visit)?;
-            }
-        }
-        HirAnalogOperator::IdtMod {
-            expr,
-            ic,
-            modulus,
-            offset,
-            abstol,
-        } => {
-            visit_state_sites(expressions, *expr, visit)?;
-            for child in [*ic, *modulus, *offset, *abstol].into_iter().flatten() {
-                visit_state_sites(expressions, child, visit)?;
-            }
-        }
-        HirAnalogOperator::Ddx { expr, probe } => {
-            visit_state_sites(expressions, *expr, visit)?;
-            visit_state_sites(expressions, *probe, visit)?;
-        }
-        HirAnalogOperator::Limexp { expr } | HirAnalogOperator::LastCrossing { expr, .. } => {
-            visit_state_sites(expressions, *expr, visit)?;
-        }
-        HirAnalogOperator::Absdelay {
-            expr,
-            delay,
-            max_delay,
-        } => {
-            visit_state_sites(expressions, *expr, visit)?;
-            visit_state_sites(expressions, *delay, visit)?;
-            for child in [*max_delay].into_iter().flatten() {
-                visit_state_sites(expressions, child, visit)?;
-            }
-        }
-        HirAnalogOperator::Slew {
-            expr,
-            max_rise,
-            max_fall,
-        } => {
-            visit_state_sites(expressions, *expr, visit)?;
-            for child in [*max_rise, *max_fall].into_iter().flatten() {
-                visit_state_sites(expressions, child, visit)?;
-            }
-        }
     }
     Ok(())
 }

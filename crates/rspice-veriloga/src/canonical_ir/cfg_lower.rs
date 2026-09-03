@@ -39,9 +39,8 @@ use super::cfg::{
     CfgUnaryOp, CfgValueKind, CfgValueType, CfgVariable, CfgZiPolynomial, SsaBuilder,
 };
 use super::hir::{
-    HirAnalogOperator, HirAssignment, HirContribution, HirContributionKind, HirCrossDirection,
-    HirExprKind, HirExpression, HirLaplaceKind, HirLimiterArgument, HirModel, HirRegion,
-    HirStatement, HirZiKind,
+    HirAnalogOperator, HirAssignment, HirContribution, HirContributionKind, HirExprKind,
+    HirExpression, HirLimiterArgument, HirModel, HirRegion, HirStatement,
 };
 use super::mir::{MirEquationKind, MirModel};
 use super::noise::{contains_noise, is_noise_call, string_literal};
@@ -347,16 +346,6 @@ impl From<(bool, bool)> for FilterForm {
     }
 }
 
-fn laplace_kind_children(kind: &HirLaplaceKind) -> Vec<ExprId> {
-    let (numerator, denominator) = kind.polynomials();
-    numerator.iter().chain(denominator).copied().collect()
-}
-
-fn zi_kind_children(kind: &HirZiKind) -> Vec<ExprId> {
-    let (numerator, denominator) = kind.polynomials();
-    numerator.iter().chain(denominator).copied().collect()
-}
-
 /// Whether replacing every noise source by its large-signal value zero makes
 /// this expression identically zero. Used only to prove that substituting a
 /// routing/filter result with zero in the metadata-only assignment stream is
@@ -383,18 +372,8 @@ fn noise_substitution_is_zero(hir: &HirModel, id: ExprId) -> bool {
             ..
         } => zero(*then_expr) && zero(*else_expr),
         HirExprKind::AnalogOperator { op } => match op {
-            HirAnalogOperator::Ddt { expr, .. }
-            | HirAnalogOperator::Absdelay { expr, .. }
-            | HirAnalogOperator::Slew { expr, .. } => zero(*expr),
-            HirAnalogOperator::Ddx { expr, .. } => zero(*expr),
-            HirAnalogOperator::Idt { .. }
-            | HirAnalogOperator::IdtMod { .. }
-            | HirAnalogOperator::Limit { .. }
-            | HirAnalogOperator::Limexp { .. }
-            | HirAnalogOperator::LastCrossing { .. }
-            | HirAnalogOperator::LimiterArgument { .. } => false,
+            HirAnalogOperator::Limit { .. } | HirAnalogOperator::LimiterArgument { .. } => false,
         },
-        HirExprKind::Laplace { expr, .. } | HirExprKind::Zi { expr, .. } => zero(*expr),
         _ => false,
     }
 }
@@ -697,8 +676,6 @@ fn hir_expr_is_instance_static(
         HirExprKind::BranchAccess { .. }
         | HirExprKind::NamedBranchAccess { .. }
         | HirExprKind::AnalogOperator { .. }
-        | HirExprKind::Laplace { .. }
-        | HirExprKind::Zi { .. }
         | HirExprKind::NoiseSource { .. } => false,
     }
 }
@@ -1455,81 +1432,8 @@ impl<'a> CfgLowerer<'a> {
                         children.extend(type_metadata);
                     }
                     HirAnalogOperator::LimiterArgument { .. } => {}
-                    HirAnalogOperator::Ddt { expr, abstol } => {
-                        children.push(expr);
-                        children.extend(abstol);
-                    }
-                    HirAnalogOperator::Idt {
-                        expr,
-                        ic,
-                        assert,
-                        abstol,
-                    } => {
-                        children.push(expr);
-                        children.extend(ic);
-                        children.extend(assert);
-                        children.extend(abstol);
-                    }
-                    HirAnalogOperator::IdtMod {
-                        expr,
-                        ic,
-                        modulus,
-                        offset,
-                        abstol,
-                    } => {
-                        children.push(expr);
-                        children.extend(ic);
-                        children.extend(modulus);
-                        children.extend(offset);
-                        children.extend(abstol);
-                    }
-                    HirAnalogOperator::Ddx { expr, probe } => children.extend([expr, probe]),
-                    HirAnalogOperator::Limexp { expr }
-                    | HirAnalogOperator::LastCrossing { expr, .. } => children.push(expr),
-                    HirAnalogOperator::Absdelay {
-                        expr,
-                        delay,
-                        max_delay,
-                    } => {
-                        children.extend([expr, delay]);
-                        children.extend(max_delay);
-                    }
-                    HirAnalogOperator::Slew {
-                        expr,
-                        max_rise,
-                        max_fall,
-                    } => {
-                        children.push(expr);
-                        children.extend(max_rise);
-                        children.extend(max_fall);
-                    }
                 }
                 for child in children {
-                    self.metadata_noise_expr(child);
-                }
-            }
-            HirExprKind::Laplace { expr, kind } => {
-                self.metadata_noise_expr(expr);
-                for child in laplace_kind_children(&kind) {
-                    self.metadata_noise_expr(child);
-                }
-            }
-            HirExprKind::Zi {
-                expr,
-                kind,
-                period,
-                transition,
-                first_transition,
-            } => {
-                self.metadata_noise_expr(expr);
-                for child in zi_kind_children(&kind) {
-                    self.metadata_noise_expr(child);
-                }
-                self.metadata_noise_expr(period);
-                if let Some(child) = transition {
-                    self.metadata_noise_expr(child);
-                }
-                if let Some(child) = first_transition {
                     self.metadata_noise_expr(child);
                 }
             }
@@ -2024,17 +1928,11 @@ impl<'a> CfgLowerer<'a> {
                 self.named_branch_access(access, name, span)
             }
             HirExprKind::SystemFunction { name, args } => self.system_function(name, args, span),
-            // The call spelling of a dynamic operator, which the arm below
-            // covers for the operator spelling.
-            //
-            // `absdelay(x, d)` reaches the HIR as an `AnalogOperator` or as a
-            // `Call` depending on how it was written, and this mode has to
-            // treat the two the same: it substitutes the operator's zero primal
-            // and records the noise site, which is what makes
+            // A dynamic operator's only spelling. `absdelay(x, d)` reaches the
+            // HIR as a `Call`, and this mode substitutes the operator's zero
+            // primal and records the noise site, which is what makes
             // `noise_metadata_from_hir` able to slice a model whose routing
-            // operator the residual CFG need not implement. Keying the guard on
-            // the spelling let the call form through — invisibly, while the
-            // call form of these operators was refused outright.
+            // operator the residual CFG need not implement.
             HirExprKind::Call { name, .. }
                 if self.noise_metadata_only
                     && is_dynamic_operator_call(name)
@@ -2068,21 +1966,6 @@ impl<'a> CfgLowerer<'a> {
                 self.metadata_noise_expr(expression.id);
                 self.real_constant(0.0)
             }
-            HirExprKind::Laplace { .. } | HirExprKind::Zi { .. }
-                if self.noise_metadata_only && contains_noise(self.hir, expression.id) =>
-            {
-                if self.metadata_assignment_value
-                    && !noise_substitution_is_zero(self.hir, expression.id)
-                {
-                    self.unsupported(
-                        span,
-                        "a noise-bearing filter assignment whose deterministic primal can reach later noise metadata"
-                            .to_string(),
-                    );
-                }
-                self.metadata_noise_expr(expression.id);
-                self.real_constant(0.0)
-            }
             HirExprKind::AnalogOperator { op } => self.analog_operator(op, expression, span),
             // Record raw metadata at the exact executed CFG site, then return
             // the required zero primal. Routing/filter amplitude is handled by
@@ -2093,41 +1976,6 @@ impl<'a> CfgLowerer<'a> {
                 operands,
                 name,
             } => self.noise_process(*process_id, source, operands, name.clone(), span),
-            // The public-AST route. The compiler's own parser writes these as
-            // calls, which [`Self::call`] resolves to the same two kinds; both
-            // routes exist because [`crate::ast`] is a public builder as well as
-            // the parser's output.
-            HirExprKind::Laplace { expr, kind } => {
-                let (numerator, denominator) = kind.polynomials();
-                self.laplace(
-                    expression.id,
-                    *expr,
-                    kind.names_roots().into(),
-                    numerator,
-                    denominator,
-                    span,
-                )
-            }
-            HirExprKind::Zi {
-                expr,
-                kind,
-                period,
-                transition,
-                first_transition,
-            } => {
-                let (numerator, denominator) = kind.polynomials();
-                self.zi(
-                    expression.id,
-                    *expr,
-                    kind.names_roots().into(),
-                    numerator,
-                    denominator,
-                    *period,
-                    *transition,
-                    *first_transition,
-                    span,
-                )
-            }
             other => {
                 self.unsupported(span, format!("{} expression", kind_label(other)));
                 self.real_constant(0.0)
@@ -3541,144 +3389,6 @@ impl<'a> CfgLowerer<'a> {
         span: SourceSpanRef,
     ) -> ValueId {
         match op {
-            HirAnalogOperator::Limexp { expr } => {
-                let input = self.expr(*expr);
-                self.unary(CfgUnaryOp::LimExp, input)
-            }
-            HirAnalogOperator::Ddx { expr, probe } => self.ddx(*expr, *probe, span),
-            HirAnalogOperator::Ddt { expr, .. } => {
-                let input = self.expr(*expr);
-                self.builder.push(
-                    self.block,
-                    CfgValueType::Real,
-                    CfgValueKind::Ddt {
-                        operator: expression.id,
-                        input,
-                    },
-                )
-            }
-            HirAnalogOperator::Idt {
-                expr,
-                ic,
-                assert,
-                abstol,
-            } => {
-                // `assert` restarts the integral on an event and `abstol` sets a
-                // per-operator tolerance; neither is expressible here yet, and
-                // an integral that silently ignored its reset would drift
-                // without ever failing.
-                if assert.is_some() || abstol.is_some() {
-                    self.unsupported(span, "idt with an assert or abstol argument".to_string());
-                    return self.real_constant(0.0);
-                }
-                self.idt(expression.id, *expr, *ic)
-            }
-            HirAnalogOperator::IdtMod {
-                expr,
-                ic,
-                modulus,
-                offset,
-                abstol,
-            } => {
-                // A modulus is what makes this `idtmod` rather than `idt`; the
-                // front end accepts the two-argument spelling as an alias for
-                // the unwrapped integral, and lowering that as a fold with no
-                // period would divide by zero.
-                if abstol.is_some() {
-                    self.unsupported(span, "idtmod with an abstol argument".to_string());
-                    return self.real_constant(0.0);
-                }
-                let Some(modulus) = modulus else {
-                    if offset.is_some() {
-                        self.unsupported(span, "idtmod with an offset and no modulus".to_string());
-                        return self.real_constant(0.0);
-                    }
-                    return self.idt(expression.id, *expr, *ic);
-                };
-                let input = self.expr(*expr);
-                let ic = self.optional_expr(*ic, 0.0);
-                let modulus = self.expr(*modulus);
-                let offset = self.optional_expr(*offset, 0.0);
-                self.builder.push(
-                    self.block,
-                    CfgValueType::Real,
-                    CfgValueKind::IdtMod {
-                        operator: expression.id,
-                        input,
-                        ic,
-                        modulus,
-                        offset,
-                    },
-                )
-            }
-            HirAnalogOperator::Absdelay {
-                expr,
-                delay,
-                max_delay,
-            } => {
-                let input = self.expr(*expr);
-                let delay = self.expr(*delay);
-                let max_delay = max_delay.map(|value| self.expr(value));
-                self.builder.push(
-                    self.block,
-                    CfgValueType::Real,
-                    CfgValueKind::AbsDelay {
-                        operator: expression.id,
-                        input,
-                        delay,
-                        max_delay,
-                    },
-                )
-            }
-            HirAnalogOperator::LastCrossing { expr, edge } => {
-                let input = self.expr(*expr);
-                let direction = self.real_constant(cross_direction_code(*edge));
-                self.builder.push(
-                    self.block,
-                    CfgValueType::Real,
-                    CfgValueKind::LastCrossing {
-                        operator: expression.id,
-                        input,
-                        direction,
-                    },
-                )
-            }
-            HirAnalogOperator::Slew {
-                expr,
-                max_rise: None,
-                max_fall: None,
-            } => self.expr(*expr),
-            HirAnalogOperator::Slew {
-                expr,
-                max_rise,
-                max_fall,
-            } => {
-                // A falling rate with no rising one is not a form the operator
-                // has: the LRM's optional arguments are positional, so an
-                // authored `max_fall` implies an authored `max_rise`, and a
-                // node built the other way would name a rate the runtime never
-                // reads.
-                let Some(max_rise) = max_rise else {
-                    self.unsupported(
-                        span,
-                        "slew with a falling rate and no rising rate".to_string(),
-                    );
-                    return self.real_constant(0.0);
-                };
-                let input = self.expr(*expr);
-                let max_rise = self.expr(*max_rise);
-                let max_fall = max_fall.map(|value| self.expr(value));
-                self.builder.push(
-                    self.block,
-                    CfgValueType::Real,
-                    CfgValueKind::Slew {
-                        operator: expression.id,
-                        input,
-                        max_rise,
-                        max_fall,
-                    },
-                )
-            }
             HirAnalogOperator::Limit {
                 proposed,
                 candidate,
@@ -3728,9 +3438,9 @@ impl<'a> CfgLowerer<'a> {
 
     /// `idt(x, ic)`, keyed by the call.
     ///
-    /// Shared by the operator spelling and by `idtmod` written without a
-    /// modulus, which the LRM makes the same integral: keying both here is what
-    /// keeps the two source forms on one state slot instead of two.
+    /// Shared by `idt` and by `idtmod` written without a modulus, which the LRM
+    /// makes the same integral: keying both here is what keeps the two source
+    /// forms on one state slot instead of two.
     fn idt(&mut self, operator: ExprId, expr: ExprId, ic: Option<ExprId>) -> ValueId {
         let input = self.expr(expr);
         // Absent means zero, which is what the LRM says an unstated initial
@@ -3885,32 +3595,17 @@ fn binary_op(op: &str) -> Option<CfgBinaryOp> {
     })
 }
 
-/// Whether a call spells one of the dynamic operators whose noise-metadata
-/// treatment is the operator spelling's.
+/// Whether a call spells one of the dynamic operators this mode substitutes
+/// with a zero primal instead of implementing.
 ///
 /// Deliberately only the operators this level newly represents. `ddt`, `idt`,
-/// `cross`, `above` and `timer` have always lowered from their call spelling,
-/// so their metadata behaviour is settled and is not this list's to change —
-/// see the report's found-broken note on the remaining spelling asymmetry.
+/// `cross`, `above` and `timer` have always lowered here, so their metadata
+/// behaviour is settled and is not this list's to change.
 fn is_dynamic_operator_call(name: &str) -> bool {
     matches!(
         name.to_ascii_lowercase().as_str(),
         "absdelay" | "slew" | "idtmod" | "last_crossing"
     )
-}
-
-/// The runtime encoding of a crossing direction: `+1` rising, `-1` falling,
-/// `0` either.
-///
-/// The same numbers `cross`'s runtime `direction` operand carries, so that a
-/// `last_crossing` written with an edge keyword and one written with a literal
-/// reach the detector the same way.
-fn cross_direction_code(edge: Option<HirCrossDirection>) -> f64 {
-    match edge {
-        Some(HirCrossDirection::Rising) => 1.0,
-        Some(HirCrossDirection::Falling) => -1.0,
-        Some(HirCrossDirection::Both) | None => 0.0,
-    }
 }
 
 /// The analog `integer` operators, kept out of [`binary_op`] because their
@@ -3969,8 +3664,6 @@ fn kind_label(kind: &HirExprKind) -> &'static str {
         HirExprKind::ArrayAccess { .. } => "array access",
         HirExprKind::ArrayLiteral { .. } => "array literal",
         HirExprKind::AnalogOperator { .. } => "analog operator",
-        HirExprKind::Laplace { .. } => "laplace",
-        HirExprKind::Zi { .. } => "z-transform",
         HirExprKind::NoiseSource { .. } => "noise source",
     }
 }

@@ -3,8 +3,7 @@ use std::collections::HashMap;
 use std::hash::Hash;
 
 use rspice_veriloga::ast::{
-    AnalogOperator, ArrayLiteralElement, ArrayLiteralExpr, BranchAccess, Expression, LaplaceKind,
-    NumberLit, PortDirection, ReplicationExpr,
+    ArrayLiteralElement, ArrayLiteralExpr, Expression, NumberLit, ReplicationExpr,
 };
 use rspice_veriloga::canonical_ir::{
     BranchId, BranchUnknownId, ContributionId, EquationId, ExprId, ModuleId, NodeId, ParamId,
@@ -13,15 +12,11 @@ use rspice_veriloga::canonical_ir::{
 use rspice_veriloga::canonical_ir::{
     CanonicalIrArtifact, CanonicalMetadata, CanonicalNoiseSourceKind, CanonicalValueType,
     CompilerPhase, DiagnosticSeverity, HirAnalogOperator, HirContributionKind, HirExprKind,
-    HirExprRef, HirExpression, HirLaplaceKind, HirLimiterArgument, HirLoop, HirModel,
-    HirParamRange, HirStatement, IrDiagnostic, MirAnalysisDomain, MirEquationKind, MirModel,
-    MirStateSlot, SourceSpanRef, StableDigest,
-};
-use rspice_veriloga::semantic::{
-    AnalogSiteGuard, AnalogSiteId, AnalyzedContribution, AnalyzedModule, AnalyzedPort, SymbolTable,
+    HirExprRef, HirExpression, HirLimiterArgument, HirLoop, HirModel, HirParamRange, HirStatement,
+    IrDiagnostic, MirAnalysisDomain, MirEquationKind, MirModel, MirStateSlot, SourceSpanRef,
+    StableDigest,
 };
 use rspice_veriloga::source::Span;
-use rspice_veriloga::types::ValueType;
 use rspice_veriloga::{
     CompilerOptions, Lexer, ParameterScope, Parser, SemanticAnalyzer, SourceMap, VerilogACompiler,
 };
@@ -1628,7 +1623,7 @@ endmodule
 }
 
 #[test]
-fn generated_rust_supports_stateless_slew_passthrough_for_call_and_typed_nodes() {
+fn generated_rust_supports_stateless_slew_passthrough() {
     let source = r#"
 `include "disciplines.vams"
 module generated_rust_slew_passthrough(p, n);
@@ -1643,37 +1638,6 @@ endmodule
     rspice_veriloga::rust_backend::RustTranspiler::default()
         .transpile(&artifact)
         .expect("one-argument slew call must transpile as its input");
-
-    // Exercise the typed HIR/MIR node path too. Source syntax currently
-    // preserves this intrinsic as a Call, while elaborated clients may supply
-    // the semantically equivalent AnalogOperator node.
-    let mut typed = artifact.clone();
-    let root = typed.mir.equations[0].expression.id;
-    let input = match &typed.hir.expressions[usize::from(root)].kind {
-        HirExprKind::Call { name, args } if name == "slew" && args.len() == 1 => args[0],
-        other => panic!("expected one-argument slew call, found {other:?}"),
-    };
-    let typed_kind = HirExprKind::AnalogOperator {
-        op: HirAnalogOperator::Slew {
-            expr: input,
-            max_rise: None,
-            max_fall: None,
-        },
-    };
-    typed.hir.expressions[usize::from(root)].kind = typed_kind.clone();
-    typed.mir.expressions[usize::from(root)].kind = typed_kind;
-    typed.hir.contributions[0].expression.kind = "analog_operator".into();
-    typed.mir.equations[0].expression.kind = "analog_operator".into();
-    let typed = CanonicalIrArtifact::from_parts_with_noise_plan(
-        typed.metadata.clone(),
-        typed.hir,
-        typed.mir,
-        typed.noise_sources.clone(),
-    )
-    .expect("reseal typed stateless slew artifact");
-    rspice_veriloga::rust_backend::RustTranspiler::default()
-        .transpile(&typed)
-        .expect("typed one-argument slew must transpile as its input");
 }
 
 #[test]
@@ -3103,215 +3067,6 @@ endmodule
     };
     assert_eq!(raw.as_str(), "M_E");
     assert_eq!(e.to_bits(), std::f64::consts::E.to_bits());
-}
-
-#[test]
-fn hir_lowering_preserves_laplace_operand_groups() {
-    let span = Span::dummy();
-    let number = |value: f64, raw: &str| {
-        Expression::Number(NumberLit {
-            value,
-            raw: raw.into(),
-            span,
-        })
-    };
-    let analyzed = AnalyzedModule {
-        name: "laplace_filter".into(),
-        default_transition: 1.0e-9,
-        default_discipline: None,
-        // No `noise()` site in this hand-built module, so the analyzer would
-        // have allocated no process id.
-        noise_process_count: 0,
-        ports: vec![
-            AnalyzedPort {
-                name: "p".into(),
-                direction: PortDirection::Inout,
-                discipline: "electrical".into(),
-                nature_potential: Some("voltage".into()),
-                nature_flow: Some("current".into()),
-            },
-            AnalyzedPort {
-                name: "n".into(),
-                direction: PortDirection::Inout,
-                discipline: "electrical".into(),
-                nature_potential: Some("voltage".into()),
-                nature_flow: Some("current".into()),
-            },
-        ],
-        parameters: Vec::new(),
-        param_aliases: Vec::new(),
-        variables: Vec::new(),
-        event_state_variables: Vec::new(),
-        branches: Vec::new(),
-        contributions: vec![AnalyzedContribution {
-            branch: "p,n".into(),
-            declared_branch: None,
-            is_current: false,
-            indirect: false,
-            expression: Expression::AnalogOperator(AnalogOperator::Laplace {
-                kind: LaplaceKind::NumeratorDenominator {
-                    numerator: vec![number(1.0, "1.0"), number(2.0, "2.0")],
-                    denominator: vec![number(0.5, "0.5")],
-                },
-                expr: Box::new(Expression::BranchAccess(BranchAccess::Nodes {
-                    access: "I".into(),
-                    pos: "p".into(),
-                    neg: Some("n".into()),
-                    span,
-                })),
-                span,
-            }),
-            site: AnalogSiteId(0),
-            expression_guard: AnalogSiteGuard::None,
-            expr_type: ValueType::Real,
-            span,
-        }],
-        statements: Vec::new(),
-        prologue_statements: Vec::new(),
-        body: Vec::new(),
-        analog_site_count: 1,
-        internal_nodes: Vec::new(),
-        ground_nodes: Vec::new(),
-        arrays: HashMap::new(),
-        symbol_table: SymbolTable::new(),
-        digital: Default::default(),
-    };
-    let metadata = CanonicalMetadata::for_source("fixture", "laplace_filter");
-    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
-
-    let contribution_expr = &hir.contributions[0].expression;
-    let HirExprKind::Laplace { expr, kind } =
-        &hir.expressions[usize::from(contribution_expr.id)].kind
-    else {
-        panic!("expected top-level contribution expression to preserve Laplace structure");
-    };
-
-    assert!(matches!(
-        hir.expressions[usize::from(*expr)].kind,
-        HirExprKind::BranchAccess { .. }
-    ));
-
-    let HirLaplaceKind::NumeratorDenominator {
-        numerator,
-        denominator,
-    } = kind
-    else {
-        panic!("expected laplace_nd to preserve numerator and denominator groups");
-    };
-
-    assert_eq!(numerator.len(), 2);
-    assert_eq!(denominator.len(), 1);
-    assert!(
-        numerator
-            .iter()
-            .all(|id| usize::from(*id) < hir.expressions.len())
-    );
-    assert!(
-        denominator
-            .iter()
-            .all(|id| usize::from(*id) < hir.expressions.len())
-    );
-}
-
-#[test]
-fn hir_lowering_preserves_typed_analog_operator_slots() {
-    let span = Span::dummy();
-    let number = |value: f64, raw: &str| {
-        Expression::Number(NumberLit {
-            value,
-            raw: raw.into(),
-            span,
-        })
-    };
-    let analyzed = AnalyzedModule {
-        name: "typed_ops".into(),
-        default_transition: 1.0e-9,
-        default_discipline: None,
-        // No `noise()` site in this hand-built module, so the analyzer would
-        // have allocated no process id.
-        noise_process_count: 0,
-        ports: vec![
-            AnalyzedPort {
-                name: "p".into(),
-                direction: PortDirection::Inout,
-                discipline: "electrical".into(),
-                nature_potential: Some("voltage".into()),
-                nature_flow: Some("current".into()),
-            },
-            AnalyzedPort {
-                name: "n".into(),
-                direction: PortDirection::Inout,
-                discipline: "electrical".into(),
-                nature_potential: Some("voltage".into()),
-                nature_flow: Some("current".into()),
-            },
-        ],
-        parameters: Vec::new(),
-        param_aliases: Vec::new(),
-        variables: Vec::new(),
-        event_state_variables: Vec::new(),
-        branches: Vec::new(),
-        contributions: vec![AnalyzedContribution {
-            branch: "p,n".into(),
-            declared_branch: None,
-            is_current: true,
-            indirect: false,
-            expression: Expression::AnalogOperator(AnalogOperator::IdtMod {
-                expr: Box::new(Expression::BranchAccess(BranchAccess::Nodes {
-                    access: "V".into(),
-                    pos: "p".into(),
-                    neg: Some("n".into()),
-                    span,
-                })),
-                ic: None,
-                modulus: Some(Box::new(number(std::f64::consts::TAU, "6.28"))),
-                offset: None,
-                abstol: Some(Box::new(number(1e-9, "1e-9"))),
-                span,
-            }),
-            site: AnalogSiteId(0),
-            expression_guard: AnalogSiteGuard::None,
-            expr_type: ValueType::Real,
-            span,
-        }],
-        statements: Vec::new(),
-        prologue_statements: Vec::new(),
-        body: Vec::new(),
-        analog_site_count: 1,
-        internal_nodes: Vec::new(),
-        ground_nodes: Vec::new(),
-        arrays: HashMap::new(),
-        symbol_table: SymbolTable::new(),
-        digital: Default::default(),
-    };
-    let metadata = CanonicalMetadata::for_source("fixture", "typed_ops");
-    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
-
-    let contribution_expr = &hir.contributions[0].expression;
-    let HirExprKind::AnalogOperator { op } =
-        &hir.expressions[usize::from(contribution_expr.id)].kind
-    else {
-        panic!("expected top-level contribution expression to preserve analog operator");
-    };
-
-    let HirAnalogOperator::IdtMod {
-        expr,
-        ic,
-        modulus,
-        offset,
-        abstol,
-    } = op
-    else {
-        panic!("expected idtmod operator payload");
-    };
-    assert!(matches!(
-        hir.expressions[usize::from(*expr)].kind,
-        HirExprKind::BranchAccess { .. }
-    ));
-    assert!(ic.is_none());
-    assert!(modulus.is_some());
-    assert!(offset.is_none());
-    assert!(abstol.is_some());
 }
 
 #[test]

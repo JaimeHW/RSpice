@@ -1311,8 +1311,6 @@ fn collect_canonical_parameter_default_references(
         | HirExprKind::BranchAccess { .. }
         | HirExprKind::NamedBranchAccess { .. }
         | HirExprKind::AnalogOperator { .. }
-        | HirExprKind::Laplace { .. }
-        | HirExprKind::Zi { .. }
         | HirExprKind::NoiseSource { .. } => {}
     }
     Ok(())

@@ -855,14 +855,6 @@ pub enum EventExpr {
     },
 }
 
-/// Cross event direction
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CrossDirection {
-    Rising,  // +1
-    Falling, // -1
-    Both,    // 0
-}
-
 /// Function/task call statement
 #[derive(Debug, Clone)]
 pub struct CallStmt {
@@ -1326,95 +1318,14 @@ pub enum AnalogOperator {
         argument: LimiterArgument,
         span: Span,
     },
-    /// Time derivative: ddt(expr)
-    Ddt {
-        expr: Box<Expression>,
-        abstol: Option<Box<Expression>>,
-        span: Span,
-    },
-    /// Time integral: idt(expr, ic, assert, abstol)
-    Idt {
-        expr: Box<Expression>,
-        ic: Option<Box<Expression>>,
-        assert_val: Option<Box<Expression>>,
-        abstol: Option<Box<Expression>>,
-        span: Span,
-    },
-    /// Modulo integral: idtmod(expr, ic, modulus, offset, abstol)
-    IdtMod {
-        expr: Box<Expression>,
-        ic: Option<Box<Expression>>,
-        modulus: Option<Box<Expression>>,
-        offset: Option<Box<Expression>>,
-        abstol: Option<Box<Expression>>,
-        span: Span,
-    },
-    /// Partial derivative: ddx(expr, signal)
-    Ddx {
-        expr: Box<Expression>,
-        probe: BranchAccess,
-        span: Span,
-    },
-    /// Limited exponential: limexp(expr)
-    Limexp { expr: Box<Expression>, span: Span },
-    /// Absolute delay: absdelay(expr, delay, max_delay)
-    Absdelay {
-        expr: Box<Expression>,
-        delay: Box<Expression>,
-        max_delay: Option<Box<Expression>>,
-        span: Span,
-    },
-    /// Slew rate limiter: slew(expr, max_pos_rate, max_neg_rate)
-    Slew {
-        expr: Box<Expression>,
-        max_rise: Option<Box<Expression>>,
-        max_fall: Option<Box<Expression>>,
-        span: Span,
-    },
-    /// Last crossing: last_crossing(expr, edge)
-    LastCrossing {
-        expr: Box<Expression>,
-        edge: Option<CrossDirection>,
-        span: Span,
-    },
-    /// Laplace transfer function
-    Laplace {
-        kind: LaplaceKind,
-        expr: Box<Expression>,
-        span: Span,
-    },
-    /// Z-transform filter
-    Zi {
-        kind: ZiKind,
-        expr: Box<Expression>,
-        /// Sample-period constant argument, evaluated and frozen at analysis
-        /// start. Its frozen value must be finite and greater than zero.
-        period: Box<Expression>,
-        /// Dynamic output transition time. Omission uses the effective
-        /// global `default_transition` setting.
-        transition: Option<Box<Expression>>,
-        /// First-transition constant argument, evaluated and frozen at
-        /// analysis start. Omission means zero.
-        first_transition: Option<Box<Expression>>,
-        span: Span,
-    },
 }
 
 impl AnalogOperator {
     pub fn span(&self) -> Span {
         match self {
-            AnalogOperator::Limit { span, .. }
-            | AnalogOperator::LimiterArgument { span, .. }
-            | AnalogOperator::Ddt { span, .. }
-            | AnalogOperator::Idt { span, .. }
-            | AnalogOperator::IdtMod { span, .. }
-            | AnalogOperator::Ddx { span, .. }
-            | AnalogOperator::Limexp { span, .. }
-            | AnalogOperator::Absdelay { span, .. }
-            | AnalogOperator::Slew { span, .. }
-            | AnalogOperator::LastCrossing { span, .. }
-            | AnalogOperator::Laplace { span, .. }
-            | AnalogOperator::Zi { span, .. } => *span,
+            AnalogOperator::Limit { span, .. } | AnalogOperator::LimiterArgument { span, .. } => {
+                *span
+            }
         }
     }
 }
@@ -1424,56 +1335,6 @@ impl AnalogOperator {
 pub enum LimiterArgument {
     Proposed,
     Previous,
-}
-
-/// Laplace transform kinds
-#[derive(Debug, Clone)]
-pub enum LaplaceKind {
-    /// laplace_zp(expr, zeros, poles)
-    ZeroPole {
-        zeros: Vec<Expression>,
-        poles: Vec<Expression>,
-    },
-    /// laplace_zd(expr, zeros, poles)
-    ZeroDenominator {
-        zeros: Vec<Expression>,
-        denominator: Vec<Expression>,
-    },
-    /// laplace_np(expr, numerator, poles)
-    NumeratorPole {
-        numerator: Vec<Expression>,
-        poles: Vec<Expression>,
-    },
-    /// laplace_nd(expr, numerator, denominator)
-    NumeratorDenominator {
-        numerator: Vec<Expression>,
-        denominator: Vec<Expression>,
-    },
-}
-
-/// Z-transform kinds
-#[derive(Debug, Clone)]
-pub enum ZiKind {
-    /// zi_zp
-    ZeroPole {
-        zeros: Vec<Expression>,
-        poles: Vec<Expression>,
-    },
-    /// zi_zd
-    ZeroDenominator {
-        zeros: Vec<Expression>,
-        denominator: Vec<Expression>,
-    },
-    /// zi_np
-    NumeratorPole {
-        numerator: Vec<Expression>,
-        poles: Vec<Expression>,
-    },
-    /// zi_nd
-    NumeratorDenominator {
-        numerator: Vec<Expression>,
-        denominator: Vec<Expression>,
-    },
 }
 
 /// Noise source

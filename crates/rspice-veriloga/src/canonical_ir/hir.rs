@@ -17,8 +17,8 @@ use smol_str::SmolStr;
 use std::collections::{HashMap, HashSet};
 
 use crate::ast::{
-    AnalogOperator, ArrayLiteralElement, BinaryOp, BranchAccess, CrossDirection, Expression,
-    LaplaceKind, LimiterArgument, NoiseSource, PortDirection, UnaryOp, ZiKind,
+    AnalogOperator, ArrayLiteralElement, BinaryOp, BranchAccess, Expression, LimiterArgument,
+    NoiseSource, PortDirection, UnaryOp,
 };
 use crate::numeric_literal::parse_integer_literal;
 use crate::semantic::{
@@ -114,119 +114,6 @@ pub struct HirExpression {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum HirLaplaceKind {
-    ZeroPole {
-        zeros: Vec<ExprId>,
-        poles: Vec<ExprId>,
-    },
-    ZeroDenominator {
-        zeros: Vec<ExprId>,
-        denominator: Vec<ExprId>,
-    },
-    NumeratorPole {
-        numerator: Vec<ExprId>,
-        poles: Vec<ExprId>,
-    },
-    NumeratorDenominator {
-        numerator: Vec<ExprId>,
-        denominator: Vec<ExprId>,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum HirZiKind {
-    ZeroPole {
-        zeros: Vec<ExprId>,
-        poles: Vec<ExprId>,
-    },
-    ZeroDenominator {
-        zeros: Vec<ExprId>,
-        denominator: Vec<ExprId>,
-    },
-    NumeratorPole {
-        numerator: Vec<ExprId>,
-        poles: Vec<ExprId>,
-    },
-    NumeratorDenominator {
-        numerator: Vec<ExprId>,
-        denominator: Vec<ExprId>,
-    },
-}
-
-impl HirLaplaceKind {
-    /// The numerator-then-denominator operand lists, whichever of the four
-    /// spellings wrote them.
-    ///
-    /// Every consumer of a filter kind wants the same two lists and differs
-    /// only in what it does with them, so the four-way match lives here rather
-    /// than once per consumer. Which of the two is a root list is
-    /// [`Self::names_roots`]'s question.
-    pub fn polynomials(&self) -> (&[ExprId], &[ExprId]) {
-        match self {
-            Self::ZeroPole { zeros, poles } => (zeros, poles),
-            Self::ZeroDenominator { zeros, denominator } => (zeros, denominator),
-            Self::NumeratorPole { numerator, poles } => (numerator, poles),
-            Self::NumeratorDenominator {
-                numerator,
-                denominator,
-            } => (numerator, denominator),
-        }
-    }
-
-    /// Whether the numerator and the denominator are named by their roots.
-    pub fn names_roots(&self) -> (bool, bool) {
-        match self {
-            Self::ZeroPole { .. } => (true, true),
-            Self::ZeroDenominator { .. } => (true, false),
-            Self::NumeratorPole { .. } => (false, true),
-            Self::NumeratorDenominator { .. } => (false, false),
-        }
-    }
-}
-
-impl HirZiKind {
-    /// The sampled-filter counterpart of [`HirLaplaceKind::polynomials`].
-    pub fn polynomials(&self) -> (&[ExprId], &[ExprId]) {
-        match self {
-            Self::ZeroPole { zeros, poles } => (zeros, poles),
-            Self::ZeroDenominator { zeros, denominator } => (zeros, denominator),
-            Self::NumeratorPole { numerator, poles } => (numerator, poles),
-            Self::NumeratorDenominator {
-                numerator,
-                denominator,
-            } => (numerator, denominator),
-        }
-    }
-
-    /// The sampled-filter counterpart of [`HirLaplaceKind::names_roots`].
-    pub fn names_roots(&self) -> (bool, bool) {
-        match self {
-            Self::ZeroPole { .. } => (true, true),
-            Self::ZeroDenominator { .. } => (true, false),
-            Self::NumeratorPole { .. } => (false, true),
-            Self::NumeratorDenominator { .. } => (false, false),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum HirCrossDirection {
-    Rising,
-    Falling,
-    Both,
-}
-
-impl From<CrossDirection> for HirCrossDirection {
-    fn from(direction: CrossDirection) -> Self {
-        match direction {
-            CrossDirection::Rising => Self::Rising,
-            CrossDirection::Falling => Self::Falling,
-            CrossDirection::Both => Self::Both,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HirAnalogOperator {
     Limit {
         proposed: ExprId,
@@ -236,44 +123,6 @@ pub enum HirAnalogOperator {
     },
     LimiterArgument {
         argument: HirLimiterArgument,
-    },
-    Ddt {
-        expr: ExprId,
-        abstol: Option<ExprId>,
-    },
-    Idt {
-        expr: ExprId,
-        ic: Option<ExprId>,
-        assert: Option<ExprId>,
-        abstol: Option<ExprId>,
-    },
-    IdtMod {
-        expr: ExprId,
-        ic: Option<ExprId>,
-        modulus: Option<ExprId>,
-        offset: Option<ExprId>,
-        abstol: Option<ExprId>,
-    },
-    Ddx {
-        expr: ExprId,
-        probe: ExprId,
-    },
-    Limexp {
-        expr: ExprId,
-    },
-    Absdelay {
-        expr: ExprId,
-        delay: ExprId,
-        max_delay: Option<ExprId>,
-    },
-    Slew {
-        expr: ExprId,
-        max_rise: Option<ExprId>,
-        max_fall: Option<ExprId>,
-    },
-    LastCrossing {
-        expr: ExprId,
-        edge: Option<HirCrossDirection>,
     },
 }
 
@@ -349,17 +198,6 @@ pub enum HirExprKind {
     },
     AnalogOperator {
         op: HirAnalogOperator,
-    },
-    Laplace {
-        expr: ExprId,
-        kind: HirLaplaceKind,
-    },
-    Zi {
-        expr: ExprId,
-        kind: HirZiKind,
-        period: ExprId,
-        transition: Option<ExprId>,
-        first_transition: Option<ExprId>,
     },
     NoiseSource {
         /// Dense structural identity assigned while lowering the source-order
@@ -795,21 +633,14 @@ fn same_expression_kind(left: &HirExprKind, right: &HirExprKind) -> bool {
         (HirExprKind::AnalogOperator { op: left }, HirExprKind::AnalogOperator { op: right }) => {
             same_analog_operator(left, right)
         }
-        (HirExprKind::Laplace { kind: left, .. }, HirExprKind::Laplace { kind: right, .. }) => {
-            std::mem::discriminant(left) == std::mem::discriminant(right)
-        }
-        (HirExprKind::Zi { kind: left, .. }, HirExprKind::Zi { kind: right, .. }) => {
-            std::mem::discriminant(left) == std::mem::discriminant(right)
-        }
         _ => false,
     }
 }
 
 /// Whether two analog operators are the same operator.
 ///
-/// Operators compare by discriminant alone; only the payload-bearing `Limit`,
-/// `LimiterArgument`, and `LastCrossing` cases also compare their selector,
-/// argument, or edge.
+/// Operators compare by discriminant alone; both payload-bearing cases also
+/// compare their selector or argument.
 fn same_analog_operator(left: &HirAnalogOperator, right: &HirAnalogOperator) -> bool {
     match (left, right) {
         (
@@ -821,10 +652,6 @@ fn same_analog_operator(left: &HirAnalogOperator, right: &HirAnalogOperator) -> 
         (
             HirAnalogOperator::LimiterArgument { argument: left },
             HirAnalogOperator::LimiterArgument { argument: right },
-        ) => left == right,
-        (
-            HirAnalogOperator::LastCrossing { edge: left, .. },
-            HirAnalogOperator::LastCrossing { edge: right, .. },
         ) => left == right,
         _ => std::mem::discriminant(left) == std::mem::discriminant(right),
     }
@@ -1302,32 +1129,6 @@ impl HirModel {
             HirExprKind::AnalogOperator { op } => {
                 self.validate_analog_operator_children(diagnostics, expression, op);
             }
-            HirExprKind::Laplace { expr, kind } => {
-                self.validate_expression_child(diagnostics, expression, "expr", *expr);
-                self.validate_laplace_children(diagnostics, expression, kind);
-            }
-            HirExprKind::Zi {
-                expr,
-                kind,
-                period,
-                transition,
-                first_transition,
-            } => {
-                self.validate_expression_child(diagnostics, expression, "expr", *expr);
-                self.validate_expression_child(diagnostics, expression, "period", *period);
-                if let Some(child) = transition {
-                    self.validate_expression_child(diagnostics, expression, "transition", *child);
-                }
-                if let Some(child) = first_transition {
-                    self.validate_expression_child(
-                        diagnostics,
-                        expression,
-                        "first_transition",
-                        *child,
-                    );
-                }
-                self.validate_zi_children(diagnostics, expression, kind);
-            }
             HirExprKind::NoiseSource {
                 process_id,
                 operands,
@@ -1473,195 +1274,6 @@ impl HirModel {
                 );
             }
             HirAnalogOperator::LimiterArgument { .. } => {}
-            HirAnalogOperator::Ddt { expr, abstol } => {
-                self.validate_expression_child(diagnostics, expression, "expr", *expr);
-                self.validate_optional_expression_child(diagnostics, expression, "abstol", *abstol);
-            }
-            HirAnalogOperator::Idt {
-                expr,
-                ic,
-                assert,
-                abstol,
-            } => {
-                self.validate_expression_child(diagnostics, expression, "expr", *expr);
-                self.validate_optional_expression_child(diagnostics, expression, "ic", *ic);
-                self.validate_optional_expression_child(diagnostics, expression, "assert", *assert);
-                self.validate_optional_expression_child(diagnostics, expression, "abstol", *abstol);
-            }
-            HirAnalogOperator::IdtMod {
-                expr,
-                ic,
-                modulus,
-                offset,
-                abstol,
-            } => {
-                self.validate_expression_child(diagnostics, expression, "expr", *expr);
-                self.validate_optional_expression_child(diagnostics, expression, "ic", *ic);
-                self.validate_optional_expression_child(
-                    diagnostics,
-                    expression,
-                    "modulus",
-                    *modulus,
-                );
-                self.validate_optional_expression_child(diagnostics, expression, "offset", *offset);
-                self.validate_optional_expression_child(diagnostics, expression, "abstol", *abstol);
-            }
-            HirAnalogOperator::Ddx { expr, probe } => {
-                self.validate_expression_child(diagnostics, expression, "expr", *expr);
-                self.validate_expression_child(diagnostics, expression, "probe", *probe);
-            }
-            HirAnalogOperator::Limexp { expr } => {
-                self.validate_expression_child(diagnostics, expression, "expr", *expr);
-            }
-            HirAnalogOperator::Absdelay {
-                expr,
-                delay,
-                max_delay,
-            } => {
-                self.validate_expression_child(diagnostics, expression, "expr", *expr);
-                self.validate_expression_child(diagnostics, expression, "delay", *delay);
-                self.validate_optional_expression_child(
-                    diagnostics,
-                    expression,
-                    "max_delay",
-                    *max_delay,
-                );
-            }
-            HirAnalogOperator::Slew {
-                expr,
-                max_rise,
-                max_fall,
-            } => {
-                self.validate_expression_child(diagnostics, expression, "expr", *expr);
-                self.validate_optional_expression_child(
-                    diagnostics,
-                    expression,
-                    "max_rise",
-                    *max_rise,
-                );
-                self.validate_optional_expression_child(
-                    diagnostics,
-                    expression,
-                    "max_fall",
-                    *max_fall,
-                );
-            }
-            HirAnalogOperator::LastCrossing { expr, .. } => {
-                self.validate_expression_child(diagnostics, expression, "expr", *expr);
-            }
-        }
-    }
-
-    fn validate_laplace_children(
-        &self,
-        diagnostics: &mut Vec<IrDiagnostic>,
-        expression: &HirExpression,
-        kind: &HirLaplaceKind,
-    ) {
-        match kind {
-            HirLaplaceKind::ZeroPole { zeros, poles } => {
-                self.validate_expression_child_list(diagnostics, expression, "zeros", zeros);
-                self.validate_expression_child_list(diagnostics, expression, "poles", poles);
-            }
-            HirLaplaceKind::ZeroDenominator { zeros, denominator } => {
-                self.validate_expression_child_list(diagnostics, expression, "zeros", zeros);
-                self.validate_expression_child_list(
-                    diagnostics,
-                    expression,
-                    "denominator",
-                    denominator,
-                );
-            }
-            HirLaplaceKind::NumeratorPole { numerator, poles } => {
-                self.validate_expression_child_list(
-                    diagnostics,
-                    expression,
-                    "numerator",
-                    numerator,
-                );
-                self.validate_expression_child_list(diagnostics, expression, "poles", poles);
-            }
-            HirLaplaceKind::NumeratorDenominator {
-                numerator,
-                denominator,
-            } => {
-                self.validate_expression_child_list(
-                    diagnostics,
-                    expression,
-                    "numerator",
-                    numerator,
-                );
-                self.validate_expression_child_list(
-                    diagnostics,
-                    expression,
-                    "denominator",
-                    denominator,
-                );
-            }
-        }
-    }
-
-    fn validate_zi_children(
-        &self,
-        diagnostics: &mut Vec<IrDiagnostic>,
-        expression: &HirExpression,
-        kind: &HirZiKind,
-    ) {
-        let (operator, numerator_scalars, denominator_scalars) = match kind {
-            HirZiKind::ZeroPole { zeros, poles } => {
-                self.validate_expression_child_list(diagnostics, expression, "zeros", zeros);
-                self.validate_expression_child_list(diagnostics, expression, "poles", poles);
-                ("zi_zp", zeros.len(), poles.len())
-            }
-            HirZiKind::ZeroDenominator { zeros, denominator } => {
-                self.validate_expression_child_list(diagnostics, expression, "zeros", zeros);
-                self.validate_expression_child_list(
-                    diagnostics,
-                    expression,
-                    "denominator",
-                    denominator,
-                );
-                ("zi_zd", zeros.len(), denominator.len())
-            }
-            HirZiKind::NumeratorPole { numerator, poles } => {
-                self.validate_expression_child_list(
-                    diagnostics,
-                    expression,
-                    "numerator",
-                    numerator,
-                );
-                self.validate_expression_child_list(diagnostics, expression, "poles", poles);
-                ("zi_np", numerator.len(), poles.len())
-            }
-            HirZiKind::NumeratorDenominator {
-                numerator,
-                denominator,
-            } => {
-                self.validate_expression_child_list(
-                    diagnostics,
-                    expression,
-                    "numerator",
-                    numerator,
-                );
-                self.validate_expression_child_list(
-                    diagnostics,
-                    expression,
-                    "denominator",
-                    denominator,
-                );
-                ("zi_nd", numerator.len(), denominator.len())
-            }
-        };
-        if let Err(error) = crate::zfilter::validate_zi_runtime_operand_budget(
-            operator,
-            numerator_scalars,
-            denominator_scalars,
-        ) {
-            diagnostics.push(IrDiagnostic::error(
-                CompilerPhase::HirValidation,
-                error.to_string(),
-                expression.span,
-            ));
         }
     }
 
@@ -2942,15 +2554,6 @@ impl HirLowerer {
         id
     }
 
-    fn lower_branch_access_expr(&mut self, access: &BranchAccess) -> ExprId {
-        let id = ExprId::from(self.expressions.len());
-        let span = SourceSpanRef::from(access.span());
-        let kind = self.lower_branch_access_kind(access);
-
-        self.expressions.push(HirExpression { id, kind, span });
-        id
-    }
-
     fn lower_branch_access_kind(&self, access: &BranchAccess) -> HirExprKind {
         match access {
             BranchAccess::Nodes {
@@ -3005,142 +2608,9 @@ impl HirLowerer {
                     argument: (*argument).into(),
                 }
             }
-            AnalogOperator::Ddt { expr, abstol, .. } => HirAnalogOperator::Ddt {
-                expr: self.lower_expr(expr).id,
-                abstol: self.lower_optional_expr_id(abstol),
-            },
-            AnalogOperator::Idt {
-                expr,
-                ic,
-                assert_val,
-                abstol,
-                ..
-            } => HirAnalogOperator::Idt {
-                expr: self.lower_expr(expr).id,
-                ic: self.lower_optional_expr_id(ic),
-                assert: self.lower_optional_expr_id(assert_val),
-                abstol: self.lower_optional_expr_id(abstol),
-            },
-            AnalogOperator::IdtMod {
-                expr,
-                ic,
-                modulus,
-                offset,
-                abstol,
-                ..
-            } => HirAnalogOperator::IdtMod {
-                expr: self.lower_expr(expr).id,
-                ic: self.lower_optional_expr_id(ic),
-                modulus: self.lower_optional_expr_id(modulus),
-                offset: self.lower_optional_expr_id(offset),
-                abstol: self.lower_optional_expr_id(abstol),
-            },
-            AnalogOperator::Ddx { expr, probe, .. } => HirAnalogOperator::Ddx {
-                expr: self.lower_expr(expr).id,
-                probe: self.lower_branch_access_expr(probe),
-            },
-            AnalogOperator::Limexp { expr, .. } => HirAnalogOperator::Limexp {
-                expr: self.lower_expr(expr).id,
-            },
-            AnalogOperator::Absdelay {
-                expr,
-                delay,
-                max_delay,
-                ..
-            } => HirAnalogOperator::Absdelay {
-                expr: self.lower_expr(expr).id,
-                delay: self.lower_expr(delay).id,
-                max_delay: self.lower_optional_expr_id(max_delay),
-            },
-            AnalogOperator::Slew {
-                expr,
-                max_rise,
-                max_fall,
-                ..
-            } => HirAnalogOperator::Slew {
-                expr: self.lower_expr(expr).id,
-                max_rise: self.lower_optional_expr_id(max_rise),
-                max_fall: self.lower_optional_expr_id(max_fall),
-            },
-            AnalogOperator::LastCrossing { expr, edge, .. } => HirAnalogOperator::LastCrossing {
-                expr: self.lower_expr(expr).id,
-                edge: edge.map(HirCrossDirection::from),
-            },
-            AnalogOperator::Laplace { kind, expr, .. } => {
-                return HirExprKind::Laplace {
-                    expr: self.lower_expr(expr).id,
-                    kind: self.lower_laplace_kind(kind),
-                };
-            }
-            AnalogOperator::Zi {
-                kind,
-                expr,
-                period,
-                transition,
-                first_transition,
-                ..
-            } => {
-                return HirExprKind::Zi {
-                    expr: self.lower_expr(expr).id,
-                    kind: self.lower_zi_kind(kind),
-                    period: self.lower_expr(period).id,
-                    transition: self.lower_optional_expr_id(transition),
-                    first_transition: self.lower_optional_expr_id(first_transition),
-                };
-            }
         };
 
         HirExprKind::AnalogOperator { op }
-    }
-
-    fn lower_laplace_kind(&mut self, kind: &LaplaceKind) -> HirLaplaceKind {
-        match kind {
-            LaplaceKind::ZeroPole { zeros, poles } => HirLaplaceKind::ZeroPole {
-                zeros: self.lower_expr_ids(zeros),
-                poles: self.lower_expr_ids(poles),
-            },
-            LaplaceKind::ZeroDenominator { zeros, denominator } => {
-                HirLaplaceKind::ZeroDenominator {
-                    zeros: self.lower_expr_ids(zeros),
-                    denominator: self.lower_expr_ids(denominator),
-                }
-            }
-            LaplaceKind::NumeratorPole { numerator, poles } => HirLaplaceKind::NumeratorPole {
-                numerator: self.lower_expr_ids(numerator),
-                poles: self.lower_expr_ids(poles),
-            },
-            LaplaceKind::NumeratorDenominator {
-                numerator,
-                denominator,
-            } => HirLaplaceKind::NumeratorDenominator {
-                numerator: self.lower_expr_ids(numerator),
-                denominator: self.lower_expr_ids(denominator),
-            },
-        }
-    }
-
-    fn lower_zi_kind(&mut self, kind: &ZiKind) -> HirZiKind {
-        match kind {
-            ZiKind::ZeroPole { zeros, poles } => HirZiKind::ZeroPole {
-                zeros: self.lower_expr_ids(zeros),
-                poles: self.lower_expr_ids(poles),
-            },
-            ZiKind::ZeroDenominator { zeros, denominator } => HirZiKind::ZeroDenominator {
-                zeros: self.lower_expr_ids(zeros),
-                denominator: self.lower_expr_ids(denominator),
-            },
-            ZiKind::NumeratorPole { numerator, poles } => HirZiKind::NumeratorPole {
-                numerator: self.lower_expr_ids(numerator),
-                poles: self.lower_expr_ids(poles),
-            },
-            ZiKind::NumeratorDenominator {
-                numerator,
-                denominator,
-            } => HirZiKind::NumeratorDenominator {
-                numerator: self.lower_expr_ids(numerator),
-                denominator: self.lower_expr_ids(denominator),
-            },
-        }
     }
 
     fn lower_noise_source(&mut self, source: &NoiseSource) -> HirExprKind {
@@ -3296,9 +2766,7 @@ fn hir_expr_kind_label(kind: &HirExprKind) -> &'static str {
         HirExprKind::BranchAccess { .. } | HirExprKind::NamedBranchAccess { .. } => "branch_access",
         HirExprKind::ArrayAccess { .. } => "array_access",
         HirExprKind::ArrayLiteral { .. } => "array_literal",
-        HirExprKind::AnalogOperator { .. }
-        | HirExprKind::Laplace { .. }
-        | HirExprKind::Zi { .. } => "analog_operator",
+        HirExprKind::AnalogOperator { .. } => "analog_operator",
         HirExprKind::NoiseSource { .. } => "noise_source",
     }
 }

@@ -1411,49 +1411,12 @@ fn collect_expr_variable_ids(
             }
             HirExprKind::ArrayAccess { index, .. } => stack.push(*index),
             HirExprKind::AnalogOperator { op } => push_analog_children(op, &mut stack),
-            HirExprKind::Laplace { expr, .. } => stack.push(*expr),
-            HirExprKind::Zi {
-                expr,
-                kind,
-                period,
-                transition,
-                first_transition,
-            } => {
-                stack.extend([*expr, *period]);
-                stack.extend(transition.iter().copied());
-                stack.extend(first_transition.iter().copied());
-                push_zi_children(kind, &mut stack);
-            }
             HirExprKind::NoiseSource { operands, .. } => stack.extend(operands.iter().copied()),
             HirExprKind::NullArgument
             | HirExprKind::Number { .. }
             | HirExprKind::StringLiteral { .. }
             | HirExprKind::BranchAccess { .. }
             | HirExprKind::NamedBranchAccess { .. } => {}
-        }
-    }
-}
-
-fn push_zi_children(kind: &crate::canonical_ir::HirZiKind, stack: &mut Vec<ExprId>) {
-    match kind {
-        crate::canonical_ir::HirZiKind::ZeroPole { zeros, poles } => {
-            stack.extend(zeros.iter().copied());
-            stack.extend(poles.iter().copied());
-        }
-        crate::canonical_ir::HirZiKind::ZeroDenominator { zeros, denominator } => {
-            stack.extend(zeros.iter().copied());
-            stack.extend(denominator.iter().copied());
-        }
-        crate::canonical_ir::HirZiKind::NumeratorPole { numerator, poles } => {
-            stack.extend(numerator.iter().copied());
-            stack.extend(poles.iter().copied());
-        }
-        crate::canonical_ir::HirZiKind::NumeratorDenominator {
-            numerator,
-            denominator,
-        } => {
-            stack.extend(numerator.iter().copied());
-            stack.extend(denominator.iter().copied());
         }
     }
 }
@@ -1470,55 +1433,6 @@ fn push_analog_children(op: &HirAnalogOperator, stack: &mut Vec<ExprId>) {
             stack.extend(type_metadata.iter().copied());
         }
         HirAnalogOperator::LimiterArgument { .. } => {}
-        HirAnalogOperator::Ddt { expr, abstol } => {
-            stack.push(*expr);
-            stack.extend(abstol.iter().copied());
-        }
-        HirAnalogOperator::Idt {
-            expr,
-            ic,
-            assert,
-            abstol,
-        } => {
-            stack.push(*expr);
-            stack.extend(ic.iter().chain(assert).chain(abstol).copied());
-        }
-        HirAnalogOperator::IdtMod {
-            expr,
-            ic,
-            modulus,
-            offset,
-            abstol,
-        } => {
-            stack.push(*expr);
-            stack.extend(
-                ic.iter()
-                    .chain(modulus)
-                    .chain(offset)
-                    .chain(abstol)
-                    .copied(),
-            );
-        }
-        HirAnalogOperator::Ddx { expr, probe } => stack.extend([*expr, *probe]),
-        HirAnalogOperator::Limexp { expr } | HirAnalogOperator::LastCrossing { expr, .. } => {
-            stack.push(*expr);
-        }
-        HirAnalogOperator::Absdelay {
-            expr,
-            delay,
-            max_delay,
-        } => {
-            stack.extend([*expr, *delay]);
-            stack.extend(max_delay.iter().copied());
-        }
-        HirAnalogOperator::Slew {
-            expr,
-            max_rise,
-            max_fall,
-        } => {
-            stack.push(*expr);
-            stack.extend(max_rise.iter().chain(max_fall).copied());
-        }
     }
 }
 
@@ -1625,8 +1539,6 @@ fn expr_is_instance_static(
             HirExprKind::ArrayLiteral { elements, .. } => stack.extend(elements.iter().copied()),
             HirExprKind::ArrayAccess { .. }
             | HirExprKind::AnalogOperator { .. }
-            | HirExprKind::Laplace { .. }
-            | HirExprKind::Zi { .. }
             | HirExprKind::BranchAccess { .. }
             | HirExprKind::NamedBranchAccess { .. } => return false,
             HirExprKind::NoiseSource { operands, .. } => stack.extend(operands.iter().copied()),

@@ -830,8 +830,6 @@ fn expression_kind_name(kind: &HirExprKind) -> &'static str {
         HirExprKind::ArrayAccess { .. } => "array_access",
         HirExprKind::ArrayLiteral { .. } => "array_literal",
         HirExprKind::AnalogOperator { .. } => "analog_operator",
-        HirExprKind::Laplace { .. } => "laplace",
-        HirExprKind::Zi { .. } => "zi",
         HirExprKind::NoiseSource { .. } => "noise_source",
     }
 }

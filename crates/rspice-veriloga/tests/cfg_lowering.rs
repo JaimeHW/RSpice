@@ -1005,14 +1005,11 @@ endmodule
             .expressions
             .get(usize::from(operator))
             .expect("a zi filter must name an expression in the HIR arena");
-        // Keyed by the call, which is what the compiler's own parser produces
-        // for a filter; the public AST's `HirExprKind::Zi` is the other
-        // spelling of the same site and keys the same way.
+        // Keyed by the call, which is a filter's only spelling.
         let spelled = match &expression.kind {
             rspice_veriloga::canonical_ir::HirExprKind::Call { name, .. } => {
                 name.to_ascii_lowercase()
             }
-            rspice_veriloga::canonical_ir::HirExprKind::Zi { .. } => "zi_nd".to_string(),
             other => panic!("a zi filter must be keyed by its own operator, found {other:?}"),
         };
         assert!(

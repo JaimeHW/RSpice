@@ -15,8 +15,8 @@ use super::{JitError, JitResult};
 use crate::array_index::checked_array_slot;
 use crate::canonical_ir::state::CanonicalStateOperator;
 use crate::canonical_ir::{
-    EquationId, ExprId, HirAnalogOperator, HirCrossDirection, HirExprKind, HirLaplaceKind,
-    HirLimiterArgument, MirEquationKind, MirModel, NodeId,
+    EquationId, ExprId, HirAnalogOperator, HirExprKind, HirLimiterArgument, MirEquationKind,
+    MirModel, NodeId,
 };
 use crate::codegen::{BytecodeProgram, CompiledModel, Instruction, ZiRuntimeLayout};
 use crate::integer_runtime::{
@@ -2652,21 +2652,6 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 _ => self.lower_intrinsic_call(name.as_str(), args.as_slice()),
             },
             HirExprKind::AnalogOperator { op } => self.lower_analog_operator(expression.id, op),
-            HirExprKind::Laplace { expr, .. } => self.lower_laplace_operator(expression.id, *expr),
-            HirExprKind::Zi {
-                expr,
-                kind,
-                period,
-                transition,
-                first_transition,
-            } => self.lower_zi_operator(
-                expression.id,
-                *expr,
-                kind,
-                *period,
-                *transition,
-                *first_transition,
-            ),
             HirExprKind::NoiseSource {
                 source, operands, ..
             } => self.lower_noise_source(source.as_str(), operands.as_slice()),
@@ -2738,44 +2723,6 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             ),
             HirAnalogOperator::LimiterArgument { argument } => {
                 self.lower_limiter_argument(*argument)
-            }
-            HirAnalogOperator::Ddt { expr, abstol } => {
-                self.lower_ddt_operator(expr_id, &[*expr], *abstol)
-            }
-            HirAnalogOperator::Idt {
-                expr,
-                ic,
-                assert,
-                abstol,
-            } => self.lower_idt_operator(expr_id, &[*expr], *ic, *assert, *abstol),
-            HirAnalogOperator::IdtMod {
-                expr,
-                ic,
-                modulus,
-                offset,
-                abstol,
-            } => self.lower_idtmod_operator(expr_id, *expr, *ic, *modulus, *offset, *abstol),
-            HirAnalogOperator::Slew {
-                expr,
-                max_rise,
-                max_fall,
-            } => self.lower_slew_operator(expr_id, *expr, *max_rise, *max_fall),
-            HirAnalogOperator::Absdelay {
-                expr,
-                delay,
-                max_delay,
-            } => self.lower_absdelay_operator(expr_id, *expr, *delay, *max_delay),
-            HirAnalogOperator::Ddx { expr, probe } => self.lower_ddx_projection(*expr, *probe),
-            HirAnalogOperator::Limexp { expr } => {
-                self.lower(*expr)?;
-                if lower_constant_unary_math(&mut self.ops, UnaryMathOp::Limexp) {
-                    Ok(())
-                } else {
-                    self.append_unary(NativeOp::UnaryMath(UnaryMathOp::Limexp))
-                }
-            }
-            HirAnalogOperator::LastCrossing { expr, edge } => {
-                self.lower_last_crossing_operator(expr_id, *expr, *edge)
             }
         }
     }
@@ -3017,12 +2964,11 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
 
     fn lower_derivative(&mut self, expr_id: ExprId, wrt: CanonicalDerivativeAxis) -> JitResult<()> {
         let expression = self.expression(expr_id)?;
-        let scheduled_zi = matches!(expression.kind, HirExprKind::Zi { .. })
-            || matches!(
-                &expression.kind,
-                HirExprKind::Call { name, .. }
-                    if matches!(normalize_intrinsic_name(name).as_str(), "zi_zp" | "zi_zd" | "zi_np" | "zi_nd")
-            );
+        let scheduled_zi = matches!(
+            &expression.kind,
+            HirExprKind::Call { name, .. }
+                if matches!(normalize_intrinsic_name(name).as_str(), "zi_zp" | "zi_zd" | "zi_np" | "zi_nd")
+        );
         if !scheduled_zi && self.expr_derivative_is_zero(expr_id, wrt)? {
             return self.push(NativeOp::Const(0.0));
         }
@@ -3072,25 +3018,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             HirExprKind::ArrayAccess { array, index } => {
                 self.lower_array_access_derivative(array.as_str(), *index, wrt)
             }
-            HirExprKind::AnalogOperator { op } => {
-                self.lower_analog_operator_derivative(expression.id, op, wrt)
-            }
-            HirExprKind::Laplace { expr, kind } => self.lower_laplace_derivative(*expr, kind, wrt),
-            HirExprKind::Zi {
-                expr,
-                kind,
-                period,
-                transition,
-                first_transition,
-            } => self.lower_zi_derivative(
-                expression.id,
-                *expr,
-                kind,
-                *period,
-                *transition,
-                *first_transition,
-                wrt,
-            ),
+            HirExprKind::AnalogOperator { op } => self.lower_analog_operator_derivative(op, wrt),
         }
     }
 
@@ -3101,12 +3029,11 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         second: CanonicalDerivativeAxis,
     ) -> JitResult<()> {
         let expression = self.expression(expr_id)?;
-        let scheduled_zi = matches!(expression.kind, HirExprKind::Zi { .. })
-            || matches!(
-                &expression.kind,
-                HirExprKind::Call { name, .. }
-                    if matches!(normalize_intrinsic_name(name).as_str(), "zi_zp" | "zi_zd" | "zi_np" | "zi_nd")
-            );
+        let scheduled_zi = matches!(
+            &expression.kind,
+            HirExprKind::Call { name, .. }
+                if matches!(normalize_intrinsic_name(name).as_str(), "zi_zp" | "zi_zd" | "zi_np" | "zi_nd")
+        );
         if !scheduled_zi && self.expr_second_derivative_is_zero(expr_id, first, second)? {
             return self.push(NativeOp::Const(0.0));
         }
@@ -3156,28 +3083,8 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 self.lower_array_access_second_derivative(array.as_str(), *index, first, second)
             }
             HirExprKind::AnalogOperator { op } => {
-                self.lower_analog_operator_second_derivative(expression.id, op, first, second)
+                self.lower_analog_operator_second_derivative(op, first, second)
             }
-            HirExprKind::Laplace { expr, kind } => {
-                let gain = self.laplace_kind_dc_gain(kind)?;
-                self.lower_scaled_second_derivative(*expr, first, second, gain)
-            }
-            HirExprKind::Zi {
-                expr,
-                kind,
-                period,
-                transition,
-                first_transition,
-            } => self.lower_zi_second_derivative(
-                expression.id,
-                *expr,
-                kind,
-                *period,
-                *transition,
-                *first_transition,
-                first,
-                second,
-            ),
         }
     }
 
@@ -3244,9 +3151,6 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 "third derivative of analog operator {}",
                 analog_operator_name(op)
             ))),
-            HirExprKind::Laplace { .. } | HirExprKind::Zi { .. } => {
-                Err(self.unsupported("third derivative of stateful operator"))
-            }
         }
     }
 
@@ -3354,9 +3258,6 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 Ok(self.array_derivative_is_zero(array.as_str(), wrt))
             }
             HirExprKind::AnalogOperator { op } => self.analog_operator_derivative_is_zero(op, wrt),
-            HirExprKind::Laplace { expr, .. } | HirExprKind::Zi { expr, .. } => {
-                self.expr_derivative_is_zero(*expr, wrt)
-            }
         }
     }
 
@@ -3432,9 +3333,6 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             }
             HirExprKind::AnalogOperator { op } => {
                 self.analog_operator_second_derivative_is_zero(op, first, second)
-            }
-            HirExprKind::Laplace { expr, .. } | HirExprKind::Zi { expr, .. } => {
-                self.expr_second_derivative_is_zero(*expr, first, second)
             }
         }
     }
@@ -3730,30 +3628,6 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 "named limiter implicit {} derivative escaped its limiter body",
                 limiter_argument_name(*argument)
             ))),
-            HirAnalogOperator::Slew {
-                expr,
-                max_rise,
-                max_fall,
-            } => {
-                let input_is_zero = self.expr_derivative_is_zero(*expr, wrt)?;
-                let rise_is_zero = match max_rise {
-                    Some(rate) => self.expr_derivative_is_zero(*rate, wrt)?,
-                    None => true,
-                };
-                let fall_is_zero = match max_fall {
-                    Some(rate) => self.expr_derivative_is_zero(*rate, wrt)?,
-                    // An omitted negative rate inherits the authored positive
-                    // rate, including its derivative.
-                    None => rise_is_zero,
-                };
-                Ok(input_is_zero && rise_is_zero && fall_is_zero)
-            }
-            HirAnalogOperator::Ddt { expr, .. }
-            | HirAnalogOperator::Idt { expr, .. }
-            | HirAnalogOperator::IdtMod { expr, .. }
-            | HirAnalogOperator::Limexp { expr }
-            | HirAnalogOperator::Absdelay { expr, .. } => self.expr_derivative_is_zero(*expr, wrt),
-            HirAnalogOperator::Ddx { .. } | HirAnalogOperator::LastCrossing { .. } => Ok(false),
         }
     }
 
@@ -3777,33 +3651,6 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 "named limiter implicit {} second derivative escaped its limiter body",
                 limiter_argument_name(*argument)
             ))),
-            HirAnalogOperator::Slew {
-                expr,
-                max_rise,
-                max_fall,
-            } => {
-                let input_is_zero = self.expr_second_derivative_is_zero(*expr, first, second)?;
-                let rise_is_zero = match max_rise {
-                    Some(rate) => self.expr_second_derivative_is_zero(*rate, first, second)?,
-                    None => true,
-                };
-                let fall_is_zero = match max_fall {
-                    Some(rate) => self.expr_second_derivative_is_zero(*rate, first, second)?,
-                    None => rise_is_zero,
-                };
-                Ok(input_is_zero && rise_is_zero && fall_is_zero)
-            }
-            HirAnalogOperator::Ddt { expr, .. }
-            | HirAnalogOperator::Idt { expr, .. }
-            | HirAnalogOperator::IdtMod { expr, .. }
-            | HirAnalogOperator::Absdelay { expr, .. } => {
-                self.expr_second_derivative_is_zero(*expr, first, second)
-            }
-            HirAnalogOperator::Limexp { expr } => Ok(self
-                .expr_second_derivative_is_zero(*expr, first, second)?
-                && (self.expr_derivative_is_zero(*expr, first)?
-                    || self.expr_derivative_is_zero(*expr, second)?)),
-            HirAnalogOperator::Ddx { .. } | HirAnalogOperator::LastCrossing { .. } => Ok(false),
         }
     }
 
@@ -5731,7 +5578,6 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
 
     fn lower_analog_operator_derivative(
         &mut self,
-        expr_id: ExprId,
         op: &HirAnalogOperator,
         wrt: CanonicalDerivativeAxis,
     ) -> JitResult<()> {
@@ -5745,40 +5591,11 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 "named limiter implicit {} derivative escaped its limiter body",
                 limiter_argument_name(*argument)
             ))),
-            HirAnalogOperator::Limexp { expr } => {
-                self.lower(*expr)?;
-                self.append_unary(NativeOp::UnaryMath(UnaryMathOp::Limexp))?;
-                self.lower_derivative(*expr, wrt)?;
-                self.append_arithmetic("Mul")
-            }
-            HirAnalogOperator::Ddt { expr, .. } => {
-                self.lower_derivative(*expr, wrt)?;
-                self.append_unary(NativeOp::DdtJacobian)
-            }
-            HirAnalogOperator::Idt { expr, .. } | HirAnalogOperator::IdtMod { expr, .. } => {
-                self.lower_derivative(*expr, wrt)?;
-                self.append_unary(NativeOp::IdtJacobian)
-            }
-            HirAnalogOperator::Absdelay {
-                expr,
-                delay,
-                max_delay,
-            } => self.lower_absdelay_derivative_operator(expr_id, *expr, *delay, *max_delay, wrt),
-            HirAnalogOperator::Slew {
-                expr,
-                max_rise,
-                max_fall,
-            } => self.lower_slew_derivative_operator(expr_id, *expr, *max_rise, *max_fall, wrt),
-            HirAnalogOperator::Ddx { expr, probe } => {
-                self.lower_ddx_projection_derivative(*expr, *probe, wrt)
-            }
-            HirAnalogOperator::LastCrossing { .. } => self.push(NativeOp::Const(0.0)),
         }
     }
 
     fn lower_analog_operator_second_derivative(
         &mut self,
-        expr_id: ExprId,
         op: &HirAnalogOperator,
         first: CanonicalDerivativeAxis,
         second: CanonicalDerivativeAxis,
@@ -5797,40 +5614,6 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             HirAnalogOperator::LimiterArgument { argument } => Err(self.unsupported(format!(
                 "named limiter implicit {} second derivative escaped its limiter body",
                 limiter_argument_name(*argument)
-            ))),
-            HirAnalogOperator::Limexp { expr } => self.lower_unary_function_second_derivative(
-                "limexp",
-                &[*expr],
-                first,
-                second,
-                |lowerer, arg| {
-                    lowerer.lower(arg)?;
-                    lowerer.append_unary(NativeOp::UnaryMath(UnaryMathOp::Exp))
-                },
-                |lowerer, arg| {
-                    lowerer.lower(arg)?;
-                    lowerer.append_unary(NativeOp::UnaryMath(UnaryMathOp::Exp))
-                },
-            ),
-            HirAnalogOperator::Absdelay { .. } => Err(self.unsupported(format!(
-                "second derivative of absdelay at expression {expr_id}"
-            ))),
-            HirAnalogOperator::Slew {
-                expr,
-                max_rise,
-                max_fall,
-            } => self.lower_slew_second_derivative_operator(
-                expr_id, *expr, *max_rise, *max_fall, first, second,
-            ),
-            HirAnalogOperator::LastCrossing { .. } => self.push(NativeOp::Const(0.0)),
-            HirAnalogOperator::Ddx { expr, probe } => {
-                self.lower_ddx_projection_second_derivative(*expr, *probe, first, second)
-            }
-            HirAnalogOperator::Ddt { .. }
-            | HirAnalogOperator::Idt { .. }
-            | HirAnalogOperator::IdtMod { .. } => Err(self.unsupported(format!(
-                "second derivative of stateful analog operator {}",
-                analog_operator_name(op)
             ))),
         }
     }
@@ -5900,16 +5683,6 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         self.lower_second_derivative(proposed, first, second)?;
         self.append_arithmetic("Mul")?;
         self.append_arithmetic("Add")
-    }
-
-    fn lower_laplace_derivative(
-        &mut self,
-        expr: ExprId,
-        kind: &HirLaplaceKind,
-        wrt: CanonicalDerivativeAxis,
-    ) -> JitResult<()> {
-        let gain = self.laplace_kind_dc_gain(kind)?;
-        self.lower_scaled_derivative(expr, wrt, gain)
     }
 
     fn checked_filter_dc_gain(
@@ -6026,33 +5799,6 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         }
     }
 
-    fn lower_zi_derivative(
-        &mut self,
-        expr_id: ExprId,
-        expr: ExprId,
-        kind: &crate::canonical_ir::HirZiKind,
-        period: ExprId,
-        transition: Option<ExprId>,
-        first_transition: Option<ExprId>,
-        wrt: CanonicalDerivativeAxis,
-    ) -> JitResult<()> {
-        let slot = self.zi_derivative_slot(expr_id)?;
-        let (numerator, denominator) = self.lower_zi_kind_definition(kind)?;
-        self.lower(period)?;
-        self.lower_optional_zi_constant(first_transition, 0.0)?;
-        self.lower_derivative(expr, wrt)?;
-        self.lower_optional_zi_constant(transition, self.mir.default_transition)?;
-        self.append_zi_state(
-            ZiRuntimeLayout {
-                filter_id: slot,
-                numerator,
-                denominator,
-                direct_assignment: self.zi_site_is_direct(),
-            },
-            true,
-        )
-    }
-
     fn lower_zi_call_derivative(
         &mut self,
         expr_id: ExprId,
@@ -6114,34 +5860,6 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         )
     }
 
-    fn lower_zi_second_derivative(
-        &mut self,
-        expr_id: ExprId,
-        expr: ExprId,
-        kind: &crate::canonical_ir::HirZiKind,
-        period: ExprId,
-        transition: Option<ExprId>,
-        first_transition: Option<ExprId>,
-        first: CanonicalDerivativeAxis,
-        second: CanonicalDerivativeAxis,
-    ) -> JitResult<()> {
-        let slot = self.zi_derivative_slot(expr_id)?;
-        let (numerator, denominator) = self.lower_zi_kind_definition(kind)?;
-        self.lower(period)?;
-        self.lower_optional_zi_constant(first_transition, 0.0)?;
-        self.lower_second_derivative(expr, first, second)?;
-        self.lower_optional_zi_constant(transition, self.mir.default_transition)?;
-        self.append_zi_state(
-            ZiRuntimeLayout {
-                filter_id: slot,
-                numerator,
-                denominator,
-                direct_assignment: self.zi_site_is_direct(),
-            },
-            true,
-        )
-    }
-
     fn zi_derivative_slot(&self, expr_id: ExprId) -> JitResult<usize> {
         let Some(slot) = self.limits.canonical_zi_slot(expr_id) else {
             return Err(self.unsupported(format!(
@@ -6190,42 +5908,6 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         }
         self.push(NativeOp::Const(gain))?;
         self.append_arithmetic("Mul")
-    }
-
-    fn laplace_kind_dc_gain(&self, kind: &HirLaplaceKind) -> JitResult<f64> {
-        match kind {
-            HirLaplaceKind::ZeroPole { zeros, poles } => {
-                let zeros = self.constant_expr_root_pairs(zeros, "laplace_zp", "zeros")?;
-                let poles = self.constant_expr_root_pairs(poles, "laplace_zp", "poles")?;
-                self.checked_root_dc_gain("laplace_zp", 1.0, &zeros, &poles)
-            }
-            HirLaplaceKind::ZeroDenominator { zeros, denominator } => {
-                let zeros = self.constant_expr_root_pairs(zeros, "laplace_zd", "zeros")?;
-                let numerator = self.checked_root_dc_gain("laplace_zd", 1.0, &zeros, &[])?;
-                self.checked_filter_dc_gain(
-                    "laplace_zd",
-                    numerator,
-                    self.constant_expr_first_or(denominator, 1.0)?,
-                )
-            }
-            HirLaplaceKind::NumeratorPole { numerator, poles } => {
-                let poles = self.constant_expr_root_pairs(poles, "laplace_np", "poles")?;
-                self.checked_root_dc_gain(
-                    "laplace_np",
-                    self.constant_expr_first_or(numerator, 0.0)?,
-                    &[],
-                    &poles,
-                )
-            }
-            HirLaplaceKind::NumeratorDenominator {
-                numerator,
-                denominator,
-            } => self.checked_filter_dc_gain(
-                "laplace_nd",
-                self.constant_expr_first_or(numerator, 0.0)?,
-                self.constant_expr_first_or(denominator, 1.0)?,
-            ),
-        }
     }
 
     fn constant_array_root_pairs(
@@ -6846,32 +6528,6 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         )
     }
 
-    fn lower_zi_operator(
-        &mut self,
-        expr_id: ExprId,
-        expr: ExprId,
-        kind: &crate::canonical_ir::HirZiKind,
-        period: ExprId,
-        transition: Option<ExprId>,
-        first_transition: Option<ExprId>,
-    ) -> JitResult<()> {
-        let (numerator, denominator) = self.lower_zi_kind_definition(kind)?;
-        self.lower(period)?;
-        self.lower_optional_zi_constant(first_transition, 0.0)?;
-        self.lower(expr)?;
-        self.lower_optional_zi_constant(transition, self.mir.default_transition)?;
-        let slot = self.zi_derivative_slot(expr_id)?;
-        self.append_zi_state(
-            ZiRuntimeLayout {
-                filter_id: slot,
-                numerator,
-                denominator,
-                direct_assignment: self.zi_site_is_direct(),
-            },
-            false,
-        )
-    }
-
     fn lower_zi_call_definition(
         &mut self,
         name: &str,
@@ -6894,37 +6550,6 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         let denominator =
             self.lower_zi_polynomial_arg(args[2], denominator_roots, denominator_roots)?;
         Ok((numerator, denominator))
-    }
-
-    fn lower_zi_kind_definition(
-        &mut self,
-        kind: &crate::canonical_ir::HirZiKind,
-    ) -> JitResult<(
-        crate::codegen::ZiPolynomialLayout,
-        crate::codegen::ZiPolynomialLayout,
-    )> {
-        use crate::canonical_ir::HirZiKind;
-        match kind {
-            HirZiKind::ZeroPole { zeros, poles } => Ok((
-                self.lower_zi_polynomial_elements(zeros, true)?,
-                self.lower_zi_polynomial_elements(poles, true)?,
-            )),
-            HirZiKind::ZeroDenominator { zeros, denominator } => Ok((
-                self.lower_zi_polynomial_elements(zeros, true)?,
-                self.lower_zi_polynomial_elements(denominator, false)?,
-            )),
-            HirZiKind::NumeratorPole { numerator, poles } => Ok((
-                self.lower_zi_polynomial_elements(numerator, false)?,
-                self.lower_zi_polynomial_elements(poles, true)?,
-            )),
-            HirZiKind::NumeratorDenominator {
-                numerator,
-                denominator,
-            } => Ok((
-                self.lower_zi_polynomial_elements(numerator, false)?,
-                self.lower_zi_polynomial_elements(denominator, false)?,
-            )),
-        }
     }
 
     fn lower_zi_polynomial_arg(
@@ -7135,29 +6760,6 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         } else {
             self.push(NativeOp::Const(0.0))?;
         }
-        self.pop_binary("canonical last_crossing")?;
-        self.ops.push(NativeOp::LastCrossingState(slot));
-        Ok(())
-    }
-
-    fn lower_last_crossing_operator(
-        &mut self,
-        expr_id: ExprId,
-        expr: ExprId,
-        edge: Option<HirCrossDirection>,
-    ) -> JitResult<()> {
-        let Some(slot) = self.limits.canonical_cross_slot(expr_id) else {
-            return Err(self.unsupported(format!(
-                "analog operator last_crossing expression {expr_id} detector slot"
-            )));
-        };
-        self.lower(expr)?;
-        let direction = match edge {
-            Some(HirCrossDirection::Rising) => 1.0,
-            Some(HirCrossDirection::Falling) => -1.0,
-            Some(HirCrossDirection::Both) | None => 0.0,
-        };
-        self.push(NativeOp::Const(direction))?;
         self.pop_binary("canonical last_crossing")?;
         self.ops.push(NativeOp::LastCrossingState(slot));
         Ok(())
@@ -8473,8 +8075,6 @@ fn expression_kind_name(kind: &HirExprKind) -> &'static str {
         HirExprKind::ArrayAccess { .. } => "array access",
         HirExprKind::ArrayLiteral { .. } => "array literal",
         HirExprKind::AnalogOperator { .. } => "analog operator",
-        HirExprKind::Laplace { .. } => "laplace",
-        HirExprKind::Zi { .. } => "zi",
         HirExprKind::NoiseSource { .. } => "noise source",
     }
 }
@@ -8483,14 +8083,6 @@ fn analog_operator_name(op: &HirAnalogOperator) -> &'static str {
     match op {
         HirAnalogOperator::Limit { .. } => "limit",
         HirAnalogOperator::LimiterArgument { .. } => "limiter_argument",
-        HirAnalogOperator::Ddt { .. } => "ddt",
-        HirAnalogOperator::Idt { .. } => "idt",
-        HirAnalogOperator::IdtMod { .. } => "idtmod",
-        HirAnalogOperator::Ddx { .. } => "ddx",
-        HirAnalogOperator::Limexp { .. } => "limexp",
-        HirAnalogOperator::Absdelay { .. } => "absdelay",
-        HirAnalogOperator::Slew { .. } => "slew",
-        HirAnalogOperator::LastCrossing { .. } => "last_crossing",
     }
 }
 
@@ -9949,8 +9541,8 @@ fn integer_binary_op(instruction: &Instruction) -> IntegerBinaryOp {
 mod tests {
     use super::*;
     use crate::ast::{
-        AnalogOperator, BinaryExpr, BinaryOp, BranchAccess, CallExpr, Expression, NoiseSource,
-        NumberLit, PortDirection,
+        BinaryExpr, BinaryOp, BranchAccess, CallExpr, Expression, NoiseSource, NumberLit,
+        PortDirection,
     };
     use crate::canonical_ir::{CanonicalMetadata, HirExprKind, HirModel, MirModel};
     use crate::semantic::{
@@ -10154,30 +9746,6 @@ mod tests {
             .iter()
             .filter(|op| matches!(op, NativeOp::UnaryMath(op) if *op == expected))
             .count()
-    }
-
-    fn explicit_analog_limexp_mir() -> MirModel {
-        let span = Span::dummy();
-        let expression = Expression::AnalogOperator(AnalogOperator::Limexp {
-            expr: Box::new(Expression::BranchAccess(BranchAccess::Nodes {
-                access: "V".into(),
-                pos: "p".into(),
-                neg: Some("n".into()),
-                span,
-            })),
-            span,
-        });
-        let hir = analyzed_two_terminal_hir("mir_analog_limexp", expression);
-        let contribution_expr = &hir.contributions[0].expression;
-        assert!(
-            matches!(
-                hir.expressions[usize::from(contribution_expr.id)].kind,
-                HirExprKind::AnalogOperator { .. }
-            ),
-            "test fixture must preserve explicit canonical analog operator"
-        );
-
-        MirModel::from_hir(&hir).expect("lower explicit analog limexp HIR to MIR")
     }
 
     fn explicit_noise_sources_mir() -> MirModel {
@@ -10484,143 +10052,6 @@ endmodule
         let msg = error.to_string();
         assert!(msg.contains("StaticCondition LoadCurrent"), "got: {msg}");
         assert!(msg.contains("no interpreter fallback"), "got: {msg}");
-    }
-
-    #[test]
-    fn lowers_canonical_ddt_with_abstol_metadata_to_state_op() {
-        let mir = analyzed_two_terminal_mir(
-            "mir_ddt_abstol",
-            Expression::AnalogOperator(AnalogOperator::Ddt {
-                expr: Box::new(voltage_expr()),
-                abstol: Some(Box::new(number(1.0e-18, "1.0e-18"))),
-                span: Span::dummy(),
-            }),
-        );
-        let root = mir.equations[0].expression.id;
-        let ddt_slots = [(root, 0)];
-
-        let program = NativeProgram::from_mir_equation(
-            "mir_ddt_abstol",
-            EntryKind::StampValue,
-            &mir,
-            crate::canonical_ir::EquationId::new(0),
-            NativeLoweringLimits::new(2, 0, 0, 0, 0).with_canonical_ddt_slots(&ddt_slots),
-        )
-        .expect("ddt abstol metadata must not block native lowering");
-
-        assert_eq!(
-            program.ops(),
-            &[
-                NativeOp::LoadVoltage {
-                    pos: VoltageNode::Terminal(0),
-                    neg: VoltageNode::Terminal(1),
-                },
-                NativeOp::DdtState(0),
-            ]
-        );
-    }
-
-    #[test]
-    fn lowers_canonical_idt_with_zero_assert_and_abstol_metadata_to_state_op() {
-        let mir = analyzed_two_terminal_mir(
-            "mir_idt_abstol",
-            Expression::AnalogOperator(AnalogOperator::Idt {
-                expr: Box::new(voltage_expr()),
-                ic: Some(Box::new(number(0.5, "0.5"))),
-                assert_val: Some(Box::new(number(0.0, "0.0"))),
-                abstol: Some(Box::new(number(1.0e-9, "1.0e-9"))),
-                span: Span::dummy(),
-            }),
-        );
-        let root = mir.equations[0].expression.id;
-        let idt_slots = [(root, 0)];
-
-        let program = NativeProgram::from_mir_equation(
-            "mir_idt_abstol",
-            EntryKind::StampValue,
-            &mir,
-            crate::canonical_ir::EquationId::new(0),
-            NativeLoweringLimits::new(2, 0, 0, 0, 0).with_canonical_idt_slots(&idt_slots),
-        )
-        .expect("zero idt assert and abstol metadata must not block native lowering");
-
-        assert_eq!(
-            program.ops(),
-            &[
-                NativeOp::LoadVoltage {
-                    pos: VoltageNode::Terminal(0),
-                    neg: VoltageNode::Terminal(1),
-                },
-                NativeOp::Const(0.5),
-                NativeOp::IdtState(0),
-            ]
-        );
-    }
-
-    #[test]
-    fn rejects_canonical_idt_with_nonzero_assert_without_fallback() {
-        let mir = analyzed_two_terminal_mir(
-            "mir_idt_assert",
-            Expression::AnalogOperator(AnalogOperator::Idt {
-                expr: Box::new(voltage_expr()),
-                ic: Some(Box::new(number(0.5, "0.5"))),
-                assert_val: Some(Box::new(number(1.0, "1.0"))),
-                abstol: Some(Box::new(number(1.0e-9, "1.0e-9"))),
-                span: Span::dummy(),
-            }),
-        );
-        let root = mir.equations[0].expression.id;
-        let idt_slots = [(root, 0)];
-
-        let err = NativeProgram::from_mir_equation(
-            "mir_idt_assert",
-            EntryKind::StampValue,
-            &mir,
-            crate::canonical_ir::EquationId::new(0),
-            NativeLoweringLimits::new(2, 0, 0, 0, 0).with_canonical_idt_slots(&idt_slots),
-        )
-        .expect_err("nonzero idt assert needs explicit native reset semantics");
-        let msg = err.to_string();
-
-        assert!(msg.contains("analog operator idt assert argument"), "{msg}");
-        assert!(msg.contains("no interpreter fallback"), "{msg}");
-    }
-
-    #[test]
-    fn lowers_canonical_idtmod_with_abstol_metadata_to_state_op() {
-        let mir = analyzed_two_terminal_mir(
-            "mir_idtmod_abstol",
-            Expression::AnalogOperator(AnalogOperator::IdtMod {
-                expr: Box::new(number(1.0, "1.0")),
-                ic: Some(Box::new(number(0.0, "0.0"))),
-                modulus: Some(Box::new(number(1.0, "1.0"))),
-                offset: Some(Box::new(number(0.0, "0.0"))),
-                abstol: Some(Box::new(number(1.0e-9, "1.0e-9"))),
-                span: Span::dummy(),
-            }),
-        );
-        let root = mir.equations[0].expression.id;
-        let idtmod_slots = [(root, 0)];
-
-        let program = NativeProgram::from_mir_equation(
-            "mir_idtmod_abstol",
-            EntryKind::StampValue,
-            &mir,
-            crate::canonical_ir::EquationId::new(0),
-            NativeLoweringLimits::new(2, 0, 0, 0, 0).with_canonical_idtmod_slots(&idtmod_slots),
-        )
-        .expect("idtmod abstol metadata must not block native lowering");
-
-        assert_eq!(
-            program.ops(),
-            &[
-                NativeOp::Const(1.0),
-                NativeOp::Const(0.0),
-                NativeOp::Const(1.0),
-                NativeOp::Const(0.0),
-                NativeOp::IdtModState(0),
-            ]
-        );
     }
 
     #[test]
@@ -11598,32 +11029,6 @@ endmodule
                     neg: VoltageNode::Terminal(1),
                 },
                 NativeOp::UnaryMath(UnaryMathOp::LimitedExp),
-            ]
-        );
-        assert_eq!(program.max_stack_depth(), 1);
-    }
-
-    #[test]
-    fn lowers_canonical_analog_limexp_operator_to_native_program() {
-        let mir = explicit_analog_limexp_mir();
-
-        let program = NativeProgram::from_mir_equation(
-            "mir_analog_limexp",
-            EntryKind::StampValue,
-            &mir,
-            crate::canonical_ir::EquationId::new(0),
-            NativeLoweringLimits::new(2, 0, 0, 0, 0),
-        )
-        .expect("lower explicit canonical analog limexp operator to native program");
-
-        assert_eq!(
-            program.ops(),
-            &[
-                NativeOp::LoadVoltage {
-                    pos: VoltageNode::Terminal(0),
-                    neg: VoltageNode::Terminal(1),
-                },
-                NativeOp::UnaryMath(UnaryMathOp::Limexp),
             ]
         );
         assert_eq!(program.max_stack_depth(), 1);

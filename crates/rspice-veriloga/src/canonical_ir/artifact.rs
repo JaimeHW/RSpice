@@ -15,11 +15,11 @@ use super::digital::CanonicalDigitalPlan;
 use super::{
     CANONICAL_IR_SCHEMA_VERSION, CanonicalMetadata, CanonicalValueType, CompilerPhase,
     HirAnalogOperator, HirArray, HirAssignment, HirBranch, HirContribution, HirContributionKind,
-    HirCrossDirection, HirExprKind, HirExprRef, HirExpression, HirInternalNode, HirLaplaceKind,
-    HirLoop, HirModel, HirParamRange, HirParameter, HirParameterDimension, HirPort, HirStatement,
-    HirVariable, HirZiKind, IrDiagnostic, IrValidationResult, MirAnalysisDomain, MirBranch,
-    MirBranchRef, MirBranchUnknown, MirEquation, MirEquationKind, MirModel, MirNode,
-    MirParameterSlot, MirStateSlot, SourceSpanRef, StableDigest,
+    HirExprKind, HirExprRef, HirExpression, HirInternalNode, HirLoop, HirModel, HirParamRange,
+    HirParameter, HirParameterDimension, HirPort, HirStatement, HirVariable, IrDiagnostic,
+    IrValidationResult, MirAnalysisDomain, MirBranch, MirBranchRef, MirBranchUnknown, MirEquation,
+    MirEquationKind, MirModel, MirNode, MirParameterSlot, MirStateSlot, SourceSpanRef,
+    StableDigest,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1035,25 +1035,6 @@ fn hir_expr_kind_label(kind: &HirExprKind) -> String {
             )
         }
         HirExprKind::AnalogOperator { op } => analog_operator_label(op),
-        HirExprKind::Laplace { expr, kind } => {
-            format!("laplace expr:{} {}", expr.index(), laplace_kind_label(kind))
-        }
-        HirExprKind::Zi {
-            expr,
-            kind,
-            period,
-            transition,
-            first_transition,
-        } => {
-            format!(
-                "zi expr:{} period:{} transition:{} first_transition:{} {}",
-                expr.index(),
-                period.index(),
-                option_expr_id(*transition),
-                option_expr_id(*first_transition),
-                zi_kind_label(kind)
-            )
-        }
         HirExprKind::NoiseSource {
             process_id,
             source,
@@ -1086,134 +1067,6 @@ fn analog_operator_label(op: &HirAnalogOperator) -> String {
         HirAnalogOperator::LimiterArgument { argument } => {
             format!("analog_operator limiter_argument {argument:?}")
         }
-        HirAnalogOperator::Ddt { expr, abstol } => {
-            format!(
-                "analog_operator ddt expr:{} abstol:{}",
-                expr.index(),
-                option_expr_id(*abstol)
-            )
-        }
-        HirAnalogOperator::Idt {
-            expr,
-            ic,
-            assert,
-            abstol,
-        } => format!(
-            "analog_operator idt expr:{} ic:{} assert:{} abstol:{}",
-            expr.index(),
-            option_expr_id(*ic),
-            option_expr_id(*assert),
-            option_expr_id(*abstol)
-        ),
-        HirAnalogOperator::IdtMod {
-            expr,
-            ic,
-            modulus,
-            offset,
-            abstol,
-        } => format!(
-            "analog_operator idtmod expr:{} ic:{} modulus:{} offset:{} abstol:{}",
-            expr.index(),
-            option_expr_id(*ic),
-            option_expr_id(*modulus),
-            option_expr_id(*offset),
-            option_expr_id(*abstol)
-        ),
-        HirAnalogOperator::Ddx { expr, probe } => {
-            format!(
-                "analog_operator ddx expr:{} probe:{}",
-                expr.index(),
-                probe.index()
-            )
-        }
-        HirAnalogOperator::Limexp { expr } => {
-            format!("analog_operator limexp expr:{}", expr.index())
-        }
-        HirAnalogOperator::Absdelay {
-            expr,
-            delay,
-            max_delay,
-        } => format!(
-            "analog_operator absdelay expr:{} delay:{} max_delay:{}",
-            expr.index(),
-            delay.index(),
-            option_expr_id(*max_delay)
-        ),
-        HirAnalogOperator::Slew {
-            expr,
-            max_rise,
-            max_fall,
-        } => format!(
-            "analog_operator slew expr:{} max_rise:{} max_fall:{}",
-            expr.index(),
-            option_expr_id(*max_rise),
-            option_expr_id(*max_fall)
-        ),
-        HirAnalogOperator::LastCrossing { expr, edge } => format!(
-            "analog_operator last_crossing expr:{} edge:{}",
-            expr.index(),
-            option_cross_direction(*edge)
-        ),
-    }
-}
-
-fn laplace_kind_label(kind: &HirLaplaceKind) -> String {
-    match kind {
-        HirLaplaceKind::ZeroPole { zeros, poles } => {
-            format!(
-                "zero_pole zeros:{} poles:{}",
-                join_expr_ids(zeros),
-                join_expr_ids(poles)
-            )
-        }
-        HirLaplaceKind::ZeroDenominator { zeros, denominator } => format!(
-            "zero_denominator zeros:{} denominator:{}",
-            join_expr_ids(zeros),
-            join_expr_ids(denominator)
-        ),
-        HirLaplaceKind::NumeratorPole { numerator, poles } => format!(
-            "numerator_pole numerator:{} poles:{}",
-            join_expr_ids(numerator),
-            join_expr_ids(poles)
-        ),
-        HirLaplaceKind::NumeratorDenominator {
-            numerator,
-            denominator,
-        } => format!(
-            "numerator_denominator numerator:{} denominator:{}",
-            join_expr_ids(numerator),
-            join_expr_ids(denominator)
-        ),
-    }
-}
-
-fn zi_kind_label(kind: &HirZiKind) -> String {
-    match kind {
-        HirZiKind::ZeroPole { zeros, poles } => {
-            format!(
-                "zero_pole zeros:{} poles:{}",
-                join_expr_ids(zeros),
-                join_expr_ids(poles)
-            )
-        }
-        HirZiKind::ZeroDenominator { zeros, denominator } => format!(
-            "zero_denominator zeros:{} denominator:{}",
-            join_expr_ids(zeros),
-            join_expr_ids(denominator)
-        ),
-        HirZiKind::NumeratorPole { numerator, poles } => format!(
-            "numerator_pole numerator:{} poles:{}",
-            join_expr_ids(numerator),
-            join_expr_ids(poles)
-        ),
-        HirZiKind::NumeratorDenominator {
-            numerator,
-            denominator,
-        } => format!(
-            "numerator_denominator numerator:{} denominator:{}",
-            join_expr_ids(numerator),
-            join_expr_ids(denominator)
-        ),
     }
 }
 
@@ -1335,15 +1188,6 @@ fn option_expr_id(value: Option<super::ExprId>) -> String {
     value
         .map(|value| value.index().to_string())
         .unwrap_or_else(|| "-".to_string())
-}
-
-fn option_cross_direction(value: Option<HirCrossDirection>) -> &'static str {
-    match value {
-        Some(HirCrossDirection::Rising) => "rising",
-        Some(HirCrossDirection::Falling) => "falling",
-        Some(HirCrossDirection::Both) => "both",
-        None => "-",
-    }
 }
 
 fn option_f64(value: Option<f64>) -> String {

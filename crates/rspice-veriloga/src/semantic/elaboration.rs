@@ -14,8 +14,8 @@ use super::{
 };
 use crate::ast::{
     AnalogOperator, ArrayAccessExpr, ArrayLiteralElement, ArrayLiteralExpr, BinaryExpr,
-    BranchAccess, CallExpr, ConditionalExpr, Connection, Expression, Identifier, Item, LaplaceKind,
-    Module, ModuleInstance, NoiseSource, NumberLit, SystemFunction, UnaryExpr, ZiKind,
+    BranchAccess, CallExpr, ConditionalExpr, Connection, Expression, Identifier, Item, Module,
+    ModuleInstance, NoiseSource, NumberLit, SystemFunction, UnaryExpr,
 };
 use crate::error::{CompileError, CompileResult, SemanticError, SemanticErrorKind};
 use crate::source::Span;
@@ -1443,143 +1443,6 @@ fn rewrite_analog_operator(
             span: *span,
         },
         AnalogOperator::LimiterArgument { .. } => operator.clone(),
-        AnalogOperator::Ddt { expr, abstol, span } => AnalogOperator::Ddt {
-            expr: Box::new(rewrite_expression(expr, scope)?),
-            abstol: optional(abstol)?,
-            span: *span,
-        },
-        AnalogOperator::Idt {
-            expr,
-            ic,
-            assert_val,
-            abstol,
-            span,
-        } => AnalogOperator::Idt {
-            expr: Box::new(rewrite_expression(expr, scope)?),
-            ic: optional(ic)?,
-            assert_val: optional(assert_val)?,
-            abstol: optional(abstol)?,
-            span: *span,
-        },
-        AnalogOperator::IdtMod {
-            expr,
-            ic,
-            modulus,
-            offset,
-            abstol,
-            span,
-        } => AnalogOperator::IdtMod {
-            expr: Box::new(rewrite_expression(expr, scope)?),
-            ic: optional(ic)?,
-            modulus: optional(modulus)?,
-            offset: optional(offset)?,
-            abstol: optional(abstol)?,
-            span: *span,
-        },
-        AnalogOperator::Ddx { expr, probe, span } => AnalogOperator::Ddx {
-            expr: Box::new(rewrite_expression(expr, scope)?),
-            probe: rewrite_branch_access(probe, scope)?,
-            span: *span,
-        },
-        AnalogOperator::Limexp { expr, span } => AnalogOperator::Limexp {
-            expr: Box::new(rewrite_expression(expr, scope)?),
-            span: *span,
-        },
-        AnalogOperator::Absdelay {
-            expr,
-            delay,
-            max_delay,
-            span,
-        } => AnalogOperator::Absdelay {
-            expr: Box::new(rewrite_expression(expr, scope)?),
-            delay: Box::new(rewrite_expression(delay, scope)?),
-            max_delay: optional(max_delay)?,
-            span: *span,
-        },
-        AnalogOperator::Slew {
-            expr,
-            max_rise,
-            max_fall,
-            span,
-        } => AnalogOperator::Slew {
-            expr: Box::new(rewrite_expression(expr, scope)?),
-            max_rise: optional(max_rise)?,
-            max_fall: optional(max_fall)?,
-            span: *span,
-        },
-        AnalogOperator::LastCrossing { expr, edge, span } => AnalogOperator::LastCrossing {
-            expr: Box::new(rewrite_expression(expr, scope)?),
-            edge: *edge,
-            span: *span,
-        },
-        AnalogOperator::Laplace { kind, expr, span } => AnalogOperator::Laplace {
-            kind: rewrite_laplace_kind(kind, scope)?,
-            expr: Box::new(rewrite_expression(expr, scope)?),
-            span: *span,
-        },
-        AnalogOperator::Zi {
-            kind,
-            expr,
-            period,
-            transition,
-            first_transition,
-            span,
-        } => AnalogOperator::Zi {
-            kind: rewrite_zi_kind(kind, scope)?,
-            expr: Box::new(rewrite_expression(expr, scope)?),
-            period: Box::new(rewrite_expression(period, scope)?),
-            transition: optional(transition)?,
-            first_transition: optional(first_transition)?,
-            span: *span,
-        },
-    })
-}
-
-fn rewrite_laplace_kind(kind: &LaplaceKind, scope: &ScopeMap) -> CompileResult<LaplaceKind> {
-    Ok(match kind {
-        LaplaceKind::ZeroPole { zeros, poles } => LaplaceKind::ZeroPole {
-            zeros: rewrite_expressions(zeros, scope)?,
-            poles: rewrite_expressions(poles, scope)?,
-        },
-        LaplaceKind::ZeroDenominator { zeros, denominator } => LaplaceKind::ZeroDenominator {
-            zeros: rewrite_expressions(zeros, scope)?,
-            denominator: rewrite_expressions(denominator, scope)?,
-        },
-        LaplaceKind::NumeratorPole { numerator, poles } => LaplaceKind::NumeratorPole {
-            numerator: rewrite_expressions(numerator, scope)?,
-            poles: rewrite_expressions(poles, scope)?,
-        },
-        LaplaceKind::NumeratorDenominator {
-            numerator,
-            denominator,
-        } => LaplaceKind::NumeratorDenominator {
-            numerator: rewrite_expressions(numerator, scope)?,
-            denominator: rewrite_expressions(denominator, scope)?,
-        },
-    })
-}
-
-fn rewrite_zi_kind(kind: &ZiKind, scope: &ScopeMap) -> CompileResult<ZiKind> {
-    Ok(match kind {
-        ZiKind::ZeroPole { zeros, poles } => ZiKind::ZeroPole {
-            zeros: rewrite_expressions(zeros, scope)?,
-            poles: rewrite_expressions(poles, scope)?,
-        },
-        ZiKind::ZeroDenominator { zeros, denominator } => ZiKind::ZeroDenominator {
-            zeros: rewrite_expressions(zeros, scope)?,
-            denominator: rewrite_expressions(denominator, scope)?,
-        },
-        ZiKind::NumeratorPole { numerator, poles } => ZiKind::NumeratorPole {
-            numerator: rewrite_expressions(numerator, scope)?,
-            poles: rewrite_expressions(poles, scope)?,
-        },
-        ZiKind::NumeratorDenominator {
-            numerator,
-            denominator,
-        } => ZiKind::NumeratorDenominator {
-            numerator: rewrite_expressions(numerator, scope)?,
-            denominator: rewrite_expressions(denominator, scope)?,
-        },
     })
 }
 

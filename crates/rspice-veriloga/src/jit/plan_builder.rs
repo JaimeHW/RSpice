@@ -17,8 +17,8 @@ use super::plan_program::PlanProgram;
 use super::{JitError, JitResult};
 use crate::canonical_ir::{
     CanonicalIrArtifact, CanonicalStateOperator, EquationId, ExprId, HirAnalogOperator,
-    HirAssignment, HirExprKind, HirExprRef, HirExpression, HirLaplaceKind, HirLoop, HirModel,
-    HirStatement, HirZiKind, MirEquationKind, MirModel, NodeId, SourceSpanRef,
+    HirAssignment, HirExprKind, HirExprRef, HirExpression, HirLoop, HirModel, HirStatement,
+    MirEquationKind, MirModel, NodeId, SourceSpanRef,
 };
 use crate::codegen::{
     AssignmentStep, BytecodeProgram, ColumnAxis, CompiledModel, CompiledNoiseSource, Instruction,
@@ -621,9 +621,6 @@ fn canonical_extract_reactive_charge(
 ) -> JitResult<Option<ExprId>> {
     let expression = canonical_expression(model, mir, expr_id)?.clone();
     match expression.kind {
-        HirExprKind::AnalogOperator {
-            op: HirAnalogOperator::Ddt { expr, .. },
-        } => Ok(Some(expr)),
         HirExprKind::Call { name, args } if canonical_is_ddt_call(name.as_str()) => {
             match args.as_slice() {
                 [expr] => Ok(Some(*expr)),
@@ -749,9 +746,6 @@ fn canonical_expr_contains_ddt(
 ) -> JitResult<bool> {
     let expression = canonical_expression(model, mir, expr_id)?;
     match &expression.kind {
-        HirExprKind::AnalogOperator {
-            op: HirAnalogOperator::Ddt { .. },
-        } => Ok(true),
         HirExprKind::Call { name, .. } if canonical_is_ddt_call(name.as_str()) => Ok(true),
         HirExprKind::NullArgument
         | HirExprKind::Number { .. }
@@ -781,34 +775,6 @@ fn canonical_expr_contains_ddt(
             || canonical_expr_contains_ddt(model, mir, *else_expr)?),
         HirExprKind::AnalogOperator { op } => {
             canonical_analog_operator_contains_ddt(model, mir, op)
-        }
-        HirExprKind::Laplace { expr, kind } => {
-            if canonical_expr_contains_ddt(model, mir, *expr)? {
-                return Ok(true);
-            }
-            canonical_laplace_kind_contains_ddt(model, mir, kind)
-        }
-        HirExprKind::Zi {
-            expr,
-            kind,
-            period,
-            transition,
-            first_transition,
-        } => {
-            if canonical_expr_contains_ddt(model, mir, *expr)?
-                || canonical_expr_contains_ddt(model, mir, *period)?
-                || transition
-                    .map(|expr| canonical_expr_contains_ddt(model, mir, expr))
-                    .transpose()?
-                    .unwrap_or(false)
-                || first_transition
-                    .map(|expr| canonical_expr_contains_ddt(model, mir, expr))
-                    .transpose()?
-                    .unwrap_or(false)
-            {
-                return Ok(true);
-            }
-            canonical_zi_kind_contains_ddt(model, mir, kind)
         }
     }
 }
@@ -841,100 +807,6 @@ fn canonical_analog_operator_contains_ddt(
             || canonical_expr_contains_ddt(model, mir, *candidate)?
             || canonical_optional_expr_contains_ddt(model, mir, *type_metadata)?),
         HirAnalogOperator::LimiterArgument { .. } => Ok(false),
-        HirAnalogOperator::Ddt { .. } => Ok(true),
-        HirAnalogOperator::Idt {
-            expr,
-            ic,
-            assert,
-            abstol,
-        } => Ok(canonical_expr_contains_ddt(model, mir, *expr)?
-            || canonical_optional_expr_contains_ddt(model, mir, *ic)?
-            || canonical_optional_expr_contains_ddt(model, mir, *assert)?
-            || canonical_optional_expr_contains_ddt(model, mir, *abstol)?),
-        HirAnalogOperator::IdtMod {
-            expr,
-            ic,
-            modulus,
-            offset,
-            abstol,
-        } => Ok(canonical_expr_contains_ddt(model, mir, *expr)?
-            || canonical_optional_expr_contains_ddt(model, mir, *ic)?
-            || canonical_optional_expr_contains_ddt(model, mir, *modulus)?
-            || canonical_optional_expr_contains_ddt(model, mir, *offset)?
-            || canonical_optional_expr_contains_ddt(model, mir, *abstol)?),
-        HirAnalogOperator::Ddx { expr, probe } => {
-            Ok(canonical_expr_contains_ddt(model, mir, *expr)?
-                || canonical_expr_contains_ddt(model, mir, *probe)?)
-        }
-        HirAnalogOperator::Limexp { expr } | HirAnalogOperator::LastCrossing { expr, .. } => {
-            canonical_expr_contains_ddt(model, mir, *expr)
-        }
-        HirAnalogOperator::Absdelay {
-            expr,
-            delay,
-            max_delay,
-        } => Ok(canonical_expr_contains_ddt(model, mir, *expr)?
-            || canonical_expr_contains_ddt(model, mir, *delay)?
-            || canonical_optional_expr_contains_ddt(model, mir, *max_delay)?),
-        HirAnalogOperator::Slew {
-            expr,
-            max_rise,
-            max_fall,
-        } => Ok(canonical_expr_contains_ddt(model, mir, *expr)?
-            || canonical_optional_expr_contains_ddt(model, mir, *max_rise)?
-            || canonical_optional_expr_contains_ddt(model, mir, *max_fall)?),
-    }
-}
-
-fn canonical_laplace_kind_contains_ddt(
-    model: &CompiledModel,
-    mir: &MirModel,
-    kind: &HirLaplaceKind,
-) -> JitResult<bool> {
-    match kind {
-        HirLaplaceKind::ZeroPole { zeros, poles } => {
-            Ok(canonical_expr_list_contains_ddt(model, mir, zeros)?
-                || canonical_expr_list_contains_ddt(model, mir, poles)?)
-        }
-        HirLaplaceKind::ZeroDenominator { zeros, denominator } => {
-            Ok(canonical_expr_list_contains_ddt(model, mir, zeros)?
-                || canonical_expr_list_contains_ddt(model, mir, denominator)?)
-        }
-        HirLaplaceKind::NumeratorPole { numerator, poles } => {
-            Ok(canonical_expr_list_contains_ddt(model, mir, numerator)?
-                || canonical_expr_list_contains_ddt(model, mir, poles)?)
-        }
-        HirLaplaceKind::NumeratorDenominator {
-            numerator,
-            denominator,
-        } => Ok(canonical_expr_list_contains_ddt(model, mir, numerator)?
-            || canonical_expr_list_contains_ddt(model, mir, denominator)?),
-    }
-}
-
-fn canonical_zi_kind_contains_ddt(
-    model: &CompiledModel,
-    mir: &MirModel,
-    kind: &HirZiKind,
-) -> JitResult<bool> {
-    match kind {
-        HirZiKind::ZeroPole { zeros, poles } => {
-            Ok(canonical_expr_list_contains_ddt(model, mir, zeros)?
-                || canonical_expr_list_contains_ddt(model, mir, poles)?)
-        }
-        HirZiKind::ZeroDenominator { zeros, denominator } => {
-            Ok(canonical_expr_list_contains_ddt(model, mir, zeros)?
-                || canonical_expr_list_contains_ddt(model, mir, denominator)?)
-        }
-        HirZiKind::NumeratorPole { numerator, poles } => {
-            Ok(canonical_expr_list_contains_ddt(model, mir, numerator)?
-                || canonical_expr_list_contains_ddt(model, mir, poles)?)
-        }
-        HirZiKind::NumeratorDenominator {
-            numerator,
-            denominator,
-        } => Ok(canonical_expr_list_contains_ddt(model, mir, numerator)?
-            || canonical_expr_list_contains_ddt(model, mir, denominator)?),
     }
 }
 
@@ -977,8 +849,6 @@ fn canonical_expr_ref_kind(kind: &HirExprKind) -> &'static str {
         HirExprKind::ArrayAccess { .. } => "array_access",
         HirExprKind::ArrayLiteral { .. } => "array_literal",
         HirExprKind::AnalogOperator { .. } => "analog_operator",
-        HirExprKind::Laplace { .. } => "laplace",
-        HirExprKind::Zi { .. } => "zi",
         HirExprKind::NoiseSource { .. } => "noise_source",
     }
 }
@@ -1626,27 +1496,6 @@ fn canonical_expr_contains_noise(
         HirExprKind::AnalogOperator { op } => {
             canonical_analog_operator_contains_noise(model, mir, op)
         }
-        HirExprKind::Laplace { expr, kind } => {
-            Ok(canonical_expr_contains_noise(model, mir, *expr)?
-                || canonical_laplace_kind_contains_noise(model, mir, kind)?)
-        }
-        HirExprKind::Zi {
-            expr,
-            kind,
-            period,
-            transition,
-            first_transition,
-        } => Ok(canonical_expr_contains_noise(model, mir, *expr)?
-            || canonical_expr_contains_noise(model, mir, *period)?
-            || transition
-                .map(|expr| canonical_expr_contains_noise(model, mir, expr))
-                .transpose()?
-                .unwrap_or(false)
-            || first_transition
-                .map(|expr| canonical_expr_contains_noise(model, mir, expr))
-                .transpose()?
-                .unwrap_or(false)
-            || canonical_zi_kind_contains_noise(model, mir, kind)?),
     }
 }
 
@@ -1665,103 +1514,6 @@ fn canonical_analog_operator_contains_noise(
             || canonical_expr_contains_noise(model, mir, *candidate)?
             || canonical_optional_expr_contains_noise(model, mir, *type_metadata)?),
         HirAnalogOperator::LimiterArgument { .. } => Ok(false),
-        HirAnalogOperator::Ddt { expr, abstol } => {
-            Ok(canonical_expr_contains_noise(model, mir, *expr)?
-                || canonical_optional_expr_contains_noise(model, mir, *abstol)?)
-        }
-        HirAnalogOperator::Idt {
-            expr,
-            ic,
-            assert,
-            abstol,
-        } => Ok(canonical_expr_contains_noise(model, mir, *expr)?
-            || canonical_optional_expr_contains_noise(model, mir, *ic)?
-            || canonical_optional_expr_contains_noise(model, mir, *assert)?
-            || canonical_optional_expr_contains_noise(model, mir, *abstol)?),
-        HirAnalogOperator::IdtMod {
-            expr,
-            ic,
-            modulus,
-            offset,
-            abstol,
-        } => Ok(canonical_expr_contains_noise(model, mir, *expr)?
-            || canonical_optional_expr_contains_noise(model, mir, *ic)?
-            || canonical_optional_expr_contains_noise(model, mir, *modulus)?
-            || canonical_optional_expr_contains_noise(model, mir, *offset)?
-            || canonical_optional_expr_contains_noise(model, mir, *abstol)?),
-        HirAnalogOperator::Ddx { expr, probe } => {
-            Ok(canonical_expr_contains_noise(model, mir, *expr)?
-                || canonical_expr_contains_noise(model, mir, *probe)?)
-        }
-        HirAnalogOperator::Limexp { expr } | HirAnalogOperator::LastCrossing { expr, .. } => {
-            canonical_expr_contains_noise(model, mir, *expr)
-        }
-        HirAnalogOperator::Absdelay {
-            expr,
-            delay,
-            max_delay,
-        } => Ok(canonical_expr_contains_noise(model, mir, *expr)?
-            || canonical_expr_contains_noise(model, mir, *delay)?
-            || canonical_optional_expr_contains_noise(model, mir, *max_delay)?),
-        HirAnalogOperator::Slew {
-            expr,
-            max_rise,
-            max_fall,
-        } => Ok(canonical_expr_contains_noise(model, mir, *expr)?
-            || canonical_optional_expr_contains_noise(model, mir, *max_rise)?
-            || canonical_optional_expr_contains_noise(model, mir, *max_fall)?),
-    }
-}
-
-fn canonical_laplace_kind_contains_noise(
-    model: &CompiledModel,
-    mir: &MirModel,
-    kind: &HirLaplaceKind,
-) -> JitResult<bool> {
-    match kind {
-        HirLaplaceKind::ZeroPole { zeros, poles } => {
-            Ok(canonical_expr_list_contains_noise(model, mir, zeros)?
-                || canonical_expr_list_contains_noise(model, mir, poles)?)
-        }
-        HirLaplaceKind::ZeroDenominator { zeros, denominator } => {
-            Ok(canonical_expr_list_contains_noise(model, mir, zeros)?
-                || canonical_expr_list_contains_noise(model, mir, denominator)?)
-        }
-        HirLaplaceKind::NumeratorPole { numerator, poles } => {
-            Ok(canonical_expr_list_contains_noise(model, mir, numerator)?
-                || canonical_expr_list_contains_noise(model, mir, poles)?)
-        }
-        HirLaplaceKind::NumeratorDenominator {
-            numerator,
-            denominator,
-        } => Ok(canonical_expr_list_contains_noise(model, mir, numerator)?
-            || canonical_expr_list_contains_noise(model, mir, denominator)?),
-    }
-}
-
-fn canonical_zi_kind_contains_noise(
-    model: &CompiledModel,
-    mir: &MirModel,
-    kind: &HirZiKind,
-) -> JitResult<bool> {
-    match kind {
-        HirZiKind::ZeroPole { zeros, poles } => {
-            Ok(canonical_expr_list_contains_noise(model, mir, zeros)?
-                || canonical_expr_list_contains_noise(model, mir, poles)?)
-        }
-        HirZiKind::ZeroDenominator { zeros, denominator } => {
-            Ok(canonical_expr_list_contains_noise(model, mir, zeros)?
-                || canonical_expr_list_contains_noise(model, mir, denominator)?)
-        }
-        HirZiKind::NumeratorPole { numerator, poles } => {
-            Ok(canonical_expr_list_contains_noise(model, mir, numerator)?
-                || canonical_expr_list_contains_noise(model, mir, poles)?)
-        }
-        HirZiKind::NumeratorDenominator {
-            numerator,
-            denominator,
-        } => Ok(canonical_expr_list_contains_noise(model, mir, numerator)?
-            || canonical_expr_list_contains_noise(model, mir, denominator)?),
     }
 }
 
@@ -2208,8 +1960,6 @@ fn canonical_expr_kind_name(kind: &HirExprKind) -> &'static str {
         HirExprKind::ArrayAccess { .. } => "array_access",
         HirExprKind::ArrayLiteral { .. } => "array_literal",
         HirExprKind::AnalogOperator { .. } => "analog_operator",
-        HirExprKind::Laplace { .. } => "laplace",
-        HirExprKind::Zi { .. } => "zi",
         HirExprKind::NoiseSource { .. } => "noise_source",
     }
 }
