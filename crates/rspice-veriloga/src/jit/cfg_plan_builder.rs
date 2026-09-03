@@ -96,8 +96,8 @@ use super::{JitError, JitResult};
 use crate::canonical_ir::cfg_lower::CfgModel;
 use crate::canonical_ir::cfg_lower::CfgNoiseProcess;
 use crate::canonical_ir::{
-    AdSeed, CanonicalIrArtifact, CfgFunction, CfgStateAllocation, CfgValueKind, MirModel, ValueId,
-    differentiate, prune_cfg_to_outputs,
+    AdSeed, CanonicalIrArtifact, CfgBinaryOp, CfgFunction, CfgStateAllocation, CfgValueKind,
+    MirModel, ValueId, differentiate, prune_cfg_to_outputs,
 };
 use crate::codegen::state_renumbering::StateSlotMapping;
 use crate::codegen::{ColumnAxis, CompiledModel};
@@ -122,6 +122,25 @@ pub(crate) enum CfgPlanRefusal {
     StateAllocation,
     /// The derivative pass refused the body.
     Differentiate,
+    /// The body contains an operation the CFG derivative pass has no rule for.
+    ///
+    /// Checked *before* differentiating rather than reported by it, because the
+    /// pass does not report it: `binary_factor`'s fallthrough in
+    /// [`crate::canonical_ir`]'s `ad` module is a `debug_assert!` over
+    /// `is_predicate` and a `None` result, so a hole there panics a debug build
+    /// and silently yields a zero derivative in a release one. A zero Jacobian
+    /// entry that should not be zero is precisely the silently-wrong class this
+    /// program refuses, and taking the postfix plan for the module is the only
+    /// answer available until the rules exist.
+    ///
+    /// See [`DERIVATIVE_RULE_HOLES`] for the list and the rules that empty it.
+    DerivativeRuleMissing,
+    /// The module contains a construct the two routes are known to disagree
+    /// about, so the CFG plan would build and be wrong.
+    ///
+    /// See [`route_divergence`] for the list, each entry with the measurement
+    /// that put it there.
+    KnownDivergence,
     /// The lane scalarizer refused the differentiated body.
     Scalarize,
     /// A value the plan needs has no scalar after lane scalarization.
@@ -151,6 +170,8 @@ impl CfgPlanRefusal {
             Self::CfgLowering => "cfg-lowering",
             Self::StateAllocation => "state-allocation",
             Self::Differentiate => "differentiate",
+            Self::DerivativeRuleMissing => "derivative-rule-missing",
+            Self::KnownDivergence => "known-divergence",
             Self::Scalarize => "scalarize",
             Self::NoScalar => "no-scalar",
             Self::Lowering => "lowering",
@@ -303,6 +324,164 @@ pub(crate) fn derivative_seeds(cfg: &CfgModel, mir: &MirModel) -> (Vec<AdSeed>, 
     (seeds, correction)
 }
 
+/// The binary operations the CFG derivative pass has no rule for.
+///
+/// Both are exactly differentiable and neither rule is subtle:
+///
+/// ```text
+/// d hypot(x, y) = (x·dx + y·dy) / hypot(x, y)
+/// d atan2(y, x) = (x·dy − y·dx) / (x² + y²)
+/// ```
+///
+/// They are missing all the same, and the pass says so only in a debug build:
+/// `binary_factor`'s fallthrough asserts the operation is a predicate and
+/// otherwise returns `None`, which a release build reads as "the derivative is
+/// zero". So this list exists to keep a wrong Jacobian out of a shipped plan,
+/// not to describe a limitation anybody intends to keep. Adding the two rules
+/// empties it, and [`a_module_the_derivative_pass_has_no_rule_for_falls_back`]
+/// is what notices: it fails by *building* the module, which is the day the
+/// list and the refusal class both come out.
+///
+/// No shipped model reaches this — a search of the forty-three-module tree
+/// finds neither operation — so the generated-Rust backend, which runs the same
+/// pass, emits nothing that depends on the hole today.
+const DERIVATIVE_RULE_HOLES: &[CfgBinaryOp] = &[CfgBinaryOp::Hypot, CfgBinaryOp::Atan2];
+
+/// The construct in this module the two routes are known to disagree about, if
+/// there is one.
+///
+/// # Why a list rather than an argument
+///
+/// The CFG is a second lowering of the same source, and the two lowerings do
+/// not agree everywhere. Where they disagree the CFG plan still *builds* — it
+/// simply computes a different number — so nothing below this function can
+/// catch it. Each entry here was found by an estate test that the flip turned
+/// red, and each one is a wrong Jacobian or a wrong residual, not a rounding
+/// difference:
+///
+/// * **`$port_connected`.** `cfg_lower` folds it to the constant `1.0` outside
+///   its noise-metadata mode, and says so: "a consumer of this level that also
+///   has to serve partially connected instances needs a real value here, not
+///   this constant". A runtime instance may omit a trailing terminal, and then
+///   the CFG residual answers as though it were connected —
+///   `port_connected_reflects_omitted_trailing_terminal` measured 6.0 against
+///   0.0. Detected on the HIR, because by CFG time it is indistinguishable from
+///   a literal.
+/// * **`$simparam`.** `cfg_program` lowers it to the model's own fallback and
+///   records the divergence: the MIR route folds the simulator's table instead.
+///   `native_device_with_canonical_ir_executes_simparam_current_without_fallback`
+///   measured 0.0 against a gmin of 1e-12.
+/// * **A contribution-current probe.** `I(p, mid)` read inside another
+///   contribution: the MIR route reads the current the other equation wrote and
+///   treats it as frozen, and the CFG route inlines that equation and
+///   differentiates through it, so the two Jacobians are different matrices —
+///   `native_device_stamps_internal_node_current_probe_alias_jacobian_without_fallback`
+///   measured 4.5 against 2.5 on one entry. Detected as a shipped value entry
+///   with a non-empty contribution-current read set, which is what "this entry
+///   probes a current" means in the plan.
+/// * **An array variable.** The MIR route's value entries read the slots its
+///   assignment pass filled, including from a declaration initializer that is
+///   not part of the analog body at all; the CFG route recomputes inline and has
+///   nothing to recompute a declaration initializer from —
+///   `assignment_pattern_initializer_fills_elements` measured a conductance the
+///   initializer never reached.
+/// * **An event-controlled variable.** The CFG recomputes a variable inline
+///   where the postfix plan reads the slot the assignment pass wrote, and for a
+///   variable whose value is an accepted event state those are different
+///   quantities across a rejected step —
+///   `checkpoint_before_acceptance_excludes_step_event_variable_candidates`
+///   measured 2.0 against 1.0.
+///
+/// # This list is empirical, and that is a bound on what it is worth
+///
+/// It names what the estate's tests exposed, not what a proof of the CFG
+/// route's soundness would name. The instrument that would bound the rest is
+/// the forty-three-module CFG-versus-MIR census, which has never run past nine
+/// modules. Until it does, a construct no test covers can still diverge, and
+/// this function will not say so.
+fn route_divergence(
+    hir: &crate::canonical_ir::HirModel,
+    function: &CfgFunction,
+    postfix: &NativeModelPlan,
+) -> Option<String> {
+    if hir.expressions.iter().any(|expression| {
+        matches!(
+            &expression.kind,
+            crate::canonical_ir::hir::HirExprKind::SystemFunction { name, .. }
+                if name == "$port_connected"
+        )
+    }) {
+        return Some(
+            "$port_connected is folded to the constant 1.0 by the CFG lowering, which is wrong \
+             for an instance that omits a terminal"
+                .to_string(),
+        );
+    }
+    if !hir.arrays.is_empty() {
+        return Some(
+            "an array variable is filled by the MIR route's assignment pass, which the CFG \
+             route's inline recomputation does not reproduce for a declaration initializer"
+                .to_string(),
+        );
+    }
+    let dependencies = &postfix.current_dependencies;
+    let flat = |rows: &[Vec<usize>]| rows.iter().any(|set| !set.is_empty());
+    let nested = |rows: &[Vec<Vec<usize>>]| {
+        rows.iter()
+            .flatten()
+            .any(|set: &Vec<usize>| !set.is_empty())
+    };
+    let probes_a_current = !dependencies.assignment_current_pairs.is_empty()
+        || !dependencies.assignment_prior_currents.is_empty()
+        || !dependencies.post_assignment_current_pairs.is_empty()
+        || !dependencies.post_assignment_prior_currents.is_empty()
+        || flat(&dependencies.stamp_values)
+        || flat(&dependencies.stamp_value_prior_currents)
+        || nested(&dependencies.jacobians)
+        || nested(&dependencies.jacobian_prior_currents)
+        || nested(&dependencies.reactive_jacobians)
+        || nested(&dependencies.reactive_jacobian_prior_currents);
+    if probes_a_current {
+        return Some(
+            "a shipped value entry probes a contribution current, which the MIR route freezes \
+             and the CFG route differentiates through"
+                .to_string(),
+        );
+    }
+    function.values.iter().find_map(|value| match value.kind {
+        CfgValueKind::SimParam { .. } => Some(
+            "$simparam takes the model's fallback on the CFG route and the simulator's value on \
+             the MIR route"
+                .to_string(),
+        ),
+        CfgValueKind::BranchFlow(_) => Some(
+            "a branch-flow probe is frozen by the MIR route and differentiated through by the \
+             CFG route"
+                .to_string(),
+        ),
+        CfgValueKind::EventState(_) => Some(
+            "an event-controlled variable is read from its runtime slot by the MIR route and \
+             recomputed inline by the CFG route"
+                .to_string(),
+        ),
+        _ => None,
+    })
+}
+
+/// The first operation of `function` the derivative pass has no rule for.
+fn derivative_rule_hole(function: &CfgFunction) -> Option<CfgBinaryOp> {
+    function.values.iter().find_map(|value| match value.kind {
+        CfgValueKind::Binary { op, .. }
+        | CfgValueKind::LaneBinary { op, .. }
+        | CfgValueKind::LaneScalar { op, .. }
+            if DERIVATIVE_RULE_HOLES.contains(&op) =>
+        {
+            Some(op)
+        }
+        _ => None,
+    })
+}
+
 /// The block program a structurally absent entry gets: one instruction, one
 /// block, returning zero.
 fn constant_zero_program() -> JitResult<Program> {
@@ -389,6 +568,16 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
                 .map_or_else(|| "unknown".to_string(), ToString::to_string),
         )
     })?;
+
+    if let Some(op) = derivative_rule_hole(&cfg.function) {
+        return Err(refuse(
+            CfgPlanRefusal::DerivativeRuleMissing,
+            format!("the CFG derivative pass has no rule for {op:?}"),
+        ));
+    }
+    if let Some(divergence) = route_divergence(&artifact.hir, &cfg.function, &plan) {
+        return Err(refuse(CfgPlanRefusal::KnownDivergence, divergence));
+    }
 
     let (seeds, correction_lane) = derivative_seeds(&cfg, &artifact.mir);
     let mut differentiated = differentiate(&cfg.function, &seeds)
@@ -971,5 +1160,110 @@ endmodule
             plan.current_dependencies.jacobians,
             postfix.current_dependencies.jacobians,
         );
+    }
+
+    /// `hypot` under a `ddx` is differentiable and the CFG pass has no rule for
+    /// it, so the module falls back rather than taking a zero derivative.
+    ///
+    /// This test fails by *building* the module, which is what it is for: the
+    /// day [`DERIVATIVE_RULE_HOLES`] gains the two rules, this says so instead
+    /// of quietly continuing to refuse a module it no longer needs to.
+    #[test]
+    fn a_module_the_derivative_pass_has_no_rule_for_falls_back() {
+        let source = r#"
+module cfg_plan_no_rule(p, n);
+  inout p, n;
+  electrical p, n;
+  analog I(p, n) <+ ddx(hypot(2.0 * V(p, n), V(p, n) + 3.0), V(p, n));
+endmodule
+"#;
+        let (model, artifact) = compile(source);
+        let (plan, refused) =
+            build_default_model_plan_reported(&model, &artifact).expect("the default plan builds");
+        let refused = refused.expect(
+            "the CFG derivative pass has no rule for hypot, so a module differentiating one \
+             cannot take the CFG route",
+        );
+        assert_eq!(refused.class, CfgPlanRefusal::DerivativeRuleMissing);
+        for (field, form) in forms(&plan) {
+            assert_eq!(form, "postfix", "a refused module's {field} stay postfix");
+        }
+    }
+
+    /// Each construct in [`route_divergence`] falls the module back, and says
+    /// which construct did it.
+    ///
+    /// One source per entry rather than one source carrying all four, so a
+    /// screen that stopped working is attributed rather than covered for by the
+    /// next one in the list.
+    #[test]
+    fn every_known_divergence_falls_the_module_back() {
+        let cases: &[(&str, &str, &str)] = &[
+            (
+                "port-connected",
+                "$port_connected",
+                r#"
+module cfg_div_port(p, n, opt);
+  inout p, n, opt;
+  electrical p, n, opt;
+  analog I(p, n) <+ ($port_connected(opt) ? 10.0 : 1.0) * V(p, n);
+endmodule
+"#,
+            ),
+            (
+                "array",
+                "array variable",
+                r#"
+module cfg_div_array(p, n);
+  inout p, n;
+  electrical p, n;
+  real c[0:1] = '{0.5e-3, 1.5e-3};
+  analog I(p, n) <+ (c[0] + c[1]) * V(p, n);
+endmodule
+"#,
+            ),
+            (
+                "current-probe",
+                "contribution current",
+                r#"
+module cfg_div_probe(p, n);
+  inout p, n;
+  electrical p, n;
+  electrical mid;
+  analog begin
+    I(p, mid) <+ V(p, mid);
+    I(p) <+ I(p, mid) * V(p);
+  end
+endmodule
+"#,
+            ),
+            (
+                "simparam",
+                "$simparam",
+                r#"
+module cfg_div_simparam(p, n);
+  inout p, n;
+  electrical p, n;
+  analog I(p, n) <+ $simparam("gmin", 1.0e-15) * V(p, n);
+endmodule
+"#,
+            ),
+        ];
+        for (case, expected, source) in cases {
+            let (model, artifact) = compile(source);
+            let (plan, refused) = build_default_model_plan_reported(&model, &artifact)
+                .unwrap_or_else(|error| panic!("{case}: the default plan builds: {error}"));
+            let refused =
+                refused.unwrap_or_else(|| panic!("{case}: the CFG route must refuse this module"));
+            assert_eq!(refused.class, CfgPlanRefusal::KnownDivergence, "{case}");
+            assert!(
+                refused.detail.contains(expected),
+                "{case}: {} names the construct",
+                refused.detail
+            );
+            for (field, form) in forms(&plan) {
+                assert_eq!(form, "postfix", "{case}: {field} stay postfix");
+            }
+        }
     }
 }

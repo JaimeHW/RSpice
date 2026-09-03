@@ -37,6 +37,26 @@ use super::census_models::shipped_census_models;
 /// Re-baselined the way [`super::code_identity`]'s digest is: with evidence
 /// naming what changed the count. A count that *rises* because a plan field was
 /// added is as much a change as one that falls.
+///
+/// # W-F3c's flip does not move these
+///
+/// This census builds its corpus with
+/// [`build_model_plan_with_canonical_ir`] by name — the *postfix* constructor —
+/// not with the default plan production compiles. That is deliberate and not
+/// an oversight: the question here is whether the branch form of a conditional
+/// agrees with the select form of the *same postfix stream*, and an entry that
+/// was never a postfix stream has no select form to compare against. So the
+/// flip changes neither count, and `value_programs`'s refusal to accept a block
+/// entry stays exactly as strong as it was.
+///
+/// What the flip *does* change is what the corpus stands for. Before it, every
+/// value entry production compiled was in here. Now the residual and Jacobian
+/// entries of a module the CFG route builds are block programs that this census
+/// never sees; what it still covers directly is the postfix form that ships for
+/// parameter defaults, static conditions, noise and the assignment passes on
+/// every module, and for every field of a module the CFG route refuses. The
+/// CFG route's own entries are measured against MIR's by
+/// [`super::cfg_mir_census`], which is the census that answers for them.
 const CENSUS_PROGRAMS: usize = 1_972_391;
 const CENSUS_EXECUTIONS: usize = 5_072_907;
 use crate::jit::expr::{NativeOp, NativeProgram};
