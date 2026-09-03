@@ -495,10 +495,12 @@ fn route_divergence(
 /// [`crate::canonical_ir::HirModel`]'s expression arena holds the executed copy
 /// and the structured body together, so a name found in it may have been read
 /// by another prologue statement rather than by the body. That over-refuses a
-/// module whose prologue variable the body never mentions — `lpsize`, whose
-/// `localparam integer SIZE` survives only in an array bound the analyzer has
-/// already folded — and it does not under-refuse, which is the direction a
-/// screen has to be wrong in.
+/// module whose prologue variable only the prologue mentions, and it does not
+/// under-refuse, which is the direction a screen has to be wrong in. No estate
+/// module is in that position today — `lpsize`'s `localparam integer SIZE` is
+/// folded into the array bound before the arena sees it, so the name is not
+/// there to be found — so the cost is potential rather than measured, and the
+/// exact test is a walk of the body's expression roots when one is worth it.
 /// Whether `name` is a variable the analyzer minted for the executed copy
 /// rather than one the source declared.
 ///
