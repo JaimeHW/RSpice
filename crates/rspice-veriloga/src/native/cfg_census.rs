@@ -200,7 +200,21 @@ impl OperatingPoint {
         self
     }
 
-    fn interpreter_inputs(&self, node_count: usize, branch_count: usize) -> CfgEvalInputs<f64> {
+    /// How many event-controlled state slots the interpreter will be asked for.
+    ///
+    /// Set after construction because the count is a property of the *CFG*, and
+    /// a census that only drives compiled plans never builds one. The
+    /// interpreter refuses a slot it was not given, so a route that does build
+    /// one has to say how many there are.
+    pub(super) fn set_event_state_slots(&mut self, slots: usize) {
+        self.event_state_slots = slots;
+    }
+
+    pub(super) fn interpreter_inputs(
+        &self,
+        node_count: usize,
+        branch_count: usize,
+    ) -> CfgEvalInputs<f64> {
         let mut node_potentials = self.terminal_voltages.clone();
         node_potentials.extend(self.internal_voltages.iter().copied());
         node_potentials.resize(node_count, 0.0);
@@ -216,7 +230,7 @@ impl OperatingPoint {
             thermal_voltage: BOLTZMANN_OVER_ELECTRON * self.temperature,
             multiplicity: self.multiplicity,
             time: self.time,
-            analyses: analysis_names(self.analysis),
+            analyses: analysis_names(self.analysis, self.initial_step),
             simparams: std::collections::HashMap::new(),
             ddt: 0.0,
             ddt_scale: 0.0,
@@ -334,7 +348,24 @@ impl OperatingPoint {
 /// context's analysis code. `static` is true for a DC or an initial-condition
 /// analysis and `smallsignal` for an AC or a noise one, so the set has to say
 /// the same or the two disagree for a reason that is not the lowering.
-fn analysis_names(analysis: u8) -> std::collections::HashSet<smol_str::SmolStr> {
+///
+/// # `@(initial_step)` is one of those names
+///
+/// The front end lowers `@(initial_step)` to `$analysis("__rspice_initial_step")`
+/// — see [`crate::canonical_ir::cfg_lower`] and
+/// [`crate::device`], which inserts the same name — and the compiled program
+/// reads it off `EvalContext::analysis_initial_step`. Building the set from the
+/// analysis *code* alone therefore leaves an interpreted CFG evaluating it false
+/// while a compiled plan at the same operating point runs with the flag set,
+/// which is a disagreement about the point rather than about the route.
+///
+/// It did not show while the only interpreted census (`cfg_census`) never asked
+/// for an initial step. Any mixed comparison does, so the flag belongs here
+/// rather than in each caller.
+fn analysis_names(
+    analysis: u8,
+    initial_step: bool,
+) -> std::collections::HashSet<smol_str::SmolStr> {
     let names: &[&str] = match analysis {
         0 => &["dc", "op", "static"],
         1 => &["ac", "smallsig", "smallsignal", "small_signal"],
@@ -343,7 +374,12 @@ fn analysis_names(analysis: u8) -> std::collections::HashSet<smol_str::SmolStr> 
         4 => &["ic", "static"],
         _ => &[],
     };
-    names.iter().map(|name| (*name).into()).collect()
+    let mut active: std::collections::HashSet<smol_str::SmolStr> =
+        names.iter().map(|name| (*name).into()).collect();
+    if initial_step {
+        active.insert(smol_str::SmolStr::new("__rspice_initial_step"));
+    }
+    active
 }
 
 #[derive(Default)]
@@ -1558,13 +1594,24 @@ fn the_two_state_slot_numberings_are_censused_over_the_shipped_corpus() {
     // not own. What it does assert is the shape of the finding, so that a
     // change making the two numberings agree fails here and is read rather than
     // absorbed.
-    assert!(
-        differing_counts > 0,
-        "the two state-slot numberings now agree on every shipped module; that is a change to \
-         the ruling recorded on CfgStateAllocation and wants reading"
-    );
+    //
+    // Corpus-wide, and therefore only over the corpus. "No shipped module has
+    // two differing numberings" is a claim about all forty-three; a run
+    // narrowed by `RSPICE_CFG_CENSUS_FILTER` cannot make it or refute it, and
+    // asserting it there fails on any slice whose modules happen to agree —
+    // `l_utsoi` is two such modules. A filtered run measures and reports.
     if filter.is_none() {
+        assert!(
+            differing_counts > 0,
+            "the two state-slot numberings now agree on every shipped module; that is a change to \
+             the ruling recorded on CfgStateAllocation and wants reading"
+        );
         assert_eq!(models, 43, "the shipped census is 43 modules");
+    } else {
+        println!(
+            "state-slots filtered={models} differing_counts={differing_counts}; the corpus-wide \
+             ruling is asserted only on an unfiltered run"
+        );
     }
 }
 
