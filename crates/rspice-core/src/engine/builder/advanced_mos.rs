@@ -26,7 +26,7 @@ impl Engine {
         temperature_kelvin: f64,
     ) -> Result<(), SimulationError> {
         use crate::device::mosfet::b3soi::dd::temp::{B3SoiDdGeometry, B3SoiDdSized};
-        use crate::device::{B3SoiDd, B3SoiDdModel, BodyMode};
+        use crate::device::{B3SoiDd, B3SoiDdModel, B3SoiDdNodes, BodyMode};
 
         let is_pmos = matches!(mos_type, crate::netlist::MosType::Pmos);
         // `config.temperature` is already in Kelvin (`TEMP_REFERENCE`).
@@ -157,14 +157,16 @@ impl Engine {
 
         let mut device = B3SoiDd::new(
             element.name.clone(),
-            node_drain,
-            node_gate_external,
-            node_gate,
-            node_source,
-            node_e,
-            node_body,
-            node_p,
-            node_temp,
+            B3SoiDdNodes {
+                node_drain: node_drain,
+                node_gate_external: node_gate_external,
+                node_gate: node_gate,
+                node_source: node_source,
+                node_e: node_e,
+                node_body: node_body,
+                node_p: node_p,
+                node_temp: node_temp,
+            },
             body_mode,
             model,
             geom,
@@ -355,10 +357,10 @@ impl Engine {
         deferred_params: &[(String, String)],
         temperature_kelvin: f64,
     ) -> Result<(), SimulationError> {
-        use crate::device::B3SoiPd;
         use crate::device::B3SoiPdModel;
         use crate::device::mosfet::b3soi::pd::BodyMode;
         use crate::device::mosfet::b3soi::pd::temp::B3SoiPdGeometry;
+        use crate::device::{B3SoiPd, B3SoiPdNodes};
 
         let is_pmos = matches!(mos_type, crate::netlist::MosType::Pmos);
         let temp_k = temperature_kelvin;
@@ -473,13 +475,15 @@ impl Engine {
 
         let mut device = B3SoiPd::new(
             element.name.clone(),
-            node_drain,
-            node_gate,
-            node_source,
-            node_e,
-            node_body,
-            node_p,
-            node_temp,
+            B3SoiPdNodes {
+                node_drain: node_drain,
+                node_gate: node_gate,
+                node_source: node_source,
+                node_e: node_e,
+                node_body: node_body,
+                node_p: node_p,
+                node_temp: node_temp,
+            },
             body_mode,
             model,
             geom,

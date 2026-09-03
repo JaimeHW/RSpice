@@ -1,5 +1,28 @@
 use super::*;
 
+/// One classic-MOSFET bulk diode as the stamper sees it: which two nodes it
+/// spans and the linearized conductance and equivalent current it contributes.
+#[derive(Clone, Copy)]
+struct ClassicDiodeBranch {
+    anode: NodeId,
+    cathode: NodeId,
+    conductance: Value,
+    equivalent_current: Value,
+}
+
+/// The linearized channel the direct operating-point stamp writes: the branch
+/// voltages it was evaluated at, the three transconductances and the
+/// equivalent current.
+#[derive(Clone, Copy)]
+struct ClassicMosDirectOperatingPoint {
+    eval_vds: Value,
+    eval_vbs: Value,
+    gm: Value,
+    gds: Value,
+    gmb: Value,
+    id_eq: Value,
+}
+
 impl Mosfet {
     #[inline]
     fn classic_diode_stamp_plan(
@@ -106,11 +129,14 @@ impl Mosfet {
         rhs: &mut [Value],
         pattern: CscPatternToken,
         plan: &ClassicMosDiodeStampPlan,
-        anode: NodeId,
-        cathode: NodeId,
-        conductance: Value,
-        equivalent_current: Value,
+        branch: ClassicDiodeBranch,
     ) {
+        let ClassicDiodeBranch {
+            anode,
+            cathode,
+            conductance,
+            equivalent_current,
+        } = branch;
         if conductance == 0.0 && equivalent_current == 0.0 {
             return;
         }
@@ -180,20 +206,24 @@ impl Mosfet {
             rhs,
             plan.pattern,
             &plan.body_source,
-            bs_anode,
-            bs_cathode,
-            terms.gbs,
-            terms.ieq_bs,
+            ClassicDiodeBranch {
+                anode: bs_anode,
+                cathode: bs_cathode,
+                conductance: terms.gbs,
+                equivalent_current: terms.ieq_bs,
+            },
         );
         Self::stamp_classic_diode_plan(
             matrix,
             rhs,
             plan.pattern,
             &plan.body_drain,
-            bd_anode,
-            bd_cathode,
-            terms.gbd,
-            terms.ieq_bd,
+            ClassicDiodeBranch {
+                anode: bd_anode,
+                cathode: bd_cathode,
+                conductance: terms.gbd,
+                equivalent_current: terms.ieq_bd,
+            },
         );
     }
 
@@ -202,11 +232,14 @@ impl Mosfet {
         values: &mut [Value],
         rhs: &mut [Value],
         plan: &ClassicMosDiodeStampPlan,
-        anode: NodeId,
-        cathode: NodeId,
-        conductance: Value,
-        equivalent_current: Value,
+        branch: ClassicDiodeBranch,
     ) {
+        let ClassicDiodeBranch {
+            anode,
+            cathode,
+            conductance,
+            equivalent_current,
+        } = branch;
         if conductance == 0.0 && equivalent_current == 0.0 {
             return;
         }
@@ -276,19 +309,23 @@ impl Mosfet {
             values,
             rhs,
             &plan.body_source,
-            bs_anode,
-            bs_cathode,
-            terms.gbs,
-            terms.ieq_bs,
+            ClassicDiodeBranch {
+                anode: bs_anode,
+                cathode: bs_cathode,
+                conductance: terms.gbs,
+                equivalent_current: terms.ieq_bs,
+            },
         );
         Self::stamp_classic_diode_values(
             values,
             rhs,
             &plan.body_drain,
-            bd_anode,
-            bd_cathode,
-            terms.gbd,
-            terms.ieq_bd,
+            ClassicDiodeBranch {
+                anode: bd_anode,
+                cathode: bd_cathode,
+                conductance: terms.gbd,
+                equivalent_current: terms.ieq_bd,
+            },
         );
     }
 
@@ -331,14 +368,17 @@ impl Mosfet {
         &self,
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],
-        eval_vds: Value,
-        eval_vbs: Value,
-        gm: Value,
-        gds: Value,
-        gmb: Value,
-        id_eq: Value,
+        operating_point: ClassicMosDirectOperatingPoint,
         cache_matches: bool,
     ) {
+        let ClassicMosDirectOperatingPoint {
+            eval_vds,
+            eval_vbs,
+            gm,
+            gds,
+            gmb,
+            id_eq,
+        } = operating_point;
         // Stamp matrix using direct indexing
         // Drain row
         if let Some(idx) = self.indices.dd {
@@ -400,12 +440,14 @@ impl Mosfet {
         self.stamp_direct_operating_point(
             matrix,
             rhs,
-            eval_vds,
-            eval_vbs,
-            gm,
-            gds,
-            gmb,
-            id_eq,
+            ClassicMosDirectOperatingPoint {
+                eval_vds: eval_vds,
+                eval_vbs: eval_vbs,
+                gm: gm,
+                gds: gds,
+                gmb: gmb,
+                id_eq: id_eq,
+            },
             cache_matches,
         );
     }
@@ -420,12 +462,14 @@ impl Mosfet {
         self.stamp_direct_operating_point(
             matrix,
             rhs,
-            self.eval_vds,
-            self.eval_vbs,
-            self.gm,
-            self.gds,
-            self.gmb,
-            self.id_eq,
+            ClassicMosDirectOperatingPoint {
+                eval_vds: self.eval_vds,
+                eval_vbs: self.eval_vbs,
+                gm: self.gm,
+                gds: self.gds,
+                gmb: self.gmb,
+                id_eq: self.id_eq,
+            },
             true,
         );
     }
@@ -563,12 +607,28 @@ impl Mosfet {
         let (bs_anode, bs_cathode, gbs, ieq_bs) =
             self.body_source_junction_linearization_cached(vbs, cache_matches);
         Self::add_diode_residual_row_terms(
-            solution, row_ax, row_rhs, bs_anode, bs_cathode, gbs, ieq_bs,
+            solution,
+            row_ax,
+            row_rhs,
+            ClassicDiodeBranch {
+                anode: bs_anode,
+                cathode: bs_cathode,
+                conductance: gbs,
+                equivalent_current: ieq_bs,
+            },
         );
         let (bd_anode, bd_cathode, gbd, ieq_bd) =
             self.body_drain_junction_linearization_cached(vds, vbs, cache_matches);
         Self::add_diode_residual_row_terms(
-            solution, row_ax, row_rhs, bd_anode, bd_cathode, gbd, ieq_bd,
+            solution,
+            row_ax,
+            row_rhs,
+            ClassicDiodeBranch {
+                anode: bd_anode,
+                cathode: bd_cathode,
+                conductance: gbd,
+                equivalent_current: ieq_bd,
+            },
         );
     }
 
@@ -625,19 +685,23 @@ impl Mosfet {
             solution,
             row_ax,
             row_rhs,
-            bs_anode,
-            bs_cathode,
-            terms.gbs,
-            terms.ieq_bs,
+            ClassicDiodeBranch {
+                anode: bs_anode,
+                cathode: bs_cathode,
+                conductance: terms.gbs,
+                equivalent_current: terms.ieq_bs,
+            },
         );
         Self::add_diode_residual_row_terms(
             solution,
             row_ax,
             row_rhs,
-            bd_anode,
-            bd_cathode,
-            terms.gbd,
-            terms.ieq_bd,
+            ClassicDiodeBranch {
+                anode: bd_anode,
+                cathode: bd_cathode,
+                conductance: terms.gbd,
+                equivalent_current: terms.ieq_bd,
+            },
         );
     }
 
@@ -694,20 +758,24 @@ impl Mosfet {
             row,
             row_ax,
             row_rhs,
-            plan.body_source_anode,
-            plan.body_source_cathode,
-            terms.gbs,
-            terms.ieq_bs,
+            ClassicDiodeBranch {
+                anode: plan.body_source_anode,
+                cathode: plan.body_source_cathode,
+                conductance: terms.gbs,
+                equivalent_current: terms.ieq_bs,
+            },
         );
         Self::add_cached_diode_residual_row_terms(
             solution,
             row,
             row_ax,
             row_rhs,
-            plan.body_drain_anode,
-            plan.body_drain_cathode,
-            terms.gbd,
-            terms.ieq_bd,
+            ClassicDiodeBranch {
+                anode: plan.body_drain_anode,
+                cathode: plan.body_drain_cathode,
+                conductance: terms.gbd,
+                equivalent_current: terms.ieq_bd,
+            },
         );
     }
 
@@ -719,11 +787,14 @@ impl Mosfet {
         row: usize,
         row_ax: &mut Value,
         row_rhs: &mut Value,
-        anode: NodeId,
-        cathode: NodeId,
-        conductance: Value,
-        equivalent_current: Value,
+        branch: ClassicDiodeBranch,
     ) {
+        let ClassicDiodeBranch {
+            anode,
+            cathode,
+            conductance,
+            equivalent_current,
+        } = branch;
         if conductance == 0.0 && equivalent_current == 0.0 {
             return;
         }
@@ -750,11 +821,14 @@ impl Mosfet {
         solution: &[Value],
         row_ax: &mut [Value],
         row_rhs: &mut [Value],
-        anode: NodeId,
-        cathode: NodeId,
-        conductance: Value,
-        equivalent_current: Value,
+        branch: ClassicDiodeBranch,
     ) {
+        let ClassicDiodeBranch {
+            anode,
+            cathode,
+            conductance,
+            equivalent_current,
+        } = branch;
         if conductance == 0.0 && equivalent_current == 0.0 {
             return;
         }
@@ -801,12 +875,14 @@ impl Mosfet {
         self.stamp_direct_operating_point(
             matrix,
             rhs,
-            vds,
-            vbs,
-            gm,
-            gds,
-            gmb,
-            id_eq,
+            ClassicMosDirectOperatingPoint {
+                eval_vds: vds,
+                eval_vbs: vbs,
+                gm: gm,
+                gds: gds,
+                gmb: gmb,
+                id_eq: id_eq,
+            },
             cache_matches,
         );
     }

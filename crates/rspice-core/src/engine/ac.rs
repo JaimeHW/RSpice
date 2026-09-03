@@ -8,6 +8,7 @@ use super::data::{FrequencyDataOverridePlan, materialize_frequency_data_row_with
 use super::{Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::ac::AcResult;
+use crate::device::mosfet::b3soi::common::SoiCompanionCurrents;
 use crate::device::semiconductor::{
     BJT_DYNAMIC_CHARGE_COUNT, BJT_EXTERNAL_STATE_DIM, BJT_INTERNAL_STATE_DIM, BjtChargeSnapshot,
 };
@@ -2297,11 +2298,13 @@ impl Engine {
                 dev.stamp_charge_companion(
                     &charge,
                     omega,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
+                    SoiCompanionCurrents {
+                        cqg: 0.0,
+                        cqb: 0.0,
+                        cqd: 0.0,
+                        cqe: 0.0,
+                        cqth: 0.0,
+                    },
                     op_voltages,
                     &mut stamper,
                 );
@@ -2314,11 +2317,13 @@ impl Engine {
                 dev.stamp_charge_companion(
                     &charge,
                     omega,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
+                    SoiCompanionCurrents {
+                        cqg: 0.0,
+                        cqb: 0.0,
+                        cqd: 0.0,
+                        cqe: 0.0,
+                        cqth: 0.0,
+                    },
                     op_voltages,
                     &mut stamper,
                 );
@@ -2331,11 +2336,13 @@ impl Engine {
                 dev.stamp_charge_companion(
                     &charge,
                     omega,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
+                    SoiCompanionCurrents {
+                        cqg: 0.0,
+                        cqb: 0.0,
+                        cqd: 0.0,
+                        cqe: 0.0,
+                        cqth: 0.0,
+                    },
                     op_voltages,
                     &mut stamper,
                 );

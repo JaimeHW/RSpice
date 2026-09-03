@@ -53,6 +53,7 @@ pub mod eval;
 pub mod params;
 pub mod temp;
 
+use crate::device::mosfet::b3soi::common::SoiCompanionCurrents;
 use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
 use crate::{NodeId, Value};
 use eval::{B3SoiFdBias, B3SoiFdOp, ModelConsts};
@@ -488,14 +489,17 @@ impl B3SoiFd {
         &self,
         charge: &eval::B3SoiFdCharge,
         ag0: Value,
-        cqg: Value,
-        cqb: Value,
-        cqd: Value,
-        cqe: Value,
-        cqth: Value,
+        currents: SoiCompanionCurrents,
         voltages: &[Value],
         matrix: &mut impl MatrixStamper,
     ) {
+        let SoiCompanionCurrents {
+            cqg,
+            cqb,
+            cqd,
+            cqe,
+            cqth,
+        } = currents;
         let (dp, g, sp, e, _b) = self.charge_nodes();
         // FD pins the body to its equilibrium value; the charge model evaluates
         // the `gc**` derivatives in the source-referenced body frame exactly as

@@ -15,7 +15,10 @@ mod mos_models;
 mod smooth;
 mod vdmos;
 
-pub use b3soi::{B3SoiDd, B3SoiDdModel, B3SoiFd, B3SoiFdModel, B3SoiPd, B3SoiPdModel, BodyMode};
+pub use b3soi::{
+    B3SoiDd, B3SoiDdModel, B3SoiDdNodes, B3SoiFd, B3SoiFdModel, B3SoiPd, B3SoiPdModel,
+    B3SoiPdNodes, BodyMode,
+};
 pub use bsim3v3::{Bsim3v3, Bsim3v3Device, Bsim3v3EquationSet, Bsim3v3Model};
 pub use bsim4v8::{Bsim4v8, Bsim4v8Device, Bsim4v8Model};
 #[cfg(feature = "parallel")]

@@ -8,7 +8,7 @@
 
 use super::*;
 use crate::NodeId;
-use crate::device::mosfet::b3soi::common::B3SoiDialect;
+use crate::device::mosfet::b3soi::common::{B3SoiDialect, SoiCompanionCurrents};
 use crate::device::mosfet::b3soi::fd::params::B3SoiFdModel;
 use crate::device::mosfet::b3soi::fd::temp::{B3SoiFdGeometry, B3SoiFdSized};
 use crate::device::traits::MatrixStamper;
@@ -249,11 +249,13 @@ fn charge_companion_folds_body_charge_linearization_into_source_rhs() {
         dev.stamp_charge_companion(
             &charge,
             ag0,
-            0.0,
-            cqb,
-            0.0,
-            0.0,
-            0.0,
+            SoiCompanionCurrents {
+                cqg: 0.0,
+                cqb: cqb,
+                cqd: 0.0,
+                cqe: 0.0,
+                cqth: 0.0,
+            },
             &voltages,
             &mut stamper,
         );
@@ -296,11 +298,13 @@ fn self_heating_charge_companion_stamps_qth_capacitance() {
     dev.stamp_charge_companion(
         &eval::B3SoiFdCharge::default(),
         ag0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
+        SoiCompanionCurrents {
+            cqg: 0.0,
+            cqb: 0.0,
+            cqd: 0.0,
+            cqe: 0.0,
+            cqth: 0.0,
+        },
         &voltages,
         &mut stamper,
     );

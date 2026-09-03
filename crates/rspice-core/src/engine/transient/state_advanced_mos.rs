@@ -1,6 +1,7 @@
 //! Advanced MOS, SOI, and EKV transient charge-history helpers.
 
 use super::*;
+use crate::device::mosfet::b3soi::common::SoiCompanionCurrents;
 
 impl Engine {
     #[inline]
@@ -313,11 +314,13 @@ impl Engine {
             dev.stamp_charge_companion(
                 &charge,
                 ag0,
-                cqg,
-                cqb,
-                cqd,
-                cqe,
-                cqth,
+                SoiCompanionCurrents {
+                    cqg: cqg,
+                    cqb: cqb,
+                    cqd: cqd,
+                    cqe: cqe,
+                    cqth: cqth,
+                },
                 voltages,
                 &mut stamper,
             );
@@ -335,11 +338,13 @@ impl Engine {
             dev.stamp_charge_companion(
                 &charge,
                 ag0,
-                cqg,
-                cqb,
-                cqd,
-                cqe,
-                cqth,
+                SoiCompanionCurrents {
+                    cqg: cqg,
+                    cqb: cqb,
+                    cqd: cqd,
+                    cqe: cqe,
+                    cqth: cqth,
+                },
                 voltages,
                 &mut stamper,
             );
@@ -357,11 +362,13 @@ impl Engine {
             dev.stamp_charge_companion(
                 &charge,
                 ag0,
-                cqg,
-                cqb,
-                cqd,
-                cqe,
-                cqth,
+                SoiCompanionCurrents {
+                    cqg: cqg,
+                    cqb: cqb,
+                    cqd: cqd,
+                    cqe: cqe,
+                    cqth: cqth,
+                },
                 voltages,
                 &mut stamper,
             );

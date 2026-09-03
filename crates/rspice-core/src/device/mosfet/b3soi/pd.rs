@@ -46,10 +46,25 @@
 pub use super::common;
 pub use params::B3SoiPdModel;
 
+/// The circuit nodes a partially-depleted SOI instance attaches to. The seven
+/// terminals are positional in the netlist and easy to transpose; naming them
+/// makes a swapped pair a compile error rather than a wrong answer.
+#[derive(Clone, Copy)]
+pub struct B3SoiPdNodes {
+    pub node_drain: NodeId,
+    pub node_gate: NodeId,
+    pub node_source: NodeId,
+    pub node_e: NodeId,
+    pub node_body: NodeId,
+    pub node_p: NodeId,
+    pub node_temp: NodeId,
+}
+
 pub mod eval;
 pub mod params;
 pub mod temp;
 
+use crate::device::mosfet::b3soi::common::SoiCompanionCurrents;
 use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
 use crate::{NodeId, Value};
 use eval::{B3SoiPdBias, B3SoiPdOp, ModelConsts};
@@ -178,18 +193,21 @@ impl B3SoiPd {
     /// Build an instance from a model card and instance geometry.
     pub fn new(
         name: String,
-        node_drain: NodeId,
-        node_gate: NodeId,
-        node_source: NodeId,
-        node_e: NodeId,
-        node_body: NodeId,
-        node_p: NodeId,
-        node_temp: NodeId,
+        nodes: B3SoiPdNodes,
         body_mode: BodyMode,
         model: Arc<B3SoiPdModel>,
         geom: B3SoiPdGeometry,
         temp_k: Value,
     ) -> Result<Self, String> {
+        let B3SoiPdNodes {
+            node_drain,
+            node_gate,
+            node_source,
+            node_e,
+            node_body,
+            node_p,
+            node_temp,
+        } = nodes;
         if model.sh_mod == 1 && geom.rth0 != 0.0 && node_temp == 0 {
             return Err(format!(
                 "B3SOIPD '{name}': self-heating (SHMOD=1 with RTH0!=0) requires a temperature node"
@@ -724,14 +742,17 @@ impl B3SoiPd {
         &self,
         charge: &eval::B3SoiPdCharge,
         ag0: Value,
-        cqg: Value,
-        cqb: Value,
-        cqd: Value,
-        cqe: Value,
-        cqth: Value,
+        currents: SoiCompanionCurrents,
         voltages: &[Value],
         matrix: &mut impl MatrixStamper,
     ) {
+        let SoiCompanionCurrents {
+            cqg,
+            cqb,
+            cqd,
+            cqe,
+            cqth,
+        } = currents;
         let (dp, g, sp, e, b) = self.charge_nodes();
         // Branch voltages are device-polarity (type-folded) and LIMITED,
         // exactly as ngspice forms them from the folded vgs/vbs/vds/ves state
