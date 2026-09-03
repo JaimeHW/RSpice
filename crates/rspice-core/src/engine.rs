@@ -114,8 +114,11 @@ pub use pss::{
 };
 pub use pss_noise::OscPnoiseResult;
 pub use result::{
-    TransientDeviceOpTrace, TransientFftBin, TransientFftHarmonic, TransientFftMetrics,
-    TransientFftResult, TransientOutputProjection, TransientResult, TransientStoreTrace,
+    DigitalTrace, DigitalTracePoint, RealTrace, RealTracePoint, TransientDeviceOpTrace,
+    TransientFftBin, TransientFftHarmonic, TransientFftMetrics, TransientFftResult,
+    TransientFourierResult, TransientOutputProjection, TransientPostResults, TransientResult,
+    TransientStoreTrace, digital_state_from_tag, digital_state_tag, digital_strength_from_tag,
+    digital_strength_tag,
 };
 pub use stb::StbAnalysisResult;
 pub use step::{MaterializedStepRun, StepPlan, StepPlanLimits};
@@ -123,14 +126,17 @@ pub use transient::{
     DEFAULT_MAX_CHECKPOINT_BYTES, TransientCheckpoint, TransientCheckpointBlocker,
     TransientCheckpointBlockerSource, TransientCheckpointCapability, TransientCheckpointEncoding,
     TransientStartupMode, XYCE_RESTART_SCHEDULE_TOLERANCE, XyceRestartJobPlan,
-    XyceRestartPlanError, netlist_fingerprint, transient_fft_window_coherent_gain,
-    xyce_restart_schedule_is_due,
+    XyceRestartPlanError, evaluate_transient_post_results, netlist_fingerprint,
+    transient_fft_window_coherent_gain, xyce_restart_schedule_is_due,
 };
 pub use waveform::{
-    CompressionConfig, TRANSIENT_COMPRESSION_REPORT_VERSION, TransientCompressionAlgorithm,
-    TransientCompressionErrorObservation, TransientCompressionPolicy, TransientCompressionReport,
-    TransientCompressionSampleDomain, TransientCompressionSignal, TransientCompressionSignalKind,
-    TransientResultCompressed, WaveformRecorder,
+    CompressionConfig, TRANSIENT_COMPRESSION_REPORT_VERSION, TransientAnalysisIdentity,
+    TransientChannelAvailability, TransientChannelDescriptor, TransientChannelOwner,
+    TransientChannelRole, TransientChannelSample, TransientChannelUnit, TransientCompressedChannel,
+    TransientCompressionAlgorithm, TransientCompressionErrorObservation,
+    TransientCompressionPolicy, TransientCompressionReport, TransientCompressionSampleDomain,
+    TransientCompressionSignal, TransientCompressionSignalKind, TransientCoordinateIdentity,
+    TransientResultCompressed, TransientResultIdentity, TransientSampleAbsence,
 };
 
 pub(crate) use source_values::extract_dc_value_with_limits;

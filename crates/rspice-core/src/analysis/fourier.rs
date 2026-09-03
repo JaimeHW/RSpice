@@ -571,7 +571,7 @@ fn exact_window(
 //=============================================================================
 
 /// Single harmonic component
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct HarmonicComponent {
     /// Harmonic number (0 = DC, 1 = fundamental, 2 = 2nd harmonic, etc.)
     pub harmonic_number: usize,
@@ -651,7 +651,7 @@ fn validate_relative_magnitude(role: &'static str, value: Value) -> Result<(), F
 }
 
 /// Fourier analysis result
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FourierResult {
     /// Fundamental frequency analyzed
     pub fundamental_freq: Value,

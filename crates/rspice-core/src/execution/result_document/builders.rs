@@ -52,12 +52,16 @@ use crate::analysis::stb::StbResult;
 use crate::analysis::transfer::TransferFunctionResult;
 use crate::circuit::DeviceOpReport;
 use crate::engine::EnvelopeResult;
-use crate::engine::waveform::TransientCompressionReport;
+use crate::engine::waveform::{
+    TransientChannelAvailability, TransientChannelRole, TransientChannelUnit,
+    TransientCompressedChannel, TransientCompressionReport, TransientResultCompressed,
+};
 use crate::engine::{DcSweepPointResult, TransientFftResult, TransientResult};
 use crate::execution::plan::AnalysisInstanceId;
 use crate::execution::schema::{
     SignalDescriptor, SignalKind, SignalOwner, SignalShape, SignalUnit, SignalValueType,
 };
+use crate::execution::topology::TopologyFingerprint;
 use crate::solver::SimulationResult;
 
 //=============================================================================
@@ -843,6 +847,175 @@ impl AnalysisResultDocument {
                 .signals(signals)
                 .device_states(device_states),
         )
+    }
+
+    /// Project one compressed transient result container.
+    ///
+    /// The compressed container is descriptor-keyed and carries typed sample
+    /// absences, so this projection is lossless: an absent sample becomes a
+    /// `null` sample rather than a fabricated number, a channel the output
+    /// projection did not retain keeps its descriptor and declares
+    /// [`SeriesAvailability::NotProjected`], and the compression certificate
+    /// travels in the transient payload.
+    ///
+    /// The `analysis` argument must agree with the container's own recorded
+    /// analysis identity when it has one; a mismatch is refused rather than
+    /// silently relabelled. The run coordinate is deliberately not rebuilt
+    /// here: a coordinate's typed axis assignments are planning state that a
+    /// result container does not carry, so the caller attaches the coordinate
+    /// it planned.
+    pub fn from_compressed_transient(
+        analysis: AnalysisInstanceId,
+        compressed: &TransientResultCompressed,
+        fft_children: Vec<super::payload::FftChildReference>,
+    ) -> Result<AnalysisResultDocumentBuilder, ResultDocumentError> {
+        const LOCATION: &str = "compressed transient result";
+        compressed
+            .validate()
+            .map_err(|detail| source_error(LOCATION, detail))?;
+        let point_count = compressed.time.len();
+        if point_count == 0 {
+            return Err(source_error(
+                LOCATION,
+                "a transient needs at least one sample",
+            ));
+        }
+        if let Some(identity) = &compressed.identity.analysis
+            && identity.tag() != analysis.tag()
+        {
+            return Err(source_error(
+                LOCATION,
+                format!(
+                    "container was produced by analysis '{}' but is being published as '{}'",
+                    identity.tag(),
+                    analysis.tag()
+                ),
+            ));
+        }
+
+        let axis = ResultAxis::new(
+            "time",
+            "Time",
+            ResultAxisKind::Time,
+            SignalUnit::Second,
+            AxisValues::Real {
+                values: finite_axis(LOCATION, "time", &compressed.time)?,
+            },
+        )?;
+
+        let mut signals = Vec::new();
+        let mut store_traces = Vec::new();
+        let mut device_columns: BTreeMap<String, Vec<DeviceParameterSeries>> = BTreeMap::new();
+        let mut device_order: Vec<String> = Vec::new();
+        for channel in &compressed.channels {
+            let samples = compressed_channel_samples(channel, point_count);
+            let availability = match channel.availability {
+                TransientChannelAvailability::Available => SeriesAvailability::Available,
+                TransientChannelAvailability::NotProjected => SeriesAvailability::NotProjected,
+            };
+            match channel.descriptor.role() {
+                TransientChannelRole::NodeVoltage { node, .. } => {
+                    signals.push(ResultSignal::new(
+                        voltage_descriptor(LOCATION, node, SignalValueType::Real, point_count)?,
+                        None,
+                        availability,
+                        SeriesValues::Real { samples },
+                    )?);
+                }
+                TransientChannelRole::BranchCurrent { branch } => {
+                    signals.push(ResultSignal::new(
+                        current_descriptor(LOCATION, branch, SignalValueType::Real, point_count)?,
+                        None,
+                        availability,
+                        SeriesValues::Real { samples },
+                    )?);
+                }
+                TransientChannelRole::DeviceObservable { device, parameter } => {
+                    let entry = device_columns.entry(device.clone()).or_insert_with(|| {
+                        device_order.push(device.clone());
+                        Vec::new()
+                    });
+                    entry.push(DeviceParameterSeries {
+                        name: parameter.clone(),
+                        unit: compressed_channel_unit(channel.descriptor.unit()),
+                        values: samples,
+                    });
+                }
+                TransientChannelRole::DeviceStore { store } => {
+                    store_traces.push(NamedObservableSeries {
+                        name: store.clone(),
+                        unit: compressed_channel_unit(channel.descriptor.unit()),
+                        values: samples,
+                    });
+                }
+            }
+        }
+        let mut device_states = Vec::with_capacity(device_order.len());
+        for name in device_order {
+            let parameters = device_columns
+                .remove(&name)
+                .ok_or_else(|| source_error(LOCATION, "device channel grouping lost a device"))?;
+            device_states.push(DeviceStateSeries::new(name, None, Vec::new(), parameters)?);
+        }
+
+        let mut digital_traces = Vec::with_capacity(compressed.digital_traces.len());
+        for trace in &compressed.digital_traces {
+            let mut points = Vec::with_capacity(trace.points.len());
+            for point in &trace.points {
+                points.push(DigitalEventPoint {
+                    time: point.time,
+                    state: point.value.state.into(),
+                    strength: point.value.strength.into(),
+                });
+            }
+            digital_traces.push(DigitalEventTrace {
+                node_name: trace.node_name.clone(),
+                points,
+            });
+        }
+        let mut real_traces = Vec::with_capacity(compressed.real_traces.len());
+        for trace in &compressed.real_traces {
+            let mut points = Vec::with_capacity(trace.points.len());
+            for point in &trace.points {
+                if !point.value.is_finite() {
+                    return Err(source_error(
+                        LOCATION,
+                        format!(
+                            "real event trace '{}' has a non-finite sample",
+                            trace.node_name
+                        ),
+                    ));
+                }
+                points.push(RealEventPoint {
+                    time: point.time,
+                    value: point.value,
+                });
+            }
+            real_traces.push(RealEventTrace {
+                node_name: trace.node_name.clone(),
+                points,
+            });
+        }
+
+        let payload = TransientPayload {
+            step_sizes: finite_axis(LOCATION, "step size", &compressed.step_sizes)?,
+            store_traces,
+            digital_traces,
+            real_traces,
+            fft_children,
+            compression: Some(CompressionReportDocument::from(
+                &compressed.compression_report,
+            )),
+        };
+
+        let mut builder = Self::builder(analysis, ResultPayload::Tran(payload), point_count)
+            .axis(axis)
+            .signals(signals)
+            .device_states(device_states);
+        if let Some(bytes) = compressed.identity.topology_fingerprint {
+            builder = builder.topology_fingerprint(TopologyFingerprint::from_bytes(bytes));
+        }
+        Ok(builder)
     }
 
     /// Project one noise sweep.
@@ -2458,6 +2631,44 @@ fn complex_document_samples(
             }
         })
         .collect()
+}
+
+/// Samples of one compressed channel as document samples.
+///
+/// A typed absence becomes `null`. A channel the output projection did not
+/// retain is all-`null` at the document's point count so its descriptor and
+/// unit still travel.
+fn compressed_channel_samples(
+    channel: &TransientCompressedChannel,
+    point_count: usize,
+) -> Vec<Option<f64>> {
+    match channel.availability {
+        TransientChannelAvailability::Available => channel
+            .samples
+            .iter()
+            .map(|sample| sample.value())
+            .collect(),
+        TransientChannelAvailability::NotProjected => vec![None; point_count],
+    }
+}
+
+/// Document unit of one compressed channel, or `None` when the producing
+/// model declares no unit for it.
+fn compressed_channel_unit(unit: &TransientChannelUnit) -> Option<SignalUnit> {
+    match unit {
+        TransientChannelUnit::Volt => Some(SignalUnit::Volt),
+        TransientChannelUnit::Ampere => Some(SignalUnit::Ampere),
+        TransientChannelUnit::Ohm => Some(SignalUnit::Ohm),
+        TransientChannelUnit::Siemens => Some(SignalUnit::Siemens),
+        TransientChannelUnit::Watt => Some(SignalUnit::Watt),
+        TransientChannelUnit::Hertz => Some(SignalUnit::Hertz),
+        TransientChannelUnit::Second => Some(SignalUnit::Second),
+        TransientChannelUnit::Degree => Some(SignalUnit::Degree),
+        TransientChannelUnit::Radian => Some(SignalUnit::Radian),
+        TransientChannelUnit::Dimensionless => Some(SignalUnit::Dimensionless),
+        TransientChannelUnit::Custom(symbol) => Some(SignalUnit::Custom(symbol.clone())),
+        TransientChannelUnit::Unspecified => None,
+    }
 }
 
 fn projected_real_series(

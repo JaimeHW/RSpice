@@ -1,10 +1,73 @@
 //! Public time-domain result types.
 
-use crate::engine::waveform::TransientResultCompressed;
+use crate::analysis::fourier::FourierResult;
+use crate::analysis::measure::MeasureResult;
+use crate::engine::waveform::{
+    TransientChannelAvailability, TransientChannelRole, TransientChannelSample,
+    TransientResultCompressed, TransientSampleAbsence,
+};
 use crate::netlist::{FftFormat, FftOutput, FftWindow, XyceFftMode, XyceOutputIntervalSchedule};
-use crate::xspice::DigitalValue;
+use crate::xspice::{DigitalState, DigitalStrength, DigitalValue};
 use crate::{NodeId, Value};
 use std::collections::HashMap;
+
+/// Stable wire spelling of one XSPICE digital logic state.
+///
+/// Persistence layers need a stable text spelling of a committed digital
+/// sample. The engine owns the one it publishes so a pickle or a wire format
+/// never has to invent a second naming of the same state.
+pub const fn digital_state_tag(state: DigitalState) -> &'static str {
+    match state {
+        DigitalState::Zero => "zero",
+        DigitalState::One => "one",
+        DigitalState::Unknown => "unknown",
+        DigitalState::ZeroR => "zero-resistive",
+        DigitalState::OneR => "one-resistive",
+        DigitalState::UnknownR => "unknown-resistive",
+        DigitalState::ZeroZ => "zero-high-z",
+        DigitalState::OneZ => "one-high-z",
+        DigitalState::UnknownZ => "unknown-high-z",
+        DigitalState::HighZ => "high-z",
+    }
+}
+
+/// Parse a spelling produced by [`digital_state_tag`].
+pub fn digital_state_from_tag(tag: &str) -> Option<DigitalState> {
+    Some(match tag {
+        "zero" => DigitalState::Zero,
+        "one" => DigitalState::One,
+        "unknown" => DigitalState::Unknown,
+        "zero-resistive" => DigitalState::ZeroR,
+        "one-resistive" => DigitalState::OneR,
+        "unknown-resistive" => DigitalState::UnknownR,
+        "zero-high-z" => DigitalState::ZeroZ,
+        "one-high-z" => DigitalState::OneZ,
+        "unknown-high-z" => DigitalState::UnknownZ,
+        "high-z" => DigitalState::HighZ,
+        _ => return None,
+    })
+}
+
+/// Stable wire spelling of one XSPICE digital drive strength.
+pub const fn digital_strength_tag(strength: DigitalStrength) -> &'static str {
+    match strength {
+        DigitalStrength::Undetermined => "undetermined",
+        DigitalStrength::HighZ => "high-z",
+        DigitalStrength::Resistive => "resistive",
+        DigitalStrength::Strong => "strong",
+    }
+}
+
+/// Parse a spelling produced by [`digital_strength_tag`].
+pub fn digital_strength_from_tag(tag: &str) -> Option<DigitalStrength> {
+    Some(match tag {
+        "undetermined" => DigitalStrength::Undetermined,
+        "high-z" => DigitalStrength::HighZ,
+        "resistive" => DigitalStrength::Resistive,
+        "strong" => DigitalStrength::Strong,
+        _ => None?,
+    })
+}
 
 /// One accepted or linearly interpolated transient output sample.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -232,6 +295,51 @@ pub struct TransientFftResult {
     /// Additional Xyce-compatible figures and ranked bins requested by
     /// `.OPTIONS FFT FFTOUT=1`.
     pub metrics: Option<TransientFftMetrics>,
+}
+
+/// Typed result of one source-authored `.FOUR` operand.
+///
+/// `.FOUR` resolves its operands through the ordered transient output
+/// resolver, so the authored spelling and the physical-quantity class are
+/// retained beside the spectrum rather than being re-derived by a frontend.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TransientFourierResult {
+    /// Zero-based ordinal of the authored `.FOUR` card.
+    pub card_index: usize,
+    /// Authored output spelling, such as `V(out)`.
+    pub output: String,
+    /// Physical quantity class: `voltage`, `current`, or `parameter`.
+    pub physical_type: &'static str,
+    /// Authored fundamental frequency in hertz.
+    pub fundamental: Value,
+    /// Authored harmonic count.
+    pub harmonic_count: usize,
+    /// The spectrum itself.
+    pub spectrum: FourierResult,
+}
+
+/// Typed transient post-processing products.
+///
+/// These are evaluated on the exact accepted trajectory, before any output
+/// projection or waveform decimation, so a compressed result publishes the
+/// same numbers as an uncompressed one and no frontend has to recompute them
+/// from a decimated expansion.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TransientPostResults {
+    /// Source-authored `.FFT` spectra in netlist order.
+    pub fft: Vec<TransientFftResult>,
+    /// Source-authored `.FOUR` spectra, one entry per resolved operand, in
+    /// card then operand order.
+    pub fourier: Vec<TransientFourierResult>,
+    /// Source-authored transient `.MEASURE` results in netlist order.
+    pub measurements: Vec<MeasureResult>,
+}
+
+impl TransientPostResults {
+    /// Whether no post-process product was requested or produced.
+    pub fn is_empty(&self) -> bool {
+        self.fft.is_empty() && self.fourier.is_empty() && self.measurements.is_empty()
+    }
 }
 
 /// Result of transient analysis - time-domain waveforms
@@ -758,26 +866,102 @@ impl TransientResult {
 }
 
 impl TransientResultCompressed {
-    /// Expand the retained analog inventory into a regular transient result.
+    /// Expand the retained inventory into a regular transient result.
     ///
     /// This preserves the retained grid; it does not reconstruct discarded
-    /// samples. Event-driven digital and real traces are outside the compressed
-    /// analog-result contract and therefore remain empty.
+    /// samples. Event-driven digital and real traces were never decimated and
+    /// are carried through unchanged.
+    ///
+    /// [`TransientResult`] stores every analog sample as a bare `Value`, so it
+    /// cannot represent a sample the producing run computed as non-finite.
+    /// Expansion therefore fails closed on such a channel instead of inventing
+    /// a number; read those samples from
+    /// [`TransientResultCompressed::channels`], which keeps them as typed
+    /// absences. A device operating-point parameter that a device did not
+    /// report is expanded back to the `NaN` padding that
+    /// [`TransientResult::record_device_op_sample`] writes, which is the exact
+    /// representation it was compressed from.
     pub fn try_into_transient(self) -> Result<TransientResult, String> {
         self.validate()?;
+        let point_count = self.time.len();
+        let mut num_nodes = 0usize;
+        let mut node_names = Vec::new();
+        let mut voltages = Vec::new();
+        let mut branch_names = Vec::new();
+        let mut branch_currents = Vec::new();
+        let mut device_op_traces = Vec::new();
+        let mut store_traces = Vec::new();
+
+        for channel in &self.channels {
+            let projected = channel.availability == TransientChannelAvailability::Available;
+            let canonical = channel.descriptor.canonical_name();
+            let expand = |padding: Option<Value>| -> Result<Vec<Value>, String> {
+                if !projected {
+                    return Ok(Vec::new());
+                }
+                let mut values = Vec::with_capacity(point_count);
+                for (index, sample) in channel.samples.iter().enumerate() {
+                    match *sample {
+                        TransientChannelSample::Value(value) => values.push(value),
+                        TransientChannelSample::Absent(TransientSampleAbsence::NotRecorded) => {
+                            match padding {
+                                Some(padding) => values.push(padding),
+                                None => {
+                                    return Err(format!(
+                                        "compressed transient channel '{canonical}' has no recorded value at retained sample {index}, which an expanded transient result cannot represent"
+                                    ));
+                                }
+                            }
+                        }
+                        TransientChannelSample::Absent(TransientSampleAbsence::NonFinite) => {
+                            return Err(format!(
+                                "compressed transient channel '{canonical}' is absent at retained sample {index} because the producing run computed a non-finite value; read it from the compressed channels, which keep the absence typed"
+                            ));
+                        }
+                    }
+                }
+                Ok(values)
+            };
+
+            match channel.descriptor.role() {
+                TransientChannelRole::NodeVoltage { node, .. } => {
+                    num_nodes += 1;
+                    node_names.push(node.clone());
+                    voltages.push(expand(None)?);
+                }
+                TransientChannelRole::BranchCurrent { branch } => {
+                    branch_names.push(branch.clone());
+                    branch_currents.push(expand(None)?);
+                }
+                TransientChannelRole::DeviceObservable { device, parameter } => {
+                    device_op_traces.push(TransientDeviceOpTrace {
+                        device_name: device.clone(),
+                        parameter: parameter.clone(),
+                        values: expand(Some(Value::NAN))?,
+                    });
+                }
+                TransientChannelRole::DeviceStore { store } => {
+                    store_traces.push(TransientStoreTrace {
+                        name: store.clone(),
+                        values: expand(None)?,
+                    });
+                }
+            }
+        }
+
         Ok(TransientResult {
             time: self.time,
             step_sizes: self.step_sizes,
-            voltages: self.voltages,
-            branch_currents: self.branch_currents,
-            num_nodes: self.num_nodes,
-            node_names: self.node_names,
-            branch_names: self.branch_names,
-            digital_traces: Vec::new(),
-            real_traces: Vec::new(),
-            device_op_traces: self.device_op_traces,
-            store_traces: self.store_traces,
-            fft_results: self.fft_results,
+            voltages,
+            branch_currents,
+            num_nodes,
+            node_names,
+            branch_names,
+            digital_traces: self.digital_traces,
+            real_traces: self.real_traces,
+            device_op_traces,
+            store_traces,
+            fft_results: self.post_results.fft.clone(),
         })
     }
 }
