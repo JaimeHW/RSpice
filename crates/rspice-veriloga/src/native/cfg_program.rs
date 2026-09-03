@@ -212,9 +212,6 @@ impl CfgRuntimeBindings {
 /// the register allocator holds one live value per slot for the length of one
 /// instruction instead of holding every one of them until the return.
 #[derive(Debug, Clone, Copy)]
-// `Published` is constructed only by the prelude, which W-F10b-2 wires into
-// `build_model_plan_from_canonical_cfg`; the attribute comes off with it.
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) enum CfgOutputs<'a> {
     /// One value, returned. What every plan entry is.
     Returned(CfgValueId),
@@ -244,8 +241,7 @@ pub(crate) fn lower_cfg_function(
 /// rather than forking it. A slot whose value is computed on a block that runs
 /// conditionally, or once per iteration of a loop, is refused by [`Program`]'s
 /// own effect discipline — the rule that already governs every analog
-/// operator's state write — rather than by a second rule written here.
-#[cfg_attr(not(test), allow(dead_code))]
+/// operator.s state write — rather than by a second rule written here.
 pub(crate) fn lower_cfg_function_to_prelude_slots(
     function: &CfgFunction,
     publications: &[(CfgValueId, usize)],

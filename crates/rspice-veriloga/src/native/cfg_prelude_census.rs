@@ -46,7 +46,7 @@ use crate::canonical_ir::{
 use crate::codegen::state_renumbering::StateSlotMapping;
 use crate::jit::cfg_lanes::scalarize_lanes;
 use crate::jit::cfg_plan_builder::{CfgPlanEntry, ShippedColumnLanes, derivative_seeds};
-use crate::jit::cfg_prelude::CfgPrelude;
+use crate::jit::cfg_prelude::{CfgPrelude, LiveCurrentTaint};
 use crate::jit::cfg_program::CfgRuntimeBindings;
 use crate::jit::plan_builder::canonical_branch_unknown_runtime_map;
 use crate::jit::ssa::RegisterAllocation;
@@ -191,6 +191,19 @@ pub(super) fn prelude_inputs(
                 entries.push((entry, scalar));
             }
         }
+    }
+
+    // The same partition the plan builder makes: an entry whose value reads a
+    // contribution current keeps its own cone, because the prelude runs before
+    // the first of them is published. Measuring the prelude *with* those
+    // entries would measure a program the builder never builds — and, since
+    // `CfgPrelude::build` refuses one, would report the module as refused.
+    let taint = LiveCurrentTaint::build(&scalarized.function);
+    let deferred = entries.len();
+    entries.retain(|(_, value)| taint.publishable(*value));
+    let deferred = deferred - entries.len();
+    if deferred > 0 {
+        println!("prelude model={module} live_current_entries={deferred}");
     }
 
     Some(PreludeInputs {
