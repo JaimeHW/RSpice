@@ -718,49 +718,6 @@ impl DeckPlan {
         Ok(plan)
     }
 
-    /// Compatibility query that returns a plan only when the deck contains a
-    /// run axis. New executors should use [`Self::from_netlist`] so authored
-    /// analysis ordinals also come from the canonical planner for scalar runs.
-    pub fn from_netlist_run_axes(
-        netlist: &crate::netlist::Netlist,
-        limits: &ResourceLimits,
-    ) -> Result<Option<Self>, DeckPlanError> {
-        Self::from_netlist_run_axes_with_abort(netlist, limits, &crate::NoAbort)
-    }
-
-    /// Abort-aware form of [`Self::from_netlist_run_axes`].
-    pub fn from_netlist_run_axes_with_abort(
-        netlist: &crate::netlist::Netlist,
-        limits: &ResourceLimits,
-        abort: &dyn AbortSignal,
-    ) -> Result<Option<Self>, DeckPlanError> {
-        let plan = Self::from_netlist_with_abort(netlist, limits, abort)?;
-        Ok((!plan.axes.is_empty()).then_some(plan))
-    }
-
-    /// Compatibility bridge for callers that still request a standalone
-    /// `.TEMP` axis. New executors should use [`Self::from_netlist`] so DATA,
-    /// `.STEP`, and temperature axes share one checked Cartesian plan.
-    pub fn from_netlist_temperature_axis(
-        netlist: &crate::netlist::Netlist,
-    ) -> Result<Option<Self>, DeckPlanError> {
-        let has_temperature = netlist
-            .analyses
-            .iter()
-            .any(|analysis| matches!(analysis, crate::netlist::AnalysisCommand::Temp { .. }));
-        if !has_temperature {
-            return Ok(None);
-        }
-        if netlist
-            .analyses
-            .iter()
-            .any(|analysis| matches!(analysis, crate::netlist::AnalysisCommand::Step(_)))
-        {
-            return Err(DeckPlanError::TemperatureAxisWithStep);
-        }
-        Self::from_netlist_run_axes(netlist, &ResourceLimits::unlimited())
-    }
-
     pub fn new(
         axes: Vec<RunAxis>,
         analysis_requests: Vec<AnalysisRequest>,
@@ -1110,7 +1067,6 @@ pub enum DeckPlanError {
         current: AxisKind,
     },
     ExplicitImplicitOp,
-    TemperatureAxisWithStep,
     /// A periodic small-signal or envelope card names an upstream periodic
     /// large-signal analysis the deck does not author before it.
     MissingUpstreamAnalysis {
@@ -1210,9 +1166,6 @@ impl fmt::Display for DeckPlanError {
             ),
             Self::ExplicitImplicitOp => formatter.write_str(
                 "implicit operating point is planner-owned and cannot be authored explicitly",
-            ),
-            Self::TemperatureAxisWithStep => formatter.write_str(
-                "the legacy temperature-only execution adapter cannot compose .TEMP with .STEP; use the canonical run-axis plan",
             ),
             Self::MissingUpstreamAnalysis { card, required } => write!(
                 formatter,
@@ -1926,9 +1879,8 @@ mod tests {
             "temperature planner\nR1 in out 1k\nV1 in 0 1\n.temp -40 125\n.ac lin 2 1 2\n.tran 1u 2u\n.ac lin 2 10 20\n.end",
         )
         .expect("temperature deck parses");
-        let plan = DeckPlan::from_netlist_temperature_axis(&netlist)
-            .expect("temperature plan is valid")
-            .expect("temperature axis is present");
+        let plan = DeckPlan::from_netlist(&netlist, &ResourceLimits::default())
+            .expect("temperature plan is valid");
 
         assert_eq!(plan.axes().len(), 1);
         assert_eq!(plan.axes()[0].kind(), AxisKind::Temperature);
@@ -1960,9 +1912,10 @@ mod tests {
     fn temperature_axis_without_physical_analysis_uses_implicit_op() {
         let netlist = crate::Netlist::parse("implicit temperature\nR1 1 0 1k\n.temp 25 50\n.end")
             .expect("temperature deck parses");
-        let plan = DeckPlan::from_netlist_temperature_axis(&netlist)
-            .expect("temperature plan is valid")
-            .expect("temperature axis is present");
+        let plan = DeckPlan::from_netlist(&netlist, &ResourceLimits::default())
+            .expect("temperature plan is valid");
+        assert_eq!(plan.axes().len(), 1);
+        assert_eq!(plan.axes()[0].kind(), AxisKind::Temperature);
         assert_eq!(plan.analyses().len(), 1);
         assert_eq!(plan.analyses()[0].id().kind(), AnalysisKind::ImplicitOp);
     }
@@ -1989,9 +1942,8 @@ mod tests {
              .end\n",
         )
         .expect("all numeric STEP modes parse");
-        let plan = DeckPlan::from_netlist_run_axes(&netlist, &ResourceLimits::default())
-            .expect("numeric STEP axes plan")
-            .expect("STEP axes are present");
+        let plan = DeckPlan::from_netlist(&netlist, &ResourceLimits::default())
+            .expect("numeric STEP axes plan");
 
         assert_eq!(
             plan.axes().iter().map(RunAxis::name).collect::<Vec<_>>(),
@@ -2022,9 +1974,8 @@ mod tests {
              .end\n",
         )
         .expect("typed STEP targets parse");
-        let plan = DeckPlan::from_netlist_run_axes(&netlist, &ResourceLimits::default())
-            .expect("typed STEP targets plan")
-            .expect("STEP axes are present");
+        let plan = DeckPlan::from_netlist(&netlist, &ResourceLimits::default())
+            .expect("typed STEP targets plan");
 
         assert!(matches!(
             plan.axes()[0].step_target(),
@@ -2079,9 +2030,8 @@ mod tests {
              .end\n",
         )
         .expect("DATA, STEP, and TEMP deck parses");
-        let plan = DeckPlan::from_netlist_run_axes(&netlist, &ResourceLimits::default())
-            .expect("mixed axes plan")
-            .expect("mixed axes are present");
+        let plan =
+            DeckPlan::from_netlist(&netlist, &ResourceLimits::default()).expect("mixed axes plan");
 
         assert_eq!(
             plan.axes().iter().map(RunAxis::kind).collect::<Vec<_>>(),
@@ -2117,9 +2067,8 @@ mod tests {
              .end\n",
         )
         .expect("TEMP by STEP deck parses");
-        let plan = DeckPlan::from_netlist_run_axes(&netlist, &ResourceLimits::default())
-            .expect("TEMP and STEP compose")
-            .expect("run axes are present");
+        let plan = DeckPlan::from_netlist(&netlist, &ResourceLimits::default())
+            .expect("TEMP and STEP compose");
 
         assert_eq!(
             plan.axes().iter().map(RunAxis::kind).collect::<Vec<_>>(),
@@ -2147,11 +2096,6 @@ mod tests {
             plan.coordinates_with_abort(&ResourceLimits::default(), &crate::NoAbort)
                 .expect("coordinate IDs are deterministic")
         );
-
-        assert!(matches!(
-            DeckPlan::from_netlist_temperature_axis(&netlist),
-            Err(DeckPlanError::TemperatureAxisWithStep)
-        ));
     }
 
     #[test]
@@ -2172,11 +2116,6 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["ac-001", "tran-001", "ac-002"]
         );
-        assert!(
-            DeckPlan::from_netlist_run_axes(&netlist, &ResourceLimits::default())
-                .expect("compatibility query succeeds")
-                .is_none()
-        );
     }
 
     #[test]
@@ -2192,7 +2131,7 @@ mod tests {
         let mut limits = ResourceLimits::default();
         limits.max_batch_runs = 5;
         assert!(matches!(
-            DeckPlan::from_netlist_run_axes(&netlist, &limits),
+            DeckPlan::from_netlist(&netlist, &limits),
             Err(DeckPlanError::ResourceLimit(ResourceLimitError {
                 resource: ResourceKind::BatchRuns,
                 requested: 6,
@@ -2203,7 +2142,7 @@ mod tests {
         limits.max_batch_runs = 6;
         limits.max_result_values = 11;
         assert!(matches!(
-            DeckPlan::from_netlist_run_axes(&netlist, &limits),
+            DeckPlan::from_netlist(&netlist, &limits),
             Err(DeckPlanError::ResourceLimit(ResourceLimitError {
                 resource: ResourceKind::ResultValues,
                 requested: 12,
@@ -2216,7 +2155,7 @@ mod tests {
     fn step_data_resolution_is_typed_and_fail_closed() {
         let missing = crate::Netlist::parse("missing DATA\n.step data=absent\n.op\n.end\n")
             .expect("unresolved DATA reference remains typed");
-        let error = DeckPlan::from_netlist_run_axes(&missing, &ResourceLimits::default())
+        let error = DeckPlan::from_netlist(&missing, &ResourceLimits::default())
             .expect_err("unknown STEP DATA table must fail planning");
         assert!(
             matches!(&error, DeckPlanError::UnknownStepDataTable { table } if table.eq_ignore_ascii_case("absent")),
@@ -2227,7 +2166,7 @@ mod tests {
         let list = crate::Netlist::parse("aborted STEP\n.step param p list 1 2\n.op\n.end\n")
             .expect("STEP list parses");
         assert!(matches!(
-            DeckPlan::from_netlist_run_axes_with_abort(&list, &ResourceLimits::default(), &abort,),
+            DeckPlan::from_netlist_with_abort(&list, &ResourceLimits::default(), &abort,),
             Err(DeckPlanError::Aborted)
         ));
     }

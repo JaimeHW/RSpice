@@ -608,10 +608,20 @@ impl<'a> RunContext<'a> {
                 *transfer_type,
                 *analysis_type,
             )?,
-            AnalysisCommand::Step(_) => {
+            // `.STEP` and `.TEMP` are run axes. `DeckPlan` turns both into
+            // Cartesian coordinates and `MaterializedRun` strips them from the
+            // coordinate-local netlist, so neither can reach a dispatcher that
+            // executes one concrete deck.
+            AnalysisCommand::Step(_) | AnalysisCommand::Temp { .. } => {
                 return Err(CliError::InternalError {
-                    message: ".STEP reached the physical-analysis dispatcher; Cartesian planning was bypassed"
-                        .to_string(),
+                    message: format!(
+                        "{} reached the physical-analysis dispatcher; Cartesian planning was bypassed",
+                        if matches!(analysis, AnalysisCommand::Step(_)) {
+                            ".STEP"
+                        } else {
+                            ".TEMP"
+                        }
+                    ),
                 });
             }
             AnalysisCommand::Four {
@@ -628,7 +638,6 @@ impl<'a> RunContext<'a> {
                 self.next_fourier_ordinal.set(next);
                 basic::run_fourier(self, ordinal as usize, *fundamental, *num_harmonics)?;
             }
-            AnalysisCommand::Temp { temperatures } => basic::run_temp(self, temperatures)?,
             AnalysisCommand::MonteCarlo(mc_cmd) => {
                 advanced::run_monte_carlo_from_command(self, mc_cmd)?
             }
@@ -747,10 +756,13 @@ fn analysis_output_tag(analysis: &AnalysisCommand) -> Option<&'static str> {
         AnalysisCommand::Tf { .. } => Some("tf"),
         AnalysisCommand::Hb { .. } => Some("hb"),
         AnalysisCommand::MonteCarlo(_) => Some("mc"),
-        AnalysisCommand::Temp { .. } => Some("temp"),
-        // The CLI publishes no artifact for the periodic large-signal family
-        // and refuses those cards before execution, so they own no namespace.
+        // `.STEP` and `.TEMP` are run axes whose coordinates own the artifact
+        // namespace; `.FOUR` publishes under its own post-process instance
+        // identity. The CLI publishes no artifact for the periodic
+        // large-signal family and refuses those cards before execution, so
+        // none of these own a physical output namespace.
         AnalysisCommand::Step(_)
+        | AnalysisCommand::Temp { .. }
         | AnalysisCommand::Four { .. }
         | AnalysisCommand::Pss(_)
         | AnalysisCommand::Pac(_)
@@ -774,7 +786,6 @@ fn is_physical_output_tag(tag: &str) -> bool {
             | "tf"
             | "hb"
             | "mc"
-            | "temp"
     )
 }
 
@@ -1537,38 +1548,68 @@ fn requested_mode_name(args: &RunArgs) -> Option<&'static str> {
     }
 }
 
-fn physical_step_analysis_kind(
+/// Whether one authored card post-processes an already completed transient
+/// instead of driving the solver itself.
+pub(crate) const fn is_transient_post_process(analysis: &AnalysisCommand) -> bool {
+    matches!(analysis, AnalysisCommand::Four { .. })
+}
+
+/// Authored cards in execution order: every physical analysis first, then the
+/// transient post-processors.
+///
+/// A `.FOUR` card is source-order independent in SPICE decks, so it must
+/// consume the deck's final authored transient even when the card precedes
+/// `.TRAN`. This is the one place that ordering is decided; every executor
+/// walks the deck through it.
+pub(crate) fn analyses_in_execution_order(
+    netlist: &Netlist,
+) -> impl Iterator<Item = &AnalysisCommand> {
+    netlist
+        .analyses
+        .iter()
+        .filter(|analysis| !is_transient_post_process(analysis))
+        .chain(
+            netlist
+                .analyses
+                .iter()
+                .filter(|analysis| is_transient_post_process(analysis)),
+        )
+}
+
+/// Signature symbol of one authored card under a run axis.
+///
+/// A run axis contributes nothing: it decorates the deck rather than naming a
+/// child analysis. `.FOUR` does contribute even though `DeckPlan` mints no
+/// planned slot for it and it owns no physical output namespace, because a
+/// conditional that adds or drops a Fourier card changes what a coordinate
+/// publishes; it is marked as a post-process entry so it cannot be mistaken
+/// for a planned physical analysis.
+fn step_analysis_signature_kind(
     analysis: &AnalysisCommand,
 ) -> Result<Option<&'static str>, CliError> {
-    match analysis {
-        AnalysisCommand::Step(_) | AnalysisCommand::Temp { .. } => Ok(None),
-        AnalysisCommand::Op => Ok(Some("op")),
-        AnalysisCommand::Dc { .. } => Ok(Some("dc")),
-        AnalysisCommand::Ac { .. } | AnalysisCommand::AcData { .. } => Ok(Some("ac")),
-        AnalysisCommand::Tran { .. } => Ok(Some("tran")),
-        AnalysisCommand::Hb { .. } => Ok(Some("hb")),
-        AnalysisCommand::Sp { .. } => Ok(Some("sp")),
-        AnalysisCommand::Stb { .. } => Ok(Some("stb")),
-        AnalysisCommand::Disto { .. } => Ok(Some("disto")),
-        AnalysisCommand::Noise { .. } | AnalysisCommand::NoiseData { .. } => Ok(Some("noise")),
-        AnalysisCommand::Sensitivity { .. } => Ok(Some("sens")),
-        AnalysisCommand::Tf { .. } => Ok(Some("tf")),
-        AnalysisCommand::PoleZero { .. } => Ok(Some("pz")),
-        AnalysisCommand::Four { .. } => Ok(Some("four")),
-        AnalysisCommand::Pss(_)
-        | AnalysisCommand::Pac(_)
-        | AnalysisCommand::Pnoise(_)
-        | AnalysisCommand::Envelope(_) => Err(unsupported_deck_analysis_error(analysis, None)),
-        AnalysisCommand::MonteCarlo(_) => Err(CliError::InvalidArgument {
+    if unsupported_deck_analysis_card(analysis).is_some() {
+        return Err(unsupported_deck_analysis_error(analysis, None));
+    }
+    if matches!(analysis, AnalysisCommand::MonteCarlo(_)) {
+        return Err(CliError::InvalidArgument {
             message: ".STEP cannot wrap authored Monte Carlo until deterministic nested seed/substream derivation is configured"
                 .to_string(),
             suggestion: Some(
                 "run the parameter coordinates or Monte Carlo campaign as the outer experiment, but not both in one deck"
                     .to_string(),
             ),
-        }),
+        });
     }
+    Ok(match analysis {
+        AnalysisCommand::Four { .. } => Some(POST_PROCESS_FOURIER_SIGNATURE),
+        other => analysis_output_tag(other),
+    })
 }
+
+/// Signature symbol of a `.FOUR` card. It is deliberately not an output tag:
+/// `.FOUR` publishes under the post-process instance identity of the transient
+/// it consumes, never under a physical analysis namespace.
+const POST_PROCESS_FOURIER_SIGNATURE: &str = "post-process:four";
 
 fn step_commands(netlist: &Netlist) -> Vec<rspice_core::netlist::StepCommand> {
     netlist
@@ -1584,7 +1625,7 @@ fn step_commands(netlist: &Netlist) -> Vec<rspice_core::netlist::StepCommand> {
 fn step_analysis_signature(netlist: &Netlist) -> Result<Vec<&'static str>, CliError> {
     let mut signature = Vec::new();
     for analysis in &netlist.analyses {
-        let Some(kind) = physical_step_analysis_kind(analysis)? else {
+        let Some(kind) = step_analysis_signature_kind(analysis)? else {
             continue;
         };
         signature.push(kind);
@@ -2694,9 +2735,8 @@ fn run_concrete_deck(
     let mut ran_analysis = false;
     let mut simulation_error: Option<String> = None;
     let mut simulation_error_details: Option<crate::cli::ErrorDetails> = None;
-    let mut transient_postprocessors = Vec::new();
 
-    for (idx, analysis) in netlist.analyses.iter().enumerate() {
+    for (idx, analysis) in analyses_in_execution_order(netlist).enumerate() {
         if verbose {
             println!(
                 "\nRunning analysis {}/{}: {:?}",
@@ -2707,13 +2747,6 @@ fn run_concrete_deck(
         }
 
         ran_analysis = true;
-        if matches!(analysis, AnalysisCommand::Four { .. }) {
-            // A Fourier card is source-order independent in SPICE decks. Run
-            // all physical analyses first so it consumes the final authored
-            // transient even when the card precedes `.TRAN`.
-            transient_postprocessors.push(analysis);
-            continue;
-        }
         if let Err(e) = ctx.run_analysis(analysis) {
             if is_run_setup_or_output_error(&e) {
                 return Err(e);
@@ -2721,19 +2754,6 @@ fn run_concrete_deck(
             simulation_error_details = Some(e.details());
             simulation_error = Some(simulation_error_message(&e));
             break;
-        }
-    }
-
-    if simulation_error.is_none() {
-        for analysis in transient_postprocessors {
-            if let Err(e) = ctx.run_analysis(analysis) {
-                if is_run_setup_or_output_error(&e) {
-                    return Err(e);
-                }
-                simulation_error_details = Some(e.details());
-                simulation_error = Some(simulation_error_message(&e));
-                break;
-            }
         }
     }
 

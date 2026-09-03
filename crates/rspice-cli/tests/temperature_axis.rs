@@ -371,3 +371,57 @@ fn two_axis_implicit_op_uses_coordinate_artifacts_and_union_manifest() {
         assert!(artifact.contains(".run_") && artifact.contains(".implicit-op-001."));
     }
 }
+
+#[test]
+fn temperature_only_deck_publishes_one_swept_table_and_no_per_point_artifact() {
+    let dir = test_dir("temp_only");
+    let deck = dir.join("temperature_only.cir");
+    std::fs::write(
+        &deck,
+        "Temperature axis with no authored physical analysis\n\
+         V1 in 0 1\n\
+         R1 in out 1k\n\
+         R2 out 0 1k TC1=0.01\n\
+         .TEMP -40 25 125\n\
+         .END\n",
+    )
+    .expect("write temperature-only deck");
+    let requested = dir.join("sweep.json");
+
+    let output = run(&deck, &requested);
+    assert!(
+        output.status.success(),
+        "temperature-only deck failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // `.TEMP` is a run axis, so the deck publishes one swept operating-point
+    // table under the axis namespace. The retired per-temperature analysis
+    // artifact (`sweep.temp.json`) must not reappear.
+    let mut files = std::fs::read_dir(&*dir)
+        .expect("list temperature-only outputs")
+        .map(|entry| entry.expect("directory entry").path())
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "json")
+        })
+        .collect::<Vec<_>>();
+    files.sort();
+    assert_eq!(
+        files.as_slice(),
+        [requested.clone()].as_slice(),
+        "temperature axis published an unexpected artifact set"
+    );
+
+    let document = read_json(&requested);
+    let temperatures = document["scale"]["values"]
+        .as_array()
+        .expect("swept temperature axis");
+    assert_eq!(temperatures.len(), 3);
+    let out = signal_real_values(&document, "V(out)");
+    assert_eq!(out.len(), 3);
+    assert!(
+        out[0] != out[2],
+        "a temperature-dependent divider produced identical cold and hot operating points"
+    );
+}

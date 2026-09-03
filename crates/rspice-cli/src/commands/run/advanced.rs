@@ -1010,16 +1010,7 @@ fn run_corner_job(
             error.get_or_insert(e.to_string());
         }
     } else {
-        for analysis in corner_netlist
-            .analyses
-            .iter()
-            .filter(|analysis| {
-                !matches!(analysis, rspice_core::netlist::AnalysisCommand::Four { .. })
-            })
-            .chain(corner_netlist.analyses.iter().filter(|analysis| {
-                matches!(analysis, rspice_core::netlist::AnalysisCommand::Four { .. })
-            }))
-        {
+        for analysis in super::analyses_in_execution_order(&corner_netlist) {
             if crate::abort::reason().is_some() {
                 passed = false;
                 error.get_or_insert_with(|| "cancelled".to_string());
@@ -1231,16 +1222,7 @@ fn run_corner_serial_source(
             passed = false;
         }
     } else {
-        for analysis in corner_netlist
-            .analyses
-            .iter()
-            .filter(|analysis| {
-                !matches!(analysis, rspice_core::netlist::AnalysisCommand::Four { .. })
-            })
-            .chain(corner_netlist.analyses.iter().filter(|analysis| {
-                matches!(analysis, rspice_core::netlist::AnalysisCommand::Four { .. })
-            }))
-        {
+        for analysis in super::analyses_in_execution_order(&corner_netlist) {
             ensure_not_cancelled(ctx)?;
             if let Err(e) = corner_ctx.run_analysis(analysis) {
                 ensure_not_cancelled(ctx)?;
