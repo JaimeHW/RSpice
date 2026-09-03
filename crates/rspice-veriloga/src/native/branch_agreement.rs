@@ -37,6 +37,29 @@ use super::census_models::shipped_census_models;
 /// Re-baselined the way [`super::code_identity`]'s digest is: with evidence
 /// naming what changed the count. A count that *rises* because a plan field was
 /// added is as much a change as one that falls.
+///
+/// # What these count, and what would move them
+///
+/// One thing this census does *not* do is compare two backends, or a VM
+/// against a JIT. It takes one postfix program, lifts it to SSA once, and
+/// compares that lift's **select** form of each conditional against its
+/// **branch** form — `Program::with_branching_conditionals` re-expressed as a
+/// real diamond — with both compiled through the same x64 emitter and executed
+/// against the same three fills. The MIR route is on both sides of every
+/// comparison; the CFG route is on neither.
+///
+/// That is why the corpus is built with [`build_model_plan_with_canonical_ir`]
+/// by name rather than with whatever
+/// [`crate::jit::cfg_plan_builder::build_default_model_plan`] returns. An entry
+/// that was never a postfix stream has no select form to compare against, so
+/// it does not belong here at all — which is exactly what `value_programs`'s
+/// block-entry refusal says.
+///
+/// So [`crate::jit::cfg_plan_builder::DEFAULT_PLAN_ROUTE`] does not enter into
+/// these two numbers, whichever way it points. What would move them is a change
+/// to the postfix lowering itself, or to which plan fields this census
+/// enumerates. The CFG route's own entries are measured against MIR's by
+/// [`super::cfg_mir_census`], which is the census that answers for them.
 const CENSUS_PROGRAMS: usize = 1_972_391;
 const CENSUS_EXECUTIONS: usize = 5_072_907;
 use crate::jit::expr::{NativeOp, NativeProgram};

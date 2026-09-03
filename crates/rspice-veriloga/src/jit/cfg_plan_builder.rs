@@ -1,15 +1,24 @@
-//! The CFG route's model plan.
+//! The CFG route's model plan, and the plan production compiles.
 //!
 //! [`build_model_plan_with_canonical_ir`] lowers every value entry from MIR's
 //! flat postfix stream. This is the second constructor: the same
-//! [`NativeModelPlan`], with `stamp_values`, `jacobians`, `reactive_jacobians`,
-//! `noise_psd` and `noise_exponents` lowered instead from the canonical CFG
-//! through [`lower_cfg_function`] and [`scalarize_lanes`], adopted as
+//! [`NativeModelPlan`], with `stamp_values`, `jacobians`, `reactive_jacobians`
+//! and — when [`CfgNoiseScope::Cfg`] is asked for — `noise_psd` and
+//! `noise_exponents` lowered instead from the canonical CFG through
+//! [`lower_cfg_function`] and [`scalarize_lanes`], adopted as
 //! [`PlanProgram::Blocks`].
 //!
-//! It is not the default. Production still builds the postfix plan; this one is
-//! reached by the CFG-versus-MIR census (`native::cfg_mir_census`), which is
-//! the evidence the flip is decided on.
+//! [`build_default_model_plan`] is what x64, AArch64 and the WASM JIT now all
+//! call, and [`DEFAULT_PLAN_ROUTE`] is the one thing that decides what it
+//! builds. On [`PlanRoute::Cfg`] it takes the CFG form of a module's residual,
+//! Jacobian and reactive-Jacobian entries, keeps every other field postfix, and
+//! falls the whole module back to the postfix plan when the CFG route refuses
+//! it. On [`PlanRoute::Postfix`] it calls [`build_model_plan_with_canonical_ir`]
+//! and nothing else.
+//!
+//! **The constant reads `Postfix`.** Everything below is built, tested and
+//! pinned; what it is waiting on is the evidence, and [`DEFAULT_PLAN_ROUTE`]
+//! carries that argument in full.
 //!
 //! # What stays postfix, and why that is not a half measure
 //!
@@ -21,6 +30,21 @@
 //! therefore what makes the two plans comparable at all: both fill `variables`
 //! by the same code, and the value entries then have to agree about what that
 //! operating point evaluates to.
+//!
+//! # Why noise stays postfix in the default plan
+//!
+//! Not conservatism: the two routes hold *different quantities* there, and the
+//! difference is measured rather than argued. `noise_process_schema >= 1` on
+//! thirty-four of the forty-three shipped modules, and under that schema the
+//! routing amplitude is folded into the grouped complex injection instead of
+//! into the PSD, so the shipped `psd_program` and the CFG process's `psd` stop
+//! being the same number — `angelov`'s `noise_exponents[9]` reads 2.0 through
+//! MIR and 0.0 through the CFG, `bsimsoi_va`'s `noise_psd[1]` reads 7.19e-28
+//! against 0.0. Taking the CFG's noise today would change what the runtime
+//! injects across most of the corpus, which is exactly the silently-wrong class
+//! this program refuses. Closing the CFG noise slice is its own lane; until it
+//! lands, production asks for [`CfgNoiseScope::Postfix`] and the CFG-versus-MIR
+//! census asks for [`CfgNoiseScope::Cfg`] so the gap stays measured.
 //!
 //! # All or nothing, per module
 //!
@@ -39,18 +63,18 @@
 //! refusing it would refuse thirty-four of the forty-three shipped modules and
 //! take every entry they *do* agree on down with them.
 //!
-//! # Why this module is `allow(dead_code)` outside `cfg(test)`
+//! # The fallback is loud
 //!
-//! Because it is: production compiles the postfix plan, and the only caller of
-//! this one is the CFG-versus-MIR census. That is the whole point of a
-//! non-default constructor, and the attribute is the honest statement of it
-//! rather than a silenced warning — W-F3c is what gives it a production caller,
-//! and this attribute comes off with the same commit that flips the default.
-//! Its reach is deliberately this module and the three items in
-//! [`crate::jit::plan_program`] that nothing *else* constructs; anything with a
-//! shipped caller is warned about normally.
-
-#![cfg_attr(not(test), allow(dead_code))]
+//! On [`PlanRoute::Cfg`], a refused module still compiles:
+//! [`build_default_model_plan`] returns the postfix plan for it, which is the
+//! plan every backend ships today, so a refusal costs accuracy nowhere and
+//! coverage nothing. What it must not do is happen quietly — a module that
+//! stops taking the CFG route because a pass regressed would otherwise look
+//! exactly like one that never took it. So the refusal goes to the same `[JIT]`
+//! seam a failed native compile uses, naming the module and the refusal class,
+//! and [`build_default_model_plan_reported`] hands it back so a test can pin
+//! it. Running the estate with the constant set to `Cfg` therefore censuses the
+//! fallback by class, which is how the counts in that lane's report were taken.
 //!
 //! # The one place a program is built rather than lowered
 //!
@@ -81,8 +105,8 @@ use super::{JitError, JitResult};
 use crate::canonical_ir::cfg_lower::CfgModel;
 use crate::canonical_ir::cfg_lower::CfgNoiseProcess;
 use crate::canonical_ir::{
-    AdSeed, CanonicalIrArtifact, CfgFunction, CfgStateAllocation, CfgValueKind, MirModel, ValueId,
-    differentiate, prune_cfg_to_outputs,
+    AdSeed, CanonicalIrArtifact, CfgBinaryOp, CfgFunction, CfgStateAllocation, CfgValueKind,
+    MirModel, ValueId, differentiate, prune_cfg_to_outputs,
 };
 use crate::codegen::state_renumbering::StateSlotMapping;
 use crate::codegen::{ColumnAxis, CompiledModel};
@@ -107,6 +131,25 @@ pub(crate) enum CfgPlanRefusal {
     StateAllocation,
     /// The derivative pass refused the body.
     Differentiate,
+    /// The body contains an operation the CFG derivative pass has no rule for.
+    ///
+    /// Checked *before* differentiating rather than reported by it, because the
+    /// pass does not report it: `binary_factor`'s scalar fallthrough in
+    /// [`crate::canonical_ir`]'s `ad` module is a `debug_assert!` over
+    /// `is_predicate` and a `None` result, so a hole there panics a debug build
+    /// and silently yields a zero derivative in a release one. A zero Jacobian
+    /// entry that should not be zero is precisely the silently-wrong class this
+    /// program refuses, and taking the postfix plan for the module is the only
+    /// answer available until the scalar rules exist.
+    ///
+    /// See [`DERIVATIVE_RULE_HOLES`] for the list and the rules that empty it.
+    DerivativeRuleMissing,
+    /// The module contains a construct the two routes are known to disagree
+    /// about, so the CFG plan would build and be wrong.
+    ///
+    /// See [`route_divergence`] for the list, each entry with the measurement
+    /// that put it there.
+    KnownDivergence,
     /// The lane scalarizer refused the differentiated body.
     Scalarize,
     /// A value the plan needs has no scalar after lane scalarization.
@@ -136,6 +179,8 @@ impl CfgPlanRefusal {
             Self::CfgLowering => "cfg-lowering",
             Self::StateAllocation => "state-allocation",
             Self::Differentiate => "differentiate",
+            Self::DerivativeRuleMissing => "derivative-rule-missing",
+            Self::KnownDivergence => "known-divergence",
             Self::Scalarize => "scalarize",
             Self::NoScalar => "no-scalar",
             Self::Lowering => "lowering",
@@ -200,6 +245,12 @@ pub(crate) struct CfgPlanReport {
     /// the whole shipped corpus — measured: thirty-four of the forty-three
     /// modules carry schema 1 — and the entries that *are* the same quantity on
     /// those modules would go unmeasured with them.
+    ///
+    /// Written on every build and read only by the census, because production
+    /// asks for [`CfgNoiseScope::Postfix`] and so takes no noise from the CFG
+    /// to classify. The lane that closes the CFG noise slice is what gives this
+    /// a production reader.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) grouped_noise: bool,
     /// Shipped Jacobian and reactive-Jacobian entries the CFG route's liveness
     /// found no value for, given the constant zero its analysis implies. Keyed
@@ -240,6 +291,9 @@ impl std::fmt::Display for CfgPlanEntry {
 #[derive(Debug)]
 pub(crate) struct CfgModelPlan {
     pub(crate) plan: NativeModelPlan,
+    /// Read by the CFG-versus-MIR census, which is what the figures are for.
+    /// [`build_default_model_plan`] takes the plan and drops this.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) report: CfgPlanReport,
 }
 
@@ -279,6 +333,170 @@ pub(crate) fn derivative_seeds(cfg: &CfgModel, mir: &MirModel) -> (Vec<AdSeed>, 
     (seeds, correction)
 }
 
+/// The binary operations the CFG derivative pass's *scalar* rules omit.
+///
+/// The pass has two rule sets. Its lane rules carry both of these already, and
+/// carry them correctly:
+///
+/// ```text
+/// d hypot(x, y) = (x·dx + y·dy) / hypot(x, y)
+/// d atan2(y, x) = (x·dy − y·dx) / (x² + y²)
+/// ```
+///
+/// Its scalar rules do not, and say so only in a debug build: `binary_factor`'s
+/// fallthrough asserts the operation is a predicate and otherwise returns
+/// `None`, which a release build reads as "the derivative is zero". The plan
+/// route reaches the scalar rules, so a `ddx` over either operation compiles to
+/// a Jacobian entry that is wrong rather than absent.
+///
+/// So this list exists to keep a wrong Jacobian out of a shipped plan, not to
+/// describe a limitation anybody intends to keep: the two rules are already
+/// written a thousand lines further down the same file, and the scalar cases
+/// are the same algebra without the lane plumbing. Adding them empties this
+/// list, and [`a_module_the_derivative_pass_has_no_rule_for_falls_back`] is what
+/// notices — it fails by *building* the module, which is the day the list and
+/// the refusal class both come out.
+///
+/// No shipped model reaches this — a search of the forty-three-module tree
+/// finds neither operation — so the generated-Rust backend, which runs the same
+/// pass, emits nothing that depends on the hole today.
+const DERIVATIVE_RULE_HOLES: &[CfgBinaryOp] = &[CfgBinaryOp::Hypot, CfgBinaryOp::Atan2];
+
+/// The construct in this module the two routes are known to disagree about, if
+/// there is one.
+///
+/// # Why a list rather than an argument
+///
+/// The CFG is a second lowering of the same source, and the two lowerings do
+/// not agree everywhere. Where they disagree the CFG plan still *builds* — it
+/// simply computes a different number — so nothing below this function can
+/// catch it. Each entry here was found by an estate test that the flip turned
+/// red, and each one is a wrong Jacobian or a wrong residual, not a rounding
+/// difference:
+///
+/// * **`$port_connected`.** `cfg_lower` folds it to the constant `1.0` outside
+///   its noise-metadata mode, and says so: "a consumer of this level that also
+///   has to serve partially connected instances needs a real value here, not
+///   this constant". A runtime instance may omit a trailing terminal, and then
+///   the CFG residual answers as though it were connected —
+///   `port_connected_reflects_omitted_trailing_terminal` measured 6.0 against
+///   0.0. Detected on the HIR, because by CFG time it is indistinguishable from
+///   a literal.
+/// * **`$simparam`.** `cfg_program` lowers it to the model's own fallback and
+///   records the divergence: the MIR route folds the simulator's table instead.
+///   `native_device_with_canonical_ir_executes_simparam_current_without_fallback`
+///   measured 0.0 against a gmin of 1e-12.
+/// * **A contribution-current probe.** `I(p, mid)` read inside another
+///   contribution: the MIR route reads the current the other equation wrote and
+///   treats it as frozen, and the CFG route inlines that equation and
+///   differentiates through it, so the two Jacobians are different matrices —
+///   `native_device_stamps_internal_node_current_probe_alias_jacobian_without_fallback`
+///   measured 4.5 against 2.5 on one entry. Detected as a shipped value entry
+///   with a non-empty contribution-current read set, which is what "this entry
+///   probes a current" means in the plan.
+/// * **An array variable.** The MIR route's value entries read the slots its
+///   assignment pass filled, including from a declaration initializer that is
+///   not part of the analog body at all; the CFG route recomputes inline and has
+///   nothing to recompute a declaration initializer from —
+///   `assignment_pattern_initializer_fills_elements` measured a conductance the
+///   initializer never reached.
+/// * **An event-controlled variable.** The CFG recomputes a variable inline
+///   where the postfix plan reads the slot the assignment pass wrote, and for a
+///   variable whose value is an accepted event state those are different
+///   quantities across a rejected step —
+///   `checkpoint_before_acceptance_excludes_step_event_variable_candidates`
+///   measured 2.0 against 1.0.
+///
+/// # This list is empirical, and that is a bound on what it is worth
+///
+/// It names what the estate's tests exposed, not what a proof of the CFG
+/// route's soundness would name. The instrument that would bound the rest is
+/// the forty-three-module CFG-versus-MIR census, which has never run past nine
+/// modules. Until it does, a construct no test covers can still diverge, and
+/// this function will not say so.
+fn route_divergence(
+    hir: &crate::canonical_ir::HirModel,
+    function: &CfgFunction,
+    postfix: &NativeModelPlan,
+) -> Option<String> {
+    if hir.expressions.iter().any(|expression| {
+        matches!(
+            &expression.kind,
+            crate::canonical_ir::hir::HirExprKind::SystemFunction { name, .. }
+                if name == "$port_connected"
+        )
+    }) {
+        return Some(
+            "$port_connected is folded to the constant 1.0 by the CFG lowering, which is wrong \
+             for an instance that omits a terminal"
+                .to_string(),
+        );
+    }
+    if !hir.arrays.is_empty() {
+        return Some(
+            "an array variable is filled by the MIR route's assignment pass, which the CFG \
+             route's inline recomputation does not reproduce for a declaration initializer"
+                .to_string(),
+        );
+    }
+    let dependencies = &postfix.current_dependencies;
+    let flat = |rows: &[Vec<usize>]| rows.iter().any(|set| !set.is_empty());
+    let nested = |rows: &[Vec<Vec<usize>>]| {
+        rows.iter()
+            .flatten()
+            .any(|set: &Vec<usize>| !set.is_empty())
+    };
+    let probes_a_current = !dependencies.assignment_current_pairs.is_empty()
+        || !dependencies.assignment_prior_currents.is_empty()
+        || !dependencies.post_assignment_current_pairs.is_empty()
+        || !dependencies.post_assignment_prior_currents.is_empty()
+        || flat(&dependencies.stamp_values)
+        || flat(&dependencies.stamp_value_prior_currents)
+        || nested(&dependencies.jacobians)
+        || nested(&dependencies.jacobian_prior_currents)
+        || nested(&dependencies.reactive_jacobians)
+        || nested(&dependencies.reactive_jacobian_prior_currents);
+    if probes_a_current {
+        return Some(
+            "a shipped value entry probes a contribution current, which the MIR route freezes \
+             and the CFG route differentiates through"
+                .to_string(),
+        );
+    }
+    function.values.iter().find_map(|value| match value.kind {
+        CfgValueKind::SimParam { .. } => Some(
+            "$simparam takes the model's fallback on the CFG route and the simulator's value on \
+             the MIR route"
+                .to_string(),
+        ),
+        CfgValueKind::BranchFlow(_) => Some(
+            "a branch-flow probe is frozen by the MIR route and differentiated through by the \
+             CFG route"
+                .to_string(),
+        ),
+        CfgValueKind::EventState(_) => Some(
+            "an event-controlled variable is read from its runtime slot by the MIR route and \
+             recomputed inline by the CFG route"
+                .to_string(),
+        ),
+        _ => None,
+    })
+}
+
+/// The first operation of `function` the derivative pass has no rule for.
+fn derivative_rule_hole(function: &CfgFunction) -> Option<CfgBinaryOp> {
+    function.values.iter().find_map(|value| match value.kind {
+        CfgValueKind::Binary { op, .. }
+        | CfgValueKind::LaneBinary { op, .. }
+        | CfgValueKind::LaneScalar { op, .. }
+            if DERIVATIVE_RULE_HOLES.contains(&op) =>
+        {
+            Some(op)
+        }
+        _ => None,
+    })
+}
+
 /// The block program a structurally absent entry gets: one instruction, one
 /// block, returning zero.
 fn constant_zero_program() -> JitResult<Program> {
@@ -290,15 +508,38 @@ fn constant_zero_program() -> JitResult<Program> {
     builder.finish(entry, entry)
 }
 
+/// Where a CFG-built plan's `noise_psd` and `noise_exponents` come from.
+///
+/// The one field of the plan the two routes are known to disagree about, so it
+/// is the one the caller chooses rather than the builder. See the module
+/// documentation for the measurement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CfgNoiseScope {
+    /// Lower them from the CFG with everything else. What the CFG-versus-MIR
+    /// census asks for, because measuring the gap is how it closes.
+    ///
+    /// Constructed only there until that lane lands; the attribute is the
+    /// honest statement of it rather than a silenced warning.
+    #[cfg_attr(not(test), allow(dead_code))]
+    Cfg,
+    /// Keep the postfix plan's. What production asks for.
+    ///
+    /// [`CfgPlanRefusal::NoiseUnpaired`] cannot fire under this scope: a
+    /// shipped source with no CFG process is not a disagreement about a value
+    /// nobody is taking from the CFG.
+    Postfix,
+}
+
 /// Build the CFG route's plan for `model`, or say why it cannot be built.
 ///
 /// The postfix plan is built first and kept: it validates the canonical
 /// artifact against the compiled model, and its assignment passes, parameter
 /// defaults, static conditions and published current pairs are the CFG plan's
-/// too. Only the five program-bearing value fields are replaced.
+/// too. Only the program-bearing value fields `noise` names are replaced.
 pub(crate) fn build_model_plan_from_canonical_cfg(
     model: &CompiledModel,
     artifact: &CanonicalIrArtifact,
+    noise: CfgNoiseScope,
 ) -> Result<CfgModelPlan, CfgPlanRefused> {
     let module = model.name.to_string();
     let refuse = |class: CfgPlanRefusal, detail: String| CfgPlanRefused {
@@ -342,6 +583,16 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
                 .map_or_else(|| "unknown".to_string(), ToString::to_string),
         )
     })?;
+
+    if let Some(op) = derivative_rule_hole(&cfg.function) {
+        return Err(refuse(
+            CfgPlanRefusal::DerivativeRuleMissing,
+            format!("the CFG derivative pass has no rule for {op:?}"),
+        ));
+    }
+    if let Some(divergence) = route_divergence(&artifact.hir, &cfg.function, &plan) {
+        return Err(refuse(CfgPlanRefusal::KnownDivergence, divergence));
+    }
 
     let (seeds, correction_lane) = derivative_seeds(&cfg, &artifact.mir);
     let mut differentiated = differentiate(&cfg.function, &seeds)
@@ -565,73 +816,83 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
     // primal; the shipped emitter's two-pass rule is kept because six shipped
     // models read a `ddx` inside a noise power and only the AD pass resolves
     // one.
-    let processes: HashMap<usize, &CfgNoiseProcess> = cfg
-        .noise_processes
-        .iter()
-        .filter_map(|process| {
-            usize::try_from(process.process_id)
-                .ok()
-                .map(|id| (id, process))
-        })
-        .collect();
-    let mut noise_psd = Vec::with_capacity(model.noise_sources.len());
-    let mut noise_exponents = Vec::with_capacity(model.noise_sources.len());
-    for (source_index, source) in model.noise_sources.iter().enumerate() {
-        let process = processes.get(&source.process_id).ok_or_else(|| {
-            refuse(
-                CfgPlanRefusal::NoiseUnpaired,
-                format!(
-                    "shipped source {source_index} names process {}",
-                    source.process_id
-                ),
-            )
-        })?;
-        let lower_noise = |value: ValueId,
-                           entry: CfgPlanEntry,
-                           report: &mut CfgPlanReport|
-         -> Result<PlanProgram, CfgPlanRefused> {
-            match lower(&cfg.function, value, entry, report) {
-                Ok(program) => Ok(program),
-                Err(primal) if primal.class == CfgPlanRefusal::Lowering => {
-                    let Some(resolved) = scalarized.scalar(value) else {
-                        return Err(primal);
-                    };
-                    let program = lower(&scalarized.function, resolved, entry, report)?;
-                    report.noise_from_differentiated += 1;
-                    Ok(program)
-                }
-                Err(other) => Err(other),
-            }
-        };
-        noise_psd.push(lower_noise(
-            process.psd,
-            CfgPlanEntry::NoisePsd(source_index),
-            &mut report,
-        )?);
-        report.noise_values += 1;
-        let exponent = match (process.exponent, source.exponent_program.as_ref()) {
-            (Some(exponent), Some(_)) => {
-                report.noise_values += 1;
-                Some(lower_noise(
-                    exponent,
-                    CfgPlanEntry::NoiseExponent(source_index),
+    //
+    // Skipped entirely under `CfgNoiseScope::Postfix`: nothing here would be
+    // kept, and running it would only let a noise-only refusal take a module's
+    // residual and Jacobian entries down with it.
+    let cfg_noise = match noise {
+        CfgNoiseScope::Postfix => None,
+        CfgNoiseScope::Cfg => {
+            let processes: HashMap<usize, &CfgNoiseProcess> = cfg
+                .noise_processes
+                .iter()
+                .filter_map(|process| {
+                    usize::try_from(process.process_id)
+                        .ok()
+                        .map(|id| (id, process))
+                })
+                .collect();
+            let mut noise_psd = Vec::with_capacity(model.noise_sources.len());
+            let mut noise_exponents = Vec::with_capacity(model.noise_sources.len());
+            for (source_index, source) in model.noise_sources.iter().enumerate() {
+                let process = processes.get(&source.process_id).ok_or_else(|| {
+                    refuse(
+                        CfgPlanRefusal::NoiseUnpaired,
+                        format!(
+                            "shipped source {source_index} names process {}",
+                            source.process_id
+                        ),
+                    )
+                })?;
+                let lower_noise = |value: ValueId,
+                                   entry: CfgPlanEntry,
+                                   report: &mut CfgPlanReport|
+                 -> Result<PlanProgram, CfgPlanRefused> {
+                    match lower(&cfg.function, value, entry, report) {
+                        Ok(program) => Ok(program),
+                        Err(primal) if primal.class == CfgPlanRefusal::Lowering => {
+                            let Some(resolved) = scalarized.scalar(value) else {
+                                return Err(primal);
+                            };
+                            let program = lower(&scalarized.function, resolved, entry, report)?;
+                            report.noise_from_differentiated += 1;
+                            Ok(program)
+                        }
+                        Err(other) => Err(other),
+                    }
+                };
+                noise_psd.push(lower_noise(
+                    process.psd,
+                    CfgPlanEntry::NoisePsd(source_index),
                     &mut report,
-                )?)
+                )?);
+                report.noise_values += 1;
+                let exponent = match (process.exponent, source.exponent_program.as_ref()) {
+                    (Some(exponent), Some(_)) => {
+                        report.noise_values += 1;
+                        Some(lower_noise(
+                            exponent,
+                            CfgPlanEntry::NoiseExponent(source_index),
+                            &mut report,
+                        )?)
+                    }
+                    (None, None) => None,
+                    (canonical, shipped) => {
+                        return Err(refuse(
+                            CfgPlanRefusal::NoiseUnpaired,
+                            format!(
+                                "source {source_index} exponent: canonical={} shipped={}",
+                                canonical.is_some(),
+                                shipped.is_some()
+                            ),
+                        ));
+                    }
+                };
+                noise_exponents.push(exponent);
             }
-            (None, None) => None,
-            (canonical, shipped) => {
-                return Err(refuse(
-                    CfgPlanRefusal::NoiseUnpaired,
-                    format!(
-                        "source {source_index} exponent: canonical={} shipped={}",
-                        canonical.is_some(),
-                        shipped.is_some()
-                    ),
-                ));
-            }
-        };
-        noise_exponents.push(exponent);
-    }
+            Some((noise_psd, noise_exponents))
+        }
+    };
 
     // ---- the read-sets the runtime validates a dispatch against ---------
     //
@@ -657,26 +918,157 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
         &reactive_jacobians,
         PlanProgram::branch_unknown_dependencies,
     );
-    dependencies.noise_psd = read_set(&noise_psd, PlanProgram::current_pair_dependencies);
-    dependencies.noise_psd_prior_currents =
-        read_set(&noise_psd, PlanProgram::prior_current_dependencies);
-    dependencies.noise_psd_branch_unknowns =
-        read_set(&noise_psd, PlanProgram::branch_unknown_dependencies);
-    dependencies.noise_exponents =
-        read_set_optional(&noise_exponents, PlanProgram::current_pair_dependencies);
-    dependencies.noise_exponent_prior_currents =
-        read_set_optional(&noise_exponents, PlanProgram::prior_current_dependencies);
-    dependencies.noise_exponent_branch_unknowns =
-        read_set_optional(&noise_exponents, PlanProgram::branch_unknown_dependencies);
+    // The noise read-sets stay the postfix plan's whenever its noise programs
+    // do: a recomputed set would then describe programs this plan does not
+    // carry, which is the same defect in the other direction.
+    if let Some((noise_psd, noise_exponents)) = &cfg_noise {
+        dependencies.noise_psd = read_set(noise_psd, PlanProgram::current_pair_dependencies);
+        dependencies.noise_psd_prior_currents =
+            read_set(noise_psd, PlanProgram::prior_current_dependencies);
+        dependencies.noise_psd_branch_unknowns =
+            read_set(noise_psd, PlanProgram::branch_unknown_dependencies);
+        dependencies.noise_exponents =
+            read_set_optional(noise_exponents, PlanProgram::current_pair_dependencies);
+        dependencies.noise_exponent_prior_currents =
+            read_set_optional(noise_exponents, PlanProgram::prior_current_dependencies);
+        dependencies.noise_exponent_branch_unknowns =
+            read_set_optional(noise_exponents, PlanProgram::branch_unknown_dependencies);
+    }
 
     plan.stamp_values = stamp_values;
     plan.jacobians = jacobians;
     plan.reactive_jacobians = reactive_jacobians;
-    plan.noise_psd = noise_psd;
-    plan.noise_exponents = noise_exponents;
+    if let Some((noise_psd, noise_exponents)) = cfg_noise {
+        plan.noise_psd = noise_psd;
+        plan.noise_exponents = noise_exponents;
+    }
     plan.validate_shape(model)
         .map_err(|error| refuse(CfgPlanRefusal::EquationsUnpaired, error.to_string()))?;
     Ok(CfgModelPlan { plan, report })
+}
+
+/// Which route builds a plan's `stamp_values`, `jacobians` and
+/// `reactive_jacobians`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PlanRoute {
+    /// MIR's flat postfix stream, for every field.
+    Postfix,
+    /// The canonical CFG for those three fields, the postfix stream for the
+    /// rest, and the postfix plan entire for a module the CFG route refuses.
+    ///
+    /// Constructed by the pins below and by anyone who sets
+    /// [`DEFAULT_PLAN_ROUTE`] to it — which nothing does yet, so outside
+    /// `cfg(test)` this variant has no constructor and the attribute is the
+    /// honest statement of that rather than a silenced warning. It comes off
+    /// with the commit that flips the constant. Note that only the *variant* is
+    /// unconstructed: everything the `Cfg` arm reaches is compiled, warned
+    /// about normally, and exercised by the pins.
+    #[cfg_attr(not(test), allow(dead_code))]
+    Cfg,
+}
+
+/// The route production compiles, and the one thing that decides it.
+///
+/// # It is `Postfix`, and this is the evidence
+///
+/// W-F3c built the `Cfg` route into the default constructor and then measured
+/// it against the estate. Six tests turned red, and not one was rounding: each
+/// was a construct the CFG lowering treats differently from MIR, where the CFG
+/// plan *builds* and computes another number. `$port_connected` (6.0 against
+/// 0.0 on an omitted terminal), `$simparam` (0.0 against a gmin of 1e-12), a
+/// contribution-current probe (a Jacobian entry of 4.5 against 2.5), an array
+/// variable's declaration initializer, an event-controlled variable across a
+/// rejected step (2.0 against 1.0), and `hypot`/`atan2` under a `ddx`, where
+/// the scalar derivative rules fall through to a zero.
+///
+/// [`route_divergence`] and [`DERIVATIVE_RULE_HOLES`] screen all six, and with
+/// them the estate is green. But that screen is *empirical*: it names what
+/// about twelve hundred tests happened to expose, not what a proof would name,
+/// and finding six on the first pass over an estate never written to test this
+/// route is the reason it is not enough. The instrument that would bound the
+/// rest is the forty-three-module CFG-versus-MIR census
+/// ([`crate::native::cfg_mir_census`]), which has never run past nine modules.
+///
+/// So the switch sits here at `Postfix` until that census runs 43/43 and the
+/// six classes are *closed* rather than screened. Flipping it is a one-line
+/// change and everything behind [`PlanRoute::Cfg`] is live, tested and pinned.
+///
+/// # What `Postfix` reaches, and why the shipped plan is byte-identical
+///
+/// The `Postfix` arm of [`build_default_model_plan_reported`] calls
+/// [`build_model_plan_with_canonical_ir`] and nothing else — no wrapper, no
+/// post-pass, no field replaced afterwards. That constructor, and every
+/// function it reaches, is unchanged by this lane: the diff touches
+/// [`build_model_plan_from_canonical_cfg`] and the items below it in this
+/// module, [`crate::jit::plan_program`]'s documentation and one attribute,
+/// [`crate::native::ssa`]'s attributes, and the four call sites' choice of
+/// entry point. `jit::plan_builder` is untouched. A model therefore compiles to
+/// the same plan, and so to the same machine code, as it did before the lane —
+/// which is what keeps [`crate::native::code_identity`]'s digest valid.
+pub(crate) const DEFAULT_PLAN_ROUTE: PlanRoute = PlanRoute::Postfix;
+
+/// The plan every backend compiles: [`DEFAULT_PLAN_ROUTE`]'s.
+///
+/// A refusal on the [`PlanRoute::Cfg`] route reaches the `[JIT]` log seam a
+/// failed native compile already uses, so a module that quietly stopped taking
+/// the CFG route would be visible in the same place a module that quietly
+/// stopped compiling is.
+pub(crate) fn build_default_model_plan(
+    model: &CompiledModel,
+    artifact: &CanonicalIrArtifact,
+) -> JitResult<NativeModelPlan> {
+    let (plan, refused) = build_default_model_plan_reported(model, artifact, DEFAULT_PLAN_ROUTE)?;
+    if let Some(refused) = refused {
+        log::warn!(
+            "[JIT] Model '{}' takes the postfix plan: {} ({})",
+            refused.module,
+            refused.class.name(),
+            refused.detail
+        );
+        #[cfg(debug_assertions)]
+        eprintln!(
+            "[JIT] Model '{}' takes the postfix plan: {} ({})",
+            refused.module,
+            refused.class.name(),
+            refused.detail
+        );
+    }
+    Ok(plan)
+}
+
+/// [`build_default_model_plan`] for a named route, handing the refusal back
+/// instead of logging it.
+///
+/// The `route` is a parameter rather than a read of [`DEFAULT_PLAN_ROUTE`] for
+/// one reason: the tests below pin [`PlanRoute::Cfg`]'s behaviour, and a pin
+/// that only exercised whatever the constant happens to say would go vacuously
+/// green the moment the constant said `Postfix`. Production passes the
+/// constant; the pins pass `Cfg`.
+///
+/// On the `Cfg` route the fallback rebuilds the postfix plan rather than
+/// recovering the one the CFG builder started from and threw away. That is one
+/// extra plan build, on the refusal path only, once per module per process —
+/// the native cache in [`crate::device`] keys on the module, so no model pays
+/// it twice — against a constructor whose refusals stay a single `?` each.
+pub(crate) fn build_default_model_plan_reported(
+    model: &CompiledModel,
+    artifact: &CanonicalIrArtifact,
+    route: PlanRoute,
+) -> JitResult<(NativeModelPlan, Option<CfgPlanRefused>)> {
+    match route {
+        // Nothing wraps this call. See [`DEFAULT_PLAN_ROUTE`] on why that is
+        // load-bearing rather than incidental.
+        PlanRoute::Postfix => Ok((build_model_plan_with_canonical_ir(model, artifact)?, None)),
+        PlanRoute::Cfg => {
+            match build_model_plan_from_canonical_cfg(model, artifact, CfgNoiseScope::Postfix) {
+                Ok(built) => Ok((built.plan, None)),
+                Err(refused) => {
+                    let plan = build_model_plan_with_canonical_ir(model, artifact)?;
+                    Ok((plan, Some(refused)))
+                }
+            }
+        }
+    }
 }
 
 fn read_set(entries: &[PlanProgram], read: fn(&PlanProgram) -> &[usize]) -> Vec<Vec<usize>> {
@@ -702,4 +1094,264 @@ fn read_set_optional(
                 .map_or_else(Vec::new, |entry| read(entry).to_vec())
         })
         .collect()
+}
+
+#[cfg(all(test, feature = "native"))]
+mod tests {
+    use super::{CfgPlanRefusal, PlanRoute, build_default_model_plan_reported};
+    use crate::canonical_ir::CanonicalIrArtifact;
+    use crate::codegen::CompiledModel;
+    use crate::jit::model_plan::NativeModelPlan;
+    use crate::jit::plan_builder::build_model_plan_with_canonical_ir;
+    use crate::{CompilerOptions, VerilogACompiler};
+
+    /// A resistor, a capacitor and a thermal noise source: one module carrying
+    /// all four kinds of value entry the flip decides between.
+    const RESISTOR_WITH_CHARGE_AND_NOISE: &str = r#"
+module cfg_default_plan(p, n);
+  inout p, n;
+  electrical p, n;
+  parameter real r = 2.0;
+  parameter real c = 1.0e-12;
+  // An expression default, so `parameter_defaults` carries a program at all.
+  parameter real g = 1.0 / r;
+  analog begin
+    I(p, n) <+ V(p, n) * g;
+    I(p, n) <+ ddt(c * V(p, n));
+    I(p, n) <+ white_noise(4.0 * 1.3806505e-23 * $temperature / r, "thermal");
+  end
+endmodule
+"#;
+
+    /// A `ddt` inside a `case` selector, which is one of the sites
+    /// `HirExecutedCorrespondence` does not cover: the canonical operator has no
+    /// executed counterpart, so [`CfgStateAllocation`](crate::canonical_ir::CfgStateAllocation)
+    /// cannot name its state record and the CFG route refuses the module.
+    ///
+    /// A real refusal from a real source, not an injected one. If a later lane
+    /// covers that site the CFG route will start building this module, and this
+    /// test will say so rather than going quietly green.
+    const OPERATOR_IN_A_CASE_SELECTOR: &str = r#"
+module cfg_plan_fallback(p, n);
+  inout p, n;
+  electrical p, n;
+  analog begin
+    case (ddt(V(p, n)) > 0.0)
+      1: I(p, n) <+ V(p, n);
+      default: I(p, n) <+ 2.0 * V(p, n);
+    endcase
+  end
+endmodule
+"#;
+
+    fn compile(source: &str) -> (CompiledModel, CanonicalIrArtifact) {
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler.compile(source).expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        (model, artifact)
+    }
+
+    fn forms(plan: &NativeModelPlan) -> Vec<(&'static str, &'static str)> {
+        let mut forms = Vec::new();
+        for entry in &plan.stamp_values {
+            forms.push(("stamp_values", entry.borrow().form_name()));
+        }
+        for entry in plan.jacobians.iter().flatten() {
+            forms.push(("jacobians", entry.borrow().form_name()));
+        }
+        for entry in plan.reactive_jacobians.iter().flatten() {
+            forms.push(("reactive_jacobians", entry.borrow().form_name()));
+        }
+        for entry in &plan.noise_psd {
+            forms.push(("noise_psd", entry.borrow().form_name()));
+        }
+        for entry in plan.noise_exponents.iter().flatten() {
+            forms.push(("noise_exponents", entry.borrow().form_name()));
+        }
+        for entry in plan.parameter_defaults.iter().flatten() {
+            forms.push(("parameter_defaults", entry.borrow().form_name()));
+        }
+        for entry in plan.static_conditions.iter().flatten() {
+            forms.push(("static_conditions", entry.borrow().form_name()));
+        }
+        forms
+    }
+
+    /// The flip, stated as the shape of one plan built on [`PlanRoute::Cfg`]:
+    /// that route owns the residual and both Jacobians, the MIR route owns
+    /// everything else.
+    #[test]
+    fn the_cfg_route_takes_its_values_from_the_cfg_and_its_noise_from_mir() {
+        let (model, artifact) = compile(RESISTOR_WITH_CHARGE_AND_NOISE);
+        let (plan, refused) = build_default_model_plan_reported(&model, &artifact, PlanRoute::Cfg)
+            .expect("the default plan builds");
+        assert!(
+            refused.is_none(),
+            "a resistor with a charge and a noise source is not a module the CFG route refuses: \
+             {refused:?}"
+        );
+
+        // Not vacuous: the module really does carry an entry of each kind.
+        assert_eq!(plan.stamp_values.len(), 3);
+        assert!(plan.jacobians.iter().flatten().count() > 0);
+        assert!(plan.reactive_jacobians.iter().flatten().count() > 0);
+        assert_eq!(plan.noise_psd.len(), 1);
+        assert!(plan.parameter_defaults.iter().flatten().count() > 0);
+
+        for (field, form) in forms(&plan) {
+            let expected = match field {
+                "stamp_values" | "jacobians" | "reactive_jacobians" => "block",
+                _ => "postfix",
+            };
+            assert_eq!(
+                form, expected,
+                "the default plan's {field} entries are {expected} programs"
+            );
+        }
+    }
+
+    /// A module the CFG route refuses takes the postfix plan whole — every
+    /// field, not the fields that happened to lower — and says which class
+    /// refused it.
+    #[test]
+    fn a_module_the_cfg_route_refuses_takes_the_postfix_plan_whole() {
+        let (model, artifact) = compile(OPERATOR_IN_A_CASE_SELECTOR);
+        let (plan, refused) = build_default_model_plan_reported(&model, &artifact, PlanRoute::Cfg)
+            .expect("the default plan builds");
+        let refused = refused.expect(
+            "a canonical operator in a case selector has no executed counterpart, so the CFG \
+             route cannot name its state record",
+        );
+        assert_eq!(refused.class, CfgPlanRefusal::StateAllocation);
+        assert_eq!(refused.module, "cfg_plan_fallback");
+
+        for (field, form) in forms(&plan) {
+            assert_eq!(
+                form, "postfix",
+                "a refused module's {field} entries come from the postfix plan"
+            );
+        }
+
+        // The fallback is the postfix plan, not a plan that resembles it: the
+        // same constructor, over the same artifact, produces the same shape.
+        let postfix = build_model_plan_with_canonical_ir(&model, &artifact)
+            .expect("the postfix plan builds for a module the CFG route refuses");
+        assert_eq!(forms(&plan), forms(&postfix));
+        assert_eq!(
+            plan.current_dependencies.stamp_values,
+            postfix.current_dependencies.stamp_values,
+        );
+        assert_eq!(
+            plan.current_dependencies.jacobians,
+            postfix.current_dependencies.jacobians,
+        );
+    }
+
+    /// `hypot` under a `ddx` is differentiable and the CFG pass has no rule for
+    /// it, so the module falls back rather than taking a zero derivative.
+    ///
+    /// This test fails by *building* the module, which is what it is for: the
+    /// day [`DERIVATIVE_RULE_HOLES`] gains the two rules, this says so instead
+    /// of quietly continuing to refuse a module it no longer needs to.
+    #[test]
+    fn a_module_the_derivative_pass_has_no_rule_for_falls_back() {
+        let source = r#"
+module cfg_plan_no_rule(p, n);
+  inout p, n;
+  electrical p, n;
+  analog I(p, n) <+ ddx(hypot(2.0 * V(p, n), V(p, n) + 3.0), V(p, n));
+endmodule
+"#;
+        let (model, artifact) = compile(source);
+        let (plan, refused) = build_default_model_plan_reported(&model, &artifact, PlanRoute::Cfg)
+            .expect("the default plan builds");
+        let refused = refused.expect(
+            "the CFG derivative pass has no rule for hypot, so a module differentiating one \
+             cannot take the CFG route",
+        );
+        assert_eq!(refused.class, CfgPlanRefusal::DerivativeRuleMissing);
+        for (field, form) in forms(&plan) {
+            assert_eq!(form, "postfix", "a refused module's {field} stay postfix");
+        }
+    }
+
+    /// Each construct in [`route_divergence`] falls the module back, and says
+    /// which construct did it.
+    ///
+    /// One source per entry rather than one source carrying all four, so a
+    /// screen that stopped working is attributed rather than covered for by the
+    /// next one in the list.
+    #[test]
+    fn every_known_divergence_falls_the_module_back() {
+        let cases: &[(&str, &str, &str)] = &[
+            (
+                "port-connected",
+                "$port_connected",
+                r#"
+module cfg_div_port(p, n, opt);
+  inout p, n, opt;
+  electrical p, n, opt;
+  analog I(p, n) <+ ($port_connected(opt) ? 10.0 : 1.0) * V(p, n);
+endmodule
+"#,
+            ),
+            (
+                "array",
+                "array variable",
+                r#"
+module cfg_div_array(p, n);
+  inout p, n;
+  electrical p, n;
+  real c[0:1] = '{0.5e-3, 1.5e-3};
+  analog I(p, n) <+ (c[0] + c[1]) * V(p, n);
+endmodule
+"#,
+            ),
+            (
+                "current-probe",
+                "contribution current",
+                r#"
+module cfg_div_probe(p, n);
+  inout p, n;
+  electrical p, n;
+  electrical mid;
+  analog begin
+    I(p, mid) <+ V(p, mid);
+    I(p) <+ I(p, mid) * V(p);
+  end
+endmodule
+"#,
+            ),
+            (
+                "simparam",
+                "$simparam",
+                r#"
+module cfg_div_simparam(p, n);
+  inout p, n;
+  electrical p, n;
+  analog I(p, n) <+ $simparam("gmin", 1.0e-15) * V(p, n);
+endmodule
+"#,
+            ),
+        ];
+        for (case, expected, source) in cases {
+            let (model, artifact) = compile(source);
+            let (plan, refused) =
+                build_default_model_plan_reported(&model, &artifact, PlanRoute::Cfg)
+                    .unwrap_or_else(|error| panic!("{case}: the default plan builds: {error}"));
+            let refused =
+                refused.unwrap_or_else(|| panic!("{case}: the CFG route must refuse this module"));
+            assert_eq!(refused.class, CfgPlanRefusal::KnownDivergence, "{case}");
+            assert!(
+                refused.detail.contains(expected),
+                "{case}: {} names the construct",
+                refused.detail
+            );
+            for (field, form) in forms(&plan) {
+                assert_eq!(form, "postfix", "{case}: {field} stay postfix");
+            }
+        }
+    }
 }

@@ -64,10 +64,6 @@
 //! that work twice would be slower than doing it once.
 
 #![cfg_attr(not(feature = "native"), allow(dead_code))]
-// Same standing as the block lowering it feeds: W-F is the lane that gives this
-// a shipped caller, and until then the census and the unit tests below are the
-// only ones.
-#![cfg_attr(not(test), allow(dead_code))]
 
 use std::collections::HashMap;
 

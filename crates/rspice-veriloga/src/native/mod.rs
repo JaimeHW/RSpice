@@ -93,8 +93,7 @@ pub fn compile_native_with_canonical_ir(
         Architecture::AArch64 => {
             #[cfg(target_arch = "aarch64")]
             {
-                let plan =
-                    crate::jit::plan_builder::build_model_plan_with_canonical_ir(model, artifact)?;
+                let plan = crate::jit::cfg_plan_builder::build_default_model_plan(model, artifact)?;
                 aarch64::compile_model_plan(model, &plan)
             }
             #[cfg(not(target_arch = "aarch64"))]

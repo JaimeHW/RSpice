@@ -90,11 +90,6 @@
 //! refuses rather than guesses when it cannot.
 
 #![cfg_attr(not(feature = "native"), allow(dead_code))]
-// The route is internal by design: W-D adds the Jacobians a shipped model
-// needs and W-F is what flips the default over, so until then the census and
-// the unit tests below are this module's only callers, and a shipped
-// constructor would be a second default nobody asked for.
-#![cfg_attr(not(test), allow(dead_code))]
 
 use smol_str::SmolStr;
 

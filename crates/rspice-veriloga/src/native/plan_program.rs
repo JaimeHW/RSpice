@@ -10,9 +10,11 @@
 //!
 //! Those are different types, so the plan cannot hold "the program" as one of
 //! them. [`PlanProgram`] is the sum: a plan entry carries whichever form its
-//! route produced, and each backend dispatches on it. Every shipped model still
-//! takes the postfix variant — the CFG route's flip is W-F3 — so this is a
-//! change of type, not of emitted code.
+//! route produced, and each backend dispatches on it. Since W-F3c the default
+//! plan takes the block variant for every module's `stamp_values`, `jacobians`
+//! and `reactive_jacobians`; `parameter_defaults`, `static_conditions`, noise
+//! and the assignment passes stay postfix, as does every field of a module the
+//! CFG route refuses.
 //!
 //! # What a block program has to carry that SSA does not
 //!
@@ -48,11 +50,6 @@ pub(crate) struct BlockProgram {
     branch_unknown_dependencies: Vec<usize>,
 }
 
-/// Dead outside `cfg(test)`, and precisely because of where its constructor
-/// sits: [`crate::jit::cfg_plan_builder`] is the only thing that adopts a block
-/// program, and until W-F3c flips the default it is reached only by the
-/// CFG-versus-MIR census. The attribute goes with that flip.
-#[cfg_attr(not(test), allow(dead_code))]
 impl BlockProgram {
     /// Adopt one lowered block program into a plan.
     ///
@@ -135,10 +132,6 @@ impl BlockProgram {
 /// bytecode side reaches under a different instruction, so classifying them
 /// here would risk refusing a module over a slot the mapping simply never
 /// counted. They are left unclassified on purpose.
-///
-/// Reached only through [`BlockProgram::adopt`], so it is dead outside
-/// `cfg(test)` for the same reason and until the same commit.
-#[cfg_attr(not(test), allow(dead_code))]
 fn state_slot(op: NativeOp) -> Option<(CanonicalStateFamily, usize)> {
     let (operator, slot) = match op {
         NativeOp::DdtState(slot) => (CanonicalStateOperator::Ddt, slot),
@@ -178,19 +171,17 @@ fn state_slot(op: NativeOp) -> Option<(CanonicalStateFamily, usize)> {
 /// [`build_model_plan_with_canonical_ir`](crate::jit::plan_builder::build_model_plan_with_canonical_ir)
 /// builds every entry as `Postfix`, and
 /// [`build_model_plan_from_canonical_cfg`](crate::jit::cfg_plan_builder::build_model_plan_from_canonical_cfg)
-/// builds the five value fields as `Blocks`. The postfix one is still what
-/// production compiles; which of the two becomes the default is W-F3c's
-/// decision, taken on the CFG-versus-MIR census's evidence.
+/// builds the value fields as `Blocks`. What production compiles is
+/// [`build_default_model_plan`](crate::jit::cfg_plan_builder::build_default_model_plan),
+/// which composes the two.
 #[derive(Debug, Clone)]
 pub(crate) enum PlanProgram {
-    /// The MIR route's flat operation stream. Every shipped model's entries.
+    /// The MIR route's flat operation stream. Parameter defaults, static
+    /// conditions and noise on every module; every field of a module the CFG
+    /// route refuses.
     Postfix(NativeProgram),
-    /// The CFG route's blocks and terminators.
-    ///
-    /// Constructed only by [`crate::jit::cfg_plan_builder`], which production
-    /// does not call yet, so this variant is dead outside `cfg(test)` until
-    /// W-F3c flips the default. Every backend already *consumes* it.
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// The CFG route's blocks and terminators. Residual, Jacobian and
+    /// reactive-Jacobian entries, on every module the CFG route builds.
     Blocks(BlockProgram),
 }
 

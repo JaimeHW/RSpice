@@ -38,12 +38,22 @@ const SHIPPED_CENSUS_MODELS: usize = 43;
 /// move this pin exists to prevent — it converts a detector into a rubber
 /// stamp.
 ///
-/// The value below was measured on this tree by the W-F3b lane. The previous
-/// value, `fe9a2072…`, moved to `e00c6b88…` at W-F3a (`84ba2c2bb`), which ruled
-/// `limexp`'s threshold once for the whole estate: exactly five modules changed
-/// — `angelov`, `angelov_gan`, `hicumL0va`, `hicumL2va` and `vbic_4T_et_cf`,
-/// the five that call `limexp` — and the other thirty-eight were digest
-/// identical across that change.
+/// The day [`crate::jit::cfg_plan_builder::DEFAULT_PLAN_ROUTE`] becomes
+/// `PlanRoute::Cfg`, this value moves — the census compiles through
+/// [`crate::native::x64::compile_model_with_canonical_ir`], which is the path
+/// that switch decides — and the evidence that re-baselines it is the same
+/// per-module list, read a particular way: every module the fallback logs by
+/// name (`[JIT] Model '…' takes the postfix plan`) must be digest *identical*,
+/// because nothing about its plan changed, and every module that does not move
+/// without appearing in that log did not take the CFG route after all.
+///
+/// The value below was measured by the W-F3b lane and remains valid: production
+/// builds the postfix plan. The previous value, `fe9a2072…`, moved to
+/// `e00c6b88…` at W-F3a (`84ba2c2bb`),
+/// which ruled `limexp`'s threshold once for the whole estate: exactly five
+/// modules changed — `angelov`, `angelov_gan`, `hicumL0va`, `hicumL2va` and
+/// `vbic_4T_et_cf`, the five that call `limexp` — and the other thirty-eight
+/// were digest identical across that change.
 const SHIPPED_CENSUS_DIGEST: &str =
     "e00c6b8818e88bba07840df35b68f69687bba439910b56b2b76c9ffe5ae601a3";
 

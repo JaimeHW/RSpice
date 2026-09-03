@@ -1960,6 +1960,14 @@ mod transition_derivative_tests {
     use super::*;
     use crate::ir::{IrExpr, TransitionSiteId};
 
+    fn nonconstant_rise_time() -> IrExpr {
+        IrExpr::Binary(
+            BinaryOp::Add,
+            Box::new(IrExpr::Voltage(1, usize::MAX)),
+            Box::new(IrExpr::Const(0.5)),
+        )
+    }
+
     fn transition(site: TransitionSiteId, derivative: bool) -> IrExpr {
         if derivative {
             IrExpr::TransitionDerivative {
@@ -1967,7 +1975,7 @@ mod transition_derivative_tests {
                 input: Box::new(IrExpr::Voltage(0, usize::MAX)),
                 input_derivative: Box::new(IrExpr::Const(1.0)),
                 delay: Some(Box::new(IrExpr::Const(0.25))),
-                rise_time: Some(Box::new(IrExpr::Const(0.5))),
+                rise_time: Some(Box::new(nonconstant_rise_time())),
                 fall_time: None,
             }
         } else {
@@ -1975,7 +1983,7 @@ mod transition_derivative_tests {
                 site,
                 expr: Box::new(IrExpr::Voltage(0, usize::MAX)),
                 delay: Some(Box::new(IrExpr::Const(0.25))),
-                rise_time: Some(Box::new(IrExpr::Const(0.5))),
+                rise_time: Some(Box::new(nonconstant_rise_time())),
                 fall_time: None,
             }
         }
@@ -2007,22 +2015,34 @@ mod transition_derivative_tests {
         ));
         assert_eq!(generator.transition_filter_count.get(), 1);
         assert_eq!(generator.transition_sites.borrow().get(&site), Some(&0));
-        assert!(matches!(
-            &primal.instructions[primal.instructions.len() - 3..],
-            [
-                Instruction::PushConst(0.5),
-                Instruction::PushConst(0.5),
-                Instruction::TransitionState(0)
-            ]
-        ));
-        assert!(matches!(
-            &derivative.instructions[derivative.instructions.len() - 3..],
-            [
-                Instruction::PushConst(0.5),
-                Instruction::PushConst(0.5),
-                Instruction::TransitionStateDerivative(0)
-            ]
-        ));
+
+        // An omitted fall time re-emits the rise expression, so the slots
+        // between the delay and the terminating filter instruction are the
+        // rise expression's own emission twice, back to back.
+        let rise_ops: Vec<String> = generator
+            .compile_expr(&nonconstant_rise_time(), &emit_context)
+            .expect("compile the rise expression on its own")
+            .instructions
+            .iter()
+            .map(|instruction| format!("{instruction:?}"))
+            .collect();
+        let expected: Vec<String> = rise_ops.iter().chain(rise_ops.iter()).cloned().collect();
+        for (label, instructions) in [
+            ("primal", &primal.instructions),
+            ("derivative", &derivative.instructions),
+        ] {
+            let end = instructions.len() - 1;
+            let start = end - expected.len();
+            let actual: Vec<String> = instructions[start..end]
+                .iter()
+                .map(|instruction| format!("{instruction:?}"))
+                .collect();
+            assert_eq!(actual, expected, "{label} rise and fall slots");
+            assert!(
+                matches!(instructions[start - 1], Instruction::PushConst(0.25)),
+                "{label} delay must sit immediately before the rise slot"
+            );
+        }
     }
 }
 
