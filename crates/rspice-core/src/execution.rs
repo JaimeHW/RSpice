@@ -18,8 +18,7 @@ pub use bounded_io::{BoundedAbortWriter, BoundedWriteFailure};
 pub use capability::{
     ANALYSIS_CAPABILITY_MATRIX, AnalysisResultCapability, AnalysisResultKind, MappingStatus,
     NonUiSurface, SIGNAL_CAPABILITY_MATRIX, SignalCapability, SurfaceCapability,
-    analysis_result_capability, analysis_result_kind, render_non_ui_capability_matrix,
-    signal_capability,
+    analysis_result_capability, analysis_result_kind, signal_capability,
 };
 pub use fingerprint::{topology_fingerprint, topology_fingerprint_with_abort};
 pub use materialized::{

@@ -78,6 +78,18 @@ Verified against `src/device/`:
 inductors (`K`), saturable inductor, and a Jiles-Atherton magnetic
 hysteresis model.
 
+Linear-inductor geometry is dialect-specific. Under the ngspice and
+`BestAvailable` policies a model card may synthesize inductance from `NT` with
+`LENGTH` and `DIA` or `CSECT` (optionally `MU`) using ngspice's Lundin/Nagaoka
+correction, qualified in `tests/inductor_geometry.rs` against the analytical
+impedance. Under the Xyce policy the Xyce Reference Guide 7.10 (section 2.3.5)
+defines a linear inductor as a required instance `L` scaled by a dimensionless
+model `L`, the temperature polynomial, and multiplicity, with no geometry
+parameters at all; RSpice therefore requires the instance value and rejects
+`NT`, `LENGTH`, `DIA`, `CSECT`, and `MU` on a Xyce model card even when an
+instance `L` is present, rather than silently ignoring an authored geometry.
+Nonlinear `CORE` mutual-inductor geometry is a separate contract.
+
 **Semiconductors** (`semiconductor/`) — junction diode; BJT (legacy
 Gummel-Poon with no `LEVEL` or `LEVEL=1/2`, native VBIC at
 `LEVEL=4/9/11/12/13`). Other BJT levels are rejected with a typed error
@@ -224,6 +236,18 @@ them as `--integration-method euler|trap|gear|trapgear`). Timestep control
 is LTE-based with breakpoint handling; a transient checkpoint/resume path
 exists (`engine/transient/`, exercised by `tests/transient_checkpoint.rs`
 and the CLI's `--checkpoint`/`--resume`).
+
+Integration order is deliberately bounded to 1 and 2. Xyce's documented
+`TIMEINT` contract defines its variable-order trapezoidal and Gear methods over
+orders 1 and 2 only (Users' Guide 7.10, section 7.3.4), so `.OPTIONS TIMEINT
+MINORD`/`MAXORD` accept only those values; any other request, including
+inverted bounds, is a typed parse or configuration error, never a silent clamp.
+The parser (`netlist/parser/commands.rs`), `SimulationConfig` validation
+(`config.rs`), and the transient checkpoint identity enforce the same bound,
+and `tests/transient_integration_order.rs` qualifies second-order behaviour
+against an ngspice BSIM3 timing oracle. Higher-order Gear/BDF would need the
+full history, device-state, checkpoint, stability, and manufactured-solution
+qualification program, not a wider option range.
 
 Advanced analyses (`analysis/advanced/`):
 
