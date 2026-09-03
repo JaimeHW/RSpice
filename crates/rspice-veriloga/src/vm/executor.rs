@@ -333,23 +333,11 @@ impl<'a> Vm<'a> {
             Instruction::Min => self.binary_op(|a, b| a.min(b))?,
             Instruction::Max => self.binary_op(|a, b| a.max(b))?,
 
-            // Limited exponential for convergence
-            // Uses linear extrapolation beyond the limit to prevent overflow
-            // while maintaining C0 and C1 continuity
-            Instruction::Limexp => self.unary_op(|a| {
-                const LIMIT: f64 = 40.0; // exp(40) ~= 2.4e17
-                if a > LIMIT {
-                    let exp_limit = LIMIT.exp();
-                    // Linear extrapolation: f(x) = f(limit) + f'(limit) * (x - limit)
-                    // For exp, f'(x) = exp(x), so f'(limit) = exp(limit)
-                    exp_limit * (1.0 + a - LIMIT)
-                } else if a < -LIMIT {
-                    // For very negative values, return essentially 0
-                    (-LIMIT).exp()
-                } else {
-                    a.exp()
-                }
-            })?,
+            // Limited exponential for convergence: linear extrapolation
+            // beyond the threshold, C0 and C1 continuous there. The threshold
+            // belongs to the workspace, not to this interpreter — see
+            // `rspice_veriloga_runtime::rspice_limexp`.
+            Instruction::Limexp => self.unary_op(rspice_veriloga_runtime::rspice_limexp)?,
             Instruction::LimitedExp => self.unary_op(limited_exp)?,
 
             // Inverse trigonometric functions

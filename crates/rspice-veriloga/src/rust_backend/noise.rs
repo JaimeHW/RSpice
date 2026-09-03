@@ -128,6 +128,9 @@ pub(super) fn generate_noise_file(
         options.runtime_path, options.runtime_path
     )
     .expect("write generated noise imports");
+    // Literal text for the same reason as `expr.rs`'s thresholds: these bytes
+    // are in the bundle digest. The assertion is what ties them to the ruling.
+    const _: () = assert!(rspice_veriloga_runtime::LIMEXP_MAX == 5.54062238439351e34);
     out.push_str("const LIMEXP_MAX: f64 = 5.54062238439351e34;\n");
     out.push_str("const THERMAL_VOLTAGE_PER_K: f64 = 1.380649e-23 / 1.602176634e-19;\n\n");
 

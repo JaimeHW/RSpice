@@ -464,27 +464,12 @@ impl<'a> SmallSignalVm<'a> {
             Instruction::Tanh => self.unary_real("Tanh", f64::tanh)?,
             Instruction::Min => self.binary_real("Min", f64::min)?,
             Instruction::Max => self.binary_real("Max", f64::max)?,
-            Instruction::Limexp => self.unary_real("Limexp", |value| {
-                const LIMIT: f64 = 40.0;
-                if value > LIMIT {
-                    LIMIT.exp() * (1.0 + value - LIMIT)
-                } else if value < -LIMIT {
-                    (-LIMIT).exp()
-                } else {
-                    value.exp()
-                }
-            })?,
-            Instruction::LimitedExp => self.unary_real("LimitedExp", |value| {
-                const LIMIT: f64 = 80.0;
-                const LOW_VALUE: f64 = 1.804851387e-35;
-                if value > LIMIT {
-                    LIMIT.exp() * (1.0 + value - LIMIT)
-                } else if value < -LIMIT {
-                    LOW_VALUE
-                } else {
-                    value.exp()
-                }
-            })?,
+            Instruction::Limexp => {
+                self.unary_real("Limexp", rspice_veriloga_runtime::rspice_limexp)?
+            }
+            Instruction::LimitedExp => {
+                self.unary_real("LimitedExp", rspice_veriloga_runtime::rspice_limited_exp)?
+            }
             Instruction::Asin => self.unary_real("Asin", f64::asin)?,
             Instruction::Acos => self.unary_real("Acos", f64::acos)?,
             Instruction::Atan => self.unary_real("Atan", f64::atan)?,

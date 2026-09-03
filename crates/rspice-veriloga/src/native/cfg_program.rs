@@ -713,13 +713,11 @@ impl Lowerer<'_> {
             // nothing today but would be a shipped surface change for a value
             // only the derivative route computes.
             //
-            // The constants are the canonical level's, not the shipped native
-            // helper's: `cfg_eval`'s `limited_exp_derivative`, the generated
-            // bundle's `rspice_limited_exp_derivative` and the complex-step
-            // oracle all use a threshold of 80, and this route is defined
-            // against that interpreter. (`NativeOp::UnaryMath(Limexp)` uses 40
-            // and disagrees with all four; that is a separate shipped defect,
-            // and reproducing it here would be adopting it.)
+            // The constants come from the workspace's one definition:
+            // `cfg_eval`'s `limited_exp_derivative`, the generated bundle's
+            // `rspice_limited_exp_derivative` and the complex-step oracle all
+            // read `rspice_veriloga_runtime::LIMITED_EXP_THRESHOLD`, and this
+            // route is defined against that interpreter.
             CfgValueKind::Unary {
                 op: CfgUnaryOp::LimitedExpDerivative,
                 input,
@@ -828,18 +826,15 @@ impl Lowerer<'_> {
 /// runtime's clamped exponential, which the derivative pass introduces and
 /// which no primal analog body contains, so there is nothing to lower rather
 /// than something to approximate.
-/// Where `limexp`'s derivative stops following the exponential.
+/// Where the clamped exponential's derivative stops following the exponential.
 ///
-/// The canonical level's figure, held here rather than imported because
-/// `cfg_eval`'s copy is private and duplicating a constant with the reason
-/// beats widening a module's surface for it. `crate::canonical_ir::cfg_eval`
-/// and `rspice_veriloga_runtime::rspice_limited_exp_derivative` are the two
-/// definitions this must not drift from.
-const LIMEXP_DERIVATIVE_THRESHOLD: f64 = 80.0;
+/// The workspace's one figure, shared with `crate::canonical_ir::cfg_eval` and
+/// `rspice_veriloga_runtime::rspice_limited_exp_derivative` rather than
+/// transcribed again.
+const LIMEXP_DERIVATIVE_THRESHOLD: f64 = rspice_veriloga_runtime::LIMITED_EXP_THRESHOLD;
 
-/// The value the derivative holds above the threshold: `exp(80)`, rounded as
-/// the two definitions above round it.
-const LIMEXP_DERIVATIVE_MAX: f64 = 5.540_622_384_393_51e34;
+/// The value the derivative holds above the threshold: `exp(80)`.
+const LIMEXP_DERIVATIVE_MAX: f64 = rspice_veriloga_runtime::LIMEXP_MAX;
 
 fn unary_op(op: CfgUnaryOp) -> Option<NativeOp> {
     let math = |op| Some(NativeOp::UnaryMath(op));

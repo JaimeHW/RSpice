@@ -55,6 +55,7 @@ use crate::native::assignment::shareable_batch_ranges;
 use crate::native::expr::{BinaryMathOp, IntegerBinaryOp, UnaryMathOp, runtime_integer_operation};
 use crate::native::expr::{CompareOp, ExtremumOp, LogicalOp, NativeOp, NativeProgram, VoltageNode};
 use crate::native::{EvalContext, JitError, JitResult, NativeStampKernelIo};
+use rspice_veriloga_runtime::{LIMEXP_MAX, LIMEXP_THRESHOLD};
 
 const MODEL: &str = "native-x64";
 const VOLTAGES_OFFSET: i32 = std::mem::offset_of!(EvalContext, voltages) as i32;
@@ -2125,29 +2126,30 @@ impl FunctionCompiler {
         }
     }
 
+    /// Inline `limexp`, in the two branches
+    /// [`rspice_veriloga_runtime::rspice_limexp`] defines.
+    ///
+    /// Two branches and no lower clamp: below the threshold this *is* `exp`,
+    /// which underflows to zero on its own. A NaN argument compares unordered
+    /// against the threshold, so it must reach the `exp` call rather than the
+    /// linear arm — hence the parity test before the magnitude test.
     fn emit_limexp(&mut self, target: Xmm) -> JitResult<()> {
-        self.emit_literal_compare(target, 40.0);
-        let high_jump = self.encoder.jcc_rel32_placeholder(ConditionCode::Above);
-
-        self.emit_literal_compare(target, -40.0);
+        self.emit_literal_compare(target, LIMEXP_THRESHOLD);
         let exp_jump = self.encoder.jcc_rel32_placeholder(ConditionCode::Parity);
-        let low_jump = self.encoder.jcc_rel32_placeholder(ConditionCode::Below);
+        let high_jump = self
+            .encoder
+            .jcc_rel32_placeholder(ConditionCode::AboveOrEqual);
 
         self.patch_rel32_to_current(exp_jump)?;
         self.emit_unary_helper_call(target, rspice_exp);
         let exp_done = self.encoder.jmp_rel32_placeholder();
 
-        self.patch_rel32_to_current(low_jump)?;
-        self.emit_literal_load(target, (-40.0_f64).exp());
-        let low_done = self.encoder.jmp_rel32_placeholder();
-
         self.patch_rel32_to_current(high_jump)?;
+        self.emit_literal_binary_op(target, LIMEXP_THRESHOLD, BinaryOp::Sub);
         self.emit_literal_binary_op(target, 1.0, BinaryOp::Add);
-        self.emit_literal_binary_op(target, 40.0, BinaryOp::Sub);
-        self.emit_literal_binary_op(target, 40.0_f64.exp(), BinaryOp::Mul);
+        self.emit_literal_binary_op(target, LIMEXP_MAX, BinaryOp::Mul);
 
         self.patch_rel32_to_current(exp_done)?;
-        self.patch_rel32_to_current(low_done)?;
         Ok(())
     }
 
@@ -11724,8 +11726,8 @@ mod tests {
             (
                 "limexp-linear",
                 Instruction::Limexp,
-                45.0,
-                runtime_limexp(45.0),
+                85.0,
+                runtime_limexp(85.0),
             ),
             (
                 "limexp-negative",
@@ -11919,10 +11921,11 @@ mod tests {
             unsafe { std::mem::transmute(entry) };
         for (name, input) in [
             ("middle", 0.5),
-            ("upper-threshold", 40.0),
-            ("lower-threshold", -40.0),
-            ("high-linear", 45.0),
-            ("low-clamped", -50.0),
+            ("just-below-threshold", 79.999_999_999),
+            ("at-threshold", rspice_veriloga_runtime::LIMEXP_THRESHOLD),
+            ("high-linear", 85.0),
+            ("deep-negative", -50.0),
+            ("underflowed", -800.0),
             ("nan", f64::NAN),
         ] {
             let params = [input];
@@ -12142,8 +12145,8 @@ mod tests {
             (
                 "limexp-linear",
                 Instruction::Limexp,
-                45.0,
-                runtime_limexp(45.0),
+                85.0,
+                runtime_limexp(85.0),
             ),
             (
                 "limexp-negative",
@@ -13696,16 +13699,7 @@ mod tests {
     }
 
     fn runtime_limexp(value: f64) -> f64 {
-        const LIMIT: f64 = 40.0;
-        let value = std::hint::black_box(value);
-        if value > LIMIT {
-            let exp_limit = LIMIT.exp();
-            exp_limit * (1.0 + value - LIMIT)
-        } else if value < -LIMIT {
-            (-LIMIT).exp()
-        } else {
-            value.exp()
-        }
+        rspice_veriloga_runtime::rspice_limexp(std::hint::black_box(value))
     }
 
     fn runtime_limited_exp(value: f64) -> f64 {

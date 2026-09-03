@@ -16,6 +16,7 @@
 //! design: every block may read them and none owns them. So a read that finds
 //! no value asks whether the value is a leaf before reporting it undefined.
 
+use rspice_veriloga_runtime::{LIMEXP_MAX, LIMEXP_THRESHOLD, LIMITED_EXP_THRESHOLD};
 use smol_str::SmolStr;
 use std::collections::{HashMap, HashSet};
 
@@ -66,24 +67,26 @@ pub trait CfgScalar: Copy {
     fn floor(self) -> Self;
     fn ceil(self) -> Self;
 
-    /// `exp` with the argument clamped, matching the runtime's `limexp`.
+    /// `exp`, made linear past the threshold: the generic reading of
+    /// [`rspice_veriloga_runtime::rspice_limexp`], whose two constants it
+    /// shares.
     fn limexp(self) -> Self {
         if self.real() < LIMEXP_THRESHOLD {
             self.exp()
         } else {
-            let scale = Self::from_f64(LIMEXP_THRESHOLD.exp());
+            let scale = Self::from_f64(LIMEXP_MAX);
             let excess = self.sub(Self::from_f64(LIMEXP_THRESHOLD));
             scale.mul(excess.add(Self::from_f64(1.0)))
         }
     }
 
-    /// The runtime's bounded exponential, clamped at both ends.
+    /// The compact-model bounded exponential, clamped at both ends.
     fn limited_exp(self) -> Self {
-        if self.real() > LIMEXP_THRESHOLD {
+        if self.real() > LIMITED_EXP_THRESHOLD {
             let scale = Self::from_f64(LIMEXP_MAX);
-            let excess = self.sub(Self::from_f64(LIMEXP_THRESHOLD));
+            let excess = self.sub(Self::from_f64(LIMITED_EXP_THRESHOLD));
             scale.mul(excess.add(Self::from_f64(1.0)))
-        } else if self.real() < -LIMEXP_THRESHOLD {
+        } else if self.real() < -LIMITED_EXP_THRESHOLD {
             Self::from_f64(LIMITED_EXP_FLOOR)
         } else {
             self.exp()
@@ -91,9 +94,9 @@ pub trait CfgScalar: Copy {
     }
 
     fn limited_exp_derivative(self) -> Self {
-        if self.real() > LIMEXP_THRESHOLD {
+        if self.real() > LIMITED_EXP_THRESHOLD {
             Self::from_f64(LIMEXP_MAX)
-        } else if self.real() < -LIMEXP_THRESHOLD {
+        } else if self.real() < -LIMITED_EXP_THRESHOLD {
             Self::from_f64(0.0)
         } else {
             self.exp()
@@ -101,9 +104,7 @@ pub trait CfgScalar: Copy {
     }
 }
 
-const LIMEXP_THRESHOLD: f64 = 80.0;
-const LIMEXP_MAX: f64 = 5.540_622_384_393_51e34;
-const LIMITED_EXP_FLOOR: f64 = 1.804_851_387e-35;
+const LIMITED_EXP_FLOOR: f64 = rspice_veriloga_runtime::LIMITED_EXP_FLOOR;
 
 impl CfgScalar for f64 {
     fn from_f64(value: f64) -> Self {

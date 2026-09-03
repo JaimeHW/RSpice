@@ -9652,15 +9652,7 @@ pub(crate) fn constant_unary_math(op: UnaryMathOp, value: f64) -> f64 {
 }
 
 fn constant_limexp(value: f64) -> f64 {
-    const LIMIT: f64 = 40.0;
-    if value > LIMIT {
-        let exp_limit = LIMIT.exp();
-        exp_limit * (1.0 + value - LIMIT)
-    } else if value < -LIMIT {
-        (-LIMIT).exp()
-    } else {
-        value.exp()
-    }
+    rspice_veriloga_runtime::rspice_limexp(value)
 }
 
 fn constant_limited_exp(value: f64) -> f64 {
