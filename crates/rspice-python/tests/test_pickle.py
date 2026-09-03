@@ -914,10 +914,40 @@ class TestCompressedTransientResult:
             "branch_names",
             "device_parameter_names",
             "store_names",
+            "channel_names",
+            "digital_trace_names",
+            "real_trace_names",
+            "analysis_id",
+            "coordinate_label",
+            "topology_fingerprint",
         ):
             assert getattr(restored, name) == getattr(original, name), name
         np.testing.assert_array_equal(restored.time, original.time)
         np.testing.assert_array_equal(restored.step_sizes, original.step_sizes)
+
+        # Descriptor identity, units and the per-sample validity mask are part
+        # of the container, so they survive the process boundary too.
+        assert original.channel_names, "compressed pickle channel coverage is non-vacuous"
+        for channel in original.channel_names:
+            assert restored.channel_unit(channel) == original.channel_unit(channel)
+            assert restored.channel_availability(channel) == original.channel_availability(
+                channel
+            )
+            assert restored.channel_absence(channel) == original.channel_absence(channel)
+
+        # Post-process products computed on the exact accepted trajectory.
+        assert len(restored.measurements) == len(original.measurements)
+        for restored_measurement, original_measurement in zip(
+            restored.measurements, original.measurements
+        ):
+            assert restored_measurement.name == original_measurement.name
+            assert restored_measurement.value == original_measurement.value
+        assert len(restored.fourier_results) == len(original.fourier_results)
+        for restored_spectrum, original_spectrum in zip(
+            restored.fourier_results, original.fourier_results
+        ):
+            assert restored_spectrum.dc_component == original_spectrum.dc_component
+            assert restored_spectrum.thd == original_spectrum.thd
         np.testing.assert_array_equal(
             restored.voltage_waveform("out"), original.voltage_waveform("out")
         )
@@ -951,33 +981,122 @@ class TestCompressedTransientResult:
         (
             version,
             step_sizes,
-            branch_currents,
-            branch_names,
-            device_ops,
-            stores,
+            channels,
+            digital_traces,
+            real_traces,
+            identity,
+            fourier,
+            measurements,
         ) = state[-2]
         compression_report = state[-1]
-        legacy = (
-            1,
-            step_sizes,
-            branch_currents,
-            branch_names,
-            device_ops,
-            stores,
-        )
-        with pytest.raises(ValueError, match="predates the required compression error"):
+        tail = (channels, digital_traces, real_traces, identity, fourier, measurements)
+        legacy = (2, step_sizes, *tail)
+        with pytest.raises(
+            ValueError, match="predates the descriptor-indexed channel container"
+        ):
             unpickler(*state[:-2], legacy)
 
-        future = (
-            999,
-            step_sizes,
-            branch_currents,
-            branch_names,
-            device_ops,
-            stores,
-        )
+        future = (999, step_sizes, *tail)
         with pytest.raises(ValueError, match="unsupported compressed-transient analog"):
             unpickler(*state[:-2], future, compression_report)
+
+        # A sample is a number or a typed absence, never both and never
+        # neither: the validity mask cannot be silently dropped or invented.
+        assert channels, "compressed pickle channel coverage is non-vacuous"
+        retained = next(
+            (index for index, channel in enumerate(channels) if channel[6]),
+            None,
+        )
+        assert retained is not None, "at least one channel must carry samples"
+        (
+            role,
+            node_index,
+            owner,
+            parameter,
+            unit,
+            availability,
+            values,
+            absence,
+        ) = channels[retained]
+        both = list(channels)
+        both[retained] = (
+            role,
+            node_index,
+            owner,
+            parameter,
+            unit,
+            availability,
+            [1.0] * len(values),
+            ["non-finite"] * len(values),
+        )
+        with pytest.raises(ValueError, match="exactly one of a value and a typed absence"):
+            unpickler(*state[:-2], (version, step_sizes, both, *tail[1:]), compression_report)
+
+        neither = list(channels)
+        neither[retained] = (
+            role,
+            node_index,
+            owner,
+            parameter,
+            unit,
+            availability,
+            [None] * len(values),
+            [None] * len(values),
+        )
+        with pytest.raises(ValueError, match="exactly one of a value and a typed absence"):
+            unpickler(
+                *state[:-2], (version, step_sizes, neither, *tail[1:]), compression_report
+            )
+
+        short = list(channels)
+        short[retained] = (
+            role,
+            node_index,
+            owner,
+            parameter,
+            unit,
+            availability,
+            values,
+            absence[:-1],
+        )
+        with pytest.raises(ValueError, match="validity entries"):
+            unpickler(*state[:-2], (version, step_sizes, short, *tail[1:]), compression_report)
+
+        unknown_reason = list(channels)
+        unknown_reason[retained] = (
+            role,
+            node_index,
+            owner,
+            parameter,
+            unit,
+            availability,
+            [None] * len(values),
+            ["invented"] * len(values),
+        )
+        with pytest.raises(ValueError, match="sample absence reason"):
+            unpickler(
+                *state[:-2],
+                (version, step_sizes, unknown_reason, *tail[1:]),
+                compression_report,
+            )
+
+        unknown_role = list(channels)
+        unknown_role[retained] = (
+            "telepathy",
+            node_index,
+            owner,
+            parameter,
+            unit,
+            availability,
+            values,
+            absence,
+        )
+        with pytest.raises(ValueError, match="channel role"):
+            unpickler(
+                *state[:-2],
+                (version, step_sizes, unknown_role, *tail[1:]),
+                compression_report,
+            )
 
         future_report = (999, *compression_report[1:])
         with pytest.raises(
@@ -997,14 +1116,7 @@ class TestCompressedTransientResult:
         with pytest.raises(ValueError, match="maximum interval"):
             unpickler(*state[:-2], state[-2], tuple(impossible_interval))
 
-        malformed = (
-            version,
-            step_sizes[:-1],
-            branch_currents,
-            branch_names,
-            device_ops,
-            stores,
-        )
+        malformed = (version, step_sizes[:-1], *tail)
         with pytest.raises(ValueError, match="step sizes"):
             unpickler(*state[:-2], malformed, compression_report)
 

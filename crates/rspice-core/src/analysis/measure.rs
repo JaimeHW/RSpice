@@ -37,7 +37,7 @@ pub use crate::netlist::measure::{
 //=============================================================================
 
 /// Result of a measurement
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MeasureResult {
     /// Measurement name
     pub name: String,

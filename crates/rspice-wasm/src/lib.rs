@@ -308,7 +308,7 @@ impl Default for WasmCompressionOptions {
         Self {
             absolute_tolerance: defaults.abs_tol,
             relative_tolerance: defaults.rel_tol,
-            maximum_interval: defaults.min_interval,
+            maximum_interval: defaults.maximum_retained_interval,
             enabled: defaults.enabled,
         }
     }
@@ -331,7 +331,7 @@ impl WasmCompressionOptions {
             abs_tol: self.absolute_tolerance,
             rel_tol: self.relative_tolerance,
             enabled: self.enabled,
-            min_interval: self.maximum_interval,
+            maximum_retained_interval: self.maximum_interval,
         })
     }
 }
@@ -2528,68 +2528,46 @@ pub fn transient_snapshot_from_result(
 
 /// Convert a validated compressed core transient into the same browser DTO.
 /// Compression provenance is retained rather than inferred from the grid.
+///
+/// The browser DTO stores each analog sample as a bare number, so a container
+/// whose channels carry typed sample absences is refused by the core expansion
+/// rather than published with an invented value.
 pub fn transient_snapshot_from_compressed_result(
     result: TransientResultCompressed,
 ) -> Result<TransientSnapshot, String> {
     result.validate()?;
-    validate_transient_analog_inventory(
-        &result.time,
-        &result.step_sizes,
-        result.num_nodes,
-        &result.node_names,
-        &result.voltages,
-        &result.branch_names,
-        &result.branch_currents,
-        &result.device_op_traces,
-        &result.store_traces,
-    )?;
-    let point_count = result.time.len();
-    let fft_results = result
-        .fft_results
-        .iter()
-        .enumerate()
-        .map(|(index, result)| fft_snapshot(result, index + 1, "tran-001"))
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(TransientSnapshot {
-        time: result.time,
-        step_sizes: result.step_sizes,
-        num_nodes: result.num_nodes,
-        node_names: result.node_names,
-        voltages: solution_waveforms(result.voltages, point_count),
-        branch_names: result.branch_names,
-        branch_currents: solution_waveforms(result.branch_currents, point_count),
-        device_op_traces: device_op_snapshots(result.device_op_traces),
-        store_traces: store_snapshots(result.store_traces),
-        fft_results,
-        compression: Some(TransientCompressionSnapshot {
-            schema_version: result.compression_report.schema_version,
-            algorithm: result.compression_report.algorithm.as_str().to_string(),
-            sample_domain: result.compression_report.sample_domain.as_str().to_string(),
-            enabled: result.compression_report.applied_policy.enabled,
-            absolute_tolerance: result.compression_report.applied_policy.absolute_tolerance,
-            relative_tolerance: result.compression_report.applied_policy.relative_tolerance,
-            maximum_retained_interval: result
-                .compression_report
-                .applied_policy
-                .maximum_retained_interval,
-            input_points: result.input_points,
-            retained_points: point_count,
-            compression_ratio: result.compression_ratio,
-            worst_observed: result.compression_report.worst_observed.map(|observation| {
-                TransientCompressionErrorSnapshot {
-                    signal_kind: observation.signal.kind.as_str().to_string(),
-                    canonical_name: observation.signal.canonical_name,
-                    input_sample_index: observation.input_sample_index,
-                    time: observation.time,
-                    actual_value: observation.actual_value,
-                    absolute_error: observation.absolute_error,
-                    relative_error: observation.relative_error,
-                    allowed_tolerance: observation.allowed_tolerance,
-                    tolerance_utilization: observation.tolerance_utilization,
-                }
-            }),
+    let input_points = result.input_points;
+    let compression_ratio = result.compression_ratio;
+    let compression_report = result.compression_report.clone();
+    let expanded = result.try_into_transient()?;
+    let retained_points = expanded.time.len();
+    let mut snapshot = transient_snapshot_from_result(expanded)?;
+    snapshot.compression = Some(TransientCompressionSnapshot {
+        schema_version: compression_report.schema_version,
+        algorithm: compression_report.algorithm.as_str().to_string(),
+        sample_domain: compression_report.sample_domain.as_str().to_string(),
+        enabled: compression_report.applied_policy.enabled,
+        absolute_tolerance: compression_report.applied_policy.absolute_tolerance,
+        relative_tolerance: compression_report.applied_policy.relative_tolerance,
+        maximum_retained_interval: compression_report.applied_policy.maximum_retained_interval,
+        input_points,
+        retained_points,
+        compression_ratio,
+        worst_observed: compression_report.worst_observed.map(|observation| {
+            TransientCompressionErrorSnapshot {
+                signal_kind: observation.signal.kind.as_str().to_string(),
+                canonical_name: observation.signal.canonical_name,
+                input_sample_index: observation.input_sample_index,
+                time: observation.time,
+                actual_value: observation.actual_value,
+                absolute_error: observation.absolute_error,
+                relative_error: observation.relative_error,
+                allowed_tolerance: observation.allowed_tolerance,
+                tolerance_utilization: observation.tolerance_utilization,
+            }
         }),
-    })
+    });
+    Ok(snapshot)
 }
 
 /// Summarize and semantically validate a netlist, returning typed diagnostics.
@@ -5412,20 +5390,78 @@ mod tests {
         }
     }
 
+    fn synthetic_compressed_channel(
+        role: rspice_core::engine::TransientChannelRole,
+        values: &[f64],
+    ) -> rspice_core::engine::TransientCompressedChannel {
+        rspice_core::engine::TransientCompressedChannel {
+            descriptor: rspice_core::engine::TransientChannelDescriptor::for_role(role)
+                .expect("synthetic channel descriptor is well formed"),
+            availability: if values.is_empty() {
+                rspice_core::engine::TransientChannelAvailability::NotProjected
+            } else {
+                rspice_core::engine::TransientChannelAvailability::Available
+            },
+            samples: values
+                .iter()
+                .map(|value| rspice_core::engine::TransientChannelSample::Value(*value))
+                .collect(),
+        }
+    }
+
     fn synthetic_compressed_analog_result() -> TransientResultCompressed {
+        use rspice_core::engine::TransientChannelRole;
+
         let result = synthetic_analog_result();
         let compression_config = rspice_core::engine::CompressionConfig::default();
+        let mut channels = Vec::new();
+        for (node_index, (node, waveform)) in
+            result.node_names.iter().zip(&result.voltages).enumerate()
+        {
+            channels.push(synthetic_compressed_channel(
+                TransientChannelRole::NodeVoltage {
+                    node_index,
+                    node: node.clone(),
+                },
+                waveform,
+            ));
+        }
+        for (branch, waveform) in result.branch_names.iter().zip(&result.branch_currents) {
+            channels.push(synthetic_compressed_channel(
+                TransientChannelRole::BranchCurrent {
+                    branch: branch.clone(),
+                },
+                waveform,
+            ));
+        }
+        for trace in &result.device_op_traces {
+            channels.push(synthetic_compressed_channel(
+                TransientChannelRole::DeviceObservable {
+                    device: trace.device_name.clone(),
+                    parameter: trace.parameter.clone(),
+                },
+                &trace.values,
+            ));
+        }
+        for trace in &result.store_traces {
+            channels.push(synthetic_compressed_channel(
+                TransientChannelRole::DeviceStore {
+                    store: trace.name.clone(),
+                },
+                &trace.values,
+            ));
+        }
         TransientResultCompressed {
             time: result.time,
             step_sizes: result.step_sizes,
-            voltages: result.voltages,
-            branch_currents: result.branch_currents,
-            num_nodes: result.num_nodes,
-            node_names: result.node_names,
-            branch_names: result.branch_names,
-            device_op_traces: result.device_op_traces,
-            store_traces: result.store_traces,
-            fft_results: result.fft_results,
+            channels,
+            digital_traces: result.digital_traces,
+            real_traces: result.real_traces,
+            post_results: rspice_core::engine::TransientPostResults {
+                fft: result.fft_results,
+                ..Default::default()
+            },
+            identity: rspice_core::engine::TransientResultIdentity::default(),
             compression_ratio: 2.0,
             input_points: 6,
             compression_report: rspice_core::engine::TransientCompressionReport {
@@ -5823,15 +5859,13 @@ mod tests {
         assert_eq!(public_compressed, compressed);
         assert_eq!(compressed.time, compressed_core.time);
         assert_eq!(compressed.step_sizes, compressed_core.step_sizes);
-        assert_eq!(compressed.node_names, compressed_core.node_names);
-        assert_eq!(compressed.branch_names, compressed_core.branch_names);
+        assert_eq!(compressed.node_names, compressed_core.node_names());
+        assert_eq!(compressed.branch_names, compressed_core.branch_names());
         assert_eq!(
-            compressed.device_op_traces.len(),
-            compressed_core.device_op_traces.len()
-        );
-        assert_eq!(
-            compressed.store_traces.len(),
-            compressed_core.store_traces.len()
+            compressed.device_op_traces.len() + compressed.store_traces.len(),
+            compressed_core.channels.len()
+                - compressed.node_names.len()
+                - compressed.branch_names.len()
         );
         assert_eq!(
             compressed.compression,

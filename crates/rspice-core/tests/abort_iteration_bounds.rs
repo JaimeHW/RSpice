@@ -579,7 +579,7 @@ fn compression_stops_after_the_transient_it_compresses() {
         enabled: true,
         abs_tol: 1.0e-9,
         rel_tol: 1.0e-6,
-        min_interval: 0.0,
+        maximum_retained_interval: 0.0,
     };
 
     let transient_only = poll_count("uncompressed transient", |abort| {

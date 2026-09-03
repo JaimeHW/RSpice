@@ -605,7 +605,7 @@ pub(super) fn run_transient(
         enabled: true,
         abs_tol: ctx.compress_tol,
         rel_tol: ctx.compress_tol,
-        min_interval: resolved_static_solver_ceiling,
+        maximum_retained_interval: resolved_static_solver_ceiling,
     };
     let result = if let Some(restart) = authored_restart {
         let restart_run =
@@ -618,8 +618,8 @@ pub(super) fn run_transient(
         // checkpointing). The core validates the netlist fingerprint, so a
         // checkpoint can never silently continue a different circuit.
         enum SegmentResult {
-            Full(rspice_core::engine::TransientResult),
-            Compressed(rspice_core::engine::TransientResultCompressed),
+            Full(Box<rspice_core::engine::TransientResult>),
+            Compressed(Box<rspice_core::engine::TransientResultCompressed>),
         }
 
         let progress_abort = crate::abort::ProgressAbort::new(&pb);
@@ -658,7 +658,9 @@ pub(super) fn run_transient(
                         compression_config(),
                         &progress_abort,
                     )
-                    .map(|(result, checkpoint)| (SegmentResult::Compressed(result), checkpoint))
+                    .map(|(result, checkpoint)| {
+                        (SegmentResult::Compressed(Box::new(result)), checkpoint)
+                    })
             } else {
                 ctx.engine
                     .run_tran_resume_with_abort(
@@ -668,7 +670,7 @@ pub(super) fn run_transient(
                         internal_max_step,
                         &progress_abort,
                     )
-                    .map(|(result, checkpoint)| (SegmentResult::Full(result), checkpoint))
+                    .map(|(result, checkpoint)| (SegmentResult::Full(Box::new(result)), checkpoint))
             }
         } else if ctx.compress {
             ctx.engine
@@ -680,7 +682,9 @@ pub(super) fn run_transient(
                     compression_config(),
                     &progress_abort,
                 )
-                .map(|(result, checkpoint)| (SegmentResult::Compressed(result), checkpoint))
+                .map(|(result, checkpoint)| {
+                    (SegmentResult::Compressed(Box::new(result)), checkpoint)
+                })
         } else {
             ctx.engine
                 .run_tran_checkpointed_with_startup_mode_and_abort(
@@ -690,13 +694,13 @@ pub(super) fn run_transient(
                     startup_mode,
                     &progress_abort,
                 )
-                .map(|(result, checkpoint)| (SegmentResult::Full(result), checkpoint))
+                .map(|(result, checkpoint)| (SegmentResult::Full(Box::new(result)), checkpoint))
         };
         pb.finish_and_clear();
         match run {
             Ok((segment, checkpoint)) => {
                 let result = match segment {
-                    SegmentResult::Full(result) => result,
+                    SegmentResult::Full(result) => *result,
                     SegmentResult::Compressed(compressed) => {
                         if !ctx.quiet {
                             println!(

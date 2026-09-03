@@ -675,7 +675,7 @@ impl PyEngine {
             abs_tol,
             rel_tol,
             enabled: true,
-            min_interval: max_interval,
+            maximum_retained_interval: max_interval,
         };
         let engine = self.engine_for_netlist(&netlist.inner);
         let result = run_interruptible(py, &self.active_runs, |abort| {

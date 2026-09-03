@@ -1,27 +1,48 @@
-//! Waveform Recording and Compression
+//! Compressed transient result container.
 //!
-//! Implements efficient storage for transient simulation waveforms using a
-//! linear interpolation-based compression algorithm.
+//! A compressed transient is a complete result container, not a reduced copy
+//! of one: it keeps the retained time grid, the exact accepted step size at
+//! every retained point, every analog channel under its own descriptor, the
+//! event-driven digital and real traces exactly as recorded, the typed
+//! post-process products, the producing run's identity, and the versioned
+//! evidence describing how the decimation was performed and how far it moved
+//! any discarded sample.
 //!
-//! The key insight is that storing every simulation timestep is wasteful when
-//! signals change linearly between points. Instead, we only store points where
-//! linear interpolation from the last stored point would introduce unacceptable
-//! error.
+//! # Decimation
 //!
-//! # Algorithm
+//! Analog channels share one retained grid, chosen by multi-channel
+//! Ramer-Douglas-Peucker decimation and read back by piecewise-linear
+//! interpolation. A sample is discarded only when every channel's linear
+//! reconstruction at that time stays inside
+//! `absolute_tolerance + relative_tolerance * |actual|`.
 //!
-//! For each new point (t, v):
-//! 1. If it's the first point, always store it
-//! 2. Calculate what value linear interpolation would predict at time t
-//! 3. If |actual - interpolated| > abs_tol + rel_tol * |actual|, then:
-//!    - Store the *previous* point (to preserve the slope before the change)
-//!    - Update the reference point
-//! 4. Always store the final point
+//! Event traces are never decimated. Interpolation is undefined for an event
+//! channel, so digital and real traces are carried verbatim as opaque typed
+//! channels.
 //!
-//! This achieves 10-100x compression for typical waveforms while preserving
-//! all significant signal changes.
+//! # Validity and non-finite policy
+//!
+//! A channel sample is either a number or explicitly absent with a reason.
+//! Compression never publishes a fabricated number: a non-finite solver value
+//! becomes [`TransientSampleAbsence::NonFinite`] and an unrecorded value (for
+//! example a device operating-point parameter that did not exist yet at that
+//! sample) becomes [`TransientSampleAbsence::NotRecorded`]. Absent samples do
+//! not participate in the decimation error budget or in its certificate: a
+//! retained segment whose endpoints are absent cannot be reconstructed, so
+//! error is only measured where both endpoints and the discarded sample are
+//! present.
+//!
+//! # Layering note
+//!
+//! The typed execution vocabulary (`SignalDescriptor`, `AnalysisInstanceId`,
+//! `RunCoordinateId`, `TopologyFingerprint`) lives in `crate::execution`,
+//! which sits *above* the engine in this crate's layer order. The engine
+//! therefore names its own descriptor and identity vocabulary here, and
+//! `crate::execution` maps it into the shared result document. The mapping is
+//! total and tested; it is not a second decision about what a volt is.
 
 use crate::Value;
+use crate::engine::result::{DigitalTrace, RealTrace, TransientPostResults};
 
 //=============================================================================
 // Configuration
@@ -42,10 +63,40 @@ pub struct CompressionConfig {
     /// When disabled, all points are stored (useful for debugging)
     pub enabled: bool,
 
-    /// Maximum time between retained points (prevents over-compression).
-    /// The historical field name is retained for API compatibility. Set to
-    /// 0.0 to impose no time-axis gap limit.
-    pub min_interval: Value,
+    /// Maximum time between retained points. Set to `0.0` to impose no
+    /// time-axis gap limit.
+    pub maximum_retained_interval: Value,
+}
+
+impl Default for CompressionConfig {
+    fn default() -> Self {
+        Self {
+            abs_tol: 1e-6, // 1 microvolt
+            rel_tol: 1e-3, // 0.1%
+            enabled: true,
+            maximum_retained_interval: 0.0,
+        }
+    }
+}
+
+impl CompressionConfig {
+    /// No compression (store all points)
+    pub fn none() -> Self {
+        Self {
+            enabled: false,
+            ..Self::default()
+        }
+    }
+
+    /// Aggressive compression (good for long simulations)
+    pub fn aggressive() -> Self {
+        Self {
+            abs_tol: 1e-5,
+            rel_tol: 1e-2, // 1%
+            enabled: true,
+            maximum_retained_interval: 0.0,
+        }
+    }
 }
 
 /// Schema version for the persisted transient-compression certificate.
@@ -103,7 +154,7 @@ impl From<&CompressionConfig> for TransientCompressionPolicy {
             enabled: config.enabled,
             absolute_tolerance: config.abs_tol,
             relative_tolerance: config.rel_tol,
-            maximum_retained_interval: config.min_interval,
+            maximum_retained_interval: config.maximum_retained_interval,
         }
     }
 }
@@ -127,13 +178,24 @@ impl TransientCompressionSignalKind {
             Self::DeviceStore => "device-store",
         }
     }
+
+    /// Parse a wire spelling produced by [`Self::as_str`].
+    pub fn from_tag(tag: &str) -> Option<Self> {
+        match tag {
+            "voltage" => Some(Self::Voltage),
+            "branch-current" => Some(Self::BranchCurrent),
+            "device-observable" => Some(Self::DeviceObservable),
+            "device-store" => Some(Self::DeviceStore),
+            _ => None,
+        }
+    }
 }
 
 /// Stable signal identity attached to a compression-error observation.
 ///
-/// `canonical_name` is deliberately independent of the current positional
-/// result arrays so this identity can become a direct reference into the
-/// descriptor-indexed Phase 5.1 result container.
+/// `canonical_name` is independent of any positional result array, so it is a
+/// direct reference into the descriptor-indexed channel list of
+/// [`TransientResultCompressed`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TransientCompressionSignal {
     pub kind: TransientCompressionSignalKind,
@@ -233,7 +295,7 @@ pub struct TransientCompressionReport {
     pub input_points: usize,
     pub retained_points: usize,
     /// `None` means no input sample was approximated (or there were no
-    /// compressible analog signals), never that error measurement was skipped.
+    /// compressible analog samples), never that error measurement was skipped.
     pub worst_observed: Option<TransientCompressionErrorObservation>,
 }
 
@@ -256,333 +318,533 @@ impl TransientCompressionReport {
     }
 }
 
-impl Default for CompressionConfig {
-    fn default() -> Self {
-        Self {
-            abs_tol: 1e-6, // 1 microvolt
-            rel_tol: 1e-3, // 0.1%
-            enabled: true,
-            min_interval: 0.0,
-        }
-    }
-}
-
-impl CompressionConfig {
-    /// No compression (store all points)
-    pub fn none() -> Self {
-        Self {
-            enabled: false,
-            ..Self::default()
-        }
-    }
-
-    /// Aggressive compression (good for long simulations)
-    pub fn aggressive() -> Self {
-        Self {
-            abs_tol: 1e-5,
-            rel_tol: 1e-2, // 1%
-            enabled: true,
-            min_interval: 0.0,
-        }
-    }
-}
-
 //=============================================================================
-// Per-Signal State
+// Channel descriptors
 //=============================================================================
 
-/// State for one signal channel during recording
-#[derive(Debug, Clone)]
-struct ChannelState {
-    /// Last actually stored point: (time, value)
-    last_stored: (Value, Value),
-
-    /// Previous point (may need to be stored on slope change)
-    previous: (Value, Value),
-
-    /// Whether we have a pending previous point
-    has_previous: bool,
-}
-
-impl ChannelState {
-    fn new(t0: Value, v0: Value) -> Self {
-        Self {
-            last_stored: (t0, v0),
-            previous: (t0, v0),
-            has_previous: false,
-        }
-    }
-
-    /// Calculate interpolated value at time t from last stored point to current
-    fn interpolate(&self, t_current: Value, v_current: Value, t_query: Value) -> Value {
-        let (t_stored, v_stored) = self.last_stored;
-        let dt = t_current - t_stored;
-
-        if dt.abs() < 1e-30 {
-            return v_stored;
-        }
-
-        let slope = (v_current - v_stored) / dt;
-        v_stored + slope * (t_query - t_stored)
-    }
-
-    /// Check if previous point should be stored (interpolation error too high)
-    fn should_store_previous(
-        &self,
-        t_current: Value,
-        v_current: Value,
-        config: &CompressionConfig,
-    ) -> bool {
-        if !self.has_previous {
-            return false;
-        }
-
-        let (t_prev, v_prev) = self.previous;
-        let (t_stored, _) = self.last_stored;
-
-        // A positive interval is a hard maximum retained gap whenever the
-        // source grid contains an intermediate point that can satisfy it.
-        if config.min_interval > 0.0 && t_current - t_stored > config.min_interval {
-            return true;
-        }
-
-        // Calculate what linear interpolation would predict at t_prev
-        let v_interpolated = self.interpolate(t_current, v_current, t_prev);
-
-        // Calculate error
-        let error = (v_prev - v_interpolated).abs();
-        let threshold = config.abs_tol + config.rel_tol * v_prev.abs();
-
-        error > threshold
-    }
-}
-
-//=============================================================================
-// Waveform Recorder
-//=============================================================================
-
-/// Compressed waveform storage for multiple channels
+/// Physical unit of one compressed transient channel.
 ///
-/// Uses the linear interpolation algorithm to achieve 10-100x compression
-/// while preserving all significant signal transitions.
-#[derive(Debug)]
-pub struct WaveformRecorder {
-    /// Compression configuration
-    config: CompressionConfig,
-
-    /// Number of channels (signals)
-    num_channels: usize,
-
-    /// Per-channel compression state
-    channel_states: Vec<ChannelState>,
-
-    /// Stored time points (shared across all channels for simplicity)
-    /// In a more sophisticated implementation, each channel could have
-    /// independent time points, but this adds complexity for post-processing
-    times: Vec<Value>,
-
-    /// Stored values: values`[channel][point_index]`
-    values: Vec<Vec<Value>>,
-
-    /// Total number of input points (for compression ratio stats)
-    input_count: usize,
+/// This mirrors the shared execution-layer unit vocabulary; see the layering
+/// note in the module documentation. [`Self::Unspecified`] is the honest
+/// answer for a device observable or store whose producing model does not
+/// declare a unit, and is deliberately not the same claim as
+/// [`Self::Dimensionless`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TransientChannelUnit {
+    Volt,
+    Ampere,
+    Ohm,
+    Siemens,
+    Watt,
+    Hertz,
+    Second,
+    Degree,
+    Radian,
+    Dimensionless,
+    Unspecified,
+    Custom(String),
 }
 
-impl WaveformRecorder {
-    /// Create a new recorder for the given number of channels
+impl TransientChannelUnit {
+    /// Stable wire spelling for adapters and persistence layers.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Volt => "volt",
+            Self::Ampere => "ampere",
+            Self::Ohm => "ohm",
+            Self::Siemens => "siemens",
+            Self::Watt => "watt",
+            Self::Hertz => "hertz",
+            Self::Second => "second",
+            Self::Degree => "degree",
+            Self::Radian => "radian",
+            Self::Dimensionless => "dimensionless",
+            Self::Unspecified => "unspecified",
+            Self::Custom(symbol) => symbol,
+        }
+    }
+
+    /// Parse a wire spelling produced by [`Self::as_str`].
     ///
-    /// # Arguments
-    /// * `num_channels` - Number of signals to record
-    /// * `t0` - Initial time
-    /// * `initial_values` - Initial values for each channel
-    /// * `config` - Compression configuration
-    pub fn new(
-        num_channels: usize,
-        t0: Value,
-        initial_values: &[Value],
-        config: CompressionConfig,
-    ) -> Result<Self, String> {
-        validate_channel_count(
-            "initial waveform sample",
-            initial_values.len(),
-            num_channels,
-        )?;
+    /// An unknown spelling is a custom unit symbol rather than an error: the
+    /// producing model owns its own symbols.
+    pub fn from_tag(tag: &str) -> Result<Self, String> {
+        Ok(match tag {
+            "volt" => Self::Volt,
+            "ampere" => Self::Ampere,
+            "ohm" => Self::Ohm,
+            "siemens" => Self::Siemens,
+            "watt" => Self::Watt,
+            "hertz" => Self::Hertz,
+            "second" => Self::Second,
+            "degree" => Self::Degree,
+            "radian" => Self::Radian,
+            "dimensionless" => Self::Dimensionless,
+            "unspecified" => Self::Unspecified,
+            symbol if symbol.trim().is_empty() => {
+                return Err("compressed transient channel unit symbol cannot be empty".to_string());
+            }
+            symbol => Self::Custom(symbol.to_string()),
+        })
+    }
+}
 
-        let channel_states: Vec<_> = initial_values
-            .iter()
-            .map(|&v| ChannelState::new(t0, v))
-            .collect();
+/// What a compressed transient channel belongs to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TransientChannelOwner {
+    /// A circuit node, named as the netlist spells it.
+    Node(String),
+    /// A branch whose current the solver carries as an unknown.
+    Branch(String),
+    /// A device instance.
+    Device(String),
+}
 
-        let values: Vec<_> = initial_values.iter().map(|&v| vec![v]).collect();
+/// Which result family one compressed channel came from.
+///
+/// The role carries the identifying names, so a channel never depends on its
+/// position in a parallel name vector.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TransientChannelRole {
+    /// Solution voltage of the node with this zero-based index; the solver
+    /// node id is `node_index + 1` because index 0 is ground.
+    NodeVoltage { node_index: usize, node: String },
+    /// Current through a named branch, positive flowing into the branch's
+    /// first terminal, which is the engine's sign convention everywhere.
+    BranchCurrent { branch: String },
+    /// Device operating-point observable `@device[parameter]`.
+    DeviceObservable { device: String, parameter: String },
+    /// Typed non-solution device store waveform, such as a compact-model
+    /// internal resistance.
+    DeviceStore { store: String },
+}
 
+impl TransientChannelRole {
+    /// Identity class of a channel with this role.
+    pub const fn kind(&self) -> TransientCompressionSignalKind {
+        match self {
+            Self::NodeVoltage { .. } => TransientCompressionSignalKind::Voltage,
+            Self::BranchCurrent { .. } => TransientCompressionSignalKind::BranchCurrent,
+            Self::DeviceObservable { .. } => TransientCompressionSignalKind::DeviceObservable,
+            Self::DeviceStore { .. } => TransientCompressionSignalKind::DeviceStore,
+        }
+    }
+
+    fn display_name(&self) -> String {
+        match self {
+            Self::NodeVoltage { node, .. } => format!("V({node})"),
+            Self::BranchCurrent { branch } => format!("I({branch})"),
+            Self::DeviceObservable { device, parameter } => format!("@{device}[{parameter}]"),
+            Self::DeviceStore { store } => store.clone(),
+        }
+    }
+
+    fn signal(&self) -> Result<TransientCompressionSignal, String> {
+        match self {
+            Self::NodeVoltage { node, .. } => TransientCompressionSignal::voltage(node),
+            Self::BranchCurrent { branch } => TransientCompressionSignal::branch_current(branch),
+            Self::DeviceObservable { device, parameter } => {
+                TransientCompressionSignal::device_observable(device, parameter)
+            }
+            Self::DeviceStore { store } => TransientCompressionSignal::device_store(store),
+        }
+    }
+
+    fn owner(&self) -> TransientChannelOwner {
+        match self {
+            Self::NodeVoltage { node, .. } => TransientChannelOwner::Node(node.clone()),
+            Self::BranchCurrent { branch } => TransientChannelOwner::Branch(branch.clone()),
+            Self::DeviceObservable { device, .. } => TransientChannelOwner::Device(device.clone()),
+            Self::DeviceStore { store } => TransientChannelOwner::Device(store.clone()),
+        }
+    }
+
+    fn default_unit(&self) -> TransientChannelUnit {
+        match self {
+            Self::NodeVoltage { .. } => TransientChannelUnit::Volt,
+            Self::BranchCurrent { .. } => TransientChannelUnit::Ampere,
+            // No compact model declares a unit for its operating-point or
+            // store outputs today. Claiming "dimensionless" would be a
+            // fabricated physical claim, so the descriptor says so.
+            Self::DeviceObservable { .. } | Self::DeviceStore { .. } => {
+                TransientChannelUnit::Unspecified
+            }
+        }
+    }
+}
+
+/// Descriptor that keys one compressed transient channel.
+///
+/// Every compressed transient channel is a real scalar sampled on the shared
+/// retained grid, so [`Self::value_type`] and [`Self::shape`] are declared
+/// invariants rather than free fields.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransientChannelDescriptor {
+    role: TransientChannelRole,
+    canonical_name: String,
+    display_name: String,
+    unit: TransientChannelUnit,
+}
+
+impl TransientChannelDescriptor {
+    /// Build a descriptor for one role with its model-declared unit.
+    pub fn new(role: TransientChannelRole, unit: TransientChannelUnit) -> Result<Self, String> {
+        if let TransientChannelUnit::Custom(symbol) = &unit
+            && symbol.trim().is_empty()
+        {
+            return Err("compressed transient channel unit symbol cannot be empty".to_string());
+        }
+        let signal = role.signal()?;
+        let display_name = role.display_name();
+        if display_name.trim().is_empty() {
+            return Err("compressed transient channel display name cannot be empty".to_string());
+        }
         Ok(Self {
-            config,
-            num_channels,
-            channel_states,
-            times: vec![t0],
-            values,
-            input_count: 1,
+            canonical_name: signal.canonical_name,
+            display_name,
+            unit,
+            role,
         })
     }
 
-    /// Record a new time point with values for all channels
-    ///
-    /// Returns true if any point was actually stored (useful for debugging)
-    pub fn record(&mut self, t: Value, values: &[Value]) -> Result<bool, String> {
-        validate_channel_count("waveform sample", values.len(), self.num_channels)?;
+    /// Build a descriptor with the unit implied by its role.
+    pub fn for_role(role: TransientChannelRole) -> Result<Self, String> {
+        let unit = role.default_unit();
+        Self::new(role, unit)
+    }
 
-        self.input_count += 1;
+    /// Which result family this channel came from.
+    pub const fn role(&self) -> &TransientChannelRole {
+        &self.role
+    }
 
-        // If compression is disabled, store everything
-        if !self.config.enabled {
-            self.times.push(t);
-            for (ch, &v) in values.iter().enumerate() {
-                self.values[ch].push(v);
-                self.channel_states[ch].last_stored = (t, v);
-            }
-            return Ok(true);
+    /// Identity class of this channel.
+    pub const fn kind(&self) -> TransientCompressionSignalKind {
+        self.role.kind()
+    }
+
+    /// Lower-case canonical name, unique within one compressed result.
+    pub fn canonical_name(&self) -> &str {
+        &self.canonical_name
+    }
+
+    /// Display spelling, preserving the authored case.
+    pub fn display_name(&self) -> &str {
+        &self.display_name
+    }
+
+    /// Physical unit of this channel's samples.
+    pub const fn unit(&self) -> &TransientChannelUnit {
+        &self.unit
+    }
+
+    /// What this channel belongs to.
+    pub fn owner(&self) -> TransientChannelOwner {
+        self.role.owner()
+    }
+
+    /// Value type of every sample. Compressed transient channels are real.
+    pub const fn value_type(&self) -> &'static str {
+        "real"
+    }
+
+    /// Shape of every sample. Compressed transient channels are scalars.
+    pub const fn shape(&self) -> &'static str {
+        "scalar"
+    }
+
+    /// Stable identity of this channel, as the compression certificate spells
+    /// it.
+    pub fn signal(&self) -> TransientCompressionSignal {
+        TransientCompressionSignal {
+            kind: self.role.kind(),
+            canonical_name: self.canonical_name.clone(),
         }
-
-        // Check each channel for whether we need to store the previous point
-        let mut any_stored = false;
-
-        for (ch, &v) in values.iter().enumerate() {
-            if self.channel_states[ch].should_store_previous(t, v, &self.config) {
-                // We need to store the previous point to preserve slope change
-                any_stored = true;
-            }
-        }
-
-        if any_stored {
-            // Find the earliest previous point time that needs storing
-            let store_time = self
-                .channel_states
-                .iter()
-                .filter(|s| s.has_previous)
-                .map(|s| s.previous.0)
-                .fold(Value::MAX, |a, b| a.min(b));
-
-            // Store that time point with interpolated values for all channels
-            self.store_point(store_time, values, t);
-        }
-
-        // Update previous point for all channels
-        for (ch, &v) in values.iter().enumerate() {
-            self.channel_states[ch].previous = (t, v);
-            self.channel_states[ch].has_previous = true;
-        }
-
-        Ok(any_stored)
-    }
-
-    /// Store a point at the given time
-    fn store_point(&mut self, t_store: Value, current_values: &[Value], t_current: Value) {
-        self.times.push(t_store);
-
-        for (ch, &v_current) in current_values.iter().enumerate() {
-            let state = &mut self.channel_states[ch];
-
-            // If this channel had a previous point at this time, use it
-            // Otherwise interpolate to this time
-            let v_store = if state.has_previous && (state.previous.0 - t_store).abs() < 1e-30 {
-                state.previous.1
-            } else {
-                state.interpolate(t_current, v_current, t_store)
-            };
-
-            self.values[ch].push(v_store);
-            state.last_stored = (t_store, v_store);
-            state.has_previous = false;
-        }
-    }
-
-    /// Finalize recording, ensuring the last point is stored
-    ///
-    /// This must be called at the end of simulation to ensure the final
-    /// values are recorded.
-    pub fn finalize(&mut self, t_final: Value, final_values: &[Value]) -> Result<(), String> {
-        validate_channel_count(
-            "final waveform sample",
-            final_values.len(),
-            self.num_channels,
-        )?;
-
-        // Always store the final point
-        let last_time = *self.times.last().unwrap_or(&0.0);
-        if (t_final - last_time).abs() > 1e-30 {
-            self.times.push(t_final);
-            for (ch, &v) in final_values.iter().enumerate() {
-                self.values[ch].push(v);
-                self.channel_states[ch].last_stored = (t_final, v);
-            }
-        }
-        Ok(())
-    }
-
-    /// Get the stored time points
-    pub fn times(&self) -> &[Value] {
-        &self.times
-    }
-
-    /// Get all stored values, indexed `[channel][point]`.
-    pub fn all_values(&self) -> &[Vec<Value>] {
-        &self.values
-    }
-
-    /// Get the number of stored points
-    pub fn stored_count(&self) -> usize {
-        self.times.len()
-    }
-
-    /// Get the total number of input points
-    pub fn input_count(&self) -> usize {
-        self.input_count
-    }
-
-    /// Get the compression ratio (input_count / stored_count)
-    pub fn compression_ratio(&self) -> Value {
-        self.input_count as Value / self.stored_count() as Value
     }
 }
 
 //=============================================================================
-// Result Structures
+// Samples and validity
 //=============================================================================
 
-/// Compressed transient result with metadata
-#[derive(Debug, Clone)]
+/// Why one compressed channel sample carries no number.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransientSampleAbsence {
+    /// The producing run computed a non-finite value here. A run started with
+    /// a non-finite tolerance policy may publish these; the number itself is
+    /// deliberately not republished as if it were a measurement.
+    NonFinite,
+    /// The producing run recorded no value for this channel at this accepted
+    /// sample, for example a device operating-point parameter that the device
+    /// did not report yet.
+    NotRecorded,
+}
+
+impl TransientSampleAbsence {
+    /// Stable wire spelling for adapters and persistence layers.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::NonFinite => "non-finite",
+            Self::NotRecorded => "not-recorded",
+        }
+    }
+
+    /// Parse a wire spelling produced by [`Self::as_str`].
+    pub fn from_tag(tag: &str) -> Option<Self> {
+        match tag {
+            "non-finite" => Some(Self::NonFinite),
+            "not-recorded" => Some(Self::NotRecorded),
+            _ => None,
+        }
+    }
+}
+
+/// One compressed channel sample: a number, or an explicit absence.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TransientChannelSample {
+    /// A finite retained value.
+    Value(Value),
+    /// No value exists here, and this is why.
+    Absent(TransientSampleAbsence),
+}
+
+impl TransientChannelSample {
+    /// The number, when this sample has one.
+    pub const fn value(self) -> Option<Value> {
+        match self {
+            Self::Value(value) => Some(value),
+            Self::Absent(_) => None,
+        }
+    }
+
+    /// Why this sample has no number, when it has none.
+    pub const fn absence(self) -> Option<TransientSampleAbsence> {
+        match self {
+            Self::Value(_) => None,
+            Self::Absent(reason) => Some(reason),
+        }
+    }
+
+    /// Whether this sample carries a number.
+    pub const fn is_present(self) -> bool {
+        matches!(self, Self::Value(_))
+    }
+
+    /// Classify one raw solver value, never publishing a non-finite number.
+    pub fn from_solver_value(value: Value) -> Self {
+        if value.is_finite() {
+            Self::Value(value)
+        } else {
+            Self::Absent(TransientSampleAbsence::NonFinite)
+        }
+    }
+}
+
+/// Whether one channel was retained at all, and if not, why.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransientChannelAvailability {
+    /// The channel was retained; it has one sample per retained time point.
+    Available,
+    /// The authored output projection deliberately did not retain this
+    /// channel. Its descriptor, unit, and owner remain evidence that it
+    /// exists, and it carries no samples.
+    NotProjected,
+}
+
+impl TransientChannelAvailability {
+    /// Stable wire spelling for adapters and persistence layers.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Available => "available",
+            Self::NotProjected => "not-projected",
+        }
+    }
+
+    /// Parse a wire spelling produced by [`Self::as_str`].
+    pub fn from_tag(tag: &str) -> Option<Self> {
+        match tag {
+            "available" => Some(Self::Available),
+            "not-projected" => Some(Self::NotProjected),
+            _ => None,
+        }
+    }
+}
+
+/// One descriptor-keyed analog channel on the retained grid.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TransientCompressedChannel {
+    /// Name, kind, unit, owner, value type, and shape of this channel.
+    pub descriptor: TransientChannelDescriptor,
+    /// Whether this channel was retained.
+    pub availability: TransientChannelAvailability,
+    /// One sample per retained time point, or empty when the channel was not
+    /// projected.
+    pub samples: Vec<TransientChannelSample>,
+}
+
+impl TransientCompressedChannel {
+    /// Present values at every retained point, or `None` when any sample is
+    /// absent or the channel was not projected.
+    pub fn dense_values(&self) -> Option<Vec<Value>> {
+        if self.availability != TransientChannelAvailability::Available {
+            return None;
+        }
+        self.samples
+            .iter()
+            .map(|sample| sample.value())
+            .collect::<Option<Vec<_>>>()
+    }
+
+    /// Per-sample validity mask aligned with the retained grid.
+    pub fn validity(&self) -> Vec<bool> {
+        self.samples
+            .iter()
+            .map(|sample| sample.is_present())
+            .collect()
+    }
+}
+
+//=============================================================================
+// Parent identity
+//=============================================================================
+
+/// Identity of the authored analysis card a compressed result came from.
+///
+/// The parts are stored rather than the execution-layer `AnalysisInstanceId`
+/// itself; see the layering note in the module documentation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransientAnalysisIdentity {
+    /// Stable analysis-kind tag, for example `tran`.
+    pub kind_tag: String,
+    /// Zero-based ordinal among the authored cards of that kind.
+    pub ordinal: u32,
+}
+
+impl TransientAnalysisIdentity {
+    /// Build an identity, rejecting an empty kind tag.
+    pub fn new(kind_tag: impl Into<String>, ordinal: u32) -> Result<Self, String> {
+        let kind_tag = kind_tag.into();
+        if kind_tag.trim().is_empty() {
+            return Err("compressed transient analysis kind tag cannot be empty".to_string());
+        }
+        Ok(Self {
+            kind_tag: kind_tag.trim().to_ascii_lowercase(),
+            ordinal,
+        })
+    }
+
+    /// Stable `<kind>-<ordinal+1, 3 digits>` tag.
+    pub fn tag(&self) -> String {
+        format!("{}-{:03}", self.kind_tag, u64::from(self.ordinal) + 1)
+    }
+}
+
+/// Identity of the shared-deck coordinate a compressed result was produced at.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransientCoordinateIdentity {
+    /// Semantic digest of the coordinate's axis assignments.
+    pub semantic: [u8; 16],
+    /// Zero-based occurrence of that digest in the planned order.
+    pub occurrence: u32,
+    /// Zero-based position in the Cartesian coordinate order.
+    pub ordinal: usize,
+    /// Display label for this coordinate.
+    pub label: String,
+}
+
+impl TransientCoordinateIdentity {
+    /// Build a coordinate identity, rejecting an empty label.
+    pub fn new(
+        semantic: [u8; 16],
+        occurrence: u32,
+        ordinal: usize,
+        label: impl Into<String>,
+    ) -> Result<Self, String> {
+        let label = label.into();
+        if label.trim().is_empty() {
+            return Err("compressed transient coordinate label cannot be empty".to_string());
+        }
+        Ok(Self {
+            semantic,
+            occurrence,
+            ordinal,
+            label: label.trim().to_string(),
+        })
+    }
+}
+
+/// Optional parent identity that makes a compressed result self-describing.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TransientResultIdentity {
+    /// Authored analysis card this result came from.
+    pub analysis: Option<TransientAnalysisIdentity>,
+    /// Shared-deck coordinate this result was produced at.
+    pub coordinate: Option<TransientCoordinateIdentity>,
+    /// Structural identity of the elaborated topology that was solved.
+    pub topology_fingerprint: Option<[u8; 32]>,
+}
+
+impl TransientResultIdentity {
+    /// Whether no identity component is recorded.
+    pub fn is_empty(&self) -> bool {
+        self.analysis.is_none() && self.coordinate.is_none() && self.topology_fingerprint.is_none()
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        if let Some(analysis) = &self.analysis
+            && analysis.kind_tag.trim().is_empty()
+        {
+            return Err("compressed transient analysis kind tag cannot be empty".to_string());
+        }
+        if let Some(coordinate) = &self.coordinate
+            && coordinate.label.trim().is_empty()
+        {
+            return Err("compressed transient coordinate label cannot be empty".to_string());
+        }
+        Ok(())
+    }
+}
+
+//=============================================================================
+// Result container
+//=============================================================================
+
+/// Compressed transient result: a complete, self-describing result container.
+#[derive(Debug, Clone, PartialEq)]
 pub struct TransientResultCompressed {
-    /// Time points (non-uniform due to compression)
+    /// Retained time points, a subset of the accepted solver grid with their
+    /// exact IEEE-754 values.
     pub time: Vec<Value>,
 
-    /// Exact integration interval associated with each retained time point.
+    /// Exact accepted integration interval associated with each retained time
+    /// point.
     pub step_sizes: Vec<Value>,
 
-    /// Voltage waveforms, indexed `[node][point]`.
-    pub voltages: Vec<Vec<Value>>,
+    /// Descriptor-keyed analog channels, in node, branch, device-observable,
+    /// then device-store order.
+    pub channels: Vec<TransientCompressedChannel>,
 
-    /// Branch-current waveforms, indexed `[branch][point]`.
-    pub branch_currents: Vec<Vec<Value>>,
+    /// XSPICE digital event traces, carried exactly. Event traces keep every
+    /// sample: interpolation is undefined for them, so they are never
+    /// decimated.
+    pub digital_traces: Vec<DigitalTrace>,
 
-    /// Number of nodes
-    pub num_nodes: usize,
+    /// XSPICE real-valued event traces, carried exactly, for the same reason.
+    pub real_traces: Vec<RealTrace>,
 
-    /// Node names aligned with `voltages`
-    pub node_names: Vec<String>,
+    /// Typed `.FFT`, `.FOUR`, and `.MEASURE` products computed on the exact
+    /// accepted trajectory, before any decimation.
+    pub post_results: TransientPostResults,
 
-    /// Branch names aligned with `branch_currents`.
-    pub branch_names: Vec<String>,
-
-    /// Device operating-point waveforms requested by the authored output
-    /// projection. Values are decimated on the same retained time grid.
-    pub device_op_traces: Vec<super::TransientDeviceOpTrace>,
-
-    /// Typed non-solution device store waveforms.
-    pub store_traces: Vec<super::TransientStoreTrace>,
-
-    /// `.FFT` post-processing is computed before waveform decimation and is
-    /// retained losslessly alongside the compressed time-domain channels.
-    pub fft_results: Vec<super::TransientFftResult>,
+    /// Analysis instance, coordinate, and topology this result came from.
+    ///
+    /// The solver entry points do not receive planning identity, so they
+    /// leave this empty rather than inventing an ordinal. A caller that
+    /// planned the run — the execution layer, or a frontend that owns the
+    /// analysis cardinality — attaches it, and
+    /// `AnalysisResultDocument::from_compressed_transient` then refuses to
+    /// publish the container under a different analysis.
+    pub identity: TransientResultIdentity,
 
     /// Compression ratio achieved
     pub compression_ratio: Value,
@@ -594,77 +856,120 @@ pub struct TransientResultCompressed {
     pub compression_report: TransientCompressionReport,
 }
 
-/// Detailed compression statistics
-#[derive(Debug, Clone)]
-pub struct CompressionStats {
-    /// Total input time points
-    pub input_points: usize,
-    /// Stored time points after compression
-    pub stored_points: usize,
-    /// Number of channels (signals)
-    pub num_channels: usize,
-    /// Compression ratio (input / stored)
-    pub compression_ratio: Value,
-    /// Estimated input memory (bytes, without compression)
-    pub input_bytes: usize,
-    /// Actual stored memory (bytes)
-    pub stored_bytes: usize,
-    /// Memory savings ratio
-    pub memory_savings_ratio: Value,
-}
-
-impl CompressionStats {
-    /// Calculate compression statistics
-    pub fn calculate(input_points: usize, stored_points: usize, num_channels: usize) -> Self {
-        // f64 is 8 bytes
-        let bytes_per_value = std::mem::size_of::<Value>();
-
-        // Input: time vec + N channel vecs, all with input_points entries
-        let input_bytes = bytes_per_value * input_points * (1 + num_channels);
-
-        // Stored: time vec + N channel vecs, all with stored_points entries
-        let stored_bytes = bytes_per_value * stored_points * (1 + num_channels);
-
-        let compression_ratio = if stored_points > 0 {
-            input_points as Value / stored_points as Value
-        } else {
-            1.0
-        };
-
-        let memory_savings_ratio = if stored_bytes > 0 {
-            input_bytes as Value / stored_bytes as Value
-        } else {
-            1.0
-        };
-
-        Self {
-            input_points,
-            stored_points,
-            num_channels,
-            compression_ratio,
-            input_bytes,
-            stored_bytes,
-            memory_savings_ratio,
-        }
-    }
-
-    /// Format as human-readable summary
-    pub fn summary(&self) -> String {
-        format!(
-            "{}/{} points ({:.1}x), {:.0} KB → {:.0} KB ({:.1}x memory savings)",
-            self.stored_points,
-            self.input_points,
-            self.compression_ratio,
-            self.input_bytes as f64 / 1024.0,
-            self.stored_bytes as f64 / 1024.0,
-            self.memory_savings_ratio,
-        )
-    }
-}
-
 impl TransientResultCompressed {
-    /// Validate the complete analog result inventory and retained-grid
-    /// alignment before exposing or expanding this result.
+    /// Number of solution nodes, excluding ground.
+    pub fn num_nodes(&self) -> usize {
+        self.channels
+            .iter()
+            .filter(|channel| {
+                matches!(
+                    channel.descriptor.role(),
+                    TransientChannelRole::NodeVoltage { .. }
+                )
+            })
+            .count()
+    }
+
+    /// Node names in solver order, as the netlist spells them.
+    pub fn node_names(&self) -> Vec<String> {
+        self.node_channels()
+            .map(|channel| channel.1.descriptor.owner_name().to_string())
+            .collect()
+    }
+
+    /// Branch names aligned with the retained branch-current channels.
+    pub fn branch_names(&self) -> Vec<String> {
+        self.channels
+            .iter()
+            .filter_map(|channel| match channel.descriptor.role() {
+                TransientChannelRole::BranchCurrent { branch } => Some(branch.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Node-voltage channels paired with their zero-based node index.
+    fn node_channels(&self) -> impl Iterator<Item = (usize, &TransientCompressedChannel)> {
+        self.channels
+            .iter()
+            .filter_map(|channel| match channel.descriptor.role() {
+                TransientChannelRole::NodeVoltage { node_index, .. } => {
+                    Some((*node_index, channel))
+                }
+                _ => None,
+            })
+    }
+
+    /// Look one channel up by its canonical identity.
+    pub fn channel(
+        &self,
+        signal: &TransientCompressionSignal,
+    ) -> Option<&TransientCompressedChannel> {
+        self.channels.iter().find(|channel| {
+            channel.descriptor.kind() == signal.kind
+                && channel.descriptor.canonical_name() == signal.canonical_name
+        })
+    }
+
+    /// Look one channel up by canonical name, ignoring case.
+    pub fn channel_named(&self, canonical_name: &str) -> Option<&TransientCompressedChannel> {
+        self.channels.iter().find(|channel| {
+            channel
+                .descriptor
+                .canonical_name()
+                .eq_ignore_ascii_case(canonical_name)
+        })
+    }
+
+    /// The node-voltage channel for a zero-based node index.
+    pub fn node_voltage_channel(&self, node_index: usize) -> Option<&TransientCompressedChannel> {
+        self.node_channels()
+            .find(|(index, _)| *index == node_index)
+            .map(|(_, channel)| channel)
+    }
+
+    /// The branch-current channel for a canonical branch name.
+    pub fn branch_current_channel(&self, name: &str) -> Option<&TransientCompressedChannel> {
+        self.channels
+            .iter()
+            .find(|channel| match channel.descriptor.role() {
+                TransientChannelRole::BranchCurrent { branch } => branch.eq_ignore_ascii_case(name),
+                _ => false,
+            })
+    }
+
+    /// The device operating-point channel for one device and parameter.
+    pub fn device_op_channel(
+        &self,
+        device_name: &str,
+        parameter: &str,
+    ) -> Option<&TransientCompressedChannel> {
+        self.channels
+            .iter()
+            .find(|channel| match channel.descriptor.role() {
+                TransientChannelRole::DeviceObservable {
+                    device,
+                    parameter: candidate,
+                } => {
+                    device.eq_ignore_ascii_case(device_name)
+                        && candidate.eq_ignore_ascii_case(parameter)
+                }
+                _ => false,
+            })
+    }
+
+    /// The typed device-store channel for a canonical store name.
+    pub fn store_channel(&self, name: &str) -> Option<&TransientCompressedChannel> {
+        self.channels
+            .iter()
+            .find(|channel| match channel.descriptor.role() {
+                TransientChannelRole::DeviceStore { store } => store.eq_ignore_ascii_case(name),
+                _ => false,
+            })
+    }
+
+    /// Validate the complete inventory and retained-grid alignment before
+    /// exposing or expanding this result.
     pub fn validate(&self) -> Result<(), String> {
         let point_count = self.time.len();
         if self.step_sizes.len() != point_count {
@@ -673,27 +978,21 @@ impl TransientResultCompressed {
                 self.step_sizes.len()
             ));
         }
-        if self.voltages.len() != self.num_nodes || self.node_names.len() != self.num_nodes {
-            return Err(format!(
-                "compressed transient declares {} nodes but has {} voltage channels and {} node names",
-                self.num_nodes,
-                self.voltages.len(),
-                self.node_names.len()
-            ));
-        }
-        if self.branch_currents.len() != self.branch_names.len() {
-            return Err(format!(
-                "compressed transient has {} branch-current channels but {} branch names",
-                self.branch_currents.len(),
-                self.branch_names.len()
-            ));
-        }
         if self.input_points < point_count {
             return Err(format!(
                 "compressed transient retains {point_count} points from an impossible {}-point input",
                 self.input_points
             ));
         }
+        self.identity.validate()?;
+        self.validate_report_policy(point_count)?;
+        self.validate_grid()?;
+        self.validate_channels(point_count)?;
+        self.validate_event_traces()?;
+        self.validate_worst_observation()
+    }
+
+    fn validate_report_policy(&self, point_count: usize) -> Result<(), String> {
         let report = &self.compression_report;
         if report.schema_version != TRANSIENT_COMPRESSION_REPORT_VERSION {
             return Err(format!(
@@ -746,6 +1045,10 @@ impl TransientResultCompressed {
                 self.compression_ratio, point_count, self.input_points
             ));
         }
+        Ok(())
+    }
+
+    fn validate_grid(&self) -> Result<(), String> {
         if self
             .time
             .windows(2)
@@ -757,6 +1060,7 @@ impl TransientResultCompressed {
                     .to_string(),
             );
         }
+        let policy = &self.compression_report.applied_policy;
         if policy.enabled
             && policy.maximum_retained_interval > 0.0
             && self.time.windows(2).any(|window| {
@@ -777,280 +1081,291 @@ impl TransientResultCompressed {
                 "compressed transient step sizes must be finite and non-negative".to_string(),
             );
         }
+        Ok(())
+    }
 
-        for (kind, name, values, may_be_projected_out) in self
-            .voltages
-            .iter()
-            .enumerate()
-            .map(|(index, values)| ("voltage", self.node_names[index].as_str(), values, true))
-            .chain(
-                self.branch_currents
-                    .iter()
-                    .enumerate()
-                    .map(|(index, values)| {
-                        (
-                            "branch-current",
-                            self.branch_names[index].as_str(),
-                            values,
-                            true,
-                        )
-                    }),
-            )
-            .chain(self.device_op_traces.iter().map(|trace| {
-                (
-                    "device operating-point",
-                    trace.parameter.as_str(),
-                    &trace.values,
-                    false,
-                )
-            }))
-            .chain(
-                self.store_traces
-                    .iter()
-                    .map(|trace| ("device store", trace.name.as_str(), &trace.values, false)),
-            )
-        {
-            if values.len() != point_count && !(may_be_projected_out && values.is_empty()) {
+    fn validate_channels(&self, point_count: usize) -> Result<(), String> {
+        let mut seen = std::collections::BTreeSet::new();
+        let mut expected_node_index = 0usize;
+        for channel in &self.channels {
+            let descriptor = &channel.descriptor;
+            let rebuilt = TransientChannelDescriptor::new(
+                descriptor.role().clone(),
+                descriptor.unit().clone(),
+            )?;
+            if rebuilt.canonical_name() != descriptor.canonical_name()
+                || rebuilt.display_name() != descriptor.display_name()
+            {
                 return Err(format!(
-                    "compressed transient {kind} channel '{name}' has {} values for {point_count} time points",
-                    values.len()
+                    "compressed transient channel '{}' has names inconsistent with its role",
+                    descriptor.canonical_name()
                 ));
             }
-            if values.iter().any(|value| !value.is_finite()) {
+            if !seen.insert((
+                descriptor.kind().as_str(),
+                descriptor.canonical_name().to_string(),
+            )) {
                 return Err(format!(
-                    "compressed transient {kind} channel '{name}' contains a non-finite value"
+                    "compressed transient has duplicate channel '{}:{}'",
+                    descriptor.kind().as_str(),
+                    descriptor.canonical_name()
                 ));
             }
-        }
-
-        let has_analog_signal = self
-            .voltages
-            .iter()
-            .chain(&self.branch_currents)
-            .any(|values| !values.is_empty())
-            || !self.device_op_traces.is_empty()
-            || !self.store_traces.is_empty();
-        let has_approximated_signal =
-            report.input_points > report.retained_points && has_analog_signal;
-        match &report.worst_observed {
-            None if has_approximated_signal => {
-                return Err(
-                    "compressed transient report omitted the worst approximated analog sample"
-                        .to_string(),
-                );
+            if let TransientChannelRole::NodeVoltage { node_index, .. } = descriptor.role() {
+                if *node_index != expected_node_index {
+                    return Err(format!(
+                        "compressed transient node channel '{}' has index {node_index} but solver order expects {expected_node_index}",
+                        descriptor.canonical_name()
+                    ));
+                }
+                expected_node_index += 1;
             }
-            None => {}
-            Some(observation) => {
-                if report.input_points == report.retained_points {
-                    return Err(
-                        "compressed transient report records an error when no sample was approximated"
-                            .to_string(),
-                    );
-                }
-                if observation.input_sample_index >= report.input_points {
-                    return Err(format!(
-                        "compressed transient worst-error sample index {} is outside the {}-point input grid",
-                        observation.input_sample_index, report.input_points
-                    ));
-                }
-                if !observation.time.is_finite()
-                    || !self
-                        .time
-                        .first()
-                        .is_some_and(|start| observation.time >= *start)
-                    || !self
-                        .time
-                        .last()
-                        .is_some_and(|stop| observation.time <= *stop)
-                {
-                    return Err(format!(
-                        "compressed transient worst-error time {} is outside the result interval",
-                        observation.time
-                    ));
-                }
-                if self
-                    .time
-                    .binary_search_by(|time| time.total_cmp(&observation.time))
-                    .is_ok()
-                {
-                    return Err(
-                        "compressed transient worst-error observation names a retained sample"
-                            .to_string(),
-                    );
-                }
-                let signal_values = self
-                    .compression_signal_values(&observation.signal)?
-                    .ok_or_else(|| {
-                        format!(
-                            "compressed transient worst-error signal '{}:{}' does not exist in the result",
-                            observation.signal.kind.as_str(),
-                            observation.signal.canonical_name
-                        )
-                    })?;
-                for (name, value) in [
-                    ("actual value", observation.actual_value),
-                    ("absolute error", observation.absolute_error),
-                    ("allowed tolerance", observation.allowed_tolerance),
-                    ("tolerance utilization", observation.tolerance_utilization),
-                ] {
-                    if !value.is_finite() || (name != "actual value" && value < 0.0) {
+            match channel.availability {
+                TransientChannelAvailability::Available => {
+                    if channel.samples.len() != point_count {
                         return Err(format!(
-                            "compressed transient worst-error report has invalid {name} {value}"
+                            "compressed transient channel '{}' has {} samples for {point_count} time points",
+                            descriptor.canonical_name(),
+                            channel.samples.len()
                         ));
                     }
                 }
-                let reconstructed = self
-                    .interpolate_values(signal_values, observation.time)
-                    .ok_or_else(|| {
-                        "compressed transient worst-error signal cannot be reconstructed"
-                            .to_string()
-                    })?;
-                let expected_absolute_error = (observation.actual_value - reconstructed).abs();
-                if !expected_absolute_error.is_finite()
-                    || !certificate_value_matches(
-                        observation.absolute_error,
-                        expected_absolute_error,
-                    )
-                {
-                    return Err(format!(
-                        "compressed transient worst-error absolute error {} is inconsistent with actual value {} and reconstructed value {reconstructed} (expected {expected_absolute_error})",
-                        observation.absolute_error, observation.actual_value
-                    ));
+                TransientChannelAvailability::NotProjected => {
+                    if !channel.samples.is_empty() {
+                        return Err(format!(
+                            "compressed transient channel '{}' declares it was not projected but carries {} samples",
+                            descriptor.canonical_name(),
+                            channel.samples.len()
+                        ));
+                    }
                 }
-                let expected_relative_error = if observation.actual_value == 0.0 {
-                    None
-                } else {
-                    let relative = observation.absolute_error / observation.actual_value.abs();
-                    relative.is_finite().then_some(relative)
-                };
-                if !optional_certificate_value_matches(
-                    observation.relative_error,
-                    expected_relative_error,
-                ) {
-                    return Err(format!(
-                        "compressed transient worst-error relative error {:?} is inconsistent with error {} and actual value {}",
-                        observation.relative_error,
-                        observation.absolute_error,
-                        observation.actual_value
-                    ));
-                }
-                let expected_tolerance = policy.absolute_tolerance
-                    + policy.relative_tolerance * observation.actual_value.abs();
-                if !expected_tolerance.is_finite()
-                    || !certificate_value_matches(observation.allowed_tolerance, expected_tolerance)
-                {
-                    return Err(format!(
-                        "compressed transient worst-error tolerance {} is inconsistent with policy and actual value {} (expected {expected_tolerance})",
-                        observation.allowed_tolerance, observation.actual_value
-                    ));
-                }
-                let expected_utilization = if observation.allowed_tolerance > 0.0 {
-                    observation.absolute_error / observation.allowed_tolerance
-                } else if observation.absolute_error == 0.0 {
-                    0.0
-                } else {
-                    Value::INFINITY
-                };
-                let utilization_slack = 64.0
-                    * Value::EPSILON
-                    * expected_utilization
-                        .abs()
-                        .max(observation.tolerance_utilization.abs())
-                        .max(1.0);
-                if !expected_utilization.is_finite()
-                    || (observation.tolerance_utilization - expected_utilization).abs()
-                        > utilization_slack
-                    || observation.tolerance_utilization > 1.0 + 64.0 * Value::EPSILON
-                {
-                    return Err(format!(
-                        "compressed transient worst-error utilization {} is inconsistent with error {} and tolerance {}",
-                        observation.tolerance_utilization,
-                        observation.absolute_error,
-                        observation.allowed_tolerance
-                    ));
-                }
+            }
+            if channel
+                .samples
+                .iter()
+                .any(|sample| sample.value().is_some_and(|value| !value.is_finite()))
+            {
+                return Err(format!(
+                    "compressed transient channel '{}' published a non-finite value instead of an absence",
+                    descriptor.canonical_name()
+                ));
             }
         }
         Ok(())
     }
 
-    fn compression_signal_values<'a>(
-        &'a self,
-        expected: &TransientCompressionSignal,
-    ) -> Result<Option<&'a [Value]>, String> {
-        match expected.kind {
-            TransientCompressionSignalKind::Voltage => {
-                for (name, values) in self.node_names.iter().zip(&self.voltages) {
-                    if !values.is_empty() && TransientCompressionSignal::voltage(name)? == *expected
-                    {
-                        return Ok(Some(values));
-                    }
-                }
+    fn validate_event_traces(&self) -> Result<(), String> {
+        for trace in &self.digital_traces {
+            if trace.node_name.trim().is_empty() {
+                return Err("compressed transient digital trace has an empty node name".to_string());
             }
-            TransientCompressionSignalKind::BranchCurrent => {
-                for (name, values) in self.branch_names.iter().zip(&self.branch_currents) {
-                    if !values.is_empty()
-                        && TransientCompressionSignal::branch_current(name)? == *expected
-                    {
-                        return Ok(Some(values));
-                    }
-                }
-            }
-            TransientCompressionSignalKind::DeviceObservable => {
-                for trace in &self.device_op_traces {
-                    if TransientCompressionSignal::device_observable(
-                        &trace.device_name,
-                        &trace.parameter,
-                    )? == *expected
-                    {
-                        return Ok(Some(&trace.values));
-                    }
-                }
-            }
-            TransientCompressionSignalKind::DeviceStore => {
-                for trace in &self.store_traces {
-                    if TransientCompressionSignal::device_store(&trace.name)? == *expected {
-                        return Ok(Some(&trace.values));
-                    }
-                }
+            if trace
+                .points
+                .windows(2)
+                .any(|window| !window[0].time.is_finite() || window[1].time < window[0].time)
+                || trace
+                    .points
+                    .last()
+                    .is_some_and(|point| !point.time.is_finite())
+            {
+                return Err(format!(
+                    "compressed transient digital trace '{}' has non-finite or unordered event times",
+                    trace.node_name
+                ));
             }
         }
-        Ok(None)
+        for trace in &self.real_traces {
+            if trace.node_name.trim().is_empty() {
+                return Err("compressed transient real trace has an empty node name".to_string());
+            }
+            if trace
+                .points
+                .windows(2)
+                .any(|window| !window[0].time.is_finite() || window[1].time < window[0].time)
+                || trace
+                    .points
+                    .last()
+                    .is_some_and(|point| !point.time.is_finite())
+            {
+                return Err(format!(
+                    "compressed transient real trace '{}' has non-finite or unordered event times",
+                    trace.node_name
+                ));
+            }
+        }
+        Ok(())
     }
 
-    fn aligned_values<'a>(&self, values: &'a [Value]) -> Option<&'a [Value]> {
-        (values.len() == self.time.len()).then_some(values)
+    fn validate_worst_observation(&self) -> Result<(), String> {
+        let report = &self.compression_report;
+        let policy = &report.applied_policy;
+        let has_comparable_sample = self.channels.iter().any(|channel| {
+            channel.availability == TransientChannelAvailability::Available
+                && channel.samples.iter().any(|sample| sample.is_present())
+        });
+        let has_approximated_signal =
+            report.input_points > report.retained_points && has_comparable_sample;
+        let Some(observation) = &report.worst_observed else {
+            if has_approximated_signal {
+                return Err(
+                    "compressed transient report omitted the worst approximated analog sample"
+                        .to_string(),
+                );
+            }
+            return Ok(());
+        };
+        if report.input_points == report.retained_points {
+            return Err(
+                "compressed transient report records an error when no sample was approximated"
+                    .to_string(),
+            );
+        }
+        if observation.input_sample_index >= report.input_points {
+            return Err(format!(
+                "compressed transient worst-error sample index {} is outside the {}-point input grid",
+                observation.input_sample_index, report.input_points
+            ));
+        }
+        if !observation.time.is_finite()
+            || !self
+                .time
+                .first()
+                .is_some_and(|start| observation.time >= *start)
+            || !self
+                .time
+                .last()
+                .is_some_and(|stop| observation.time <= *stop)
+        {
+            return Err(format!(
+                "compressed transient worst-error time {} is outside the result interval",
+                observation.time
+            ));
+        }
+        if self
+            .time
+            .binary_search_by(|time| time.total_cmp(&observation.time))
+            .is_ok()
+        {
+            return Err(
+                "compressed transient worst-error observation names a retained sample".to_string(),
+            );
+        }
+        let channel = self
+            .channel(&observation.signal)
+            .filter(|channel| channel.availability == TransientChannelAvailability::Available)
+            .ok_or_else(|| {
+                format!(
+                    "compressed transient worst-error signal '{}:{}' does not exist in the result",
+                    observation.signal.kind.as_str(),
+                    observation.signal.canonical_name
+                )
+            })?;
+        for (name, value) in [
+            ("actual value", observation.actual_value),
+            ("absolute error", observation.absolute_error),
+            ("allowed tolerance", observation.allowed_tolerance),
+            ("tolerance utilization", observation.tolerance_utilization),
+        ] {
+            if !value.is_finite() || (name != "actual value" && value < 0.0) {
+                return Err(format!(
+                    "compressed transient worst-error report has invalid {name} {value}"
+                ));
+            }
+        }
+        let reconstructed = self
+            .interpolate_channel(channel, observation.time)
+            .ok_or_else(|| {
+                "compressed transient worst-error signal cannot be reconstructed".to_string()
+            })?;
+        let expected_absolute_error = (observation.actual_value - reconstructed).abs();
+        if !expected_absolute_error.is_finite()
+            || !certificate_value_matches(observation.absolute_error, expected_absolute_error)
+        {
+            return Err(format!(
+                "compressed transient worst-error absolute error {} is inconsistent with actual value {} and reconstructed value {reconstructed} (expected {expected_absolute_error})",
+                observation.absolute_error, observation.actual_value
+            ));
+        }
+        let expected_relative_error = if observation.actual_value == 0.0 {
+            None
+        } else {
+            let relative = observation.absolute_error / observation.actual_value.abs();
+            relative.is_finite().then_some(relative)
+        };
+        if !optional_certificate_value_matches(observation.relative_error, expected_relative_error)
+        {
+            return Err(format!(
+                "compressed transient worst-error relative error {:?} is inconsistent with error {} and actual value {}",
+                observation.relative_error, observation.absolute_error, observation.actual_value
+            ));
+        }
+        let expected_tolerance =
+            policy.absolute_tolerance + policy.relative_tolerance * observation.actual_value.abs();
+        if !expected_tolerance.is_finite()
+            || !certificate_value_matches(observation.allowed_tolerance, expected_tolerance)
+        {
+            return Err(format!(
+                "compressed transient worst-error tolerance {} is inconsistent with policy and actual value {} (expected {expected_tolerance})",
+                observation.allowed_tolerance, observation.actual_value
+            ));
+        }
+        let expected_utilization = if observation.allowed_tolerance > 0.0 {
+            observation.absolute_error / observation.allowed_tolerance
+        } else if observation.absolute_error == 0.0 {
+            0.0
+        } else {
+            Value::INFINITY
+        };
+        let utilization_slack = 64.0
+            * Value::EPSILON
+            * expected_utilization
+                .abs()
+                .max(observation.tolerance_utilization.abs())
+                .max(1.0);
+        if !expected_utilization.is_finite()
+            || (observation.tolerance_utilization - expected_utilization).abs() > utilization_slack
+            || observation.tolerance_utilization > 1.0 + 64.0 * Value::EPSILON
+        {
+            return Err(format!(
+                "compressed transient worst-error utilization {} is inconsistent with error {} and tolerance {}",
+                observation.tolerance_utilization,
+                observation.absolute_error,
+                observation.allowed_tolerance
+            ));
+        }
+        Ok(())
     }
 
-    fn aligned_channel_values(&self, node: usize) -> Option<&[Value]> {
-        if node >= self.num_nodes {
+    fn interpolate_channel(
+        &self,
+        channel: &TransientCompressedChannel,
+        time: Value,
+    ) -> Option<Value> {
+        if channel.availability != TransientChannelAvailability::Available
+            || channel.samples.len() != self.time.len()
+            || self.time.is_empty()
+            || !time.is_finite()
+        {
             return None;
         }
-
-        let values = self.voltages.get(node)?;
-        self.aligned_values(values)
-    }
-
-    fn interpolate_values(&self, values: &[Value], time: Value) -> Option<Value> {
-        if self.time.is_empty() || !time.is_finite() {
-            return None;
-        }
-        let values = self.aligned_values(values)?;
         let times = &self.time;
+        let samples = &channel.samples;
         if time <= times[0] {
-            return Some(values[0]);
+            return samples[0].value();
         }
         if time >= *times.last()? {
-            return values.last().copied();
+            return samples.last()?.value();
         }
         let index = match times.binary_search_by(|candidate| candidate.total_cmp(&time)) {
-            Ok(index) => return values.get(index).copied(),
+            Ok(index) => return samples.get(index)?.value(),
             Err(index) => index.checked_sub(1)?,
         };
+        let start = samples[index].value()?;
+        let end = samples[index + 1].value()?;
         let t0 = times[index];
         let t1 = times[index + 1];
         let fraction = (time - t0) / (t1 - t0);
-        Some(values[index] + fraction * (values[index + 1] - values[index]))
+        Some(start + fraction * (end - start))
     }
 
     /// Get value at arbitrary time via linear interpolation
@@ -1058,22 +1373,21 @@ impl TransientResultCompressed {
     /// This is how compressed waveforms are read - the stored points
     /// are the control points for piecewise linear interpolation.
     pub fn interpolate(&self, node: usize, time: Value) -> Option<Value> {
-        let values = self.aligned_channel_values(node)?;
-        self.interpolate_values(values, time)
+        self.interpolate_channel(self.node_voltage_channel(node)?, time)
     }
 
     /// Get the retained branch-current waveform for a canonical branch name.
-    pub fn try_branch_current_waveform_named(&self, name: &str) -> Option<&[Value]> {
-        let index = self
-            .branch_names
-            .iter()
-            .position(|candidate| candidate.eq_ignore_ascii_case(name))?;
-        self.aligned_values(self.branch_currents.get(index)?)
+    ///
+    /// Returns `None` when the branch was not projected or any retained sample
+    /// is absent; the samples themselves are then read through
+    /// [`Self::branch_current_channel`].
+    pub fn try_branch_current_waveform_named(&self, name: &str) -> Option<Vec<Value>> {
+        self.branch_current_channel(name)?.dense_values()
     }
 
     /// Interpolate a retained branch-current waveform by canonical name.
     pub fn interpolate_branch_current_named(&self, name: &str, time: Value) -> Option<Value> {
-        self.interpolate_values(self.try_branch_current_waveform_named(name)?, time)
+        self.interpolate_channel(self.branch_current_channel(name)?, time)
     }
 
     /// Get a retained device operating-point waveform by device and parameter.
@@ -1081,12 +1395,9 @@ impl TransientResultCompressed {
         &self,
         device_name: &str,
         parameter: &str,
-    ) -> Option<&[Value]> {
-        let trace = self.device_op_traces.iter().find(|trace| {
-            trace.device_name.eq_ignore_ascii_case(device_name)
-                && trace.parameter.eq_ignore_ascii_case(parameter)
-        })?;
-        self.aligned_values(&trace.values)
+    ) -> Option<Vec<Value>> {
+        self.device_op_channel(device_name, parameter)?
+            .dense_values()
     }
 
     /// Interpolate a retained device operating-point waveform.
@@ -1096,34 +1407,32 @@ impl TransientResultCompressed {
         parameter: &str,
         time: Value,
     ) -> Option<Value> {
-        self.interpolate_values(
-            self.try_device_op_waveform_named(device_name, parameter)?,
-            time,
-        )
+        self.interpolate_channel(self.device_op_channel(device_name, parameter)?, time)
     }
 
     /// Get a retained typed device-store waveform by canonical name.
-    pub fn try_store_waveform_named(&self, name: &str) -> Option<&[Value]> {
-        let trace = self
-            .store_traces
-            .iter()
-            .find(|trace| trace.name.eq_ignore_ascii_case(name))?;
-        self.aligned_values(&trace.values)
+    pub fn try_store_waveform_named(&self, name: &str) -> Option<Vec<Value>> {
+        self.store_channel(name)?.dense_values()
     }
 
     /// Interpolate a retained typed device-store waveform by canonical name.
     pub fn interpolate_store_named(&self, name: &str, time: Value) -> Option<Value> {
-        self.interpolate_values(self.try_store_waveform_named(name)?, time)
+        self.interpolate_channel(self.store_channel(name)?, time)
+    }
+
+    /// Get the retained voltage waveform for a zero-based node index.
+    pub fn try_voltage_waveform(&self, node: usize) -> Option<Vec<Value>> {
+        self.node_voltage_channel(node)?.dense_values()
     }
 
     /// Sample waveform at uniform intervals
     ///
     /// Useful for FFT or other analysis that requires uniform sampling.
     pub fn resample(&self, node: usize, num_points: usize) -> Option<(Vec<Value>, Vec<Value>)> {
-        if node >= self.num_nodes || self.time.is_empty() || num_points < 2 {
+        if self.time.is_empty() || num_points < 2 {
             return None;
         }
-        self.aligned_channel_values(node)?;
+        let channel = self.node_voltage_channel(node)?;
 
         let t_start = self.time[0];
         let t_end = *self.time.last()?;
@@ -1133,10 +1442,22 @@ impl TransientResultCompressed {
 
         let values = times
             .iter()
-            .map(|&time| self.interpolate(node, time))
+            .map(|&time| self.interpolate_channel(channel, time))
             .collect::<Option<Vec<_>>>()?;
 
         Some((times, values))
+    }
+}
+
+impl TransientChannelDescriptor {
+    /// Netlist spelling of this channel's owner.
+    pub fn owner_name(&self) -> &str {
+        match &self.role {
+            TransientChannelRole::NodeVoltage { node, .. } => node,
+            TransientChannelRole::BranchCurrent { branch } => branch,
+            TransientChannelRole::DeviceObservable { device, .. } => device,
+            TransientChannelRole::DeviceStore { store } => store,
+        }
     }
 }
 
@@ -1165,16 +1486,6 @@ fn retained_gap_exceeds(start: Value, stop: Value, maximum_interval: Value) -> b
     gap > maximum_interval + 64.0 * Value::EPSILON * scale
 }
 
-fn validate_channel_count(context: &str, actual: usize, expected: usize) -> Result<(), String> {
-    if actual == expected {
-        Ok(())
-    } else {
-        Err(format!(
-            "{context} has {actual} value(s) but recorder expects {expected} channel(s)"
-        ))
-    }
-}
-
 //=============================================================================
 // Tests
 //=============================================================================
@@ -1183,19 +1494,46 @@ fn validate_channel_count(context: &str, actual: usize, expected: usize) -> Resu
 mod tests {
     use super::*;
 
-    fn malformed_compressed_result(voltages: Vec<Vec<Value>>) -> TransientResultCompressed {
+    pub(crate) fn node_channel(
+        node_index: usize,
+        name: &str,
+        samples: Vec<TransientChannelSample>,
+    ) -> TransientCompressedChannel {
+        let availability = if samples.is_empty() {
+            TransientChannelAvailability::NotProjected
+        } else {
+            TransientChannelAvailability::Available
+        };
+        TransientCompressedChannel {
+            descriptor: TransientChannelDescriptor::for_role(TransientChannelRole::NodeVoltage {
+                node_index,
+                node: name.to_string(),
+            })
+            .expect("node descriptor is well formed"),
+            availability,
+            samples,
+        }
+    }
+
+    fn values(samples: &[Value]) -> Vec<TransientChannelSample> {
+        samples
+            .iter()
+            .map(|value| TransientChannelSample::Value(*value))
+            .collect()
+    }
+
+    fn malformed_compressed_result(
+        channels: Vec<TransientCompressedChannel>,
+    ) -> TransientResultCompressed {
         let config = CompressionConfig::none();
         TransientResultCompressed {
             time: vec![0.0, 1.0, 2.0],
             step_sizes: vec![0.0, 1.0, 1.0],
-            voltages,
-            branch_currents: Vec::new(),
-            num_nodes: 1,
-            node_names: vec!["out".to_string()],
-            branch_names: Vec::new(),
-            device_op_traces: Vec::new(),
-            store_traces: Vec::new(),
-            fft_results: Vec::new(),
+            channels,
+            digital_traces: Vec::new(),
+            real_traces: Vec::new(),
+            post_results: TransientPostResults::default(),
+            identity: TransientResultIdentity::default(),
             compression_ratio: 1.0,
             input_points: 3,
             compression_report: TransientCompressionReport::new(&config, 3, 3, None),
@@ -1203,34 +1541,96 @@ mod tests {
     }
 
     #[test]
-    fn compressed_result_rejects_missing_or_misaligned_voltage_channels() {
+    fn compressed_result_rejects_misaligned_voltage_channels() {
         let missing_channel = malformed_compressed_result(Vec::new());
         assert_eq!(missing_channel.interpolate(0, 0.5), None);
         assert_eq!(missing_channel.resample(0, 3), None);
-        assert!(missing_channel.validate().is_err());
+        missing_channel
+            .validate()
+            .expect("a result with no channels is structurally valid");
 
-        let short_channel = malformed_compressed_result(vec![vec![0.0]]);
+        let short_channel =
+            malformed_compressed_result(vec![node_channel(0, "out", values(&[0.0]))]);
         assert_eq!(short_channel.interpolate(0, 0.5), None);
         assert_eq!(short_channel.resample(0, 3), None);
         assert!(short_channel.validate().is_err());
     }
 
     #[test]
-    fn compressed_result_validates_projected_out_solution_channels() {
-        let mut projected = malformed_compressed_result(vec![Vec::new()]);
-        projected.branch_names = vec!["V1".to_string()];
-        projected.branch_currents = vec![Vec::new()];
+    fn compressed_result_validates_projected_out_channels() {
+        let mut projected = malformed_compressed_result(vec![node_channel(0, "out", Vec::new())]);
+        projected.channels.push(TransientCompressedChannel {
+            descriptor: TransientChannelDescriptor::for_role(TransientChannelRole::BranchCurrent {
+                branch: "V1".to_string(),
+            })
+            .expect("branch descriptor is well formed"),
+            availability: TransientChannelAvailability::NotProjected,
+            samples: Vec::new(),
+        });
 
         projected
             .validate()
-            .expect("empty projected-out voltage and current channels are typed missingness");
+            .expect("empty projected-out channels are typed missingness");
         assert_eq!(projected.interpolate(0, 0.5), None);
         assert_eq!(projected.try_branch_current_waveform_named("v1"), None);
+        assert_eq!(projected.node_names(), vec!["out".to_string()]);
+        assert_eq!(projected.branch_names(), vec!["V1".to_string()]);
+    }
+
+    #[test]
+    fn compressed_result_rejects_a_published_non_finite_sample() {
+        let mut fabricated =
+            malformed_compressed_result(vec![node_channel(0, "out", values(&[0.0, 1.0, 2.0]))]);
+        fabricated.channels[0].samples[1] = TransientChannelSample::Value(Value::NAN);
+        assert!(
+            fabricated
+                .validate()
+                .expect_err("a non-finite number must be an absence instead")
+                .contains("instead of an absence")
+        );
+
+        fabricated.channels[0].samples[1] =
+            TransientChannelSample::Absent(TransientSampleAbsence::NonFinite);
+        fabricated
+            .validate()
+            .expect("an explicit absence is the supported representation");
+        assert_eq!(fabricated.channels[0].dense_values(), None);
+        assert_eq!(
+            fabricated.channels[0].validity(),
+            vec![true, false, true],
+            "validity marks the absent sample"
+        );
+    }
+
+    #[test]
+    fn compressed_result_rejects_duplicate_and_misordered_channels() {
+        let duplicate = malformed_compressed_result(vec![
+            node_channel(0, "out", values(&[0.0, 1.0, 2.0])),
+            node_channel(1, "OUT", values(&[0.0, 1.0, 2.0])),
+        ]);
+        assert!(
+            duplicate
+                .validate()
+                .expect_err("canonical channel names are unique")
+                .contains("duplicate channel")
+        );
+
+        let misordered = malformed_compressed_result(vec![
+            node_channel(1, "out", values(&[0.0, 1.0, 2.0])),
+            node_channel(0, "in", values(&[0.0, 1.0, 2.0])),
+        ]);
+        assert!(
+            misordered
+                .validate()
+                .expect_err("node channels stay in solver order")
+                .contains("solver order")
+        );
     }
 
     #[test]
     fn compressed_result_rejects_inconsistent_ratio_metadata() {
-        let mut malformed = malformed_compressed_result(vec![vec![0.0, 1.0, 2.0]]);
+        let mut malformed =
+            malformed_compressed_result(vec![node_channel(0, "out", values(&[0.0, 1.0, 2.0]))]);
         malformed.input_points = 6;
         malformed.compression_ratio = 1.5;
         malformed.compression_report.input_points = 6;
@@ -1244,7 +1644,8 @@ mod tests {
 
     #[test]
     fn compressed_result_rejects_malformed_error_certificate() {
-        let mut certified = malformed_compressed_result(vec![vec![0.0, 1.0, 2.0]]);
+        let mut certified =
+            malformed_compressed_result(vec![node_channel(0, "out", values(&[0.0, 1.0, 2.0]))]);
         certified.input_points = 4;
         certified.compression_ratio = 4.0 / 3.0;
         let observed_actual = 0.500_000_5_f64;
@@ -1360,7 +1761,8 @@ mod tests {
         );
 
         let mut projected_out = certified.clone();
-        projected_out.voltages[0].clear();
+        projected_out.channels[0].samples.clear();
+        projected_out.channels[0].availability = TransientChannelAvailability::NotProjected;
         assert!(
             projected_out
                 .validate()
@@ -1389,61 +1791,133 @@ mod tests {
     }
 
     #[test]
-    fn recorder_new_rejects_mismatched_initial_values_without_panicking() {
-        let err = WaveformRecorder::new(2, 0.0, &[1.0], CompressionConfig::none())
-            .expect_err("initial sample width must be validated");
-        assert!(err.contains("initial waveform sample"));
-    }
-
-    #[test]
-    fn recorder_record_rejects_mismatched_values_without_panicking() {
-        let mut recorder = WaveformRecorder::new(2, 0.0, &[1.0, 2.0], CompressionConfig::none())
-            .expect("recorder initializes");
-
-        let err = recorder
-            .record(1.0, &[3.0])
-            .expect_err("record sample width must be validated");
-        assert!(err.contains("waveform sample"));
-    }
-
-    #[test]
-    fn recorder_finalize_rejects_mismatched_values_without_panicking() {
-        let mut recorder = WaveformRecorder::new(2, 0.0, &[1.0, 2.0], CompressionConfig::none())
-            .expect("recorder initializes");
-
-        let err = recorder
-            .finalize(1.0, &[3.0])
-            .expect_err("final sample width must be validated");
-        assert!(err.contains("final waveform sample"));
-    }
-
-    #[test]
-    fn recorder_positive_interval_limits_retained_gap() {
-        let config = CompressionConfig {
-            abs_tol: 1.0,
-            rel_tol: 1.0,
-            enabled: true,
-            min_interval: 1.0,
+    fn parent_identity_is_optional_but_never_blank() {
+        let mut identified =
+            malformed_compressed_result(vec![node_channel(0, "out", values(&[0.0, 1.0, 2.0]))]);
+        assert!(identified.identity.is_empty());
+        identified.identity = TransientResultIdentity {
+            analysis: Some(
+                TransientAnalysisIdentity::new(" TRAN ", 2).expect("analysis identity normalizes"),
+            ),
+            coordinate: Some(
+                TransientCoordinateIdentity::new([3u8; 16], 1, 4, " sweep-3 ")
+                    .expect("coordinate identity normalizes"),
+            ),
+            topology_fingerprint: Some([9u8; 32]),
         };
-        let mut recorder =
-            WaveformRecorder::new(1, 0.0, &[0.0], config).expect("recorder initializes");
-        for index in 1..=8 {
-            let time = index as Value * 0.25;
-            recorder
-                .record(time, &[time])
-                .expect("aligned sample records");
-        }
-        recorder
-            .finalize(2.0, &[2.0])
-            .expect("aligned final sample records");
+        identified
+            .validate()
+            .expect("a populated identity is part of a valid container");
+        assert!(!identified.identity.is_empty());
+        let analysis = identified
+            .identity
+            .analysis
+            .as_ref()
+            .expect("analysis identity");
+        assert_eq!(analysis.kind_tag, "tran");
+        assert_eq!(analysis.tag(), "tran-003");
+        assert_eq!(
+            identified
+                .identity
+                .coordinate
+                .as_ref()
+                .expect("coordinate identity")
+                .label,
+            "sweep-3"
+        );
 
+        assert!(TransientAnalysisIdentity::new("   ", 0).is_err());
+        assert!(TransientCoordinateIdentity::new([0u8; 16], 0, 0, "  ").is_err());
+
+        let mut blanked = identified;
+        blanked
+            .identity
+            .analysis
+            .as_mut()
+            .expect("analysis identity")
+            .kind_tag = String::new();
         assert!(
-            recorder
-                .times()
-                .windows(2)
-                .all(|window| window[1] - window[0] <= 1.0),
-            "retained grid exceeded maximum interval: {:?}",
-            recorder.times()
+            blanked
+                .validate()
+                .expect_err("a blank analysis kind tag is not an identity")
+                .contains("analysis kind tag")
+        );
+    }
+
+    #[test]
+    fn channel_unit_wire_spellings_round_trip() {
+        for unit in [
+            TransientChannelUnit::Volt,
+            TransientChannelUnit::Ampere,
+            TransientChannelUnit::Ohm,
+            TransientChannelUnit::Siemens,
+            TransientChannelUnit::Watt,
+            TransientChannelUnit::Hertz,
+            TransientChannelUnit::Second,
+            TransientChannelUnit::Degree,
+            TransientChannelUnit::Radian,
+            TransientChannelUnit::Dimensionless,
+            TransientChannelUnit::Unspecified,
+            TransientChannelUnit::Custom("V/K".to_string()),
+        ] {
+            let tag = unit.as_str().to_string();
+            assert_eq!(
+                TransientChannelUnit::from_tag(&tag).expect("known unit spelling parses"),
+                unit
+            );
+        }
+        assert!(TransientChannelUnit::from_tag("   ").is_err());
+    }
+
+    #[test]
+    fn descriptor_carries_unit_owner_and_shape_for_every_role() {
+        let voltage = TransientChannelDescriptor::for_role(TransientChannelRole::NodeVoltage {
+            node_index: 0,
+            node: "OUT".to_string(),
+        })
+        .expect("voltage descriptor");
+        assert_eq!(voltage.canonical_name(), "v(out)");
+        assert_eq!(voltage.display_name(), "V(OUT)");
+        assert_eq!(*voltage.unit(), TransientChannelUnit::Volt);
+        assert_eq!(voltage.owner(), TransientChannelOwner::Node("OUT".into()));
+        assert_eq!(voltage.value_type(), "real");
+        assert_eq!(voltage.shape(), "scalar");
+
+        let current = TransientChannelDescriptor::for_role(TransientChannelRole::BranchCurrent {
+            branch: "V1".to_string(),
+        })
+        .expect("current descriptor");
+        assert_eq!(current.canonical_name(), "i(v1)");
+        assert_eq!(*current.unit(), TransientChannelUnit::Ampere);
+        assert_eq!(current.owner(), TransientChannelOwner::Branch("V1".into()));
+
+        let observable =
+            TransientChannelDescriptor::for_role(TransientChannelRole::DeviceObservable {
+                device: "M1".to_string(),
+                parameter: "gm".to_string(),
+            })
+            .expect("observable descriptor");
+        assert_eq!(observable.canonical_name(), "@m1[gm]");
+        assert_eq!(*observable.unit(), TransientChannelUnit::Unspecified);
+        assert_eq!(
+            observable.owner(),
+            TransientChannelOwner::Device("M1".into())
+        );
+
+        let store = TransientChannelDescriptor::for_role(TransientChannelRole::DeviceStore {
+            store: "YMEM!R1:R".to_string(),
+        })
+        .expect("store descriptor");
+        assert_eq!(store.canonical_name(), "ymem!r1:r");
+        assert!(
+            TransientChannelDescriptor::new(
+                TransientChannelRole::DeviceStore {
+                    store: "YMEM!R1:R".to_string()
+                },
+                TransientChannelUnit::Custom(" ".to_string())
+            )
+            .expect_err("an empty custom unit symbol is refused")
+            .contains("unit symbol")
         );
     }
 }
