@@ -9,7 +9,7 @@ pub mod bench;
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod branch_agreement;
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
-mod census_models;
+pub(crate) mod census_models;
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod cfg_census;
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]

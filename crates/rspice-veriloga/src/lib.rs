@@ -95,6 +95,7 @@ pub mod metrics;
 mod numeric_literal;
 pub mod parser;
 pub mod preprocessor;
+mod reaching_definition;
 pub mod runtime_report;
 pub mod rust_backend;
 pub mod semantic;

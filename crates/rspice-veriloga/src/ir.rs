@@ -1048,6 +1048,45 @@ impl DeviceIR {
             module.contributions.len()
         ));
 
+        // Give every equation the definition that reaches the point it was
+        // written at, before anything reads a contribution expression again.
+        // Noise process metadata is extracted from these expressions below and
+        // keeps a clone of the magnitude, so a rewrite after that point would
+        // leave the PSD reading the slot the assignment pass finishes with
+        // while the residual read the snapshot. The pass also splices copies
+        // into `assignments`, which has to precede the static classification (a
+        // snapshot of a static variable is itself static) and the shadow build
+        // (which then differentiates the copies and captures the derivative
+        // shadows at the same point). Its spliced items are plain variable
+        // reads: no noise site, no branch probe, nothing the passes between
+        // here and there look for.
+        let span = crate::metrics::FineSpan::new("ir.reaching_snapshots");
+        let statement_sites = module
+            .statements
+            .iter()
+            .map(|statement| match statement {
+                crate::semantic::AnalyzedStatement::Assignment(assignment) => assignment.site,
+                crate::semantic::AnalyzedStatement::Loop(loop_statement) => loop_statement.site,
+            })
+            .collect::<Vec<_>>();
+        let equation_sites = module
+            .contributions
+            .iter()
+            .map(|contribution| contribution.site)
+            .collect::<Vec<_>>();
+        let snapshots = crate::reaching_definition::insert_equation_snapshots(
+            &mut ir.assignments,
+            &mut ir.variables,
+            &ir.arrays,
+            &statement_sites,
+            &mut converted_contribs,
+            &equation_sites,
+        )?;
+        span.finish(&format!(
+            "module={} reaching_snapshots={snapshots}",
+            module.name
+        ));
+
         let span = crate::metrics::FineSpan::new("ir.noise_collect");
         Self::collect_noise_processes_in_items(&ir.assignments, &mut ir.noise_sources)?;
         for expr in &converted_contribs {
@@ -3736,7 +3775,7 @@ pub mod autodiff {
 
     /// Structurally map an IR expression bottom-up. The closure may replace
     /// a node entirely (returning Some) before its children are visited.
-    pub(super) fn map_expr(expr: &IrExpr, f: &mut impl FnMut(&IrExpr) -> Option<IrExpr>) -> IrExpr {
+    pub(crate) fn map_expr(expr: &IrExpr, f: &mut impl FnMut(&IrExpr) -> Option<IrExpr>) -> IrExpr {
         if let Some(replacement) = f(expr) {
             return replacement;
         }
