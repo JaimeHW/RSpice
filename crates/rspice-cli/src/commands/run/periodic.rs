@@ -630,6 +630,15 @@ fn map_periodic_error(
     if matches!(error, rspice_core::SimulationError::Aborted) {
         super::cancellation_cli_error(ctx.args.timeout)
     } else {
-        CliError::simulation_error_in(error.to_string(), analysis)
+        // Carry the engine's typed failure rather than its text. All four
+        // cards of this family - .PSS, .PAC, .PNOISE and .ENVELOPE - report
+        // through here, so stringifying re-decided every one of their failures
+        // as the simulation category: a device the periodic solver refuses
+        // left this process with the same status as one that would not
+        // converge.
+        CliError::CoreSimulationError {
+            source: error,
+            analysis: Some(analysis.to_string()),
+        }
     }
 }

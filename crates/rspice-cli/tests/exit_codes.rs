@@ -1472,6 +1472,98 @@ fn an_advanced_analysis_keeps_the_engine_category_of_what_refused_it() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The periodic family - `.PSS`, `.PAC`, `.PNOISE`, `.ENVELOPE` - shares one
+/// error map, so typing it types all four. `.PSS` is the spelling driven here
+/// because it is the carrier the other three linearize around, so it is the
+/// one card of the family a deck can raise on its own.
+#[test]
+fn a_periodic_analysis_keeps_the_engine_category_of_what_refused_it() {
+    let dir = test_dir("pss_capability");
+    let diagnostic = run_json(
+        &dir,
+        "ltra_pss.sp",
+        "* RLGC LTRA with shunt conductance, under a periodic steady state\n\
+         V1 in 0 SIN(0 1 1e6)\n\
+         O1 in 0 out 0 rgline\n\
+         .model rgline LTRA R=1 G=1e-3 L=1n C=1p LEN=1\n\
+         Rl out 0 50\n\
+         .pss FUND=1e6\n\
+         .end\n",
+        &[],
+    );
+
+    assert_eq!(
+        diagnostic["observed_exit_code"], 69,
+        "a refusal a periodic analysis raised is still a capability refusal: {diagnostic}"
+    );
+    assert_eq!(diagnostic["error"]["category"], "capability");
+    assert_eq!(diagnostic["error"]["code"], "unsupported_capability");
+    assert_eq!(
+        diagnostic["error"]["capability"],
+        "device.ltra.rlgc_conductance"
+    );
+    assert_eq!(
+        diagnostic["error"]["analysis"], "PSS",
+        "the refusal must still name the analysis that raised it: {diagnostic}"
+    );
+    assert!(
+        diagnostic["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message
+                .contains("neither ngspice nor Xyce defines an RLGC line with shunt conductance")),
+        "the engine's detail must survive to the diagnostic: {diagnostic}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The same refusal reached while resolving a `--node`-style flag rather than
+/// while running an analysis.
+///
+/// A flag is resolved by elaborating the deck, which is where an authored
+/// construct this build declines is refused; stringifying that refusal exited
+/// 80 purely because a flag asked for the node map first.
+#[test]
+fn a_resolved_node_flag_keeps_the_engine_category_of_what_refused_it() {
+    let dir = test_dir("node_resolution_capability");
+    let diagnostic = run_json(
+        &dir,
+        "ltra_sens.sp",
+        "* RLGC LTRA with shunt conductance, behind a node-resolving flag\n\
+         V1 in 0 1\n\
+         O1 in 0 out 0 rgline\n\
+         .model rgline LTRA R=1 G=1e-3 L=1n C=1p LEN=1\n\
+         Rl out 0 50\n\
+         .op\n\
+         .end\n",
+        &["--sens-output", "out", "--sens-param", "R1"],
+    );
+
+    assert_eq!(
+        diagnostic["observed_exit_code"], 69,
+        "a refusal raised while resolving a flag is still a capability refusal: {diagnostic}"
+    );
+    assert_eq!(diagnostic["error"]["category"], "capability");
+    assert_eq!(diagnostic["error"]["code"], "unsupported_capability");
+    assert_eq!(
+        diagnostic["error"]["capability"],
+        "device.ltra.rlgc_conductance"
+    );
+    assert_eq!(
+        diagnostic["error"]["analysis"], "Node Resolution",
+        "the refusal must still name the step that raised it: {diagnostic}"
+    );
+    assert!(
+        diagnostic["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message
+                .contains("neither ngspice nor Xyce defines an RLGC line with shunt conductance")),
+        "the engine's detail must survive to the diagnostic: {diagnostic}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn an_unreadable_checkpoint_version_exits_seventy_six() {
     let dir = test_dir("category_persistence");

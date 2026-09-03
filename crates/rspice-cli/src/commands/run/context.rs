@@ -1336,7 +1336,7 @@ pub(super) fn resolve_node(
     node: &str,
     flag: &str,
 ) -> Result<usize, CliError> {
-    let resolver = shared::NodeResolver::from_netlist(ctx.engine, ctx.netlist)?;
+    let resolver = shared::NodeResolver::from_netlist(ctx.engine, ctx.netlist, ctx.args.timeout)?;
     resolver
         .resolve_node(node)
         .ok_or_else(|| CliError::InvalidArgument {

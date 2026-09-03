@@ -22,14 +22,36 @@ impl NodeResolver {
     /// the process abort source: `--timeout` and Ctrl-C must stop a run that
     /// is still resolving `--node`-style flags, not only one already inside a
     /// solver.
-    pub(super) fn from_netlist(engine: &Engine, netlist: &Netlist) -> Result<Self, CliError> {
+    pub(super) fn from_netlist(
+        engine: &Engine,
+        netlist: &Netlist,
+        timeout_seconds: Option<f64>,
+    ) -> Result<Self, CliError> {
         rspice_core::engine::NodeResolver::build_with_abort(
             engine,
             netlist,
             &crate::abort::ProcessAbort,
         )
         .map(Self)
-        .map_err(|e| CliError::simulation_error_in(e.to_string(), "Node Resolution"))
+        .map_err(|source| {
+            // A flag resolved before an analysis runs is resolved by
+            // elaborating the deck, which is where a capability this build
+            // refuses is raised. Stringifying it re-decided that refusal as
+            // the simulation category, so the same refusal exited 80 when a
+            // node flag reached it and 69 when an analysis card did. This
+            // failure never reaches the run report - the requested-mode
+            // dispatch propagates it straight out - so the stop the report
+            // would have re-labelled has to be re-labelled here, exactly as
+            // the sibling resolver in `frequency.rs` does.
+            if matches!(source, rspice_core::SimulationError::Aborted) {
+                super::cancellation_cli_error(timeout_seconds)
+            } else {
+                CliError::CoreSimulationError {
+                    source,
+                    analysis: Some("Node Resolution".to_string()),
+                }
+            }
+        })
     }
 
     pub(super) fn resolve_node(&self, node: &str) -> Option<usize> {
@@ -406,7 +428,8 @@ mod tests {
         )
         .expect("deck parses");
         let engine = Engine::new(rspice_core::SimulationConfig::default());
-        let resolver = NodeResolver::from_netlist(&engine, &netlist).expect("resolver builds");
+        let resolver =
+            NodeResolver::from_netlist(&engine, &netlist, None).expect("resolver builds");
         assert_eq!(resolver.resolve_node("0"), Some(0));
         assert_eq!(resolver.resolve_node("out"), resolver.resolve_node("OUT"));
         assert!(resolver.resolve_node("out").is_some_and(|index| index != 0));
