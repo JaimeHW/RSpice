@@ -79,6 +79,7 @@ const GENERATOR_SOURCE_DIGEST_INPUTS: &[&str] = &[
     "src/numeric_literal.rs",
     "src/parser",
     "src/preprocessor.rs",
+    "src/reaching_definition.rs",
     "src/runtime_report.rs",
     "src/rust_backend",
     "src/semantic",

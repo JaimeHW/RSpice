@@ -1078,6 +1078,39 @@ impl DeviceIR {
             autodiff::rewrite_branch_probes_in_items(&mut ir.assignments, &branch_table);
         }
 
+        // Give every equation the definition that reaches the point it was
+        // written at, before anything downstream reads either list. The pass
+        // splices copies into `assignments`, so it has to precede the static
+        // classification (a snapshot of a static variable is itself static)
+        // and the shadow build (which then differentiates the copies and
+        // captures the derivatives at the same point).
+        let span = crate::metrics::FineSpan::new("ir.reaching_snapshots");
+        let statement_sites = module
+            .statements
+            .iter()
+            .map(|statement| match statement {
+                crate::semantic::AnalyzedStatement::Assignment(assignment) => assignment.site,
+                crate::semantic::AnalyzedStatement::Loop(loop_statement) => loop_statement.site,
+            })
+            .collect::<Vec<_>>();
+        let equation_sites = module
+            .contributions
+            .iter()
+            .map(|contribution| contribution.site)
+            .collect::<Vec<_>>();
+        let snapshots = crate::reaching_definition::insert_equation_snapshots(
+            &mut ir.assignments,
+            &mut ir.variables,
+            &ir.arrays,
+            &statement_sites,
+            &mut converted_contribs,
+            &equation_sites,
+        )?;
+        span.finish(&format!(
+            "module={} reaching_snapshots={snapshots}",
+            module.name
+        ));
+
         // Variables that are fixed per instance (computed purely from
         // parameters) may participate in topology guards
         let span = crate::metrics::FineSpan::new("ir.static_vars");
@@ -3736,7 +3769,7 @@ pub mod autodiff {
 
     /// Structurally map an IR expression bottom-up. The closure may replace
     /// a node entirely (returning Some) before its children are visited.
-    pub(super) fn map_expr(expr: &IrExpr, f: &mut impl FnMut(&IrExpr) -> Option<IrExpr>) -> IrExpr {
+    pub(crate) fn map_expr(expr: &IrExpr, f: &mut impl FnMut(&IrExpr) -> Option<IrExpr>) -> IrExpr {
         if let Some(replacement) = f(expr) {
             return replacement;
         }
