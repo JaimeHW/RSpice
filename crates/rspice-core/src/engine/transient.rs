@@ -2953,6 +2953,12 @@ impl Engine {
         ),
         SimulationError,
     > {
+        // `.IC`/`.NODESET` validation and the scoped-directive flatten are the
+        // same work for every hint collector this run reaches: the t=0 startup
+        // solve and each of its stepping retries, the UIC override pass, and
+        // the hint-active probe. Doing it once here is the difference between
+        // one elaboration and one per collector.
+        let _startup_directives = self.startup_directive_scope(netlist);
         fft::preflight(self, netlist, tstop, abort)?;
         let trapezoidal_xmu = if self.config.spice_dialect == SpiceDialect::Xyce {
             0.5

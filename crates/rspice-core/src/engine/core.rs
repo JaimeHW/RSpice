@@ -54,27 +54,155 @@ pub struct Engine {
     /// step — or once-per-solve. None is in the Newton inner loop, so the lock
     /// is uncontended in the hot path.
     convergence: std::sync::Arc<std::sync::Mutex<ConvergenceQuality>>,
+    /// Startup directives already validated and flattened for one elaboration.
+    ///
+    /// Populated only for the duration of a [`StartupDirectiveScope`], which
+    /// holds a borrow of the netlist it names. See that type for why the
+    /// address alone is a sound key inside the scope and for nothing outside
+    /// it.
+    startup_directives: std::sync::Mutex<Option<std::sync::Arc<CachedStartupDirectives>>>,
+}
+
+/// One elaboration's validated startup netlist and its subcircuit-scoped
+/// `.IC`/`.NODESET` entries.
+///
+/// Building this is the whole cost of startup-hint collection: the netlist is
+/// cloned, `.IC`/`.NODESET` validation re-elaborates it, and the hierarchy is
+/// flattened a second time to recover the scoped entries. One transient used
+/// to pay that four times over — `.NODESET` collection, `.IC` collection, the
+/// UIC override pass, and the hint-active probe each rebuilt it from scratch.
+struct CachedStartupDirectives {
+    /// Address of the netlist this entry was built from.
+    ///
+    /// A [`StartupDirectiveScope`] borrows that netlist for as long as the
+    /// entry lives, so a second live `&Netlist` with the same address is the
+    /// same object. Outside a scope the entry is cleared, because a dropped
+    /// netlist's address may be reused by an unrelated one and a stale hit
+    /// would seed one `.STEP` coordinate with another's initial conditions.
+    source: usize,
+    /// The netlist startup validation produced, absent when validation failed
+    /// and hint collection must therefore contribute nothing.
+    validated: Option<Netlist>,
+    scoped_initial_conditions: Vec<crate::netlist::InitialCondition>,
+    scoped_node_sets: Vec<crate::netlist::NodeSet>,
+}
+
+impl CachedStartupDirectives {
+    fn hints<'a>(&'a self, netlist: &'a Netlist) -> Option<StartupDirectives<'a>> {
+        Some(StartupDirectives {
+            netlist: match &self.validated {
+                Some(validated) => validated,
+                None if netlist.startup_directives.is_empty() => netlist,
+                None => return None,
+            },
+            scoped_initial_conditions: &self.scoped_initial_conditions,
+            scoped_node_sets: &self.scoped_node_sets,
+        })
+    }
+}
+
+/// Borrowed view of one elaboration's validated startup directives.
+struct StartupDirectives<'a> {
+    netlist: &'a Netlist,
+    scoped_initial_conditions: &'a [crate::netlist::InitialCondition],
+    scoped_node_sets: &'a [crate::netlist::NodeSet],
+}
+
+/// Keeps one elaboration's validated startup directives available to every
+/// hint collector that runs inside it.
+///
+/// The scope borrows the netlist, so the netlist outlives the cache entry and
+/// the entry's address key cannot name a different object. Dropping the scope
+/// restores whatever entry was cached before it, so a nested elaboration
+/// leaves the outer one intact.
+pub(crate) struct StartupDirectiveScope<'a> {
+    engine: &'a Engine,
+    restore: Option<std::sync::Arc<CachedStartupDirectives>>,
+    /// The borrow that makes the cached address meaningful.
+    _netlist: &'a Netlist,
+}
+
+impl Drop for StartupDirectiveScope<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut slot) = self.engine.startup_directives.lock() {
+            *slot = self.restore.take();
+        }
+    }
 }
 
 impl Engine {
-    fn validated_startup_netlist<'a>(
-        &self,
+    /// Validate and flatten `netlist`'s startup directives once, and keep the
+    /// result available to every hint collector that runs while the returned
+    /// scope is alive.
+    ///
+    /// An analysis opens exactly one of these around the elaboration it is
+    /// solving. Without it each collector rebuilds the same validated netlist
+    /// and the same flattened hierarchy, which a transient does four times
+    /// before it takes its first step.
+    pub(crate) fn startup_directive_scope<'a>(
+        &'a self,
         netlist: &'a Netlist,
-    ) -> Option<std::borrow::Cow<'a, Netlist>> {
-        if netlist.startup_directives.is_empty() {
-            return Some(std::borrow::Cow::Borrowed(netlist));
+    ) -> StartupDirectiveScope<'a> {
+        let entry = std::sync::Arc::new(self.build_startup_directives(netlist));
+        let restore = match self.startup_directives.lock() {
+            Ok(mut slot) => slot.replace(entry),
+            // A poisoned lock means another thread panicked while holding it.
+            // Hint collection then rebuilds per call, which is slower and
+            // exactly as correct.
+            Err(_) => None,
+        };
+        StartupDirectiveScope {
+            engine: self,
+            restore,
+            _netlist: netlist,
         }
-        let mut validated = netlist.clone();
-        match crate::netlist::validate_startup_directives(&mut validated) {
-            Ok(()) => Some(std::borrow::Cow::Owned(validated)),
-            Err(error) => {
-                // Circuit construction owns the typed fatal error path. Hint
-                // collection remains infallible for established internal API
-                // callers, but never applies unvalidated sidecar entries.
-                log::debug!("startup validation failed before hint collection: {error}");
-                None
+    }
+
+    fn build_startup_directives(&self, netlist: &Netlist) -> CachedStartupDirectives {
+        let validated = if netlist.startup_directives.is_empty() {
+            None
+        } else {
+            let mut candidate = netlist.clone();
+            match crate::netlist::validate_startup_directives(&mut candidate) {
+                Ok(()) => Some(candidate),
+                Err(error) => {
+                    // Circuit construction owns the typed fatal error path.
+                    // Hint collection remains infallible for established
+                    // internal API callers, but never applies unvalidated
+                    // sidecar entries.
+                    log::debug!("startup validation failed before hint collection: {error}");
+                    return CachedStartupDirectives {
+                        source: std::ptr::from_ref(netlist) as usize,
+                        validated: None,
+                        scoped_initial_conditions: Vec::new(),
+                        scoped_node_sets: Vec::new(),
+                    };
+                }
             }
+        };
+        let (scoped_initial_conditions, scoped_node_sets) =
+            Self::scoped_startup_directives(validated.as_ref().unwrap_or(netlist));
+        CachedStartupDirectives {
+            source: std::ptr::from_ref(netlist) as usize,
+            validated,
+            scoped_initial_conditions,
+            scoped_node_sets,
         }
+    }
+
+    /// This elaboration's validated startup directives: the open scope's entry
+    /// when it names this exact netlist, and a freshly built one otherwise.
+    ///
+    /// The entry is shared rather than copied and the lock is released before
+    /// any hint is derived, so a parallel sweep never serializes on it.
+    fn startup_directives(&self, netlist: &Netlist) -> std::sync::Arc<CachedStartupDirectives> {
+        if let Ok(slot) = self.startup_directives.lock()
+            && let Some(entry) = slot.as_ref()
+            && entry.source == std::ptr::from_ref(netlist) as usize
+        {
+            return std::sync::Arc::clone(entry);
+        }
+        std::sync::Arc::new(self.build_startup_directives(netlist))
     }
 
     /// Create a new engine with the given configuration
@@ -89,6 +217,7 @@ impl Engine {
             #[cfg(feature = "parallel")]
             classic_mos_parallel_pool: std::sync::OnceLock::new(),
             convergence: std::sync::Arc::new(std::sync::Mutex::new(ConvergenceQuality::new())),
+            startup_directives: std::sync::Mutex::new(None),
         }
     }
 
@@ -109,6 +238,7 @@ impl Engine {
             #[cfg(feature = "parallel")]
             classic_mos_parallel_pool: std::sync::OnceLock::new(),
             convergence: std::sync::Arc::new(std::sync::Mutex::new(ConvergenceQuality::new())),
+            startup_directives: std::sync::Mutex::new(None),
         })
     }
 
@@ -129,6 +259,7 @@ impl Engine {
             #[cfg(feature = "parallel")]
             classic_mos_parallel_pool: std::sync::OnceLock::new(),
             convergence: std::sync::Arc::new(std::sync::Mutex::new(ConvergenceQuality::new())),
+            startup_directives: std::sync::Mutex::new(None),
         }
     }
 
@@ -151,6 +282,7 @@ impl Engine {
             #[cfg(feature = "parallel")]
             classic_mos_parallel_pool: std::sync::OnceLock::new(),
             convergence: std::sync::Arc::new(std::sync::Mutex::new(ConvergenceQuality::new())),
+            startup_directives: std::sync::Mutex::new(None),
         })
     }
 
@@ -977,6 +1109,71 @@ R2 b out 1
         );
     }
 
+    /// The startup-directive scope is a cache, so the hints it serves must be
+    /// the ones a cold collector computes — including for a second netlist
+    /// that happens to be elaborated inside the scope of the first.
+    #[test]
+    fn a_startup_directive_scope_serves_the_hints_a_cold_collector_computes() {
+        fn deck(voltage: &str) -> Netlist {
+            Netlist::parse(&format!(
+                "\
+scoped startup directive cache
+V1 1 0 0
+X2 1 2 IC_Subckt
+RLOAD 2 0 1k
+.IC V(X2:mid)={voltage}
+.SUBCKT IC_Subckt in out
+R1 in mid 10
+C1 mid out 1u
+.ENDS
+.END
+"
+            ))
+            .expect("test deck parses")
+        }
+
+        let engine = Engine::default();
+        let netlist = deck("0.25");
+        let circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        let cold = engine.collect_initial_condition_hints(&netlist, &circuit);
+        assert_eq!(cold.len(), 1, "the deck authors one hierarchical .IC");
+
+        let other = deck("0.75");
+        let other_circuit = engine.build_circuit(&other).expect("circuit builds");
+        let other_cold = engine.collect_initial_condition_hints(&other, &other_circuit);
+        assert_ne!(cold, other_cold, "the two decks force different voltages");
+
+        let outer = engine.startup_directive_scope(&netlist);
+        assert_eq!(engine.collect_initial_condition_hints(&netlist, &circuit), cold);
+        // A netlist the open scope does not name is collected from scratch
+        // rather than served the cached entry.
+        assert_eq!(
+            engine.collect_initial_condition_hints(&other, &other_circuit),
+            other_cold
+        );
+        {
+            let _inner = engine.startup_directive_scope(&other);
+            assert_eq!(
+                engine.collect_initial_condition_hints(&other, &other_circuit),
+                other_cold
+            );
+            assert_eq!(
+                engine.collect_initial_condition_hints(&netlist, &circuit),
+                cold
+            );
+        }
+        // The inner scope restored the outer entry rather than clearing it.
+        assert_eq!(
+            engine.collect_initial_condition_hints(&netlist, &circuit),
+            cold
+        );
+        drop(outer);
+        assert_eq!(
+            engine.collect_initial_condition_hints(&netlist, &circuit),
+            cold
+        );
+    }
+
     #[test]
     fn dot_delimited_subcircuit_port_initial_condition_targets_connected_node() {
         let netlist = Netlist::parse(
@@ -1051,7 +1248,6 @@ impl Default for Engine {
 
 impl Engine {
     fn scoped_startup_directives(
-        &self,
         netlist: &Netlist,
     ) -> (
         Vec<crate::netlist::InitialCondition>,
@@ -1175,13 +1371,17 @@ impl Engine {
         netlist: &Netlist,
         circuit: &crate::CircuitData,
     ) -> Vec<StartupVoltageConstraint> {
-        let Some(validated) = self.validated_startup_netlist(netlist) else {
+        let entry = self.startup_directives(netlist);
+        let Some(directives) = entry.hints(netlist) else {
             return Vec::new();
         };
-        let netlist = validated.as_ref();
-        let (scoped_initial_conditions, scoped_node_sets) = self.scoped_startup_directives(netlist);
+        let StartupDirectives {
+            netlist,
+            scoped_initial_conditions,
+            scoped_node_sets,
+        } = directives;
         let initial_conditions =
-            Self::initial_condition_constraints(netlist, circuit, &scoped_initial_conditions);
+            Self::initial_condition_constraints(netlist, circuit, scoped_initial_conditions);
         let ic_nodes = initial_conditions
             .iter()
             .flat_map(|constraint| [constraint.positive, constraint.negative])
@@ -1209,15 +1409,14 @@ impl Engine {
         netlist: &Netlist,
         circuit: &crate::CircuitData,
     ) -> Vec<StartupVoltageConstraint> {
-        let Some(validated) = self.validated_startup_netlist(netlist) else {
+        let entry = self.startup_directives(netlist);
+        let Some(directives) = entry.hints(netlist) else {
             return Vec::new();
         };
-        let netlist = validated.as_ref();
-        let (scoped_initial_conditions, _) = self.scoped_startup_directives(netlist);
         Self::reduce_startup_constraints(&Self::initial_condition_constraints(
-            netlist,
+            directives.netlist,
             circuit,
-            &scoped_initial_conditions,
+            directives.scoped_initial_conditions,
         ))
     }
 
