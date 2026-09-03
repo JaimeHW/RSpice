@@ -134,7 +134,34 @@ impl CfgModel {
     /// flow survives, and node, branch, and branch-unknown identity is settled
     /// in MIR. Nothing is recomputed here that MIR already decided.
     pub fn from_hir(hir: &HirModel, mir: &MirModel) -> Result<Self, Vec<IrDiagnostic>> {
-        Self::from_hir_with_mode(hir, mir, false)
+        Self::from_hir_with_mode(hir, mir, CfgLowerMode::GENERATED)
+    }
+
+    /// Lower `hir` for a backend that evaluates instances it did not build.
+    ///
+    /// The one thing this changes is `$port_connected`, and it changes it
+    /// because the guarantee behind the constant fold is not a property of the
+    /// language: a generated device is instantiated with exactly the terminals
+    /// its descriptor declares — `veriloga_builtins::instantiate` refuses any
+    /// other count — so every port it can be asked about is connected, and
+    /// folding the query to `1.0` deletes every guard in the shipped compact
+    /// models. `VerilogADevice` has no such guarantee. It marks terminal `i`
+    /// connected only while `i < supplied_terminals`, so an instance that omits
+    /// a trailing terminal takes the other arm of every one of those guards.
+    ///
+    /// So the fold is an optimization one consumer has earned and the other has
+    /// not, and this is where the two part company rather than a mode the CFG
+    /// level is confused about.
+    ///
+    /// Gated with its only caller, [`crate::jit`]: a build with neither JIT
+    /// compiles no executable backend, so this entry point has no consumer to
+    /// be alive for.
+    #[cfg(any(feature = "native", feature = "wasm-jit"))]
+    pub(crate) fn from_hir_for_executable_backend(
+        hir: &HirModel,
+        mir: &MirModel,
+    ) -> Result<Self, Vec<IrDiagnostic>> {
+        Self::from_hir_with_mode(hir, mir, CfgLowerMode::EXECUTABLE)
     }
 
     /// Lower only the control-flow and reaching definitions needed to
@@ -146,15 +173,15 @@ impl CfgModel {
         hir: &HirModel,
         mir: &MirModel,
     ) -> Result<Self, Vec<IrDiagnostic>> {
-        Self::from_hir_with_mode(hir, mir, true)
+        Self::from_hir_with_mode(hir, mir, CfgLowerMode::NOISE_METADATA)
     }
 
     fn from_hir_with_mode(
         hir: &HirModel,
         mir: &MirModel,
-        noise_metadata_only: bool,
+        mode: CfgLowerMode,
     ) -> Result<Self, Vec<IrDiagnostic>> {
-        let mut lowerer = CfgLowerer::new(hir, mir, noise_metadata_only);
+        let mut lowerer = CfgLowerer::new(hir, mir, mode);
         let (function, residuals, activations, event_state_candidates, noise, noise_processes) =
             lowerer.lower()?;
         // Errors only. A warning that failed the lowering would be an error
@@ -376,6 +403,9 @@ struct CfgLowerer<'a> {
     /// Scoped mode used only by the grouped-noise metadata slicer. It never
     /// changes ordinary canonical residual lowering or its diagnostics.
     noise_metadata_only: bool,
+    /// Whether `$port_connected` is a runtime leaf rather than the constant
+    /// `1.0`. See [`CfgModel::from_hir_for_executable_backend`].
+    per_instance_ports: bool,
     metadata_assignment_value: bool,
     /// Whether the expression being lowered is a contribution's right-hand
     /// side. Verilog-AMS 2023 section 4.5.12 requires a strictly positive
@@ -695,8 +725,62 @@ fn compute_instance_static_guard_conditions(hir: &HirModel) -> HashSet<ExprId> {
     static_conditions
 }
 
+/// The value `$simparam("name")` means when the source names no fallback and
+/// the simulator offers no value for `name`.
+///
+/// One table rather than one per lowering: `$simparam` is answered at compile
+/// time by the bytecode route ([`crate::native`]'s `lower_simparam_intrinsic`),
+/// as a fallback under a runtime query by the generated-Rust backend, and by
+/// the closed defaults above under metadata-only noise lowering. The three
+/// answer the same question, so they read the same table — a second copy is
+/// how `$simparam("gmin")` came to mean 1e-12 on one route and 0.0 on another.
+///
+/// Names are matched as the source spells them, which is how the language
+/// spells them: `simulatorVersion` is not `simulatorversion`.
+pub(crate) fn simparam_source_default(name: &str) -> f64 {
+    match name {
+        "gmin" => 1.0e-12,
+        "tnom" => 300.15,
+        "simulatorVersion" => 1.0,
+        _ => 0.0,
+    }
+}
+
+/// What the consumer of a lowered CFG is, in the two respects the lowering has
+/// to know about.
+///
+/// Two independent facts rather than one three-valued mode, because they are
+/// independent: noise metadata is lowered for the generated backend and still
+/// needs the runtime `$port_connected` leaf, since the metadata it produces is
+/// read per instance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CfgLowerMode {
+    /// Lower only what raw grouped-noise metadata needs.
+    noise_metadata_only: bool,
+    /// The consumer may evaluate an instance that omits a trailing terminal,
+    /// so `$port_connected` is a runtime leaf rather than the constant `1.0`.
+    /// See [`CfgModel::from_hir_for_executable_backend`].
+    per_instance_ports: bool,
+}
+
+impl CfgLowerMode {
+    const GENERATED: Self = Self {
+        noise_metadata_only: false,
+        per_instance_ports: false,
+    };
+    #[cfg(any(feature = "native", feature = "wasm-jit"))]
+    const EXECUTABLE: Self = Self {
+        noise_metadata_only: false,
+        per_instance_ports: true,
+    };
+    const NOISE_METADATA: Self = Self {
+        noise_metadata_only: true,
+        per_instance_ports: true,
+    };
+}
+
 impl<'a> CfgLowerer<'a> {
-    fn new(hir: &'a HirModel, mir: &'a MirModel, noise_metadata_only: bool) -> Self {
+    fn new(hir: &'a HirModel, mir: &'a MirModel, mode: CfgLowerMode) -> Self {
         let mut ground_names: HashSet<SmolStr> = mir.ground_nodes.iter().cloned().collect();
         ground_names.insert(SmolStr::new("0"));
         let static_guard_conditions = compute_instance_static_guard_conditions(hir);
@@ -728,7 +812,8 @@ impl<'a> CfgLowerer<'a> {
             limiters: Vec::new(),
             noise: Vec::new(),
             noise_processes: Vec::new(),
-            noise_metadata_only,
+            noise_metadata_only: mode.noise_metadata_only,
+            per_instance_ports: mode.per_instance_ports,
             metadata_assignment_value: false,
             zi_direct_assignment: false,
             diagnostics: Vec::new(),
@@ -2649,21 +2734,20 @@ impl<'a> CfgLowerer<'a> {
                     self.real_constant(0.0)
                 }
             },
-            // Constant, and only sound for the backend that reads this level
-            // today.
+            // The runtime flag for a consumer that evaluates instances it did
+            // not build, and the constant `1.0` for one that did.
             //
             // A generated device is instantiated with exactly the terminals its
             // descriptor declares — `veriloga_builtins::instantiate` refuses any
-            // other count — so no port it can be asked about is unconnected. The
+            // other count — so no port it can be asked about is unconnected, and
+            // folding the query lets the optimizer delete every
+            // `$port_connected` guard in the shipped compact models. The
             // executable backends have no such guarantee: `VerilogADevice` marks
             // terminal `i` connected only while `i < supplied_terminals`, and the
-            // JIT reads that flag with `NativeOp::LoadPortConnected`. So a
-            // consumer of this level that also has to serve partially connected
-            // instances needs a real value here, not this constant. That is a
-            // kind and an evaluator input, not a one-line change: the constant is
-            // what lets the optimizer fold every `$port_connected` guard in the
-            // shipped compact models away, and an opaque leaf would keep them.
-            ("$port_connected", 1) if self.noise_metadata_only => {
+            // JIT reads that flag with `NativeOp::LoadPortConnected`. See
+            // [`CfgModel::from_hir_for_executable_backend`] for which consumer
+            // asks for which.
+            ("$port_connected", 1) if self.per_instance_ports => {
                 match self.port_argument(args[0]) {
                     Some(port) => self.leaf(
                         LeafKey::PortConnected(port),
@@ -2698,13 +2782,7 @@ impl<'a> CfgLowerer<'a> {
             if let Some(fallback) = args.get(1) {
                 return self.expr(*fallback);
             }
-            let value = match value.as_str() {
-                "gmin" => 1.0e-12,
-                "tnom" => 300.15,
-                "simulatorVersion" => 1.0,
-                _ => 0.0,
-            };
-            return self.real_constant(value);
+            return self.real_constant(simparam_source_default(value.as_str()));
         }
 
         // Ordinary generated devices receive simulator-owned values (most
@@ -2712,9 +2790,15 @@ impl<'a> CfgLowerer<'a> {
         // the source fallback in the CFG, but do not replace the runtime leaf
         // with it. Metadata-only noise evaluation has no such runtime input,
         // so the closed defaults above are deliberately confined to that mode.
+        //
+        // A call that names no fallback still needs one, and it is not zero:
+        // the source says nothing, so the value the language defines for the
+        // parameter is what the call means. `simparam_source_default` is the
+        // same table the bytecode route folds at compile time, so a runtime
+        // with no value for the name and the compiled route answer alike.
         let fallback = match args.get(1) {
             Some(fallback) => self.expr(*fallback),
-            None => self.real_constant(0.0),
+            None => self.real_constant(simparam_source_default(value.as_str())),
         };
         self.builder.push(
             self.block,

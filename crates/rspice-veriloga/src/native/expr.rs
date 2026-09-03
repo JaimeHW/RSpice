@@ -7404,12 +7404,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             return self.lower(default);
         }
 
-        let value = match simparam_name {
-            "gmin" => 1.0e-12,
-            "tnom" => 300.15,
-            "simulatorVersion" => 1.0,
-            _ => 0.0,
-        };
+        let value = crate::canonical_ir::cfg_lower::simparam_source_default(simparam_name);
         self.push(NativeOp::Const(value))
     }
 
