@@ -944,8 +944,16 @@ impl Engine {
                 let q_prev_prev = history.charge_q_prev_prev[idx][branch_idx];
                 let q_prev_prev_prev = history.charge_q_prev_prev_prev[idx][branch_idx];
                 let cq_prev = history.charge_cq_prev[idx][branch_idx];
-                let cq_curr =
-                    Self::jfet_companion_ccap(&coeff, dt, q_curr, q_prev, q_prev_prev, cq_prev);
+                let cq_curr = Self::jfet_companion_ccap(
+                    &coeff,
+                    dt,
+                    q_curr,
+                    BranchChargeHistory {
+                        q_prev: q_prev,
+                        q_prev_prev: q_prev_prev,
+                        cq_prev: cq_prev,
+                    },
+                );
 
                 let Some(branch_limit) = truncation.limit(ChargeSamples {
                     q_curr,
@@ -1086,8 +1094,16 @@ impl Engine {
                 let q_prev_prev = history.charge_q_prev_prev[idx][branch_idx];
                 let q_prev_prev_prev = history.charge_q_prev_prev_prev[idx][branch_idx];
                 let cq_prev = history.charge_cq_prev[idx][branch_idx];
-                let cq_curr =
-                    Self::jfet_companion_ccap(&coeff, dt, q_curr, q_prev, q_prev_prev, cq_prev);
+                let cq_curr = Self::jfet_companion_ccap(
+                    &coeff,
+                    dt,
+                    q_curr,
+                    BranchChargeHistory {
+                        q_prev: q_prev,
+                        q_prev_prev: q_prev_prev,
+                        cq_prev: cq_prev,
+                    },
+                );
 
                 let Some(branch_limit) = truncation.limit(ChargeSamples {
                     q_curr,
@@ -1325,9 +1341,11 @@ impl Engine {
                         capacitance,
                         voltage,
                         q_exact,
-                        q_prev,
-                        q_prev_prev,
-                        cq_prev,
+                        BranchChargeHistory {
+                            q_prev: q_prev,
+                            q_prev_prev: q_prev_prev,
+                            cq_prev: cq_prev,
+                        },
                     )
                 } else {
                     Self::jfet_companion_terms(
@@ -1336,9 +1354,11 @@ impl Engine {
                         capacitance,
                         voltage,
                         voltage_prev,
-                        q_prev,
-                        q_prev_prev,
-                        cq_prev,
+                        BranchChargeHistory {
+                            q_prev: q_prev,
+                            q_prev_prev: q_prev_prev,
+                            cq_prev: cq_prev,
+                        },
                     )
                 };
                 let Some(branch_limit) = truncation.limit(ChargeSamples {
@@ -1430,9 +1450,11 @@ impl Engine {
                 capd,
                 vd,
                 qd,
-                history.qd_prev[idx],
-                history.qd_prev_prev[idx],
-                history.cqd_prev[idx],
+                BranchChargeHistory {
+                    q_prev: history.qd_prev[idx],
+                    q_prev_prev: history.qd_prev_prev[idx],
+                    cq_prev: history.cqd_prev[idx],
+                },
             );
             let Some(branch_limit) = truncation.limit(ChargeSamples {
                 q_curr,
@@ -1587,9 +1609,11 @@ impl Engine {
                     capacitance,
                     voltage,
                     voltage_prev,
-                    q_prev,
-                    q_prev_prev,
-                    cq_prev,
+                    BranchChargeHistory {
+                        q_prev: q_prev,
+                        q_prev_prev: q_prev_prev,
+                        cq_prev: cq_prev,
+                    },
                 );
                 let Some(branch_limit) = truncation.limit(ChargeSamples {
                     q_curr,
@@ -1735,9 +1759,11 @@ impl Engine {
                     capacitance,
                     voltage,
                     voltage_prev,
-                    q_prev,
-                    q_prev_prev,
-                    cq_prev,
+                    BranchChargeHistory {
+                        q_prev: q_prev,
+                        q_prev_prev: q_prev_prev,
+                        cq_prev: cq_prev,
+                    },
                 );
                 let Some(branch_limit) = truncation.limit(ChargeSamples {
                     q_curr,
@@ -1803,9 +1829,11 @@ impl Engine {
                     capacitance,
                     voltage,
                     q_curr_exact,
-                    q_prev,
-                    q_prev_prev,
-                    cq_prev,
+                    BranchChargeHistory {
+                        q_prev: q_prev,
+                        q_prev_prev: q_prev_prev,
+                        cq_prev: cq_prev,
+                    },
                 );
                 let Some(branch_limit) = truncation.limit(ChargeSamples {
                     q_curr,
@@ -1936,8 +1964,16 @@ impl Engine {
                 ),
             ] {
                 // Integrated charge current at the candidate point.
-                let cq_curr =
-                    Self::jfet_companion_ccap(&coeff, dt, q_curr, q_prev, q_prev_prev, cq_prev);
+                let cq_curr = Self::jfet_companion_ccap(
+                    &coeff,
+                    dt,
+                    q_curr,
+                    BranchChargeHistory {
+                        q_prev: q_prev,
+                        q_prev_prev: q_prev_prev,
+                        cq_prev: cq_prev,
+                    },
+                );
                 let Some(branch_limit) = truncation.limit(ChargeSamples {
                     q_curr,
                     q_prev,
@@ -2033,8 +2069,16 @@ impl Engine {
                 ),
             ] {
                 // Integrated charge current at the candidate point.
-                let cq_curr =
-                    Self::jfet_companion_ccap(&coeff, dt, q_curr, q_prev, q_prev_prev, cq_prev);
+                let cq_curr = Self::jfet_companion_ccap(
+                    &coeff,
+                    dt,
+                    q_curr,
+                    BranchChargeHistory {
+                        q_prev: q_prev,
+                        q_prev_prev: q_prev_prev,
+                        cq_prev: cq_prev,
+                    },
+                );
                 let Some(branch_limit) = truncation.limit(ChargeSamples {
                     q_curr,
                     q_prev,
@@ -2125,8 +2169,16 @@ impl Engine {
                                        q_prev_prev_prev: Value,
                                        cq_prev: Value| {
                 // Integrated charge current at the candidate point.
-                let cq_curr =
-                    Self::jfet_companion_ccap(&coeff, dt, q_curr, q_prev, q_prev_prev, cq_prev);
+                let cq_curr = Self::jfet_companion_ccap(
+                    &coeff,
+                    dt,
+                    q_curr,
+                    BranchChargeHistory {
+                        q_prev: q_prev,
+                        q_prev_prev: q_prev_prev,
+                        cq_prev: cq_prev,
+                    },
+                );
                 let Some(branch_limit) = truncation.limit(ChargeSamples {
                     q_curr,
                     q_prev,
@@ -2264,8 +2316,16 @@ impl Engine {
                 let q_prev_prev = history.q_prev_prev[idx][row];
                 let q_prev_prev_prev = history.q_prev_prev_prev[idx][row];
                 let cq_prev = history.cq_prev[idx][row];
-                let cq_curr =
-                    Self::jfet_companion_ccap(&coeff, dt, charge, q_prev, q_prev_prev, cq_prev);
+                let cq_curr = Self::jfet_companion_ccap(
+                    &coeff,
+                    dt,
+                    charge,
+                    BranchChargeHistory {
+                        q_prev: q_prev,
+                        q_prev_prev: q_prev_prev,
+                        cq_prev: cq_prev,
+                    },
+                );
                 let Some(branch_limit) = truncation.limit(ChargeSamples {
                     q_curr: charge,
                     q_prev,
@@ -2364,8 +2424,16 @@ impl Engine {
                 // different length, so its own current is rebuilt from the
                 // candidate's coefficients exactly as the native families do,
                 // rather than read back off the model's staged coefficients.
-                let cq_curr =
-                    Self::jfet_companion_ccap(&coeff, dt, q_curr, q_prev, q_prev_prev, cq_prev);
+                let cq_curr = Self::jfet_companion_ccap(
+                    &coeff,
+                    dt,
+                    q_curr,
+                    BranchChargeHistory {
+                        q_prev: q_prev,
+                        q_prev_prev: q_prev_prev,
+                        cq_prev: cq_prev,
+                    },
+                );
                 let Some(branch_limit) = truncation.limit(ChargeSamples {
                     q_curr: q_curr,
                     q_prev: q_prev,

@@ -147,9 +147,11 @@ impl Engine {
             let ieq = Self::linear_charge_history_ieq(
                 coeff,
                 dt,
-                q_prev[thermal_charge_idx],
-                q_prev_prev[thermal_charge_idx],
-                cq_prev[thermal_charge_idx],
+                BranchChargeHistory {
+                    q_prev: q_prev[thermal_charge_idx],
+                    q_prev_prev: q_prev_prev[thermal_charge_idx],
+                    cq_prev: cq_prev[thermal_charge_idx],
+                },
             );
             residual += charge_factor * cth * vrth - ieq;
             derivative += charge_factor * cth;
@@ -284,9 +286,11 @@ impl Engine {
                 coeff,
                 dt,
                 branch.charge,
-                q_prev[branch_idx],
-                q_prev_prev[branch_idx],
-                cq_prev[branch_idx],
+                BranchChargeHistory {
+                    q_prev: q_prev[branch_idx],
+                    q_prev_prev: q_prev_prev[branch_idx],
+                    cq_prev: cq_prev[branch_idx],
+                },
             );
             let i_eq = charge_factor
                 * branch.linearization_dot(
@@ -392,9 +396,11 @@ impl Engine {
                     coeff,
                     dt,
                     charges.qbe,
-                    q_prev[BJT_QBE_BRANCH_INDEX],
-                    q_prev_prev[BJT_QBE_BRANCH_INDEX],
-                    cq_prev[BJT_QBE_BRANCH_INDEX],
+                    BranchChargeHistory {
+                        q_prev: q_prev[BJT_QBE_BRANCH_INDEX],
+                        q_prev_prev: q_prev_prev[BJT_QBE_BRANCH_INDEX],
+                        cq_prev: cq_prev[BJT_QBE_BRANCH_INDEX],
+                    },
                 );
                 let geqbe = charge_factor * charges.capbe;
                 let i_eq = geqbe
@@ -454,9 +460,11 @@ impl Engine {
                 coeff,
                 dt,
                 charges.qbc,
-                q_prev[BJT_QBC_BRANCH_INDEX],
-                q_prev_prev[BJT_QBC_BRANCH_INDEX],
-                cq_prev[BJT_QBC_BRANCH_INDEX],
+                BranchChargeHistory {
+                    q_prev: q_prev[BJT_QBC_BRANCH_INDEX],
+                    q_prev_prev: q_prev_prev[BJT_QBC_BRANCH_INDEX],
+                    cq_prev: cq_prev[BJT_QBC_BRANCH_INDEX],
+                },
             );
             let geqbc = charge_factor * charges.capbc;
             let i_eq = geqbc
@@ -489,9 +497,11 @@ impl Engine {
                 coeff,
                 dt,
                 charges.qbx,
-                q_prev[BJT_QBCX_BRANCH_INDEX],
-                q_prev_prev[BJT_QBCX_BRANCH_INDEX],
-                cq_prev[BJT_QBCX_BRANCH_INDEX],
+                BranchChargeHistory {
+                    q_prev: q_prev[BJT_QBCX_BRANCH_INDEX],
+                    q_prev_prev: q_prev_prev[BJT_QBCX_BRANCH_INDEX],
+                    cq_prev: cq_prev[BJT_QBCX_BRANCH_INDEX],
+                },
             );
             let geqbx = charge_factor * charges.capbx;
             let i_eq = geqbx * Self::legacy_bjt_charge_branch_voltage(snapshot, &qbx_branch) - cqbx;
@@ -516,9 +526,11 @@ impl Engine {
                 coeff,
                 dt,
                 charges.qcs,
-                q_prev[BJT_QBCP_BRANCH_INDEX],
-                q_prev_prev[BJT_QBCP_BRANCH_INDEX],
-                cq_prev[BJT_QBCP_BRANCH_INDEX],
+                BranchChargeHistory {
+                    q_prev: q_prev[BJT_QBCP_BRANCH_INDEX],
+                    q_prev_prev: q_prev_prev[BJT_QBCP_BRANCH_INDEX],
+                    cq_prev: cq_prev[BJT_QBCP_BRANCH_INDEX],
+                },
             );
             let geqcs = charge_factor * charges.capcs;
             let i_eq = geqcs * Self::legacy_bjt_charge_branch_voltage(snapshot, &qcs_branch) - cqcs;

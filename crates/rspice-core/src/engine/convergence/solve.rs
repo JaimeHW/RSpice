@@ -540,10 +540,12 @@ impl Engine {
                 circuit,
                 probe,
                 rhs,
-                solution,
-                time,
-                crate::xspice::AnalysisType::Transient,
-                junction_gmin,
+                OperatingPointProbe {
+                    solution: solution,
+                    time: time,
+                    analysis: crate::xspice::AnalysisType::Transient,
+                    junction_gmin: junction_gmin,
+                },
             )?;
             Self::apply_node_voltage_constraints(circuit, probe, rhs, node_hints, solution)?;
             Ok(self.residual_probe_fixed_point_converged(circuit, probe, solution, rhs))
@@ -776,9 +778,11 @@ impl Engine {
                 damped_solution = self.apply_damping_strategy_for_circuit(
                     circuit.has_b3soi_devices(),
                     &circuit.non_electrical_state_mask(),
-                    &solution,
-                    &raw_solution,
-                    &mut damping_state,
+                    DampingStep {
+                        old: &solution,
+                        proposal: &raw_solution,
+                        damping_state: &mut damping_state,
+                    },
                     junction_owns_steps,
                     |trial| self.nonlinear_merit(circuit, matrix, trial),
                 );
@@ -1501,10 +1505,12 @@ impl Engine {
                 circuit,
                 matrix,
                 &mut rhs,
-                &solution,
-                time,
-                crate::xspice::AnalysisType::Transient,
-                junction_gmin,
+                OperatingPointProbe {
+                    solution: &solution,
+                    time: time,
+                    analysis: crate::xspice::AnalysisType::Transient,
+                    junction_gmin: junction_gmin,
+                },
             )?;
             Self::apply_node_voltage_constraints(circuit, matrix, &mut rhs, node_hints, &solution)?;
 
@@ -1518,10 +1524,12 @@ impl Engine {
                 self.node_voltage_convergence_met(&solution, &new_solution, node_count);
             self.update_device_states_for_operating_point(
                 circuit,
-                &new_solution,
-                time,
-                crate::xspice::AnalysisType::Transient,
-                junction_gmin,
+                OperatingPointProbe {
+                    solution: &new_solution,
+                    time: time,
+                    analysis: crate::xspice::AnalysisType::Transient,
+                    junction_gmin: junction_gmin,
+                },
             );
             let device_converged = circuit.nonlinear_converged(self.device_convergence_criteria());
             let nonlinear_residual_converged = voltage_converged
@@ -1919,10 +1927,12 @@ impl Engine {
                 circuit,
                 matrix,
                 &mut rhs,
-                &solution,
-                time,
-                crate::xspice::AnalysisType::Transient,
-                junction_gmin,
+                OperatingPointProbe {
+                    solution: &solution,
+                    time: time,
+                    analysis: crate::xspice::AnalysisType::Transient,
+                    junction_gmin: junction_gmin,
+                },
             )?;
             Self::apply_node_voltage_constraints(
                 circuit,
@@ -1969,18 +1979,22 @@ impl Engine {
                 damped_solution = self.apply_damping_strategy_for_circuit(
                     circuit.has_b3soi_devices(),
                     &circuit.non_electrical_state_mask(),
-                    &solution,
-                    &raw_solution,
-                    &mut damping_state,
+                    DampingStep {
+                        old: &solution,
+                        proposal: &raw_solution,
+                        damping_state: &mut damping_state,
+                    },
                     junction_owns_steps,
                     |trial| {
                         self.nonlinear_merit_with_linear_stamp_for_operating_point(
                             circuit,
                             matrix,
-                            trial,
-                            time,
-                            crate::xspice::AnalysisType::Transient,
-                            junction_gmin,
+                            OperatingPointProbe {
+                                solution: trial,
+                                time,
+                                analysis: crate::xspice::AnalysisType::Transient,
+                                junction_gmin,
+                            },
                             |circuit, matrix, rhs| {
                                 circuit.refresh_jiles_atherton_inductances(trial);
                                 if use_transient_current_seed {
@@ -2012,10 +2026,12 @@ impl Engine {
                 self.node_voltage_convergence_met(&solution, new_solution, circuit.num_nodes());
             self.update_device_states_for_operating_point(
                 circuit,
-                new_solution,
-                time,
-                crate::xspice::AnalysisType::Transient,
-                junction_gmin,
+                OperatingPointProbe {
+                    solution: new_solution,
+                    time: time,
+                    analysis: crate::xspice::AnalysisType::Transient,
+                    junction_gmin: junction_gmin,
+                },
             );
             let device_converged = circuit.nonlinear_converged(self.device_convergence_criteria());
             let nonlinear_residual_converged = if !voltage_converged || !device_converged {
@@ -2024,10 +2040,12 @@ impl Engine {
                 self.nonlinear_residual_converged_with_linear_stamp_for_operating_point(
                     circuit,
                     matrix,
-                    new_solution,
-                    time,
-                    crate::xspice::AnalysisType::Transient,
-                    junction_gmin,
+                    OperatingPointProbe {
+                        solution: new_solution,
+                        time: time,
+                        analysis: crate::xspice::AnalysisType::Transient,
+                        junction_gmin: junction_gmin,
+                    },
                     |circuit, matrix, rhs| {
                         circuit.refresh_jiles_atherton_inductances(new_solution);
                         if use_transient_current_seed {

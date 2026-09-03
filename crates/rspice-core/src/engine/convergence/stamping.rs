@@ -45,10 +45,12 @@ impl Engine {
             circuit,
             matrix,
             rhs,
-            solution,
-            0.0,
-            crate::xspice::AnalysisType::DcOp,
-            junction_gmin,
+            OperatingPointProbe {
+                solution: solution,
+                time: 0.0,
+                analysis: crate::xspice::AnalysisType::DcOp,
+                junction_gmin: junction_gmin,
+            },
         )
     }
 
@@ -109,10 +111,12 @@ impl Engine {
             circuit,
             matrix,
             rhs,
-            solution,
-            0.0,
-            crate::xspice::AnalysisType::DcOp,
-            junction_gmin,
+            OperatingPointProbe {
+                solution: solution,
+                time: 0.0,
+                analysis: crate::xspice::AnalysisType::DcOp,
+                junction_gmin: junction_gmin,
+            },
         )
     }
 
@@ -122,11 +126,14 @@ impl Engine {
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],
-        solution: &[Value],
-        time: Value,
-        analysis: crate::xspice::AnalysisType,
-        junction_gmin: Value,
+        probe: OperatingPointProbe<'_>,
     ) -> Result<(), SimulationError> {
+        let OperatingPointProbe {
+            solution,
+            time,
+            analysis,
+            junction_gmin,
+        } = probe;
         circuit.set_b3soi_operating_point_mode(true);
         circuit.set_xyce_memristor_operating_point_mode(true);
         circuit.set_semiconductor_junction_gmin(junction_gmin);
@@ -158,11 +165,14 @@ impl Engine {
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],
-        solution: &[Value],
-        time: Value,
-        analysis: crate::xspice::AnalysisType,
-        junction_gmin: Value,
+        probe: OperatingPointProbe<'_>,
     ) -> Result<(), SimulationError> {
+        let OperatingPointProbe {
+            solution,
+            time,
+            analysis,
+            junction_gmin,
+        } = probe;
         // One call assembles one complete nonlinear Newton Jacobian. Keep the
         // public convergence metric at this common assembly boundary so DC,
         // startup, and continuation paths cannot silently omit successful
@@ -212,10 +222,12 @@ impl Engine {
     ) {
         self.update_device_states_for_operating_point(
             circuit,
-            solution,
-            0.0,
-            crate::xspice::AnalysisType::DcOp,
-            junction_gmin,
+            OperatingPointProbe {
+                solution: solution,
+                time: 0.0,
+                analysis: crate::xspice::AnalysisType::DcOp,
+                junction_gmin: junction_gmin,
+            },
         );
     }
 
@@ -223,11 +235,14 @@ impl Engine {
     pub(in crate::engine::convergence) fn update_device_states_for_operating_point(
         &self,
         circuit: &mut CircuitData,
-        solution: &[Value],
-        time: Value,
-        analysis: crate::xspice::AnalysisType,
-        junction_gmin: Value,
+        probe: OperatingPointProbe<'_>,
     ) {
+        let OperatingPointProbe {
+            solution,
+            time,
+            analysis,
+            junction_gmin,
+        } = probe;
         circuit.set_b3soi_operating_point_mode(true);
         circuit.set_xyce_memristor_operating_point_mode(true);
         circuit.set_semiconductor_junction_gmin(junction_gmin);

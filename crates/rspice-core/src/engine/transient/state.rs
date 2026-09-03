@@ -911,9 +911,11 @@ impl Engine {
                         coeff,
                         dt,
                         branch.charge,
-                        history.charge_q_prev[idx][branch_idx],
-                        history.charge_q_prev_prev[idx][branch_idx],
-                        history.charge_cq_prev[idx][branch_idx],
+                        BranchChargeHistory {
+                            q_prev: history.charge_q_prev[idx][branch_idx],
+                            q_prev_prev: history.charge_q_prev_prev[idx][branch_idx],
+                            cq_prev: history.charge_cq_prev[idx][branch_idx],
+                        },
                     );
                     Self::stamp_vbic_mna_charge_branch(
                         &mut stamper,
@@ -1126,9 +1128,11 @@ impl Engine {
                         cgs,
                         vgs_charge,
                         charge.qgs,
-                        history.qgs_prev[idx],
-                        history.qgs_prev_prev[idx],
-                        history.cqgs_prev[idx],
+                        BranchChargeHistory {
+                            q_prev: history.qgs_prev[idx],
+                            q_prev_prev: history.qgs_prev_prev[idx],
+                            cq_prev: history.cqgs_prev[idx],
+                        },
                     )
                 } else {
                     Self::jfet_companion_terms(
@@ -1137,9 +1141,11 @@ impl Engine {
                         cgs,
                         vgs_charge,
                         history.vgs_prev[idx],
-                        history.qgs_prev[idx],
-                        history.qgs_prev_prev[idx],
-                        history.cqgs_prev[idx],
+                        BranchChargeHistory {
+                            q_prev: history.qgs_prev[idx],
+                            q_prev_prev: history.qgs_prev_prev[idx],
+                            cq_prev: history.cqgs_prev[idx],
+                        },
                     )
                 };
                 Self::stamp_two_terminal_companion(matrix, rhs, jfet.gate, jfet.source, geq, ieq);
@@ -1153,9 +1159,11 @@ impl Engine {
                         cgd,
                         vgd_charge,
                         charge.qgd,
-                        history.qgd_prev[idx],
-                        history.qgd_prev_prev[idx],
-                        history.cqgd_prev[idx],
+                        BranchChargeHistory {
+                            q_prev: history.qgd_prev[idx],
+                            q_prev_prev: history.qgd_prev_prev[idx],
+                            cq_prev: history.cqgd_prev[idx],
+                        },
                     )
                 } else {
                     Self::jfet_companion_terms(
@@ -1164,9 +1172,11 @@ impl Engine {
                         cgd,
                         vgd_charge,
                         history.vgd_prev[idx],
-                        history.qgd_prev[idx],
-                        history.qgd_prev_prev[idx],
-                        history.cqgd_prev[idx],
+                        BranchChargeHistory {
+                            q_prev: history.qgd_prev[idx],
+                            q_prev_prev: history.qgd_prev_prev[idx],
+                            cq_prev: history.cqgd_prev[idx],
+                        },
                     )
                 };
                 Self::stamp_two_terminal_companion(matrix, rhs, jfet.gate, jfet.drain, geq, ieq);
@@ -1179,9 +1189,11 @@ impl Engine {
                     cds,
                     vds_charge,
                     history.vds_prev[idx],
-                    history.qds_prev[idx],
-                    history.qds_prev_prev[idx],
-                    history.cqds_prev[idx],
+                    BranchChargeHistory {
+                        q_prev: history.qds_prev[idx],
+                        q_prev_prev: history.qds_prev_prev[idx],
+                        cq_prev: history.cqds_prev[idx],
+                    },
                 );
                 Self::stamp_two_terminal_companion(matrix, rhs, jfet.drain, jfet.source, geq, ieq);
             }
@@ -1309,9 +1321,11 @@ impl Engine {
                 capd,
                 vd,
                 qd,
-                history.qd_prev[idx],
-                history.qd_prev_prev[idx],
-                history.cqd_prev[idx],
+                BranchChargeHistory {
+                    q_prev: history.qd_prev[idx],
+                    q_prev_prev: history.qd_prev_prev[idx],
+                    cq_prev: history.cqd_prev[idx],
+                },
             );
             Self::stamp_two_terminal_companion_direct(matrix, rhs, &slots[idx], geq, ieq);
         }
@@ -1593,9 +1607,11 @@ impl Engine {
                 cgs,
                 vgs,
                 history.vgs_prev[idx],
-                history.qgs_prev[idx],
-                history.qgs_prev_prev[idx],
-                history.cqgs_prev[idx],
+                BranchChargeHistory {
+                    q_prev: history.qgs_prev[idx],
+                    q_prev_prev: history.qgs_prev_prev[idx],
+                    cq_prev: history.cqgs_prev[idx],
+                },
             );
             terms[0] = (geq_gs, ieq_gs);
             if CAPTURE_CHARGES {
@@ -1609,9 +1625,11 @@ impl Engine {
                 cgd,
                 vgd,
                 history.vgd_prev[idx],
-                history.qgd_prev[idx],
-                history.qgd_prev_prev[idx],
-                history.cqgd_prev[idx],
+                BranchChargeHistory {
+                    q_prev: history.qgd_prev[idx],
+                    q_prev_prev: history.qgd_prev_prev[idx],
+                    cq_prev: history.cqgd_prev[idx],
+                },
             );
             terms[1] = (geq_gd, ieq_gd);
             if CAPTURE_CHARGES {
@@ -1625,9 +1643,11 @@ impl Engine {
                 cgb,
                 vgb,
                 history.vgb_prev[idx],
-                history.qgb_prev[idx],
-                history.qgb_prev_prev[idx],
-                history.cqgb_prev[idx],
+                BranchChargeHistory {
+                    q_prev: history.qgb_prev[idx],
+                    q_prev_prev: history.qgb_prev_prev[idx],
+                    cq_prev: history.cqgb_prev[idx],
+                },
             );
             terms[2] = (geq_gb, ieq_gb);
             if CAPTURE_CHARGES {
@@ -1648,9 +1668,11 @@ impl Engine {
                 cbs,
                 vbs_j,
                 qbs_curr,
-                history.qbs_prev[idx],
-                history.qbs_prev_prev[idx],
-                history.cqbs_prev[idx],
+                BranchChargeHistory {
+                    q_prev: history.qbs_prev[idx],
+                    q_prev_prev: history.qbs_prev_prev[idx],
+                    cq_prev: history.cqbs_prev[idx],
+                },
             );
             terms[3] = (geq_bs, ieq_bs);
         }
@@ -1665,9 +1687,11 @@ impl Engine {
                 cbd,
                 vbd_j,
                 qbd_curr,
-                history.qbd_prev[idx],
-                history.qbd_prev_prev[idx],
-                history.cqbd_prev[idx],
+                BranchChargeHistory {
+                    q_prev: history.qbd_prev[idx],
+                    q_prev_prev: history.qbd_prev_prev[idx],
+                    cq_prev: history.cqbd_prev[idx],
+                },
             );
             terms[4] = (geq_bd, ieq_bd);
         }
@@ -1730,9 +1754,11 @@ impl Engine {
             cgs,
             vgs,
             history.vgs_prev[idx],
-            history.qgs_prev[idx],
-            history.qgs_prev_prev[idx],
-            history.cqgs_prev[idx],
+            BranchChargeHistory {
+                q_prev: history.qgs_prev[idx],
+                q_prev_prev: history.qgs_prev_prev[idx],
+                cq_prev: history.cqgs_prev[idx],
+            },
         );
         terms[0] = (geq_gs, ieq_gs);
 
@@ -1742,9 +1768,11 @@ impl Engine {
             cgd,
             vgd,
             history.vgd_prev[idx],
-            history.qgd_prev[idx],
-            history.qgd_prev_prev[idx],
-            history.cqgd_prev[idx],
+            BranchChargeHistory {
+                q_prev: history.qgd_prev[idx],
+                q_prev_prev: history.qgd_prev_prev[idx],
+                cq_prev: history.cqgd_prev[idx],
+            },
         );
         terms[1] = (geq_gd, ieq_gd);
 
@@ -1754,9 +1782,11 @@ impl Engine {
             cgb,
             vgb,
             history.vgb_prev[idx],
-            history.qgb_prev[idx],
-            history.qgb_prev_prev[idx],
-            history.cqgb_prev[idx],
+            BranchChargeHistory {
+                q_prev: history.qgb_prev[idx],
+                q_prev_prev: history.qgb_prev_prev[idx],
+                cq_prev: history.cqgb_prev[idx],
+            },
         );
         terms[2] = (geq_gb, ieq_gb);
 
@@ -1766,9 +1796,11 @@ impl Engine {
             cds,
             vds,
             history.vds_prev[idx],
-            history.qds_prev[idx],
-            history.qds_prev_prev[idx],
-            history.cqds_prev[idx],
+            BranchChargeHistory {
+                q_prev: history.qds_prev[idx],
+                q_prev_prev: history.qds_prev_prev[idx],
+                cq_prev: history.cqds_prev[idx],
+            },
         );
         terms[3] = (geq_ds, ieq_ds);
 
@@ -1778,9 +1810,11 @@ impl Engine {
             cbs,
             vbs,
             qbs,
-            history.qbs_prev[idx],
-            history.qbs_prev_prev[idx],
-            history.cqbs_prev[idx],
+            BranchChargeHistory {
+                q_prev: history.qbs_prev[idx],
+                q_prev_prev: history.qbs_prev_prev[idx],
+                cq_prev: history.cqbs_prev[idx],
+            },
         );
         terms[4] = (geq_bs, ieq_bs);
 
@@ -1790,9 +1824,11 @@ impl Engine {
             cbd,
             vbd,
             qbd,
-            history.qbd_prev[idx],
-            history.qbd_prev_prev[idx],
-            history.cqbd_prev[idx],
+            BranchChargeHistory {
+                q_prev: history.qbd_prev[idx],
+                q_prev_prev: history.qbd_prev_prev[idx],
+                cq_prev: history.cqbd_prev[idx],
+            },
         );
         terms[5] = (geq_bd, ieq_bd);
 
@@ -1802,9 +1838,11 @@ impl Engine {
             cd1,
             vd1,
             qd1,
-            history.qd1_prev[idx],
-            history.qd1_prev_prev[idx],
-            history.cqd1_prev[idx],
+            BranchChargeHistory {
+                q_prev: history.qd1_prev[idx],
+                q_prev_prev: history.qd1_prev_prev[idx],
+                cq_prev: history.cqd1_prev[idx],
+            },
         );
         terms[6] = (geq_d1, ieq_d1);
 

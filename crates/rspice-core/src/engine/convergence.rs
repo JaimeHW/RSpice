@@ -16,6 +16,35 @@ use crate::solver::{
 };
 use crate::{CircuitData, Value};
 
+/// The trial point an operating-point probe evaluates at: the candidate
+/// solution, the analysis time it is dated to, the analysis kind whose
+/// evaluation phase applies, and the junction conductance floor added to every
+/// nonlinear branch. A probe given the solution without the floor would be
+/// reading a different circuit than the one being solved.
+#[derive(Clone, Copy)]
+pub(in crate::engine::convergence) struct OperatingPointProbe<'a> {
+    pub solution: &'a [Value],
+    pub time: Value,
+    pub analysis: crate::xspice::AnalysisType,
+    pub junction_gmin: Value,
+}
+
+/// One corrector run: where it starts, the damping state it carries across
+/// its Newton steps, and the iteration ceiling it must finish inside.
+pub(in crate::engine::convergence) struct CorrectorRun<'a> {
+    pub initial_solution: &'a [Value],
+    pub damping_state: &'a mut NewtonDampingState,
+    pub max_iterations: usize,
+}
+
+/// One damping decision: the accepted point, the Newton proposal from it, and
+/// the damping state that remembers what the previous steps did.
+pub(in crate::engine::convergence) struct DampingStep<'a> {
+    pub old: &'a [Value],
+    pub proposal: &'a [Value],
+    pub damping_state: &'a mut NewtonDampingState,
+}
+
 mod continuation;
 mod damping;
 mod fallback;

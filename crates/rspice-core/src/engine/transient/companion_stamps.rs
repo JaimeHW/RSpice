@@ -2,6 +2,16 @@
 
 use super::*;
 
+/// The accepted charge history one branch's companion is formed from: the two
+/// previous charges the integrator differences and the companion current at
+/// the previous step.
+#[derive(Clone, Copy)]
+pub(super) struct BranchChargeHistory {
+    pub q_prev: Value,
+    pub q_prev_prev: Value,
+    pub cq_prev: Value,
+}
+
 /// Pre-resolved matrix slots for one two-terminal companion branch.
 ///
 /// `stamp_two_terminal_companion` pays four position-map hash lookups per
@@ -752,10 +762,13 @@ impl Engine {
         coeff: &CompanionCoefficients,
         dt: Value,
         q_curr: Value,
-        q_prev: Value,
-        q_prev_prev: Value,
-        cq_prev: Value,
+        history: BranchChargeHistory,
     ) -> Value {
+        let BranchChargeHistory {
+            q_prev,
+            q_prev_prev,
+            cq_prev,
+        } = history;
         if !dt.is_finite() || dt <= 0.0 {
             return 0.0;
         }
@@ -770,10 +783,13 @@ impl Engine {
         capacitance: Value,
         v_curr: Value,
         v_prev: Value,
-        q_prev: Value,
-        q_prev_prev: Value,
-        cq_prev: Value,
+        history: BranchChargeHistory,
     ) -> (Value, Value, Value, Value) {
+        let BranchChargeHistory {
+            q_prev,
+            q_prev_prev,
+            cq_prev,
+        } = history;
         let geq = Self::jfet_companion_geq(coeff, capacitance, dt);
         if geq == 0.0 {
             return (0.0, 0.0, q_prev, 0.0);
@@ -781,7 +797,16 @@ impl Engine {
         // Match ngspice nonlinear charge-branch transient update:
         // q(n+1) = q(n) + C(n+1) * (v(n+1) - v(n))
         let q_curr = q_prev + capacitance * (v_curr - v_prev);
-        let cq_curr = Self::jfet_companion_ccap(coeff, dt, q_curr, q_prev, q_prev_prev, cq_prev);
+        let cq_curr = Self::jfet_companion_ccap(
+            coeff,
+            dt,
+            q_curr,
+            BranchChargeHistory {
+                q_prev: q_prev,
+                q_prev_prev: q_prev_prev,
+                cq_prev: cq_prev,
+            },
+        );
         // Match ngspice load linearization contract for capacitive branches:
         //   i(v) ≈ ccap + geq * (v - v_hist) = geq * v - (geq * v_hist - ccap).
         // With our companion stamp convention (i = geq * v - i_eq), this gives:
@@ -805,10 +830,13 @@ impl Engine {
         capacitance: Value,
         v_curr: Value,
         v_prev: Value,
-        q_prev: Value,
-        q_prev_prev: Value,
-        cq_prev: Value,
+        history: BranchChargeHistory,
     ) -> (Value, Value, Value, Value) {
+        let BranchChargeHistory {
+            q_prev,
+            q_prev_prev,
+            cq_prev,
+        } = history;
         let geq = Self::jfet_companion_geq(coeff, capacitance, dt);
         if geq == 0.0 {
             return (0.0, 0.0, q_prev, 0.0);
@@ -827,15 +855,27 @@ impl Engine {
         capacitance: Value,
         v_curr: Value,
         q_curr: Value,
-        q_prev: Value,
-        q_prev_prev: Value,
-        cq_prev: Value,
+        history: BranchChargeHistory,
     ) -> (Value, Value, Value, Value) {
+        let BranchChargeHistory {
+            q_prev,
+            q_prev_prev,
+            cq_prev,
+        } = history;
         let geq = Self::jfet_companion_geq(coeff, capacitance, dt);
         if geq == 0.0 {
             return (0.0, 0.0, q_curr, 0.0);
         }
-        let cq_curr = Self::jfet_companion_ccap(coeff, dt, q_curr, q_prev, q_prev_prev, cq_prev);
+        let cq_curr = Self::jfet_companion_ccap(
+            coeff,
+            dt,
+            q_curr,
+            BranchChargeHistory {
+                q_prev: q_prev,
+                q_prev_prev: q_prev_prev,
+                cq_prev: cq_prev,
+            },
+        );
         let ieq = geq * v_curr - cq_curr;
         (geq, ieq, q_curr, cq_curr)
     }
@@ -844,10 +884,13 @@ impl Engine {
     pub(super) fn linear_charge_history_ieq(
         coeff: &CompanionCoefficients,
         dt: Value,
-        q_prev: Value,
-        q_prev_prev: Value,
-        cq_prev: Value,
+        history: BranchChargeHistory,
     ) -> Value {
+        let BranchChargeHistory {
+            q_prev,
+            q_prev_prev,
+            cq_prev,
+        } = history;
         if !dt.is_finite() || dt <= 0.0 {
             return 0.0;
         }
@@ -932,9 +975,11 @@ mod tests {
                         capacitance,
                         1.7,
                         -0.4,
-                        3.1e-12,
-                        -2.7e-12,
-                        8.3e-6,
+                        BranchChargeHistory {
+                            q_prev: 3.1e-12,
+                            q_prev_prev: -2.7e-12,
+                            cq_prev: 8.3e-6,
+                        },
                     );
                     let shared = Engine::jfet_companion_terms_with_unit_geq(
                         &coeff,
@@ -943,9 +988,11 @@ mod tests {
                         capacitance,
                         1.7,
                         -0.4,
-                        3.1e-12,
-                        -2.7e-12,
-                        8.3e-6,
+                        BranchChargeHistory {
+                            q_prev: 3.1e-12,
+                            q_prev_prev: -2.7e-12,
+                            cq_prev: 8.3e-6,
+                        },
                     );
                     assert_eq!(
                         [

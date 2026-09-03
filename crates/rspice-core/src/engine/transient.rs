@@ -361,7 +361,7 @@ fn capture_transient_merit_rollback(
 mod breakpoints;
 mod checkpoint;
 mod companion_stamps;
-use companion_stamps::{CompactTwoTerminalStampSlots, TwoTerminalStampSlots};
+use companion_stamps::{BranchChargeHistory, CompactTwoTerminalStampSlots, TwoTerminalStampSlots};
 mod charge_stamper;
 use charge_stamper::StaticMatrixChargeStamper;
 mod damped_status;
@@ -12870,21 +12870,66 @@ D1 D 0 DMOD
         assert_eq!(gear_order_one_geq, backward_euler_geq);
         assert_ne!(gear_order_two_geq, backward_euler_geq);
 
-        let backward_euler_ccap =
-            Engine::jfet_companion_ccap(&backward_euler, dt, q_curr, q_prev, q_prev_prev, cq_prev);
-        let gear_order_one_ccap =
-            Engine::jfet_companion_ccap(&gear_order_one, dt, q_curr, q_prev, q_prev_prev, cq_prev);
-        let gear_order_two_ccap =
-            Engine::jfet_companion_ccap(&gear_order_two, dt, q_curr, q_prev, q_prev_prev, cq_prev);
+        let backward_euler_ccap = Engine::jfet_companion_ccap(
+            &backward_euler,
+            dt,
+            q_curr,
+            BranchChargeHistory {
+                q_prev: q_prev,
+                q_prev_prev: q_prev_prev,
+                cq_prev: cq_prev,
+            },
+        );
+        let gear_order_one_ccap = Engine::jfet_companion_ccap(
+            &gear_order_one,
+            dt,
+            q_curr,
+            BranchChargeHistory {
+                q_prev: q_prev,
+                q_prev_prev: q_prev_prev,
+                cq_prev: cq_prev,
+            },
+        );
+        let gear_order_two_ccap = Engine::jfet_companion_ccap(
+            &gear_order_two,
+            dt,
+            q_curr,
+            BranchChargeHistory {
+                q_prev: q_prev,
+                q_prev_prev: q_prev_prev,
+                cq_prev: cq_prev,
+            },
+        );
         assert_eq!(gear_order_one_ccap, backward_euler_ccap);
         assert_ne!(gear_order_two_ccap, backward_euler_ccap);
 
-        let backward_euler_ieq =
-            Engine::linear_charge_history_ieq(&backward_euler, dt, q_prev, q_prev_prev, cq_prev);
-        let gear_order_one_ieq =
-            Engine::linear_charge_history_ieq(&gear_order_one, dt, q_prev, q_prev_prev, cq_prev);
-        let gear_order_two_ieq =
-            Engine::linear_charge_history_ieq(&gear_order_two, dt, q_prev, q_prev_prev, cq_prev);
+        let backward_euler_ieq = Engine::linear_charge_history_ieq(
+            &backward_euler,
+            dt,
+            BranchChargeHistory {
+                q_prev: q_prev,
+                q_prev_prev: q_prev_prev,
+                cq_prev: cq_prev,
+            },
+        );
+        let gear_order_one_ieq = Engine::linear_charge_history_ieq(
+            &gear_order_one,
+            dt,
+            BranchChargeHistory {
+                q_prev: q_prev,
+                q_prev_prev: q_prev_prev,
+                cq_prev: cq_prev,
+            },
+        );
+        let gear_order_two_ieq = Engine::linear_charge_history_ieq(
+            &gear_order_two,
+            dt,
+            BranchChargeHistory {
+                q_prev: q_prev,
+                q_prev_prev: q_prev_prev,
+                cq_prev: cq_prev,
+            },
+        );
         assert_eq!(gear_order_one_ieq, backward_euler_ieq);
         assert_ne!(gear_order_two_ieq, backward_euler_ieq);
     }
@@ -12906,9 +12951,11 @@ D1 D 0 DMOD
             dq_dv,
             v_curr,
             q_curr,
-            q_prev,
-            q_prev_prev,
-            0.0,
+            BranchChargeHistory {
+                q_prev: q_prev,
+                q_prev_prev: q_prev_prev,
+                cq_prev: 0.0,
+            },
         );
         let expected_cq = (5.0 / 3.0 * q_curr - 3.0 * q_prev + 4.0 / 3.0 * q_prev_prev) / dt;
         let expected_geq = 5.0 / 3.0 * dq_dv / dt;

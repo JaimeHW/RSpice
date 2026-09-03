@@ -189,7 +189,16 @@ impl Engine {
         qth: Value,
     ) -> (Value, Value, Value, Value, Value) {
         let cq = |q: Value, q_prev: Value, q_prev_prev: Value, cq_prev: Value| {
-            Self::jfet_companion_ccap(coeff, dt, q, q_prev, q_prev_prev, cq_prev)
+            Self::jfet_companion_ccap(
+                coeff,
+                dt,
+                q,
+                BranchChargeHistory {
+                    q_prev: q_prev,
+                    q_prev_prev: q_prev_prev,
+                    cq_prev: cq_prev,
+                },
+            )
         };
         (
             cq(
@@ -533,7 +542,16 @@ impl Engine {
         qd: Value,
     ) -> (Value, Value, Value) {
         let cq = |q: Value, q_prev: Value, q_prev_prev: Value, cq_prev: Value| {
-            Self::jfet_companion_ccap(coeff, dt, q, q_prev, q_prev_prev, cq_prev)
+            Self::jfet_companion_ccap(
+                coeff,
+                dt,
+                q,
+                BranchChargeHistory {
+                    q_prev: q_prev,
+                    q_prev_prev: q_prev_prev,
+                    cq_prev: cq_prev,
+                },
+            )
         };
         (
             cq(
@@ -567,7 +585,16 @@ impl Engine {
         qcdump: Value,
     ) -> (Value, Value) {
         let cq = |q: Value, q_prev: Value, q_prev_prev: Value, cq_prev: Value| {
-            Self::jfet_companion_ccap(coeff, dt, q, q_prev, q_prev_prev, cq_prev)
+            Self::jfet_companion_ccap(
+                coeff,
+                dt,
+                q,
+                BranchChargeHistory {
+                    q_prev: q_prev,
+                    q_prev_prev: q_prev_prev,
+                    cq_prev: cq_prev,
+                },
+            )
         };
         (
             cq(
@@ -879,7 +906,16 @@ impl Engine {
         qbd: Value,
     ) -> (Value, Value, Value, Value, Value, Value) {
         let cq = |q: Value, q_prev: Value, q_prev_prev: Value, cq_prev: Value| {
-            Self::jfet_companion_ccap(coeff, dt, q, q_prev, q_prev_prev, cq_prev)
+            Self::jfet_companion_ccap(
+                coeff,
+                dt,
+                q,
+                BranchChargeHistory {
+                    q_prev: q_prev,
+                    q_prev_prev: q_prev_prev,
+                    cq_prev: cq_prev,
+                },
+            )
         };
         (
             cq(
@@ -931,7 +967,16 @@ impl Engine {
         qcdump: Value,
     ) -> (Value, Value) {
         let cq = |q: Value, q_prev: Value, q_prev_prev: Value, cq_prev: Value| {
-            Self::jfet_companion_ccap(coeff, dt, q, q_prev, q_prev_prev, cq_prev)
+            Self::jfet_companion_ccap(
+                coeff,
+                dt,
+                q,
+                BranchChargeHistory {
+                    q_prev: q_prev,
+                    q_prev_prev: q_prev_prev,
+                    cq_prev: cq_prev,
+                },
+            )
         };
         (
             cq(
@@ -1150,9 +1195,11 @@ impl Engine {
                 coeff,
                 dt,
                 q_curr[row],
-                history.q_prev[idx][row],
-                history.q_prev_prev[idx][row],
-                history.cq_prev[idx][row],
+                BranchChargeHistory {
+                    q_prev: history.q_prev[idx][row],
+                    q_prev_prev: history.q_prev_prev[idx][row],
+                    cq_prev: history.cq_prev[idx][row],
+                },
             );
         }
         cq

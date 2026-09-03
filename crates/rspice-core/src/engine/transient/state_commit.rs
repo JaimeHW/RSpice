@@ -336,9 +336,11 @@ impl Engine {
                         coeff,
                         dt,
                         branch.charge,
-                        q_prev,
-                        q_prev_prev,
-                        cq_prev,
+                        BranchChargeHistory {
+                            q_prev: q_prev,
+                            q_prev_prev: q_prev_prev,
+                            cq_prev: cq_prev,
+                        },
                     );
                     bjt_history.charge_q_prev_prev_prev[idx][branch_idx] = q_prev_prev;
                     bjt_history.charge_q_prev_prev[idx][branch_idx] = q_prev;
@@ -422,8 +424,16 @@ impl Engine {
                 let q_prev = bjt_history.charge_q_prev[idx][branch_idx];
                 let q_prev_prev = bjt_history.charge_q_prev_prev[idx][branch_idx];
                 let cq_prev = bjt_history.charge_cq_prev[idx][branch_idx];
-                let cq_curr =
-                    Self::jfet_companion_ccap(coeff, dt, charge, q_prev, q_prev_prev, cq_prev);
+                let cq_curr = Self::jfet_companion_ccap(
+                    coeff,
+                    dt,
+                    charge,
+                    BranchChargeHistory {
+                        q_prev: q_prev,
+                        q_prev_prev: q_prev_prev,
+                        cq_prev: cq_prev,
+                    },
+                );
                 bjt_history.charge_q_prev_prev_prev[idx][branch_idx] = q_prev_prev;
                 bjt_history.charge_q_prev_prev[idx][branch_idx] = q_prev;
                 bjt_history.charge_q_prev[idx][branch_idx] = charge;
@@ -501,9 +511,11 @@ impl Engine {
                         cgs,
                         vgs_charge,
                         charge.qgs,
-                        jfet_history.qgs_prev[idx],
-                        jfet_history.qgs_prev_prev[idx],
-                        jfet_history.cqgs_prev[idx],
+                        BranchChargeHistory {
+                            q_prev: jfet_history.qgs_prev[idx],
+                            q_prev_prev: jfet_history.qgs_prev_prev[idx],
+                            cq_prev: jfet_history.cqgs_prev[idx],
+                        },
                     )
                 } else {
                     Self::jfet_companion_terms(
@@ -512,9 +524,11 @@ impl Engine {
                         cgs,
                         vgs_charge,
                         jfet_history.vgs_prev_prev[idx],
-                        jfet_history.qgs_prev[idx],
-                        jfet_history.qgs_prev_prev[idx],
-                        jfet_history.cqgs_prev[idx],
+                        BranchChargeHistory {
+                            q_prev: jfet_history.qgs_prev[idx],
+                            q_prev_prev: jfet_history.qgs_prev_prev[idx],
+                            cq_prev: jfet_history.cqgs_prev[idx],
+                        },
                     )
                 };
                 jfet_history.qgs_prev_prev_prev[idx] = jfet_history.qgs_prev_prev[idx];
@@ -529,9 +543,11 @@ impl Engine {
                         cgd,
                         vgd_charge,
                         charge.qgd,
-                        jfet_history.qgd_prev[idx],
-                        jfet_history.qgd_prev_prev[idx],
-                        jfet_history.cqgd_prev[idx],
+                        BranchChargeHistory {
+                            q_prev: jfet_history.qgd_prev[idx],
+                            q_prev_prev: jfet_history.qgd_prev_prev[idx],
+                            cq_prev: jfet_history.cqgd_prev[idx],
+                        },
                     )
                 } else {
                     Self::jfet_companion_terms(
@@ -540,9 +556,11 @@ impl Engine {
                         cgd,
                         vgd_charge,
                         jfet_history.vgd_prev_prev[idx],
-                        jfet_history.qgd_prev[idx],
-                        jfet_history.qgd_prev_prev[idx],
-                        jfet_history.cqgd_prev[idx],
+                        BranchChargeHistory {
+                            q_prev: jfet_history.qgd_prev[idx],
+                            q_prev_prev: jfet_history.qgd_prev_prev[idx],
+                            cq_prev: jfet_history.cqgd_prev[idx],
+                        },
                     )
                 };
                 jfet_history.qgd_prev_prev_prev[idx] = jfet_history.qgd_prev_prev[idx];
@@ -557,9 +575,11 @@ impl Engine {
                     cds,
                     vds_charge,
                     jfet_history.vds_prev_prev[idx],
-                    jfet_history.qds_prev[idx],
-                    jfet_history.qds_prev_prev[idx],
-                    jfet_history.cqds_prev[idx],
+                    BranchChargeHistory {
+                        q_prev: jfet_history.qds_prev[idx],
+                        q_prev_prev: jfet_history.qds_prev_prev[idx],
+                        cq_prev: jfet_history.cqds_prev[idx],
+                    },
                 );
                 jfet_history.qds_prev_prev_prev[idx] = jfet_history.qds_prev_prev[idx];
                 jfet_history.qds_prev_prev[idx] = jfet_history.qds_prev[idx];
@@ -583,9 +603,11 @@ impl Engine {
                     capd,
                     vd,
                     qd,
-                    diode_history.qd_prev[idx],
-                    diode_history.qd_prev_prev[idx],
-                    diode_history.cqd_prev[idx],
+                    BranchChargeHistory {
+                        q_prev: diode_history.qd_prev[idx],
+                        q_prev_prev: diode_history.qd_prev_prev[idx],
+                        cq_prev: diode_history.cqd_prev[idx],
+                    },
                 );
                 diode_history.qd_prev_prev_prev[idx] = diode_history.qd_prev_prev[idx];
                 diode_history.qd_prev_prev[idx] = diode_history.qd_prev[idx];
@@ -778,9 +800,11 @@ impl Engine {
                                                 cgs,
                                                 vgs,
                                                 vgs_prev_prev[idx],
-                                                qgs_prev_prev[idx],
-                                                qgs_prev_prev_prev[idx],
-                                                *cqgs_out,
+                                                BranchChargeHistory {
+                                                    q_prev: qgs_prev_prev[idx],
+                                                    q_prev_prev: qgs_prev_prev_prev[idx],
+                                                    cq_prev: *cqgs_out,
+                                                },
                                             );
                                         *qgs_out = q_curr;
                                         *cqgs_out = cq_curr;
@@ -792,9 +816,11 @@ impl Engine {
                                                 cgd,
                                                 vgd,
                                                 vgd_prev_prev[idx],
-                                                qgd_prev_prev[idx],
-                                                qgd_prev_prev_prev[idx],
-                                                *cqgd_out,
+                                                BranchChargeHistory {
+                                                    q_prev: qgd_prev_prev[idx],
+                                                    q_prev_prev: qgd_prev_prev_prev[idx],
+                                                    cq_prev: *cqgd_out,
+                                                },
                                             );
                                         *qgd_out = q_curr;
                                         *cqgd_out = cq_curr;
@@ -806,9 +832,11 @@ impl Engine {
                                                 cgb,
                                                 vgb,
                                                 vgb_prev_prev[idx],
-                                                qgb_prev_prev[idx],
-                                                qgb_prev_prev_prev[idx],
-                                                *cqgb_out,
+                                                BranchChargeHistory {
+                                                    q_prev: qgb_prev_prev[idx],
+                                                    q_prev_prev: qgb_prev_prev_prev[idx],
+                                                    cq_prev: *cqgb_out,
+                                                },
                                             );
                                         *qgb_out = q_curr;
                                         *cqgb_out = cq_curr;
@@ -827,9 +855,11 @@ impl Engine {
                                             capacitance,
                                             vbs_j,
                                             q_exact,
-                                            *qbs_out,
-                                            *qbs_prev_out,
-                                            *cqbs_out,
+                                            BranchChargeHistory {
+                                                q_prev: *qbs_out,
+                                                q_prev_prev: *qbs_prev_out,
+                                                cq_prev: *cqbs_out,
+                                            },
                                         );
                                     *vbs_j_prev_out = *vbs_j_out;
                                     *vbs_j_out = vbs_j;
@@ -849,9 +879,11 @@ impl Engine {
                                             capacitance,
                                             vbd_j,
                                             q_exact,
-                                            *qbd_out,
-                                            *qbd_prev_out,
-                                            *cqbd_out,
+                                            BranchChargeHistory {
+                                                q_prev: *qbd_out,
+                                                q_prev_prev: *qbd_prev_out,
+                                                cq_prev: *cqbd_out,
+                                            },
                                         );
                                     *vbd_j_prev_out = *vbd_j_out;
                                     *vbd_j_out = vbd_j;
@@ -918,9 +950,11 @@ impl Engine {
                         cgs,
                         vgs,
                         mosfet_history.vgs_prev_prev[idx],
-                        mosfet_history.qgs_prev_prev[idx],
-                        mosfet_history.qgs_prev_prev_prev[idx],
-                        mosfet_history.cqgs_prev[idx],
+                        BranchChargeHistory {
+                            q_prev: mosfet_history.qgs_prev_prev[idx],
+                            q_prev_prev: mosfet_history.qgs_prev_prev_prev[idx],
+                            cq_prev: mosfet_history.cqgs_prev[idx],
+                        },
                     );
                     mosfet_history.qgs_prev[idx] = qgs_curr;
                     mosfet_history.cqgs_prev[idx] = cqgs_curr;
@@ -931,9 +965,11 @@ impl Engine {
                         cgd,
                         vgd,
                         mosfet_history.vgd_prev_prev[idx],
-                        mosfet_history.qgd_prev_prev[idx],
-                        mosfet_history.qgd_prev_prev_prev[idx],
-                        mosfet_history.cqgd_prev[idx],
+                        BranchChargeHistory {
+                            q_prev: mosfet_history.qgd_prev_prev[idx],
+                            q_prev_prev: mosfet_history.qgd_prev_prev_prev[idx],
+                            cq_prev: mosfet_history.cqgd_prev[idx],
+                        },
                     );
                     mosfet_history.qgd_prev[idx] = qgd_curr;
                     mosfet_history.cqgd_prev[idx] = cqgd_curr;
@@ -944,9 +980,11 @@ impl Engine {
                         cgb,
                         vgb,
                         mosfet_history.vgb_prev_prev[idx],
-                        mosfet_history.qgb_prev_prev[idx],
-                        mosfet_history.qgb_prev_prev_prev[idx],
-                        mosfet_history.cqgb_prev[idx],
+                        BranchChargeHistory {
+                            q_prev: mosfet_history.qgb_prev_prev[idx],
+                            q_prev_prev: mosfet_history.qgb_prev_prev_prev[idx],
+                            cq_prev: mosfet_history.cqgb_prev[idx],
+                        },
                     );
                     mosfet_history.qgb_prev[idx] = qgb_curr;
                     mosfet_history.cqgb_prev[idx] = cqgb_curr;
@@ -964,9 +1002,11 @@ impl Engine {
                         cbs,
                         vbs_j,
                         qbs_exact,
-                        mosfet_history.qbs_prev[idx],
-                        mosfet_history.qbs_prev_prev[idx],
-                        mosfet_history.cqbs_prev[idx],
+                        BranchChargeHistory {
+                            q_prev: mosfet_history.qbs_prev[idx],
+                            q_prev_prev: mosfet_history.qbs_prev_prev[idx],
+                            cq_prev: mosfet_history.cqbs_prev[idx],
+                        },
                     );
                 mosfet_history.vbs_j_prev_prev[idx] = mosfet_history.vbs_j_prev[idx];
                 mosfet_history.vbs_j_prev[idx] = vbs_j;
@@ -985,9 +1025,11 @@ impl Engine {
                         cbd,
                         vbd_j,
                         qbd_exact,
-                        mosfet_history.qbd_prev[idx],
-                        mosfet_history.qbd_prev_prev[idx],
-                        mosfet_history.cqbd_prev[idx],
+                        BranchChargeHistory {
+                            q_prev: mosfet_history.qbd_prev[idx],
+                            q_prev_prev: mosfet_history.qbd_prev_prev[idx],
+                            cq_prev: mosfet_history.cqbd_prev[idx],
+                        },
                     );
                 mosfet_history.vbd_j_prev_prev[idx] = mosfet_history.vbd_j_prev[idx];
                 mosfet_history.vbd_j_prev[idx] = vbd_j;
@@ -1017,9 +1059,11 @@ impl Engine {
                 cgs,
                 vgs,
                 vdmos_history.vgs_prev_prev[idx],
-                vdmos_history.qgs_prev[idx],
-                vdmos_history.qgs_prev_prev[idx],
-                vdmos_history.cqgs_prev[idx],
+                BranchChargeHistory {
+                    q_prev: vdmos_history.qgs_prev[idx],
+                    q_prev_prev: vdmos_history.qgs_prev_prev[idx],
+                    cq_prev: vdmos_history.cqgs_prev[idx],
+                },
             );
             vdmos_history.qgs_prev_prev_prev[idx] = vdmos_history.qgs_prev_prev[idx];
             vdmos_history.qgs_prev_prev[idx] = vdmos_history.qgs_prev[idx];
@@ -1034,9 +1078,11 @@ impl Engine {
                 cgd,
                 vgd,
                 vdmos_history.vgd_prev_prev[idx],
-                vdmos_history.qgd_prev[idx],
-                vdmos_history.qgd_prev_prev[idx],
-                vdmos_history.cqgd_prev[idx],
+                BranchChargeHistory {
+                    q_prev: vdmos_history.qgd_prev[idx],
+                    q_prev_prev: vdmos_history.qgd_prev_prev[idx],
+                    cq_prev: vdmos_history.cqgd_prev[idx],
+                },
             );
             vdmos_history.qgd_prev_prev_prev[idx] = vdmos_history.qgd_prev_prev[idx];
             vdmos_history.qgd_prev_prev[idx] = vdmos_history.qgd_prev[idx];
@@ -1051,9 +1097,11 @@ impl Engine {
                 cgb,
                 vgb,
                 vdmos_history.vgb_prev_prev[idx],
-                vdmos_history.qgb_prev[idx],
-                vdmos_history.qgb_prev_prev[idx],
-                vdmos_history.cqgb_prev[idx],
+                BranchChargeHistory {
+                    q_prev: vdmos_history.qgb_prev[idx],
+                    q_prev_prev: vdmos_history.qgb_prev_prev[idx],
+                    cq_prev: vdmos_history.cqgb_prev[idx],
+                },
             );
             vdmos_history.qgb_prev_prev_prev[idx] = vdmos_history.qgb_prev_prev[idx];
             vdmos_history.qgb_prev_prev[idx] = vdmos_history.qgb_prev[idx];
@@ -1068,9 +1116,11 @@ impl Engine {
                 cds,
                 vds,
                 vdmos_history.vds_prev_prev[idx],
-                vdmos_history.qds_prev[idx],
-                vdmos_history.qds_prev_prev[idx],
-                vdmos_history.cqds_prev[idx],
+                BranchChargeHistory {
+                    q_prev: vdmos_history.qds_prev[idx],
+                    q_prev_prev: vdmos_history.qds_prev_prev[idx],
+                    cq_prev: vdmos_history.cqds_prev[idx],
+                },
             );
             vdmos_history.qds_prev_prev_prev[idx] = vdmos_history.qds_prev_prev[idx];
             vdmos_history.qds_prev_prev[idx] = vdmos_history.qds_prev[idx];
@@ -1085,9 +1135,11 @@ impl Engine {
                 cbs,
                 vbs,
                 qbs_exact,
-                vdmos_history.qbs_prev[idx],
-                vdmos_history.qbs_prev_prev[idx],
-                vdmos_history.cqbs_prev[idx],
+                BranchChargeHistory {
+                    q_prev: vdmos_history.qbs_prev[idx],
+                    q_prev_prev: vdmos_history.qbs_prev_prev[idx],
+                    cq_prev: vdmos_history.cqbs_prev[idx],
+                },
             );
             vdmos_history.qbs_prev_prev_prev[idx] = vdmos_history.qbs_prev_prev[idx];
             vdmos_history.qbs_prev_prev[idx] = vdmos_history.qbs_prev[idx];
@@ -1102,9 +1154,11 @@ impl Engine {
                 cbd,
                 vbd,
                 qbd_exact,
-                vdmos_history.qbd_prev[idx],
-                vdmos_history.qbd_prev_prev[idx],
-                vdmos_history.cqbd_prev[idx],
+                BranchChargeHistory {
+                    q_prev: vdmos_history.qbd_prev[idx],
+                    q_prev_prev: vdmos_history.qbd_prev_prev[idx],
+                    cq_prev: vdmos_history.cqbd_prev[idx],
+                },
             );
             vdmos_history.qbd_prev_prev_prev[idx] = vdmos_history.qbd_prev_prev[idx];
             vdmos_history.qbd_prev_prev[idx] = vdmos_history.qbd_prev[idx];
@@ -1119,9 +1173,11 @@ impl Engine {
                 cd1,
                 vd1,
                 qd1_exact,
-                vdmos_history.qd1_prev[idx],
-                vdmos_history.qd1_prev_prev[idx],
-                vdmos_history.cqd1_prev[idx],
+                BranchChargeHistory {
+                    q_prev: vdmos_history.qd1_prev[idx],
+                    q_prev_prev: vdmos_history.qd1_prev_prev[idx],
+                    cq_prev: vdmos_history.cqd1_prev[idx],
+                },
             );
             vdmos_history.qd1_prev_prev_prev[idx] = vdmos_history.qd1_prev_prev[idx];
             vdmos_history.qd1_prev_prev[idx] = vdmos_history.qd1_prev[idx];
