@@ -374,10 +374,18 @@ const DERIVATIVE_RULE_HOLES: &[CfgBinaryOp] = &[CfgBinaryOp::Hypot, CfgBinaryOp:
 /// red, and each one is a wrong Jacobian or a wrong residual, not a rounding
 /// difference.
 ///
-/// Three entries have come off the list, and how they came off is the pattern
+/// Four entries have come off the list, and how they came off is the pattern
 /// the rest are meant to follow — the divergence was a lowering decision one
 /// route had and the other did not, and the fix was to give the CFG route the
-/// same decision rather than a better screen. A **prologue-only definition** —
+/// same decision rather than a better screen. An **event-controlled variable**
+/// was applied twice on this route: the assignment pass this plan keeps had
+/// already run the guard-folded event body into the variable's slot, and the
+/// CFG then applied it again on top of the leaf that reads that slot, counting
+/// 2.0 where the shipped route counts 1.0. A read of one is now the leaf
+/// itself, which is the `LoadVariable` the postfix route's own read lowers to —
+/// `CfgLowerMode::frozen_event_state` in `canonical_ir::cfg_lower` is where the
+/// two consumers part company, and why.
+/// A **prologue-only definition** —
 /// a localparam or a declaration initializer the body reads — took Verilog-AMS
 /// zero because the CFG had no definition of it at all; W-F4b gave the
 /// executable lowering the module prologue, so the entry block writes what the
@@ -399,12 +407,6 @@ const DERIVATIVE_RULE_HOLES: &[CfgBinaryOp] = &[CfgBinaryOp::Hypot, CfgBinaryOp:
 ///   measured 4.5 against 2.5 on one entry. Detected as a shipped value entry
 ///   with a non-empty contribution-current read set, which is what "this entry
 ///   probes a current" means in the plan.
-/// * **An event-controlled variable.** The CFG recomputes a variable inline
-///   where the postfix plan reads the slot the assignment pass wrote, and for a
-///   variable whose value is an accepted event state those are different
-///   quantities across a rejected step —
-///   `checkpoint_before_acceptance_excludes_step_event_variable_candidates`
-///   measured 2.0 against 1.0.
 ///
 /// # This list is empirical, and that is a bound on what it is worth
 ///
@@ -442,11 +444,6 @@ fn route_divergence(function: &CfgFunction, postfix: &NativeModelPlan) -> Option
         CfgValueKind::BranchFlow(_) => Some(
             "a branch-flow probe is frozen by the MIR route and differentiated through by the \
              CFG route"
-                .to_string(),
-        ),
-        CfgValueKind::EventState(_) => Some(
-            "an event-controlled variable is read from its runtime slot by the MIR route and \
-             recomputed inline by the CFG route"
                 .to_string(),
         ),
         _ => None,
@@ -1381,6 +1378,25 @@ module cfg_div_localparam(p, n);
 endmodule
 "#,
             ),
+            // The event-controlled variable W-F4 measured at 2.0 against 1.0.
+            // Its number is pinned by
+            // `event_semantics::checkpoint_before_acceptance_excludes_step_event_variable_candidates`,
+            // which runs the shipped route; this pins that the CFG route builds
+            // the module rather than falling it back.
+            (
+                "event-controlled-variable",
+                r#"
+module cfg_div_event(p, n);
+  inout p, n;
+  electrical p, n;
+  real count;
+  analog begin
+    @(initial_step("tran")) count = count + 1.0;
+    I(p, n) <+ count;
+  end
+endmodule
+"#,
+            ),
             // A guarded contribution, which mints a `__guard1` snapshot. The
             // screen that used to name a prologue-only definition by variable
             // read that snapshot as one and refused sixteen of the estate's
@@ -1553,6 +1569,70 @@ endmodule
                 "{case}: the executable CFG reads the prologue's value"
             );
         }
+    }
+
+    /// An event-controlled variable is read from its slot, not recomputed.
+    ///
+    /// The executable plan keeps the MIR route's assignment pass, which has
+    /// already run `count = count + 1.0` into `count`'s runtime slot by the time
+    /// a value entry executes. Applying the event body again on top of the leaf
+    /// that reads that slot is what counted 2.0 against the shipped route's 1.0.
+    ///
+    /// Stated structurally, because that is the property rather than one
+    /// arithmetic consequence of it: the residual's cone holds the
+    /// `EventState` leaf — the same `LoadVariable` the postfix route reads —
+    /// and holds nothing from the event body, so there is no second
+    /// application left to get wrong. The generated lowering of the same module
+    /// keeps the body, because there it *is* the computation.
+    #[test]
+    fn an_event_controlled_variable_is_read_from_its_slot() {
+        use crate::canonical_ir::{CfgModel, CfgValueKind, prune_cfg_to_outputs};
+
+        const SOURCE: &str = r#"
+module cfg_event_frozen(p, n);
+  inout p, n;
+  electrical p, n;
+  real count;
+  analog begin
+    @(initial_step("tran")) count = count + 1.0;
+    I(p, n) <+ count;
+  end
+endmodule
+"#;
+        let (_, artifact) = compile(SOURCE);
+
+        let residual_cone = |cfg: &CfgModel| {
+            let (pruned, _) = prune_cfg_to_outputs(&cfg.function, &cfg.residuals);
+            pruned
+                .values
+                .iter()
+                .map(|value| value.kind.clone())
+                .collect::<Vec<_>>()
+        };
+
+        let executable = CfgModel::from_hir_for_executable_backend(&artifact.hir, &artifact.mir)
+            .expect("lowers");
+        let cone = residual_cone(&executable);
+        assert!(
+            cone.iter()
+                .any(|kind| matches!(kind, CfgValueKind::EventState(0))),
+            "the residual reads the event-state leaf: {cone:?}"
+        );
+        assert!(
+            !cone
+                .iter()
+                .any(|kind| matches!(kind, CfgValueKind::RealConstant(one) if *one == 1.0)),
+            "the event body's increment is not applied a second time: {cone:?}"
+        );
+
+        let generated = CfgModel::from_hir(&artifact.hir, &artifact.mir).expect("lowers");
+        let cone = residual_cone(&generated);
+        assert!(
+            cone.iter()
+                .any(|kind| matches!(kind, CfgValueKind::RealConstant(one) if *one == 1.0)),
+            "the generated lowering keeps the event body, which is its whole computation: \
+             {cone:?}"
+        );
     }
 
     /// Each construct in [`route_divergence`] falls the module back, and says

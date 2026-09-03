@@ -410,6 +410,12 @@ struct CfgLowerer<'a> {
     /// Whether the module prologue is evaluated into the entry block. See
     /// [`Self::prologue`].
     lower_prologue: bool,
+    /// See [`CfgLowerMode::frozen_event_state`].
+    frozen_event_state: bool,
+    /// The entry block's `EventState` leaf for each event-controlled variable,
+    /// when that leaf is what a read of the variable means. Empty unless
+    /// [`Self::frozen_event_state`].
+    frozen_event_states: HashMap<VariableId, ValueId>,
     metadata_assignment_value: bool,
     /// Whether the expression being lowered is a contribution's right-hand
     /// side. Verilog-AMS 2023 section 4.5.12 requires a strictly positive
@@ -769,6 +775,34 @@ struct CfgLowerMode {
     /// the body, so a body read of a localparam or a declaration initializer
     /// sees what the initializer wrote. See [`CfgLowerer::prologue`].
     lower_prologue: bool,
+    /// Whether a read of an event-controlled variable is the entry block's
+    /// `EventState` leaf rather than the body's reaching definition.
+    ///
+    /// # Which consumer owns the event body
+    ///
+    /// The consumer decides, because the consumer decides whether the event
+    /// body has already run. A generated device computes everything from this
+    /// CFG: the leaf is the *accepted* value its runtime restored, the body
+    /// applies the event on top of it, and what comes out is the candidate the
+    /// device stores. That is one application of the event body and it is
+    /// correct.
+    ///
+    /// An executable plan does not. It keeps the MIR route's assignment pass —
+    /// see [`crate::jit::cfg_plan_builder`] — and that pass has already run the
+    /// guard-folded event body into the variable's runtime slot before any
+    /// value entry executes. The leaf reads that slot, so by the time the CFG's
+    /// body applies the event again it is applying it a *second* time:
+    /// `checkpoint_before_acceptance_excludes_step_event_variable_candidates`
+    /// counted 2.0 where the shipped route counts 1.0.
+    ///
+    /// So the residual reads the slot, which is exactly the
+    /// `NativeOp::LoadVariable` the postfix route's own read lowers to — the
+    /// two routes agree by identity of leaf and op, the standard
+    /// `$port_connected` set. The body's writes to the variable are then dead
+    /// on this route and the pruner drops them; they are still what
+    /// [`CfgModel::event_state_candidates`] reads, which only the generated
+    /// backend consumes.
+    frozen_event_state: bool,
 }
 
 impl CfgLowerMode {
@@ -786,12 +820,14 @@ impl CfgLowerMode {
         noise_metadata_only: false,
         per_instance_ports: false,
         lower_prologue: false,
+        frozen_event_state: false,
     };
     #[cfg(any(feature = "native", feature = "wasm-jit"))]
     const EXECUTABLE: Self = Self {
         noise_metadata_only: false,
         per_instance_ports: true,
         lower_prologue: true,
+        frozen_event_state: true,
     };
     /// Raw grouped-noise metadata is lowered for the generated backend and is
     /// part of the same frozen output, so it stays with `GENERATED` here.
@@ -799,6 +835,7 @@ impl CfgLowerMode {
         noise_metadata_only: true,
         per_instance_ports: true,
         lower_prologue: false,
+        frozen_event_state: false,
     };
 }
 
@@ -838,6 +875,8 @@ impl<'a> CfgLowerer<'a> {
             noise_metadata_only: mode.noise_metadata_only,
             per_instance_ports: mode.per_instance_ports,
             lower_prologue: mode.lower_prologue,
+            frozen_event_state: mode.frozen_event_state,
+            frozen_event_states: HashMap::new(),
             metadata_assignment_value: false,
             zi_direct_assignment: false,
             diagnostics: Vec::new(),
@@ -881,6 +920,9 @@ impl<'a> CfgLowerer<'a> {
             );
             self.builder
                 .write_variable(CfgVariable::Local(variable), entry, accepted);
+            if self.frozen_event_state {
+                self.frozen_event_states.insert(variable, accepted);
+            }
         }
         for index in 0..self.hir.contributions.len() {
             let contribution = ContributionId::from(index);
@@ -2304,6 +2346,12 @@ impl<'a> CfgLowerer<'a> {
 
     fn identifier(&mut self, name: &SmolStr, span: SourceSpanRef) -> ValueId {
         if let Some(variable) = self.variables_by_name.get(name).copied() {
+            // An event-controlled variable, for a consumer whose assignment
+            // pass has already run the body's event bodies into this
+            // variable's slot. See [`CfgLowerMode::frozen_event_state`].
+            if let Some(frozen) = self.frozen_event_states.get(&variable).copied() {
+                return frozen;
+            }
             // The whole reason this level exists: no history search, no
             // heuristic. The builder either has a reaching definition or the
             // variable is genuinely read before assignment.
