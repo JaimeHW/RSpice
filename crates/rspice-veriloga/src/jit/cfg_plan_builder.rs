@@ -1481,6 +1481,25 @@ module cfg_closed_simparam_bare(p, n);
 endmodule
 "#,
             ),
+            // A guarded contribution, which mints the `__guard1` snapshot
+            // [`analyzer_synthesized`] excludes. Without that exclusion this is
+            // a prologue-only definition and sixteen of the estate's modules
+            // refuse on it.
+            (
+                "guarded-contribution",
+                r#"
+module cfg_closed_guard(p, n);
+  inout p, n;
+  electrical p, n;
+  analog begin
+    if (V(p, n) > 1.0)
+      I(p, n) <+ 2.0 * V(p, n);
+    else
+      I(p, n) <+ V(p, n);
+  end
+endmodule
+"#,
+            ),
         ];
         for (case, source) in cases {
             let (model, artifact) = compile(source);
