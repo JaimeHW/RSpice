@@ -294,7 +294,7 @@ impl DeckPlanMaterializer<'_> {
         }
 
         let topology =
-            super::fingerprint::topology_fingerprint_with_abort(&self.engine, &netlist, abort)
+            super::fingerprint::topology_fingerprint_with_abort(self.engine, &netlist, abort)
                 .map_err(materialization_simulation_error)?;
         if abort.is_aborted() {
             return Err(MaterializedRunError::Aborted);
