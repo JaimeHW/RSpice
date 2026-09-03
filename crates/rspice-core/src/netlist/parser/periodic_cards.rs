@@ -32,33 +32,19 @@ fn at_keyword(stream: &TokenStream) -> bool {
         && matches!(stream.peek_n(1).kind, TokenKind::Equals)
 }
 
-/// Consume `KEYWORD =` and return the upper-cased keyword.
-fn take_keyword(
-    stream: &mut TokenStream,
-    card: AnalysisCard,
-    line: usize,
-) -> Result<String, ParseError> {
+/// Consume `KEYWORD =` and return the upper-cased keyword, or leave the
+/// stream untouched when it is not positioned on a keyword pair.
+fn take_keyword(stream: &mut TokenStream) -> Option<String> {
+    if !at_keyword(stream) {
+        return None;
+    }
     let TokenKind::Ident(name) = &stream.peek().kind else {
-        return Err(card_error(
-            card,
-            line,
-            AnalysisCardIssue::TrailingToken {
-                token: stream.peek().lexeme.clone(),
-            },
-        ));
+        return None;
     };
     let keyword = name.to_ascii_uppercase();
     stream.advance();
-    if !stream.consume(&TokenKind::Equals) {
-        // `take_keyword` is only called behind `at_keyword`, but a caller that
-        // scans keywords itself still gets the typed diagnostic.
-        return Err(card_error(
-            card,
-            line,
-            AnalysisCardIssue::UnknownKeyword { keyword },
-        ));
-    }
-    Ok(keyword)
+    stream.advance();
+    Some(keyword)
 }
 
 /// Reject a keyword the card has already bound.
@@ -116,7 +102,6 @@ fn card_count(
     minimum: usize,
 ) -> Result<usize, ParseError> {
     let expected: &'static str = match minimum {
-        0 => "a non-negative whole number",
         1 => "a whole number >= 1",
         16 => "a whole number >= 16",
         _ => "a whole number",
@@ -437,10 +422,9 @@ pub(super) fn parse_pss_command(
         if at_card_end(stream) {
             break;
         }
-        if !at_keyword(stream) {
-            return Err(unhonourable_pss_tail(stream, line_num));
-        }
-        let keyword = take_keyword(stream, CARD, line_num)?;
+        let Some(keyword) = take_keyword(stream) else {
+            return Err(unhonourable_pss_tail(stream, line_num, positional));
+        };
         if let Some(field) = positional_fields
             .iter()
             .find(|field| **field == keyword.as_str())
@@ -735,9 +719,11 @@ pub(super) fn parse_pss_command(
 }
 
 /// Diagnose the ngspice `.pss` tail fields RSpice cannot honour.
-fn unhonourable_pss_tail(stream: &TokenStream, line_num: usize) -> ParseError {
+fn unhonourable_pss_tail(stream: &TokenStream, line_num: usize, positional: bool) -> ParseError {
     match &stream.peek().kind {
-        TokenKind::Number(_) => card_error(
+        // Only the positional form has a seventh field, so only there is a
+        // stray number ngspice's steady coefficient rather than a typo.
+        TokenKind::Number(_) if positional => card_error(
             AnalysisCard::Pss,
             line_num,
             AnalysisCardIssue::UnhonourableField {
@@ -793,7 +779,7 @@ pub(super) fn parse_pac_command(
         if at_card_end(stream) {
             break;
         }
-        if !at_keyword(stream) {
+        let Some(keyword) = take_keyword(stream) else {
             return Err(card_error(
                 CARD,
                 line_num,
@@ -801,8 +787,7 @@ pub(super) fn parse_pac_command(
                     token: stream.peek().lexeme.clone(),
                 },
             ));
-        }
-        let keyword = take_keyword(stream, CARD, line_num)?;
+        };
         match keyword.as_str() {
             "INPUT" => bind_once(
                 &mut input_source,
@@ -987,7 +972,7 @@ pub(super) fn parse_pnoise_command(
         if at_card_end(stream) {
             break;
         }
-        if !at_keyword(stream) {
+        let Some(keyword) = take_keyword(stream) else {
             return Err(card_error(
                 CARD,
                 line_num,
@@ -995,8 +980,7 @@ pub(super) fn parse_pnoise_command(
                     token: stream.peek().lexeme.clone(),
                 },
             ));
-        }
-        let keyword = take_keyword(stream, CARD, line_num)?;
+        };
         match keyword.as_str() {
             "OUT" => bind_once(
                 &mut output,
@@ -1078,7 +1062,7 @@ pub(super) fn parse_envelope_command(
         if at_card_end(stream) {
             break;
         }
-        if !at_keyword(stream) {
+        let Some(keyword) = take_keyword(stream) else {
             return Err(card_error(
                 CARD,
                 line_num,
@@ -1086,8 +1070,7 @@ pub(super) fn parse_envelope_command(
                     token: stream.peek().lexeme.clone(),
                 },
             ));
-        }
-        let keyword = take_keyword(stream, CARD, line_num)?;
+        };
         match keyword.as_str() {
             "TSTOP" => bind_once(
                 &mut duration,
@@ -1424,6 +1407,22 @@ mod tests {
         assert!(matches!(
             card_failure(".PSS FUND=1G junk").2,
             AnalysisCardIssue::TrailingToken { ref token } if token == "junk"
+        ));
+        // A keyword without its value is a stray token, not a silent default.
+        assert!(matches!(
+            card_failure(".PSS FUND=1G HARMS").2,
+            AnalysisCardIssue::TrailingToken { ref token } if token.eq_ignore_ascii_case("HARMS")
+        ));
+        // The keyword form has no seventh positional field, so a stray number
+        // there is a typo rather than ngspice's steady coefficient.
+        assert!(matches!(
+            card_failure(".PSS FUND=1G 5e-3").2,
+            AnalysisCardIssue::TrailingToken { .. }
+        ));
+        // `uic` is an ngspice spelling in either form.
+        assert!(matches!(
+            card_failure(".PSS FUND=1G uic").2,
+            AnalysisCardIssue::UnhonourableField { field: "uic", .. }
         ));
     }
 

@@ -56,7 +56,6 @@ fn analysis_card_issue_kind(issue: &rspice_core::netlist::AnalysisCardIssue) -> 
         Issue::MissingField { .. } => "missing_field",
         Issue::UnknownKeyword { .. } => "unknown_keyword",
         Issue::DuplicateKeyword { .. } => "duplicate_keyword",
-        Issue::MissingKeywordValue { .. } => "missing_keyword_value",
         Issue::InvalidNumber { .. } => "invalid_number",
         Issue::InvalidChoice { .. } => "invalid_choice",
         Issue::ConflictingFields { .. } => "conflicting_fields",
@@ -76,9 +75,7 @@ fn analysis_card_field(issue: &rspice_core::netlist::AnalysisCardIssue) -> Optio
         | Issue::InvalidChoice { field, .. }
         | Issue::InvalidName { field, .. }
         | Issue::UnhonourableField { field, .. } => Some((*field).to_string()),
-        Issue::DuplicateKeyword { keyword } | Issue::MissingKeywordValue { keyword } => {
-            Some((*keyword).to_string())
-        }
+        Issue::DuplicateKeyword { keyword } => Some((*keyword).to_string()),
         Issue::UnknownKeyword { keyword } => Some(keyword.clone()),
         Issue::ConflictingFields { first, .. } => Some((*first).to_string()),
         Issue::TrailingToken { .. } | Issue::Rejected { .. } => None,

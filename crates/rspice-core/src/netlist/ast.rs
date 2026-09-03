@@ -2306,7 +2306,8 @@ pub struct EnvelopeAnalysis {
     /// Maximum continued timestep in seconds.
     pub max_step: Value,
     /// Independent sources frozen at their exact time-zero values during the
-    /// carrier solve. Authored spelling is retained; the engine canonicalizes.
+    /// carrier solve, canonicalized to upper case like every other authored
+    /// instance name.
     pub frozen_sources: Vec<String>,
 }
 
@@ -2330,17 +2331,6 @@ pub enum PeriodicSourceSelector {
     Pss,
     /// The nearest preceding `.HB` card.
     Hb,
-}
-
-impl PeriodicSourceSelector {
-    /// Authored spelling of the `FROM=` selector.
-    pub const fn keyword(self) -> &'static str {
-        match self {
-            Self::Preceding => "PRECEDING",
-            Self::Pss => "PSS",
-            Self::Hb => "HB",
-        }
-    }
 }
 
 /// Which authored analysis card a card-level parse failure came from.
@@ -2379,8 +2369,6 @@ pub enum AnalysisCardIssue {
     UnknownKeyword { keyword: String },
     /// The same keyword was authored more than once.
     DuplicateKeyword { keyword: &'static str },
-    /// A keyword appeared without its `=value`.
-    MissingKeywordValue { keyword: &'static str },
     /// A numeric field is non-finite or outside its admissible range.
     InvalidNumber {
         field: &'static str,
@@ -2421,9 +2409,6 @@ impl std::fmt::Display for AnalysisCardIssue {
             Self::UnknownKeyword { keyword } => write!(formatter, "unknown keyword '{keyword}'"),
             Self::DuplicateKeyword { keyword } => {
                 write!(formatter, "keyword {keyword} authored more than once")
-            }
-            Self::MissingKeywordValue { keyword } => {
-                write!(formatter, "keyword {keyword} requires {keyword}=<value>")
             }
             Self::InvalidNumber {
                 field,
