@@ -8940,11 +8940,27 @@ impl Engine {
         self.compress_published_transient(netlist, &result, &compression, abort)
     }
 
-    /// Compress one published accepted transient into a complete container.
+    /// Compress one already-published accepted transient result.
     ///
     /// The typed `.FFT`, `.FOUR`, and `.MEASURE` products are evaluated on the
     /// exact accepted trajectory and stored in the container, so a consumer
-    /// never has to recompute them from a decimated expansion.
+    /// never has to recompute them from a decimated expansion. The authored
+    /// output schedule is read from `netlist`, so the retained grid keeps every
+    /// sample an `OUTPUTTIMEPOINTS` or `INITIAL_INTERVAL` schedule reads.
+    ///
+    /// This is the composition point for a caller that already holds an
+    /// accepted result — an authored `.OPTIONS RESTART` segment, or a replayed
+    /// run — and wants the same container the compressed entry points build.
+    pub fn compress_transient_result_with_abort(
+        &self,
+        netlist: &Netlist,
+        result: &TransientResult,
+        compression: &CompressionConfig,
+        abort: &dyn AbortSignal,
+    ) -> Result<TransientResultCompressed, SimulationError> {
+        self.compress_published_transient(netlist, result, compression, abort)
+    }
+
     fn compress_published_transient(
         &self,
         netlist: &Netlist,

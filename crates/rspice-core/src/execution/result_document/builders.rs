@@ -2930,3 +2930,193 @@ fn transient_payload_of(
         )),
     }
 }
+
+//=============================================================================
+// Compressed transient projection tests
+//=============================================================================
+
+#[cfg(test)]
+mod compressed_transient_tests {
+    use super::*;
+    use crate::engine::waveform::{
+        TRANSIENT_COMPRESSION_REPORT_VERSION, TransientAnalysisIdentity,
+        TransientChannelDescriptor, TransientChannelSample, TransientCompressionAlgorithm,
+        TransientCompressionReport, TransientCompressionSampleDomain, TransientResultIdentity,
+        TransientSampleAbsence,
+    };
+    use crate::engine::{CompressionConfig, TransientPostResults};
+    use crate::execution::plan::AnalysisKind;
+    use crate::execution::topology::TopologyFingerprint;
+
+    fn channel(
+        role: TransientChannelRole,
+        samples: Vec<TransientChannelSample>,
+    ) -> TransientCompressedChannel {
+        TransientCompressedChannel {
+            descriptor: TransientChannelDescriptor::for_role(role)
+                .expect("descriptor is well formed"),
+            availability: if samples.is_empty() {
+                TransientChannelAvailability::NotProjected
+            } else {
+                TransientChannelAvailability::Available
+            },
+            samples,
+        }
+    }
+
+    fn container() -> TransientResultCompressed {
+        let config = CompressionConfig::none();
+        TransientResultCompressed {
+            time: vec![0.0, 1.0, 2.0],
+            step_sizes: vec![0.0, 1.0, 1.0],
+            channels: vec![
+                channel(
+                    TransientChannelRole::NodeVoltage {
+                        node_index: 0,
+                        node: "OUT".to_owned(),
+                    },
+                    vec![
+                        TransientChannelSample::Value(1.0),
+                        TransientChannelSample::Absent(TransientSampleAbsence::NonFinite),
+                        TransientChannelSample::Value(3.0),
+                    ],
+                ),
+                channel(
+                    TransientChannelRole::BranchCurrent {
+                        branch: "V1".to_owned(),
+                    },
+                    Vec::new(),
+                ),
+                channel(
+                    TransientChannelRole::DeviceObservable {
+                        device: "M1".to_owned(),
+                        parameter: "gm".to_owned(),
+                    },
+                    vec![
+                        TransientChannelSample::Absent(TransientSampleAbsence::NotRecorded),
+                        TransientChannelSample::Value(2.0),
+                        TransientChannelSample::Value(3.0),
+                    ],
+                ),
+                channel(
+                    TransientChannelRole::DeviceStore {
+                        store: "YMEMRISTOR!MR1:R".to_owned(),
+                    },
+                    vec![
+                        TransientChannelSample::Value(50.0),
+                        TransientChannelSample::Value(60.0),
+                        TransientChannelSample::Value(70.0),
+                    ],
+                ),
+            ],
+            digital_traces: Vec::new(),
+            real_traces: Vec::new(),
+            post_results: TransientPostResults::default(),
+            identity: TransientResultIdentity {
+                analysis: Some(
+                    TransientAnalysisIdentity::new("tran", 0).expect("analysis identity"),
+                ),
+                coordinate: None,
+                topology_fingerprint: Some([7u8; 32]),
+            },
+            compression_ratio: 1.0,
+            input_points: 3,
+            compression_report: TransientCompressionReport {
+                schema_version: TRANSIENT_COMPRESSION_REPORT_VERSION,
+                algorithm: TransientCompressionAlgorithm::MultiChannelRdpLinearV1,
+                sample_domain: TransientCompressionSampleDomain::AcceptedInputSamples,
+                applied_policy: (&config).into(),
+                input_points: 3,
+                retained_points: 3,
+                worst_observed: None,
+            },
+        }
+    }
+
+    #[test]
+    fn compressed_transient_projects_validity_units_and_identity() {
+        let compressed = container();
+        let analysis = AnalysisInstanceId::new(AnalysisKind::Tran, 0);
+        let document =
+            AnalysisResultDocument::from_compressed_transient(analysis, &compressed, Vec::new())
+                .expect("a container with typed absences projects")
+                .build()
+                .expect("the projected document validates");
+
+        assert_eq!(
+            document.topology_fingerprint(),
+            Some(TopologyFingerprint::from_bytes([7u8; 32]))
+        );
+
+        let voltage = document
+            .signals()
+            .iter()
+            .find(|signal| signal.descriptor().canonical_name() == "v(out)")
+            .expect("the node channel is published");
+        assert_eq!(voltage.descriptor().kind(), SignalKind::Voltage);
+        assert_eq!(*voltage.descriptor().unit(), SignalUnit::Volt);
+        assert_eq!(
+            *voltage.descriptor().owner(),
+            SignalOwner::Node("out".to_owned())
+        );
+        assert_eq!(voltage.availability(), SeriesAvailability::Available);
+        match voltage.values() {
+            SeriesValues::Real { samples } => {
+                assert_eq!(samples, &vec![Some(1.0), None, Some(3.0)]);
+            }
+            other => panic!("a real transient channel encoded as {other:?}"),
+        }
+
+        let current = document
+            .signals()
+            .iter()
+            .find(|signal| signal.descriptor().canonical_name() == "i(v1)")
+            .expect("a projected-out channel keeps its descriptor");
+        assert_eq!(current.availability(), SeriesAvailability::NotProjected);
+        assert_eq!(*current.descriptor().unit(), SignalUnit::Ampere);
+        assert!(!current.has_any_sample());
+
+        let device = document
+            .device_states()
+            .iter()
+            .find(|state| state.device_name() == "M1")
+            .expect("the device observable is published as device state");
+        let parameter = device
+            .parameters()
+            .iter()
+            .find(|parameter| parameter.name == "gm")
+            .expect("the device parameter is published");
+        assert_eq!(parameter.values, vec![None, Some(2.0), Some(3.0)]);
+        assert_eq!(parameter.unit, None, "no model declares a unit for gm");
+
+        let ResultPayload::Tran(payload) = document.payload() else {
+            panic!("a compressed transient must publish a transient payload");
+        };
+        assert_eq!(payload.step_sizes, vec![0.0, 1.0, 1.0]);
+        assert_eq!(payload.store_traces.len(), 1);
+        assert_eq!(payload.store_traces[0].name, "YMEMRISTOR!MR1:R");
+        assert!(
+            payload.compression.is_some(),
+            "the compression certificate travels with the result"
+        );
+
+        let json = document.to_json().expect("the document encodes");
+        let decoded = AnalysisResultDocument::from_json(&json).expect("the document decodes");
+        assert_eq!(decoded, document);
+    }
+
+    #[test]
+    fn compressed_transient_refuses_a_relabelled_analysis() {
+        let compressed = container();
+        let error = AnalysisResultDocument::from_compressed_transient(
+            AnalysisInstanceId::new(AnalysisKind::Tran, 3),
+            &compressed,
+            Vec::new(),
+        )
+        .expect_err("a container may not be published under another analysis identity");
+        assert!(
+            error.to_string().contains("tran-001"),
+            "unexpected error: {error}"
+        );
+    }
+}
