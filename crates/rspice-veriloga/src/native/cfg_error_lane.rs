@@ -109,13 +109,52 @@ fn term(partial: f64, error: f64) -> f64 {
     }
 }
 
-/// A correctly-rounded operation: propagated error plus this step's own
-/// half-ulp.
+/// A correctly-rounded operation whose own rounding is not known exactly:
+/// propagated error plus this step's worst case, one unit round-off.
 fn rounded(value: f64, propagated: f64) -> ErrorBounded {
     ErrorBounded {
         value,
         error: propagated + UNIT_ROUNDOFF * value.abs(),
     }
+}
+
+/// A correctly-rounded operation whose own rounding *is* known exactly:
+/// propagated error plus the residual an error-free transformation recovered.
+///
+/// # Why the exact residual and not the `u` bound
+///
+/// `u · |result|` is the worst case over all operands, and a compact model's
+/// derivative cone does not commit the worst case: `x * 1`, `x + 0`, `2 * x`
+/// and — by Sterbenz's lemma — the subtraction of two nearby quantities are all
+/// *exact*, and those are most of what a chain rule emits. Charging them a
+/// half-ulp each puts a fictitious error on the largest intermediate in the
+/// cone and then propagates it forward, which is where a bound stops being a
+/// statement about the computation and starts being slack.
+///
+/// The residual costs a handful of flops and it is not an estimate: 2Sum
+/// recovers a sum's rounding exactly for every pair of finite doubles, and an
+/// FMA recovers a product's. Where the transformation itself leaves the reals —
+/// an infinite operand, an overflowing result — the worst-case charge stands.
+fn measured(value: f64, propagated: f64, residual: f64) -> ErrorBounded {
+    let own = if residual.is_finite() {
+        residual.abs()
+    } else {
+        UNIT_ROUNDOFF * value.abs()
+    };
+    ErrorBounded {
+        value,
+        error: propagated + own,
+    }
+}
+
+/// The exact rounding error of `a + b`, by 2Sum.
+///
+/// `fl(a + b) + two_sum_residual(a, b) == a + b` exactly, for all finite
+/// operands and with no assumption about their relative magnitudes.
+fn two_sum_residual(a: f64, b: f64) -> f64 {
+    let sum = a + b;
+    let b_part = sum - a;
+    (a - (sum - b_part)) + (b - b_part)
 }
 
 /// An operation that commits no rounding of its own.
@@ -143,28 +182,49 @@ impl CfgScalar for ErrorBounded {
     }
 
     fn add(self, rhs: Self) -> Self {
-        rounded(self.value + rhs.value, self.error + rhs.error)
+        measured(
+            self.value + rhs.value,
+            self.error + rhs.error,
+            two_sum_residual(self.value, rhs.value),
+        )
     }
 
     // Both operands' errors survive undiminished while the result may be
     // arbitrarily small: this is where cancellation enters the bound, and it is
-    // the whole reason an ill-conditioned cone reports one.
+    // the whole reason an ill-conditioned cone reports one. Its *own* rounding,
+    // by contrast, is usually nothing — Sterbenz's lemma makes the subtraction
+    // of two nearby quantities exact — which is what the residual reports.
     fn sub(self, rhs: Self) -> Self {
-        rounded(self.value - rhs.value, self.error + rhs.error)
-    }
-
-    fn mul(self, rhs: Self) -> Self {
-        rounded(
-            self.value * rhs.value,
-            term(rhs.value, self.error) + term(self.value, rhs.error),
+        measured(
+            self.value - rhs.value,
+            self.error + rhs.error,
+            two_sum_residual(self.value, -rhs.value),
         )
     }
 
+    fn mul(self, rhs: Self) -> Self {
+        let value = self.value * rhs.value;
+        measured(
+            value,
+            term(rhs.value, self.error) + term(self.value, rhs.error),
+            self.value.mul_add(rhs.value, -value),
+        )
+    }
+
+    // The second partial is `a/b/b` rather than `a/(b*b)`: squaring a
+    // denominator the model legitimately drove to `1e-30` underflows to zero
+    // and reports an infinite sensitivity the arithmetic never had.
+    //
+    // The residual is the standard one: `a - q*b` is exact under an FMA, and
+    // dividing it by `b` recovers the quotient's own rounding to within one
+    // further rounding of a quantity that is already an ulp.
     fn div(self, rhs: Self) -> Self {
-        rounded(
-            self.value / rhs.value,
+        let value = self.value / rhs.value;
+        measured(
+            value,
             term(1.0 / rhs.value, self.error)
-                + term(self.value / (rhs.value * rhs.value), rhs.error),
+                + term(self.value / rhs.value / rhs.value, rhs.error),
+            (-value).mul_add(rhs.value, self.value) / rhs.value,
         )
     }
 
@@ -220,9 +280,15 @@ impl CfgScalar for ErrorBounded {
         )
     }
 
+    // Same error-free transformation as division: `x - s*s` is exact under an
+    // FMA, and `(x - s*s) / (2s)` is the square root's own rounding.
     fn sqrt(self) -> Self {
         let value = self.value.sqrt();
-        rounded(value, term(0.5 / value, self.error))
+        measured(
+            value,
+            term(0.5 / value, self.error),
+            (-value).mul_add(value, self.value) / (2.0 * value),
+        )
     }
 
     fn abs(self) -> Self {
