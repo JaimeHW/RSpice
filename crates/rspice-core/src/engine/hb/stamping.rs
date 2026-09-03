@@ -609,7 +609,7 @@ impl Engine {
                     line.name
                 )));
             }
-            if !line.is_zero_length_pass_through()
+            if !line.is_memoryless_two_port()
                 && line.ltra_ac_total_rlc().is_none()
                 && (line.attenuation() != 1.0
                     || line.loss_time_constant() != 0.0
@@ -623,6 +623,7 @@ impl Engine {
             }
             let branches = line
                 .zero_length_branch_ordinals()
+                .or_else(|| line.rg_branch_ordinals())
                 .or_else(|| line.ltra_branch_ordinals());
             let Some((branch1, branch2)) = branches else {
                 continue;
@@ -919,6 +920,43 @@ impl Engine {
                     line.name
                 ))
             })?;
+            // The RG two-port is frequency independent, so its complete branch
+            // rows go in as static MNA entries rather than as a distributed
+            // network evaluated per harmonic. Its ports are still canonical
+            // `NetworkPort` branches, which contribute their nodal KCL
+            // incidence and leave the branch rows to those entries.
+            if let Some(two_port) = line.ltra_rg_two_port() {
+                let (row1, row2) = (branch_index(branch1), branch_index(branch2));
+                let node = |terminal: usize| terminal.checked_sub(1);
+                let mut entry =
+                    |row: usize, column: usize, value: Value| -> Result<(), SimulationError> {
+                        solver
+                            .try_add_exact_mna_static_entry(row, column, value, &line.name)
+                            .map_err(|error| SimulationError::Circuit(error.to_string()))
+                    };
+                for (column, value) in [
+                    (node(line.node1_pos), 1.0),
+                    (node(line.node1_neg), -1.0),
+                    (node(line.node2_pos), -two_port.cosh_theta),
+                    (node(line.node2_neg), two_port.cosh_theta),
+                ] {
+                    if let Some(column) = column {
+                        entry(row1, column, value)?;
+                    }
+                }
+                entry(row1, row2, two_port.transfer_impedance)?;
+                for (column, value) in [
+                    (node(line.node2_pos), -two_port.transfer_admittance),
+                    (node(line.node2_neg), two_port.transfer_admittance),
+                ] {
+                    if let Some(column) = column {
+                        entry(row2, column, value)?;
+                    }
+                }
+                entry(row2, row1, 1.0)?;
+                entry(row2, row2, two_port.cosh_theta)?;
+                continue;
+            }
             let network = if line.is_zero_length_pass_through() {
                 ExactPeriodicNetwork::ScalarWave {
                     name: line.name.clone(),

@@ -27,6 +27,7 @@ use crate::analysis::{
     PeriodicWaveform, PssConfig, PssResult, ShootingNewtonSolver, ShootingState,
 };
 use crate::circuit::CircuitData;
+use crate::engine::periodic_capability;
 use crate::engine::transient::{netlist_checkpoint_identity, simulation_checkpoint_identity};
 use crate::numerics::integration::CompanionCoefficients;
 use crate::numerics::integration::IntegrationMethod;
@@ -1801,111 +1802,19 @@ impl Engine {
         engine.run_tran_resume_with_abort(netlist, &checkpoint, tstop, max_step, abort)
     }
 
+    /// Refuse a continuation whose state the shooting period map cannot carry.
+    ///
+    /// The blockers come from the declared `PssStateMap` capability of every
+    /// family present, so a device family that gains or loses period-map state
+    /// changes this answer by editing its declaration, not this function.
     fn ensure_pss_continuation_state_supported(
         circuit: &CircuitData,
     ) -> Result<(), SimulationError> {
-        let mut blockers = Vec::new();
-        // Keep this list aligned with transient/residual.rs and
-        // transient/state_commit.rs. Shooting PSS currently advances only the
-        // ordinary capacitor and inductor companion histories exactly.
-        if !circuit.diodes.is_empty() {
-            blockers.push("diode junction/diffusion charge history");
-        }
-        if !circuit.bjts.is_empty() {
-            blockers.push("BJT/VBIC charge and internal-state history");
-        }
-        if !circuit.jfets.is_empty() {
-            blockers.push("JFET/MESFET charge and trap history");
-        }
-        if !circuit.mosfets.is_empty() {
-            blockers.push("classic MOSFET charge history");
-        }
-        if !circuit.b3soi.is_empty() || !circuit.b3soi_fd.is_empty() || !circuit.b3soi_pd.is_empty()
-        {
-            blockers.push("BSIMSOI charge history");
-        }
-        if !circuit.bsim3v3.is_empty() {
-            blockers.push("BSIM3 charge history");
-        }
-        if !circuit.bsim4v8.is_empty() {
-            blockers.push("BSIM4 charge and NQS history");
-        }
-        if !circuit.ekv26s.is_empty() {
-            blockers.push("EKV 2.6 charge history");
-        }
-        if !circuit.ekv3s.is_empty() {
-            blockers.push("EKV3 charge history");
-        }
-        if !circuit.vdmoses.is_empty() {
-            blockers.push("VDMOS charge history");
-        }
-        if !circuit.couplings.is_empty() || !circuit.coupled_inductor_pairs.is_empty() {
-            blockers.push("coupled-inductor mutual history");
-        }
-        if !circuit.multi_winding_transformers.is_empty() {
-            blockers.push("multi-winding transformer history");
-        }
-        if !circuit.tlines.is_empty() {
-            blockers.push("transmission-line delay history");
-        }
-        if !circuit.coupled_tlines.is_empty() {
-            blockers.push("coupled transmission-line convolution history");
-        }
-        if !circuit.xspice_instances.is_empty() {
-            blockers.push("XSPICE accepted-step and event state");
-        }
-        if !circuit.generic_switches.is_empty()
-            || !circuit.vswitches.is_empty()
-            || !circuit.iswitches.is_empty()
-        {
-            blockers.push("switch hysteresis state");
-        }
-        if !circuit.xyce_memristors.is_empty() {
-            blockers.push("native memristor resistance state");
-        }
-        if !circuit.jiles_atherton_inductors.is_empty() {
-            blockers.push("Jiles-Atherton hysteretic magnetic history");
-        }
-        if !circuit.xyce_core_groups.is_empty() {
-            blockers.push("shared Xyce Core hysteretic magnetic history");
-        }
-        if circuit.capacitors.has_solution_dependent_values() {
-            blockers.push("solution-dependent capacitor charge/expression history");
-        }
-        if circuit.resistors.thermal.iter().any(Option::is_some) {
-            blockers.push("thermal resistor accepted temperature state");
-        }
-        if circuit
-            .behavioral_sources
-            .voltage_sources
-            .iter()
-            .any(|source| source.program.sdt_count != 0)
-            || circuit
-                .behavioral_sources
-                .current_sources
-                .iter()
-                .any(|source| source.program.sdt_count != 0)
-        {
-            blockers.push("behavioral-source accepted-step memory");
-        }
-        #[cfg(feature = "veriloga")]
-        if circuit.has_veriloga_devices() {
-            blockers.push("Verilog-A integration state");
-        }
-        #[cfg(feature = "veriloga-builtins-base")]
-        if circuit.has_generated_veriloga_devices() {
-            blockers.push("generated Verilog-A integration state");
-        }
-
-        if blockers.is_empty() {
-            Ok(())
-        } else {
-            blockers.sort_unstable();
-            blockers.dedup();
-            Err(SimulationError::Circuit(format!(
-                "PSS transient continuation is unavailable because the circuit contains {}; the shooting period map advances only ordinary capacitor and inductor companion history exactly",
-                blockers.join(", ")
-            )))
+        match periodic_capability::summarize(&periodic_capability::pss_state_gaps(circuit)) {
+            None => Ok(()),
+            Some(blockers) => Err(SimulationError::Circuit(format!(
+                "PSS transient continuation is unavailable because the circuit contains {blockers}; the shooting period map advances only ordinary capacitor and inductor companion history exactly"
+            ))),
         }
     }
 
@@ -3195,6 +3104,18 @@ impl Engine {
             .voltage_sources
             .update_transient_rhs(rhs, t_next, |br_ordinal| num_nodes + br_ordinal);
         circuit.current_sources.update_transient_rhs(rhs, t_next);
+
+        // Memoryless transmission lines: the LEN=0 ideal through connection
+        // and the finite-length RG two-port both load a constant matrix with
+        // no history term, so the shooting period map integrates them exactly.
+        // Lines with propagation delay own retained history the period map
+        // cannot carry and are refused by their declared `PssStateMap`
+        // capability before reaching here.
+        for tline in &circuit.tlines {
+            if tline.is_memoryless_two_port() {
+                Self::stamp_tline_companions_for_memoryless_line(matrix, rhs, tline);
+            }
+        }
 
         // Reuse the transient capacitor companion so shooting PSS has exactly
         // the same branch-current convention and numerical scaling as TRAN.

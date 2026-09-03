@@ -21,8 +21,10 @@ pub(in crate::engine::builder) enum LtraModelClass {
     Rc,
     /// Finite-length memoryless RG line (`R > 0`, `G > 0`, `L = C = 0`).
     ///
-    /// This class is recognized so it cannot fall through to a synthetic
-    /// lossless line, but its native execution stamps are a follow-up slice.
+    /// With no reactance the line's ABCD parameters are real constants, so
+    /// one frequency-independent two-port describes it in DC, AC, transient
+    /// and every periodic analysis. This is the only nonzero-`G` line ngspice
+    /// and Xyce implement; RLGC with `G != 0` stays rejected.
     Rg,
     /// Xyce's exact `LEN=0` RC/RG ideal-through special case.
     ZeroLengthThrough,
@@ -102,6 +104,12 @@ impl TransmissionLineModelParams {
     #[inline]
     pub(in crate::engine::builder) fn is_finite_rc(self) -> bool {
         self.kind == TransmissionLineModelKind::Ltra && self.ltra_class == Some(LtraModelClass::Rc)
+    }
+
+    /// Return whether this is the finite-length memoryless RG special case.
+    #[inline]
+    pub(in crate::engine::builder) fn is_finite_rg(self) -> bool {
+        self.kind == TransmissionLineModelKind::Ltra && self.ltra_class == Some(LtraModelClass::Rg)
     }
 }
 
@@ -346,13 +354,12 @@ pub fn validate_native_xyce_ltra_model_contract(
         SimulationError::Circuit(format!("LTRA model '{model_name}' is not defined"))
     })?;
     match params.ltra_class {
-        Some(LtraModelClass::RlcLc | LtraModelClass::Rc | LtraModelClass::ZeroLengthThrough) => {
-            Ok(())
-        }
-        Some(LtraModelClass::Rg) => Err(SimulationError::Circuit(format!(
-            "LTRA model '{}' is finite-length RG, whose native execution stamps are not implemented",
-            model.name
-        ))),
+        Some(
+            LtraModelClass::RlcLc
+            | LtraModelClass::Rc
+            | LtraModelClass::Rg
+            | LtraModelClass::ZeroLengthThrough,
+        ) => Ok(()),
         None => Err(SimulationError::Circuit(format!(
             "LTRA model '{}' has no classified native scalar semantics",
             model.name
@@ -482,14 +489,7 @@ fn finalize_ltra_model_params(
         }
     }
 
-    let class = classify_ltra_model_params(model_name, params)?;
-    if class == LtraModelClass::Rg {
-        return Err(SimulationError::Circuit(format!(
-            "LTRA model '{}' is a finite-length RG line (R>0, G>0, L=C=0), whose native execution stamps are not implemented; only LEN=0 RG is currently supported",
-            model_name
-        )));
-    }
-    params.ltra_class = Some(class);
+    params.ltra_class = Some(classify_ltra_model_params(model_name, params)?);
     Ok(params)
 }
 
@@ -1010,19 +1010,17 @@ mod tests {
     }
 
     #[test]
-    fn ltra_classifies_but_rejects_finite_rg_until_native_stamps_exist() {
-        let err = resolve_test_tline_err(
+    fn ltra_classifies_finite_rg_as_its_own_memoryless_class() {
+        let params = resolve_test_tline(
             r#"title
 .model y ltra r=3 g=1u len=10
 .end
 "#,
         );
-        assert!(err.to_string().contains("finite-length RG line"), "{err}");
-        assert!(
-            err.to_string()
-                .contains("native execution stamps are not implemented"),
-            "{err}"
-        );
+        assert_eq!(params.ltra_class, Some(LtraModelClass::Rg));
+        assert!(params.is_finite_rg());
+        assert!(!params.is_finite_rc());
+        assert!(!params.is_zero_length_rc_rg());
     }
 
     #[test]

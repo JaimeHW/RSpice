@@ -867,9 +867,7 @@ impl Engine {
             // points and schedule arrival breakpoints dynamically from history
             // derivative changes, not from statically propagated source edges.
             .filter(|tl| {
-                !tl.is_zero_length_pass_through()
-                    && !tl.has_txl_runtime()
-                    && !tl.has_distributed_rlgc()
+                !tl.is_memoryless_two_port() && !tl.has_txl_runtime() && !tl.has_distributed_rlgc()
             })
             .map(crate::device::TransmissionLine::delay)
             .chain(

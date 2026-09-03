@@ -432,6 +432,123 @@ pub(super) fn known_unsupported_bjt_family(level: f64) -> Option<(&'static str, 
     None
 }
 
+/// A BJT compact model whose equations are owned by the Verilog-A model
+/// program rather than written by hand here.
+///
+/// The generated backend routes these `.MODEL` type names to a compiled
+/// module when its feature is enabled. When it is not, the card must be
+/// refused by name here: without this, an authored `HICUML2` type falls
+/// through to native BJT resolution and is rejected as an "incompatible type",
+/// which reads as a typo in the deck rather than as the build decision it is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct VerilogADeliveredBjtModel {
+    /// Compact-model family as its literature and both reference simulators
+    /// name it.
+    pub(super) family: &'static str,
+    /// Generated module the routing layer selects when it is compiled in.
+    pub(super) generated_model: &'static str,
+    /// Cargo feature that compiles that module into the build.
+    pub(super) feature: &'static str,
+}
+
+/// Match a `.MODEL` type name against the Verilog-A-delivered BJT families.
+///
+/// Comparison ignores case and non-alphanumeric separators, matching the
+/// generated routing layer's own key normalization, so `BJT505_VA`,
+/// `bjt505va` and `BJT505-VA` name the same module.
+pub(super) fn verilog_a_delivered_bjt_model(model_type: &str) -> Option<VerilogADeliveredBjtModel> {
+    const DELIVERED: &[(&[&str], VerilogADeliveredBjtModel)] = &[
+        (
+            &["HICUML0VA", "HICUML0"],
+            VerilogADeliveredBjtModel {
+                family: "HICUM/L0",
+                generated_model: "hicumL0va",
+                feature: "veriloga-model-hicuml0va",
+            },
+        ),
+        (
+            &["HICUML2VA", "HICUML2"],
+            VerilogADeliveredBjtModel {
+                family: "HICUM/L2",
+                generated_model: "hicumL2va",
+                feature: "veriloga-model-hicuml2va",
+            },
+        ),
+        (
+            &["BJT505_VA", "MEXTRAM505"],
+            VerilogADeliveredBjtModel {
+                family: "MEXTRAM 505",
+                generated_model: "bjt505_va",
+                feature: "veriloga-model-bjt505-va",
+            },
+        ),
+        (
+            &["BJT505T_VA", "MEXTRAM505T"],
+            VerilogADeliveredBjtModel {
+                family: "MEXTRAM 505 self-heating",
+                generated_model: "bjt505t_va",
+                feature: "veriloga-model-bjt505t-va",
+            },
+        ),
+        (
+            &["BJTD505_VA"],
+            VerilogADeliveredBjtModel {
+                family: "MEXTRAM 505 with a diffusion-charge split",
+                generated_model: "bjtd505_va",
+                feature: "veriloga-model-bjtd505-va",
+            },
+        ),
+        (
+            &["BJTD505T_VA"],
+            VerilogADeliveredBjtModel {
+                family: "MEXTRAM 505 with a diffusion-charge split and self-heating",
+                generated_model: "bjtd505t_va",
+                feature: "veriloga-model-bjtd505t-va",
+            },
+        ),
+    ];
+
+    let normalized = normalize_model_type_key(model_type);
+    DELIVERED
+        .iter()
+        .find(|(aliases, _)| {
+            aliases
+                .iter()
+                .any(|alias| normalize_model_type_key(alias) == normalized)
+        })
+        .map(|(_, model)| *model)
+}
+
+fn normalize_model_type_key(value: &str) -> String {
+    value
+        .chars()
+        .filter(char::is_ascii_alphanumeric)
+        .flat_map(char::to_uppercase)
+        .collect()
+}
+
+/// Refuse a Verilog-A-delivered BJT card this build did not compile.
+///
+/// The rejection names the model program that owns the equations, the module
+/// the routing layer would have selected, and the feature that supplies it,
+/// so the answer to "why did my HICUM deck not run" is the build
+/// configuration rather than a guess about the netlist.
+pub(super) fn verilog_a_delivered_bjt_model_error(
+    element_name: &str,
+    model_name: &str,
+    model_type: &str,
+    delivered: VerilogADeliveredBjtModel,
+) -> SimulationError {
+    SimulationError::Circuit(format!(
+        "BJT '{element_name}': model '{model_name}' selects the {} compact model (type \
+         '{model_type}'), which is delivered by the Verilog-A model program as generated module \
+         '{}' and is not compiled into this build. Enable the '{}' feature to route this card; it \
+         must not fall back to the native Gummel-Poon or VBIC equations, which are a different \
+         model.",
+        delivered.family, delivered.generated_model, delivered.feature
+    ))
+}
+
 pub(super) fn supported_diode_level(level: f64) -> bool {
     bjt_level_matches(level, 0.0)
         || bjt_level_matches(level, 1.0)

@@ -532,6 +532,44 @@ impl Engine {
         true
     }
 
+    /// Exact memoryless RG small-signal load.
+    ///
+    /// An RG line has no reactance, so its ABCD parameters are the same real
+    /// constants at every frequency and this is the identical stamp the DC and
+    /// transient loads use: `V1 - A*V2 + B*I2 = 0` and `I1 + A*I2 - C*V2 = 0`
+    /// on the reserved branch rows (ngspice `ltraload.c`, `LTRA_MOD_RG`).
+    fn stamp_rg_branch_ac(
+        matrix: &mut ComplexMatrix,
+        tline: &crate::device::TransmissionLine,
+        br1: NodeId,
+        br2: NodeId,
+    ) {
+        let Some(two_port) = tline.ltra_rg_two_port() else {
+            return;
+        };
+        let mut add = |row: NodeId, col: NodeId, value: Value| {
+            if row > 0 && col > 0 {
+                matrix.add_real(row - 1, col - 1, value);
+            }
+        };
+
+        add(tline.node1_pos, br1, 1.0);
+        add(tline.node1_neg, br1, -1.0);
+        add(tline.node2_pos, br2, 1.0);
+        add(tline.node2_neg, br2, -1.0);
+
+        add(br1, tline.node1_pos, 1.0);
+        add(br1, tline.node1_neg, -1.0);
+        add(br1, tline.node2_pos, -two_port.cosh_theta);
+        add(br1, tline.node2_neg, two_port.cosh_theta);
+        add(br1, br2, two_port.transfer_impedance);
+
+        add(br2, tline.node2_pos, -two_port.transfer_admittance);
+        add(br2, tline.node2_neg, two_port.transfer_admittance);
+        add(br2, br1, 1.0);
+        add(br2, br2, two_port.cosh_theta);
+    }
+
     /// Native TXL small-signal load. ngspice registers the regular TXLload
     /// as DEVacLoad, and the AC driver runs it under MODEDC, so the oracle
     /// semantic is the DC resistive two-port: `I1 + I2 = 0` and
@@ -2056,6 +2094,10 @@ impl Engine {
                 // Xyce's zero-length RC/RG special cases are exact ideal
                 // through connections in small signal as well as transient.
                 Self::stamp_txl_branch_ac(ac_matrix, tline, br1, br2);
+                continue;
+            }
+            if let Some((br1, br2)) = tline.rg_branch_matrix_indices() {
+                Self::stamp_rg_branch_ac(ac_matrix, tline, br1, br2);
                 continue;
             }
             if let Some((br1, br2)) = tline.ltra_branch_matrix_indices()

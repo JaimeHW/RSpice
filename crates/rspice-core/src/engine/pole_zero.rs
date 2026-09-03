@@ -381,30 +381,24 @@ impl Engine {
         }
     }
 
-    fn ensure_supported_bsim_ac_nqs_pz_models(
+    /// Refuse a circuit whose dynamic state cannot be exported as an explicit
+    /// finite state in a rational `G + sC` descriptor.
+    ///
+    /// Pole-zero extraction is the consumer of the charge/dynamic-state
+    /// capability: a delay line's descriptor is irrational, and an AC-NQS BSIM
+    /// charge deficit needs a hidden state the descriptor pair has no room
+    /// for. Both answers come from the declaration table rather than from a
+    /// list maintained here.
+    fn ensure_supported_pz_dynamic_state_descriptors(
         circuit: &CircuitData,
     ) -> Result<(), SimulationError> {
-        for dev in &circuit.bsim3v3.devices {
-            if dev.core.model.acnqs_mod != 0 {
-                return Err(SimulationError::Circuit(format!(
-                    "Pole-zero analysis does not yet support BSIM3 '{}' with ACNQSMOD=1; \
-                     AC-NQS is a rational charge-deficit effect and needs a hidden \
-                     charge-deficit state instead of G+sC descriptor extraction",
-                    dev.name
-                )));
-            }
+        let gaps = crate::engine::periodic_capability::dynamic_state_descriptor_gaps(circuit);
+        match crate::engine::periodic_capability::summarize(&gaps) {
+            None => Ok(()),
+            Some(summary) => Err(SimulationError::Circuit(format!(
+                "Pole-zero analysis does not yet support {summary}"
+            ))),
         }
-        for dev in &circuit.bsim4v8.devices {
-            if dev.core.model.acnqs_mod != 0 {
-                return Err(SimulationError::Circuit(format!(
-                    "Pole-zero analysis does not yet support BSIM4 '{}' with ACNQSMOD=1; \
-                     AC-NQS is a rational charge-deficit effect and needs a hidden \
-                     charge-deficit state instead of G+sC descriptor extraction",
-                    dev.name
-                )));
-            }
-        }
-        Ok(())
     }
 
     pub(in crate::engine) fn descriptor_expand_square(
@@ -665,7 +659,7 @@ impl Engine {
         );
         Self::ensure_no_mixed_signal_analysis(&circuit, "pole-zero analysis")?;
         Self::ensure_supported_dynamic_charges(&circuit, "Pole-zero")?;
-        Self::ensure_supported_bsim_ac_nqs_pz_models(&circuit)?;
+        Self::ensure_supported_pz_dynamic_state_descriptors(&circuit)?;
         let num_nodes = circuit.num_nodes();
 
         let validate_node = |node: usize, label: &str| -> Result<(), SimulationError> {
@@ -707,12 +701,6 @@ impl Engine {
         if output_neg == Some(output_pos) {
             return Err(SimulationError::Circuit(
                 "Invalid PZ output port: output_pos and output_neg cannot be the same".to_string(),
-            ));
-        }
-
-        if !circuit.tlines.is_empty() {
-            return Err(SimulationError::Circuit(
-                "Pole-zero analysis does not yet support transmission lines".to_string(),
             ));
         }
 

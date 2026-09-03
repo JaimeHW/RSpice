@@ -878,6 +878,7 @@ impl Engine {
                 .txl_branch_ordinals()
                 .or_else(|| tl.ltra_branch_ordinals())
                 .or_else(|| tl.zero_length_branch_ordinals())
+                .or_else(|| tl.rg_branch_ordinals())
             {
                 let br1 = circuit.get_branch_matrix_index(br1_ordinal);
                 let br2 = circuit.get_branch_matrix_index(br2_ordinal);

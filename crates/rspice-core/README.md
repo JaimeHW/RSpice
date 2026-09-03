@@ -84,6 +84,34 @@ Gummel-Poon with no `LEVEL` or `LEVEL=1/2`, native VBIC at
 naming the supported set; advanced CMC bipolar models are reached through
 generated Rust from Verilog-A rather than a hand-written path.
 
+### Compact model routing and boundaries
+
+Advanced CMC compact models — HICUM/L0 and L2, MEXTRAM 505 and its
+self-heating and diffusion-charge-split variants, PSP, BSIM-CMG, HiSIM, ASM
+HEMT and the rest — are delivered by the Verilog-A model program as generated
+Rust modules under `../rspice-veriloga-models/models/`, each behind its own
+`veriloga-model-*` feature. This crate owns three things for them and nothing
+else: routing a `.MODEL` card to the right module, the result identity the
+routed instance produces, and how the analysis-capability descriptors answer
+for it. It never carries a hand-written approximation of their equations.
+
+A card naming one of those families therefore has exactly two outcomes. If the
+module is compiled in, the card routes to it and no native device is created
+alongside it. If it is not, the build is refused with a typed error naming the
+compact-model family, the generated module the routing layer would have
+selected, and the feature that supplies it — never a fall-back to the native
+Gummel-Poon or VBIC equations, which are a different model, and never a
+name-only route that fails later inside the solver. Level selectors for those
+families (`Q LEVEL=8/23/230/234/504/505`) stay rejected in every build: a level
+names a *dialect's* device rather than a module, and routing one to a
+particular generated artifact would be a guess.
+
+For the analyses, a routed generated instance participates in DC, AC,
+transient and noise, and is refused by capability for the periodic analyses:
+it declares no exact periodic MNA descriptor and no captured period-map
+integration state, so harmonic balance, PAC, periodic noise and PSS
+continuation reject it by name (see `engine/periodic_capability.rs`).
+
 **MOSFETs and FET-family models** (`mosfet/`) —
 
 - Classic Berkeley MOS1/MOS2/MOS3/MOS6 at `LEVEL=1/2/3/6` (`mosfet.rs`,
@@ -145,6 +173,21 @@ plus `transmission_line/` with delay, distributed, lossy, and TXL
 submodules; the LTRA path is checked by `tests/ltra_ac_oracle.rs`), and
 coupled multi-conductor lines (`coupled_transmission_line.rs`,
 `cpl_native.rs`).
+
+*LTRA shunt conductance.* A scalar LTRA card is classified exactly from its
+per-unit-length `R`/`L`/`G`/`C`, because those are physical densities and no
+absolute epsilon can decide whether an authored `G` is negligible over an
+arbitrary length. Four classes execute: RLC and lossless LC lines (`G = 0`),
+RC diffusion lines, the memoryless finite-length RG line (`R > 0`, `G > 0`,
+`L = C = 0`), and the `LEN = 0` RC/RG ideal-through special case. An RG line
+has no reactance, so its ABCD parameters are real constants and one
+frequency-independent two-port describes it in DC, AC, transient and the
+periodic analyses; it is admitted wherever a linear resistor is, and it
+contributes no noise source of its own, matching both reference simulators.
+**RLGC with `G != 0` is rejected.** That is a deliberate boundary, not a gap:
+neither ngspice-46 nor Xyce 7.10 implements a lossy line with both shunt
+conductance and reactance, so there is no reference semantics to match, and
+inventing one would produce numbers no oracle can qualify.
 
 **Memristors** — native Xyce `YMEMRISTOR` families: the TEAM model at
 `LEVEL=2` (`memristor_team.rs`) and the threshold-adaptive PEM model at

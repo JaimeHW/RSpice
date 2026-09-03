@@ -14,6 +14,8 @@ impl Engine {
         for tl in &circuit.tlines {
             if tl.is_zero_length_pass_through() {
                 Self::stamp_zero_length_branch_runtime(matrix, rhs, tl);
+            } else if tl.ltra_rg_two_port().is_some() {
+                Self::stamp_rg_branch_runtime(matrix, rhs, tl);
             } else if tl.has_txl_runtime() {
                 if let Some(stamp) = tl.txl_transient_stamp(time) {
                     Self::stamp_txl_branch_runtime(matrix, rhs, tl, stamp);
@@ -25,6 +27,24 @@ impl Engine {
                 let response = tl.transient_port_response(time);
                 Self::stamp_tline_two_port(matrix, rhs, tl, response);
             }
+        }
+    }
+
+    /// Stamp one memoryless line's constant two-port load.
+    ///
+    /// Shooting PSS needs exactly the transient stamp for the lines whose
+    /// period map it can carry, and reaching it through the same helpers the
+    /// transient driver uses keeps the two paths from drifting apart.
+    #[inline]
+    pub(in crate::engine) fn stamp_tline_companions_for_memoryless_line(
+        matrix: &mut crate::solver::StaticMatrix,
+        rhs: &mut [Value],
+        tl: &crate::device::TransmissionLine,
+    ) {
+        if tl.is_zero_length_pass_through() {
+            Self::stamp_zero_length_branch_runtime(matrix, rhs, tl);
+        } else if tl.ltra_rg_two_port().is_some() {
+            Self::stamp_rg_branch_runtime(matrix, rhs, tl);
         }
     }
 
@@ -181,7 +201,7 @@ impl Engine {
             let v1 = Self::differential_voltage(initial_solution, tl.node1_pos, tl.node1_neg);
             let v2 = Self::differential_voltage(initial_solution, tl.node2_pos, tl.node2_neg);
             refs.push((v1, v2));
-            if tl.is_zero_length_pass_through() {
+            if tl.is_memoryless_two_port() {
                 continue;
             }
             if let Some((br1, br2)) = tl.txl_branch_matrix_indices() {

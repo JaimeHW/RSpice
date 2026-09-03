@@ -239,75 +239,11 @@ impl Engine {
     }
 
     fn ensure_hb_envelope_linear_subset(circuit: &CircuitData) -> Result<(), SimulationError> {
-        let mut blockers = Vec::new();
-        if !circuit.resistor_branches.is_empty() {
-            blockers.push("zero-resistance MNA branches");
-        }
-        if !circuit.inductors.is_empty() {
-            blockers.push("inductors");
-        }
-        if circuit.has_nonlinear_devices() {
-            blockers.push("nonlinear devices");
-        }
-        if !circuit.vcvs.is_empty()
-            || !circuit.vccs.is_empty()
-            || !circuit.cccs.is_empty()
-            || !circuit.ccvs.is_empty()
-        {
-            blockers.push("controlled sources");
-        }
-        if !circuit.vswitches.is_empty()
-            || !circuit.iswitches.is_empty()
-            || !circuit.generic_switches.is_empty()
-        {
-            blockers.push("switches");
-        }
-        if !circuit.tlines.is_empty()
-            || !circuit.coupled_tlines.is_empty()
-            || !circuit.couplings.is_empty()
-            || !circuit.coupled_inductor_pairs.is_empty()
-            || !circuit.multi_winding_transformers.is_empty()
-            || !circuit.jiles_atherton_inductors.is_empty()
-            || !circuit.xyce_core_groups.is_empty()
-        {
-            blockers.push("distributed or magnetic state");
-        }
-        if !circuit.behavioral_sources.is_empty() {
-            blockers.push("behavioral sources");
-        }
-        if !circuit.xspice_instances.is_empty() {
-            blockers.push("XSPICE devices");
-        }
-        #[cfg(feature = "veriloga")]
-        if circuit.has_veriloga_devices() {
-            blockers.push("Verilog-A devices");
-        }
-        #[cfg(feature = "veriloga-builtins-base")]
-        if circuit.has_generated_veriloga_devices() {
-            blockers.push("generated Verilog-A devices");
-        }
-        if circuit.capacitors.internal.iter().any(|internal| *internal)
-            || circuit
-                .capacitors
-                .ic_branch_indices
-                .iter()
-                .any(Option::is_some)
-        {
-            blockers.push("internal or IC-constrained capacitor branches");
-        }
-        if circuit.num_branches() != circuit.voltage_sources.len() {
-            blockers.push("unrecognized MNA branch families");
-        }
-
-        if blockers.is_empty() {
-            Ok(())
-        } else {
-            blockers.sort_unstable();
-            blockers.dedup();
-            Err(SimulationError::Circuit(format!(
-                "HB Envelope continuation is unavailable because the circuit contains {}; the exact initializer currently supports only ordinary R/C elements and independent voltage/current sources",
-                blockers.join(", ")
-            )))
+        match periodic_capability::summarize(&periodic_capability::envelope_gaps(circuit)) {
+            None => Ok(()),
+            Some(blockers) => Err(SimulationError::Circuit(format!(
+                "HB Envelope continuation is unavailable because the circuit contains {blockers}; the exact initializer currently supports only ordinary R/C elements and independent voltage/current sources"
+            ))),
         }
     }
 

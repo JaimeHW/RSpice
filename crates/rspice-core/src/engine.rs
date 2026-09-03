@@ -19,6 +19,9 @@
 //! - `convergence` - Newton driver plus the GMIN/source/pseudo-transient aids
 //! - `result`, `error`, `health` - result structures, typed errors, and the
 //!   [`EngineHealthReport`] diagnostics summary
+//! - `periodic_capability` - what each native device family can contribute to
+//!   a periodic analysis, declared once and queried by every advanced driver
+//!   below instead of restated as a family list per driver
 //!
 //! Analysis drivers, one per family:
 //!
@@ -59,6 +62,10 @@ mod matrix;
 mod monte_carlo;
 pub use monte_carlo::{MonteCarloEnvironment, apply_supply_voltage_scale_with_abort};
 mod noise;
+/// Declared native periodic-analysis device capabilities, keyed by family.
+/// Every advanced-analysis admission check reads this table instead of a
+/// hand-maintained device list.
+pub(crate) mod periodic_capability;
 mod pole_zero;
 mod pss;
 mod pss_noise;

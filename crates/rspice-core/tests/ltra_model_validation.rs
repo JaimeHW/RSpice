@@ -47,20 +47,26 @@ fn invalid_and_tiny_g_ltra_cards_fail_during_build_before_small_signal_stamping(
     }
 }
 
+/// The finite-length RG line is the one nonzero-`G` case ngspice and Xyce
+/// implement, so it executes natively. `crates/rspice-core/tests/ltra_rg_line.rs`
+/// owns its numerical qualification; this only pins that the classifier routes
+/// it to execution instead of to a rejection.
 #[test]
-fn finite_rg_is_recognized_but_remains_fail_closed_before_stamping() {
-    let error = Engine::new(SimulationConfig::default())
+fn finite_rg_executes_natively_while_reactive_nonzero_g_stays_rejected() {
+    let engine = Engine::new(SimulationConfig::default());
+    engine
         .run_ac(&deck(".model line ltra r=3 g=1u len=10"), &[1.0e3])
-        .expect_err("finite RG execution belongs to the follow-up slice");
+        .expect("a finite-length RG line has native execution stamps");
+
+    let error = engine
+        .run_ac(
+            &deck(".model line ltra r=3 g=1u l=1n c=1p len=10"),
+            &[1.0e3],
+        )
+        .expect_err("RLGC with nonzero G has no reference implementation to match");
     assert!(
-        error.to_string().contains("finite-length RG line"),
-        "{error}"
-    );
-    assert!(
-        error
-            .to_string()
-            .contains("native execution stamps are not implemented"),
-        "{error}"
+        error.to_string().contains("finite nonzero G"),
+        "the rejection must name the parameter that has no reference semantics: {error}"
     );
 }
 

@@ -266,10 +266,14 @@ impl Engine {
             SimulationError::Circuit("PAC retained scalar-value count overflows usize".to_string())
         })?;
         self.ensure_result_values(retained_scalar_values)?;
-        if let Some(summary) = Self::hb_unsupported_nonlinear_device_summary(&circuit, num_nodes) {
+        if let Some(summary) =
+            periodic_capability::summarize(&periodic_capability::periodic_residual_gaps(&circuit))
+        {
             return Err(HbError::UnsupportedNonlinearDevices(summary).into());
         }
-        if let Some(summary) = Self::hb_periodic_mna_unsupported_summary(&circuit) {
+        if let Some(summary) =
+            periodic_capability::summarize(&periodic_capability::periodic_descriptor_gaps(&circuit))
+        {
             return Err(SimulationError::Circuit(format!(
                 "PAC exact periodic MNA is unavailable because the circuit contains {summary}"
             )));
@@ -296,7 +300,7 @@ impl Engine {
         self.hb_stamp_periodic_mna_branches(&circuit, &mut solver)?;
         self.hb_stamp_current_sources(&circuit, &mut solver, &hb_config, &drive_tones)?;
 
-        let has_nonlinear = Self::hb_has_supported_nonlinear_devices(&circuit, num_nodes);
+        let has_nonlinear = periodic_capability::has_exact_periodic_nonlinear_devices(&circuit);
         if has_nonlinear {
             self.hb_stamp_supported_nonlinear_devices(&circuit, &mut solver, num_nodes);
         }
