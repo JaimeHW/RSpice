@@ -2244,7 +2244,7 @@ impl DcOutputSeries {
         }
         let point_count = sweep.len();
         let mut slots = HashMap::<String, Slot>::new();
-        for (row, (sweep_value, result)) in sweep.iter().enumerate() {
+        for (row, (_sweep_value, result)) in sweep.iter().enumerate() {
             if row.is_multiple_of(64) && abort.is_aborted() {
                 return Err(DcOutputSeriesBuildError::Aborted);
             }
@@ -4585,7 +4585,7 @@ impl DcSweepSeries {
         // case-insensitive union before requiring a complete waveform so a
         // name first introduced after row zero is not silently omitted.
         let mut observable_names = Vec::<String>::new();
-        for (row, (sweep_value, result)) in sweep.iter().enumerate() {
+        for (row, (_sweep_value, result)) in sweep.iter().enumerate() {
             if row.is_multiple_of(64) && abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
@@ -4608,7 +4608,7 @@ impl DcSweepSeries {
             }
             let mut values = Vec::with_capacity(sweep.len());
             let mut complete = true;
-            for (row, (sweep_value, result)) in sweep.iter().enumerate() {
+            for (row, (_sweep_value, result)) in sweep.iter().enumerate() {
                 if row.is_multiple_of(64) && abort.is_aborted() {
                     return Err(SimulationError::Aborted);
                 }

@@ -649,16 +649,58 @@ fn pss_integration_method(
     }
 }
 
+/// How one finite-difference Jacobian column is probed: over which period,
+/// under which shooting configuration, and with which perturbation. The step
+/// is scaled against the period and the configuration's tolerances, so a
+/// caller that supplied it without them would be probing at an unrelated size.
+#[derive(Clone, Copy)]
+struct PssJacobianProbe<'a> {
+    period: Value,
+    config: &'a PssConfig,
+    fd_step: Value,
+}
+
+/// The fixed accepted-step grid a PSS traversal replays, when it replays one.
+#[derive(Clone, Copy)]
+struct PssFixedGrid {
+    enabled: bool,
+    index: usize,
+    steps: usize,
+}
+
+/// One companion step of the shooting integration: the coefficients, the time
+/// the step lands on, and its size.
+#[derive(Clone, Copy)]
+pub(in crate::engine) struct PssCompanionStep<'a> {
+    pub coeff: &'a CompanionCoefficients,
+    pub t_next: Value,
+    pub dt: Value,
+}
+
+/// What one period traversal is asked to walk: how far, how large a step it
+/// may take, whether it replays a fixed grid, and which integration method it
+/// is pinned to.
+#[derive(Clone, Copy)]
+pub(in crate::engine) struct PssTraversal {
+    pub tstop: Value,
+    pub max_step: Value,
+    pub fixed_grid: bool,
+    pub integration_method: Option<IntegrationMethod>,
+}
+
 fn ensure_pss_traversal_complete(
     time: Value,
     tstop: Value,
     total_iterations: usize,
     max_iterations: usize,
-    fixed_grid: bool,
-    fixed_index: usize,
-    fixed_steps: usize,
+    fixed: PssFixedGrid,
     retained_endpoint: Option<Value>,
 ) -> Result<(), SimulationError> {
+    let PssFixedGrid {
+        enabled: fixed_grid,
+        index: fixed_index,
+        steps: fixed_steps,
+    } = fixed;
     if time != tstop {
         let reason = if total_iterations >= max_iterations {
             format!("reached the hard {max_iterations}-iteration guard")
@@ -1708,11 +1750,13 @@ impl Engine {
             &mut circuit,
             &mut matrix,
             seed,
-            period,
-            max_step,
-            true,
+            PssTraversal {
+                tstop: period,
+                max_step,
+                fixed_grid: true,
+                integration_method: continuation_config.integration_method,
+            },
             Some(&mut trace),
-            continuation_config.integration_method,
             abort,
         )?;
         Self::ensure_pss_continuation_netlist_identity(
@@ -2064,9 +2108,11 @@ impl Engine {
                         self.pss_compute_autonomous_newton_step_krylov(
                             &circuit,
                             &shooting_state,
-                            detected_period,
-                            &config,
-                            FD_STEP,
+                            PssJacobianProbe {
+                                period: detected_period,
+                                config: &config,
+                                fd_step: FD_STEP,
+                            },
                             jacobian,
                             abort,
                         )?
@@ -2088,9 +2134,11 @@ impl Engine {
                     let (delta, delta_t, jacobian) = self.pss_compute_autonomous_newton_step(
                         &circuit,
                         &shooting_state,
-                        detected_period,
-                        &config,
-                        FD_STEP,
+                        PssJacobianProbe {
+                            period: detected_period,
+                            config: &config,
+                            fd_step: FD_STEP,
+                        },
                         abort,
                     )?;
                     preconditioner_jacobian = Some(jacobian.clone());
@@ -2107,9 +2155,11 @@ impl Engine {
                         self.pss_compute_newton_step_krylov(
                             &circuit,
                             &shooting_state,
-                            detected_period,
-                            &config,
-                            FD_STEP,
+                            PssJacobianProbe {
+                                period: detected_period,
+                                config: &config,
+                                fd_step: FD_STEP,
+                            },
                             jacobian,
                             abort,
                         )?
@@ -2129,9 +2179,11 @@ impl Engine {
                     let (delta, jacobian) = self.pss_compute_newton_step(
                         &circuit,
                         &shooting_state,
-                        detected_period,
-                        &config,
-                        FD_STEP,
+                        PssJacobianProbe {
+                            period: detected_period,
+                            config: &config,
+                            fd_step: FD_STEP,
+                        },
                         abort,
                     )?;
                     preconditioner_jacobian = Some(jacobian.clone());
@@ -2173,9 +2225,11 @@ impl Engine {
             self.pss_compute_monodromy(
                 &circuit,
                 &shooting_state,
-                detected_period,
-                &config,
-                FD_STEP,
+                PssJacobianProbe {
+                    period: detected_period,
+                    config: &config,
+                    fd_step: FD_STEP,
+                },
                 abort,
             )?
         } else {
@@ -2184,9 +2238,11 @@ impl Engine {
                 None => self.pss_compute_monodromy(
                     &circuit,
                     &shooting_state,
-                    detected_period,
-                    &config,
-                    FD_STEP,
+                    PssJacobianProbe {
+                        period: detected_period,
+                        config: &config,
+                        fd_step: FD_STEP,
+                    },
                     abort,
                 )?,
             }
@@ -2352,11 +2408,13 @@ impl Engine {
                 circuit,
                 matrix,
                 dc_solution.to_vec(),
-                tstab,
-                max_step,
-                false,
+                PssTraversal {
+                    tstop: tstab,
+                    max_step,
+                    fixed_grid: false,
+                    integration_method: config.integration_method,
+                },
                 None,
-                config.integration_method,
                 abort,
             )?;
 
@@ -2461,11 +2519,13 @@ impl Engine {
             circuit,
             matrix,
             solution,
-            period,
-            max_step,
-            true,
+            PssTraversal {
+                tstop: period,
+                max_step,
+                fixed_grid: true,
+                integration_method: config.integration_method,
+            },
             None,
-            config.integration_method,
             abort,
         )?;
 
@@ -2494,7 +2554,17 @@ impl Engine {
         );
         let start = vec![0.0; circuit.matrix_size()];
 
-        match self.pss_newton_trial(circuit, matrix, &coeff, dt_freeze, dt_freeze, &start, abort)? {
+        match self.pss_newton_trial(
+            circuit,
+            matrix,
+            PssCompanionStep {
+                coeff: &coeff,
+                t_next: dt_freeze,
+                dt: dt_freeze,
+            },
+            &start,
+            abort,
+        )? {
             Some(solution) => Ok(solution),
             None => Err(SimulationError::ConvergenceFailed(
                 self.config.max_iterations,
@@ -2520,12 +2590,15 @@ impl Engine {
         &self,
         circuit: &CircuitData,
         x0: &[Value],
-        period: Value,
-        config: &PssConfig,
-        fd_step: Value,
+        probe: PssJacobianProbe<'_>,
         subtract_identity: bool,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Vec<Value>>, SimulationError> {
+        let PssJacobianProbe {
+            period,
+            config,
+            fd_step,
+        } = probe;
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
@@ -2618,12 +2691,15 @@ impl Engine {
         worker_circuit: &mut CircuitData,
         worker_matrix: &mut StaticMatrix,
         x0: &[Value],
-        period: Value,
-        config: &PssConfig,
-        fd_step: Value,
+        probe: PssJacobianProbe<'_>,
         direction: &[Value],
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
+        let PssJacobianProbe {
+            period,
+            config,
+            fd_step,
+        } = probe;
         let scaled_direction = direction
             .iter()
             .zip(x0)
@@ -2673,12 +2749,15 @@ impl Engine {
         &self,
         circuit: &CircuitData,
         state: &ShootingState,
-        period: Value,
-        config: &PssConfig,
-        fd_step: Value,
+        probe: PssJacobianProbe<'_>,
         preconditioner_jacobian: &[Vec<Value>],
         abort: &dyn AbortSignal,
     ) -> Result<Option<Vec<Value>>, SimulationError> {
+        let PssJacobianProbe {
+            period,
+            config,
+            fd_step,
+        } = probe;
         let Some(preconditioner) = PssDenseLu::factor(preconditioner_jacobian) else {
             return Ok(None);
         };
@@ -2696,9 +2775,11 @@ impl Engine {
                 &mut worker,
                 &mut worker_matrix,
                 &state.x0,
-                period,
-                config,
-                fd_step,
+                PssJacobianProbe {
+                    period,
+                    config,
+                    fd_step,
+                },
                 direction,
                 abort,
             )
@@ -2719,12 +2800,15 @@ impl Engine {
         &self,
         circuit: &CircuitData,
         state: &ShootingState,
-        period: Value,
-        config: &PssConfig,
-        fd_step: Value,
+        probe: PssJacobianProbe<'_>,
         preconditioner_jacobian: &[Vec<Value>],
         abort: &dyn AbortSignal,
     ) -> Result<Option<(Vec<Value>, Value)>, SimulationError> {
+        let PssJacobianProbe {
+            period,
+            config,
+            fd_step,
+        } = probe;
         let n = state.dimension();
         let h_t = period * 1e-7;
         let mut worker = circuit.clone();
@@ -2766,9 +2850,11 @@ impl Engine {
                 &mut worker,
                 &mut worker_matrix,
                 &state.x0,
-                period,
-                config,
-                fd_step,
+                PssJacobianProbe {
+                    period,
+                    config,
+                    fd_step,
+                },
                 state_direction,
                 abort,
             )?;
@@ -2794,14 +2880,26 @@ impl Engine {
         &self,
         circuit: &CircuitData,
         state: &ShootingState,
-        period: Value,
-        config: &PssConfig,
-        fd_step: Value,
+        probe: PssJacobianProbe<'_>,
         abort: &dyn AbortSignal,
     ) -> Result<(Vec<Value>, Vec<Vec<Value>>), SimulationError> {
+        let PssJacobianProbe {
+            period,
+            config,
+            fd_step,
+        } = probe;
         let n = state.dimension();
-        let columns =
-            self.pss_sensitivity_columns(circuit, &state.x0, period, config, fd_step, true, abort)?;
+        let columns = self.pss_sensitivity_columns(
+            circuit,
+            &state.x0,
+            PssJacobianProbe {
+                period,
+                config,
+                fd_step,
+            },
+            true,
+            abort,
+        )?;
 
         let mut jacobian = vec![vec![0.0; n]; n];
         for (j, column) in columns.iter().enumerate() {
@@ -2833,14 +2931,26 @@ impl Engine {
         &self,
         circuit: &CircuitData,
         state: &ShootingState,
-        period: Value,
-        config: &PssConfig,
-        fd_step: Value,
+        probe: PssJacobianProbe<'_>,
         abort: &dyn AbortSignal,
     ) -> Result<AutonomousNewtonStep, SimulationError> {
+        let PssJacobianProbe {
+            period,
+            config,
+            fd_step,
+        } = probe;
         let n = state.dimension();
-        let columns =
-            self.pss_sensitivity_columns(circuit, &state.x0, period, config, fd_step, true, abort)?;
+        let columns = self.pss_sensitivity_columns(
+            circuit,
+            &state.x0,
+            PssJacobianProbe {
+                period,
+                config,
+                fd_step,
+            },
+            true,
+            abort,
+        )?;
 
         // dPhi/dT by forward difference; Phi_T(x0) is already in state.x_t.
         let h_t = period * 1e-7;
@@ -2896,14 +3006,26 @@ impl Engine {
         &self,
         circuit: &CircuitData,
         state: &ShootingState,
-        period: Value,
-        config: &PssConfig,
-        fd_step: Value,
+        probe: PssJacobianProbe<'_>,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Vec<Value>>, SimulationError> {
+        let PssJacobianProbe {
+            period,
+            config,
+            fd_step,
+        } = probe;
         let n = state.dimension();
-        let columns = self
-            .pss_sensitivity_columns(circuit, &state.x0, period, config, fd_step, false, abort)?;
+        let columns = self.pss_sensitivity_columns(
+            circuit,
+            &state.x0,
+            PssJacobianProbe {
+                period,
+                config,
+                fd_step,
+            },
+            false,
+            abort,
+        )?;
 
         let mut monodromy = vec![vec![0.0; n]; n];
         for (j, column) in columns.iter().enumerate() {
@@ -2996,12 +3118,11 @@ impl Engine {
         &self,
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
-        coeff: &CompanionCoefficients,
-        t_next: Value,
-        dt: Value,
+        step: PssCompanionStep<'_>,
         start: &[Value],
         abort: &dyn AbortSignal,
     ) -> Result<Option<Vec<Value>>, SimulationError> {
+        let PssCompanionStep { coeff, t_next, dt } = step;
         let size = circuit.matrix_size();
         let mut new_solution = start.to_vec();
         let mut rhs = vec![0.0; size];
@@ -3011,7 +3132,13 @@ impl Engine {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
-            self.pss_stamp_system(circuit, matrix, &mut rhs, coeff, t_next, dt, &new_solution)?;
+            self.pss_stamp_system(
+                circuit,
+                matrix,
+                &mut rhs,
+                PssCompanionStep { coeff, t_next, dt },
+                &new_solution,
+            )?;
 
             match matrix.solve_into(&rhs, &mut proposal) {
                 Ok(()) => {
@@ -3054,14 +3181,19 @@ impl Engine {
         &self,
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
-        coeff: &CompanionCoefficients,
-        t_next: Value,
-        dt: Value,
+        step: PssCompanionStep<'_>,
         start: &[Value],
         abort: &dyn AbortSignal,
     ) -> Result<Option<Vec<Value>>, SimulationError> {
+        let PssCompanionStep { coeff, t_next, dt } = step;
         let accepted_state = circuit.transient_trial_state_snapshot();
-        match self.pss_newton_solve(circuit, matrix, coeff, t_next, dt, start, abort) {
+        match self.pss_newton_solve(
+            circuit,
+            matrix,
+            PssCompanionStep { coeff, t_next, dt },
+            start,
+            abort,
+        ) {
             Ok(Some(solution)) => Ok(Some(solution)),
             Ok(None) => {
                 circuit.restore_nonlinear_state(accepted_state);
@@ -3087,11 +3219,10 @@ impl Engine {
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],
-        coeff: &CompanionCoefficients,
-        t_next: Value,
-        dt: Value,
+        step: PssCompanionStep<'_>,
         linearize_at: &[Value],
     ) -> Result<(), SimulationError> {
+        let PssCompanionStep { coeff, t_next, dt } = step;
         matrix.clear_values();
         rhs.fill(0.0);
 
@@ -3197,13 +3328,16 @@ impl Engine {
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
         mut solution: Vec<Value>,
-        tstop: Value,
-        max_step: Value,
-        fixed_grid: bool,
+        traversal: PssTraversal,
         mut trace: Option<&mut PssStateTrace>,
-        integration_method: Option<IntegrationMethod>,
         abort: &dyn AbortSignal,
     ) -> Result<TransientResult, SimulationError> {
+        let PssTraversal {
+            tstop,
+            max_step,
+            fixed_grid,
+            integration_method,
+        } = traversal;
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
@@ -3319,8 +3453,17 @@ impl Engine {
             );
             let coeff = accepted_step_history.coefficients_for_trial(current_method, dt);
 
-            let Some(new_solution) =
-                self.pss_newton_trial(circuit, matrix, &coeff, t_next, dt, &solution, abort)?
+            let Some(new_solution) = self.pss_newton_trial(
+                circuit,
+                matrix,
+                PssCompanionStep {
+                    coeff: &coeff,
+                    t_next,
+                    dt,
+                },
+                &solution,
+                abort,
+            )?
             else {
                 if fixed_grid {
                     // The grid is the contract: a Newton failure on it is a
@@ -3433,9 +3576,11 @@ impl Engine {
             tstop,
             total_iterations,
             MAX_ITERATIONS,
-            fixed_grid,
-            fixed_index,
-            fixed_steps,
+            PssFixedGrid {
+                enabled: fixed_grid,
+                index: fixed_index,
+                steps: fixed_steps,
+            },
             result.time.last().copied(),
         )?;
 
@@ -3716,11 +3861,13 @@ mod tests {
                 &mut circuit,
                 &mut matrix,
                 vec![0.0; 2],
-                1.0e-9,
-                1.0e-9,
-                true,
+                PssTraversal {
+                    tstop: 1.0e-9,
+                    max_step: 1.0e-9,
+                    fixed_grid: true,
+                    integration_method: Some(IntegrationMethod::BackwardEuler),
+                },
                 None,
-                Some(IntegrationMethod::BackwardEuler),
                 &NoAbort,
             )
             .expect("one fixed PSS step converges");
@@ -3927,9 +4074,19 @@ mod tests {
 
     #[test]
     fn pss_iteration_guard_refuses_a_partial_trajectory() {
-        let error =
-            ensure_pss_traversal_complete(0.75, 1.0, 100_000, 100_000, false, 0, 0, Some(0.75))
-                .expect_err("the traversal guard must never publish a partial result");
+        let error = ensure_pss_traversal_complete(
+            0.75,
+            1.0,
+            100_000,
+            100_000,
+            PssFixedGrid {
+                enabled: false,
+                index: 0,
+                steps: 0,
+            },
+            Some(0.75),
+        )
+        .expect_err("the traversal guard must never publish a partial result");
         let message = error.to_string();
         assert!(message.contains("hard 100000-iteration guard"));
         assert!(message.contains("refusing to publish a partial trajectory"));
@@ -3938,17 +4095,38 @@ mod tests {
     #[test]
     fn pss_traversal_requires_the_exact_retained_endpoint() {
         let rounded = Value::from_bits(1.0_f64.to_bits() - 1);
-        let error =
-            ensure_pss_traversal_complete(rounded, 1.0, 32, 100_000, true, 32, 32, Some(rounded))
-                .expect_err("a nearby floating endpoint is not an exact completed traversal");
+        let error = ensure_pss_traversal_complete(
+            rounded,
+            1.0,
+            32,
+            100_000,
+            PssFixedGrid {
+                enabled: true,
+                index: 32,
+                steps: 32,
+            },
+            Some(rounded),
+        )
+        .expect_err("a nearby floating endpoint is not an exact completed traversal");
         assert!(
             error
                 .to_string()
                 .contains("exhausted the 32-step fixed grid")
         );
 
-        ensure_pss_traversal_complete(1.0, 1.0, 32, 100_000, true, 32, 32, Some(1.0))
-            .expect("the exact retained endpoint is complete");
+        ensure_pss_traversal_complete(
+            1.0,
+            1.0,
+            32,
+            100_000,
+            PssFixedGrid {
+                enabled: true,
+                index: 32,
+                steps: 32,
+            },
+            Some(1.0),
+        )
+        .expect("the exact retained endpoint is complete");
     }
 
     #[test]

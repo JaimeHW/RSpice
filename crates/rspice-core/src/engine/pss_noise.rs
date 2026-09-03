@@ -24,6 +24,7 @@
 //! whose corner sits at f_c = pi f0^2 c (the paper's Section 10 example) and
 //! whose integral preserves the carrier power exactly.
 
+use super::pss::{PssCompanionStep, PssTraversal};
 use super::{Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::{NoiseSource, NoiseSourceType, PssConfig};
@@ -327,11 +328,13 @@ impl Engine {
             &mut circuit,
             &mut matrix,
             seed,
-            period,
-            max_step,
-            true,
+            PssTraversal {
+                tstop: period,
+                max_step,
+                fixed_grid: true,
+                integration_method: config.integration_method,
+            },
             Some(&mut base),
-            config.integration_method,
             abort,
         )?;
 
@@ -377,11 +380,13 @@ impl Engine {
                 &mut circuit,
                 &mut matrix,
                 seed_p,
-                period,
-                max_step,
-                true,
+                PssTraversal {
+                    tstop: period,
+                    max_step,
+                    fixed_grid: true,
+                    integration_method: config.integration_method,
+                },
                 Some(&mut tr_plus),
-                config.integration_method,
                 abort,
             )?;
 
@@ -395,11 +400,13 @@ impl Engine {
                 &mut circuit,
                 &mut matrix,
                 seed_m,
-                period,
-                max_step,
-                true,
+                PssTraversal {
+                    tstop: period,
+                    max_step,
+                    fixed_grid: true,
+                    integration_method: config.integration_method,
+                },
                 Some(&mut tr_minus),
-                config.integration_method,
                 abort,
             )?;
 
@@ -525,9 +532,11 @@ impl Engine {
                 &mut circuit,
                 &mut matrix,
                 &mut rhs_scratch,
-                &coeff,
-                base.times[k] + dt_freeze,
-                dt_freeze,
+                PssCompanionStep {
+                    coeff: &coeff,
+                    t_next: base.times[k] + dt_freeze,
+                    dt: dt_freeze,
+                },
                 &solution,
             )?;
 
