@@ -378,12 +378,12 @@ struct IndexedMeasureSignal<'a> {
 /// Case, hierarchy separators, and insignificant whitespace normalize once.
 /// Distinct physical columns that collapse to one key are retained as a typed
 /// lookup failure instead of depending on `HashMap` iteration order.
-struct CanonicalMeasureSignalIndex<'a> {
+pub(crate) struct CanonicalMeasureSignalIndex<'a> {
     signals: HashMap<String, IndexedMeasureSignal<'a>>,
 }
 
 impl<'a> CanonicalMeasureSignalIndex<'a> {
-    fn new(signals: &HashMap<String, &'a [Value]>) -> Self {
+    pub(crate) fn new(signals: &HashMap<String, &'a [Value]>) -> Self {
         let mut index = HashMap::<String, IndexedMeasureSignal<'a>>::with_capacity(signals.len());
         for (name, waveform) in signals {
             let canonical = canonical_measure_signal_name(name);
@@ -1288,6 +1288,14 @@ pub(crate) struct OutputColumn {
     values: Vec<Value>,
 }
 
+impl OutputColumn {
+    /// Decompose an evaluated column so output projection can describe it
+    /// without reparsing the authored spelling.
+    pub(crate) fn into_parts(self) -> (String, OutputColumnKind, Vec<Value>) {
+        (self.name, self.kind, self.values)
+    }
+}
+
 /// Typed failure at the ordered output-projection boundary.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum OutputProjectionError {
@@ -1309,13 +1317,21 @@ pub(crate) enum OutputProjectionError {
     },
 }
 
+/// Ordered output cards that select one analysis family.
+///
+/// `.PLOT` carries the same operand grammar and analysis qualifier as
+/// `.PRINT`, so both are evaluated by this one resolver. Treating `.PLOT` as
+/// a second, weaker path is exactly how an authored column goes missing when
+/// a deck mixes the two cards.
 fn matching_print_requests(netlist: &Netlist, analysis: OutputAnalysisKind) -> Vec<&OutputRequest> {
     netlist
         .output_requests
         .iter()
         .filter(|request| {
-            request.directive == OutputDirectiveKind::Print
-                && request.analysis.is_none_or(|owned| owned == analysis)
+            matches!(
+                request.directive,
+                OutputDirectiveKind::Print | OutputDirectiveKind::Plot
+            ) && request.analysis.is_none_or(|owned| owned == analysis)
         })
         .collect()
 }
@@ -1933,7 +1949,7 @@ fn evaluate_real_output_requests(
     Ok(columns)
 }
 
-enum OutputOperandEvaluationError {
+pub(crate) enum OutputOperandEvaluationError {
     Aborted,
     Detail { row: Option<usize>, detail: String },
 }
@@ -1944,7 +1960,7 @@ impl From<(Option<usize>, String)> for OutputOperandEvaluationError {
     }
 }
 
-fn evaluate_output_operand(
+pub(crate) fn evaluate_output_operand(
     authored: &str,
     kind: &OutputOperandKind,
     axis: &[Value],
@@ -5714,6 +5730,73 @@ fn measurement_node_waveform<'a>(
         ));
     }
     Ok(Some(waveform.to_owned()))
+}
+
+/// Resolve one authored output specification against a transient result.
+///
+/// This is the same resolver `.PRINT TRAN`, `.FOUR`, and `.FFT` use: node
+/// voltages, differential pairs, branch and device-lead currents,
+/// `@device[param]` observables, hierarchy spellings, and — when a deck is
+/// supplied — braced output expressions all mean here exactly what they mean
+/// on an output card. A frontend must never reimplement this grammar.
+///
+/// `netlist` supplies the parameter scope an expression needs; pass `None`
+/// when only direct probes are meaningful, and a braced expression is then
+/// rejected rather than silently reinterpreted as a vector name.
+pub fn evaluate_transient_probe_with_abort(
+    netlist: Option<&Netlist>,
+    result: &TransientResult,
+    spec: &str,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<Value>, SimulationError> {
+    let trimmed = spec.trim();
+    let braced = trimmed
+        .strip_prefix('{')
+        .and_then(|body| body.strip_suffix('}'));
+    if braced.is_none()
+        && let Some(detail) = crate::execution::probe_specification_error(trimmed)
+    {
+        return Err(SimulationError::Netlist(detail));
+    }
+    let kind = match braced {
+        Some(body) => OutputOperandKind::Expression {
+            body: body.to_string(),
+        },
+        None => match crate::netlist::parse_save_probe(trimmed) {
+            Some(
+                signal @ (SaveSignal::Voltage(_)
+                | SaveSignal::VoltageDiff(_, _)
+                | SaveSignal::Current(_)
+                | SaveSignal::DeviceParam { .. }
+                | SaveSignal::Raw(_)),
+            ) => OutputOperandKind::Probe(signal),
+            _ => OutputOperandKind::Expression {
+                body: trimmed.to_string(),
+            },
+        },
+    };
+    if matches!(kind, OutputOperandKind::Expression { .. }) && netlist.is_none() {
+        return Err(SimulationError::Netlist(format!(
+            "output specification '{spec}' is an expression and needs a deck to resolve"
+        )));
+    }
+    let owned_params;
+    let params = match netlist {
+        Some(netlist) => &netlist.params,
+        None => {
+            owned_params = crate::netlist::ParamContext::new();
+            &owned_params
+        }
+    };
+    let signals = transient_signal_map(result);
+    let index = CanonicalMeasureSignalIndex::new(&signals);
+    match evaluate_output_operand(trimmed, &kind, &result.time, &index, params, abort) {
+        Ok(column) => Ok(column.into_parts().2),
+        Err(OutputOperandEvaluationError::Aborted) => Err(SimulationError::Aborted),
+        Err(OutputOperandEvaluationError::Detail { .. }) => Err(
+            SimulationError::requested_signal_unavailable(trimmed, "TRAN", None),
+        ),
+    }
 }
 
 /// Evaluate the netlist's transient .MEAS statements against a result.

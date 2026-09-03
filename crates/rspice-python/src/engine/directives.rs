@@ -190,7 +190,7 @@ pub(super) fn run(
             },
             &mut out,
         )?;
-        evaluate_pending_fourier(py, &mut out)?;
+        evaluate_pending_fourier(py, net, &mut out)?;
         let mut measurements = evaluate_measurements(py, net, &out);
         set_measurement_execution_context(&mut measurements, &plan, None);
         measurements
@@ -479,7 +479,7 @@ fn run_axis_plan(
             )?;
         }
 
-        evaluate_pending_fourier(py, &mut coordinate_out)?;
+        evaluate_pending_fourier(py, &materialized.inner, &mut coordinate_out)?;
         let mut coordinate_measurements =
             evaluate_measurements(py, &materialized.inner, &coordinate_out);
         set_measurement_execution_context(&mut coordinate_measurements, plan, Some(&coordinate));
@@ -1136,7 +1136,11 @@ fn execute(
 }
 
 /// Evaluate deferred `.four` cards against the transient result.
-fn evaluate_pending_fourier(py: Python<'_>, out: &mut DirectiveOutcomes) -> PyResult<()> {
+fn evaluate_pending_fourier(
+    py: Python<'_>,
+    netlist: &rspice_core::Netlist,
+    out: &mut DirectiveOutcomes,
+) -> PyResult<()> {
     // .FOUR needs a transient result; evaluate after the loop so a
     // .four directive may precede its .tran in the deck.
     for pending in std::mem::take(&mut out.pending_fourier) {
@@ -1165,11 +1169,22 @@ fn evaluate_pending_fourier(py: Python<'_>, out: &mut DirectiveOutcomes) -> PyRe
                 // Python can call meanwhile invalidates this grid.
                 let time = tran_ref.inner.time.as_slice();
                 for output in &outputs {
-                    // `.four` addresses node voltages, differential node
-                    // pairs, and branch currents alike.
-                    let waveform = crate::signal::parse_signal_spec(output)
-                        .map_err(crate::errors::value_error)
-                        .and_then(|spec| tran_ref.signal_waveform(&spec));
+                    // `.four` shares the ordered output resolver with
+                    // `.PRINT`: node voltages, differential pairs, branch and
+                    // device-lead currents, `@device[param]` observables and
+                    // braced expressions all mean the same thing here.
+                    let waveform = rspice_core::analysis::evaluate_transient_probe_with_abort(
+                        Some(netlist),
+                        &tran_ref.inner,
+                        output,
+                        &rspice_core::abort_signal::NoAbort,
+                    )
+                    .map_err(|error| match error {
+                        rspice_core::SimulationError::RequestedSignalUnavailable(_) => {
+                            crate::errors::key_error(error.to_string())
+                        }
+                        other => crate::errors::value_error(other.to_string()),
+                    });
                     match waveform {
                         Ok(waveform) => {
                             let analysis = rspice_core::analysis::FourierAnalysis::new(

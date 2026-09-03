@@ -1,0 +1,9 @@
+* The same deck whose model does not publish the saved device parameter
+V1 in 0 PULSE(0 1 0 100n 100n 2u 4u)
+R1 in out 100
+D1 out 0 DMODEL
+.MODEL DMODEL D(IS=1e-12 N=1)
+.PRINT TRAN V(out)
+.SAVE @D1[NotAParameter]
+.TRAN 100n 2u
+.END

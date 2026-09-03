@@ -65,6 +65,42 @@ impl PySimulationResult {
 
 #[pymethods]
 impl PySimulationResult {
+    /// Project this operating point onto a deck's authored output contract
+    ///
+    /// Returns the columns the deck's `.SAVE`, `.PROBE`, `.PRINT OP` and
+    /// `.PLOT OP` cards select, each with its per-sample validity. Device
+    /// observables resolve through the same `@device[param]` grammar the CLI
+    /// uses. Whole-result access is unaffected.
+    ///
+    /// Args:
+    ///     netlist: The parsed deck whose output cards to apply
+    ///
+    /// Returns:
+    ///     list[ProjectedSignal]: Selected columns in authored order
+    ///
+    /// Raises:
+    ///     RequestedSignalUnavailableError: If an authored symbol is absent
+    ///
+    /// Example:
+    ///     >>> [s.name for s in op.saved_signals(netlist)]
+    fn saved_signals(
+        &self,
+        netlist: &crate::netlist::PyNetlist,
+    ) -> PyResult<Vec<crate::results::PyProjectedSignal>> {
+        let inventory = rspice_core::execution::operating_point_projection_signals(&self.inner)
+            .map_err(|error| crate::errors::value_error(error.to_string()))?;
+        let observables = rspice_core::execution::operating_point_observable_series(&self.inner);
+        crate::results::projection::project_real(
+            &netlist.inner,
+            rspice_core::execution::AnalysisResultKind::OperatingPoint,
+            "DC OP",
+            &[0.0],
+            inventory,
+            rspice_core::execution::observable_lookup(&observables),
+            None,
+        )
+    }
+
     /// Get voltage at a node by index or name
     ///
     /// Args:

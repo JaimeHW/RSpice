@@ -45,15 +45,26 @@ class TestSignalAccessor:
         )
 
     @pytest.mark.parametrize(
-        "spec", ["", "   ", "P(R1)", "V(a,b,c)", "I(V1,V2)", "V()", "V(in"]
+        "spec", ["", "   ", "V(a,b,c)", "I(V1,V2)", "V()", "V(in"]
     )
     def test_malformed_specifications_raise_value_error(self, tran, spec):
         with pytest.raises(ValueError):
             tran.signal(spec)
 
-    @pytest.mark.parametrize("spec", ["V(nosuch)", "I(nosuch)", "V(in,nosuch)"])
+    # `P()` is a real device-power accessor in both Xyce and ngspice, so a
+    # well-formed `P(R1)` this result does not carry is an unavailable signal
+    # rather than a syntax error.
+    @pytest.mark.parametrize(
+        "spec", ["V(nosuch)", "I(nosuch)", "V(in,nosuch)", "P(R1)", "@nosuch[id]"]
+    )
     def test_unknown_quantities_raise_key_error_naming_the_spec(self, tran, spec):
-        with pytest.raises(KeyError, match=spec.replace("(", r"\(").replace(")", r"\)")):
+        pattern = (
+            spec.replace("(", r"\(")
+            .replace(")", r"\)")
+            .replace("[", r"\[")
+            .replace("]", r"\]")
+        )
+        with pytest.raises(KeyError, match=pattern):
             tran.signal(spec)
 
 
@@ -92,6 +103,99 @@ class TestFourier:
         assert result.thd is None
         assert result.thd_percent is None
         assert all(harmonic.magnitude == 0.0 for harmonic in result.harmonics)
+
+
+# A diode's operating-point trace is retained per time point when the deck
+# asks for it, so `@D1[Id]` is a real waveform the core resolver reaches
+# through the same `@device[param]` grammar `.SAVE` and `.PRINT` use.
+DIODE = """* Device-observable probes
+V1 in 0 SIN(0 1 1k)
+R1 in mid 500
+D1 mid 0 DMODEL
+.MODEL DMODEL D(IS=1e-12 N=1)
+.save @D1[Id]
+.end
+"""
+
+
+def signal_names(signals):
+    return [signal.name.upper() for signal in signals]
+
+
+class TestDeviceObservableProbe:
+    """`@device[param]` is one grammar shared with `.SAVE` and `.PRINT`."""
+
+    @pytest.fixture()
+    def diode_tran(self, engine):
+        return engine.run_tran(
+            rspice.Netlist.parse(DIODE), stop_time=2e-3, max_step=2e-6
+        )
+
+    def test_device_parameter_probe_is_a_waveform(self, diode_tran):
+        current = diode_tran.signal("@D1[Id]")
+        assert len(current) == len(diode_tran.time)
+        assert np.all(np.isfinite(current))
+        assert np.max(current) > 0.0
+
+    def test_device_parameter_probe_is_case_insensitive(self, diode_tran):
+        np.testing.assert_allclose(
+            diode_tran.signal("@d1[id]"), diode_tran.signal("@D1[Id]")
+        )
+
+    def test_fourier_of_a_device_parameter_matches_the_probe(self, diode_tran):
+        spectrum = diode_tran.fourier_of("@D1[Id]", 1e3)
+        assert spectrum.fundamental_magnitude > 0.0
+
+    def test_fourier_of_a_differential_pair_matches_the_direct_call(self, tran):
+        spectrum = tran.fourier_of("V(in,mid)", 1e3)
+        assert spectrum.fundamental_magnitude == pytest.approx(
+            tran.fourier("in", 1e3, reference="mid").fundamental_magnitude
+        )
+
+
+class TestSavedSignals:
+    """`.SAVE` projection is available to Python, not only to the CLI."""
+
+    DECK = DIODE.replace(".end", ".tran 2u 2m\n.print tran V(mid)\n.end")
+
+    def test_a_saved_device_observable_survives_beside_a_print_card(self, engine):
+        netlist = rspice.Netlist.parse(self.DECK)
+        report = engine.run(netlist)
+        signals = report.tran.saved_signals(netlist)
+
+        assert signal_names(signals) == ["V(MID)", "@D1[ID]"]
+        assert [signal.kind for signal in signals] == ["voltage", "parameter"]
+        for signal in signals:
+            assert len(signal.values) == len(report.tran.time)
+            assert all(signal.validity)
+
+    def test_a_deck_without_output_directives_keeps_everything(self, tran):
+        names = signal_names(tran.saved_signals(rspice.Netlist.parse(SINE)))
+        assert "V(IN)" in names
+        assert "V(MID)" in names
+        assert "I(V1)" in names
+
+    def test_an_unavailable_saved_symbol_raises_the_typed_error(self, tran):
+        deck = SINE.replace(".end", ".tran 2u 20m\n.save @R1[NotAParameter]\n.end")
+        netlist = rspice.Netlist.parse(deck)
+        with pytest.raises(rspice.SimulationError) as failure:
+            tran.saved_signals(netlist)
+        assert "@R1[NotAParameter]" in str(failure.value)
+
+    def test_an_operating_point_projects_its_saved_signals(self, engine):
+        deck = """* saved operating point
+V1 in 0 5
+R1 in out 1k
+R2 out 0 1k
+.op
+.save V(out)
+.end
+"""
+        netlist = rspice.Netlist.parse(deck)
+        op = engine.run_dc_op(netlist)
+        signals = op.saved_signals(netlist)
+        assert signal_names(signals) == ["V(OUT)"]
+        assert signals[0].values[0] == pytest.approx(2.5)
 
 
 class TestFourDirective:

@@ -2011,8 +2011,9 @@ fn run_implicit_step_op_table(
             }
         };
         let signals = crate::commands::run_signals::dc_operating_point_export_signals(
+            materialized.netlist(),
             &result,
-            &materialized.netlist().saves,
+            &crate::abort::ProcessAbort,
         )
         .map_err(|source| CliError::CoreSimulationError {
             source,

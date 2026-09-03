@@ -179,57 +179,25 @@ impl PyTransientResult {
 
     /// Resolve any SPICE output specification to a time series.
     ///
-    /// Differential voltages are evaluated sample by sample rather than being
-    /// approximated from a single node, and branch currents come from the MNA
-    /// branch equations rather than the node map.
-    pub(crate) fn signal_waveform(&self, spec: &SignalSpec) -> PyResult<Vec<f64>> {
-        match spec {
-            SignalSpec::Voltage {
-                node,
-                reference: None,
-            } => self
-                .checked_waveform_named(node)
-                .map_err(|_| unknown_signal_error(spec, "node")),
-            SignalSpec::Voltage {
-                node,
-                reference: Some(reference),
-            } => {
-                let positive = self
-                    .checked_waveform_named(node)
-                    .map_err(|_| unknown_signal_error(spec, "node"))?;
-                let negative = self
-                    .checked_waveform_named(reference)
-                    .map_err(|_| unknown_signal_error(spec, "reference node"))?;
-                if positive.len() != negative.len() {
-                    return Err(crate::errors::value_error(format!(
-                        "malformed transient result: '{}' and its reference have {} and {} samples",
-                        spec.label(),
-                        positive.len(),
-                        negative.len()
-                    )));
-                }
-                Ok(positive
-                    .iter()
-                    .zip(&negative)
-                    .map(|(high, low)| high - low)
-                    .collect())
+    /// The core output resolver owns this grammar, so a differential pair, a
+    /// branch current, a device-lead current, an `@device[param]` observable,
+    /// and a hierarchy spelling mean exactly what they mean on a `.PRINT` or
+    /// `.FOUR` card. The binding layer only maps the typed failure onto an
+    /// exception.
+    pub(crate) fn probe_waveform(&self, spec: &str) -> PyResult<Vec<f64>> {
+        rspice_core::analysis::evaluate_transient_probe_with_abort(
+            None,
+            &self.inner,
+            spec,
+            &rspice_core::abort_signal::NoAbort,
+        )
+        .map_err(|error| match error {
+            rspice_core::SimulationError::RequestedSignalUnavailable(_) => {
+                crate::errors::key_error(error.to_string())
             }
-            SignalSpec::Current { element } => self
-                .inner
-                .try_branch_current_waveform_named(element)
-                .map(<[f64]>::to_vec)
-                .ok_or_else(|| unknown_signal_error(spec, "branch")),
-        }
+            other => crate::errors::value_error(other.to_string()),
+        })
     }
-}
-
-/// Error for a probe whose circuit quantity does not exist, naming the
-/// original specification rather than an extracted fragment.
-fn unknown_signal_error(spec: &SignalSpec, what: &str) -> PyErr {
-    crate::errors::key_error(format!(
-        "unknown {what} in output specification '{}'",
-        spec.label()
-    ))
 }
 
 impl PyTransientResult {
@@ -512,6 +480,35 @@ impl PyTransientResult {
         self.fourier_of_waveform(py, &waveform, fundamental, num_harmonics)
     }
 
+    /// Fourier-analyze any SPICE output specification
+    ///
+    /// The `.FOUR` card accepts the full probe grammar, so this accessor does
+    /// too: `V(out)`, `V(outp,outn)`, `I(V1)`, `@m1[id]`, or a bare node name,
+    /// resolved by the same core resolver `.FOUR` uses.
+    ///
+    /// Args:
+    ///     spec: Output specification string
+    ///     fundamental: Fundamental frequency in Hz
+    ///     num_harmonics: Number of harmonics to compute (default 9)
+    ///
+    /// Raises:
+    ///     ValueError: If the specification or Fourier configuration is invalid
+    ///     KeyError: If the result does not supply that signal
+    ///
+    /// Example:
+    ///     >>> four = tran.fourier_of("@d1[id]", fundamental=1e3)
+    #[pyo3(signature = (spec, fundamental, num_harmonics=9))]
+    fn fourier_of(
+        &self,
+        py: Python<'_>,
+        spec: &str,
+        fundamental: f64,
+        num_harmonics: usize,
+    ) -> PyResult<PyFourierResult> {
+        let waveform = self.probe_waveform(spec)?;
+        self.fourier_of_waveform(py, &waveform, fundamental, num_harmonics)
+    }
+
     /// Fourier-analyze a branch-current waveform
     ///
     /// The `.FOUR` counterpart of `fourier` for `I(element)` outputs. Branch
@@ -536,16 +533,15 @@ impl PyTransientResult {
         fundamental: f64,
         num_harmonics: usize,
     ) -> PyResult<PyFourierResult> {
-        let waveform = self.signal_waveform(&SignalSpec::Current {
-            element: element.to_string(),
-        })?;
+        let waveform = self.probe_waveform(&format!("I({element})"))?;
         self.fourier_of_waveform(py, &waveform, fundamental, num_harmonics)
     }
 
     /// Evaluate any SPICE output specification against this result
     ///
-    /// Accepts `V(out)`, `V(outp,outn)`, `I(V1)`, or a bare node name — the
-    /// same probe grammar `.FOUR` and `.PRINT` use.
+    /// Accepts `V(out)`, `V(outp,outn)`, `I(V1)`, `@d1[id]`, or a bare node
+    /// name — the same probe grammar `.FOUR` and `.PRINT` use, resolved by the
+    /// same core resolver.
     ///
     /// Args:
     ///     spec: Output specification string
@@ -555,14 +551,62 @@ impl PyTransientResult {
     ///
     /// Raises:
     ///     ValueError: If the specification is malformed
-    ///     KeyError: If the node, reference node, or branch does not exist
+    ///     KeyError: If the result does not supply that signal
     ///
     /// Example:
     ///     >>> vdiff = tran.signal("V(outp,outn)")
     ///     >>> isupply = tran.signal("I(V1)")
+    ///     >>> idrain = tran.signal("@m1[id]")
     fn signal<'py>(&self, py: Python<'py>, spec: &str) -> PyResult<Bound<'py, PyArray1<f64>>> {
-        let parsed = crate::signal::parse_signal_spec(spec).map_err(crate::errors::value_error)?;
-        Ok(self.signal_waveform(&parsed)?.to_pyarray(py))
+        Ok(self.probe_waveform(spec)?.to_pyarray(py))
+    }
+
+    /// Project this result onto a deck's authored output contract
+    ///
+    /// Returns the columns the deck's `.SAVE`, `.PROBE`, `.PRINT TRAN` and
+    /// `.PLOT TRAN` cards select, in card order, each with its per-sample
+    /// validity. Whole-result access is unaffected: this is the authored view,
+    /// not a replacement for it.
+    ///
+    /// A deck with no output directive selects everything.
+    ///
+    /// Args:
+    ///     netlist: The parsed deck whose output cards to apply
+    ///
+    /// Returns:
+    ///     list[ProjectedSignal]: Selected columns in authored order
+    ///
+    /// Raises:
+    ///     RequestedSignalUnavailableError: If an authored symbol is absent
+    ///
+    /// Example:
+    ///     >>> for signal in tran.saved_signals(netlist):
+    ///     ...     print(signal.name, signal.values[-1])
+    fn saved_signals(
+        &self,
+        netlist: &crate::netlist::PyNetlist,
+    ) -> PyResult<Vec<crate::results::PyProjectedSignal>> {
+        let inventory = rspice_core::execution::transient_projection_signals(&self.inner)
+            .map_err(|error| crate::errors::value_error(error.to_string()))?;
+        let projection = rspice_core::execution::SignalProjection::from_netlist(&netlist.inner)
+            .map_err(crate::errors::simulation_error_to_pyerr)?;
+        let ordered = projection
+            .ordered_transient_columns(
+                &netlist.inner,
+                &self.inner,
+                netlist.resource_limits,
+                &rspice_core::abort_signal::NoAbort,
+            )
+            .map_err(crate::errors::simulation_error_to_pyerr)?;
+        crate::results::projection::project_real(
+            &netlist.inner,
+            rspice_core::execution::AnalysisResultKind::Transient,
+            "TRAN",
+            &self.inner.time,
+            inventory,
+            rspice_core::analysis::measure_signals::transient_signal_map(&self.inner),
+            ordered,
+        )
     }
 
     /// Column headers used by `to_csv` and the raw exporters, in order.
