@@ -25,6 +25,9 @@ use std::path::Path;
 use super::basic::TransientOutputDocument;
 
 #[allow(clippy::too_many_arguments)]
+// One atomic pair takes both destinations, the format, the identities both
+// members carry, and the results and requests the FFT member is checked
+// against; a struct would move the same list one call earlier.
 pub(super) fn write_transient_fft_output_pair(
     transient_path: &Path,
     transient: &TransientOutputDocument,
@@ -2151,6 +2154,9 @@ fn write_fft_output(
 }
 
 #[allow(clippy::too_many_arguments)]
+// The FFT artifact declares its parent, its own identities, its coordinate,
+// its results and the authored requests they are validated against; every one
+// is an independent input the renderer needs.
 fn write_fft_to_writer(
     writer: &mut dyn std::io::Write,
     path: &Path,
