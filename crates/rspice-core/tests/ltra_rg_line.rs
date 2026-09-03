@@ -546,3 +546,44 @@ RL out 0 50
         "the rejection must name the missing capability: {error}"
     );
 }
+
+/// The `LEN=0` RC/RG ideal-through case is the other memoryless line, and it
+/// reaches the periodic analyses through the same declaration: no propagation
+/// history for the period map, no dynamic state for the descriptor.
+#[test]
+fn the_zero_length_through_connection_is_admitted_alongside_the_rg_line() {
+    use rspice_core::analysis::PssConfig;
+
+    let deck = "\
+* LEN=0 RC through connection carries no state either
+VIN in 0 SIN(0 1 1meg)
+RS in a 50
+O1 a 0 out 0 through
+CL out 0 100p
+RL out 0 75
+.model through ltra r=0.05 c=20p len=0
+.end
+";
+    let netlist = Netlist::parse(deck).expect("zero-length deck parses");
+    engine()
+        .run_pss_with_continuation_state(
+            &netlist,
+            PssConfig::new(1.0e6)
+                .with_harmonics(2)
+                .with_points_per_period(64)
+                .with_tstab_periods(0)
+                .with_tolerance(1.0e-6),
+        )
+        .expect("an ideal through connection carries no period-map state");
+
+    let circuit = engine().build_circuit(&netlist).expect("circuit builds");
+    let input = circuit.get_node_by_name("a").expect("input node");
+    let output = circuit.get_node_by_name("out").expect("output node");
+    let pz = engine()
+        .run_pz(&netlist, input, output)
+        .expect("an ideal through connection contributes no dynamic state");
+    assert!(
+        !pz.poles.is_empty(),
+        "the RC pole behind the through connection must still be extracted"
+    );
+}

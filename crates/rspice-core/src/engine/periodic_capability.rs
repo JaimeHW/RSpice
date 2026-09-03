@@ -41,8 +41,10 @@ use crate::circuit::CircuitData;
 
 /// The six native periodic-analysis device contracts.
 ///
-/// These are the contracts of plan section 10.1. Each one is queried by the
-/// analyses that actually need it; a family may satisfy one and not another.
+/// Each is queried by the analyses that actually need it, and a family may
+/// satisfy one and not another: a diode's exact periodic residual covers only
+/// its LEVEL=1 form, while a lossless delay line has an exact periodic
+/// descriptor but no finite explicit dynamic state for pole-zero extraction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum PeriodicCapability {
     /// Exact periodic residual and analytic Jacobian for a nonlinear device

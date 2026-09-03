@@ -19,6 +19,9 @@
 //! - `convergence` - Newton driver plus the GMIN/source/pseudo-transient aids
 //! - `result`, `error`, `health` - result structures, typed errors, and the
 //!   [`EngineHealthReport`] diagnostics summary
+//! - `periodic_capability` - what each native device family can contribute to
+//!   a periodic analysis, declared once and queried by every advanced driver
+//!   below instead of restated as a family list per driver
 //!
 //! Analysis drivers, one per family:
 //!
