@@ -2292,26 +2292,26 @@ pub struct PssCard {
 
 impl PssCard {
     /// Harmonics retained when the card does not say.
-    pub const DEFAULT_HARMONICS: usize = 9;
+    pub(crate) const DEFAULT_HARMONICS: usize = 9;
     /// Samples per period retained when the card does not say.
-    pub const DEFAULT_POINTS_PER_PERIOD: usize = 256;
+    pub(crate) const DEFAULT_POINTS_PER_PERIOD: usize = 256;
     /// Maximum shooting iterations when the card does not say.
-    pub const DEFAULT_MAX_ITERATIONS: usize = 100;
+    pub(crate) const DEFAULT_MAX_ITERATIONS: usize = 100;
     /// Relative periodicity tolerance when the card does not say.
-    pub const DEFAULT_TOLERANCE: Value = 1e-6;
+    pub(crate) const DEFAULT_TOLERANCE: Value = 1e-6;
     /// Absolute tolerance when the card does not say.
-    pub const DEFAULT_ABSTOL: Value = 1e-12;
+    pub(crate) const DEFAULT_ABSTOL: Value = 1e-12;
     /// Newton damping when the card does not say.
-    pub const DEFAULT_DAMPING: Value = 1.0;
+    pub(crate) const DEFAULT_DAMPING: Value = 1.0;
     /// Relative period-change bound when the card does not say.
-    pub const DEFAULT_MAX_PERIOD_CHANGE: Value = 0.1;
+    pub(crate) const DEFAULT_MAX_PERIOD_CHANGE: Value = 0.1;
     /// Autonomous period seed when the card does not say.
-    pub const DEFAULT_PERIOD_GUESS: Value = 1e-9;
+    pub(crate) const DEFAULT_PERIOD_GUESS: Value = 1e-9;
     /// Stabilization periods for a driven card that does not say.
-    pub const DEFAULT_DRIVEN_TSTAB_PERIODS: usize = 10;
+    pub(crate) const DEFAULT_DRIVEN_TSTAB_PERIODS: usize = 10;
     /// Stabilization periods for an autonomous card that does not say.
     /// Detecting a period needs more startup than tracking a known one.
-    pub const DEFAULT_AUTONOMOUS_TSTAB_PERIODS: usize = 20;
+    pub(crate) const DEFAULT_AUTONOMOUS_TSTAB_PERIODS: usize = 20;
 
     /// A driven card at `fundamental_freq`, every optional field defaulted.
     pub fn driven(fundamental_freq: Value) -> Self {
@@ -2360,7 +2360,7 @@ impl PssCard {
     }
 
     /// Stabilization time the card asks for, resolving the period form.
-    pub fn effective_tstab(&self) -> Value {
+    pub(crate) fn effective_tstab(&self) -> Value {
         if self.tstab > 0.0 {
             self.tstab
         } else {
@@ -2400,11 +2400,11 @@ impl PacCard {
     /// Lowest sideband index when the card does not say.
     pub const DEFAULT_SIDEBAND_MIN: i32 = -5;
     /// Highest sideband index when the card does not say.
-    pub const DEFAULT_SIDEBAND_MAX: i32 = 5;
+    pub(crate) const DEFAULT_SIDEBAND_MAX: i32 = 5;
     /// Relative tolerance when the card does not say.
-    pub const DEFAULT_RELTOL: Value = 1e-3;
+    pub(crate) const DEFAULT_RELTOL: Value = 1e-3;
     /// Absolute tolerance when the card does not say.
-    pub const DEFAULT_ABSTOL: Value = 1e-12;
+    pub(crate) const DEFAULT_ABSTOL: Value = 1e-12;
 }
 
 /// Authored `.PNOISE` card.

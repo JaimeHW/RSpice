@@ -56,7 +56,7 @@ pub use floquet::{
     FloquetSpectrumEvidence, FloquetStabilityVerdict, classify_floquet_stability,
     select_autonomous_phase_mode,
 };
-pub use frequency_grid::{FrequencyGridError, FrequencyGridScale};
+pub use frequency_grid::FrequencyGridError;
 pub use monte_carlo::{
     Distribution, MonteCarloConfig, MonteCarloResult, MonteCarloRunner, Tolerance,
     VariableStatistics, VariationSet,

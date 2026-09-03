@@ -5,7 +5,7 @@ use crate::abort_signal::AbortSignal;
 
 /// Sweep scale used to construct a frequency grid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FrequencyGridScale {
+pub(crate) enum FrequencyGridScale {
     /// Uniformly spaced frequencies.
     Linear,
     /// Uniform spacing in base-10 logarithmic frequency.
@@ -90,7 +90,7 @@ impl std::error::Error for FrequencyGridError {}
 ///
 /// `point_parameter` is a total count for [`FrequencyGridScale::Linear`] and
 /// a density per decade or octave for logarithmic scales.
-pub fn validate_generated_sweep(
+pub(crate) fn validate_generated_sweep(
     start: Value,
     stop: Value,
     point_parameter: usize,
@@ -121,7 +121,7 @@ pub fn validate_generated_sweep(
 /// endpoints, point parameter, and scale. `minimum_log_points` permits a
 /// logarithmic consumer to require two interpolated endpoints; use `1` for
 /// PAC/PXF-compatible single-point degenerate spans.
-pub fn frequency_point_count(
+pub(crate) fn frequency_point_count(
     start: Value,
     stop: Value,
     point_parameter: usize,
@@ -146,7 +146,7 @@ pub fn frequency_point_count(
 ///
 /// This validates before computing the exact retained count, reserves all
 /// storage before writing values, and never returns a partial grid.
-pub fn generate_frequency_grid(
+pub(crate) fn generate_frequency_grid(
     start: Value,
     stop: Value,
     point_parameter: usize,
@@ -203,7 +203,7 @@ pub fn generate_frequency_grid(
 }
 
 /// Validate and copy an explicitly authored frequency list.
-pub fn copy_explicit_frequency_grid(
+pub(crate) fn copy_explicit_frequency_grid(
     authored: &[Value],
     abort: &dyn AbortSignal,
 ) -> Result<Vec<Value>, FrequencyGridError> {

@@ -188,12 +188,12 @@ impl StbConfig {
 
     /// Generate frequency points while preserving configuration and
     /// allocation failures.
-    pub fn try_frequency_points(&self) -> Result<Vec<Value>, StbAnalysisError> {
+    pub(crate) fn try_frequency_points(&self) -> Result<Vec<Value>, StbAnalysisError> {
         self.try_frequency_points_with_abort(&NoAbort)
     }
 
     /// Cancellable, fallible frequency-grid generation.
-    pub fn try_frequency_points_with_abort(
+    pub(crate) fn try_frequency_points_with_abort(
         &self,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, StbAnalysisError> {
@@ -484,7 +484,7 @@ impl StbResult {
     }
 
     /// Cancellable, fallible magnitude-curve projection.
-    pub fn magnitude_curve_with_abort(
+    pub(crate) fn magnitude_curve_with_abort(
         &self,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<(Value, Value)>, StbAnalysisError> {
@@ -497,7 +497,7 @@ impl StbResult {
     }
 
     /// Cancellable, fallible phase-curve projection.
-    pub fn phase_curve_with_abort(
+    pub(crate) fn phase_curve_with_abort(
         &self,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<(Value, Value)>, StbAnalysisError> {
