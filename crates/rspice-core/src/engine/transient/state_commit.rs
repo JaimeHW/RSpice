@@ -2,6 +2,46 @@
 
 use super::*;
 
+/// The accepted step whose reactive history is being committed: the solution
+/// that was accepted, the time it lands at, the step size, and the companion
+/// coefficients the devices stamped with (BSIM4's non-quasi-static branch uses
+/// its own set).
+#[derive(Clone, Copy)]
+pub(super) struct AcceptedReactiveStep<'a> {
+    pub accepted_solution: &'a [Value],
+    pub accepted_time: Value,
+    pub dt: Value,
+    pub coeff: &'a CompanionCoefficients,
+    pub bsim4_trnqs_coeff: &'a CompanionCoefficients,
+}
+
+/// The optional per-family state the commit reseeds from when the step
+/// produced it: the Xyce second-order flag it was taken under, the VBIC charge
+/// snapshots, the accepted capacitor and MOSFET capacitance states, the gate
+/// companion charges and whether to suppress them, and the transmission-line
+/// reference states.
+#[derive(Clone, Copy)]
+pub(super) struct AcceptedReactiveSnapshots<'a> {
+    pub xyce_one_step_order2: bool,
+    pub vbic_snapshots: Option<&'a [Option<BjtChargeSnapshot>]>,
+    pub capacitor_accepted_states: Option<&'a [CapacitorAcceptedState]>,
+    pub mosfet_caps: Option<&'a [(Value, Value, Value)]>,
+    pub mosfet_gate_companion_charges: Option<&'a [MosfetGateCompanionCharges]>,
+    pub suppress_gate_charge_history: bool,
+    pub tline_dc_refs: &'a [(Value, Value)],
+    pub coupled_tline_refs: &'a [CoupledTlineReferenceState],
+}
+
+/// The breakpoint schedule the commit may extend, with the analysis stop time
+/// and the tolerances a new breakpoint is judged against.
+pub(super) struct ReactiveBreakpointScheduling<'a> {
+    pub breakpoints: &'a mut BreakpointManager,
+    pub tstop: Value,
+    pub voltage_reltol: Value,
+    pub voltage_abstol: Value,
+    pub current_abstol: Value,
+}
+
 impl Engine {
     #[inline]
     fn install_cached_mosfet_gate_companion_charges(
@@ -22,37 +62,52 @@ impl Engine {
     pub(super) fn update_reactive_history(
         &self,
         circuit: &mut crate::circuit::CircuitData,
-        accepted_solution: &[Value],
-        accepted_time: Value,
-        dt: Value,
-        coeff: &CompanionCoefficients,
-        bsim4_trnqs_coeff: &CompanionCoefficients,
-        bjt_history: &mut BjtTransientHistory,
-        jfet_history: &mut JfetTransientHistory,
-        diode_history: &mut DiodeTransientHistory,
-        mosfet_history: &mut MosfetTransientHistory,
-        vdmos_history: &mut VdmosTransientHistory,
-        b3soi_history: &mut B3SoiTransientHistory,
-        bsim3_history: &mut Bsim3TransientHistory,
-        bsim4_history: &mut Bsim4TransientHistory,
-        ekv26_history: &mut Ekv26TransientHistory,
-        xyce_one_step_order2: bool,
-        vbic_snapshots: Option<&[Option<BjtChargeSnapshot>]>,
-        capacitor_accepted_states: Option<&[CapacitorAcceptedState]>,
-        mosfet_caps: Option<&[(Value, Value, Value)]>,
-        mosfet_gate_companion_charges: Option<&[MosfetGateCompanionCharges]>,
-        suppress_gate_charge_history: bool,
-        tline_dc_refs: &[(Value, Value)],
-        coupled_tline_refs: &[CoupledTlineReferenceState],
-        breakpoints: &mut BreakpointManager,
-        tstop: Value,
-        voltage_reltol: Value,
-        voltage_abstol: Value,
-        current_abstol: Value,
-        dynamic_breakpoints_added: &mut usize,
-        warned_dynamic_breakpoint_cap: &mut bool,
-        pending_dynamic_breakpoints: &mut Vec<Value>,
+        step: AcceptedReactiveStep<'_>,
+        histories: TransientDeviceHistories<'_>,
+        snapshots: AcceptedReactiveSnapshots<'_>,
+        scheduling: ReactiveBreakpointScheduling<'_>,
+        sink: DynamicBreakpointSink<'_>,
     ) -> Result<(), SimulationError> {
+        let DynamicBreakpointSink {
+            dynamic_breakpoints_added,
+            warned_dynamic_breakpoint_cap,
+            pending_dynamic_breakpoints,
+        } = sink;
+        let ReactiveBreakpointScheduling {
+            breakpoints,
+            tstop,
+            voltage_reltol,
+            voltage_abstol,
+            current_abstol,
+        } = scheduling;
+        let AcceptedReactiveSnapshots {
+            xyce_one_step_order2,
+            vbic_snapshots,
+            capacitor_accepted_states,
+            mosfet_caps,
+            mosfet_gate_companion_charges,
+            suppress_gate_charge_history,
+            tline_dc_refs,
+            coupled_tline_refs,
+        } = snapshots;
+        let TransientDeviceHistories {
+            bjt: bjt_history,
+            jfet: jfet_history,
+            diode: diode_history,
+            mosfet: mosfet_history,
+            vdmos: vdmos_history,
+            b3soi: b3soi_history,
+            bsim3: bsim3_history,
+            bsim4: bsim4_history,
+            ekv26: ekv26_history,
+        } = histories;
+        let AcceptedReactiveStep {
+            accepted_solution,
+            accepted_time,
+            dt,
+            coeff,
+            bsim4_trnqs_coeff,
+        } = step;
         let num_nodes = circuit.num_nodes();
         let capacitor_accepted_states = capacitor_accepted_states
             .filter(|states| states.len() == circuit.capacitors.stamps.len());

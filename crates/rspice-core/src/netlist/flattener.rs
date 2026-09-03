@@ -240,13 +240,6 @@ pub(super) fn validate_subcircuit_port_bindings(
     Ok(())
 }
 
-/// Flattens a hierarchical netlist into a flat element list
-///
-/// This is the core hierarchy processor that converts subcircuit instances
-/// into their constituent elements while managing:
-/// - Unique node naming
-/// - Parameter inheritance and override
-/// - Local options propagation
 /// The three names one subcircuit instantiation carries: the `.SUBCKT` it
 /// invokes, the instance's own name, and the fully qualified name it takes in
 /// the flattened deck. Diagnostics read all three, and passing them as bare
@@ -269,6 +262,13 @@ struct FlattenScope<'a> {
     depth: usize,
 }
 
+/// Flattens a hierarchical netlist into a flat element list
+///
+/// This is the core hierarchy processor that converts subcircuit instances
+/// into their constituent elements while managing:
+/// - Unique node naming
+/// - Parameter inheritance and override
+/// - Local options propagation
 pub struct Flattener<'a> {
     /// Subcircuit definitions indexed by name
     subcircuits: HashMap<String, &'a SubcircuitDef>,

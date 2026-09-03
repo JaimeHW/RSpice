@@ -526,7 +526,164 @@ impl Engine {
 
             let sideband_count = result.num_sidebands();
             solver
-                .solve_periodic_ac_each_with_branch_voltages(&state, PeriodicSidebandWindow { offset_hz: offset, sideband_min: config.sideband_min, sideband_max: config.sideband_max }, &excitations, &branch_excitations, |col, solution| { if abort.is_aborted() { return Err(AnalysisHbError::Aborted); } if solution.len() != lifted_unknowns { return Err(AnalysisHbError::InvalidCircuit(format!( "PAC solver returned {} values for a {lifted_unknowns}-value lifted MNA system", solution.len() ))); } if let Some((index, value)) = solution .iter() .copied() .enumerate() .find(|(_, value)| !value.re.is_finite() || !value.im.is_finite()) { return Err(AnalysisHbError::InvalidCircuit(format!( "PAC solver returned a non-finite value at lifted MNA index {index} ({:+.6e}{:+.6e}j)", value.re, value.im ))); } let m = *excitation_sidebands.get(col).ok_or_else(|| { AnalysisHbError::InvalidCircuit(format!( "PAC returned unexpected excitation column {col}" )) })?; if m == 0 { for k_idx in 0..sideband_count { let k = i64::from(config.sideband_min) .checked_add(i64::try_from(k_idx).map_err(|_| { AnalysisHbError::InvalidCircuit( "PAC sideband offset exceeds i64".to_string(), ) })?) .and_then(|value| i32::try_from(value).ok()) .ok_or_else(|| { AnalysisHbError::InvalidCircuit( "PAC sideband index exceeds i32".to_string(), ) })?; let data = result .get_sideband_data_mut(freq_idx, k) .ok_or_else(|| { AnalysisHbError::InvalidCircuit(format!( "PAC result is missing frequency {freq_idx}, sideband {k}" )) })?; if data.node_voltages.len() != num_nodes || data.branch_currents.len() != branch_count { return Err(AnalysisHbError::InvalidCircuit(format!( "PAC sideband result cardinality differs at frequency {freq_idx}, sideband {k}: {} nodes/{} branches; expected {num_nodes}/{branch_count}", data.node_voltages.len(), data.branch_currents.len() ))); } for node in 0..num_nodes { let index = node .checked_mul(sideband_count) .and_then(|row| row.checked_add(k_idx)) .ok_or_else(|| { AnalysisHbError::InvalidCircuit( "PAC node-spectrum index overflows usize" .to_string(), ) })?; let value = *solution.get(index).ok_or_else(|| { AnalysisHbError::InvalidCircuit(format!( "PAC solution is missing node {node}, sideband {k}" )) })?; data.set_voltage(node, value).map_err(|error| { AnalysisHbError::InvalidCircuit(format!( "PAC node-spectrum publication failed: {error}" )) })?; } for branch in 0..branch_count { let row = num_nodes.checked_add(branch).ok_or_else(|| { AnalysisHbError::InvalidCircuit( "PAC branch-row index overflows usize".to_string(), ) })?; let index = row .checked_mul(sideband_count) .and_then(|row| row.checked_add(k_idx)) .ok_or_else(|| { AnalysisHbError::InvalidCircuit( "PAC branch-spectrum index overflows usize" .to_string(), ) })?; let value = *solution.get(index).ok_or_else(|| { AnalysisHbError::InvalidCircuit(format!( "PAC solution is missing branch {branch}, sideband {k}" )) })?; data.set_current(branch, value).map_err(|error| { AnalysisHbError::InvalidCircuit(format!( "PAC branch-spectrum publication failed: {error}" )) })?; } } } if let Some(out) = output_idx { for k_idx in 0..sideband_count { let k = i64::from(config.sideband_min) .checked_add(i64::try_from(k_idx).map_err(|_| { AnalysisHbError::InvalidCircuit( "PAC sideband offset exceeds i64".to_string(), ) })?) .and_then(|value| i32::try_from(value).ok()) .ok_or_else(|| { AnalysisHbError::InvalidCircuit( "PAC sideband index exceeds i32".to_string(), ) })?; let output = solution[out * sideband_count + k_idx]; let output_voltage = if let Some(reference) = output_ref_idx { output - solution[reference * sideband_count + k_idx] } else { output }; if !output_voltage.re.is_finite() || !output_voltage.im.is_finite() { return Err(AnalysisHbError::InvalidCircuit(format!( "PAC differential output is non-representable at offset {offset:.6e} Hz, input sideband {m}, output sideband {k}" ))); } result .conversion_matrix .set(freq_idx, k, m, output_voltage) .map_err(|error| { AnalysisHbError::InvalidCircuit(format!( "PAC conversion publication failed: {error}" )) })?; } } if abort.is_aborted() { return Err(AnalysisHbError::Aborted); } Ok(()) })
+                .solve_periodic_ac_each_with_branch_voltages(
+                    &state,
+                    PeriodicSidebandWindow {
+                        offset_hz: offset,
+                        sideband_min: config.sideband_min,
+                        sideband_max: config.sideband_max,
+                    },
+                    &excitations,
+                    &branch_excitations,
+                    |col, solution| {
+                        if abort.is_aborted() {
+                            return Err(AnalysisHbError::Aborted);
+                        }
+                        if solution.len() != lifted_unknowns {
+                            return Err(AnalysisHbError::InvalidCircuit(format!(
+                                "PAC solver returned {} values for a {lifted_unknowns}-value lifted MNA system",
+                                solution.len()
+                            )));
+                        }
+                        if let Some((index, value)) = solution
+                            .iter()
+                            .copied()
+                            .enumerate()
+                            .find(|(_, value)| !value.re.is_finite() || !value.im.is_finite())
+                        {
+                            return Err(AnalysisHbError::InvalidCircuit(format!(
+                                "PAC solver returned a non-finite value at lifted MNA index {index} ({:+.6e}{:+.6e}j)",
+                                value.re, value.im
+                            )));
+                        }
+                        let m = *excitation_sidebands.get(col).ok_or_else(|| {
+                            AnalysisHbError::InvalidCircuit(format!(
+                                "PAC returned unexpected excitation column {col}"
+                            ))
+                        })?;
+                        if m == 0 {
+                            for k_idx in 0..sideband_count {
+                                let k = i64::from(config.sideband_min)
+                                    .checked_add(i64::try_from(k_idx).map_err(|_| {
+                                        AnalysisHbError::InvalidCircuit(
+                                            "PAC sideband offset exceeds i64".to_string(),
+                                        )
+                                    })?)
+                                    .and_then(|value| i32::try_from(value).ok())
+                                    .ok_or_else(|| {
+                                        AnalysisHbError::InvalidCircuit(
+                                            "PAC sideband index exceeds i32".to_string(),
+                                        )
+                                    })?;
+                                let data = result
+                                    .get_sideband_data_mut(freq_idx, k)
+                                    .ok_or_else(|| {
+                                        AnalysisHbError::InvalidCircuit(format!(
+                                            "PAC result is missing frequency {freq_idx}, sideband {k}"
+                                        ))
+                                    })?;
+                                if data.node_voltages.len() != num_nodes
+                                    || data.branch_currents.len() != branch_count
+                                {
+                                    return Err(AnalysisHbError::InvalidCircuit(format!(
+                                        "PAC sideband result cardinality differs at frequency {freq_idx}, sideband {k}: {} nodes/{} branches; expected {num_nodes}/{branch_count}",
+                                        data.node_voltages.len(),
+                                        data.branch_currents.len()
+                                    )));
+                                }
+                                for node in 0..num_nodes {
+                                    let index = node
+                                        .checked_mul(sideband_count)
+                                        .and_then(|row| row.checked_add(k_idx))
+                                        .ok_or_else(|| {
+                                            AnalysisHbError::InvalidCircuit(
+                                                "PAC node-spectrum index overflows usize"
+                                                    .to_string(),
+                                            )
+                                        })?;
+                                    let value = *solution.get(index).ok_or_else(|| {
+                                        AnalysisHbError::InvalidCircuit(format!(
+                                            "PAC solution is missing node {node}, sideband {k}"
+                                        ))
+                                    })?;
+                                    data.set_voltage(node, value).map_err(|error| {
+                                        AnalysisHbError::InvalidCircuit(format!(
+                                            "PAC node-spectrum publication failed: {error}"
+                                        ))
+                                    })?;
+                                }
+                                for branch in 0..branch_count {
+                                    let row = num_nodes.checked_add(branch).ok_or_else(|| {
+                                        AnalysisHbError::InvalidCircuit(
+                                            "PAC branch-row index overflows usize".to_string(),
+                                        )
+                                    })?;
+                                    let index = row
+                                        .checked_mul(sideband_count)
+                                        .and_then(|row| row.checked_add(k_idx))
+                                        .ok_or_else(|| {
+                                            AnalysisHbError::InvalidCircuit(
+                                                "PAC branch-spectrum index overflows usize"
+                                                    .to_string(),
+                                            )
+                                        })?;
+                                    let value = *solution.get(index).ok_or_else(|| {
+                                        AnalysisHbError::InvalidCircuit(format!(
+                                            "PAC solution is missing branch {branch}, sideband {k}"
+                                        ))
+                                    })?;
+                                    data.set_current(branch, value).map_err(|error| {
+                                        AnalysisHbError::InvalidCircuit(format!(
+                                            "PAC branch-spectrum publication failed: {error}"
+                                        ))
+                                    })?;
+                                }
+                            }
+                        }
+
+                        if let Some(out) = output_idx {
+                            for k_idx in 0..sideband_count {
+                                let k = i64::from(config.sideband_min)
+                                    .checked_add(i64::try_from(k_idx).map_err(|_| {
+                                        AnalysisHbError::InvalidCircuit(
+                                            "PAC sideband offset exceeds i64".to_string(),
+                                        )
+                                    })?)
+                                    .and_then(|value| i32::try_from(value).ok())
+                                    .ok_or_else(|| {
+                                        AnalysisHbError::InvalidCircuit(
+                                            "PAC sideband index exceeds i32".to_string(),
+                                        )
+                                    })?;
+                                let output = solution[out * sideband_count + k_idx];
+                                let output_voltage = if let Some(reference) = output_ref_idx {
+                                    output - solution[reference * sideband_count + k_idx]
+                                } else {
+                                    output
+                                };
+                                if !output_voltage.re.is_finite()
+                                    || !output_voltage.im.is_finite()
+                                {
+                                    return Err(AnalysisHbError::InvalidCircuit(format!(
+                                        "PAC differential output is non-representable at offset {offset:.6e} Hz, input sideband {m}, output sideband {k}"
+                                    )));
+                                }
+                                result
+                                    .conversion_matrix
+                                    .set(freq_idx, k, m, output_voltage)
+                                    .map_err(|error| {
+                                        AnalysisHbError::InvalidCircuit(format!(
+                                            "PAC conversion publication failed: {error}"
+                                        ))
+                                    })?;
+                            }
+                        }
+                        if abort.is_aborted() {
+                            return Err(AnalysisHbError::Aborted);
+                        }
+                        Ok(())
+                    },
+                )
                 .map_err(|error| match error {
                     AnalysisHbError::Aborted => SimulationError::Aborted,
                     error => SimulationError::Circuit(format!(

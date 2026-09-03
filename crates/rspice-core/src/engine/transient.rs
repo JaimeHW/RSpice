@@ -368,6 +368,7 @@ use breakpoints::{DynamicBreakpointSink, TlineArrivalEvent, TlineWaveChange};
 pub(in crate::engine) use checkpoint::CheckpointState;
 use checkpoint::{AcceptedTransientRuntime, CheckpointIdentity, CheckpointIntegrationState};
 use state_advanced_mos::Bsim4CompanionStep;
+use state_commit::{AcceptedReactiveSnapshots, AcceptedReactiveStep, ReactiveBreakpointScheduling};
 use state_recovery::{ForceAcceptLimits, SourceActivityRecovery};
 use step_control::{SourceActivityDeltas, StepBiasFloors};
 use vbic::VbicSnapshotTolerances;
@@ -8117,36 +8118,46 @@ impl Engine {
                     }
                     self.update_reactive_history(
                         &mut circuit,
-                        &new_solution,
-                        t,
-                        dt,
-                        &coeff,
-                        &bsim4_trnqs_coeff,
-                        &mut bjt_history,
-                        &mut jfet_history,
-                        &mut diode_history,
-                        &mut mosfet_history,
-                        &mut vdmos_history,
-                        &mut b3soi_history,
-                        &mut bsim3_history,
-                        &mut bsim4_history,
-                        &mut ekv26_history,
-                        xyce_one_step_order2,
-                        Some(vbic_snapshot_cache.as_slice()),
-                        None,
-                        None,
-                        None,
-                        suppress_gate_charge,
-                        &tline_dc_refs,
-                        &coupled_tline_refs,
-                        &mut breakpoints,
-                        tstop,
-                        self.voltage_reltol(),
-                        self.voltage_abstol(),
-                        self.current_abstol(),
-                        &mut dynamic_tline_breakpoints_added,
-                        &mut warned_dynamic_tline_breakpoint_cap,
-                        &mut pending_dynamic_tline_breakpoints,
+                        AcceptedReactiveStep {
+                            accepted_solution: &new_solution,
+                            accepted_time: t,
+                            dt,
+                            coeff: &coeff,
+                            bsim4_trnqs_coeff: &bsim4_trnqs_coeff,
+                        },
+                        TransientDeviceHistories {
+                            bjt: &mut bjt_history,
+                            jfet: &mut jfet_history,
+                            diode: &mut diode_history,
+                            mosfet: &mut mosfet_history,
+                            vdmos: &mut vdmos_history,
+                            b3soi: &mut b3soi_history,
+                            bsim3: &mut bsim3_history,
+                            bsim4: &mut bsim4_history,
+                            ekv26: &mut ekv26_history,
+                        },
+                        AcceptedReactiveSnapshots {
+                            xyce_one_step_order2,
+                            vbic_snapshots: Some(vbic_snapshot_cache.as_slice()),
+                            capacitor_accepted_states: None,
+                            mosfet_caps: None,
+                            mosfet_gate_companion_charges: None,
+                            suppress_gate_charge_history: suppress_gate_charge,
+                            tline_dc_refs: &tline_dc_refs,
+                            coupled_tline_refs: &coupled_tline_refs,
+                        },
+                        ReactiveBreakpointScheduling {
+                            breakpoints: &mut breakpoints,
+                            tstop,
+                            voltage_reltol: self.voltage_reltol(),
+                            voltage_abstol: self.voltage_abstol(),
+                            current_abstol: self.current_abstol(),
+                        },
+                        DynamicBreakpointSink {
+                            dynamic_breakpoints_added: &mut dynamic_tline_breakpoints_added,
+                            warned_dynamic_breakpoint_cap: &mut warned_dynamic_tline_breakpoint_cap,
+                            pending_dynamic_breakpoints: &mut pending_dynamic_tline_breakpoints,
+                        },
                     )?;
                     if circuit.has_xspice_devices() {
                         if capture_xyce_static_history {
@@ -8627,37 +8638,47 @@ impl Engine {
             .then_some(mosfet_companion_charges_scratch.as_slice());
             self.update_reactive_history(
                 &mut circuit,
-                &new_solution,
-                t,
-                dt,
-                &coeff,
-                &bsim4_trnqs_coeff,
-                &mut bjt_history,
-                &mut jfet_history,
-                &mut diode_history,
-                &mut mosfet_history,
-                &mut vdmos_history,
-                &mut b3soi_history,
-                &mut bsim3_history,
-                &mut bsim4_history,
-                &mut ekv26_history,
-                xyce_one_step_order2,
-                Some(vbic_snapshot_cache.as_slice()),
-                capacitor_accepted_states_valid
-                    .then_some(capacitor_accepted_states_scratch.as_slice()),
-                mosfet_caps_valid.then_some(mosfet_caps_scratch.as_slice()),
-                cached_mosfet_gate_companion_charges,
-                suppress_gate_charge,
-                &tline_dc_refs,
-                &coupled_tline_refs,
-                &mut breakpoints,
-                tstop,
-                self.voltage_reltol(),
-                self.voltage_abstol(),
-                self.current_abstol(),
-                &mut dynamic_tline_breakpoints_added,
-                &mut warned_dynamic_tline_breakpoint_cap,
-                &mut pending_dynamic_tline_breakpoints,
+                AcceptedReactiveStep {
+                    accepted_solution: &new_solution,
+                    accepted_time: t,
+                    dt,
+                    coeff: &coeff,
+                    bsim4_trnqs_coeff: &bsim4_trnqs_coeff,
+                },
+                TransientDeviceHistories {
+                    bjt: &mut bjt_history,
+                    jfet: &mut jfet_history,
+                    diode: &mut diode_history,
+                    mosfet: &mut mosfet_history,
+                    vdmos: &mut vdmos_history,
+                    b3soi: &mut b3soi_history,
+                    bsim3: &mut bsim3_history,
+                    bsim4: &mut bsim4_history,
+                    ekv26: &mut ekv26_history,
+                },
+                AcceptedReactiveSnapshots {
+                    xyce_one_step_order2,
+                    vbic_snapshots: Some(vbic_snapshot_cache.as_slice()),
+                    capacitor_accepted_states: capacitor_accepted_states_valid
+                        .then_some(capacitor_accepted_states_scratch.as_slice()),
+                    mosfet_caps: mosfet_caps_valid.then_some(mosfet_caps_scratch.as_slice()),
+                    mosfet_gate_companion_charges: cached_mosfet_gate_companion_charges,
+                    suppress_gate_charge_history: suppress_gate_charge,
+                    tline_dc_refs: &tline_dc_refs,
+                    coupled_tline_refs: &coupled_tline_refs,
+                },
+                ReactiveBreakpointScheduling {
+                    breakpoints: &mut breakpoints,
+                    tstop,
+                    voltage_reltol: self.voltage_reltol(),
+                    voltage_abstol: self.voltage_abstol(),
+                    current_abstol: self.current_abstol(),
+                },
+                DynamicBreakpointSink {
+                    dynamic_breakpoints_added: &mut dynamic_tline_breakpoints_added,
+                    warned_dynamic_breakpoint_cap: &mut warned_dynamic_tline_breakpoint_cap,
+                    pending_dynamic_breakpoints: &mut pending_dynamic_tline_breakpoints,
+                },
             )?;
             total_history_nanos += history_phase_start.elapsed().as_nanos();
             let tail_phase_start = DiagnosticTimer::start(diagnostic_timing_enabled);
