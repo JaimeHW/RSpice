@@ -88,8 +88,12 @@ fn planned_artifacts(deck: &Path, requested: &Path) -> Vec<PathBuf> {
     let source = std::fs::read_to_string(deck).expect("read planned deck");
     let netlist = rspice_core::Netlist::parse(&source).expect("parse planned deck");
     let limits = rspice_core::ResourceLimits::default();
-    let plan = rspice_core::execution::DeckPlan::from_netlist(&netlist, &limits)
-        .expect("plan artifact namespaces");
+    let plan = rspice_core::execution::DeckPlan::from_netlist_with_abort(
+        &netlist,
+        &limits,
+        &rspice_core::NoAbort,
+    )
+    .expect("plan artifact namespaces");
     plan.coordinates_with_abort(&limits, &rspice_core::NoAbort)
         .expect("plan coordinates")
         .iter()

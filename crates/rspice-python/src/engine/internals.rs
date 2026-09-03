@@ -21,8 +21,14 @@ impl PyEngine {
 
     /// Resolve a node identifier (index or name) to a node index, building
     /// the circuit to obtain the node map when a name is given.
+    ///
+    /// Elaborating a large hierarchical deck is real work that happens before
+    /// any solver starts, so it runs on the interruptible worker like every
+    /// other long call: `KeyboardInterrupt` reaches a name lookup, and the GIL
+    /// is not held across the build.
     pub(super) fn resolve_node(
         &self,
+        py: Python<'_>,
         engine: &Engine,
         netlist: &rspice_core::Netlist,
         node: &NodeIdentifier,
@@ -38,9 +44,9 @@ impl PyEngine {
                 if let Ok(idx) = name.parse::<usize>() {
                     return Ok(idx);
                 }
-                let circuit = engine
-                    .build_circuit(netlist)
-                    .map_err(crate::errors::simulation_error_to_pyerr)?;
+                let circuit = run_interruptible(py, &self.active_runs, |abort| {
+                    engine.build_circuit_with_abort(netlist, abort)
+                })?;
                 circuit
                     .node_names_sorted()
                     .iter()
@@ -252,13 +258,14 @@ impl PyEngine {
         compute_zeros: bool,
     ) -> PyResult<PyPoleZeroResult> {
         let engine = self.engine_for_netlist(&netlist.inner);
-        let input_pos = self.resolve_node(&engine, &netlist.inner, input_pos, "PZ input+")?;
+        let input_pos = self.resolve_node(py, &engine, &netlist.inner, input_pos, "PZ input+")?;
         let input_neg = input_neg
-            .map(|node| self.resolve_node(&engine, &netlist.inner, node, "PZ input-"))
+            .map(|node| self.resolve_node(py, &engine, &netlist.inner, node, "PZ input-"))
             .transpose()?;
-        let output_pos = self.resolve_node(&engine, &netlist.inner, output_pos, "PZ output+")?;
+        let output_pos =
+            self.resolve_node(py, &engine, &netlist.inner, output_pos, "PZ output+")?;
         let output_neg = output_neg
-            .map(|node| self.resolve_node(&engine, &netlist.inner, node, "PZ output-"))
+            .map(|node| self.resolve_node(py, &engine, &netlist.inner, node, "PZ output-"))
             .transpose()?;
         let result = run_interruptible(py, &self.active_runs, |abort| {
             engine.run_pz_ports_with_abort(
@@ -284,9 +291,12 @@ impl PyEngine {
         reference: Option<&NodeIdentifier>,
     ) -> PyResult<PySensitivityResult> {
         let engine = self.engine_for_netlist(&netlist.inner);
-        let output = self.resolve_node(&engine, &netlist.inner, output, "sensitivity output")?;
+        let output =
+            self.resolve_node(py, &engine, &netlist.inner, output, "sensitivity output")?;
         let reference = reference
-            .map(|node| self.resolve_node(&engine, &netlist.inner, node, "sensitivity reference"))
+            .map(|node| {
+                self.resolve_node(py, &engine, &netlist.inner, node, "sensitivity reference")
+            })
             .transpose()?;
         let result = run_interruptible(py, &self.active_runs, |abort| {
             engine.run_sensitivity_linearized_with_abort(&netlist.inner, output, reference, abort)
@@ -318,10 +328,16 @@ impl PyEngine {
             AcSensitivityOutput::BranchCurrent(element.clone())
         } else {
             let positive =
-                self.resolve_node(&engine, &netlist.inner, output, "DC sensitivity output")?;
+                self.resolve_node(py, &engine, &netlist.inner, output, "DC sensitivity output")?;
             let negative = reference
                 .map(|node| {
-                    self.resolve_node(&engine, &netlist.inner, node, "DC sensitivity reference")
+                    self.resolve_node(
+                        py,
+                        &engine,
+                        &netlist.inner,
+                        node,
+                        "DC sensitivity reference",
+                    )
                 })
                 .transpose()?;
             AcSensitivityOutput::Voltage { positive, negative }
@@ -359,10 +375,16 @@ impl PyEngine {
             AcSensitivityOutput::BranchCurrent(element.clone())
         } else {
             let positive =
-                self.resolve_node(&engine, &netlist.inner, output, "AC sensitivity output")?;
+                self.resolve_node(py, &engine, &netlist.inner, output, "AC sensitivity output")?;
             let negative = reference
                 .map(|node| {
-                    self.resolve_node(&engine, &netlist.inner, node, "AC sensitivity reference")
+                    self.resolve_node(
+                        py,
+                        &engine,
+                        &netlist.inner,
+                        node,
+                        "AC sensitivity reference",
+                    )
                 })
                 .transpose()?;
             AcSensitivityOutput::Voltage { positive, negative }
@@ -404,23 +426,29 @@ impl PyEngine {
         let temperature = engine.config().temperature;
         let (parameters, noise) = run_interruptible(py, &self.active_runs, |abort| {
             let num_points = frequencies.len();
-            let scattering =
-                s_param::extract_s_matrix(&netlist.inner, &ports, &frequencies, |driven| {
+            let scattering = s_param::extract_s_matrix_with_abort(
+                &netlist.inner,
+                &ports,
+                &frequencies,
+                |driven| {
                     engine
                         .run_ac_with_abort(driven, &frequencies, abort)
                         .map_err(|error| error.to_string())
-                })
-                // An interrupt surfaces as a failed AC solve, so the abort
-                // signal — not the error text — decides which it was. A
-                // cancelled run must never reach the caller dressed up as a
-                // defect in their circuit.
-                .map_err(|error| {
-                    if abort.is_aborted() {
-                        rspice_core::engine::SimulationError::Aborted
-                    } else {
-                        rspice_core::engine::SimulationError::Circuit(error.to_string())
-                    }
-                })?;
+                },
+                abort,
+            )
+            // The extraction reports its own cancellation, but an interrupt
+            // caught inside the caller's AC solve still surfaces as a failed
+            // solve, so the abort signal — not the error text — decides which
+            // it was. A cancelled run must never reach the caller dressed up
+            // as a defect in their circuit.
+            .map_err(|error| {
+                if matches!(error, s_param::ExtractError::Aborted) || abort.is_aborted() {
+                    rspice_core::engine::SimulationError::Aborted
+                } else {
+                    rspice_core::engine::SimulationError::Circuit(error.to_string())
+                }
+            })?;
 
             let noise = if do_noise {
                 let points = engine.run_port_noise_correlation_with_abort(

@@ -1384,11 +1384,17 @@ fn solve_netlist_sparameters(
     do_noise: bool,
 ) -> Result<SParameterSweepData, CliError> {
     ensure_not_cancelled(ctx)?;
-    let s = s_param::extract_s_matrix(ctx.netlist, &ports, &frequencies, |driven| {
-        ctx.engine
-            .run_ac_with_abort(driven, &frequencies, &crate::abort::ProcessAbort)
-            .map_err(|error| error.to_string())
-    })
+    let s = s_param::extract_s_matrix_with_abort(
+        ctx.netlist,
+        &ports,
+        &frequencies,
+        |driven| {
+            ctx.engine
+                .run_ac_with_abort(driven, &frequencies, &crate::abort::ProcessAbort)
+                .map_err(|error| error.to_string())
+        },
+        &crate::abort::ProcessAbort,
+    )
     .map_err(|error| map_advanced_string_error(ctx, "S-Parameters", error))?;
     ensure_not_cancelled(ctx)?;
 

@@ -60,8 +60,12 @@ fn planned_coordinate(base: &Path, one_based_index: usize) -> Option<(String, Ve
     let source = std::fs::read_to_string(deck).expect("read test deck");
     let netlist = rspice_core::Netlist::parse(&source).expect("parse test deck");
     let limits = rspice_core::ResourceLimits::default();
-    let plan =
-        rspice_core::execution::DeckPlan::from_netlist(&netlist, &limits).expect("plan test deck");
+    let plan = rspice_core::execution::DeckPlan::from_netlist_with_abort(
+        &netlist,
+        &limits,
+        &rspice_core::NoAbort,
+    )
+    .expect("plan test deck");
     let coordinates = plan
         .coordinates_with_abort(&limits, &rspice_core::NoAbort)
         .expect("plan test coordinates");

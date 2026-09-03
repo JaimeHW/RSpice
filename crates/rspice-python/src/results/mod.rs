@@ -37,6 +37,7 @@ use numpy::{PyArray1, ToPyArray};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use rspice_core::Complex64;
+use rspice_core::analysis::fourier::FourierError;
 use rspice_core::analysis::{
     AcResult, AcSensitivityResult, DistortionAnalysisResult, DistortionProduct,
     HbContinuationLimitation, HbReactiveKind,

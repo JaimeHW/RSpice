@@ -131,6 +131,22 @@ impl AbortSignal for RunControl {
 ///
 /// Polling uses exponential backoff from 50 µs to 50 ms so sub-millisecond
 /// solves pay ~0.1 ms of overhead while long runs poll cheaply.
+/// Run a long call interruptibly when there is no engine registry to join.
+///
+/// Result objects own no `Engine`, so an operation on one — post-processing a
+/// stored waveform, for instance — cannot be reached by `Engine.cancel_all()`
+/// and has nothing to report progress to. It still must not hold the GIL for
+/// minutes or ignore `KeyboardInterrupt`, which is what this provides: the
+/// same worker-thread and signal-polling behavior against a registry that
+/// lives only for this call.
+pub(crate) fn run_interruptible_unregistered<T, F>(py: Python<'_>, f: F) -> PyResult<T>
+where
+    T: Send,
+    F: FnOnce(&RunControl) -> Result<T, SimulationError> + Send,
+{
+    run_interruptible(py, &ActiveRuns::default(), f)
+}
+
 pub(crate) fn run_interruptible<T, F>(py: Python<'_>, active_runs: &ActiveRuns, f: F) -> PyResult<T>
 where
     T: Send,

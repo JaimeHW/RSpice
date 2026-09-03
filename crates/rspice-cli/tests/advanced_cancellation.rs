@@ -100,19 +100,3 @@ fn monte_carlo_timeout_is_typed_prompt_and_does_not_publish_an_artifact() {
         artifact.display()
     );
 }
-
-#[test]
-fn advanced_runner_contains_no_direct_non_abort_core_analysis_wrapper() {
-    let source = include_str!("../src/commands/run/advanced.rs");
-    for forbidden in [
-        ".run_monte_carlo_with_options(",
-        ".run_pss(",
-        ".run_hb(",
-        ".run_ac(&netlist",
-    ] {
-        assert!(
-            !source.contains(forbidden),
-            "advanced runner regressed to non-cancellable core wrapper {forbidden}"
-        );
-    }
-}

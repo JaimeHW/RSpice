@@ -46,6 +46,7 @@ pub fn execute(
         println!("Checking: {}", args.input.display());
     }
 
+    crate::abort::install_interrupt_handler();
     let resource_limits = config.resources.limits();
     let parsed =
         crate::commands::parse_netlist_input(&args.input, resource_limits).and_then(|netlist| {
@@ -82,7 +83,7 @@ pub fn execute(
     // Always-on topology checks: these decks produce singular systems, so
     // catching them statically beats a NaN at runtime.
     check_topology(&netlist, &mut result);
-    check_xspice_build(&netlist, &mut result, resource_limits);
+    check_xspice_build(&netlist, &mut result, resource_limits)?;
 
     if args.connectivity {
         check_connectivity(&netlist, &mut result);
@@ -115,13 +116,20 @@ pub fn execute(
     }
 }
 
+/// Elaborate an XSPICE deck to prove it builds.
+///
+/// This is the one part of `check` that runs the engine's circuit builder, so
+/// it runs under the process abort source: Ctrl-C during a large hierarchical
+/// build stops the check. A cancelled build is returned as an interrupt, never
+/// recorded as a validation error — reporting a cancelled run as a defect in
+/// the customer's deck would be a false negative.
 fn check_xspice_build(
     netlist: &Netlist,
     result: &mut ValidationResult,
     resource_limits: rspice_core::ResourceLimits,
-) {
+) -> Result<(), CliError> {
     if !netlist_contains_xspice(netlist) {
-        return;
+        return Ok(());
     }
 
     let _external_guard = XspiceCheckExternalRuntimeGuard::install();
@@ -129,13 +137,18 @@ fn check_xspice_build(
         resource_limits,
         ..rspice_core::SimulationConfig::default()
     };
-    if let Err(error) = Engine::new(config).build_circuit(netlist) {
-        result.errors.push(ValidationIssue {
-            message: format!("XSPICE build validation failed: {error}"),
-            element: None,
-            line: None,
-            code: None,
-        });
+    match Engine::new(config).build_circuit_with_abort(netlist, &crate::abort::ProcessAbort) {
+        Ok(_) => Ok(()),
+        Err(rspice_core::SimulationError::Aborted) => Err(CliError::Interrupted),
+        Err(error) => {
+            result.errors.push(ValidationIssue {
+                message: format!("XSPICE build validation failed: {error}"),
+                element: None,
+                line: None,
+                code: None,
+            });
+            Ok(())
+        }
     }
 }
 

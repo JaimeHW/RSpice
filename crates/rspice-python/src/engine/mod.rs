@@ -816,10 +816,11 @@ impl PyEngine {
     ) -> PyResult<Vec<PyNoiseResult>> {
         validate_frequencies(&frequencies)?;
         let engine = self.engine_for_netlist(&netlist.inner);
-        let output = self.resolve_node(&engine, &netlist.inner, &output_node, "noise output")?;
+        let output =
+            self.resolve_node(py, &engine, &netlist.inner, &output_node, "noise output")?;
         let output_neg = match &reference_node {
             Some(node) => {
-                Some(self.resolve_node(&engine, &netlist.inner, node, "noise reference")?)
+                Some(self.resolve_node(py, &engine, &netlist.inner, node, "noise reference")?)
             }
             None => None,
         };
@@ -1702,7 +1703,7 @@ impl PyEngine {
             )));
         }
         let engine = self.engine_for_netlist(&netlist.inner);
-        let output = self.resolve_node(&engine, &netlist.inner, &output_node, "output")?;
+        let output = self.resolve_node(py, &engine, &netlist.inner, &output_node, "output")?;
         run_interruptible(py, &self.active_runs, |abort| {
             engine.run_sensitivity_with_abort(
                 &netlist.inner,
@@ -1798,7 +1799,7 @@ impl PyEngine {
         }
         validate_frequencies(&frequencies)?;
         let engine = self.engine_for_netlist(&netlist.inner);
-        let output = self.resolve_node(&engine, &netlist.inner, &output_node, "output")?;
+        let output = self.resolve_node(py, &engine, &netlist.inner, &output_node, "output")?;
         let values = run_interruptible(py, &self.active_runs, |abort| {
             engine.run_sensitivity_ac_with_abort(
                 &netlist.inner,

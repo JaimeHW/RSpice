@@ -189,7 +189,7 @@ pub(super) fn run(
             },
             &mut out,
         )?;
-        evaluate_pending_fourier(py, &mut out);
+        evaluate_pending_fourier(py, &mut out)?;
         let mut measurements = evaluate_measurements(py, net, &out);
         set_measurement_execution_context(&mut measurements, &plan, None);
         measurements
@@ -437,7 +437,7 @@ fn run_axis_plan(
             )?;
         }
 
-        evaluate_pending_fourier(py, &mut coordinate_out);
+        evaluate_pending_fourier(py, &mut coordinate_out)?;
         let mut coordinate_measurements =
             evaluate_measurements(py, &materialized.inner, &coordinate_out);
         set_measurement_execution_context(&mut coordinate_measurements, plan, Some(&coordinate));
@@ -837,6 +837,7 @@ fn execute(
         } => {
             let engine = py_engine.engine_for_netlist(net);
             let output = py_engine.resolve_node(
+                py,
                 &engine,
                 net,
                 &NodeIdentifier::Name(output_node.clone()),
@@ -844,6 +845,7 @@ fn execute(
             )?;
             let output_neg = match reference_node {
                 Some(reference) => Some(py_engine.resolve_node(
+                    py,
                     &engine,
                     net,
                     &NodeIdentifier::Name(reference.clone()),
@@ -1078,7 +1080,7 @@ fn execute(
 }
 
 /// Evaluate deferred `.four` cards against the transient result.
-fn evaluate_pending_fourier(py: Python<'_>, out: &mut DirectiveOutcomes) {
+fn evaluate_pending_fourier(py: Python<'_>, out: &mut DirectiveOutcomes) -> PyResult<()> {
     // .FOUR needs a transient result; evaluate after the loop so a
     // .four directive may precede its .tran in the deck.
     for pending in std::mem::take(&mut out.pending_fourier) {
@@ -1102,6 +1104,7 @@ fn evaluate_pending_fourier(py: Python<'_>, out: &mut DirectiveOutcomes) {
         match out.tran.last() {
             Some(tran_obj) => {
                 let tran_ref = tran_obj.borrow(py);
+                let time = tran_ref.inner.time.as_slice();
                 for output in &outputs {
                     // `.four` addresses node voltages, differential node
                     // pairs, and branch currents alike.
@@ -1114,7 +1117,22 @@ fn evaluate_pending_fourier(py: Python<'_>, out: &mut DirectiveOutcomes) {
                                 rspice_core::analysis::FourierConfig::new(fundamental)
                                     .with_harmonics(num_harmonics),
                             );
-                            match analysis.analyze(&tran_ref.inner.time, &waveform) {
+                            // Qualification and transformation of a long
+                            // waveform is unbounded work, so it runs on the
+                            // interruptible worker. A cancellation is the one
+                            // outcome that is not this output's own problem:
+                            // it propagates instead of being recorded as a
+                            // skipped directive.
+                            let qualified =
+                                crate::abort::run_interruptible_unregistered(py, |abort| {
+                                    match analysis.analyze_with_abort(time, &waveform, abort) {
+                                        Err(
+                                            rspice_core::analysis::fourier::FourierError::Aborted,
+                                        ) => Err(rspice_core::SimulationError::Aborted),
+                                        outcome => Ok(outcome),
+                                    }
+                                })?;
+                            match qualified {
                                 Ok(result) => {
                                     out.fourier.push(PyFourierResult::from_core_with_provenance(
                                         &result,
@@ -1162,6 +1180,7 @@ fn evaluate_pending_fourier(py: Python<'_>, out: &mut DirectiveOutcomes) {
             record.set_parent_analysis_id(parent_analysis_id.clone());
         }
     }
+    Ok(())
 }
 
 /// Evaluate the deck's `.MEAS` statements against whatever ran.

@@ -816,9 +816,10 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
 
     crate::abort::install_interrupt_handler();
     validate_run_numeric_args(&args)?;
-    if let Some(seconds) = args.timeout {
-        crate::abort::arm_timeout(seconds);
-    }
+    // Held for the whole cancellable region. Dropping it on any exit path
+    // closes the completion latch, so a deadline that expires after the run
+    // is already over cannot announce a cancellation that never happened.
+    let _timeout = args.timeout.map(crate::abort::arm_timeout);
 
     let resource_limits = config.resources.limits();
     let parse_options = parse_options_for_run(&args, resource_limits);
