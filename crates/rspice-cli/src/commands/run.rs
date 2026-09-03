@@ -11,13 +11,16 @@
 mod advanced;
 mod basic;
 mod document;
+mod fft_document;
+mod fourier_document;
 mod frequency;
+mod restart;
 mod shared;
 
 pub(crate) use document::PublishedResult;
 
 pub(crate) use crate::commands::export_table as export;
-pub(crate) use basic::read_fft_raw_artifact;
+pub(crate) use fft_document::read_fft_raw_artifact;
 
 use crate::report::{
     CsvMeasReporter, JUnitReporter, JsonMeasReporter, MeasurementReport, SimulationReport,
@@ -883,7 +886,12 @@ impl<'a> RunContext<'a> {
                         message: "authored Fourier ordinal overflowed u32".to_string(),
                     })?;
                 self.next_fourier_ordinal.set(next);
-                basic::run_fourier(self, ordinal as usize, *fundamental, *num_harmonics)?;
+                fourier_document::run_fourier(
+                    self,
+                    ordinal as usize,
+                    *fundamental,
+                    *num_harmonics,
+                )?;
             }
             AnalysisCommand::MonteCarlo(mc_cmd) => {
                 advanced::run_monte_carlo_from_command(self, mc_cmd)?
