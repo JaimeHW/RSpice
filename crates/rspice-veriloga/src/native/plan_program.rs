@@ -332,7 +332,7 @@ mod tests {
                 NativeOp::LoadBranchUnknown(0),
                 NativeOp::Add,
             ],
-            3,
+            2,
             vec![2],
             vec![4],
         );
