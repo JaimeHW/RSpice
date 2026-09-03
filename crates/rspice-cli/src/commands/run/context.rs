@@ -56,6 +56,15 @@ pub(super) struct RunContext<'a> {
     /// Canonical transient identities used by checkpoint and post-processing
     /// namespaces, indexed by zero-based authored transient ordinal.
     planned_transient_ids: Vec<rspice_core::execution::AnalysisInstanceId>,
+    /// The upstream periodic instance the canonical plan bound each dependent
+    /// analysis to, in planned order.
+    ///
+    /// A `.PAC`, `.PNOISE` or `.ENVELOPE` card linearizes around the periodic
+    /// operating point of a specific `.PSS`/`.HB` instance. The plan decides
+    /// which one; reading that binding here is what keeps a deck with two
+    /// carriers attaching each dependent card to the same carrier the browser
+    /// runner and the engine adapter attach it to.
+    planned_upstreams: Vec<(AnalysisInstanceId, AnalysisInstanceId)>,
     /// Every planned `.FOUR` operand and `.FFT` card, named by the canonical
     /// plan and bound to the transient it post-processes.
     planned_post_processes: Vec<PlannedPostProcess>,
@@ -85,12 +94,19 @@ pub(super) struct RunContext<'a> {
     /// manifest.
     pub(super) outputs: std::cell::RefCell<Vec<std::path::PathBuf>>,
     /// Completed authored transients a planned `.FOUR` card post-processes,
-    /// in authored order. `.FOUR` cards run after every physical analysis —
-    /// ngspice accepts a `.FOUR` card above the `.TRAN` it belongs to — so a
+    /// in authored order. `.FOUR` cards run after every physical analysis â€”
+    /// ngspice accepts a `.FOUR` card above the `.TRAN` it belongs to â€” so a
     /// deck with several transients must still be able to reach the one the
     /// plan bound each card to, not merely the one that ran last. A transient
     /// no planned card names is not retained at all.
     retained_transients: std::cell::RefCell<Vec<RetainedTransient>>,
+    /// Periodic large-signal operating points this run has solved.
+    ///
+    /// `.PAC`, `.PNOISE` and `.ENVELOPE` linearize around an upstream `.PSS`
+    /// or `.HB`. Core exposes that operating point alongside the upstream
+    /// analysis's own result, so the deck route retains it instead of solving
+    /// the large-signal problem a second time for every dependent card.
+    periodic: std::cell::RefCell<PeriodicOperatingPoints>,
     /// Zero-based ordinal assigned to authored transient cards as they enter
     /// the physical-analysis dispatcher.
     next_transient_ordinal: std::cell::Cell<u32>,
@@ -101,6 +117,50 @@ pub(super) struct RunContext<'a> {
 /// The canonical identity of one planned `.FOUR` operand and the authored
 /// output spelling that operand names.
 type PlannedFourierOperand<'plan> = (AnalysisInstanceId, &'plan str);
+
+/// Periodic large-signal operating points one concrete deck run retained.
+///
+/// The harmonic-balance configuration is retained beside its operating point
+/// because `.ENVELOPE` continues the exact carrier its upstream `.HB` solved,
+/// and re-deriving that configuration from the card would let a deck-level
+/// `.OPTIONS HBINT` change turn one carrier into two.
+#[derive(Default)]
+pub(super) struct PeriodicOperatingPoints {
+    pss: Vec<(AnalysisInstanceId, rspice_core::engine::PssOperatingPoint)>,
+    hb: Vec<(
+        AnalysisInstanceId,
+        rspice_core::engine::HbOperatingPoint,
+        rspice_core::analysis::HbConfig,
+    )>,
+}
+
+impl PeriodicOperatingPoints {
+    /// The retained shooting-`.PSS` state of one instance.
+    pub(super) fn pss(
+        &self,
+        id: AnalysisInstanceId,
+    ) -> Option<&rspice_core::engine::PssOperatingPoint> {
+        self.pss
+            .iter()
+            .find(|(candidate, _)| *candidate == id)
+            .map(|(_, point)| point)
+    }
+
+    /// The retained harmonic-balance state of one instance, with the exact
+    /// configuration that produced it.
+    pub(super) fn hb(
+        &self,
+        id: AnalysisInstanceId,
+    ) -> Option<(
+        &rspice_core::engine::HbOperatingPoint,
+        &rspice_core::analysis::HbConfig,
+    )> {
+        self.hb
+            .iter()
+            .find(|(candidate, _, _)| *candidate == id)
+            .map(|(_, point, config)| (point, config))
+    }
+}
 
 pub(super) struct RetainedTransient {
     pub(super) analysis_id: String,
@@ -194,6 +254,7 @@ impl<'a> RunContext<'a> {
             output_tag_multiplicities: analysis_output_tag_multiplicities(netlist),
             planned_output_ids: std::cell::RefCell::new(planned.output_ids),
             planned_transient_ids: planned.transient_ids,
+            planned_upstreams: planned.upstreams,
             planned_fft_ids: planned_fft_ids(&planned.post_processes, netlist)?,
             planned_post_processes: planned.post_processes,
             planned_namespace_error: std::cell::RefCell::new(None),
@@ -206,6 +267,7 @@ impl<'a> RunContext<'a> {
             evaluated_meas: std::cell::RefCell::new(std::collections::HashSet::new()),
             outputs: std::cell::RefCell::new(Vec::new()),
             retained_transients: std::cell::RefCell::new(Vec::new()),
+            periodic: std::cell::RefCell::default(),
             next_transient_ordinal: std::cell::Cell::new(0),
             next_fourier_ordinal: std::cell::Cell::new(0),
         })
@@ -252,6 +314,7 @@ impl<'a> RunContext<'a> {
             output_tag_multiplicities: analysis_output_tag_multiplicities(netlist),
             planned_output_ids: std::cell::RefCell::new(planned.output_ids),
             planned_transient_ids: planned.transient_ids,
+            planned_upstreams: planned.upstreams,
             planned_fft_ids: planned_fft_ids(&planned.post_processes, netlist)?,
             planned_post_processes: planned.post_processes,
             planned_namespace_error: std::cell::RefCell::new(None),
@@ -266,6 +329,7 @@ impl<'a> RunContext<'a> {
             evaluated_meas: std::cell::RefCell::new(std::collections::HashSet::new()),
             outputs: std::cell::RefCell::new(Vec::new()),
             retained_transients: std::cell::RefCell::new(Vec::new()),
+            periodic: std::cell::RefCell::default(),
             next_transient_ordinal: std::cell::Cell::new(0),
             next_fourier_ordinal: std::cell::Cell::new(0),
         })
@@ -387,13 +451,28 @@ impl<'a> RunContext<'a> {
     /// first instance of its family.
     pub(super) fn resolve_output(&self, tag: &str) -> Option<ResolvedOutput> {
         let path = self.output.clone()?;
+        let (qualified_tag, analysis) = self.take_planned_identity(tag)?;
+        let resolved = self.namespaced_artifact_path(path, &qualified_tag);
+        self.outputs.borrow_mut().push(resolved.clone());
+        Some(ResolvedOutput {
+            path: resolved,
+            analysis,
+        })
+    }
+
+    /// The canonical identity the next artifact under `tag` publishes with,
+    /// and the namespace component its path takes.
+    ///
+    /// `None` means the planned queue disagrees with the deck, which is
+    /// recorded as a deferred namespace error rather than resolved here.
+    fn take_planned_identity(&self, tag: &str) -> Option<(String, Option<AnalysisInstanceId>)> {
         let planned_id = self
             .planned_output_ids
             .borrow_mut()
             .get_mut(tag)
             .and_then(std::collections::VecDeque::pop_front);
-        let (qualified_tag, analysis) = match planned_id {
-            Some(id) => (id.tag(), Some(id)),
+        match planned_id {
+            Some(id) => Some((id.tag(), Some(id))),
             None => {
                 if self.output_tag_multiplicities.contains_key(tag) {
                     self.planned_namespace_error.replace(Some(format!(
@@ -410,28 +489,113 @@ impl<'a> RunContext<'a> {
                         )));
                         None
                     });
-                (tag.to_string(), minted)
+                Some((tag.to_string(), minted))
             }
+        }
+    }
+
+    fn namespaced_artifact_path(&self, path: PathBuf, qualified_tag: &str) -> PathBuf {
+        if !self.multi_analysis {
+            return path;
+        }
+        let mut file_name = path
+            .file_stem()
+            .map(|stem| stem.to_os_string())
+            .unwrap_or_default();
+        file_name.push(format!(".{qualified_tag}"));
+        if let Some(ext) = path.extension() {
+            file_name.push(".");
+            file_name.push(ext);
+        }
+        path.with_file_name(file_name)
+    }
+
+    /// The canonical identity of the periodic large-signal card entering the
+    /// dispatcher, with its artifact destination when the run resolved one.
+    ///
+    /// `.PSS`, `.HB`, `.PAC`, `.PNOISE` and `.ENVELOPE` need their identity
+    /// before they publish, and on a run that resolved no output path at all:
+    /// a carrier is retained under its identity so the dependent cards the
+    /// plan bound to it can find it, and a dependent card looks its carrier up
+    /// by that same identity. Every other family resolves its identity
+    /// together with its destination, because it needs the identity only to
+    /// publish. The destination is recorded in the `--summary` manifest by the
+    /// caller when it publishes, so a card that fails names no artifact.
+    pub(super) fn resolve_periodic_analysis(
+        &self,
+        tag: &str,
+    ) -> Result<PeriodicArtifact, CliError> {
+        let namespace_error = || {
+            self.planned_namespace_error
+                .borrow_mut()
+                .take()
+                .map_or_else(
+                    || CliError::InternalError {
+                        message: format!("'{tag}' has no canonical analysis identity"),
+                    },
+                    |message| CliError::InternalError { message },
+                )
         };
-        let resolved = if !self.multi_analysis {
-            path
-        } else {
-            let mut file_name = path
-                .file_stem()
-                .map(|stem| stem.to_os_string())
-                .unwrap_or_default();
-            file_name.push(format!(".{qualified_tag}"));
-            if let Some(ext) = path.extension() {
-                file_name.push(".");
-                file_name.push(ext);
-            }
-            path.with_file_name(file_name)
-        };
-        self.outputs.borrow_mut().push(resolved.clone());
-        Some(ResolvedOutput {
-            path: resolved,
-            analysis,
-        })
+        let (qualified_tag, analysis) = self
+            .take_planned_identity(tag)
+            .ok_or_else(namespace_error)?;
+        let analysis = analysis.ok_or_else(namespace_error)?;
+        let path = self
+            .output
+            .clone()
+            .map(|path| self.namespaced_artifact_path(path, &qualified_tag));
+        Ok(PeriodicArtifact { analysis, path })
+    }
+
+    /// The upstream periodic carrier the canonical plan bound `analysis` to.
+    pub(super) fn planned_upstream(
+        &self,
+        analysis: AnalysisInstanceId,
+        card: &'static str,
+    ) -> Result<AnalysisInstanceId, CliError> {
+        self.planned_upstreams
+            .iter()
+            .find(|(dependent, _)| *dependent == analysis)
+            .map(|(_, upstream)| *upstream)
+            .ok_or_else(|| {
+                CliError::simulation_error_in(
+                    format!(
+                        "{card} linearizes around an upstream periodic analysis and the canonical plan bound {analysis} to none"
+                    ),
+                    card,
+                )
+            })
+    }
+
+    /// Borrow the periodic operating points this run has retained.
+    pub(super) fn periodic(&self) -> std::cell::Ref<'_, PeriodicOperatingPoints> {
+        self.periodic.borrow()
+    }
+
+    /// Retain one converged shooting-`.PSS` operating point under its identity.
+    pub(super) fn retain_pss(
+        &self,
+        analysis: AnalysisInstanceId,
+        operating_point: rspice_core::engine::PssOperatingPoint,
+    ) {
+        self.periodic
+            .borrow_mut()
+            .pss
+            .push((analysis, operating_point));
+    }
+
+    /// Retain one converged harmonic-balance operating point, with the exact
+    /// configuration that produced it, under its identity.
+    pub(super) fn retain_hb(
+        &self,
+        analysis: AnalysisInstanceId,
+        operating_point: rspice_core::engine::HbOperatingPoint,
+        config: rspice_core::analysis::HbConfig,
+    ) {
+        self.periodic
+            .borrow_mut()
+            .hb
+            .push((analysis, operating_point, config));
     }
 
     /// The canonical coordinate this concrete deck run belongs to.
@@ -601,7 +765,7 @@ impl<'a> RunContext<'a> {
     /// identity and authored spelling of each of its operands.
     ///
     /// The core evaluates one Fourier spectrum per resolved operand and the
-    /// shared result document names one spectrum, so an operand — not a card —
+    /// shared result document names one spectrum, so an operand â€” not a card â€”
     /// is the analysis instance. The plan already assigned those identities
     /// and already bound the card to its transient, so the CLI reads both off
     /// it instead of counting operands and assuming the transient that ran
@@ -857,15 +1021,10 @@ impl<'a> RunContext<'a> {
             AnalysisCommand::MonteCarlo(mc_cmd) => {
                 advanced::run_monte_carlo_from_command(self, mc_cmd)?
             }
-            AnalysisCommand::Pss(_)
-            | AnalysisCommand::Pac(_)
-            | AnalysisCommand::Pnoise(_)
-            | AnalysisCommand::Envelope(_) => {
-                // `refuse_unsupported_deck_analyses` rejects these before any
-                // solver or artifact work; reaching the dispatcher means the
-                // preflight was bypassed.
-                return Err(unsupported_deck_analysis_error(analysis, None));
-            }
+            AnalysisCommand::Pss(card) => periodic::run_pss_card(self, card)?,
+            AnalysisCommand::Pac(card) => periodic::run_pac_card(self, card)?,
+            AnalysisCommand::Pnoise(card) => periodic::run_pnoise_card(self, card)?,
+            AnalysisCommand::Envelope(card) => periodic::run_envelope_card(self, card)?,
         }
 
         Ok(())
@@ -875,7 +1034,7 @@ impl<'a> RunContext<'a> {
 /// The canonical plan identity of every authored analysis one concrete deck
 /// run publishes under.
 ///
-/// Both sources resolve to the same thing — the `AnalysisInstanceId` the
+/// Both sources resolve to the same thing â€” the `AnalysisInstanceId` the
 /// canonical planner minted for each authored card, in source order. A scalar
 /// deck reads them straight off its `DeckPlan`; an axis coordinate reads them
 /// off that coordinate's `MaterializedAnalysis` list, which additionally binds
@@ -893,6 +1052,9 @@ pub(super) struct PlannedAnalysisIdentities {
     /// Transient identities in authored order, indexed by zero-based
     /// transient ordinal for checkpoint and post-processing namespaces.
     transient_ids: Vec<rspice_core::execution::AnalysisInstanceId>,
+    /// Every planned analysis the plan bound to an upstream periodic carrier,
+    /// as `(dependent, carrier)`.
+    upstreams: Vec<(AnalysisInstanceId, AnalysisInstanceId)>,
     /// Every planned `.FOUR` operand and `.FFT` card, each already named and
     /// bound to the transient it post-processes.
     ///
@@ -929,17 +1091,35 @@ impl PlannedAnalysisIdentities {
         identities
     }
 
+    /// The carrier binding of every planned analysis that has one.
+    fn planned_upstreams<'plan>(
+        planned: impl IntoIterator<Item = &'plan rspice_core::execution::PlannedAnalysis>,
+    ) -> Vec<(AnalysisInstanceId, AnalysisInstanceId)> {
+        planned
+            .into_iter()
+            .filter_map(|analysis| {
+                analysis
+                    .request()
+                    .upstream()
+                    .map(|upstream| (analysis.id(), upstream))
+            })
+            .collect()
+    }
+
     /// Identities for a deck with no run axis, read off its canonical plan.
     ///
     /// Run axes and `.FOUR` pair with `None` in the plan: an axis owns no
     /// analysis namespace, and a Fourier card publishes under its own
     /// post-process identity instead.
     pub(super) fn from_plan(plan: &DeckPlan, netlist: &Netlist) -> Self {
-        Self::from_pairs(
-            plan.authored_analyses(netlist)
-                .filter_map(|(analysis, id)| id.map(|id| (analysis, id))),
-            plan.post_process_analyses(),
-        )
+        Self {
+            upstreams: Self::planned_upstreams(plan.analyses()),
+            ..Self::from_pairs(
+                plan.authored_analyses(netlist)
+                    .filter_map(|(analysis, id)| id.map(|id| (analysis, id))),
+                plan.post_process_analyses(),
+            )
+        }
     }
 
     /// Identities for one materialized axis coordinate.
@@ -972,12 +1152,15 @@ impl PlannedAnalysisIdentities {
         // Post-processes are planned per deck, not per coordinate: a `.FOUR`
         // operand keeps one identity across the whole sweep, and the
         // coordinate that separates two artifacts is already in their paths.
-        Ok(Self::from_pairs(
-            analyses
-                .iter()
-                .filter_map(|analysis| analysis.command().map(|command| (command, analysis.id()))),
-            plan.post_process_analyses(),
-        ))
+        Ok(Self {
+            upstreams: Self::planned_upstreams(analyses.iter().map(MaterializedAnalysis::planned)),
+            ..Self::from_pairs(
+                analyses.iter().filter_map(|analysis| {
+                    analysis.command().map(|command| (command, analysis.id()))
+                }),
+                plan.post_process_analyses(),
+            )
+        })
     }
 }
 
@@ -1001,6 +1184,16 @@ impl ResolvedOutput {
             message: format!("'{tag}' resolved an artifact with no canonical analysis identity"),
         })
     }
+}
+
+/// What one periodic-family card publishes under.
+///
+/// The destination is optional because a run without `-o` still executes the
+/// card: a carrier must be solved and retained for the dependent cards bound
+/// to it whether or not anything is written.
+pub(super) struct PeriodicArtifact {
+    pub(super) analysis: AnalysisInstanceId,
+    pub(super) path: Option<PathBuf>,
 }
 
 /// Artifact paths one re-elaborated deck publishes under, already namespaced

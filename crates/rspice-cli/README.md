@@ -34,9 +34,14 @@ rspice health --json
 
 `rspice run` executes every analysis card found in the netlist, in order:
 
-`.OP`, `.DC`, `.TRAN`, `.AC`, `.HB`, `.SP`, `.STB`, `.DISTO`, `.NOISE`, `.TF`, `.SENS`, `.PZ`, `.STEP`, `.FOUR`, `.TEMP`, and Monte Carlo cards. `.AC` and `.NOISE` additionally accept the `DATA=<table>` form, sweeping the frequencies listed in a `.DATA` table instead of a generated sweep. If the netlist contains no analysis cards, a DC operating point is run by default.
+`.OP`, `.DC`, `.TRAN`, `.AC`, `.HB`, `.SP`, `.STB`, `.DISTO`, `.NOISE`, `.TF`, `.SENS`, `.PZ`, `.PSS`, `.PAC`, `.PNOISE`, `.ENVELOPE`, `.STEP`, `.FOUR`, `.TEMP`, and Monte Carlo cards. `.AC` and `.NOISE` additionally accept the `DATA=<table>` form, sweeping the frequencies listed in a `.DATA` table instead of a generated sweep. If the netlist contains no analysis cards, a DC operating point is run by default.
 
-`.PSS`, `.PAC`, `.PNOISE` and `.ENVELOPE` parse and validate (their grammar is in the [core README](../rspice-core/README.md)), but this CLI has no execution route or result artifact for them yet: a deck that authors one is refused with an `unsupported_deck_analysis` error naming the card and its analysis instance, and writes nothing. Reach those analyses through the Python API, or run PSS with `--pss-freq` below.
+Periodic large-signal analysis notes (the card grammar is in the [core README](../rspice-core/README.md)):
+
+- `.PSS` and `.HB` are *carriers*: each solves a periodic large-signal operating point and publishes its own result.
+- `.PAC`, `.PNOISE` and `.ENVELOPE` linearize or continue around a carrier. Which carrier is decided by the canonical deck plan — the same binding RSpice's Python, browser, and engine-adapter surfaces use — so a deck with two carriers attaches each dependent card to the same one everywhere. Each dependent document names its carrier as its parent analysis. The carrier is solved once and its exact numerical state is reused, never re-solved per dependent card.
+- A `.PAC`/`.PNOISE` sideband span wider than the carrier's harmonic capacity is refused rather than truncated, and a `.ENVELOPE` card bound to a shooting `.PSS` carrier is refused rather than converted: envelope following continues a harmonic-balance carrier.
+- `.PNOISE` around a driven carrier publishes an absolute output noise PSD in V²/Hz with each source's own contribution beside it; around an autonomous carrier it publishes single-sideband phase noise in dBc/Hz. There is no carrier to normalize a driven run against, so none is invented.
 
 Frequency-domain analysis notes:
 
@@ -55,7 +60,7 @@ A handful of analyses can instead be requested from the command line. When one o
 | Two-port S-parameters | `--sparam "P1+,P1-,P2+,P2-"` (needs a `.AC` card for the sweep) |
 | Process corners | `--corners tt,ss,ff` |
 
-Each mode's tuning flags are listed under **Analysis-mode options** below. `--pss-freq` and an authored `.PSS` card both request a periodic steady state, so combining them is an explicit error rather than one route silently winning.
+Each mode's tuning flags are listed under **Analysis-mode options** below. `--pss-freq` and an authored `.PSS` card both request a periodic steady state, so combining them is an explicit error rather than one route silently winning. Because a command-line mode supersedes the deck's cards, its carrier is not available to an authored `.PAC`/`.PNOISE`/`.ENVELOPE`; author `.PSS`/`.HB` in the deck when a dependent card needs it.
 
 Numeric flag values accept SPICE magnitude suffixes everywhere: `--pss-freq 2.4G`, `--max-step 1u`, `-D RLOAD=4.7k`.
 
@@ -97,8 +102,9 @@ anything else it publishes:
 ```
 
 - `<analysis id>` is `<family>-<NNN>`, one-based in authored source order:
-  `op-001`, `tran-001`, `ac-001`, `ac-002`, `four-001`. A deck with exactly one
-  analysis and no run axis keeps the exact `-o` path you asked for.
+  `op-001`, `tran-001`, `ac-001`, `ac-002`, `four-001`, `pss-001`, `pac-001`,
+  `pnoise-001`, `env-001`. A deck with exactly one analysis and no run axis
+  keeps the exact `-o` path you asked for.
 - `<coordinate>` appears only under a `.STEP`, `.TEMP`, or `.DATA` axis and is
   the deterministic coordinate identity, `run_<32 hex>_<NNN>`. It is derived
   from the coordinate's semantic axis assignment, so it does not change when
@@ -142,6 +148,13 @@ for a two-port — the `Rn`/`F`/`Fmin`/`Sopt` figures at every frequency. The fl
 formats keep both in one table, because they have no per-family payload to
 separate.
 
+A document produced around a carrier names it. `.PAC`, `.PNOISE`, and
+`.ENVELOPE` each publish under their own analysis identity and declare the
+`.PSS` or `.HB` instance they linearized or continued as their parent analysis,
+so a reader can pair a sideband sweep with the exact large-signal state it came
+from. The flat formats have no nested identity to carry that in, so the pairing
+is in the artifact names.
+
 Both forms of `.SENS` publish the shared document too: a DC card fills the
 per-element operating-point derivatives, an AC card fills the complex
 derivative traces sampled on the document's own frequency axis, and the
@@ -172,6 +185,9 @@ shapes:
 | Monte Carlo | Per-run samples, one column per tracked variable |
 | PSS | One period of the steady-state waveforms (time domain) |
 | HB | Complex spectrum per node over the harmonic frequencies |
+| `.PAC` | Complex node and branch columns per sideband (`V(out):sb0`) over the offset frequency. `.PRINT`/`.SAVE` names the signal, not the sideband, so a selected signal is exported at every sideband |
+| `.PNOISE` | Real density columns over the offset frequency: `output_noise` and each source's `contribution:<label>` for a driven carrier, `phase_noise` for an autonomous one |
+| `.ENVELOPE` | The continued slow-time trajectory, in the transient's own table shape |
 | `.STB` | Complex `loopgain` plus `loopgain_mag_db` and `loopgain_phase_deg` |
 | `.TF` | Gain, input impedance, output impedance |
 | Pole-zero | `pole(i)`/`zero(i)` complex columns |
@@ -205,6 +221,16 @@ so a cancelled or failed run leaves either the previous complete set or nothing.
 
 An implicit axis sweep whose topology and complete signal schema are identical
 at every coordinate keeps the single wide aggregated table instead.
+
+Every analysis family runs under a run axis, including the periodic
+large-signal cards and Monte Carlo. An authored Monte Carlo card inside a
+`.STEP` or `.TEMP` sweep runs once per coordinate, and its random stream is
+derived from the authored seed together with the coordinate's own stable
+identity. Coordinate *k* therefore reproduces byte for byte no matter what else
+ran or in what order, and two coordinates never draw the same variation vector —
+which is what makes a parametric Monte Carlo study a study rather than one
+sample repeated. A deck with no run axis has no coordinate and keeps its
+authored seed unchanged.
 
 For a stepped transient, `--checkpoint state.chk` and `--resume state.chk`
 resolve one state file per coordinate and per authored transient, tagged with

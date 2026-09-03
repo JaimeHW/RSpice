@@ -1,6 +1,5 @@
-//! Every result family the CLI can execute publishes the shared typed result
-//! document under `-f json`, and every family it cannot execute is a typed
-//! refusal.
+//! Every result family the CLI executes publishes the shared typed result
+//! document under `-f json`.
 //!
 //! The sweep is exhaustive over `AnalysisResultKind`, so a new core result
 //! family cannot be added without deciding — here, in a test that runs the
@@ -51,11 +50,6 @@ struct FamilyRun {
 enum FamilyCoverage {
     /// The family runs and publishes the shared typed document.
     Document(FamilyRun),
-    /// The CLI has no execution route for the family at all.
-    RefusedCard {
-        cards: &'static str,
-        fragments: &'static [&'static str],
-    },
     /// The family publishes its own versioned artifact rather than the shared
     /// document, for a reason the registry records.
     OwnArtifact {
@@ -231,8 +225,8 @@ fn coverage(kind: AnalysisResultKind) -> FamilyCoverage {
         }),
         AnalysisResultKind::Pss => FamilyCoverage::Document(FamilyRun {
             circuit: None,
-            cards: ".TRAN 10u 1m\n",
-            flags: &["--pss-freq", "1k"],
+            cards: ".PSS FUND=1k\n",
+            flags: &[],
             artifact: "",
             analysis_tag: "pss-001",
             series: Some(("v(out)", "volt")),
@@ -247,18 +241,50 @@ fn coverage(kind: AnalysisResultKind) -> FamilyCoverage {
             series: Some(("v(out)", "volt")),
             scalar: Some("converged"),
         }),
-        AnalysisResultKind::Pac => FamilyCoverage::RefusedCard {
-            cards: ".HB 1k\n.PAC DEC 2 1k 10k INPUT=V1 OUT=V(out)\n",
-            fragments: &[".PAC"],
-        },
-        AnalysisResultKind::PNoise => FamilyCoverage::RefusedCard {
-            cards: ".HB 1k\n.PNOISE DEC 2 1k 10k OUT=V(out)\n",
-            fragments: &[".PNOISE"],
-        },
-        AnalysisResultKind::Envelope => FamilyCoverage::RefusedCard {
-            cards: ".HB 1k\n.ENVELOPE TSTOP=1m\n",
-            fragments: &[".ENVELOPE"],
-        },
+        // The periodic small-signal families linearize around the carrier the
+        // plan binds them to, so each deck authors the carrier first. The
+        // sideband span is kept inside the carrier's harmonic capacity, which
+        // the core refuses to exceed rather than truncate.
+        AnalysisResultKind::Pac => FamilyCoverage::Document(FamilyRun {
+            circuit: None,
+            cards: ".HB 1k\n.PAC DEC 2 1k 10k INPUT=V1 OUT=V(out) MAXSIDEBAND=1\n",
+            flags: &[],
+            artifact: "pac-001",
+            analysis_tag: "pac-001",
+            series: Some(("v(out)", "volt")),
+            scalar: Some("residual_norm"),
+        }),
+        AnalysisResultKind::PNoise => FamilyCoverage::Document(FamilyRun {
+            circuit: None,
+            cards: ".HB 1k\n.PNOISE DEC 2 1k 10k OUT=V(out) INPUT=V1 MAXSIDEBAND=1\n",
+            flags: &[],
+            artifact: "pnoise-001",
+            analysis_tag: "pnoise-001",
+            // A driven run reports an absolute output PSD in V^2/Hz, which the
+            // shared unit vocabulary carries as a named custom unit.
+            series: Some(("output_noise", "custom")),
+            scalar: Some("carrier_frequency"),
+        }),
+        // Envelope following publishes the continued slow-time trajectory, so
+        // its series are the transient's and its carrier lives in the payload
+        // rather than in a named scalar. Its exact carrier initializer covers
+        // linear R/C networks and independent sources, so the shared nonlinear
+        // deck is replaced by one it is defined for rather than accepting an
+        // approximated continuation.
+        AnalysisResultKind::Envelope => FamilyCoverage::Document(FamilyRun {
+            circuit: Some(
+                "* envelope coverage\n\
+                 V1 in 0 SIN(0 1 1k)\n\
+                 R1 in out 1k\n\
+                 C1 out 0 159.154943091895n\n",
+            ),
+            cards: ".HB 1k\n.ENVELOPE TSTOP=1m MAXSTEP=0.1m\n",
+            flags: &[],
+            artifact: "env-001",
+            analysis_tag: "env-001",
+            series: Some(("v(out)", "volt")),
+            scalar: None,
+        }),
     }
 }
 
@@ -444,32 +470,10 @@ fn hdf5_groups_are_keyed_by_analysis_identity() {
 }
 
 #[test]
-fn every_runnable_family_publishes_a_typed_document_and_the_rest_are_typed_refusals() {
+fn every_result_family_publishes_a_typed_document() {
     for kind in AnalysisResultKind::ALL {
         match coverage(kind) {
             FamilyCoverage::Document(family) => assert_document(kind, &family),
-            FamilyCoverage::RefusedCard { cards, fragments } => {
-                let dir = test_dir(kind.tag());
-                let (output, requested) = run(&dir, None, cards, &[], "json");
-                assert!(
-                    !output.status.success(),
-                    "{}: an unroutable card was accepted",
-                    kind.tag()
-                );
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                for fragment in fragments {
-                    assert!(
-                        stderr.contains(fragment),
-                        "{}: refusal does not name the card {fragment:?}: {stderr}",
-                        kind.tag()
-                    );
-                }
-                assert!(
-                    !requested.exists(),
-                    "{}: a refused card published an artifact",
-                    kind.tag()
-                );
-            }
             FamilyCoverage::OwnArtifact {
                 cards,
                 artifact,

@@ -1,10 +1,10 @@
-//! Turning command-line arguments and a deck source into something runnable.
+﻿//! Turning command-line arguments and a deck source into something runnable.
 //!
 //! Everything here happens before any solver work: reading and preprocessing
-//! the source, refusing an authored card this frontend has no route for,
-//! refusing an argument that is not a number the analysis can use, resolving
-//! the simulation configuration, and computing the physical-analysis signature
-//! a run axis must preserve at every coordinate.
+//! the source, refusing a command line that contradicts the deck, refusing an
+//! argument that is not a number the analysis can use, resolving the
+//! simulation configuration, and computing the physical-analysis signature a
+//! run axis must preserve at every coordinate.
 
 // This module was split out of `run.rs` and still works against the run
 // command's own context, errors, and helpers, so it takes the parent's
@@ -30,68 +30,6 @@ pub(super) fn parse_options_for_run(
         options.expression_dialect = dialect.expression_dialect();
     }
     options
-}
-
-/// Dot-command spelling of a card the CLI has no execution route for.
-fn unsupported_deck_analysis_card(analysis: &AnalysisCommand) -> Option<&'static str> {
-    match analysis {
-        AnalysisCommand::Pss(_) => Some(".PSS"),
-        AnalysisCommand::Pac(_) => Some(".PAC"),
-        AnalysisCommand::Pnoise(_) => Some(".PNOISE"),
-        AnalysisCommand::Envelope(_) => Some(".ENVELOPE"),
-        _ => None,
-    }
-}
-
-/// Typed refusal for an authored periodic-family card.
-pub(super) fn unsupported_deck_analysis_error(
-    analysis: &AnalysisCommand,
-    analysis_id: Option<String>,
-) -> CliError {
-    let card = unsupported_deck_analysis_card(analysis).unwrap_or(".<analysis>");
-    CliError::UnsupportedDeckAnalysis {
-        card,
-        analysis_id,
-        reason: "the CLI has no execution route or result artifact for the periodic \
-                 large-signal analysis family; run it through the Python API",
-    }
-}
-
-/// Refuse authored cards this frontend cannot execute before any solver work
-/// runs, any run-axis compatibility check reports a lesser problem, or any
-/// artifact is written.
-pub(super) fn refuse_unsupported_deck_analyses(
-    netlist: &Netlist,
-    config: &Config,
-    args: &RunArgs,
-) -> Result<(), CliError> {
-    if !netlist
-        .analyses
-        .iter()
-        .any(|analysis| unsupported_deck_analysis_card(analysis).is_some())
-    {
-        return Ok(());
-    }
-    let plan = DeckPlan::from_netlist_with_abort(
-        netlist,
-        &config.resources.limits(),
-        &crate::abort::ProcessAbort,
-    )
-    .map_err(|error| map_deck_plan_error(error, args))?;
-    refuse_planned_unsupported_analyses(netlist, &plan)
-}
-
-/// Name every refused card with the identity the canonical plan assigned it.
-fn refuse_planned_unsupported_analyses(netlist: &Netlist, plan: &DeckPlan) -> Result<(), CliError> {
-    for (analysis, id) in plan.authored_analyses(netlist) {
-        if unsupported_deck_analysis_card(analysis).is_some() {
-            return Err(unsupported_deck_analysis_error(
-                analysis,
-                id.map(|id| id.tag()),
-            ));
-        }
-    }
-    Ok(())
 }
 
 /// `--pss-freq` and an authored `.PSS` both name a periodic steady state.
@@ -294,26 +232,11 @@ pub(crate) fn analyses_in_execution_order(
 /// conditional that adds or drops a Fourier card changes what a coordinate
 /// publishes; it is marked as a post-process entry so it cannot be mistaken
 /// for a planned physical analysis.
-fn step_analysis_signature_kind(
-    analysis: &AnalysisCommand,
-) -> Result<Option<&'static str>, CliError> {
-    if unsupported_deck_analysis_card(analysis).is_some() {
-        return Err(unsupported_deck_analysis_error(analysis, None));
-    }
-    if matches!(analysis, AnalysisCommand::MonteCarlo(_)) {
-        return Err(CliError::InvalidArgument {
-            message: ".STEP cannot wrap authored Monte Carlo until deterministic nested seed/substream derivation is configured"
-                .to_string(),
-            suggestion: Some(
-                "run the parameter coordinates or Monte Carlo campaign as the outer experiment, but not both in one deck"
-                    .to_string(),
-            ),
-        });
-    }
-    Ok(match analysis {
+fn step_analysis_signature_kind(analysis: &AnalysisCommand) -> Option<&'static str> {
+    match analysis {
         AnalysisCommand::Four { .. } => Some(POST_PROCESS_FOURIER_SIGNATURE),
         other => analysis_output_tag(other),
-    })
+    }
 }
 
 /// Signature symbol of a `.FOUR` card. It is deliberately not an output tag:
@@ -332,15 +255,12 @@ fn step_commands(netlist: &Netlist) -> Vec<rspice_core::netlist::StepCommand> {
         .collect()
 }
 
-pub(super) fn step_analysis_signature(netlist: &Netlist) -> Result<Vec<&'static str>, CliError> {
-    let mut signature = Vec::new();
-    for analysis in &netlist.analyses {
-        let Some(kind) = step_analysis_signature_kind(analysis)? else {
-            continue;
-        };
-        signature.push(kind);
-    }
-    Ok(signature)
+pub(super) fn step_analysis_signature(netlist: &Netlist) -> Vec<&'static str> {
+    netlist
+        .analyses
+        .iter()
+        .filter_map(step_analysis_signature_kind)
+        .collect()
 }
 
 pub(super) fn validate_step_frontend_compatibility(
@@ -382,7 +302,7 @@ pub(super) fn validate_step_frontend_compatibility(
     for step in &steps {
         shared::validate_step_sweep(&step.sweep)?;
     }
-    let signature = step_analysis_signature(netlist)?;
+    let signature = step_analysis_signature(netlist);
     if (args.checkpoint.is_some() || args.resume.is_some()) && !signature.contains(&"tran") {
         return Err(CliError::InvalidArgument {
             message: ".STEP --checkpoint/--resume requires an authored .TRAN child analysis"
@@ -413,7 +333,7 @@ pub(super) fn preflight_deck_run_count(
         return Ok(1);
     }
 
-    let base_signature = step_analysis_signature(netlist)?;
+    let base_signature = step_analysis_signature(netlist);
     let engine = Engine::try_new(build_sim_config(args, config, netlist))?;
     let materializer = engine
         .prepare_deck_plan_materializer_with_abort(
@@ -598,7 +518,7 @@ fn parse_define(define: &str) -> Result<(String, f64), CliError> {
 /// Each override is injected as a `.param` right after the title so it exists
 /// before first use, and every top-level `.param` assignment of the same name
 /// is rewritten in place so the deck cannot re-assign it. Assignments inside
-/// `.subckt` bodies are left alone — overrides target global parameters only.
+/// `.subckt` bodies are left alone â€” overrides target global parameters only.
 fn apply_defines_to_source(source: &str, defines: &[(String, f64)]) -> String {
     let mut out = String::with_capacity(source.len() + defines.len() * 32);
     let mut lines = source.lines();

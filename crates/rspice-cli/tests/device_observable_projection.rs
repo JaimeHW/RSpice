@@ -1,21 +1,25 @@
-//! Public CLI contracts for `.SAVE @device[param]` projection.
+//! Public CLI contracts for device observables.
 //!
-//! Device observables must be qualified data columns when the core result
-//! publishes them. An unavailable probe is a typed execution failure, never a
-//! successful scale-only artifact.
+//! Two contracts, one signal kind. The flat formats publish exactly the
+//! qualified columns the deck's `.SAVE`/`.PRINT` projection selected, and an
+//! unavailable probe is a typed execution failure rather than a successful
+//! scale-only artifact. The shared typed document instead publishes the
+//! complete device inventory the solver computed, projection or no projection,
+//! because a document that carried only the authored subset could not be told
+//! apart from one whose devices had no state.
 
 mod common;
 
-use common::{TestDirectory, test_dir};
+use common::{AxisRunSet, TestDirectory, read_json, test_dir};
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-fn run_fixture(tag: &str, fixture: &str) -> (TestDirectory, PathBuf, Output) {
+fn run_source(tag: &str, source: &str, format: &str) -> (TestDirectory, PathBuf, Output) {
     let dir = test_dir(tag);
     let deck = dir.join("input.cir");
-    let output_path = dir.join("result.csv");
-    std::fs::write(&deck, fixture).expect("write device-observable fixture");
+    let output_path = dir.join(format!("result.{format}"));
+    std::fs::write(&deck, source).expect("write device-observable fixture");
     let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
         .args([
             "--quiet",
@@ -24,11 +28,15 @@ fn run_fixture(tag: &str, fixture: &str) -> (TestDirectory, PathBuf, Output) {
             "-o",
             output_path.to_str().expect("UTF-8 output path"),
             "-f",
-            "csv",
+            format,
         ])
         .output()
         .expect("run rspice device-observable fixture");
     (dir, output_path, output)
+}
+
+fn run_fixture(tag: &str, fixture: &str) -> (TestDirectory, PathBuf, Output) {
+    run_source(tag, fixture, "csv")
 }
 
 fn assert_success(output: &Output) {
@@ -150,6 +158,132 @@ fn assert_unavailable_failure(tag: &str, fixture: &str, authored_symbol: &str, a
         !output_path.exists(),
         "failure must not publish a scale-only artifact"
     );
+    cleanup(&dir);
+}
+
+/// One deck whose authored projection names a single device parameter, so the
+/// flat artifact carries one column while the typed document must carry the
+/// device's whole state.
+const NARROW_PROJECTION: &str = "* narrow device-observable projection\n\
+                                 V1 in 0 DC 0.6 SIN(0.6 0.05 1k)\n\
+                                 R1 in mid 100\n\
+                                 D1 mid 0 DMODEL\n\
+                                 .MODEL DMODEL D(IS=1e-12 N=1)\n\
+                                 .SAVE V(mid) @D1[Id]\n";
+
+/// The device parameters one published document carries for a named device.
+fn document_device_parameters(document: &serde_json::Value, device: &str) -> Vec<String> {
+    document["deviceStates"]
+        .as_array()
+        .unwrap_or_else(|| panic!("document has no deviceStates array: {document:#}"))
+        .iter()
+        .find(|state| state["deviceName"] == device)
+        .unwrap_or_else(|| panic!("document names no device '{device}': {document:#}"))["parameters"]
+        .as_array()
+        .expect("device parameter list")
+        .iter()
+        .map(|parameter| {
+            parameter["name"]
+                .as_str()
+                .expect("parameter name")
+                .to_ascii_lowercase()
+        })
+        .collect()
+}
+
+/// The complete inventory the diode model computes. A document that published
+/// only `id` would be indistinguishable from one whose device had no other
+/// state, which is exactly what a consumer reading the typed result needs to
+/// be able to tell apart.
+const DIODE_INVENTORY: [&str; 4] = ["vd", "id", "gd", "cd"];
+
+fn assert_complete_diode_inventory(document: &serde_json::Value, what: &str) {
+    let parameters = document_device_parameters(document, "D1");
+    for expected in DIODE_INVENTORY {
+        assert!(
+            parameters.iter().any(|name| name == expected),
+            "{what}: the typed document dropped the '{expected}' observable; it carries {parameters:?}"
+        );
+    }
+}
+
+/// Every family whose solver captures per-device state publishes the complete
+/// inventory in its typed document, even when the authored projection selected
+/// one parameter for the flat table.
+#[test]
+fn the_typed_document_publishes_the_complete_device_inventory_for_every_family() {
+    for (tag, cards, artifact) in [
+        ("doc_op", ".OP\n", "op-001"),
+        ("doc_dc", ".DC V1 0.5 0.7 0.1\n", "dc-001"),
+        ("doc_tran", ".TRAN 100u 1m\n", "tran-001"),
+    ] {
+        let (dir, requested, output) =
+            run_source(tag, &format!("{NARROW_PROJECTION}{cards}.END\n"), "json");
+        assert_success(&output);
+        let stem = requested.file_stem().expect("stem").to_string_lossy();
+        // A single-analysis deck keeps the requested path; the loop asks for
+        // the namespaced one only when the family publishes it.
+        let namespaced = requested.with_file_name(format!("{stem}.{artifact}.json"));
+        let path = if namespaced.exists() {
+            namespaced
+        } else {
+            requested.clone()
+        };
+        assert_complete_diode_inventory(&read_json(&path), artifact);
+
+        // The flat artifact stays projection-driven: it has no representation
+        // for a per-family payload, so it publishes the authored columns only.
+        let (_flat_dir, flat_path, flat_output) =
+            run_source(tag, &format!("{NARROW_PROJECTION}{cards}.END\n"), "csv");
+        assert_success(&flat_output);
+        let flat_stem = flat_path.file_stem().expect("stem").to_string_lossy();
+        let flat_namespaced = flat_path.with_file_name(format!("{flat_stem}.{artifact}.csv"));
+        let flat = std::fs::read_to_string(if flat_namespaced.exists() {
+            &flat_namespaced
+        } else {
+            &flat_path
+        })
+        .expect("read flat artifact");
+        let header = flat.lines().next().expect("header").to_ascii_lowercase();
+        assert!(
+            header.contains("@d1[id]") || flat.to_ascii_lowercase().contains("@d1[id]"),
+            "{artifact}: the authored device column is missing from {flat}"
+        );
+        for dropped in ["[gd]", "[cd]"] {
+            assert!(
+                !flat.to_ascii_lowercase().contains(dropped),
+                "{artifact}: the flat artifact published an unprojected observable {dropped}"
+            );
+        }
+        cleanup(&dir);
+    }
+}
+
+/// A stepped implicit operating point publishes the same complete inventory at
+/// every coordinate. A sweep that dropped the device report would publish
+/// fewer observables than the identical deck run without an axis.
+#[test]
+fn every_axis_coordinate_publishes_the_complete_device_inventory() {
+    let (dir, requested, output) = run_source(
+        "doc_axis",
+        "* stepped device-observable inventory\n\
+         .param rs=100\n\
+         V1 in 0 DC 0.6\n\
+         R1 in mid {rs}\n\
+         D1 mid 0 DMODEL\n\
+         .MODEL DMODEL D(IS=1e-12 N=1)\n\
+         .SAVE V(mid) @D1[Id]\n\
+         .STEP PARAM rs LIST 100 200\n\
+         .OP\n\
+         .END\n",
+        "json",
+    );
+    assert_success(&output);
+    let run_set = AxisRunSet::read(&requested);
+    assert_eq!(run_set.coordinates.len(), 2);
+    for coordinate in &run_set.coordinates {
+        assert_complete_diode_inventory(&read_json(coordinate.only_artifact()), &coordinate.tag);
+    }
     cleanup(&dir);
 }
 

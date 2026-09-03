@@ -1,4 +1,4 @@
-//! Execution of a `.STEP`/`.TEMP`/`.DATA` axis: one coordinate at a time, one
+﻿//! Execution of a `.STEP`/`.TEMP`/`.DATA` axis: one coordinate at a time, one
 //! transaction for the set.
 //!
 //! Every coordinate is materialized from the canonical plan, preflighted for
@@ -37,10 +37,15 @@ pub(super) fn map_deck_plan_error(error: DeckPlanError, args: &RunArgs) -> CliEr
             args.timeout,
             "Run-axis planning",
         ),
+        // The plan names run axes, analysis instances, and the carrier each
+        // periodic card depends on, so this covers more than a malformed
+        // `.STEP`: the message must not tell the author to fix an axis their
+        // deck does not have.
         error => CliError::InvalidArgument {
-            message: format!("canonical .STEP/.TEMP planning failed: {error}"),
+            message: format!("canonical deck planning failed: {error}"),
             suggestion: Some(
-                "fix the run-axis definition before any coordinate is simulated".to_string(),
+                "fix the run axis or the analysis card it names before any coordinate is simulated"
+                    .to_string(),
             ),
         },
     }
@@ -159,7 +164,7 @@ pub(super) fn preflight_step_coordinates(
                     ),
                 )
             })?;
-        let signature = step_analysis_signature(materialized.netlist())?;
+        let signature = step_analysis_signature(materialized.netlist());
         if signature != base_signature {
             return Err(CliError::InvalidArgument {
                 message: format!(
@@ -344,10 +349,15 @@ fn run_implicit_step_op_table(
         let coordinate_engine =
             Engine::try_new(build_sim_config(args, config, materialized.netlist()))?;
         let topology = materialized.topology_fingerprint();
-        let result = match coordinate_engine
-            .run_dc_op_with_abort(materialized.netlist(), &crate::abort::ProcessAbort)
+        // The device operating-point report is taken at every coordinate, not
+        // only for a scalar deck: it is what carries the complete typed
+        // device-observable inventory into the coordinate's typed document, and
+        // a sweep that dropped it would publish fewer observables than the same
+        // deck run without an axis.
+        let (result, device_report) = match coordinate_engine
+            .run_dc_op_with_report_and_abort(materialized.netlist(), &crate::abort::ProcessAbort)
         {
-            Ok(result) => result,
+            Ok(solved) => solved,
             Err(rspice_core::SimulationError::Aborted) if crate::abort::reason().is_some() => {
                 break;
             }
@@ -418,6 +428,7 @@ fn run_implicit_step_op_table(
             analysis_id: implicit_analysis.output_namespace().analysis_component(),
             topology,
             result,
+            device_report,
             signals,
             schema,
             validity: Vec::new(),
@@ -515,7 +526,7 @@ fn run_implicit_step_op_table(
                 let builder = rspice_core::execution::AnalysisResultDocument::from_operating_point(
                     run.analysis,
                     &run.result,
-                    None,
+                    Some(&run.device_report),
                 )
                 .map_err(|error| document::document_error(&ctx, run.analysis, error))?;
                 let built = document::finish_at_coordinate(
@@ -614,6 +625,9 @@ struct ImplicitStepCoordinate {
     pub(super) analysis_id: String,
     pub(super) topology: rspice_core::execution::TopologyFingerprint,
     pub(super) result: rspice_core::solver::SimulationResult,
+    /// The coordinate's complete device operating-point inventory, published in
+    /// its typed document beside the node and branch series.
+    device_report: rspice_core::circuit::DeviceOpReport,
     pub(super) signals: Vec<crate::commands::run_signals::ScalarSignal>,
     pub(super) schema: rspice_core::execution::SignalSchema,
     pub(super) validity: Vec<bool>,
@@ -647,8 +661,8 @@ struct CoordinateValidity {
 /// Union each analysis instance's coordinate-local schemas and record, per
 /// coordinate, which union columns that coordinate actually carried.
 ///
-/// An analysis that only some coordinates published — a conditional that adds
-/// or drops a card — is still named, with its own coordinate list. Nothing is
+/// An analysis that only some coordinates published â€” a conditional that adds
+/// or drops a card â€” is still named, with its own coordinate list. Nothing is
 /// inferred from a coordinate that did not publish it.
 fn analysis_schema_unions(
     published: &[CoordinatePublication],
@@ -868,7 +882,6 @@ pub(super) fn run_deck(
     run_label: Option<&str>,
 ) -> Result<DeckOutcome, CliError> {
     validate_pss_flag_conflict(netlist, args)?;
-    refuse_unsupported_deck_analyses(netlist, config, args)?;
     validate_step_frontend_compatibility(netlist, args)?;
 
     let resource_limits = config.resources.limits();
@@ -899,7 +912,7 @@ pub(super) fn run_deck(
         });
     }
 
-    let base_signature = step_analysis_signature(netlist)?;
+    let base_signature = step_analysis_signature(netlist);
     let sim_config = build_sim_config(args, config, netlist);
     let engine = Engine::try_new(sim_config)?;
     let materializer = engine
@@ -969,7 +982,7 @@ pub(super) fn run_deck(
                 }
             };
         let canonical_coordinate = materialized.coordinate();
-        let materialized_signature = step_analysis_signature(materialized.netlist())?;
+        let materialized_signature = step_analysis_signature(materialized.netlist());
         if materialized_signature != expected.signature {
             return Err(CliError::InternalError {
                 message: format!(

@@ -1,4 +1,4 @@
-//! The `run` command: execute one deck and publish what it produced.
+﻿//! The `run` command: execute one deck and publish what it produced.
 //!
 //! This file is the entry point and the whole-run orchestration -- argument
 //! handling, the multi-run `.ALTER`/`.DATA`/corner plan, the report files, and
@@ -12,9 +12,9 @@
 //!   it publishes under;
 //! - [`axis`] executes a `.STEP`/`.TEMP`/`.DATA` coordinate set as one
 //!   transaction;
-//! - [`basic`], [`frequency`] and [`advanced`] run the analysis families, and
-//!   [`document`], [`fft_document`], [`fourier_document`] and [`restart`]
-//!   publish what they produce.
+//! - [`basic`], [`frequency`], [`advanced`] and [`periodic`] run the analysis
+//!   families, and [`document`], [`fft_document`], [`fourier_document`] and
+//!   [`restart`] publish what they produce.
 
 #![allow(clippy::too_many_arguments)]
 
@@ -28,6 +28,7 @@ mod fft_document;
 mod fourier_document;
 mod frequency;
 mod naming;
+mod periodic;
 mod restart;
 mod shared;
 
@@ -46,9 +47,8 @@ use context::{
 use deck::{
     analyses_in_execution_order, build_sim_config, load_netlist_from_source,
     materialize_addresistors_artifact, parse_format_name, parse_options_for_run,
-    preflight_deck_run_count, refuse_unsupported_deck_analyses, step_analysis_signature,
-    unsupported_deck_analysis_error, validate_pss_flag_conflict, validate_run_numeric_args,
-    validate_step_frontend_compatibility,
+    preflight_deck_run_count, step_analysis_signature, validate_pss_flag_conflict,
+    validate_run_numeric_args, validate_step_frontend_compatibility,
 };
 use naming::{
     axis_set_manifest_path, compose_run_label, conditional_step_schema_path, resolve_output_path,
@@ -253,8 +253,8 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
     if workers > 1 {
         // Parallel multi-run execution: every run is independent (own
         // parse, own engine, tagged output files). Per-run console
-        // output is silenced — interleaved analysis chatter from N
-        // workers is noise — and replaced by ordered status lines.
+        // output is silenced â€” interleaved analysis chatter from N
+        // workers is noise â€” and replaced by ordered status lines.
         if !quiet {
             println!("Running {} runs on {workers} workers", plan.len());
         }
@@ -283,7 +283,7 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
                         .iter()
                         .map(|report| report.duration_secs)
                         .sum();
-                    println!("  ✓ {label} ({duration:.3}s)");
+                    println!("  âœ“ {label} ({duration:.3}s)");
                 } else {
                     let failure = outcome
                         .reports
@@ -294,7 +294,7 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
                                 "multi-run aggregate for '{label}' reported failure without a failed child report"
                             ),
                         })?;
-                    println!("  ✗ {label}: {}", status_failure_summary(failure));
+                    println!("  âœ— {label}: {}", status_failure_summary(failure));
                 }
             }
             if first_error.is_none() {
@@ -310,7 +310,6 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
             }
             let netlist = load_netlist_from_source(&deck.source, &args, config, !quiet)?;
             validate_pss_flag_conflict(&netlist, &args)?;
-            refuse_unsupported_deck_analyses(&netlist, config, &args)?;
             validate_step_frontend_compatibility(&netlist, &args)?;
             let addresistors_artifact =
                 materialize_addresistors_artifact(&netlist, &args.input, from_stdin, args.timeout)?;
@@ -628,7 +627,7 @@ struct ConcreteDeckOutcome {
 }
 
 /// Run one concrete deck (all of its analyses) and assemble its report.
-/// Multi-run failures don't abort the remaining runs — HSPICE semantics —
+/// Multi-run failures don't abort the remaining runs â€” HSPICE semantics â€”
 /// so errors land in the report instead of bubbling, except for setup
 /// errors (bad output paths, alternate-mode failures).
 fn run_concrete_deck(
@@ -773,7 +772,7 @@ fn simulation_error_message(e: &CliError) -> String {
 /// published.
 ///
 /// The message alone used to be all that survived, which turned every deck
-/// failure — a capability refusal, a convergence failure, an exceeded budget —
+/// failure â€” a capability refusal, a convergence failure, an exceeded budget â€”
 /// into one undifferentiated simulation error at the process boundary.
 fn first_reported_failure(
     reports: &[SimulationReport],
