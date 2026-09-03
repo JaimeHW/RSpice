@@ -32,7 +32,7 @@ use crate::canonical_ir::{
 };
 use crate::codegen::{AssignmentStep, BytecodeProgram, CompiledModel, Instruction};
 use crate::jit::cfg_lanes::{ScalarLanes, scalarize_lanes};
-use crate::jit::cfg_plan_builder::{derivative_seeds, shipped_entry_lane};
+use crate::jit::cfg_plan_builder::{ShippedColumnLanes, derivative_seeds};
 use crate::jit::cfg_program::{CfgRuntimeBindings, lower_cfg_function};
 use crate::jit::expr::BranchUnknownRuntimeMapping;
 use crate::jit::plan_builder::canonical_branch_unknown_runtime_map;
@@ -110,6 +110,9 @@ pub(super) struct OperatingPoint {
     /// interpreter refuses a slot it was not given, and every value is zero
     /// because a static evaluation has no accepted history.
     event_state_slots: usize,
+    /// Whether `@(initial_step)` is active here. See
+    /// [`OperatingPoint::with_initial_step`].
+    initial_step: bool,
 }
 
 const BOLTZMANN_OVER_ELECTRON: f64 = 1.380_649e-23 / 1.602_176_634e-19;
@@ -167,7 +170,34 @@ impl OperatingPoint {
             state: vec![0.0; state_len],
             state_flags: vec![0; state_len],
             event_state_slots,
+            initial_step: false,
         }
+    }
+
+    /// Evaluate here with `@(initial_step)` active.
+    ///
+    /// # Why a point without it is not a point at all for some models
+    ///
+    /// A compact model that maps its parameters to temperature does that work
+    /// once, in an initial block, and the body then divides by what the block
+    /// wrote. VBIC writes `tiniK = TABS + tnom` under `@(initial_step)` and the
+    /// body computes `rT = tdevK / tiniK`; with the block skipped `tiniK` is the
+    /// zero its slot was allocated with, `rT` is infinite, and
+    /// `exp(-dear * (1 - rT) / …)` with VBIC's default `dear = 0` is `exp(0 *
+    /// -inf)` — a NaN that reaches 347 of the module's 1052 variables.
+    ///
+    /// Nothing about that measures a route. Both plans read the one variable
+    /// array the shipped assignment pass fills, so a poisoned array is poisoned
+    /// for both, and every entry that loads one of those variables compares two
+    /// readings of the same NaN. It also hides the entries that *would* differ:
+    /// `deviation` cannot separate two NaNs, so they are counted as agreeing.
+    ///
+    /// Production never evaluates in this state — the first load of a device
+    /// runs its initial step — so this is not a wider operating envelope than
+    /// the model was written for. It is the one the model was written for.
+    pub(super) fn with_initial_step(mut self) -> Self {
+        self.initial_step = true;
+        self
     }
 
     fn interpreter_inputs(&self, node_count: usize, branch_count: usize) -> CfgEvalInputs<f64> {
@@ -272,6 +302,7 @@ impl OperatingPoint {
         context.multiplicity = self.multiplicity;
         context.time = self.time;
         context.analysis_type = self.analysis;
+        context.analysis_initial_step = u8::from(self.initial_step);
         context.integration_active = 0;
         let values = self.state.as_mut_ptr();
         let flags = self.state_flags.as_mut_ptr();
@@ -854,7 +885,8 @@ fn the_cfg_jacobian_route_agrees_with_the_interpreter_and_the_oracles() {
         let variables = vec![0.0_f64; runtime.model.num_variables + 8];
 
         // ---- sparsity ---------------------------------------------------
-        let node_count = artifact.mir.nodes.len();
+        let column_lanes = ShippedColumnLanes::build(&runtime.model, &artifact.mir)
+            .unwrap_or_else(|error| panic!("{module}: shipped column lanes: {error}"));
         let mut cfg_pairs: HashSet<(usize, usize)> = HashSet::new();
         for (equation, row) in rows.iter().enumerate() {
             for (lane, entry) in row.iter().enumerate() {
@@ -866,7 +898,9 @@ fn the_cfg_jacobian_route_agrees_with_the_interpreter_and_the_oracles() {
         let mut shipped_pairs: HashSet<(usize, usize)> = HashSet::new();
         for (equation, program) in runtime.model.stamp_programs.iter().enumerate() {
             for entry in &program.jacobian_programs {
-                shipped_pairs.insert((equation, shipped_entry_lane(&entry.col_axis, node_count)));
+                if let Some(lane) = column_lanes.lane(&entry.col_axis) {
+                    shipped_pairs.insert((equation, lane));
+                }
             }
         }
         let paired = runtime.model.stamp_programs.len() == cfg.residuals.len();
@@ -1773,7 +1807,8 @@ fn the_cfg_reactive_jacobian_route_agrees_with_the_interpreter_and_the_oracles()
         }
 
         // ---- sparsity ---------------------------------------------------
-        let node_count = artifact.mir.nodes.len();
+        let column_lanes = ShippedColumnLanes::build(&runtime.model, &artifact.mir)
+            .unwrap_or_else(|error| panic!("{module}: shipped column lanes: {error}"));
         let mut cfg_pairs: HashSet<(usize, usize)> = HashSet::new();
         for (equation, row) in rows.iter().enumerate() {
             for (lane, entry) in row.iter().enumerate() {
@@ -1785,7 +1820,9 @@ fn the_cfg_reactive_jacobian_route_agrees_with_the_interpreter_and_the_oracles()
         let mut shipped_pairs: HashSet<(usize, usize)> = HashSet::new();
         for (equation, program) in runtime.model.stamp_programs.iter().enumerate() {
             for entry in &program.reactive_jacobians {
-                shipped_pairs.insert((equation, shipped_entry_lane(&entry.col_axis, node_count)));
+                if let Some(lane) = column_lanes.lane(&entry.col_axis) {
+                    shipped_pairs.insert((equation, lane));
+                }
             }
         }
         let paired = runtime.model.stamp_programs.len() == cfg.residuals.len();

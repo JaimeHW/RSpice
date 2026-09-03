@@ -204,6 +204,9 @@ struct Tally {
     structural_zeros: usize,
     over_bound: usize,
     nonzero_structural_zeros: usize,
+    /// Structural zeros the shipped route read as non-finite at a point where
+    /// its own assignment pass produced no model. See [`check_structural_zero`].
+    structural_zeros_not_evaluable: usize,
     /// Noise magnitudes lowered from the exit read under a guard: asserted, on
     /// the weaker of the two noise criteria. See [`check_guarded_noise`].
     guarded_noise_entries: usize,
@@ -441,8 +444,62 @@ impl MatrixScales {
 /// identically zero there, which is a claim about the corpus rather than a
 /// theorem — so it is checked here, at every operating point, rather than
 /// assumed.
-fn check_structural_zero(comparison: &Comparison) -> bool {
-    comparison.cfg == 0.0 && comparison.mir == 0.0
+#[derive(Clone, Copy)]
+enum StructuralZero {
+    /// Both routes read exactly zero. The claim holds here.
+    Absent,
+    /// The shipped route read something else. A finding.
+    Present,
+    /// The shipped route read no number at all. See [`check_structural_zero`].
+    NotEvaluable,
+}
+
+/// # Why a non-finite shipped reading is not a counterexample
+///
+/// "Structurally absent" is a claim about *dependence*: the residual does not
+/// depend on this unknown, so the derivative is zero. What decides it is
+/// whether the dependence exists, and the shipped route's reading is evidence
+/// about that only when it is a number.
+///
+/// It reaches the same entry by a different road — it carries every column the
+/// front end's chain rule emitted, and a column the residual does not depend on
+/// is that rule run with a zero seed. `0 * NaN` and `0 / 0` are NaN, so a dead
+/// column reads NaN wherever the factor it is multiplied by is not a number:
+/// at a bias the model's own domain rejects, and at a kink where the derivative
+/// of the primal is `0/0`. Both are in the corpus. BSIMSOI and HICUM read NaN
+/// at one of the three points from a node potential drawn from `(-1, 1)` — 130
+/// and 4 entries — and HICUM's `jacobians[12][2]` reads NaN out of an
+/// eleven-operation program whose inputs are all finite, which is the kink.
+///
+/// Neither says the residual depends on the unknown. Failing a module on them
+/// would be failing it on the arithmetic of a column that contributes nothing.
+///
+/// So a non-finite shipped reading is excused — but never silently, and never
+/// on its own:
+///
+/// * the CFG's own reading must still be exactly zero, so a CFG entry that
+///   stopped being the constant zero is a finding at every point;
+/// * every excused reading is counted as
+///   [`Tally::structural_zeros_not_evaluable`] and printed per module and in
+///   the totals, so the class cannot grow unseen;
+/// * the entry is still asserted at every operating point where the shipped
+///   route does read a number, so a dependence the CFG really dropped is caught
+///   wherever the shipped route can say so.
+///
+/// A shipped route that stamps NaN into a matrix column is a finding of its
+/// own. It is a finding about the shipped route, not about this comparison,
+/// which is why it is counted here and raised there.
+fn check_structural_zero(comparison: &Comparison) -> StructuralZero {
+    if comparison.cfg != 0.0 {
+        return StructuralZero::Present;
+    }
+    if comparison.mir == 0.0 {
+        return StructuralZero::Absent;
+    }
+    if comparison.mir.is_finite() {
+        return StructuralZero::Present;
+    }
+    StructuralZero::NotEvaluable
 }
 
 /// Storage both routes read, sized once per model.
@@ -551,6 +608,7 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
                     state_len,
                     0,
                 )
+                .with_initial_step()
             })
             .collect();
 
@@ -569,6 +627,7 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
     let mut insignificant_worst = 0.0_f64;
     let mut insignificant_case: Option<Comparison> = None;
     let mut insignificant_here = 0_usize;
+    let mut not_evaluable_here = 0_usize;
 
     for (index, point) in points.iter_mut().enumerate() {
         let mut context = point.context();
@@ -634,9 +693,16 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
             }
             if structural_zeros.contains(&entry) {
                 tally.structural_zeros += 1;
-                if !check_structural_zero(&comparison) {
-                    tally.nonzero_structural_zeros += 1;
-                    nonzero_structural.get_or_insert(comparison);
+                match check_structural_zero(&comparison) {
+                    StructuralZero::Absent => {}
+                    StructuralZero::NotEvaluable => {
+                        tally.structural_zeros_not_evaluable += 1;
+                        not_evaluable_here += 1;
+                    }
+                    StructuralZero::Present => {
+                        tally.nonzero_structural_zeros += 1;
+                        nonzero_structural.get_or_insert(comparison);
+                    }
                 }
                 continue;
             }
@@ -683,6 +749,7 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
     println!(
         "cfg-mir model={module} entries={} compared={compared} exact={exact} \
          below_significance={insignificant_here} structural_zeros={} \
+         not_evaluable={not_evaluable_here} \
          noise_from_differentiated={} max_deviation_over_bound={worst_ratio:.3e}{}{}{}",
         positions.len(),
         cfg_plan.report.structural_zeros.len(),
@@ -800,6 +867,7 @@ fn the_cfg_built_plan_agrees_with_the_shipped_plan_within_the_reassociation_boun
     println!(
         "cfg-mir models={} built={} refused={} entries={} comparisons={} exact={} \
          runtime_errors={} structural_zeros={} over_bound={} nonzero_structural_zeros={} \
+         structural_zeros_not_evaluable={} \
          guarded_noise_entries={} guarded_noise_agreed={} guarded_noise_third_value={} \
          below_significance={}",
         tally.models,
@@ -812,6 +880,7 @@ fn the_cfg_built_plan_agrees_with_the_shipped_plan_within_the_reassociation_boun
         tally.structural_zeros,
         tally.over_bound,
         tally.nonzero_structural_zeros,
+        tally.structural_zeros_not_evaluable,
         tally.guarded_noise_entries,
         tally.guarded_noise_agreed,
         tally.guarded_noise_third_value,
@@ -854,6 +923,108 @@ fn every_refusal_class_has_a_name() {
         assert!(!class.name().is_empty());
         assert!(!class.name().contains(' '), "{:?}", class);
     }
+}
+
+/// VBIC's temperature mapping, reduced to the two statements that make an
+/// operating point without `@(initial_step)` meaningless.
+///
+/// `tiniK` is written by the initial block and divided by in the body, and the
+/// exponential's coefficient is the zero VBIC's `dear` defaults to. Skip the
+/// block and `tiniK` is its slot's zero, `rT` is infinite, and `-0.0 * -inf` is
+/// a NaN that everything downstream inherits.
+const TEMPERATURE_MAPPED_BY_AN_INITIAL_STEP: &str = r#"
+module cfg_initial_step_temperature(p, n);
+  inout p, n;
+  electrical p, n;
+  parameter real tnom = 27.0;
+  parameter real dear = 0.0;
+  parameter real g0 = 1.0e-3;
+  real tiniK;
+  real rT;
+  real g;
+  analog begin
+    @(initial_step) begin
+      tiniK = 273.15 + tnom;
+    end
+    rT = $temperature / tiniK;
+    g = g0 * exp(-dear * (1.0 - rT));
+    I(p, n) <+ V(p, n) * g;
+  end
+endmodule
+"#;
+
+/// The census's operating point has to run the model's initial step.
+///
+/// Without it a third of VBIC's variables are NaN before either plan is asked
+/// for anything — measured at 347 of 1052 — so every entry that loads one
+/// compares two readings of the same NaN, and the structural-zero check reads
+/// the shipped route's NaN as a nonzero it was supposed to evaluate to zero.
+/// This pins the reason rather than the count: the same module, at the same
+/// point, with and without the initial block.
+#[test]
+fn an_operating_point_without_the_initial_step_poisons_the_variable_array() {
+    let compiler = crate::VerilogACompiler::new(crate::CompilerOptions::default());
+    let model = compiler
+        .compile(TEMPERATURE_MAPPED_BY_AN_INITIAL_STEP)
+        .expect("compile bytecode model");
+    let artifact = compiler
+        .compile_canonical_ir(TEMPERATURE_MAPPED_BY_AN_INITIAL_STEP)
+        .expect("compile canonical IR");
+    let plan = build_model_plan_with_canonical_ir(&model, &artifact).expect("shipped plan");
+    let native = crate::native::x64::compile_model_plan(&model, &plan).expect("shipped codegen");
+
+    let parameter_defaults: Vec<Option<f64>> = artifact
+        .mir
+        .parameters
+        .iter()
+        .map(|parameter| parameter.default)
+        .collect();
+    let branch_unknowns =
+        crate::jit::plan_builder::canonical_branch_unknown_runtime_map(&model, &artifact.mir)
+            .expect("branch unknown map");
+    let storage = native.required_storage();
+    let state_len = storage
+        .state_values
+        .max(storage.state_initialized)
+        .max(storage.state_candidate_valid)
+        + 8;
+
+    let nan_count = |initial_step: bool| {
+        let mut point = OperatingPoint::new(
+            0x0005_EED1,
+            0,
+            &parameter_defaults,
+            model.num_terminals,
+            model.internal_nodes,
+            &branch_unknowns,
+            state_len,
+            0,
+        );
+        if initial_step {
+            point = point.with_initial_step();
+        }
+        let context = point.context();
+        let mut variables = vec![0.0_f64; model.num_variables + 64];
+        context.clear_runtime_error();
+        native.run_assignments(&context, variables.as_mut_ptr());
+        let _ = context.take_runtime_error();
+        variables
+            .iter()
+            .take(model.num_variables)
+            .filter(|value| value.is_nan())
+            .count()
+    };
+
+    assert!(
+        nan_count(false) > 0,
+        "without the initial step the body divides by an unwritten slot, so this module is not \
+         evaluable and the census would be comparing NaNs"
+    );
+    assert_eq!(
+        nan_count(true),
+        0,
+        "with the initial step every variable is a number"
+    );
 }
 
 /// The bound is derived from the entry's size, so it has to grow with it and
