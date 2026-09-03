@@ -67,7 +67,7 @@ pub(crate) fn scalar_signal_schema(
     rspice_core::execution::SignalSchema::new(descriptors)
 }
 
-fn scalar_descriptor(
+pub(crate) fn scalar_descriptor(
     signal: &ScalarSignal,
 ) -> Result<rspice_core::execution::SignalDescriptor, rspice_core::execution::SignalSchemaError> {
     let value_type = if signal.kind == SignalKind::Digital {
@@ -83,7 +83,7 @@ fn scalar_descriptor(
     )
 }
 
-fn complex_descriptor(
+pub(crate) fn complex_descriptor(
     signal: &ComplexSignal,
 ) -> Result<rspice_core::execution::SignalDescriptor, rspice_core::execution::SignalSchemaError> {
     signal_descriptor(

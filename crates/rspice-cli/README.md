@@ -84,43 +84,118 @@ Continuous rows are serialized additively. JSON and CSV retain `record_index`, r
 
 ### Output files for every mode
 
-With `-o`, every run mode writes machine-readable results. When a deck runs several analyses, each writes its own tagged file (`out.csv` → `out.op.csv`, `out.tran.csv`, ...). The `.OP`, `.DC`, `.TRAN`, `.AC`, and `.NOISE` cards write the expected node/branch tables under the `op`, `dc`, `tran`, `ac`, and `noise` tags. The rest have mode-specific shapes:
+With `-o`, every run mode writes machine-readable results.
 
-| Mode | Tag | Contents |
+#### Artifact naming
+
+Every artifact is namespaced by the canonical identity RSpice's planner minted
+for the analysis that produced it, so nothing a deck publishes can overwrite
+anything else it publishes:
+
+```
+<output stem>[.<run label>][.<coordinate>].<analysis id>.<extension>
+```
+
+- `<analysis id>` is `<family>-<NNN>`, one-based in authored source order:
+  `op-001`, `tran-001`, `ac-001`, `ac-002`, `four-001`. A deck with exactly one
+  analysis and no run axis keeps the exact `-o` path you asked for.
+- `<coordinate>` appears only under a `.STEP`, `.TEMP`, or `.DATA` axis and is
+  the deterministic coordinate identity, `run_<32 hex>_<NNN>`. It is derived
+  from the coordinate's semantic axis assignment, so it does not change when
+  the authored order of the axis values changes.
+- `<run label>` appears only for an outer `.ALTER` or textual `.DATA` variant.
+- A complete coordinate set is described by `<output stem>.run_set.json`,
+  published last, so a reader that finds the manifest is guaranteed every
+  artifact it names is present and complete.
+
+The `.FOUR` family publishes one artifact per resolved operand, because RSpice
+evaluates one spectrum per operand: `.FOUR 1k V(out) I(V1)` writes `four-001`
+and `four-002`. Command-line analysis modes (`--monte-carlo`, `--sparam`,
+`--pss-freq`, `--sens-*`, `--pz-*`) are single by construction and publish
+under their bare mode tag.
+
+#### `json`: the shared typed result document
+
+`-f json` publishes the shared `rspice-analysis-result` document, the same
+typed result RSpice's Python, browser, and engine-adapter surfaces publish. It
+carries the analysis instance, the coordinate and topology fingerprint it was
+produced at, its artifact namespaces, typed axes, one series per signal with a
+descriptor giving that signal's canonical name, display spelling, kind, unit,
+value type and owner, family-specific scalars, and a per-family payload. A
+sample that does not exist is encoded as absent, never as zero, and a channel
+the authored output projection did not retain keeps its descriptor and declares
+that it was not retained.
+
+Three forms are refused in `json` rather than published with evidence dropped,
+each naming what is lost and where to get it:
+
+| Refused | Why | Use instead |
 | :--- | :--- | :--- |
-| `.STEP` | `step` | One row per step value, node voltages as columns |
-| `.FOUR` | `four` | One row per harmonic and output: frequency, magnitude, phase, DC component, THD |
-| `.TEMP` | `temp` | One row per temperature point, node voltages as columns |
-| Monte Carlo | `mc` | Per-run samples; JSON adds mean/std/min/max, seed, failure count |
-| PSS | `pss` | One period of the steady-state waveforms (time domain) |
-| HB | `hb` | Complex spectrum per node over the harmonic frequencies |
-| `.STB` | `stb` | Complex `loopgain` plus `loopgain_mag_db` and `loopgain_phase_deg` |
-| `.TF` | `tf` | Gain, input impedance, output impedance |
-| Pole-zero | `pz` | `pole(i)`/`zero(i)` complex columns |
-| `.SENS` | `sens` | `dV/d(param)` columns (DC: single point; AC: series over frequency) |
-| `.SP` | `sp` | `S_i_j` complex columns for the deck's N ports (Touchstone instead when `-o` ends in a matching `.sNp`) |
-| `--sparam` | `sparam` | `S11`/`S21`/`S12`/`S22` complex columns over frequency (Touchstone instead when `-o` ends in `.s2p`) |
+| `.SP DONOISE` | the covariance matrix, its reference temperature, the 4kT normalization, and the two-port noise figures have no home in the shared S-parameter payload | `csv`, `tsv`, `raw`, `hdf5` |
+| AC `.SENS` | the sensitivity payload declares one operating-point derivative per element, not a complex sweep | `csv`, `tsv`, `raw` |
+| `--sens-param` | the probe returns one number, with no element identity or output value | `csv`, `tsv`, `raw`, or author a `.SENS` card |
 
-An implicit `.STEP` whose topology and complete signal schema are identical at
-every coordinate retains the single wide `step` table above. If a conditional
-changes either contract, RSpice writes one coordinate-local artifact
-(`out.step_000001.csv`, and so on) plus `out.step_schema.json`. The companion
-manifest records each deterministic coordinate ID, its topology fingerprint,
-the union signal schema, its artifact path, and a validity bitmap. A signal
-absent at one coordinate is omitted from that coordinate's artifact and marked
-invalid in the bitmap; it is never inferred from the first coordinate or
-fabricated as zero. This policy applies to every selected output format; the
-companion manifest is JSON.
+`.FFT` keeps its own versioned bundle (`schema_version: 2`), which already
+carries instance and coordinate identity plus the complete transform contract,
+and which must publish atomically alongside its parent transient.
+
+#### `csv`, `tsv`, `raw`, `ascii`: the flat authored projection
+
+These formats publish the columns the deck's `.PRINT`/`.PLOT`/`.SAVE` cards
+selected, in authored order, exactly as authored — including a column a card
+deliberately repeats. They have no representation for an absent sample, so the
+per-coordinate policy below is what carries missingness. Family-specific
+shapes:
+
+| Mode | Contents |
+| :--- | :--- |
+| `.OP` | `signal,value` rows |
+| `.DC`, `.TRAN`, `.AC`, `.NOISE` | node/branch tables over the family's own scale |
+| Aggregated axis sweep | One row per coordinate, node voltages as columns |
+| `.FOUR` | One row per harmonic: frequency, magnitude, phase, DC component, THD |
+| Monte Carlo | Per-run samples, one column per tracked variable |
+| PSS | One period of the steady-state waveforms (time domain) |
+| HB | Complex spectrum per node over the harmonic frequencies |
+| `.STB` | Complex `loopgain` plus `loopgain_mag_db` and `loopgain_phase_deg` |
+| `.TF` | Gain, input impedance, output impedance |
+| Pole-zero | `pole(i)`/`zero(i)` complex columns |
+| `.SENS` | `dV/d(param)` columns (DC: single point; AC: series over frequency) |
+| `.SP` | `S_i_j` complex columns for the deck's N ports (Touchstone instead when `-o` ends in a matching `.sNp`) |
+| `--sparam` | `S11`/`S21`/`S12`/`S22` complex columns over frequency (Touchstone instead when `-o` ends in `.s2p`) |
+
+TF, pole-zero, and sensitivity tables have no natural HDF5 section and reject
+`-f hdf5` with a clear error; use `csv`, `json`, or `raw`.
+
+#### `hdf5`
+
+One document per analysis, whose section group is named by the analysis
+identity rather than by the result family, so repeated cards cannot collide.
+The group declares its family in its own `section_type` attribute, and the root
+carries `analysis_id` plus, for an axis coordinate, `coordinate_id`,
+`coordinate_tag`, `coordinate_assignment`, and `topology_fingerprint`.
+
+#### Coordinate sets and missingness
+
+`.STEP`, `.TEMP`, and `.DATA` publish one artifact per coordinate and analysis,
+plus `<output stem>.step_schema.json`. That manifest groups by analysis
+instance; each entry records the union of the coordinates' signal schemas and,
+for every coordinate, its deterministic coordinate ID, its topology
+fingerprint, its artifact filename, and a validity bitmap over the union
+columns. A signal a conditional removed is omitted from that coordinate's
+artifact and marked invalid in the bitmap; it is never inferred from another
+coordinate or fabricated as zero. The whole set — every coordinate artifact,
+the schema manifest, and the set manifest — is published as one transaction,
+so a cancelled or failed run leaves either the previous complete set or nothing.
+
+An implicit axis sweep whose topology and complete signal schema are identical
+at every coordinate keeps the single wide aggregated table instead.
 
 For a stepped transient, `--checkpoint state.chk` and `--resume state.chk`
-resolve one state file per coordinate (`state.step_000001.chk`, and so on).
-Outer `.ALTER`/textual-`.DATA` labels are composed into the same filename, so
-no run can overwrite or resume another run's solver state. Checkpoint options
-on a `.STEP` deck without an authored `.TRAN` are rejected before execution.
-
-TF, pole-zero, and sensitivity tables have no natural HDF5 section and reject `-f hdf5` with a clear error; use `csv`, `json`, or `raw`.
-
-`.FOUR` and `.TEMP` are harmonic and sweep tables rather than waveforms, so they do not use the waveform writers. `.FOUR` honors `csv`/`tsv` and writes JSON for every other format; `.TEMP` honors `csv` and `json`, and writes a plain-text dump otherwise. Ask for `csv` or `json` explicitly with these two.
+resolve one state file per coordinate and per authored transient, tagged with
+the same identities. Outer `.ALTER`/textual-`.DATA` labels are composed into
+the same filename, so no run can overwrite or resume another run's solver
+state. Checkpoint options on a `.STEP` deck without an authored `.TRAN` are
+rejected before execution.
 
 ## Commands
 
@@ -150,7 +225,7 @@ Accepts `.sp`, `.cir`, `.net`, and `.spice` netlists, or `-` to read the netlist
 
 | Flag | Description |
 | :--- | :--- |
-| `-o, --output <FILE>` | Output file for results. With several analysis cards in one deck, each analysis writes its own tagged file: `out.csv` → `out.op.csv`, `out.tran.csv`, ... |
+| `-o, --output <FILE>` | Output file for results. With several analysis cards in one deck, each analysis writes its own file, namespaced by its canonical analysis identity: `out.csv` → `out.op-001.csv`, `out.tran-001.csv`, ... |
 | `-f, --format <FORMAT>` | Output format: `raw`, `ascii`, `csv`, `json`, `tsv`, `hdf5` (default: config `output.format`, else `raw`) |
 | `--save <SIGNAL>` | Limit exported signals, replacing the netlist `.SAVE`/`.PROBE`/`.PRINT`/`.PLOT` selection: `V(out)`, `V(a,b)`, `I(v1)`, `@m1[id]`, `all` (repeatable) |
 | `--meas` | Print `.MEAS` measurement results |
@@ -158,6 +233,15 @@ Accepts `.sp`, `.cir`, `.net`, and `.spice` netlists, or `-` to read the netlist
 | `--progress` | Show a live percentage bar during transient analysis (the engine reports its completed fraction; elapsed time, no ETA) |
 | `--compress` | Enable waveform compression for long simulations |
 | `--compress-tol <TOL>` | Compression tolerance (default: config `compression_tolerance`, else 1e-4; requires `--compress`) |
+
+`--compress` decimates the published transient waveform, and the run prints
+the worst reconstruction error it accepted beside the compression ratio. It
+changes nothing else: `.MEASURE`, `.FOUR`, and `.FFT` are evaluated on the
+exact accepted trajectory before any decimation, so their artifacts are
+byte-identical with and without the flag. An authored `.OPTIONS OUTPUT
+INITIAL_INTERVAL` lattice and an authored `.OPTIONS RESTART` schedule both
+compose with it: every sample the lattice names is retained exactly, and every
+restart file is written from the accepted trajectory and stays byte-identical.
 
 **Run-discipline options:**
 

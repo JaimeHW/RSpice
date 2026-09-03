@@ -259,9 +259,11 @@ fn export_monte_carlo(
     variables: &[&rspice_core::analysis::VariableStatistics],
 ) -> Result<(), CliError> {
     ensure_not_cancelled(ctx)?;
-    let Some(ref output_path) = ctx.output_path_for("mc") else {
+    let Some(resolved) = ctx.resolve_output("mc") else {
         return Ok(());
     };
+    let analysis_id = resolved.analysis("mc")?;
+    let output_path = resolved.path;
 
     let num_samples = variables
         .iter()
@@ -269,46 +271,31 @@ fn export_monte_carlo(
         .max()
         .unwrap_or(0);
     let runs: Vec<f64> = (1..=num_samples).map(|i| i as f64).collect();
-
-    if matches!(ctx.format, crate::cli::OutputFormat::Json) {
-        let json = serde_json::json!({
-            "analysis": "monte_carlo",
-            "runs": result.num_runs,
-            "failures": result.num_failures,
-            "seed": seed,
-            "variables": variables.iter().map(|stats| {
-                serde_json::json!({
-                    "name": stats.name,
-                    "mean": stats.mean,
-                    "std_dev": stats.std_dev,
-                    "min": stats.min,
-                    "max": stats.max,
-                    "samples": stats.samples,
-                })
-            }).collect::<Vec<_>>(),
-        });
-        publish::artifact(output_path, |file| {
-            serde_json::to_writer_pretty(&mut *file, &json)
-                .map_err(|e| CliError::output_json_error(output_path, e))?;
-            file.write_all(b"\n")
-                .map_err(|e| CliError::output_error(output_path, e))
+    let signals: Vec<crate::commands::run_signals::ScalarSignal> = variables
+        .iter()
+        .map(|stats| crate::commands::run_signals::ScalarSignal {
+            display_name: stats.name.clone(),
+            raw_name: stats.name.clone(),
+            kind: crate::commands::run_signals::SignalKind::Voltage,
+            values: stats.samples.clone(),
         })
-        .map_err(|error| map_atomic_output_error(output_path, error))?;
-    } else {
-        let signals: Vec<crate::commands::run_signals::ScalarSignal> = variables
-            .iter()
-            .map(|stats| crate::commands::run_signals::ScalarSignal {
-                display_name: stats.name.clone(),
-                raw_name: stats.name.clone(),
-                kind: crate::commands::run_signals::SignalKind::Voltage,
-                values: stats.samples.clone(),
-            })
-            .collect();
+        .collect();
+    // The campaign seed is run configuration rather than a result field. It is
+    // reported on the console and in the `--summary` manifest; the typed
+    // document carries the statistics the core computed.
+    let _ = seed;
 
-        match ctx.format {
+    super::document::publish_analysis_result(
+        ctx,
+        &output_path,
+        analysis_id,
+        super::document::scalar_schema(&signals)?,
+        || rspice_core::execution::AnalysisResultDocument::from_monte_carlo(analysis_id, result),
+        |path, format| match format {
             crate::cli::OutputFormat::Hdf5 => {
                 let mut data = crate::hdf5::Hdf5SimulationData::new();
                 data.title = "Monte Carlo Samples".to_string();
+                data.identity = Some(super::document::hdf5_identity(ctx, analysis_id)?);
                 let mut sweep = crate::hdf5::Hdf5WaveformSection::new("run", runs.clone());
                 for signal in &signals {
                     sweep.add_typed_signal(
@@ -318,22 +305,20 @@ fn export_monte_carlo(
                     );
                 }
                 data.dc_sweep = Some(sweep);
-                crate::hdf5::write_hdf5(output_path, &data)
-                    .map_err(|err| super::shared::map_hdf5_output_error(output_path, err))?;
+                crate::hdf5::write_hdf5(path, &data)
+                    .map_err(|err| super::shared::map_hdf5_output_error(path, err))
             }
-            _ => {
-                super::export::scalar_table(
-                    "monte_carlo",
-                    "Monte Carlo Samples",
-                    "run",
-                    "index",
-                    runs,
-                    &signals,
-                )
-                .write(output_path, ctx.format)?;
-            }
-        }
-    }
+            format => super::export::scalar_table(
+                "monte_carlo",
+                "Monte Carlo Samples",
+                "run",
+                "index",
+                runs.clone(),
+                &signals,
+            )
+            .write(path, format),
+        },
+    )?;
 
     if !ctx.quiet {
         println!(
@@ -431,9 +416,11 @@ fn export_pss(
     result: &rspice_core::analysis::PssResult,
 ) -> Result<(), CliError> {
     ensure_not_cancelled(ctx)?;
-    let Some(ref output_path) = ctx.output_path_for("pss") else {
+    let Some(resolved) = ctx.resolve_output("pss") else {
         return Ok(());
     };
+    let analysis_id = resolved.analysis("pss")?;
+    let output_path = &resolved.path;
 
     let signals: Vec<crate::commands::run_signals::ScalarSignal> = result
         .waveforms
@@ -466,56 +453,68 @@ fn export_pss(
         analysis: Some("PSS output projection".to_string()),
     })?;
 
-    match ctx.format {
-        crate::cli::OutputFormat::Hdf5 => {
-            let mut data = crate::hdf5::Hdf5SimulationData::new();
-            data.title = "Periodic Steady State".to_string();
-            let mut section = crate::hdf5::Hdf5WaveformSection::new("time", result.time.clone());
-            for signal in &signals {
-                section.add_typed_signal(
-                    signal.display_name.clone(),
-                    signal.raw_variable_type(),
-                    signal.values.clone(),
-                );
+    super::document::publish_analysis_result(
+        ctx,
+        output_path,
+        analysis_id,
+        super::document::scalar_schema(&signals)?,
+        || rspice_core::execution::AnalysisResultDocument::from_pss(analysis_id, result),
+        |path, format| {
+            match format {
+                crate::cli::OutputFormat::Hdf5 => {
+                    let mut data = crate::hdf5::Hdf5SimulationData::new();
+                    data.title = "Periodic Steady State".to_string();
+                    data.identity = Some(super::document::hdf5_identity(ctx, analysis_id)?);
+                    let mut section =
+                        crate::hdf5::Hdf5WaveformSection::new("time", result.time.clone());
+                    for signal in &signals {
+                        section.add_typed_signal(
+                            signal.display_name.clone(),
+                            signal.raw_variable_type(),
+                            signal.values.clone(),
+                        );
+                    }
+                    data.transient = Some(section);
+                    crate::hdf5::write_hdf5(path, &data)
+                        .map_err(|err| super::shared::map_hdf5_output_error(path, err))?;
+                }
+                crate::cli::OutputFormat::Raw | crate::cli::OutputFormat::RawAscii => {
+                    let node_names: Vec<String> = signals
+                        .iter()
+                        .map(|signal| signal.raw_name.clone())
+                        .collect();
+                    let waveforms: Vec<Vec<f64>> =
+                        signals.iter().map(|signal| signal.values.clone()).collect();
+                    rspice_core::io::export_transient(
+                        path,
+                        &result.time,
+                        &node_names,
+                        &waveforms,
+                        match format {
+                            crate::cli::OutputFormat::RawAscii => rspice_core::io::RawFormat::Ascii,
+                            _ => rspice_core::io::RawFormat::Binary,
+                        },
+                    )
+                    .map_err(|e| CliError::OutputError {
+                        path: path.to_path_buf(),
+                        source: e,
+                    })?;
+                }
+                format => {
+                    super::export::scalar_table(
+                        "pss",
+                        "Periodic Steady State",
+                        "time",
+                        "time",
+                        result.time.clone(),
+                        &signals,
+                    )
+                    .write(path, format)?;
+                }
             }
-            data.transient = Some(section);
-            crate::hdf5::write_hdf5(output_path, &data)
-                .map_err(|err| super::shared::map_hdf5_output_error(output_path, err))?;
-        }
-        crate::cli::OutputFormat::Raw | crate::cli::OutputFormat::RawAscii => {
-            let node_names: Vec<String> = signals
-                .iter()
-                .map(|signal| signal.raw_name.clone())
-                .collect();
-            let waveforms: Vec<Vec<f64>> =
-                signals.iter().map(|signal| signal.values.clone()).collect();
-            rspice_core::io::export_transient(
-                output_path,
-                &result.time,
-                &node_names,
-                &waveforms,
-                match ctx.format {
-                    crate::cli::OutputFormat::RawAscii => rspice_core::io::RawFormat::Ascii,
-                    _ => rspice_core::io::RawFormat::Binary,
-                },
-            )
-            .map_err(|e| CliError::OutputError {
-                path: output_path.clone(),
-                source: e,
-            })?;
-        }
-        _ => {
-            super::export::scalar_table(
-                "pss",
-                "Periodic Steady State",
-                "time",
-                "time",
-                result.time.clone(),
-                &signals,
-            )
-            .write(output_path, ctx.format)?;
-        }
-    }
+            Ok(())
+        },
+    )?;
 
     if !ctx.quiet {
         println!("  PSS waveforms exported to: {}", output_path.display());
@@ -582,9 +581,11 @@ fn export_hb(
     result: &rspice_core::analysis::HbResult,
 ) -> Result<(), CliError> {
     ensure_not_cancelled(ctx)?;
-    let Some(ref output_path) = ctx.output_path_for("hb") else {
+    let Some(resolved) = ctx.resolve_output("hb") else {
         return Ok(());
     };
+    let analysis_id = resolved.analysis("hb")?;
+    let output_path = &resolved.path;
 
     let num_coeffs = result
         .spectral_voltages
@@ -669,24 +670,44 @@ fn export_hb(
         analysis: Some("HB output projection".to_string()),
     })?;
 
-    if matches!(ctx.format, crate::cli::OutputFormat::Hdf5) {
-        let mut data = crate::hdf5::Hdf5SimulationData::new();
-        data.title = "Harmonic Balance Spectrum".to_string();
-        let mut section = crate::hdf5::Hdf5AcSection::new(frequencies);
-        for signal in &signals {
-            section.add_signal(
-                signal.display_name.clone(),
-                signal.real.clone(),
-                signal.imag.clone(),
-            );
-        }
-        data.ac = Some(section);
-        crate::hdf5::write_hdf5(output_path, &data)
-            .map_err(|err| super::shared::map_hdf5_output_error(output_path, err))?;
-    } else {
-        super::export::complex_table("hb", "Harmonic Balance Spectrum", frequencies, &signals)
-            .write(output_path, ctx.format)?;
-    }
+    super::document::publish_analysis_result(
+        ctx,
+        output_path,
+        analysis_id,
+        super::document::complex_schema(&signals)?,
+        || {
+            rspice_core::execution::AnalysisResultDocument::from_harmonic_balance(
+                analysis_id,
+                result,
+            )
+        },
+        |path, format| {
+            if matches!(format, crate::cli::OutputFormat::Hdf5) {
+                let mut data = crate::hdf5::Hdf5SimulationData::new();
+                data.title = "Harmonic Balance Spectrum".to_string();
+                data.identity = Some(super::document::hdf5_identity(ctx, analysis_id)?);
+                let mut section = crate::hdf5::Hdf5AcSection::new(frequencies.clone());
+                for signal in &signals {
+                    section.add_signal(
+                        signal.display_name.clone(),
+                        signal.real.clone(),
+                        signal.imag.clone(),
+                    );
+                }
+                data.ac = Some(section);
+                crate::hdf5::write_hdf5(path, &data)
+                    .map_err(|err| super::shared::map_hdf5_output_error(path, err))
+            } else {
+                super::export::complex_table(
+                    "hb",
+                    "Harmonic Balance Spectrum",
+                    frequencies.clone(),
+                    &signals,
+                )
+                .write(path, format)
+            }
+        },
+    )?;
 
     if !ctx.quiet {
         println!("  HB spectrum exported to: {}", output_path.display());
@@ -937,34 +958,35 @@ fn run_corner_job(
     };
 
     let corner_engine = rspice_core::Engine::new(setup.config.clone());
-    let corner_ctx = RunContext {
-        engine: &corner_engine,
-        netlist: &corner_netlist,
-        args: setup.args,
-        format: setup.format,
-        output: corner_output_path(setup.output.as_deref(), corner),
-        checkpoint: corner_output_path(setup.args.checkpoint.as_deref(), corner),
-        resume: corner_output_path(setup.args.resume.as_deref(), corner),
-        show_progress: false,
-        compress: setup.compress,
-        compress_tol: setup.compress_tol,
-        multi_analysis: corner_netlist.analyses.len() > 1
-            || !corner_netlist.fft_analyses.is_empty(),
-        coordinate: None,
-        output_tag_multiplicities: super::analysis_output_tag_multiplicities(&corner_netlist),
-        next_output_tag_ordinal: std::cell::RefCell::new(std::collections::HashMap::new()),
-        materialized_output_ids: std::cell::RefCell::new(std::collections::HashMap::new()),
-        materialized_transient_ids: Vec::new(),
-        materialized_namespace_required: false,
-        materialized_namespace_error: std::cell::RefCell::new(None),
-        verbose: false,
-        quiet: true,
-        measurements: std::cell::RefCell::new(Vec::new()),
-        evaluated_meas: std::cell::RefCell::new(std::collections::HashSet::new()),
-        outputs: std::cell::RefCell::new(Vec::new()),
-        last_transient: std::cell::RefCell::new(None),
-        next_transient_ordinal: std::cell::Cell::new(0),
-        next_fourier_ordinal: std::cell::Cell::new(0),
+    let corner_ctx = match RunContext::for_elaborated_deck(
+        &corner_engine,
+        &corner_netlist,
+        setup.args,
+        setup.format,
+        super::ElaboratedDeckPaths {
+            output: corner_output_path(setup.output.as_deref(), corner),
+            checkpoint: corner_output_path(setup.args.checkpoint.as_deref(), corner),
+            resume: corner_output_path(setup.args.resume.as_deref(), corner),
+        },
+        &super::RunContextSettings {
+            show_progress: false,
+            compress: setup.compress,
+            compress_tol: setup.compress_tol,
+            coordinate: None,
+            verbose: false,
+            quiet: true,
+        },
+    ) {
+        Ok(context) => context,
+        Err(error) => {
+            return CornerOutcome {
+                simulation_passed: false,
+                measurements_passed: false,
+                error: Some(format!("corner '{}': {}", corner, error)),
+                measurements: Vec::new(),
+                outputs: Vec::new(),
+            };
+        }
     };
 
     let mut passed = true;
@@ -975,16 +997,7 @@ fn run_corner_job(
             error.get_or_insert(e.to_string());
         }
     } else {
-        for analysis in corner_netlist
-            .analyses
-            .iter()
-            .filter(|analysis| {
-                !matches!(analysis, rspice_core::netlist::AnalysisCommand::Four { .. })
-            })
-            .chain(corner_netlist.analyses.iter().filter(|analysis| {
-                matches!(analysis, rspice_core::netlist::AnalysisCommand::Four { .. })
-            }))
-        {
+        for analysis in super::analyses_in_execution_order(&corner_netlist) {
             if crate::abort::reason().is_some() {
                 passed = false;
                 error.get_or_insert_with(|| "cancelled".to_string());
@@ -1156,35 +1169,25 @@ fn run_corner_serial_source(
     })?;
 
     let corner_engine = rspice_core::Engine::new(ctx.engine.config().clone());
-    let corner_ctx = RunContext {
-        engine: &corner_engine,
-        netlist: &corner_netlist,
-        args: ctx.args,
-        format: ctx.format,
-        output: corner_output_path(ctx.output.as_deref(), corner),
-        checkpoint: corner_output_path(ctx.checkpoint.as_deref(), corner),
-        resume: corner_output_path(ctx.resume.as_deref(), corner),
-        show_progress: ctx.show_progress,
-        compress: ctx.compress,
-        compress_tol: ctx.compress_tol,
-        multi_analysis: corner_netlist.analyses.len() > 1
-            || !corner_netlist.fft_analyses.is_empty(),
-        coordinate: ctx.coordinate.clone(),
-        output_tag_multiplicities: super::analysis_output_tag_multiplicities(&corner_netlist),
-        next_output_tag_ordinal: std::cell::RefCell::new(std::collections::HashMap::new()),
-        materialized_output_ids: std::cell::RefCell::new(std::collections::HashMap::new()),
-        materialized_transient_ids: Vec::new(),
-        materialized_namespace_required: false,
-        materialized_namespace_error: std::cell::RefCell::new(None),
-        verbose: ctx.verbose,
-        quiet: ctx.quiet,
-        measurements: std::cell::RefCell::new(Vec::new()),
-        evaluated_meas: std::cell::RefCell::new(std::collections::HashSet::new()),
-        outputs: std::cell::RefCell::new(Vec::new()),
-        last_transient: std::cell::RefCell::new(None),
-        next_transient_ordinal: std::cell::Cell::new(0),
-        next_fourier_ordinal: std::cell::Cell::new(0),
-    };
+    let corner_ctx = RunContext::for_elaborated_deck(
+        &corner_engine,
+        &corner_netlist,
+        ctx.args,
+        ctx.format,
+        super::ElaboratedDeckPaths {
+            output: corner_output_path(ctx.output.as_deref(), corner),
+            checkpoint: corner_output_path(ctx.checkpoint.as_deref(), corner),
+            resume: corner_output_path(ctx.resume.as_deref(), corner),
+        },
+        &super::RunContextSettings {
+            show_progress: ctx.show_progress,
+            compress: ctx.compress,
+            compress_tol: ctx.compress_tol,
+            coordinate: ctx.coordinate.clone(),
+            verbose: ctx.verbose,
+            quiet: ctx.quiet,
+        },
+    )?;
 
     let mut passed = true;
     if corner_netlist.analyses.is_empty() {
@@ -1196,16 +1199,7 @@ fn run_corner_serial_source(
             passed = false;
         }
     } else {
-        for analysis in corner_netlist
-            .analyses
-            .iter()
-            .filter(|analysis| {
-                !matches!(analysis, rspice_core::netlist::AnalysisCommand::Four { .. })
-            })
-            .chain(corner_netlist.analyses.iter().filter(|analysis| {
-                matches!(analysis, rspice_core::netlist::AnalysisCommand::Four { .. })
-            }))
-        {
+        for analysis in super::analyses_in_execution_order(&corner_netlist) {
             ensure_not_cancelled(ctx)?;
             if let Err(e) = corner_ctx.run_analysis(analysis) {
                 ensure_not_cancelled(ctx)?;
@@ -1333,7 +1327,9 @@ pub(super) fn run_sparam_from_command(
         );
     }
 
-    if let Some(ref output_path) = ctx.output_path_for("sp") {
+    if let Some(resolved) = ctx.resolve_output("sp") {
+        let analysis_id = resolved.analysis("sp")?;
+        let output_path = &resolved.path;
         if touchstone_extension_matches(output_path, data.ports.len()) {
             if data.noise.is_some() {
                 return Err(CliError::InvalidArgument {
@@ -1342,37 +1338,67 @@ pub(super) fn run_sparam_from_command(
                         output_path.display()
                     ),
                     suggestion: Some(
-                        "use JSON, CSV, TSV, raw, or HDF5 output for .SP DONOISE".to_string(),
+                        "use CSV, TSV, raw, or HDF5 output for .SP DONOISE".to_string(),
                     ),
                 });
             }
             write_touchstone_nport(output_path, &data.ports, &data.frequencies, &data.s)?;
         } else {
-            let signals = sparameter_export_signals(&data);
-
-            if matches!(ctx.format, crate::cli::OutputFormat::Hdf5) {
-                let mut hdf5 = crate::hdf5::Hdf5SimulationData::new();
-                hdf5.title = "S-Parameters".to_string();
-                let mut section = crate::hdf5::Hdf5AcSection::new(data.frequencies.clone());
-                for signal in &signals {
-                    section.add_signal(
-                        signal.display_name.clone(),
-                        signal.real.clone(),
-                        signal.imag.clone(),
-                    );
-                }
-                hdf5.ac = Some(section);
-                crate::hdf5::write_hdf5(output_path, &hdf5)
-                    .map_err(|err| super::shared::map_hdf5_output_error(output_path, err))?;
-            } else {
-                super::export::complex_table(
-                    "sp",
-                    "S-Parameters",
-                    data.frequencies.clone(),
-                    &signals,
-                )
-                .write(output_path, ctx.format)?;
+            // The shared S-parameter document declares the scattering matrix
+            // and its ports. `.SP DONOISE` additionally publishes the current
+            // covariance, its reference temperature, the 4kT normalization,
+            // and the two-port noise figures, none of which that document can
+            // hold — so the typed representation is refused rather than
+            // published with the noise provenance dropped.
+            if matches!(ctx.format, crate::cli::OutputFormat::Json) && data.noise.is_some() {
+                return Err(CliError::InvalidArgument {
+                    message: "the shared S-parameter result document cannot retain the .SP DONOISE covariance, reference temperature, or two-port noise figures"
+                        .to_string(),
+                    suggestion: Some(
+                        "export .SP DONOISE with --format csv, tsv, raw, or hdf5".to_string(),
+                    ),
+                });
             }
+            let signals = sparameter_export_signals(&data);
+            let core_result = sparameter_core_result(&data);
+            super::document::publish_analysis_result(
+                ctx,
+                output_path,
+                analysis_id,
+                super::document::complex_schema(&signals)?,
+                || {
+                    rspice_core::execution::AnalysisResultDocument::from_s_parameters(
+                        analysis_id,
+                        &core_result,
+                    )
+                },
+                |path, format| {
+                    if matches!(format, crate::cli::OutputFormat::Hdf5) {
+                        let mut hdf5 = crate::hdf5::Hdf5SimulationData::new();
+                        hdf5.title = "S-Parameters".to_string();
+                        hdf5.identity = Some(super::document::hdf5_identity(ctx, analysis_id)?);
+                        let mut section = crate::hdf5::Hdf5AcSection::new(data.frequencies.clone());
+                        for signal in &signals {
+                            section.add_signal(
+                                signal.display_name.clone(),
+                                signal.real.clone(),
+                                signal.imag.clone(),
+                            );
+                        }
+                        hdf5.ac = Some(section);
+                        crate::hdf5::write_hdf5(path, &hdf5)
+                            .map_err(|err| super::shared::map_hdf5_output_error(path, err))
+                    } else {
+                        super::export::complex_table(
+                            "sp",
+                            "S-Parameters",
+                            data.frequencies.clone(),
+                            &signals,
+                        )
+                        .write(path, format)
+                    }
+                },
+            )?;
         }
 
         if !ctx.quiet {
@@ -1381,6 +1407,46 @@ pub(super) fn run_sparam_from_command(
     }
 
     Ok(())
+}
+
+/// Re-assemble the swept scattering matrix into the core result type the
+/// shared document is built from. The numbers are the ones the extraction
+/// produced; only their container changes.
+fn sparameter_core_result(
+    data: &SParameterSweepData,
+) -> rspice_core::analysis::s_param::SParameterResult {
+    use rspice_core::analysis::s_param::{Port, SMatrix, SParameterResult};
+
+    let ports = data
+        .ports
+        .iter()
+        .map(|port| Port {
+            number: port.number,
+            node_pos: port.node_pos.clone(),
+            node_neg: port.node_neg.clone(),
+            z0: port.z0,
+        })
+        .collect::<Vec<_>>();
+    let reference = ports.first().map_or(50.0, |port| port.z0);
+    let mut result = SParameterResult::new(reference, ports);
+    let count = data.ports.len();
+    for (index, frequency) in data.frequencies.iter().enumerate() {
+        let mut matrix = SMatrix::new(*frequency, count);
+        for row in 0..count {
+            for column in 0..count {
+                if let Some(value) = data
+                    .s
+                    .get(row)
+                    .and_then(|entries| entries.get(column))
+                    .and_then(|series| series.get(index))
+                {
+                    matrix.set(row, column, *value);
+                }
+            }
+        }
+        result.data.push(matrix);
+    }
+    result
 }
 
 fn solve_netlist_sparameters(
@@ -1832,7 +1898,9 @@ pub(super) fn run_sparam(ctx: &RunContext<'_>, ports_spec: &str, z0: f64) -> Res
     }
 
     ensure_not_cancelled(ctx)?;
-    if let Some(ref output_path) = ctx.output_path_for("sparam") {
+    if let Some(resolved) = ctx.resolve_output("sparam") {
+        let analysis_id = resolved.analysis("sparam")?;
+        let output_path = &resolved.path;
         if output_path
             .extension()
             .is_some_and(|ext| ext.eq_ignore_ascii_case("s2p") || ext.eq_ignore_ascii_case("snp"))
@@ -1854,25 +1922,45 @@ pub(super) fn run_sparam(ctx: &RunContext<'_>, ports_spec: &str, z0: f64) -> Res
                 signal("S12", &s12),
                 signal("S22", &s22),
             ];
-            if matches!(ctx.format, crate::cli::OutputFormat::Hdf5) {
-                let mut data = crate::hdf5::Hdf5SimulationData::new();
-                data.title = "S-Parameters".to_string();
-                let mut section = crate::hdf5::Hdf5AcSection::new(frequencies.clone());
-                for s in &signals {
-                    section.add_signal(s.display_name.clone(), s.real.clone(), s.imag.clone());
-                }
-                data.ac = Some(section);
-                crate::hdf5::write_hdf5(output_path, &data)
-                    .map_err(|err| super::shared::map_hdf5_output_error(output_path, err))?;
-            } else {
-                super::export::complex_table(
-                    "sparam",
-                    "S-Parameters",
-                    frequencies.clone(),
-                    &signals,
-                )
-                .write(output_path, ctx.format)?;
-            }
+            let core_result = two_port_core_result(z0, &frequencies, [&s11, &s21, &s12, &s22]);
+            super::document::publish_analysis_result(
+                ctx,
+                output_path,
+                analysis_id,
+                super::document::complex_schema(&signals)?,
+                || {
+                    rspice_core::execution::AnalysisResultDocument::from_s_parameters(
+                        analysis_id,
+                        &core_result,
+                    )
+                },
+                |path, format| {
+                    if matches!(format, crate::cli::OutputFormat::Hdf5) {
+                        let mut data = crate::hdf5::Hdf5SimulationData::new();
+                        data.title = "S-Parameters".to_string();
+                        data.identity = Some(super::document::hdf5_identity(ctx, analysis_id)?);
+                        let mut section = crate::hdf5::Hdf5AcSection::new(frequencies.clone());
+                        for s in &signals {
+                            section.add_signal(
+                                s.display_name.clone(),
+                                s.real.clone(),
+                                s.imag.clone(),
+                            );
+                        }
+                        data.ac = Some(section);
+                        crate::hdf5::write_hdf5(path, &data)
+                            .map_err(|err| super::shared::map_hdf5_output_error(path, err))
+                    } else {
+                        super::export::complex_table(
+                            "sparam",
+                            "S-Parameters",
+                            frequencies.clone(),
+                            &signals,
+                        )
+                        .write(path, format)
+                    }
+                },
+            )?;
         }
         if !ctx.quiet {
             println!("  S-parameters exported to: {}", output_path.display());
@@ -1880,6 +1968,40 @@ pub(super) fn run_sparam(ctx: &RunContext<'_>, ports_spec: &str, z0: f64) -> Res
     }
 
     Ok(())
+}
+
+/// Re-assemble the `--sparam` two-port sweep into the core result type the
+/// shared document is built from.
+fn two_port_core_result(
+    z0: f64,
+    frequencies: &[f64],
+    s: [&[rspice_core::Complex64]; 4],
+) -> rspice_core::analysis::s_param::SParameterResult {
+    use rspice_core::analysis::s_param::{Port, SMatrix, SParameterResult};
+
+    // `--sparam` drives the deck's two named ports; their reference planes are
+    // not carried through this path, so the ports are identified by number.
+    let ports = (1..=2)
+        .map(|number| Port {
+            number,
+            node_pos: format!("port{number}"),
+            node_neg: "0".to_string(),
+            z0,
+        })
+        .collect::<Vec<_>>();
+    let mut result = SParameterResult::new(z0, ports);
+    // `s` is ordered S11, S21, S12, S22, matching Touchstone two-port order.
+    let placement = [(0, 0), (1, 0), (0, 1), (1, 1)];
+    for (index, frequency) in frequencies.iter().enumerate() {
+        let mut matrix = SMatrix::new(*frequency, 2);
+        for (series, (row, column)) in s.iter().zip(placement) {
+            if let Some(value) = series.get(index) {
+                matrix.set(row, column, *value);
+            }
+        }
+        result.data.push(matrix);
+    }
+    result
 }
 
 /// Touchstone v1 two-port file (`# HZ S RI R <z0>`, S11 S21 S12 S22 order).

@@ -18,6 +18,21 @@ fn run_rspice(args: &[&str]) -> std::process::Output {
         .expect("run rspice")
 }
 
+/// One named scalar from a typed result document.
+///
+/// A family whose result is a small set of named numbers publishes them as
+/// document scalars rather than as series columns.
+fn scalar_value(document: &serde_json::Value, name: &str) -> f64 {
+    document["scalars"]
+        .as_array()
+        .expect("document scalars")
+        .iter()
+        .find(|scalar| scalar["name"].as_str() == Some(name))
+        .unwrap_or_else(|| panic!("missing scalar '{name}' in {document:#}"))["value"]["value"]
+        .as_f64()
+        .expect("numeric scalar")
+}
+
 fn write_deck(dir: &std::path::Path, name: &str, body: &str) -> PathBuf {
     let path = dir.join(name);
     std::fs::write(&path, body).expect("write deck");
@@ -116,10 +131,13 @@ fn monte_carlo_exports_samples_and_is_seed_deterministic() {
 
     let json: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&json_out).expect("mc json")).expect("parse");
-    assert_eq!(json["analysis"], "monte_carlo");
-    assert_eq!(json["runs"], 6);
-    assert_eq!(json["seed"], 11);
-    let variables = json["variables"].as_array().expect("variables array");
+    assert_eq!(json["resultKind"], "monte-carlo");
+    assert_eq!(json["analysis"]["tag"], "mc-001");
+    assert_eq!(scalar_value(&json, "completed_runs"), 6.0);
+    assert_eq!(scalar_value(&json, "failed_runs"), 0.0);
+    let variables = json["payload"]["statistics"]
+        .as_array()
+        .expect("statistics array");
     let vout = variables
         .iter()
         .find(|v| {
@@ -130,7 +148,7 @@ fn monte_carlo_exports_samples_and_is_seed_deterministic() {
         })
         .expect("V(OUT) variable");
     assert_eq!(vout["samples"].as_array().unwrap().len(), 6);
-    let std_dev = vout["std_dev"].as_f64().unwrap();
+    let std_dev = vout["standardDeviation"].as_f64().unwrap();
     assert!(
         std_dev > 1e-3,
         "5% spread must move the divider output, std={std_dev}"
@@ -203,9 +221,9 @@ fn monte_carlo_zero_spread_exports_nominal_samples() {
 
     let json: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&json_out).expect("mc json")).expect("parse");
-    let vout = json["variables"]
+    let vout = json["payload"]["statistics"]
         .as_array()
-        .expect("variables array")
+        .expect("statistics array")
         .iter()
         .find(|v| {
             v["name"]
@@ -214,7 +232,7 @@ fn monte_carlo_zero_spread_exports_nominal_samples() {
                 .eq_ignore_ascii_case("V(OUT)")
         })
         .expect("V(OUT) variable");
-    assert_eq!(vout["std_dev"].as_f64().unwrap(), 0.0);
+    assert_eq!(vout["standardDeviation"].as_f64().unwrap(), 0.0);
     let samples = vout["samples"].as_array().unwrap();
     assert_eq!(samples.len(), 4);
     assert!(

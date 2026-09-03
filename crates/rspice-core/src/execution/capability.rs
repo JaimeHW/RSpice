@@ -208,9 +208,6 @@ impl AnalysisResultCapability {
     }
 }
 
-const CLI_ARTIFACT: &str = "CSV/text artifact exists, but no shared typed result document";
-const CLI_AXIS: &str =
-    "shared deck axes execute, but the CLI artifact does not retain a typed coordinate document";
 const CLI_AXIS_UNAVAILABLE: &str = "CLI has no authored deck-axis route for this analysis family";
 const PY_PNOISE_DRIVEN_AXIS_ONLY: &str = "deck-axis .PNOISE executes around a driven carrier only; an autonomous PSS carrier's      oscillator phase noise has no run-report field";
 /// The adapter stages one shared result document per authored card. Port noise
@@ -218,20 +215,39 @@ const PY_PNOISE_DRIVEN_AXIS_ONLY: &str = "deck-axis .PNOISE executes around a dr
 /// naming and projection are no longer what is missing: the executor has no
 /// slot to publish a second document beside its parent.
 const ADAPTER_SECOND_DOCUMENT: &str = "the protocol-4 executor publishes one shared result document per authored card, and this      family is a second result produced beside another card's; core names and projects it, but      the adapter has no slot for it and refuses the deck rather than dropping it";
+const CLI_SENSITIVITY_AC: &str = "the DC .SENS card publishes the shared document; an AC sweep cannot, because the sensitivity payload declares one operating-point derivative per element";
+const CLI_SP_DONOISE: &str = "plain .SP publishes the shared document; .SP DONOISE is refused in that format because the covariance, reference temperature, and two-port noise figures have no home in it";
+const CLI_PORT_NOISE: &str = "the .SP DONOISE covariance is published in the flat formats; the shared port-noise payload cannot also carry its reference temperature, 4kT normalization, or two-port figures";
 
-const fn cli_artifact_axes() -> SurfaceCapability {
+/// The CLI publishes the shared typed result document for this family, under
+/// its canonical analysis identity, for a scalar deck and for every coordinate
+/// of a `.STEP` or `.TEMP` axis.
+const fn cli_mapped_axes() -> SurfaceCapability {
     SurfaceCapability::new(
-        MappingStatus::Partial(CLI_ARTIFACT),
-        MappingStatus::Partial(CLI_AXIS),
-        MappingStatus::Partial(CLI_AXIS),
+        MappingStatus::Mapped,
+        MappingStatus::Mapped,
+        MappingStatus::Mapped,
     )
 }
 
-const fn cli_artifact_scalar_only() -> SurfaceCapability {
+/// The shared document is published, but the deck has no authored axis route
+/// for this family.
+const fn cli_mapped_scalar_only() -> SurfaceCapability {
     SurfaceCapability::new(
-        MappingStatus::Partial(CLI_ARTIFACT),
+        MappingStatus::Mapped,
         MappingStatus::Unsupported(CLI_AXIS_UNAVAILABLE),
         MappingStatus::Unsupported(CLI_AXIS_UNAVAILABLE),
+    )
+}
+
+/// The family executes and publishes at every coordinate, but one of its
+/// authored forms cannot fill the shared payload and is refused in that
+/// format rather than published with evidence dropped.
+const fn cli_partial_axes(reason: &'static str) -> SurfaceCapability {
+    SurfaceCapability::new(
+        MappingStatus::Partial(reason),
+        MappingStatus::Partial(reason),
+        MappingStatus::Partial(reason),
     )
 }
 
@@ -277,91 +293,91 @@ const fn adapter_attached_fft() -> SurfaceCapability {
 pub const ANALYSIS_CAPABILITY_MATRIX: &[AnalysisResultCapability] = &[
     AnalysisResultCapability {
         result: AnalysisResultKind::OperatingPoint,
-        cli: cli_artifact_axes(),
+        cli: cli_mapped_axes(),
         python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::DcSweep,
-        cli: cli_artifact_axes(),
+        cli: cli_mapped_axes(),
         python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Ac,
-        cli: cli_artifact_axes(),
+        cli: cli_mapped_axes(),
         python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Transient,
-        cli: cli_artifact_axes(),
+        cli: cli_mapped_axes(),
         python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Noise,
-        cli: cli_artifact_axes(),
+        cli: cli_mapped_axes(),
         python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::SParameters,
-        cli: cli_artifact_axes(),
+        cli: cli_partial_axes(CLI_SP_DONOISE),
         python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::PortNoise,
-        cli: cli_artifact_axes(),
+        cli: cli_partial_axes(CLI_PORT_NOISE),
         python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: SurfaceCapability::unsupported(ADAPTER_SECOND_DOCUMENT),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Distortion,
-        cli: cli_artifact_axes(),
+        cli: cli_mapped_axes(),
         python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::TransferFunction,
-        cli: cli_artifact_axes(),
+        cli: cli_mapped_axes(),
         python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Stability,
-        cli: cli_artifact_axes(),
+        cli: cli_mapped_axes(),
         python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Sensitivity,
-        cli: cli_artifact_axes(),
+        cli: cli_partial_axes(CLI_SENSITIVITY_AC),
         python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::PoleZero,
-        cli: cli_artifact_axes(),
+        cli: cli_mapped_axes(),
         python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Fourier,
-        cli: cli_artifact_axes(),
+        cli: cli_mapped_axes(),
         python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: SurfaceCapability::unsupported(ADAPTER_SECOND_DOCUMENT),
@@ -379,7 +395,7 @@ pub const ANALYSIS_CAPABILITY_MATRIX: &[AnalysisResultCapability] = &[
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::MonteCarlo,
-        cli: cli_artifact_scalar_only(),
+        cli: cli_mapped_scalar_only(),
         python: SurfaceCapability::new(
             MappingStatus::Mapped,
             MappingStatus::Partial(
@@ -394,7 +410,7 @@ pub const ANALYSIS_CAPABILITY_MATRIX: &[AnalysisResultCapability] = &[
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Pss,
-        cli: cli_artifact_scalar_only(),
+        cli: cli_mapped_scalar_only(),
         python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
@@ -419,7 +435,7 @@ pub const ANALYSIS_CAPABILITY_MATRIX: &[AnalysisResultCapability] = &[
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::HarmonicBalance,
-        cli: cli_artifact_axes(),
+        cli: cli_mapped_axes(),
         python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
@@ -482,8 +498,7 @@ impl SignalCapability {
     }
 }
 
-const SIGNAL_ARTIFACT: &str = "export exists, but it is not a shared SignalDescriptor document";
-const ADVANCED_SIGNAL_SUBSET: &str = "mapped for a subset of result families only";
+const CLI_DEVICE_OBSERVABLE: &str = "the operating point publishes device observables in its typed payload; the sweep families export the ones their authored projection selected, not the complete device inventory";
 /// The Python device-observable and analysis-scalar gaps, stated by family.
 ///
 /// These are deliberately specific rather than "a subset of result families":
@@ -506,28 +521,28 @@ const WASM_LOGIC_SAMPLES: &str = "descriptors, state/strength samples and validi
 pub const SIGNAL_CAPABILITY_MATRIX: &[SignalCapability] = &[
     SignalCapability {
         signal: SignalKind::Voltage,
-        cli: MappingStatus::Partial(SIGNAL_ARTIFACT),
+        cli: MappingStatus::Mapped,
         python: MappingStatus::Mapped,
         wasm: MappingStatus::Mapped,
         engine_adapter: MappingStatus::Mapped,
     },
     SignalCapability {
         signal: SignalKind::Current,
-        cli: MappingStatus::Partial(SIGNAL_ARTIFACT),
+        cli: MappingStatus::Mapped,
         python: MappingStatus::Mapped,
         wasm: MappingStatus::Mapped,
         engine_adapter: MappingStatus::Mapped,
     },
     SignalCapability {
         signal: SignalKind::DeviceObservable,
-        cli: MappingStatus::Partial(ADVANCED_SIGNAL_SUBSET),
+        cli: MappingStatus::Partial(CLI_DEVICE_OBSERVABLE),
         python: MappingStatus::Partial(PY_DEVICE_OBSERVABLE_SUBSET),
         wasm: MappingStatus::Mapped,
         engine_adapter: MappingStatus::Mapped,
     },
     SignalCapability {
         signal: SignalKind::Scalar,
-        cli: MappingStatus::Partial(SIGNAL_ARTIFACT),
+        cli: MappingStatus::Mapped,
         python: MappingStatus::Partial(PY_SCALAR_SUBSET),
         wasm: MappingStatus::Mapped,
         engine_adapter: MappingStatus::Mapped,

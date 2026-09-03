@@ -89,7 +89,6 @@ disallowed-methods = [
     { path = "rspice_core::analysis::fourier::FourierAnalysis::analyze", reason = "use analyze_with_abort (plan rule 6)" },
     { path = "rspice_core::analysis::s_param::extract_s_matrix", reason = "use extract_s_matrix_with_abort (plan rule 6)" },
     { path = "rspice_core::execution::DeckPlan::from_netlist", reason = "use from_netlist_with_abort (plan rule 6)" },
-    { path = "rspice_core::execution::DeckPlan::from_netlist_run_axes", reason = "use from_netlist_run_axes_with_abort (plan rule 6)" },
     { path = "rspice_core::engine::TransientCheckpoint::load", reason = "use load_with_abort (plan rule 6)" },
     { path = "rspice_core::engine::TransientCheckpoint::save", reason = "use save_with_abort (plan rule 6)" },
     { path = "rspice_core::engine::TransientCheckpoint::to_bytes", reason = "use to_bytes_with_abort (plan rule 6)" },

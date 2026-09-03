@@ -101,7 +101,13 @@ fn canonical_temperature_axis_still_completes_and_publishes_each_coordinate() {
                 .unwrap_or_else(|error| panic!("read {}: {error}", artifact.display())),
         )
         .unwrap_or_else(|error| panic!("parse {}: {error}", artifact.display()));
-        assert_eq!(document["analysis"], "dc_op", "{}", artifact.display());
+        assert_eq!(document["resultKind"], "op", "{}", artifact.display());
+        assert_eq!(
+            document["analysis"]["tag"],
+            "op-001",
+            "{}",
+            artifact.display()
+        );
     }
 }
 

@@ -515,10 +515,127 @@ fn load_json(
         });
     }
 
+    // A `run` artifact is a shared typed result document. Flatten its axis and
+    // series into the same table so `convert` and `compare` read what `run`
+    // wrote. A series the document declares as not retained has no samples and
+    // becomes no column, rather than a column of zeros.
+    if value.get("schema").and_then(serde_json::Value::as_str)
+        == Some(rspice_core::execution::ANALYSIS_RESULT_DOCUMENT_SCHEMA)
+    {
+        let document = rspice_core::execution::AnalysisResultDocument::from_json(&content)
+            .map_err(|error| conversion_error(path, error))?;
+        return result_document_table(path, &document, resource_limits);
+    }
+
     Err(conversion_error(
         path,
-        "unrecognized JSON schema: expected 'scale' and 'signals'",
+        "unrecognized JSON schema: expected a typed result document, or 'scale' and 'signals'",
     ))
+}
+
+/// Flatten one typed result document into the shared tabular model.
+///
+/// A document whose family carries no coordinate axis — the operating point,
+/// the transfer function — flattens onto a single-point index axis, which is
+/// what the flat writers already use for those families.
+fn result_document_table(
+    path: &Path,
+    document: &rspice_core::execution::AnalysisResultDocument,
+    resource_limits: rspice_core::ResourceLimits,
+) -> Result<ExportTable, CliError> {
+    use rspice_core::execution::result_document::{AxisValues, SeriesValues};
+
+    let (scale_name, scale): (String, Vec<f64>) = match document.axes().first() {
+        Some(axis) => (
+            axis.name().to_string(),
+            match axis.values() {
+                AxisValues::Real { values } => values.clone(),
+                AxisValues::Integer { values } => {
+                    values.iter().map(|value| *value as f64).collect()
+                }
+            },
+        ),
+        None => ("point".to_string(), vec![0.0]),
+    };
+    enforce_resource_limit(
+        path,
+        rspice_core::ResourceKind::ExternalDataValues,
+        scale
+            .len()
+            .saturating_mul(document.signals().len().saturating_add(1)),
+        resource_limits.max_external_data_values,
+    )?;
+
+    let mut columns = Vec::new();
+    for signal in document.signals() {
+        let name = signal.descriptor().display_name().to_string();
+        let present = |samples: &[Option<f64>]| -> Result<Vec<f64>, CliError> {
+            samples
+                .iter()
+                .map(|sample| {
+                    sample.ok_or_else(|| {
+                        conversion_error(
+                            path,
+                            format!(
+                                "series '{name}' has an absent sample, which a flat table cannot represent"
+                            ),
+                        )
+                    })
+                })
+                .collect()
+        };
+        let data = match signal.values() {
+            SeriesValues::Real { samples } => {
+                if samples.iter().all(Option::is_none) {
+                    continue;
+                }
+                ColumnData::Real(present(samples)?)
+            }
+            SeriesValues::Complex { samples } => {
+                if samples.iter().all(Option::is_none) {
+                    continue;
+                }
+                let mut real = Vec::with_capacity(samples.len());
+                let mut imag = Vec::with_capacity(samples.len());
+                for sample in samples {
+                    let sample = sample.ok_or_else(|| {
+                        conversion_error(
+                            path,
+                            format!(
+                                "series '{name}' has an absent sample, which a flat table cannot represent"
+                            ),
+                        )
+                    })?;
+                    real.push(sample.real);
+                    imag.push(sample.imaginary);
+                }
+                ColumnData::Complex { real, imag }
+            }
+            other => {
+                return Err(conversion_error(
+                    path,
+                    format!(
+                        "series '{name}' has a representation no flat table carries: {other:?}"
+                    ),
+                ));
+            }
+        };
+        columns.push(ExportColumn {
+            var_type: rspice_core::execution::raw_variable_type(signal.descriptor().kind())
+                .to_string(),
+            name,
+            data,
+        });
+    }
+
+    Ok(ExportTable {
+        analysis: document.result_kind().tag().to_string(),
+        plot_name: format!("{} ({})", document.result_kind().tag(), document.analysis()),
+        scale_type: scale_var_type(&scale_name),
+        scale_name,
+        scale,
+        columns,
+    })
 }
 
 fn load_hdf5(

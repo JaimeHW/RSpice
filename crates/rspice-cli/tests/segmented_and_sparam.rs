@@ -192,6 +192,69 @@ fn xyce_bug_1284_job_writes_20ns_checkpoint_and_file_resumes_to_50ns() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// `--compress` decimates only the published waveform. An authored
+/// `.OPTIONS RESTART` writes its checkpoints from the accepted trajectory, so
+/// the two compose: every restart file stays byte-identical and only the
+/// exported table shrinks.
+#[test]
+fn compression_composes_with_an_authored_restart_schedule() {
+    let plain = test_dir("restart_compress_plain");
+    let compressed = test_dir("restart_compress_compressed");
+    let checkpoints = [
+        "trans_test0",
+        "trans_test5e-09",
+        "trans_test1e-08",
+        "trans_test1.5e-08",
+        "trans_test2e-08",
+    ];
+
+    let mut exported = Vec::new();
+    for (dir, extra) in [
+        (&plain, Vec::new()),
+        (&compressed, vec!["--compress", "--compress-tol", "1e-6"]),
+    ] {
+        let deck = dir.join("bug_1284_first.cir");
+        std::fs::write(&deck, BUG_1284_FIRST).expect("write restart deck");
+        let table = dir.join("first.csv");
+        let mut args = vec![
+            "--quiet",
+            "run",
+            deck.to_str().unwrap(),
+            "-o",
+            table.to_str().unwrap(),
+            "-f",
+            "csv",
+        ];
+        args.extend(extra);
+        let output = run_rspice(&args);
+        assert!(
+            output.status.success(),
+            "restart run failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        exported.push(std::fs::read_to_string(&table).expect("read restart export"));
+    }
+
+    for name in checkpoints {
+        let left = std::fs::read(plain.join(name)).expect("read uncompressed restart checkpoint");
+        let right =
+            std::fs::read(compressed.join(name)).expect("read compressed restart checkpoint");
+        assert_eq!(
+            left, right,
+            "compression changed the authored restart checkpoint {name}"
+        );
+    }
+
+    let rows = |text: &str| text.lines().count();
+    assert!(
+        rows(&exported[1]) < rows(&exported[0]),
+        "the compressed restart run retained every row, so this test proves nothing"
+    );
+
+    let _ = std::fs::remove_dir_all(&plain);
+    let _ = std::fs::remove_dir_all(&compressed);
+}
+
 #[test]
 fn xyce_restart_rejects_namespace_escape_and_cli_checkpoint_conflict() {
     let dir = test_dir("restart_safety");

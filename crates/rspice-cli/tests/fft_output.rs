@@ -121,7 +121,7 @@ fn json_bundle_preserves_ordered_complex_spectra_metrics_units_and_parent_identi
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(!requested.exists(), "base artifact path was overwritten");
-    assert!(directory.join("results.tran.json").exists());
+    assert!(directory.join("results.tran-001.json").exists());
     let artifact = directory.join("results.fft.json");
     let document = read_json(&artifact);
     assert_eq!(document["schema_version"], 2);
@@ -405,7 +405,7 @@ fn second_sibling_commit_failure_restores_existing_pair_or_leaves_both_absent() 
          .end\n",
     );
     let requested = directory.join("results.json");
-    let transient = directory.join("results.tran.json");
+    let transient = directory.join("results.tran-001.json");
     let fft = directory.join("results.fft.json");
     std::fs::create_dir(&fft).expect("create conflicting FFT destination directory");
 
