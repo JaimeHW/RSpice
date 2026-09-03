@@ -3,6 +3,7 @@
 #[cfg(test)]
 use super::state::MosfetCompanionBiasSource;
 use super::*;
+use crate::numerics::integration::LtePrefixWindow;
 
 /// The three Meyer capacitances of one MOSFET on a candidate step:
 /// gate-source, gate-drain, gate-bulk.
@@ -3010,9 +3011,11 @@ impl Engine {
         if !uses_xyce_solution_domain {
             return voltage_lte_estimator.estimate_prefix_excluding(
                 candidate_solution,
-                circuit.num_nodes(),
-                dt,
-                voltage_lte_excluded_nodes,
+                LtePrefixWindow {
+                    prefix_len: circuit.num_nodes(),
+                    dt,
+                    excluded_indices: voltage_lte_excluded_nodes,
+                },
             );
         }
         let error_domain_len = candidate_solution.len();
@@ -3022,17 +3025,21 @@ impl Engine {
                 .estimate_correction_prefix_excluding_for_integration(
                     candidate_solution,
                     predicted,
-                    error_domain_len,
-                    dt,
-                    excluded,
+                    LtePrefixWindow {
+                        prefix_len: error_domain_len,
+                        dt,
+                        excluded_indices: excluded,
+                    },
                     method,
                     trap_order,
                 ),
             None => voltage_lte_estimator.estimate_prefix_excluding_for_integration(
                 candidate_solution,
-                error_domain_len,
-                dt,
-                excluded,
+                LtePrefixWindow {
+                    prefix_len: error_domain_len,
+                    dt,
+                    excluded_indices: excluded,
+                },
                 method,
                 trap_order,
             ),

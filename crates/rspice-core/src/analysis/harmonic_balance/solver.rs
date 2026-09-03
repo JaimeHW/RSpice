@@ -24,6 +24,68 @@ mod result_builder;
 
 pub use periodic_ac::{PeriodicAcExcitation, PeriodicNoiseSource};
 
+/// What one harmonic-balance Newton inner loop is allowed to do: the gmin it
+/// stamps with, the iteration ceiling, the relative and absolute convergence
+/// tolerances, and how far the independent sources are ramped in.
+#[derive(Clone, Copy)]
+struct HbNewtonLimits {
+    gmin: Value,
+    max_iterations: usize,
+    tol: Value,
+    abstol: Value,
+    source_scale: Value,
+}
+
+/// The tolerances a harmonic-balance line search accepts a step against.
+#[derive(Clone, Copy)]
+struct HbLineSearchLimits {
+    gmin: Value,
+    source_scale: Value,
+    reltol: Value,
+    current_abstol: Value,
+}
+
+/// The same, for the DC seed solve, which separates the current and voltage
+/// absolute tolerances.
+#[derive(Clone, Copy)]
+struct HbDcLineSearchLimits {
+    gmin: Value,
+    reltol: Value,
+    current_abstol: Value,
+    voltage_abstol: Value,
+    source_scale: Value,
+}
+
+/// The four nodes a harmonic-balance voltage switch spans: the switched branch
+/// and the branch it senses.
+#[derive(Clone, Copy)]
+pub struct HbSwitchNodes {
+    pub node_pos: usize,
+    pub node_neg: usize,
+    pub ctrl_pos: usize,
+    pub ctrl_neg: usize,
+}
+
+/// A voltage switch's model card: the threshold and hysteresis voltages, the
+/// on and off resistances, and the smoothing width.
+#[derive(Clone, Copy)]
+pub struct HbVoltageSwitchModel {
+    pub vt: Value,
+    pub vh: Value,
+    pub ron: Value,
+    pub roff: Value,
+    pub smooth: Value,
+}
+
+/// The sideband window a periodic small-signal solve is taken over: the offset
+/// from the carrier and the inclusive sideband index range.
+#[derive(Clone, Copy)]
+pub struct PeriodicSidebandWindow {
+    pub offset_hz: Value,
+    pub sideband_min: i32,
+    pub sideband_max: i32,
+}
+
 /// Conductance used to model an inductor as a DC short across every solve
 /// path (full-spectrum residual, Jacobian, DC seed, linear solve). One value
 /// everywhere keeps the operating point and the seed solving the same

@@ -101,20 +101,34 @@ impl HbSolver {
     }
 
     /// Add a voltage-controlled switch for Newton iteration
-    pub fn add_voltage_switch(
-        &mut self,
-        node_pos: usize,
-        node_neg: usize,
-        ctrl_pos: usize,
-        ctrl_neg: usize,
-        vt: Value,
-        vh: Value,
-        ron: Value,
-        roff: Value,
-        smooth: Value,
-    ) {
+    pub fn add_voltage_switch(&mut self, nodes: HbSwitchNodes, model: HbVoltageSwitchModel) {
+        let HbSwitchNodes {
+            node_pos,
+            node_neg,
+            ctrl_pos,
+            ctrl_neg,
+        } = nodes;
+        let HbVoltageSwitchModel {
+            vt,
+            vh,
+            ron,
+            roff,
+            smooth,
+        } = model;
         self.add_nonlinear_device(NonlinearDeviceInstance::voltage_switch(
-            node_pos, node_neg, ctrl_pos, ctrl_neg, vt, vh, ron, roff, smooth,
+            HbSwitchNodes {
+                node_pos,
+                node_neg,
+                ctrl_pos,
+                ctrl_neg,
+            },
+            HbVoltageSwitchModel {
+                vt,
+                vh,
+                ron,
+                roff,
+                smooth,
+            },
         ));
     }
 

@@ -257,17 +257,20 @@ impl NonlinearDeviceInstance {
     }
 
     /// Create a voltage-controlled switch instance
-    pub(crate) fn voltage_switch(
-        node_pos: usize,
-        node_neg: usize,
-        ctrl_pos: usize,
-        ctrl_neg: usize,
-        vt: Value,
-        vh: Value,
-        ron: Value,
-        roff: Value,
-        smooth: Value,
-    ) -> Self {
+    pub(crate) fn voltage_switch(nodes: HbSwitchNodes, model: HbVoltageSwitchModel) -> Self {
+        let HbSwitchNodes {
+            node_pos,
+            node_neg,
+            ctrl_pos,
+            ctrl_neg,
+        } = nodes;
+        let HbVoltageSwitchModel {
+            vt,
+            vh,
+            ron,
+            roff,
+            smooth,
+        } = model;
         Self {
             device_type: NonlinearDeviceType::VoltageSwitch,
             terminals: vec![node_pos, node_neg, ctrl_pos, ctrl_neg],
@@ -1778,8 +1781,21 @@ mod tests {
 
     #[test]
     fn voltage_switch_preserves_high_off_resistance_without_a_conductance_floor() {
-        let switch =
-            NonlinearDeviceInstance::voltage_switch(0, 1, 2, 3, 0.0, 0.0, 1.0, 1.0e15, 0.1);
+        let switch = NonlinearDeviceInstance::voltage_switch(
+            HbSwitchNodes {
+                node_pos: 0,
+                node_neg: 1,
+                ctrl_pos: 2,
+                ctrl_neg: 3,
+            },
+            HbVoltageSwitchModel {
+                vt: 0.0,
+                vh: 0.0,
+                ron: 1.0,
+                roff: 1.0e15,
+                smooth: 0.1,
+            },
+        );
         let (conductance, derivative) = switch.switch_conductance_and_derivative(-100.0);
         let expected = 1.0e-15;
         assert!((conductance - expected).abs() <= 16.0 * Value::EPSILON * expected);
@@ -1795,8 +1811,21 @@ mod tests {
             (1.0, 1.0e6, 0.0),
             (Value::NAN, 1.0e6, 0.1),
         ] {
-            let switch =
-                NonlinearDeviceInstance::voltage_switch(0, 1, 2, 3, 0.0, 0.0, ron, roff, smooth);
+            let switch = NonlinearDeviceInstance::voltage_switch(
+                HbSwitchNodes {
+                    node_pos: 0,
+                    node_neg: 1,
+                    ctrl_pos: 2,
+                    ctrl_neg: 3,
+                },
+                HbVoltageSwitchModel {
+                    vt: 0.0,
+                    vh: 0.0,
+                    ron,
+                    roff,
+                    smooth,
+                },
+            );
             let (conductance, derivative) = switch.switch_conductance_and_derivative(0.0);
             assert!(conductance.is_nan());
             assert!(derivative.is_nan());
@@ -2009,7 +2038,21 @@ mod tests {
 
     #[test]
     fn switch_jacobians_match_finite_difference() {
-        let vsw = NonlinearDeviceInstance::voltage_switch(0, 1, 2, 3, 0.5, 0.1, 1.0, 1e6, 0.1);
+        let vsw = NonlinearDeviceInstance::voltage_switch(
+            HbSwitchNodes {
+                node_pos: 0,
+                node_neg: 1,
+                ctrl_pos: 2,
+                ctrl_neg: 3,
+            },
+            HbVoltageSwitchModel {
+                vt: 0.5,
+                vh: 0.1,
+                ron: 1.0,
+                roff: 1e6,
+                smooth: 0.1,
+            },
+        );
         assert_jacobian_matches_finite_difference(&vsw, 4, (-2.0, 2.0), 60, 41);
     }
 

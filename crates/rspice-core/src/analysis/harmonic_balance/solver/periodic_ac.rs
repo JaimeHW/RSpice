@@ -1593,16 +1593,21 @@ impl HbSolver {
     pub(crate) fn solve_periodic_ac(
         &mut self,
         state: &HbSolverState,
-        offset_hz: Value,
-        sideband_min: i32,
-        sideband_max: i32,
+        window: PeriodicSidebandWindow,
         excitations: &[PeriodicAcExcitation],
     ) -> Result<Vec<Vec<Vec<Complex64>>>, HbError> {
-        self.solve_periodic_ac_with_branch_voltages(
-            state,
+        let PeriodicSidebandWindow {
             offset_hz,
             sideband_min,
             sideband_max,
+        } = window;
+        self.solve_periodic_ac_with_branch_voltages(
+            state,
+            PeriodicSidebandWindow {
+                offset_hz,
+                sideband_min,
+                sideband_max,
+            },
             excitations,
             &[],
         )
@@ -1611,12 +1616,15 @@ impl HbSolver {
     pub(crate) fn solve_periodic_ac_with_branch_voltages(
         &mut self,
         state: &HbSolverState,
-        offset_hz: Value,
-        sideband_min: i32,
-        sideband_max: i32,
+        window: PeriodicSidebandWindow,
         excitations: &[PeriodicAcExcitation],
         branch_voltages: &[&[(usize, Complex64)]],
     ) -> Result<Vec<Vec<Vec<Complex64>>>, HbError> {
+        let PeriodicSidebandWindow {
+            offset_hz,
+            sideband_min,
+            sideband_max,
+        } = window;
         let num_nodes = self.num_nodes;
         let num_unknowns = num_nodes
             .checked_add(self.periodic_mna_branches.len())
@@ -1639,9 +1647,11 @@ impl HbSolver {
             })?;
         self.solve_periodic_ac_each_with_branch_voltages(
             state,
-            offset_hz,
-            sideband_min,
-            sideband_max,
+            PeriodicSidebandWindow {
+                offset_hz,
+                sideband_min,
+                sideband_max,
+            },
             excitations,
             branch_voltages,
             |_, solution| {
@@ -1684,17 +1694,22 @@ impl HbSolver {
     pub(crate) fn solve_periodic_ac_each(
         &mut self,
         state: &HbSolverState,
-        offset_hz: Value,
-        sideband_min: i32,
-        sideband_max: i32,
+        window: PeriodicSidebandWindow,
         excitations: &[PeriodicAcExcitation],
         consume: impl FnMut(usize, Vec<Complex64>) -> Result<(), HbError>,
     ) -> Result<(), HbError> {
-        self.solve_periodic_ac_each_with_branch_voltages(
-            state,
+        let PeriodicSidebandWindow {
             offset_hz,
             sideband_min,
             sideband_max,
+        } = window;
+        self.solve_periodic_ac_each_with_branch_voltages(
+            state,
+            PeriodicSidebandWindow {
+                offset_hz,
+                sideband_min,
+                sideband_max,
+            },
             excitations,
             &[],
             consume,
@@ -1704,13 +1719,16 @@ impl HbSolver {
     pub(crate) fn solve_periodic_ac_each_with_branch_voltages(
         &mut self,
         state: &HbSolverState,
-        offset_hz: Value,
-        sideband_min: i32,
-        sideband_max: i32,
+        window: PeriodicSidebandWindow,
         excitations: &[PeriodicAcExcitation],
         branch_voltages: &[&[(usize, Complex64)]],
         mut consume: impl FnMut(usize, Vec<Complex64>) -> Result<(), HbError>,
     ) -> Result<(), HbError> {
+        let PeriodicSidebandWindow {
+            offset_hz,
+            sideband_min,
+            sideband_max,
+        } = window;
         let n = self.num_nodes;
         let num_unknowns = n
             .checked_add(self.periodic_mna_branches.len())
@@ -1744,7 +1762,14 @@ impl HbSolver {
         let dense = if try_krylov {
             None
         } else {
-            Some(self.assemble_conversion_matrix(state, offset_hz, sideband_min, sideband_max)?)
+            Some(self.assemble_conversion_matrix(
+                state,
+                PeriodicSidebandWindow {
+                    offset_hz,
+                    sideband_min,
+                    sideband_max,
+                },
+            )?)
         };
 
         let (spectra, cap_spectra) = if try_krylov && self.has_nonlinear_devices() {
@@ -1876,10 +1901,13 @@ impl HbSolver {
     fn assemble_conversion_matrix(
         &mut self,
         state: &HbSolverState,
-        offset_hz: Value,
-        sideband_min: i32,
-        sideband_max: i32,
+        window: PeriodicSidebandWindow,
     ) -> Result<Vec<Vec<Complex64>>, HbError> {
+        let PeriodicSidebandWindow {
+            offset_hz,
+            sideband_min,
+            sideband_max,
+        } = window;
         let n = self.num_nodes;
         let num_unknowns = n
             .checked_add(self.periodic_mna_branches.len())
@@ -2234,13 +2262,16 @@ impl HbSolver {
     pub(crate) fn solve_periodic_noise(
         &mut self,
         state: &HbSolverState,
-        offset_hz: Value,
-        sideband_min: i32,
-        sideband_max: i32,
+        window: PeriodicSidebandWindow,
         output_node: usize,
         output_ref: Option<usize>,
         sources: &[PeriodicNoiseSource],
     ) -> Result<Vec<Value>, HbError> {
+        let PeriodicSidebandWindow {
+            offset_hz,
+            sideband_min,
+            sideband_max,
+        } = window;
         let n = self.num_nodes;
         if !offset_hz.is_finite() || offset_hz < 0.0 {
             return Err(HbError::InvalidCircuit(format!(
@@ -2941,12 +2972,32 @@ mod matrix_free_tests {
         };
 
         let non_finite = solver
-            .solve_periodic_noise(&state, 1.0e3, 0, 0, 0, None, &[invalid_source(Value::NAN)])
+            .solve_periodic_noise(
+                &state,
+                PeriodicSidebandWindow {
+                    offset_hz: 1.0e3,
+                    sideband_min: 0,
+                    sideband_max: 0,
+                },
+                0,
+                None,
+                &[invalid_source(Value::NAN)],
+            )
             .expect_err("NaN source density must fail closed");
         assert!(non_finite.to_string().contains("non-finite"));
 
         let negative = solver
-            .solve_periodic_noise(&state, 1.0e3, 0, 0, 0, None, &[invalid_source(-1.0)])
+            .solve_periodic_noise(
+                &state,
+                PeriodicSidebandWindow {
+                    offset_hz: 1.0e3,
+                    sideband_min: 0,
+                    sideband_max: 0,
+                },
+                0,
+                None,
+                &[invalid_source(-1.0)],
+            )
             .expect_err("negative source density must not be clamped to zero");
         assert!(negative.to_string().contains("invalid DC"));
 
@@ -2997,7 +3048,17 @@ mod matrix_free_tests {
             ),
         ] {
             let error = solver
-                .solve_periodic_noise(&state, 1.0e3, 0, 0, 0, None, &[source])
+                .solve_periodic_noise(
+                    &state,
+                    PeriodicSidebandWindow {
+                        offset_hz: 1.0e3,
+                        sideband_min: 0,
+                        sideband_max: 0,
+                    },
+                    0,
+                    None,
+                    &[source],
+                )
                 .expect_err("invalid source evidence must fail closed");
             assert!(
                 error.to_string().contains(expected),
@@ -3007,7 +3068,17 @@ mod matrix_free_tests {
 
         for density in [0.0, 1.0] {
             let valid = solver
-                .solve_periodic_noise(&state, 1.0e3, 0, 0, 0, None, &[invalid_source(density)])
+                .solve_periodic_noise(
+                    &state,
+                    PeriodicSidebandWindow {
+                        offset_hz: 1.0e3,
+                        sideband_min: 0,
+                        sideband_max: 0,
+                    },
+                    0,
+                    None,
+                    &[invalid_source(density)],
+                )
                 .expect("finite non-negative DC density remains valid");
             assert_eq!(valid, vec![density]);
         }
@@ -3021,12 +3092,32 @@ mod matrix_free_tests {
             flicker: Some((1.0, 1.0)),
         };
         let singular = solver
-            .solve_periodic_noise(&state, 0.0, 0, 0, 0, None, std::slice::from_ref(&flicker))
+            .solve_periodic_noise(
+                &state,
+                PeriodicSidebandWindow {
+                    offset_hz: 0.0,
+                    sideband_min: 0,
+                    sideband_max: 0,
+                },
+                0,
+                None,
+                std::slice::from_ref(&flicker),
+            )
             .expect_err("1/f noise at an exact zero-frequency sideband is singular");
         assert!(singular.to_string().contains("singular 1/f"));
 
         let below_legacy_floor = solver
-            .solve_periodic_noise(&state, 1.0e-6, 0, 0, 0, None, &[flicker])
+            .solve_periodic_noise(
+                &state,
+                PeriodicSidebandWindow {
+                    offset_hz: 1.0e-6,
+                    sideband_min: 0,
+                    sideband_max: 0,
+                },
+                0,
+                None,
+                &[flicker],
+            )
             .expect("nonzero sub-millihertz flicker density remains physical");
         assert!((below_legacy_floor[0] - 1.0e6).abs() <= 4.0 * Value::EPSILON * 1.0e6);
     }
@@ -3207,9 +3298,11 @@ mod matrix_free_tests {
         solver
             .solve_periodic_ac_each_with_branch_voltages(
                 &state,
-                1.0e4,
-                0,
-                0,
+                PeriodicSidebandWindow {
+                    offset_hz: 1.0e4,
+                    sideband_min: 0,
+                    sideband_max: 0,
+                },
                 &[excitation],
                 &[&branch_voltage],
                 |_, solution| {
@@ -3240,10 +3333,19 @@ mod matrix_free_tests {
         };
         let mut retained = None;
         solver
-            .solve_periodic_ac_each(&state, 0.0, 0, 0, &[excitation], |_, solution| {
-                retained = Some(solution);
-                Ok(())
-            })
+            .solve_periodic_ac_each(
+                &state,
+                PeriodicSidebandWindow {
+                    offset_hz: 0.0,
+                    sideband_min: 0,
+                    sideband_max: 0,
+                },
+                &[excitation],
+                |_, solution| {
+                    retained = Some(solution);
+                    Ok(())
+                },
+            )
             .expect("the zero-frequency exact inductor system is certified");
         let solution = retained.expect("one PAC column is returned");
         assert_eq!(solution.len(), 2);
@@ -3661,7 +3763,15 @@ mod matrix_free_tests {
             ),
         ] {
             let error = solver
-                .solve_periodic_ac(&state, 1.0e3, 0, 0, &[excitation])
+                .solve_periodic_ac(
+                    &state,
+                    PeriodicSidebandWindow {
+                        offset_hz: 1.0e3,
+                        sideband_min: 0,
+                        sideband_max: 0,
+                    },
+                    &[excitation],
+                )
                 .expect_err("invalid PAC excitation evidence must fail closed");
             assert!(error.to_string().contains(expected), "{error}");
         }
@@ -3709,10 +3819,19 @@ mod matrix_free_tests {
         ];
         let mut consumed = 0;
         let error = solver
-            .solve_periodic_ac_each(&state, 1.0e3, 0, 0, &excitations, |_, _| {
-                consumed += 1;
-                Err(HbError::Aborted)
-            })
+            .solve_periodic_ac_each(
+                &state,
+                PeriodicSidebandWindow {
+                    offset_hz: 1.0e3,
+                    sideband_min: 0,
+                    sideband_max: 0,
+                },
+                &excitations,
+                |_, _| {
+                    consumed += 1;
+                    Err(HbError::Aborted)
+                },
+            )
             .expect_err("the consumer abort must stop the column stream");
         assert!(matches!(error, HbError::Aborted));
         assert_eq!(consumed, 1, "no later excitation may be solved or consumed");

@@ -78,11 +78,13 @@ impl HbSolver {
         // Step 1: Try direct DC Newton with minimal GMIN
         if self.dc_newton_inner_loop(
             state,
-            target_gmin,
-            dc_max_iter,
-            dc_reltol,
-            dc_abstol,
-            1.0,
+            HbNewtonLimits {
+                gmin: target_gmin,
+                max_iterations: dc_max_iter,
+                tol: dc_reltol,
+                abstol: dc_abstol,
+                source_scale: 1.0,
+            },
             abort,
         )? {
             return Ok(self.extract_dc_solution(state));
@@ -93,11 +95,14 @@ impl HbSolver {
         for gmin_level in [1e-9, 1e-6, 1e-4, 1e-2, 0.1, 1.0] {
             if self.dc_newton_inner_loop(
                 state,
-                gmin_level,
-                dc_max_iter,
-                dc_reltol * 10.0, // Relaxed tolerance during stepping
-                dc_abstol * 10.0,
-                1.0,
+                HbNewtonLimits {
+                    gmin: gmin_level,
+                    max_iterations: dc_max_iter,
+                    // Relaxed tolerance during stepping.
+                    tol: dc_reltol * 10.0,
+                    abstol: dc_abstol * 10.0,
+                    source_scale: 1.0,
+                },
                 abort,
             )? {
                 // Converged at this GMIN level - refine to target
@@ -110,11 +115,13 @@ impl HbSolver {
                     current_gmin /= 2.0;
                     if self.dc_newton_inner_loop(
                         state,
-                        current_gmin,
-                        dc_max_iter,
-                        dc_reltol,
-                        dc_abstol,
-                        1.0,
+                        HbNewtonLimits {
+                            gmin: current_gmin,
+                            max_iterations: dc_max_iter,
+                            tol: dc_reltol,
+                            abstol: dc_abstol,
+                            source_scale: 1.0,
+                        },
                         abort,
                     )? {
                         last_good_state = self.capture_dc_checkpoint(state)?;
@@ -137,11 +144,13 @@ impl HbSolver {
                 // only after a full solve on the unmodified DC equations.
                 if self.dc_newton_inner_loop(
                     state,
-                    target_gmin,
-                    dc_max_iter,
-                    dc_reltol,
-                    dc_abstol,
-                    1.0,
+                    HbNewtonLimits {
+                        gmin: target_gmin,
+                        max_iterations: dc_max_iter,
+                        tol: dc_reltol,
+                        abstol: dc_abstol,
+                        source_scale: 1.0,
+                    },
                     abort,
                 )? {
                     return Ok(self.extract_dc_solution(state));
@@ -172,11 +181,13 @@ impl HbSolver {
 
             if self.dc_newton_inner_loop(
                 state,
-                1e-6,
-                dc_max_iter / 2,
-                dc_reltol * 10.0,
-                dc_abstol * 10.0,
-                factor,
+                HbNewtonLimits {
+                    gmin: 1e-6,
+                    max_iterations: dc_max_iter / 2,
+                    tol: dc_reltol * 10.0,
+                    abstol: dc_abstol * 10.0,
+                    source_scale: factor,
+                },
                 abort,
             )? {
                 source_stepper.advance_on_success();
@@ -192,11 +203,13 @@ impl HbSolver {
         if source_stepper.is_complete()
             && self.dc_newton_inner_loop(
                 state,
-                target_gmin,
-                dc_max_iter,
-                dc_reltol,
-                dc_abstol,
-                1.0,
+                HbNewtonLimits {
+                    gmin: target_gmin,
+                    max_iterations: dc_max_iter,
+                    tol: dc_reltol,
+                    abstol: dc_abstol,
+                    source_scale: 1.0,
+                },
                 abort,
             )?
         {
@@ -291,13 +304,16 @@ impl HbSolver {
     fn dc_newton_inner_loop(
         &mut self,
         state: &mut HbSolverState,
-        gmin: Value,
-        max_iterations: usize,
-        tol: Value,
-        abstol: Value,
-        source_scale: Value,
+        limits: HbNewtonLimits,
         abort: &dyn AbortSignal,
     ) -> Result<bool, HbError> {
+        let HbNewtonLimits {
+            gmin,
+            max_iterations,
+            tol,
+            abstol,
+            source_scale,
+        } = limits;
         if !source_scale.is_finite() || !(0.0..=1.0).contains(&source_scale) {
             return Err(HbError::InvalidCircuit(format!(
                 "HB DC source scale must be finite and within [0, 1], got {source_scale:e}"
@@ -348,11 +364,13 @@ impl HbSolver {
             self.apply_dc_line_search(
                 state,
                 &delta_x,
-                gmin,
-                tol,
-                abstol,
-                crate::constants::VNTOL,
-                source_scale,
+                HbDcLineSearchLimits {
+                    gmin,
+                    reltol: tol,
+                    current_abstol: abstol,
+                    voltage_abstol: crate::constants::VNTOL,
+                    source_scale,
+                },
             )?;
         }
 
@@ -670,12 +688,15 @@ impl HbSolver {
         &mut self,
         state: &mut HbSolverState,
         delta_x: &[Value],
-        gmin: Value,
-        reltol: Value,
-        current_abstol: Value,
-        voltage_abstol: Value,
-        source_scale: Value,
+        limits: HbDcLineSearchLimits,
     ) -> Result<(), HbError> {
+        let HbDcLineSearchLimits {
+            gmin,
+            reltol,
+            current_abstol,
+            voltage_abstol,
+            source_scale,
+        } = limits;
         let n = self.num_nodes;
         let expected_unknowns =
             n.checked_add(state.mna_branch_currents.len())

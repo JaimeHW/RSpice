@@ -15,7 +15,9 @@ use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::HbSolverState;
 // Only the unit tests below construct these records directly; the
 // production paths in this module receive them already built.
-use crate::analysis::harmonic_balance::{HbConfig, PeriodicAcExcitation, PeriodicNoiseSource};
+use crate::analysis::harmonic_balance::{
+    HbConfig, PeriodicAcExcitation, PeriodicNoiseSource, PeriodicSidebandWindow,
+};
 #[cfg(test)]
 use crate::circuit::ResistorValues;
 
@@ -932,9 +934,11 @@ impl Engine {
             let per_source = solver
                 .solve_periodic_noise(
                     &state,
-                    offset,
-                    -max_sideband,
-                    max_sideband,
+                    PeriodicSidebandWindow {
+                        offset_hz: offset,
+                        sideband_min: -max_sideband,
+                        sideband_max: max_sideband,
+                    },
                     out_idx,
                     ref_idx,
                     &sources,
@@ -958,9 +962,11 @@ impl Engine {
                 let response = solver
                     .solve_periodic_ac_with_branch_voltages(
                         &state,
-                        offset,
-                        -max_sideband,
-                        max_sideband,
+                        PeriodicSidebandWindow {
+                            offset_hz: offset,
+                            sideband_min: -max_sideband,
+                            sideband_max: max_sideband,
+                        },
                         std::slice::from_ref(excitation),
                         input_branch_voltages,
                     )

@@ -5189,9 +5189,11 @@ pub fn evaluate_noise_measurements_with_abort(
             &netlist.params,
             &[],
             traces,
-            netlist.options.measure_default_value,
-            -1.0,
-            false,
+            MeasureEvaluationPolicy {
+                global_default: netlist.options.measure_default_value,
+                equation_default: -1.0,
+                use_legacy_tran_trig_targ: false,
+            },
         ),
         Err(_) => evaluate_statements(&statements, series.axis(), &signals, &netlist.params, false),
     };
@@ -5346,6 +5348,16 @@ fn evaluate_statements_with_segment_starts(
     )
 }
 
+/// How a batch of `.measure` statements is evaluated: the fallback the whole
+/// run supplies, the fallback an equation measurement supplies, and whether
+/// the legacy transient TRIG/TARG reading applies.
+#[derive(Clone, Copy)]
+struct MeasureEvaluationPolicy {
+    global_default: Option<Value>,
+    equation_default: Value,
+    use_legacy_tran_trig_targ: bool,
+}
+
 fn evaluate_statements_with_equation_traces(
     statements: &[&MeasureStatement],
     axis: &[Value],
@@ -5353,10 +5365,13 @@ fn evaluate_statements_with_equation_traces(
     params: &crate::netlist::ParamContext,
     segment_starts: &[usize],
     traces: &[EquationMeasureTrace],
-    global_default: Option<Value>,
-    equation_default: Value,
-    use_legacy_tran_trig_targ: bool,
+    policy: MeasureEvaluationPolicy,
 ) -> Vec<MeasureResult> {
+    let MeasureEvaluationPolicy {
+        global_default,
+        equation_default,
+        use_legacy_tran_trig_targ,
+    } = policy;
     let statement_dependencies = statements
         .iter()
         .map(|statement| statement_live_dependencies(statement, params))
@@ -6058,9 +6073,11 @@ fn evaluate_tran_measurements_with_signals_and_abort(
             &netlist.params,
             &[],
             traces,
-            netlist.options.measure_default_value,
-            -1.0,
-            netlist.options.measure_use_lttm(),
+            MeasureEvaluationPolicy {
+                global_default: netlist.options.measure_default_value,
+                equation_default: -1.0,
+                use_legacy_tran_trig_targ: netlist.options.measure_use_lttm(),
+            },
         ),
         Err(_) => evaluate_statements(
             &statements,
@@ -6376,9 +6393,11 @@ pub fn evaluate_dc_measurements_with_parameter_contexts_and_abort(
             &netlist.params,
             &segment_starts,
             traces,
-            netlist.options.measure_default_value,
-            0.0,
-            false,
+            MeasureEvaluationPolicy {
+                global_default: netlist.options.measure_default_value,
+                equation_default: 0.0,
+                use_legacy_tran_trig_targ: false,
+            },
         ),
         Err(_) => evaluate_statements_with_segment_starts(
             &statements,
@@ -6619,9 +6638,11 @@ pub fn evaluate_ac_measurements_with_abort(
             &netlist.params,
             &[],
             traces,
-            netlist.options.measure_default_value,
-            -1.0,
-            false,
+            MeasureEvaluationPolicy {
+                global_default: netlist.options.measure_default_value,
+                equation_default: -1.0,
+                use_legacy_tran_trig_targ: false,
+            },
         ),
         Err(_) => evaluate_statements(&statements, series.axis(), &signals, &netlist.params, false),
     };

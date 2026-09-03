@@ -49,7 +49,8 @@ pub use result::{
 #[cfg(test)]
 pub(crate) use solver::DC_SHORT_CONDUCTANCE;
 pub use solver::{
-    DepletionCap, HbError, HbSolver, HbSolverState, NonlinearDeviceInstance, NonlinearDeviceParams,
-    NonlinearDeviceType, PeriodicAcExcitation, PeriodicNoiseSource,
+    DepletionCap, HbError, HbSolver, HbSolverState, HbSwitchNodes, HbVoltageSwitchModel,
+    NonlinearDeviceInstance, NonlinearDeviceParams, NonlinearDeviceType, PeriodicAcExcitation,
+    PeriodicNoiseSource, PeriodicSidebandWindow,
 };
 pub(crate) use solver::{ExactPeriodicNetwork, HbDcSeedPolicy};

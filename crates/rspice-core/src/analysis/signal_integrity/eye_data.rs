@@ -282,10 +282,12 @@ impl EyeDataBuilder {
                     &signal[..n],
                     interp_start_idx,
                     interp_end_idx,
-                    window_start,
-                    window_duration,
-                    self.bit_period,
-                    resampled_points,
+                    EyeResampleWindow {
+                        window_start,
+                        window_duration,
+                        bit_period: self.bit_period,
+                        sample_count: resampled_points,
+                    },
                 )
             {
                 eye_data.add_trace(trace);
@@ -298,16 +300,29 @@ impl EyeDataBuilder {
     }
 }
 
+/// The window one eye trace is resampled onto: where it starts, how long it
+/// runs, the bit period it is folded against, and how many samples to take.
+#[derive(Clone, Copy)]
+struct EyeResampleWindow {
+    window_start: f64,
+    window_duration: f64,
+    bit_period: f64,
+    sample_count: usize,
+}
+
 fn resample_window_trace(
     time: &[f64],
     signal: &[f64],
     start_idx: usize,
     end_idx: usize,
-    window_start: f64,
-    window_duration: f64,
-    bit_period: f64,
-    sample_count: usize,
+    window: EyeResampleWindow,
 ) -> Option<EyeTrace> {
+    let EyeResampleWindow {
+        window_start,
+        window_duration,
+        bit_period,
+        sample_count,
+    } = window;
     if end_idx <= start_idx + 1 || sample_count < 2 || !window_duration.is_finite() {
         return None;
     }

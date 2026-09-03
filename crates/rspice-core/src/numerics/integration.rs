@@ -31,7 +31,7 @@ pub use companion::{CompanionCoefficients, IntegrationMethod, parse_integration_
 pub(crate) use lte::{
     ACCEPTED_BOUNDARY_LTE_ESTIMATOR_CHECKPOINT_VERSION, AcceptedBoundaryLteEstimatorCheckpoint,
 };
-pub use lte::{LteEstimator, TransientLteReference};
+pub use lte::{LteEstimator, LtePrefixWindow, TransientLteReference};
 pub use timestep::{TimestepController, TransientErrorControl, TrapGearController};
 pub(crate) use timestep::{
     TrapGearControllerSnapshot, XYCE_DEFAULT_MIN_TIME_STEPS_BREAKPOINT, XYCE_DEFAULT_NLMAX,

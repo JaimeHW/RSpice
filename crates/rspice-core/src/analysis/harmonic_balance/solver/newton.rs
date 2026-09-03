@@ -737,11 +737,13 @@ impl HbSolver {
         // Step 1: Try direct Newton first
         if self.newton_inner_loop(
             state,
-            target_gmin,
-            self.config.max_iterations,
-            tol,
-            abstol,
-            1.0,
+            HbNewtonLimits {
+                gmin: target_gmin,
+                max_iterations: self.config.max_iterations,
+                tol,
+                abstol,
+                source_scale: 1.0,
+            },
             abort,
         )? {
             state.converged = true;
@@ -754,11 +756,13 @@ impl HbSolver {
         for gmin_level in [1e-6, 1e-4, 1e-2, 0.1, 1.0] {
             if self.newton_inner_loop(
                 state,
-                gmin_level,
-                self.config.max_iterations,
-                tol * 10.0,
-                abstol,
-                1.0,
+                HbNewtonLimits {
+                    gmin: gmin_level,
+                    max_iterations: self.config.max_iterations,
+                    tol: tol * 10.0,
+                    abstol,
+                    source_scale: 1.0,
+                },
                 abort,
             )? {
                 // Converged at higher GMIN - now refine with progressively lower GMIN
@@ -773,11 +777,13 @@ impl HbSolver {
                     current_gmin /= 2.0;
                     if self.newton_inner_loop(
                         state,
-                        current_gmin,
-                        self.config.max_iterations,
-                        tol,
-                        abstol,
-                        1.0,
+                        HbNewtonLimits {
+                            gmin: current_gmin,
+                            max_iterations: self.config.max_iterations,
+                            tol,
+                            abstol,
+                            source_scale: 1.0,
+                        },
                         abort,
                     )? {
                         // Success - update last good state
@@ -797,11 +803,13 @@ impl HbSolver {
                 // circuit before publishing it.
                 if self.newton_inner_loop(
                     state,
-                    target_gmin,
-                    self.config.max_iterations,
-                    tol,
-                    abstol,
-                    1.0,
+                    HbNewtonLimits {
+                        gmin: target_gmin,
+                        max_iterations: self.config.max_iterations,
+                        tol,
+                        abstol,
+                        source_scale: 1.0,
+                    },
                     abort,
                 )? {
                     state.converged = true;
@@ -836,11 +844,13 @@ impl HbSolver {
             // Try Newton at this source level (using previous solution as starting point)
             let converged = self.newton_inner_loop(
                 state,
-                target_gmin,
-                self.config.max_iterations / 2,
-                tol * 10.0,
-                abstol,
-                factor,
+                HbNewtonLimits {
+                    gmin: target_gmin,
+                    max_iterations: self.config.max_iterations / 2,
+                    tol: tol * 10.0,
+                    abstol,
+                    source_scale: factor,
+                },
                 abort,
             )?;
 
@@ -860,11 +870,13 @@ impl HbSolver {
         if source_stepper.is_complete()
             && self.newton_inner_loop(
                 state,
-                target_gmin,
-                self.config.max_iterations,
-                tol,
-                abstol,
-                1.0,
+                HbNewtonLimits {
+                    gmin: target_gmin,
+                    max_iterations: self.config.max_iterations,
+                    tol,
+                    abstol,
+                    source_scale: 1.0,
+                },
                 abort,
             )?
         {
@@ -886,11 +898,14 @@ impl HbSolver {
 
             let converged = self.newton_inner_loop(
                 state,
-                ptran_gmin,
-                self.config.max_iterations / 4,
-                tol * 100.0, // Relaxed tolerance during stepping
-                abstol,
-                1.0,
+                HbNewtonLimits {
+                    gmin: ptran_gmin,
+                    max_iterations: self.config.max_iterations / 4,
+                    // Relaxed tolerance during stepping.
+                    tol: tol * 100.0,
+                    abstol,
+                    source_scale: 1.0,
+                },
                 abort,
             )?;
 
@@ -909,11 +924,13 @@ impl HbSolver {
         if ptran.is_complete()
             && self.newton_inner_loop(
                 state,
-                target_gmin,
-                self.config.max_iterations,
-                tol,
-                abstol,
-                1.0,
+                HbNewtonLimits {
+                    gmin: target_gmin,
+                    max_iterations: self.config.max_iterations,
+                    tol,
+                    abstol,
+                    source_scale: 1.0,
+                },
                 abort,
             )?
         {
@@ -932,13 +949,16 @@ impl HbSolver {
     fn newton_inner_loop(
         &mut self,
         state: &mut HbSolverState,
-        gmin: Value,
-        max_iter: usize,
-        tol: Value,
-        abstol: Value,
-        source_scale: Value,
+        limits: HbNewtonLimits,
         abort: &dyn AbortSignal,
     ) -> Result<bool, HbError> {
+        let HbNewtonLimits {
+            gmin,
+            max_iterations: max_iter,
+            tol,
+            abstol,
+            source_scale,
+        } = limits;
         for iter in 0..max_iter {
             if abort.is_aborted() {
                 return Err(HbError::Aborted);
@@ -980,10 +1000,12 @@ impl HbSolver {
             match self.apply_line_search_with_gmin(
                 state,
                 &delta_x,
-                gmin,
-                source_scale,
-                tol,
-                abstol,
+                HbLineSearchLimits {
+                    gmin,
+                    source_scale,
+                    reltol: tol,
+                    current_abstol: abstol,
+                },
                 abort,
             ) {
                 Ok(()) => {}
@@ -1245,12 +1267,15 @@ impl HbSolver {
         &mut self,
         state: &mut HbSolverState,
         delta: &HbNewtonStep,
-        gmin: Value,
-        source_scale: Value,
-        reltol: Value,
-        current_abstol: Value,
+        limits: HbLineSearchLimits,
         abort: &dyn AbortSignal,
     ) -> Result<(), HbError> {
+        let HbLineSearchLimits {
+            gmin,
+            source_scale,
+            reltol,
+            current_abstol,
+        } = limits;
         let initial_merit =
             state.certificate_merit(reltol, current_abstol, crate::constants::VNTOL, false)?;
         let armijo_c = 1e-4;
@@ -3208,7 +3233,17 @@ mod exact_matrix_free_tests {
         let reltol = solver.config.tolerance;
         let abstol = solver.config.abstol;
         let error = solver
-            .apply_line_search_with_gmin(&mut state, &delta, 0.0, 1.0, reltol, abstol, &NoAbort)
+            .apply_line_search_with_gmin(
+                &mut state,
+                &delta,
+                HbLineSearchLimits {
+                    gmin: 0.0,
+                    source_scale: 1.0,
+                    reltol,
+                    current_abstol: abstol,
+                },
+                &NoAbort,
+            )
             .expect_err("non-real DC evidence must fail closed before line search");
         assert!(error.to_string().contains("imaginary DC"), "{error}");
     }

@@ -1,6 +1,7 @@
 use super::*;
 // Only the unit tests below construct these records directly; the
 // production paths in this module receive them already built.
+use crate::analysis::harmonic_balance::{HbSwitchNodes, HbVoltageSwitchModel};
 #[cfg(test)]
 use crate::device::passive::CoupledWinding;
 
@@ -179,8 +180,19 @@ impl Engine {
             solver.add_named_nonlinear_device(
                 sw.name.clone(),
                 NonlinearDeviceInstance::voltage_switch(
-                    node_pos, node_neg, ctrl_pos, ctrl_neg, sw.vt, sw.vh, sw.ron, sw.roff,
-                    sw.smooth,
+                    HbSwitchNodes {
+                        node_pos,
+                        node_neg,
+                        ctrl_pos,
+                        ctrl_neg,
+                    },
+                    HbVoltageSwitchModel {
+                        vt: sw.vt,
+                        vh: sw.vh,
+                        ron: sw.ron,
+                        roff: sw.roff,
+                        smooth: sw.smooth,
+                    },
                 ),
             );
         }
