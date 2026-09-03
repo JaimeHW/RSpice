@@ -20,7 +20,7 @@ use thiserror::Error;
 
 mod storage;
 pub use storage::{
-    Capacitors, CurrentSources, Diodes, Inductors, ResistorBranches, Resistors,
+    Capacitors, CurrentSources, Diodes, Inductors, ResistorBranches, Resistors, SourceExcitation,
     ThermalResistorState, VoltageSources,
 };
 // The nonlinear device arrays are stamping machinery that no frontend names,

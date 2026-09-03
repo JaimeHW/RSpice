@@ -26,4 +26,4 @@ pub(crate) use nonlinear::{
 };
 pub(crate) use passive::SolutionDependentCapacitorState;
 pub use passive::{Capacitors, ResistorBranches, Resistors, ThermalResistorState};
-pub use sources::{CurrentSources, VoltageSources};
+pub use sources::{CurrentSources, SourceExcitation, VoltageSources};

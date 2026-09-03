@@ -5,6 +5,7 @@
 
 use super::{Engine, JfetLevel2Model, SimulationError, SpiceDialect, extract_dc_value_with_limits};
 use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::circuit::SourceExcitation;
 
 /// A model parameter the deck left as text: its name and the unresolved
 /// expression or string literal that follows it.
@@ -3728,10 +3729,10 @@ fn add_generated_xspice_auto_bridge_subcircuit(
 ) -> Result<(), SimulationError> {
     let XspiceAutoBridgeContext {
         temperature,
-        ramptime,
-        digital_delay_type,
+        ramptime: _,
+        digital_delay_type: _,
         spice_dialect,
-        resource_limits,
+        resource_limits: _,
         ..
     } = context;
     let flattened = flatten_netlist_with_models(generated).map_err(|e| {
@@ -3823,10 +3824,10 @@ fn add_template_xspice_auto_bridge(
 ) -> Result<(), SimulationError> {
     let XspiceAutoBridgeContext {
         source_path,
-        temperature,
-        ramptime,
-        digital_delay_type,
-        spice_dialect,
+        temperature: _,
+        ramptime: _,
+        digital_delay_type: _,
+        spice_dialect: _,
         node_names,
         resource_limits,
         ..
@@ -4091,7 +4092,7 @@ fn add_planned_xspice_auto_bridge(
         temperature,
         ramptime,
         digital_delay_type,
-        spice_dialect,
+        spice_dialect: _,
         family_enabled,
         node_names,
         resource_limits,
@@ -5305,10 +5306,12 @@ impl Engine {
                         np,
                         nn,
                         branch,
-                        dc_value,
-                        ac_mag,
-                        ac_phase,
-                        transient_spec,
+                        SourceExcitation {
+                            dc_value,
+                            ac_magnitude: ac_mag,
+                            ac_phase,
+                            source_spec: transient_spec,
+                        },
                         pwl_waveform,
                     );
                     if self.config.spice_dialect == SpiceDialect::Xyce {
@@ -5350,10 +5353,12 @@ impl Engine {
                         element.name.clone(),
                         np,
                         nn,
-                        dc_value,
-                        ac_mag,
-                        ac_phase,
-                        transient_spec,
+                        SourceExcitation {
+                            dc_value,
+                            ac_magnitude: ac_mag,
+                            ac_phase,
+                            source_spec: transient_spec,
+                        },
                         pwl_waveform,
                     );
                     if self.config.spice_dialect == SpiceDialect::Xyce {

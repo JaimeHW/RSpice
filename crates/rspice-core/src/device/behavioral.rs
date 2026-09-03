@@ -117,16 +117,40 @@ pub enum BehavioralEvaluationError {
     },
 }
 
-fn try_stamp_behavioral_matrix_coefficient(
-    matrix: &mut StaticMatrix,
+/// One matrix entry a behavioral source contributes: where it lands and how
+/// much it adds.
+#[derive(Clone, Copy)]
+struct BehavioralMatrixEntry {
     row: usize,
     column: usize,
     coefficient: Value,
+}
+
+/// The point a behavioral expression is evaluated at, beyond its own operands:
+/// the analysis coordinate, the ambient temperature, the conductance floor the
+/// solver adds, and the dialect whose function set and rounding apply.
+#[derive(Clone, Copy)]
+pub(crate) struct BehavioralEnvironment {
+    pub(crate) time: Value,
+    pub(crate) frequency: Value,
+    pub(crate) temperature: Value,
+    pub(crate) gmin: Value,
+    pub(crate) expression_dialect: ExpressionDialect,
+}
+
+fn try_stamp_behavioral_matrix_coefficient(
+    matrix: &mut StaticMatrix,
+    entry: BehavioralMatrixEntry,
     source_kind: &'static str,
     source_name: &str,
     time: Value,
     frequency: Value,
 ) -> Result<(), BehavioralEvaluationError> {
+    let BehavioralMatrixEntry {
+        row,
+        column,
+        coefficient,
+    } = entry;
     matrix
         .try_add(row, column, coefficient)
         .map_err(|error| BehavioralEvaluationError::Stamp {
@@ -575,11 +599,13 @@ impl BehavioralVoltageSource {
                     &self.program,
                     &self.node_values,
                     &self.branch_values,
-                    time,
-                    self.frequency,
-                    self.temperature,
-                    self.gmin,
-                    self.expression_dialect,
+                    BehavioralEnvironment {
+                        time,
+                        frequency: self.frequency,
+                        temperature: self.temperature,
+                        gmin: self.gmin,
+                        expression_dialect: self.expression_dialect,
+                    },
                     DerivativeTarget::Node(idx),
                 )
                 .map(Ok)
@@ -595,11 +621,13 @@ impl BehavioralVoltageSource {
                     &self.program,
                     &self.node_values,
                     &self.branch_values,
-                    time,
-                    self.frequency,
-                    self.temperature,
-                    self.gmin,
-                    self.expression_dialect,
+                    BehavioralEnvironment {
+                        time,
+                        frequency: self.frequency,
+                        temperature: self.temperature,
+                        gmin: self.gmin,
+                        expression_dialect: self.expression_dialect,
+                    },
                     DerivativeTarget::Branch(idx),
                 )
                 .map(Ok)
@@ -751,9 +779,11 @@ impl BehavioralVoltageSource {
         if np > 0 {
             try_stamp_behavioral_matrix_coefficient(
                 matrix,
-                br - 1,
-                np - 1,
-                1.0,
+                BehavioralMatrixEntry {
+                    row: br - 1,
+                    column: np - 1,
+                    coefficient: 1.0,
+                },
                 "voltage",
                 &self.name,
                 time,
@@ -761,9 +791,11 @@ impl BehavioralVoltageSource {
             )?;
             try_stamp_behavioral_matrix_coefficient(
                 matrix,
-                np - 1,
-                br - 1,
-                1.0,
+                BehavioralMatrixEntry {
+                    row: np - 1,
+                    column: br - 1,
+                    coefficient: 1.0,
+                },
                 "voltage",
                 &self.name,
                 time,
@@ -773,9 +805,11 @@ impl BehavioralVoltageSource {
         if nn > 0 {
             try_stamp_behavioral_matrix_coefficient(
                 matrix,
-                br - 1,
-                nn - 1,
-                -1.0,
+                BehavioralMatrixEntry {
+                    row: br - 1,
+                    column: nn - 1,
+                    coefficient: -1.0,
+                },
                 "voltage",
                 &self.name,
                 time,
@@ -783,9 +817,11 @@ impl BehavioralVoltageSource {
             )?;
             try_stamp_behavioral_matrix_coefficient(
                 matrix,
-                nn - 1,
-                br - 1,
-                -1.0,
+                BehavioralMatrixEntry {
+                    row: nn - 1,
+                    column: br - 1,
+                    coefficient: -1.0,
+                },
                 "voltage",
                 &self.name,
                 time,
@@ -801,9 +837,11 @@ impl BehavioralVoltageSource {
                 if df != 0.0 {
                     try_stamp_behavioral_matrix_coefficient(
                         matrix,
-                        br - 1,
-                        *global_idx,
-                        -df,
+                        BehavioralMatrixEntry {
+                            row: br - 1,
+                            column: *global_idx,
+                            coefficient: -df,
+                        },
                         "voltage",
                         &self.name,
                         time,
@@ -818,9 +856,11 @@ impl BehavioralVoltageSource {
                 if df != 0.0 {
                     try_stamp_behavioral_matrix_coefficient(
                         matrix,
-                        br - 1,
-                        *global_idx,
-                        -df,
+                        BehavioralMatrixEntry {
+                            row: br - 1,
+                            column: *global_idx,
+                            coefficient: -df,
+                        },
                         "voltage",
                         &self.name,
                         time,
@@ -1166,13 +1206,16 @@ fn analytic_expression_partial(
     program: &CompiledExpr,
     node_values: &[Value],
     branch_values: &[Value],
-    time: Value,
-    frequency: Value,
-    temperature: Value,
-    gmin: Value,
-    expression_dialect: ExpressionDialect,
+    environment: BehavioralEnvironment,
     target: DerivativeTarget,
 ) -> Option<Value> {
+    let BehavioralEnvironment {
+        time,
+        frequency,
+        temperature,
+        gmin,
+        expression_dialect,
+    } = environment;
     let context = BehavioralDerivativeContext {
         program,
         node_values,
@@ -1198,23 +1241,28 @@ pub(crate) fn compiled_expression_node_partial(
     program: &CompiledExpr,
     node_values: &[Value],
     branch_values: &[Value],
-    time: Value,
-    frequency: Value,
-    temperature: Value,
-    gmin: Value,
-    expression_dialect: ExpressionDialect,
+    environment: BehavioralEnvironment,
     node_index: usize,
 ) -> Option<Value> {
-    analytic_expression_partial(
-        expr,
-        program,
-        node_values,
-        branch_values,
+    let BehavioralEnvironment {
         time,
         frequency,
         temperature,
         gmin,
         expression_dialect,
+    } = environment;
+    analytic_expression_partial(
+        expr,
+        program,
+        node_values,
+        branch_values,
+        BehavioralEnvironment {
+            time,
+            frequency,
+            temperature,
+            gmin,
+            expression_dialect,
+        },
         DerivativeTarget::Node(node_index),
     )
 }
@@ -1227,23 +1275,28 @@ pub(crate) fn compiled_expression_branch_partial(
     program: &CompiledExpr,
     node_values: &[Value],
     branch_values: &[Value],
-    time: Value,
-    frequency: Value,
-    temperature: Value,
-    gmin: Value,
-    expression_dialect: ExpressionDialect,
+    environment: BehavioralEnvironment,
     branch_index: usize,
 ) -> Option<Value> {
-    analytic_expression_partial(
-        expr,
-        program,
-        node_values,
-        branch_values,
+    let BehavioralEnvironment {
         time,
         frequency,
         temperature,
         gmin,
         expression_dialect,
+    } = environment;
+    analytic_expression_partial(
+        expr,
+        program,
+        node_values,
+        branch_values,
+        BehavioralEnvironment {
+            time,
+            frequency,
+            temperature,
+            gmin,
+            expression_dialect,
+        },
         DerivativeTarget::Branch(branch_index),
     )
 }
@@ -2385,11 +2438,13 @@ impl BehavioralCurrentSource {
                     &self.program,
                     &self.node_values,
                     &self.branch_values,
-                    time,
-                    self.frequency,
-                    self.temperature,
-                    self.gmin,
-                    self.expression_dialect,
+                    BehavioralEnvironment {
+                        time,
+                        frequency: self.frequency,
+                        temperature: self.temperature,
+                        gmin: self.gmin,
+                        expression_dialect: self.expression_dialect,
+                    },
                     DerivativeTarget::Node(idx),
                 )
                 .map(Ok)
@@ -2405,11 +2460,13 @@ impl BehavioralCurrentSource {
                     &self.program,
                     &self.node_values,
                     &self.branch_values,
-                    time,
-                    self.frequency,
-                    self.temperature,
-                    self.gmin,
-                    self.expression_dialect,
+                    BehavioralEnvironment {
+                        time,
+                        frequency: self.frequency,
+                        temperature: self.temperature,
+                        gmin: self.gmin,
+                        expression_dialect: self.expression_dialect,
+                    },
                     DerivativeTarget::Branch(idx),
                 )
                 .map(Ok)
@@ -2565,9 +2622,11 @@ impl BehavioralCurrentSource {
                     if np > 0 {
                         try_stamp_behavioral_matrix_coefficient(
                             matrix,
-                            np - 1,
-                            *global_idx,
-                            df,
+                            BehavioralMatrixEntry {
+                                row: np - 1,
+                                column: *global_idx,
+                                coefficient: df,
+                            },
                             "current",
                             &self.name,
                             time,
@@ -2577,9 +2636,11 @@ impl BehavioralCurrentSource {
                     if nn > 0 {
                         try_stamp_behavioral_matrix_coefficient(
                             matrix,
-                            nn - 1,
-                            *global_idx,
-                            -df,
+                            BehavioralMatrixEntry {
+                                row: nn - 1,
+                                column: *global_idx,
+                                coefficient: -df,
+                            },
                             "current",
                             &self.name,
                             time,
@@ -2596,9 +2657,11 @@ impl BehavioralCurrentSource {
                     if np > 0 {
                         try_stamp_behavioral_matrix_coefficient(
                             matrix,
-                            np - 1,
-                            *global_idx,
-                            df,
+                            BehavioralMatrixEntry {
+                                row: np - 1,
+                                column: *global_idx,
+                                coefficient: df,
+                            },
                             "current",
                             &self.name,
                             time,
@@ -2608,9 +2671,11 @@ impl BehavioralCurrentSource {
                     if nn > 0 {
                         try_stamp_behavioral_matrix_coefficient(
                             matrix,
-                            nn - 1,
-                            *global_idx,
-                            -df,
+                            BehavioralMatrixEntry {
+                                row: nn - 1,
+                                column: *global_idx,
+                                coefficient: -df,
+                            },
                             "current",
                             &self.name,
                             time,

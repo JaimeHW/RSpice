@@ -2,7 +2,7 @@
 
 use crate::config::ExpressionDialect;
 use crate::device::behavioral::{
-    compiled_expression_branch_partial, compiled_expression_node_partial,
+    BehavioralEnvironment, compiled_expression_branch_partial, compiled_expression_node_partial,
 };
 use crate::device::traits::{DynamicDevice, MatrixStamper};
 use crate::expr::{
@@ -281,11 +281,13 @@ impl SolutionDependentCapacitor {
                 &self.program,
                 &self.node_values,
                 &self.branch_values,
-                time,
-                self.frequency,
-                self.temperature,
-                self.gmin,
-                self.expression_dialect,
+                BehavioralEnvironment {
+                    time,
+                    frequency: self.frequency,
+                    temperature: self.temperature,
+                    gmin: self.gmin,
+                    expression_dialect: self.expression_dialect,
+                },
                 index,
             )
             .unwrap_or_else(|| self.estimate_node_partial(index, value, time));
@@ -301,11 +303,13 @@ impl SolutionDependentCapacitor {
                 &self.program,
                 &self.node_values,
                 &self.branch_values,
-                time,
-                self.frequency,
-                self.temperature,
-                self.gmin,
-                self.expression_dialect,
+                BehavioralEnvironment {
+                    time,
+                    frequency: self.frequency,
+                    temperature: self.temperature,
+                    gmin: self.gmin,
+                    expression_dialect: self.expression_dialect,
+                },
                 index,
             )
             .unwrap_or_else(|| self.estimate_branch_partial(index, value, time));
