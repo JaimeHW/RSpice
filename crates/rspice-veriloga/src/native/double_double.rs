@@ -86,24 +86,28 @@ const SPLIT_CEILING: f64 = 6.696_928_794_914_171e299;
 const LN2: DoubleDouble = DoubleDouble {
     hi: 6.931_471_805_599_452_9e-1,
     lo: 2.319_046_813_846_299_6e-17,
+    real: 6.931_471_805_599_452_9e-1,
 };
 
 /// `ln 10`, to double-double precision.
 const LN10: DoubleDouble = DoubleDouble {
     hi: 2.302_585_092_994_046e0,
     lo: -2.170_756_223_382_249_4e-16,
+    real: 2.302_585_092_994_046e0,
 };
 
 /// `π/2`, to double-double precision.
 const PI_OVER_2: DoubleDouble = DoubleDouble {
     hi: 1.570_796_326_794_896_6e0,
     lo: 6.123_233_995_736_766e-17,
+    real: 1.570_796_326_794_896_6e0,
 };
 
 /// `π`, to double-double precision.
 const PI: DoubleDouble = DoubleDouble {
     hi: 3.141_592_653_589_793e0,
     lo: 1.224_646_799_147_353_2e-16,
+    real: 3.141_592_653_589_793e0,
 };
 
 /// Past this argument magnitude the double-double `π/2` has no digits left to
@@ -118,11 +122,35 @@ const SERIES_EPSILON: f64 = 1.0e-34;
 /// than spinning.
 const SERIES_TERM_LIMIT: usize = 64;
 
-/// A value carried as an unevaluated sum of two doubles.
+/// A value carried as an unevaluated sum of two doubles, alongside what the
+/// same sequence of operations would have produced in `f64`.
+///
+/// # Why the `f64` value travels with it
+///
+/// [`CfgScalar`]'s own contract says why: "predicates go through `Self::real`
+/// rather than being part of the trait, so a derivative-carrying scalar
+/// branches on its value and not on its infinitesimal part — which is what
+/// makes a dual number reproduce the primal walk exactly." A wider precision is
+/// in the same position. A cone that computes `a − b` where the two agree to
+/// the last bit of `f64` gets `+0` there and `−1e-40` here, and a `>= 0`
+/// downstream then sends the two walks into different arms of a piecewise
+/// function. `vbic13_4t` does exactly that: its `jacobians[2][0]` is `1.0` on
+/// both compiled routes and the unguided double-double walk returned `0.0`,
+/// having taken the other arm of a selection.
+///
+/// A reference that evaluates a different branch is not a reference for the
+/// walk it is measuring. So `real` carries the `f64` result of the same
+/// operation sequence, every predicate reads it, and the double-double walk
+/// follows the `f64` walk's path exactly — which makes `|value − real|` the
+/// rounding error of *that* path and nothing else.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct DoubleDouble {
     hi: f64,
     lo: f64,
+    /// What the `f64` walk of the same operations reached. Not a rounding of
+    /// `hi`: it is its own computation, and the distance between them is the
+    /// measurement this module exists to take.
+    real: f64,
 }
 
 /// `fl(a + b)` and the exact residual, by 2Sum. No assumption about the
@@ -167,13 +195,31 @@ fn two_prod(a: f64, b: f64) -> (f64, f64) {
 
 impl DoubleDouble {
     /// A normalized value, with a non-finite high word collapsing the low one.
+    ///
+    /// The `f64` companion defaults to the double-double value itself, which is
+    /// right for the intermediates of a transcendental — those are steps of one
+    /// mathematical function, not of the walk being measured. Every operation
+    /// the [`CfgScalar`] impl exposes overrides it with the `f64` rule for that
+    /// operation; see [`Self::carrying`].
     #[inline]
     fn from_parts(hi: f64, lo: f64) -> Self {
         if hi.is_finite() && lo.is_finite() {
-            Self { hi, lo }
+            Self { hi, lo, real: hi }
         } else {
-            Self { hi, lo: 0.0 }
+            Self { hi, lo: 0.0, real: hi }
         }
+    }
+
+    /// The same double-double value, with the `f64` walk's own result attached.
+    #[inline]
+    fn carrying(mut self, real: f64) -> Self {
+        self.real = real;
+        self
+    }
+
+    /// What the `f64` walk of the same operations reached.
+    pub(super) fn narrow(self) -> f64 {
+        self.real
     }
 
     /// The exact value `hi + lo` names, rounded once to `f64`.
@@ -359,20 +405,21 @@ impl DoubleDouble {
     }
 }
 
-impl CfgScalar for DoubleDouble {
+/// The double-double arithmetic itself, without the `f64` companion.
+///
+/// Inherent rather than the trait impl, and the split is load-bearing: these
+/// are the operations a transcendental composes itself out of, where carrying a
+/// separate `f64` walk would be meaningless — `exp`'s Taylor series is one
+/// function's own steps, not two evaluations of a model. The [`CfgScalar`] impl
+/// below is a thin layer over these that attaches the `f64` rule for each
+/// operation, and it is the one an interpreted walk sees.
+impl DoubleDouble {
     fn from_f64(value: f64) -> Self {
-        Self { hi: value, lo: 0.0 }
-    }
-
-    /// The high word, which is the value rounded once to `f64`.
-    ///
-    /// Every predicate in the reference interpreter reads this, so a
-    /// double-double walk takes the branch its own value implies. Where that
-    /// differs from the `f64` walk's branch the cone is sitting on a kink, and
-    /// the two are then evaluating different arms of a piecewise function —
-    /// which the census's significance gate is what excludes.
-    fn real(self) -> f64 {
-        self.hi
+        Self {
+            hi: value,
+            lo: 0.0,
+            real: value,
+        }
     }
 
     fn neg(self) -> Self {
@@ -503,9 +550,15 @@ impl CfgScalar for DoubleDouble {
         value.scale(2.0_f64.powi(multiple as i32))
     }
 
-    // One Newton step on `exp` from the `f64` logarithm: sixteen correct
-    // digits become thirty-two, which is the whole of the double-double
-    // format.
+    // Newton on `exp` from the `f64` logarithm: sixteen correct digits become
+    // thirty-two, which is the whole of the double-double format.
+    //
+    // The argument is first halved or doubled into `[1/2, 2]`. That is exact —
+    // the scalings are powers of two — and it is not an optimization: Newton
+    // asks for `exp(−estimate)`, and the logarithm of a number near `f64`'s
+    // exponent limits is an estimate near `±745`, whose exponential is an
+    // overflow or a flush to zero. Reduced, the estimate is under `0.7` and the
+    // iteration converges on the first step.
     fn ln(self) -> Self {
         if self.hi <= 0.0 || !self.hi.is_finite() {
             return Self::from_f64(self.hi.ln());
@@ -513,12 +566,22 @@ impl CfgScalar for DoubleDouble {
         if self.hi == 1.0 && self.lo == 0.0 {
             return Self::from_f64(0.0);
         }
-        let mut estimate = Self::from_f64(self.hi.ln());
+        let mut reduced = self;
+        let mut doublings = 0.0_f64;
+        while reduced.hi > 2.0 {
+            reduced = reduced.scale(0.5);
+            doublings += 1.0;
+        }
+        while reduced.hi < 0.5 {
+            reduced = reduced.scale(2.0);
+            doublings -= 1.0;
+        }
+        let mut estimate = Self::from_f64(reduced.hi.ln());
         for _ in 0..2 {
-            let correction = self.mul(estimate.negated().exp()).sub(Self::from_f64(1.0));
+            let correction = reduced.mul(estimate.negated().exp()).sub(Self::from_f64(1.0));
             estimate = estimate.add(correction);
         }
-        estimate
+        estimate.add(LN2.scale(doublings))
     }
 
     fn log10(self) -> Self {
@@ -705,6 +768,142 @@ impl CfgScalar for DoubleDouble {
         } else {
             Self::from_parts(hi, 0.0)
         }
+    }
+}
+
+/// The scalar an interpreted walk sees: the double-double arithmetic above,
+/// with the `f64` walk of the same operations carried alongside.
+///
+/// Every method is the inherent operation plus [`DoubleDouble::carrying`] of
+/// the corresponding `f64` rule — the *same* rule
+/// [`impl CfgScalar for f64`](CfgScalar) uses, so the companion is the walk
+/// being measured and not an approximation of it. [`Self::real`] returns that
+/// companion, which is what makes every predicate take the `f64` walk's branch.
+///
+/// `limexp`, `limited_exp` and `limited_exp_derivative` are left to their
+/// default bodies and need no rule here: they are written in terms of these
+/// operations and of `real`, so they inherit both halves.
+impl CfgScalar for DoubleDouble {
+    fn from_f64(value: f64) -> Self {
+        Self::from_f64(value)
+    }
+
+    /// The `f64` walk's value, not the double-double one. See the type's
+    /// documentation for why the reference must branch on the walk it measures.
+    fn real(self) -> f64 {
+        self.real
+    }
+
+    fn neg(self) -> Self {
+        Self::neg(self).carrying(-self.real)
+    }
+
+    fn add(self, rhs: Self) -> Self {
+        Self::add(self, rhs).carrying(self.real + rhs.real)
+    }
+
+    fn sub(self, rhs: Self) -> Self {
+        Self::sub(self, rhs).carrying(self.real - rhs.real)
+    }
+
+    fn mul(self, rhs: Self) -> Self {
+        Self::mul(self, rhs).carrying(self.real * rhs.real)
+    }
+
+    fn div(self, rhs: Self) -> Self {
+        Self::div(self, rhs).carrying(self.real / rhs.real)
+    }
+
+    fn rem(self, rhs: Self) -> Self {
+        Self::rem(self, rhs).carrying(self.real % rhs.real)
+    }
+
+    fn powf(self, rhs: Self) -> Self {
+        Self::powf(self, rhs).carrying(self.real.powf(rhs.real))
+    }
+
+    fn hypot(self, rhs: Self) -> Self {
+        Self::hypot(self, rhs).carrying(f64::hypot(self.real, rhs.real))
+    }
+
+    fn atan2(self, rhs: Self) -> Self {
+        Self::atan2(self, rhs).carrying(f64::atan2(self.real, rhs.real))
+    }
+
+    fn exp(self) -> Self {
+        Self::exp(self).carrying(self.real.exp())
+    }
+
+    fn ln(self) -> Self {
+        Self::ln(self).carrying(self.real.ln())
+    }
+
+    fn log10(self) -> Self {
+        Self::log10(self).carrying(self.real.log10())
+    }
+
+    fn sqrt(self) -> Self {
+        Self::sqrt(self).carrying(self.real.sqrt())
+    }
+
+    fn abs(self) -> Self {
+        Self::abs(self).carrying(self.real.abs())
+    }
+
+    fn sin(self) -> Self {
+        Self::sin(self).carrying(self.real.sin())
+    }
+
+    fn cos(self) -> Self {
+        Self::cos(self).carrying(self.real.cos())
+    }
+
+    fn tan(self) -> Self {
+        Self::tan(self).carrying(self.real.tan())
+    }
+
+    fn sinh(self) -> Self {
+        Self::sinh(self).carrying(self.real.sinh())
+    }
+
+    fn cosh(self) -> Self {
+        Self::cosh(self).carrying(self.real.cosh())
+    }
+
+    fn tanh(self) -> Self {
+        Self::tanh(self).carrying(self.real.tanh())
+    }
+
+    fn asin(self) -> Self {
+        Self::asin(self).carrying(self.real.asin())
+    }
+
+    fn acos(self) -> Self {
+        Self::acos(self).carrying(self.real.acos())
+    }
+
+    fn atan(self) -> Self {
+        Self::atan(self).carrying(self.real.atan())
+    }
+
+    fn asinh(self) -> Self {
+        Self::asinh(self).carrying(self.real.asinh())
+    }
+
+    fn acosh(self) -> Self {
+        Self::acosh(self).carrying(self.real.acosh())
+    }
+
+    fn atanh(self) -> Self {
+        Self::atanh(self).carrying(self.real.atanh())
+    }
+
+    fn floor(self) -> Self {
+        Self::floor(self).carrying(self.real.floor())
+    }
+
+    fn ceil(self) -> Self {
+        Self::ceil(self).carrying(self.real.ceil())
     }
 }
 
@@ -1098,6 +1297,72 @@ mod tests {
         assert_eq!(dd(2.5).relative_distance_to(2.5), 0.0);
         assert_eq!(dd(0.0).relative_distance_to(0.0), 0.0);
         assert!(dd(0.0).relative_distance_to(1.0).is_infinite());
+    }
+
+    /// The scalar an interpreted walk sees branches on the `f64` walk, not on
+    /// its own wider value.
+    ///
+    /// This is what makes the reference a reference. A cancellation the `f64`
+    /// walk rounds to zero is a real quantity here, and a predicate that read
+    /// the wider value would send the two walks into different arms of a
+    /// piecewise function — which is what `vbic13_4t`'s `jacobians[2][0]` did
+    /// before the companion was carried: `1.0` on both compiled routes, `0.0`
+    /// from the reference.
+    #[test]
+    fn the_reference_branches_on_the_walk_it_measures() {
+        let large = dd(1.0e16);
+        let cancelled = CfgScalar::sub(CfgScalar::add(large, dd(1.0)), large);
+        // The wider walk kept the unit; the `f64` walk lost it.
+        assert_eq!(cancelled.to_f64(), 1.0);
+        assert_eq!(cancelled.narrow(), 0.0);
+        assert_eq!(CfgScalar::real(cancelled), 0.0, "predicates read the walk");
+        // So a selection driven by it takes the arm the `f64` walk takes, and
+        // the reference is then the exact value *of that arm*.
+        let selected = if CfgScalar::real(cancelled) > 0.5 {
+            dd(10.0)
+        } else {
+            dd(20.0)
+        };
+        assert_eq!(selected.to_f64(), 20.0);
+        // And the measurement of that cancellation is the whole unit it lost.
+        assert_eq!(cancelled.absolute_distance_to(cancelled.narrow()), 1.0);
+        // The companion follows the `f64` rule at every step, transcendentals
+        // included: `exp` of the two differs because the arguments do.
+        let raised = CfgScalar::exp(cancelled);
+        assert_eq!(raised.narrow(), 0.0_f64.exp());
+        assert!((raised.to_f64() - 1.0_f64.exp()).abs() < 1.0e-15);
+    }
+
+    /// The logarithm holds at both ends of `f64`'s exponent range, where a
+    /// Newton step on the unreduced argument would ask `exp` for `±745`.
+    #[test]
+    fn the_logarithm_holds_at_the_exponent_limits() {
+        for value in [
+            f64::MIN_POSITIVE,
+            1.0e-300,
+            5.0e-324,
+            1.0e-30,
+            1.0e30,
+            1.0e300,
+            f64::MAX,
+        ] {
+            let ours = dd(value).ln();
+            let theirs = value.ln();
+            assert!(ours.hi.is_finite(), "ln({value:e}) = {:e}", ours.hi);
+            assert!(
+                (ours.hi - theirs).abs() <= 4.0 * f64::EPSILON * theirs.abs(),
+                "ln({value:e}): {:.17e} vs {theirs:.17e}",
+                ours.hi
+            );
+            // And it is a double-double logarithm, not the library's lifted:
+            // exponentiating it returns the argument to the wider precision.
+            // Only where the format has a low word to return it in — within a
+            // few hundred orders of `f64`'s exponent limits the low word is
+            // subnormal or absent, and a double-double is a double there.
+            if (1.0e-290..1.0e290).contains(&value.abs()) {
+                assert!(dd_ulp_error(ours.exp(), dd(value)) < 4096.0, "{value:e}");
+            }
+        }
     }
 
     /// The trigonometric reduction says where it stops rather than returning a

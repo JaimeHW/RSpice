@@ -260,9 +260,33 @@ impl Comparison {
         )
     }
 
-    /// Both routes' cones re-walked in double-double, where both walks exist.
+    /// Both routes' cones re-walked in double-double, where both walks exist
+    /// *and both reached the reals*.
+    ///
+    /// # Why a non-finite reference is no reference
+    ///
+    /// A wider precision resolves a cancellation the narrow one rounded away,
+    /// and where the cancelled quantity feeds a square root or a logarithm that
+    /// changes the answer from a number to a NaN: `sqrt(a − b)` with `a` and `b`
+    /// equal to the last bit of `f64` is `sqrt(+0)` there and `sqrt(−1e-40)`
+    /// here. `vbic13_3t_et` does that at one of the three biases, in 186 of its
+    /// entries.
+    ///
+    /// Neither walk is wrong. What is true is that the two are no longer
+    /// evaluating the same branch of the same function, so the reference does
+    /// not answer the question it was computed for, and the entry falls back to
+    /// the `f64` criterion. It is counted as [`Tally::reference_not_finite`]
+    /// rather than folded into the missing ones, because the two have different
+    /// causes and only this one is a statement about the model.
     fn references(&self) -> Option<(DoubleDouble, DoubleDouble)> {
-        Some((self.mir_dd?, self.cfg_dd?))
+        let (mir, cfg) = (self.mir_dd?, self.cfg_dd?);
+        (mir.to_f64().is_finite() && cfg.to_f64().is_finite()).then_some((mir, cfg))
+    }
+
+    /// Whether a reference was taken on both sides and one of them left the
+    /// reals. See [`Self::references`].
+    fn reference_left_the_reals(&self) -> bool {
+        self.mir_dd.is_some() && self.cfg_dd.is_some() && self.references().is_none()
     }
 
     /// `|mir_dd − cfg_dd|` as a share of the entry, taken *in* double-double so
@@ -288,12 +312,12 @@ impl Comparison {
     /// `E_mir = |mir_f64 − mir_dd|`, relative: the shipped route's own rounding
     /// error at this entry, measured rather than bounded.
     fn mir_error(&self) -> Option<f64> {
-        Some(self.mir_dd?.relative_distance_to(self.mir))
+        Some(self.references()?.0.relative_distance_to(self.mir))
     }
 
     /// `E_cfg`, the same for the CFG route.
     fn cfg_error(&self) -> Option<f64> {
-        Some(self.cfg_dd?.relative_distance_to(self.cfg))
+        Some(self.references()?.1.relative_distance_to(self.cfg))
     }
 
     /// `E_cfg / (E_mir + u)`: how much noisier the CFG route's arithmetic is
@@ -458,6 +482,13 @@ struct Tally {
     /// Significant entries one route evaluated with no correct digit in it.
     /// See `Comparison::lost_significance`.
     lost_entries: usize,
+    /// Derivative comparisons where both references were taken and one left the
+    /// reals. See `Comparison::references`.
+    reference_not_finite: usize,
+    /// Derivative comparisons whose CFG reference walk did not reproduce the
+    /// compiled CFG plan's own `f64` reading, so it is a reference for a
+    /// different computation and was dropped.
+    reference_diverged: usize,
 }
 
 /// What a noise magnitude the CFG route took at the *exit block*, under a
@@ -1022,11 +1053,19 @@ fn mir_reference(
         };
         // Bit-identical, or the walker is not modelling this entry. `total_cmp`
         // rather than `==` so two NaNs count as the agreement they are.
-        if walked.total_cmp(compiled) != std::cmp::Ordering::Equal {
+        // Bit-identical on both counts, or the walker is not modelling this
+        // entry: the `f64` walk against the machine code, and the `f64` walk
+        // the double-double scalar carries alongside itself against that.
+        // `total_cmp` rather than `==` so two NaNs count as the agreement they
+        // are.
+        let agrees = walked.total_cmp(compiled) == std::cmp::Ordering::Equal
+            && reference.narrow().total_cmp(compiled) == std::cmp::Ordering::Equal;
+        if !agrees {
             tally.walker_disagreements += 1;
             println!(
                 "cfg-mir walker_disagreement entry={entry} walked={walked:.17e} \
-                 compiled={compiled:.17e}"
+                 carried={:.17e} compiled={compiled:.17e}",
+                reference.narrow()
             );
             continue;
         }
@@ -1243,6 +1282,8 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
     let mut lost: Vec<String> = Vec::new();
     let mut referenced_here = 0_usize;
     let mut missing_here = 0_usize;
+    let mut not_finite_here = 0_usize;
+    let mut diverged_here = 0_usize;
     // The three entries where the CFG route's measured rounding is furthest
     // above the shipped route's. Named rather than counted, because the reading
     // the flip's pre-flight wants is *which* entry, not how many.
@@ -1322,6 +1363,17 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
         for (entry, mir, cfg) in readings {
             compared += 1;
             let operations = entry_operations(&mir_plan, &cfg_plan.plan, entry);
+            // The interpreted cone's own `f64` walk has to be the compiled
+            // plan's reading, or the reference is a reference for some other
+            // computation. `super::cfg_census` pins the block program
+            // bit-identical to the interpreter on every shipped module, so a
+            // disagreement here is about this census's rebuild of the lowering
+            // — it repeats the lower/differentiate/scalarize passes rather than
+            // borrowing the plan builder's — and not about the route.
+            let cfg_candidate = cfg_here.and_then(|values| values.get(&entry)).copied();
+            let cfg_dd = cfg_candidate
+                .filter(|value| value.narrow().total_cmp(&cfg) == std::cmp::Ordering::Equal);
+            let diverged = cfg_candidate.is_some() && cfg_dd.is_none();
             let comparison = Comparison {
                 entry,
                 point: index,
@@ -1330,7 +1382,7 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
                 operations,
                 deviation: deviation(mir, cfg).unwrap_or(0.0),
                 mir_dd: mir_here.get(&entry).copied(),
-                cfg_dd: cfg_here.and_then(|values| values.get(&entry)).copied(),
+                cfg_dd,
             };
             if comparison.deviation == 0.0 {
                 exact += 1;
@@ -1389,6 +1441,12 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
                     tally.referenced += 1;
                     referenced_here += 1;
                     spread.push(&comparison);
+                } else if diverged {
+                    tally.reference_diverged += 1;
+                    diverged_here += 1;
+                } else if comparison.reference_left_the_reals() {
+                    tally.reference_not_finite += 1;
+                    not_finite_here += 1;
                 } else {
                     tally.reference_missing += 1;
                     missing_here += 1;
@@ -1482,7 +1540,8 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
     );
     println!(
         "cfg-mir model={module} referenced={referenced_here} \
-         reference_missing={missing_here} {}{}",
+         reference_missing={missing_here} reference_not_finite={not_finite_here} \
+         reference_diverged={diverged_here} {}{}",
         spread.describe(),
         f64_worst
             .as_ref()
@@ -1607,8 +1666,8 @@ fn the_cfg_built_plan_agrees_with_the_shipped_plan_within_the_reassociation_boun
          structural_zeros_not_evaluable={} \
          guarded_noise_entries={} guarded_noise_agreed={} guarded_noise_third_value={} \
          below_significance={} referenced={} reference_missing={} \
-         models_without_reference={} walker_disagreements={} lost_entries={} \
-         walker_refusals={:?}",
+         reference_not_finite={} reference_diverged={} models_without_reference={} \
+         walker_disagreements={} lost_entries={} walker_refusals={:?}",
         tally.models,
         tally.built,
         tally.refused,
@@ -1627,6 +1686,8 @@ fn the_cfg_built_plan_agrees_with_the_shipped_plan_within_the_reassociation_boun
         tally.insignificant,
         tally.referenced,
         tally.reference_missing,
+        tally.reference_not_finite,
+        tally.reference_diverged,
         tally.models_without_reference,
         tally.walker_disagreements,
         tally.lost_entries,
