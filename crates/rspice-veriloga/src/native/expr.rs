@@ -2699,29 +2699,6 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 offset,
                 abstol,
             } => self.lower_idtmod_operator(expr_id, *expr, *ic, *modulus, *offset, *abstol),
-            HirAnalogOperator::Transition {
-                expr,
-                delay,
-                rise,
-                fall,
-                tolerance,
-                ..
-            } => self.lower_transition_operator(expr_id, *expr, *delay, *rise, *fall, *tolerance),
-            HirAnalogOperator::TransitionDerivative {
-                input,
-                input_derivative,
-                delay,
-                rise,
-                fall,
-                ..
-            } => self.lower_transition_derivative_operator(
-                expr_id,
-                *input,
-                *input_derivative,
-                *delay,
-                *rise,
-                *fall,
-            ),
             HirAnalogOperator::Slew {
                 expr,
                 max_rise,
@@ -3719,13 +3696,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             | HirAnalogOperator::Idt { expr, .. }
             | HirAnalogOperator::IdtMod { expr, .. }
             | HirAnalogOperator::Limexp { expr }
-            | HirAnalogOperator::Absdelay { expr, .. }
-            | HirAnalogOperator::Transition { expr, .. } => {
-                self.expr_derivative_is_zero(*expr, wrt)
-            }
-            HirAnalogOperator::TransitionDerivative {
-                input_derivative, ..
-            } => self.expr_derivative_is_zero(*input_derivative, wrt),
+            | HirAnalogOperator::Absdelay { expr, .. } => self.expr_derivative_is_zero(*expr, wrt),
             HirAnalogOperator::Ddx { .. } | HirAnalogOperator::LastCrossing { .. } => Ok(false),
         }
     }
@@ -3769,13 +3740,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             HirAnalogOperator::Ddt { expr, .. }
             | HirAnalogOperator::Idt { expr, .. }
             | HirAnalogOperator::IdtMod { expr, .. }
-            | HirAnalogOperator::Absdelay { expr, .. }
-            | HirAnalogOperator::Transition { expr, .. } => {
+            | HirAnalogOperator::Absdelay { expr, .. } => {
                 self.expr_second_derivative_is_zero(*expr, first, second)
             }
-            HirAnalogOperator::TransitionDerivative {
-                input_derivative, ..
-            } => self.expr_second_derivative_is_zero(*input_derivative, first, second),
             HirAnalogOperator::Limexp { expr } => Ok(self
                 .expr_second_derivative_is_zero(*expr, first, second)?
                 && (self.expr_derivative_is_zero(*expr, first)?
@@ -5741,71 +5708,6 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 delay,
                 max_delay,
             } => self.lower_absdelay_derivative_operator(expr_id, *expr, *delay, *max_delay, wrt),
-            HirAnalogOperator::Transition {
-                expr,
-                delay,
-                rise,
-                fall,
-                ..
-            } => {
-                let Some(slot) = self.limits.canonical_transition_slot(expr_id) else {
-                    return Err(self.unsupported(format!(
-                        "analog operator transition derivative expression {expr_id} filter slot"
-                    )));
-                };
-                self.lower(*expr)?;
-                self.lower_derivative(*expr, wrt)?;
-                for timing in [*delay, *rise, *fall] {
-                    if let Some(timing) = timing {
-                        self.lower(timing)?;
-                    } else {
-                        self.push(NativeOp::Const(0.0))?;
-                    }
-                }
-                require_stack(
-                    self.model.clone(),
-                    self.entry_kind,
-                    "canonical transition derivative",
-                    self.depth,
-                    5,
-                )?;
-                self.depth -= 4;
-                self.ops.push(NativeOp::TransitionStateDerivative(slot));
-                Ok(())
-            }
-            HirAnalogOperator::TransitionDerivative {
-                input,
-                input_derivative,
-                delay,
-                rise,
-                fall,
-                ..
-            } => {
-                let Some(slot) = self.limits.canonical_transition_slot(expr_id) else {
-                    return Err(self.unsupported(format!(
-                        "analog operator transition higher derivative expression {expr_id} filter slot"
-                    )));
-                };
-                self.lower(*input)?;
-                self.lower_derivative(*input_derivative, wrt)?;
-                for timing in [*delay, *rise, *fall] {
-                    if let Some(timing) = timing {
-                        self.lower(timing)?;
-                    } else {
-                        self.push(NativeOp::Const(0.0))?;
-                    }
-                }
-                require_stack(
-                    self.model.clone(),
-                    self.entry_kind,
-                    "canonical transition higher derivative",
-                    self.depth,
-                    5,
-                )?;
-                self.depth -= 4;
-                self.ops.push(NativeOp::TransitionStateDerivative(slot));
-                Ok(())
-            }
             HirAnalogOperator::Slew {
                 expr,
                 max_rise,
@@ -5857,71 +5759,6 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             HirAnalogOperator::Absdelay { .. } => Err(self.unsupported(format!(
                 "second derivative of absdelay at expression {expr_id}"
             ))),
-            HirAnalogOperator::Transition {
-                expr,
-                delay,
-                rise,
-                fall,
-                ..
-            } => {
-                let Some(slot) = self.limits.canonical_transition_slot(expr_id) else {
-                    return Err(self.unsupported(format!(
-                        "analog operator transition second derivative expression {expr_id} filter slot"
-                    )));
-                };
-                self.lower(*expr)?;
-                self.lower_second_derivative(*expr, first, second)?;
-                for timing in [*delay, *rise, *fall] {
-                    if let Some(timing) = timing {
-                        self.lower(timing)?;
-                    } else {
-                        self.push(NativeOp::Const(0.0))?;
-                    }
-                }
-                require_stack(
-                    self.model.clone(),
-                    self.entry_kind,
-                    "canonical transition second derivative",
-                    self.depth,
-                    5,
-                )?;
-                self.depth -= 4;
-                self.ops.push(NativeOp::TransitionStateDerivative(slot));
-                Ok(())
-            }
-            HirAnalogOperator::TransitionDerivative {
-                input,
-                input_derivative,
-                delay,
-                rise,
-                fall,
-                ..
-            } => {
-                let Some(slot) = self.limits.canonical_transition_slot(expr_id) else {
-                    return Err(self.unsupported(format!(
-                        "analog operator transition derivative second derivative expression {expr_id} filter slot"
-                    )));
-                };
-                self.lower(*input)?;
-                self.lower_second_derivative(*input_derivative, first, second)?;
-                for timing in [*delay, *rise, *fall] {
-                    if let Some(timing) = timing {
-                        self.lower(timing)?;
-                    } else {
-                        self.push(NativeOp::Const(0.0))?;
-                    }
-                }
-                require_stack(
-                    self.model.clone(),
-                    self.entry_kind,
-                    "canonical transition derivative second derivative",
-                    self.depth,
-                    5,
-                )?;
-                self.depth -= 4;
-                self.ops.push(NativeOp::TransitionStateDerivative(slot));
-                Ok(())
-            }
             HirAnalogOperator::Slew {
                 expr,
                 max_rise,
@@ -6614,18 +6451,14 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     }
 
     fn lower_transition_call(&mut self, expr_id: ExprId, args: &[ExprId]) -> JitResult<()> {
-        let (expr, delay, rise, fall, tolerance) = match args {
-            [expr] => (*expr, None, None, None, None),
-            [expr, delay] => (*expr, Some(*delay), None, None, None),
-            [expr, delay, rise] => (*expr, Some(*delay), Some(*rise), None, None),
-            [expr, delay, rise, fall] => (*expr, Some(*delay), Some(*rise), Some(*fall), None),
-            [expr, delay, rise, fall, tolerance] => (
-                *expr,
-                Some(*delay),
-                Some(*rise),
-                Some(*fall),
-                Some(*tolerance),
-            ),
+        // The fifth operand is `time_tol`, which this lowering does not honour.
+        let (expr, delay, rise, fall) = match args {
+            [expr] => (*expr, None, None, None),
+            [expr, delay] => (*expr, Some(*delay), None, None),
+            [expr, delay, rise] => (*expr, Some(*delay), Some(*rise), None),
+            [expr, delay, rise, fall] | [expr, delay, rise, fall, _] => {
+                (*expr, Some(*delay), Some(*rise), Some(*fall))
+            }
             _ => {
                 return Err(self.unsupported(format!(
                     "analog operator transition expects one to five operands, found {}",
@@ -6633,18 +6466,6 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 )));
             }
         };
-        self.lower_transition_operator(expr_id, expr, delay, rise, fall, tolerance)
-    }
-
-    fn lower_transition_operator(
-        &mut self,
-        expr_id: ExprId,
-        expr: ExprId,
-        delay: Option<ExprId>,
-        rise: Option<ExprId>,
-        fall: Option<ExprId>,
-        _tolerance: Option<ExprId>,
-    ) -> JitResult<()> {
         let Some(slot) = self.limits.canonical_transition_slot(expr_id) else {
             return Err(self.unsupported(format!(
                 "analog operator transition expression {expr_id} filter slot"
@@ -6675,41 +6496,6 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         )?;
         self.depth -= 3;
         self.ops.push(NativeOp::TransitionState(slot));
-        Ok(())
-    }
-
-    fn lower_transition_derivative_operator(
-        &mut self,
-        expr_id: ExprId,
-        input: ExprId,
-        input_derivative: ExprId,
-        delay: Option<ExprId>,
-        rise: Option<ExprId>,
-        fall: Option<ExprId>,
-    ) -> JitResult<()> {
-        let Some(slot) = self.limits.canonical_transition_slot(expr_id) else {
-            return Err(self.unsupported(format!(
-                "analog operator transition derivative expression {expr_id} filter slot"
-            )));
-        };
-        self.lower(input)?;
-        self.lower(input_derivative)?;
-        for timing in [delay, rise, fall] {
-            if let Some(timing) = timing {
-                self.lower(timing)?;
-            } else {
-                self.push(NativeOp::Const(0.0))?;
-            }
-        }
-        require_stack(
-            self.model.clone(),
-            self.entry_kind,
-            "canonical transition derivative",
-            self.depth,
-            5,
-        )?;
-        self.depth -= 4;
-        self.ops.push(NativeOp::TransitionStateDerivative(slot));
         Ok(())
     }
 
@@ -8652,8 +8438,6 @@ fn analog_operator_name(op: &HirAnalogOperator) -> &'static str {
         HirAnalogOperator::Ddx { .. } => "ddx",
         HirAnalogOperator::Limexp { .. } => "limexp",
         HirAnalogOperator::Absdelay { .. } => "absdelay",
-        HirAnalogOperator::Transition { .. } => "transition",
-        HirAnalogOperator::TransitionDerivative { .. } => "transition_derivative",
         HirAnalogOperator::Slew { .. } => "slew",
         HirAnalogOperator::LastCrossing { .. } => "last_crossing",
     }

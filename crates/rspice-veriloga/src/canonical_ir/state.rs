@@ -39,9 +39,7 @@
 //! lowers each module **twice** into one expression arena: once as the flat
 //! `contributions` and `statements` the existing backends execute, and again as
 //! the structured `body` the CFG level consumes. Every source operator therefore
-//! appears in the arena twice, under two different `ExprId`s — and, for
-//! `transition`, under two different [`crate::ir::TransitionSiteId`] ordinals,
-//! because the preorder counter that mints them runs across both copies.
+//! appears in the arena twice, under two different `ExprId`s.
 //!
 //! This layout numbers the executed copy, because that is the copy whose records
 //! the runtime allocates and the checkpoint serializes. The consequence for a
@@ -76,13 +74,12 @@
 //! [`crate::native::expr`] still reads its slot *numbers* from the program it
 //! is lowering, and takes only the identity and the order from this module.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use super::cfg::{CfgFunction, CfgStateSite};
 use super::hir::{HirAnalogOperator, HirExprKind, HirExpression, HirModel, HirStatement};
 use super::ids::ExprId;
 use super::noise::contains_noise;
-use crate::ir::TransitionSiteId;
 
 /// Which runtime array a site's record lives in.
 ///
@@ -335,11 +332,6 @@ impl CanonicalStateOperator {
                 },
             ) => true,
             (
-                Self::Transition,
-                HirAnalogOperator::Transition { .. }
-                | HirAnalogOperator::TransitionDerivative { .. },
-            ) => true,
-            (
                 Self::Slew,
                 HirAnalogOperator::Slew {
                     max_rise: Some(_), ..
@@ -549,34 +541,6 @@ fn visit_analog_operator_children(
             visit_state_sites(expressions, *expr, visit)?;
             visit_state_sites(expressions, *delay, visit)?;
             for child in [*max_delay].into_iter().flatten() {
-                visit_state_sites(expressions, child, visit)?;
-            }
-        }
-        HirAnalogOperator::Transition {
-            expr,
-            delay,
-            rise,
-            fall,
-            tolerance,
-            ..
-        } => {
-            visit_state_sites(expressions, *expr, visit)?;
-            for child in [*delay, *rise, *fall, *tolerance].into_iter().flatten() {
-                visit_state_sites(expressions, child, visit)?;
-            }
-        }
-        HirAnalogOperator::TransitionDerivative {
-            input,
-            input_derivative,
-            delay,
-            rise,
-            fall,
-            ..
-        } => {
-            for child in [Some(*input), Some(*input_derivative), *delay, *rise, *fall]
-                .into_iter()
-                .flatten()
-            {
                 visit_state_sites(expressions, child, visit)?;
             }
         }
@@ -797,23 +761,6 @@ pub enum CfgStateAllocationError {
         kind: CanonicalStateOperator,
         found: Option<CanonicalStateOperator>,
     },
-    /// A `transition` filter, which this allocation cannot name.
-    ///
-    /// `transition` is the one operator the CFG names by its own
-    /// [`TransitionSiteId`] rather than by the expression that owns it, and the
-    /// two lowerings mint different ordinals for one source site because the
-    /// preorder counter runs across both copies. The correspondence is a map
-    /// over expressions and does not carry that pairing.
-    ///
-    /// It costs nothing today and is a refusal rather than a gap on purpose.
-    /// `transition` reaches the canonical IR as `HirExprKind::Call`, never as
-    /// the typed `HirAnalogOperator::Transition` — the parser produces no such
-    /// node and the semantic analyzer's arms for one are unreachable through
-    /// the compiler's own pipeline — so [`super::cfg_lower`] refuses it by name
-    /// and no CFG carries this kind. When the CFG level gains `transition`, the
-    /// pairing has to be added deliberately, and this refusal is what makes
-    /// that a compile error in a model rather than a wrong slot.
-    UnsupportedTransition { site: TransitionSiteId },
     /// Two CFG operators resolved onto one executed record.
     ///
     /// Two distinct operators sharing a record would integrate one's history
@@ -847,11 +794,6 @@ impl std::fmt::Display for CfgStateAllocationError {
                     Some(found) => format!("a {} record", found.name()),
                     None => "no state record".to_string(),
                 }
-            ),
-            Self::UnsupportedTransition { site } => write!(
-                formatter,
-                "transition site {}:{}..{}#{} is named by site identity rather than by expression, and the two lowerings mint different ordinals for one source site, so its filter record cannot be named from the executed correspondence",
-                site.source, site.start, site.end, site.ordinal
             ),
             Self::Aliased {
                 first,
@@ -1013,58 +955,50 @@ impl CfgStateAllocation {
 
         let mut by_operator: HashMap<ExprId, CanonicalStateSite> = HashMap::new();
         let mut executed_owners: HashMap<ExprId, ExprId> = HashMap::new();
-        let mut refused_transitions: HashSet<TransitionSiteId> = HashSet::new();
         let mut errors = Vec::new();
 
         for value in &function.values {
-            match value.kind.state_site() {
-                Some(CfgStateSite::Operator(operator, kind)) => {
-                    if by_operator.contains_key(&operator) {
-                        continue;
-                    }
-                    let Some(executed) = correspondence.executed(operator) else {
-                        errors.push(CfgStateAllocationError::Unmapped { operator, kind });
-                        continue;
-                    };
-                    let Some(site) = layout.site(executed) else {
-                        errors.push(CfgStateAllocationError::Mispaired {
-                            operator,
-                            executed,
-                            kind,
-                            found: None,
-                        });
-                        continue;
-                    };
-                    // `cross` and `above` are one family but two operators, and
-                    // the layout records the spelling it saw; comparing families
-                    // rather than operators is what keeps a `cross` reading a
-                    // detector from being called a mispairing.
-                    if site.kind.family() != kind.family() {
-                        errors.push(CfgStateAllocationError::Mispaired {
-                            operator,
-                            executed,
-                            kind,
-                            found: Some(site.kind),
-                        });
-                        continue;
-                    }
-                    if let Some(first) = executed_owners.insert(executed, operator) {
-                        errors.push(CfgStateAllocationError::Aliased {
-                            first,
-                            second: operator,
-                            executed,
-                        });
-                        continue;
-                    }
-                    by_operator.insert(operator, *site);
-                }
-                Some(CfgStateSite::Transition(site)) => {
-                    if refused_transitions.insert(site) {
-                        errors.push(CfgStateAllocationError::UnsupportedTransition { site });
-                    }
-                }
-                None => {}
+            let Some(CfgStateSite(operator, kind)) = value.kind.state_site() else {
+                continue;
+            };
+            if by_operator.contains_key(&operator) {
+                continue;
             }
+            let Some(executed) = correspondence.executed(operator) else {
+                errors.push(CfgStateAllocationError::Unmapped { operator, kind });
+                continue;
+            };
+            let Some(site) = layout.site(executed) else {
+                errors.push(CfgStateAllocationError::Mispaired {
+                    operator,
+                    executed,
+                    kind,
+                    found: None,
+                });
+                continue;
+            };
+            // `cross` and `above` are one family but two operators, and the
+            // layout records the spelling it saw; comparing families rather
+            // than operators is what keeps a `cross` reading a detector from
+            // being called a mispairing.
+            if site.kind.family() != kind.family() {
+                errors.push(CfgStateAllocationError::Mispaired {
+                    operator,
+                    executed,
+                    kind,
+                    found: Some(site.kind),
+                });
+                continue;
+            }
+            if let Some(first) = executed_owners.insert(executed, operator) {
+                errors.push(CfgStateAllocationError::Aliased {
+                    first,
+                    second: operator,
+                    executed,
+                });
+                continue;
+            }
+            by_operator.insert(operator, *site);
         }
 
         if errors.is_empty() {

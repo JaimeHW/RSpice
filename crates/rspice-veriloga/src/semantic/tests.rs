@@ -456,17 +456,6 @@ fn public_analog_operator_nodes_share_the_stateful_placement_classifier() {
             "absdelay",
         ),
         (
-            AnalogOperator::Transition {
-                expr: number(),
-                delay: None,
-                rise: None,
-                fall: None,
-                tolerance: None,
-                span,
-            },
-            "transition",
-        ),
-        (
             AnalogOperator::Slew {
                 expr: number(),
                 max_rise: None,

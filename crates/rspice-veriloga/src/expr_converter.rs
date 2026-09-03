@@ -2209,29 +2209,6 @@ impl<'a> ExprConverter<'a> {
                     .map(|value| self.convert(value).map(Box::new))
                     .transpose()?,
             }),
-            AnalogOperator::Transition {
-                expr,
-                delay,
-                rise,
-                fall,
-                span,
-                ..
-            } => Ok(IrExpr::Transition {
-                site: crate::ir::TransitionSiteId::from_span(*span),
-                expr: Box::new(self.convert(expr)?),
-                delay: delay
-                    .as_deref()
-                    .map(|value| self.convert(value).map(Box::new))
-                    .transpose()?,
-                rise_time: rise
-                    .as_deref()
-                    .map(|value| self.convert(value).map(Box::new))
-                    .transpose()?,
-                fall_time: fall
-                    .as_deref()
-                    .map(|value| self.convert(value).map(Box::new))
-                    .transpose()?,
-            }),
             AnalogOperator::Slew {
                 expr,
                 max_rise,
@@ -3236,28 +3213,30 @@ mod tests {
     }
 
     #[test]
-    fn public_transition_ast_retains_a_site_correlated_derivative_carrier() {
+    fn transition_call_retains_a_site_correlated_derivative_carrier() {
         let mut context = empty_context();
         context.node_map.insert("p".into(), 0);
         context.node_map.insert("n".into(), 1);
         context.num_terminals = 2;
         let converter = ExprConverter::new(&context);
-        let expression = Expression::AnalogOperator(AnalogOperator::Transition {
-            expr: Box::new(Expression::BranchAccess(BranchAccess::Nodes {
-                access: "V".into(),
-                pos: "p".into(),
-                neg: Some("n".into()),
-                span: Span::dummy(),
-            })),
-            delay: Some(Box::new(number(1.0e-9))),
-            rise: Some(Box::new(number(2.0e-9))),
-            fall: Some(Box::new(number(3.0e-9))),
-            tolerance: None,
+        let expression = Expression::Call(CallExpr {
+            name: "transition".into(),
+            args: vec![
+                Expression::BranchAccess(BranchAccess::Nodes {
+                    access: "V".into(),
+                    pos: "p".into(),
+                    neg: Some("n".into()),
+                    span: Span::dummy(),
+                }),
+                number(1.0e-9),
+                number(2.0e-9),
+                number(3.0e-9),
+            ],
             span: Span::dummy(),
         });
         let mut primal = converter
             .convert(&expression)
-            .expect("typed transition AST must retain its dynamic operator");
+            .expect("a transition call must convert to its dynamic operator");
         let mut next = 0;
         crate::ir::autodiff::assign_transition_site_ordinals(&mut primal, &mut next);
         let derivative =
@@ -3267,7 +3246,7 @@ mod tests {
             site: primal_site, ..
         } = primal
         else {
-            panic!("typed transition must remain a primal transition carrier");
+            panic!("a transition call must remain a primal transition carrier");
         };
         let IrExpr::TransitionDerivative {
             site,

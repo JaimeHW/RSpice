@@ -2183,8 +2183,6 @@ impl CanonicalNoiseRuntimePlan {
                     | CfgValueKind::Idt { .. }
                     | CfgValueKind::IdtScale
                     | CfgValueKind::IdtMod { .. }
-                    | CfgValueKind::Transition { .. }
-                    | CfgValueKind::TransitionDerivative { .. }
                     | CfgValueKind::AbsDelay { .. }
                     | CfgValueKind::AbsDelayDerivative { .. }
                     | CfgValueKind::Slew { .. }

@@ -1795,13 +1795,9 @@ fn leaf_class(kind: &CfgValueKind, parameter_scopes: &[ParameterScope]) -> Inval
         // Every remaining stateful operator is here because its value is a
         // function of accepted history and of the current time, not only of the
         // operands the propagation pass can see. The catch-all below would
-        // classify one whose operands happen to be model-scope — `transition(1,
-        // 0, tr, tf)`, `slew(vdd, sr)` with a model parameter — as `Model` and
-        // compute it once per model card, freezing a waveform that is supposed
-        // to be ramping. `transition` and its derivative fell through exactly
-        // that way until this arm existed.
-        | CfgValueKind::Transition { .. }
-        | CfgValueKind::TransitionDerivative { .. }
+        // classify one whose operands happen to be model-scope — `slew(vdd, sr)`
+        // with a model parameter — as `Model` and compute it once per model
+        // card, freezing a waveform that is supposed to be ramping.
         | CfgValueKind::AbsDelay { .. }
         | CfgValueKind::AbsDelayDerivative { .. }
         | CfgValueKind::Slew { .. }
@@ -2415,36 +2411,12 @@ mod digital_leaf_class {
     /// because the classification that matters is the one before propagation
     /// raises anything: an operator whose operands are all bias-dependent comes
     /// out `Newton` no matter what this function says, so a model-level test
-    /// cannot see the hole. `transition` and `TransitionDerivative` are here
-    /// for a second reason — no Verilog-A source reaches them through
-    /// `cfg_lower` today, so this is the only place their classification can be
-    /// checked at all.
+    /// cannot see the hole.
     #[test]
     fn every_history_owning_kind_is_classified_rather_than_defaulted() {
         let value = ValueId::from(0usize);
         let operator = crate::canonical_ir::ExprId::from(0usize);
-        let site = crate::ir::TransitionSiteId {
-            source: 0,
-            start: 0,
-            end: 0,
-            ordinal: 0,
-        };
         let kinds = [
-            CfgValueKind::Transition {
-                site,
-                input: value,
-                delay: value,
-                rise: value,
-                fall: value,
-            },
-            CfgValueKind::TransitionDerivative {
-                site,
-                input: value,
-                input_derivative: value,
-                delay: value,
-                rise: value,
-                fall: value,
-            },
             CfgValueKind::IdtMod {
                 operator,
                 input: value,

@@ -1511,35 +1511,6 @@ fn push_analog_children(op: &HirAnalogOperator, stack: &mut Vec<ExprId>) {
             stack.extend([*expr, *delay]);
             stack.extend(max_delay.iter().copied());
         }
-        HirAnalogOperator::Transition {
-            expr,
-            delay,
-            rise,
-            fall,
-            tolerance,
-            ..
-        } => {
-            stack.push(*expr);
-            stack.extend(
-                delay
-                    .iter()
-                    .chain(rise)
-                    .chain(fall)
-                    .chain(tolerance)
-                    .copied(),
-            );
-        }
-        HirAnalogOperator::TransitionDerivative {
-            input,
-            input_derivative,
-            delay,
-            rise,
-            fall,
-            ..
-        } => {
-            stack.extend([*input, *input_derivative]);
-            stack.extend(delay.iter().chain(rise).chain(fall).copied());
-        }
         HirAnalogOperator::Slew {
             expr,
             max_rise,

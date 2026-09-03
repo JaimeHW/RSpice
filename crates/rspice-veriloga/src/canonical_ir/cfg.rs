@@ -70,7 +70,6 @@ use super::{
     BlockId, BranchId, BranchUnknownId, ContributionId, DigitalLocalId, DigitalSignalId, ExprId,
     NodeId, ParamId, ShapeId, ValueId, VariableId,
 };
-use crate::ir::TransitionSiteId;
 
 /// What SSA tracks a definition for.
 ///
@@ -473,25 +472,6 @@ pub enum CfgValueKind {
         operator: ExprId,
         input: ValueId,
         direction: ValueId,
-    },
-    /// Transactional piecewise-linear transition candidate.
-    Transition {
-        site: TransitionSiteId,
-        input: ValueId,
-        delay: ValueId,
-        rise: ValueId,
-        fall: ValueId,
-    },
-    /// Exact read-only local Jacobian action for the correlated transition
-    /// candidate. The timing operands are primal-only; the runtime coefficient
-    /// multiplies `input_derivative`.
-    TransitionDerivative {
-        site: TransitionSiteId,
-        input: ValueId,
-        input_derivative: ValueId,
-        delay: ValueId,
-        rise: ValueId,
-        fall: ValueId,
     },
     /// `laplace_zp`, `laplace_zd`, `laplace_np` or `laplace_nd` — a continuous
     /// linear filter applied to `input`.
@@ -1092,8 +1072,6 @@ impl CfgValueKind {
             | Self::Cross { .. }
             | Self::Above { .. }
             | Self::Timer { .. }
-            | Self::Transition { .. }
-            | Self::TransitionDerivative { .. }
             | Self::Limit { .. }
             | Self::Ddx { .. }
             | Self::LimitPrevious { .. }
@@ -1146,53 +1124,40 @@ impl CfgValueKind {
     /// is cached at a coarser scope computes a waveform once and freezes it —
     /// and `cfg_state_sites_and_newton_leaves_agree` pins that they do.
     ///
-    /// The two answers are different *kinds* of name, and that is the shipped
-    /// state of the IR rather than an inconsistency: every operator but
-    /// `transition` is keyed by the canonical expression that owns it, while
-    /// `transition` is keyed by its own [`TransitionSiteId`]. Both are body-copy
-    /// names, and both need [`super::hir::HirExecutedCorrespondence`] to reach
-    /// the executed copy the runtime allocates in.
+    /// Every stateful kind is keyed by the canonical expression that owns it.
+    /// That is a body-copy name, so it needs
+    /// [`super::hir::HirExecutedCorrespondence`] to reach the executed copy the
+    /// runtime allocates in.
     pub fn state_site(&self) -> Option<CfgStateSite> {
         let site = match self {
-            Self::Ddt { operator, .. } => {
-                CfgStateSite::Operator(*operator, CanonicalStateOperator::Ddt)
-            }
-            Self::Idt { operator, .. } => {
-                CfgStateSite::Operator(*operator, CanonicalStateOperator::Idt)
-            }
+            Self::Ddt { operator, .. } => CfgStateSite(*operator, CanonicalStateOperator::Ddt),
+            Self::Idt { operator, .. } => CfgStateSite(*operator, CanonicalStateOperator::Idt),
             Self::IdtMod { operator, .. } => {
-                CfgStateSite::Operator(*operator, CanonicalStateOperator::IdtMod)
+                CfgStateSite(*operator, CanonicalStateOperator::IdtMod)
             }
             Self::AbsDelay { operator, .. } | Self::AbsDelayDerivative { operator, .. } => {
-                CfgStateSite::Operator(*operator, CanonicalStateOperator::Absdelay)
+                CfgStateSite(*operator, CanonicalStateOperator::Absdelay)
             }
             Self::Slew { operator, .. } | Self::SlewDerivative { operator, .. } => {
-                CfgStateSite::Operator(*operator, CanonicalStateOperator::Slew)
+                CfgStateSite(*operator, CanonicalStateOperator::Slew)
             }
             // `cross` and `last_crossing` share a detector, which is why the
             // layout gives them one family; `above` draws from the same array.
             Self::LastCrossing { operator, .. } | Self::Cross { operator, .. } => {
-                CfgStateSite::Operator(*operator, CanonicalStateOperator::Cross)
+                CfgStateSite(*operator, CanonicalStateOperator::Cross)
             }
-            Self::Above { operator, .. } => {
-                CfgStateSite::Operator(*operator, CanonicalStateOperator::Above)
-            }
+            Self::Above { operator, .. } => CfgStateSite(*operator, CanonicalStateOperator::Above),
             Self::Laplace { operator, .. } | Self::LaplaceDerivative { operator, .. } => {
-                CfgStateSite::Operator(*operator, CanonicalStateOperator::Laplace)
+                CfgStateSite(*operator, CanonicalStateOperator::Laplace)
             }
             Self::Zi { operator, .. } | Self::ZiDerivative { operator, .. } => {
-                CfgStateSite::Operator(*operator, CanonicalStateOperator::Zi)
+                CfgStateSite(*operator, CanonicalStateOperator::Zi)
             }
-            Self::Timer { operator, .. } => {
-                CfgStateSite::Operator(*operator, CanonicalStateOperator::Timer)
-            }
+            Self::Timer { operator, .. } => CfgStateSite(*operator, CanonicalStateOperator::Timer),
             // `LimitPrevious` reads the same anchor its `Limit` writes and
             // carries the same operator id, so it resolves to one record.
             Self::Limit { operator, .. } | Self::LimitPrevious { operator, .. } => {
-                CfgStateSite::Operator(*operator, CanonicalStateOperator::Limit)
-            }
-            Self::Transition { site, .. } | Self::TransitionDerivative { site, .. } => {
-                CfgStateSite::Transition(*site)
+                CfgStateSite(*operator, CanonicalStateOperator::Limit)
             }
             _ => return None,
         };
@@ -1281,21 +1246,6 @@ impl CfgValueKind {
                 *max_fall,
                 *max_fall_derivative,
             ],
-            Self::Transition {
-                input,
-                delay,
-                rise,
-                fall,
-                ..
-            } => vec![*input, *delay, *rise, *fall],
-            Self::TransitionDerivative {
-                input,
-                input_derivative,
-                delay,
-                rise,
-                fall,
-                ..
-            } => vec![*input, *input_derivative, *delay, *rise, *fall],
             // Only the input is an operand. The transfer function is folded
             // constants, so there is nothing else in the node for a pass to
             // rename, and nothing for the scheduler to depend on.
@@ -1532,32 +1482,6 @@ impl CfgValueKind {
                 *transition = map(*transition);
                 *first_transition = map(*first_transition);
             }
-            Self::Transition {
-                input,
-                delay,
-                rise,
-                fall,
-                ..
-            } => {
-                *input = map(*input);
-                *delay = map(*delay);
-                *rise = map(*rise);
-                *fall = map(*fall);
-            }
-            Self::TransitionDerivative {
-                input,
-                input_derivative,
-                delay,
-                rise,
-                fall,
-                ..
-            } => {
-                *input = map(*input);
-                *input_derivative = map(*input_derivative);
-                *delay = map(*delay);
-                *rise = map(*rise);
-                *fall = map(*fall);
-            }
             Self::Cross {
                 input,
                 direction,
@@ -1771,16 +1695,12 @@ pub enum CfgTerminator {
     Unset,
 }
 
-/// How one CFG value names the runtime record it reads.
+/// How one CFG value names the runtime record it reads: the canonical
+/// expression that owns the record, and the operator whose record it is.
 ///
-/// Two spellings because the IR has two: see [`CfgValueKind::state_site`].
+/// See [`CfgValueKind::state_site`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum CfgStateSite {
-    /// Keyed by the canonical expression that owns the record.
-    Operator(ExprId, CanonicalStateOperator),
-    /// Keyed by the `transition` site's own identity.
-    Transition(TransitionSiteId),
-}
+pub struct CfgStateSite(pub ExprId, pub CanonicalStateOperator);
 
 /// What a suspended process is waiting for.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1982,24 +1902,7 @@ impl CfgFunction {
                 //
                 // They cannot go through the catch-all below, which reads any
                 // packed operand as a mistake — correctly, for arithmetic, and
-                // wrongly for these. `TransitionDerivative` was in that
-                // position: no fixture reached it in packed form, so the
-                // rejection was latent rather than absent.
-                CfgValueKind::TransitionDerivative {
-                    input,
-                    input_derivative,
-                    delay,
-                    rise,
-                    fall,
-                    ..
-                } => {
-                    self.validate_stateful_derivative(
-                        value.id,
-                        lanes,
-                        &[*input, *delay, *rise, *fall],
-                        &[*input_derivative],
-                    )?;
-                }
+                // wrongly for these.
                 CfgValueKind::AbsDelayDerivative {
                     input,
                     input_derivative,

@@ -470,16 +470,6 @@ fn kernel_region_metrics(
             CfgValueKind::ZiDerivative { operator, .. } => {
                 write!(out, "zi-derivative:{}", operator_indices[operator])
             }
-            CfgValueKind::Transition { site, .. } => write!(
-                out,
-                "transition:{}:{}:{}:{}",
-                site.source, site.start, site.end, site.ordinal
-            ),
-            CfgValueKind::TransitionDerivative { site, .. } => write!(
-                out,
-                "transition-derivative:{}:{}:{}:{}",
-                site.source, site.start, site.end, site.ordinal
-            ),
             CfgValueKind::Cross { operator, .. } => {
                 write!(out, "cross:{}", operator_indices[operator])
             }
@@ -4781,19 +4771,12 @@ fn reject_unsupported_kinds(
                     format!("an unresolved flow probe on {branch}"),
                 ));
             }
-            CfgValueKind::Transition { .. } | CfgValueKind::TransitionDerivative { .. } => {
-                return Err(unsupported(
-                    artifact,
-                    "stateful transition in the direct generated-Rust backend; use the VM, native JIT, or WebAssembly JIT runtime so accepted queue and interruption history are preserved",
-                ));
-            }
             // The canonical level represents these; this backend does not run
             // them. Each owns accepted history — a wrapped running total, a
             // transport queue, a rate-limiter state, a crossing detector — that
             // the VM, the native JIT and the WebAssembly JIT keep and this one
             // has no place for. Refusing sends the model to a runtime that
-            // does, which is the same answer a transition already gets and for
-            // the same reason.
+            // does.
             CfgValueKind::IdtMod { .. } => {
                 return Err(unsupported(
                     artifact,

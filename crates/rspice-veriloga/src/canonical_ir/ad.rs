@@ -394,14 +394,6 @@ fn lane_liveness_with_control(
                     CfgValueKind::Unary { input, .. } | CfgValueKind::Ddt { input, .. } => {
                         changed |= live.union_from(value.id, *input);
                     }
-                    CfgValueKind::Transition { input, .. } => {
-                        changed |= live.union_from(value.id, *input);
-                    }
-                    CfgValueKind::TransitionDerivative {
-                        input_derivative, ..
-                    } => {
-                        changed |= live.union_from(value.id, *input_derivative);
-                    }
                     CfgValueKind::Binary { left, right, .. } => {
                         changed |= live.union_from(value.id, *left);
                         changed |= live.union_from(value.id, *right);
@@ -418,8 +410,7 @@ fn lane_liveness_with_control(
                         changed |= live.union_from(value.id, *ic);
                     }
                     // A delay that depends on an unknown moves the sample
-                    // point, so it carries lanes — unlike a transition's
-                    // timing, which the LRM makes primal-only.
+                    // point, so it carries lanes.
                     CfgValueKind::AbsDelay { input, delay, .. } => {
                         changed |= live.union_from(value.id, *input);
                         changed |= live.union_from(value.id, *delay);
@@ -506,8 +497,6 @@ fn differentiable(kind: &CfgValueKind) -> bool {
         // no derivative. It is discontinuous exactly at the wrap, which is a
         // measure-zero set the companion form does not linearise across.
         | CfgValueKind::IdtMod { .. }
-        | CfgValueKind::Transition { .. }
-        | CfgValueKind::TransitionDerivative { .. }
         | CfgValueKind::AbsDelay { .. }
         | CfgValueKind::AbsDelayDerivative { .. }
         | CfgValueKind::Slew { .. }
@@ -784,14 +773,6 @@ fn ddx_direction_liveness(
                 | CfgValueKind::Idt { input, .. }
                 | CfgValueKind::IdtMod { input, .. } => {
                     changed |= needed.union_from(*input, value.id);
-                }
-                CfgValueKind::Transition { input, .. } => {
-                    changed |= needed.union_from(*input, value.id);
-                }
-                CfgValueKind::TransitionDerivative {
-                    input_derivative, ..
-                } => {
-                    changed |= needed.union_from(*input_derivative, value.id);
                 }
                 CfgValueKind::AbsDelay { input, delay, .. } => {
                     changed |= needed.union_from(*input, value.id);
@@ -1368,47 +1349,6 @@ impl<'a> ScalarDdxBuilder<'a> {
                         transition: *transition,
                         first_transition: *first_transition,
                         direct_assignment: *direct_assignment,
-                    },
-                ))
-            }
-            CfgValueKind::Transition {
-                site,
-                input,
-                delay,
-                rise,
-                fall,
-            } => {
-                let input_derivative = self.derivative(*input, lane)?;
-                Some(self.push(
-                    CfgValueType::Real,
-                    CfgValueKind::TransitionDerivative {
-                        site: *site,
-                        input: *input,
-                        input_derivative,
-                        delay: *delay,
-                        rise: *rise,
-                        fall: *fall,
-                    },
-                ))
-            }
-            CfgValueKind::TransitionDerivative {
-                site,
-                input,
-                input_derivative,
-                delay,
-                rise,
-                fall,
-            } => {
-                let derivative = self.derivative(*input_derivative, lane)?;
-                Some(self.push(
-                    CfgValueType::Real,
-                    CfgValueKind::TransitionDerivative {
-                        site: *site,
-                        input: *input,
-                        input_derivative: derivative,
-                        delay: *delay,
-                        rise: *rise,
-                        fall: *fall,
                     },
                 ))
             }
@@ -2464,47 +2404,6 @@ impl<'a> AdBuilder<'a> {
                         transition: *transition,
                         first_transition: *first_transition,
                         direct_assignment: *direct_assignment,
-                    },
-                ))
-            }
-            CfgValueKind::Transition {
-                site,
-                input,
-                delay,
-                rise,
-                fall,
-            } => {
-                let input_derivative = self.derivatives[usize::from(*input)]?;
-                Some(self.push(
-                    CfgValueType::Lanes(target),
-                    CfgValueKind::TransitionDerivative {
-                        site: *site,
-                        input: *input,
-                        input_derivative,
-                        delay: *delay,
-                        rise: *rise,
-                        fall: *fall,
-                    },
-                ))
-            }
-            CfgValueKind::TransitionDerivative {
-                site,
-                input,
-                input_derivative,
-                delay,
-                rise,
-                fall,
-            } => {
-                let derivative = self.derivatives[usize::from(*input_derivative)]?;
-                Some(self.push(
-                    CfgValueType::Lanes(target),
-                    CfgValueKind::TransitionDerivative {
-                        site: *site,
-                        input: *input,
-                        input_derivative: derivative,
-                        delay: *delay,
-                        rise: *rise,
-                        fall: *fall,
                     },
                 ))
             }

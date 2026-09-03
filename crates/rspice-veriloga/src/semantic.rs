@@ -3556,19 +3556,6 @@ impl SemanticAnalyzer {
                     visit(value)?;
                 }
             }
-            AnalogOperator::Transition {
-                expr,
-                delay,
-                rise,
-                fall,
-                tolerance,
-                ..
-            } => {
-                visit(expr)?;
-                for value in [delay, rise, fall, tolerance].into_iter().flatten() {
-                    visit(value)?;
-                }
-            }
             AnalogOperator::Slew {
                 expr,
                 max_rise,
@@ -4738,22 +4725,6 @@ impl SemanticAnalyzer {
                     .materialize_output_function_calls_opt_box(max_delay, module, sink)?,
                 span: *span,
             },
-            AnalogOperator::Transition {
-                expr,
-                delay,
-                rise,
-                fall,
-                tolerance,
-                span,
-            } => AnalogOperator::Transition {
-                expr: self.materialize_output_function_calls_box(expr, module, sink)?,
-                delay: self.materialize_output_function_calls_opt_box(delay, module, sink)?,
-                rise: self.materialize_output_function_calls_opt_box(rise, module, sink)?,
-                fall: self.materialize_output_function_calls_opt_box(fall, module, sink)?,
-                tolerance: self
-                    .materialize_output_function_calls_opt_box(tolerance, module, sink)?,
-                span: *span,
-            },
             AnalogOperator::Slew {
                 expr,
                 max_rise,
@@ -5095,20 +5066,6 @@ impl SemanticAnalyzer {
                 self.expression_contains_output_function_call(expr)
                     || self.expression_contains_output_function_call(delay)
                     || contains_opt(max_delay)
-            }
-            AnalogOperator::Transition {
-                expr,
-                delay,
-                rise,
-                fall,
-                tolerance,
-                ..
-            } => {
-                self.expression_contains_output_function_call(expr)
-                    || contains_opt(delay)
-                    || contains_opt(rise)
-                    || contains_opt(fall)
-                    || contains_opt(tolerance)
             }
             AnalogOperator::Slew {
                 expr,
@@ -5824,47 +5781,6 @@ impl SemanticAnalyzer {
                     expr: Box::new(self.lower_expression(expr)?),
                     delay: Box::new(self.lower_expression(delay)?),
                     max_delay: lower_optional(self, max_delay)?,
-                    span: *span,
-                }
-            }
-            AnalogOperator::Transition {
-                expr,
-                delay,
-                rise,
-                fall,
-                tolerance,
-                span,
-            } => {
-                if let Some(tolerance) = tolerance {
-                    return Err(CompileError::Semantic(SemanticError::new(
-                        SemanticErrorKind::UnsupportedFeature(
-                            "transition time_tol is parsed but exact tolerance-controlled corner placement is not implemented; omit the fifth operand instead of silently discarding it"
-                                .into(),
-                        ),
-                        tolerance.span(),
-                    )));
-                }
-                let mut operands = vec![self.lower_expression(expr)?];
-                operands.push(match delay {
-                    Some(delay) => self.lower_expression(delay)?,
-                    None => Self::number_expr(0.0, *span),
-                });
-                if rise.is_some() || fall.is_some() {
-                    operands.push(match rise {
-                        Some(rise) => self.lower_expression(rise)?,
-                        None => Self::number_expr(self.current_default_transition, *span),
-                    });
-                }
-                if let Some(fall) = fall {
-                    operands.push(self.lower_expression(fall)?);
-                }
-                self.materialize_transition_defaults(&mut operands, *span);
-                AnalogOperator::Transition {
-                    expr: Box::new(operands.remove(0)),
-                    delay: Some(Box::new(operands.remove(0))),
-                    rise: Some(Box::new(operands.remove(0))),
-                    fall: Some(Box::new(operands.remove(0))),
-                    tolerance: None,
                     span: *span,
                 }
             }
@@ -9104,7 +9020,6 @@ fn stateful_public_analog_operator_name(operator: &AnalogOperator) -> Option<&'s
         AnalogOperator::Idt { .. } => "idt",
         AnalogOperator::IdtMod { .. } => "idtmod",
         AnalogOperator::Absdelay { .. } => "absdelay",
-        AnalogOperator::Transition { .. } => "transition",
         AnalogOperator::Slew { .. } => "slew",
         AnalogOperator::LastCrossing { .. } => "last_crossing",
         AnalogOperator::Laplace { kind, .. } => match kind {

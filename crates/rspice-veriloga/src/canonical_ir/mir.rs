@@ -1337,58 +1337,6 @@ fn validate_analog_operator_children(
                 *max_delay,
             );
         }
-        HirAnalogOperator::Transition {
-            expr,
-            delay,
-            rise,
-            fall,
-            tolerance,
-            ..
-        } => {
-            validate_expression_child(diagnostics, expressions, expression, "expr", *expr);
-            validate_optional_expression_child(
-                diagnostics,
-                expressions,
-                expression,
-                "delay",
-                *delay,
-            );
-            validate_optional_expression_child(diagnostics, expressions, expression, "rise", *rise);
-            validate_optional_expression_child(diagnostics, expressions, expression, "fall", *fall);
-            validate_optional_expression_child(
-                diagnostics,
-                expressions,
-                expression,
-                "tolerance",
-                *tolerance,
-            );
-        }
-        HirAnalogOperator::TransitionDerivative {
-            input,
-            input_derivative,
-            delay,
-            rise,
-            fall,
-            ..
-        } => {
-            validate_expression_child(diagnostics, expressions, expression, "input", *input);
-            validate_expression_child(
-                diagnostics,
-                expressions,
-                expression,
-                "input_derivative",
-                *input_derivative,
-            );
-            validate_optional_expression_child(
-                diagnostics,
-                expressions,
-                expression,
-                "delay",
-                *delay,
-            );
-            validate_optional_expression_child(diagnostics, expressions, expression, "rise", *rise);
-            validate_optional_expression_child(diagnostics, expressions, expression, "fall", *fall);
-        }
         HirAnalogOperator::Slew {
             expr,
             max_rise,

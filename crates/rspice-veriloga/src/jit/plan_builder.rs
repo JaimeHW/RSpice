@@ -844,30 +844,6 @@ fn canonical_analog_operator_contains_ddt(
         } => Ok(canonical_expr_contains_ddt(model, mir, *expr)?
             || canonical_expr_contains_ddt(model, mir, *delay)?
             || canonical_optional_expr_contains_ddt(model, mir, *max_delay)?),
-        HirAnalogOperator::Transition {
-            expr,
-            delay,
-            rise,
-            fall,
-            tolerance,
-            ..
-        } => Ok(canonical_expr_contains_ddt(model, mir, *expr)?
-            || canonical_optional_expr_contains_ddt(model, mir, *delay)?
-            || canonical_optional_expr_contains_ddt(model, mir, *rise)?
-            || canonical_optional_expr_contains_ddt(model, mir, *fall)?
-            || canonical_optional_expr_contains_ddt(model, mir, *tolerance)?),
-        HirAnalogOperator::TransitionDerivative {
-            input,
-            input_derivative,
-            delay,
-            rise,
-            fall,
-            ..
-        } => Ok(canonical_expr_contains_ddt(model, mir, *input)?
-            || canonical_expr_contains_ddt(model, mir, *input_derivative)?
-            || canonical_optional_expr_contains_ddt(model, mir, *delay)?
-            || canonical_optional_expr_contains_ddt(model, mir, *rise)?
-            || canonical_optional_expr_contains_ddt(model, mir, *fall)?),
         HirAnalogOperator::Slew {
             expr,
             max_rise,
@@ -1695,30 +1671,6 @@ fn canonical_analog_operator_contains_noise(
         } => Ok(canonical_expr_contains_noise(model, mir, *expr)?
             || canonical_expr_contains_noise(model, mir, *delay)?
             || canonical_optional_expr_contains_noise(model, mir, *max_delay)?),
-        HirAnalogOperator::Transition {
-            expr,
-            delay,
-            rise,
-            fall,
-            tolerance,
-            ..
-        } => Ok(canonical_expr_contains_noise(model, mir, *expr)?
-            || canonical_optional_expr_contains_noise(model, mir, *delay)?
-            || canonical_optional_expr_contains_noise(model, mir, *rise)?
-            || canonical_optional_expr_contains_noise(model, mir, *fall)?
-            || canonical_optional_expr_contains_noise(model, mir, *tolerance)?),
-        HirAnalogOperator::TransitionDerivative {
-            input,
-            input_derivative,
-            delay,
-            rise,
-            fall,
-            ..
-        } => Ok(canonical_expr_contains_noise(model, mir, *input)?
-            || canonical_expr_contains_noise(model, mir, *input_derivative)?
-            || canonical_optional_expr_contains_noise(model, mir, *delay)?
-            || canonical_optional_expr_contains_noise(model, mir, *rise)?
-            || canonical_optional_expr_contains_noise(model, mir, *fall)?),
         HirAnalogOperator::Slew {
             expr,
             max_rise,
