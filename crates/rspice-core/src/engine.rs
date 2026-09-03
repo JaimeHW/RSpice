@@ -105,8 +105,8 @@ pub use error::{
     SimulationErrorCategory, SimulationErrorCode, SimulationErrorDescriptor,
 };
 pub use hb::{
-    HbAnalysisResult, HbEnvelopeContinuationState, HbEnvelopeStateGuarantee, HbOperatingPoint,
-    HbOperatingPointIdentity, PacAnalysisResult, PnoiseAnalysisResult,
+    EnvelopeResult, HbAnalysisResult, HbEnvelopeContinuationState, HbEnvelopeStateGuarantee,
+    HbOperatingPoint, HbOperatingPointIdentity, PacAnalysisResult, PnoiseAnalysisResult,
 };
 pub use health::EngineHealthReport;
 pub use pss::{

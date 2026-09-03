@@ -6,6 +6,7 @@ use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::harmonic_balance::HbContinuationLimitation;
 use crate::analysis::harmonic_balance::{HbReactiveKind, HbReactiveSpectrum};
 use crate::circuit::CircuitData;
+use crate::engine::hb::EnvelopeResult;
 use crate::engine::transient::{
     netlist_checkpoint_identity, netlist_fingerprint, simulation_checkpoint_identity,
 };
@@ -579,6 +580,48 @@ impl Engine {
                 history_step,
                 checkpoint,
             },
+        ))
+    }
+
+    /// Run a complete envelope analysis and return one typed result.
+    ///
+    /// This composes the two authenticated halves that already exist: the
+    /// carrier solve with the selected slow sources frozen, and the transient
+    /// continuation that reactivates them at slow-time origin zero. It adds no
+    /// physics of its own, so an envelope result carries exactly the carrier
+    /// spectra, the continuation artifact, and the continued transient.
+    pub fn run_envelope_with_abort(
+        &self,
+        netlist: &Netlist,
+        config: HbConfig,
+        frozen_source_names: &[String],
+        duration: Value,
+        max_step: Value,
+        abort: &dyn AbortSignal,
+    ) -> Result<EnvelopeResult, SimulationError> {
+        let (carrier, state) = self.run_hb_envelope_continuation_state_with_abort(
+            netlist,
+            config.clone(),
+            frozen_source_names,
+            abort,
+        )?;
+        let (continued_transient, final_checkpoint) = self
+            .run_tran_from_hb_envelope_state_with_abort(
+                netlist,
+                &config,
+                frozen_source_names,
+                &state,
+                duration,
+                max_step,
+                abort,
+            )?;
+        Ok(EnvelopeResult::new(
+            carrier.result,
+            state,
+            continued_transient,
+            final_checkpoint,
+            duration,
+            max_step,
         ))
     }
 
