@@ -2405,7 +2405,10 @@ impl<'a> ExprConverter<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{ArrayLiteralExpr, CallExpr, NumberLit, ReplicationExpr, SystemFunction};
+    use crate::ast::{
+        ArrayLiteralExpr, BinaryExpr, CallExpr, ConditionalExpr, NumberLit, ReplicationExpr,
+        SystemFunction,
+    };
     use crate::source::Span;
 
     fn number(value: f64) -> Expression {
@@ -2748,5 +2751,334 @@ mod tests {
             .expect_err("oversized replication fails before allocation")
             .to_string();
         assert!(error.contains("supported limit is 1020"), "{error}");
+    }
+
+    #[test]
+    fn idtmod_retains_all_four_wrapping_operands() {
+        let context = empty_context();
+        let converter = ExprConverter::new(&context);
+        let expression = Expression::Call(CallExpr {
+            name: "idtmod".into(),
+            args: vec![number(1.25), number(2.5), number(3.75), number(-4.0)],
+            span: Span::dummy(),
+        });
+
+        let IrExpr::IdtMod {
+            expr,
+            ic: Some(ic),
+            modulus,
+            offset: Some(offset),
+        } = converter
+            .convert(&expression)
+            .expect("idtmod with a modulus must retain modulo integration")
+        else {
+            panic!("idtmod was not lowered to IrExpr::IdtMod");
+        };
+        assert!(matches!(*expr, IrExpr::Const(value) if value == 1.25));
+        assert!(matches!(*ic, IrExpr::Const(value) if value == 2.5));
+        assert!(matches!(*modulus, IrExpr::Const(value) if value == 3.75));
+        assert!(matches!(*offset, IrExpr::Const(value) if value == -4.0));
+    }
+
+    #[test]
+    fn ddx_retains_a_symbolic_derivative_instead_of_its_operand() {
+        let mut context = empty_context();
+        context.node_map.insert("p".into(), 0);
+        context.node_map.insert("n".into(), 1);
+        context.num_terminals = 2;
+        let converter = ExprConverter::new(&context);
+        let voltage = || {
+            Expression::BranchAccess(BranchAccess::Nodes {
+                access: "V".into(),
+                pos: "p".into(),
+                neg: Some("n".into()),
+                span: Span::dummy(),
+            })
+        };
+        let expression = Expression::Call(CallExpr {
+            name: "ddx".into(),
+            args: vec![
+                Expression::Binary(BinaryExpr {
+                    op: BinaryOp::Mul,
+                    left: Box::new(voltage()),
+                    right: Box::new(voltage()),
+                    span: Span::dummy(),
+                }),
+                voltage(),
+            ],
+            span: Span::dummy(),
+        });
+
+        let converted = converter
+            .convert(&expression)
+            .expect("ddx potential probe must lower symbolically");
+        assert!(matches!(
+            converted,
+            IrExpr::Ddx {
+                axis: DdxAxis::Potential {
+                    pos: Some(0),
+                    neg: Some(1),
+                },
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn ddx_fails_closed_for_an_unrepresentable_flow_axis() {
+        let mut context = empty_context();
+        context.node_map.insert("p".into(), 0);
+        context.node_map.insert("n".into(), 1);
+        context.num_terminals = 2;
+        let converter = ExprConverter::new(&context);
+        let expression = Expression::Call(CallExpr {
+            name: "ddx".into(),
+            args: vec![
+                number(1.0),
+                Expression::BranchAccess(BranchAccess::Nodes {
+                    access: "I".into(),
+                    pos: "p".into(),
+                    neg: Some("n".into()),
+                    span: Span::dummy(),
+                }),
+            ],
+            span: Span::dummy(),
+        });
+
+        let error = converter
+            .convert(&expression)
+            .expect_err("dependent flow must not become a ddx axis")
+            .to_string();
+        assert!(
+            error.contains("requires a solver-owned branch-current unknown"),
+            "{error}"
+        );
+        assert!(!error.contains("Unknown node"), "{error}");
+    }
+
+    #[test]
+    fn ddx_retains_a_valid_branch_current_axis() {
+        let mut context = empty_context();
+        context.node_map.insert("p".into(), 0);
+        context.node_map.insert("n".into(), 1);
+        context.branch_current_map.insert((0, 1), (0, 0));
+        context.num_terminals = 2;
+        let converter = ExprConverter::new(&context);
+        let current = || {
+            Expression::BranchAccess(BranchAccess::Nodes {
+                access: "I".into(),
+                pos: "p".into(),
+                neg: Some("n".into()),
+                span: Span::dummy(),
+            })
+        };
+        let expression = Expression::Call(CallExpr {
+            name: "ddx".into(),
+            args: vec![current(), current()],
+            span: Span::dummy(),
+        });
+
+        assert!(matches!(
+            converter
+                .convert(&expression)
+                .expect("solver branch flow is a valid ddx axis"),
+            IrExpr::Ddx {
+                axis: DdxAxis::BranchCurrent {
+                    ordinal: 0,
+                    reversed: false,
+                },
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn ddx_classifies_magnetic_mmf_as_potential_and_phi_as_flow() {
+        let mut context = empty_context();
+        context.node_map.insert("p".into(), 0);
+        context.node_map.insert("n".into(), 1);
+        context.branch_current_map.insert((0, 1), (0, 0));
+        context.num_terminals = 2;
+        let converter = ExprConverter::new(&context);
+        let ddx = |access: &str| {
+            Expression::Call(CallExpr {
+                name: "ddx".into(),
+                args: vec![
+                    number(1.0),
+                    Expression::BranchAccess(BranchAccess::Nodes {
+                        access: access.into(),
+                        pos: "p".into(),
+                        neg: Some("n".into()),
+                        span: Span::dummy(),
+                    }),
+                ],
+                span: Span::dummy(),
+            })
+        };
+
+        assert!(matches!(
+            converter.convert(&ddx("MMF")).expect("MMF is a potential"),
+            IrExpr::Ddx {
+                axis: DdxAxis::Potential { .. },
+                ..
+            }
+        ));
+        assert!(matches!(
+            converter
+                .convert(&ddx("Phi"))
+                .expect("Phi is a solver-owned magnetic flow"),
+            IrExpr::Ddx {
+                axis: DdxAxis::BranchCurrent { .. },
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn laplace_refuses_improper_and_nonconjugate_definitions() {
+        let context = empty_context();
+        let converter = ExprConverter::new(&context);
+        let improper = Expression::Call(CallExpr {
+            name: "laplace_nd".into(),
+            args: vec![number(1.0), vector(&[1.0, 2.0], true), vector(&[0.5], true)],
+            span: Span::dummy(),
+        });
+        let error = converter
+            .convert(&improper)
+            .expect_err("laplace_nd must enforce proper transfer shape");
+        assert!(error.to_string().contains("improper transfer function"));
+
+        let nonconjugate = Expression::Call(CallExpr {
+            name: "laplace_zp".into(),
+            args: vec![
+                number(1.0),
+                vector(&[1.0, 2.0, 3.0, -2.0], true),
+                vector(&[-1.0, 0.0, -2.0, 0.0], true),
+            ],
+            span: Span::dummy(),
+        });
+        let error = converter
+            .convert(&nonconjugate)
+            .expect_err("laplace_zp must validate conjugate roots");
+        assert!(error.to_string().contains("no conjugate partner"));
+    }
+
+    #[test]
+    fn zi_lowers_only_a_definition_that_passes_validation() {
+        let context = empty_context();
+        let converter = ExprConverter::new(&context);
+        let valid = Expression::Call(CallExpr {
+            name: "zi_nd".into(),
+            args: vec![
+                number(2.0),
+                vector(&[0.25], true),
+                vector(&[1.0, -0.75], true),
+                number(1.0e-6),
+            ],
+            span: Span::dummy(),
+        });
+        assert!(matches!(
+            converter.convert(&valid).expect("valid zi_nd definition"),
+            IrExpr::ZiFilter { .. }
+        ));
+
+        let invalid = Expression::Call(CallExpr {
+            name: "zi_nd".into(),
+            args: vec![
+                number(1.0),
+                vector(&[1.0], true),
+                vector(&[0.0], true),
+                number(1.0e-6),
+            ],
+            span: Span::dummy(),
+        });
+        let error = converter
+            .convert(&invalid)
+            .expect_err("zi_nd must reject zero a0");
+        assert!(error.to_string().contains("a0 must be nonzero"));
+    }
+
+    #[test]
+    fn zi_nodes_with_dummy_spans_receive_distinct_site_ordinals() {
+        let unit_zi = |input| {
+            Expression::Call(CallExpr {
+                name: "zi_nd".into(),
+                args: vec![
+                    number(input),
+                    vector(&[1.0], true),
+                    vector(&[1.0], true),
+                    number(1.0e-6),
+                    number(0.0),
+                ],
+                span: Span::dummy(),
+            })
+        };
+        let context = empty_context();
+        let converter = ExprConverter::new(&context);
+        let assignment = converter
+            .convert(&unit_zi(3.0))
+            .expect("assignment Zi lowers independently");
+        let IrExpr::ZiFilter {
+            direct_assignment: assignment_direct,
+            ..
+        } = assignment
+        else {
+            panic!("assignment expression must remain Zi");
+        };
+        assert!(!assignment_direct);
+
+        let wrapped = Expression::Conditional(ConditionalExpr {
+            condition: Box::new(number(1.0)),
+            then_expr: Box::new(Expression::Binary(BinaryExpr {
+                op: BinaryOp::Mul,
+                left: Box::new(number(2.0)),
+                right: Box::new(unit_zi(4.0)),
+                span: Span::dummy(),
+            })),
+            else_expr: Box::new(number(0.0)),
+            span: Span::dummy(),
+        });
+        let contribution = converter
+            .convert_contribution(&wrapped)
+            .expect("wrapped contribution Zi lowers independently");
+        let IrExpr::Conditional(_, then_expr, _) = contribution else {
+            panic!("contribution wrapper must remain conditional");
+        };
+        let IrExpr::Binary(_, _, contribution_zi) = then_expr.as_ref() else {
+            panic!("contribution then-arm must remain arithmetic");
+        };
+        let IrExpr::ZiFilter {
+            direct_assignment: contribution_direct,
+            ..
+        } = contribution_zi.as_ref()
+        else {
+            panic!("wrapped contribution operand must remain Zi");
+        };
+        assert!(*contribution_direct);
+
+        let expression = Expression::Binary(BinaryExpr {
+            op: BinaryOp::Add,
+            left: Box::new(unit_zi(1.0)),
+            right: Box::new(unit_zi(2.0)),
+            span: Span::dummy(),
+        });
+        let mut converted = converter
+            .convert(&expression)
+            .expect("independent zi_nd calls lower");
+        let mut next = 0;
+        crate::ir::autodiff::assign_zi_site_ordinals(&mut converted, &mut next);
+
+        let IrExpr::Binary(_, left, right) = converted else {
+            panic!("binary expression must remain binary");
+        };
+        let IrExpr::ZiFilter { site: left, .. } = left.as_ref() else {
+            panic!("left operand must remain Zi");
+        };
+        let IrExpr::ZiFilter { site: right, .. } = right.as_ref() else {
+            panic!("right operand must remain Zi");
+        };
+        assert_ne!(left, right, "equal/dummy spans must not alias Zi state");
+        assert_eq!(left.ordinal, 0);
+        assert_eq!(right.ordinal, 1);
     }
 }

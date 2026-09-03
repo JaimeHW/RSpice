@@ -205,13 +205,55 @@ fn stateful_operator_under_model_and_connectivity_guards_is_analysis_invariant()
             end
         "#,
     );
+    let operator_offset = runtime
+        .find("ddt(V(p, n))")
+        .expect("operator source offset") as u32;
     let error = analyze(&runtime).expect_err("solution-dependent case must remain rejected");
-    let diagnostic = error.to_string();
+    let CompileError::Semantic(error) = error else {
+        panic!("expected semantic placement error, got {error}");
+    };
+    // The refusal names the operator's own span, not the enclosing statement's.
+    assert_eq!(error.span.start, operator_offset);
+    let diagnostic = error.kind.to_string();
     assert!(diagnostic.contains("'ddt' analog operator"), "{diagnostic}");
     assert!(
         diagnostic.contains("under runtime control flow"),
         "{diagnostic}"
     );
+}
+
+#[test]
+fn stateful_operator_operands_receive_normal_semantic_lowering() {
+    let module = analyze_one(&module_src(
+        r#"
+            real y, local_value;
+            analog begin : scoped
+                real local_value;
+                local_value = V(p, n);
+                y = ddt(local_value);
+                I(p, n) <+ y;
+            end
+        "#,
+    ));
+    let assignment = flat_assignments(&module)
+        .into_iter()
+        .find(|assignment| assignment.target == "y")
+        .expect("lowered y assignment");
+    let Expression::Call(call) = &assignment.expression else {
+        panic!(
+            "ddt was not retained as a call, got {:?}",
+            assignment.expression
+        );
+    };
+    assert_eq!(call.name, "ddt");
+    let Some(Expression::Identifier(identifier)) = call.args.first() else {
+        panic!(
+            "expected a lowered block-local identifier, got {:?}",
+            call.args
+        );
+    };
+    assert_ne!(identifier.name, "local_value");
+    assert!(identifier.name.starts_with("local_value__blk"));
 }
 
 #[test]
