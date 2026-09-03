@@ -950,6 +950,36 @@ impl DeckPlan {
         &self.analyses
     }
 
+    /// Pair every authored analysis command with the planned analysis it
+    /// became, in authored order.
+    ///
+    /// Run axes (`.STEP`, `.TEMP`) and post-processing cards (`.FOUR`) occupy
+    /// no planned slot and pair with `None`. Frontends that report on an
+    /// authored card need its canonical identity; deriving that pairing
+    /// separately on each surface is how the two drift apart.
+    pub fn authored_analyses<'plan>(
+        &'plan self,
+        netlist: &'plan crate::netlist::Netlist,
+    ) -> impl Iterator<
+        Item = (
+            &'plan crate::netlist::AnalysisCommand,
+            Option<AnalysisInstanceId>,
+        ),
+    > {
+        use crate::netlist::AnalysisCommand;
+
+        let mut planned = self.analyses.iter();
+        netlist.analyses.iter().map(move |command| {
+            let id = match command {
+                AnalysisCommand::Step(_)
+                | AnalysisCommand::Temp { .. }
+                | AnalysisCommand::Four { .. } => None,
+                _ => planned.next().map(PlannedAnalysis::id),
+            };
+            (command, id)
+        })
+    }
+
     fn coordinate_resource_estimate(&self) -> Result<CoordinateResourceEstimate, DeckPlanError> {
         let coordinate_count =
             checked_coordinate_count(self.axes.iter().map(|axis| axis.values.len()))?;

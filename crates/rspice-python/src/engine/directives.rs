@@ -232,22 +232,12 @@ fn refuse_unsupported_deck_analyses(
     netlist: &rspice_core::netlist::Netlist,
     plan: &rspice_core::execution::DeckPlan,
 ) -> PyResult<()> {
-    let mut planned = plan
-        .analyses()
-        .iter()
-        .map(|analysis| analysis.id().tag())
-        .collect::<std::collections::VecDeque<_>>();
-    for analysis in &netlist.analyses {
-        if matches!(
-            analysis,
-            AnalysisCommand::Step(_) | AnalysisCommand::Temp { .. } | AnalysisCommand::Four { .. }
-        ) {
-            // Run axes and `.FOUR` never occupy a planned-analysis slot.
-            continue;
-        }
-        let analysis_id = planned.pop_front();
+    for (analysis, id) in plan.authored_analyses(netlist) {
         if unsupported_deck_analysis_card(analysis).is_some() {
-            return Err(unsupported_deck_analysis_error(analysis, analysis_id));
+            return Err(unsupported_deck_analysis_error(
+                analysis,
+                id.map(|id| id.tag()),
+            ));
         }
     }
     Ok(())

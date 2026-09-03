@@ -329,3 +329,53 @@ def test_periodic_result_types_have_public_module_identity():
         rspice.OscillatorNoiseResult,
     ):
         assert cls.__module__ == "rspice"
+
+
+PERIODIC_CARD_DECKS = [
+    (".PSS FUND=1G", ".PSS", "pss-001"),
+    (".HB 1G\n.PAC DEC 5 1k 1meg INPUT=V1 OUT=V(out)", ".PAC", "pac-001"),
+    (".HB 1G\n.PNOISE DEC 5 1 1k OUT=V(out)", ".PNOISE", "pnoise-001"),
+    (".HB 1G\n.ENVELOPE TSTOP=1u", ".ENVELOPE", "env-001"),
+]
+
+
+def periodic_card_deck(cards: str) -> rspice.Netlist:
+    return parse(
+        f"""
+V1 in 0 SIN(0 1 {F0})
+R1 in out 1k
+C1 out 0 1p
+{cards}
+.end
+"""
+    )
+
+
+@pytest.mark.parametrize(("cards", "card", "analysis_id"), PERIODIC_CARD_DECKS)
+def test_authored_periodic_cards_are_refused_by_engine_run(cards, card, analysis_id):
+    """Engine.run has no authored route for the periodic family yet."""
+    netlist = periodic_card_deck(cards)
+    with pytest.raises(NotImplementedError) as excinfo:
+        rspice.Engine().run(netlist)
+    assert isinstance(excinfo.value, rspice.RSpiceError)
+    assert card in str(excinfo.value)
+    assert analysis_id in str(excinfo.value)
+
+
+def test_a_refused_periodic_deck_publishes_no_result():
+    """The refusal precedes every directive, continue_on_error included."""
+    netlist = periodic_card_deck(".OP\n.PSS FUND=1G")
+    with pytest.raises(rspice.RSpiceNotImplementedError):
+        rspice.Engine().run(netlist, continue_on_error=True)
+
+
+def test_a_malformed_periodic_card_is_a_typed_parse_error():
+    with pytest.raises(rspice.ParseError) as excinfo:
+        parse("bad pss\nV1 out 0 1\nR1 out 0 1k\n.PSS FUND=1G HARMS=0\n.end\n")
+    error = excinfo.value
+    assert error.kind == "analysis_card"
+    assert error.category == "analysis_card_validation"
+    assert error.output_directive == ".PSS"
+    assert error.reason == "invalid_number"
+    assert error.parameter_name == "HARMS"
+    assert error.line == 4

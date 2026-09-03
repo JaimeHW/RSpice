@@ -673,22 +673,37 @@ fn unsupported_deck_analysis_error(
 }
 
 /// Refuse authored cards this frontend cannot execute before any solver work
-/// runs or any artifact is written.
-fn refuse_unsupported_deck_analyses(netlist: &Netlist, plan: &DeckPlan) -> Result<(), CliError> {
-    let mut planned = plan
-        .analyses()
+/// runs, any run-axis compatibility check reports a lesser problem, or any
+/// artifact is written.
+fn refuse_unsupported_deck_analyses(
+    netlist: &Netlist,
+    config: &Config,
+    args: &RunArgs,
+) -> Result<(), CliError> {
+    if !netlist
+        .analyses
         .iter()
-        .map(|analysis| analysis.id().tag())
-        .collect::<std::collections::VecDeque<_>>();
-    for analysis in &netlist.analyses {
-        if matches!(analysis, AnalysisCommand::Four { .. }) {
-            // `.FOUR` is attached to a transient by the planner and never
-            // occupies its own planned-analysis slot.
-            continue;
-        }
-        let id = planned.pop_front();
+        .any(|analysis| unsupported_deck_analysis_card(analysis).is_some())
+    {
+        return Ok(());
+    }
+    let plan = DeckPlan::from_netlist_with_abort(
+        netlist,
+        &config.resources.limits(),
+        &crate::abort::ProcessAbort,
+    )
+    .map_err(|error| map_deck_plan_error(error, args))?;
+    refuse_planned_unsupported_analyses(netlist, &plan)
+}
+
+/// Name every refused card with the identity the canonical plan assigned it.
+fn refuse_planned_unsupported_analyses(netlist: &Netlist, plan: &DeckPlan) -> Result<(), CliError> {
+    for (analysis, id) in plan.authored_analyses(netlist) {
         if unsupported_deck_analysis_card(analysis).is_some() {
-            return Err(unsupported_deck_analysis_error(analysis, id));
+            return Err(unsupported_deck_analysis_error(
+                analysis,
+                id.map(|id| id.tag()),
+            ));
         }
     }
     Ok(())
@@ -1056,6 +1071,8 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
                 println!("\n=== run: {} ===", deck.label.as_deref().unwrap_or("base"));
             }
             let netlist = load_netlist_from_source(&deck.source, &args, config, !quiet)?;
+            validate_pss_flag_conflict(&netlist, &args)?;
+            refuse_unsupported_deck_analyses(&netlist, config, &args)?;
             validate_step_frontend_compatibility(&netlist, &args)?;
             let addresistors_artifact =
                 materialize_addresistors_artifact(&netlist, &args.input, from_stdin, args.timeout)?;
@@ -2359,14 +2376,14 @@ fn run_deck(
     quiet: bool,
     run_label: Option<&str>,
 ) -> Result<DeckOutcome, CliError> {
-    validate_step_frontend_compatibility(netlist, args)?;
     validate_pss_flag_conflict(netlist, args)?;
+    refuse_unsupported_deck_analyses(netlist, config, args)?;
+    validate_step_frontend_compatibility(netlist, args)?;
 
     let resource_limits = config.resources.limits();
     let canonical_plan =
         DeckPlan::from_netlist_with_abort(netlist, &resource_limits, &crate::abort::ProcessAbort)
             .map_err(|error| map_deck_plan_error(error, args))?;
-    refuse_unsupported_deck_analyses(netlist, &canonical_plan)?;
     if canonical_plan.axes().is_empty() {
         let (report, outputs) =
             run_concrete_deck(netlist, args, config, verbose, quiet, run_label, None, None)?;

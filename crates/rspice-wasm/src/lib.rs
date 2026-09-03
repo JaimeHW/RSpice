@@ -3570,24 +3570,9 @@ fn refuse_unsupported_deck_analyses(
     netlist: &Netlist,
     plan: &rspice_core::execution::DeckPlan,
 ) -> DetailedWasmResult<()> {
-    use rspice_core::netlist::AnalysisCommand;
-
-    let mut planned = plan
-        .analyses()
-        .iter()
-        .map(|analysis| analysis.id().tag())
-        .collect::<std::collections::VecDeque<_>>();
-    for analysis in &netlist.analyses {
-        if matches!(
-            analysis,
-            AnalysisCommand::Step(_) | AnalysisCommand::Temp { .. } | AnalysisCommand::Four { .. }
-        ) {
-            // Run axes and `.FOUR` never occupy a planned-analysis slot.
-            continue;
-        }
-        let analysis_id = planned.pop_front();
+    for (analysis, id) in plan.authored_analyses(netlist) {
         if let Some(card) = unsupported_deck_analysis_card(analysis) {
-            let instance = analysis_id.map(|id| format!(" ({id})")).unwrap_or_default();
+            let instance = id.map(|id| format!(" ({id})")).unwrap_or_default();
             return Err(unsupported_deck_analysis(format!(
                 "authored {card} card{instance} is not mapped by the browser deck API"
             )));
