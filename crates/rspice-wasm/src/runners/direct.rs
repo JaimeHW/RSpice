@@ -1,25 +1,30 @@
 //! Direct execution entry points.
 //!
-//! Each function takes an explicitly configured analysis request, runs it
-//! through an abort-aware `rspice-core` entrypoint, and projects the result
-//! into a versioned document.
+//! These run one explicitly configured analysis from JavaScript arguments
+//! instead of from an authored card. They still produce the same core
+//! `AnalysisResultDocument` and the same handle as the deck route: a direct
+//! request is planned as a one-analysis [`DeckPlan`], which is where its
+//! canonical `AnalysisInstanceId` and its single run coordinate come from.
+//! Nothing here mints an identity of its own.
 
-use rspice_core::analysis::StbConfig;
-use rspice_core::{AbortSignal, NoAbort, ResourceKind, ResourceLimits};
+use rspice_core::execution::{
+    AnalysisInstanceId, AnalysisKind, AnalysisRequest, AnalysisResultDocument,
+    AnalysisResultDocumentBuilder, DeckPlan, RunCoordinate, SignalUnit,
+    topology_fingerprint_with_abort,
+};
+use rspice_core::{AbortSignal, Engine, NoAbort, ResourceKind, ResourceLimits, Value};
 
 use crate::DetailedWasmResult;
-use crate::WasmResult;
 use crate::abort::ensure_not_aborted;
-use crate::dto::{
-    AcPointSnapshot, DcOperatingPoint, NetlistSummary, TransientSnapshot, WasmHealthReport,
-    complex_series_from_slice, transient_snapshot_from_compressed_result,
-    transient_snapshot_from_result,
+use crate::dto::{NetlistSummary, WasmHealthReport};
+use crate::errors::{
+    WasmError, diagnostic_summary, resource_limit_error, startup_diagnostic_summary,
 };
-use crate::errors::resource_limit_error;
-use crate::errors::{WasmError, diagnostic_summary, startup_diagnostic_summary};
-use crate::options::{WasmCompressionOptions, WasmExecutionOptions, WasmStbSweep};
-use crate::result_document::{self, AnalogResultDocument};
-use crate::stb_result_document::{self, StbResultDocument};
+use crate::options::WasmExecutionOptions;
+use crate::runners::deck::{
+    DeckExecution, deck_plan_wasm_error, document_projection_error, preflight_transient_points,
+    simulation_error,
+};
 use crate::support::{engine_with_resource_limits, parse_netlist_detailed};
 
 /// Summarize and semantically validate a netlist, returning typed diagnostics.
@@ -63,98 +68,121 @@ pub fn summarize_netlist_with_options_and_abort_detailed(
 }
 
 /// Backward-compatible string-error summary API.
-pub fn summarize_netlist(source: &str) -> WasmResult<NetlistSummary> {
+pub fn summarize_netlist(source: &str) -> crate::WasmResult<NetlistSummary> {
     summarize_netlist_detailed(source).map_err(|error| error.message)
 }
 
-/// Run an operating point after strict semantic validation.
-pub fn run_dc_operating_point_detailed(source: &str) -> DetailedWasmResult<DcOperatingPoint> {
-    run_dc_operating_point_with_options_detailed(source, &WasmExecutionOptions::default())
-}
-
-/// Run an operating point under an explicit browser execution policy.
-pub fn run_dc_operating_point_with_options_detailed(
-    source: &str,
-    options: &WasmExecutionOptions,
-) -> DetailedWasmResult<DcOperatingPoint> {
-    run_dc_operating_point_with_options_and_abort_detailed(source, options, &NoAbort)
-}
-
-/// Run an operating point under an explicit browser policy and cooperative
-/// abort source.
-pub fn run_dc_operating_point_with_options_and_abort_detailed(
-    source: &str,
-    options: &WasmExecutionOptions,
-    external_abort: &dyn AbortSignal,
-) -> DetailedWasmResult<DcOperatingPoint> {
-    let resource_limits = options.resource_limits.to_core();
-    let netlist = parse_netlist_detailed(source, resource_limits, external_abort)?;
-    let result = engine_with_resource_limits(resource_limits)?
-        .run_dc_op_with_abort(&netlist, external_abort)
-        .map_err(|error| Box::new(WasmError::from_simulation_error(error)))?;
-    ensure_not_aborted(external_abort)?;
-    Ok(DcOperatingPoint {
-        node_names: result.node_names,
-        node_voltages: result.node_voltages,
-        branch_names: result.branch_names,
-        branch_currents: result.branch_currents,
-    })
-}
-
-/// Backward-compatible string-error operating-point API.
-pub fn run_dc_operating_point(source: &str) -> WasmResult<DcOperatingPoint> {
-    run_dc_operating_point_detailed(source).map_err(|error| error.message)
-}
-
-pub(crate) fn validate_analysis_ordinal(ordinal: usize) -> DetailedWasmResult<()> {
-    if ordinal == 0 {
-        return Err(Box::new(WasmError::invalid_argument(
-            "analysis ordinal must be one-based".to_owned(),
-        )));
-    }
-    Ok(())
-}
-
-/// Run OP into the versioned, loss-aware analog document. Unlike the legacy
-/// compatibility DTO, this retains engine-owned device observables and device
-/// operating regions in addition to node voltages and branch currents.
-pub fn run_operating_point_document_with_options_and_abort_detailed(
-    source: &str,
-    ordinal: usize,
-    options: &WasmExecutionOptions,
-    external_abort: &dyn AbortSignal,
-) -> DetailedWasmResult<AnalogResultDocument> {
-    validate_analysis_ordinal(ordinal)?;
-    ensure_not_aborted(external_abort)?;
-    let resource_limits = options.resource_limits.to_core();
-    let netlist = parse_netlist_detailed(source, resource_limits, external_abort)?;
-    let (result, report) = engine_with_resource_limits(resource_limits)?
-        .run_dc_op_with_report_and_abort(&netlist, external_abort)
-        .map_err(|error| Box::new(WasmError::from_simulation_error(error)))?;
-    ensure_not_aborted(external_abort)?;
-    result_document::operating_point_document(result, report, ordinal).map_err(|message| {
+/// Plan one direct request and finish its documents at its one coordinate.
+///
+/// A `DeckPlan` with no axes has exactly one coordinate. Consuming that
+/// instead of inventing a "scalar, no coordinate" special case is what keeps
+/// a direct result and the same analysis inside a deck describable by one
+/// reader.
+fn direct_execution(
+    kind: AnalysisKind,
+    engine: &Engine,
+    netlist: &rspice_core::Netlist,
+    resource_limits: ResourceLimits,
+    abort: &dyn AbortSignal,
+    project: impl FnOnce(AnalysisInstanceId) -> DetailedWasmResult<Vec<AnalysisResultDocumentBuilder>>,
+) -> DetailedWasmResult<DeckExecution> {
+    let plan = DeckPlan::new(Vec::new(), vec![AnalysisRequest::new(kind)])
+        .map_err(deck_plan_wasm_error)?;
+    let coordinates: Vec<RunCoordinate> = plan
+        .coordinates_with_abort(&resource_limits, abort)
+        .map_err(deck_plan_wasm_error)?;
+    let coordinate = coordinates.first().cloned().ok_or_else(|| {
         Box::new(WasmError::new(
-            message,
-            "invalid_result_document",
+            "a one-analysis plan produced no run coordinate".to_owned(),
+            "invalid_deck_plan",
             "result_validation",
         ))
+    })?;
+    let id = plan
+        .analyses()
+        .first()
+        .ok_or_else(|| {
+            Box::new(WasmError::new(
+                "a one-analysis plan produced no planned analysis".to_owned(),
+                "invalid_deck_plan",
+                "result_validation",
+            ))
+        })?
+        .id();
+    let topology =
+        topology_fingerprint_with_abort(engine, netlist, abort).map_err(simulation_error)?;
+    let result_coordinate =
+        rspice_core::execution::result_document::ResultCoordinate::from_run_coordinate(&coordinate);
+
+    let builders = project(id)?;
+    let mut results = Vec::new();
+    results
+        .try_reserve_exact(builders.len())
+        .map_err(|_| allocation_error("direct analysis results"))?;
+    let mut retained = 0usize;
+    for builder in builders {
+        let document = builder
+            .coordinate(result_coordinate.clone())
+            .topology_fingerprint(topology)
+            .build_with_abort(abort)
+            .map_err(document_projection_error)?;
+        retained = retained
+            .checked_add(document.total_value_count())
+            .ok_or_else(|| allocation_error("direct retained-value accounting"))?;
+        if retained > resource_limits.max_result_values {
+            return Err(resource_limit_error(
+                ResourceKind::ResultValues,
+                retained,
+                resource_limits.max_result_values,
+            ));
+        }
+        results.push(document);
+    }
+    Ok(DeckExecution {
+        plan,
+        coordinates,
+        results,
     })
 }
 
-pub fn run_operating_point_document_detailed(
+/// Run one operating point into the shared result document.
+pub fn run_operating_point_document_with_options_and_abort_detailed(
     source: &str,
-) -> DetailedWasmResult<AnalogResultDocument> {
+    options: &WasmExecutionOptions,
+    external_abort: &dyn AbortSignal,
+) -> DetailedWasmResult<DeckExecution> {
+    ensure_not_aborted(external_abort)?;
+    let resource_limits = options.resource_limits.to_core();
+    let netlist = parse_netlist_detailed(source, resource_limits, external_abort)?;
+    let engine = engine_with_resource_limits(resource_limits)?;
+    direct_execution(
+        AnalysisKind::Op,
+        &engine,
+        &netlist,
+        resource_limits,
+        external_abort,
+        |id| {
+            let (result, report) = engine
+                .run_dc_op_with_report_and_abort(&netlist, external_abort)
+                .map_err(simulation_error)?;
+            ensure_not_aborted(external_abort)?;
+            Ok(vec![
+                AnalysisResultDocument::from_operating_point(id, &result, Some(&report))
+                    .map_err(document_projection_error)?,
+            ])
+        },
+    )
+}
+
+pub fn run_operating_point_document_detailed(source: &str) -> DetailedWasmResult<DeckExecution> {
     run_operating_point_document_with_options_and_abort_detailed(
         source,
-        1,
         &WasmExecutionOptions::default(),
         &NoAbort,
     )
 }
 
-/// Run a scalar-deck DC sweep into one typed document. The adapter unions
-/// device observables across points and marks coordinate-local absence
-/// explicitly instead of zero-filling it.
+/// Run one linear source sweep into the shared result document.
 #[allow(clippy::too_many_arguments)]
 pub fn run_dc_sweep_document_with_options_and_abort_detailed(
     source: &str,
@@ -162,11 +190,9 @@ pub fn run_dc_sweep_document_with_options_and_abort_detailed(
     start: f64,
     stop: f64,
     step: f64,
-    ordinal: usize,
     options: &WasmExecutionOptions,
     external_abort: &dyn AbortSignal,
-) -> DetailedWasmResult<AnalogResultDocument> {
-    validate_analysis_ordinal(ordinal)?;
+) -> DetailedWasmResult<DeckExecution> {
     ensure_not_aborted(external_abort)?;
     if source_name.trim().is_empty() {
         return Err(Box::new(WasmError::invalid_argument(
@@ -180,24 +206,36 @@ pub fn run_dc_sweep_document_with_options_and_abort_detailed(
     }
     let resource_limits = options.resource_limits.to_core();
     let netlist = parse_netlist_detailed(source, resource_limits, external_abort)?;
-    let points = engine_with_resource_limits(resource_limits)?
-        .run_dc_sweep_with_report_and_abort(
-            &netlist,
-            source_name,
-            start,
-            stop,
-            step,
-            external_abort,
-        )
-        .map_err(|error| Box::new(WasmError::from_simulation_error(error)))?;
-    ensure_not_aborted(external_abort)?;
-    result_document::dc_sweep_document(source_name, points, ordinal).map_err(|message| {
-        Box::new(WasmError::new(
-            message,
-            "invalid_result_document",
-            "result_validation",
-        ))
-    })
+    let engine = engine_with_resource_limits(resource_limits)?;
+    direct_execution(
+        AnalysisKind::Dc,
+        &engine,
+        &netlist,
+        resource_limits,
+        external_abort,
+        |id| {
+            let points = engine
+                .run_dc_sweep_with_report_and_abort(
+                    &netlist,
+                    source_name,
+                    start,
+                    stop,
+                    step,
+                    external_abort,
+                )
+                .map_err(simulation_error)?;
+            ensure_not_aborted(external_abort)?;
+            Ok(vec![
+                AnalysisResultDocument::from_dc_sweep(
+                    id,
+                    source_name,
+                    sweep_source_unit(source_name),
+                    &points,
+                )
+                .map_err(document_projection_error)?,
+            ])
+        },
+    )
 }
 
 pub fn run_dc_sweep_document_detailed(
@@ -206,346 +244,140 @@ pub fn run_dc_sweep_document_detailed(
     start: f64,
     stop: f64,
     step: f64,
-) -> DetailedWasmResult<AnalogResultDocument> {
+) -> DetailedWasmResult<DeckExecution> {
     run_dc_sweep_document_with_options_and_abort_detailed(
         source,
         source_name,
         start,
         stop,
         step,
-        1,
         &WasmExecutionOptions::default(),
         &NoAbort,
     )
 }
 
-/// Run AC analysis after strict semantic validation.
-pub fn run_ac_analysis_detailed(
-    source: &str,
-    frequencies: &[f64],
-) -> DetailedWasmResult<Vec<AcPointSnapshot>> {
-    run_ac_analysis_with_options_detailed(source, frequencies, &WasmExecutionOptions::default())
-}
-
-/// Run AC analysis under an explicit browser execution policy.
-pub fn run_ac_analysis_with_options_detailed(
-    source: &str,
-    frequencies: &[f64],
-    options: &WasmExecutionOptions,
-) -> DetailedWasmResult<Vec<AcPointSnapshot>> {
-    run_ac_analysis_with_options_and_abort_detailed(source, frequencies, options, &NoAbort)
-}
-
-/// Run AC analysis under an explicit browser policy and cooperative abort
-/// source.
-pub fn run_ac_analysis_with_options_and_abort_detailed(
-    source: &str,
-    frequencies: &[f64],
-    options: &WasmExecutionOptions,
-    external_abort: &dyn AbortSignal,
-) -> DetailedWasmResult<Vec<AcPointSnapshot>> {
-    ensure_not_aborted(external_abort)?;
-    if frequencies.is_empty() {
-        return Err(Box::new(WasmError::invalid_argument(
-            "AC analysis requires at least one frequency".to_string(),
-        )));
-    }
-    let resource_limits = options.resource_limits.to_core();
-    if frequencies.len() > resource_limits.max_analysis_points {
-        return Err(resource_limit_error(
-            ResourceKind::AnalysisPoints,
-            frequencies.len(),
-            resource_limits.max_analysis_points,
-        ));
-    }
-    if let Some((index, frequency)) = frequencies
-        .iter()
-        .copied()
-        .enumerate()
-        .find(|(_, frequency)| !frequency.is_finite() || *frequency < 0.0)
-    {
-        return Err(Box::new(WasmError::invalid_argument(format!(
-            "AC frequency at index {index} must be finite and non-negative, got {frequency}"
-        ))));
-    }
-
-    let netlist = parse_netlist_detailed(source, resource_limits, external_abort)?;
-    let results = engine_with_resource_limits(resource_limits)?
-        .run_ac_with_abort(&netlist, frequencies, external_abort)
-        .map_err(|error| Box::new(WasmError::from_simulation_error(error)))?;
-
-    let snapshots = results
-        .into_iter()
-        .map(|point| AcPointSnapshot {
-            frequency: point.frequency,
-            node_names: point.node_names,
-            branch_names: point.branch_names,
-            voltages: complex_series_from_slice(&point.voltages),
-            currents: complex_series_from_slice(&point.currents),
-        })
-        .collect();
-    ensure_not_aborted(external_abort)?;
-    Ok(snapshots)
-}
-
-/// Backward-compatible string-error AC API.
-pub fn run_ac_analysis(source: &str, frequencies: &[f64]) -> WasmResult<Vec<AcPointSnapshot>> {
-    run_ac_analysis_detailed(source, frequencies).map_err(|error| error.message)
-}
-
-/// Run AC into the common versioned analog document, preserving complex node
-/// voltages and branch currents as aligned series.
+/// Run one AC sweep over an explicit frequency grid.
 pub fn run_ac_document_with_options_and_abort_detailed(
     source: &str,
     frequencies: &[f64],
-    ordinal: usize,
     options: &WasmExecutionOptions,
     external_abort: &dyn AbortSignal,
-) -> DetailedWasmResult<AnalogResultDocument> {
-    validate_analysis_ordinal(ordinal)?;
-    let points = run_ac_analysis_with_options_and_abort_detailed(
-        source,
-        frequencies,
-        options,
+) -> DetailedWasmResult<DeckExecution> {
+    ensure_not_aborted(external_abort)?;
+    let resource_limits = options.resource_limits.to_core();
+    validate_frequency_grid("AC", frequencies, false, resource_limits)?;
+    let netlist = parse_netlist_detailed(source, resource_limits, external_abort)?;
+    let engine = engine_with_resource_limits(resource_limits)?;
+    direct_execution(
+        AnalysisKind::Ac,
+        &engine,
+        &netlist,
+        resource_limits,
         external_abort,
-    )?;
-    result_document::ac_document(points, ordinal).map_err(|message| {
-        Box::new(WasmError::new(
-            message,
-            "invalid_result_document",
-            "result_validation",
-        ))
-    })
+        |id| {
+            let points = engine
+                .run_ac_with_abort(&netlist, frequencies, external_abort)
+                .map_err(simulation_error)?;
+            ensure_not_aborted(external_abort)?;
+            Ok(vec![
+                AnalysisResultDocument::from_ac(id, &points).map_err(document_projection_error)?,
+            ])
+        },
+    )
 }
 
 pub fn run_ac_document_detailed(
     source: &str,
     frequencies: &[f64],
-) -> DetailedWasmResult<AnalogResultDocument> {
+) -> DetailedWasmResult<DeckExecution> {
     run_ac_document_with_options_and_abort_detailed(
         source,
         frequencies,
-        1,
         &WasmExecutionOptions::default(),
         &NoAbort,
     )
 }
 
-/// Run transient analysis after strict semantic validation.
-pub fn run_transient_analysis_detailed(
-    source: &str,
-    tstop: f64,
-    max_step: f64,
-) -> DetailedWasmResult<TransientSnapshot> {
-    run_transient_analysis_with_options_detailed(
-        source,
-        tstop,
-        max_step,
-        &WasmExecutionOptions::default(),
-    )
-}
-
-/// Run transient analysis under an explicit browser execution policy.
-pub(crate) fn validate_transient_request(
-    tstop: f64,
-    max_step: f64,
-    resource_limits: ResourceLimits,
-) -> DetailedWasmResult<()> {
-    if !tstop.is_finite() || tstop <= 0.0 {
-        return Err(Box::new(WasmError::invalid_argument(format!(
-            "Transient stop time must be positive and finite, got {tstop}"
-        ))));
-    }
-    if !max_step.is_finite() || max_step <= 0.0 {
-        return Err(Box::new(WasmError::invalid_argument(format!(
-            "Transient maximum step must be positive and finite, got {max_step}"
-        ))));
-    }
-    let estimated_points = (tstop / max_step).ceil() as usize;
-    let estimated_points = estimated_points.saturating_add(1);
-    if estimated_points > resource_limits.max_analysis_points {
-        return Err(resource_limit_error(
-            ResourceKind::AnalysisPoints,
-            estimated_points,
-            resource_limits.max_analysis_points,
-        ));
-    }
-    Ok(())
-}
-
-pub fn run_transient_analysis_with_options_detailed(
-    source: &str,
-    tstop: f64,
-    max_step: f64,
-    options: &WasmExecutionOptions,
-) -> DetailedWasmResult<TransientSnapshot> {
-    run_transient_analysis_with_options_and_abort_detailed(
-        source, tstop, max_step, options, &NoAbort,
-    )
-}
-
-/// Run transient analysis under an explicit browser policy and cooperative
-/// abort source.
-pub fn run_transient_analysis_with_options_and_abort_detailed(
-    source: &str,
-    tstop: f64,
-    max_step: f64,
-    options: &WasmExecutionOptions,
-    external_abort: &dyn AbortSignal,
-) -> DetailedWasmResult<TransientSnapshot> {
-    ensure_not_aborted(external_abort)?;
-    let resource_limits = options.resource_limits.to_core();
-    validate_transient_request(tstop, max_step, resource_limits)?;
-
-    let netlist = parse_netlist_detailed(source, resource_limits, external_abort)?;
-    let result = engine_with_resource_limits(resource_limits)?
-        .run_tran_with_abort(&netlist, tstop, max_step, external_abort)
-        .map_err(|error| Box::new(WasmError::from_simulation_error(error)))?;
-
-    let snapshot = transient_snapshot_from_result(result).map_err(|message| {
-        Box::new(WasmError::new(
-            message,
-            "invalid_transient_result",
-            "result_validation",
-        ))
-    })?;
-    ensure_not_aborted(external_abort)?;
-    Ok(snapshot)
-}
-
-/// Run transient analysis with bounded, multi-channel analog compression.
-pub fn run_transient_analysis_compressed_detailed(
-    source: &str,
-    tstop: f64,
-    max_step: f64,
-    compression: &WasmCompressionOptions,
-) -> DetailedWasmResult<TransientSnapshot> {
-    run_transient_analysis_compressed_with_options_detailed(
-        source,
-        tstop,
-        max_step,
-        compression,
-        &WasmExecutionOptions::default(),
-    )
-}
-
-/// Run a compressed transient under explicit compression and browser resource
-/// policies. The solver and authored output projection are identical to the
-/// full-grid path; only the published analog history is decimated.
-pub fn run_transient_analysis_compressed_with_options_detailed(
-    source: &str,
-    tstop: f64,
-    max_step: f64,
-    compression: &WasmCompressionOptions,
-    options: &WasmExecutionOptions,
-) -> DetailedWasmResult<TransientSnapshot> {
-    run_transient_analysis_compressed_with_options_and_abort_detailed(
-        source,
-        tstop,
-        max_step,
-        compression,
-        options,
-        &NoAbort,
-    )
-}
-
-/// Run compressed transient analysis under explicit browser policies and a
-/// cooperative abort source. Both the solver and compression pass observe the
-/// same signal through the core abort-aware entrypoint.
-pub fn run_transient_analysis_compressed_with_options_and_abort_detailed(
-    source: &str,
-    tstop: f64,
-    max_step: f64,
-    compression: &WasmCompressionOptions,
-    options: &WasmExecutionOptions,
-    external_abort: &dyn AbortSignal,
-) -> DetailedWasmResult<TransientSnapshot> {
-    ensure_not_aborted(external_abort)?;
-    let resource_limits = options.resource_limits.to_core();
-    validate_transient_request(tstop, max_step, resource_limits)?;
-    let compression = compression.to_core()?;
-    let netlist = parse_netlist_detailed(source, resource_limits, external_abort)?;
-    let result = engine_with_resource_limits(resource_limits)?
-        .run_tran_compressed_with_abort(&netlist, tstop, max_step, compression, external_abort)
-        .map_err(|error| Box::new(WasmError::from_simulation_error(error)))?;
-    let snapshot = transient_snapshot_from_compressed_result(result).map_err(|message| {
-        Box::new(WasmError::new(
-            message,
-            "invalid_transient_result",
-            "result_validation",
-        ))
-    })?;
-    ensure_not_aborted(external_abort)?;
-    Ok(snapshot)
-}
-
-/// Backward-compatible string-error compressed transient API.
-pub fn run_transient_analysis_compressed(
-    source: &str,
-    tstop: f64,
-    max_step: f64,
-    compression: &WasmCompressionOptions,
-) -> WasmResult<TransientSnapshot> {
-    run_transient_analysis_compressed_detailed(source, tstop, max_step, compression)
-        .map_err(|error| error.message)
-}
-
-/// Backward-compatible string-error transient API.
-pub fn run_transient_analysis(
-    source: &str,
-    tstop: f64,
-    max_step: f64,
-) -> WasmResult<TransientSnapshot> {
-    run_transient_analysis_detailed(source, tstop, max_step).map_err(|error| error.message)
-}
-
-/// Run transient into the common result document. Projected-out solution
-/// channels remain present with `None` samples, while device OP/store traces
-/// retain explicit owners and unknown units.
-#[allow(clippy::too_many_arguments)]
+/// Run one transient over an explicit interval.
 pub fn run_transient_document_with_options_and_abort_detailed(
     source: &str,
     tstop: f64,
     max_step: f64,
-    ordinal: usize,
     options: &WasmExecutionOptions,
     external_abort: &dyn AbortSignal,
-) -> DetailedWasmResult<AnalogResultDocument> {
-    validate_analysis_ordinal(ordinal)?;
-    let snapshot = run_transient_analysis_with_options_and_abort_detailed(
-        source,
-        tstop,
-        max_step,
-        options,
+) -> DetailedWasmResult<DeckExecution> {
+    ensure_not_aborted(external_abort)?;
+    let resource_limits = options.resource_limits.to_core();
+    preflight_transient_points(tstop, max_step, resource_limits)?;
+    let compression = options.compression_config()?;
+    let netlist = parse_netlist_detailed(source, resource_limits, external_abort)?;
+    let engine = engine_with_resource_limits(resource_limits)?;
+    direct_execution(
+        AnalysisKind::Tran,
+        &engine,
+        &netlist,
+        resource_limits,
         external_abort,
-    )?;
-    result_document::transient_document(snapshot, ordinal).map_err(|message| {
-        Box::new(WasmError::new(
-            message,
-            "invalid_result_document",
-            "result_validation",
-        ))
-    })
+        |id| {
+            let (result, report) = match compression {
+                Some(config) => {
+                    let compressed = engine
+                        .run_tran_compressed_with_abort(
+                            &netlist,
+                            tstop,
+                            max_step,
+                            config,
+                            external_abort,
+                        )
+                        .map_err(simulation_error)?;
+                    let report = compressed.compression_report.clone();
+                    let expanded = compressed.try_into_transient().map_err(|message| {
+                        Box::new(WasmError::new(
+                            message,
+                            "invalid_result_document",
+                            "result_validation",
+                        ))
+                    })?;
+                    (expanded, Some(report))
+                }
+                None => (
+                    engine
+                        .run_tran_with_abort(&netlist, tstop, max_step, external_abort)
+                        .map_err(simulation_error)?,
+                    None,
+                ),
+            };
+            ensure_not_aborted(external_abort)?;
+            if !result.fft_results.is_empty() {
+                return Err(Box::new(WasmError::new(
+                    "this deck attaches .FFT post-processing to its transient; run it through runAuthoredDeckDocument so every spectrum keeps its own analysis identity".to_owned(),
+                    "unsupported_deck_analysis",
+                    "unsupported_feature",
+                )));
+            }
+            Ok(vec![
+                AnalysisResultDocument::from_transient(id, &result, report.as_ref(), Vec::new())
+                    .map_err(document_projection_error)?,
+            ])
+        },
+    )
 }
 
 pub fn run_transient_document_detailed(
     source: &str,
     tstop: f64,
     max_step: f64,
-) -> DetailedWasmResult<AnalogResultDocument> {
+) -> DetailedWasmResult<DeckExecution> {
     run_transient_document_with_options_and_abort_detailed(
         source,
         tstop,
         max_step,
-        1,
         &WasmExecutionOptions::default(),
         &NoAbort,
     )
 }
 
-/// Run scalar-deck input-referred noise into the common typed result document.
-/// It preserves complex small-signal voltages/currents, total densities, gain,
-/// and sparse per-device contribution identities with explicit validity.
+/// Run one input-referred noise sweep over an explicit frequency grid.
 #[allow(clippy::too_many_arguments)]
 pub fn run_noise_document_with_options_and_abort_detailed(
     source: &str,
@@ -553,61 +385,44 @@ pub fn run_noise_document_with_options_and_abort_detailed(
     reference_node: Option<&str>,
     input_source: &str,
     frequencies: &[f64],
-    ordinal: usize,
     options: &WasmExecutionOptions,
     external_abort: &dyn AbortSignal,
-) -> DetailedWasmResult<AnalogResultDocument> {
-    validate_analysis_ordinal(ordinal)?;
+) -> DetailedWasmResult<DeckExecution> {
     ensure_not_aborted(external_abort)?;
     if output_node.trim().is_empty() || input_source.trim().is_empty() {
         return Err(Box::new(WasmError::invalid_argument(
             "noise output node and input source must not be empty".to_owned(),
         )));
     }
-    if frequencies.is_empty() {
-        return Err(Box::new(WasmError::invalid_argument(
-            "noise analysis requires at least one frequency".to_owned(),
-        )));
-    }
     let resource_limits = options.resource_limits.to_core();
-    if frequencies.len() > resource_limits.max_analysis_points {
-        return Err(resource_limit_error(
-            ResourceKind::AnalysisPoints,
-            frequencies.len(),
-            resource_limits.max_analysis_points,
-        ));
-    }
-    if let Some((index, frequency)) = frequencies
-        .iter()
-        .copied()
-        .enumerate()
-        .find(|(_, frequency)| !frequency.is_finite() || *frequency <= 0.0)
-    {
-        return Err(Box::new(WasmError::invalid_argument(format!(
-            "noise frequency at index {index} must be finite and positive, got {frequency}"
-        ))));
-    }
+    validate_frequency_grid("noise", frequencies, true, resource_limits)?;
     let netlist = parse_netlist_detailed(source, resource_limits, external_abort)?;
     let engine = engine_with_resource_limits(resource_limits)?;
-    let points = engine
-        .run_noise_named_with_input_source_and_abort(
-            &netlist,
-            output_node,
-            reference_node,
-            input_source,
-            frequencies,
-            engine.config().temperature,
-            external_abort,
-        )
-        .map_err(|error| Box::new(WasmError::from_simulation_error(error)))?;
-    ensure_not_aborted(external_abort)?;
-    result_document::noise_document(points, ordinal).map_err(|message| {
-        Box::new(WasmError::new(
-            message,
-            "invalid_result_document",
-            "result_validation",
-        ))
-    })
+    direct_execution(
+        AnalysisKind::Noise,
+        &engine,
+        &netlist,
+        resource_limits,
+        external_abort,
+        |id| {
+            let points = engine
+                .run_noise_named_with_input_source_and_abort(
+                    &netlist,
+                    output_node,
+                    reference_node,
+                    input_source,
+                    frequencies,
+                    engine.config().temperature,
+                    external_abort,
+                )
+                .map_err(simulation_error)?;
+            ensure_not_aborted(external_abort)?;
+            Ok(vec![
+                AnalysisResultDocument::from_noise(id, &points)
+                    .map_err(document_projection_error)?,
+            ])
+        },
+    )
 }
 
 pub fn run_noise_document_detailed(
@@ -616,92 +431,13 @@ pub fn run_noise_document_detailed(
     reference_node: Option<&str>,
     input_source: &str,
     frequencies: &[f64],
-) -> DetailedWasmResult<AnalogResultDocument> {
+) -> DetailedWasmResult<DeckExecution> {
     run_noise_document_with_options_and_abort_detailed(
         source,
         output_node,
         reference_node,
         input_source,
         frequencies,
-        1,
-        &WasmExecutionOptions::default(),
-        &NoAbort,
-    )
-}
-
-/// Run one scalar Tian loop-stability analysis into its lossless retained
-/// result document. The direct request deliberately does not consume authored
-/// STEP/TEMP axes.
-#[allow(clippy::too_many_arguments)]
-pub fn run_stb_document_with_options_and_abort_detailed(
-    source: &str,
-    probe: &str,
-    sweep: WasmStbSweep,
-    points: usize,
-    start_frequency: f64,
-    stop_frequency: f64,
-    compute_nyquist: bool,
-    ordinal: usize,
-    options: &WasmExecutionOptions,
-    external_abort: &dyn AbortSignal,
-) -> DetailedWasmResult<StbResultDocument> {
-    validate_analysis_ordinal(ordinal)?;
-    ensure_not_aborted(external_abort)?;
-    if probe.trim().is_empty() {
-        return Err(Box::new(WasmError::invalid_argument(
-            "STB probe name must not be empty".to_owned(),
-        )));
-    }
-    let config = StbConfig::new()
-        .with_sweep(start_frequency, stop_frequency, points)
-        .with_sweep_type(sweep.to_core())
-        .with_probe(probe)
-        .with_nyquist(compute_nyquist);
-    config.validate().map_err(|message| {
-        Box::new(WasmError::invalid_argument(format!(
-            "invalid STB request: {message}"
-        )))
-    })?;
-
-    let resource_limits = options.resource_limits.to_core();
-    let netlist = parse_netlist_detailed(source, resource_limits, external_abort)?;
-    let result = engine_with_resource_limits(resource_limits)?
-        .run_stb_with_abort(&netlist, config, external_abort)
-        .map_err(|error| Box::new(WasmError::from_simulation_error(error)))?;
-    ensure_not_aborted(external_abort)?;
-    match stb_result_document::stb_document_with_abort(result, ordinal, external_abort) {
-        Ok(document) => Ok(document),
-        Err(stb_result_document::StbDocumentError::Aborted) => Err(Box::new(
-            WasmError::from_simulation_error(rspice_core::engine::SimulationError::Aborted),
-        )),
-        Err(stb_result_document::StbDocumentError::Invalid(message)) => Err(Box::new(
-            WasmError::new(message, "invalid_result_document", "result_validation"),
-        )),
-        Err(stb_result_document::StbDocumentError::Allocation(message)) => Err(Box::new(
-            WasmError::new(message, "result_allocation_failed", "result_projection"),
-        )),
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-pub fn run_stb_document_detailed(
-    source: &str,
-    probe: &str,
-    sweep: WasmStbSweep,
-    points: usize,
-    start_frequency: f64,
-    stop_frequency: f64,
-    compute_nyquist: bool,
-) -> DetailedWasmResult<StbResultDocument> {
-    run_stb_document_with_options_and_abort_detailed(
-        source,
-        probe,
-        sweep,
-        points,
-        start_frequency,
-        stop_frequency,
-        compute_nyquist,
-        1,
         &WasmExecutionOptions::default(),
         &NoAbort,
     )
@@ -722,7 +458,7 @@ pub fn health_check_with_options_and_abort_detailed(
 ) -> DetailedWasmResult<WasmHealthReport> {
     let report = engine_with_resource_limits(options.resource_limits.to_core())?
         .health_check_with_abort(external_abort)
-        .map_err(|error| Box::new(WasmError::from_simulation_error(error)))?;
+        .map_err(simulation_error)?;
     Ok(WasmHealthReport {
         status: "ready".to_string(),
         ready: true,
@@ -732,4 +468,237 @@ pub fn health_check_with_options_and_abort_detailed(
         branch_count: report.branch_count,
         output_voltage: report.output_voltage,
     })
+}
+
+fn validate_frequency_grid(
+    analysis: &str,
+    frequencies: &[Value],
+    strictly_positive: bool,
+    resource_limits: ResourceLimits,
+) -> DetailedWasmResult<()> {
+    if frequencies.is_empty() {
+        return Err(Box::new(WasmError::invalid_argument(format!(
+            "{analysis} analysis requires at least one frequency"
+        ))));
+    }
+    if frequencies.len() > resource_limits.max_analysis_points {
+        return Err(resource_limit_error(
+            ResourceKind::AnalysisPoints,
+            frequencies.len(),
+            resource_limits.max_analysis_points,
+        ));
+    }
+    let rejected = frequencies.iter().copied().enumerate().find(|(_, value)| {
+        !value.is_finite() || *value < 0.0 || (strictly_positive && *value <= 0.0)
+    });
+    if let Some((index, frequency)) = rejected {
+        let bound = if strictly_positive {
+            "positive"
+        } else {
+            "non-negative"
+        };
+        return Err(Box::new(WasmError::invalid_argument(format!(
+            "{analysis} frequency at index {index} must be finite and {bound}, got {frequency}"
+        ))));
+    }
+    Ok(())
+}
+
+/// Unit of a directly requested sweep source.
+///
+/// This mirrors the first-letter element contract the parser itself uses:
+/// `V`-prefixed instances are voltage sources and `I`-prefixed are current
+/// sources. Anything else is a swept parameter with no intrinsic unit.
+fn sweep_source_unit(source_name: &str) -> SignalUnit {
+    match source_name
+        .trim()
+        .chars()
+        .next()
+        .map(|first| first.to_ascii_uppercase())
+    {
+        Some('V') => SignalUnit::Volt,
+        Some('I') => SignalUnit::Ampere,
+        _ => SignalUnit::Dimensionless,
+    }
+}
+
+fn allocation_error(object: &'static str) -> Box<WasmError> {
+    Box::new(WasmError::new(
+        format!("could not allocate {object}"),
+        "result_allocation_failed",
+        "result_projection",
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use rspice_core::abort_signal::ImmediateAbort;
+    use rspice_core::execution::AnalysisResultKind;
+
+    use super::*;
+
+    const DECK: &str = "browser direct deck\n\
+V1 in 0 1 AC 1\n\
+R1 in out 1k\n\
+C1 out 0 1p\n\
+.END\n";
+
+    /// A direct request is planned, so its result carries the canonical
+    /// analysis identity and the one coordinate a no-axis plan has.
+    #[test]
+    fn a_direct_request_is_planned_and_carries_its_canonical_identity() {
+        let cases: Vec<(AnalysisResultKind, &str, DeckExecution)> = vec![
+            (
+                AnalysisResultKind::OperatingPoint,
+                "op-001",
+                run_operating_point_document_detailed(DECK).expect("OP runs"),
+            ),
+            (
+                AnalysisResultKind::DcSweep,
+                "dc-001",
+                run_dc_sweep_document_detailed(DECK, "V1", 0.0, 1.0, 0.5).expect("DC runs"),
+            ),
+            (
+                AnalysisResultKind::Ac,
+                "ac-001",
+                run_ac_document_detailed(DECK, &[1.0e3, 1.0e4]).expect("AC runs"),
+            ),
+            (
+                AnalysisResultKind::Transient,
+                "tran-001",
+                run_transient_document_detailed(DECK, 1.0e-8, 1.0e-9).expect("TRAN runs"),
+            ),
+            (
+                AnalysisResultKind::Noise,
+                "noise-001",
+                run_noise_document_detailed(DECK, "out", None, "V1", &[1.0e3, 1.0e4])
+                    .expect("noise runs"),
+            ),
+        ];
+
+        for (kind, tag, execution) in cases {
+            assert_eq!(execution.plan.axes().len(), 0, "{kind:?}");
+            assert_eq!(execution.coordinates.len(), 1, "{kind:?}");
+            assert_eq!(execution.results.len(), 1, "{kind:?}");
+            let document = &execution.results[0];
+            assert_eq!(document.result_kind(), kind);
+            assert_eq!(document.analysis().tag(), tag);
+            assert!(
+                document.coordinate().is_some(),
+                "{kind:?} names the single coordinate of its plan"
+            );
+            assert!(
+                document.topology_fingerprint().is_some(),
+                "{kind:?} carries the solved topology identity"
+            );
+            assert!(
+                document.namespaces().is_none(),
+                "{kind:?} was not run under a deck artifact namespace"
+            );
+            document
+                .validate()
+                .expect("the published document is valid");
+        }
+    }
+
+    /// Invalid direct arguments fail before any solver work, with the typed
+    /// argument category.
+    #[test]
+    fn direct_arguments_are_validated_before_any_solve() {
+        for error in [
+            *run_ac_document_detailed(DECK, &[]).expect_err("an empty AC grid is invalid"),
+            *run_ac_document_detailed(DECK, &[-1.0]).expect_err("a negative frequency is invalid"),
+            *run_noise_document_detailed(DECK, "out", None, "V1", &[0.0])
+                .expect_err("a zero noise frequency is invalid"),
+            *run_noise_document_detailed(DECK, "", None, "V1", &[1.0e3])
+                .expect_err("an empty noise output is invalid"),
+            *run_dc_sweep_document_detailed(DECK, "V1", 0.0, 1.0, 0.0)
+                .expect_err("a zero DC step is invalid"),
+            *run_transient_document_detailed(DECK, -1.0, 1.0e-9)
+                .expect_err("a negative stop time is invalid"),
+        ] {
+            assert_eq!(error.code, "invalid_argument");
+            assert_eq!(error.category, "input_validation");
+        }
+    }
+
+    /// Every direct entry point observes the abort source it was given.
+    #[test]
+    fn every_direct_entry_point_observes_its_abort_source() {
+        let options = WasmExecutionOptions::default();
+        let failures = [
+            *summarize_netlist_with_options_and_abort_detailed(DECK, &options, &ImmediateAbort)
+                .expect_err("summarize observes cancellation"),
+            *run_operating_point_document_with_options_and_abort_detailed(
+                DECK,
+                &options,
+                &ImmediateAbort,
+            )
+            .expect_err("OP observes cancellation"),
+            *run_dc_sweep_document_with_options_and_abort_detailed(
+                DECK,
+                "V1",
+                0.0,
+                1.0,
+                0.5,
+                &options,
+                &ImmediateAbort,
+            )
+            .expect_err("DC observes cancellation"),
+            *run_ac_document_with_options_and_abort_detailed(
+                DECK,
+                &[1.0e3],
+                &options,
+                &ImmediateAbort,
+            )
+            .expect_err("AC observes cancellation"),
+            *run_transient_document_with_options_and_abort_detailed(
+                DECK,
+                1.0e-8,
+                1.0e-9,
+                &options,
+                &ImmediateAbort,
+            )
+            .expect_err("TRAN observes cancellation"),
+            *run_noise_document_with_options_and_abort_detailed(
+                DECK,
+                "out",
+                None,
+                "V1",
+                &[1.0e3],
+                &options,
+                &ImmediateAbort,
+            )
+            .expect_err("noise observes cancellation"),
+            *health_check_with_options_and_abort_detailed(&options, &ImmediateAbort)
+                .expect_err("the readiness probe observes cancellation"),
+        ];
+        for error in failures {
+            assert_eq!(error.code, "aborted");
+            assert_eq!(error.category, "cancellation");
+            assert!(error.retryable);
+        }
+    }
+
+    /// A transient with attached `.FFT` post-processing is refused on the
+    /// direct route, because a direct request plans one analysis and each
+    /// spectrum needs its own canonical identity.
+    #[test]
+    fn a_direct_transient_refuses_attached_fft_post_processing() {
+        let source = "browser direct fft deck\n\
+V1 in 0 SIN(0 1 1G)\n\
+R1 in out 1k\n\
+C1 out 0 1p\n\
+.options fft\n\
+.FFT v(out) np=16 format=norm\n\
+.END\n";
+        let error = *run_transient_document_detailed(source, 1.6e-8, 5.0e-11)
+            .expect_err("attached FFT must be refused on the direct route");
+        assert_eq!(error.code, "unsupported_deck_analysis");
+        assert!(
+            error.message.contains("runAuthoredDeckDocument"),
+            "the refusal points at the route that does support it: {}",
+            error.message
+        );
+    }
 }

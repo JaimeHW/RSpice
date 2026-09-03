@@ -1,384 +1,321 @@
-//! Retained result handles.
+//! The retained result handle.
 //!
-//! JavaScript reads descriptor-only metadata once, then requests bounded
-//! point windows whose numeric columns cross the boundary as typed arrays.
-//! No export copies a whole result into ordinary JavaScript arrays.
+//! One handle carries every result of one browser call: a scalar request has
+//! a single result, an authored deck has one per coordinate/analysis pair plus
+//! one per attached post-process. JavaScript reads descriptor-only metadata,
+//! then requests bounded point windows whose numeric columns cross the
+//! boundary as typed arrays. No export copies a whole result into ordinary
+//! JavaScript arrays.
 
+use rspice_core::execution::result_document::ResultCoordinate;
+use rspice_core::execution::{
+    AnalysisResultDocument, AxisKind, DeckPlan, ResultDocumentError, RunAxis, RunAxisValue,
+    RunCoordinate, StepAxisTarget,
+};
 use rspice_core::{AbortSignal, ResourceKind, ResourceLimits};
+use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
 use crate::DetailedWasmResult;
 use crate::abort::aborted_error;
-use crate::deck_result_document::DeckResultDocument;
-use crate::errors::resource_limit_error;
+use crate::document::{AnalysisIdentity, ResultMetadata, result_metadata, window_transfer_values};
 use crate::errors::{WasmError, wasm_error_to_js};
-use crate::js_interop::{
-    serialize_deck_fft_bin_window_to_js, serialize_deck_fft_harmonic_window_to_js,
-    serialize_result_window_to_js, serialize_stb_result_window_to_js, serialize_to_js,
-};
-use crate::options::DEFAULT_MAX_TRANSFER_VALUES;
-use crate::result_document::{AnalogResultDocument, AnalogResultMetadata, AnalogResultWindow};
-use crate::stb_result_document::{
-    self, StbDocumentError, StbResultDocument, StbResultMetadata, StbResultWindow,
-};
+use crate::js_interop::{serialize_result_window_to_js, serialize_to_js};
+use crate::options::{DEFAULT_MAX_RESULT_JSON_BYTES, DEFAULT_MAX_TRANSFER_VALUES};
 
-/// A versioned analog result retained in WebAssembly memory.
-///
-/// JavaScript reads the descriptor-only metadata once, then calls
-/// `readWindow(start, count)` to transfer a bounded slice of every aligned
-/// numeric column as typed arrays. This avoids serializing a second full copy
-/// of a large result into ordinary JavaScript arrays.
+/// Schema identifier of the handle's own metadata envelope. The results it
+/// carries keep the core document's schema and version.
+pub const BROWSER_RESULT_SCHEMA: &str = "rspice-browser-result";
+/// Version of the handle metadata envelope.
+pub const BROWSER_RESULT_VERSION: u32 = 2;
+
+/// One planned run axis, without its values.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunAxisDescriptor {
+    pub kind: &'static str,
+    pub name: String,
+    pub step_target: Option<StepTargetDescriptor>,
+    pub value_count: usize,
+    /// Parameter names one DATA row binds; empty for every other axis kind.
+    pub data_bindings: Vec<String>,
+}
+
+/// The typed target one authored numeric `.STEP` dimension changes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum StepTargetDescriptor {
+    Parameter {
+        name: String,
+    },
+    Device {
+        name: String,
+        parameter: Option<String>,
+    },
+    Model {
+        name: String,
+        parameter: String,
+    },
+    Temperature,
+}
+
+/// Compact per-result entry in the handle's metadata.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResultSummary {
+    pub index: usize,
+    pub result_kind: &'static str,
+    pub analysis: AnalysisIdentity,
+    pub parent_analysis: Option<AnalysisIdentity>,
+    pub coordinate_index: Option<usize>,
+    pub coordinate_id: Option<String>,
+    pub output_namespace: Option<String>,
+    pub checkpoint_namespace: Option<String>,
+    pub point_count: usize,
+    pub signal_count: usize,
+    pub scalar_count: usize,
+    pub device_state_count: usize,
+    pub total_value_count: usize,
+}
+
+/// The handle's own metadata: the plan it executed and what it retained.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HandleMetadata<'a> {
+    pub schema: &'static str,
+    pub schema_version: u32,
+    pub axes: &'a [RunAxisDescriptor],
+    pub planned_analyses: Vec<AnalysisIdentity>,
+    pub coordinates: &'a [ResultCoordinate],
+    pub results: Vec<ResultSummary>,
+    pub result_count: usize,
+    pub maximum_window_values: usize,
+    pub maximum_result_json_bytes: f64,
+}
+
+/// Every result of one browser call, retained in WebAssembly memory.
 #[derive(Debug)]
 #[wasm_bindgen]
-pub struct WasmAnalogResultHandle {
-    pub(crate) document: AnalogResultDocument,
-    pub(crate) maximum_window_values: usize,
+pub struct WasmResultHandle {
+    axes: Vec<RunAxisDescriptor>,
+    planned_analyses: Vec<rspice_core::execution::AnalysisInstanceId>,
+    coordinates: Vec<ResultCoordinate>,
+    results: Vec<AnalysisResultDocument>,
+    maximum_window_values: usize,
+    maximum_result_json_bytes: u64,
 }
 
-/// Versioned results from a complete authored analog deck.
-///
-/// The handle retains every coordinate-local result in WebAssembly memory.
-/// Only descriptors and caller-bounded numeric windows cross into JavaScript.
-#[derive(Debug)]
-#[wasm_bindgen]
-pub struct WasmDeckResultHandle {
-    pub(crate) document: DeckResultDocument,
-    pub(crate) maximum_window_values: usize,
-}
-
-/// Versioned STB result retained in WebAssembly memory.
-///
-/// Metadata contains the six scalar margins and all descriptors. Large
-/// primary, Bode, and optional Nyquist columns cross the boundary only through
-/// bounded typed-array windows.
-#[derive(Debug)]
-#[wasm_bindgen]
-pub struct WasmStbResultHandle {
-    pub(crate) document: StbResultDocument,
-    pub(crate) maximum_window_values: usize,
-}
-
-pub(crate) fn stb_metadata_error(error: StbDocumentError) -> Box<WasmError> {
-    match error {
-        StbDocumentError::Aborted => Box::new(WasmError::from_simulation_error(
-            rspice_core::engine::SimulationError::Aborted,
-        )),
-        StbDocumentError::Invalid(message) => Box::new(WasmError::new(
-            message,
-            "invalid_result_document",
-            "result_validation",
-        )),
-        StbDocumentError::Allocation(message) => Box::new(WasmError::new(
-            message,
-            "result_allocation_failed",
-            "result_transfer",
-        )),
-    }
-}
-
-pub(crate) fn stb_window_error(error: StbDocumentError) -> Box<WasmError> {
-    match error {
-        StbDocumentError::Aborted => Box::new(WasmError::from_simulation_error(
-            rspice_core::engine::SimulationError::Aborted,
-        )),
-        StbDocumentError::Invalid(message) => Box::new(WasmError::new(
-            message,
-            "invalid_result_window",
-            "result_transfer",
-        )),
-        StbDocumentError::Allocation(message) => Box::new(WasmError::new(
-            message,
-            "result_allocation_failed",
-            "result_transfer",
-        )),
-    }
-}
-
-impl WasmStbResultHandle {
-    pub(crate) fn new_with_abort(
-        document: StbResultDocument,
+impl WasmResultHandle {
+    /// Build a handle over the plan that produced these results.
+    ///
+    /// The transfer ceiling is the browser default, further reduced by the
+    /// caller's own `maxResultValues`, so tightening the resource policy can
+    /// never widen what one window transfers.
+    pub(crate) fn new(
+        plan: &DeckPlan,
+        coordinates: Vec<RunCoordinate>,
+        results: Vec<AnalysisResultDocument>,
         resource_limits: ResourceLimits,
-        abort: &dyn AbortSignal,
     ) -> DetailedWasmResult<Self> {
-        match document.validate_with_abort(abort) {
-            Ok(()) => {}
-            Err(stb_result_document::StbDocumentError::Aborted) => {
-                return Err(Box::new(WasmError::from_simulation_error(
-                    rspice_core::engine::SimulationError::Aborted,
-                )));
-            }
-            Err(stb_result_document::StbDocumentError::Invalid(message)) => {
-                return Err(Box::new(WasmError::new(
-                    message,
-                    "invalid_result_document",
-                    "result_validation",
-                )));
-            }
-            Err(stb_result_document::StbDocumentError::Allocation(message)) => {
-                return Err(Box::new(WasmError::new(
-                    message,
-                    "result_allocation_failed",
-                    "result_validation",
-                )));
-            }
+        let mut axes = Vec::new();
+        axes.try_reserve_exact(plan.axes().len())
+            .map_err(|_| allocation_error("run-axis descriptors"))?;
+        for axis in plan.axes() {
+            axes.push(run_axis_descriptor(axis)?);
         }
-        let retained_values = document.retained_numeric_value_count().map_err(|message| {
-            Box::new(WasmError::new(
-                message,
-                "invalid_result_document",
-                "result_validation",
-            ))
-        })?;
-        if retained_values > resource_limits.max_result_values {
-            return Err(resource_limit_error(
-                ResourceKind::ResultValues,
-                retained_values,
-                resource_limits.max_result_values,
-            ));
+        let mut planned_analyses = Vec::new();
+        planned_analyses
+            .try_reserve_exact(plan.analyses().len())
+            .map_err(|_| allocation_error("planned analysis identities"))?;
+        for analysis in plan.analyses() {
+            planned_analyses.push(analysis.id());
+        }
+        let mut projected = Vec::new();
+        projected
+            .try_reserve_exact(coordinates.len())
+            .map_err(|_| allocation_error("run coordinates"))?;
+        for coordinate in &coordinates {
+            projected.push(ResultCoordinate::from_run_coordinate(coordinate));
         }
         Ok(Self {
-            document,
-            maximum_window_values: resource_limits
-                .max_result_values
-                .min(DEFAULT_MAX_TRANSFER_VALUES),
+            axes,
+            planned_analyses,
+            coordinates: projected,
+            results,
+            maximum_window_values: DEFAULT_MAX_TRANSFER_VALUES
+                .min(resource_limits.max_result_values),
+            maximum_result_json_bytes: DEFAULT_MAX_RESULT_JSON_BYTES,
         })
     }
 
-    /// Access the canonical Rust document without crossing the JS boundary.
-    pub fn document(&self) -> &StbResultDocument {
-        &self.document
+    /// The retained core documents, in publication order.
+    pub fn documents(&self) -> &[AnalysisResultDocument] {
+        &self.results
     }
 
-    pub(crate) fn metadata_snapshot(&self) -> DetailedWasmResult<StbResultMetadata> {
-        self.document
-            .metadata(self.maximum_window_values)
-            .map_err(stb_metadata_error)
+    fn document(&self, index: usize) -> DetailedWasmResult<&AnalysisResultDocument> {
+        self.results.get(index).ok_or_else(|| {
+            Box::new(WasmError::new(
+                format!(
+                    "result index {index} is outside the {} retained results",
+                    self.results.len()
+                ),
+                "invalid_result_index",
+                "input_validation",
+            ))
+        })
+    }
+
+    pub(crate) fn metadata_snapshot(&self) -> DetailedWasmResult<HandleMetadata<'_>> {
+        let mut results = Vec::new();
+        results
+            .try_reserve_exact(self.results.len())
+            .map_err(|_| allocation_error("result summaries"))?;
+        for (index, document) in self.results.iter().enumerate() {
+            let namespaces = document.namespaces();
+            results.push(ResultSummary {
+                index,
+                result_kind: document.result_kind().tag(),
+                analysis: AnalysisIdentity::new(document.analysis()),
+                parent_analysis: document.parent_analysis().map(AnalysisIdentity::new),
+                coordinate_index: document
+                    .coordinate()
+                    .map(rspice_core::execution::result_document::ResultCoordinate::ordinal),
+                coordinate_id: document
+                    .coordinate()
+                    .map(|coordinate| coordinate.id().to_string()),
+                output_namespace: namespaces.map(|namespaces| namespaces.output.clone()),
+                checkpoint_namespace: namespaces.map(|namespaces| namespaces.checkpoint.clone()),
+                point_count: document.point_count(),
+                signal_count: document.signals().len(),
+                scalar_count: document.scalars().len(),
+                device_state_count: document.device_states().len(),
+                total_value_count: document.total_value_count(),
+            });
+        }
+        let mut planned_analyses = Vec::new();
+        planned_analyses
+            .try_reserve_exact(self.planned_analyses.len())
+            .map_err(|_| allocation_error("planned analysis descriptors"))?;
+        for id in &self.planned_analyses {
+            planned_analyses.push(AnalysisIdentity::new(*id));
+        }
+        Ok(HandleMetadata {
+            schema: BROWSER_RESULT_SCHEMA,
+            schema_version: BROWSER_RESULT_VERSION,
+            axes: &self.axes,
+            planned_analyses,
+            coordinates: &self.coordinates,
+            results,
+            result_count: self.results.len(),
+            maximum_window_values: self.maximum_window_values,
+            #[allow(clippy::cast_precision_loss)]
+            // JavaScript numbers are f64; the byte ceiling is far below 2^53.
+            maximum_result_json_bytes: self.maximum_result_json_bytes as f64,
+        })
+    }
+
+    pub(crate) fn result_metadata_snapshot(
+        &self,
+        index: usize,
+    ) -> DetailedWasmResult<ResultMetadata<'_>> {
+        let document = self.document(index)?;
+        result_metadata(document, self.maximum_window_values)
     }
 
     pub(crate) fn window_snapshot(
         &self,
+        index: usize,
         start: usize,
         count: usize,
-    ) -> DetailedWasmResult<StbResultWindow> {
-        self.document
-            .window(start, count, self.maximum_window_values)
-            .map_err(stb_window_error)
+    ) -> DetailedWasmResult<rspice_core::execution::ResultWindow> {
+        let document = self.document(index)?;
+        if count == 0 {
+            return Err(window_error(
+                "a result window must contain at least one point".to_owned(),
+            ));
+        }
+        let requested = window_transfer_values(document, count)?;
+        if requested > self.maximum_window_values {
+            return Err(window_error(format!(
+                "result window requires {requested} numeric/validity values but the transfer limit is {}",
+                self.maximum_window_values
+            )));
+        }
+        document
+            .window(start, count)
+            .map_err(|error| window_error(error.to_string()))
+    }
+
+    pub(crate) fn result_json_snapshot(
+        &self,
+        index: usize,
+        abort: &dyn AbortSignal,
+    ) -> DetailedWasmResult<String> {
+        let document = self.document(index)?;
+        document
+            .to_json_with_abort(abort, self.maximum_result_json_bytes)
+            .map_err(|error| match error {
+                ResultDocumentError::Aborted => aborted_error(),
+                ResultDocumentError::ArtifactTooLarge { limit_bytes } => Box::new(
+                    WasmError::resource_limit(
+                        format!(
+                            "result {index} does not fit in the {limit_bytes}-byte browser export budget"
+                        ),
+                        rspice_core::ResourceLimitError {
+                            resource: ResourceKind::ResultValues,
+                            requested: document.total_value_count(),
+                            limit: self.maximum_window_values,
+                        },
+                    ),
+                ),
+                other => Box::new(WasmError::new(
+                    other.to_string(),
+                    "invalid_result_document",
+                    "result_validation",
+                )),
+            })
     }
 }
 
 #[wasm_bindgen]
-impl WasmStbResultHandle {
-    #[wasm_bindgen(getter, js_name = pointCount)]
-    pub fn point_count(&self) -> usize {
-        self.document.point_count
+impl WasmResultHandle {
+    /// Number of retained results.
+    #[wasm_bindgen(js_name = resultCount)]
+    pub fn result_count(&self) -> usize {
+        self.results.len()
     }
 
-    #[wasm_bindgen(getter, js_name = analysisId)]
-    pub fn analysis_id(&self) -> String {
-        self.document.analysis.id.clone()
+    /// Number of canonical run coordinates the plan produced.
+    #[wasm_bindgen(js_name = coordinateCount)]
+    pub fn coordinate_count(&self) -> usize {
+        self.coordinates.len()
     }
 
-    /// Return STB descriptors, units, margins, status, and transfer ceiling
-    /// without copying any per-frequency sample column.
+    /// The plan, the coordinates, and a compact summary of every result.
     #[wasm_bindgen(js_name = metadata)]
     pub fn metadata_js(&self) -> Result<JsValue, JsValue> {
         let metadata = self
             .metadata_snapshot()
             .map_err(|error| wasm_error_to_js(*error))?;
-        serialize_to_js(&metadata).map_err(|_| {
-            wasm_error_to_js(WasmError::new(
-                "failed to serialize STB result metadata".to_owned(),
-                "result_serialization_failed",
-                "result_transfer",
-            ))
-        })
+        serialize_to_js(&metadata)
     }
 
-    /// Transfer one bounded half-open frequency range as typed arrays.
-    #[wasm_bindgen(js_name = readWindow)]
-    pub fn read_window_js(&self, start: usize, count: usize) -> Result<JsValue, JsValue> {
-        let window = self
-            .window_snapshot(start, count)
-            .map_err(|error| wasm_error_to_js(*error))?;
-        serialize_stb_result_window_to_js(&window).map_err(|_| {
-            wasm_error_to_js(WasmError::new(
-                "failed to serialize STB result window".to_owned(),
-                "result_serialization_failed",
-                "result_transfer",
-            ))
-        })
-    }
-}
-
-impl WasmAnalogResultHandle {
-    pub(crate) fn new(
-        document: AnalogResultDocument,
-        resource_limits: ResourceLimits,
-    ) -> DetailedWasmResult<Self> {
-        document.validate().map_err(|message| {
-            Box::new(WasmError::new(
-                message,
-                "invalid_result_document",
-                "result_validation",
-            ))
-        })?;
-        let retained_values = document.retained_numeric_value_count();
-        if retained_values > resource_limits.max_result_values {
-            return Err(resource_limit_error(
-                ResourceKind::ResultValues,
-                retained_values,
-                resource_limits.max_result_values,
-            ));
-        }
-        Ok(Self {
-            document,
-            maximum_window_values: resource_limits
-                .max_result_values
-                .min(DEFAULT_MAX_TRANSFER_VALUES),
-        })
-    }
-
-    /// Access the canonical Rust document without crossing the JS boundary.
-    pub fn document(&self) -> &AnalogResultDocument {
-        &self.document
-    }
-
-    pub(crate) fn metadata_snapshot(&self) -> AnalogResultMetadata {
-        self.document.metadata(self.maximum_window_values)
-    }
-
-    pub(crate) fn window_snapshot(
-        &self,
-        start: usize,
-        count: usize,
-    ) -> DetailedWasmResult<AnalogResultWindow> {
-        self.document
-            .window(start, count, self.maximum_window_values)
-            .map_err(|message| {
-                Box::new(WasmError::new(
-                    message,
-                    "invalid_result_window",
-                    "result_transfer",
-                ))
-            })
-    }
-}
-
-impl WasmDeckResultHandle {
-    pub(crate) fn new_with_abort(
-        document: DeckResultDocument,
-        resource_limits: ResourceLimits,
-        abort: &dyn AbortSignal,
-    ) -> DetailedWasmResult<Self> {
-        document.validate_with_abort(abort).map_err(|message| {
-            if abort.is_aborted() {
-                aborted_error()
-            } else {
-                Box::new(WasmError::new(
-                    message,
-                    "invalid_deck_result_document",
-                    "result_validation",
-                ))
-            }
-        })?;
-        let retained_values = document
-            .retained_numeric_value_count_with_abort(abort)
-            .map_err(|message| {
-                if abort.is_aborted() {
-                    aborted_error()
-                } else {
-                    Box::new(WasmError::new(
-                        message,
-                        "invalid_deck_result_document",
-                        "result_validation",
-                    ))
-                }
-            })?;
-        if retained_values > resource_limits.max_result_values {
-            return Err(resource_limit_error(
-                ResourceKind::ResultValues,
-                retained_values,
-                resource_limits.max_result_values,
-            ));
-        }
-        Ok(Self {
-            document,
-            maximum_window_values: resource_limits
-                .max_result_values
-                .min(DEFAULT_MAX_TRANSFER_VALUES),
-        })
-    }
-
-    /// Access the canonical Rust document without crossing the JS boundary.
-    pub fn document(&self) -> &DeckResultDocument {
-        &self.document
-    }
-}
-
-#[wasm_bindgen]
-impl WasmDeckResultHandle {
-    #[wasm_bindgen(getter, js_name = coordinateCount)]
-    pub fn coordinate_count(&self) -> usize {
-        self.document.coordinates.len()
-    }
-
-    #[wasm_bindgen(getter, js_name = resultCount)]
-    pub fn result_count(&self) -> usize {
-        self.document.results.len()
-    }
-
-    #[wasm_bindgen(getter, js_name = fftResultCount)]
-    pub fn fft_result_count(&self) -> usize {
-        self.document.fft_results.len()
-    }
-
-    /// Return aggregate axes, coordinates, stable namespaces, and compact
-    /// result summaries without copying any numeric result column.
-    #[wasm_bindgen(js_name = metadata)]
-    pub fn metadata_js(&self) -> Result<JsValue, JsValue> {
-        let metadata = self
-            .document
-            .metadata(self.maximum_window_values)
-            .map_err(|message| {
-                wasm_error_to_js(WasmError::new(
-                    message,
-                    "invalid_deck_result_document",
-                    "result_validation",
-                ))
-            })?;
-        serialize_to_js(&metadata).map_err(|_| {
-            wasm_error_to_js(WasmError::new(
-                "failed to serialize deck result metadata".to_owned(),
-                "result_serialization_failed",
-                "result_transfer",
-            ))
-        })
-    }
-
-    /// Return the coordinate-local schema for one analog result.
+    /// Descriptors, units, availability, and provenance of one result.
     #[wasm_bindgen(js_name = resultMetadata)]
     pub fn result_metadata_js(&self, result_index: usize) -> Result<JsValue, JsValue> {
         let metadata = self
-            .document
-            .result_metadata(result_index, self.maximum_window_values)
-            .map_err(|message| {
-                wasm_error_to_js(WasmError::new(
-                    message,
-                    "invalid_result_index",
-                    "result_transfer",
-                ))
-            })?;
-        serialize_to_js(&metadata).map_err(|_| {
-            wasm_error_to_js(WasmError::new(
-                "failed to serialize coordinate-local result metadata".to_owned(),
-                "result_serialization_failed",
-                "result_transfer",
-            ))
-        })
+            .result_metadata_snapshot(result_index)
+            .map_err(|error| wasm_error_to_js(*error))?;
+        serialize_to_js(&metadata)
     }
 
-    /// Transfer one bounded half-open window from one coordinate-local analog
-    /// result as typed numeric and validity arrays.
+    /// A bounded half-open window of one result's aligned numeric columns.
+    ///
+    /// Axis and sample columns are `Float64Array`; every signal also carries a
+    /// `Uint8Array` validity mask. A zero validity entry marks an explicitly
+    /// unavailable sample, so the aligned numeric placeholder must not be
+    /// interpreted as a measurement.
     #[wasm_bindgen(js_name = readWindow)]
     pub fn read_window_js(
         &self,
@@ -387,129 +324,223 @@ impl WasmDeckResultHandle {
         count: usize,
     ) -> Result<JsValue, JsValue> {
         let window = self
-            .document
-            .result_window(result_index, start, count, self.maximum_window_values)
-            .map_err(|message| {
-                wasm_error_to_js(WasmError::new(
-                    message,
-                    "invalid_result_window",
-                    "result_transfer",
-                ))
-            })?;
-        serialize_result_window_to_js(&window).map_err(|_| {
-            wasm_error_to_js(WasmError::new(
-                "failed to serialize coordinate-local result window".to_owned(),
-                "result_serialization_failed",
-                "result_transfer",
-            ))
-        })
+            .window_snapshot(result_index, start, count)
+            .map_err(|error| wasm_error_to_js(*error))?;
+        serialize_result_window_to_js(&window)
     }
 
-    /// Return complete scalar FFT configuration and metrics without copying
-    /// bin or harmonic numeric columns.
-    #[wasm_bindgen(js_name = fftMetadata)]
-    pub fn fft_metadata_js(&self, fft_index: usize) -> Result<JsValue, JsValue> {
-        let metadata = self
-            .document
-            .fft_metadata(fft_index, self.maximum_window_values)
-            .map_err(|message| {
-                wasm_error_to_js(WasmError::new(
-                    message,
-                    "invalid_fft_result_index",
-                    "result_transfer",
-                ))
-            })?;
-        serialize_to_js(&metadata).map_err(|_| {
-            wasm_error_to_js(WasmError::new(
-                "failed to serialize deck FFT metadata".to_owned(),
-                "result_serialization_failed",
-                "result_transfer",
-            ))
-        })
-    }
-
-    /// Transfer one bounded half-open FFT-bin window as typed arrays.
-    #[wasm_bindgen(js_name = readFftBins)]
-    pub fn read_fft_bins_js(
-        &self,
-        fft_index: usize,
-        start: usize,
-        count: usize,
-    ) -> Result<JsValue, JsValue> {
-        let window = self
-            .document
-            .fft_bin_window(fft_index, start, count, self.maximum_window_values)
-            .map_err(|message| {
-                wasm_error_to_js(WasmError::new(
-                    message,
-                    "invalid_fft_result_window",
-                    "result_transfer",
-                ))
-            })?;
-        serialize_deck_fft_bin_window_to_js(&window).map_err(|_| {
-            wasm_error_to_js(WasmError::new(
-                "failed to serialize deck FFT bin window".to_owned(),
-                "result_serialization_failed",
-                "result_transfer",
-            ))
-        })
-    }
-
-    /// Transfer one bounded half-open magnitude-ranked harmonic window.
-    #[wasm_bindgen(js_name = readFftHarmonics)]
-    pub fn read_fft_harmonics_js(
-        &self,
-        fft_index: usize,
-        start: usize,
-        count: usize,
-    ) -> Result<JsValue, JsValue> {
-        let window = self
-            .document
-            .fft_harmonic_window(fft_index, start, count, self.maximum_window_values)
-            .map_err(|message| {
-                wasm_error_to_js(WasmError::new(
-                    message,
-                    "invalid_fft_result_window",
-                    "result_transfer",
-                ))
-            })?;
-        serialize_deck_fft_harmonic_window_to_js(&window).map_err(|_| {
-            wasm_error_to_js(WasmError::new(
-                "failed to serialize deck FFT harmonic window".to_owned(),
-                "result_serialization_failed",
-                "result_transfer",
-            ))
-        })
+    /// The complete core result document for one result, as JSON.
+    ///
+    /// This is the lossless export path: it is bounded by an explicit byte
+    /// budget and fails closed rather than truncating.
+    #[wasm_bindgen(js_name = resultJson)]
+    pub fn result_json_js(&self, result_index: usize) -> Result<String, JsValue> {
+        self.result_json_snapshot(result_index, &rspice_core::NoAbort)
+            .map_err(|error| wasm_error_to_js(*error))
     }
 }
 
-#[wasm_bindgen]
-impl WasmAnalogResultHandle {
-    #[wasm_bindgen(getter, js_name = pointCount)]
-    pub fn point_count(&self) -> usize {
-        self.document.point_count
+fn run_axis_descriptor(axis: &RunAxis) -> DetailedWasmResult<RunAxisDescriptor> {
+    let kind = match axis.kind() {
+        AxisKind::Alter => "alter",
+        AxisKind::Data => "data",
+        AxisKind::Step => "step",
+        AxisKind::Temperature => "temperature",
+        other => {
+            return Err(Box::new(WasmError::new(
+                format!("canonical run-axis kind {other:?} has no browser representation"),
+                "unsupported_deck_axis",
+                "unsupported_feature",
+            )));
+        }
+    };
+    let mut data_bindings = Vec::new();
+    if let Some(RunAxisValue::DataRow(bindings)) = axis.values().first() {
+        data_bindings
+            .try_reserve_exact(bindings.len())
+            .map_err(|_| allocation_error("DATA axis binding descriptors"))?;
+        for binding in bindings {
+            data_bindings.push(binding.name().to_owned());
+        }
+    }
+    Ok(RunAxisDescriptor {
+        kind,
+        name: axis.name().to_owned(),
+        step_target: axis.step_target().map(step_target_descriptor).transpose()?,
+        value_count: axis.values().len(),
+        data_bindings,
+    })
+}
+
+fn step_target_descriptor(target: &StepAxisTarget) -> DetailedWasmResult<StepTargetDescriptor> {
+    Ok(match target {
+        StepAxisTarget::Parameter { name } => {
+            StepTargetDescriptor::Parameter { name: name.clone() }
+        }
+        StepAxisTarget::Device { name, parameter } => StepTargetDescriptor::Device {
+            name: name.clone(),
+            parameter: parameter.clone(),
+        },
+        StepAxisTarget::Model { name, parameter } => StepTargetDescriptor::Model {
+            name: name.clone(),
+            parameter: parameter.clone(),
+        },
+        StepAxisTarget::Temperature => StepTargetDescriptor::Temperature,
+        other => {
+            return Err(Box::new(WasmError::new(
+                format!("canonical STEP target {other:?} has no browser representation"),
+                "unsupported_deck_axis",
+                "unsupported_feature",
+            )));
+        }
+    })
+}
+
+fn window_error(message: String) -> Box<WasmError> {
+    Box::new(WasmError::new(
+        message,
+        "invalid_result_window",
+        "result_transfer",
+    ))
+}
+
+fn allocation_error(object: &'static str) -> Box<WasmError> {
+    Box::new(WasmError::new(
+        format!("could not allocate {object}"),
+        "result_allocation_failed",
+        "result_projection",
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use rspice_core::NoAbort;
+    use rspice_core::execution::result_document::SeriesWindowValues;
+
+    use super::*;
+    use crate::runners::deck::run_authored_deck_document_detailed;
+
+    const TRANSIENT: &str = "browser window deck\n\
+V1 in 0 PULSE(0 1 0 1n 1n 20n 40n)\n\
+R1 in out 1k\n\
+C1 out 0 1p\n\
+.TRAN 1n 20n\n\
+.END\n";
+
+    fn handle(source: &str, limits: ResourceLimits) -> WasmResultHandle {
+        let execution = run_authored_deck_document_detailed(source)
+            .unwrap_or_else(|error| panic!("deck must run: {}", error.message));
+        WasmResultHandle::new(
+            &execution.plan,
+            execution.coordinates,
+            execution.results,
+            limits,
+        )
+        .expect("the handle retains the executed plan")
     }
 
-    #[wasm_bindgen(getter, js_name = analysisId)]
-    pub fn analysis_id(&self) -> String {
-        self.document.analysis.id.clone()
+    /// A window is a half-open slice of every aligned column, and each signal
+    /// carries the validity mask that says which numbers are measurements.
+    #[test]
+    fn a_window_transfers_aligned_columns_with_their_validity_masks() {
+        let handle = handle(TRANSIENT, crate::options::browser_resource_limits());
+        let point_count = handle.documents()[0].point_count();
+        let window = handle
+            .window_snapshot(0, 1, 3)
+            .expect("a three-point window is inside the result");
+
+        assert_eq!(window.start, 1);
+        assert_eq!(window.count, 3);
+        assert_eq!(window.point_count, point_count);
+        assert_eq!(window.axes.len(), 1);
+        assert!(!window.signals.is_empty());
+        for signal in &window.signals {
+            let validity = match &signal.values {
+                SeriesWindowValues::Real { values, validity } => {
+                    assert_eq!(values.len(), 3);
+                    validity
+                }
+                SeriesWindowValues::Complex {
+                    real,
+                    imaginary,
+                    validity,
+                } => {
+                    assert_eq!(real.len(), 3);
+                    assert_eq!(imaginary.len(), 3);
+                    validity
+                }
+                SeriesWindowValues::Logic { samples, validity } => {
+                    assert_eq!(samples.len(), 3);
+                    validity
+                }
+            };
+            assert_eq!(validity.len(), 3, "every window column carries its mask");
+        }
     }
 
-    /// Return descriptors, units, identity, explicit coordinate absence, and
-    /// the transfer ceiling without copying result samples.
-    #[wasm_bindgen(js_name = metadata)]
-    pub fn metadata_js(&self) -> Result<JsValue, JsValue> {
-        serialize_to_js(&self.metadata_snapshot())
+    /// Empty, out-of-range, and overflowing windows fail closed with the
+    /// documented code instead of clamping to something plausible.
+    #[test]
+    fn empty_and_out_of_range_windows_fail_closed() {
+        let handle = handle(TRANSIENT, crate::options::browser_resource_limits());
+        let point_count = handle.documents()[0].point_count();
+
+        for (start, count) in [(0, 0), (point_count, 1), (0, point_count + 1)] {
+            let error = *handle
+                .window_snapshot(0, start, count)
+                .expect_err("an invalid window must fail closed");
+            assert_eq!(error.code, "invalid_result_window");
+            assert_eq!(error.category, "result_transfer");
+        }
+        let error = *handle
+            .window_snapshot(handle.result_count(), 0, 1)
+            .expect_err("an unknown result index must fail closed");
+        assert_eq!(error.code, "invalid_result_index");
     }
 
-    /// Transfer one bounded, half-open point range as typed numeric and
-    /// validity arrays. Missing samples carry validity zero; their numeric
-    /// slots are placeholders and must not be interpreted.
-    #[wasm_bindgen(js_name = readWindow)]
-    pub fn read_window_js(&self, start: usize, count: usize) -> Result<JsValue, JsValue> {
-        let window = self
-            .window_snapshot(start, count)
-            .map_err(|error| wasm_error_to_js(*error))?;
-        serialize_result_window_to_js(&window)
+    /// A tighter `maxResultValues` tightens the transfer ceiling; it can never
+    /// widen it.
+    #[test]
+    fn the_transfer_budget_is_the_stricter_of_the_two_ceilings() {
+        let mut limits = crate::options::browser_resource_limits();
+        limits.max_result_values = 8;
+        let handle = handle(TRANSIENT, limits);
+        let metadata = handle
+            .result_metadata_snapshot(0)
+            .expect("result metadata projects");
+        assert_eq!(metadata.maximum_window_values, 8);
+
+        let error = *handle
+            .window_snapshot(0, 0, 4)
+            .expect_err("an over-budget window must fail closed");
+        assert_eq!(error.code, "invalid_result_window");
+        assert!(
+            error.message.contains("transfer limit is 8"),
+            "the failure quotes the effective ceiling: {}",
+            error.message
+        );
+    }
+
+    /// The lossless JSON export is the core document, unchanged.
+    #[test]
+    fn the_json_export_round_trips_the_core_document() {
+        let handle = handle(TRANSIENT, crate::options::browser_resource_limits());
+        let json = handle
+            .result_json_snapshot(0, &NoAbort)
+            .expect("the lossless export encodes");
+        let decoded = AnalysisResultDocument::from_json(&json).expect("the export decodes");
+        assert_eq!(&decoded, &handle.documents()[0]);
+    }
+
+    /// Projection is cancellable: a pre-set abort stops the export instead of
+    /// returning a truncated string.
+    #[test]
+    fn a_pre_set_abort_cancels_the_json_export() {
+        let handle = handle(TRANSIENT, crate::options::browser_resource_limits());
+        let error = *handle
+            .result_json_snapshot(0, &rspice_core::abort_signal::ImmediateAbort)
+            .expect_err("a cancelled export must not return a document");
+        assert_eq!(error.code, "aborted");
+        assert_eq!(error.category, "cancellation");
     }
 }

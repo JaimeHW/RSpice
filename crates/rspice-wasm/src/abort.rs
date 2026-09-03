@@ -6,6 +6,8 @@
 //! entrypoint. There is no non-abort execution path.
 
 use rspice_core::AbortSignal;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::{JsCast, JsValue};
 
 use crate::DetailedWasmResult;
 use crate::errors::WasmError;
@@ -246,5 +248,46 @@ impl ExecutionScope {
     /// The single abort source every runner in this call polls.
     pub(crate) fn abort(&self) -> ConfiguredAbort<'_> {
         ConfiguredAbort::with_deadline(self.deadline, &self.shared)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rspice_core::NoAbort;
+
+    use super::*;
+
+    /// A zero deadline is a valid request for immediate cancellation, and an
+    /// implausibly large one fails before any work starts.
+    #[test]
+    fn zero_deadlines_cancel_and_oversized_deadlines_fail_closed() {
+        let deadline = ExecutionDeadline::new(Some(0))
+            .expect("a zero deadline is a valid immediate-cancellation policy");
+        assert!(ConfiguredAbort::with_deadline(deadline, &NoAbort).is_aborted());
+
+        let error = *ExecutionDeadline::new(Some(MAX_TIMEOUT_MILLISECONDS + 1))
+            .expect_err("an implausibly large browser deadline must fail closed");
+        assert_eq!(error.code, "invalid_argument");
+        assert!(error.message.contains("timeoutMilliseconds"));
+    }
+
+    /// With no deadline, the composed abort reports exactly what the external
+    /// source reports; it never invents cancellation of its own.
+    #[test]
+    fn an_absent_deadline_defers_entirely_to_the_external_source() {
+        let deadline = ExecutionDeadline::new(None).expect("no deadline is a valid policy");
+        assert!(!ConfiguredAbort::with_deadline(deadline, &NoAbort).is_aborted());
+        assert!(
+            ConfiguredAbort::with_deadline(deadline, &rspice_core::abort_signal::ImmediateAbort)
+                .is_aborted()
+        );
+    }
+
+    /// Without an installed shared control word, the shared signal never
+    /// claims cancellation.
+    #[test]
+    fn the_shared_signal_is_inert_until_a_control_word_is_installed() {
+        let signal = JsSharedAbortSignal { enabled: false };
+        assert!(!signal.is_aborted());
     }
 }

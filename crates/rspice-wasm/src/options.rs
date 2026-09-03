@@ -4,7 +4,7 @@
 //! fields are rejected so a misspelled control cannot silently widen a limit.
 
 use rspice_core::ResourceLimits;
-use rspice_core::analysis::StbSweepType;
+
 use serde::{Deserialize, Serialize};
 
 use crate::DetailedWasmResult;
@@ -13,6 +13,8 @@ use crate::errors::WasmError;
 pub(crate) const MEBIBYTE: usize = 1024 * 1024;
 pub(crate) const MAX_TIMEOUT_MILLISECONDS: u32 = 86_400_000;
 pub(crate) const DEFAULT_MAX_TRANSFER_VALUES: usize = 262_144;
+/// Largest lossless JSON export one retained result may produce.
+pub(crate) const DEFAULT_MAX_RESULT_JSON_BYTES: u64 = 64 * 1024 * 1024;
 
 pub(crate) fn browser_resource_limits() -> ResourceLimits {
     let mut limits = ResourceLimits::default();
@@ -112,39 +114,28 @@ impl Default for WasmResourceLimits {
 }
 
 /// Extensible options object accepted by every JavaScript export.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct WasmExecutionOptions {
     pub resource_limits: WasmResourceLimits,
+    /// Waveform compression applied to every authored `.TRAN` this call runs.
+    ///
+    /// Omitting it publishes the full accepted grid. Compression is a browser
+    /// transfer policy: the solver and the authored output projection are
+    /// identical either way, and the published result always carries the
+    /// compression certificate that says which grid it is on.
+    pub transient_compression: Option<WasmCompressionOptions>,
 }
 
-/// Frequency-grid convention for direct scalar STB execution.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum WasmStbSweep {
-    Linear,
-    Decade,
-    Octave,
-}
-
-impl WasmStbSweep {
-    pub(crate) const fn to_core(self) -> StbSweepType {
-        match self {
-            Self::Linear => StbSweepType::Linear,
-            Self::Decade => StbSweepType::Decade,
-            Self::Octave => StbSweepType::Octave,
-        }
-    }
-
-    pub(crate) fn parse(value: &str) -> DetailedWasmResult<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "lin" | "linear" => Ok(Self::Linear),
-            "dec" | "decade" => Ok(Self::Decade),
-            "oct" | "octave" => Ok(Self::Octave),
-            _ => Err(Box::new(WasmError::invalid_argument(format!(
-                "STB sweep must be 'linear', 'decade', or 'octave', got {value:?}"
-            )))),
-        }
+impl WasmExecutionOptions {
+    /// The core compression policy this call asked for, if any.
+    pub(crate) fn compression_config(
+        &self,
+    ) -> DetailedWasmResult<Option<rspice_core::engine::CompressionConfig>> {
+        self.transient_compression
+            .as_ref()
+            .map(WasmCompressionOptions::to_core)
+            .transpose()
     }
 }
 
@@ -194,5 +185,70 @@ impl WasmCompressionOptions {
             enabled: self.enabled,
             min_interval: self.maximum_interval,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Browser defaults are stricter than the desktop defaults, because a page
+    /// cannot be allowed to exhaust a tab's memory.
+    #[test]
+    fn browser_defaults_are_stricter_than_the_desktop_defaults() {
+        let browser = browser_resource_limits();
+        let desktop = ResourceLimits::default();
+        assert!(browser.max_netlist_bytes <= desktop.max_netlist_bytes);
+        assert!(browser.max_circuit_nodes <= desktop.max_circuit_nodes);
+        assert!(browser.max_analysis_points <= desktop.max_analysis_points);
+        assert!(browser.max_result_values <= desktop.max_result_values);
+        assert_eq!(browser.max_parallel_workers, 1);
+    }
+
+    /// A partial options object inherits every omitted browser default, and a
+    /// misspelled control is rejected rather than silently ignored.
+    #[test]
+    fn partial_options_inherit_defaults_and_unknown_fields_are_rejected() {
+        let options: WasmExecutionOptions =
+            serde_json::from_str(r#"{"resourceLimits":{"maxCircuitNodes":8}}"#)
+                .expect("a partial options object decodes");
+        assert_eq!(options.resource_limits.max_circuit_nodes, 8);
+        assert_eq!(
+            options.resource_limits.max_netlist_bytes,
+            WasmResourceLimits::default().max_netlist_bytes
+        );
+        assert!(options.transient_compression.is_none());
+
+        serde_json::from_str::<WasmExecutionOptions>(r#"{"resourceLimits":{"maxNodes":8}}"#)
+            .expect_err("a misspelled resource control must be rejected");
+        serde_json::from_str::<WasmExecutionOptions>(r#"{"resourceLimit":{}}"#)
+            .expect_err("a misspelled option must be rejected");
+    }
+
+    /// Compression tolerances must be finite and non-negative; a nonsense
+    /// policy fails before any solve.
+    #[test]
+    fn compression_options_fail_closed_on_impossible_tolerances() {
+        for policy in [
+            WasmCompressionOptions {
+                absolute_tolerance: -1.0,
+                ..WasmCompressionOptions::default()
+            },
+            WasmCompressionOptions {
+                relative_tolerance: f64::NAN,
+                ..WasmCompressionOptions::default()
+            },
+            WasmCompressionOptions {
+                maximum_interval: f64::INFINITY,
+                ..WasmCompressionOptions::default()
+            },
+        ] {
+            let error = *policy
+                .to_core()
+                .expect_err("an impossible compression policy must fail closed");
+            assert_eq!(error.code, "invalid_argument");
+            assert_eq!(error.category, "input_validation");
+        }
+        assert!(WasmCompressionOptions::default().to_core().is_ok());
     }
 }

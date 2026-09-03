@@ -23,7 +23,7 @@ class WasmPlaygroundWorkerTests(unittest.TestCase):
                 self.assertIn('type: "module"', index)
                 self.assertNotRegex(
                     index,
-                    re.compile(r"import\s+init,\s*\{[^}]*runTransientAnalysis", re.S),
+                    re.compile(r"import\s+init,\s*\{[^}]*runTransientAnalysisDocument", re.S),
                     "main page must not import synchronous engine solve exports",
                 )
                 self.assertNotIn(
@@ -36,23 +36,30 @@ class WasmPlaygroundWorkerTests(unittest.TestCase):
                     worker,
                     re.compile(
                         r"import\s+init,\s*\{[^}]*summarizeNetlist"
-                        r"[^}]*runDcOperatingPoint[^}]*runAcAnalysis"
-                        r"[^}]*runTransientAnalysis",
+                        r"[^}]*runOperatingPointDocument[^}]*runAcAnalysisDocument"
+                        r"[^}]*runTransientAnalysisDocument",
                         re.S,
                     ),
                 )
                 self.assertIn('case "ac":', worker)
-                self.assertIn("runAcAnalysis(payload.source, payload.frequencies)", worker)
                 self.assertIn("const options = payload.options", worker)
                 self.assertIn("summarizeNetlist(payload.source, options)", worker)
-                self.assertIn("runDcOperatingPoint(payload.source, options)", worker)
+                self.assertIn("runOperatingPointDocument(payload.source, options)", worker)
                 self.assertIn(
-                    "runAcAnalysis(payload.source, payload.frequencies, options)", worker
-                )
-                self.assertIn(
-                    "runTransientAnalysis(payload.source, payload.tstop, payload.hmax, options)",
+                    "runAcAnalysisDocument(payload.source, payload.frequencies, options)",
                     worker,
                 )
+                self.assertIn(
+                    "runTransientAnalysisDocument(payload.source, payload.tstop, payload.hmax, options)",
+                    worker,
+                )
+                # Results stay in WebAssembly memory; the worker transfers only
+                # descriptors and one budgeted window per result.
+                self.assertIn("function readHandle(handle)", worker)
+                self.assertIn("handle.metadata()", worker)
+                self.assertIn("handle.resultMetadata(summary.index)", worker)
+                self.assertIn("handle.readWindow(summary.index, 0, count)", worker)
+                self.assertIn("function windowPointBudget(metadata)", worker)
                 self.assertIn('postMessage({ type: "ready" })', worker)
                 self.assertRegex(worker, re.compile(r'postMessage\(\{\s*type: "result"', re.S))
                 self.assertRegex(worker, re.compile(r'postMessage\(\{\s*type: "error"', re.S))

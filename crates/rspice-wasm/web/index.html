@@ -306,23 +306,68 @@ function acFrequencies() {
   return Array.from({ length: points }, (_, i) => 10 ** (lo + (hi - lo) * i / (points - 1)));
 }
 
-function drawAcPlot(points) {
-  const first = points[0];
-  if (!first) { return null; }
+/* ---- shared result-document readers ----
+   Every analysis returns the same document: descriptor-only metadata plus one
+   bounded window whose numeric columns are typed arrays. A zero validity byte
+   marks an explicitly unavailable sample, so the aligned number beside it is a
+   placeholder and must never be plotted as a measurement. */
+function firstResult(payload, resultKind) {
+  return (payload.results ?? []).find(
+    entry => entry.metadata.resultKind === resultKind,
+  );
+}
 
-  const preferred = ["out", "in"];
-  let nodeIndex = 0;
+function axisValues(entry, axisName) {
+  const axis = entry.window?.axes.find(candidate => candidate.name === axisName);
+  return axis ? Array.from(axis.values.values) : [];
+}
+
+/* Pick the first named voltage that exists, else any voltage. */
+function pickVoltage(entry, preferred) {
+  const voltages = entry.metadata.signals
+    .map((descriptor, index) => ({ descriptor, index }))
+    .filter(candidate => candidate.descriptor.kind === "voltage");
   for (const name of preferred) {
-    const idx = first.node_names.findIndex(n => n.toLowerCase() === name);
-    if (idx >= 0) { nodeIndex = idx; break; }
+    const match = voltages.find(
+      candidate => candidate.descriptor.owner.name?.toLowerCase() === name,
+    );
+    if (match) { return match; }
   }
+  return voltages[0] ?? null;
+}
 
-  const frequencies = points.map(p => p.frequency);
-  const magnitudesDb = points.map(p => {
-    const re = p.voltages.real[nodeIndex] || 0;
-    const im = p.voltages.imag[nodeIndex] || 0;
-    return 20 * Math.log10(Math.max(Math.hypot(re, im), 1e-30));
+/* Present samples only. An absent sample ends the run of points. */
+function realSamples(entry, signalIndex) {
+  const column = entry.window?.signals[signalIndex]?.values;
+  if (!column || column.representation !== "real") { return []; }
+  return Array.from(column.values, (value, i) => (column.validity[i] ? value : null));
+}
+
+function complexMagnitudeDb(entry, signalIndex) {
+  const column = entry.window?.signals[signalIndex]?.values;
+  if (!column || column.representation !== "complex") { return []; }
+  return Array.from(column.real, (re, i) => {
+    if (!column.validity[i]) { return null; }
+    return 20 * Math.log10(Math.max(Math.hypot(re, column.imaginary[i]), 1e-30));
   });
+}
+
+function drawAcPlot(payload) {
+  const entry = firstResult(payload, "ac");
+  if (!entry || !entry.window) { return null; }
+  const chosen = pickVoltage(entry, ["out", "in"]);
+  if (!chosen) { return null; }
+
+  const allFrequencies = axisValues(entry, "frequency");
+  const allMagnitudes = complexMagnitudeDb(entry, chosen.index);
+  const frequencies = [];
+  const magnitudesDb = [];
+  for (let i = 0; i < allFrequencies.length; i++) {
+    if (allMagnitudes[i] === null || allMagnitudes[i] === undefined) { continue; }
+    frequencies.push(allFrequencies[i]);
+    magnitudesDb.push(allMagnitudes[i]);
+  }
+  if (frequencies.length < 2) { return null; }
 
   const svg = $("plot");
   const W = svg.clientWidth || 520, H = svg.clientHeight || 300;
@@ -360,8 +405,8 @@ function drawAcPlot(points) {
   }
   el("path", { d, fill: "none", stroke: "var(--trace)", "stroke-width": 1.8,
     "stroke-linejoin": "round" }, svg);
-  $("plot-meta").textContent = "V(" + first.node_names[nodeIndex] + ") magnitude (dB)";
-  return first.node_names[nodeIndex];
+  $("plot-meta").textContent = chosen.descriptor.displayName + " magnitude (dB)";
+  return chosen.descriptor.displayName;
 }
 
 /* ---- engine wiring ---- */
@@ -474,22 +519,28 @@ async function doOp() {
   try {
     const response = await runEngine("op", { source: deck() });
     if (!response) { return; }
-    const r = response.result;
+    const entry = firstResult(response.result, "op");
+    if (!entry) { log("op: no operating-point result was published", "err"); return; }
     const ms = response.elapsedMs.toFixed(1);
     const table = $("op-table");
     table.textContent = "";
-    r.node_names.forEach((n, i) => {
+    let nodes = 0;
+    let branches = 0;
+    entry.metadata.signals.forEach((descriptor, index) => {
+      const samples = realSamples(entry, index);
+      const value = samples[0];
+      if (descriptor.kind === "voltage") { nodes += 1; }
+      if (descriptor.kind === "current") { branches += 1; }
+      if (descriptor.kind !== "voltage" && descriptor.kind !== "current") { return; }
       const row = table.insertRow();
-      row.insertCell().textContent = "V(" + n + ")";
-      row.insertCell().textContent = fmtEng(r.node_voltages[i]) + " V";
-    });
-    r.branch_names.forEach((n, i) => {
-      const row = table.insertRow();
-      row.insertCell().textContent = "I(" + n + ")";
-      row.insertCell().textContent = fmtEng(r.branch_currents[i]) + " A";
+      row.insertCell().textContent = descriptor.displayName;
+      /* An unavailable sample is reported as unavailable, not as zero. */
+      row.insertCell().textContent = value === null || value === undefined
+        ? "unavailable"
+        : fmtEng(value) + (descriptor.kind === "voltage" ? " V" : " A");
     });
     $("op-panel").hidden = false;
-    log(`op: converged — ${r.node_names.length} nodes, ${r.branch_names.length} branches (${ms} ms)`, "ok");
+    log(`op: converged — ${nodes} nodes, ${branches} branches (${ms} ms)`, "ok");
   } catch (e) { log("op error: " + e, "err"); }
 }
 async function doAc() {
@@ -524,19 +575,36 @@ async function doTran() {
   try {
     const response = await runEngine("tran", { source: deck(), tstop, hmax });
     if (!response) { return; }
-    const r = response.result;
+    const entry = firstResult(response.result, "tran");
+    if (!entry || !entry.window) { log("tran: no transient result was published", "err"); return; }
     const ms = response.elapsedMs.toFixed(1);
-    const want = ["out", "in"];
+    const time = axisValues(entry, "time");
     const series = [];
-    for (const name of want) {
-      const i = r.node_names.findIndex(n => n.toLowerCase() === name);
-      if (i >= 0) { series.push({ name: "V(" + r.node_names[i] + ")", values: r.voltages[i] }); }
+    for (const name of ["out", "in"]) {
+      const chosen = pickVoltage(entry, [name]);
+      if (chosen && chosen.descriptor.owner.name?.toLowerCase() === name) {
+        series.push({ name: chosen.descriptor.displayName, values: realSamples(entry, chosen.index) });
+      }
     }
-    if (!series.length && r.node_names.length) {
-      series.push({ name: "V(" + r.node_names[0] + ")", values: r.voltages[0] });
+    if (!series.length) {
+      const chosen = pickVoltage(entry, []);
+      if (chosen) {
+        series.push({ name: chosen.descriptor.displayName, values: realSamples(entry, chosen.index) });
+      }
     }
-    drawPlot(r.time, series);
-    log(`tran: 0–${fmtEng(tstop)}s · ${r.time.length} pts · solved in ${ms} ms`, "ok");
+    /* Plot only the leading run where every selected waveform is present. An
+       absent sample is not interpolated over and not drawn as zero. */
+    let plotted = time.length;
+    for (const s of series) {
+      const gap = s.values.findIndex(value => value === null || value === undefined);
+      if (gap >= 0) { plotted = Math.min(plotted, gap); }
+    }
+    drawPlot(time.slice(0, plotted), series.map(s => ({ ...s, values: s.values.slice(0, plotted) })));
+    const budget = entry.truncated
+      ? ` of ${entry.metadata.pointCount} (transfer budget)`
+      : "";
+    const gaps = plotted < time.length ? `, stopped at the first unavailable sample` : "";
+    log(`tran: 0–${fmtEng(tstop)}s · ${plotted} pts${budget}${gaps} · solved in ${ms} ms`, "ok");
   } catch (e) { log("tran error: " + e, "err"); }
 }
 

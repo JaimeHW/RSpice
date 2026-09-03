@@ -214,8 +214,18 @@ const CLI_AXIS: &str =
 const CLI_AXIS_UNAVAILABLE: &str = "CLI has no authored deck-axis route for this analysis family";
 const PY_AXIS_UNAVAILABLE: &str =
     "typed direct API exists, but Engine.run has no authored axis route";
-const WASM_UNAVAILABLE: &str = "browser API has no result adapter for this family";
-const WASM_AXIS_UNAVAILABLE: &str = "browser API does not consume DeckPlan axes";
+const WASM_SP_RUNNER: &str =
+    "no Engine runner returns an SParameterResult, so the browser deck route refuses .SP by name";
+const WASM_NODE_INDEX: &str =
+    "core takes node indices here and exposes no authored-name to node-index resolver, so the browser deck route refuses the card by name";
+const WASM_FOUR_RESOLVER: &str =
+    "core exposes no resolver from a .FOUR output specification to a TransientResult column, so the browser deck route refuses .FOUR by name";
+const WASM_PNOISE_RUNNER: &str =
+    "no Engine runner returns analysis::pnoise::PnoiseResult, so the browser deck route refuses .PNOISE by name";
+const WASM_STB_INFINITE_MARGIN: &str =
+    "the browser deck route executes .STB and publishes the shared stability document, but a loop with no gain or phase crossover has an infinite Tian margin that a finite ResultScalar cannot encode, so such a run fails closed instead of publishing a different margin";
+const WASM_MONTE_CARLO_SEED: &str =
+    "the axis executes, but coordinate-derived Monte Carlo seed semantics are undefined";
 const ADAPTER_UNAVAILABLE: &str = "protocol-3 adapter has no result mapping for this family";
 
 const fn cli_artifact_axes() -> SurfaceCapability {
@@ -247,14 +257,6 @@ const fn python_direct_only() -> SurfaceCapability {
         MappingStatus::Mapped,
         MappingStatus::Unsupported(PY_AXIS_UNAVAILABLE),
         MappingStatus::Unsupported(PY_AXIS_UNAVAILABLE),
-    )
-}
-
-const fn wasm_direct_only() -> SurfaceCapability {
-    SurfaceCapability::new(
-        MappingStatus::Mapped,
-        MappingStatus::Unsupported(WASM_AXIS_UNAVAILABLE),
-        MappingStatus::Unsupported(WASM_AXIS_UNAVAILABLE),
     )
 }
 
@@ -318,56 +320,60 @@ pub const ANALYSIS_CAPABILITY_MATRIX: &[AnalysisResultCapability] = &[
         result: AnalysisResultKind::SParameters,
         cli: cli_artifact_axes(),
         python: python_mapped_axes(),
-        wasm: SurfaceCapability::unsupported(WASM_UNAVAILABLE),
+        wasm: SurfaceCapability::unsupported(WASM_SP_RUNNER),
         engine_adapter: SurfaceCapability::unsupported(ADAPTER_UNAVAILABLE),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::PortNoise,
         cli: cli_artifact_axes(),
         python: python_mapped_axes(),
-        wasm: SurfaceCapability::unsupported(WASM_UNAVAILABLE),
+        wasm: SurfaceCapability::unsupported(WASM_SP_RUNNER),
         engine_adapter: SurfaceCapability::unsupported(ADAPTER_UNAVAILABLE),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Distortion,
         cli: cli_artifact_axes(),
         python: python_mapped_axes(),
-        wasm: SurfaceCapability::unsupported(WASM_UNAVAILABLE),
+        wasm: wasm_mapped_axes(),
         engine_adapter: SurfaceCapability::unsupported(ADAPTER_UNAVAILABLE),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::TransferFunction,
         cli: cli_artifact_axes(),
         python: python_mapped_axes(),
-        wasm: SurfaceCapability::unsupported(WASM_UNAVAILABLE),
+        wasm: wasm_mapped_axes(),
         engine_adapter: SurfaceCapability::unsupported(ADAPTER_UNAVAILABLE),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Stability,
         cli: cli_artifact_axes(),
         python: python_mapped_axes(),
-        wasm: wasm_direct_only(),
+        wasm: SurfaceCapability::new(
+            MappingStatus::Partial(WASM_STB_INFINITE_MARGIN),
+            MappingStatus::Partial(WASM_STB_INFINITE_MARGIN),
+            MappingStatus::Partial(WASM_STB_INFINITE_MARGIN),
+        ),
         engine_adapter: SurfaceCapability::unsupported(ADAPTER_UNAVAILABLE),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Sensitivity,
         cli: cli_artifact_axes(),
         python: python_mapped_axes(),
-        wasm: SurfaceCapability::unsupported(WASM_UNAVAILABLE),
+        wasm: SurfaceCapability::unsupported(WASM_NODE_INDEX),
         engine_adapter: SurfaceCapability::unsupported(ADAPTER_UNAVAILABLE),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::PoleZero,
         cli: cli_artifact_axes(),
         python: python_mapped_axes(),
-        wasm: SurfaceCapability::unsupported(WASM_UNAVAILABLE),
+        wasm: SurfaceCapability::unsupported(WASM_NODE_INDEX),
         engine_adapter: SurfaceCapability::unsupported(ADAPTER_UNAVAILABLE),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Fourier,
         cli: cli_artifact_axes(),
         python: python_mapped_axes(),
-        wasm: SurfaceCapability::unsupported(WASM_UNAVAILABLE),
+        wasm: SurfaceCapability::unsupported(WASM_FOUR_RESOLVER),
         engine_adapter: SurfaceCapability::unsupported(ADAPTER_UNAVAILABLE),
     },
     AnalysisResultCapability {
@@ -393,35 +399,39 @@ pub const ANALYSIS_CAPABILITY_MATRIX: &[AnalysisResultCapability] = &[
                 "nested TEMP executes, but coordinate-derived Monte Carlo seed semantics are undefined",
             ),
         ),
-        wasm: SurfaceCapability::unsupported(WASM_UNAVAILABLE),
+        wasm: SurfaceCapability::new(
+            MappingStatus::Mapped,
+            MappingStatus::Partial(WASM_MONTE_CARLO_SEED),
+            MappingStatus::Partial(WASM_MONTE_CARLO_SEED),
+        ),
         engine_adapter: SurfaceCapability::unsupported(ADAPTER_UNAVAILABLE),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Pss,
         cli: cli_artifact_scalar_only(),
         python: python_direct_only(),
-        wasm: SurfaceCapability::unsupported(WASM_UNAVAILABLE),
+        wasm: wasm_mapped_axes(),
         engine_adapter: SurfaceCapability::unsupported(ADAPTER_UNAVAILABLE),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Pac,
         cli: SurfaceCapability::unsupported("CLI has no PAC execution or result adapter"),
         python: python_direct_only(),
-        wasm: SurfaceCapability::unsupported(WASM_UNAVAILABLE),
+        wasm: wasm_mapped_axes(),
         engine_adapter: SurfaceCapability::unsupported(ADAPTER_UNAVAILABLE),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::PNoise,
         cli: SurfaceCapability::unsupported("CLI has no PNoise execution or result adapter"),
         python: python_direct_only(),
-        wasm: SurfaceCapability::unsupported(WASM_UNAVAILABLE),
+        wasm: SurfaceCapability::unsupported(WASM_PNOISE_RUNNER),
         engine_adapter: SurfaceCapability::unsupported(ADAPTER_UNAVAILABLE),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::HarmonicBalance,
         cli: cli_artifact_axes(),
         python: python_mapped_axes(),
-        wasm: SurfaceCapability::unsupported(WASM_UNAVAILABLE),
+        wasm: wasm_mapped_axes(),
         engine_adapter: SurfaceCapability::unsupported(ADAPTER_UNAVAILABLE),
     },
     AnalysisResultCapability {
@@ -434,7 +444,7 @@ pub const ANALYSIS_CAPABILITY_MATRIX: &[AnalysisResultCapability] = &[
             MappingStatus::Unsupported(PY_AXIS_UNAVAILABLE),
             MappingStatus::Unsupported(PY_AXIS_UNAVAILABLE),
         ),
-        wasm: SurfaceCapability::unsupported(WASM_UNAVAILABLE),
+        wasm: wasm_mapped_axes(),
         engine_adapter: SurfaceCapability::unsupported(ADAPTER_UNAVAILABLE),
     },
 ];
@@ -492,6 +502,8 @@ const SIGNAL_ARTIFACT: &str = "export exists, but it is not a shared SignalDescr
 const ADVANCED_SIGNAL_SUBSET: &str = "mapped for a subset of result families only";
 const DIGITAL_OUT_OF_SCOPE: &str =
     "digital/AMS surface work is owned by the separate digital effort";
+const WASM_LOGIC_SAMPLES: &str =
+    "descriptors, state/strength samples and validity masks cross the browser boundary with the shared document, but no digital-specific browser surface exists; that work is owned by the separate digital effort";
 
 /// Signal-descriptor adapter coverage, kept beside result coverage so adding a
 /// `SignalKind` cannot silently inherit a frontend default.
@@ -500,37 +512,35 @@ pub const SIGNAL_CAPABILITY_MATRIX: &[SignalCapability] = &[
         signal: SignalKind::Voltage,
         cli: MappingStatus::Partial(SIGNAL_ARTIFACT),
         python: MappingStatus::Mapped,
-        wasm: MappingStatus::Partial(ADVANCED_SIGNAL_SUBSET),
+        wasm: MappingStatus::Mapped,
         engine_adapter: MappingStatus::Mapped,
     },
     SignalCapability {
         signal: SignalKind::Current,
         cli: MappingStatus::Partial(SIGNAL_ARTIFACT),
         python: MappingStatus::Mapped,
-        wasm: MappingStatus::Partial(ADVANCED_SIGNAL_SUBSET),
+        wasm: MappingStatus::Mapped,
         engine_adapter: MappingStatus::Mapped,
     },
     SignalCapability {
         signal: SignalKind::DeviceObservable,
         cli: MappingStatus::Partial(ADVANCED_SIGNAL_SUBSET),
         python: MappingStatus::Partial(ADVANCED_SIGNAL_SUBSET),
-        wasm: MappingStatus::Partial("mapped for OP, DC, transient, and noise result documents"),
+        wasm: MappingStatus::Mapped,
         engine_adapter: MappingStatus::Mapped,
     },
     SignalCapability {
         signal: SignalKind::Scalar,
         cli: MappingStatus::Partial(SIGNAL_ARTIFACT),
         python: MappingStatus::Partial(ADVANCED_SIGNAL_SUBSET),
-        wasm: MappingStatus::Partial(
-            "mapped for transient integration and noise scalars; other result families remain unavailable",
-        ),
+        wasm: MappingStatus::Mapped,
         engine_adapter: MappingStatus::Mapped,
     },
     SignalCapability {
         signal: SignalKind::Digital,
         cli: MappingStatus::Unsupported(DIGITAL_OUT_OF_SCOPE),
         python: MappingStatus::Unsupported(DIGITAL_OUT_OF_SCOPE),
-        wasm: MappingStatus::Unsupported(DIGITAL_OUT_OF_SCOPE),
+        wasm: MappingStatus::Partial(WASM_LOGIC_SAMPLES),
         engine_adapter: MappingStatus::Unsupported(DIGITAL_OUT_OF_SCOPE),
     },
 ];
