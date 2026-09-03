@@ -318,22 +318,20 @@ fn a_mixed_checkpoint_schedule_is_refused_before_solving_by_naming_the_state_it_
         "mixed Verilog-AMS accepted digital state is not checkpointed"
     );
 
-    let scheduled = engine
-        .run_tran_checkpoint_schedule_with_startup_mode(
-            &netlist,
-            200.0e-9,
-            1.0e-9,
-            TransientStartupMode::OperatingPoint,
-            &[100.0e-9],
-        )
-        .err()
-        .expect("a scheduled mixed checkpoint must be refused, not produced");
+    let Err(scheduled) = engine.run_tran_checkpoint_schedule_with_startup_mode(
+        &netlist,
+        200.0e-9,
+        1.0e-9,
+        TransientStartupMode::OperatingPoint,
+        &[100.0e-9],
+    ) else {
+        panic!("a scheduled mixed checkpoint must be refused, not produced")
+    };
     assert_mixed_checkpoint_refusal("a scheduled mixed checkpoint", &scheduled);
 
-    let retained = engine
-        .run_tran_checkpointed(&netlist, 200.0e-9, 1.0e-9)
-        .err()
-        .expect("a retained mixed checkpoint must be refused, not produced");
+    let Err(retained) = engine.run_tran_checkpointed(&netlist, 200.0e-9, 1.0e-9) else {
+        panic!("a retained mixed checkpoint must be refused, not produced")
+    };
     assert_mixed_checkpoint_refusal("a retained mixed checkpoint", &retained);
 }
 
@@ -355,16 +353,15 @@ fn a_self_scheduling_module_is_refused_by_the_preflight_not_by_a_missed_breakpoi
     let netlist = Netlist::parse(&deck).expect("the deck parses");
     let engine = Engine::new(SimulationConfig::default());
 
-    let error = engine
-        .run_tran_checkpoint_schedule_with_startup_mode(
-            &netlist,
-            200.0e-9,
-            1.0e-9,
-            TransientStartupMode::OperatingPoint,
-            &[100.0e-9],
-        )
-        .err()
-        .expect("a scheduled mixed checkpoint must be refused, not produced");
+    let Err(error) = engine.run_tran_checkpoint_schedule_with_startup_mode(
+        &netlist,
+        200.0e-9,
+        1.0e-9,
+        TransientStartupMode::OperatingPoint,
+        &[100.0e-9],
+    ) else {
+        panic!("a scheduled mixed checkpoint must be refused, not produced")
+    };
     assert_mixed_checkpoint_refusal("a self-scheduling mixed checkpoint", &error);
     assert!(
         !error.to_string().to_lowercase().contains("stepped past"),
