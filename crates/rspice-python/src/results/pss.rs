@@ -379,8 +379,11 @@ impl PyPssResult {
         py: Python<'py>,
         node: NodeIdentifier,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
-        let values = match self.waveform_index(&node)? {
-            Some(index) => self.inner.waveforms[index].values.clone(),
+        let values = match self
+            .waveform_index(&node)?
+            .and_then(|index| self.inner.waveforms.get(index))
+        {
+            Some(waveform) => waveform.values.clone(),
             None => vec![0.0; self.inner.time.len()],
         };
         Ok(values.to_pyarray(py))
@@ -390,26 +393,31 @@ impl PyPssResult {
         if !time.is_finite() {
             return Err(crate::errors::value_error("time must be finite"));
         }
-        match self.waveform_index(&node)? {
-            Some(index) => Ok(self.inner.waveforms[index].interpolate(
-                &self.inner.time,
-                time,
-                self.inner.period,
-            )),
+        match self
+            .waveform_index(&node)?
+            .and_then(|index| self.inner.waveforms.get(index))
+        {
+            Some(waveform) => Ok(waveform.interpolate(&self.inner.time, time, self.inner.period)),
             None => Ok(0.0),
         }
     }
 
     fn dc(&self, node: NodeIdentifier) -> PyResult<f64> {
-        match self.waveform_index(&node)? {
-            Some(index) => Ok(self.inner.waveforms[index].dc(&self.inner.time, self.inner.period)),
+        match self
+            .waveform_index(&node)?
+            .and_then(|index| self.inner.waveforms.get(index))
+        {
+            Some(waveform) => Ok(waveform.dc(&self.inner.time, self.inner.period)),
             None => Ok(0.0),
         }
     }
 
     fn peak_to_peak(&self, node: NodeIdentifier) -> PyResult<f64> {
-        match self.waveform_index(&node)? {
-            Some(index) => Ok(self.inner.waveforms[index].peak_to_peak()),
+        match self
+            .waveform_index(&node)?
+            .and_then(|index| self.inner.waveforms.get(index))
+        {
+            Some(waveform) => Ok(waveform.peak_to_peak()),
             None => Ok(0.0),
         }
     }

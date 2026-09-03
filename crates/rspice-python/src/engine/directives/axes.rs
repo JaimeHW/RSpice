@@ -80,8 +80,10 @@ pub(super) fn run_axis_plan(
             .prepare_deck_plan_materializer_with_abort(&netlist.inner, plan, abort)
             .map_err(materialized_run_simulation_error)
     })?;
-    let implicit_op = plan.analyses().len() == 1
-        && plan.analyses()[0].id().kind() == rspice_core::execution::AnalysisKind::ImplicitOp;
+    let implicit_op = matches!(
+        plan.analyses(),
+        [only] if only.id().kind() == rspice_core::execution::AnalysisKind::ImplicitOp
+    );
     let compatibility_axis = implicit_op.then(|| single_legacy_axis(plan)).flatten();
     let mut compatibility_operating_points = Vec::new();
     let mut compatibility_complete = compatibility_axis.is_some();

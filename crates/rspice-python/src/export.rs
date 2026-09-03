@@ -96,8 +96,14 @@ fn asctime_utc_now() -> String {
 
     format!(
         "{} {} {day} {hour:02}:{minute:02}:{second:02} {year}",
-        WEEKDAYS[days.rem_euclid(7) as usize],
-        MONTHS[(month - 1) as usize],
+        WEEKDAYS
+            .get(days.rem_euclid(7) as usize)
+            .copied()
+            .unwrap_or("Thu"),
+        MONTHS
+            .get(month.saturating_sub(1) as usize)
+            .copied()
+            .unwrap_or("Jan"),
     )
 }
 
@@ -157,7 +163,9 @@ impl RawPlot {
                 self.variables.len()
             ));
         }
-        let points = self.series[0].len();
+        let Some(points) = self.series.first().map(Vec::len) else {
+            return Err("raw export has no data series".to_string());
+        };
         for (variable, series) in self.variables.iter().zip(&self.series) {
             if series.len() != points {
                 return Err(format!(
@@ -205,7 +213,9 @@ impl RawPlot {
         let _ = writeln!(output, "Values:");
         for point in 0..points {
             for (column, series) in self.series.iter().enumerate() {
-                let value = series[point];
+                let Some(&value) = series.get(point) else {
+                    continue;
+                };
                 let rendered = if self.complex {
                     format!("{},{}", format_float(value.re), format_float(value.im))
                 } else {
@@ -229,7 +239,9 @@ impl RawPlot {
         output.extend_from_slice(b"Binary:\n");
         for point in 0..points {
             for series in &self.series {
-                let value = series[point];
+                let Some(&value) = series.get(point) else {
+                    continue;
+                };
                 output.extend_from_slice(&value.re.to_le_bytes());
                 if self.complex {
                     output.extend_from_slice(&value.im.to_le_bytes());

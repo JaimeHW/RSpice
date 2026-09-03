@@ -112,9 +112,14 @@ impl PyDcSweep {
                         "sweep value at index {index} must be finite, got {value}"
                     )));
                 }
+                let (Some(&start), Some(&stop)) = (values.first(), values.last()) else {
+                    return Err(crate::errors::value_error(
+                        "list sweep requires at least one value",
+                    ));
+                };
                 DcSweepSpec {
-                    start: values[0],
-                    stop: *values.last().expect("values is non-empty"),
+                    start,
+                    stop,
                     step: 0.0,
                     mode: DcSweepMode::List(values),
                 }
