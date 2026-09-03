@@ -1,10 +1,12 @@
 //! Where the CFG route's machine code goes: a size census of the plan it
 //! builds, against the postfix plan for the same module.
 //!
-//! The CFG route compiles bsimcmg_va to a 417 MB image where the postfix route
-//! compiles it to 4.8 MB, and asmhemt does not finish at all. This census
-//! measures *why*, at the level the difference is decided — the plan, not the
-//! encoder — so a repair can be costed before it is written.
+//! The CFG route compiled bsimcmg_va to a 417 MB image where the postfix route
+//! compiles it to 4.8 MB, and asmhemt did not finish at all. This census
+//! measured *why*, at the level the difference is decided — the plan, not the
+//! encoder — so the repair could be costed before it was written. With the
+//! prelude in the plan builder those two are 5.6 MB and 17.3 MB against a
+//! 4.8 MB and 16.7 MB postfix, and this census is what says so.
 //!
 //! # The two shapes being compared
 //!
@@ -14,12 +16,24 @@
 //! therefore shares all of the body's intermediate arithmetic, and the plan's
 //! total size is `assignment pass + Σ (small entries)`.
 //!
-//! The CFG route has no such pass. Each entry is
+//! The CFG route had no such pass. Each entry was
 //! [`prune_cfg_to_outputs`](crate::canonical_ir::prune_cfg_to_outputs) applied
 //! to the scalarized differentiated body for that one output, and then lowered
-//! whole: the entry *contains* its entire dependence cone. Nothing is shared
-//! between entries beyond what the value-entry cache can prove structurally
-//! identical after the fact. The plan's total size is `Σ (cone of each entry)`.
+//! whole: the entry *contained* its entire dependence cone. Nothing was shared
+//! between entries beyond what the value-entry cache could prove structurally
+//! identical after the fact, and the plan's total size was
+//! `Σ (cone of each entry)`.
+//!
+//! # What the plan builder does now, and why the cones are still measured
+//!
+//! It builds one [`CfgPrelude`](crate::jit::cfg_prelude::CfgPrelude): the union
+//! below, pruned and lowered once, publishing each entry output into a slot.
+//! Every entry it covers is *one instruction* — a `LoadPreludeSlot` — so the
+//! `route=cfg` per-entry figures no longer describe the plan the builder
+//! produces. They still describe the thing the fix is measured against: the
+//! `cone_over_union` factor is the duplication that was removed, and the
+//! `prelude` line beside the images is what replaced it. `image route=cfg`
+//! compiles the real plan and is the figure to read for size.
 //!
 //! So the figure that decides the whole question is the **duplication factor**:
 //! `Σ cone instructions` over the shared work counted once. The body is the

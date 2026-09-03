@@ -8,6 +8,31 @@
 //! [`lower_cfg_function`] and [`scalarize_lanes`], adopted as
 //! [`PlanProgram::Blocks`].
 //!
+//! # The plan has an assignment pass of its own
+//!
+//! Every `stamp_values`, `jacobians` and `reactive_jacobians` entry used to be
+//! its own pruned dependence cone of one function, and the cones overlapped
+//! almost completely: Σ cone / union ran from 24 on asmesd to 383 on asmhemt,
+//! and the fused stamp kernel inlined every one of them a second time.
+//! bsimcmg_va compiled to 417 MB against the postfix route's 4.8 MB — past the
+//! image limit, which is raised *after* the whole-module fallback point, so it
+//! was a model production could not construct.
+//!
+//! So the builder gathers every entry of every stamp first, builds one
+//! [`CfgPrelude`] over them — one prune, one lowering, one slot per distinct
+//! output value — and each entry becomes the single `LoadPreludeSlot` that
+//! reads what the prelude published. The plan carries it as
+//! [`NativeModelPlan::prelude`] and every backend runs it once per evaluation,
+//! after the assignment pass whose variables it reads and before the first
+//! entry that reads one of its slots.
+//!
+//! Two classes keep their own cone. A value that reads a contribution current
+//! is ordered against the residuals before it and the prelude runs before all
+//! of them ([`LiveCurrentTaint`]); and the noise magnitudes below lower from
+//! the *primal* body and from hoisted copies of it, which are not the function
+//! the prelude is built over. Noise is tens of entries, not thousands, so it
+//! was never part of the explosion.
+//!
 //! [`build_default_model_plan`] is what x64, AArch64 and the WASM JIT now all
 //! call, and [`DEFAULT_PLAN_ROUTE`] is the one thing that decides what it
 //! builds. On [`PlanRoute::Cfg`] it takes the CFG form of a module's residual,
