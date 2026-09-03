@@ -5340,6 +5340,7 @@ dependencies = [
 name = "rspice-engine-adapter"
 version = "0.1.0"
 dependencies = [
+ "ctrlc",
  "num-complex",
  "rayon",
  "rspice-core",
@@ -5349,6 +5350,7 @@ dependencies = [
  "sha2 0.10.9",
  "thiserror 2.0.20",
  "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

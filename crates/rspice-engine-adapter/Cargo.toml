@@ -20,5 +20,13 @@ sha2 = "0.10"
 thiserror.workspace = true
 uuid = { version = "1.0", default-features = false, features = ["serde", "std"] }
 
+[target.'cfg(not(windows))'.dependencies]
+# `termination` widens the handler past SIGINT to the SIGTERM a supervising
+# worker actually sends, which is the stop request this executor must honor.
+ctrlc = { version = "3.4", features = ["termination"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_System_Console"] }
+
 [lints]
 workspace = true
