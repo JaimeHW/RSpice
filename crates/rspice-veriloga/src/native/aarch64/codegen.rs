@@ -6,7 +6,9 @@
 //! decoder before executable publication.
 
 use super::calling_convention::HOST_ABI;
-use super::encoder::{A64Encoder, BranchPatch, Condition, DReg, LiteralPatch, XReg};
+use super::encoder::{
+    A64Encoder, BranchPatch, Condition, DReg, LiteralPatch, MAX_FORWARD_LITERAL_REACH_BYTES, XReg,
+};
 use super::verifier::{verify_exact_function, verify_exact_function_at};
 use crate::jit::plan_program::PlanProgram;
 use crate::native::abi::NativeRuntimeStatus;
@@ -674,8 +676,30 @@ struct FunctionCompiler {
     saves_kernel_io: bool,
     early_returns: Vec<BranchPatch>,
     literals: Vec<(LiteralPatch, u64)>,
+    /// Byte offset of the oldest `LDR (literal)` still waiting for its
+    /// constant. The reach that has to be respected is measured from here.
+    literal_window_start: Option<usize>,
     variable_window_enabled: bool,
     variable_window_base: Option<usize>,
+}
+
+/// Bytes held back from [`MAX_FORWARD_LITERAL_REACH_BYTES`] when deciding to
+/// flush an inline constant island.
+///
+/// The decision is taken at instruction boundaries, so the margin has to cover
+/// everything one SSA instruction can emit — a spilled-operand reload, a
+/// helper call sequence, its own new constants — before the next boundary is
+/// reached. One page is three orders of magnitude more than any single
+/// instruction emits and still leaves the flush point far beyond the largest
+/// function the shipped route builds, so no function that encodes today
+/// changes by a byte.
+const LITERAL_ISLAND_MARGIN_BYTES: usize = 4096;
+
+/// The most constants one island may hold, bounded by the marker's `imm16`.
+const MAX_LITERAL_ISLAND_WORDS: usize = u16::MAX as usize;
+
+fn align_up_8(offset: usize) -> usize {
+    offset.div_ceil(8) * 8
 }
 
 impl FunctionCompiler {
@@ -706,6 +730,7 @@ impl FunctionCompiler {
             saves_kernel_io,
             early_returns: Vec::new(),
             literals: Vec::new(),
+            literal_window_start: None,
             variable_window_enabled: !saves_entry_args,
             variable_window_base: None,
         };
@@ -757,12 +782,14 @@ impl FunctionCompiler {
         let mut block_offsets: Vec<Option<usize>> = vec![None; ssa.blocks().len()];
         let mut pending_branches: Vec<(usize, BranchPatch)> = Vec::new();
         for block in ssa.blocks() {
+            self.flush_literal_island_if_needed()?;
             block_offsets[block.id().index()] = Some(self.encoder.position());
             let range = block.instruction_start()..block.instruction_end();
             for (instruction, allocated) in ssa.instructions()[range.clone()]
                 .iter()
                 .zip(&allocation.instructions()[range])
             {
+                self.flush_literal_island_if_needed()?;
                 self.emit_allocated_instruction(instruction, allocated)?;
             }
             self.emit_terminator(allocation, block, &mut pending_branches)?;
@@ -991,6 +1018,7 @@ impl FunctionCompiler {
             .zip(allocation.instructions())
             .enumerate()
         {
+            self.flush_literal_island_if_needed()?;
             self.emit_allocated_instruction(instruction, allocated)?;
             let instruction_end = instruction_index + 1;
             while let Some(output) = ssa.outputs().get(output_index).copied() {
@@ -2502,7 +2530,87 @@ impl FunctionCompiler {
             return Ok(());
         }
         let patch = self.encoder.ldr_d_literal_placeholder(result);
+        self.literal_window_start
+            .get_or_insert(patch.instruction_offset());
         self.literals.push((patch, value.to_bits()));
+        Ok(())
+    }
+
+    /// Place the pending constants inline when the function has grown too long
+    /// for them to stay in the trailing pool.
+    ///
+    /// Call sites are instruction boundaries: every live value is in its
+    /// allocated register or its spill slot there, and an island clobbers
+    /// neither, so the flush is invisible to the program around it.
+    fn flush_literal_island_if_needed(&mut self) -> JitResult<()> {
+        let Some(window_start) = self.literal_window_start else {
+            return Ok(());
+        };
+        let words = self.distinct_pending_literals();
+        let projected_end = align_up_8(self.encoder.position() + 8) + words * 8;
+        let reach = window_start.saturating_add(MAX_FORWARD_LITERAL_REACH_BYTES);
+        if words < MAX_LITERAL_ISLAND_WORDS
+            && projected_end.saturating_add(LITERAL_ISLAND_MARGIN_BYTES) <= reach
+        {
+            return Ok(());
+        }
+        self.flush_literal_island()
+    }
+
+    fn distinct_pending_literals(&self) -> usize {
+        let mut seen = std::collections::HashSet::<u64>::with_capacity(self.literals.len());
+        self.literals
+            .iter()
+            .filter(|(_, bits)| seen.insert(*bits))
+            .count()
+    }
+
+    /// Emit `B over; BRK words; <constants>` and resolve every pending patch
+    /// into the island.
+    fn flush_literal_island(&mut self) -> JitResult<()> {
+        if self.literals.is_empty() {
+            return Ok(());
+        }
+        let words = self.distinct_pending_literals();
+        let words = u16::try_from(words).map_err(|_| {
+            encoding_error("AArch64 literal island holds more constants than its marker can name")
+        })?;
+        if self.encoder.position() % 8 != 0 {
+            self.encoder.nop();
+        }
+        let over = self.encoder.b_placeholder();
+        self.encoder.literal_island_marker(words);
+        self.emit_pending_literal_pool()?;
+        let resume = self.encoder.position();
+        self.encoder.patch_branch(over, resume)?;
+        self.literal_window_start = None;
+        Ok(())
+    }
+
+    /// Append the pending constants at the current position and patch every
+    /// load that named one. The caller owns alignment and reachability.
+    fn emit_pending_literal_pool(&mut self) -> JitResult<()> {
+        let mut offsets = std::collections::HashMap::<u64, usize>::new();
+        for &(_, bits) in &self.literals {
+            if offsets.contains_key(&bits) {
+                continue;
+            }
+            let offset = self.encoder.position();
+            if offset % 8 != 0 {
+                return Err(encoding_error(
+                    "AArch64 literal pool is not naturally aligned",
+                ));
+            }
+            offsets.insert(bits, offset);
+            self.encoder.append_u64_data(bits);
+        }
+        for (patch, bits) in std::mem::take(&mut self.literals) {
+            let target = offsets
+                .get(&bits)
+                .copied()
+                .ok_or_else(|| encoding_error("AArch64 literal patch has no pooled constant"))?;
+            self.encoder.patch_ldr_d_literal(patch, target)?;
+        }
         Ok(())
     }
 
@@ -2551,27 +2659,7 @@ impl FunctionCompiler {
         if !self.literals.is_empty() && self.encoder.position() % 8 != 0 {
             self.encoder.nop();
         }
-        let mut offsets = std::collections::HashMap::<u64, usize>::new();
-        for &(_, bits) in &self.literals {
-            if offsets.contains_key(&bits) {
-                continue;
-            }
-            let offset = self.encoder.position();
-            if offset % 8 != 0 {
-                return Err(encoding_error(
-                    "AArch64 literal pool is not naturally aligned",
-                ));
-            }
-            offsets.insert(bits, offset);
-            self.encoder.append_u64_data(bits);
-        }
-        for (patch, bits) in self.literals {
-            let target = offsets
-                .get(&bits)
-                .copied()
-                .ok_or_else(|| encoding_error("AArch64 literal patch has no pooled constant"))?;
-            self.encoder.patch_ldr_d_literal(patch, target)?;
-        }
+        self.emit_pending_literal_pool()?;
         Ok(self.encoder.into_bytes())
     }
 
@@ -3077,15 +3165,184 @@ fn register_allocation_error(detail: impl Into<String>) -> JitError {
 mod cross_target_contract_tests {
     use super::compile_value_function;
     use crate::native::aarch64::calling_convention::HOST_ABI;
-    use crate::native::aarch64::encoder::{A64Encoder, XReg};
+    use crate::native::aarch64::encoder::{
+        A64Encoder, DReg, MAX_FORWARD_LITERAL_REACH_BYTES, XReg,
+    };
+    use crate::native::aarch64::image::MAX_A64_FUNCTION_BYTES;
     use crate::native::aarch64::verifier::verify_exact_function;
-    use crate::native::expr::{NativeOp, NativeProgram};
+    use crate::native::expr::{BinaryMathOp, NativeOp, NativeProgram};
 
     fn instruction_occurrences(bytes: &[u8], instruction: &[u8]) -> usize {
         bytes
             .chunks_exact(std::mem::size_of::<u32>())
             .filter(|candidate| *candidate == instruction)
             .count()
+    }
+
+    fn word_at(bytes: &[u8], offset: usize) -> u32 {
+        u32::from_le_bytes(
+            bytes[offset..offset + 4]
+                .try_into()
+                .expect("four-byte A64 word"),
+        )
+    }
+
+    /// Walk the instruction stream the way the verifier does, reporting every
+    /// inline constant island as `(marker offset, constant count)`.
+    fn constant_islands(bytes: &[u8]) -> Vec<(usize, usize)> {
+        let mut islands = Vec::new();
+        let mut offset = 0;
+        while offset < bytes.len() {
+            let instruction = word_at(bytes, offset);
+            if instruction & 0xFFE0_001F == 0xD420_0000 {
+                let words = ((instruction >> 5) & 0xFFFF) as usize;
+                islands.push((offset, words));
+                offset += 4 + words * 8;
+                continue;
+            }
+            if instruction & 0xFFFF_FC1F == 0xD65F_0000 {
+                break;
+            }
+            offset += 4;
+        }
+        islands
+    }
+
+    /// One function whose constants all reach a trailing pool, and one long
+    /// enough that they cannot.
+    ///
+    /// `LDR (literal)` carries a signed 19-bit word displacement, so a
+    /// constant more than [`MAX_FORWARD_LITERAL_REACH_BYTES`] past the load
+    /// that names it cannot be encoded at all. Before inline islands this was
+    /// the reason an A64 function could not grow past a megabyte; the
+    /// megabyte-sized `MAX_A64_FUNCTION_BYTES` refusal in the image builder hid
+    /// it by never letting the encoder get there.
+    #[test]
+    #[ignore = "emits two megabytes of real code; run with --release --features native -- --ignored"]
+    fn a_function_past_the_literal_reach_places_its_constants_inline() {
+        // Roughly forty bytes of code per pair — one `LDR` literal and one
+        // helper call — so this clears two megabytes and needs two islands.
+        const PAIRS: usize = 60_000;
+        let mut ops = Vec::with_capacity(PAIRS * 2 + 1);
+        ops.push(NativeOp::Const(1.5));
+        for index in 0..PAIRS {
+            // Distinct, and none of them encodable as an `FMOV` immediate, so
+            // every one takes a pooled constant of its own.
+            ops.push(NativeOp::Const(2.0 + (index as f64) * 1.0e-6));
+            ops.push(NativeOp::BinaryMath(BinaryMathOp::Hypot));
+        }
+        let program = NativeProgram::from_ops_for_test(ops, 2, Vec::new(), Vec::new());
+        let bytes = compile_value_function(&program)
+            .expect("a function past the literal reach must still encode");
+        verify_exact_function(&bytes, "oversized value function")
+            .expect("inline constant islands must verify");
+
+        assert!(
+            bytes.len() > MAX_A64_FUNCTION_BYTES,
+            "the case is only interesting past the old ceiling, got {} bytes",
+            bytes.len()
+        );
+        let islands = constant_islands(&bytes);
+        assert!(
+            islands.len() >= 2,
+            "a function of {} bytes needs more than one island, got {islands:?}",
+            bytes.len()
+        );
+        for (marker, words) in islands {
+            let end = marker + 4 + words * 8;
+            // The exact relaxed shape: an unconditional `B` over the data,
+            // then the marker naming its length.
+            let branch = word_at(&bytes, marker - 4);
+            let displacement = ((branch & 0x03FF_FFFF) as i32) << 6 >> 6;
+            assert_eq!(branch & 0xFC00_0000, 0x1400_0000, "island {marker} branch");
+            assert_eq!(
+                (marker - 4) as i64 + i64::from(displacement) * 4,
+                end as i64,
+                "island {marker} is not branched over"
+            );
+            assert_eq!(
+                word_at(&bytes, marker),
+                0xD420_0000 | ((words as u32) << 5),
+                "island {marker} marker"
+            );
+            assert_eq!(marker % 8, 4, "island {marker} data is not eight-aligned");
+        }
+    }
+
+    /// The relaxation is invisible to anything that already fit: no function
+    /// under the reach gains an island, so its bytes cannot move.
+    #[test]
+    fn a_function_within_the_literal_reach_keeps_one_trailing_pool() {
+        let program = NativeProgram::from_ops_for_test(
+            vec![
+                NativeOp::Const(1.5),
+                NativeOp::Const(2.5),
+                NativeOp::BinaryMath(BinaryMathOp::Hypot),
+            ],
+            2,
+            Vec::new(),
+            Vec::new(),
+        );
+        let bytes = compile_value_function(&program).expect("encode a small value function");
+        verify_exact_function(&bytes, "small value function").expect("verify");
+        assert!(bytes.len() < MAX_FORWARD_LITERAL_REACH_BYTES);
+        assert_eq!(constant_islands(&bytes), Vec::new());
+    }
+
+    /// Build `BTI; LDR d0, island; B over; BRK words; <constants>; RET`.
+    fn hand_built_island(marker_words: u16, branch_target_delta: i64, load: bool) -> Vec<u8> {
+        let mut encoder = A64Encoder::new();
+        encoder.bti_c();
+        let literal = load.then(|| encoder.ldr_d_literal_placeholder(DReg::D0));
+        if !load {
+            encoder.nop();
+        }
+        let over = encoder.b_placeholder();
+        encoder.literal_island_marker(marker_words);
+        let start = encoder.position();
+        encoder.append_u64_data(2.0_f64.to_bits());
+        let end = encoder.position();
+        encoder
+            .patch_branch(over, (end as i64 + branch_target_delta) as usize)
+            .expect("patch the branch over the island");
+        if let Some(literal) = literal {
+            encoder
+                .patch_ldr_d_literal(literal, start)
+                .expect("patch the inline literal load");
+        }
+        encoder.ret();
+        encoder.into_bytes()
+    }
+
+    /// The verifier authenticates an island rather than trusting it: the data
+    /// has to be jumped over, its declared length has to match the branch, and
+    /// every word of it has to be named by a load.
+    #[test]
+    fn the_verifier_authenticates_inline_constant_islands() {
+        verify_exact_function(&hand_built_island(1, 0, true), "island")
+            .expect("a well-formed island verifies");
+
+        let unbranched = hand_built_island(1, -8, true);
+        let error = verify_exact_function(&unbranched, "island")
+            .expect_err("an island the code does not jump over must be refused");
+        assert!(
+            format!("{error}").contains("does not branch over"),
+            "unexpected refusal: {error}"
+        );
+
+        let overdeclared = hand_built_island(2, 0, true);
+        assert!(
+            verify_exact_function(&overdeclared, "island").is_err(),
+            "an island longer than the branch skips must be refused"
+        );
+
+        let unread = hand_built_island(1, 0, false);
+        let error = verify_exact_function(&unread, "island")
+            .expect_err("inline constants nothing loads must be refused");
+        assert!(
+            format!("{error}").contains("partly unread"),
+            "unexpected refusal: {error}"
+        );
     }
 
     #[test]

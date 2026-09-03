@@ -46,12 +46,21 @@ pub(crate) fn verify_exact_function_at(
 
     let mut direct_branches = Vec::new();
     let mut literal_targets = Vec::new();
+    let mut islands: Vec<(usize, usize)> = Vec::new();
     let mut code_bytes = None;
-    for (index, chunk) in bytes.chunks_exact(4).enumerate() {
-        let offset = index * 4;
+    let mut offset = 0_usize;
+    while offset < bytes.len() {
+        let chunk = &bytes[offset..offset + 4];
         let instruction = u32::from_le_bytes(chunk.try_into().expect("four-byte A64 word"));
         match classify(instruction) {
             InstructionClass::Ordinary => {}
+            InstructionClass::LiteralIsland { data_words } => {
+                let (start, end) =
+                    authenticate_literal_island(bytes, offset, data_words, entry_kind)?;
+                islands.push((start, end));
+                offset = end;
+                continue;
+            }
             InstructionClass::Return => {
                 code_bytes = Some(offset + 4);
                 break;
@@ -103,6 +112,7 @@ pub(crate) fn verify_exact_function_at(
                 )));
             }
         }
+        offset += 4;
     }
 
     let code_bytes = code_bytes.ok_or_else(|| {
@@ -124,6 +134,15 @@ pub(crate) fn verify_exact_function_at(
 
     literal_targets.sort_unstable();
     literal_targets.dedup();
+
+    // Constants placed inline are authenticated first: each island the emitter
+    // announced must be tiled exactly by the loads that read it, so no word
+    // inside the code escapes as either an approved instruction or a named
+    // constant.
+    let inline_count = literal_targets.partition_point(|target| *target < code_bytes);
+    let (inline_targets, literal_targets) = literal_targets.split_at(inline_count);
+    authenticate_island_targets(inline_targets, &islands, entry_kind)?;
+
     if literal_targets.is_empty() {
         if code_bytes != bytes.len() {
             return Err(verifier_error(format!(
@@ -178,10 +197,96 @@ pub(crate) fn verify_exact_function_at(
     })
 }
 
+/// Prove that an announced run of inline constants is data the code jumps
+/// over, and report the byte range it covers.
+fn authenticate_literal_island(
+    bytes: &[u8],
+    marker_offset: usize,
+    data_words: usize,
+    entry_kind: &str,
+) -> JitResult<(usize, usize)> {
+    if data_words == 0 {
+        return Err(verifier_error(format!(
+            "compiled {entry_kind} announces an empty constant island at byte {marker_offset}"
+        )));
+    }
+    let start = marker_offset + 4;
+    if start % 8 != 0 {
+        return Err(verifier_error(format!(
+            "compiled {entry_kind} has a constant island at byte {start} that is not naturally aligned"
+        )));
+    }
+    let end = start
+        .checked_add(data_words * 8)
+        .filter(|end| *end <= bytes.len())
+        .ok_or_else(|| {
+            verifier_error(format!(
+                "compiled {entry_kind} announces {data_words} constants at byte {start}, past its own end"
+            ))
+        })?;
+    let branch_offset = marker_offset.checked_sub(4).ok_or_else(|| {
+        verifier_error(format!(
+            "compiled {entry_kind} has a constant island at byte {start} with no branch over it"
+        ))
+    })?;
+    let branch = u32::from_le_bytes(
+        bytes[branch_offset..branch_offset + 4]
+            .try_into()
+            .expect("four-byte A64 word"),
+    );
+    let branched_over = branch & 0xFC00_0000 == 0x1400_0000
+        && i64::try_from(branch_offset)
+            .ok()
+            .and_then(|source| source.checked_add(sign_extend(branch & 0x03FF_FFFF, 26) * 4))
+            .is_some_and(|target| u64::try_from(target).ok() == Some(end as u64));
+    if !branched_over {
+        return Err(verifier_error(format!(
+            "compiled {entry_kind} does not branch over the constant island at byte {start}"
+        )));
+    }
+    Ok((start, end))
+}
+
+/// Require the inline loads to tile every island exactly, in order.
+fn authenticate_island_targets(
+    targets: &[usize],
+    islands: &[(usize, usize)],
+    entry_kind: &str,
+) -> JitResult<()> {
+    let mut cursor = 0_usize;
+    for &(start, end) in islands {
+        let words = (end - start) / 8;
+        let read = targets.get(cursor..cursor + words).ok_or_else(|| {
+            verifier_error(format!(
+                "compiled {entry_kind} leaves the constant island at byte {start} partly unread"
+            ))
+        })?;
+        for (index, target) in read.iter().copied().enumerate() {
+            let expected = start + index * 8;
+            if target != expected {
+                return Err(verifier_error(format!(
+                    "compiled {entry_kind} has invalid inline literal target byte {target}, expected {expected}"
+                )));
+            }
+        }
+        cursor += words;
+    }
+    if let Some(stray) = targets.get(cursor) {
+        return Err(verifier_error(format!(
+            "compiled {entry_kind} loads a constant from byte {stray}, which no island covers"
+        )));
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum InstructionClass {
     Ordinary,
     Return,
+    /// A `BRK` announcing `data_words` eight-byte constants that follow it.
+    LiteralIsland {
+        data_words: usize,
+    },
     LiteralLoad {
         displacement: i64,
     },
@@ -202,8 +307,12 @@ fn classify(instruction: u32) -> InstructionClass {
             displacement: sign_extend((instruction >> 5) & 0x7_FFFF, 19) * 4,
         };
     }
+    if instruction & 0xFFE0_001F == 0xD420_0000 {
+        return InstructionClass::LiteralIsland {
+            data_words: ((instruction >> 5) & 0xFFFF) as usize,
+        };
+    }
     if matches!(instruction, 0xD503_201F | 0xD503_245F)
-        || instruction & 0xFFE0_001F == 0xD420_0000
         || instruction & 0xFFFF_FC1F == 0xD61F_0000
         || instruction & 0xFFFF_FC1F == 0xD63F_0000
         || instruction & 0xFF80_0000 == 0xD280_0000

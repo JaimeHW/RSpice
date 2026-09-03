@@ -115,6 +115,20 @@ pub(crate) struct LiteralPatch {
     instruction_offset: usize,
 }
 
+impl LiteralPatch {
+    pub(crate) fn instruction_offset(self) -> usize {
+        self.instruction_offset
+    }
+}
+
+/// How far forward a `LDR (literal)` can name its constant.
+///
+/// `LDR Dt, <label>` carries a signed 19-bit *word* displacement, so its reach
+/// is `[-2^18, 2^18 - 1]` words: 1,048,576 bytes backwards and 1,048,572
+/// bytes forwards. Constants are always placed after the load that reads them,
+/// which makes the forward figure the only one that binds.
+pub(crate) const MAX_FORWARD_LITERAL_REACH_BYTES: usize = ((1 << 18) - 1) * 4;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BranchKind {
     Unconditional,
@@ -487,6 +501,22 @@ impl A64Encoder {
         // Register encoding 31 denotes XZR for FMOV (general), even though the
         // same architectural field denotes SP in add/sub addressing forms.
         self.emit(0x9E67_0000 | (31 << 5) | dreg(destination));
+    }
+
+    /// Announce a run of `data_words` eight-byte constants placed inline.
+    ///
+    /// A `LDR (literal)` reaches only [`MAX_FORWARD_LITERAL_REACH_BYTES`], so a
+    /// function longer than that cannot keep every constant in one pool after
+    /// its `RET`. The emitter flushes the pending constants early instead,
+    /// behind an unconditional `B` over them; this marker is what makes the
+    /// resulting data run *self-describing*, so the independent verifier can
+    /// authenticate it rather than decoding constants as instructions.
+    ///
+    /// `BRK` is the carrier because the word is unreachable — the `B` before it
+    /// skips the whole island — and because a trap is the only sound thing to
+    /// execute if control ever did arrive.
+    pub(crate) fn literal_island_marker(&mut self, data_words: u16) {
+        self.emit(0xD420_0000 | (u32::from(data_words) << 5));
     }
 
     pub(crate) fn ldr_d_literal_placeholder(&mut self, destination: DReg) -> LiteralPatch {
