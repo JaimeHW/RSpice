@@ -3013,17 +3013,18 @@ impl RegisterAllocation {
             //
             // The block, not an instruction position, because a block with no
             // instructions shares its instruction boundary with its
-            // neighbours. A block parameter is bound at the earliest
-            // predecessor terminator that binds it, so a parameter bound just
-            // before an empty block that precedes a loop header carries the
-            // header's own start position and reads as if it were defined
-            // *inside* the loop. It is not — it is read on every iteration —
-            // and the scan then hands its location to the first value defined
-            // after its last read. That was a miscompile: a fourteen-thousand
-            // instruction cone of `hisimsotb_va` returned NaN where both the
-            // reference interpreter and a walk of the same block program
-            // returned zero, because a `MulConst` inherited the location of
-            // the parameter it reads and overwrote it for the next iteration.
+            // neighbours. A block parameter's only position is a boundary —
+            // the earliest predecessor terminator that binds it — so when
+            // nothing between that terminator and the loop header emits an
+            // instruction, the parameter carries the header's own start
+            // position and reads as if it were defined *inside* the loop. It
+            // is not: it is read on every iteration, and the scan then hands
+            // its location to the first value defined after its last read.
+            // That was a miscompile. A 14,456-instruction cone of
+            // `hisimsotb_va` returned NaN where both the reference interpreter
+            // and a walk of the same block program returned zero, because a
+            // `MulConst` inherited the location of the parameter it reads and
+            // overwrote it for the next iteration.
             let definition_block = program.definition_blocks();
             let extent = |range: &LoopRange| {
                 let blocks = program.blocks();
@@ -4415,7 +4416,15 @@ mod tests {
         let reader = program.instructions()[program.blocks()[3].instruction_start()]
             .result
             .index();
-        for bank in [CALLER_SAVED_BANK, WIN64_BANK] {
+        // Every bank a backend gives this allocator: System V x64's ten
+        // volatile registers, Win64's ten with four preserved, and AArch64's
+        // fifteen. The defect is in the liveness rather than in any bank, so
+        // it has to be absent from all three.
+        for bank in [
+            CALLER_SAVED_BANK,
+            WIN64_BANK,
+            RegisterBank::all_caller_saved(15),
+        ] {
             let allocation = RegisterAllocation::build(&program, bank).expect("allocate the loop");
             let carried_at = allocation.location(carried).expect("carried location");
             let reader_at = allocation

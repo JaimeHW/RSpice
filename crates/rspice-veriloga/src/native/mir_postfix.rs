@@ -1269,6 +1269,31 @@ mod tests {
         );
     }
 
+    /// The walk of the empty-block loop is what the machine code must return.
+    ///
+    /// The fixture exists for a register-allocation defect the walk cannot
+    /// have — it holds every value in its own slot — so the walk is the
+    /// authority on what the program means, and the two backends that can run
+    /// it are held to this number. Walking it here also states the answer on
+    /// every host, including the one where the x64 test does not compile.
+    #[test]
+    fn the_block_walk_carries_a_value_into_a_loop_through_an_empty_block() {
+        use crate::jit::ssa::Program;
+
+        const TRIPS: f64 = 3.0;
+        let loop_program =
+            Program::empty_block_loop_fixture_for_test(TRIPS).expect("the empty-block fixture");
+        let point = point();
+        let mut walk: PlanWalk<'_, f64> = PlanWalk::new(&point, 0, 0);
+        assert_eq!(
+            walk.run_blocks(&loop_program),
+            Ok(Program::empty_block_loop_fixture_expectation(
+                TRIPS,
+                PARAMETERS[0]
+            ))
+        );
+    }
+
     /// A branch reads the truthiness the backend's terminator reads, which is
     /// "not exactly zero" — so a NaN condition takes the `then` arm.
     #[test]
