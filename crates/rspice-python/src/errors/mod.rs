@@ -18,7 +18,9 @@
 //! built by calling Python's `type()` with a two-base tuple.
 
 use pyo3::create_exception;
-use pyo3::exceptions::{PyException, PyIndexError, PyKeyError, PyTypeError, PyValueError};
+use pyo3::exceptions::{
+    PyException, PyIndexError, PyKeyError, PyNotImplementedError, PyTypeError, PyValueError,
+};
 use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
 use pyo3::types::{PyDict, PyTuple, PyType};
@@ -133,6 +135,8 @@ enum HybridError {
     Value,
     /// An argument of the wrong Python type.
     Type,
+    /// An authored analysis this surface cannot execute yet.
+    NotImplemented,
 }
 
 impl HybridError {
@@ -142,6 +146,7 @@ impl HybridError {
             HybridError::Index => "RSpiceIndexError",
             HybridError::Value => "RSpiceValueError",
             HybridError::Type => "RSpiceTypeError",
+            HybridError::NotImplemented => "RSpiceNotImplementedError",
         }
     }
 
@@ -155,6 +160,10 @@ impl HybridError {
             }
             HybridError::Value => "Invalid argument value. Both an RSpiceError and a ValueError.",
             HybridError::Type => "Invalid argument type. Both an RSpiceError and a TypeError.",
+            HybridError::NotImplemented => {
+                "An authored analysis this surface cannot execute yet. \
+                 Both an RSpiceError and a NotImplementedError."
+            }
         }
     }
 
@@ -163,11 +172,13 @@ impl HybridError {
         static INDEX: PyOnceLock<Py<PyType>> = PyOnceLock::new();
         static VALUE: PyOnceLock<Py<PyType>> = PyOnceLock::new();
         static TYPE: PyOnceLock<Py<PyType>> = PyOnceLock::new();
+        static NOT_IMPLEMENTED: PyOnceLock<Py<PyType>> = PyOnceLock::new();
         match self {
             HybridError::Key => &KEY,
             HybridError::Index => &INDEX,
             HybridError::Value => &VALUE,
             HybridError::Type => &TYPE,
+            HybridError::NotImplemented => &NOT_IMPLEMENTED,
         }
     }
 
@@ -177,6 +188,7 @@ impl HybridError {
             HybridError::Index => py.get_type::<PyIndexError>(),
             HybridError::Value => py.get_type::<PyValueError>(),
             HybridError::Type => py.get_type::<PyTypeError>(),
+            HybridError::NotImplemented => py.get_type::<PyNotImplementedError>(),
         }
     }
 
@@ -188,6 +200,7 @@ impl HybridError {
             HybridError::Index => PyIndexError::new_err(message),
             HybridError::Value => PyValueError::new_err(message),
             HybridError::Type => PyTypeError::new_err(message),
+            HybridError::NotImplemented => PyNotImplementedError::new_err(message),
         }
     }
 
@@ -240,6 +253,11 @@ pub(crate) fn type_error(message: impl Into<String>) -> PyErr {
     HybridError::Type.raise(message.into())
 }
 
+/// An authored analysis this surface has no execution route for.
+pub(crate) fn not_implemented_error(message: impl Into<String>) -> PyErr {
+    HybridError::NotImplemented.raise(message.into())
+}
+
 /// Register the hybrid classes on the module.
 ///
 /// They are created eagerly so `rspice.RSpiceKeyError` is importable and
@@ -251,6 +269,7 @@ pub(crate) fn register_hybrid_errors(module: &Bound<'_, PyModule>) -> PyResult<(
         HybridError::Index,
         HybridError::Value,
         HybridError::Type,
+        HybridError::NotImplemented,
     ] {
         module.add(kind.class_name(), kind.class(py)?)?;
     }

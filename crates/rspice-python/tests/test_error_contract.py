@@ -72,6 +72,7 @@ class TestHybridExceptions:
             ("RSpiceIndexError", IndexError),
             ("RSpiceValueError", ValueError),
             ("RSpiceTypeError", TypeError),
+            ("RSpiceNotImplementedError", NotImplementedError),
         ],
     )
     def test_hybrid_classes_are_exported_with_both_bases(self, name, builtin):

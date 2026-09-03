@@ -1019,6 +1019,59 @@ fn a_tampered_request_exits_nonzero_without_a_response() {
 }
 
 #[test]
+fn an_authored_periodic_card_fails_the_whole_request_without_writing_results() {
+    // Skipping a card this build cannot represent would drop authored intent
+    // from the response, so the request is refused instead.
+    for (cards, card, analysis_id) in [
+        (".pss fund=1g\n", ".PSS", "pss-001"),
+        (
+            ".hb 1g\n.pac dec 5 1k 1meg input=v1 out=v(out)\n",
+            ".PAC",
+            "pac-001",
+        ),
+        (
+            ".hb 1g\n.pnoise dec 5 1 1k out=v(out)\n",
+            ".PNOISE",
+            "pnoise-001",
+        ),
+        (".hb 1g\n.envelope tstop=1u\n", ".ENVELOPE", "env-001"),
+    ] {
+        let job = Job::new("periodic-card");
+        let deck = format!(
+            "periodic adapter refusal\n\
+             V1 in 0 SIN(0 1 1G)\n\
+             R1 in out 1k\n\
+             C1 out 0 1p\n\
+             .tran 10p 1n\n\
+             {cards}.end\n"
+        );
+        let request = build_request(
+            json!({"schema": "rspice-circuit-v1", "netlist_utf8": deck}),
+            json!({"kind": "transient"}),
+            Vec::new(),
+        );
+        let response = parse_stdout(&job.run(&request));
+        assert_eq!(response["status"], "failed");
+        assert_eq!(response["failure_code"], "analysis.unsupported_kind");
+        let detail = response["failure_detail"]
+            .as_str()
+            .expect("a refusal explains itself");
+        assert!(
+            detail.contains(card) && detail.contains(analysis_id),
+            "refusal must name the card and its analysis instance: {detail}"
+        );
+        assert!(response.get("result_artifacts").is_none());
+        assert_eq!(
+            std::fs::read_dir(job.root.join("results"))
+                .expect("read results")
+                .count(),
+            0,
+            "a refused request must write no results"
+        );
+    }
+}
+
+#[test]
 fn component_info_states_the_reviewed_identity() {
     let output = Command::new(env!("CARGO_BIN_EXE_rspice-engine-adapter"))
         .arg("component-info")

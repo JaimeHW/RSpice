@@ -359,6 +359,35 @@ fn execute_bounded(
     execute_planned_netlist(kind, &netlist, engine_build, &engine, abort)
 }
 
+/// Dot-command spelling of a card this adapter has no result mapping for.
+fn unsupported_deck_analysis_card(command: &AnalysisCommand) -> Option<&'static str> {
+    match command {
+        AnalysisCommand::Pss(_) => Some(".PSS"),
+        AnalysisCommand::Pac(_) => Some(".PAC"),
+        AnalysisCommand::Pnoise(_) => Some(".PNOISE"),
+        AnalysisCommand::Envelope(_) => Some(".ENVELOPE"),
+        _ => None,
+    }
+}
+
+/// Refuse a deck that authors a periodic large-signal card.
+///
+/// The adapter runs the requested kind only, but skipping a card it cannot
+/// represent would drop authored intent from the response without saying so,
+/// so the whole request is refused with the card and its canonical identity.
+fn unsupported_deck_analysis_detail(netlist: &Netlist, plan: &DeckPlan) -> Option<String> {
+    for (command, id) in plan.authored_analyses(netlist) {
+        if let Some(card) = unsupported_deck_analysis_card(command) {
+            let instance = id.map(|id| format!(" ({id})")).unwrap_or_default();
+            return Some(format!(
+                "The deck authors a {card} card{instance}; this engine build has no result \
+                 mapping for the periodic large-signal analysis family."
+            ));
+        }
+    }
+    None
+}
+
 fn execute_planned_netlist(
     kind: AnalysisKind,
     netlist: &Netlist,
@@ -376,6 +405,9 @@ fn execute_planned_netlist(
     };
     if let Err(detail) = validate_adapter_axes(&plan) {
         return Execution::failed("analysis.axis_unsupported", &detail);
+    }
+    if let Some(detail) = unsupported_deck_analysis_detail(netlist, &plan) {
+        return Execution::failed("analysis.unsupported_kind", &detail);
     }
     let materializer =
         match engine.prepare_deck_plan_materializer_with_abort(netlist, &plan, deadline) {

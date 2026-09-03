@@ -150,6 +150,22 @@ pub(super) fn parse_command(
             }
             analyses.push(AnalysisCommand::Hb { frequencies });
         }
+        ".PSS" => {
+            analyses.push(periodic_cards::parse_pss_command(stream, line_num, params)?);
+        }
+        ".PAC" => {
+            analyses.push(periodic_cards::parse_pac_command(stream, line_num, params)?);
+        }
+        ".PNOISE" => {
+            analyses.push(periodic_cards::parse_pnoise_command(
+                stream, line_num, params,
+            )?);
+        }
+        ".ENVELOPE" => {
+            analyses.push(periodic_cards::parse_envelope_command(
+                stream, line_num, params,
+            )?);
+        }
         ".SP" => {
             let sp = parse_sp_command(stream, line_num, params)?;
             analyses.push(sp);

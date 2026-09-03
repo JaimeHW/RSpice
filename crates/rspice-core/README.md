@@ -277,6 +277,108 @@ varies — the [CLI README](../rspice-cli/README.md) documents the
 netlist-card and flag surface; anything not listed there is engine-API
 only.
 
+### Periodic large-signal cards
+
+`.PSS`, `.PAC`, `.PNOISE` and `.ENVELOPE` are parsed into typed, fully
+validated cards in `netlist`. The analysis layer converts a card into the
+configuration its entry point takes (`PssConfig::from(&PssCard)`,
+`PacConfig::from(&PacCard)`) — a parsed deck sits below the analyses and
+never names them. Every card is
+case-insensitive and continues across `+` lines. A field another simulator
+accepts here that RSpice cannot honour is refused with a source-located
+error rather than parsed and dropped.
+
+**`.PSS`** — shooting periodic steady state. Two disjoint forms; a token
+followed by `=` is always a keyword, a token that is not is always
+positional, so the two never overlap.
+
+```
+.PSS <gfreq> <tstab> <oscnode> <psspoints> <harms> <sciter> [KEY=VALUE ...]
+.PSS KEY=VALUE ...
+```
+
+The positional field order is ngspice's `.pss` card. It names an oscillator
+node, so it selects autonomous period detection. ngspice's trailing
+`steadycoeff` and `uic` fields are refused: the shooting solver converges on
+a relative periodicity norm rather than an ngspice per-node steady
+coefficient, and always starts its stabilization run from the operating
+point. Author `TOL=`/`ABSTOL=` and `TSTAB=`/`TSTABPERIODS=` instead. In the
+positional form the keywords `FUND`, `PERIODGUESS`, `TSTAB`, `OSCNODE`,
+`POINTS`, `HARMS`, `MAXITER` and `AUTONOMOUS` are refused as conflicts,
+because the positional fields already bind them.
+
+| Keyword | Positional | Meaning | Default |
+| :--- | :--- | :--- | :--- |
+| `FUND` | `gfreq` | Fundamental frequency (Hz) | required when driven |
+| `HARMS` | `harms` | Harmonics retained in the result | 9 |
+| `POINTS` | `psspoints` | Samples per period (≥ 16, ≥ 2·`HARMS`) | 256 |
+| `TSTAB` | `tstab` | Stabilization time (s) | 0 |
+| `TSTABPERIODS` | — | Stabilization periods when `TSTAB` is 0 | 10 driven, 20 autonomous |
+| `MAXITER` | `sciter` | Maximum shooting iterations | 100 |
+| `TOL` | — | Relative periodicity tolerance | 1e-6 |
+| `ABSTOL` | — | Absolute tolerance | 1e-12 |
+| `DAMPING` | — | Newton damping in [0.1, 1.0] | 1.0 |
+| `MAXPERIODCHANGE` | — | Relative period change bound | 0.1 |
+| `AUTONOMOUS` | implied | Detect the period instead of taking `FUND` | FALSE |
+| `PERIODGUESS` | from `gfreq` | Autonomous period seed (s) | 1e-9 |
+| `OSCNODE` | `oscnode` | Node the period is detected on | none |
+| `METHOD` | — | `TRAP`, `GEAR`, `EULER` or `TRAPGEAR` | engine default |
+| `VERBOSE` | — | Log convergence progress | FALSE |
+
+`FUND` and `PERIODGUESS` set the same quantity and may not both appear;
+`OSCNODE` implies `AUTONOMOUS=TRUE` and conflicts with `AUTONOMOUS=FALSE`.
+
+**`.PAC`** — periodic small-signal AC around a periodic operating point.
+The leading sweep is the input-frequency sweep.
+
+```
+.PAC DEC|LIN|OCT <np> <fstart> <fstop> INPUT=<source> OUT=V(node[,ref]) [KEY=VALUE ...]
+```
+
+| Keyword | Meaning | Default |
+| :--- | :--- | :--- |
+| `INPUT` | Small-signal source swept across the sweep | required |
+| `OUT` | Output probe, `V(node)` or `V(node,ref)` | required |
+| `MAXSIDEBAND` | Symmetric sideband range `-n..=n` | — |
+| `SIDEBANDMIN` / `SIDEBANDMAX` | Explicit asymmetric range | -5 / +5 |
+| `RELTOL` | Relative tolerance | 1e-3 |
+| `ABSTOL` | Absolute tolerance (A) | 1e-12 |
+| `FROM` | `PSS` or `HB`: which upstream to linearize around | nearest preceding |
+
+`MAXSIDEBAND` and `SIDEBANDMIN`/`SIDEBANDMAX` are two spellings of one range
+and may not be combined.
+
+**`.PNOISE`** — periodic (cyclostationary) noise. The leading sweep is the
+offset-frequency sweep.
+
+```
+.PNOISE DEC|LIN|OCT <np> <fstart> <fstop> OUT=V(node[,ref]) [KEY=VALUE ...]
+```
+
+| Keyword | Meaning | Default |
+| :--- | :--- | :--- |
+| `OUT` | Output probe, `V(node)` or `V(node,ref)` | required |
+| `INPUT` | Source for input-referred noise | none |
+| `MAXSIDEBAND` | Folded sideband bound `-n..=n` | 6 |
+| `FROM` | `PSS` or `HB` | nearest preceding |
+
+**`.ENVELOPE`** — harmonic-balance envelope continuation. It attaches to the
+nearest preceding `.HB` and exposes only what the continuation executes.
+
+```
+.ENVELOPE TSTOP=<seconds> [MAXSTEP=<seconds>] [FREEZE=(<source>[,<source>...])]
+```
+
+`MAXSTEP` defaults to `TSTOP/50`, as the direct continuation entry point
+does. `FREEZE` names the independent sources held at their exact time-zero
+values during the carrier solve; a single source may be written without
+parentheses, and a repeated source is refused.
+
+`.PAC`, `.PNOISE` and `.ENVELOPE` each consume the periodic operating point
+of an upstream analysis. Planning binds each of them to the concrete
+upstream instance (`pss-001`, `hb-002`, …) and refuses a card whose upstream
+the deck does not author before it.
+
 ## Solvers and convergence
 
 - **Sparse LU**: the real-valued path defaults to the KLU-class backend

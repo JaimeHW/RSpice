@@ -2234,6 +2234,355 @@ pub enum AnalysisCommand {
 
     /// Temperature sweep: .TEMP t1 [t2 t3...]
     Temp { temperatures: Vec<Value> },
+
+    /// Shooting periodic steady state: `.PSS`.
+    Pss(Box<PssCard>),
+
+    /// Periodic small-signal AC around a periodic operating point: `.PAC`.
+    Pac(Box<PacCard>),
+
+    /// Periodic (cyclostationary) noise around a periodic operating
+    /// point: `.PNOISE`.
+    Pnoise(Box<PnoiseCard>),
+
+    /// Harmonic-balance envelope continuation: `.ENVELOPE`.
+    Envelope(Box<EnvelopeCard>),
+}
+
+//=============================================================================
+// Periodic large-signal analysis cards
+//=============================================================================
+
+/// Authored `.PSS` card.
+///
+/// Every field is validated by the parser, so the analysis layer converts
+/// rather than re-deriving what the deck asked for. The field set mirrors the
+/// shooting configuration one-for-one; the conversion and the test pinning
+/// these defaults to that configuration's own live beside it, because a
+/// parsed deck may not reach up into the analysis layer.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PssCard {
+    /// Fundamental frequency in Hz. Zero only for an autonomous card that
+    /// authored no frequency, where `period_guess` seeds the search instead.
+    pub fundamental_freq: Value,
+    /// Harmonics retained in the result.
+    pub num_harmonics: usize,
+    /// Stabilization time in seconds before shooting begins.
+    pub tstab: Value,
+    /// Stabilization periods used when `tstab` is zero.
+    pub tstab_periods: usize,
+    /// Maximum shooting iterations.
+    pub max_iterations: usize,
+    /// Relative periodicity convergence tolerance.
+    pub tolerance: Value,
+    /// Absolute convergence tolerance.
+    pub abstol: Value,
+    /// Detect the period instead of taking `fundamental_freq` as exact.
+    pub auto_period: bool,
+    /// Node the autonomous period is detected on.
+    pub oscillator_node: Option<String>,
+    /// Autonomous period seed in seconds.
+    pub period_guess: Value,
+    /// Newton damping factor.
+    pub damping_factor: Value,
+    /// Maximum relative period change per autonomous iteration.
+    pub max_period_change: Value,
+    /// Integration method override; `None` keeps the engine default.
+    pub integration_method: Option<crate::numerics::integration::IntegrationMethod>,
+    /// Samples per period retained for the periodic waveforms.
+    pub points_per_period: usize,
+    /// Log convergence progress.
+    pub verbose: bool,
+}
+
+impl PssCard {
+    /// Harmonics retained when the card does not say.
+    pub const DEFAULT_HARMONICS: usize = 9;
+    /// Samples per period retained when the card does not say.
+    pub const DEFAULT_POINTS_PER_PERIOD: usize = 256;
+    /// Maximum shooting iterations when the card does not say.
+    pub const DEFAULT_MAX_ITERATIONS: usize = 100;
+    /// Relative periodicity tolerance when the card does not say.
+    pub const DEFAULT_TOLERANCE: Value = 1e-6;
+    /// Absolute tolerance when the card does not say.
+    pub const DEFAULT_ABSTOL: Value = 1e-12;
+    /// Newton damping when the card does not say.
+    pub const DEFAULT_DAMPING: Value = 1.0;
+    /// Relative period-change bound when the card does not say.
+    pub const DEFAULT_MAX_PERIOD_CHANGE: Value = 0.1;
+    /// Autonomous period seed when the card does not say.
+    pub const DEFAULT_PERIOD_GUESS: Value = 1e-9;
+    /// Stabilization periods for a driven card that does not say.
+    pub const DEFAULT_DRIVEN_TSTAB_PERIODS: usize = 10;
+    /// Stabilization periods for an autonomous card that does not say.
+    /// Detecting a period needs more startup than tracking a known one.
+    pub const DEFAULT_AUTONOMOUS_TSTAB_PERIODS: usize = 20;
+
+    /// A driven card at `fundamental_freq`, every optional field defaulted.
+    pub fn driven(fundamental_freq: Value) -> Self {
+        Self {
+            fundamental_freq,
+            num_harmonics: Self::DEFAULT_HARMONICS,
+            tstab: 0.0,
+            tstab_periods: Self::DEFAULT_DRIVEN_TSTAB_PERIODS,
+            max_iterations: Self::DEFAULT_MAX_ITERATIONS,
+            tolerance: Self::DEFAULT_TOLERANCE,
+            abstol: Self::DEFAULT_ABSTOL,
+            auto_period: false,
+            oscillator_node: None,
+            period_guess: Self::DEFAULT_PERIOD_GUESS,
+            damping_factor: Self::DEFAULT_DAMPING,
+            max_period_change: Self::DEFAULT_MAX_PERIOD_CHANGE,
+            integration_method: None,
+            points_per_period: Self::DEFAULT_POINTS_PER_PERIOD,
+            verbose: false,
+        }
+    }
+
+    /// An autonomous card with period detection on, every optional field
+    /// defaulted.
+    pub fn autonomous() -> Self {
+        Self {
+            fundamental_freq: 0.0,
+            auto_period: true,
+            tstab_periods: Self::DEFAULT_AUTONOMOUS_TSTAB_PERIODS,
+            ..Self::driven(0.0)
+        }
+    }
+
+    /// Whether the period is a solver unknown rather than authored input.
+    pub fn is_autonomous(&self) -> bool {
+        self.auto_period || self.fundamental_freq <= 0.0
+    }
+
+    /// Period the stabilization run is measured in.
+    pub fn period(&self) -> Value {
+        if self.fundamental_freq > 0.0 {
+            1.0 / self.fundamental_freq
+        } else {
+            self.period_guess
+        }
+    }
+
+    /// Stabilization time the card asks for, resolving the period form.
+    pub fn effective_tstab(&self) -> Value {
+        if self.tstab > 0.0 {
+            self.tstab
+        } else {
+            self.tstab_periods as Value * self.period()
+        }
+    }
+}
+
+/// Authored `.PAC` card.
+///
+/// The large-signal fundamental is deliberately absent: it comes from the
+/// upstream `.PSS`/`.HB` instance when the analysis runs, exactly as the
+/// direct PAC entry points bind it from their operating point.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PacCard {
+    /// Input-frequency sweep.
+    pub sweep: PeriodicSweep,
+    /// Small-signal source swept across the sweep.
+    pub input_source: String,
+    /// Output probe node.
+    pub output_node: String,
+    /// Reference node of a differential `V(out,ref)` probe.
+    pub output_ref: Option<String>,
+    /// Lowest output sideband index relative to the input.
+    pub sideband_min: i32,
+    /// Highest output sideband index relative to the input.
+    pub sideband_max: i32,
+    /// Relative tolerance for the frequency-domain solve.
+    pub reltol: Value,
+    /// Absolute tolerance for small-signal currents, in amps.
+    pub abstol: Value,
+    /// Which upstream periodic analysis this card linearizes around.
+    pub source: PeriodicSourceSelector,
+}
+
+impl PacCard {
+    /// Lowest sideband index when the card does not say.
+    pub const DEFAULT_SIDEBAND_MIN: i32 = -5;
+    /// Highest sideband index when the card does not say.
+    pub const DEFAULT_SIDEBAND_MAX: i32 = 5;
+    /// Relative tolerance when the card does not say.
+    pub const DEFAULT_RELTOL: Value = 1e-3;
+    /// Absolute tolerance when the card does not say.
+    pub const DEFAULT_ABSTOL: Value = 1e-12;
+}
+
+/// Authored `.PNOISE` card.
+///
+/// There is no single core configuration struct for periodic noise: the
+/// runners take the offset grid, the output probe, an optional input source
+/// and the folded sideband bound directly, so the card carries exactly those.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PnoiseCard {
+    /// Offset-frequency sweep; generates the offsets the runners consume.
+    pub sweep: PeriodicSweep,
+    /// Output voltage probe node.
+    pub output_node: String,
+    /// Reference node of a differential `V(out,ref)` probe.
+    pub reference_node: Option<String>,
+    /// Independent source used for input-referred noise, when authored.
+    pub input_source: Option<String>,
+    /// Highest folded sideband index; sidebands `-n..=n` participate.
+    pub max_sideband: i32,
+    /// Which upstream periodic analysis this card folds noise around.
+    pub source: PeriodicSourceSelector,
+}
+
+/// Authored `.ENVELOPE` card: harmonic-balance envelope continuation.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EnvelopeCard {
+    /// Slow-time continuation length in seconds.
+    pub duration: Value,
+    /// Maximum continued timestep in seconds.
+    pub max_step: Value,
+    /// Independent sources frozen at their exact time-zero values during the
+    /// carrier solve, canonicalized to upper case like every other authored
+    /// instance name.
+    pub frozen_sources: Vec<String>,
+}
+
+/// `DEC|LIN|OCT np fstart fstop` sweep shared by `.PAC` and `.PNOISE`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PeriodicSweep {
+    pub variation: FreqVariation,
+    pub points: usize,
+    pub start_freq: Value,
+    pub stop_freq: Value,
+}
+
+/// Which upstream periodic large-signal analysis a `.PAC`/`.PNOISE` card
+/// attaches to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PeriodicSourceSelector {
+    /// The nearest preceding `.PSS` or `.HB` card, whichever is closer.
+    #[default]
+    Preceding,
+    /// The nearest preceding `.PSS` card.
+    Pss,
+    /// The nearest preceding `.HB` card.
+    Hb,
+}
+
+/// Which authored analysis card a card-level parse failure came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnalysisCard {
+    Pss,
+    Pac,
+    Pnoise,
+    Envelope,
+}
+
+impl AnalysisCard {
+    /// Dot-command spelling used in diagnostics.
+    pub const fn directive(self) -> &'static str {
+        match self {
+            Self::Pss => ".PSS",
+            Self::Pac => ".PAC",
+            Self::Pnoise => ".PNOISE",
+            Self::Envelope => ".ENVELOPE",
+        }
+    }
+}
+
+impl std::fmt::Display for AnalysisCard {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.directive())
+    }
+}
+
+/// What is wrong with one authored analysis card.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AnalysisCardIssue {
+    /// A field the card cannot default was not authored.
+    MissingField { field: &'static str },
+    /// A keyword this card does not define.
+    UnknownKeyword { keyword: String },
+    /// The same keyword was authored more than once.
+    DuplicateKeyword { keyword: &'static str },
+    /// A numeric field is non-finite or outside its admissible range.
+    InvalidNumber {
+        field: &'static str,
+        value: Value,
+        expected: &'static str,
+    },
+    /// A choice-valued field received a spelling the card does not define.
+    InvalidChoice {
+        field: &'static str,
+        value: String,
+        expected: &'static str,
+    },
+    /// Two authored fields describe the same quantity.
+    ConflictingFields {
+        first: &'static str,
+        second: &'static str,
+    },
+    /// A name field was empty or repeated where it must be unique.
+    InvalidName { field: &'static str, value: String },
+    /// A field another simulator accepts here that RSpice cannot honour.
+    ///
+    /// Ignoring it would silently change what the deck asked for, so the
+    /// card is refused instead.
+    UnhonourableField {
+        field: &'static str,
+        detail: &'static str,
+    },
+    /// Tokens remain after the card's grammar is complete.
+    TrailingToken { token: String },
+}
+
+impl std::fmt::Display for AnalysisCardIssue {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingField { field } => write!(formatter, "missing required field {field}"),
+            Self::UnknownKeyword { keyword } => write!(formatter, "unknown keyword '{keyword}'"),
+            Self::DuplicateKeyword { keyword } => {
+                write!(formatter, "keyword {keyword} authored more than once")
+            }
+            Self::InvalidNumber {
+                field,
+                value,
+                expected,
+            } => write!(formatter, "{field} must be {expected}, got {value}"),
+            Self::InvalidChoice {
+                field,
+                value,
+                expected,
+            } => write!(formatter, "{field} must be {expected}, got '{value}'"),
+            Self::ConflictingFields { first, second } => write!(
+                formatter,
+                "{first} and {second} set the same quantity; author only one"
+            ),
+            Self::InvalidName { field, value } => {
+                write!(formatter, "invalid {field} name '{value}'")
+            }
+            Self::UnhonourableField { field, detail } => {
+                write!(formatter, "{field} cannot be honoured by RSpice: {detail}")
+            }
+            Self::TrailingToken { token } => {
+                write!(formatter, "unexpected trailing token '{token}'")
+            }
+        }
+    }
+}
+
+/// Source-located failure of one authored analysis card.
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+#[error("{card} at line {line}: {issue}")]
+pub struct AnalysisCardError {
+    pub card: AnalysisCard,
+    pub line: usize,
+    pub issue: AnalysisCardIssue,
+}
+
+impl AnalysisCardError {
+    pub fn new(card: AnalysisCard, line: usize, issue: AnalysisCardIssue) -> Self {
+        Self { card, line, issue }
+    }
 }
 
 /// Monte Carlo command configuration

@@ -609,15 +609,32 @@ impl RunCoordinate {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AnalysisRequest {
     kind: AnalysisKind,
+    upstream: Option<AnalysisInstanceId>,
 }
 
 impl AnalysisRequest {
     pub const fn new(kind: AnalysisKind) -> Self {
-        Self { kind }
+        Self {
+            kind,
+            upstream: None,
+        }
+    }
+
+    /// Bind the periodic large-signal analysis this request linearizes
+    /// around. Only `.PAC`, `.PNOISE` and `.ENVELOPE` carry one.
+    pub fn with_upstream(mut self, upstream: AnalysisInstanceId) -> Self {
+        self.upstream = Some(upstream);
+        self
     }
 
     pub const fn kind(&self) -> AnalysisKind {
         self.kind
+    }
+
+    /// Identity of the analysis whose periodic operating point this request
+    /// consumes, when the authored card attaches to one.
+    pub const fn upstream(&self) -> Option<AnalysisInstanceId> {
+        self.upstream
     }
 }
 
@@ -713,6 +730,14 @@ impl DeckPlan {
             "authored analysis requests",
         )?;
 
+        // Per-kind ordinals are recomputed here so a `.PAC`/`.PNOISE`/
+        // `.ENVELOPE` card can name the upstream instance it consumes with
+        // the same identity `DeckPlan::new` will assign it.
+        let mut authored_ordinals = std::collections::BTreeMap::<AnalysisKind, u32>::new();
+        let mut last_pss: Option<AnalysisInstanceId> = None;
+        let mut last_hb: Option<AnalysisInstanceId> = None;
+        let mut last_periodic: Option<AnalysisInstanceId> = None;
+
         for (command_index, command) in netlist.analyses.iter().enumerate() {
             if command_index.is_multiple_of(64) && abort.is_aborted() {
                 return Err(DeckPlanError::Aborted);
@@ -741,7 +766,56 @@ impl DeckPlan {
                     // it is not a physical analysis that suppresses implicit
                     // OP when it appears alone.
                 }
-                command => analyses.push(AnalysisRequest::new(analysis_kind(command))),
+                command => {
+                    let kind = analysis_kind(command);
+                    let ordinal = *authored_ordinals.get(&kind).unwrap_or(&0);
+                    let id = AnalysisInstanceId::new(kind, ordinal);
+                    authored_ordinals.insert(
+                        kind,
+                        ordinal
+                            .checked_add(1)
+                            .ok_or(DeckPlanError::AnalysisCountOverflow(kind))?,
+                    );
+                    let request = match command {
+                        AnalysisCommand::Pac(card) => {
+                            AnalysisRequest::new(kind).with_upstream(resolve_periodic_source(
+                                card.source,
+                                ".PAC",
+                                last_pss,
+                                last_hb,
+                                last_periodic,
+                            )?)
+                        }
+                        AnalysisCommand::Pnoise(card) => {
+                            AnalysisRequest::new(kind).with_upstream(resolve_periodic_source(
+                                card.source,
+                                ".PNOISE",
+                                last_pss,
+                                last_hb,
+                                last_periodic,
+                            )?)
+                        }
+                        AnalysisCommand::Envelope(_) => AnalysisRequest::new(kind).with_upstream(
+                            last_hb.ok_or(DeckPlanError::MissingUpstreamAnalysis {
+                                card: ".ENVELOPE",
+                                required: "a preceding .HB",
+                            })?,
+                        ),
+                        _ => AnalysisRequest::new(kind),
+                    };
+                    match kind {
+                        AnalysisKind::Pss => {
+                            last_pss = Some(id);
+                            last_periodic = Some(id);
+                        }
+                        AnalysisKind::HarmonicBalance => {
+                            last_hb = Some(id);
+                            last_periodic = Some(id);
+                        }
+                        _ => {}
+                    }
+                    analyses.push(request);
+                }
             }
         }
         if abort.is_aborted() {
@@ -874,6 +948,36 @@ impl DeckPlan {
 
     pub fn analyses(&self) -> &[PlannedAnalysis] {
         &self.analyses
+    }
+
+    /// Pair every authored analysis command with the planned analysis it
+    /// became, in authored order.
+    ///
+    /// Run axes (`.STEP`, `.TEMP`) and post-processing cards (`.FOUR`) occupy
+    /// no planned slot and pair with `None`. Frontends that report on an
+    /// authored card need its canonical identity; deriving that pairing
+    /// separately on each surface is how the two drift apart.
+    pub fn authored_analyses<'plan>(
+        &'plan self,
+        netlist: &'plan crate::netlist::Netlist,
+    ) -> impl Iterator<
+        Item = (
+            &'plan crate::netlist::AnalysisCommand,
+            Option<AnalysisInstanceId>,
+        ),
+    > {
+        use crate::netlist::AnalysisCommand;
+
+        let mut planned = self.analyses.iter();
+        netlist.analyses.iter().map(move |command| {
+            let id = match command {
+                AnalysisCommand::Step(_)
+                | AnalysisCommand::Temp { .. }
+                | AnalysisCommand::Four { .. } => None,
+                _ => planned.next().map(PlannedAnalysis::id),
+            };
+            (command, id)
+        })
     }
 
     fn coordinate_resource_estimate(&self) -> Result<CoordinateResourceEstimate, DeckPlanError> {
@@ -1123,6 +1227,14 @@ pub enum DeckPlanError {
     },
     ExplicitImplicitOp,
     TemperatureAxisWithStep,
+    /// A periodic small-signal or envelope card names an upstream periodic
+    /// large-signal analysis the deck does not author before it.
+    MissingUpstreamAnalysis {
+        /// Dot-command spelling of the dependent card.
+        card: &'static str,
+        /// What the card needs to attach to.
+        required: &'static str,
+    },
     AnalysisCountOverflow(AnalysisKind),
     Allocation {
         object: &'static str,
@@ -1218,6 +1330,10 @@ impl fmt::Display for DeckPlanError {
             Self::TemperatureAxisWithStep => formatter.write_str(
                 "the legacy temperature-only execution adapter cannot compose .TEMP with .STEP; use the canonical run-axis plan",
             ),
+            Self::MissingUpstreamAnalysis { card, required } => write!(
+                formatter,
+                "{card} requires {required} in the same deck to linearize around"
+            ),
             Self::AnalysisCountOverflow(kind) => {
                 write!(
                     formatter,
@@ -1247,6 +1363,29 @@ impl fmt::Display for DeckPlanError {
 
 impl std::error::Error for DeckPlanError {}
 
+/// Resolve which authored periodic analysis a small-signal periodic card
+/// linearizes around.
+///
+/// `FROM=` pins the family; without it the card follows the nearest preceding
+/// `.PSS` or `.HB` in authored order, which is how the periodic small-signal
+/// configurations already reference their large-signal source.
+fn resolve_periodic_source(
+    selector: crate::netlist::PeriodicSourceSelector,
+    card: &'static str,
+    last_pss: Option<AnalysisInstanceId>,
+    last_hb: Option<AnalysisInstanceId>,
+    last_periodic: Option<AnalysisInstanceId>,
+) -> Result<AnalysisInstanceId, DeckPlanError> {
+    use crate::netlist::PeriodicSourceSelector;
+
+    let (found, required) = match selector {
+        PeriodicSourceSelector::Preceding => (last_periodic, "a preceding .PSS or .HB"),
+        PeriodicSourceSelector::Pss => (last_pss, "a preceding .PSS"),
+        PeriodicSourceSelector::Hb => (last_hb, "a preceding .HB"),
+    };
+    found.ok_or(DeckPlanError::MissingUpstreamAnalysis { card, required })
+}
+
 pub(super) fn analysis_kind(command: &crate::netlist::AnalysisCommand) -> AnalysisKind {
     use crate::netlist::AnalysisCommand;
 
@@ -1265,6 +1404,10 @@ pub(super) fn analysis_kind(command: &crate::netlist::AnalysisCommand) -> Analys
         AnalysisCommand::MonteCarlo(_) => AnalysisKind::MonteCarlo,
         AnalysisCommand::Sensitivity { .. } => AnalysisKind::Sensitivity,
         AnalysisCommand::Four { .. } => AnalysisKind::Fourier,
+        AnalysisCommand::Pss(_) => AnalysisKind::Pss,
+        AnalysisCommand::Pac(_) => AnalysisKind::Pac,
+        AnalysisCommand::Pnoise(_) => AnalysisKind::PNoise,
+        AnalysisCommand::Envelope(_) => AnalysisKind::Envelope,
         AnalysisCommand::Step(_) | AnalysisCommand::Temp { .. } => AnalysisKind::ImplicitOp,
     }
 }
@@ -2203,5 +2346,210 @@ mod tests {
             DeckPlan::from_netlist_run_axes_with_abort(&list, &ResourceLimits::default(), &abort,),
             Err(DeckPlanError::Aborted)
         ));
+    }
+
+    const PERIODIC_CIRCUIT: &str = "periodic planner\n\
+                                    V1 in 0 SIN(0 1 1G)\n\
+                                    R1 in out 1k\n\
+                                    C1 out 0 1p\n";
+
+    fn periodic_plan(cards: &str) -> DeckPlan {
+        let netlist = crate::Netlist::parse(&format!("{PERIODIC_CIRCUIT}{cards}.end\n"))
+            .expect("periodic deck parses");
+        DeckPlan::from_netlist(&netlist, &ResourceLimits::default()).expect("periodic deck plans")
+    }
+
+    fn analysis_tags(plan: &DeckPlan) -> Vec<String> {
+        plan.analyses()
+            .iter()
+            .map(|analysis| analysis.id().tag())
+            .collect()
+    }
+
+    #[test]
+    fn periodic_cards_map_to_their_analysis_kinds_with_stable_ordinals() {
+        let plan = periodic_plan(
+            ".pss fund=1g\n\
+             .pnoise dec 5 1 1k out=v(out)\n\
+             .hb 1g\n\
+             .pac dec 5 1k 1meg input=v1 out=v(out)\n\
+             .envelope tstop=1u\n\
+             .pss fund=2g\n",
+        );
+
+        assert_eq!(
+            plan.analyses()
+                .iter()
+                .map(|analysis| analysis.request().kind())
+                .collect::<Vec<_>>(),
+            [
+                AnalysisKind::Pss,
+                AnalysisKind::PNoise,
+                AnalysisKind::HarmonicBalance,
+                AnalysisKind::Pac,
+                AnalysisKind::Envelope,
+                AnalysisKind::Pss,
+            ]
+        );
+        assert_eq!(
+            analysis_tags(&plan),
+            [
+                "pss-001",
+                "pnoise-001",
+                "hb-001",
+                "pac-001",
+                "env-001",
+                "pss-002"
+            ]
+        );
+    }
+
+    #[test]
+    fn periodic_small_signal_cards_attach_to_their_upstream_instance() {
+        let plan = periodic_plan(
+            ".pss fund=1g\n\
+             .hb 1g\n\
+             .pac dec 5 1k 1meg input=v1 out=v(out)\n\
+             .pac dec 5 1k 1meg input=v1 out=v(out) from=pss\n\
+             .pnoise dec 5 1 1k out=v(out) from=hb\n\
+             .envelope tstop=1u\n",
+        );
+
+        let upstream = plan
+            .analyses()
+            .iter()
+            .map(|analysis| {
+                (
+                    analysis.id().tag(),
+                    analysis.request().upstream().map(|id| id.tag()),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            upstream,
+            [
+                ("pss-001".to_string(), None),
+                ("hb-001".to_string(), None),
+                // No FROM: the nearest preceding periodic card, the .HB.
+                ("pac-001".to_string(), Some("hb-001".to_string())),
+                ("pac-002".to_string(), Some("pss-001".to_string())),
+                ("pnoise-001".to_string(), Some("hb-001".to_string())),
+                ("env-001".to_string(), Some("hb-001".to_string())),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_second_upstream_analysis_rebinds_the_cards_that_follow_it() {
+        let plan = periodic_plan(
+            ".hb 1g\n\
+             .pac dec 5 1k 1meg input=v1 out=v(out)\n\
+             .hb 2g\n\
+             .pac dec 5 1k 1meg input=v1 out=v(out)\n",
+        );
+        assert_eq!(
+            plan.analyses()
+                .iter()
+                .filter_map(|analysis| analysis.request().upstream().map(|id| id.tag()))
+                .collect::<Vec<_>>(),
+            ["hb-001", "hb-002"]
+        );
+    }
+
+    #[test]
+    fn a_dependent_card_without_its_upstream_analysis_is_typed_and_fail_closed() {
+        for (cards, card, required) in [
+            (
+                ".pac dec 5 1k 1meg input=v1 out=v(out)\n",
+                ".PAC",
+                "a preceding .PSS or .HB",
+            ),
+            (
+                ".hb 1g\n.pac dec 5 1k 1meg input=v1 out=v(out) from=pss\n",
+                ".PAC",
+                "a preceding .PSS",
+            ),
+            (
+                ".pss fund=1g\n.pnoise dec 5 1 1k out=v(out) from=hb\n",
+                ".PNOISE",
+                "a preceding .HB",
+            ),
+            (
+                ".pss fund=1g\n.envelope tstop=1u\n",
+                ".ENVELOPE",
+                "a preceding .HB",
+            ),
+            (
+                // The upstream must precede the card, not merely exist.
+                ".pac dec 5 1k 1meg input=v1 out=v(out)\n.hb 1g\n",
+                ".PAC",
+                "a preceding .PSS or .HB",
+            ),
+        ] {
+            let netlist = crate::Netlist::parse(&format!("{PERIODIC_CIRCUIT}{cards}.end\n"))
+                .expect("deck parses");
+            let error = DeckPlan::from_netlist(&netlist, &ResourceLimits::default())
+                .expect_err("a dependent card without its upstream must fail planning");
+            assert!(
+                matches!(
+                    &error,
+                    DeckPlanError::MissingUpstreamAnalysis {
+                        card: found_card,
+                        required: found_required,
+                    } if *found_card == card && *found_required == required
+                ),
+                "unexpected planning error for {cards:?}: {error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn run_axes_wrap_periodic_cards_with_stable_ordinals_and_upstream_bindings() {
+        let plan = periodic_plan(
+            ".step param rload list 1k 2k\n\
+             .temp -40 125\n\
+             .hb 1g\n\
+             .pac dec 5 1k 1meg input=v1 out=v(out)\n\
+             .pss fund=1g\n\
+             .pnoise dec 5 1 1k out=v(out)\n",
+        );
+
+        assert_eq!(
+            plan.axes()
+                .iter()
+                .map(|axis| axis.kind())
+                .collect::<Vec<_>>(),
+            [AxisKind::Step, AxisKind::Temperature]
+        );
+        assert_eq!(
+            analysis_tags(&plan),
+            ["hb-001", "pac-001", "pss-001", "pnoise-001"]
+        );
+        assert_eq!(
+            plan.analyses()
+                .iter()
+                .filter_map(|analysis| analysis.request().upstream().map(|id| id.tag()))
+                .collect::<Vec<_>>(),
+            ["hb-001", "pss-001"]
+        );
+        let coordinates = plan
+            .coordinates_with_abort(&ResourceLimits::default(), &crate::NoAbort)
+            .expect("periodic run coordinates materialize");
+        assert_eq!(coordinates.len(), 4);
+    }
+
+    #[test]
+    fn every_periodic_kind_selects_its_registered_capability_row() {
+        use crate::execution::{analysis_result_capability, analysis_result_kind};
+
+        for kind in [
+            AnalysisKind::Pss,
+            AnalysisKind::Pac,
+            AnalysisKind::PNoise,
+            AnalysisKind::Envelope,
+        ] {
+            let result = analysis_result_kind(kind);
+            assert_eq!(analysis_result_capability(result).result, result);
+        }
     }
 }

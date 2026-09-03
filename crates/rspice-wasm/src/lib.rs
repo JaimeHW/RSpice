@@ -3293,6 +3293,7 @@ pub fn run_authored_deck_document_with_options_and_abort_detailed(
     preflight_authored_deck(&netlist)?;
     let plan = DeckPlan::from_netlist_with_abort(&netlist, &resource_limits, external_abort)
         .map_err(deck_plan_wasm_error)?;
+    refuse_unsupported_deck_analyses(&netlist, &plan)?;
     for axis in plan.axes() {
         match axis.kind() {
             rspice_core::execution::AxisKind::Data
@@ -3530,11 +3531,51 @@ fn preflight_authored_deck(netlist: &Netlist) -> DetailedWasmResult<()> {
                         .to_owned(),
                 ));
             }
+            AnalysisCommand::Pss(_)
+            | AnalysisCommand::Pac(_)
+            | AnalysisCommand::Pnoise(_)
+            | AnalysisCommand::Envelope(_) => {
+                // Refused by `refuse_unsupported_deck_analyses` once the
+                // canonical plan has assigned each card its instance identity,
+                // so the refusal can name it.
+            }
             other => {
                 return Err(unsupported_deck_analysis(format!(
                     "authored analysis {other:?} is not mapped by the browser deck API"
                 )));
             }
+        }
+    }
+    Ok(())
+}
+
+/// Dot-command spelling of a card the browser deck API cannot execute.
+fn unsupported_deck_analysis_card(
+    analysis: &rspice_core::netlist::AnalysisCommand,
+) -> Option<&'static str> {
+    use rspice_core::netlist::AnalysisCommand;
+
+    match analysis {
+        AnalysisCommand::Pss(_) => Some(".PSS"),
+        AnalysisCommand::Pac(_) => Some(".PAC"),
+        AnalysisCommand::Pnoise(_) => Some(".PNOISE"),
+        AnalysisCommand::Envelope(_) => Some(".ENVELOPE"),
+        _ => None,
+    }
+}
+
+/// Refuse the periodic large-signal family with its canonical analysis
+/// identity, before any solve runs or any result handle is published.
+fn refuse_unsupported_deck_analyses(
+    netlist: &Netlist,
+    plan: &rspice_core::execution::DeckPlan,
+) -> DetailedWasmResult<()> {
+    for (analysis, id) in plan.authored_analyses(netlist) {
+        if let Some(card) = unsupported_deck_analysis_card(analysis) {
+            let instance = id.map(|id| format!(" ({id})")).unwrap_or_default();
+            return Err(unsupported_deck_analysis(format!(
+                "authored {card} card{instance} is not mapped by the browser deck API"
+            )));
         }
     }
     Ok(())
