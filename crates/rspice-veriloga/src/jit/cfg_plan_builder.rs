@@ -125,13 +125,13 @@ pub(crate) enum CfgPlanRefusal {
     /// The body contains an operation the CFG derivative pass has no rule for.
     ///
     /// Checked *before* differentiating rather than reported by it, because the
-    /// pass does not report it: `binary_factor`'s fallthrough in
+    /// pass does not report it: `binary_factor`'s scalar fallthrough in
     /// [`crate::canonical_ir`]'s `ad` module is a `debug_assert!` over
     /// `is_predicate` and a `None` result, so a hole there panics a debug build
     /// and silently yields a zero derivative in a release one. A zero Jacobian
     /// entry that should not be zero is precisely the silently-wrong class this
     /// program refuses, and taking the postfix plan for the module is the only
-    /// answer available until the rules exist.
+    /// answer available until the scalar rules exist.
     ///
     /// See [`DERIVATIVE_RULE_HOLES`] for the list and the rules that empty it.
     DerivativeRuleMissing,
@@ -324,23 +324,29 @@ pub(crate) fn derivative_seeds(cfg: &CfgModel, mir: &MirModel) -> (Vec<AdSeed>, 
     (seeds, correction)
 }
 
-/// The binary operations the CFG derivative pass has no rule for.
+/// The binary operations the CFG derivative pass's *scalar* rules omit.
 ///
-/// Both are exactly differentiable and neither rule is subtle:
+/// The pass has two rule sets. Its lane rules carry both of these already, and
+/// carry them correctly:
 ///
 /// ```text
 /// d hypot(x, y) = (x·dx + y·dy) / hypot(x, y)
 /// d atan2(y, x) = (x·dy − y·dx) / (x² + y²)
 /// ```
 ///
-/// They are missing all the same, and the pass says so only in a debug build:
-/// `binary_factor`'s fallthrough asserts the operation is a predicate and
-/// otherwise returns `None`, which a release build reads as "the derivative is
-/// zero". So this list exists to keep a wrong Jacobian out of a shipped plan,
-/// not to describe a limitation anybody intends to keep. Adding the two rules
-/// empties it, and [`a_module_the_derivative_pass_has_no_rule_for_falls_back`]
-/// is what notices: it fails by *building* the module, which is the day the
-/// list and the refusal class both come out.
+/// Its scalar rules do not, and say so only in a debug build: `binary_factor`'s
+/// fallthrough asserts the operation is a predicate and otherwise returns
+/// `None`, which a release build reads as "the derivative is zero". The plan
+/// route reaches the scalar rules, so a `ddx` over either operation compiles to
+/// a Jacobian entry that is wrong rather than absent.
+///
+/// So this list exists to keep a wrong Jacobian out of a shipped plan, not to
+/// describe a limitation anybody intends to keep: the two rules are already
+/// written a thousand lines further down the same file, and the scalar cases
+/// are the same algebra without the lane plumbing. Adding them empties this
+/// list, and [`a_module_the_derivative_pass_has_no_rule_for_falls_back`] is what
+/// notices — it fails by *building* the module, which is the day the list and
+/// the refusal class both come out.
 ///
 /// No shipped model reaches this — a search of the forty-three-module tree
 /// finds neither operation — so the generated-Rust backend, which runs the same
