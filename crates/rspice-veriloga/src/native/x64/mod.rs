@@ -178,7 +178,10 @@ pub(crate) fn compile_model_with_canonical_ir(
     compile_model_plan(model, &plan)
 }
 
-fn compile_model_plan(model: &CompiledModel, plan: &NativeModelPlan) -> JitResult<NativeModel> {
+pub(crate) fn compile_model_plan(
+    model: &CompiledModel,
+    plan: &NativeModelPlan,
+) -> JitResult<NativeModel> {
     plan.validate_shape(model)?;
 
     let mut image = Vec::new();

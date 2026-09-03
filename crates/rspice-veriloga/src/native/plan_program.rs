@@ -48,6 +48,10 @@ pub(crate) struct BlockProgram {
     branch_unknown_dependencies: Vec<usize>,
 }
 
+/// Dead outside `cfg(test)`, and precisely because of where its constructor
+/// sits: [`crate::jit::cfg_plan_builder`] is the only thing that adopts a block
+/// program, and until W-F3c flips the default it is reached only by the
+/// CFG-versus-MIR census. The attribute goes with that flip.
 #[cfg_attr(not(test), allow(dead_code))]
 impl BlockProgram {
     /// Adopt one lowered block program into a plan.
@@ -88,9 +92,12 @@ impl BlockProgram {
 
     /// Adopt a block program whose module has no state vocabulary to consult.
     ///
-    /// The qualification route: a fixture built by a test or a census owns no
-    /// compiled module, so there is no [`StateSlotMapping`] to check it
-    /// against. Production adoption goes through [`Self::adopt`].
+    /// The qualification route, and `cfg(test)` says so rather than a comment:
+    /// a fixture built by a test owns no compiled module, so there is no
+    /// [`StateSlotMapping`] to check it against. Every shipped adoption —
+    /// [`crate::jit::cfg_plan_builder`]'s included — goes through
+    /// [`Self::adopt`].
+    #[cfg(test)]
     pub(crate) fn adopt_unrooted(program: ssa::Program) -> Self {
         Self::from_lowered(program)
     }
@@ -128,6 +135,9 @@ impl BlockProgram {
 /// bytecode side reaches under a different instruction, so classifying them
 /// here would risk refusing a module over a slot the mapping simply never
 /// counted. They are left unclassified on purpose.
+///
+/// Reached only through [`BlockProgram::adopt`], so it is dead outside
+/// `cfg(test)` for the same reason and until the same commit.
 #[cfg_attr(not(test), allow(dead_code))]
 fn state_slot(op: NativeOp) -> Option<(CanonicalStateFamily, usize)> {
     let (operator, slot) = match op {
@@ -164,15 +174,22 @@ fn state_slot(op: NativeOp) -> Option<(CanonicalStateFamily, usize)> {
 
 /// One plan entry's program, in whichever form its route produced.
 ///
-/// `Blocks` has no production constructor yet — the plan builder emits postfix
-/// entries for every model — so outside the tests that qualify it, it is dead
-/// by construction. W-F3 is what gives it a shipped one; until then the
-/// `cfg_attr` below is the honest statement of that, not a silenced warning.
+/// Both arms have a constructor:
+/// [`build_model_plan_with_canonical_ir`](crate::jit::plan_builder::build_model_plan_with_canonical_ir)
+/// builds every entry as `Postfix`, and
+/// [`build_model_plan_from_canonical_cfg`](crate::jit::cfg_plan_builder::build_model_plan_from_canonical_cfg)
+/// builds the five value fields as `Blocks`. The postfix one is still what
+/// production compiles; which of the two becomes the default is W-F3c's
+/// decision, taken on the CFG-versus-MIR census's evidence.
 #[derive(Debug, Clone)]
 pub(crate) enum PlanProgram {
     /// The MIR route's flat operation stream. Every shipped model's entries.
     Postfix(NativeProgram),
     /// The CFG route's blocks and terminators.
+    ///
+    /// Constructed only by [`crate::jit::cfg_plan_builder`], which production
+    /// does not call yet, so this variant is dead outside `cfg(test)` until
+    /// W-F3c flips the default. Every backend already *consumes* it.
     #[cfg_attr(not(test), allow(dead_code))]
     Blocks(BlockProgram),
 }

@@ -27,7 +27,7 @@ const ENTRY_ALIGNMENT: usize = 16;
 // Windows ARM64 full xdata has an 18-bit instruction-count field. Keeping
 // every entry within that architectural limit also bounds local B/BL reach on
 // every host and makes the emitted image identical across desktop platforms.
-const MAX_A64_FUNCTION_BYTES: usize = 0x3ffff * 4;
+pub(crate) const MAX_A64_FUNCTION_BYTES: usize = 0x3ffff * 4;
 const A64_NOP: [u8; 4] = 0xD503_201F_u32.to_le_bytes();
 const A64_BTI_C: [u8; 4] = 0xD503_245F_u32.to_le_bytes();
 

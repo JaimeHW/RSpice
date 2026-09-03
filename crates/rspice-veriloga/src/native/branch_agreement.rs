@@ -21,6 +21,24 @@
 //! `--release --features native -- --ignored --nocapture`.
 
 use super::census_models::shipped_census_models;
+
+/// The corpus this census covers, pinned.
+///
+/// Zero disagreements is only half of what the census claims; the other half is
+/// how much it looked at. A change that stopped enumerating a plan field, or
+/// that made `is_executable_here` reject an operation family, would still
+/// report zero failures — over a smaller corpus, silently. These two counts are
+/// what makes the zero mean something.
+///
+/// `programs` is every value program of every shipped module's plan, and
+/// `executions` is every (program, operating point) pair actually run. Both are
+/// deterministic: the corpus, the plan lowering and the three fills are fixed.
+///
+/// Re-baselined the way [`super::code_identity`]'s digest is: with evidence
+/// naming what changed the count. A count that *rises* because a plan field was
+/// added is as much a change as one that falls.
+const CENSUS_PROGRAMS: usize = 1_972_391;
+const CENSUS_EXECUTIONS: usize = 5_072_907;
 use crate::jit::expr::{NativeOp, NativeProgram};
 use crate::jit::plan_builder::build_model_plan_with_canonical_ir;
 use crate::jit::plan_program::PlanProgram;
@@ -415,5 +433,11 @@ fn branch_lowering_agrees_with_the_select_form_across_the_shipped_census() {
     assert!(
         tally.split_conditionals > 0 && tally.executions > 0,
         "the census must actually exercise the branch form"
+    );
+    assert_eq!(
+        (tally.programs, tally.executions),
+        (CENSUS_PROGRAMS, CENSUS_EXECUTIONS),
+        "the branch-agreement corpus changed size; zero disagreements over a corpus that is not \
+         the pinned one is not the claim this census makes"
     );
 }

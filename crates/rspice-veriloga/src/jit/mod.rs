@@ -8,6 +8,7 @@
 pub(crate) mod assignment;
 #[path = "../native/cfg_lanes.rs"]
 pub(crate) mod cfg_lanes;
+pub(crate) mod cfg_plan_builder;
 #[path = "../native/cfg_program.rs"]
 pub(crate) mod cfg_program;
 pub(crate) mod coverage;

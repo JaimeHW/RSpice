@@ -661,6 +661,46 @@ class CiConfigurationTests(unittest.TestCase):
             workflow,
         )
 
+    def test_model_less_generated_veriloga_shard_is_linted_over_test_targets(
+        self,
+    ) -> None:
+        """`veriloga-builtins-base` with no model selected is a lint blind spot.
+
+        The feature compiles the adapter and the generated catalog but
+        selects no model, so `GeneratedBuiltinKind` has no variants and
+        every type holding one is uninhabited. Code that builds such a
+        value is unreachable, which `-D warnings` rejects -- but only in a
+        target something compiles. The helper this caught lives in
+        `#[cfg(test)]`, and a bare `cargo check` walks straight past it.
+
+        Nothing else covers the shard. The workspace Clippy in this job
+        runs default features, which leave the generated catalog out
+        entirely, and `python.yml` lints `-p rspice-core --all-features`,
+        which selects every model and so always sees the enum inhabited.
+        """
+        workflow = read_text(".github/workflows/ci.yml")
+        step = workflow.split("- name: Check granular generated Verilog-A features", 1)[
+            1
+        ].split("- name:", 1)[0]
+
+        self.assertIn("RUSTFLAGS: -D warnings", step)
+        self.assertIn(
+            "cargo check --locked -p rspice-core"
+            " --features veriloga-builtins-base --all-targets",
+            step,
+        )
+
+        # The two lanes whose blind spots make the line above load-bearing.
+        self.assertIn(
+            "cargo clippy --locked --workspace --exclude rspice-python"
+            " --exclude rspice-wasm --all-targets --message-format short -- -D warnings",
+            workflow,
+        )
+        self.assertIn(
+            "cargo clippy --locked -p rspice-core --all-targets --all-features -- -D warnings",
+            read_text(".github/workflows/python.yml"),
+        )
+
     def test_windows_ci_runs_native_veriloga_jit_tests(self) -> None:
         workflow = read_text(".github/workflows/ci.yml")
 

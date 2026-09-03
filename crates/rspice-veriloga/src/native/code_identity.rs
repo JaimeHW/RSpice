@@ -12,6 +12,41 @@
 
 use super::census_models::shipped_census_models;
 
+/// How many modules the shipped model tree declares.
+///
+/// Pinned beside the digest because the digest alone cannot tell "no module
+/// moved" from "the corpus shrank": a census that discovered forty-two modules
+/// would produce a different digest and say nothing about which one it lost.
+const SHIPPED_CENSUS_MODELS: usize = 43;
+
+/// The combined machine-code digest of the shipped corpus.
+///
+/// # This is a drift detector, not a proof
+///
+/// Nothing about this number says the emitted code is *correct*. What it says
+/// is that the code emitted for the shipped corpus is the same code as when it
+/// was last measured, so a change that was supposed to be a refactor and moved
+/// a byte says so here instead of in a customer's transient.
+///
+/// # How it is re-baselined
+///
+/// Only with evidence that names the modules that moved and why. The census
+/// prints a per-module digest before the combined one, so a run that changes
+/// this value already knows which modules are responsible; a re-baseline
+/// commit has to say which those were and what emitted-code change accounts
+/// for each. "The census turned red so the constant was updated" is the one
+/// move this pin exists to prevent — it converts a detector into a rubber
+/// stamp.
+///
+/// The value below was measured on this tree by the W-F3b lane. The previous
+/// value, `fe9a2072…`, moved to `e00c6b88…` at W-F3a (`84ba2c2bb`), which ruled
+/// `limexp`'s threshold once for the whole estate: exactly five modules changed
+/// — `angelov`, `angelov_gan`, `hicumL0va`, `hicumL2va` and `vbic_4T_et_cf`,
+/// the five that call `limexp` — and the other thirty-eight were digest
+/// identical across that change.
+const SHIPPED_CENSUS_DIGEST: &str =
+    "e00c6b8818e88bba07840df35b68f69687bba439910b56b2b76c9ffe5ae601a3";
+
 /// One shipped module's compiled machine-code digest.
 struct ModelImageDigest {
     name: String,
@@ -121,9 +156,20 @@ fn shipped_model_machine_code_census_digest() {
         combined.update(entry.name.as_bytes());
         combined.update(entry.digest.as_bytes());
     }
+    let digest = combined.finalize().to_hex().to_string();
     eprintln!(
-        "code-identity models={} census_digest={}",
+        "code-identity models={} census_digest={digest}",
         census.len(),
-        combined.finalize().to_hex()
+    );
+    assert_eq!(
+        census.len(),
+        SHIPPED_CENSUS_MODELS,
+        "the shipped model tree no longer declares {SHIPPED_CENSUS_MODELS} compilable modules"
+    );
+    assert_eq!(
+        digest, SHIPPED_CENSUS_DIGEST,
+        "the shipped corpus's emitted machine code moved; the per-module digests above name \
+         which modules, and re-baselining SHIPPED_CENSUS_DIGEST means naming them and the \
+         emitted-code change that accounts for each"
     );
 }
