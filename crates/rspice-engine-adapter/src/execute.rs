@@ -69,10 +69,15 @@ pub const SOLVE_BUDGET_SECONDS_ENV: &str = "RSPICE_ENGINE_SOLVE_BUDGET_SECONDS";
 /// operator meant to shorten would let a request outlive the deadline the
 /// worker is holding it to.
 pub fn solve_budget_from_env() -> Result<Duration, String> {
-    match std::env::var(SOLVE_BUDGET_SECONDS_ENV) {
-        Err(_) => Ok(DEFAULT_SOLVE_BUDGET),
-        Ok(value) => parse_solve_budget(&value),
-    }
+    // Read through `var_os` so a value that is not valid UTF-8 is refused as
+    // a malformed budget rather than mistaken for an unset one.
+    let Some(value) = std::env::var_os(SOLVE_BUDGET_SECONDS_ENV) else {
+        return Ok(DEFAULT_SOLVE_BUDGET);
+    };
+    let value = value.to_str().ok_or_else(|| {
+        format!("{SOLVE_BUDGET_SECONDS_ENV} is not valid UTF-8; expected a number of seconds")
+    })?;
+    parse_solve_budget(value)
 }
 
 fn parse_solve_budget(value: &str) -> Result<Duration, String> {
