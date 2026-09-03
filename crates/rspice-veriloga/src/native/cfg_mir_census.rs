@@ -847,6 +847,7 @@ impl Storage {
 /// `E` would then be the distance between two different computations rather
 /// than one computation's rounding.
 fn plan_reference(
+    module: &str,
     route: &'static str,
     plan: &crate::jit::model_plan::NativeModelPlan,
     point: &super::mir_postfix::MirPoint<'_>,
@@ -871,7 +872,7 @@ fn plan_reference(
         );
         if let (Err(refusal), _) | (_, Err(refusal)) = published {
             println!(
-                "cfg-mir prelude_refused route={route} detail={}",
+                "cfg-mir model={module} prelude_refused route={route} detail={}",
                 refusal.name()
             );
         }
@@ -895,8 +896,8 @@ fn plan_reference(
         if !agrees {
             tally.walker_disagreements += 1;
             println!(
-                "cfg-mir walker_disagreement route={route} entry={entry} walked={walked:.17e} \
-                 carried={:.17e} compiled={compiled:.17e}",
+                "cfg-mir model={module} walker_disagreement route={route} entry={entry} \
+                 walked={walked:.17e} carried={:.17e} compiled={compiled:.17e}",
                 reference.narrow()
             );
             continue;
@@ -1188,6 +1189,7 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
             let walked = point.mir_point(&storage.currents, &storage.branch_currents);
             (
                 plan_reference(
+                    module,
                     "mir",
                     &mir_plan,
                     &walked,
@@ -1197,6 +1199,7 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
                     tally,
                 ),
                 plan_reference(
+                    module,
                     "cfg",
                     &cfg_plan.plan,
                     &walked,
