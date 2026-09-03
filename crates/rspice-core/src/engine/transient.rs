@@ -363,6 +363,13 @@ fn capture_transient_merit_rollback(
     }
 }
 
+pub(in crate::engine) use breakpoints::BreakpointWindow;
+use breakpoints::{DynamicBreakpointSink, TlineArrivalEvent, TlineWaveChange};
+use state_advanced_mos::Bsim4CompanionStep;
+use state_recovery::{ForceAcceptLimits, SourceActivityRecovery};
+use step_control::{SourceActivityDeltas, StepBiasFloors};
+use vbic::VbicSnapshotTolerances;
+
 mod breakpoints;
 mod checkpoint;
 mod companion_stamps;
@@ -1941,9 +1948,11 @@ impl Engine {
         let mut breakpoints = BreakpointManager::new();
         Self::collect_independent_source_breakpoints(
             &circuit,
-            tstop,
-            source_step_hint,
-            self.config.spice_dialect,
+            BreakpointWindow {
+                tstop,
+                tstep_hint: source_step_hint,
+                dialect: self.config.spice_dialect,
+            },
             (!selected.is_empty()).then_some(&selected),
             &mut breakpoints,
             abort,
@@ -3471,9 +3480,11 @@ impl Engine {
         }
         Self::collect_transient_source_breakpoints(
             &circuit,
-            tstop,
-            source_step_hint,
-            self.config.spice_dialect,
+            BreakpointWindow {
+                tstop,
+                tstep_hint: source_step_hint,
+                dialect: self.config.spice_dialect,
+            },
             &mut breakpoints,
             abort,
             self.config.resource_limits.max_analysis_points,
@@ -5058,16 +5069,22 @@ impl Engine {
                     dt,
                     tstop - t,
                     at_breakpoint,
-                    expected_source_delta,
-                    interior_source_delta,
-                    Self::source_ramp_tracking_delta(
-                        &circuit,
-                        self.config.transient_node_activity_bound,
-                    ),
-                    practical_min,
-                    timestep.preferred_min_dt(),
-                    Self::should_apply_active_source_recovery_cap(force_accept_cooldown),
-                    nonlinear_source_ramp_cap_enabled,
+                    SourceActivityDeltas {
+                        expected_source_delta,
+                        interior_source_delta,
+                        source_ramp_tracking_delta: Self::source_ramp_tracking_delta(
+                            &circuit,
+                            self.config.transient_node_activity_bound,
+                        ),
+                    },
+                    StepBiasFloors {
+                        practical_min_dt: practical_min,
+                        preferred_min_dt: timestep.preferred_min_dt(),
+                        recovery_cap_enabled: Self::should_apply_active_source_recovery_cap(
+                            force_accept_cooldown,
+                        ),
+                        nonlinear_source_ramp_cap_enabled,
+                    },
                 );
                 if biased_dt + 1e-30 < dt {
                     dt = biased_dt;
@@ -7491,10 +7508,12 @@ impl Engine {
                         &solution,
                         &new_solution,
                         step_time,
-                        num_nodes,
-                        force_accept_delta_limit,
-                        &force_accept_protected_nodes,
-                        &ideal_output_pairs,
+                        ForceAcceptLimits {
+                            num_nodes,
+                            force_accept_delta_limit,
+                            protected_nodes: &force_accept_protected_nodes,
+                            ideal_output_pairs: &ideal_output_pairs,
+                        },
                     )?;
                     let unbounded_force_candidate = Self::is_unbounded_step(
                         &solution,
@@ -8657,10 +8676,13 @@ impl Engine {
                             dt,
                         },
                         accepted_max_step,
-                        is_strictly_linear_transient,
-                        expected_source_delta,
-                        Self::should_apply_active_source_recovery_cap(force_accept_cooldown),
-                        Some(lte_scale),
+                        SourceActivityRecovery {
+                            is_strictly_linear_transient,
+                            expected_source_delta,
+                            source_activity_growth_cap_enabled:
+                                Self::should_apply_active_source_recovery_cap(force_accept_cooldown),
+                            accepted_scale: Some(lte_scale),
+                        },
                     );
                 }
             }
@@ -13059,13 +13081,17 @@ D1 D 0 DMOD
             dt,
             dt,
             false,
-            source_delta,
-            source_delta,
-            crate::constants::DEVICE_ACTIVITY_STEP_BOUND,
-            1.0e-15,
-            1.0e-12,
-            false,
-            true,
+            SourceActivityDeltas {
+                expected_source_delta: source_delta,
+                interior_source_delta: source_delta,
+                source_ramp_tracking_delta: crate::constants::DEVICE_ACTIVITY_STEP_BOUND,
+            },
+            StepBiasFloors {
+                practical_min_dt: 1.0e-15,
+                preferred_min_dt: 1.0e-12,
+                recovery_cap_enabled: false,
+                nonlinear_source_ramp_cap_enabled: true,
+            },
         );
         let expected = dt * crate::constants::DEVICE_ACTIVITY_STEP_BOUND / source_delta;
 
@@ -13075,13 +13101,17 @@ D1 D 0 DMOD
                 dt,
                 dt,
                 false,
-                source_delta,
-                source_delta,
-                crate::constants::DEVICE_ACTIVITY_STEP_BOUND,
-                1.0e-15,
-                1.0e-12,
-                false,
-                false,
+                SourceActivityDeltas {
+                    expected_source_delta: source_delta,
+                    interior_source_delta: source_delta,
+                    source_ramp_tracking_delta: crate::constants::DEVICE_ACTIVITY_STEP_BOUND
+                },
+                StepBiasFloors {
+                    practical_min_dt: 1.0e-15,
+                    preferred_min_dt: 1.0e-12,
+                    recovery_cap_enabled: false,
+                    nonlinear_source_ramp_cap_enabled: false
+                }
             ),
             dt
         );

@@ -1626,9 +1626,11 @@ impl Engine {
             matrix,
             rhs,
             solution,
-            &companion_coeff,
-            &bsim4_companion_coeff,
-            dt,
+            Bsim4CompanionStep {
+                coeff: &companion_coeff,
+                trnqs_coeff: &bsim4_companion_coeff,
+                dt,
+            },
             ctx.bsim4_history,
         );
         Self::stamp_ekv26_transient_companions(

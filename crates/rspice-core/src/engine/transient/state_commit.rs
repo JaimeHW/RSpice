@@ -163,9 +163,11 @@ impl Engine {
                         breakpoints,
                         arrival,
                         tstop,
-                        dynamic_breakpoints_added,
-                        warned_dynamic_breakpoint_cap,
-                        pending_dynamic_breakpoints,
+                        DynamicBreakpointSink {
+                            dynamic_breakpoints_added,
+                            warned_dynamic_breakpoint_cap,
+                            pending_dynamic_breakpoints,
+                        },
                     );
                 }
                 tl.compact_ltra_history_if_straight();
@@ -183,38 +185,52 @@ impl Engine {
                         breakpoints,
                         arrival,
                         tstop,
-                        dynamic_breakpoints_added,
-                        warned_dynamic_breakpoint_cap,
-                        pending_dynamic_breakpoints,
+                        DynamicBreakpointSink {
+                            dynamic_breakpoints_added,
+                            warned_dynamic_breakpoint_cap,
+                            pending_dynamic_breakpoints,
+                        },
                     );
                 }
                 tl.compact_ltra_history_if_straight();
             } else {
                 Self::maybe_schedule_tline_arrival_breakpoint(
                     breakpoints,
-                    accepted_time,
-                    tl.delay(),
-                    tstop,
-                    previous_forward,
-                    tl.launched_forward_wave(),
-                    voltage_reltol,
-                    voltage_abstol,
-                    dynamic_breakpoints_added,
-                    warned_dynamic_breakpoint_cap,
-                    pending_dynamic_breakpoints,
+                    TlineArrivalEvent {
+                        event_time: accepted_time,
+                        delay: tl.delay(),
+                        tstop,
+                    },
+                    TlineWaveChange {
+                        previous_wave: previous_forward,
+                        current_wave: tl.launched_forward_wave(),
+                        reltol: voltage_reltol,
+                        abstol: voltage_abstol,
+                    },
+                    DynamicBreakpointSink {
+                        dynamic_breakpoints_added,
+                        warned_dynamic_breakpoint_cap,
+                        pending_dynamic_breakpoints,
+                    },
                 );
                 Self::maybe_schedule_tline_arrival_breakpoint(
                     breakpoints,
-                    accepted_time,
-                    tl.delay(),
-                    tstop,
-                    previous_backward,
-                    tl.launched_backward_wave(),
-                    voltage_reltol,
-                    voltage_abstol,
-                    dynamic_breakpoints_added,
-                    warned_dynamic_breakpoint_cap,
-                    pending_dynamic_breakpoints,
+                    TlineArrivalEvent {
+                        event_time: accepted_time,
+                        delay: tl.delay(),
+                        tstop,
+                    },
+                    TlineWaveChange {
+                        previous_wave: previous_backward,
+                        current_wave: tl.launched_backward_wave(),
+                        reltol: voltage_reltol,
+                        abstol: voltage_abstol,
+                    },
+                    DynamicBreakpointSink {
+                        dynamic_breakpoints_added,
+                        warned_dynamic_breakpoint_cap,
+                        pending_dynamic_breakpoints,
+                    },
                 );
             }
         }
@@ -283,29 +299,41 @@ impl Engine {
             {
                 Self::maybe_schedule_tline_arrival_breakpoint(
                     breakpoints,
-                    accepted_time,
-                    delay,
-                    tstop,
-                    previous_forward,
-                    current_forward,
-                    voltage_reltol,
-                    voltage_abstol,
-                    dynamic_breakpoints_added,
-                    warned_dynamic_breakpoint_cap,
-                    pending_dynamic_breakpoints,
+                    TlineArrivalEvent {
+                        event_time: accepted_time,
+                        delay,
+                        tstop,
+                    },
+                    TlineWaveChange {
+                        previous_wave: previous_forward,
+                        current_wave: current_forward,
+                        reltol: voltage_reltol,
+                        abstol: voltage_abstol,
+                    },
+                    DynamicBreakpointSink {
+                        dynamic_breakpoints_added,
+                        warned_dynamic_breakpoint_cap,
+                        pending_dynamic_breakpoints,
+                    },
                 );
                 Self::maybe_schedule_tline_arrival_breakpoint(
                     breakpoints,
-                    accepted_time,
-                    delay,
-                    tstop,
-                    previous_backward,
-                    current_backward,
-                    voltage_reltol,
-                    voltage_abstol,
-                    dynamic_breakpoints_added,
-                    warned_dynamic_breakpoint_cap,
-                    pending_dynamic_breakpoints,
+                    TlineArrivalEvent {
+                        event_time: accepted_time,
+                        delay,
+                        tstop,
+                    },
+                    TlineWaveChange {
+                        previous_wave: previous_backward,
+                        current_wave: current_backward,
+                        reltol: voltage_reltol,
+                        abstol: voltage_abstol,
+                    },
+                    DynamicBreakpointSink {
+                        dynamic_breakpoints_added,
+                        warned_dynamic_breakpoint_cap,
+                        pending_dynamic_breakpoints,
+                    },
                 );
             }
         }
@@ -386,8 +414,10 @@ impl Engine {
                 },
                 cached_snapshot,
                 VbicCachedSnapshotReuse::SeedOnly,
-                snapshot_reuse_abstol,
-                snapshot_reuse_reltol,
+                VbicSnapshotTolerances {
+                    voltage_abstol: snapshot_reuse_abstol,
+                    reltol: snapshot_reuse_reltol,
+                },
             ) else {
                 continue;
             };
@@ -1192,9 +1222,11 @@ impl Engine {
         Self::update_bsim4_history(
             circuit,
             accepted_solution,
-            coeff,
-            bsim4_trnqs_coeff,
-            dt,
+            Bsim4CompanionStep {
+                coeff,
+                trnqs_coeff: bsim4_trnqs_coeff,
+                dt,
+            },
             bsim4_history,
         );
         Self::update_ekv26_history(circuit, accepted_solution, coeff, dt, ekv26_history);

@@ -15,6 +15,16 @@ pub(super) struct Bsim4TerminalCharges {
     pub qbd: Value,
 }
 
+/// The integration step a BSIM4 companion stamp is written for: the companion
+/// coefficients for the terminal charges, the separate ones for the
+/// non-quasi-static branch, and the step size.
+#[derive(Clone, Copy)]
+pub(super) struct Bsim4CompanionStep<'a> {
+    pub coeff: &'a CompanionCoefficients,
+    pub trnqs_coeff: &'a CompanionCoefficients,
+    pub dt: Value,
+}
+
 impl Engine {
     #[inline]
     pub(super) fn initialize_b3soi_history(
@@ -1025,11 +1035,14 @@ impl Engine {
         matrix: &mut crate::solver::StaticMatrix,
         rhs: &mut [Value],
         voltages: &[Value],
-        coeff: &CompanionCoefficients,
-        trnqs_coeff: &CompanionCoefficients,
-        dt: Value,
+        step: Bsim4CompanionStep<'_>,
         history: &Bsim4TransientHistory,
     ) {
+        let Bsim4CompanionStep {
+            coeff,
+            trnqs_coeff,
+            dt,
+        } = step;
         if !circuit.has_bsim4v8_devices() {
             return;
         }
@@ -1118,11 +1131,14 @@ impl Engine {
     pub(super) fn update_bsim4_history(
         circuit: &crate::circuit::CircuitData,
         voltages: &[Value],
-        coeff: &CompanionCoefficients,
-        trnqs_coeff: &CompanionCoefficients,
-        dt: Value,
+        step: Bsim4CompanionStep<'_>,
         history: &mut Bsim4TransientHistory,
     ) {
+        let Bsim4CompanionStep {
+            coeff,
+            trnqs_coeff,
+            dt,
+        } = step;
         if !circuit.has_bsim4v8_devices() {
             return;
         }

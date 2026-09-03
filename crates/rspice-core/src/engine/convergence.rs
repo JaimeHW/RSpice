@@ -11,6 +11,7 @@ use crate::device::NonlinearConvergenceCriteria;
 use crate::diagnostics::{
     ConvergenceDiagnostic, ConvergenceFailureClass, ConvergenceSite, ConvergenceSiteKind,
 };
+use crate::engine::core::StartupVoltageConstraint;
 use crate::solver::{
     ArcLengthConfig, ArcLengthContinuation, PseudoTransient, SolverError, StaticMatrix,
 };
@@ -43,6 +44,25 @@ pub(in crate::engine::convergence) struct DampingStep<'a> {
     pub old: &'a [Value],
     pub proposal: &'a [Value],
     pub damping_state: &'a mut NewtonDampingState,
+}
+
+/// The conductance floors and seeding choice one constrained transient
+/// operating-point residual check is evaluated under.
+#[derive(Clone, Copy)]
+pub(crate) struct TransientOpConductances {
+    pub nodal_gmin: Value,
+    pub junction_gmin: Value,
+    pub use_transient_current_seed: bool,
+}
+
+/// The linear system a startup-constraint solve is posed as: the step it is
+/// taken at, the nodal gmin floor, the assembled system, and the node
+/// constraints it must honour.
+pub(crate) struct LinearTransientConstraintSolve<'a> {
+    pub time: Value,
+    pub nodal_gmin: Value,
+    pub linear_system: TransientOperatingPointLinearSystem,
+    pub constraints: &'a [StartupVoltageConstraint],
 }
 
 mod continuation;

@@ -6,6 +6,41 @@ use super::*;
 #[cfg(test)]
 use crate::device::DistributedRlgc;
 
+/// The window breakpoints are scheduled over: the analysis stop time, the
+/// step hint the deck asked for, and the dialect whose scheduling rules apply.
+#[derive(Clone, Copy)]
+pub(in crate::engine) struct BreakpointWindow {
+    pub tstop: Value,
+    pub tstep_hint: Value,
+    pub dialect: crate::engine::SpiceDialect,
+}
+
+/// A transmission-line arrival that may deserve a breakpoint.
+#[derive(Clone, Copy)]
+pub(super) struct TlineArrivalEvent {
+    pub event_time: Value,
+    pub delay: Value,
+    pub tstop: Value,
+}
+
+/// The wave change that decides whether the arrival matters, against the
+/// tolerances it is judged by.
+#[derive(Clone, Copy)]
+pub(super) struct TlineWaveChange {
+    pub previous_wave: Value,
+    pub current_wave: Value,
+    pub reltol: Value,
+    pub abstol: Value,
+}
+
+/// Where dynamically scheduled breakpoints accumulate, with the cap bookkeeping
+/// that goes with them.
+pub(super) struct DynamicBreakpointSink<'a> {
+    pub dynamic_breakpoints_added: &'a mut usize,
+    pub warned_dynamic_breakpoint_cap: &'a mut bool,
+    pub pending_dynamic_breakpoints: &'a mut Vec<Value>,
+}
+
 impl Engine {
     #[inline]
     pub(super) fn max_expected_source_delta(
@@ -110,17 +145,22 @@ impl Engine {
     pub(super) fn add_source_spec_breakpoints(
         breakpoints: &mut BreakpointManager,
         spec: &crate::netlist::SourceSpec,
-        tstop: Value,
-        tstep_hint: Value,
-        dialect: crate::engine::SpiceDialect,
+        window: BreakpointWindow,
     ) {
+        let BreakpointWindow {
+            tstop,
+            tstep_hint,
+            dialect,
+        } = window;
         Self::add_source_spec_breakpoints_with_pwl(
             breakpoints,
             spec,
             None,
-            tstop,
-            tstep_hint,
-            dialect,
+            BreakpointWindow {
+                tstop,
+                tstep_hint,
+                dialect,
+            },
             &crate::abort_signal::NoAbort,
             usize::MAX,
         )
@@ -131,12 +171,15 @@ impl Engine {
         breakpoints: &mut BreakpointManager,
         spec: &crate::netlist::SourceSpec,
         pwl_waveform: Option<&crate::device::pwl_file::PwlWaveform>,
-        tstop: Value,
-        tstep_hint: Value,
-        dialect: crate::engine::SpiceDialect,
+        window: BreakpointWindow,
         abort: &dyn crate::abort_signal::AbortSignal,
         max_points: usize,
     ) -> Result<(), crate::engine::SimulationError> {
+        let BreakpointWindow {
+            tstop,
+            tstep_hint,
+            dialect,
+        } = window;
         use crate::netlist::SourceSpec;
 
         match spec {
@@ -145,9 +188,11 @@ impl Engine {
                     breakpoints,
                     inner,
                     pwl_waveform,
-                    tstop,
-                    tstep_hint,
-                    dialect,
+                    BreakpointWindow {
+                        tstop,
+                        tstep_hint,
+                        dialect,
+                    },
                     abort,
                     max_points,
                 )?;
@@ -157,9 +202,11 @@ impl Engine {
                     breakpoints,
                     inner,
                     pwl_waveform,
-                    tstop,
-                    tstep_hint,
-                    dialect,
+                    BreakpointWindow {
+                        tstop,
+                        tstep_hint,
+                        dialect,
+                    },
                     abort,
                     max_points,
                 )?;
@@ -177,9 +224,11 @@ impl Engine {
                     breakpoints,
                     transient,
                     pwl_waveform,
-                    tstop,
-                    tstep_hint,
-                    dialect,
+                    BreakpointWindow {
+                        tstop,
+                        tstep_hint,
+                        dialect,
+                    },
                     abort,
                     max_points,
                 )?;
@@ -773,18 +822,23 @@ impl Engine {
 
     pub(in crate::engine) fn collect_transient_source_breakpoints(
         circuit: &crate::circuit::CircuitData,
-        tstop: Value,
-        tstep_hint: Value,
-        dialect: crate::engine::SpiceDialect,
+        window: BreakpointWindow,
         breakpoints: &mut BreakpointManager,
         abort: &dyn crate::abort_signal::AbortSignal,
         max_points: usize,
     ) -> Result<(), crate::engine::SimulationError> {
-        Self::collect_independent_source_breakpoints(
-            circuit,
+        let BreakpointWindow {
             tstop,
             tstep_hint,
             dialect,
+        } = window;
+        Self::collect_independent_source_breakpoints(
+            circuit,
+            BreakpointWindow {
+                tstop,
+                tstep_hint,
+                dialect,
+            },
             None,
             breakpoints,
             abort,
@@ -831,14 +885,17 @@ impl Engine {
     /// not internal switch, transmission-line, or code-model events.
     pub(in crate::engine) fn collect_independent_source_breakpoints(
         circuit: &crate::circuit::CircuitData,
-        tstop: Value,
-        tstep_hint: Value,
-        dialect: crate::engine::SpiceDialect,
+        window: BreakpointWindow,
         selected_sources: Option<&std::collections::HashSet<String>>,
         breakpoints: &mut BreakpointManager,
         abort: &dyn crate::abort_signal::AbortSignal,
         max_points: usize,
     ) -> Result<(), crate::engine::SimulationError> {
+        let BreakpointWindow {
+            tstop,
+            tstep_hint,
+            dialect,
+        } = window;
         for (index, (name, spec, pwl_waveform)) in circuit
             .voltage_sources
             .transient_specs_named_with_pwl()
@@ -857,9 +914,11 @@ impl Engine {
                 breakpoints,
                 spec,
                 pwl_waveform,
-                tstop,
-                tstep_hint,
-                dialect,
+                BreakpointWindow {
+                    tstop,
+                    tstep_hint,
+                    dialect,
+                },
                 abort,
                 max_points,
             )?;
@@ -957,17 +1016,26 @@ impl Engine {
     #[inline]
     pub(super) fn maybe_schedule_tline_arrival_breakpoint(
         breakpoints: &mut BreakpointManager,
-        event_time: Value,
-        delay: Value,
-        tstop: Value,
-        previous_wave: Value,
-        current_wave: Value,
-        reltol: Value,
-        abstol: Value,
-        dynamic_breakpoints_added: &mut usize,
-        warned_dynamic_breakpoint_cap: &mut bool,
-        pending_dynamic_breakpoints: &mut Vec<Value>,
+        arrival: TlineArrivalEvent,
+        wave: TlineWaveChange,
+        sink: DynamicBreakpointSink<'_>,
     ) {
+        let DynamicBreakpointSink {
+            dynamic_breakpoints_added,
+            warned_dynamic_breakpoint_cap,
+            pending_dynamic_breakpoints,
+        } = sink;
+        let TlineWaveChange {
+            previous_wave,
+            current_wave,
+            reltol,
+            abstol,
+        } = wave;
+        let TlineArrivalEvent {
+            event_time,
+            delay,
+            tstop,
+        } = arrival;
         if !Self::wave_event_exceeds_tolerance(previous_wave, current_wave, reltol, abstol) {
             return;
         }
@@ -1013,10 +1081,13 @@ impl Engine {
         breakpoints: &mut BreakpointManager,
         arrival: Value,
         tstop: Value,
-        dynamic_breakpoints_added: &mut usize,
-        warned_dynamic_breakpoint_cap: &mut bool,
-        pending_dynamic_breakpoints: &mut Vec<Value>,
+        sink: DynamicBreakpointSink<'_>,
     ) {
+        let DynamicBreakpointSink {
+            dynamic_breakpoints_added,
+            warned_dynamic_breakpoint_cap,
+            pending_dynamic_breakpoints,
+        } = sink;
         if !(arrival.is_finite() && arrival >= 0.0 && arrival <= tstop) {
             return;
         }
@@ -1137,9 +1208,11 @@ mod tests {
                 Engine::add_source_spec_breakpoints(
                     &mut breakpoints,
                     spec,
-                    100.0e-9,
-                    1.0e-9,
-                    dialect,
+                    BreakpointWindow {
+                        tstop: 100.0e-9,
+                        tstep_hint: 1.0e-9,
+                        dialect,
+                    },
                 );
                 assert_delays_close(breakpoints.times(), &[10.0e-9]);
             }
@@ -1148,9 +1221,11 @@ mod tests {
             Engine::add_source_spec_breakpoints(
                 &mut xyce_breakpoints,
                 spec,
-                100.0e-9,
-                1.0e-9,
-                crate::engine::SpiceDialect::Xyce,
+                BreakpointWindow {
+                    tstop: 100.0e-9,
+                    tstep_hint: 1.0e-9,
+                    dialect: crate::engine::SpiceDialect::Xyce,
+                },
             );
             assert!(xyce_breakpoints.times().is_empty());
         }
@@ -1176,9 +1251,11 @@ mod tests {
             &mut breakpoints,
             &spec,
             Some(&waveform),
-            10.0,
-            0.1,
-            crate::engine::SpiceDialect::Xyce,
+            BreakpointWindow {
+                tstop: 10.0,
+                tstep_hint: 0.1,
+                dialect: crate::engine::SpiceDialect::Xyce,
+            },
             &crate::abort_signal::NoAbort,
             usize::MAX,
         )
@@ -1202,9 +1279,11 @@ mod tests {
         Engine::add_source_spec_breakpoints(
             &mut xyce_breakpoints,
             &spec,
-            300.0e-3,
-            100.0e-6,
-            crate::engine::SpiceDialect::Xyce,
+            BreakpointWindow {
+                tstop: 300.0e-3,
+                tstep_hint: 100.0e-6,
+                dialect: crate::engine::SpiceDialect::Xyce,
+            },
         );
         assert!(xyce_breakpoints.times().is_empty());
 
@@ -1216,9 +1295,11 @@ mod tests {
             Engine::add_source_spec_breakpoints(
                 &mut breakpoints,
                 &spec,
-                300.0e-3,
-                100.0e-6,
-                dialect,
+                BreakpointWindow {
+                    tstop: 300.0e-3,
+                    tstep_hint: 100.0e-6,
+                    dialect,
+                },
             );
             assert_delays_close(breakpoints.times(), &[3.0e-3, 200.0e-3]);
         }
@@ -1249,9 +1330,11 @@ mod tests {
         Engine::add_source_spec_breakpoints(
             &mut breakpoints,
             &spec,
-            20.0e-9,
-            0.5e-9,
-            crate::engine::SpiceDialect::BestAvailable,
+            BreakpointWindow {
+                tstop: 20.0e-9,
+                tstep_hint: 0.5e-9,
+                dialect: crate::engine::SpiceDialect::BestAvailable,
+            },
         );
 
         assert_delays_close(breakpoints.times(), &[1.0e-9, 3.0e-9, 6.0e-9]);
@@ -1279,9 +1362,11 @@ mod tests {
         Engine::add_source_spec_breakpoints(
             &mut breakpoints,
             &spec,
-            20.0e-9,
-            0.5e-9,
-            crate::engine::SpiceDialect::BestAvailable,
+            BreakpointWindow {
+                tstop: 20.0e-9,
+                tstep_hint: 0.5e-9,
+                dialect: crate::engine::SpiceDialect::BestAvailable,
+            },
         );
 
         // Period is TR + PW + TF = 9 ns: edges at TD, +TR, +TR+PW, +TR+PW+TF,
@@ -1310,9 +1395,11 @@ mod tests {
         Engine::add_source_spec_breakpoints(
             &mut breakpoints,
             &spec,
-            400.0e-3,
-            0.5e-6,
-            crate::engine::SpiceDialect::Xyce,
+            BreakpointWindow {
+                tstop: 400.0e-3,
+                tstep_hint: 0.5e-6,
+                dialect: crate::engine::SpiceDialect::Xyce,
+            },
         );
 
         assert_delays_close(
@@ -1339,9 +1426,11 @@ mod tests {
         Engine::add_source_spec_breakpoints(
             &mut breakpoints,
             &spec,
-            0.8,
-            0.02,
-            crate::engine::SpiceDialect::Xyce,
+            BreakpointWindow {
+                tstop: 0.8,
+                tstep_hint: 0.02,
+                dialect: crate::engine::SpiceDialect::Xyce,
+            },
         );
 
         assert_delays_close(breakpoints.times(), &[0.0, 0.2, 0.4, 0.6, 0.8]);
@@ -1366,9 +1455,11 @@ mod tests {
             &mut breakpoints,
             &spec,
             None,
-            2.0,
-            0.1,
-            crate::engine::SpiceDialect::Xyce,
+            BreakpointWindow {
+                tstop: 2.0,
+                tstep_hint: 0.1,
+                dialect: crate::engine::SpiceDialect::Xyce,
+            },
             &crate::abort_signal::NoAbort,
             64,
         )
@@ -1395,9 +1486,11 @@ mod tests {
         Engine::add_source_spec_breakpoints(
             &mut breakpoints,
             &spec,
-            0.011,
-            0.0001,
-            crate::engine::SpiceDialect::Xyce,
+            BreakpointWindow {
+                tstop: 0.011,
+                tstep_hint: 0.0001,
+                dialect: crate::engine::SpiceDialect::Xyce,
+            },
         );
 
         assert_delays_close(
@@ -1426,9 +1519,11 @@ mod tests {
         Engine::add_source_spec_breakpoints(
             &mut breakpoints,
             &spec,
-            0.8,
-            0.02,
-            crate::engine::SpiceDialect::Xyce,
+            BreakpointWindow {
+                tstop: 0.8,
+                tstep_hint: 0.02,
+                dialect: crate::engine::SpiceDialect::Xyce,
+            },
         );
 
         assert!(breakpoints.times().is_empty());
@@ -1452,9 +1547,11 @@ mod tests {
         Engine::add_source_spec_breakpoints(
             &mut breakpoints,
             &spec,
-            400.0e-3,
-            0.5e-6,
-            crate::engine::SpiceDialect::Ngspice,
+            BreakpointWindow {
+                tstop: 400.0e-3,
+                tstep_hint: 0.5e-6,
+                dialect: crate::engine::SpiceDialect::Ngspice,
+            },
         );
 
         assert_delays_close(
@@ -1487,9 +1584,11 @@ mod tests {
         Engine::add_source_spec_breakpoints(
             &mut breakpoints,
             &spec,
-            1.0e-2,
-            2.0e-5,
-            crate::engine::SpiceDialect::BestAvailable,
+            BreakpointWindow {
+                tstop: 1.0e-2,
+                tstep_hint: 2.0e-5,
+                dialect: crate::engine::SpiceDialect::BestAvailable,
+            },
         );
 
         assert_delays_close(
@@ -1574,9 +1673,11 @@ mod tests {
         let mut breakpoints = BreakpointManager::new_with_tolerance(1.0e-21);
         Engine::collect_transient_source_breakpoints(
             &circuit,
-            2.5e-9,
-            1.0e-9,
-            crate::engine::SpiceDialect::BestAvailable,
+            BreakpointWindow {
+                tstop: 2.5e-9,
+                tstep_hint: 1.0e-9,
+                dialect: crate::engine::SpiceDialect::BestAvailable,
+            },
             &mut breakpoints,
             &crate::abort_signal::NoAbort,
             usize::MAX,

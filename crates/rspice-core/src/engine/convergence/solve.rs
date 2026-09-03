@@ -520,10 +520,13 @@ impl Engine {
         solution: &[Value],
         time: Value,
         node_hints: &[StartupVoltageConstraint],
-        nodal_gmin: Value,
-        junction_gmin: Value,
-        use_transient_current_seed: bool,
+        conductances: TransientOpConductances,
     ) -> Result<bool, SimulationError> {
+        let TransientOpConductances {
+            nodal_gmin,
+            junction_gmin,
+            use_transient_current_seed,
+        } = conductances;
         let snapshot = circuit.nonlinear_state_snapshot();
         let result = matrix.with_probe_values(|probe, rhs| -> Result<bool, SimulationError> {
             circuit.refresh_jiles_atherton_inductances(solution);
@@ -1540,9 +1543,11 @@ impl Engine {
                     &new_solution,
                     time,
                     node_hints,
-                    gmin_floor,
-                    junction_gmin,
-                    false,
+                    TransientOpConductances {
+                        nodal_gmin: gmin_floor,
+                        junction_gmin,
+                        use_transient_current_seed: false,
+                    },
                 )?;
 
             std::mem::swap(&mut solution, &mut new_solution);
@@ -1591,10 +1596,12 @@ impl Engine {
         let primary = self.solve_linear_transient_constraint_system(
             circuit,
             matrix,
-            time,
-            nodal_gmin,
-            TransientOperatingPointLinearSystem::IdealInductorShorts,
-            node_constraints,
+            LinearTransientConstraintSolve {
+                time,
+                nodal_gmin,
+                linear_system: TransientOperatingPointLinearSystem::IdealInductorShorts,
+                constraints: node_constraints,
+            },
             abort,
         );
         match primary {
@@ -1612,10 +1619,12 @@ impl Engine {
                 match self.solve_linear_transient_constraint_system(
                     circuit,
                     matrix,
-                    time,
-                    nodal_gmin,
-                    TransientOperatingPointLinearSystem::CurrentSeededInductors,
-                    node_constraints,
+                    LinearTransientConstraintSolve {
+                        time,
+                        nodal_gmin,
+                        linear_system: TransientOperatingPointLinearSystem::CurrentSeededInductors,
+                        constraints: node_constraints,
+                    },
                     abort,
                 ) {
                     Ok(values) => Ok(TransientOperatingPointSolution {
@@ -1640,12 +1649,15 @@ impl Engine {
         &self,
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
-        time: Value,
-        nodal_gmin: Value,
-        linear_system: TransientOperatingPointLinearSystem,
-        constraints: &[StartupVoltageConstraint],
+        solve: LinearTransientConstraintSolve<'_>,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
+        let LinearTransientConstraintSolve {
+            time,
+            nodal_gmin,
+            linear_system,
+            constraints,
+        } = solve;
         let size = circuit.matrix_size();
         let mut roots = constraints
             .iter()
@@ -2066,9 +2078,11 @@ impl Engine {
                     new_solution,
                     time,
                     node_constraints,
-                    gmin_floor,
-                    junction_gmin,
-                    use_transient_current_seed,
+                    TransientOpConductances {
+                        nodal_gmin: gmin_floor,
+                        junction_gmin,
+                        use_transient_current_seed,
+                    },
                 )?
             };
 

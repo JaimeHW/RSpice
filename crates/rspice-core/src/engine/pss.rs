@@ -27,6 +27,7 @@ use crate::analysis::{
 };
 use crate::circuit::CircuitData;
 use crate::engine::periodic_capability;
+use crate::engine::transient::BreakpointWindow;
 use crate::engine::transient::{netlist_checkpoint_identity, simulation_checkpoint_identity};
 use crate::numerics::integration::CompanionCoefficients;
 use crate::numerics::integration::IntegrationMethod;
@@ -3366,9 +3367,11 @@ impl Engine {
         let mut breakpoints = BreakpointManager::new();
         Self::collect_transient_source_breakpoints(
             circuit,
-            tstop,
-            max_step,
-            self.config.spice_dialect,
+            BreakpointWindow {
+                tstop,
+                tstep_hint: max_step,
+                dialect: self.config.spice_dialect,
+            },
             &mut breakpoints,
             abort,
             self.config.resource_limits.max_analysis_points,

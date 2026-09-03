@@ -2,6 +2,24 @@
 
 use super::*;
 
+/// How far the independent sources are expected to move over a candidate step:
+/// across it, inside it, and along the ramp being tracked.
+#[derive(Clone, Copy)]
+pub(super) struct SourceActivityDeltas {
+    pub expected_source_delta: Value,
+    pub interior_source_delta: Value,
+    pub source_ramp_tracking_delta: Value,
+}
+
+/// The floors and caps the source-activity bias may not cross.
+#[derive(Clone, Copy)]
+pub(super) struct StepBiasFloors {
+    pub practical_min_dt: Value,
+    pub preferred_min_dt: Value,
+    pub recovery_cap_enabled: bool,
+    pub nonlinear_source_ramp_cap_enabled: bool,
+}
+
 impl Engine {
     #[inline]
     pub(super) fn max_abs_delta_prefix(a: &[Value], b: &[Value], count: usize) -> Value {
@@ -218,14 +236,20 @@ impl Engine {
         proposed_dt: Value,
         remaining_time: Value,
         at_breakpoint: bool,
-        expected_source_delta: Value,
-        interior_source_delta: Value,
-        source_ramp_tracking_delta: Value,
-        practical_min_dt: Value,
-        preferred_min_dt: Value,
-        recovery_cap_enabled: bool,
-        nonlinear_source_ramp_cap_enabled: bool,
+        deltas: SourceActivityDeltas,
+        floors: StepBiasFloors,
     ) -> Value {
+        let SourceActivityDeltas {
+            expected_source_delta,
+            interior_source_delta,
+            source_ramp_tracking_delta,
+        } = deltas;
+        let StepBiasFloors {
+            practical_min_dt,
+            preferred_min_dt,
+            recovery_cap_enabled,
+            nonlinear_source_ramp_cap_enabled,
+        } = floors;
         let mut dt = proposed_dt.min(remaining_time);
         let source_is_moving_before_endpoint =
             !at_breakpoint || interior_source_delta >= SOURCE_ACTIVE_DELTA;

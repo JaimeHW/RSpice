@@ -248,13 +248,16 @@ impl Engine {
         bjt: &crate::device::Bjt,
         bias: BjtExternalBias,
         step: VbicChargeStep<'_>,
-        current_internal: [Value; BJT_INTERNAL_STATE_DIM],
-        _current_residual_norm: Value,
-        current_residual_objective: Value,
-        target_internal: [Value; BJT_INTERNAL_STATE_DIM],
-        envelope_reference: [Value; BJT_INTERNAL_STATE_DIM],
+        progress: VbicInternalStateProgress,
         max_backtracks: usize,
     ) -> Option<VbicDynamicStateEvaluation> {
+        let VbicInternalStateProgress {
+            current_internal,
+            current_residual_norm: _current_residual_norm,
+            current_residual_objective,
+            target_internal,
+            envelope_reference,
+        } = progress;
         let BjtExternalBias { vc, vb, ve, vs } = bias;
         let VbicChargeStep {
             coeff,

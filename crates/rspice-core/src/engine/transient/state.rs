@@ -955,8 +955,10 @@ impl Engine {
                 },
                 cached_snapshot,
                 cache_reuse,
-                snapshot_reuse_abstol,
-                snapshot_reuse_reltol,
+                VbicSnapshotTolerances {
+                    voltage_abstol: snapshot_reuse_abstol,
+                    reltol: snapshot_reuse_reltol,
+                },
             ) else {
                 vbic_snapshot_cache[idx] = None;
                 continue;

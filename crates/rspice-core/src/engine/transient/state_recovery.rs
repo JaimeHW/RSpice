@@ -2,6 +2,27 @@
 
 use super::*;
 
+/// What the recovery step knows about how hard the sources are moving: whether
+/// the circuit is strictly linear, how far the sources are expected to move
+/// over the step, whether the growth cap is armed, and the accepted scale to
+/// grow from.
+#[derive(Clone, Copy)]
+pub(super) struct SourceActivityRecovery {
+    pub is_strictly_linear_transient: bool,
+    pub expected_source_delta: Value,
+    pub source_activity_growth_cap_enabled: bool,
+    pub accepted_scale: Option<Value>,
+}
+
+/// The bounds a force-accepted candidate must stay inside.
+#[derive(Clone, Copy)]
+pub(super) struct ForceAcceptLimits<'a> {
+    pub num_nodes: usize,
+    pub force_accept_delta_limit: Value,
+    pub protected_nodes: &'a [bool],
+    pub ideal_output_pairs: &'a [(crate::NodeId, crate::NodeId)],
+}
+
 impl Engine {
     #[inline]
     pub(super) fn recover_timestep_after_accepted_step(
@@ -10,11 +31,14 @@ impl Engine {
         accepted_solution: &[Value],
         step: TruncationStep,
         max_step: Value,
-        is_strictly_linear_transient: bool,
-        expected_source_delta: Value,
-        source_activity_growth_cap_enabled: bool,
-        accepted_scale: Option<Value>,
+        activity: SourceActivityRecovery,
     ) {
+        let SourceActivityRecovery {
+            is_strictly_linear_transient,
+            expected_source_delta,
+            source_activity_growth_cap_enabled,
+            accepted_scale,
+        } = activity;
         let TruncationStep {
             method: active_method,
             trap_order: active_order,
@@ -175,11 +199,14 @@ impl Engine {
         previous_solution: &[Value],
         candidate_solution: &[Value],
         accepted_time: Value,
-        num_nodes: usize,
-        force_accept_delta_limit: Value,
-        protected_nodes: &[bool],
-        ideal_output_pairs: &[(crate::NodeId, crate::NodeId)],
+        limits: ForceAcceptLimits<'_>,
     ) -> Result<Vec<Value>, SimulationError> {
+        let ForceAcceptLimits {
+            num_nodes,
+            force_accept_delta_limit,
+            protected_nodes,
+            ideal_output_pairs,
+        } = limits;
         let mut bounded = candidate_solution.to_vec();
         for i in 0..num_nodes {
             if protected_nodes.get(i).copied().unwrap_or(false) {
@@ -333,10 +360,12 @@ mod tests {
                 dt: 1.0,
             },
             10.0,
-            true,
-            0.0,
-            false,
-            Some(1.1),
+            SourceActivityRecovery {
+                is_strictly_linear_transient: true,
+                expected_source_delta: 0.0,
+                source_activity_growth_cap_enabled: false,
+                accepted_scale: Some(1.1),
+            },
         );
 
         assert!((timestep.dt() - 1.1).abs() <= 1.0e-15);
@@ -365,10 +394,12 @@ mod tests {
                     dt: 1.0,
                 },
                 10.0,
-                true,
-                0.0,
-                false,
-                Some(1.1),
+                SourceActivityRecovery {
+                    is_strictly_linear_transient: true,
+                    expected_source_delta: 0.0,
+                    source_activity_growth_cap_enabled: false,
+                    accepted_scale: Some(1.1),
+                },
             );
 
             assert_eq!(timestep.dt(), 4.0, "method {method:?}");
@@ -390,10 +421,12 @@ mod tests {
                 dt: 1.0,
             },
             10.0,
-            true,
-            0.0,
-            false,
-            Some(4.0),
+            SourceActivityRecovery {
+                is_strictly_linear_transient: true,
+                expected_source_delta: 0.0,
+                source_activity_growth_cap_enabled: false,
+                accepted_scale: Some(4.0),
+            },
         );
 
         assert_eq!(timestep.dt(), 2.0);
@@ -414,10 +447,12 @@ mod tests {
                 dt: 1.0,
             },
             10.0,
-            true,
-            0.0,
-            false,
-            Some(4.0),
+            SourceActivityRecovery {
+                is_strictly_linear_transient: true,
+                expected_source_delta: 0.0,
+                source_activity_growth_cap_enabled: false,
+                accepted_scale: Some(4.0),
+            },
         );
 
         assert_eq!(timestep.dt(), 4.0);
@@ -440,10 +475,12 @@ mod tests {
                 dt: 1.0,
             },
             10.0,
-            true,
-            0.0,
-            false,
-            Some(4.0),
+            SourceActivityRecovery {
+                is_strictly_linear_transient: true,
+                expected_source_delta: 0.0,
+                source_activity_growth_cap_enabled: false,
+                accepted_scale: Some(4.0),
+            },
         );
 
         assert_eq!(timestep.dt(), 2.0);

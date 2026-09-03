@@ -57,6 +57,32 @@ pub(in crate::engine::transient) struct BjtExternalBias {
     pub vs: Value,
 }
 
+/// The tolerances a cached VBIC snapshot is judged reusable against.
+#[derive(Clone, Copy)]
+pub(in crate::engine::transient) struct VbicSnapshotTolerances {
+    pub voltage_abstol: Value,
+    pub reltol: Value,
+}
+
+/// The two-step internal history a VBIC predictor seeds from.
+#[derive(Clone, Copy)]
+pub(in crate::engine::transient) struct VbicSeedHistory<'a> {
+    pub internal_prev: Option<&'a [Value; BJT_INTERNAL_STATE_DIM]>,
+    pub internal_prev_prev: Option<&'a [Value; BJT_INTERNAL_STATE_DIM]>,
+    pub linear_prev: Option<&'a VbicPredictorLinearBranchState>,
+    pub linear_prev_prev: Option<&'a VbicPredictorLinearBranchState>,
+}
+
+/// Where a VBIC internal-state improvement currently stands.
+#[derive(Clone, Copy)]
+pub(in crate::engine::transient) struct VbicInternalStateProgress {
+    pub current_internal: [Value; BJT_INTERNAL_STATE_DIM],
+    pub current_residual_norm: Value,
+    pub current_residual_objective: Value,
+    pub target_internal: [Value; BJT_INTERNAL_STATE_DIM],
+    pub envelope_reference: [Value; BJT_INTERNAL_STATE_DIM],
+}
+
 mod continuation;
 mod convergence;
 mod linearization;

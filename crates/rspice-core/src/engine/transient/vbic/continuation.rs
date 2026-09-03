@@ -795,10 +795,12 @@ impl Engine {
         let predicted_seed = Self::vbic_dynamic_internal_seed_from_history_with_linear_history(
             bjt,
             BjtExternalBias { vc, vb, ve, vs },
-            history_internal_prev,
-            history_internal_prev_prev,
-            history_linear_prev,
-            history_linear_prev_prev,
+            VbicSeedHistory {
+                internal_prev: history_internal_prev,
+                internal_prev_prev: history_internal_prev_prev,
+                linear_prev: history_linear_prev,
+                linear_prev_prev: history_linear_prev_prev,
+            },
             dt,
             previous_dt,
         );
@@ -971,9 +973,12 @@ impl Engine {
         predictor: VbicPredictorHistory<'_>,
         cached_snapshot: Option<BjtChargeSnapshot>,
         cache_reuse: VbicCachedSnapshotReuse,
-        voltage_abstol: Value,
-        reltol: Value,
+        tolerances: VbicSnapshotTolerances,
     ) -> Option<BjtChargeSnapshot> {
+        let VbicSnapshotTolerances {
+            voltage_abstol,
+            reltol,
+        } = tolerances;
         let VbicPredictorHistory {
             internal_prev: history_internal_prev,
             internal_prev_prev: history_internal_prev_prev,
@@ -1094,10 +1099,12 @@ impl Engine {
                 ve: external[2],
                 vs: external[3],
             },
-            history_internal_prev,
-            history_internal_prev_prev,
-            history_linear_prev,
-            history_linear_prev_prev,
+            VbicSeedHistory {
+                internal_prev: history_internal_prev,
+                internal_prev_prev: history_internal_prev_prev,
+                linear_prev: history_linear_prev,
+                linear_prev_prev: history_linear_prev_prev,
+            },
             dt,
             previous_dt,
         );
@@ -1460,13 +1467,16 @@ impl Engine {
     pub(in crate::engine::transient) fn vbic_dynamic_internal_seed_from_history_with_linear_history(
         bjt: &crate::device::Bjt,
         bias: BjtExternalBias,
-        history_internal_prev: Option<&[Value; BJT_INTERNAL_STATE_DIM]>,
-        history_internal_prev_prev: Option<&[Value; BJT_INTERNAL_STATE_DIM]>,
-        history_linear_prev: Option<&VbicPredictorLinearBranchState>,
-        history_linear_prev_prev: Option<&VbicPredictorLinearBranchState>,
+        history: VbicSeedHistory<'_>,
         dt: Value,
         previous_dt: Value,
     ) -> [Value; BJT_INTERNAL_STATE_DIM] {
+        let VbicSeedHistory {
+            internal_prev: history_internal_prev,
+            internal_prev_prev: history_internal_prev_prev,
+            linear_prev: history_linear_prev,
+            linear_prev_prev: history_linear_prev_prev,
+        } = history;
         let BjtExternalBias { vc, vb, ve, vs } = bias;
         let live_seed = bjt.dynamic_internal_state_seed(vc, vb, ve, vs);
         let Some(history_internal_prev) = history_internal_prev else {

@@ -684,11 +684,13 @@ impl Engine {
                     q_prev_prev,
                     cq_prev,
                 },
-                current_internal,
-                current_residual_norm,
-                current_residual_objective,
-                target_internal,
-                current_internal,
+                VbicInternalStateProgress {
+                    current_internal,
+                    current_residual_norm,
+                    current_residual_objective,
+                    target_internal,
+                    envelope_reference: current_internal,
+                },
                 12,
             )
             else {
@@ -779,11 +781,13 @@ impl Engine {
                             q_prev_prev,
                             cq_prev,
                         },
-                        current_internal,
-                        current_state.4,
-                        current_residual_objective,
-                        target_internal,
-                        current_internal,
+                        VbicInternalStateProgress {
+                            current_internal,
+                            current_residual_norm: current_state.4,
+                            current_residual_objective,
+                            target_internal,
+                            envelope_reference: current_internal,
+                        },
                         12,
                     )
                     .map(|candidate_state| {
@@ -926,11 +930,13 @@ impl Engine {
                             q_prev_prev,
                             cq_prev,
                         },
-                        current_internal,
-                        current_state.4,
-                        current_residual_objective,
-                        target_internal,
-                        current_internal,
+                        VbicInternalStateProgress {
+                            current_internal,
+                            current_residual_norm: current_state.4,
+                            current_residual_objective,
+                            target_internal,
+                            envelope_reference: current_internal,
+                        },
                         12,
                     )
                     .map(|candidate_state| {
@@ -1027,11 +1033,13 @@ impl Engine {
                                 q_prev_prev,
                                 cq_prev,
                             },
-                            current_internal,
-                            current_state.4,
-                            current_residual_objective,
-                            target_internal,
-                            current_internal,
+                            VbicInternalStateProgress {
+                                current_internal,
+                                current_residual_norm: current_state.4,
+                                current_residual_objective,
+                                target_internal,
+                                envelope_reference: current_internal,
+                            },
                             12,
                         )
                         .map(|candidate_state| {

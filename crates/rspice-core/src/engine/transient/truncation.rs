@@ -1060,8 +1060,10 @@ impl Engine {
                 },
                 vbic_snapshot_cache.get(idx).copied().flatten(),
                 VbicCachedSnapshotReuse::SeedOnly,
-                snapshot_reuse_abstol,
-                snapshot_reuse_reltol,
+                VbicSnapshotTolerances {
+                    voltage_abstol: snapshot_reuse_abstol,
+                    reltol: snapshot_reuse_reltol,
+                },
             )?;
 
             // Take the charge from the model, not from the snapshot's branch
