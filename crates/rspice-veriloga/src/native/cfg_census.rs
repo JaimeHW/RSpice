@@ -210,16 +210,6 @@ impl OperatingPoint {
         self
     }
 
-    /// How many event-controlled state slots the interpreter will be asked for.
-    ///
-    /// Set after construction because the count is a property of the *CFG*, and
-    /// a census that only drives compiled plans never builds one. The
-    /// interpreter refuses a slot it was not given, so a route that does build
-    /// one has to say how many there are.
-    pub(super) fn set_event_state_slots(&mut self, slots: usize) {
-        self.event_state_slots = slots;
-    }
-
     /// Give this point room for a CFG plan's prelude slots.
     ///
     /// Sized from the compiled model's `NativeRequiredStorage::prelude_slots`,

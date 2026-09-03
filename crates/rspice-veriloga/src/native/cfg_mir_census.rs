@@ -46,15 +46,22 @@
 //!
 //! # Where the derivative criterion is asked
 //!
-//! Not in `f64`. Both cones are walked a second time in
-//! [`DoubleDouble`](super::double_double::DoubleDouble) — the CFG one by the
-//! reference interpreter, the shipped one by
-//! [`PostfixWalk`](super::mir_postfix::PostfixWalk) — and the agreement
-//! criterion is asked of *those*, where a condition number of `5e7` still
-//! leaves twenty-four digits and the arithmetic is no longer part of the
-//! answer. Each route's `f64` rounding error is then a *measurement*,
-//! `|value_f64 − value_dd|`, reported per entry and per model. See
-//! [`Comparison`].
+//! Not in `f64`. Both *plans* are walked a second time in
+//! [`DoubleDouble`](super::double_double::DoubleDouble) by
+//! [`PlanWalk`](super::mir_postfix::PlanWalk), which takes either program form
+//! — the shipped route's postfix streams, the CFG route's prelude and block
+//! entries — and the agreement criterion is asked of *those*, where a condition
+//! number of `5e7` still leaves twenty-four digits and the arithmetic is no
+//! longer part of the answer. Each route's `f64` rounding error is then a
+//! *measurement*, `|value_f64 − value_dd|`, reported per entry and per model.
+//! See [`Comparison`].
+//!
+//! The reference is the plan itself and not a reconstruction of it. That is
+//! what W-F11 changed: the CFG side used to rebuild its own lowering, and where
+//! that rebuild's `f64` walk did not reproduce the compiled plan the entry lost
+//! its reference — 222 of `vbic`'s derivative comparisons, and for no reason
+//! anybody could name, because a rebuild is not the program. See
+//! [`plan_reference`].
 //!
 //! Two verdicts come out of that and they are different findings. The agreement
 //! criterion asks whether the two chain rules compute one real derivative;
@@ -95,13 +102,13 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use super::census_models::{CensusModel, shipped_census_models_matching};
 use super::cfg_census::{OperatingPoint, deviation};
 use super::double_double::{DoubleDouble, lift_inputs};
-use super::mir_postfix::PostfixWalk;
+use super::mir_postfix::PlanWalk;
 use crate::canonical_ir::cfg_lower::CfgModel;
-use crate::canonical_ir::{CfgScalar, ValueId, differentiate, evaluate_cfg, prune_cfg_to_outputs};
+use crate::canonical_ir::{CfgScalar, differentiate, evaluate_cfg, prune_cfg_to_outputs};
 use crate::jit::cfg_lanes::scalarize_lanes;
 use crate::jit::cfg_plan_builder::{
-    CfgNoiseScope, CfgPlanEntry, CfgPlanRefusal, ShippedColumnLanes,
-    build_model_plan_from_canonical_cfg, derivative_seeds,
+    CfgNoiseScope, CfgPlanEntry, CfgPlanRefusal, build_model_plan_from_canonical_cfg,
+    derivative_seeds,
 };
 use crate::jit::plan_builder::build_model_plan_with_canonical_ir;
 use crate::jit::plan_program::PlanProgram;
@@ -227,13 +234,13 @@ const UNIT_ROUNDOFF: f64 = f64::EPSILON / 2.0;
 ///
 /// # Where the reference is unavailable
 ///
-/// A `DoubleDouble` reference needs *both* walks. The CFG side needs a cone the
-/// reference interpreter can walk (see [`entry_reference`]) and the shipped
-/// side needs a postfix stream [`PostfixWalk`] implements every operation of.
-/// Where either is missing the entry falls back to the `f64` deviation against
-/// [`DERIVATIVE_AGREEMENT`] — the criterion this census carried before any of
-/// this — and is counted as [`Tally::reference_missing`] so the class cannot
-/// grow unseen.
+/// A `DoubleDouble` reference needs *both* walks, and both are now walks of the
+/// built plan: [`PlanWalk`] has to implement every operation of the shipped
+/// route's postfix stream and of the CFG route's prelude and block entry. Where
+/// either walk refuses an operation the entry falls back to the `f64` deviation
+/// against [`DERIVATIVE_AGREEMENT`] — the criterion this census carried before
+/// any of this — and is counted as [`Tally::reference_missing`] so the class
+/// cannot grow unseen.
 #[derive(Clone, Copy)]
 struct Comparison {
     entry: CfgPlanEntry,
@@ -252,10 +259,7 @@ impl Comparison {
     /// Whether the two routes lower one expression, or two expressions one
     /// chain rule apart. See [`DERIVATIVE_AGREEMENT`].
     fn is_derivative(&self) -> bool {
-        matches!(
-            self.entry,
-            CfgPlanEntry::Jacobian(..) | CfgPlanEntry::ReactiveJacobian(..)
-        )
+        is_derivative_entry(self.entry)
     }
 
     /// Both routes' cones re-walked in double-double, where both walks exist
@@ -472,11 +476,8 @@ struct Tally {
     /// Derivative comparisons with no double-double reference on one side or
     /// the other, held to the `f64` criterion instead.
     reference_missing: usize,
-    /// Models whose CFG this census could not rebuild for the reference walk,
-    /// so every derivative comparison in them is judged in `f64`.
-    models_without_reference: usize,
-    /// Entries whose shipped postfix stream this census's walker could not
-    /// evaluate, by operation name.
+    /// Entries whose plan program this census's walker could not evaluate, by
+    /// operation name — on either route.
     walker_refusals: BTreeSet<&'static str>,
     /// Entries where the walker's own `f64` walk disagreed with the machine
     /// code it is modelling. Any is a finding about the walker.
@@ -487,10 +488,19 @@ struct Tally {
     /// Derivative comparisons where both references were taken and one left the
     /// reals. See `Comparison::references`.
     reference_not_finite: usize,
-    /// Derivative comparisons whose CFG reference walk did not reproduce the
-    /// compiled CFG plan's own `f64` reading, so it is a reference for a
-    /// different computation and was dropped.
-    reference_diverged: usize,
+}
+
+/// Whether an entry is one of the two the double-double criterion judges.
+///
+/// The same question [`Comparison::is_derivative`] asks, taken before a
+/// `Comparison` exists: it decides which entries a reference walk is asked for,
+/// and a residual or a noise magnitude is judged on its `f64` readings against
+/// the reassociation bound instead.
+fn is_derivative_entry(entry: CfgPlanEntry) -> bool {
+    matches!(
+        entry,
+        CfgPlanEntry::Jacobian(..) | CfgPlanEntry::ReactiveJacobian(..)
+    )
 }
 
 /// What a noise magnitude the CFG route took at the *exit block*, under a
@@ -793,246 +803,51 @@ impl Storage {
     }
 }
 
-/// Every derivative entry's double-double value, one map per operating point.
-type ReferenceValues = Vec<HashMap<CfgPlanEntry, DoubleDouble>>;
-
-/// Fill `bounds` for the named equations off one lowering, and say which of
-/// them the interpreter refused.
+/// Re-walk one *built plan* in double-double at one point, whichever route
+/// built it.
 ///
-/// # One pass per row, not per entry and not per model
+/// # The reference is the plan, not a reconstruction of it
 ///
-/// A row's Jacobian entries share nearly all of their cone with each other, so
-/// the outputs are pruned to the row's *union* and interpreted once per
-/// operating point: every entry's bound comes off one snapshot. Pruning to the
-/// whole model's union instead would be one pass fewer, and would lose a whole
-/// module to a single unevaluable value. The row is where the plan builder cuts
-/// for the same reason, and it is the granularity at which a refusal is worth
-/// reporting.
-fn row_reference(
-    shipped: &CensusModel,
-    mut cfg: CfgModel,
-    wanted: &[usize],
-    bounds: &mut ReferenceValues,
-) -> Vec<usize> {
-    let model = &shipped.model;
-    let artifact = &shipped.canonical_ir;
-    let mut refused = Vec::new();
-    if model.stamp_programs.len() != cfg.residuals.len() {
-        return wanted.to_vec();
-    }
-
-    // Charges first, for the reason the plan builder gives: the extraction
-    // *builds* the values a scaled or summed charge needs, so it has to run
-    // before anything is differentiated.
-    let charges = stored_charges(&mut cfg.function, &cfg.residuals);
-    let (seeds, correction_lane) = derivative_seeds(&cfg, &artifact.mir);
-    let Ok(mut differentiated) = differentiate(&cfg.function, &seeds) else {
-        return wanted.to_vec();
-    };
-    // Every read-out before anything else: taking one appends an instruction.
-    let jacobian_rows: Vec<Vec<Option<ValueId>>> = cfg
-        .residuals
-        .iter()
-        .map(|residual| differentiated.derivative_row(*residual))
-        .collect();
-    let reactive_rows: Vec<Vec<Option<ValueId>>> = charges
-        .iter()
-        .map(|charge| match charge {
-            Some(charge) => differentiated.derivative_row(*charge),
-            None => Vec::new(),
-        })
-        .collect();
-    let Ok(scalarized) = scalarize_lanes(&differentiated.function) else {
-        return wanted.to_vec();
-    };
-    let Ok(column_lanes) = ShippedColumnLanes::build(model, &artifact.mir) else {
-        return wanted.to_vec();
-    };
-    let Ok(branch_unknowns) =
-        crate::jit::plan_builder::canonical_branch_unknown_runtime_map(model, &artifact.mir)
-    else {
-        return wanted.to_vec();
-    };
-    let parameter_defaults: Vec<Option<f64>> = artifact
-        .mir
-        .parameters
-        .iter()
-        .map(|parameter| parameter.default)
-        .collect();
-    // The state array is sized zero: this is the interpreter's static
-    // evaluation, where `ddt` and `idt` answer zero and no slot is read.
-    // Everything the two routes share — the parameters, the potentials, the
-    // branch flows — is drawn from the same seed in the same order, so these are
-    // the points the compiled plans stand at.
-    let inputs: Vec<_> = CENSUS_POINTS
-        .iter()
-        .map(|(seed, analysis)| {
-            let mut point = OperatingPoint::new(
-                *seed,
-                *analysis,
-                &parameter_defaults,
-                model.num_terminals,
-                model.internal_nodes,
-                &branch_unknowns,
-                0,
-                0,
-            )
-            .with_initial_step();
-            point.set_event_state_slots(cfg.event_state_candidates.len());
-            lift_inputs(
-                &point.interpreter_inputs(artifact.mir.nodes.len(), artifact.mir.branches.len()),
-            )
-        })
-        .collect();
-
-    let lane_of = |axis: &_| -> Option<usize> {
-        let lane = column_lanes.lane(axis)?;
-        (lane < seeds.len() && Some(lane) != correction_lane).then_some(lane)
-    };
-    for stamp_index in wanted.iter().copied() {
-        let stamp = &model.stamp_programs[stamp_index];
-        let mut entries: Vec<(CfgPlanEntry, ValueId)> = Vec::new();
-        for (entry_index, jacobian) in stamp.jacobian_programs.iter().enumerate() {
-            let Some(lane) = lane_of(&jacobian.col_axis) else {
-                continue;
-            };
-            let Some(value) = jacobian_rows[stamp_index].get(lane).copied().flatten() else {
-                continue;
-            };
-            if let Some(scalar) = scalarized.scalar(value) {
-                entries.push((CfgPlanEntry::Jacobian(stamp_index, entry_index), scalar));
-            }
-        }
-        for (entry_index, reactive) in stamp.reactive_jacobians.iter().enumerate() {
-            let Some(lane) = lane_of(&reactive.col_axis) else {
-                continue;
-            };
-            let Some(value) = reactive_rows[stamp_index].get(lane).copied().flatten() else {
-                continue;
-            };
-            if let Some(scalar) = scalarized.scalar(value) {
-                entries.push((
-                    CfgPlanEntry::ReactiveJacobian(stamp_index, entry_index),
-                    scalar,
-                ));
-            }
-        }
-        if entries.is_empty() {
-            continue;
-        }
-        let outputs: Vec<ValueId> = entries.iter().map(|(_, value)| *value).collect();
-        let (pruned, mapped) = prune_cfg_to_outputs(&scalarized.function, &outputs);
-        let mut walked = Vec::with_capacity(inputs.len());
-        for point in &inputs {
-            match evaluate_cfg(&pruned, point) {
-                Ok(snapshot) => walked.push(snapshot),
-                Err(error) => {
-                    println!(
-                        "cfg-mir model={} reference=refused stamp={stamp_index} detail={error}",
-                        shipped.name
-                    );
-                    break;
-                }
-            }
-        }
-        if walked.len() != inputs.len() {
-            refused.push(stamp_index);
-            continue;
-        }
-        for (index, snapshot) in walked.into_iter().enumerate() {
-            for ((entry, _), output) in entries.iter().zip(&mapped) {
-                if let Some(value) = snapshot.value(*output) {
-                    bounds[index].insert(*entry, value);
-                }
-            }
-        }
-    }
-    refused
-}
-
-/// Every derivative entry's rounding bound, taken off the plan's own lowering
-/// where the interpreter can walk it.
+/// This is what W-F11 changed and it is the whole point of the census. The CFG
+/// side used to rebuild its own lowering for the reference — lower, store
+/// charges, differentiate, scalarize, prune per entry, walk with
+/// `canonical_ir::cfg_eval` — and wherever that rebuild's `f64` walk did not
+/// reproduce the compiled plan's reading the entry was dropped and judged in
+/// `f64` instead: 222 of `vbic`'s 614 derivative comparisons, 82 of
+/// `hisimsotb_va`'s, 9 of `angelov_gan`'s. Nothing about that was a reading of
+/// the plan production compiles, and the divergence had no cause anyone could
+/// name because the two things being compared were never the same program.
 ///
-/// # Two lowerings, chosen per equation
-///
-/// `from_hir_for_executable_backend` is what the CFG plan is built from, so it
-/// is the cone whose bound is wanted. It freezes a branch-current probe into a
-/// `ContributedCurrent`: storage an executable plan keeps and
-/// the reference interpreter, which evaluates one body to a number, has none
-/// of. It refuses the kind by name rather than answering it with the
-/// contribution's own expression, which would undo exactly the freezing the
-/// kind exists to state.
-///
-/// So the refusal is taken per equation rather than per module. Rows reaching
-/// no frozen current are bounded on the plan's own cone; the rest are retried
-/// on `from_hir`, the lowering [`super::cfg_census`] and
-/// `tests/cfg_derivatives.rs` already hold the interpreter to, where the same
-/// probed current is computed from the contribution it was frozen from rather
-/// than read back. Every retried equation is named in the output, so the class
-/// cannot grow unseen, and an equation neither lowering can walk is named too.
-///
-/// The two artifacts are built one after the other and the first is released
-/// before the second, so the peak working set is one of them rather than both —
-/// and the whole thing runs and is released before either plan is compiled.
-/// `asmhemt` has taken this pipeline past twenty gigabytes on its own.
-///
-/// # Rebuilt rather than borrowed
-///
-/// The plan builder makes the same function on its way to machine code but
-/// keeps no map from a plan entry back to the CFG value it lowered, and it is
-/// another lane's file. So the steps are repeated here — lower, store charges,
-/// differentiate, scalarize — from the same artifact by the same deterministic
-/// passes, which is what makes the entry-to-value map the same one.
-fn entry_reference(shipped: &CensusModel) -> Option<ReferenceValues> {
-    let artifact = &shipped.canonical_ir;
-    let mut bounds: ReferenceValues = vec![HashMap::new(); CENSUS_POINTS.len()];
-    let wanted: Vec<usize> = (0..shipped.model.stamp_programs.len()).collect();
-
-    let executable =
-        CfgModel::from_hir_for_executable_backend(&artifact.hir, &artifact.mir).ok()?;
-    let refused = row_reference(shipped, executable, &wanted, &mut bounds);
-    if !refused.is_empty() {
-        println!(
-            "cfg-mir model={} reference=interpretable equations={}",
-            shipped.name,
-            refused.len()
-        );
-        if let Ok(interpretable) = CfgModel::from_hir(&artifact.hir, &artifact.mir) {
-            let still = row_reference(shipped, interpretable, &refused, &mut bounds);
-            if !still.is_empty() {
-                println!(
-                    "cfg-mir model={} reference=unavailable equations={}",
-                    shipped.name,
-                    still.len()
-                );
-            }
-        }
-    }
-    Some(bounds)
-}
-
-/// Re-walk the shipped plan's postfix streams in double-double at one point.
+/// A plan is now walked as a plan. Both routes' entries are
+/// [`PlanProgram`]s — postfix on the shipped route, blocks on the CFG route —
+/// and [`PlanWalk`] takes either, so one function is the reference for both:
+/// fill the variable array from the plan's own assignment pass, run the plan's
+/// prelude if it has one, then read each entry. That is exactly the order a
+/// device evaluates in, and the values are exactly the ones the machine code
+/// produced.
 ///
 /// # Why the walker's own `f64` walk runs alongside
 ///
 /// The reference is only a reference if the thing it is a reference *for* is
-/// the same computation. [`PostfixWalk`] reads the operation semantics off
+/// the same computation. [`PlanWalk`] reads the operation semantics off
 /// [`x64::codegen`](crate::native::x64), but reading them off and reproducing
-/// them are different claims, so the same streams are walked twice: once in
-/// `f64`, where the answer has to be the machine code's own, and once in
+/// them are different claims, so every program is walked twice: once in `f64`,
+/// where the answer has to be the machine code's own, and once in
 /// double-double, which is the value that is kept. An entry whose `f64` walk
 /// disagrees with the compiled reading gets *no* reference — a walker that does
 /// not model an entry cannot be its reference — and the disagreement is
-/// counted.
+/// counted. With the rebuild gone that is the only fidelity check left, and it
+/// now runs on both routes.
 ///
 /// # Only the first assignment pass
 ///
 /// The census fills its `f64` variable array with `run_assignments` alone, so
 /// that is what this mirrors. Adding `post_assignments` here would give the
 /// double-double walk variables the `f64` walk it is measuring never had, and
-/// `E_mir` would then be the distance between two different computations rather
+/// `E` would then be the distance between two different computations rather
 /// than one computation's rounding.
-fn mir_reference(
+fn plan_reference(
+    route: &'static str,
     plan: &crate::jit::model_plan::NativeModelPlan,
     point: &super::mir_postfix::MirPoint<'_>,
     variables: usize,
@@ -1040,17 +855,37 @@ fn mir_reference(
     wanted: &[(CfgPlanEntry, f64)],
     tally: &mut Tally,
 ) -> HashMap<CfgPlanEntry, DoubleDouble> {
-    let mut narrow: PostfixWalk<'_, f64> = PostfixWalk::new(point, variables, prelude_slots);
-    let mut wide: PostfixWalk<'_, DoubleDouble> = PostfixWalk::new(point, variables, prelude_slots);
+    let mut narrow: PlanWalk<'_, f64> = PlanWalk::new(point, variables, prelude_slots);
+    let mut wide: PlanWalk<'_, DoubleDouble> = PlanWalk::new(point, variables, prelude_slots);
     narrow.fill_variables(&plan.assignments);
     wide.fill_variables(&plan.assignments);
+    // The prelude, in the position the device runs it: after the variables are
+    // filled and before the first value entry. Its slots are this walk's own,
+    // so an entry that reads one reads what this walk published rather than
+    // what the machine code did — which is what makes the entry's reference a
+    // reference for the whole computation and not just its last instruction.
+    if let Some(prelude) = plan.prelude.as_ref() {
+        let published = (
+            narrow.run_plan_program(&prelude.program),
+            wide.run_plan_program(&prelude.program),
+        );
+        if let (Err(refusal), _) | (_, Err(refusal)) = published {
+            println!(
+                "cfg-mir prelude_refused route={route} detail={}",
+                refusal.name()
+            );
+        }
+    }
 
     let mut values = HashMap::new();
     for (entry, compiled) in wanted {
-        let Some(PlanProgram::Postfix(program)) = entry_program(plan, *entry) else {
+        let Some(program) = entry_program(plan, *entry) else {
             continue;
         };
-        let (Ok(walked), Ok(reference)) = (narrow.run(program), wide.run(program)) else {
+        let (Ok(walked), Ok(reference)) = (
+            narrow.run_plan_program(program),
+            wide.run_plan_program(program),
+        ) else {
             continue;
         };
         // The same reading on both counts, or the walker is not modelling this
@@ -1060,7 +895,7 @@ fn mir_reference(
         if !agrees {
             tally.walker_disagreements += 1;
             println!(
-                "cfg-mir walker_disagreement entry={entry} walked={walked:.17e} \
+                "cfg-mir walker_disagreement route={route} entry={entry} walked={walked:.17e} \
                  carried={:.17e} compiled={compiled:.17e}",
                 reference.narrow()
             );
@@ -1172,19 +1007,6 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
     let model = &shipped.model;
     let artifact = &shipped.canonical_ir;
 
-    // The CFG reference walk first, and released before either plan is
-    // compiled: both passes build the same differentiated body, and holding two
-    // of them is what puts this census into paging on the largest modules.
-    let cfg_reference = entry_reference(shipped);
-    if cfg_reference.is_none() {
-        tally.models_without_reference += 1;
-        println!(
-            "cfg-mir model={module} reference=unavailable; every derivative entry is judged in \
-             f64"
-        );
-    }
-    let cfg_reference = cfg_reference.unwrap_or_else(|| vec![HashMap::new(); CENSUS_POINTS.len()]);
-
     // `Cfg`, not the `Postfix` scope production takes: the whole point of this
     // census is to measure the noise slice the default plan declines to use, so
     // narrowing it here would make the gap invisible on the day it closes.
@@ -1293,7 +1115,6 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
     let mut referenced_here = 0_usize;
     let mut missing_here = 0_usize;
     let mut not_finite_here = 0_usize;
-    let mut diverged_here = 0_usize;
     // The three entries where the CFG route's measured rounding is furthest
     // above the shipped route's. Named rather than counted, because the reading
     // the flip's pre-flight wants is *which* entry, not how many.
@@ -1346,43 +1167,51 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
         }
         let scales = MatrixScales::of(&readings);
 
-        // The shipped route's reference, taken once for this point: the
-        // assignment pass is most of the work and every entry shares it. Only
-        // the entries the CFG side has a reference for are asked, because a
-        // reference on one side alone answers nothing.
-        let cfg_here = cfg_reference.get(index);
-        let wanted: Vec<(CfgPlanEntry, f64)> = readings
+        // Both routes' references, each taken once for this point: the
+        // assignment pass is most of the work and every entry of a route shares
+        // it. The population is the derivative entries, which are the ones the
+        // double-double criterion judges; a residual takes the reassociation
+        // bound, which is asked of the `f64` readings.
+        let wanted_mir: Vec<(CfgPlanEntry, f64)> = readings
             .iter()
-            .filter(|(entry, ..)| cfg_here.is_some_and(|values| values.contains_key(entry)))
+            .filter(|(entry, ..)| is_derivative_entry(*entry))
             .map(|(entry, mir, _)| (*entry, *mir))
             .collect();
-        let mir_here = if wanted.is_empty() {
-            HashMap::new()
+        let wanted_cfg: Vec<(CfgPlanEntry, f64)> = readings
+            .iter()
+            .filter(|(entry, ..)| is_derivative_entry(*entry))
+            .map(|(entry, _, cfg)| (*entry, *cfg))
+            .collect();
+        let (mir_here, cfg_here) = if wanted_mir.is_empty() {
+            (HashMap::new(), HashMap::new())
         } else {
             let walked = point.mir_point(&storage.currents, &storage.branch_currents);
-            mir_reference(
-                &mir_plan,
-                &walked,
-                variables.len(),
-                mir_storage.prelude_slots,
-                &wanted,
-                tally,
+            (
+                plan_reference(
+                    "mir",
+                    &mir_plan,
+                    &walked,
+                    variables.len(),
+                    mir_storage.prelude_slots,
+                    &wanted_mir,
+                    tally,
+                ),
+                plan_reference(
+                    "cfg",
+                    &cfg_plan.plan,
+                    &walked,
+                    variables.len(),
+                    cfg_storage.prelude_slots,
+                    &wanted_cfg,
+                    tally,
+                ),
             )
         };
 
         for (entry, mir, cfg) in readings {
             compared += 1;
             let operations = entry_operations(&mir_plan, &cfg_plan.plan, entry);
-            // The interpreted cone's own `f64` walk has to be the compiled
-            // plan's reading, or the reference is a reference for some other
-            // computation. `super::cfg_census` pins the block program
-            // bit-identical to the interpreter on every shipped module, so a
-            // disagreement here is about this census's rebuild of the lowering
-            // — it repeats the lower/differentiate/scalarize passes rather than
-            // borrowing the plan builder's — and not about the route.
-            let cfg_candidate = cfg_here.and_then(|values| values.get(&entry)).copied();
-            let cfg_dd = cfg_candidate.filter(|value| same_reading(value.narrow(), cfg));
-            let diverged = cfg_candidate.is_some() && cfg_dd.is_none();
+            let cfg_dd = cfg_here.get(&entry).copied();
             let comparison = Comparison {
                 entry,
                 point: index,
@@ -1450,9 +1279,6 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
                     tally.referenced += 1;
                     referenced_here += 1;
                     spread.push(&comparison);
-                } else if diverged {
-                    tally.reference_diverged += 1;
-                    diverged_here += 1;
                 } else if comparison.reference_left_the_reals() {
                     tally.reference_not_finite += 1;
                     not_finite_here += 1;
@@ -1549,8 +1375,7 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
     );
     println!(
         "cfg-mir model={module} referenced={referenced_here} \
-         reference_missing={missing_here} reference_not_finite={not_finite_here} \
-         reference_diverged={diverged_here} {}{}",
+         reference_missing={missing_here} reference_not_finite={not_finite_here} {}{}",
         spread.describe(),
         f64_worst
             .as_ref()
@@ -1675,8 +1500,8 @@ fn the_cfg_built_plan_agrees_with_the_shipped_plan_within_the_reassociation_boun
          structural_zeros_not_evaluable={} \
          guarded_noise_entries={} guarded_noise_agreed={} guarded_noise_third_value={} \
          below_significance={} referenced={} reference_missing={} \
-         reference_not_finite={} reference_diverged={} models_without_reference={} \
-         walker_disagreements={} lost_entries={} walker_refusals={:?}",
+         reference_not_finite={} walker_disagreements={} lost_entries={} \
+         walker_refusals={:?}",
         tally.models,
         tally.built,
         tally.refused,
@@ -1696,8 +1521,6 @@ fn the_cfg_built_plan_agrees_with_the_shipped_plan_within_the_reassociation_boun
         tally.referenced,
         tally.reference_missing,
         tally.reference_not_finite,
-        tally.reference_diverged,
-        tally.models_without_reference,
         tally.walker_disagreements,
         tally.lost_entries,
         tally.walker_refusals,
