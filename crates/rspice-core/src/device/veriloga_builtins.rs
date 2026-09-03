@@ -633,7 +633,7 @@ impl BuiltinVerilogADevices {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, feature = "veriloga-model-diode-cmc"))]
     #[inline]
     pub(crate) fn advance_state(&mut self) -> Result<(), String> {
         self.validate_state_acceptance()?;
@@ -2026,11 +2026,24 @@ mod tests {
     };
 
     #[cfg(feature = "veriloga-builtins-base")]
+    use super::{BuiltinVerilogAInstance, GeneratedNoiseProcessDescriptor};
+
+    // The rest of the adapter's surface is only reachable from a test that
+    // instantiates a model, so each import names the models that reach it.
+    // A build with `veriloga-builtins-base` and no model compiles every one
+    // of those tests out.
+    #[cfg(feature = "veriloga-model-diode-cmc")]
     use super::{
-        BuiltinVerilogADevices, BuiltinVerilogAInstance, GENERATED_VERILOGA_COMPATIBILITY_CATALOG,
-        GeneratedNoiseProcessDescriptor, GeneratedVerilogAAcceptedStateShapeIdentity,
-        instantiate_builtin,
+        BuiltinVerilogADevices, GENERATED_VERILOGA_COMPATIBILITY_CATALOG,
+        GeneratedVerilogAAcceptedStateShapeIdentity,
     };
+
+    #[cfg(any(
+        feature = "veriloga-model-diode-cmc",
+        feature = "veriloga-model-ekv-va",
+        feature = "veriloga-model-vbic13",
+    ))]
+    use super::instantiate_builtin;
 
     /// An `OFF` instance is evaluated at its cut-off state until Newton moves.
     ///
@@ -2192,7 +2205,19 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "veriloga-builtins-base")]
+    /// Two `DIODE_CMC` instances on their own nodes, for the checkpoint
+    /// and rollback tests below.
+    ///
+    /// The gate names the model, not `veriloga-builtins-base`. That base
+    /// feature compiles this adapter and the catalog but selects no model,
+    /// so `instantiate_builtin` has nothing to hand back and every caller
+    /// here panicked on the `expect`. It also leaves `GeneratedBuiltinKind`
+    /// without variants, which makes `BuiltinVerilogAInstance` uninhabited
+    /// and every statement after that call unreachable -- three denied
+    /// lints on a shard `ci.yml` builds with `--all-targets`. Naming the
+    /// model each caller indexes states the real precondition and settles
+    /// both, the way the VBIC13 test below names its own.
+    #[cfg(feature = "veriloga-model-diode-cmc")]
     fn checkpoint_test_devices() -> BuiltinVerilogADevices {
         let mut circuit = crate::CircuitData::new();
         let mut devices = BuiltinVerilogADevices::new();
@@ -2212,7 +2237,7 @@ mod tests {
         devices
     }
 
-    #[cfg(feature = "veriloga-builtins-base")]
+    #[cfg(feature = "veriloga-model-diode-cmc")]
     #[test]
     fn two_terminal_primary_current_projection_is_exact_and_index_aligned() {
         let mut devices = checkpoint_test_devices();
@@ -2239,7 +2264,7 @@ mod tests {
         assert_eq!(devices.primary_terminal_current(1), Some(-0.5));
     }
 
-    #[cfg(feature = "veriloga-builtins-base")]
+    #[cfg(feature = "veriloga-model-diode-cmc")]
     #[test]
     fn primary_current_projection_fails_closed_for_multiterminal_metadata() {
         const MULTI_TERMINALS: [super::GeneratedVerilogATerminalDescriptor; 3] = [
@@ -2376,7 +2401,7 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "veriloga-builtins-base")]
+    #[cfg(feature = "veriloga-model-diode-cmc")]
     #[test]
     fn generated_checkpoint_restore_is_atomic_and_validates_provenance() {
         let mut devices = checkpoint_test_devices();
@@ -2478,7 +2503,7 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "veriloga-builtins-base")]
+    #[cfg(feature = "veriloga-model-diode-cmc")]
     #[test]
     fn generated_state_acceptance_validates_every_instance_before_applying_any() {
         let mut devices = checkpoint_test_devices();
@@ -2511,7 +2536,7 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "veriloga-builtins-base")]
+    #[cfg(feature = "veriloga-model-diode-cmc")]
     #[test]
     fn generated_checkpoint_capture_rejects_in_flight_candidates() {
         let mut devices = checkpoint_test_devices();
@@ -2636,7 +2661,7 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "veriloga-builtins-base")]
+    #[cfg(feature = "veriloga-model-diode-cmc")]
     #[test]
     fn generated_rollback_refresh_reuses_the_instance_vector() {
         let mut devices = checkpoint_test_devices();
