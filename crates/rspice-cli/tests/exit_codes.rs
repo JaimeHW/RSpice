@@ -1382,6 +1382,96 @@ fn capability_refusals_exit_sixty_nine_with_their_token() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The same refusal reached through a `.DC` card rather than a `.OP` one.
+///
+/// The DC sweep used to stringify whatever the engine returned, so this deck
+/// exited 80 while the `.OP` spelling of it exited 69 - one refusal, two
+/// statuses, decided by which card happened to name it.
+#[test]
+fn a_dc_sweep_keeps_the_engine_category_of_what_refused_it() {
+    let dir = test_dir("dc_sweep_capability");
+    let diagnostic = run_json(
+        &dir,
+        "ltra_dc.sp",
+        "* RLGC LTRA with shunt conductance, swept\n\
+         V1 in 0 1\n\
+         O1 in 0 out 0 rgline\n\
+         .model rgline LTRA R=1 G=1e-3 L=1n C=1p LEN=1\n\
+         Rl out 0 50\n\
+         .dc V1 0 1 0.5\n\
+         .end\n",
+        &[],
+    );
+
+    assert_eq!(
+        diagnostic["observed_exit_code"], 69,
+        "a refusal a DC sweep raised is still a capability refusal: {diagnostic}"
+    );
+    assert_eq!(diagnostic["error"]["category"], "capability");
+    assert_eq!(diagnostic["error"]["code"], "unsupported_capability");
+    assert_eq!(
+        diagnostic["error"]["capability"],
+        "device.ltra.rlgc_conductance"
+    );
+    assert_eq!(
+        diagnostic["error"]["analysis"], "DC Sweep",
+        "the refusal must still name the analysis that raised it: {diagnostic}"
+    );
+    // The engine's own detail text is what the user reads, before and after
+    // the category stopped being re-decided here.
+    assert!(
+        diagnostic["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message
+                .contains("neither ngspice nor Xyce defines an RLGC line with shunt conductance")),
+        "the engine's detail must survive to the diagnostic: {diagnostic}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Every advanced analysis shares one error map, so typing it types them all:
+/// HB, PSS, Monte Carlo, and both S-parameter routes. `.HB` is the spelling
+/// driven here because its refusal is a device the analysis declines to stamp.
+#[test]
+fn an_advanced_analysis_keeps_the_engine_category_of_what_refused_it() {
+    let dir = test_dir("hb_capability");
+    let diagnostic = run_json(
+        &dir,
+        "hb_bjt.sp",
+        "* HB has no stamp for the complete Gummel-Poon equations\n\
+         V1 in 0 SIN(0 0.5 1e6)\n\
+         Vcc vcc 0 5\n\
+         R1 in b 1k\n\
+         Rc vcc c 1k\n\
+         Q1 c b 0 npnmod\n\
+         .model npnmod NPN IS=1e-16 BF=100\n\
+         .hb 1e6\n\
+         .end\n",
+        &[],
+    );
+
+    assert_eq!(
+        diagnostic["observed_exit_code"], 69,
+        "a device HB declines to stamp is a capability refusal: {diagnostic}"
+    );
+    assert_eq!(diagnostic["error"]["category"], "capability");
+    assert_eq!(diagnostic["error"]["code"], "unsupported_capability");
+    assert_eq!(diagnostic["error"]["capability"], "analysis.hb.device");
+    assert_eq!(
+        diagnostic["error"]["analysis"], "HB",
+        "the refusal must still name the analysis that raised it: {diagnostic}"
+    );
+    assert!(
+        diagnostic["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("HB runtime does not yet support")),
+        "the engine's detail must survive to the diagnostic: {diagnostic}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn an_unreadable_checkpoint_version_exits_seventy_six() {
     let dir = test_dir("category_persistence");

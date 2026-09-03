@@ -507,7 +507,14 @@ pub(super) fn run_dc_sweep(
             }
             Ok(())
         }
-        Err(e) => Err(CliError::simulation_error_in(e.to_string(), "DC Sweep")),
+        // Carry the engine's typed failure rather than its text. Stringifying
+        // here re-decided every DC-sweep failure as the simulation category,
+        // so a refused capability and a singular matrix left this process with
+        // the same status.
+        Err(source) => Err(CliError::CoreSimulationError {
+            source,
+            analysis: Some("DC Sweep".to_string()),
+        }),
     }
 }
 

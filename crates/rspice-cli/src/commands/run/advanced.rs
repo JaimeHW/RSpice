@@ -38,7 +38,15 @@ fn map_advanced_simulation_error(
     if matches!(error, rspice_core::SimulationError::Aborted) {
         super::cancellation_cli_error(ctx.args.timeout)
     } else {
-        CliError::simulation_error_in(error.to_string(), analysis)
+        // Carry the engine's typed failure rather than its text. Every
+        // analysis routed through here - HB, PSS, Monte Carlo, S-parameters -
+        // stringified its failure into the simulation category, so a device
+        // the analysis refuses and one that failed to converge left this
+        // process with the same status.
+        CliError::CoreSimulationError {
+            source: error,
+            analysis: Some(analysis.to_string()),
+        }
     }
 }
 
