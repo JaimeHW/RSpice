@@ -13,6 +13,7 @@ mod post_process;
 mod projection;
 pub mod result_document;
 mod schema;
+mod seed;
 mod topology;
 mod transient;
 
@@ -53,5 +54,6 @@ pub use schema::{
     CoordinateSchema, SchemaUnion, SignalDescriptor, SignalKind, SignalOwner, SignalSchema,
     SignalSchemaError, SignalShape, SignalUnit, SignalValueType,
 };
+pub use seed::monte_carlo_seed_at_coordinate;
 pub use topology::{TopologyComponent, TopologyFingerprint, TopologyFingerprintError};
 pub use transient::{TransientMaximumStepError, resolve_transient_maximum_step};

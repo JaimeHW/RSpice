@@ -834,6 +834,53 @@ impl Engine {
         abort.observe_progress(1.0);
         Ok(result)
     }
+
+    /// Run one authored `.PZ` card.
+    ///
+    /// The card names its four ports the way the deck does; this resolves them
+    /// against the elaborated circuit and selects the pole/zero mode the card
+    /// asked for. Doing that translation on a frontend means deciding what a
+    /// `.PZ` port name means a second time, which is why the card runner lives
+    /// here.
+    pub fn run_pz_from_card_with_abort(
+        &self,
+        netlist: &Netlist,
+        card: &crate::netlist::AnalysisCommand,
+        abort: &dyn AbortSignal,
+    ) -> Result<PoleZeroResult, SimulationError> {
+        use crate::netlist::{AnalysisCommand, PoleZeroAnalysisType, PoleZeroTransferType};
+
+        let AnalysisCommand::PoleZero {
+            input_pos,
+            input_neg,
+            output_pos,
+            output_neg,
+            transfer_type,
+            analysis_type,
+        } = card
+        else {
+            return Err(SimulationError::Netlist(
+                "run_pz_from_card_with_abort was given a card that is not .PZ".to_owned(),
+            ));
+        };
+        let resolver = super::NodeResolver::build_with_abort(self, netlist, abort)?;
+        let (compute_poles, compute_zeros) = match analysis_type {
+            PoleZeroAnalysisType::PoleZero => (true, true),
+            PoleZeroAnalysisType::PolesOnly => (true, false),
+            PoleZeroAnalysisType::ZerosOnly => (false, true),
+        };
+        self.run_pz_ports_with_abort(
+            netlist,
+            resolver.resolve(input_pos, ".PZ input")?,
+            Some(resolver.resolve(input_neg, ".PZ input reference")?),
+            resolver.resolve(output_pos, ".PZ output")?,
+            Some(resolver.resolve(output_neg, ".PZ output reference")?),
+            matches!(transfer_type, PoleZeroTransferType::Current),
+            compute_poles,
+            compute_zeros,
+            abort,
+        )
+    }
 }
 
 #[cfg(test)]

@@ -17,18 +17,18 @@ use std::collections::BTreeMap;
 use num_complex::Complex64;
 
 use super::payload::{
-    AcPayload, CompressionReportDocument, DcSweepAxisDocument, DcSweepPayload, DigitalEventPoint,
-    DigitalEventTrace, DistortionPayload, DistortionProductSeries, DistortionProductTag,
-    DistortionTone, EnvelopeCarrierDocument, EnvelopeContinuationDocument, EnvelopeNodeSpectrum,
-    EnvelopePayload, FftMetricsDocument, FftPayload, FftSourceDocument, FloquetEvidenceDocument,
-    FourierPayload, HarmonicBalancePayload, HbReactiveSpectrumDocument, MonteCarloPayload,
-    MonteCarloVariableStatistics, NamedObservable, NamedObservableSeries, NoiseContributionSeries,
-    NoisePayload, NoiseSourceIdentityDocument, NyquistSample, OperatingPointPayload,
-    PNoiseBandwidth, PNoiseContribution, PNoiseContributor, PNoisePayload, PacConversionEntry,
-    PacConversionMatrixDocument, PacPayload, PacSidebandDescriptor, PoleZeroPayload, PortDocument,
-    PortNoisePayload, RealEventPoint, RealEventTrace, ResultPayload, RootSetEvidenceDocument,
-    SParameterPayload, SensitivityEntry, SensitivityPayload, StabilityPayload,
-    TransferFunctionPayload, TransientPayload,
+    AcPayload, AcSensitivityEntry, CompressionReportDocument, DcSweepAxisDocument, DcSweepPayload,
+    DigitalEventPoint, DigitalEventTrace, DistortionPayload, DistortionProductSeries,
+    DistortionProductTag, DistortionTone, EnvelopeCarrierDocument, EnvelopeContinuationDocument,
+    EnvelopeNodeSpectrum, EnvelopePayload, FftMetricsDocument, FftPayload, FftSourceDocument,
+    FloquetEvidenceDocument, FourierPayload, HarmonicBalancePayload, HbReactiveSpectrumDocument,
+    MonteCarloPayload, MonteCarloVariableStatistics, NamedObservable, NamedObservableSeries,
+    NoiseContributionSeries, NoisePayload, NoiseSourceIdentityDocument, NyquistSample,
+    OperatingPointPayload, OscillatorPhaseNoiseDocument, PNoiseBandwidth, PNoiseContribution,
+    PNoiseContributor, PNoisePayload, PacConversionEntry, PacConversionMatrixDocument, PacPayload,
+    PacSidebandDescriptor, PoleZeroPayload, PortDocument, PortNoisePayload, RealEventPoint,
+    RealEventTrace, ResultPayload, RootSetEvidenceDocument, SParameterPayload, SensitivityEntry,
+    SensitivityPayload, StabilityPayload, TransferFunctionPayload, TransientPayload,
 };
 use super::{
     AnalysisResultDocument, AnalysisResultDocumentBuilder, AxisValues, ComplexSample,
@@ -48,16 +48,16 @@ use crate::analysis::pnoise::{PhaseNoisePoint, PnoiseResult};
 use crate::analysis::pole_zero::PoleZeroResult;
 use crate::analysis::pss::PssResult;
 use crate::analysis::s_param::SParameterResult;
-use crate::analysis::sensitivity::SensitivityResult;
+use crate::analysis::sensitivity::{AcSensitivityResult, SensitivityResult};
 use crate::analysis::stb::StbResult;
 use crate::analysis::transfer::TransferFunctionResult;
 use crate::circuit::DeviceOpReport;
-use crate::engine::EnvelopeResult;
 use crate::engine::waveform::{
     TransientChannelAvailability, TransientChannelRole, TransientChannelUnit,
     TransientCompressedChannel, TransientCompressionReport, TransientResultCompressed,
 };
 use crate::engine::{DcSweepPointResult, TransientFftResult, TransientResult};
+use crate::engine::{EnvelopeResult, PeriodicNoiseResult};
 use crate::execution::plan::AnalysisInstanceId;
 use crate::execution::schema::{
     SignalDescriptor, SignalKind, SignalOwner, SignalShape, SignalUnit, SignalValueType,
@@ -289,6 +289,25 @@ fn crossover_frequency_scalar(
             },
         )
     }
+}
+
+/// Complex payload entries, which are always present: a payload table is not a
+/// signal series and has no validity mask to record absence in.
+fn finite_complex_entries(
+    location: &'static str,
+    name: &str,
+    values: &[Complex64],
+) -> Result<Vec<ComplexSample>, ResultDocumentError> {
+    values
+        .iter()
+        .map(|value| {
+            if value.re.is_finite() && value.im.is_finite() {
+                Ok(ComplexSample::new(value.re, value.im))
+            } else {
+                Err(source_error(location, format!("'{name}' entry is {value}")))
+            }
+        })
+        .collect()
 }
 
 fn count_scalar(
@@ -1814,8 +1833,124 @@ impl AnalysisResultDocument {
         let payload = SensitivityPayload {
             output: result.output.clone(),
             entries,
+            ac_entries: Vec::new(),
         };
         Ok(Self::builder(analysis, ResultPayload::Sensitivity(payload), 0).scalars(scalars))
+    }
+
+    /// Project one `.SENS ... AC` result.
+    ///
+    /// The frequency grid becomes the document's axis and the nominal complex
+    /// output becomes a signal on it; every parameter's complex derivative
+    /// trace is carried in the payload beside them. The DC and AC forms of
+    /// `.SENS` share a result family and a payload type, and which one a
+    /// document carries is visible in that payload rather than inferred from
+    /// whether it has an axis.
+    pub fn from_ac_sensitivity(
+        analysis: AnalysisInstanceId,
+        result: &AcSensitivityResult,
+    ) -> Result<AnalysisResultDocumentBuilder, ResultDocumentError> {
+        const LOCATION: &str = "AC sensitivity result";
+        let point_count = result.frequencies.len();
+        if point_count == 0 {
+            return Err(source_error(
+                LOCATION,
+                "an AC sensitivity sweep needs at least one frequency",
+            ));
+        }
+        if result.output_values.len() != point_count {
+            return Err(source_error(
+                LOCATION,
+                "the nominal output does not cover every swept frequency",
+            ));
+        }
+        let axis = ResultAxis::new(
+            "frequency",
+            "Frequency",
+            ResultAxisKind::Frequency,
+            SignalUnit::Hertz,
+            AxisValues::Real {
+                values: finite_axis(LOCATION, "frequency", &result.frequencies)?,
+            },
+        )?;
+        let signals = vec![ResultSignal::new(
+            analysis_descriptor(
+                LOCATION,
+                "output",
+                "Nominal output",
+                SignalUnit::Unspecified,
+                SignalValueType::Complex,
+                point_count,
+            )?,
+            None,
+            SeriesAvailability::Available,
+            SeriesValues::Complex {
+                samples: finite_complex_samples(LOCATION, "output", &result.output_values)?,
+            },
+        )?];
+
+        let mut ac_entries = Vec::with_capacity(result.sensitivities.len());
+        for trace in &result.sensitivities {
+            for (label, values) in [
+                ("absolute sensitivity", &trace.absolute),
+                ("normalized sensitivity", &trace.normalized),
+            ] {
+                if values.len() != point_count {
+                    return Err(source_error(
+                        LOCATION,
+                        format!(
+                            "{label} of '{}' does not cover every swept frequency",
+                            trace.vector_name
+                        ),
+                    ));
+                }
+            }
+            for (label, values) in [
+                ("magnitude sensitivity", &trace.magnitude),
+                ("phase sensitivity", &trace.phase),
+            ] {
+                if values.len() != point_count {
+                    return Err(source_error(
+                        LOCATION,
+                        format!(
+                            "{label} of '{}' does not cover every swept frequency",
+                            trace.vector_name
+                        ),
+                    ));
+                }
+            }
+            if !trace.nominal_value.is_finite() {
+                return Err(source_error(
+                    LOCATION,
+                    format!(
+                        "nominal value of '{}' is {}",
+                        trace.vector_name, trace.nominal_value
+                    ),
+                ));
+            }
+            ac_entries.push(AcSensitivityEntry {
+                vector_name: trace.vector_name.clone(),
+                element: trace.element.clone(),
+                element_kind: trace.element_type.into(),
+                parameter: trace.parameter.clone(),
+                nominal_value: trace.nominal_value,
+                absolute: finite_complex_entries(LOCATION, "absolute", &trace.absolute)?,
+                normalized: finite_complex_entries(LOCATION, "normalized", &trace.normalized)?,
+                magnitude: finite_axis(LOCATION, "magnitude", &trace.magnitude)?,
+                phase: finite_axis(LOCATION, "phase", &trace.phase)?,
+            });
+        }
+
+        let payload = SensitivityPayload {
+            output: result.output.clone(),
+            entries: Vec::new(),
+            ac_entries,
+        };
+        Ok(
+            Self::builder(analysis, ResultPayload::Sensitivity(payload), point_count)
+                .axis(axis)
+                .signals(signals),
+        )
     }
 
     /// Project one `.PZ` result with its root-set evidence.
@@ -2439,6 +2574,239 @@ impl AnalysisResultDocument {
     /// Project one phase-noise result.
     pub fn from_pnoise(
         analysis: AnalysisInstanceId,
+        result: &PeriodicNoiseResult,
+    ) -> Result<AnalysisResultDocumentBuilder, ResultDocumentError> {
+        match result {
+            PeriodicNoiseResult::Spectral(result) => Self::from_spectral_pnoise(analysis, result),
+            PeriodicNoiseResult::Driven { output, result } => {
+                Self::from_driven_pnoise(analysis, output, result)
+            }
+            PeriodicNoiseResult::Oscillator { output, result } => {
+                Self::from_oscillator_pnoise(analysis, output, result)
+            }
+        }
+    }
+
+    /// Project one driven `.PNOISE` run.
+    ///
+    /// A driven run reports an absolute output voltage PSD, not a
+    /// carrier-normalized ratio, so it is published in V^2/Hz with each noise
+    /// source's own contribution beside it. There is no carrier to normalize
+    /// against and inventing one would be a fabricated number.
+    fn from_driven_pnoise(
+        analysis: AnalysisInstanceId,
+        output: &str,
+        result: &crate::engine::PnoiseAnalysisResult,
+    ) -> Result<AnalysisResultDocumentBuilder, ResultDocumentError> {
+        const LOCATION: &str = "driven PNoise result";
+        let point_count = result.frequencies.len();
+        if point_count == 0 {
+            return Err(source_error(
+                LOCATION,
+                "a periodic-noise sweep needs at least one offset",
+            ));
+        }
+        if result.output_noise.len() != point_count {
+            return Err(source_error(
+                LOCATION,
+                "the output noise density does not cover every swept offset",
+            ));
+        }
+        let axis = ResultAxis::new(
+            "offset_frequency",
+            "Offset frequency",
+            ResultAxisKind::OffsetFrequency,
+            SignalUnit::Hertz,
+            AxisValues::Real {
+                values: finite_axis(LOCATION, "offset frequency", &result.frequencies)?,
+            },
+        )?;
+
+        let mut signals = vec![ResultSignal::new(
+            analysis_descriptor(
+                LOCATION,
+                "output_noise",
+                "Output noise density",
+                volt_squared_per_hertz(),
+                SignalValueType::Real,
+                point_count,
+            )?,
+            None,
+            SeriesAvailability::Available,
+            SeriesValues::Real {
+                samples: finite_samples(LOCATION, "output_noise", &result.output_noise)?,
+            },
+        )?];
+        if let Some(input_noise) = &result.input_noise {
+            if input_noise.len() != point_count {
+                return Err(source_error(
+                    LOCATION,
+                    "the input-referred noise density does not cover every swept offset",
+                ));
+            }
+            signals.push(ResultSignal::new(
+                analysis_descriptor(
+                    LOCATION,
+                    "input_referred_noise",
+                    "Input-referred noise density",
+                    volt_squared_per_hertz(),
+                    SignalValueType::Real,
+                    point_count,
+                )?,
+                None,
+                SeriesAvailability::Available,
+                SeriesValues::Real {
+                    samples: finite_samples(LOCATION, "input_referred_noise", input_noise)?,
+                },
+            )?);
+        }
+        for (label, density) in &result.contributors {
+            if density.len() != point_count {
+                return Err(source_error(
+                    LOCATION,
+                    format!("contributor '{label}' does not cover every swept offset"),
+                ));
+            }
+            let canonical = format!("contribution:{}", label.to_ascii_lowercase());
+            signals.push(ResultSignal::new(
+                analysis_descriptor(
+                    LOCATION,
+                    &canonical,
+                    &format!("Noise from {label}"),
+                    volt_squared_per_hertz(),
+                    SignalValueType::Real,
+                    point_count,
+                )?,
+                None,
+                SeriesAvailability::Available,
+                SeriesValues::Real {
+                    samples: finite_samples(LOCATION, &canonical, density)?,
+                },
+            )?);
+        }
+
+        let scalars = vec![
+            real_scalar(
+                LOCATION,
+                "carrier_frequency",
+                "Carrier frequency",
+                SignalUnit::Hertz,
+                result.fundamental_freq,
+            )?,
+            boolean_scalar("converged", "Converged", result.converged)?,
+        ];
+        let payload = PNoisePayload {
+            output_node: output.to_owned(),
+            jitter_bandwidth: None,
+            contributors: Vec::new(),
+            oscillator: None,
+        };
+        Ok(
+            Self::builder(analysis, ResultPayload::PNoise(payload), point_count)
+                .axis(axis)
+                .signals(signals)
+                .scalars(scalars),
+        )
+    }
+
+    /// Project one autonomous oscillator phase-noise run.
+    ///
+    /// The spectrum is carrier-normalized by construction, and the Demir
+    /// diffusion evidence travels with it so a reader can check that the
+    /// published curve preserves carrier power.
+    fn from_oscillator_pnoise(
+        analysis: AnalysisInstanceId,
+        output: &str,
+        result: &crate::engine::OscPnoiseResult,
+    ) -> Result<AnalysisResultDocumentBuilder, ResultDocumentError> {
+        const LOCATION: &str = "oscillator PNoise result";
+        let point_count = result.frequencies.len();
+        if point_count == 0 {
+            return Err(source_error(
+                LOCATION,
+                "a phase-noise sweep needs at least one offset",
+            ));
+        }
+        if result.phase_noise_dbc.len() != point_count {
+            return Err(source_error(
+                LOCATION,
+                "the phase-noise density does not cover every swept offset",
+            ));
+        }
+        let axis = ResultAxis::new(
+            "offset_frequency",
+            "Offset frequency",
+            ResultAxisKind::OffsetFrequency,
+            SignalUnit::Hertz,
+            AxisValues::Real {
+                values: finite_axis(LOCATION, "offset frequency", &result.frequencies)?,
+            },
+        )?;
+        let signals = vec![ResultSignal::new(
+            analysis_descriptor(
+                LOCATION,
+                "phase_noise",
+                "Phase noise",
+                dbc_per_hertz(),
+                SignalValueType::Real,
+                point_count,
+            )?,
+            None,
+            SeriesAvailability::Available,
+            SeriesValues::Real {
+                samples: finite_samples(LOCATION, "phase_noise", &result.phase_noise_dbc)?,
+            },
+        )?];
+        // The solved period is the carrier: reporting it as a frequency here
+        // keeps the scalar name meaning the same thing it does for a driven
+        // run, and the period itself is retained in the payload.
+        let carrier = if result.period.is_finite() && result.period > 0.0 {
+            1.0 / result.period
+        } else {
+            return Err(source_error(
+                LOCATION,
+                format!("the solved oscillation period is {}", result.period),
+            ));
+        };
+        let scalars = vec![
+            real_scalar(
+                LOCATION,
+                "carrier_frequency",
+                "Carrier frequency",
+                SignalUnit::Hertz,
+                carrier,
+            )?,
+            boolean_scalar("converged", "Converged", true)?,
+        ];
+        for value in [result.diffusion_constant, result.period, result.corner_hz] {
+            if !value.is_finite() {
+                return Err(source_error(
+                    LOCATION,
+                    format!("a phase-diffusion figure is {value}"),
+                ));
+            }
+        }
+        let payload = PNoisePayload {
+            output_node: output.to_owned(),
+            jitter_bandwidth: None,
+            contributors: Vec::new(),
+            oscillator: Some(OscillatorPhaseNoiseDocument {
+                diffusion_constant: result.diffusion_constant,
+                period: result.period,
+                corner_frequency: result.corner_hz,
+            }),
+        };
+        Ok(
+            Self::builder(analysis, ResultPayload::PNoise(payload), point_count)
+                .axis(axis)
+                .signals(signals)
+                .scalars(scalars),
+        )
+    }
+
+    /// Project one directly assembled spectral phase-noise result.
+    fn from_spectral_pnoise(
+        analysis: AnalysisInstanceId,
         result: &PnoiseResult,
     ) -> Result<AnalysisResultDocumentBuilder, ResultDocumentError> {
         const LOCATION: &str = "PNoise result";
@@ -2584,6 +2952,7 @@ impl AnalysisResultDocument {
                 .jitter_bandwidth
                 .map(|(start, stop)| PNoiseBandwidth { start, stop }),
             contributors,
+            oscillator: None,
         };
 
         Ok(

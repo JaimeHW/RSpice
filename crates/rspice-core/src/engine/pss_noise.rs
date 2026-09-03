@@ -51,7 +51,160 @@ pub struct OscPnoiseResult {
     pub corner_hz: Value,
 }
 
+/// The offset-frequency grid one authored `.PNOISE` card sweeps.
+fn pnoise_card_offsets(
+    card: &crate::netlist::PnoiseCard,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<Value>, SimulationError> {
+    super::sp::card_frequency_grid(
+        card.sweep.variation,
+        card.sweep.points,
+        card.sweep.start_freq,
+        card.sweep.stop_freq,
+        abort,
+    )
+}
+
+/// The authored output probe spelling of one `.PNOISE` card.
+fn pnoise_card_output(card: &crate::netlist::PnoiseCard) -> String {
+    match &card.reference_node {
+        Some(reference) => format!("V({},{})", card.output_node, reference),
+        None => format!("V({})", card.output_node),
+    }
+}
+
+/// Every shape a periodic-noise run produces, in one type the shared result
+/// document accepts.
+///
+/// A driven `.PNOISE` run reports an absolute output voltage PSD in V^2/Hz
+/// with a per-source breakdown; an autonomous oscillator run reports a
+/// carrier-normalized single-sideband spectrum in dBc/Hz plus the Demir phase
+/// diffusion constant. Converting either into the other's units would either
+/// invent a carrier the driven run does not have or discard the diffusion
+/// evidence, so the two stay distinct and the document projection handles
+/// both. The authored output probe travels with the result because the
+/// runners take it as a parameter and never put it in their own return value.
+#[derive(Debug, Clone)]
+pub enum PeriodicNoiseResult {
+    /// A driven `.PNOISE` run around a `.PSS` or `.HB` carrier.
+    Driven {
+        /// Authored output probe spelling, such as `V(out)`.
+        output: String,
+        result: super::PnoiseAnalysisResult,
+    },
+    /// An autonomous oscillator phase-noise run.
+    Oscillator {
+        /// Authored output probe spelling.
+        output: String,
+        result: OscPnoiseResult,
+    },
+    /// A spectral phase-noise result assembled directly, as the standalone
+    /// PNoise analyzer produces it.
+    Spectral(crate::analysis::pnoise::PnoiseResult),
+}
+
+impl PeriodicNoiseResult {
+    /// Offset frequencies the run swept, in hertz.
+    pub fn offset_frequencies(&self) -> Vec<Value> {
+        match self {
+            Self::Driven { result, .. } => result.frequencies.clone(),
+            Self::Oscillator { result, .. } => result.frequencies.clone(),
+            Self::Spectral(result) => result
+                .spectral_points
+                .iter()
+                .map(|point| point.offset_freq)
+                .collect(),
+        }
+    }
+
+    /// Authored output probe this run measured.
+    pub fn output(&self) -> &str {
+        match self {
+            Self::Driven { output, .. } | Self::Oscillator { output, .. } => output,
+            Self::Spectral(result) => &result.output_node,
+        }
+    }
+
+    /// Whether the periodic operating point the run linearized around
+    /// converged. An oscillator run only returns at all when its autonomous
+    /// PSS converged, so it reports `true`.
+    pub fn converged(&self) -> bool {
+        match self {
+            Self::Driven { result, .. } => result.converged,
+            Self::Oscillator { .. } => true,
+            Self::Spectral(result) => result.converged,
+        }
+    }
+}
+
 impl Engine {
+    /// Run one authored `.PNOISE` card against a retained shooting-`.PSS`
+    /// operating point.
+    ///
+    /// The card's offset sweep, output probe, input source and sideband depth
+    /// are read here rather than on each frontend, and the result comes back
+    /// in the one type the shared document accepts. An autonomous carrier
+    /// selects the oscillator driver, because folding cyclostationary noise
+    /// around a free-running orbit is a different computation, not a
+    /// configuration of the driven one.
+    pub fn run_pnoise_card_from_pss_with_abort(
+        &self,
+        netlist: &Netlist,
+        card: &crate::netlist::PnoiseCard,
+        operating_point: &super::PssOperatingPoint,
+        abort: &dyn AbortSignal,
+    ) -> Result<PeriodicNoiseResult, SimulationError> {
+        let offsets = pnoise_card_offsets(card, abort)?;
+        let output = pnoise_card_output(card);
+        if operating_point.config().is_autonomous() {
+            let result = self.run_pnoise_oscillator_from_pss_with_abort(
+                netlist,
+                operating_point.config().clone(),
+                &offsets,
+                operating_point,
+                abort,
+            )?;
+            return Ok(PeriodicNoiseResult::Oscillator { output, result });
+        }
+        let result = self.run_pnoise_from_pss_with_abort(
+            netlist,
+            &offsets,
+            &card.output_node,
+            card.reference_node.as_deref(),
+            card.input_source.as_deref(),
+            card.max_sideband,
+            operating_point,
+            abort,
+        )?;
+        Ok(PeriodicNoiseResult::Driven { output, result })
+    }
+
+    /// Run one authored `.PNOISE` card against a retained harmonic-balance
+    /// operating point.
+    pub fn run_pnoise_card_from_hb_with_abort(
+        &self,
+        netlist: &Netlist,
+        card: &crate::netlist::PnoiseCard,
+        operating_point: &super::HbOperatingPoint,
+        abort: &dyn AbortSignal,
+    ) -> Result<PeriodicNoiseResult, SimulationError> {
+        let offsets = pnoise_card_offsets(card, abort)?;
+        let result = self.run_pnoise_from_hb_with_abort(
+            netlist,
+            &offsets,
+            &card.output_node,
+            card.reference_node.as_deref(),
+            card.input_source.as_deref(),
+            card.max_sideband,
+            operating_point,
+            abort,
+        )?;
+        Ok(PeriodicNoiseResult::Driven {
+            output: pnoise_card_output(card),
+            result,
+        })
+    }
+
     /// Compute oscillator single-sideband phase noise at the given carrier
     /// offsets.
     ///

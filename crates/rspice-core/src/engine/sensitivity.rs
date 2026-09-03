@@ -2713,6 +2713,83 @@ impl Engine {
             sensitivities,
         })
     }
+
+    /// Run one authored `.SENS` card.
+    ///
+    /// The card names its output probe the way the deck does and may request
+    /// an AC sweep. This resolves the probe against the elaborated circuit,
+    /// builds the sweep grid from the card's own frequency specification, and
+    /// selects the DC or AC driver accordingly. Which of the two a `.SENS AC`
+    /// card selects is analysis semantics, so it is decided here rather than
+    /// on each frontend.
+    pub fn run_sensitivity_from_card_with_abort(
+        &self,
+        netlist: &Netlist,
+        card: &crate::netlist::AnalysisCommand,
+        abort: &dyn AbortSignal,
+    ) -> Result<SensitivityCardResult, SimulationError> {
+        use crate::netlist::AnalysisCommand;
+
+        let AnalysisCommand::Sensitivity {
+            output_node,
+            reference_node,
+            output_is_current,
+            filters,
+            ac_sweep,
+        } = card
+        else {
+            return Err(SimulationError::Netlist(
+                "run_sensitivity_from_card_with_abort was given a card that is not .SENS"
+                    .to_owned(),
+            ));
+        };
+        let output = if *output_is_current {
+            AcSensitivityOutput::BranchCurrent(output_node.clone())
+        } else {
+            let resolver = super::NodeResolver::build_with_abort(self, netlist, abort)?;
+            AcSensitivityOutput::Voltage {
+                positive: resolver.resolve(output_node, ".SENS output")?,
+                negative: resolver
+                    .resolve_reference(reference_node.as_deref(), ".SENS reference")?,
+            }
+        };
+        match ac_sweep {
+            None => self
+                .run_sensitivity_dc_complete_with_abort(netlist, output, filters, abort)
+                .map(SensitivityCardResult::Dc),
+            Some(sweep) => {
+                let frequencies = super::sp::card_frequency_grid(
+                    sweep.variation,
+                    sweep.points,
+                    sweep.start_freq,
+                    sweep.stop_freq,
+                    abort,
+                )?;
+                self.run_sensitivity_ac_complete_with_abort(
+                    netlist,
+                    output,
+                    &frequencies,
+                    filters,
+                    abort,
+                )
+                .map(SensitivityCardResult::Ac)
+            }
+        }
+    }
+}
+
+/// What one authored `.SENS` card produced.
+///
+/// A bare `.SENS` is a DC study of the converged operating point; `.SENS ... AC`
+/// is a frequency-domain study whose derivatives are complex. They are
+/// different result shapes, not two encodings of one, so the card runner names
+/// which it produced instead of flattening either into the other.
+#[derive(Debug, Clone)]
+pub enum SensitivityCardResult {
+    /// A `.SENS` card with no `AC` clause.
+    Dc(SensitivityResult),
+    /// A `.SENS ... AC` card.
+    Ac(AcSensitivityResult),
 }
 
 #[cfg(test)]

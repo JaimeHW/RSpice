@@ -26,7 +26,7 @@ use crate::analysis::sensitivity::{ElementType, Sensitivity, SensitivityResult};
 use crate::analysis::stb::{BodePoint, NyquistPoint, StabilityMargins, StbResult};
 use crate::analysis::transfer::TransferFunctionResult;
 use crate::circuit::{DeviceOpEntry, DeviceOpReport, OpLabel};
-use crate::engine::{Engine, SimulationConfig};
+use crate::engine::{Engine, PeriodicNoiseResult, SimulationConfig};
 use crate::engine::{TransientDeviceOpTrace, TransientResult, TransientStoreTrace};
 use crate::execution::plan::AnalysisKind;
 use crate::netlist::Netlist;
@@ -449,9 +449,10 @@ fn document_for(kind: AnalysisResultKind) -> AnalysisResultDocument {
         AnalysisResultKind::Pac => {
             AnalysisResultDocument::from_pac(instance(AnalysisKind::Pac), &pac_result())
         }
-        AnalysisResultKind::PNoise => {
-            AnalysisResultDocument::from_pnoise(instance(AnalysisKind::PNoise), &pnoise_result())
-        }
+        AnalysisResultKind::PNoise => AnalysisResultDocument::from_pnoise(
+            instance(AnalysisKind::PNoise),
+            &PeriodicNoiseResult::Spectral(pnoise_result()),
+        ),
         AnalysisResultKind::HarmonicBalance => AnalysisResultDocument::from_harmonic_balance(
             instance(AnalysisKind::HarmonicBalance),
             &harmonic_balance_result(),

@@ -37,6 +37,7 @@ mod extract;
 mod matrix;
 mod network;
 mod noise_params;
+mod port_noise;
 mod ports;
 mod stability;
 mod touchstone;
@@ -48,6 +49,7 @@ pub use network::{
     s_column_from_port_voltages, s_from_y, s_from_y_with_abort, y_from_s,
 };
 pub use noise_params::{TwoPortNoise, derive_two_port_noise};
+pub use port_noise::{PortNoiseAssembly, PortNoiseAssemblyError, assemble_port_noise};
 pub use ports::{
     PortError, PortRealization, SParameterPort, collect_ports, normalize_ports, set_excitations,
 };
