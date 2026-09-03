@@ -338,6 +338,14 @@ pub struct VmContext {
     /// `NativeRequiredStorage::prelude_slots` rather than from anything the
     /// interpreter knows. Runtime-only, and never serialized: a slot has no
     /// meaning outside the evaluation that wrote it.
+    ///
+    /// Read only by a JIT backend's evaluation context. The interpreter has no
+    /// prelude — it executes each entry's own program — so a build with neither
+    /// backend carries the field and never looks at it.
+    #[cfg_attr(
+        not(any(feature = "native", all(feature = "wasm-jit", target_arch = "wasm32"))),
+        allow(dead_code)
+    )]
     pub(crate) prelude_slots: Vec<f64>,
     /// Current timestep (delta t) for transient analysis
     timestep: f64,
