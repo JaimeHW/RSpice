@@ -43,15 +43,43 @@ fn test_dir(tag: &str) -> TestDirectory {
     TestDirectory(path)
 }
 
-fn harmonic_magnitude(result: &Value, harmonic: u64) -> f64 {
-    result["harmonics"]
+/// Real samples of one named series in a typed result document.
+fn samples(document: &Value, name: &str) -> Vec<f64> {
+    document["signals"]
         .as_array()
-        .expect("harmonics array")
+        .expect("signals array")
         .iter()
-        .find(|entry| entry["n"].as_u64() == Some(harmonic))
-        .expect("requested harmonic")["magnitude"]
-        .as_f64()
-        .expect("finite harmonic magnitude")
+        .find(|signal| signal["descriptor"]["canonicalName"].as_str() == Some(name))
+        .unwrap_or_else(|| panic!("missing series '{name}' in {document:#}"))["values"]["samples"]
+        .as_array()
+        .expect("real samples")
+        .iter()
+        .map(|sample| sample.as_f64().expect("finite sample"))
+        .collect()
+}
+
+/// The magnitude the document publishes for one harmonic index.
+///
+/// The harmonic index is the document's own axis, so the row is selected by
+/// the coordinate rather than by position.
+fn harmonic_magnitude(document: &Value, harmonic: i64) -> f64 {
+    let index = document["axes"]
+        .as_array()
+        .expect("document axes")
+        .iter()
+        .find(|axis| axis["name"].as_str() == Some("harmonic"))
+        .expect("harmonic axis")["values"]["values"]
+        .as_array()
+        .expect("harmonic coordinates")
+        .iter()
+        .position(|value| value.as_i64() == Some(harmonic))
+        .unwrap_or_else(|| panic!("harmonic {harmonic} is not on the axis of {document:#}"));
+    samples(document, "harmonic_magnitude")[index]
+}
+
+fn read_json(path: &Path) -> Value {
+    serde_json::from_slice(&std::fs::read(path).expect("read JSON artifact"))
+        .expect("parse JSON artifact")
 }
 
 #[test]
@@ -78,30 +106,42 @@ fn fourier_consumes_the_authored_transient_and_exports_currents_with_parent_iden
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let fourier_path = directory.join("results.four-001.json");
+    // The core evaluates one spectrum per resolved `.FOUR` operand and the
+    // shared result document names one spectrum, so each operand is its own
+    // analysis instance with its own artifact.
+    let voltage_path = directory.join("results.four-001.json");
+    let current_path = directory.join("results.four-002.json");
     let transient_path = directory.join("results.tran-001.json");
     assert!(
         transient_path.exists(),
         "authored transient artifact is missing"
     );
-    assert!(fourier_path.exists(), "Fourier artifact is missing");
+    assert!(voltage_path.exists(), "voltage Fourier artifact is missing");
+    assert!(current_path.exists(), "current Fourier artifact is missing");
     assert!(
         !requested.exists(),
         "multi-analysis base path was overwritten"
     );
 
-    let document: Value =
-        serde_json::from_slice(&std::fs::read(&fourier_path).expect("read Fourier JSON artifact"))
-            .expect("parse Fourier JSON artifact");
-    assert_eq!(document["analysis"], "fourier");
-    assert_eq!(document["analysis_id"], "four-001");
-    assert_eq!(document["parent_analysis_id"], "tran-001");
-    let results = document["results"].as_array().expect("Fourier results");
-    assert_eq!(results.len(), 2, "voltage or current output was dropped");
-    assert_eq!(results[0]["physical_type"], "voltage");
-    assert_eq!(results[1]["physical_type"], "current");
-    let differential = harmonic_magnitude(&results[0], 1);
-    let source_current = harmonic_magnitude(&results[1], 1);
+    let voltage = read_json(&voltage_path);
+    let current = read_json(&current_path);
+    for (document, tag) in [(&voltage, "four-001"), (&current, "four-002")] {
+        assert_eq!(document["resultKind"], "fourier");
+        assert_eq!(document["analysis"]["tag"], tag);
+        assert_eq!(
+            document["parentAnalysis"]["tag"], "tran-001",
+            "a Fourier spectrum must name the transient it post-processed"
+        );
+    }
+    assert_eq!(voltage["payload"]["output"], "V(IN,MID)");
+    assert_eq!(current["payload"]["output"], "I(V1)");
+    assert_eq!(voltage["signals"][0]["descriptor"]["unit"]["unit"], "volt");
+    assert_eq!(
+        current["signals"][0]["descriptor"]["unit"]["unit"],
+        "ampere"
+    );
+    let differential = harmonic_magnitude(&voltage, 1);
+    let source_current = harmonic_magnitude(&current, 1);
     assert!(
         (differential - 0.5).abs() <= 5.0e-3,
         "V(in,mid) fundamental is {differential}, expected 0.5"

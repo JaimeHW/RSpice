@@ -120,8 +120,9 @@ pub(super) fn run_tf_from_command(
         println!("{source}#input_impedance = {zin}");
     }
 
-    if let Some(ref output_path) = ctx.output_path_for("tf") {
+    if let Some(output) = ctx.resolve_output("tf") {
         reject_hdf5(ctx.format, "transfer function")?;
+        let analysis_id = output.analysis("tf")?;
         use super::export::{ColumnData, ExportColumn, ExportTable};
 
         let scalar = |name: &str, var_type: &str, value: f64| ExportColumn {
@@ -129,7 +130,7 @@ pub(super) fn run_tf_from_command(
             var_type: var_type.to_string(),
             data: ColumnData::Real(vec![value]),
         };
-        ExportTable {
+        let table = ExportTable {
             analysis: "tf".to_string(),
             plot_name: "DC Transfer Function".to_string(),
             scale_name: "point".to_string(),
@@ -148,11 +149,25 @@ pub(super) fn run_tf_from_command(
                     result.output_impedance,
                 ),
             ],
-        }
-        .write(output_path, ctx.format)?;
+        };
+        super::document::publish_table_result(
+            ctx,
+            &output.path,
+            analysis_id,
+            // The transfer function exports three named scalars rather than a
+            // series, so its typed values live in the document's payload.
+            super::document::empty_schema(),
+            &table,
+            || {
+                rspice_core::execution::AnalysisResultDocument::from_transfer_function(
+                    analysis_id,
+                    &result,
+                )
+            },
+        )?;
 
         if !ctx.quiet {
-            println!("  Transfer function exported to: {}", output_path.display());
+            println!("  Transfer function exported to: {}", output.path.display());
         }
     }
 
@@ -221,20 +236,36 @@ pub(super) fn run_disto(
         }
     }
 
-    if let Some(ref output_path) = ctx.output_path_for("disto") {
-        if matches!(ctx.format, OutputFormat::Hdf5) {
-            let mut data = Hdf5SimulationData::new();
-            data.title = "Volterra Distortion Analysis".to_string();
-            data.distortion = Some(distortion_hdf5_section(&projection)?);
-            write_hdf5(output_path, &data)
-                .map_err(|error| map_hdf5_output_error(output_path, error))?;
-        } else {
-            distortion_export_table(projection)?.write(output_path, ctx.format)?;
-        }
+    if let Some(output) = ctx.resolve_output("disto") {
+        let analysis_id = output.analysis("disto")?;
+        let table = distortion_export_table(projection.clone())?;
+        let schema = table_schema(&table)?;
+        super::document::publish_analysis_result(
+            ctx,
+            &output.path,
+            analysis_id,
+            schema,
+            || {
+                rspice_core::execution::AnalysisResultDocument::from_distortion(
+                    analysis_id,
+                    &result,
+                )
+            },
+            |path, format| {
+                if matches!(format, OutputFormat::Hdf5) {
+                    let mut data = Hdf5SimulationData::new();
+                    data.title = "Volterra Distortion Analysis".to_string();
+                    data.distortion = Some(distortion_hdf5_section(&projection)?);
+                    write_hdf5(path, &data).map_err(|error| map_hdf5_output_error(path, error))
+                } else {
+                    table.write(path, format)
+                }
+            },
+        )?;
         if !ctx.quiet {
             println!(
                 "  Volterra distortion products exported to: {}",
-                output_path.display()
+                output.path.display()
             );
         }
     }
@@ -242,7 +273,7 @@ pub(super) fn run_disto(
     Ok(())
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct DistortionSeries {
     label: String,
     is_product: bool,
@@ -250,7 +281,7 @@ struct DistortionSeries {
     signals: Vec<ComplexSignal>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct DistortionProjection {
     f2_over_f1: Option<f64>,
     f1_frequencies: Vec<f64>,
@@ -745,29 +776,38 @@ fn finish_ac_results(
     )
     .map_err(ac_projection_error)?;
 
-    if let Some(ref output_path) = ctx.output_path_for("ac") {
-        if matches!(ctx.format, OutputFormat::Hdf5) {
-            let mut data = Hdf5SimulationData::new();
-            data.title = "AC Analysis".to_string();
+    if let Some(output) = ctx.resolve_output("ac") {
+        let analysis_id = output.analysis("ac")?;
+        super::document::publish_analysis_result(
+            ctx,
+            &output.path,
+            analysis_id,
+            super::document::complex_schema(&signals)?,
+            || rspice_core::execution::AnalysisResultDocument::from_ac(analysis_id, &results),
+            |path, format| {
+                if matches!(format, OutputFormat::Hdf5) {
+                    let mut data = Hdf5SimulationData::new();
+                    data.title = "AC Analysis".to_string();
 
-            let mut ac = Hdf5AcSection::new(frequencies);
-            for signal in &signals {
-                ac.add_signal(
-                    signal.display_name.clone(),
-                    signal.real.clone(),
-                    signal.imag.clone(),
-                );
-            }
-            data.ac = Some(ac);
+                    let mut ac = Hdf5AcSection::new(frequencies.clone());
+                    for signal in &signals {
+                        ac.add_signal(
+                            signal.display_name.clone(),
+                            signal.real.clone(),
+                            signal.imag.clone(),
+                        );
+                    }
+                    data.ac = Some(ac);
 
-            write_hdf5(output_path, &data)
-                .map_err(|err| map_hdf5_output_error(output_path, err))?;
-        } else {
-            super::export::complex_table("ac", "AC Analysis", frequencies, &signals)
-                .write(output_path, ctx.format)?;
-        }
+                    write_hdf5(path, &data).map_err(|err| map_hdf5_output_error(path, err))
+                } else {
+                    super::export::complex_table("ac", "AC Analysis", frequencies.clone(), &signals)
+                        .write(path, format)
+                }
+            },
+        )?;
         if !ctx.quiet {
-            println!("  AC response exported to: {}", output_path.display());
+            println!("  AC response exported to: {}", output.path.display());
         }
     }
     Ok(())
@@ -855,69 +895,103 @@ pub(super) fn run_stb(
         }
     }
 
-    if let Some(ref output_path) = ctx.output_path_for("stb") {
-        if matches!(ctx.format, OutputFormat::Hdf5) {
-            let mut data = Hdf5SimulationData::new();
-            data.title = "STB Loop Gain".to_string();
+    if let Some(output) = ctx.resolve_output("stb") {
+        let analysis_id = output.analysis("stb")?;
+        use super::export::{ColumnData, ExportColumn, ExportTable};
 
-            let mut ac = Hdf5AcSection::new(stb.frequencies.clone());
-            ac.add_signal(
-                "loopgain".to_string(),
-                stb.loop_gains.iter().map(|g| g.re).collect(),
-                stb.loop_gains.iter().map(|g| g.im).collect(),
-            );
-            data.ac = Some(ac);
+        let table = ExportTable {
+            analysis: "stb".to_string(),
+            plot_name: "STB Loop Gain".to_string(),
+            scale_name: "frequency".to_string(),
+            scale_type: "frequency".to_string(),
+            scale: stb.frequencies.clone(),
+            columns: vec![
+                ExportColumn {
+                    name: "loopgain".to_string(),
+                    var_type: "gain".to_string(),
+                    data: ColumnData::Complex {
+                        real: stb.loop_gains.iter().map(|g| g.re).collect(),
+                        imag: stb.loop_gains.iter().map(|g| g.im).collect(),
+                    },
+                },
+                ExportColumn {
+                    name: "loopgain_mag_db".to_string(),
+                    var_type: "gain".to_string(),
+                    data: ColumnData::Real(
+                        stb.loop_gains
+                            .iter()
+                            .map(|g| 20.0 * g.norm().max(1e-300).log10())
+                            .collect(),
+                    ),
+                },
+                ExportColumn {
+                    name: "loopgain_phase_deg".to_string(),
+                    var_type: "phase".to_string(),
+                    data: ColumnData::Real(
+                        stb.loop_gains
+                            .iter()
+                            .map(|g| g.im.atan2(g.re).to_degrees())
+                            .collect(),
+                    ),
+                },
+            ],
+        };
+        let schema = table_schema(&table)?;
+        super::document::publish_analysis_result(
+            ctx,
+            &output.path,
+            analysis_id,
+            schema,
+            || {
+                rspice_core::execution::AnalysisResultDocument::from_stability(
+                    analysis_id,
+                    &stb.result,
+                )
+            },
+            |path, format| {
+                if matches!(format, OutputFormat::Hdf5) {
+                    let mut data = Hdf5SimulationData::new();
+                    data.title = "STB Loop Gain".to_string();
 
-            write_hdf5(output_path, &data)
-                .map_err(|err| map_hdf5_output_error(output_path, err))?;
-        } else {
-            use super::export::{ColumnData, ExportColumn, ExportTable};
+                    let mut ac = Hdf5AcSection::new(stb.frequencies.clone());
+                    ac.add_signal(
+                        "loopgain".to_string(),
+                        stb.loop_gains.iter().map(|g| g.re).collect(),
+                        stb.loop_gains.iter().map(|g| g.im).collect(),
+                    );
+                    data.ac = Some(ac);
 
-            ExportTable {
-                analysis: "stb".to_string(),
-                plot_name: "STB Loop Gain".to_string(),
-                scale_name: "frequency".to_string(),
-                scale_type: "frequency".to_string(),
-                scale: stb.frequencies.clone(),
-                columns: vec![
-                    ExportColumn {
-                        name: "loopgain".to_string(),
-                        var_type: "gain".to_string(),
-                        data: ColumnData::Complex {
-                            real: stb.loop_gains.iter().map(|g| g.re).collect(),
-                            imag: stb.loop_gains.iter().map(|g| g.im).collect(),
-                        },
-                    },
-                    ExportColumn {
-                        name: "loopgain_mag_db".to_string(),
-                        var_type: "gain".to_string(),
-                        data: ColumnData::Real(
-                            stb.loop_gains
-                                .iter()
-                                .map(|g| 20.0 * g.norm().max(1e-300).log10())
-                                .collect(),
-                        ),
-                    },
-                    ExportColumn {
-                        name: "loopgain_phase_deg".to_string(),
-                        var_type: "phase".to_string(),
-                        data: ColumnData::Real(
-                            stb.loop_gains
-                                .iter()
-                                .map(|g| g.im.atan2(g.re).to_degrees())
-                                .collect(),
-                        ),
-                    },
-                ],
-            }
-            .write(output_path, ctx.format)?;
-        }
+                    write_hdf5(path, &data).map_err(|err| map_hdf5_output_error(path, err))
+                } else {
+                    table.write(path, format)
+                }
+            },
+        )?;
         if !ctx.quiet {
-            println!("  Loop gain exported to: {}", output_path.display());
+            println!("  Loop gain exported to: {}", output.path.display());
         }
     }
 
     Ok(())
+}
+
+/// The schema of a flat artifact assembled column by column rather than from
+/// a projected signal list: each column keeps its exported name and value type.
+fn table_schema(
+    table: &super::export::ExportTable,
+) -> Result<rspice_core::execution::SignalSchema, CliError> {
+    super::document::distinct_schema(table.columns.iter().map(|column| {
+        rspice_core::execution::signal_descriptor(
+            &column.name,
+            &column.name,
+            rspice_core::execution::SignalKind::Scalar,
+            if matches!(column.data, super::export::ColumnData::Complex { .. }) {
+                rspice_core::execution::SignalValueType::Complex
+            } else {
+                rspice_core::execution::SignalValueType::Real
+            },
+        )
+    }))
 }
 
 pub(super) fn run_noise(
@@ -1090,7 +1164,8 @@ fn finish_noise(
                 }
             }
 
-            if let Some(ref output_path) = ctx.output_path_for("noise") {
+            if let Some(output) = ctx.resolve_output("noise") {
+                let analysis_id = output.analysis("noise")?;
                 let noise_frequencies: Vec<f64> =
                     results.iter().map(|result| result.frequency).collect();
                 // ngspice-46 emits the onoise/inoise vectors in
@@ -1106,44 +1181,59 @@ fn finish_noise(
                     .map(|result| result.input_referred_rms())
                     .collect();
 
-                if matches!(ctx.format, OutputFormat::Hdf5) {
-                    let mut data = Hdf5SimulationData::new();
-                    data.title = "Noise Analysis".to_string();
+                use super::export::{ColumnData, ExportColumn, ExportTable};
 
-                    let mut noise = Hdf5WaveformSection::new("frequency", noise_frequencies);
-                    noise.add_signal("onoise_spectrum", onoise);
-                    noise.add_signal("inoise_spectrum", inoise);
-                    data.noise = Some(noise);
+                let table = ExportTable {
+                    analysis: "noise".to_string(),
+                    plot_name: "Noise Spectral Density Curves".to_string(),
+                    scale_name: "frequency".to_string(),
+                    scale_type: "frequency".to_string(),
+                    scale: noise_frequencies.clone(),
+                    columns: vec![
+                        ExportColumn {
+                            name: "onoise_spectrum".to_string(),
+                            var_type: "voltage".to_string(),
+                            data: ColumnData::Real(onoise.clone()),
+                        },
+                        ExportColumn {
+                            name: "inoise_spectrum".to_string(),
+                            var_type: "voltage".to_string(),
+                            data: ColumnData::Real(inoise.clone()),
+                        },
+                    ],
+                };
+                let schema = table_schema(&table)?;
+                super::document::publish_analysis_result(
+                    ctx,
+                    &output.path,
+                    analysis_id,
+                    schema,
+                    || {
+                        rspice_core::execution::AnalysisResultDocument::from_noise(
+                            analysis_id,
+                            &results,
+                        )
+                    },
+                    |path, format| {
+                        if matches!(format, OutputFormat::Hdf5) {
+                            let mut data = Hdf5SimulationData::new();
+                            data.title = "Noise Analysis".to_string();
 
-                    write_hdf5(output_path, &data)
-                        .map_err(|err| map_hdf5_output_error(output_path, err))?;
-                } else {
-                    use super::export::{ColumnData, ExportColumn, ExportTable};
+                            let mut noise =
+                                Hdf5WaveformSection::new("frequency", noise_frequencies.clone());
+                            noise.add_signal("onoise_spectrum", onoise.clone());
+                            noise.add_signal("inoise_spectrum", inoise.clone());
+                            data.noise = Some(noise);
 
-                    ExportTable {
-                        analysis: "noise".to_string(),
-                        plot_name: "Noise Spectral Density Curves".to_string(),
-                        scale_name: "frequency".to_string(),
-                        scale_type: "frequency".to_string(),
-                        scale: noise_frequencies,
-                        columns: vec![
-                            ExportColumn {
-                                name: "onoise_spectrum".to_string(),
-                                var_type: "voltage".to_string(),
-                                data: ColumnData::Real(onoise),
-                            },
-                            ExportColumn {
-                                name: "inoise_spectrum".to_string(),
-                                var_type: "voltage".to_string(),
-                                data: ColumnData::Real(inoise),
-                            },
-                        ],
-                    }
-                    .write(output_path, ctx.format)?;
-                }
+                            write_hdf5(path, &data).map_err(|err| map_hdf5_output_error(path, err))
+                        } else {
+                            table.write(path, format)
+                        }
+                    },
+                )?;
 
                 if !ctx.quiet {
-                    println!("  Noise spectra exported to: {}", output_path.display());
+                    println!("  Noise spectra exported to: {}", output.path.display());
                 }
             }
             Ok(())
@@ -1224,7 +1314,7 @@ pub(super) fn run_pz(
         &crate::abort::ProcessAbort,
     ) {
         Ok(result) => {
-            report_pz(ctx, &result.poles, &result.zeros)?;
+            report_pz(ctx, &result)?;
             Ok(())
         }
         Err(source) => Err(map_frequency_error(ctx, "Pole-Zero", source)),
@@ -1237,9 +1327,10 @@ pub(super) fn run_pz(
 /// point with one complex variable per pole/zero (`pole(1)`, `zero(1)`, ...).
 fn report_pz(
     ctx: &RunContext<'_>,
-    poles: &[rspice_core::Complex64],
-    zeros: &[rspice_core::Complex64],
+    result: &rspice_core::analysis::PoleZeroResult,
 ) -> Result<(), CliError> {
+    let poles = result.poles.as_slice();
+    let zeros = result.zeros.as_slice();
     if !ctx.quiet {
         println!("âœ“ Pole-Zero analysis complete");
         println!("  Poles: {}", poles.len());
@@ -1270,8 +1361,9 @@ fn report_pz(
         }
     }
 
-    if let Some(ref output_path) = ctx.output_path_for("pz") {
+    if let Some(output) = ctx.resolve_output("pz") {
         reject_hdf5(ctx.format, "pole-zero")?;
+        let analysis_id = output.analysis("pz")?;
         use super::export::{ColumnData, ExportColumn, ExportTable};
 
         let singularity =
@@ -1295,18 +1387,26 @@ fn report_pz(
             )
             .collect();
 
-        ExportTable {
+        let table = ExportTable {
             analysis: "pz".to_string(),
             plot_name: "Pole-Zero Analysis".to_string(),
             scale_name: "point".to_string(),
             scale_type: "index".to_string(),
             scale: vec![0.0],
             columns,
-        }
-        .write(output_path, ctx.format)?;
+        };
+        let schema = table_schema(&table)?;
+        super::document::publish_table_result(
+            ctx,
+            &output.path,
+            analysis_id,
+            schema,
+            &table,
+            || rspice_core::execution::AnalysisResultDocument::from_pole_zero(analysis_id, result),
+        )?;
 
         if !ctx.quiet {
-            println!("  Poles/zeros exported to: {}", output_path.display());
+            println!("  Poles/zeros exported to: {}", output.path.display());
         }
     }
 
@@ -1367,7 +1467,7 @@ pub(super) fn run_pz_from_command(
         &crate::abort::ProcessAbort,
     ) {
         Ok(result) => {
-            report_pz(ctx, &result.poles, &result.zeros)?;
+            report_pz(ctx, &result)?;
             Ok(())
         }
         Err(source) => Err(map_frequency_error(ctx, "Pole-Zero", source)),
@@ -1521,11 +1621,25 @@ pub(super) fn run_sensitivity_from_command(
             }
         }
 
-        if let Some(ref output_path) = ctx.output_path_for("sens") {
+        // The shared sensitivity payload declares one derivative per element
+        // at the operating point. An AC sweep produces a complex derivative at
+        // every frequency, which that payload cannot hold, so the typed
+        // document is refused rather than published with the sweep collapsed.
+        if matches!(ctx.format, OutputFormat::Json) && ctx.output.is_some() {
+            return Err(CliError::InvalidArgument {
+                message: "the shared sensitivity result document holds one operating-point derivative per element, so an AC .SENS sweep cannot be published as one"
+                    .to_string(),
+                suggestion: Some(
+                    "export the AC sensitivity sweep with --format csv, tsv, or raw".to_string(),
+                ),
+            });
+        }
+        if let Some(resolved) = ctx.resolve_output("sens") {
             reject_hdf5(ctx.format, "sensitivity")?;
+            let analysis_id = resolved.analysis("sens")?;
             use super::export::{ColumnData, ExportColumn, ExportTable};
 
-            ExportTable {
+            let table = ExportTable {
                 analysis: "sens_ac".to_string(),
                 plot_name: "AC Sensitivity".to_string(),
                 scale_name: "frequency".to_string(),
@@ -1543,11 +1657,17 @@ pub(super) fn run_sensitivity_from_command(
                         },
                     })
                     .collect(),
-            }
-            .write(output_path, ctx.format)?;
+            };
+            let schema = table_schema(&table)?;
+            ctx.record_published(super::PublishedResult {
+                analysis_id: analysis_id.tag(),
+                schema,
+                artifact: resolved.path.clone(),
+            });
+            table.write(&resolved.path, ctx.format)?;
 
             if !ctx.quiet {
-                println!("  Sensitivities exported to: {}", output_path.display());
+                println!("  Sensitivities exported to: {}", resolved.path.display());
             }
         }
 
@@ -1567,6 +1687,7 @@ pub(super) fn run_sensitivity_from_command(
             &crate::abort::ProcessAbort,
         )
         .map_err(|source| map_frequency_error(ctx, "Sensitivity", source))?;
+    let complete = result.clone();
     let mut sensitivities = result.sensitivities;
 
     sensitivities.sort_by(|a, b| {
@@ -1594,17 +1715,31 @@ pub(super) fn run_sensitivity_from_command(
         .iter()
         .map(|sensitivity| (sensitivity.vector_name.clone(), sensitivity.absolute))
         .collect::<Vec<_>>();
-    export_dc_sensitivity_result(ctx, &output_label, &results)?;
+    export_dc_sensitivity_result(ctx, &output_label, &complete, &results)?;
     Ok(())
 }
 
-/// Write DC sensitivities: a single-point table with one `dV/d(param)`
-/// column per parameter.
+/// Write the single derivative the `--sens-*` command-line probe computed.
+///
+/// The probe returns one number, not a complete `.SENS` result: it carries no
+/// element identity, no operating-point output value, and therefore no
+/// normalized sensitivity. That is enough for the flat table and not enough
+/// for a typed result document, so JSON is refused here rather than published
+/// as something narrower than the format promises.
 fn export_dc_sensitivities(
     ctx: &RunContext<'_>,
     results: &[(String, f64)],
 ) -> Result<(), CliError> {
-    export_dc_sensitivity_result(ctx, "V", results)
+    if matches!(ctx.format, OutputFormat::Json) {
+        return Err(CliError::InvalidArgument {
+            message: "--sens-param computes one derivative, which cannot fill a typed sensitivity result document".to_string(),
+            suggestion: Some(
+                "author a .SENS card for the typed JSON document, or export the probe with --format csv, tsv, or raw"
+                    .to_string(),
+            ),
+        });
+    }
+    export_dc_sensitivity_table(ctx, "V", results, None)
 }
 
 /// Write a complete `.SENS` result using the selected probe identity in every
@@ -1612,15 +1747,26 @@ fn export_dc_sensitivities(
 fn export_dc_sensitivity_result(
     ctx: &RunContext<'_>,
     output: &str,
+    result: &rspice_core::analysis::SensitivityResult,
     results: &[(String, f64)],
 ) -> Result<(), CliError> {
-    let Some(ref output_path) = ctx.output_path_for("sens") else {
+    export_dc_sensitivity_table(ctx, output, results, Some(result))
+}
+
+fn export_dc_sensitivity_table(
+    ctx: &RunContext<'_>,
+    output: &str,
+    results: &[(String, f64)],
+    complete: Option<&rspice_core::analysis::SensitivityResult>,
+) -> Result<(), CliError> {
+    let Some(resolved) = ctx.resolve_output("sens") else {
         return Ok(());
     };
     reject_hdf5(ctx.format, "sensitivity")?;
+    let analysis_id = resolved.analysis("sens")?;
     use super::export::{ColumnData, ExportColumn, ExportTable};
 
-    ExportTable {
+    let table = ExportTable {
         analysis: "sens".to_string(),
         plot_name: "DC Sensitivity".to_string(),
         scale_name: "point".to_string(),
@@ -1634,11 +1780,27 @@ fn export_dc_sensitivity_result(
                 data: ColumnData::Real(vec![*value]),
             })
             .collect(),
+    };
+    let schema = table_schema(&table)?;
+    match complete {
+        Some(complete) => super::document::publish_table_result(
+            ctx,
+            &resolved.path,
+            analysis_id,
+            schema,
+            &table,
+            || {
+                rspice_core::execution::AnalysisResultDocument::from_sensitivity(
+                    analysis_id,
+                    complete,
+                )
+            },
+        )?,
+        None => table.write(&resolved.path, ctx.format)?,
     }
-    .write(output_path, ctx.format)?;
 
     if !ctx.quiet {
-        println!("  Sensitivities exported to: {}", output_path.display());
+        println!("  Sensitivities exported to: {}", resolved.path.display());
     }
     Ok(())
 }

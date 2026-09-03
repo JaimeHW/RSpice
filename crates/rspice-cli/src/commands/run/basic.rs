@@ -113,10 +113,26 @@ pub(super) fn run_dc_op(ctx: &RunContext<'_>) -> Result<(), CliError> {
                 print_device_op_report(&op_report, ctx.verbose);
             }
 
-            if let Some(ref output_path) = ctx.output_path_for("op") {
-                write_dc_op_output(output_path, &exported_operating_point_signals, ctx.format)?;
+            if let Some(output) = ctx.resolve_output("op") {
+                let analysis_id = output.analysis("op")?;
+                super::document::publish_analysis_result(
+                    ctx,
+                    &output.path,
+                    analysis_id,
+                    super::document::scalar_schema(&exported_operating_point_signals)?,
+                    || {
+                        rspice_core::execution::AnalysisResultDocument::from_operating_point(
+                            analysis_id,
+                            &result,
+                            Some(&op_report),
+                        )
+                    },
+                    |path, format| {
+                        write_dc_op_output(path, &exported_operating_point_signals, format)
+                    },
+                )?;
                 if !ctx.quiet {
-                    println!("Results exported to: {}", output_path.display());
+                    println!("Results exported to: {}", output.path.display());
                 }
             }
 
@@ -229,23 +245,11 @@ pub(super) fn write_dc_op_output(
     publish::artifact(path, |file| {
         match format {
             OutputFormat::Json => {
-                let mut vars = serde_json::Map::new();
-                for signal in signals {
-                    vars.insert(
-                        signal.display_name.clone(),
-                        serde_json::json!(signal.values[0]),
-                    );
-                }
-                let json = serde_json::json!({
-                    "analysis": "dc_op",
-                    "variables": vars,
+                return Err(CliError::InternalError {
+                    message:
+                        "the operating point publishes JSON as a typed result document, not a flat table"
+                            .to_string(),
                 });
-                let text = serde_json::to_string_pretty(&json)
-                    .map_err(|e| CliError::output_json_error(path, e))?;
-                writeln!(file, "{}", text).map_err(|e| CliError::OutputError {
-                    path: path.to_path_buf(),
-                    source: e,
-                })?;
             }
             OutputFormat::Csv => {
                 writeln!(file, "signal,value").map_err(|e| CliError::OutputError {
@@ -369,16 +373,25 @@ pub(super) fn run_dc_sweep(
         }
     }
 
-    match ctx.engine.run_dc_sweep2_with_abort(
-        ctx.netlist,
-        source,
-        start,
-        stop,
-        step,
-        sweep2,
-        &crate::abort::ProcessAbort,
-    ) {
-        Ok(results) => {
+    // The reporting form is used so the typed result document can carry each
+    // point's device operating report. The flat exporters read the same points.
+    match ctx
+        .engine
+        .run_dc_sweep2_spec_with_report_and_abort(
+            ctx.netlist,
+            source,
+            &rspice_core::netlist::DcSweepSpec::linear(start, stop, step),
+            sweep2,
+            &crate::abort::ProcessAbort,
+        )
+        .map(|points| {
+            let pairs = points
+                .iter()
+                .map(|point| (point.sweep_value, point.result.clone()))
+                .collect::<Vec<_>>();
+            (points, pairs)
+        }) {
+        Ok((points, results)) => {
             for (_, point) in &results {
                 super::shared::ensure_finite_series(
                     ctx.args.allow_nonfinite,
@@ -424,7 +437,8 @@ pub(super) fn run_dc_sweep(
             )
             .map_err(|error| map_output_projection_error(ctx, error, "DC"))?;
 
-            if let Some(ref output_path) = ctx.output_path_for("dc") {
+            if let Some(output) = ctx.resolve_output("dc") {
+                let analysis_id = output.analysis("dc")?;
                 let sweep_vals: Vec<f64> = results.iter().map(|(v, _)| *v).collect();
                 super::shared::ensure_finite_series(
                     ctx.args.allow_nonfinite,
@@ -433,43 +447,49 @@ pub(super) fn run_dc_sweep(
                         .iter()
                         .map(|signal| (signal.display_name.as_str(), signal.values.as_slice())),
                 )?;
-                match ctx.format {
-                    OutputFormat::Hdf5 => {
-                        let mut data = Hdf5SimulationData::new();
-                        data.title = "DC Sweep".to_string();
+                super::document::publish_analysis_result(
+                    ctx,
+                    &output.path,
+                    analysis_id,
+                    super::document::scalar_schema(&signals)?,
+                    || {
+                        rspice_core::execution::AnalysisResultDocument::from_dc_sweep(
+                            analysis_id,
+                            source,
+                            rspice_core::execution::SignalUnit::Volt,
+                            &points,
+                        )
+                    },
+                    |path, format| match format {
+                        OutputFormat::Hdf5 => {
+                            let mut data = Hdf5SimulationData::new();
+                            data.title = "DC Sweep".to_string();
 
-                        let mut dc_sweep = Hdf5WaveformSection::new(source, sweep_vals.clone());
-                        for signal in &signals {
-                            dc_sweep.add_typed_signal(
-                                signal.display_name.clone(),
-                                signal.raw_variable_type(),
-                                signal.values.clone(),
-                            );
+                            let mut dc_sweep = Hdf5WaveformSection::new(source, sweep_vals.clone());
+                            for signal in &signals {
+                                dc_sweep.add_typed_signal(
+                                    signal.display_name.clone(),
+                                    signal.raw_variable_type(),
+                                    signal.values.clone(),
+                                );
+                            }
+                            data.dc_sweep = Some(dc_sweep);
+                            write_hdf5(path, &data).map_err(|err| map_hdf5_output_error(path, err))
                         }
-                        data.dc_sweep = Some(dc_sweep);
-
-                        write_hdf5(output_path, &data)
-                            .map_err(|err| map_hdf5_output_error(output_path, err))?;
-                    }
-                    OutputFormat::Raw
-                    | OutputFormat::RawAscii
-                    | OutputFormat::Csv
-                    | OutputFormat::Tsv
-                    | OutputFormat::Json => {
-                        super::export::scalar_table(
+                        format => super::export::scalar_table(
                             "dc_sweep",
                             "DC transfer characteristic",
                             source,
                             "voltage",
-                            sweep_vals,
+                            sweep_vals.clone(),
                             &signals,
                         )
-                        .write(output_path, ctx.format)?;
-                    }
-                }
+                        .write(path, format),
+                    },
+                )?;
 
                 if !ctx.quiet {
-                    println!("Results exported to: {}", output_path.display());
+                    println!("Results exported to: {}", output.path.display());
                 }
             }
             Ok(())
@@ -648,6 +668,7 @@ pub(super) fn run_transient(
     // consumes them instead of recomputing from the decimated expansion, which
     // is what made a compressed run report different numbers.
     let mut post_results: Option<rspice_core::engine::TransientPostResults> = None;
+    let mut compression_report: Option<rspice_core::engine::TransientCompressionReport> = None;
     let result = if let Some(restart) = authored_restart {
         let restart_run =
             run_authored_restart(ctx, restart, tstop, internal_max_step, startup_mode, &pb);
@@ -668,6 +689,7 @@ pub(super) fn run_transient(
                 )
                 .map_err(|error| map_restart_simulation_error(ctx, error))?;
             report_compression(ctx, &compressed, "Transient complete (compressed)");
+            compression_report = Some(compressed.compression_report.clone());
             post_results = Some(compressed.post_results.clone());
             Ok(expand_compressed(compressed, "restart segment")?)
         } else {
@@ -775,6 +797,7 @@ pub(super) fn run_transient(
                                 describe_compression_error(&compressed.compression_report)
                             );
                         }
+                        compression_report = Some(compressed.compression_report.clone());
                         post_results = Some(compressed.post_results.clone());
                         expand_compressed(*compressed, "checkpoint segment")?
                     }
@@ -814,6 +837,7 @@ pub(super) fn run_transient(
         match result {
             Ok(compressed) => {
                 report_compression(ctx, &compressed, "Transient complete (compressed)");
+                compression_report = Some(compressed.compression_report.clone());
                 post_results = Some(compressed.post_results.clone());
                 Ok(expand_compressed(compressed, "transient result")?)
             }
@@ -908,7 +932,9 @@ pub(super) fn run_transient(
 
             validate_fft_result_count(&result.fft_results, &ctx.netlist.fft_analyses)?;
 
-            if let Some(output_path) = ctx.output_path_for("tran") {
+            if let Some(resolved) = ctx.resolve_output("tran") {
+                let analysis_id = resolved.analysis("tran")?;
+                let output_path = resolved.path;
                 let output_start = result
                     .time
                     .first()
@@ -952,11 +978,41 @@ pub(super) fn run_transient(
                         data.transient = Some(transient);
                         TransientOutputDocument::Hdf5(Box::new(data))
                     }
+                    OutputFormat::Json => {
+                        // `.FFT` spectra attached to this transient are named
+                        // as children of it, so a reader of the typed document
+                        // can find the sibling artifact that carries them.
+                        let children = ctx
+                            .fft_analysis_instances()?
+                            .into_iter()
+                            .zip(&result.fft_results)
+                            .map(|(analysis, spectrum)| {
+                                rspice_core::execution::result_document::FftChildReference {
+                                    analysis,
+                                    output_name: spectrum.output_name.clone(),
+                                }
+                            })
+                            .collect();
+                        let builder =
+                            rspice_core::execution::AnalysisResultDocument::from_transient(
+                                analysis_id,
+                                &result,
+                                compression_report.as_ref(),
+                                children,
+                            )
+                            .map_err(|error| {
+                                super::document::document_error(ctx, analysis_id, error)
+                            })?;
+                        TransientOutputDocument::Typed(Box::new(super::document::finish(
+                            ctx,
+                            analysis_id,
+                            builder,
+                        )?))
+                    }
                     OutputFormat::Raw
                     | OutputFormat::RawAscii
                     | OutputFormat::Csv
-                    | OutputFormat::Tsv
-                    | OutputFormat::Json => {
+                    | OutputFormat::Tsv => {
                         TransientOutputDocument::Table(super::export::scalar_table(
                             "transient",
                             "Transient Analysis",
@@ -967,9 +1023,22 @@ pub(super) fn run_transient(
                         ))
                     }
                 };
+                ctx.record_published(super::PublishedResult {
+                    analysis_id: analysis_id.tag(),
+                    schema: super::document::scalar_schema(&signals)?,
+                    artifact: output_path.clone(),
+                });
 
                 if result.fft_results.is_empty() {
-                    document.write(&output_path, ctx.format)?;
+                    publish::artifact(&output_path, |writer| {
+                        document.write_to(
+                            writer,
+                            &output_path,
+                            ctx.format,
+                            super::document::json_byte_limit(ctx),
+                        )
+                    })
+                    .map_err(|error| map_atomic_output_error(&output_path, error))?;
                 } else {
                     let parent_analysis_id = ctx.current_transient_analysis_id()?;
                     let fft_output_path =
@@ -990,6 +1059,7 @@ pub(super) fn run_transient(
                         &result.fft_results,
                         ctx.netlist,
                         ctx.args.timeout,
+                        super::document::json_byte_limit(ctx),
                     )?;
                     if !ctx.quiet {
                         println!("  FFT results exported to: {}", fft_output_path.display());
@@ -1012,28 +1082,37 @@ pub(super) fn run_transient(
 enum TransientOutputDocument {
     Hdf5(Box<Hdf5SimulationData>),
     Table(super::export::ExportTable),
+    /// The shared typed result document, published for `-f json`.
+    Typed(Box<rspice_core::execution::AnalysisResultDocument>),
 }
 
 impl TransientOutputDocument {
-    fn write(&self, path: &Path, format: OutputFormat) -> Result<(), CliError> {
-        match self {
-            Self::Hdf5(data) => {
-                write_hdf5(path, data).map_err(|error| map_hdf5_output_error(path, error))
-            }
-            Self::Table(table) => table.write(path, format),
-        }
-    }
-
     fn write_to(
         &self,
         writer: &mut dyn std::io::Write,
         path: &Path,
         format: OutputFormat,
+        byte_limit: u64,
     ) -> Result<(), CliError> {
         match self {
             Self::Hdf5(data) => write_hdf5_to_writer(writer, data)
                 .map_err(|error| map_hdf5_output_error(path, error)),
             Self::Table(table) => table.write_to(writer, path, format),
+            Self::Typed(document) => {
+                let json = document
+                    .to_json_with_abort(&crate::abort::ProcessAbort, byte_limit)
+                    .map_err(|error| CliError::CoreSimulationError {
+                        source: rspice_core::SimulationError::Circuit(format!(
+                            "{} cannot publish a typed result document: {error}",
+                            document.analysis().tag()
+                        )),
+                        analysis: Some(document.analysis().tag()),
+                    })?;
+                writer
+                    .write_all(json.as_bytes())
+                    .and_then(|()| writer.write_all(b"\n"))
+                    .map_err(|error| CliError::output_error(path, error))
+            }
         }
     }
 }
@@ -1050,6 +1129,7 @@ fn write_transient_fft_output_pair(
     results: &[rspice_core::engine::TransientFftResult],
     netlist: &rspice_core::Netlist,
     timeout_seconds: Option<f64>,
+    byte_limit: u64,
 ) -> Result<(), CliError> {
     validate_fft_publication(results, netlist)?;
     let requests = &netlist.fft_analyses;
@@ -1058,7 +1138,7 @@ fn write_transient_fft_output_pair(
     // spectrum is missing. They are staged together and published together.
     publish::artifact_pair(
         transient_path,
-        |writer| transient.write_to(writer, transient_path, format),
+        |writer| transient.write_to(writer, transient_path, format, byte_limit),
         fft_path,
         |writer| {
             write_fft_to_writer(
@@ -3675,16 +3755,43 @@ pub(super) fn run_fourier(
         }
     }
 
-    let fourier_analysis_id = ctx.fourier_analysis_id(four_index)?.to_string();
-    if let Some(ref output_path) = ctx.output_path_for(&fourier_analysis_id) {
-        write_fourier_output(
-            output_path,
-            ctx.format,
-            &retained.analysis_id,
-            &fourier_analysis_id,
-            fundamental,
-            num_harmonics,
-            &analyzed,
+    // The core evaluates one spectrum per resolved operand and the shared
+    // result document names one spectrum, so each operand is its own analysis
+    // instance and publishes its own artifact.
+    for (output, physical_type, result) in &analyzed {
+        let ordinal = ctx.take_fourier_operand_ordinal()?;
+        let analysis_id = ctx.fourier_operand_analysis_id(ordinal)?;
+        let Some(output_path) = ctx.output_path_for(&analysis_id.tag()) else {
+            continue;
+        };
+        let one = [(output.clone(), *physical_type, result.clone())];
+        super::document::publish_analysis_result(
+            ctx,
+            &output_path,
+            analysis_id,
+            // A Fourier spectrum is a harmonic table, not a named series set;
+            // the typed harmonics live in the document's payload.
+            super::document::empty_schema(),
+            || {
+                rspice_core::execution::AnalysisResultDocument::from_fourier(
+                    analysis_id,
+                    retained.analysis,
+                    output,
+                    fourier_output_unit(physical_type),
+                    result,
+                )
+            },
+            |path, format| {
+                write_fourier_output(
+                    path,
+                    format,
+                    &retained.analysis_id,
+                    &analysis_id.tag(),
+                    fundamental,
+                    num_harmonics,
+                    &one,
+                )
+            },
         )?;
         if !ctx.quiet {
             println!("\nResults written to: {}", output_path.display());
@@ -3692,6 +3799,18 @@ pub(super) fn run_fourier(
     }
 
     Ok(())
+}
+
+/// The physical unit one Fourier spectrum's magnitudes carry.
+fn fourier_output_unit(physical_type: &str) -> rspice_core::execution::SignalUnit {
+    use rspice_core::execution::SignalUnit;
+    match physical_type {
+        "voltage" => SignalUnit::Volt,
+        "current" => SignalUnit::Ampere,
+        // `.FOUR` also accepts a braced expression, whose value is a bare
+        // circuit parameter with no declared physical dimension.
+        _ => SignalUnit::Dimensionless,
+    }
 }
 
 /// Export Fourier results with full harmonic data (JSON or CSV).
@@ -3992,6 +4111,7 @@ mod restart_tests {
             &reordered,
             &netlist,
             None,
+            u64::MAX,
         )
         .expect_err("malformed FFT pair must fail before staging either sibling");
         assert!(!transient_path.exists());

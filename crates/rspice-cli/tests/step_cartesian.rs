@@ -226,7 +226,13 @@ fn assert_conditional_implicit_step_topology_is_typed(
     .expect("conditional schema manifest must be JSON");
     assert_eq!(manifest["aggregation"], "coordinate_local");
     assert_eq!(manifest["missingness"], "union_validity_bitmap");
-    let union_schema = manifest["union_schema"]
+    // The manifest groups its union by analysis instance, so a deck whose
+    // coordinates publish several analyses keeps them apart.
+    let analyses = manifest["analyses"].as_array().expect("manifest analyses");
+    assert_eq!(analyses.len(), 1);
+    let entry = &analyses[0];
+    assert_eq!(entry["analysis_id"], "implicit-op-001");
+    let union_schema = entry["union_schema"]
         .as_array()
         .expect("union schema array");
     let extra_index = union_schema
@@ -237,7 +243,7 @@ fn assert_conditional_implicit_step_topology_is_typed(
                 .is_some_and(|name| name.eq_ignore_ascii_case("V(extra)"))
         })
         .expect("union schema retains conditional V(extra)");
-    let manifest_coordinates = manifest["coordinates"]
+    let manifest_coordinates = entry["coordinates"]
         .as_array()
         .expect("coordinate metadata array");
     assert_eq!(manifest_coordinates.len(), modes.len());
@@ -1382,4 +1388,204 @@ fn stepped_measurement_exports_identify_every_coordinate_run() {
     );
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Everything one coordinate of a stepped physical deck published, keyed by
+/// the semantic value it was produced at rather than by enumeration position.
+#[derive(Debug, PartialEq)]
+struct SteppedCoordinateResult {
+    coordinate_id: String,
+    topology_fingerprint: String,
+    /// Union columns this coordinate's artifact actually carried.
+    validity: Vec<bool>,
+    /// The coordinate's own artifact, verbatim.
+    artifact: String,
+    /// Whether the conditional column is present in the artifact at all.
+    conditional_present: bool,
+}
+
+/// Run a stepped physical deck whose topology is conditional on the swept
+/// parameter, and return each coordinate's published contract.
+///
+/// `mode==1` adds a second divider leg and the node `extra`; `mode==0` does
+/// not. The signal set therefore differs across coordinates, which is exactly
+/// what the union schema and the validity bitmap exist to describe.
+fn run_conditional_stepped_analysis(
+    tag: &str,
+    card: &str,
+    values: &str,
+    conditional_column: &str,
+) -> std::collections::BTreeMap<i32, SteppedCoordinateResult> {
+    let dir = test_dir(tag);
+    let deck = dir.join(format!("{tag}.sp"));
+    std::fs::write(
+        &deck,
+        format!(
+            "* conditional stepped analysis\n\
+             .param mode=0\n\
+             V1 in 0 SIN(0 1 1k) AC 1\n\
+             R1 in out 1k\n\
+             C1 out 0 1u\n\
+             .if (mode==1)\n\
+             R2 out extra 1k\n\
+             C2 extra 0 1u\n\
+             .endif\n\
+             .step param mode list {values}\n\
+             {card}\n\
+             .end\n"
+        ),
+    )
+    .expect("write conditional stepped deck");
+
+    let requested = dir.join("stepped.csv");
+    let output = run_rspice(&[
+        "--quiet",
+        "run",
+        deck.to_str().unwrap(),
+        "-o",
+        requested.to_str().unwrap(),
+        "-f",
+        "csv",
+    ]);
+    assert!(
+        output.status.success(),
+        "conditional stepped run failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let manifest: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(dir.join("stepped.step_schema.json"))
+            .expect("stepped schema manifest must exist"),
+    )
+    .expect("stepped schema manifest must be JSON");
+    assert_eq!(manifest["aggregation"], "coordinate_local");
+    assert_eq!(manifest["missingness"], "union_validity_bitmap");
+    let analyses = manifest["analyses"].as_array().expect("manifest analyses");
+    assert_eq!(analyses.len(), 1, "one authored analysis, one union");
+    let entry = &analyses[0];
+    let union_schema = entry["union_schema"]
+        .as_array()
+        .expect("union schema array");
+    let conditional_index = union_schema
+        .iter()
+        .position(|descriptor| {
+            descriptor["display_name"]
+                .as_str()
+                .is_some_and(|name| name.eq_ignore_ascii_case("V(extra)"))
+        })
+        .expect("union schema dropped the conditional node");
+
+    let modes = values
+        .split_ascii_whitespace()
+        .map(|value| value.parse::<i32>().expect("integer mode"))
+        .collect::<Vec<_>>();
+    let coordinates = entry["coordinates"]
+        .as_array()
+        .expect("manifest coordinates");
+    assert_eq!(coordinates.len(), modes.len());
+
+    let mut semantic = std::collections::BTreeMap::new();
+    for (index, mode) in modes.into_iter().enumerate() {
+        let metadata = &coordinates[index];
+        let filename = metadata["artifact"].as_str().expect("artifact filename");
+        let artifact =
+            std::fs::read_to_string(dir.join(filename)).expect("coordinate artifact must exist");
+        let validity = metadata["validity"]
+            .as_array()
+            .expect("coordinate validity bitmap")
+            .iter()
+            .map(|value| value.as_bool().expect("boolean validity bit"))
+            .collect::<Vec<_>>();
+        assert_eq!(validity.len(), union_schema.len());
+
+        let header = artifact.lines().next().expect("artifact header");
+        let conditional_present = header
+            .split(',')
+            .any(|column| column.eq_ignore_ascii_case(conditional_column));
+        assert_eq!(
+            validity[conditional_index], conditional_present,
+            "the validity bitmap must say exactly what the artifact carries"
+        );
+        assert_eq!(
+            conditional_present,
+            mode == 1,
+            "a signal a conditional removed must be absent, never fabricated as zero"
+        );
+
+        semantic.insert(
+            mode,
+            SteppedCoordinateResult {
+                coordinate_id: metadata["coordinate_id"]
+                    .as_str()
+                    .expect("coordinate id")
+                    .to_string(),
+                topology_fingerprint: metadata["topology_fingerprint"]
+                    .as_str()
+                    .expect("topology fingerprint")
+                    .to_string(),
+                validity,
+                artifact,
+                conditional_present,
+            },
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+    semantic
+}
+
+/// A stepped `.TRAN` and a stepped `.AC` must publish the same values, the
+/// same coordinate identities, and the same topology fingerprints regardless
+/// of the order their axis values were authored in.
+#[test]
+fn stepped_physical_analyses_are_order_independent_and_never_fabricate_data() {
+    for (family, card, conditional) in [
+        ("tran", ".tran 100u 400u", "V(extra)"),
+        ("ac", ".ac dec 2 100 1k", "Re(V(extra))"),
+    ] {
+        let forward = run_conditional_stepped_analysis(
+            &format!("{family}_forward"),
+            card,
+            "0 1",
+            conditional,
+        );
+        let reverse = run_conditional_stepped_analysis(
+            &format!("{family}_reverse"),
+            card,
+            "1 0",
+            conditional,
+        );
+
+        for mode in [0, 1] {
+            let forward = &forward[&mode];
+            let reverse = &reverse[&mode];
+            assert_eq!(
+                forward.coordinate_id, reverse.coordinate_id,
+                "{family}: semantic coordinate identity must not depend on enumeration order"
+            );
+            assert_eq!(
+                forward.topology_fingerprint, reverse.topology_fingerprint,
+                "{family}: the same materialized topology must have the same fingerprint"
+            );
+            assert_eq!(
+                forward.validity, reverse.validity,
+                "{family}: the union validity bitmap must not depend on enumeration order"
+            );
+            assert_eq!(
+                forward.conditional_present,
+                mode == 1,
+                "{family}: the conditional signal must follow its coordinate topology"
+            );
+            assert_eq!(
+                forward.artifact, reverse.artifact,
+                "{family}: coordinate {mode} published different values in the two orders"
+            );
+        }
+
+        // The two coordinates really are different circuits, so the test is
+        // not vacuously comparing identical runs.
+        assert_ne!(
+            forward[&0].topology_fingerprint,
+            forward[&1].topology_fingerprint
+        );
+    }
 }

@@ -10,8 +10,11 @@
 
 mod advanced;
 mod basic;
+mod document;
 mod frequency;
 mod shared;
+
+pub(crate) use document::PublishedResult;
 
 pub(crate) use crate::commands::export_table as export;
 pub(crate) use basic::read_fft_raw_artifact;
@@ -87,16 +90,29 @@ struct RunContext<'a> {
     /// Canonical plan-owned output identities, consumed in authored analysis
     /// order by the per-analysis exporters.
     planned_output_ids: std::cell::RefCell<
-        std::collections::HashMap<&'static str, std::collections::VecDeque<String>>,
+        std::collections::HashMap<
+            &'static str,
+            std::collections::VecDeque<rspice_core::execution::AnalysisInstanceId>,
+        >,
     >,
     /// Canonical transient identities used by checkpoint and post-processing
     /// namespaces, indexed by zero-based authored transient ordinal.
-    planned_transient_ids: Vec<String>,
-    /// Canonical `.FOUR` identities, one per authored Fourier card.
-    planned_fourier_ids: Vec<String>,
+    planned_transient_ids: Vec<rspice_core::execution::AnalysisInstanceId>,
+    /// Next deck-wide ordinal for a resolved `.FOUR` operand.
+    next_fourier_operand: std::cell::Cell<usize>,
     /// Canonical `.FFT` identities, one per authored transient FFT request.
     planned_fft_ids: Vec<String>,
     planned_namespace_error: std::cell::RefCell<Option<String>>,
+    /// The canonical coordinate this concrete deck run belongs to, retained so
+    /// a typed result document can name it. Scalar decks have none.
+    run_coordinate: Option<RunCoordinate>,
+    /// Structural fingerprint of the elaborated circuit. An axis coordinate
+    /// arrives with the one its materialization computed; a scalar deck
+    /// computes it on demand, and only when a format that carries it is
+    /// requested.
+    topology: std::cell::RefCell<Option<rspice_core::execution::TopologyFingerprint>>,
+    /// Typed results this run published, in publication order.
+    published: std::cell::RefCell<Vec<PublishedResult>>,
     verbose: bool,
     quiet: bool,
     /// .MEAS results collected while analyses run, for CI/CD reporting
@@ -120,6 +136,9 @@ struct RunContext<'a> {
 
 struct RetainedTransient {
     analysis_id: String,
+    /// The same identity, typed, so a post-process document can name its
+    /// parent.
+    analysis: rspice_core::execution::AnalysisInstanceId,
     result: rspice_core::engine::TransientResult,
     /// Typed post-process products the core evaluated on the exact accepted
     /// trajectory. Present only for a compressed run, whose retained waveform
@@ -159,6 +178,7 @@ impl<'a> RunContext<'a> {
     ) -> Result<Self, CliError> {
         let RunIdentity {
             coordinate,
+            topology,
             analyses: planned,
         } = identity;
         let format = match args.format {
@@ -206,19 +226,15 @@ impl<'a> RunContext<'a> {
             output_tag_multiplicities: analysis_output_tag_multiplicities(netlist),
             planned_output_ids: std::cell::RefCell::new(planned.output_ids),
             planned_transient_ids: planned.transient_ids,
-            planned_fourier_ids: post_process_tags(
-                rspice_core::execution::AnalysisKind::Fourier,
-                netlist
-                    .analyses
-                    .iter()
-                    .filter(|analysis| matches!(analysis, AnalysisCommand::Four { .. }))
-                    .count(),
-            )?,
+            next_fourier_operand: std::cell::Cell::new(0),
             planned_fft_ids: post_process_tags(
                 rspice_core::execution::AnalysisKind::Fft,
                 netlist.fft_analyses.len(),
             )?,
             planned_namespace_error: std::cell::RefCell::new(None),
+            run_coordinate: coordinate.cloned(),
+            topology: std::cell::RefCell::new(topology),
+            published: std::cell::RefCell::new(Vec::new()),
             verbose,
             quiet,
             measurements: std::cell::RefCell::new(Vec::new()),
@@ -272,19 +288,17 @@ impl<'a> RunContext<'a> {
             output_tag_multiplicities: analysis_output_tag_multiplicities(netlist),
             planned_output_ids: std::cell::RefCell::new(planned.output_ids),
             planned_transient_ids: planned.transient_ids,
-            planned_fourier_ids: post_process_tags(
-                rspice_core::execution::AnalysisKind::Fourier,
-                netlist
-                    .analyses
-                    .iter()
-                    .filter(|analysis| matches!(analysis, AnalysisCommand::Four { .. }))
-                    .count(),
-            )?,
+            next_fourier_operand: std::cell::Cell::new(0),
             planned_fft_ids: post_process_tags(
                 rspice_core::execution::AnalysisKind::Fft,
                 netlist.fft_analyses.len(),
             )?,
             planned_namespace_error: std::cell::RefCell::new(None),
+            // A corner is a re-elaborated deck: it owns no plan coordinate,
+            // and its topology is its own, computed on demand.
+            run_coordinate: None,
+            topology: std::cell::RefCell::new(None),
+            published: std::cell::RefCell::new(Vec::new()),
             verbose: source.verbose,
             quiet: source.quiet,
             measurements: std::cell::RefCell::new(Vec::new()),
@@ -396,14 +410,25 @@ impl<'a> RunContext<'a> {
     ///
     /// Every resolved path is remembered for the `--summary` manifest.
     fn output_path_for(&self, tag: &str) -> Option<std::path::PathBuf> {
+        self.resolve_output(tag).map(|output| output.path)
+    }
+
+    /// Resolve one analysis artifact: where it goes and which canonical
+    /// analysis instance it publishes under.
+    ///
+    /// A deck-authored card takes the identity the planner minted for it. A
+    /// command-line analysis mode has no authored card, so its identity is
+    /// minted the same canonical way: it is single by construction, and the
+    /// first instance of its family.
+    fn resolve_output(&self, tag: &str) -> Option<ResolvedOutput> {
         let path = self.output.clone()?;
         let planned_id = self
             .planned_output_ids
             .borrow_mut()
             .get_mut(tag)
             .and_then(std::collections::VecDeque::pop_front);
-        let qualified_tag = match planned_id {
-            Some(id) => id,
+        let (qualified_tag, analysis) = match planned_id {
+            Some(id) => (id.tag(), Some(id)),
             None => {
                 if self.output_tag_multiplicities.contains_key(tag) {
                     self.planned_namespace_error.replace(Some(format!(
@@ -411,7 +436,17 @@ impl<'a> RunContext<'a> {
                     )));
                     return None;
                 }
-                tag.to_string()
+                let minted = output_tag_analysis_kind(tag)
+                    .map(|kind| crate::analysis_identity::post_process_ids(kind, 1))
+                    .transpose()
+                    .unwrap_or_else(|error| {
+                        self.planned_namespace_error.replace(Some(format!(
+                            "cannot mint a canonical '{tag}' identity: {error}"
+                        )));
+                        None
+                    })
+                    .and_then(|ids| ids.first().copied());
+                (tag.to_string(), minted)
             }
         };
         let resolved = if !self.multi_analysis {
@@ -429,7 +464,51 @@ impl<'a> RunContext<'a> {
             path.with_file_name(file_name)
         };
         self.outputs.borrow_mut().push(resolved.clone());
-        Some(resolved)
+        Some(ResolvedOutput {
+            path: resolved,
+            analysis,
+        })
+    }
+
+    /// The canonical coordinate this concrete deck run belongs to.
+    const fn run_coordinate(&self) -> Option<&RunCoordinate> {
+        self.run_coordinate.as_ref()
+    }
+
+    /// Structural fingerprint of this run's elaborated circuit.
+    ///
+    /// An axis coordinate arrives with the fingerprint its materialization
+    /// already computed. A scalar deck computes it once, on the first request,
+    /// so a run that publishes no typed artifact never pays for a circuit
+    /// build it does not use.
+    fn topology_fingerprint(
+        &self,
+    ) -> Result<Option<rspice_core::execution::TopologyFingerprint>, CliError> {
+        if let Some(fingerprint) = *self.topology.borrow() {
+            return Ok(Some(fingerprint));
+        }
+        let fingerprint = rspice_core::execution::topology_fingerprint_with_abort(
+            self.engine,
+            self.netlist,
+            &crate::abort::ProcessAbort,
+        )
+        .map_err(|source| {
+            if matches!(source, rspice_core::SimulationError::Aborted) {
+                cancellation_cli_error(self.args.timeout)
+            } else {
+                CliError::CoreSimulationError {
+                    source,
+                    analysis: Some("Result topology fingerprint".to_string()),
+                }
+            }
+        })?;
+        self.topology.replace(Some(fingerprint));
+        Ok(Some(fingerprint))
+    }
+
+    /// Record one typed result this run published.
+    fn record_published(&self, published: PublishedResult) {
+        self.published.borrow_mut().push(published);
     }
 
     fn ensure_planned_namespaces_consumed(&self) -> Result<(), CliError> {
@@ -487,6 +566,13 @@ impl<'a> RunContext<'a> {
     }
 
     fn current_transient_analysis_id(&self) -> Result<String, CliError> {
+        self.current_transient_instance().map(|id| id.tag())
+    }
+
+    /// Canonical identity of the transient currently entering the dispatcher.
+    fn current_transient_instance(
+        &self,
+    ) -> Result<rspice_core::execution::AnalysisInstanceId, CliError> {
         let ordinal = self.next_transient_ordinal.get();
         let index = ordinal
             .checked_sub(1)
@@ -496,7 +582,7 @@ impl<'a> RunContext<'a> {
             })?;
         self.planned_transient_ids
             .get(index as usize)
-            .cloned()
+            .copied()
             .ok_or_else(|| CliError::InternalError {
                 message: format!(
                     "planned transient namespace has no identity for ordinal {ordinal}"
@@ -520,21 +606,61 @@ impl<'a> RunContext<'a> {
         self.output_path_for(&tag)
     }
 
-    /// Canonical identity of one authored `.FOUR` card, addressed by its
-    /// zero-based source ordinal.
-    fn fourier_analysis_id(&self, index: usize) -> Result<&str, CliError> {
-        self.planned_fourier_ids
-            .get(index)
-            .map(String::as_str)
-            .ok_or_else(|| CliError::InternalError {
-                message: format!("planned Fourier namespace has no identity for index {index}"),
-            })
+    /// Canonical identity of one resolved `.FOUR` operand.
+    ///
+    /// The core evaluates one Fourier spectrum per resolved operand, and the
+    /// shared result document names one spectrum, so an operand — not a card —
+    /// is the analysis instance. `index` is its zero-based deck-wide ordinal.
+    fn fourier_operand_analysis_id(
+        &self,
+        index: usize,
+    ) -> Result<rspice_core::execution::AnalysisInstanceId, CliError> {
+        crate::analysis_identity::post_process_ids(
+            rspice_core::execution::AnalysisKind::Fourier,
+            index.saturating_add(1),
+        )
+        .map_err(|error| CliError::InternalError {
+            message: format!("cannot mint canonical Fourier identities: {error}"),
+        })?
+        .last()
+        .copied()
+        .ok_or_else(|| CliError::InternalError {
+            message: format!("planned Fourier namespace has no identity for operand {index}"),
+        })
+    }
+
+    /// Take the next deck-wide `.FOUR` operand ordinal.
+    fn take_fourier_operand_ordinal(&self) -> Result<usize, CliError> {
+        let ordinal = self.next_fourier_operand.get();
+        self.next_fourier_operand
+            .set(
+                ordinal
+                    .checked_add(1)
+                    .ok_or_else(|| CliError::InternalError {
+                        message: "resolved Fourier operand ordinal overflowed".to_string(),
+                    })?,
+            );
+        Ok(ordinal)
     }
 
     /// Canonical identities of the deck's authored `.FFT` requests, in source
     /// order. One transient publishes a spectrum for each of them.
     fn fft_analysis_ids(&self) -> &[String] {
         &self.planned_fft_ids
+    }
+
+    /// The same identities as typed instances, for a document that names its
+    /// attached spectra as children.
+    fn fft_analysis_instances(
+        &self,
+    ) -> Result<Vec<rspice_core::execution::AnalysisInstanceId>, CliError> {
+        crate::analysis_identity::post_process_ids(
+            rspice_core::execution::AnalysisKind::Fft,
+            self.planned_fft_ids.len(),
+        )
+        .map_err(|error| CliError::InternalError {
+            message: format!("cannot mint canonical FFT identities: {error}"),
+        })
     }
 
     fn run_analysis(&self, analysis: &AnalysisCommand) -> Result<(), CliError> {
@@ -570,8 +696,10 @@ impl<'a> RunContext<'a> {
                     *max_step,
                     *uic,
                 )?;
+                let analysis = self.current_transient_instance()?;
                 self.last_transient.replace(Some(RetainedTransient {
-                    analysis_id: self.current_transient_analysis_id()?,
+                    analysis_id: analysis.tag(),
+                    analysis,
                     result: outcome.result,
                     post_results: outcome.post_results,
                 }));
@@ -879,12 +1007,15 @@ fn analysis_output_tag_multiplicities(
 /// exactly one reason everywhere.
 #[derive(Debug, Default)]
 struct PlannedAnalysisIdentities {
-    /// Output tag to the queue of canonical analysis tags, consumed in
+    /// Output tag to the queue of canonical analysis identities, consumed in
     /// authored order by the per-analysis exporters.
-    output_ids: std::collections::HashMap<&'static str, std::collections::VecDeque<String>>,
+    output_ids: std::collections::HashMap<
+        &'static str,
+        std::collections::VecDeque<rspice_core::execution::AnalysisInstanceId>,
+    >,
     /// Transient identities in authored order, indexed by zero-based
     /// transient ordinal for checkpoint and post-processing namespaces.
-    transient_ids: Vec<String>,
+    transient_ids: Vec<rspice_core::execution::AnalysisInstanceId>,
 }
 
 impl PlannedAnalysisIdentities {
@@ -901,15 +1032,10 @@ impl PlannedAnalysisIdentities {
             let Some(tag) = analysis_output_tag(analysis) else {
                 continue;
             };
-            let component = id.tag();
             if tag == "tran" {
-                identities.transient_ids.push(component.clone());
+                identities.transient_ids.push(id);
             }
-            identities
-                .output_ids
-                .entry(tag)
-                .or_default()
-                .push_back(component);
+            identities.output_ids.entry(tag).or_default().push_back(id);
         }
         identities
     }
@@ -958,6 +1084,54 @@ impl PlannedAnalysisIdentities {
     }
 }
 
+/// One resolved artifact destination and the canonical analysis instance it
+/// publishes under.
+///
+/// `analysis` is `None` only for the aggregated axis sweep table, which is a
+/// cross-coordinate aggregation rather than one analysis result.
+struct ResolvedOutput {
+    path: PathBuf,
+    analysis: Option<rspice_core::execution::AnalysisInstanceId>,
+}
+
+impl ResolvedOutput {
+    /// The canonical identity this artifact publishes under.
+    fn analysis(&self, tag: &str) -> Result<rspice_core::execution::AnalysisInstanceId, CliError> {
+        self.analysis.ok_or_else(|| CliError::InternalError {
+            message: format!("'{tag}' resolved an artifact with no canonical analysis identity"),
+        })
+    }
+}
+
+/// The core analysis family one output tag publishes under.
+///
+/// Every tag `analysis_output_tag` can return appears here, plus the two the
+/// command line can request without an authored card. A tag with no family
+/// owns no analysis identity and therefore no typed result document.
+fn output_tag_analysis_kind(tag: &str) -> Option<rspice_core::execution::AnalysisKind> {
+    use rspice_core::execution::AnalysisKind;
+    match tag {
+        "op" => Some(AnalysisKind::Op),
+        "dc" => Some(AnalysisKind::Dc),
+        "ac" => Some(AnalysisKind::Ac),
+        "tran" => Some(AnalysisKind::Tran),
+        "noise" => Some(AnalysisKind::Noise),
+        // `--sparam` is the command-line spelling of the `.SP` family.
+        "sp" | "sparam" => Some(AnalysisKind::Sp),
+        "stb" => Some(AnalysisKind::Stb),
+        "disto" => Some(AnalysisKind::Distortion),
+        "pz" => Some(AnalysisKind::PoleZero),
+        "sens" => Some(AnalysisKind::Sensitivity),
+        "tf" => Some(AnalysisKind::TransferFunction),
+        "hb" => Some(AnalysisKind::HarmonicBalance),
+        "mc" => Some(AnalysisKind::MonteCarlo),
+        "pss" => Some(AnalysisKind::Pss),
+        // The aggregated axis sweep table spans coordinates, so it is not one
+        // analysis instance and publishes no typed document of its own.
+        _ => None,
+    }
+}
+
 /// Artifact paths one re-elaborated deck publishes under, already namespaced
 /// by the caller.
 pub(crate) struct ElaboratedDeckPaths {
@@ -996,6 +1170,9 @@ struct RunIdentity<'a> {
     /// coordinate deliberately does not namespace artifact paths, so this
     /// stays `None` there.
     coordinate: Option<&'a RunCoordinate>,
+    /// Structural fingerprint the coordinate's materialization computed. A
+    /// scalar deck computes its own on demand.
+    topology: Option<rspice_core::execution::TopologyFingerprint>,
     analyses: PlannedAnalysisIdentities,
 }
 
@@ -1917,14 +2094,26 @@ fn canonical_assignment_target(assignment: &AxisAssignment) -> String {
     }
 }
 
+/// The contract one axis coordinate declared before any solver work began.
+///
+/// The preflight materializes every coordinate once, so this is where its
+/// child-analysis signature and its structural fingerprint are captured. The
+/// execution pass re-materializes to run, and checks what it gets against this
+/// rather than re-deriving it, so a coordinate whose topology moved between the
+/// two passes fails instead of publishing under a contract it no longer meets.
+struct StepCoordinateContract {
+    signature: Vec<&'static str>,
+    topology: rspice_core::execution::TopologyFingerprint,
+}
+
 fn preflight_step_coordinates(
     engine: &Engine,
     materializer: &DeckPlanMaterializer<'_>,
     base_signature: &[&'static str],
     aggregate_report_values: Option<usize>,
     args: &RunArgs,
-) -> Result<Vec<Vec<&'static str>>, CliError> {
-    let mut signatures = Vec::with_capacity(materializer.len());
+) -> Result<Vec<StepCoordinateContract>, CliError> {
+    let mut contracts = Vec::with_capacity(materializer.len());
     let mut retained_report_values = aggregate_report_values.unwrap_or(0);
     let retained_limit = engine.config().resource_limits.max_result_values;
     if retained_report_values > retained_limit {
@@ -1967,7 +2156,10 @@ fn preflight_step_coordinates(
                 ),
             });
         }
-        signatures.push(signature);
+        contracts.push(StepCoordinateContract {
+            signature,
+            topology: materialized.topology_fingerprint(),
+        });
 
         // Each report retains one duration plus up to value/goal/tolerance
         // for every measurement. Bound the numeric reporting payload before
@@ -1989,7 +2181,7 @@ fn preflight_step_coordinates(
             }
         }
     }
-    Ok(signatures)
+    Ok(contracts)
 }
 
 /// Preflight one already-expanded `.ALTER`/textual-`.DATA` variant without
@@ -2133,6 +2325,7 @@ fn run_implicit_step_op_table(
         run_label,
         RunIdentity {
             coordinate: None,
+            topology: None,
             analyses: PlannedAnalysisIdentities::default(),
         },
     )?;
@@ -2249,8 +2442,9 @@ fn run_implicit_step_op_table(
             value,
             coordinate_id: canonical_coordinate.stable_id(),
             coordinate_tag: canonical_coordinate.stable_tag(),
+            canonical: canonical_coordinate.clone(),
+            analysis: implicit_analysis.id(),
             analysis_id: implicit_analysis.output_namespace().analysis_component(),
-            coordinate: canonical_coordinate_description(canonical_coordinate),
             topology,
             result,
             signals,
@@ -2337,20 +2531,45 @@ fn run_implicit_step_op_table(
         // as one transaction, so the schema manifest can never name a
         // coordinate artifact that a cancellation left unwritten.
         let transaction = publish::begin()?;
+        let mut coordinate_publications = Vec::with_capacity(preflight.len());
         for run in &preflight {
             let coordinate_path =
                 tag_output_path(&base_output, &sanitize_run_tag(&run.coordinate_tag));
             let path = tag_output_path(&coordinate_path, &run.analysis_id);
-            basic::write_dc_op_output(&path, &run.signals, ctx.format)?;
+            if ctx.format == OutputFormat::Json {
+                // A coordinate-local implicit operating point is a result like
+                // any other: it publishes the shared typed document, naming the
+                // coordinate and topology that produced it.
+                let builder = rspice_core::execution::AnalysisResultDocument::from_operating_point(
+                    run.analysis,
+                    &run.result,
+                    None,
+                )
+                .map_err(|error| document::document_error(&ctx, run.analysis, error))?;
+                let built = document::finish_at_coordinate(
+                    &ctx,
+                    run.analysis,
+                    &run.canonical,
+                    run.topology,
+                    builder,
+                )?;
+                document::write_document(&ctx, &path, &built)?;
+            } else {
+                basic::write_dc_op_output(&path, &run.signals, ctx.format)?;
+            }
+            coordinate_publications.push(CoordinatePublication {
+                coordinate: run.canonical.clone(),
+                topology: run.topology,
+                results: vec![PublishedResult {
+                    analysis_id: run.analysis_id.clone(),
+                    schema: run.schema.clone(),
+                    artifact: path.clone(),
+                }],
+            });
             outputs.push(path);
         }
         let manifest_path = conditional_step_schema_path(&base_output);
-        write_conditional_step_schema_manifest(
-            &manifest_path,
-            &schema_union,
-            &preflight,
-            &outputs,
-        )?;
+        write_step_schema_manifest(&manifest_path, &coordinate_publications)?;
         if crate::abort::reason().is_some() {
             drop(transaction);
             return Err(cancellation_cli_error(args.timeout));
@@ -2389,8 +2608,11 @@ struct ImplicitStepCoordinate {
     value: Option<f64>,
     coordinate_id: rspice_core::execution::RunCoordinateId,
     coordinate_tag: String,
+    /// The canonical coordinate itself, so a typed coordinate document can
+    /// name every axis assignment rather than only its identity string.
+    canonical: RunCoordinate,
+    analysis: rspice_core::execution::AnalysisInstanceId,
     analysis_id: String,
-    coordinate: String,
     topology: rspice_core::execution::TopologyFingerprint,
     result: rspice_core::solver::SimulationResult,
     signals: Vec<crate::commands::run_signals::ScalarSignal>,
@@ -2404,62 +2626,161 @@ fn conditional_step_schema_path(base: &std::path::Path) -> PathBuf {
     path
 }
 
-fn write_conditional_step_schema_manifest(
-    path: &std::path::Path,
-    union: &rspice_core::execution::SchemaUnion,
-    coordinates: &[ImplicitStepCoordinate],
-    artifacts: &[PathBuf],
-) -> Result<(), CliError> {
-    if artifacts.len() != coordinates.len() {
-        return Err(CliError::InternalError {
-            message: format!(
-                "conditional STEP manifest has {} coordinate(s) but {} artifact path(s)",
-                coordinates.len(),
-                artifacts.len()
-            ),
-        });
+/// Version of the coordinate schema manifest.
+///
+/// Version 2 groups the union by analysis instance. Version 1 described one
+/// implicit operating point, which could not name the several analyses a
+/// stepped physical deck publishes at each coordinate.
+const STEP_SCHEMA_MANIFEST_VERSION: u32 = 2;
+
+/// The union schema and per-coordinate validity of one analysis instance
+/// across an axis deck's coordinates.
+struct AnalysisSchemaUnion {
+    analysis_id: String,
+    union: rspice_core::execution::SchemaUnion,
+    coordinates: Vec<CoordinateValidity>,
+}
+
+/// What one coordinate published for one analysis, and which of the union's
+/// columns it carried.
+struct CoordinateValidity {
+    coordinate_id: rspice_core::execution::RunCoordinateId,
+    assignment: String,
+    topology: rspice_core::execution::TopologyFingerprint,
+    artifact: PathBuf,
+    validity: Vec<bool>,
+}
+
+/// Union each analysis instance's coordinate-local schemas and record, per
+/// coordinate, which union columns that coordinate actually carried.
+///
+/// An analysis that only some coordinates published — a conditional that adds
+/// or drops a card — is still named, with its own coordinate list. Nothing is
+/// inferred from a coordinate that did not publish it.
+fn analysis_schema_unions(
+    published: &[CoordinatePublication],
+) -> Result<Vec<AnalysisSchemaUnion>, CliError> {
+    let mut order: Vec<String> = Vec::new();
+    let mut grouped: std::collections::HashMap<
+        String,
+        Vec<(&CoordinatePublication, &PublishedResult)>,
+    > = std::collections::HashMap::new();
+    for coordinate in published {
+        for result in &coordinate.results {
+            let entry = grouped.entry(result.analysis_id.clone()).or_default();
+            if entry.is_empty() {
+                order.push(result.analysis_id.clone());
+            }
+            entry.push((coordinate, result));
+        }
     }
-    let descriptors = union
-        .schema()
-        .descriptors()
-        .iter()
-        .map(signal_descriptor_json)
-        .collect::<Vec<_>>();
-    let coordinate_documents = coordinates
-        .iter()
-        .zip(artifacts)
-        .map(|(coordinate, artifact)| {
-            let artifact = artifact
-                .file_name()
-                .and_then(std::ffi::OsStr::to_str)
+
+    let mut unions = Vec::with_capacity(order.len());
+    for analysis_id in order {
+        let entries = grouped.remove(&analysis_id).unwrap_or_default();
+        let union = rspice_core::execution::SignalSchema::union(entries.iter().map(
+            |(coordinate, result)| {
+                rspice_core::execution::CoordinateSchema::new(
+                    coordinate.coordinate.stable_id(),
+                    &result.schema,
+                )
+            },
+        ))
+        .map_err(|error| CliError::CoreSimulationError {
+            source: rspice_core::SimulationError::Circuit(format!(
+                "coordinate schemas of {analysis_id} cannot form a typed union: {error}"
+            )),
+            analysis: Some("Step output-schema union".to_string()),
+        })?;
+        let mut coordinates = Vec::with_capacity(entries.len());
+        for (coordinate, result) in entries {
+            let indices = union
+                .source_indices()
+                .get(&coordinate.coordinate.stable_id())
                 .ok_or_else(|| CliError::InternalError {
                     message: format!(
-                        "conditional STEP artifact '{}' has no portable UTF-8 filename",
-                        artifact.display()
+                        "coordinate {} vanished from the {analysis_id} schema union",
+                        coordinate.coordinate.stable_id()
                     ),
                 })?;
+            coordinates.push(CoordinateValidity {
+                coordinate_id: coordinate.coordinate.stable_id(),
+                assignment: canonical_coordinate_description(&coordinate.coordinate),
+                topology: coordinate.topology,
+                artifact: result.artifact.clone(),
+                validity: indices.iter().map(Option::is_some).collect(),
+            });
+        }
+        unions.push(AnalysisSchemaUnion {
+            analysis_id,
+            union,
+            coordinates,
+        });
+    }
+    Ok(unions)
+}
+
+/// Publish the manifest that says what each coordinate of an axis deck
+/// carried.
+///
+/// Flat formats have no representation for an absent column, so this is where
+/// a consumer learns which coordinate published which signal: the union names
+/// every column any coordinate had, and each coordinate's validity bitmap says
+/// which of them its own artifact contains.
+fn write_step_schema_manifest(
+    path: &std::path::Path,
+    published: &[CoordinatePublication],
+) -> Result<(), CliError> {
+    let unions = analysis_schema_unions(published)?;
+    let analyses = unions
+        .iter()
+        .map(|entry| {
+            let coordinates = entry
+                .coordinates
+                .iter()
+                .map(|coordinate| {
+                    let artifact = coordinate
+                        .artifact
+                        .file_name()
+                        .and_then(std::ffi::OsStr::to_str)
+                        .ok_or_else(|| CliError::InternalError {
+                            message: format!(
+                                "coordinate artifact '{}' has no portable UTF-8 filename",
+                                coordinate.artifact.display()
+                            ),
+                        })?;
+                    Ok(serde_json::json!({
+                        "coordinate_id": coordinate.coordinate_id.to_string(),
+                        "assignment": coordinate.assignment,
+                        "topology_fingerprint": coordinate.topology.to_string(),
+                        "validity": coordinate.validity,
+                        "artifact": artifact,
+                    }))
+                })
+                .collect::<Result<Vec<_>, CliError>>()?;
             Ok(serde_json::json!({
-                "coordinate_id": coordinate.coordinate_id.to_string(),
-                "analysis_id": coordinate.analysis_id,
-                "assignment": coordinate.coordinate,
-                "topology_fingerprint": coordinate.topology.to_string(),
-                "validity": coordinate.validity,
-                "artifact": artifact,
+                "analysis_id": entry.analysis_id,
+                "union_schema": entry
+                    .union
+                    .schema()
+                    .descriptors()
+                    .iter()
+                    .map(signal_descriptor_json)
+                    .collect::<Vec<_>>(),
+                "coordinates": coordinates,
             }))
         })
         .collect::<Result<Vec<_>, CliError>>()?;
     let document = serde_json::json!({
-        "schema_version": 1,
-        "analysis": "implicit_op",
+        "schema_version": STEP_SCHEMA_MANIFEST_VERSION,
         "aggregation": "coordinate_local",
         "missingness": "union_validity_bitmap",
-        "union_schema": descriptors,
-        "coordinates": coordinate_documents,
+        "analyses": analyses,
     });
     let text = serde_json::to_string_pretty(&document)
         .map_err(|error| CliError::output_json_error(path, error))?
         + "\n";
-    publish::set_manifest(path, |writer| {
+    publish::artifact(path, |writer: &mut dyn std::io::Write| {
         writer
             .write_all(text.as_bytes())
             .map_err(|error| CliError::output_error(path, error))
@@ -2566,7 +2887,7 @@ fn run_deck(
         // canonical plan. Reading the authored identities straight off the
         // plan costs no materialization, so a scalar run does not pay for a
         // second elaboration to learn what it already planned.
-        let (report, outputs) = run_concrete_deck(
+        let outcome = run_concrete_deck(
             netlist,
             args,
             config,
@@ -2575,12 +2896,13 @@ fn run_deck(
             run_label,
             RunIdentity {
                 coordinate: None,
+                topology: None,
                 analyses: PlannedAnalysisIdentities::from_plan(&canonical_plan, netlist),
             },
         )?;
         return Ok(DeckOutcome {
-            reports: vec![report],
-            outputs,
+            reports: vec![outcome.report],
+            outputs: outcome.outputs,
         });
     }
 
@@ -2597,7 +2919,7 @@ fn run_deck(
     let aggregate_report_values = base_signature
         .is_empty()
         .then(|| 1usize.saturating_add(netlist.measurements.len().saturating_mul(3)));
-    let coordinate_signatures = preflight_step_coordinates(
+    let coordinate_contracts = preflight_step_coordinates(
         &engine,
         &materializer,
         &base_signature,
@@ -2633,7 +2955,8 @@ fn run_deck(
     let mut reports = Vec::with_capacity(materializer.len());
     let mut outputs = Vec::new();
     let mut coordinates = Vec::new();
-    for (run_index, expected_signature) in coordinate_signatures.iter().enumerate() {
+    let mut published = Vec::new();
+    for (run_index, expected) in coordinate_contracts.iter().enumerate() {
         if crate::abort::reason().is_some() {
             break;
         }
@@ -2653,13 +2976,27 @@ fn run_deck(
             };
         let canonical_coordinate = materialized.coordinate();
         let materialized_signature = step_analysis_signature(materialized.netlist())?;
-        if &materialized_signature != expected_signature {
+        if materialized_signature != expected.signature {
             return Err(CliError::InternalError {
                 message: format!(
                     ".STEP coordinate {} changed its preflight physical-analysis signature from {:?} to {:?}",
                     run_index + 1,
-                    expected_signature,
+                    expected.signature,
                     materialized_signature
+                ),
+            });
+        }
+        // The preflight captured this coordinate's structural fingerprint
+        // before any solver work. Executing it a second time must reproduce the
+        // same circuit, or the artifact would be published under a topology
+        // contract it no longer meets.
+        let topology = materialized.topology_fingerprint();
+        if topology != expected.topology {
+            return Err(CliError::InternalError {
+                message: format!(
+                    ".STEP coordinate {} changed its preflight topology fingerprint from {} to {topology}",
+                    run_index + 1,
+                    expected.topology
                 ),
             });
         }
@@ -2676,7 +3013,7 @@ fn run_deck(
                 canonical_coordinate_description(canonical_coordinate)
             );
         }
-        let (report, run_outputs) = match run_concrete_deck(
+        let outcome = match run_concrete_deck(
             materialized.netlist(),
             args,
             config,
@@ -2685,6 +3022,7 @@ fn run_deck(
             Some(&label),
             RunIdentity {
                 coordinate: Some(canonical_coordinate),
+                topology: Some(topology),
                 analyses: PlannedAnalysisIdentities::from_materialized(
                     canonical_coordinate,
                     materialized.analyses(),
@@ -2695,12 +3033,17 @@ fn run_deck(
             Err(_) if crate::abort::reason().is_some() => break,
             Err(error) => return Err(error),
         };
-        reports.push(report);
+        reports.push(outcome.report);
+        published.push(CoordinatePublication {
+            coordinate: canonical_coordinate.clone(),
+            topology,
+            results: outcome.published,
+        });
         coordinates.push(AxisSetCoordinate {
             identity: ArtifactCoordinate::from_run_coordinate(canonical_coordinate),
-            artifacts: run_outputs.clone(),
+            artifacts: outcome.outputs.clone(),
         });
-        outputs.extend(run_outputs);
+        outputs.extend(outcome.outputs);
         if crate::abort::reason().is_some() {
             break;
         }
@@ -2731,12 +3074,43 @@ fn run_deck(
         });
     }
 
+    // Every coordinate published under its own schema, so the set declares the
+    // union of those schemas and, per coordinate, which of its columns the
+    // coordinate actually carried. A signal a conditional removed is absent
+    // from that coordinate's artifact and invalid in the bitmap; it is never
+    // inferred from another coordinate or written as zero.
+    if let Some(base_output) = resolve_output_path(args.output.clone(), config)? {
+        let base_output = match run_label {
+            Some(label) => tag_output_path(&base_output, &sanitize_run_tag(label)),
+            None => base_output,
+        };
+        let manifest_path = conditional_step_schema_path(&base_output);
+        write_step_schema_manifest(&manifest_path, &published)?;
+        outputs.push(manifest_path);
+    }
+
     if let Some(manifest_path) = axis_set_manifest_path(args, config, run_label)? {
         write_axis_set_manifest(&manifest_path, args, &canonical_plan, &coordinates)?;
         outputs.push(manifest_path);
     }
     transaction.commit()?;
     Ok(DeckOutcome { reports, outputs })
+}
+
+/// Everything one axis coordinate published, with the identity it published
+/// under.
+struct CoordinatePublication {
+    coordinate: RunCoordinate,
+    topology: rspice_core::execution::TopologyFingerprint,
+    results: Vec<PublishedResult>,
+}
+
+/// What one concrete deck run produced: its report, the artifacts it staged,
+/// and the typed contract each of those artifacts published under.
+struct ConcreteDeckOutcome {
+    report: SimulationReport,
+    outputs: Vec<PathBuf>,
+    published: Vec<PublishedResult>,
 }
 
 /// One coordinate's identity and the artifacts it staged, for the set
@@ -2844,7 +3218,7 @@ fn run_concrete_deck(
     quiet: bool,
     run_label: Option<&str>,
     identity: RunIdentity<'_>,
-) -> Result<(SimulationReport, Vec<PathBuf>), CliError> {
+) -> Result<ConcreteDeckOutcome, CliError> {
     if verbose {
         println!("Title: {}", netlist.title);
         println!("Elements: {}", netlist.elements.len());
@@ -2883,8 +3257,8 @@ fn run_concrete_deck(
         }
         let measurements = ctx.measurements.borrow().clone();
         let passed = measurements.iter().all(|meas| meas.passed);
-        return Ok((
-            SimulationReport {
+        return Ok(ConcreteDeckOutcome {
+            report: SimulationReport {
                 name,
                 netlist: args.input.display().to_string(),
                 passed,
@@ -2893,8 +3267,9 @@ fn run_concrete_deck(
                 error_details: None,
                 measurements,
             },
-            ctx.outputs.into_inner(),
-        ));
+            published: ctx.published.into_inner(),
+            outputs: ctx.outputs.into_inner(),
+        });
     }
 
     let mut ran_analysis = false;
@@ -2947,8 +3322,8 @@ fn run_concrete_deck(
     let measurements = ctx.measurements.borrow().clone();
     let passed = simulation_error.is_none() && measurements.iter().all(|meas| meas.passed);
 
-    Ok((
-        SimulationReport {
+    Ok(ConcreteDeckOutcome {
+        report: SimulationReport {
             name,
             netlist: args.input.display().to_string(),
             passed,
@@ -2957,8 +3332,9 @@ fn run_concrete_deck(
             error_details: simulation_error_details,
             measurements,
         },
-        ctx.outputs.into_inner(),
-    ))
+        published: ctx.published.into_inner(),
+        outputs: ctx.outputs.into_inner(),
+    })
 }
 
 /// Failure text for the run report: simulation errors carry their bare

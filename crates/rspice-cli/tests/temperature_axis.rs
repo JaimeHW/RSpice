@@ -116,14 +116,18 @@ fn planned_artifacts(deck: &Path, requested: &Path) -> Vec<PathBuf> {
 }
 
 /// Everything a completed axis deck publishes: one artifact per coordinate
-/// and analysis, plus the manifest that says the set is complete.
+/// and analysis, the schema manifest that says which signals each coordinate
+/// carried, and the manifest that says the set is complete.
 fn planned_directory_contents(deck: &Path, requested: &Path) -> Vec<PathBuf> {
     let mut contents = planned_artifacts(deck, requested);
+    contents.push(tag_output_path(requested, "step_schema").with_extension("json"));
     contents.push(planned_set_manifest(requested));
     contents.sort();
     contents
 }
 
+/// Values of one named column in the flat swept table an axis deck publishes
+/// when its coordinates share a topology and schema.
 fn signal_real_values(document: &Value, name: &str) -> Vec<f64> {
     let signal = document["signals"]
         .as_array()
@@ -142,6 +146,33 @@ fn signal_real_values(document: &Value, name: &str) -> Vec<f64> {
     values
         .iter()
         .map(|value| value.as_f64().expect("finite signal value"))
+        .collect()
+}
+
+/// Samples of one named series in a typed coordinate result document.
+///
+/// A complex family publishes one complex sample per point; its real part is
+/// what a coordinate-to-coordinate comparison reads.
+fn document_series(document: &Value, name: &str) -> Vec<f64> {
+    document["signals"]
+        .as_array()
+        .expect("document signals")
+        .iter()
+        .find(|signal| {
+            signal["descriptor"]["canonicalName"]
+                .as_str()
+                .is_some_and(|candidate| candidate.eq_ignore_ascii_case(name))
+        })
+        .unwrap_or_else(|| panic!("missing series '{name}' in {document:#}"))["values"]["samples"]
+        .as_array()
+        .expect("series samples")
+        .iter()
+        .map(|sample| {
+            sample
+                .as_f64()
+                .or_else(|| sample["real"].as_f64())
+                .expect("finite sample")
+        })
         .collect()
 }
 
@@ -171,25 +202,20 @@ fn multi_temperature_wraps_every_authored_analysis_without_extra_runs() {
 
     for path in &expected {
         let document = read_json(path);
-        let expected_analysis = if path.to_string_lossy().contains(".tran-") {
-            "transient"
+        let expected_kind = if path.to_string_lossy().contains(".tran-") {
+            "tran"
         } else {
             "ac"
         };
-        assert_eq!(
-            document["analysis"],
-            expected_analysis,
-            "{}",
-            path.display()
-        );
-        assert!(!signal_real_values(&document, "V(out)").is_empty());
+        assert_eq!(document["resultKind"], expected_kind, "{}", path.display());
+        assert!(!document_series(&document, "v(out)").is_empty());
     }
 
     let cold_ac = read_json(&expected[1]);
     let hot_ac = read_json(&expected[3]);
     assert_ne!(
-        signal_real_values(&cold_ac, "V(out)"),
-        signal_real_values(&hot_ac, "V(out)"),
+        document_series(&cold_ac, "v(out)"),
+        document_series(&hot_ac, "v(out)"),
         "temperature coordinates produced identical AC data"
     );
 }
@@ -215,7 +241,7 @@ fn single_temperature_configures_transient_without_running_a_temp_op() {
         planned_directory_contents(&deck, &requested).as_slice()
     );
     let expected = planned_artifacts(&deck, &requested);
-    assert_eq!(read_json(&expected[0])["analysis"], "transient");
+    assert_eq!(read_json(&expected[0])["resultKind"], "tran");
 }
 
 #[test]
@@ -284,10 +310,12 @@ fn repeated_ac_cards_keep_stable_analysis_namespaces_at_each_temperature() {
         let second = &pair[1];
         let first_document = read_json(first);
         let second_document = read_json(second);
-        assert_eq!(first_document["analysis"], "ac");
-        assert_eq!(second_document["analysis"], "ac");
-        let first_values = signal_real_values(&first_document, "V(out)");
-        let second_values = signal_real_values(&second_document, "V(out)");
+        assert_eq!(first_document["resultKind"], "ac");
+        assert_eq!(second_document["resultKind"], "ac");
+        assert_eq!(first_document["analysis"]["tag"], "ac-001");
+        assert_eq!(second_document["analysis"]["tag"], "ac-002");
+        let first_values = document_series(&first_document, "v(out)");
+        let second_values = document_series(&second_document, "v(out)");
         assert_eq!(first_values.len(), 1);
         assert_eq!(second_values.len(), 1);
         assert_ne!(
@@ -305,6 +333,7 @@ fn repeated_ac_cards_keep_stable_analysis_namespaces_at_each_temperature() {
         })
         .collect::<Vec<_>>();
     actual.sort();
+    expected.push(tag_output_path(&requested, "step_schema").with_extension("json"));
     expected.push(planned_set_manifest(&requested));
     expected.sort();
     assert_eq!(actual, expected, "unexpected OP or colliding AC artifact");
@@ -346,23 +375,38 @@ fn two_axis_implicit_op_uses_coordinate_artifacts_and_union_manifest() {
                 .and_then(|name| name.to_str())
                 .is_some_and(|name| name.contains(".run_") && name.contains(".implicit-op-001."))
         );
-        assert_eq!(read_json(artifact)["analysis"], "dc_op");
+        let document = read_json(artifact);
+        assert_eq!(document["resultKind"], "op");
+        assert_eq!(document["analysis"]["tag"], "implicit-op-001");
+        // A coordinate artifact names the coordinate and the topology it was
+        // produced at, so it can be read back without its manifest.
+        assert!(!document["coordinate"]["label"].is_null());
+        assert!(
+            document["topologyFingerprint"]
+                .as_str()
+                .is_some_and(|hex| hex.len() == 64)
+        );
     }
 
+    // The schema manifest groups its union by analysis instance, so a deck
+    // that publishes several analyses at each coordinate has one entry per
+    // analysis rather than one manifest per deck shape.
     let manifest_path = dir.join("operating_points.step_schema.json");
     let manifest = read_json(&manifest_path);
-    assert_eq!(manifest["analysis"], "implicit_op");
     assert_eq!(manifest["aggregation"], "coordinate_local");
     assert_eq!(manifest["missingness"], "union_validity_bitmap");
-    let coordinates = manifest["coordinates"]
+    let analyses = manifest["analyses"].as_array().expect("manifest analyses");
+    assert_eq!(analyses.len(), 1);
+    let entry = &analyses[0];
+    assert_eq!(entry["analysis_id"], "implicit-op-001");
+    let coordinates = entry["coordinates"]
         .as_array()
         .expect("manifest coordinates");
     assert_eq!(coordinates.len(), 4);
     for coordinate in coordinates {
-        assert_eq!(coordinate["analysis_id"], "implicit-op-001");
         assert_eq!(
             coordinate["validity"].as_array().expect("validity").len(),
-            manifest["union_schema"]
+            entry["union_schema"]
                 .as_array()
                 .expect("union schema")
                 .len()

@@ -114,9 +114,15 @@ fn assert_complete_set_or_nothing(directory: &Path) -> bool {
         published.contains(&"results.run_set.json".to_owned()),
         "a published coordinate set has no manifest: {published:?}"
     );
+    assert!(
+        published.contains(&"results.step_schema.json".to_owned()),
+        "a published coordinate set has no schema manifest: {published:?}"
+    );
+    // One artifact per coordinate, plus the schema manifest and the set
+    // manifest, both of which are members of the same transaction.
     assert_eq!(
         published.len(),
-        COORDINATES + 1,
+        COORDINATES + 2,
         "a partial coordinate set was published: {published:?}"
     );
     true

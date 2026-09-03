@@ -59,34 +59,86 @@ fn read_json(path: &Path) -> Value {
     serde_json::from_slice(&std::fs::read(path).expect("read SP JSON")).expect("parse SP JSON")
 }
 
-fn complex_signal<'a>(document: &'a Value, name: &str) -> (&'a [Value], &'a [Value]) {
-    let signal = document["signals"]
-        .as_array()
-        .expect("signals array")
-        .iter()
-        .find(|signal| signal["name"].as_str() == Some(name))
-        .unwrap_or_else(|| panic!("missing signal '{name}' in {document:#}"));
-    (
-        signal["real"].as_array().expect("real values"),
-        signal["imag"].as_array().expect("imaginary values"),
-    )
+/// One `.SP` CSV artifact decoded into its scale and its named columns.
+///
+/// `.SP DONOISE` publishes the current covariance matrix, its reference
+/// temperature, the 4kT normalization, and the two-port noise figures. The
+/// shared typed result document has no home for the last three, so those runs
+/// are exported in a flat format, which retains every column; this reads one
+/// back so the physical assertions below are unchanged.
+struct SpTable {
+    scale: Vec<f64>,
+    columns: Vec<(String, Vec<f64>)>,
 }
 
-fn real_values(document: &Value, name: &str) -> Vec<f64> {
-    complex_signal(document, name)
-        .0
-        .iter()
-        .map(|value| value.as_f64().expect("finite real value"))
-        .collect()
-}
+impl SpTable {
+    fn read(path: &Path) -> Self {
+        let text = std::fs::read_to_string(path).expect("read SP CSV");
+        let mut lines = text.lines().filter(|line| !line.trim().is_empty());
+        let header = lines
+            .next()
+            .expect("SP CSV header")
+            .split(',')
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        let mut columns = header
+            .iter()
+            .skip(1)
+            .map(|name| (name.clone(), Vec::new()))
+            .collect::<Vec<(String, Vec<f64>)>>();
+        let mut scale = Vec::new();
+        for line in lines {
+            let fields = line.split(',').collect::<Vec<_>>();
+            assert_eq!(fields.len(), header.len(), "ragged SP CSV row: {line}");
+            scale.push(fields[0].parse::<f64>().expect("numeric SP scale"));
+            for (index, column) in columns.iter_mut().enumerate() {
+                column
+                    .1
+                    .push(fields[index + 1].parse::<f64>().expect("numeric SP value"));
+            }
+        }
+        Self { scale, columns }
+    }
 
-fn signal_names(document: &Value) -> Vec<&str> {
-    document["signals"]
-        .as_array()
-        .expect("signals array")
-        .iter()
-        .map(|signal| signal["name"].as_str().expect("signal name"))
-        .collect()
+    fn column(&self, name: &str) -> &[f64] {
+        self.columns
+            .iter()
+            .find(|(candidate, _)| candidate == name)
+            .map(|(_, values)| values.as_slice())
+            .unwrap_or_else(|| {
+                panic!(
+                    "missing column '{name}' in {:?}",
+                    self.columns.iter().map(|(n, _)| n).collect::<Vec<_>>()
+                )
+            })
+    }
+
+    /// The real part of a complex column, which the flat writer splits into
+    /// `Re(name)`/`Im(name)`.
+    fn real_values(&self, name: &str) -> &[f64] {
+        self.column(&format!("Re({name})"))
+    }
+
+    fn imag_values(&self, name: &str) -> &[f64] {
+        self.column(&format!("Im({name})"))
+    }
+
+    /// Exported signal names with the complex real/imaginary decoration
+    /// removed, in artifact order.
+    fn signal_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = Vec::new();
+        for (name, _) in &self.columns {
+            let bare = name
+                .strip_prefix("Re(")
+                .or_else(|| name.strip_prefix("Im("))
+                .and_then(|rest| rest.strip_suffix(')'))
+                .unwrap_or(name);
+            if !names.iter().any(|seen| seen == bare) {
+                names.push(bare.to_string());
+            }
+        }
+        names
+    }
 }
 
 fn assert_relative(actual: f64, expected: f64, tolerance: f64, label: &str) {
@@ -100,45 +152,37 @@ fn assert_relative(actual: f64, expected: f64, tolerance: f64, label: &str) {
 #[test]
 fn keyword_noise_exports_physical_covariance_and_two_port_parameters() {
     let dir = test_dir("oracle");
-    let path = dir.join("sp.json");
-    let output = run(
-        &fixture("sp_donoise_keyword.cir"),
-        Some(&path),
-        Some("json"),
-    );
+    let path = dir.join("sp.csv");
+    let output = run(&fixture("sp_donoise_keyword.cir"), Some(&path), Some("csv"));
     assert!(
         output.status.success(),
         "SP DONOISE failed:\n{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let document = read_json(&path);
-    assert_eq!(document["analysis"], "sp");
-    assert_eq!(
-        document["scale"]["values"],
-        serde_json::json!([1000.0, 2000.0, 3000.0])
-    );
+    let table = SpTable::read(&path);
+    assert_eq!(table.scale, vec![1000.0, 2000.0, 3000.0]);
 
     let temperature = 300.15;
     let expected_density = 4.0 * 1.380_649e-23 * temperature / 50.0;
-    for value in real_values(&document, "CY_A2_per_Hz_1_1") {
+    for &value in table.real_values("CY_A2_per_Hz_1_1") {
         assert_relative(value, expected_density, 1.0e-10, "C11");
     }
-    for value in real_values(&document, "CY_A2_per_Hz_1_2") {
+    for &value in table.real_values("CY_A2_per_Hz_1_2") {
         assert_relative(value, -expected_density, 1.0e-10, "C12");
     }
-    for value in real_values(&document, "noise_resistance_ohm") {
+    for &value in table.real_values("noise_resistance_ohm") {
         assert_relative(value, 50.0, 1.0e-10, "Rn");
     }
-    for value in real_values(&document, "noise_factor_linear") {
+    for &value in table.real_values("noise_factor_linear") {
         assert_relative(value, 2.0, 1.0e-10, "F");
     }
-    for value in real_values(&document, "minimum_noise_factor_linear") {
+    for &value in table.real_values("minimum_noise_factor_linear") {
         assert_relative(value, 1.0, 1.0e-10, "Fmin");
     }
-    for value in real_values(&document, "noise_reference_temperature_K") {
+    for &value in table.real_values("noise_reference_temperature_K") {
         assert_relative(value, temperature, f64::EPSILON * 4.0, "temperature");
     }
-    for value in real_values(&document, "noise_normalization_4kT_J") {
+    for &value in table.real_values("noise_normalization_4kT_J") {
         assert_relative(
             value,
             4.0 * 1.380_649e-23 * temperature,
@@ -146,31 +190,75 @@ fn keyword_noise_exports_physical_covariance_and_two_port_parameters() {
             "4kT normalization",
         );
     }
-    let (gamma_real, gamma_imag) = complex_signal(&document, "optimum_source_reflection");
     assert!(
-        gamma_real
+        table
+            .real_values("optimum_source_reflection")
             .iter()
-            .all(|value| { (value.as_f64().expect("gamma real") - 1.0).abs() <= 1.0e-10 })
+            .all(|value| (value - 1.0).abs() <= 1.0e-10)
     );
     assert!(
-        gamma_imag
+        table
+            .imag_values("optimum_source_reflection")
             .iter()
-            .all(|value| { value.as_f64().expect("gamma imaginary").abs() <= 1.0e-12 })
+            .all(|value| value.abs() <= 1.0e-12)
     );
+}
+
+/// The shared S-parameter result document declares the scattering matrix and
+/// its ports. `.SP DONOISE` publishes more than that, so the typed format is
+/// refused rather than published with the noise provenance dropped.
+#[test]
+fn donoise_refuses_the_typed_document_instead_of_dropping_noise_provenance() {
+    let dir = test_dir("donoise_json_refusal");
+    let path = dir.join("sp.json");
+    let output = run(
+        &fixture("sp_donoise_keyword.cir"),
+        Some(&path),
+        Some("json"),
+    );
+
+    assert!(
+        !output.status.success(),
+        "a typed document that cannot hold the noise result was published anyway"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("covariance")
+            && stderr.contains("two-port noise")
+            && stderr.contains("csv"),
+        "the refusal must name what is lost and where to get it: {stderr}"
+    );
+    assert!(!path.exists(), "the refused run published an artifact");
+
+    // The same deck without DONOISE has a complete typed representation.
+    let typed = dir.join("plain.json");
+    let output = run(
+        &fixture("sp_donoise_numeric_false.cir"),
+        Some(&typed),
+        Some("json"),
+    );
+    assert!(
+        output.status.success(),
+        "plain .SP failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let document = read_json(&typed);
+    assert_eq!(document["resultKind"], "sp");
+    assert_eq!(document["analysis"]["tag"], "sp-001");
 }
 
 #[test]
 fn numeric_noise_forms_are_explicit_and_do_not_claim_disabled_work() {
     let dir = test_dir("numeric");
-    let keyword_path = dir.join("keyword.json");
-    let enabled_path = dir.join("enabled.json");
-    let disabled_path = dir.join("disabled.json");
+    let keyword_path = dir.join("keyword.csv");
+    let enabled_path = dir.join("enabled.csv");
+    let disabled_path = dir.join("disabled.csv");
     for (fixture_name, path) in [
         ("sp_donoise_keyword.cir", &keyword_path),
         ("sp_donoise_numeric_true.cir", &enabled_path),
         ("sp_donoise_numeric_false.cir", &disabled_path),
     ] {
-        let output = run(&fixture(fixture_name), Some(path), Some("json"));
+        let output = run(&fixture(fixture_name), Some(path), Some("csv"));
         assert!(
             output.status.success(),
             "{fixture_name} failed:\n{}",
@@ -178,12 +266,11 @@ fn numeric_noise_forms_are_explicit_and_do_not_claim_disabled_work() {
         );
     }
 
-    let keyword = read_json(&keyword_path);
-    let enabled = read_json(&enabled_path);
-    assert_eq!(keyword["signals"], enabled["signals"]);
+    let keyword = std::fs::read_to_string(&keyword_path).expect("read keyword form");
+    let enabled = std::fs::read_to_string(&enabled_path).expect("read numeric-true form");
+    assert_eq!(keyword, enabled);
 
-    let disabled = read_json(&disabled_path);
-    let names = signal_names(&disabled);
+    let names = SpTable::read(&disabled_path).signal_names();
     assert!(names.iter().all(|name| name.starts_with("S_")), "{names:?}");
     assert!(
         !names

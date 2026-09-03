@@ -72,42 +72,93 @@ fn read_json(path: &Path) -> Value {
         .expect("parse JSON output")
 }
 
-fn values<'a>(document: &'a Value, name: &str) -> &'a [Value] {
-    document["signals"]
+/// The complex samples of one distortion series.
+///
+/// The typed document keys a distortion series by the signal it measures and
+/// the sub-result it belongs to: the fundamental at a tone, or one Volterra
+/// product. It publishes the peak phasor itself, so magnitude, phase, and the
+/// ratio to the fundamental are computed here from the published number rather
+/// than being read back from a column the writer pre-computed.
+fn series(document: &Value, signal: &str, qualifier: &Value) -> Vec<(f64, f64)> {
+    let found = document["signals"]
         .as_array()
         .expect("signals array")
         .iter()
-        .find(|signal| {
-            signal["name"]
+        .find(|candidate| {
+            candidate["descriptor"]["canonicalName"]
                 .as_str()
-                .is_some_and(|candidate| candidate.eq_ignore_ascii_case(name))
+                .is_some_and(|name| name.eq_ignore_ascii_case(signal))
+                && &candidate["qualifier"] == qualifier
         })
-        .unwrap_or_else(|| panic!("missing signal '{name}' in {document:#}"))["values"]
+        .unwrap_or_else(|| {
+            panic!("missing series '{signal}' qualified {qualifier} in {document:#}")
+        });
+    found["values"]["samples"]
         .as_array()
-        .expect("real-valued signal")
+        .expect("complex samples")
+        .iter()
+        .map(|sample| {
+            (
+                sample["real"].as_f64().expect("real part"),
+                sample["imaginary"].as_f64().expect("imaginary part"),
+            )
+        })
+        .collect()
 }
 
-fn complex_values<'a>(document: &'a Value, name: &str) -> (&'a [Value], &'a [Value]) {
-    let signal = document["signals"]
-        .as_array()
-        .expect("signals array")
-        .iter()
-        .find(|signal| {
-            signal["name"]
-                .as_str()
-                .is_some_and(|candidate| candidate.eq_ignore_ascii_case(name))
-        })
-        .unwrap_or_else(|| panic!("missing signal '{name}' in {document:#}"));
-    (
-        signal["real"].as_array().expect("complex real values"),
-        signal["imag"].as_array().expect("complex imaginary values"),
+fn fundamental(document: &Value, signal: &str, tone: &str) -> Vec<(f64, f64)> {
+    series(
+        document,
+        signal,
+        &serde_json::json!({"kind": "distortion-fundamental", "tone": tone}),
     )
 }
 
-fn numbers(values: &[Value]) -> Vec<f64> {
-    values
+fn product(document: &Value, signal: &str, product: &str) -> Vec<(f64, f64)> {
+    series(
+        document,
+        signal,
+        &serde_json::json!({"kind": "distortion-product", "product": product}),
+    )
+}
+
+/// Frequencies the document declares for one named Volterra product.
+fn product_frequencies(document: &Value, product: &str) -> Vec<f64> {
+    document["payload"]["products"]
+        .as_array()
+        .expect("distortion products")
         .iter()
-        .map(|value| value.as_f64().expect("finite JSON number"))
+        .find(|entry| entry["product"].as_str() == Some(product))
+        .unwrap_or_else(|| panic!("missing product '{product}' in {document:#}"))["frequencies"]
+        .as_array()
+        .expect("product frequencies")
+        .iter()
+        .map(|value| value.as_f64().expect("finite frequency"))
+        .collect()
+}
+
+fn magnitudes(samples: &[(f64, f64)]) -> Vec<f64> {
+    samples.iter().map(|(re, im)| re.hypot(*im)).collect()
+}
+
+fn phases_deg(samples: &[(f64, f64)]) -> Vec<f64> {
+    samples
+        .iter()
+        .map(|(re, im)| im.atan2(*re).to_degrees())
+        .collect()
+}
+
+fn axis_values(document: &Value, name: &str) -> Vec<f64> {
+    document["axes"]
+        .as_array()
+        .expect("document axes")
+        .iter()
+        .find(|axis| axis["name"].as_str() == Some(name))
+        .unwrap_or_else(|| panic!("missing axis '{name}' in {document:#}"))["values"]["values"]
+        .as_array()
+        .expect("axis coordinates")
+        .iter()
+        .map(|value| value.as_f64().expect("finite coordinate"))
         .collect()
 }
 
@@ -139,51 +190,54 @@ fn one_tone_exports_nonzero_physical_harmonics_and_normalization() {
     );
 
     let document = read_json(&output_path);
-    assert_eq!(document["analysis"], "disto");
-    assert_eq!(document["scale"]["name"], "frequency(f1)");
+    assert_eq!(document["resultKind"], "distortion");
+    assert_eq!(document["analysis"]["tag"], "disto-001");
+    assert_eq!(axis_values(&document, "frequency"), [1.0e3, 1.5e3, 2.0e3]);
     assert_eq!(
-        numbers(document["scale"]["values"].as_array().unwrap()),
-        [1.0e3, 1.5e3, 2.0e3]
-    );
-    assert_eq!(
-        numbers(values(&document, "frequency(2f1)")),
+        product_frequencies(&document, "second-harmonic"),
         [2.0e3, 3.0e3, 4.0e3]
     );
     assert_eq!(
-        numbers(values(&document, "frequency(3f1)")),
+        product_frequencies(&document, "third-harmonic"),
         [3.0e3, 4.5e3, 6.0e3]
     );
 
     let vt = thermal_voltage();
     let expected_hd2 = diode_bias_current() * A1.powi(2) / (4.0 * vt.powi(2));
     let expected_hd3 = diode_bias_current() * A1.powi(3) / (24.0 * vt.powi(3));
-    let hd2 = numbers(values(&document, "magnitude(2f1:I(V1))"));
-    let hd3 = numbers(values(&document, "magnitude(3f1:I(V1))"));
-    for actual in hd2 {
+    let hd2_samples = product(&document, "i(v1)", "second-harmonic");
+    let hd3_samples = product(&document, "i(v1)", "third-harmonic");
+    for actual in magnitudes(&hd2_samples) {
         assert_close(actual, expected_hd2, 2.0e-5, "second harmonic current");
     }
-    for actual in hd3 {
+    for actual in magnitudes(&hd3_samples) {
         assert_close(actual, expected_hd3, 2.0e-3, "third harmonic current");
     }
 
-    let (real, imag) = complex_values(&document, "peak(2f1:I(V1))");
-    let real = numbers(real);
-    let imag = numbers(imag);
     assert!(
-        real.iter().all(|value| *value < 0.0),
+        hd2_samples.iter().all(|(re, _)| *re < 0.0),
         "the voltage-source branch convention makes the diode product current negative real"
     );
     assert!(
-        imag.iter()
-            .all(|value| value.abs() <= expected_hd2 * 1.0e-10)
+        hd2_samples
+            .iter()
+            .all(|(_, im)| im.abs() <= expected_hd2 * 1.0e-10)
     );
-    let phase = numbers(values(&document, "phase_deg(2f1:I(V1))"));
     assert!(
-        phase
+        phases_deg(&hd2_samples)
             .iter()
             .all(|value| (value.abs() - 180.0).abs() <= 1.0e-8)
     );
-    let ratios = numbers(values(&document, "magnitude_ratio_to_f1(2f1:I(V1))"));
+
+    // The published fundamental is what a magnitude ratio normalizes against,
+    // and it is non-zero at every point, so every ratio is finite.
+    let f1 = magnitudes(&fundamental(&document, "i(v1)", "f1"));
+    assert!(f1.iter().all(|value| *value > 0.0));
+    let ratios = magnitudes(&hd2_samples)
+        .iter()
+        .zip(&f1)
+        .map(|(product, fundamental)| product / fundamental)
+        .collect::<Vec<_>>();
     assert!(ratios.iter().all(|ratio| ratio.is_finite() && *ratio > 0.0));
 }
 
@@ -199,41 +253,43 @@ fn two_tone_accepts_ratio_below_one_and_exports_fixed_f2_products() {
     );
 
     let document = read_json(&output_path);
-    assert_eq!(numbers(values(&document, "f2_over_f1")), [0.9, 0.9, 0.9]);
+    assert_eq!(document["payload"]["f2OverF1"], 0.9);
     assert_eq!(
-        numbers(values(&document, "frequency(f2)")),
-        [900.0, 900.0, 900.0]
-    );
-    assert_eq!(
-        numbers(values(&document, "frequency(f1+f2)")),
+        product_frequencies(&document, "sum"),
         [1_900.0, 2_400.0, 2_900.0]
     );
     assert_eq!(
-        numbers(values(&document, "frequency(f1-f2)")),
+        product_frequencies(&document, "difference"),
         [100.0, 600.0, 1_100.0]
     );
     assert_eq!(
-        numbers(values(&document, "frequency(2f1-f2)")),
+        product_frequencies(&document, "third-order-difference"),
         [1_100.0, 2_100.0, 3_100.0]
+    );
+    // f2 = 0.9 * f1 is published as its own fundamental tone, not as a column
+    // of a repeated constant.
+    assert_eq!(
+        fundamental(&document, "i(v1)", "f2").len(),
+        axis_values(&document, "frequency").len()
     );
 
     let vt = thermal_voltage();
     let expected_im2 = diode_bias_current() * A1 * A2 / (2.0 * vt.powi(2));
     let expected_im3 = diode_bias_current() * A1.powi(2) * A2 / (8.0 * vt.powi(3));
-    for product in ["f1+f2", "f1-f2"] {
-        for actual in numbers(values(&document, &format!("magnitude({product}:I(V1))"))) {
-            assert_close(actual, expected_im2, 2.0e-5, product);
+    for name in ["sum", "difference"] {
+        for actual in magnitudes(&product(&document, "i(v1)", name)) {
+            assert_close(actual, expected_im2, 2.0e-5, name);
         }
     }
-    for actual in numbers(values(&document, "magnitude(2f1-f2:I(V1))")) {
+    for actual in magnitudes(&product(&document, "i(v1)", "third-order-difference")) {
         assert_close(actual, expected_im3, 2.0e-3, "third-order difference");
     }
-    for product in ["f1+f2", "2f1-f2"] {
+    for name in ["sum", "third-order-difference"] {
         assert!(
-            numbers(values(&document, &format!("phase_deg({product}:I(V1))")))
+            phases_deg(&product(&document, "i(v1)", name))
                 .iter()
                 .all(|phase| (phase.abs() - 180.0).abs() <= 1.0e-8),
-            "{product} branch-current phase must match the real negative diode oracle"
+            "{name} branch-current phase must match the real negative diode oracle"
         );
     }
 }
