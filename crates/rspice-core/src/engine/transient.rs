@@ -2180,6 +2180,13 @@ impl Engine {
     /// Run a transient and additionally return the end-of-run state
     /// checkpoint, for segmented long simulations: save it, then extend
     /// later with [`Engine::run_tran_resume`].
+    ///
+    /// Refused before any solver work when an owner of this deck's accepted
+    /// state is not checkpointable, naming every such owner: the only consumer
+    /// of a checkpoint is a resume, so an image that cannot be resumed is worth
+    /// nothing, and a run that reported that only at `tstop` would have spent
+    /// the whole run to say so. [`Engine::preflight_transient_checkpoint`]
+    /// answers the same question without running.
     pub fn run_tran_checkpointed(
         &self,
         netlist: &Netlist,
@@ -2304,6 +2311,11 @@ impl Engine {
     /// without another file, matching Xyce 7.10. Keeping nominal filename time
     /// separate from actual accepted state time prevents checkpointing from
     /// perturbing the physical trajectory.
+    ///
+    /// A non-empty schedule is refused before any solver work when an owner of
+    /// this deck's accepted state is not checkpointable, naming every such
+    /// owner; [`Engine::preflight_transient_checkpoint`] reports the same
+    /// inventory without running.
     pub fn run_tran_checkpoint_schedule_with_startup_mode(
         &self,
         netlist: &Netlist,
@@ -3233,9 +3245,18 @@ impl Engine {
         let record_device_op_traces = Self::should_record_transient_device_op_traces(netlist);
         let mut circuit = self.build_circuit_with_abort(netlist, abort)?;
         if final_checkpoint_retention.is_retained() || !scheduled_checkpoint_times.is_empty() {
+            // A deck this build understands, asking for a checkpoint it cannot
+            // produce: a capability refusal, not a malformed circuit, and one
+            // a frontend reports against the roadmap rather than back at the
+            // author.
             Self::transient_checkpoint_capability_for_circuit(&circuit, abort)?
                 .require_resumable()
-                .map_err(SimulationError::Circuit)?;
+                .map_err(|detail| {
+                    SimulationError::unsupported_capability(
+                        "analysis.tran.checkpoint_capability",
+                        detail,
+                    )
+                })?;
         }
         if circuit.num_nodes() == 0 && circuit.num_branches() == 0 {
             let mut result = TransientResult {
