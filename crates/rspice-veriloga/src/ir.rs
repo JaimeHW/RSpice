@@ -1048,6 +1048,45 @@ impl DeviceIR {
             module.contributions.len()
         ));
 
+        // Give every equation the definition that reaches the point it was
+        // written at, before anything reads a contribution expression again.
+        // Noise process metadata is extracted from these expressions below and
+        // keeps a clone of the magnitude, so a rewrite after that point would
+        // leave the PSD reading the slot the assignment pass finishes with
+        // while the residual read the snapshot. The pass also splices copies
+        // into `assignments`, which has to precede the static classification (a
+        // snapshot of a static variable is itself static) and the shadow build
+        // (which then differentiates the copies and captures the derivative
+        // shadows at the same point). Its spliced items are plain variable
+        // reads: no noise site, no branch probe, nothing the passes between
+        // here and there look for.
+        let span = crate::metrics::FineSpan::new("ir.reaching_snapshots");
+        let statement_sites = module
+            .statements
+            .iter()
+            .map(|statement| match statement {
+                crate::semantic::AnalyzedStatement::Assignment(assignment) => assignment.site,
+                crate::semantic::AnalyzedStatement::Loop(loop_statement) => loop_statement.site,
+            })
+            .collect::<Vec<_>>();
+        let equation_sites = module
+            .contributions
+            .iter()
+            .map(|contribution| contribution.site)
+            .collect::<Vec<_>>();
+        let snapshots = crate::reaching_definition::insert_equation_snapshots(
+            &mut ir.assignments,
+            &mut ir.variables,
+            &ir.arrays,
+            &statement_sites,
+            &mut converted_contribs,
+            &equation_sites,
+        )?;
+        span.finish(&format!(
+            "module={} reaching_snapshots={snapshots}",
+            module.name
+        ));
+
         let span = crate::metrics::FineSpan::new("ir.noise_collect");
         Self::collect_noise_processes_in_items(&ir.assignments, &mut ir.noise_sources)?;
         for expr in &converted_contribs {
@@ -1077,39 +1116,6 @@ impl DeviceIR {
         if !branch_table.is_empty() {
             autodiff::rewrite_branch_probes_in_items(&mut ir.assignments, &branch_table);
         }
-
-        // Give every equation the definition that reaches the point it was
-        // written at, before anything downstream reads either list. The pass
-        // splices copies into `assignments`, so it has to precede the static
-        // classification (a snapshot of a static variable is itself static)
-        // and the shadow build (which then differentiates the copies and
-        // captures the derivatives at the same point).
-        let span = crate::metrics::FineSpan::new("ir.reaching_snapshots");
-        let statement_sites = module
-            .statements
-            .iter()
-            .map(|statement| match statement {
-                crate::semantic::AnalyzedStatement::Assignment(assignment) => assignment.site,
-                crate::semantic::AnalyzedStatement::Loop(loop_statement) => loop_statement.site,
-            })
-            .collect::<Vec<_>>();
-        let equation_sites = module
-            .contributions
-            .iter()
-            .map(|contribution| contribution.site)
-            .collect::<Vec<_>>();
-        let snapshots = crate::reaching_definition::insert_equation_snapshots(
-            &mut ir.assignments,
-            &mut ir.variables,
-            &ir.arrays,
-            &statement_sites,
-            &mut converted_contribs,
-            &equation_sites,
-        )?;
-        span.finish(&format!(
-            "module={} reaching_snapshots={snapshots}",
-            module.name
-        ));
 
         // Variables that are fixed per instance (computed purely from
         // parameters) may participate in topology guards

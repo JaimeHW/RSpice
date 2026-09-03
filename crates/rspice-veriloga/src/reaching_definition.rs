@@ -146,12 +146,7 @@ pub(crate) fn insert_equation_snapshots(
         let site = equation_sites[equation];
         let point = statement_sites.partition_point(|statement| *statement < site);
 
-        let mut reads: Vec<SmolStr> = Vec::new();
-        crate::ir::autodiff::visit_expr(expr, &mut |node| match node {
-            IrExpr::Var(name) => reads.push(name.clone()),
-            IrExpr::VarIndexed { array, .. } => reads.push(array.clone()),
-            _ => {}
-        });
+        let mut reads = variable_reads(expr);
         reads.sort_unstable();
         reads.dedup();
 
@@ -268,10 +263,174 @@ fn record_writes(item: &IrAssignmentItem, index: usize, out: &mut HashMap<usize,
     }
 }
 
-/// Replace the named variable reads with their snapshots.
+/// The operand programs an operator owns, which the generic walk stops at.
+///
+/// `map_expr` and `visit_expr` treat every event and noise node as a leaf,
+/// because an operator's operands are compiled into programs of their own
+/// rather than into the expression holding it. Those programs are evaluated
+/// with the equation all the same — a noise magnitude is read at the operating
+/// point the residual was stamped from — so they read the same definitions and
+/// must be captured the same way. Nothing else the two walks stop at owns a
+/// sub-expression: a Laplace or Zi coefficient list is numbers, a companion is
+/// a slot ordinal.
+fn operator_operands(expr: &IrExpr) -> Vec<&IrExpr> {
+    fn optional<'a>(out: &mut Vec<&'a IrExpr>, operand: &'a Option<Box<IrExpr>>) {
+        if let Some(operand) = operand {
+            out.push(operand);
+        }
+    }
+
+    let mut operands = Vec::new();
+    match expr {
+        IrExpr::WhiteNoise { power, .. } => operands.push(power.as_ref()),
+        IrExpr::FlickerNoise {
+            power, exponent, ..
+        } => {
+            operands.push(power);
+            operands.push(exponent);
+        }
+        IrExpr::Cross {
+            expr,
+            direction,
+            time_tol,
+            expr_tol,
+            enable,
+        } => {
+            operands.push(expr);
+            optional(&mut operands, direction);
+            optional(&mut operands, time_tol);
+            optional(&mut operands, expr_tol);
+            optional(&mut operands, enable);
+        }
+        IrExpr::Above {
+            expr,
+            time_tol,
+            expr_tol,
+            enable,
+        } => {
+            operands.push(expr);
+            optional(&mut operands, time_tol);
+            optional(&mut operands, expr_tol);
+            optional(&mut operands, enable);
+        }
+        IrExpr::Timer {
+            start_time,
+            period,
+            time_tol,
+            enable,
+        } => {
+            operands.push(start_time);
+            optional(&mut operands, period);
+            optional(&mut operands, time_tol);
+            optional(&mut operands, enable);
+        }
+        IrExpr::LastCrossing { expr, .. } => operands.push(expr),
+        _ => {}
+    }
+    operands
+}
+
+/// Every variable an equation reads, operator operands included.
+fn variable_reads(expr: &IrExpr) -> Vec<SmolStr> {
+    /// One generic walk, queueing the operand programs it stops at.
+    ///
+    /// The operands are queued by value because `visit_expr` hands its
+    /// callback a reference that may not outlive the call. They are an
+    /// operator's arguments — a noise magnitude, a crossing tolerance — so the
+    /// copy is bounded by what one operator was written with.
+    fn scan(expr: &IrExpr, reads: &mut Vec<SmolStr>, queue: &mut Vec<IrExpr>) {
+        crate::ir::autodiff::visit_expr(expr, &mut |node| {
+            match node {
+                IrExpr::Var(name) => reads.push(name.clone()),
+                IrExpr::VarIndexed { array, .. } => reads.push(array.clone()),
+                _ => {}
+            }
+            queue.extend(operator_operands(node).into_iter().cloned());
+        });
+    }
+
+    let mut reads = Vec::new();
+    let mut queue = Vec::new();
+    scan(expr, &mut reads, &mut queue);
+    while !queue.is_empty() {
+        for operand in std::mem::take(&mut queue) {
+            scan(&operand, &mut reads, &mut queue);
+        }
+    }
+    reads
+}
+
+/// Replace the named variable reads with their snapshots, operator operands
+/// included.
 fn rename_variable_reads(expr: &IrExpr, renames: &HashMap<SmolStr, SmolStr>) -> IrExpr {
+    fn rename_optional(
+        operand: &Option<Box<IrExpr>>,
+        renames: &HashMap<SmolStr, SmolStr>,
+    ) -> Option<Box<IrExpr>> {
+        operand
+            .as_ref()
+            .map(|operand| Box::new(rename_variable_reads(operand, renames)))
+    }
+
     crate::ir::autodiff::map_expr(expr, &mut |node| match node {
-        IrExpr::Var(name) => renames.get(name).map(|snapshot| IrExpr::Var(snapshot.clone())),
+        IrExpr::Var(name) => renames
+            .get(name)
+            .map(|snapshot| IrExpr::Var(snapshot.clone())),
+        IrExpr::WhiteNoise { site, power, name } => Some(IrExpr::WhiteNoise {
+            site: *site,
+            power: Box::new(rename_variable_reads(power, renames)),
+            name: name.clone(),
+        }),
+        IrExpr::FlickerNoise {
+            site,
+            power,
+            exponent,
+            name,
+        } => Some(IrExpr::FlickerNoise {
+            site: *site,
+            power: Box::new(rename_variable_reads(power, renames)),
+            exponent: Box::new(rename_variable_reads(exponent, renames)),
+            name: name.clone(),
+        }),
+        IrExpr::Cross {
+            expr,
+            direction,
+            time_tol,
+            expr_tol,
+            enable,
+        } => Some(IrExpr::Cross {
+            expr: Box::new(rename_variable_reads(expr, renames)),
+            direction: rename_optional(direction, renames),
+            time_tol: rename_optional(time_tol, renames),
+            expr_tol: rename_optional(expr_tol, renames),
+            enable: rename_optional(enable, renames),
+        }),
+        IrExpr::Above {
+            expr,
+            time_tol,
+            expr_tol,
+            enable,
+        } => Some(IrExpr::Above {
+            expr: Box::new(rename_variable_reads(expr, renames)),
+            time_tol: rename_optional(time_tol, renames),
+            expr_tol: rename_optional(expr_tol, renames),
+            enable: rename_optional(enable, renames),
+        }),
+        IrExpr::Timer {
+            start_time,
+            period,
+            time_tol,
+            enable,
+        } => Some(IrExpr::Timer {
+            start_time: Box::new(rename_variable_reads(start_time, renames)),
+            period: rename_optional(period, renames),
+            time_tol: rename_optional(time_tol, renames),
+            enable: rename_optional(enable, renames),
+        }),
+        IrExpr::LastCrossing { expr, direction } => Some(IrExpr::LastCrossing {
+            expr: Box::new(rename_variable_reads(expr, renames)),
+            direction: *direction,
+        }),
         _ => None,
     })
 }
@@ -519,9 +678,9 @@ mod survey {
                 .model
                 .variable_names
                 .iter()
-                .filter(|name| name.contains(SNAPSHOT_MARKER))
                 .map(|name| name.as_str())
-                .collect::<Vec<_>>();
+                .filter(|name| name.contains(SNAPSHOT_MARKER))
+                .collect::<Vec<&str>>();
             if slots.is_empty() {
                 println!("reaching-survey model={} snapshots=0", shipped.name);
                 continue;

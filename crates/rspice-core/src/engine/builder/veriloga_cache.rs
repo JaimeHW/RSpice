@@ -200,7 +200,17 @@ use super::*;
 // at exactly the point the comparison is made. The widths are syntactic, so
 // they now travel with the compiled model. Rebuilding is the only reading: the
 // old record's placeholder shape is not recoverable from the record.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 40;
+// Version 41 changes which value an equation reads. Through version 40 the
+// bytecode's stamp entries read a variable's slot after the whole assignment
+// pass had run, so an equation over a scratch variable a later statement
+// reassigns read the last write rather than the definition reaching the point
+// the contribution was written at. The compiler now redirects such a read to a
+// snapshot slot filled where the definition reaches. A version-40 record holds
+// a `CompiledModel` with neither the snapshot variables nor the redirected
+// stamp programs, and nothing in the record distinguishes one written before
+// the repair from one written after — reading it would silently stamp the
+// defective value on the VM and JIT routes. Rebuilding is the only reading.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 41;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
