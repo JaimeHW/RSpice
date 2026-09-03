@@ -63,16 +63,7 @@ pub(crate) fn compressed_transient_analog_state(
         result
             .real_traces
             .iter()
-            .map(|trace| {
-                (
-                    trace.node_name.clone(),
-                    trace
-                        .points
-                        .iter()
-                        .map(|point| (point.time, point.value))
-                        .collect(),
-                )
-            })
+            .map(real_trace_persistence_state)
             .collect(),
         identity_persistence_state(&result.identity),
         result
@@ -144,16 +135,7 @@ pub(crate) fn rebuild_compressed_transient(
             .into_iter()
             .map(rebuild_digital_trace)
             .collect::<PyResult<Vec<_>>>()?,
-        real_traces: real_traces
-            .into_iter()
-            .map(|(node_name, points)| rspice_core::engine::RealTrace {
-                node_name,
-                points: points
-                    .into_iter()
-                    .map(|(time, value)| rspice_core::engine::RealTracePoint { time, value })
-                    .collect(),
-            })
-            .collect(),
+        real_traces: real_traces.into_iter().map(rebuild_real_trace).collect(),
         post_results: rspice_core::engine::TransientPostResults {
             fft: rebuild_transient_fft_results(fft_state)?,
             fourier: fourier

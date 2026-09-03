@@ -58,3 +58,29 @@ pub(crate) fn rebuild_digital_trace(
         points: rebuilt,
     })
 }
+
+pub(crate) fn real_trace_persistence_state(
+    trace: &rspice_core::engine::RealTrace,
+) -> CompressedRealTracePersistenceState {
+    (
+        trace.node_name.clone(),
+        trace
+            .points
+            .iter()
+            .map(|point| (point.time, point.value))
+            .collect(),
+    )
+}
+
+pub(crate) fn rebuild_real_trace(
+    state: CompressedRealTracePersistenceState,
+) -> rspice_core::engine::RealTrace {
+    let (node_name, points) = state;
+    rspice_core::engine::RealTrace {
+        node_name,
+        points: points
+            .into_iter()
+            .map(|(time, value)| rspice_core::engine::RealTracePoint { time, value })
+            .collect(),
+    }
+}
