@@ -2111,9 +2111,12 @@ impl CircuitData {
                     rhs,
                     solution,
                     num_nodes,
-                    crate::device::veriloga_builtins::GeneratedAnalysisKind::Tran,
-                    simparams,
-                    crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
+                    crate::device::veriloga_builtins::GeneratedEvaluationRequest {
+                        analysis: crate::device::veriloga_builtins::GeneratedAnalysisKind::Tran,
+                        simparams,
+                        evaluation_mode:
+                            crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
+                    },
                 )
                 .map_err(|error| error.to_string())
         })

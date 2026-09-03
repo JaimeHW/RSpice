@@ -2400,10 +2400,10 @@ impl Engine {
             effective_method,
             trap_order,
             NgspiceTruncationTolerances {
-                reltol: reltol,
-                current_abstol: current_abstol,
-                charge_abstol: charge_abstol,
-                trtol: trtol,
+                reltol,
+                current_abstol,
+                charge_abstol,
+                trtol,
             },
         )?;
         let num_nodes = circuit.num_nodes();
@@ -2432,18 +2432,18 @@ impl Engine {
                     dt,
                     q_curr,
                     BranchChargeHistory {
-                        q_prev: q_prev,
-                        q_prev_prev: q_prev_prev,
-                        cq_prev: cq_prev,
+                        q_prev,
+                        q_prev_prev,
+                        cq_prev,
                     },
                 );
                 let Some(branch_limit) = truncation.limit(ChargeSamples {
-                    q_curr: q_curr,
-                    q_prev: q_prev,
-                    q_prev_prev: q_prev_prev,
-                    q_prev_prev_prev: q_prev_prev_prev,
-                    cq_curr: cq_curr,
-                    cq_prev: cq_prev,
+                    q_curr,
+                    q_prev,
+                    q_prev_prev,
+                    q_prev_prev_prev,
+                    cq_curr,
+                    cq_prev,
                 }) else {
                     continue;
                 };
@@ -2800,17 +2800,17 @@ impl Engine {
                 circuit,
                 candidate_solution,
                 TruncationStep {
-                    method: method,
-                    trap_order: trap_order,
-                    dt: dt,
+                    method,
+                    trap_order,
+                    dt,
                 },
                 mosfet_history.accepted_dt_prev,
                 mosfet_history.accepted_dt_prev_prev,
                 NgspiceTruncationTolerances {
-                    reltol: reltol,
-                    current_abstol: current_abstol,
-                    charge_abstol: charge_abstol,
-                    trtol: trtol,
+                    reltol,
+                    current_abstol,
+                    charge_abstol,
+                    trtol,
                 },
             )
             .filter(|limit| limit.is_finite() && *limit > 0.0)

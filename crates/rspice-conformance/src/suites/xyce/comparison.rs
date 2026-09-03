@@ -1033,10 +1033,10 @@ impl XyceTestRunner {
     ) -> Result<Vec<XyceValueMismatch>, String> {
         self.compare_step_tran_runs_with_print(
             &XyceStepTranComparison {
-                plan: plan,
-                step_runs: step_runs,
-                abort: abort,
-                locked_time_grid: locked_time_grid,
+                plan,
+                step_runs,
+                abort,
+                locked_time_grid,
             },
             plan.require_print("stepped transient comparison")?,
             step_references,
@@ -1230,10 +1230,10 @@ impl XyceTestRunner {
             };
             let mut mismatches = self.compare_step_tran_runs_with_print(
                 &XyceStepTranComparison {
-                    plan: plan,
-                    step_runs: step_runs,
-                    abort: abort,
-                    locked_time_grid: locked_time_grid,
+                    plan,
+                    step_runs,
+                    abort,
+                    locked_time_grid,
                 },
                 &print,
                 &step_references,
@@ -4586,7 +4586,7 @@ impl XyceTestRunner {
             results,
             XyceStepContext {
                 row_netlists: None,
-                expected_step_index: expected_step_index,
+                expected_step_index,
             },
         )
     }
@@ -5515,13 +5515,13 @@ impl XyceTestRunner {
                             &XyceReferenceRow {
                                 table: reference,
                                 time_column: layout.time_column,
-                                row_index: row_index,
+                                row_index,
                             },
                             column_index + layout.data_column_offset,
                             actual,
                             XyceNeighborhoodTolerance {
                                 value: tolerance,
-                                time_tolerance: time_tolerance,
+                                time_tolerance,
                                 time_scale_factor: tran_time_scale_factor,
                             },
                         )
@@ -5537,12 +5537,12 @@ impl XyceTestRunner {
                             &XyceReferenceRow {
                                 table: reference,
                                 time_column: layout.time_column,
-                                row_index: row_index,
+                                row_index,
                             },
                             expected,
                             XyceCorridorTolerance {
                                 value: tolerance,
-                                output_interval: output_interval,
+                                output_interval,
                                 time_scale_factor: tran_time_scale_factor,
                             },
                         )?
@@ -6309,8 +6309,8 @@ impl XyceTestRunner {
             return self.compare_measurement_references(
                 &XyceMeasureArtifacts {
                     paths: scalar_paths,
-                    tolerance: tolerance,
-                    declarations: declarations,
+                    tolerance,
+                    declarations,
                 },
                 scalar,
                 XyceMeasurePolicy {
@@ -6324,8 +6324,8 @@ impl XyceTestRunner {
             return self.compare_mixed_measurement_references(
                 &XyceMeasureArtifacts {
                     paths: scalar_paths,
-                    tolerance: tolerance,
-                    declarations: declarations,
+                    tolerance,
+                    declarations,
                 },
                 scalar,
                 continuous,
@@ -6340,8 +6340,8 @@ impl XyceTestRunner {
             self.compare_measurement_references(
                 &XyceMeasureArtifacts {
                     paths: scalar_paths,
-                    tolerance: tolerance,
-                    declarations: declarations,
+                    tolerance,
+                    declarations,
                 },
                 scalar,
                 XyceMeasurePolicy {

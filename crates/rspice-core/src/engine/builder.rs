@@ -90,8 +90,8 @@ use advanced_mos::{
 mod generated_model_routing;
 #[cfg(feature = "veriloga-builtins-base")]
 use generated_model_routing::{
-    try_route_generated_bjt_model, try_route_generated_diode_model, try_route_generated_mos_model,
-    try_route_generated_resistor_model,
+    GeneratedRoutingContext, try_route_generated_bjt_model, try_route_generated_diode_model,
+    try_route_generated_mos_model, try_route_generated_resistor_model,
 };
 
 #[inline]
@@ -4929,10 +4929,12 @@ impl Engine {
                             netlist,
                             element,
                             model_name,
-                            instance_params,
-                            deferred_params,
-                            self.config.spice_dialect,
-                            self.config.temperature,
+                            GeneratedRoutingContext {
+                                instance_params,
+                                deferred_params,
+                                spice_dialect: self.config.spice_dialect,
+                                temperature: self.config.temperature,
+                            },
                         )?
                     {
                         continue;
@@ -5432,10 +5434,12 @@ impl Engine {
                         netlist,
                         element,
                         model,
-                        instance_params,
-                        deferred_params,
-                        self.config.spice_dialect,
-                        self.config.temperature,
+                        GeneratedRoutingContext {
+                            instance_params,
+                            deferred_params,
+                            spice_dialect: self.config.spice_dialect,
+                            temperature: self.config.temperature,
+                        },
                     )? {
                         continue;
                     }
@@ -5742,10 +5746,12 @@ impl Engine {
                         element,
                         model,
                         model_def,
-                        instance_params,
-                        deferred_params,
-                        self.config.spice_dialect,
-                        self.config.temperature,
+                        GeneratedRoutingContext {
+                            instance_params,
+                            deferred_params,
+                            spice_dialect: self.config.spice_dialect,
+                            temperature: self.config.temperature,
+                        },
                         self.config.device_voltage_limiting,
                     )? {
                         continue;
@@ -6009,10 +6015,12 @@ impl Engine {
                         model,
                         model_def,
                         *compact_syntax,
-                        instance_params,
-                        deferred_params,
-                        self.config.spice_dialect,
-                        self.config.temperature,
+                        GeneratedRoutingContext {
+                            instance_params,
+                            deferred_params,
+                            spice_dialect: self.config.spice_dialect,
+                            temperature: self.config.temperature,
+                        },
                     )? {
                         continue;
                     }

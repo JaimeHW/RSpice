@@ -1,6 +1,7 @@
 //! Curve comparison against a vendored reference.
 
 use super::*;
+use rspice_core::engine::DcSweepRange;
 
 /// The worst-disagreeing point on a compared curve.
 #[derive(Debug, Clone, Copy)]
@@ -128,9 +129,7 @@ impl DeviceRunner {
             .run_dc_sweep2_with_abort(
                 &netlist,
                 &sweep_source,
-                start,
-                stop,
-                step,
+                DcSweepRange { start, stop, step },
                 sweep2.as_ref(),
                 &abort,
             )

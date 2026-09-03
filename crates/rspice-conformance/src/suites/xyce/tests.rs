@@ -4981,7 +4981,7 @@ fn transient_comparison_uses_local_samples_inside_prn_time_neighborhood() {
                 &Netlist::default(),
                 &result,
                 XyceProbeSample {
-                    time: time,
+                    time,
                     expected: 2.38339292e-4,
                     actual: 3.984804681e-4
                 },
@@ -5115,7 +5115,7 @@ fn transient_comparison_accepts_rounded_reference_time_neighborhood() {
             0.020293594015632306,
             XyceNeighborhoodTolerance {
                 value: tolerance,
-                time_tolerance: time_tolerance,
+                time_tolerance,
                 time_scale_factor: 1.0
             }
         ),
@@ -5152,7 +5152,7 @@ fn transient_comparison_accepts_decimal_boundary_reference_time_neighborhood() {
             8.189634498984992e-3,
             XyceNeighborhoodTolerance {
                 value: tolerance,
-                time_tolerance: time_tolerance,
+                time_tolerance,
                 time_scale_factor: 1.0
             }
         ),

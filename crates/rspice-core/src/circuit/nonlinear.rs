@@ -1594,9 +1594,11 @@ impl CircuitData {
                     rhs,
                     solution,
                     num_nodes,
-                    generated_analysis,
-                    simparams,
-                    _evaluation_mode,
+                    crate::device::veriloga_builtins::GeneratedEvaluationRequest {
+                        analysis: generated_analysis,
+                        simparams,
+                        evaluation_mode: _evaluation_mode,
+                    },
                 )
                 .map_err(|error| error.to_string())?;
         }

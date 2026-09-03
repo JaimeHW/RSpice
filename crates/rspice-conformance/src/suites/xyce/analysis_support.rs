@@ -593,7 +593,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             deck_path,
             source,
             &XyceParsePolicy {
-                expression_dialect: expression_dialect,
+                expression_dialect,
                 redefinition: parameter_redefinition_policy,
                 redefinition_diagnostic: parameter_redefinition_diagnostic_policy,
             },
@@ -615,7 +615,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             deck_path,
             source,
             &XyceParsePolicy {
-                expression_dialect: expression_dialect,
+                expression_dialect,
                 redefinition: ParameterRedefinitionPolicy::UseLast,
                 redefinition_diagnostic:
                     rspice_core::netlist::ParameterRedefinitionDiagnosticPolicy::Silent,
@@ -2933,7 +2933,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     parameter_name: "C",
                     value: *value,
                     value_expr: value_expr.as_deref(),
-                    instance_params: instance_params,
+                    instance_params,
                 },
             ),
             ElementKind::Inductor {
@@ -2951,7 +2951,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     parameter_name: "L",
                     value: *value,
                     value_expr: value_expr.as_deref(),
-                    instance_params: instance_params,
+                    instance_params,
                 },
             ),
             _ => Err(format!(
@@ -3051,7 +3051,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 parameter_name: "C",
                 value: *value,
                 value_expr: value_expr.as_deref(),
-                instance_params: instance_params,
+                instance_params,
             },
         )
     }
@@ -3093,7 +3093,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 parameter_name: "L",
                 value: *value,
                 value_expr: value_expr.as_deref(),
-                instance_params: instance_params,
+                instance_params,
             },
         )
     }
@@ -3248,7 +3248,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 parameter_name: "R",
                 value: *value,
                 value_expr: value_expr.as_deref(),
-                instance_params: instance_params,
+                instance_params,
             },
         );
         if value.is_ok() {
@@ -3302,7 +3302,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 parameter_name: "C",
                 value: *value,
                 value_expr: value_expr.as_deref(),
-                instance_params: instance_params,
+                instance_params,
             },
         )
     }
@@ -3344,7 +3344,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 parameter_name: "L",
                 value: *value,
                 value_expr: value_expr.as_deref(),
-                instance_params: instance_params,
+                instance_params,
             },
         )
     }

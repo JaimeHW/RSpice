@@ -6,6 +6,7 @@ use rspice_core::SimulationError;
 use rspice_core::analysis::FrequencyGridError;
 use rspice_core::analysis::ac::try_ac_sweep_frequencies_with_abort;
 use rspice_core::analysis::s_param;
+use rspice_core::engine::DcSweepRange;
 
 impl ExecutionRunner {
     /// Run every discovered deck, honouring the extended-cost gate.
@@ -239,9 +240,11 @@ impl ExecutionRunner {
                     Some(outer) => engine.run_dc_sweep2_with_abort(
                         netlist,
                         source,
-                        *start,
-                        *stop,
-                        *step,
+                        DcSweepRange {
+                            start: *start,
+                            stop: *stop,
+                            step: *step,
+                        },
                         Some(outer),
                         abort,
                     ),

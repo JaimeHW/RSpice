@@ -1436,8 +1436,8 @@ impl HbSolver {
         if !self.veriloga_nonlinear_devices.is_empty() {
             let mut circuit_voltages = vec![0.0; n];
             for t in 0..n_time {
-                for node in 0..n {
-                    circuit_voltages[node] = v_time[node][t];
+                for (voltage, row) in circuit_voltages.iter_mut().zip(v_time.iter()) {
+                    *voltage = row[t];
                 }
                 for device in &mut self.veriloga_nonlinear_devices {
                     device.device.update_all_voltages(&circuit_voltages);

@@ -1,6 +1,7 @@
 //! End-to-end DC lifecycle pins for runtime-compiled Verilog-A devices.
 #![cfg(feature = "veriloga")]
 
+use rspice_core::engine::DcSweepRange;
 use rspice_core::{Engine, Netlist, NoAbort};
 use std::io::Write;
 use std::path::PathBuf;

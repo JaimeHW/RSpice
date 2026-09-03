@@ -2366,8 +2366,10 @@ endmodule
                 .len(),
         )
         .expect("cache record fits usize");
-        let mut limits = ResourceLimits::default();
-        limits.max_shared_cache_bytes = cache_bytes.saturating_sub(1);
+        let limits = ResourceLimits {
+            max_shared_cache_bytes: cache_bytes.saturating_sub(1),
+            ..ResourceLimits::default()
+        };
 
         assert!(
             load_model_from_disk_locked_with_limits(&source_path, &cache_root, limits, &NoAbort,)
@@ -2390,8 +2392,10 @@ endmodule
         let entry = compiled_entry(&source_path);
         let cache_root = root.join("cache");
         let cache_path = cache_record_path_with_root(&source_path, &cache_root);
-        let mut limits = ResourceLimits::default();
-        limits.max_shared_cache_bytes = 1;
+        let limits = ResourceLimits {
+            max_shared_cache_bytes: 1,
+            ..ResourceLimits::default()
+        };
 
         let error =
             persist_model_to_disk_locked_with_limits(&source_path, &entry, &cache_root, limits)
@@ -2416,8 +2420,10 @@ endmodule
         let second = root.join("second.va");
         std::fs::write(&first, b"0123456789").expect("write first dependency");
         std::fs::write(&second, b"abcdefghij").expect("write second dependency");
-        let mut limits = ResourceLimits::default();
-        limits.max_dependency_source_bytes = 15;
+        let limits = ResourceLimits {
+            max_dependency_source_bytes: 15,
+            ..ResourceLimits::default()
+        };
 
         let error = fingerprint_paths_with_limits(&[first, second], limits)
             .expect_err("aggregate dependency bytes must be bounded");
