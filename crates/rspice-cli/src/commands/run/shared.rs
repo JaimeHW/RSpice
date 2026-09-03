@@ -247,6 +247,36 @@ pub(super) fn ensure_finite_series<'a>(
     Ok(())
 }
 
+/// One report row for a continuous-measurement stream.
+///
+/// Every row of a stream shares its name, its aggregate policy, and the
+/// absence of the scalar comparison fields; only the per-record verdict and
+/// coordinate differ. Building them from one place keeps a new
+/// `MeasurementReport` field from being set on some rows and forgotten on
+/// others.
+fn continuous_measurement_row(
+    name: String,
+    policy: rspice_core::analysis::ContinuousMeasureAggregatePolicy,
+    failure_limit: Option<f64>,
+) -> MeasurementReport {
+    MeasurementReport {
+        name,
+        value: None,
+        raw_value: None,
+        expected: None,
+        tolerance: None,
+        failure_limit,
+        failure_limit_exceeded: false,
+        passed: false,
+        error: None,
+        record_index: None,
+        event_axis: None,
+        trigger_axis: None,
+        target_axis: None,
+        aggregate_policy: Some(policy.to_string()),
+    }
+}
+
 /// Retain every row from a vector-valued continuous measurement and project
 /// its per-record verification contract into the common report model.
 ///
@@ -302,15 +332,17 @@ pub(super) fn record_continuous_measurements(
                 );
             }
             println!(
-                "    {} aggregate = {} (all_records_must_pass)",
+                "    {} aggregate = {} ({})",
                 result.name,
-                if result.passed() { "PASS" } else { "FAILED" }
+                if result.passed() { "PASS" } else { "FAILED" },
+                result.aggregate_policy()
             );
         }
     }
 
     let mut reports = ctx.measurements.borrow_mut();
     for result in results {
+        let policy = result.aggregate_policy();
         let authored_failure_limit = ctx
             .netlist
             .measurements
@@ -322,48 +354,24 @@ pub(super) fn record_continuous_measurements(
             .and_then(|statement| statement.fail_value);
 
         if let Some(failure) = result.failure {
-            reports.push(MeasurementReport {
-                name: result.name,
-                value: None,
-                raw_value: None,
-                expected: None,
-                tolerance: None,
-                failure_limit: authored_failure_limit,
-                failure_limit_exceeded: false,
-                passed: false,
-                error: Some(failure),
-                record_index: None,
-                event_axis: None,
-                trigger_axis: result
-                    .failure_metadata
-                    .and_then(|metadata| metadata.trigger_axis),
-                target_axis: result
-                    .failure_metadata
-                    .and_then(|metadata| metadata.target_axis),
-                aggregate_policy: Some("all_records_must_pass".to_string()),
-            });
+            let mut row = continuous_measurement_row(result.name, policy, authored_failure_limit);
+            row.error = Some(failure);
+            row.trigger_axis = result
+                .failure_metadata
+                .and_then(|metadata| metadata.trigger_axis);
+            row.target_axis = result
+                .failure_metadata
+                .and_then(|metadata| metadata.target_axis);
+            reports.push(row);
             continue;
         }
 
         if result.records.is_empty() {
-            reports.push(MeasurementReport {
-                name: result.name,
-                value: None,
-                raw_value: None,
-                expected: None,
-                tolerance: None,
-                failure_limit: authored_failure_limit,
-                failure_limit_exceeded: false,
-                passed: false,
-                error: Some(
-                    "continuous measurement returned no records and no failure reason".to_string(),
-                ),
-                record_index: None,
-                event_axis: None,
-                trigger_axis: None,
-                target_axis: None,
-                aggregate_policy: Some("all_records_must_pass".to_string()),
-            });
+            let mut row = continuous_measurement_row(result.name, policy, authored_failure_limit);
+            row.error = Some(
+                "continuous measurement returned no records and no failure reason".to_string(),
+            );
+            reports.push(row);
             continue;
         }
 
@@ -372,21 +380,22 @@ pub(super) fn record_continuous_measurements(
                 .records
                 .into_iter()
                 .enumerate()
-                .map(|(index, record)| MeasurementReport {
-                    name: result.name.clone(),
-                    value: Some(record.value),
-                    raw_value: Some(record.raw_value),
-                    expected: None,
-                    tolerance: None,
-                    failure_limit: record.failure_limit,
-                    failure_limit_exceeded: record.failure_limit_exceeded,
-                    passed: record.passed,
-                    error: record.verification_failure_message(),
-                    record_index: Some(index),
-                    event_axis: record.event_axis,
-                    trigger_axis: record.trigger_axis,
-                    target_axis: record.target_axis,
-                    aggregate_policy: Some("all_records_must_pass".to_string()),
+                .map(|(index, record)| {
+                    let mut row = continuous_measurement_row(
+                        result.name.clone(),
+                        policy,
+                        record.failure_limit,
+                    );
+                    row.value = Some(record.value);
+                    row.raw_value = Some(record.raw_value);
+                    row.failure_limit_exceeded = record.failure_limit_exceeded;
+                    row.passed = record.passed;
+                    row.error = record.verification_failure_message();
+                    row.record_index = Some(index);
+                    row.event_axis = record.event_axis;
+                    row.trigger_axis = record.trigger_axis;
+                    row.target_axis = record.target_axis;
+                    row
                 }),
         );
     }

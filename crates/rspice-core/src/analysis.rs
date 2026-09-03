@@ -113,11 +113,12 @@ pub use {
         SpectralBranchCurrent, SpectralVoltage,
     },
     measure::{
-        ContinuousMeasureCoordinate, ContinuousMeasureFailureMetadata, ContinuousMeasureRecord,
-        ContinuousMeasureResult, ContinuousMeasureVerificationFailure, EdgeType, ErrorFunctionNorm,
-        EventOccurrence, ExtremaOutput, FileErrorNorm, MeasureEngine, MeasureOperand,
-        MeasurePrintPolicy, MeasureResult, MeasureStatement, MeasureType, TrigSpec, TriggerEvent,
-        WhenCondition, canonical_measure_signal_name,
+        ContinuousMeasureAggregatePolicy, ContinuousMeasureCoordinate,
+        ContinuousMeasureFailureMetadata, ContinuousMeasureRecord, ContinuousMeasureResult,
+        ContinuousMeasureVerificationFailure, EdgeType, ErrorFunctionNorm, EventOccurrence,
+        ExtremaOutput, FileErrorNorm, MeasureEngine, MeasureOperand, MeasurePrintPolicy,
+        MeasureResult, MeasureStatement, MeasureType, TrigSpec, TriggerEvent, WhenCondition,
+        canonical_measure_signal_name,
     },
     measure_signals::{
         AcSweepSeries, DcSweepSeries, EquationMeasureTrace, NoiseSweepSeries,

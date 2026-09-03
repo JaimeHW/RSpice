@@ -790,35 +790,276 @@ mod tests {
         write_measurement_csv(&mut csv_bytes, Path::new("continuous.csv"), &reports)
             .expect("write continuous CSV");
         let csv = String::from_utf8(csv_bytes).expect("CSV is UTF-8");
-        assert!(
-            csv.contains(",0,5.000000000e-1,,,all_records_must_pass"),
-            "{csv}"
-        );
-        assert!(
-            csv.contains(",1,1.500000000e0,,,all_records_must_pass"),
-            "{csv}"
-        );
+        let rows = parse_measurement_csv(&csv);
+        assert_eq!(rows.len(), 2, "{csv}");
+        assert_eq!(rows[0]["name"], "crossings");
+        assert_eq!(rows[0]["record_index"], "0");
+        assert_eq!(rows[0]["value"], "5.000000000e-1");
+        assert_eq!(rows[0]["passed"], "true");
+        assert_eq!(rows[0]["aggregate_policy"], "all_records_must_pass");
+        assert_eq!(rows[1]["record_index"], "1");
+        assert_eq!(rows[1]["raw_value"], "1.500000000e0");
+        assert_eq!(rows[1]["failure_limit"], "1.000000000e0");
+        assert_eq!(rows[1]["failure_limit_exceeded"], "true");
+        assert_eq!(rows[1]["passed"], "false");
+        assert_eq!(rows[1]["aggregate_policy"], "all_records_must_pass");
 
         let mut junit_bytes = Vec::new();
         write_junit_report(&mut junit_bytes, Path::new("continuous.xml"), &reports)
             .expect("write continuous JUnit");
         let junit = String::from_utf8(junit_bytes).expect("JUnit is UTF-8");
-        assert!(junit.contains("crossings[record 0]"), "{junit}");
-        assert!(junit.contains("crossings[record 1]"), "{junit}");
-        assert!(junit.contains("raw_value=1.500000e+00"), "{junit}");
-        assert!(junit.contains("FAILVALUE=1.000000e+00"), "{junit}");
-        assert!(junit.contains("coordinate: axis=1.500000e+00"), "{junit}");
-        assert!(junit.contains("all_records_must_pass"), "{junit}");
+        let cases = parse_junit_testcases(&junit);
+        let record_case = |index: usize| {
+            cases
+                .iter()
+                .find(|case| case.name == format!("crossings[record {index}]"))
+                .unwrap_or_else(|| panic!("JUnit testcase for record {index}: {junit}"))
+        };
+        let first = record_case(0);
+        assert!(first.failures.is_empty(), "{junit}");
+        assert!(
+            first
+                .system_out
+                .iter()
+                .any(|line| line.contains("aggregate_policy=all_records_must_pass")),
+            "{junit}"
+        );
+        let second = record_case(1);
+        assert_eq!(second.failures.len(), 1, "{junit}");
+        assert!(second.failures[0].contains("FAILVALUE failed"), "{junit}");
+        assert!(
+            second.failures[0].contains("coordinate: axis=1.500000e+00"),
+            "{junit}"
+        );
+        let contract = second.system_out.join(" ");
+        assert!(contract.contains("raw_value=1.500000e+00"), "{junit}");
+        assert!(contract.contains("FAILVALUE=1.000000e+00"), "{junit}");
+        assert!(
+            contract.contains("aggregate_policy=all_records_must_pass"),
+            "{junit}"
+        );
 
         let mut tap_bytes = Vec::new();
         write_tap_report(&mut tap_bytes, Path::new("continuous.tap"), &reports)
             .expect("write continuous TAP");
         let tap = String::from_utf8(tap_bytes).expect("TAP is UTF-8");
-        assert!(tap.contains("ok 2 - crossings[record 0]"), "{tap}");
-        assert!(tap.contains("not ok 3 - crossings[record 1]"), "{tap}");
-        assert!(tap.contains("raw_value=5.000000e-01"), "{tap}");
-        assert!(tap.contains("FAILVALUE failed"), "{tap}");
-        assert!(tap.contains("all_records_must_pass"), "{tap}");
+        let results = parse_tap_results(&tap);
+        let tap_case = |index: usize| {
+            results
+                .iter()
+                .find(|result| {
+                    result
+                        .description
+                        .starts_with(&format!("crossings[record {index}]"))
+                })
+                .unwrap_or_else(|| panic!("TAP result for record {index}: {tap}"))
+        };
+        let first = tap_case(0);
+        assert!(first.ok, "{tap}");
+        assert_eq!(first.number, 2, "{tap}");
+        assert!(
+            first
+                .diagnostics
+                .iter()
+                .any(|line| line.contains("raw_value=5.000000e-01")
+                    && line.contains("aggregate_policy=all_records_must_pass")),
+            "{tap}"
+        );
+        let second = tap_case(1);
+        assert!(!second.ok, "{tap}");
+        assert_eq!(second.number, 3, "{tap}");
+        let diagnostics = second.diagnostics.join(" ");
+        assert!(diagnostics.contains("FAILVALUE failed"), "{tap}");
+        assert!(
+            diagnostics.contains("aggregate_policy=all_records_must_pass"),
+            "{tap}"
+        );
+    }
+
+    /// Split the measurement CSV this module writes into header-keyed rows.
+    ///
+    /// The reader is the RFC 4180 subset `csv_escape` can produce: comma
+    /// separators, optional double quoting, and a doubled quote inside a
+    /// quoted field.
+    fn parse_measurement_csv(source: &str) -> Vec<std::collections::HashMap<String, String>> {
+        let mut records: Vec<Vec<String>> = Vec::new();
+        let mut fields: Vec<String> = Vec::new();
+        let mut field = String::new();
+        let mut quoted = false;
+        let mut characters = source.chars().peekable();
+        while let Some(character) = characters.next() {
+            match character {
+                '"' if quoted => {
+                    if characters.peek() == Some(&'"') {
+                        characters.next();
+                        field.push('"');
+                    } else {
+                        quoted = false;
+                    }
+                }
+                '"' => quoted = true,
+                ',' if !quoted => fields.push(std::mem::take(&mut field)),
+                '\r' if !quoted => {}
+                '\n' if !quoted => {
+                    fields.push(std::mem::take(&mut field));
+                    records.push(std::mem::take(&mut fields));
+                }
+                other => field.push(other),
+            }
+        }
+        assert!(!quoted, "CSV ends inside a quoted field");
+        if !field.is_empty() || !fields.is_empty() {
+            fields.push(field);
+            records.push(fields);
+        }
+
+        let (header, rows) = records.split_first().expect("CSV has a header row");
+        rows.iter()
+            .map(|row| {
+                assert_eq!(
+                    row.len(),
+                    header.len(),
+                    "CSV row has the wrong arity: {row:?}"
+                );
+                header.iter().cloned().zip(row.iter().cloned()).collect()
+            })
+            .collect()
+    }
+
+    #[derive(Debug)]
+    struct JUnitTestCase {
+        name: String,
+        failures: Vec<String>,
+        system_out: Vec<String>,
+    }
+
+    /// Read the JUnit document this module writes as testcases with the text
+    /// of their `failure` and `system-out` children.
+    fn parse_junit_testcases(source: &str) -> Vec<JUnitTestCase> {
+        let mut cases: Vec<JUnitTestCase> = Vec::new();
+        for line in source.lines().map(str::trim) {
+            if let Some(attributes) = line.strip_prefix("<testcase ") {
+                cases.push(JUnitTestCase {
+                    name: xml_attribute(attributes, "name"),
+                    failures: Vec::new(),
+                    system_out: Vec::new(),
+                });
+            } else if line.starts_with("<failure ") {
+                let text = xml_element_text(line, "failure");
+                cases
+                    .last_mut()
+                    .expect("<failure> appears inside a testcase")
+                    .failures
+                    .push(text);
+            } else if line.starts_with("<system-out>") {
+                let text = xml_element_text(line, "system-out");
+                cases
+                    .last_mut()
+                    .expect("<system-out> appears inside a testcase")
+                    .system_out
+                    .push(text);
+            }
+        }
+        assert!(
+            source.trim_end().ends_with("</testsuites>"),
+            "JUnit document is unterminated: {source}"
+        );
+        cases
+    }
+
+    fn xml_attribute(source: &str, name: &str) -> String {
+        let key = format!("{name}=\"");
+        let start = source
+            .find(&key)
+            .unwrap_or_else(|| panic!("attribute {name} in {source}"))
+            + key.len();
+        let end = start
+            + source[start..]
+                .find('"')
+                .unwrap_or_else(|| panic!("closing quote for {name} in {source}"));
+        xml_unescape(&source[start..end])
+    }
+
+    fn xml_element_text(source: &str, tag: &str) -> String {
+        let open = source
+            .find('>')
+            .unwrap_or_else(|| panic!("opening tag in {source}"))
+            + 1;
+        let close = source
+            .rfind(&format!("</{tag}>"))
+            .unwrap_or_else(|| panic!("closing </{tag}> in {source}"));
+        xml_unescape(&source[open..close])
+    }
+
+    fn xml_unescape(source: &str) -> String {
+        source
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", "\"")
+            .replace("&apos;", "'")
+            .replace("&amp;", "&")
+    }
+
+    #[derive(Debug)]
+    struct TapResult {
+        number: usize,
+        ok: bool,
+        description: String,
+        diagnostics: Vec<String>,
+    }
+
+    /// Read the TAP 13 document this module writes as numbered results with
+    /// the diagnostic lines attached to each.
+    fn parse_tap_results(source: &str) -> Vec<TapResult> {
+        let mut lines = source.lines();
+        assert_eq!(lines.next(), Some("TAP version 13"), "{source}");
+        let plan = lines.next().expect("TAP document has a plan line");
+        let planned: usize = plan
+            .strip_prefix("1..")
+            .unwrap_or_else(|| panic!("TAP plan line: {plan}"))
+            .parse()
+            .expect("TAP plan names a test count");
+
+        let mut results: Vec<TapResult> = Vec::new();
+        for line in lines {
+            let trimmed = line.trim_start();
+            if trimmed == "---" || trimmed == "..." {
+                continue;
+            }
+            if let Some(diagnostic) = trimmed
+                .strip_prefix("# ")
+                .or_else(|| trimmed.strip_prefix("message: "))
+            {
+                results
+                    .last_mut()
+                    .expect("a TAP diagnostic follows a result")
+                    .diagnostics
+                    .push(diagnostic.trim_matches('\'').to_string());
+                continue;
+            }
+            let (ok, rest) = if let Some(rest) = line.strip_prefix("not ok ") {
+                (false, rest)
+            } else if let Some(rest) = line.strip_prefix("ok ") {
+                (true, rest)
+            } else {
+                panic!("unexpected TAP line: {line}");
+            };
+            let (number, description) = rest
+                .split_once(" - ")
+                .unwrap_or_else(|| panic!("TAP result names its test: {line}"));
+            results.push(TapResult {
+                number: number.trim().parse().expect("TAP result number"),
+                ok,
+                description: description.to_string(),
+                diagnostics: Vec::new(),
+            });
+        }
+        assert_eq!(
+            results.len(),
+            planned,
+            "TAP plan disagrees with its results"
+        );
+        results
     }
 
     #[test]

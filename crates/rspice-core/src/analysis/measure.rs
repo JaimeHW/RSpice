@@ -325,6 +325,29 @@ pub struct ContinuousMeasureResult {
     pub failure_metadata: Option<ContinuousMeasureFailureMetadata>,
 }
 
+/// How a continuous measurement's per-record verdicts become one verdict for
+/// the stream.
+///
+/// The rule is part of the result, not of whatever renders it: CSV, JSON,
+/// JUnit and TAP all report the same policy beside the same records, and none
+/// of them decides what an aggregate means. Its `Display` form is the stable
+/// identifier those formats write.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ContinuousMeasureAggregatePolicy {
+    /// Evaluation must succeed and every retained record must pass its own
+    /// verification contract.
+    #[default]
+    AllRecordsMustPass,
+}
+
+impl std::fmt::Display for ContinuousMeasureAggregatePolicy {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::AllRecordsMustPass => formatter.write_str("all_records_must_pass"),
+        }
+    }
+}
+
 /// Partial event provenance retained for a failed continuous delay measure.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ContinuousMeasureFailureMetadata {
@@ -384,8 +407,15 @@ impl ContinuousMeasureResult {
         }
     }
 
-    /// Aggregate policy: evaluation must succeed and every emitted record
-    /// must pass its own verification contract. Failed records remain present.
+    /// The rule [`Self::passed`] applies, which every report format names
+    /// beside the stream's records.
+    pub const fn aggregate_policy(&self) -> ContinuousMeasureAggregatePolicy {
+        ContinuousMeasureAggregatePolicy::AllRecordsMustPass
+    }
+
+    /// Apply [`Self::aggregate_policy`]: evaluation must succeed and every
+    /// emitted record must pass its own verification contract. Failed records
+    /// remain present.
     pub fn passed(&self) -> bool {
         self.failure.is_none()
             && !self.records.is_empty()
