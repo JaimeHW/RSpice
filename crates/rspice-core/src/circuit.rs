@@ -33,7 +33,7 @@ pub(crate) use storage::{
 mod construction;
 pub(crate) mod dae;
 mod external_models;
-pub(crate) use external_models::VerilogADcAcceptedStateCarrier;
+pub(crate) use external_models::{VerilogADcAcceptedStateCarrier, XspiceCompanionPolicy};
 mod force_accept;
 mod introspection;
 pub use introspection::{DeviceOpEntry, DeviceOpReport};

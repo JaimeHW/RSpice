@@ -242,6 +242,16 @@ fn xspice_event_settling_message(
     )
 }
 
+/// How a code model's reactive contribution is turned into a companion stamp:
+/// the integration coefficients for the step, and whether Xyce's second-order
+/// one-step start-up applies to them. The flag selects which of the
+/// coefficients are read, so neither means anything without the other.
+#[derive(Clone, Copy)]
+pub(crate) struct XspiceCompanionPolicy<'a> {
+    pub coefficients: &'a crate::numerics::integration::CompanionCoefficients,
+    pub xyce_one_step_order2: bool,
+}
+
 impl CircuitData {
     //=========================================================================
     // XSPICE Code Model Interface
@@ -492,8 +502,11 @@ impl CircuitData {
             solution,
             analysis,
             phase,
-            crate::numerics::integration::CompanionCoefficients::backward_euler(),
-            false,
+            XspiceCompanionPolicy {
+                coefficients: &crate::numerics::integration::CompanionCoefficients::backward_euler(
+                ),
+                xyce_one_step_order2: false,
+            },
         )
     }
 
@@ -504,9 +517,13 @@ impl CircuitData {
         solution: &[Value],
         analysis: crate::xspice::AnalysisType,
         phase: crate::xspice::EvaluationPhase,
-        companion_coefficients: crate::numerics::integration::CompanionCoefficients,
-        xyce_one_step_order2: bool,
+        companion: XspiceCompanionPolicy<'_>,
     ) -> crate::xspice::CmResult<()> {
+        let XspiceCompanionPolicy {
+            coefficients,
+            xyce_one_step_order2,
+        } = companion;
+        let companion_coefficients = *coefficients;
         let current_source_values = self.current_sources.values_at_time(time);
         let num_nodes = self.num_nodes;
         let mut analog_transitions =
@@ -838,8 +855,11 @@ impl CircuitData {
             time,
             timestep,
             voltages,
-            &crate::numerics::integration::CompanionCoefficients::backward_euler(),
-            false,
+            XspiceCompanionPolicy {
+                coefficients: &crate::numerics::integration::CompanionCoefficients::backward_euler(
+                ),
+                xyce_one_step_order2: false,
+            },
         );
     }
 
@@ -852,9 +872,12 @@ impl CircuitData {
         time: Value,
         timestep: Value,
         voltages: &[Value],
-        coefficients: &crate::numerics::integration::CompanionCoefficients,
-        xyce_one_step_order2: bool,
+        companion: XspiceCompanionPolicy<'_>,
     ) {
+        let XspiceCompanionPolicy {
+            coefficients,
+            xyce_one_step_order2,
+        } = companion;
         let snapshot = self.nonlinear_state_snapshot();
         if let Err(e) = self.try_evaluate_xspice_with_analysis_phase_and_coefficients(
             time,
@@ -862,8 +885,10 @@ impl CircuitData {
             voltages,
             crate::xspice::AnalysisType::Transient,
             crate::xspice::EvaluationPhase::RollbackableProbe,
-            *coefficients,
-            xyce_one_step_order2,
+            XspiceCompanionPolicy {
+                coefficients,
+                xyce_one_step_order2,
+            },
         ) {
             log::warn!("XSPICE evaluation error: {e}");
         }
@@ -881,17 +906,22 @@ impl CircuitData {
         time: Value,
         timestep: Value,
         voltages: &[Value],
-        coefficients: &crate::numerics::integration::CompanionCoefficients,
-        xyce_one_step_order2: bool,
+        companion: XspiceCompanionPolicy<'_>,
     ) {
+        let XspiceCompanionPolicy {
+            coefficients,
+            xyce_one_step_order2,
+        } = companion;
         if let Err(e) = self.try_evaluate_xspice_with_analysis_phase_and_coefficients(
             time,
             timestep,
             voltages,
             crate::xspice::AnalysisType::Transient,
             crate::xspice::EvaluationPhase::AcceptedStep,
-            *coefficients,
-            xyce_one_step_order2,
+            XspiceCompanionPolicy {
+                coefficients,
+                xyce_one_step_order2,
+            },
         ) {
             log::warn!("XSPICE evaluation error: {e}");
         }
@@ -904,17 +934,22 @@ impl CircuitData {
         time: Value,
         timestep: Value,
         voltages: &[Value],
-        coefficients: &crate::numerics::integration::CompanionCoefficients,
-        xyce_one_step_order2: bool,
+        companion: XspiceCompanionPolicy<'_>,
     ) {
+        let XspiceCompanionPolicy {
+            coefficients,
+            xyce_one_step_order2,
+        } = companion;
         if let Err(e) = self.try_evaluate_xspice_with_analysis_phase_and_coefficients(
             time,
             timestep,
             voltages,
             crate::xspice::AnalysisType::Transient,
             crate::xspice::EvaluationPhase::AcceptedStep,
-            *coefficients,
-            xyce_one_step_order2,
+            XspiceCompanionPolicy {
+                coefficients,
+                xyce_one_step_order2,
+            },
         ) {
             log::warn!("XSPICE evaluation error: {e}");
         }
@@ -1238,17 +1273,31 @@ impl CircuitData {
             }
         }
 
+        /// Where one XSPICE output port writes: the MNA system, the instance
+        /// and port declaration that name the rows, and the node count that
+        /// separates node rows from branch rows.
+        struct XspiceOutputStamp<'a, 'b> {
+            matrix: &'a mut StaticMatrix,
+            rhs: &'a mut [Value],
+            instance: &'b crate::xspice::XspiceInstance,
+            port: &'b crate::xspice::PortSpec,
+            num_nodes: usize,
+        }
+
         fn stamp_current_output_port(
-            matrix: &mut StaticMatrix,
-            rhs: &mut [Value],
-            instance: &crate::xspice::XspiceInstance,
-            port: &crate::xspice::PortSpec,
+            stamp: XspiceOutputStamp<'_, '_>,
             pos: usize,
             neg: usize,
             conductance: Value,
             current: Value,
-            num_nodes: usize,
         ) {
+            let XspiceOutputStamp {
+                matrix,
+                rhs,
+                instance,
+                port,
+                num_nodes,
+            } = stamp;
             let mut equivalent_current = current;
             for (control_port, partial) in instance.output_input_partials(&port.name) {
                 if !partial.is_finite() {
@@ -1296,17 +1345,20 @@ impl CircuitData {
         }
 
         fn stamp_current_vector_output_port(
-            matrix: &mut StaticMatrix,
-            rhs: &mut [Value],
-            instance: &crate::xspice::XspiceInstance,
-            port: &crate::xspice::PortSpec,
+            stamp: XspiceOutputStamp<'_, '_>,
             output_index: usize,
             pos: usize,
             neg: usize,
             conductance: Value,
             current: Value,
-            num_nodes: usize,
         ) {
+            let XspiceOutputStamp {
+                matrix,
+                rhs,
+                instance,
+                port,
+                num_nodes,
+            } = stamp;
             let mut equivalent_current = current;
             for (control_port, partial) in
                 instance.output_vector_input_partials(&port.name, output_index)
@@ -1386,17 +1438,20 @@ impl CircuitData {
         }
 
         fn stamp_vector_voltage_output_branch(
-            matrix: &mut StaticMatrix,
-            rhs: &mut [Value],
-            instance: &crate::xspice::XspiceInstance,
-            port: &crate::xspice::PortSpec,
+            stamp: XspiceOutputStamp<'_, '_>,
             output_index: usize,
             branch_ordinal: usize,
             pos: usize,
             neg: usize,
             value: Value,
-            num_nodes: usize,
         ) {
+            let XspiceOutputStamp {
+                matrix,
+                rhs,
+                instance,
+                port,
+                num_nodes,
+            } = stamp;
             let br_mna = num_nodes + branch_ordinal;
             let br = br_mna - 1;
             if br >= rhs.len() {
@@ -1479,16 +1534,18 @@ impl CircuitData {
                                             instance.branch_vector_output_ordinal(port_idx, index)
                                         {
                                             stamp_vector_voltage_output_branch(
-                                                matrix,
-                                                rhs,
-                                                instance,
-                                                port,
+                                                XspiceOutputStamp {
+                                                    matrix,
+                                                    rhs,
+                                                    instance,
+                                                    port,
+                                                    num_nodes,
+                                                },
                                                 index,
                                                 branch_ordinal,
                                                 node,
                                                 0,
                                                 current,
-                                                num_nodes,
                                             );
                                         }
                                     }
@@ -1497,16 +1554,18 @@ impl CircuitData {
                                     | crate::xspice::PortType::Conductance
                                     | crate::xspice::PortType::DifferentialConductance => {
                                         stamp_current_vector_output_port(
-                                            matrix,
-                                            rhs,
-                                            instance,
-                                            port,
+                                            XspiceOutputStamp {
+                                                matrix,
+                                                rhs,
+                                                instance,
+                                                port,
+                                                num_nodes,
+                                            },
                                             index,
                                             node,
                                             0,
                                             conductance,
                                             current,
-                                            num_nodes,
                                         );
                                     }
                                     _ => {}
@@ -1528,16 +1587,18 @@ impl CircuitData {
                                                     .branch_vector_output_ordinal(port_idx, index)
                                                 {
                                                     stamp_vector_voltage_output_branch(
-                                                        matrix,
-                                                        rhs,
-                                                        instance,
-                                                        port,
+                                                        XspiceOutputStamp {
+                                                            matrix,
+                                                            rhs,
+                                                            instance,
+                                                            port,
+                                                            num_nodes,
+                                                        },
                                                         index,
                                                         branch_ordinal,
                                                         *node,
                                                         0,
                                                         current,
-                                                        num_nodes,
                                                     );
                                                 }
                                             }
@@ -1546,16 +1607,18 @@ impl CircuitData {
                                             | crate::xspice::PortType::Conductance
                                             | crate::xspice::PortType::DifferentialConductance => {
                                                 stamp_current_vector_output_port(
-                                                    matrix,
-                                                    rhs,
-                                                    instance,
-                                                    port,
+                                                    XspiceOutputStamp {
+                                                        matrix,
+                                                        rhs,
+                                                        instance,
+                                                        port,
+                                                        num_nodes,
+                                                    },
                                                     index,
                                                     *node,
                                                     0,
                                                     conductance,
                                                     current,
-                                                    num_nodes,
                                                 );
                                             }
                                             _ => {}
@@ -1578,16 +1641,18 @@ impl CircuitData {
                                                 .branch_vector_output_ordinal(port_idx, index)
                                             {
                                                 stamp_vector_voltage_output_branch(
-                                                    matrix,
-                                                    rhs,
-                                                    instance,
-                                                    port,
+                                                    XspiceOutputStamp {
+                                                        matrix,
+                                                        rhs,
+                                                        instance,
+                                                        port,
+                                                        num_nodes,
+                                                    },
                                                     index,
                                                     branch_ordinal,
                                                     *pos,
                                                     *neg,
                                                     current,
-                                                    num_nodes,
                                                 );
                                             }
                                         }
@@ -1596,16 +1661,18 @@ impl CircuitData {
                                         | crate::xspice::PortType::Conductance
                                         | crate::xspice::PortType::DifferentialConductance => {
                                             stamp_current_vector_output_port(
-                                                matrix,
-                                                rhs,
-                                                instance,
-                                                port,
+                                                XspiceOutputStamp {
+                                                    matrix,
+                                                    rhs,
+                                                    instance,
+                                                    port,
+                                                    num_nodes,
+                                                },
                                                 index,
                                                 *pos,
                                                 *neg,
                                                 conductance,
                                                 current,
-                                                num_nodes,
                                             );
                                         }
                                         _ => {}
@@ -1615,16 +1682,18 @@ impl CircuitData {
                                         neg,
                                     } => {
                                         stamp_current_vector_output_port(
-                                            matrix,
-                                            rhs,
-                                            instance,
-                                            port,
+                                            XspiceOutputStamp {
+                                                matrix,
+                                                rhs,
+                                                instance,
+                                                port,
+                                                num_nodes,
+                                            },
                                             index,
                                             *pos,
                                             *neg,
                                             conductance,
                                             current,
-                                            num_nodes,
                                         );
                                     }
                                     _ => {}
@@ -1641,15 +1710,17 @@ impl CircuitData {
                     };
                     if let crate::xspice::PortConnection::CurrentOutput { pos, neg } = connection {
                         stamp_current_output_port(
-                            matrix,
-                            rhs,
-                            instance,
-                            port,
+                            XspiceOutputStamp {
+                                matrix,
+                                rhs,
+                                instance,
+                                port,
+                                num_nodes,
+                            },
                             *pos,
                             *neg,
                             conductance,
                             current,
-                            num_nodes,
                         );
                         continue;
                     }
@@ -1777,15 +1848,17 @@ impl CircuitData {
                                 _ => continue,
                             };
                             stamp_current_output_port(
-                                matrix,
-                                rhs,
-                                instance,
-                                port,
+                                XspiceOutputStamp {
+                                    matrix,
+                                    rhs,
+                                    instance,
+                                    port,
+                                    num_nodes,
+                                },
                                 pos,
                                 neg,
                                 conductance,
                                 current,
-                                num_nodes,
                             );
                         }
                         _ => {}
@@ -3709,8 +3782,11 @@ mod tests {
             2.0e-9,
             1.0e-9,
             &[0.0],
-            &crate::numerics::integration::CompanionCoefficients::backward_euler(),
-            false,
+            XspiceCompanionPolicy {
+                coefficients: &crate::numerics::integration::CompanionCoefficients::backward_euler(
+                ),
+                xyce_one_step_order2: false,
+            },
         );
 
         let breakpoints = circuit.take_xspice_requested_breakpoints();
@@ -3734,8 +3810,11 @@ mod tests {
             1.0e-9,
             1.0e-9,
             &[0.0],
-            &crate::numerics::integration::CompanionCoefficients::backward_euler(),
-            false,
+            XspiceCompanionPolicy {
+                coefficients: &crate::numerics::integration::CompanionCoefficients::backward_euler(
+                ),
+                xyce_one_step_order2: false,
+            },
         );
 
         assert_eq!(
@@ -4254,8 +4333,11 @@ mod tests {
             2.0e-9,
             1.0e-9,
             &[0.0, 0.0, 0.0],
-            &crate::numerics::integration::CompanionCoefficients::backward_euler(),
-            false,
+            XspiceCompanionPolicy {
+                coefficients: &crate::numerics::integration::CompanionCoefficients::backward_euler(
+                ),
+                xyce_one_step_order2: false,
+            },
         );
 
         // The breakpoint sweep skips an instance whose queue is empty. A model
@@ -4521,8 +4603,11 @@ mod tests {
             2.0e-9,
             1.0e-9,
             &[0.0, 0.0, 0.0],
-            &crate::numerics::integration::CompanionCoefficients::backward_euler(),
-            false,
+            XspiceCompanionPolicy {
+                coefficients: &crate::numerics::integration::CompanionCoefficients::backward_euler(
+                ),
+                xyce_one_step_order2: false,
+            },
         );
 
         // The pass genuinely ran: the time-driven model evaluated and queued a

@@ -373,6 +373,7 @@ mod residual;
 mod restart;
 mod startup;
 mod state;
+use crate::circuit::XspiceCompanionPolicy;
 use state::{TransientCompanionStamp, TransientDeviceHistories};
 mod xyce_dae;
 use state::{
@@ -7944,8 +7945,10 @@ impl Engine {
                                 t,
                                 dt,
                                 &new_solution,
-                                &coeff,
-                                xyce_one_step_order2,
+                                XspiceCompanionPolicy {
+                                    coefficients: &coeff,
+                                    xyce_one_step_order2,
+                                },
                             );
                             circuit.accept_xspice_timestep();
                         } else {
@@ -7953,8 +7956,10 @@ impl Engine {
                                 t,
                                 dt,
                                 &new_solution,
-                                &coeff,
-                                xyce_one_step_order2,
+                                XspiceCompanionPolicy {
+                                    coefficients: &coeff,
+                                    xyce_one_step_order2,
+                                },
                             );
                         }
                         circuit.project_xspice_voltage_outputs(&mut new_solution, num_nodes);
@@ -8431,8 +8436,10 @@ impl Engine {
                         t,
                         dt,
                         &new_solution,
-                        &coeff,
-                        xyce_one_step_order2,
+                        XspiceCompanionPolicy {
+                            coefficients: &coeff,
+                            xyce_one_step_order2,
+                        },
                     );
                     circuit.accept_xspice_timestep();
                 } else {
@@ -8440,8 +8447,10 @@ impl Engine {
                         t,
                         dt,
                         &new_solution,
-                        &coeff,
-                        xyce_one_step_order2,
+                        XspiceCompanionPolicy {
+                            coefficients: &coeff,
+                            xyce_one_step_order2,
+                        },
                     );
                 }
                 circuit.project_xspice_voltage_outputs(&mut new_solution, num_nodes);

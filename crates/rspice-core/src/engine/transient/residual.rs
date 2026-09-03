@@ -1737,8 +1737,10 @@ impl Engine {
                 time,
                 dt,
                 solution,
-                &companion_coeff,
-                ctx.xyce_one_step_order2,
+                XspiceCompanionPolicy {
+                    coefficients: &companion_coeff,
+                    xyce_one_step_order2: ctx.xyce_one_step_order2,
+                },
             );
         }
         // The mixed Verilog-AMS boundary, on the same terms and in the same

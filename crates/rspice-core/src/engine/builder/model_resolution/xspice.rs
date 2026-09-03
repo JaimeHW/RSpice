@@ -745,17 +745,49 @@ fn reject_native_xtradev_non_scalar_params(
     Ok(())
 }
 
+/// One XSPICE instance card's parameters, split by the form the parser left
+/// them in: resolved scalars, unresolved scalar expressions, and the string,
+/// string-vector and real-vector forms with their own unresolved variants.
+/// A resolver reads all eight to decide what a parameter means, so they are
+/// one card rather than eight lists.
+#[derive(Clone, Copy)]
+pub(in crate::engine::builder) struct XspiceInstanceParams<'a> {
+    pub params: &'a [(String, f64)],
+    pub expr_params: &'a [(String, String)],
+    pub string_params: &'a [(String, String)],
+    pub string_expr_params: &'a [(String, String)],
+    pub string_vector_params: &'a [(String, Vec<String>)],
+    pub string_vector_expr_params: &'a [(String, String)],
+    pub real_vector_params: &'a [(String, Vec<f64>)],
+    pub real_vector_expr_params: &'a [(String, Vec<String>)],
+}
+
+/// The non-scalar parameter forms a native `xtradev` model rejects, in the
+/// order the diagnostics report them.
+#[derive(Clone, Copy)]
+struct XspiceNonScalarParams<'a> {
+    string_params: &'a [(String, String)],
+    string_expr_params: &'a [(String, String)],
+    string_vector_params: &'a [(String, Vec<String>)],
+    string_vector_expr_params: &'a [(String, String)],
+    real_vector_params: &'a [(String, Vec<f64>)],
+    real_vector_expr_params: &'a [(String, Vec<String>)],
+}
+
 fn reject_native_xtradev_instance_string_params(
     kind: &str,
     element_name: &str,
     model_name: &str,
-    string_params: &[(String, String)],
-    string_expr_params: &[(String, String)],
-    string_vector_params: &[(String, Vec<String>)],
-    string_vector_expr_params: &[(String, String)],
-    real_vector_params: &[(String, Vec<f64>)],
-    real_vector_expr_params: &[(String, Vec<String>)],
+    non_scalar: XspiceNonScalarParams<'_>,
 ) -> Result<(), SimulationError> {
+    let XspiceNonScalarParams {
+        string_params,
+        string_expr_params,
+        string_vector_params,
+        string_vector_expr_params,
+        real_vector_params,
+        real_vector_expr_params,
+    } = non_scalar;
     if let Some((name, _)) = string_params.first() {
         validate_native_xtradev_param_name(kind, element_name, model_name, name)?;
         return Err(SimulationError::Circuit(format!(
@@ -897,26 +929,31 @@ fn resolve_native_xtradev_params(
     kind: &str,
     element_name: &str,
     model_name: &str,
-    instance_params: &[(String, f64)],
-    instance_expr_params: &[(String, String)],
-    instance_string_params: &[(String, String)],
-    instance_string_expr_params: &[(String, String)],
-    instance_string_vector_params: &[(String, Vec<String>)],
-    instance_string_vector_expr_params: &[(String, String)],
-    instance_real_vector_params: &[(String, Vec<f64>)],
-    instance_real_vector_expr_params: &[(String, Vec<String>)],
+    instance: XspiceInstanceParams<'_>,
 ) -> Result<Vec<(String, f64)>, SimulationError> {
+    let XspiceInstanceParams {
+        params: instance_params,
+        expr_params: instance_expr_params,
+        string_params: instance_string_params,
+        string_expr_params: instance_string_expr_params,
+        string_vector_params: instance_string_vector_params,
+        string_vector_expr_params: instance_string_vector_expr_params,
+        real_vector_params: instance_real_vector_params,
+        real_vector_expr_params: instance_real_vector_expr_params,
+    } = instance;
     validate_native_xtradev_numeric_params(kind, element_name, model_name, instance_params)?;
     reject_native_xtradev_instance_string_params(
         kind,
         element_name,
         model_name,
-        instance_string_params,
-        instance_string_expr_params,
-        instance_string_vector_params,
-        instance_string_vector_expr_params,
-        instance_real_vector_params,
-        instance_real_vector_expr_params,
+        XspiceNonScalarParams {
+            string_params: instance_string_params,
+            string_expr_params: instance_string_expr_params,
+            string_vector_params: instance_string_vector_params,
+            string_vector_expr_params: instance_string_vector_expr_params,
+            real_vector_params: instance_real_vector_params,
+            real_vector_expr_params: instance_real_vector_expr_params,
+        },
     )?;
     for (name, _) in instance_expr_params {
         validate_native_xtradev_param_name(kind, element_name, model_name, name)?;
@@ -951,15 +988,18 @@ pub(in crate::engine::builder) fn resolve_native_xtradev_reactive_model(
     netlist: &Netlist,
     model_name: &str,
     element_name: &str,
-    instance_params: &[(String, f64)],
-    instance_expr_params: &[(String, String)],
-    instance_string_params: &[(String, String)],
-    instance_string_expr_params: &[(String, String)],
-    instance_string_vector_params: &[(String, Vec<String>)],
-    instance_string_vector_expr_params: &[(String, String)],
-    instance_real_vector_params: &[(String, Vec<f64>)],
-    instance_real_vector_expr_params: &[(String, Vec<String>)],
+    instance: XspiceInstanceParams<'_>,
 ) -> Result<Option<NativeXtradevReactiveModel>, SimulationError> {
+    let XspiceInstanceParams {
+        params: instance_params,
+        expr_params: instance_expr_params,
+        string_params: instance_string_params,
+        string_expr_params: instance_string_expr_params,
+        string_vector_params: instance_string_vector_params,
+        string_vector_expr_params: instance_string_vector_expr_params,
+        real_vector_params: instance_real_vector_params,
+        real_vector_expr_params: instance_real_vector_expr_params,
+    } = instance;
     let model_def = find_model_def(netlist, model_name);
     let model_type = model_def
         .map(|model_def| model_def.model_type.as_str())
@@ -974,14 +1014,16 @@ pub(in crate::engine::builder) fn resolve_native_xtradev_reactive_model(
         kind,
         element_name,
         model_name,
-        instance_params,
-        instance_expr_params,
-        instance_string_params,
-        instance_string_expr_params,
-        instance_string_vector_params,
-        instance_string_vector_expr_params,
-        instance_real_vector_params,
-        instance_real_vector_expr_params,
+        XspiceInstanceParams {
+            params: instance_params,
+            expr_params: instance_expr_params,
+            string_params: instance_string_params,
+            string_expr_params: instance_string_expr_params,
+            string_vector_params: instance_string_vector_params,
+            string_vector_expr_params: instance_string_vector_expr_params,
+            real_vector_params: instance_real_vector_params,
+            real_vector_expr_params: instance_real_vector_expr_params,
+        },
     )?;
 
     match kind {
@@ -1027,15 +1069,18 @@ pub(in crate::engine::builder) fn resolve_xspice_model_instance(
     netlist: &Netlist,
     registry: &crate::xspice::CodeModelRegistry,
     model_name: &str,
-    instance_params: &[(String, f64)],
-    instance_expr_params: &[(String, String)],
-    instance_string_params: &[(String, String)],
-    instance_string_expr_params: &[(String, String)],
-    instance_string_vector_params: &[(String, Vec<String>)],
-    instance_string_vector_expr_params: &[(String, String)],
-    instance_real_vector_params: &[(String, Vec<f64>)],
-    instance_real_vector_expr_params: &[(String, Vec<String>)],
+    instance: XspiceInstanceParams<'_>,
 ) -> Result<ResolvedXspiceModel, SimulationError> {
+    let XspiceInstanceParams {
+        params: instance_params,
+        expr_params: instance_expr_params,
+        string_params: instance_string_params,
+        string_expr_params: instance_string_expr_params,
+        string_vector_params: instance_string_vector_params,
+        string_vector_expr_params: instance_string_vector_expr_params,
+        real_vector_params: instance_real_vector_params,
+        real_vector_expr_params: instance_real_vector_expr_params,
+    } = instance;
     let model_def = find_model_def(netlist, model_name);
 
     if model_def.is_none()
@@ -1310,14 +1355,16 @@ mod tests {
             &netlist,
             &registry,
             "custom_gate",
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
+            XspiceInstanceParams {
+                params: &[],
+                expr_params: &[],
+                string_params: &[],
+                string_expr_params: &[],
+                string_vector_params: &[],
+                string_vector_expr_params: &[],
+                real_vector_params: &[],
+                real_vector_expr_params: &[],
+            },
         ) {
             Ok(_) => panic!("unknown XSPICE model must be rejected"),
             Err(err) => err,
@@ -1346,14 +1393,16 @@ mod tests {
             &netlist,
             &registry,
             "ext",
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
+            XspiceInstanceParams {
+                params: &[],
+                expr_params: &[],
+                string_params: &[],
+                string_expr_params: &[],
+                string_vector_params: &[],
+                string_vector_expr_params: &[],
+                real_vector_params: &[],
+                real_vector_expr_params: &[],
+            },
         ) {
             Ok(_) => panic!("alias resolving to unknown XSPICE model must be rejected"),
             Err(err) => err,
@@ -1391,14 +1440,16 @@ mod tests {
             &netlist,
             &registry,
             "divider",
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
+            XspiceInstanceParams {
+                params: &[],
+                expr_params: &[],
+                string_params: &[],
+                string_expr_params: &[],
+                string_vector_params: &[],
+                string_vector_expr_params: &[],
+                real_vector_params: &[],
+                real_vector_expr_params: &[],
+            },
         )
         .expect("xspice alias resolves before direct model name");
 
@@ -1431,14 +1482,16 @@ mod tests {
             &netlist,
             &registry,
             "vp",
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
+            XspiceInstanceParams {
+                params: &[],
+                expr_params: &[],
+                string_params: &[],
+                string_expr_params: &[],
+                string_vector_params: &[],
+                string_vector_expr_params: &[],
+                real_vector_params: &[],
+                real_vector_expr_params: &[],
+            },
         )
         .expect("xspice model resolves");
 
@@ -1470,14 +1523,16 @@ mod tests {
             &netlist,
             &registry,
             "lut",
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
+            XspiceInstanceParams {
+                params: &[],
+                expr_params: &[],
+                string_params: &[],
+                string_expr_params: &[],
+                string_vector_params: &[],
+                string_vector_expr_params: &[],
+                real_vector_params: &[],
+                real_vector_expr_params: &[],
+            },
         )
         .expect("xspice model resolves");
 
@@ -1515,14 +1570,16 @@ mod tests {
             &netlist,
             &registry,
             "bp",
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
+            XspiceInstanceParams {
+                params: &[],
+                expr_params: &[],
+                string_params: &[],
+                string_expr_params: &[],
+                string_vector_params: &[],
+                string_vector_expr_params: &[],
+                real_vector_params: &[],
+                real_vector_expr_params: &[],
+            },
         )
         .expect("xspice model resolves");
 
@@ -1560,14 +1617,16 @@ mod tests {
             &netlist,
             &registry,
             "pp",
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
+            XspiceInstanceParams {
+                params: &[],
+                expr_params: &[],
+                string_params: &[],
+                string_expr_params: &[],
+                string_vector_params: &[],
+                string_vector_expr_params: &[],
+                real_vector_params: &[],
+                real_vector_expr_params: &[],
+            },
         )
         .expect("xspice model resolves");
 
@@ -1605,14 +1664,16 @@ mod tests {
             &netlist,
             &registry,
             "bp",
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
+            XspiceInstanceParams {
+                params: &[],
+                expr_params: &[],
+                string_params: &[],
+                string_expr_params: &[],
+                string_vector_params: &[],
+                string_vector_expr_params: &[],
+                real_vector_params: &[],
+                real_vector_expr_params: &[],
+            },
         )
         .expect("fractional integer vector elements round like ngspice");
 
@@ -1644,14 +1705,16 @@ mod tests {
             &netlist,
             &registry,
             "vp",
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
+            XspiceInstanceParams {
+                params: &[],
+                expr_params: &[],
+                string_params: &[],
+                string_expr_params: &[],
+                string_vector_params: &[],
+                string_vector_expr_params: &[],
+                real_vector_params: &[],
+                real_vector_expr_params: &[],
+            },
         ) {
             Ok(_) => panic!("scalar value for known vector parameter must be rejected"),
             Err(err) => err,
@@ -1683,14 +1746,16 @@ mod tests {
             &netlist,
             &registry,
             "vp",
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
+            XspiceInstanceParams {
+                params: &[],
+                expr_params: &[],
+                string_params: &[],
+                string_expr_params: &[],
+                string_vector_params: &[],
+                string_vector_expr_params: &[],
+                real_vector_params: &[],
+                real_vector_expr_params: &[],
+            },
         ) {
             Ok(_) => panic!("string value for known vector parameter must be rejected"),
             Err(err) => err,
@@ -1722,14 +1787,16 @@ mod tests {
             &netlist,
             &registry,
             "vp",
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
+            XspiceInstanceParams {
+                params: &[],
+                expr_params: &[],
+                string_params: &[],
+                string_expr_params: &[],
+                string_vector_params: &[],
+                string_vector_expr_params: &[],
+                real_vector_params: &[],
+                real_vector_expr_params: &[],
+            },
         ) {
             Ok(_) => panic!("expression value for known vector parameter must be rejected"),
             Err(err) => err,
@@ -1761,14 +1828,16 @@ mod tests {
             &netlist,
             &registry,
             "gp",
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
+            XspiceInstanceParams {
+                params: &[],
+                expr_params: &[],
+                string_params: &[],
+                string_expr_params: &[],
+                string_vector_params: &[],
+                string_vector_expr_params: &[],
+                real_vector_params: &[],
+                real_vector_expr_params: &[],
+            },
         )
         .expect("xspice model resolves");
 
@@ -1800,14 +1869,16 @@ mod tests {
             &netlist,
             &registry,
             "gain_probe",
-            &[("base".to_string(), 3.0)],
-            &[("gain".to_string(), "scale*base".to_string())],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
+            XspiceInstanceParams {
+                params: &[("base".to_string(), 3.0)],
+                expr_params: &[("gain".to_string(), "scale*base".to_string())],
+                string_params: &[],
+                string_expr_params: &[],
+                string_vector_params: &[],
+                string_vector_expr_params: &[],
+                real_vector_params: &[],
+                real_vector_expr_params: &[],
+            },
         )
         .expect("xspice instance expression param resolves");
 
@@ -1839,14 +1910,16 @@ mod tests {
             &netlist,
             &registry,
             "fp",
-            &[],
-            &[],
-            &[("file".to_string(), "instance.tbl".to_string())],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
+            XspiceInstanceParams {
+                params: &[],
+                expr_params: &[],
+                string_params: &[("file".to_string(), "instance.tbl".to_string())],
+                string_expr_params: &[],
+                string_vector_params: &[],
+                string_vector_expr_params: &[],
+                real_vector_params: &[],
+                real_vector_expr_params: &[],
+            },
         )
         .expect("xspice string instance param resolves");
 
@@ -1878,14 +1951,16 @@ mod tests {
             &netlist,
             &registry,
             "file_probe",
-            &[],
-            &[],
-            &[],
-            &[("file".to_string(), "fname".to_string())],
-            &[],
-            &[],
-            &[],
-            &[],
+            XspiceInstanceParams {
+                params: &[],
+                expr_params: &[],
+                string_params: &[],
+                string_expr_params: &[("file".to_string(), "fname".to_string())],
+                string_vector_params: &[],
+                string_vector_expr_params: &[],
+                real_vector_params: &[],
+                real_vector_expr_params: &[],
+            },
         )
         .expect("xspice string expression instance param resolves");
 
@@ -1917,14 +1992,16 @@ mod tests {
             &netlist,
             &registry,
             "vp",
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[("points".to_string(), vec![3.0, 4.0])],
-            &[],
+            XspiceInstanceParams {
+                params: &[],
+                expr_params: &[],
+                string_params: &[],
+                string_expr_params: &[],
+                string_vector_params: &[],
+                string_vector_expr_params: &[],
+                real_vector_params: &[("points".to_string(), vec![3.0, 4.0])],
+                real_vector_expr_params: &[],
+            },
         )
         .expect("xspice real-vector instance param resolves");
 
@@ -1955,14 +2032,16 @@ mod tests {
             &netlist,
             &registry,
             "bit_probe",
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[("bits".to_string(), vec![1.0, 0.5, 2.2])],
-            &[],
+            XspiceInstanceParams {
+                params: &[],
+                expr_params: &[],
+                string_params: &[],
+                string_expr_params: &[],
+                string_vector_params: &[],
+                string_vector_expr_params: &[],
+                real_vector_params: &[("bits".to_string(), vec![1.0, 0.5, 2.2])],
+                real_vector_expr_params: &[],
+            },
         )
         .expect("xspice integer-vector instance param resolves");
 
@@ -1994,17 +2073,19 @@ mod tests {
             &netlist,
             &registry,
             "pp",
-            &[],
-            &[],
-            &[],
-            &[],
-            &[(
-                "process_params".to_string(),
-                vec!["--mode".to_string(), "fast".to_string()],
-            )],
-            &[],
-            &[],
-            &[],
+            XspiceInstanceParams {
+                params: &[],
+                expr_params: &[],
+                string_params: &[],
+                string_expr_params: &[],
+                string_vector_params: &[(
+                    "process_params".to_string(),
+                    vec!["--mode".to_string(), "fast".to_string()],
+                )],
+                string_vector_expr_params: &[],
+                real_vector_params: &[],
+                real_vector_expr_params: &[],
+            },
         )
         .expect("xspice string-vector instance param resolves");
 
@@ -2037,14 +2118,16 @@ mod tests {
             &netlist,
             &registry,
             "pp",
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[("process_params".to_string(), "args".to_string())],
-            &[],
-            &[],
+            XspiceInstanceParams {
+                params: &[],
+                expr_params: &[],
+                string_params: &[],
+                string_expr_params: &[],
+                string_vector_params: &[],
+                string_vector_expr_params: &[("process_params".to_string(), "args".to_string())],
+                real_vector_params: &[],
+                real_vector_expr_params: &[],
+            },
         )
         .expect("xspice string-vector expression instance param resolves");
 
@@ -2081,14 +2164,16 @@ mod tests {
             &netlist,
             &registry,
             "vector_probe",
-            &[],
-            &[("points".to_string(), "2".to_string())],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
+            XspiceInstanceParams {
+                params: &[],
+                expr_params: &[("points".to_string(), "2".to_string())],
+                string_params: &[],
+                string_expr_params: &[],
+                string_vector_params: &[],
+                string_vector_expr_params: &[],
+                real_vector_params: &[],
+                real_vector_expr_params: &[],
+            },
         ) {
             Ok(_) => panic!("expression value for known vector parameter must be rejected"),
             Err(err) => err,
@@ -2120,14 +2205,16 @@ mod tests {
             &netlist,
             &registry,
             "gp",
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
+            XspiceInstanceParams {
+                params: &[],
+                expr_params: &[],
+                string_params: &[],
+                string_expr_params: &[],
+                string_vector_params: &[],
+                string_vector_expr_params: &[],
+                real_vector_params: &[],
+                real_vector_expr_params: &[],
+            },
         ) {
             Ok(_) => panic!("unresolved scalar expression parameter must be rejected"),
             Err(err) => err,

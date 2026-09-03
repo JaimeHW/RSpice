@@ -1677,14 +1677,16 @@ fn xspice_meter_resolved_capacitance(
                 netlist,
                 model,
                 &element.name,
-                params,
-                expr_params,
-                string_params,
-                string_expr_params,
-                string_vector_params,
-                string_vector_expr_params,
-                real_vector_params,
-                real_vector_expr_params,
+                XspiceInstanceParams {
+                    params,
+                    expr_params,
+                    string_params,
+                    string_expr_params,
+                    string_vector_params,
+                    string_vector_expr_params,
+                    real_vector_params,
+                    real_vector_expr_params,
+                },
             )? {
                 Some(NativeXtradevReactiveModel::Capacitor { capacitance, .. }) => {
                     Ok(Some(capacitance))
@@ -1733,14 +1735,16 @@ fn xspice_meter_resolved_inductance(
                 netlist,
                 model,
                 &element.name,
-                params,
-                expr_params,
-                string_params,
-                string_expr_params,
-                string_vector_params,
-                string_vector_expr_params,
-                real_vector_params,
-                real_vector_expr_params,
+                XspiceInstanceParams {
+                    params,
+                    expr_params,
+                    string_params,
+                    string_expr_params,
+                    string_vector_params,
+                    string_vector_expr_params,
+                    real_vector_params,
+                    real_vector_expr_params,
+                },
             )? {
                 Some(NativeXtradevReactiveModel::Inductor { inductance, .. }) => {
                     Ok(Some(inductance))
@@ -3663,14 +3667,16 @@ fn add_generated_xspice_auto_bridge_instance(
         generated,
         &circuit.xspice_registry,
         model,
-        params,
-        expr_params,
-        string_params,
-        string_expr_params,
-        string_vector_params,
-        string_vector_expr_params,
-        real_vector_params,
-        real_vector_expr_params,
+        XspiceInstanceParams {
+            params,
+            expr_params,
+            string_params,
+            string_expr_params,
+            string_vector_params,
+            string_vector_expr_params,
+            real_vector_params,
+            real_vector_expr_params,
+        },
     )
     .map_err(|e| {
         SimulationError::Circuit(format!(
@@ -8095,14 +8101,16 @@ impl Engine {
                             netlist,
                             model,
                             &element.name,
-                            params,
-                            expr_params,
-                            string_params,
-                            string_expr_params,
-                            string_vector_params,
-                            string_vector_expr_params,
-                            real_vector_params,
-                            real_vector_expr_params,
+                            XspiceInstanceParams {
+                                params,
+                                expr_params,
+                                string_params,
+                                string_expr_params,
+                                string_vector_params,
+                                string_vector_expr_params,
+                                real_vector_params,
+                                real_vector_expr_params,
+                            },
                         )?
                     {
                         let lowered_to_native = match native_model {
@@ -8171,14 +8179,16 @@ impl Engine {
                         netlist,
                         &circuit.xspice_registry,
                         effective_model,
-                        &xspice_instance_params,
-                        expr_params,
-                        string_params,
-                        string_expr_params,
-                        string_vector_params,
-                        string_vector_expr_params,
-                        real_vector_params,
-                        real_vector_expr_params,
+                        XspiceInstanceParams {
+                            params: &xspice_instance_params,
+                            expr_params,
+                            string_params,
+                            string_expr_params,
+                            string_vector_params,
+                            string_vector_expr_params,
+                            real_vector_params,
+                            real_vector_expr_params,
+                        },
                     )
                     .map_err(|e| {
                         SimulationError::Circuit(format!(
