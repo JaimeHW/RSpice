@@ -1104,6 +1104,9 @@ fn evaluate_pending_fourier(py: Python<'_>, out: &mut DirectiveOutcomes) -> PyRe
         match out.tran.last() {
             Some(tran_obj) => {
                 let tran_ref = tran_obj.borrow(py);
+                // Borrowed, not copied, across the worker's GIL release:
+                // `TransientResult` exposes no mutating method, so nothing
+                // Python can call meanwhile invalidates this grid.
                 let time = tran_ref.inner.time.as_slice();
                 for output in &outputs {
                     // `.four` addresses node voltages, differential node

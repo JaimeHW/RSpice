@@ -290,6 +290,11 @@ impl PyTransientResult {
     /// GIL is released while it runs. A result object owns no engine, so the
     /// run is not registered with one — `Engine.cancel_all()` does not reach
     /// post-processing of an already-returned result.
+    ///
+    /// The sample grid is borrowed rather than copied across that release,
+    /// which is sound because this class exposes no mutating method: there is
+    /// no `&mut self` entry point and no `__setstate__`, so nothing Python
+    /// can call while the worker runs can move the values out from under it.
     fn fourier_of_waveform(
         &self,
         py: Python<'_>,
