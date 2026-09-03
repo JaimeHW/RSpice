@@ -59,6 +59,10 @@ mod matrix;
 mod monte_carlo;
 pub use monte_carlo::{MonteCarloEnvironment, apply_supply_voltage_scale_with_abort};
 mod noise;
+/// Declared native periodic-analysis device capabilities, keyed by family.
+/// Every advanced-analysis admission check reads this table instead of a
+/// hand-maintained device list.
+pub(crate) mod periodic_capability;
 mod pole_zero;
 mod pss;
 mod pss_noise;

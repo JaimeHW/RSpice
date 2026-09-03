@@ -23,6 +23,7 @@ use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::harmonic_balance::{ExactPeriodicNetwork, HbDcSeedPolicy, HbFft};
 use crate::analysis::{HbConfig, HbResult, HbSolver, HbSolverState};
 use crate::circuit::CircuitData;
+use crate::engine::periodic_capability;
 use crate::engine::transient::netlist_checkpoint_identity;
 use crate::netlist::SourceSpec;
 use crate::{Netlist, Value};
@@ -1365,11 +1366,16 @@ impl Engine {
         // No reactive-element gate: junction devices carry their own charge
         // storage, and HB on a resistive nonlinear circuit is legitimate
         // distortion analysis (every harmonic system is solvable regardless).
-        if let Some(summary) = Self::hb_unsupported_nonlinear_device_summary(&circuit, num_nodes) {
+        if let Some(summary) =
+            periodic_capability::summarize(&periodic_capability::periodic_residual_gaps(&circuit))
+        {
             return Err(HbError::UnsupportedNonlinearDevices(summary).into());
         }
-        let has_supported_nonlinear = Self::hb_has_supported_nonlinear_devices(&circuit, num_nodes);
-        if let Some(summary) = Self::hb_periodic_mna_unsupported_summary(&circuit) {
+        let has_supported_nonlinear =
+            periodic_capability::has_exact_periodic_nonlinear_devices(&circuit);
+        if let Some(summary) =
+            periodic_capability::summarize(&periodic_capability::periodic_descriptor_gaps(&circuit))
+        {
             return Err(SimulationError::Circuit(format!(
                 "exact HB MNA is unavailable because the circuit contains {summary}"
             )));

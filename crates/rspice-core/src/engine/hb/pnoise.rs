@@ -60,75 +60,6 @@ fn pnoise_physical_constants(
     }
 }
 
-/// Identify authored colored-noise controls whose intensity depends on the
-/// periodically varying device current. The low-level periodic solver has an
-/// exact stationary colored-source contract, but these device controls need
-/// cyclostationary colored correlation rather than a DC-bias substitution.
-fn unsupported_device_colored_noise(circuit: &CircuitData) -> Vec<String> {
-    let mut unsupported = Vec::new();
-    for (index, flicker) in circuit.resistors.flicker.iter().enumerate() {
-        if !circuit.resistors.noisy[index] {
-            continue;
-        }
-        if let Some((coefficient, af, ef)) = flicker
-            && *coefficient != 0.0
-        {
-            let name = circuit
-                .resistors
-                .names
-                .get(index)
-                .map(String::as_str)
-                .unwrap_or("<unnamed resistor>");
-            unsupported.push(format!(
-                "resistor '{name}' flicker noise (coefficient={coefficient}, AF={af}, EF={ef})"
-            ));
-        }
-    }
-    for (index, flicker) in circuit.resistor_branches.flicker.iter().enumerate() {
-        if !circuit.resistor_branches.noisy[index] {
-            continue;
-        }
-        if let Some((coefficient, af, ef)) = flicker
-            && *coefficient != 0.0
-        {
-            let name = circuit
-                .resistor_branches
-                .names
-                .get(index)
-                .map(String::as_str)
-                .unwrap_or("<unnamed branch-form resistor>");
-            unsupported.push(format!(
-                "branch-form resistor '{name}' cyclostationary flicker noise (coefficient={coefficient}, AF={af}, EF={ef})"
-            ));
-        }
-    }
-    for diode in &circuit.diodes.devices {
-        if diode.kf != 0.0 {
-            unsupported.push(format!(
-                "diode '{}' flicker noise (KF={}, AF={})",
-                diode.name, diode.kf, diode.af
-            ));
-        }
-    }
-    for mos in &circuit.mosfets.devices {
-        if mos.kf != 0.0 {
-            unsupported.push(format!(
-                "MOSFET '{}' flicker noise (KF={}, AF={}, EF={})",
-                mos.name, mos.kf, mos.af, mos.ef
-            ));
-        }
-    }
-    for jfet in &circuit.jfets {
-        if jfet.params.kf != 0.0 {
-            unsupported.push(format!(
-                "JFET '{}' flicker noise (KF={}, AF={}, EF={})",
-                jfet.name, jfet.params.kf, jfet.params.af, jfet.params.ef
-            ));
-        }
-    }
-    unsupported
-}
-
 fn validate_resistor_noise_metadata(circuit: &CircuitData) -> Result<(), SimulationError> {
     let count = circuit.resistors.len();
     for (label, actual) in [
@@ -624,19 +555,23 @@ impl Engine {
             ))
         })?;
         self.ensure_matrix_unknowns(lifted_unknowns)?;
-        if let Some(summary) = Self::hb_unsupported_nonlinear_device_summary(&circuit, num_nodes) {
+        if let Some(summary) =
+            periodic_capability::summarize(&periodic_capability::periodic_residual_gaps(&circuit))
+        {
             return Err(HbError::UnsupportedNonlinearDevices(summary).into());
         }
-        if let Some(summary) = Self::hb_periodic_mna_unsupported_summary(&circuit) {
+        if let Some(summary) =
+            periodic_capability::summarize(&periodic_capability::periodic_descriptor_gaps(&circuit))
+        {
             return Err(SimulationError::Circuit(format!(
                 "pnoise exact periodic MNA is unavailable because the circuit contains {summary}"
             )));
         }
-        let unsupported_colored = unsupported_device_colored_noise(&circuit);
-        if !unsupported_colored.is_empty() {
+        if let Some(summary) = periodic_capability::summarize(
+            &periodic_capability::cyclostationary_noise_gaps(&circuit),
+        ) {
             return Err(SimulationError::Circuit(format!(
-                "driven pnoise requires exact cyclostationary colored-noise folding, which is not implemented for {}; set the listed noise coefficient exactly to zero to disable that mechanism",
-                unsupported_colored.join(", ")
+                "driven pnoise requires exact cyclostationary colored-noise folding, which is not implemented for {summary}; set the listed noise coefficient exactly to zero to disable that mechanism"
             )));
         }
         let temperature = self.config.temperature;
@@ -676,7 +611,7 @@ impl Engine {
         self.hb_stamp_periodic_mna_branches(&circuit, &mut solver)?;
         self.hb_stamp_current_sources(&circuit, &mut solver, &hb_config, &drive_tones)?;
 
-        let has_nonlinear = Self::hb_has_supported_nonlinear_devices(&circuit, num_nodes);
+        let has_nonlinear = periodic_capability::has_exact_periodic_nonlinear_devices(&circuit);
         if has_nonlinear {
             self.hb_stamp_supported_nonlinear_devices(&circuit, &mut solver, num_nodes);
         }
