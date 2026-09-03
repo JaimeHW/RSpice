@@ -622,6 +622,9 @@ impl Engine {
     }
 
     /// Run pole-zero analysis with explicit differential ports and mode control.
+    // Mirrors `run_pz_ports_with_abort`, which crates outside this package
+    // call; the two must keep the same argument shape.
+    #[allow(clippy::too_many_arguments)]
     pub fn run_pz_ports(
         &self,
         netlist: &Netlist,
@@ -647,6 +650,8 @@ impl Engine {
     }
 
     /// Cancellable form of [`Self::run_pz_ports`].
+    // Port selection is five independent scalars in the published API; the
+    // uncancellable form below must keep the same shape.
     #[allow(clippy::too_many_arguments)]
     pub fn run_pz_ports_with_abort(
         &self,

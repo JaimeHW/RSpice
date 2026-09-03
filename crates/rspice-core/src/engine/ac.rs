@@ -380,6 +380,28 @@ impl MatrixStamper for AcImagStamper<'_> {
     }
 }
 
+/// One XSPICE output port as the AC vector stamp addresses it: which port,
+/// which output row it writes, and the node pair it spans.
+#[derive(Clone, Copy)]
+struct XspiceAcOutputPort<'a> {
+    output_port: &'a str,
+    output_index: usize,
+    pos: usize,
+    neg: usize,
+}
+
+/// The same, for a port taken from the model's own port list, plus whether the
+/// stamp is forced to the current-output form.
+#[derive(Clone, Copy)]
+struct XspiceAcOutputElement<'a> {
+    port: &'a crate::xspice::PortSpec,
+    port_idx: usize,
+    output_index: usize,
+    pos: usize,
+    neg: usize,
+    force_current_output: bool,
+}
+
 impl Engine {
     /// Align every stateful nonlinear model and behavioral-source Jacobian
     /// with a supplied operating state before building a small-signal
@@ -920,13 +942,16 @@ impl Engine {
     fn stamp_xspice_ac_vector_current_controls(
         ac_matrix: &mut ComplexMatrix,
         instance: &crate::xspice::XspiceInstance,
-        output_port: &str,
-        output_index: usize,
-        pos: usize,
-        neg: usize,
+        port: XspiceAcOutputPort<'_>,
         frequency_hz: Value,
         num_nodes: usize,
     ) {
+        let XspiceAcOutputPort {
+            output_port,
+            output_index,
+            pos,
+            neg,
+        } = port;
         for (control_port, partial) in
             instance.output_vector_input_ac_partials(output_port, output_index, frequency_hz)
         {
@@ -995,15 +1020,18 @@ impl Engine {
         circuit: &CircuitData,
         ac_matrix: &mut ComplexMatrix,
         instance: &crate::xspice::XspiceInstance,
-        port: &crate::xspice::PortSpec,
-        port_idx: usize,
-        output_index: usize,
-        pos: usize,
-        neg: usize,
-        force_current_output: bool,
+        element: XspiceAcOutputElement<'_>,
         frequency_hz: Value,
         num_nodes: usize,
     ) {
+        let XspiceAcOutputElement {
+            port,
+            port_idx,
+            output_index,
+            pos,
+            neg,
+            force_current_output,
+        } = element;
         let (conductance, _) =
             instance.analog_vector_small_signal_contribution_at(port_idx, output_index);
         let stamp_as_current_output = force_current_output
@@ -1021,10 +1049,12 @@ impl Engine {
             Self::stamp_xspice_ac_vector_current_controls(
                 ac_matrix,
                 instance,
-                &port.name,
-                output_index,
-                pos,
-                neg,
+                XspiceAcOutputPort {
+                    output_port: &port.name,
+                    output_index,
+                    pos,
+                    neg,
+                },
                 frequency_hz,
                 num_nodes,
             );
@@ -1092,12 +1122,14 @@ impl Engine {
                                     circuit,
                                     ac_matrix,
                                     instance,
-                                    port,
-                                    port_idx,
-                                    output_index,
-                                    node,
-                                    0,
-                                    false,
+                                    XspiceAcOutputElement {
+                                        port,
+                                        port_idx,
+                                        output_index,
+                                        pos: node,
+                                        neg: 0,
+                                        force_current_output: false,
+                                    },
                                     frequency_hz,
                                     num_nodes,
                                 );
@@ -1111,12 +1143,14 @@ impl Engine {
                                             circuit,
                                             ac_matrix,
                                             instance,
-                                            port,
-                                            port_idx,
-                                            output_index,
-                                            *node,
-                                            0,
-                                            false,
+                                            XspiceAcOutputElement {
+                                                port,
+                                                port_idx,
+                                                output_index,
+                                                pos: *node,
+                                                neg: 0,
+                                                force_current_output: false,
+                                            },
                                             frequency_hz,
                                             num_nodes,
                                         );
@@ -1134,12 +1168,14 @@ impl Engine {
                                             circuit,
                                             ac_matrix,
                                             instance,
-                                            port,
-                                            port_idx,
-                                            output_index,
-                                            *pos,
-                                            *neg,
-                                            false,
+                                            XspiceAcOutputElement {
+                                                port,
+                                                port_idx,
+                                                output_index,
+                                                pos: *pos,
+                                                neg: *neg,
+                                                force_current_output: false,
+                                            },
                                             frequency_hz,
                                             num_nodes,
                                         );
@@ -1152,12 +1188,14 @@ impl Engine {
                                             circuit,
                                             ac_matrix,
                                             instance,
-                                            port,
-                                            port_idx,
-                                            output_index,
-                                            *pos,
-                                            *neg,
-                                            true,
+                                            XspiceAcOutputElement {
+                                                port,
+                                                port_idx,
+                                                output_index,
+                                                pos: *pos,
+                                                neg: *neg,
+                                                force_current_output: true,
+                                            },
                                             frequency_hz,
                                             num_nodes,
                                         );

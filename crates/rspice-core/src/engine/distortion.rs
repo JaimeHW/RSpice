@@ -115,9 +115,11 @@ impl Engine {
                 f1,
                 &h1,
                 2.0,
-                num_nodes,
-                &node_names,
-                &branch_names,
+                DistortionNaming {
+                    num_nodes,
+                    node_names: &node_names,
+                    branch_names: &branch_names,
+                },
             );
 
             let point = if let (Some(f2), Some(rhs_f2)) = (f2, rhs_f2.as_ref()) {
@@ -273,9 +275,11 @@ impl VolterraContext<'_> {
                     2.0 * f1,
                     &h11,
                     2.0,
-                    self.num_nodes,
-                    node_names,
-                    branch_names,
+                    DistortionNaming {
+                        num_nodes: self.num_nodes,
+                        node_names,
+                        branch_names,
+                    },
                 ),
                 make_product_result(
                     self.circuit,
@@ -283,9 +287,11 @@ impl VolterraContext<'_> {
                     3.0 * f1,
                     &h111,
                     2.0,
-                    self.num_nodes,
-                    node_names,
-                    branch_names,
+                    DistortionNaming {
+                        num_nodes: self.num_nodes,
+                        node_names,
+                        branch_names,
+                    },
                 ),
             ],
         })
@@ -331,9 +337,11 @@ impl VolterraContext<'_> {
                 f2,
                 &h2,
                 2.0,
-                self.num_nodes,
-                node_names,
-                branch_names,
+                DistortionNaming {
+                    num_nodes: self.num_nodes,
+                    node_names,
+                    branch_names,
+                },
             )),
             products: vec![
                 make_product_result(
@@ -342,9 +350,11 @@ impl VolterraContext<'_> {
                     f1 + f2,
                     &h12,
                     4.0,
-                    self.num_nodes,
-                    node_names,
-                    branch_names,
+                    DistortionNaming {
+                        num_nodes: self.num_nodes,
+                        node_names,
+                        branch_names,
+                    },
                 ),
                 make_product_result(
                     self.circuit,
@@ -352,9 +362,11 @@ impl VolterraContext<'_> {
                     f1 - f2,
                     &h1m2,
                     4.0,
-                    self.num_nodes,
-                    node_names,
-                    branch_names,
+                    DistortionNaming {
+                        num_nodes: self.num_nodes,
+                        node_names,
+                        branch_names,
+                    },
                 ),
                 make_product_result(
                     self.circuit,
@@ -362,9 +374,11 @@ impl VolterraContext<'_> {
                     output_frequency,
                     &h11m2,
                     6.0,
-                    self.num_nodes,
-                    node_names,
-                    branch_names,
+                    DistortionNaming {
+                        num_nodes: self.num_nodes,
+                        node_names,
+                        branch_names,
+                    },
                 ),
             ],
         })
@@ -633,16 +647,27 @@ fn normalize_real_direction(
     )))
 }
 
+/// The names a distortion product result is labelled with.
+#[derive(Clone, Copy)]
+struct DistortionNaming<'a> {
+    num_nodes: usize,
+    node_names: &'a [String],
+    branch_names: &'a [String],
+}
+
 fn make_product_result(
     circuit: &CircuitData,
     product: DistortionProduct,
     frequency: Value,
     kernel: &[Complex64],
     sinusoid_scale: Value,
-    num_nodes: usize,
-    node_names: &[String],
-    branch_names: &[String],
+    naming: DistortionNaming<'_>,
 ) -> DistortionProductResult {
+    let DistortionNaming {
+        num_nodes,
+        node_names,
+        branch_names,
+    } = naming;
     DistortionProductResult {
         product,
         response: make_ac_result(
@@ -650,9 +675,11 @@ fn make_product_result(
             frequency,
             kernel,
             sinusoid_scale,
-            num_nodes,
-            node_names,
-            branch_names,
+            DistortionNaming {
+                num_nodes,
+                node_names,
+                branch_names,
+            },
         ),
     }
 }
@@ -662,10 +689,13 @@ fn make_ac_result(
     frequency: Value,
     kernel: &[Complex64],
     sinusoid_scale: Value,
-    num_nodes: usize,
-    node_names: &[String],
-    branch_names: &[String],
+    naming: DistortionNaming<'_>,
 ) -> AcResult {
+    let DistortionNaming {
+        num_nodes,
+        node_names,
+        branch_names,
+    } = naming;
     let voltages = kernel[..num_nodes]
         .iter()
         .map(|value| sinusoid_scale * *value)

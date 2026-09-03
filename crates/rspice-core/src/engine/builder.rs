@@ -11,6 +11,7 @@ use crate::device::DistributedRlgc;
 use crate::device::controlled::VoltageControlledNodes;
 use crate::device::passive::CoupledWinding;
 use crate::xspice::CodeModelVectorParams;
+use behavioral::{BehavioralResistorModel, BehavioralResistorPolicy};
 
 /// A model parameter the deck left as text: its name and the unresolved
 /// expression or string literal that follows it.
@@ -4945,12 +4946,19 @@ impl Engine {
                             netlist,
                             element,
                             expression,
-                            model.as_deref(),
-                            instance_params,
-                            self.config.temperature,
-                            self.config.convergence_config.junction_gmin_target,
-                            self.config.resource_limits,
-                            self.config.spice_dialect,
+                            BehavioralResistorModel {
+                                model_name: model.as_deref(),
+                                instance_params,
+                                temperature_kelvin: self.config.temperature,
+                            },
+                            BehavioralResistorPolicy {
+                                expression_gmin: self
+                                    .config
+                                    .convergence_config
+                                    .junction_gmin_target,
+                                resource_limits: self.config.resource_limits,
+                                spice_dialect: self.config.spice_dialect,
+                            },
                         )?;
                         continue;
                     }

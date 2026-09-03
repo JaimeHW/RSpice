@@ -336,6 +336,25 @@ pub struct DcSweepRange {
     pub step: Value,
 }
 
+/// One segment of a `.dc` sweep the substep solver is asked to cross: which
+/// source moves, from where to where, and the solution it starts from.
+#[derive(Clone, Copy)]
+struct DcSweepSegment<'a> {
+    sweep_source: &'a DcSweepSource,
+    from_value: Value,
+    to_value: Value,
+    seed: &'a [Value],
+}
+
+/// How hard it is allowed to try: the minimum subdivision count, and whether
+/// the first and last substeps must land exactly on the segment endpoints.
+#[derive(Clone, Copy)]
+struct DcSubstepPolicy {
+    min_subdivisions: usize,
+    target_initial_step: bool,
+    target_final_step: bool,
+}
+
 impl Engine {
     /// Resolve a Xyce device-parameter `.DC` source to the canonical AST
     /// override spelling used by the engine and regression wrapper.
@@ -569,15 +588,21 @@ impl Engine {
         &self,
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
-        sweep_source: &DcSweepSource,
-        from_value: Value,
-        to_value: Value,
-        seed: &[Value],
-        min_subdivisions: usize,
-        target_initial_step: bool,
-        target_final_step: bool,
+        segment: DcSweepSegment<'_>,
+        policy: DcSubstepPolicy,
         abort: &dyn AbortSignal,
     ) -> Result<(Vec<Value>, usize), SimulationError> {
+        let DcSubstepPolicy {
+            min_subdivisions,
+            target_initial_step,
+            target_final_step,
+        } = policy;
+        let DcSweepSegment {
+            sweep_source,
+            from_value,
+            to_value,
+            seed,
+        } = segment;
         let span = to_value - from_value;
         if !span.is_finite() || span == 0.0 {
             sweep_source.set_value(circuit, to_value);
@@ -1305,13 +1330,17 @@ impl Engine {
                                     match engine.solve_nonlinear_dc_sweep_target_with_substeps(
                                         &mut circuit,
                                         &mut matrix,
-                                        &sweep_source,
-                                        previous_value,
-                                        sweep_value,
-                                        seed,
-                                        dc_sweep_subdivisions,
-                                        analysis_initial_step,
-                                        analysis_final_step,
+                                        DcSweepSegment {
+                                            sweep_source: &sweep_source,
+                                            from_value: previous_value,
+                                            to_value: sweep_value,
+                                            seed,
+                                        },
+                                        DcSubstepPolicy {
+                                            min_subdivisions: dc_sweep_subdivisions,
+                                            target_initial_step: analysis_initial_step,
+                                            target_final_step: analysis_final_step,
+                                        },
                                         abort,
                                     ) {
                                         Ok((solution, subdivisions)) => {

@@ -66,18 +66,42 @@ pub(in crate::engine::builder) fn prepare_temperature_scaled_behavioral_expressi
     Ok(format!("(({})*{})", prepared, scale))
 }
 
+/// The model card a behavioural resistor resolves against.
+#[derive(Clone, Copy)]
+pub(in crate::engine::builder) struct BehavioralResistorModel<'a> {
+    pub model_name: Option<&'a str>,
+    pub instance_params: &'a [(String, f64)],
+    pub temperature_kelvin: f64,
+}
+
+/// How its expression is evaluated: the conductance floor stamped alongside
+/// it, the resource ceiling the expression is evaluated under, and the dialect
+/// whose expression semantics apply.
+#[derive(Clone, Copy)]
+pub(in crate::engine::builder) struct BehavioralResistorPolicy {
+    pub expression_gmin: Value,
+    pub resource_limits: ResourceLimits,
+    pub spice_dialect: SpiceDialect,
+}
+
 pub(in crate::engine::builder) fn add_behavioral_resistor(
     circuit: &mut CircuitData,
     netlist: &Netlist,
     element: &crate::netlist::Element,
     expression: &str,
-    model_name: Option<&str>,
-    instance_params: &[(String, f64)],
-    temperature_kelvin: f64,
-    expression_gmin: Value,
-    resource_limits: ResourceLimits,
-    spice_dialect: SpiceDialect,
+    model: BehavioralResistorModel<'_>,
+    policy: BehavioralResistorPolicy,
 ) -> Result<(), SimulationError> {
+    let BehavioralResistorPolicy {
+        expression_gmin,
+        resource_limits,
+        spice_dialect,
+    } = policy;
+    let BehavioralResistorModel {
+        model_name,
+        instance_params,
+        temperature_kelvin,
+    } = model;
     let np = circuit.get_or_create_node(&element.nodes[0]);
     let nn = circuit.get_or_create_node(&element.nodes[1]);
     let policy = resolve_behavioral_resistor_policy(

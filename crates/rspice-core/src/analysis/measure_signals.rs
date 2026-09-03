@@ -592,6 +592,34 @@ struct LiveMeasureReadContext<'program, 'netlist> {
     axis: &'program [Value],
 }
 
+/// One row of the series a live measurement is being advanced over.
+#[derive(Clone, Copy)]
+struct LiveMeasureRow {
+    row: usize,
+    axis_value: Value,
+    starts_segment: bool,
+}
+
+/// The window a live condition is only allowed to fire inside.
+#[derive(Clone, Copy)]
+struct LiveConditionWindow {
+    lower: Value,
+    upper: Value,
+    exclusive_lower: Option<Value>,
+}
+
+/// One row of the series a live selection is being advanced over, with the
+/// axis bounds and direction it is judged against.
+#[derive(Clone, Copy)]
+struct LiveSelectionRow {
+    row: usize,
+    axis_value: Value,
+    ascending: bool,
+    axis_minimum: Value,
+    axis_maximum: Value,
+    starts_segment: bool,
+}
+
 impl LiveMeasureReadContext<'_, '_> {
     fn read_measure(&mut self, canonical_name: &str) -> Option<Value> {
         if let Some(&program_index) = self.program_indices.get(canonical_name)
@@ -3130,16 +3158,22 @@ impl LiveCondition {
 
     fn update(
         &mut self,
-        row: usize,
-        axis_value: Value,
-        starts_segment: bool,
+        sample: LiveMeasureRow,
         signals: &CanonicalMeasureSignalIndex<'_>,
         reads: &mut LiveMeasureReadContext<'_, '_>,
         params: &crate::netlist::ParamContext,
-        lower: Value,
-        upper: Value,
-        exclusive_lower: Option<Value>,
+        window: LiveConditionWindow,
     ) -> Result<LiveConditionUpdate, String> {
+        let LiveConditionWindow {
+            lower,
+            upper,
+            exclusive_lower,
+        } = window;
+        let LiveMeasureRow {
+            row,
+            axis_value,
+            starts_segment,
+        } = sample;
         if starts_segment {
             self.previous = None;
         }
@@ -3286,18 +3320,21 @@ impl LiveDelayClause {
 
     fn update(
         &mut self,
-        row: usize,
-        axis_value: Value,
-        ascending: bool,
-        axis_minimum: Value,
-        axis_maximum: Value,
-        starts_segment: bool,
+        sample: LiveSelectionRow,
         signals: &CanonicalMeasureSignalIndex<'_>,
         reads: &mut LiveMeasureReadContext<'_, '_>,
         params: &crate::netlist::ParamContext,
         after: Option<Value>,
         allow_selection: bool,
     ) -> Result<(), String> {
+        let LiveSelectionRow {
+            row,
+            axis_value,
+            ascending,
+            axis_minimum,
+            axis_maximum,
+            starts_segment,
+        } = sample;
         if self.selected.is_some()
             && (self.at.is_some()
                 || self
@@ -3732,15 +3769,19 @@ impl LiveMeasureState {
                     return Ok(None);
                 };
                 let update = condition.update(
-                    row,
-                    axis_value,
-                    starts_segment,
+                    LiveMeasureRow {
+                        row,
+                        axis_value,
+                        starts_segment,
+                    },
                     signals,
                     reads,
                     params,
-                    *lower,
-                    *upper,
-                    None,
+                    LiveConditionWindow {
+                        lower: *lower,
+                        upper: *upper,
+                        exclusive_lower: None,
+                    },
                 )?;
                 if matches!(kind, LivePointKind::When) {
                     let Some(event) = update.selected else {
@@ -3861,12 +3902,14 @@ impl LiveMeasureState {
                     return Ok(pair.map(|(trigger, target)| target - trigger));
                 }
                 trigger.update(
-                    row,
-                    axis_value,
-                    *axis_ascending,
-                    *axis_minimum,
-                    *axis_maximum,
-                    starts_segment,
+                    LiveSelectionRow {
+                        row,
+                        axis_value,
+                        ascending: *axis_ascending,
+                        axis_minimum: *axis_minimum,
+                        axis_maximum: *axis_maximum,
+                        starts_segment,
+                    },
                     signals,
                     reads,
                     params,
@@ -3876,12 +3919,14 @@ impl LiveMeasureState {
                 let trigger_axis = trigger.selected;
                 let target_after = target.legacy.then_some(trigger_axis).flatten();
                 target.update(
-                    row,
-                    axis_value,
-                    *axis_ascending,
-                    *axis_minimum,
-                    *axis_maximum,
-                    starts_segment,
+                    LiveSelectionRow {
+                        row,
+                        axis_value,
+                        ascending: *axis_ascending,
+                        axis_minimum: *axis_minimum,
+                        axis_maximum: *axis_maximum,
+                        starts_segment,
+                    },
                     signals,
                     reads,
                     params,
@@ -8124,15 +8169,19 @@ mod tests {
             };
             if let Some(event) = selector
                 .update(
-                    row,
-                    axis_value,
-                    false,
+                    LiveMeasureRow {
+                        row,
+                        axis_value,
+                        starts_segment: false,
+                    },
                     &signal_index,
                     &mut reads,
                     &params,
-                    Value::NEG_INFINITY,
-                    Value::INFINITY,
-                    None,
+                    LiveConditionWindow {
+                        lower: Value::NEG_INFINITY,
+                        upper: Value::INFINITY,
+                        exclusive_lower: None,
+                    },
                 )
                 .expect("bounded selector updates")
                 .selected
