@@ -295,6 +295,15 @@ pub struct EvalContext {
     pub state_older_candidate: *mut f64,
     /// Length of `state_older_candidate`.
     pub state_older_candidate_len: usize,
+    /// Per-evaluation slot array a CFG prelude publishes its shared values
+    /// into, and every entry built against that prelude reads.
+    ///
+    /// Sized by the plan, not by the module: it holds one double per distinct
+    /// entry output the prelude computes. Null and zero-length for a plan
+    /// with no prelude, which is every plan the shipped route builds.
+    pub prelude_slots: *mut f64,
+    /// Length of `prelude_slots`.
+    pub prelude_slots_len: usize,
 }
 
 impl EvalContext {
@@ -360,6 +369,8 @@ impl EvalContext {
             state_candidate_valid_len: 0,
             state_older_candidate: std::ptr::null_mut(),
             state_older_candidate_len: 0,
+            prelude_slots: std::ptr::null_mut(),
+            prelude_slots_len: 0,
         }
     }
 
@@ -2508,12 +2519,14 @@ mod tests {
         assert_eq!(offset_of!(EvalContext, state_candidate_valid_len), 464);
         assert_eq!(offset_of!(EvalContext, state_older_candidate), 472);
         assert_eq!(offset_of!(EvalContext, state_older_candidate_len), 480);
+        assert_eq!(offset_of!(EvalContext, prelude_slots), 488);
+        assert_eq!(offset_of!(EvalContext, prelude_slots_len), 496);
         assert_eq!(offset_of!(NativeRuntimeStatus, failed), 0);
         assert_eq!(
             NativeRuntimeStatus::failed_offset(),
             offset_of!(NativeRuntimeStatus, failed)
         );
-        assert_eq!(size_of::<EvalContext>(), 488);
+        assert_eq!(size_of::<EvalContext>(), 504);
         assert_eq!(align_of::<EvalContext>(), 8);
     }
 
@@ -2946,6 +2959,8 @@ mod tests {
             state_candidate_valid_len: 0,
             state_older_candidate: std::ptr::null_mut(),
             state_older_candidate_len: 0,
+            prelude_slots: std::ptr::null_mut(),
+            prelude_slots_len: 0,
         };
 
         assert_eq!(

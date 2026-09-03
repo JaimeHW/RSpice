@@ -1362,6 +1362,8 @@ mod tests {
             state_candidate_valid_len: 0,
             state_older_candidate: std::ptr::null_mut(),
             state_older_candidate_len: 0,
+            prelude_slots: std::ptr::null_mut(),
+            prelude_slots_len: 0,
         };
 
         let mut encoder = X64Encoder::new();

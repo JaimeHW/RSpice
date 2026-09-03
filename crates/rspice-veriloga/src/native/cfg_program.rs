@@ -199,6 +199,29 @@ impl CfgRuntimeBindings {
     }
 }
 
+/// What a lowered CFG function does with the values it was pruned to.
+///
+/// One lowering, two publications. A plan entry is pruned to a single value
+/// and *returns* it, which is the shape every backend's value ABI already has.
+/// A prelude is pruned to every entry output at once and cannot return them,
+/// so it publishes each one into a per-evaluation slot with
+/// [`NativeOp::StorePreludeSlot`] and returns a constant nothing reads.
+///
+/// Publishing at the definition rather than at the exit is the whole reason a
+/// prelude fits in a frame: a value stored where it is computed dies there, so
+/// the register allocator holds one live value per slot for the length of one
+/// instruction instead of holding every one of them until the return.
+#[derive(Debug, Clone, Copy)]
+// `Published` is constructed only by the prelude, which W-F10b-2 wires into
+// `build_model_plan_from_canonical_cfg`; the attribute comes off with it.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) enum CfgOutputs<'a> {
+    /// One value, returned. What every plan entry is.
+    Returned(CfgValueId),
+    /// `(value, prelude slot)` pairs, each published where it is computed.
+    Published(&'a [(CfgValueId, usize)]),
+}
+
 /// Lower `function`, pruned to `output`, onto the block model.
 ///
 /// The caller prunes: [`crate::canonical_ir::prune_cfg_to_outputs`] already
@@ -210,12 +233,45 @@ pub(crate) fn lower_cfg_function(
     state: &CfgStateAllocation,
     bindings: &CfgRuntimeBindings,
 ) -> JitResult<Program> {
+    lower_cfg_outputs(function, CfgOutputs::Returned(output), state, bindings)
+}
+
+/// Lower `function`, pruned to every published value, as one program that
+/// writes each of them into its prelude slot.
+///
+/// The same lowering, the same hoisting and the same refusals: only the
+/// publication differs, which is why this extends [`lower_cfg_function`]
+/// rather than forking it. A slot whose value is computed on a block that runs
+/// conditionally, or once per iteration of a loop, is refused by [`Program`]'s
+/// own effect discipline — the rule that already governs every analog
+/// operator's state write — rather than by a second rule written here.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn lower_cfg_function_to_prelude_slots(
+    function: &CfgFunction,
+    publications: &[(CfgValueId, usize)],
+    state: &CfgStateAllocation,
+    bindings: &CfgRuntimeBindings,
+) -> JitResult<Program> {
+    lower_cfg_outputs(
+        function,
+        CfgOutputs::Published(publications),
+        state,
+        bindings,
+    )
+}
+
+fn lower_cfg_outputs(
+    function: &CfgFunction,
+    outputs: CfgOutputs<'_>,
+    state: &CfgStateAllocation,
+    bindings: &CfgRuntimeBindings,
+) -> JitResult<Program> {
     Lowerer {
         function,
         state,
         bindings,
     }
-    .run(output)
+    .run(outputs)
 }
 
 struct Lowerer<'a> {
@@ -225,7 +281,7 @@ struct Lowerer<'a> {
 }
 
 impl Lowerer<'_> {
-    fn run(&self, output: CfgValueId) -> JitResult<Program> {
+    fn run(&self, outputs: CfgOutputs<'_>) -> JitResult<Program> {
         let layout = layout_order(self.function)?;
         let order = &layout.order;
         let mut position = vec![usize::MAX; self.function.blocks.len()];
@@ -251,20 +307,27 @@ impl Lowerer<'_> {
         // deliberately leaves unpinned so that any block may read one, and
         // which is materialized here in the entry block — the one block that
         // dominates every use by construction.
-        let unpinned = self.unpinned_leaves(order, output)?;
+        let unpinned = self.unpinned_leaves(order, outputs)?;
+        // One hoist decision per site and one record advance per operator,
+        // whichever publication this is: the hoist is a property of the
+        // function, and the prelude lowers the function once.
         let hoisted = self.hoisted_state_operators(&layout)?;
+        let publications = self.publication_slots(outputs)?;
 
         let mut lowered: Vec<Option<BuilderValue>> = vec![None; self.function.values.len()];
         for (index, block) in order.iter().enumerate() {
             let id = BlockId::new(index)?;
             builder.begin_block(id)?;
             for (slot, param) in self.function.block(*block).params.iter().enumerate() {
-                lowered[usize::from(*param)] = Some(builder.parameter(id, slot)?);
+                let emitted = builder.parameter(id, slot)?;
+                lowered[usize::from(*param)] = Some(emitted);
+                self.publish(&mut builder, &publications, *param, emitted)?;
             }
             if index == 0 {
                 for leaf in &unpinned {
                     let emitted = self.emit(&mut builder, &lowered, *leaf)?;
                     lowered[usize::from(*leaf)] = Some(emitted);
+                    self.publish(&mut builder, &publications, *leaf, emitted)?;
                 }
             }
             for instruction in &self.function.block(*block).instructions {
@@ -273,6 +336,7 @@ impl Lowerer<'_> {
                 }
                 let emitted = self.emit(&mut builder, &lowered, instruction.result)?;
                 lowered[usize::from(instruction.result)] = Some(emitted);
+                self.publish(&mut builder, &publications, instruction.result, emitted)?;
             }
             // A speculated cone value may appear in more than one operator's
             // cone, and a speculated value may also be one this block already
@@ -283,12 +347,74 @@ impl Lowerer<'_> {
                 }
                 let emitted = self.emit(&mut builder, &lowered, *value)?;
                 lowered[usize::from(*value)] = Some(emitted);
+                self.publish(&mut builder, &publications, *value, emitted)?;
             }
-            let terminator = self.terminator(*block, &position, &lowered, output)?;
+            // A publishing program has no value to return, and the block model
+            // has exactly one `Return`. The constant is that return: it costs
+            // one instruction, reads nothing, and keeps the exit terminator the
+            // same shape for both publications.
+            let returned = match outputs {
+                CfgOutputs::Returned(_) => None,
+                CfgOutputs::Published(_)
+                    if matches!(
+                        self.function.block(*block).terminator,
+                        CfgTerminator::Return
+                    ) =>
+                {
+                    Some(builder.push(NativeOp::Const(0.0), &[], ValueType::F64)?)
+                }
+                CfgOutputs::Published(_) => None,
+            };
+            let terminator = self.terminator(*block, &position, &lowered, outputs, returned)?;
             builder.end_block(terminator)?;
         }
 
         builder.finish(BlockId::new(0)?, BlockId::new(position[layout.exit])?)
+    }
+
+    /// The prelude slots each value is published into, indexed by CFG value.
+    ///
+    /// Empty for a returning lowering, which publishes nothing. A `Vec` per
+    /// value rather than one slot, because the caller is allowed to give two
+    /// entries the same value; the alternative would be for it to deduplicate
+    /// and for this to trust that it did.
+    fn publication_slots(&self, outputs: CfgOutputs<'_>) -> JitResult<Vec<Vec<usize>>> {
+        let CfgOutputs::Published(pairs) = outputs else {
+            return Ok(Vec::new());
+        };
+        let mut publications: Vec<Vec<usize>> = vec![Vec::new(); self.function.values.len()];
+        for (value, slot) in pairs {
+            let Some(slots) = publications.get_mut(usize::from(*value)) else {
+                return Err(self.refuse(format!(
+                    "prelude slot {slot} publishes CFG value {}, which this function does not have",
+                    usize::from(*value)
+                )));
+            };
+            slots.push(*slot);
+        }
+        Ok(publications)
+    }
+
+    /// Write `lowered` into every prelude slot `value` was assigned, here,
+    /// where it has just been computed.
+    fn publish(
+        &self,
+        builder: &mut ProgramBuilder,
+        publications: &[Vec<usize>],
+        value: CfgValueId,
+        lowered: BuilderValue,
+    ) -> JitResult<()> {
+        let Some(slots) = publications.get(usize::from(value)) else {
+            return Ok(());
+        };
+        for slot in slots {
+            builder.push(
+                NativeOp::StorePreludeSlot(*slot),
+                &[lowered],
+                ValueType::F64,
+            )?;
+        }
+        Ok(())
     }
 
     /// Where each analog operator that owns a state record is emitted, indexed
@@ -486,7 +612,7 @@ impl Lowerer<'_> {
     fn unpinned_leaves(
         &self,
         order: &[CfgBlockId],
-        output: CfgValueId,
+        outputs: CfgOutputs<'_>,
     ) -> JitResult<Vec<CfgValueId>> {
         let mut pinned = vec![false; self.function.values.len()];
         let mut read = vec![false; self.function.values.len()];
@@ -495,7 +621,17 @@ impl Lowerer<'_> {
                 *flag = true;
             }
         };
-        mark(output, &mut read);
+        // A published value is read by its own store exactly as a returned one
+        // is read by the return, so a leaf that only an output names still has
+        // to be materialized.
+        match outputs {
+            CfgOutputs::Returned(output) => mark(output, &mut read),
+            CfgOutputs::Published(pairs) => {
+                for (value, _) in pairs {
+                    mark(*value, &mut read);
+                }
+            }
+        }
         for block in order {
             let block = self.function.block(*block);
             for param in &block.params {
@@ -548,7 +684,8 @@ impl Lowerer<'_> {
         block: CfgBlockId,
         position: &[usize],
         lowered: &[Option<BuilderValue>],
-        output: CfgValueId,
+        outputs: CfgOutputs<'_>,
+        published_return: Option<BuilderValue>,
     ) -> JitResult<BuilderTerminator> {
         let target = |block: CfgBlockId| BlockId::new(position[usize::from(block)]);
         let arguments = |args: &[CfgValueId]| {
@@ -557,7 +694,15 @@ impl Lowerer<'_> {
                 .collect::<JitResult<Vec<_>>>()
         };
         Ok(match &self.function.block(block).terminator {
-            CfgTerminator::Return => BuilderTerminator::Return(self.read(lowered, output)?),
+            CfgTerminator::Return => BuilderTerminator::Return(match outputs {
+                CfgOutputs::Returned(output) => self.read(lowered, output)?,
+                CfgOutputs::Published(_) => published_return.ok_or_else(|| {
+                    self.refuse(
+                        "a publishing lowering reached its return with no constant to return"
+                            .to_string(),
+                    )
+                })?,
+            }),
             CfgTerminator::Jump { target: to, args } => BuilderTerminator::Jump {
                 target: target(*to)?,
                 arguments: arguments(args)?,

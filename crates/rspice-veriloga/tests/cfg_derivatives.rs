@@ -1091,6 +1091,80 @@ endmodule
     );
 }
 
+/// A `max` whose losing arm has a derivative seventeen orders above the
+/// winner's.
+///
+/// At the fixture bias `V(p, n)` is `0.13`, so `gentle` is `0.13`, `steep` is
+/// `1.0e17 * (0.13 - 1.0)`, and `max` selects `gentle`. The derivative of the
+/// selection is therefore `d(gentle)/d V(p) = 1`, exactly, and the losing arm's
+/// `1.0e17` contributes nothing to it.
+const MAX_WITH_A_STEEP_LOSING_ARM: &str = r#"
+module max_selection(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real steepness = 1.0e17;
+    real gentle, steep;
+    analog begin
+        gentle = V(p, n);
+        steep = steepness * (V(p, n) - 1.0);
+        I(p, n) <+ max(gentle, steep);
+    end
+endmodule
+"#;
+
+/// `max` and `min` differentiate to the *selected* arm's derivative, and a rule
+/// that reaches it by arithmetic does not return that number.
+///
+/// The rule this pins used to be written `db + (da - db) * takes_left`, which
+/// is algebraically the selection and numerically is not: with `da = 1` and
+/// `db = 1.0e17`, `da - db` rounds to `-1.0e17` — one is eight ulp below half
+/// the spacing at that magnitude — and the sum is `0`. The derivative of a
+/// `max` that plainly selects its first argument came back as zero.
+///
+/// That is the shape of the deviation `l_utsoi` carries into the cfg/mir
+/// census: the selection sits deep in a compact model's cone, the two arms'
+/// derivatives differ by orders rather than by everything, and the blend's
+/// error is `2 * u * |db| / |result|` rather than the whole entry. The bound
+/// this fixture asserts is exact equality, because a selection has no rounding
+/// to budget for.
+#[test]
+fn min_and_max_differentiate_to_the_selected_arm_exactly() {
+    let artifact = artifact(MAX_WITH_A_STEEP_LOSING_ARM);
+    let cfg = CfgModel::from_hir(&artifact.hir, &artifact.mir).expect("fixture must lower");
+    let lanes: Vec<AdSeed> = (0..artifact.mir.nodes.len())
+        .map(|index| AdSeed::NodePotential(index.into()))
+        .collect();
+    let mut differentiated = differentiate(&cfg.function, &lanes).expect("must differentiate");
+    let residual = cfg.residuals[0];
+    let row = differentiated.derivative_row(residual);
+    let bias = bias_point(&artifact);
+    let snapshot = evaluate_cfg(&differentiated.function, &inputs(&bias)).expect("must evaluate");
+
+    let value = snapshot
+        .value(residual)
+        .expect("the residual is defined on every path");
+    assert!(
+        (value - 0.13).abs() < 1.0e-12,
+        "the fixture must select the gentle arm, not {value}"
+    );
+
+    let entry = row[0]
+        .and_then(|lane| snapshot.value(lane))
+        .expect("the residual depends on V(p)");
+    assert_eq!(
+        entry, 1.0,
+        "max selected its first argument, whose derivative is exactly one; a blended \
+         rule reads {entry}"
+    );
+    let other = row[1]
+        .and_then(|lane| snapshot.value(lane))
+        .expect("the residual depends on V(n)");
+    assert_eq!(
+        other, -1.0,
+        "and the same selection through the other terminal, which is -1"
+    );
+}
+
 /// A counter-based generator, so a failure is reproducible from its model name.
 ///
 /// SplitMix64, written out rather than taken from `DefaultHasher`, whose output
