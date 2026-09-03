@@ -76,28 +76,33 @@ impl Engine {
         vb: Value,
         ve: Value,
         vs: Value,
-        coeff: &CompanionCoefficients,
-        dt: Value,
-        q_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
-        q_prev_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
-        cq_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
+        step: VbicChargeStep<'_>,
         seed_internal: Option<&[Value; BJT_INTERNAL_STATE_DIM]>,
     ) -> Option<(
         crate::device::semiconductor::BjtChargeSnapshot,
         VbicTransientLinearization,
         [[Value; BJT_EXTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
     )> {
+        let VbicChargeStep {
+            coeff,
+            dt,
+            q_prev,
+            q_prev_prev,
+            cq_prev,
+        } = step;
         Self::solve_vbic_dynamic_snapshot_primary(
             bjt,
             vc,
             vb,
             ve,
             vs,
-            coeff,
-            dt,
-            q_prev,
-            q_prev_prev,
-            cq_prev,
+            VbicChargeStep {
+                coeff,
+                dt,
+                q_prev,
+                q_prev_prev,
+                cq_prev,
+            },
             seed_internal,
         )
         .or_else(|| {
@@ -107,11 +112,13 @@ impl Engine {
                 vb,
                 ve,
                 vs,
-                coeff,
-                dt,
-                q_prev,
-                q_prev_prev,
-                cq_prev,
+                VbicChargeStep {
+                    coeff,
+                    dt,
+                    q_prev,
+                    q_prev_prev,
+                    cq_prev,
+                },
                 seed_internal,
             )
         })
@@ -124,28 +131,33 @@ impl Engine {
         vb: Value,
         ve: Value,
         vs: Value,
-        coeff: &CompanionCoefficients,
-        dt: Value,
-        q_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
-        q_prev_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
-        cq_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
+        step: VbicChargeStep<'_>,
         seed_internal: Option<&[Value; BJT_INTERNAL_STATE_DIM]>,
     ) -> Option<(
         crate::device::semiconductor::BjtChargeSnapshot,
         VbicTransientLinearization,
         [[Value; BJT_EXTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
     )> {
+        let VbicChargeStep {
+            coeff,
+            dt,
+            q_prev,
+            q_prev_prev,
+            cq_prev,
+        } = step;
         Self::solve_vbic_dynamic_snapshot_direct(
             bjt,
             vc,
             vb,
             ve,
             vs,
-            coeff,
-            dt,
-            q_prev,
-            q_prev_prev,
-            cq_prev,
+            VbicChargeStep {
+                coeff,
+                dt,
+                q_prev,
+                q_prev_prev,
+                cq_prev,
+            },
             seed_internal,
         )
         .or_else(|| {
@@ -155,11 +167,13 @@ impl Engine {
                 vb,
                 ve,
                 vs,
-                coeff,
-                dt,
-                q_prev,
-                q_prev_prev,
-                cq_prev,
+                VbicChargeStep {
+                    coeff,
+                    dt,
+                    q_prev,
+                    q_prev_prev,
+                    cq_prev,
+                },
                 seed_internal,
             )
         })
@@ -171,17 +185,20 @@ impl Engine {
         vb: Value,
         ve: Value,
         vs: Value,
-        coeff: &CompanionCoefficients,
-        dt: Value,
-        q_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
-        q_prev_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
-        cq_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
+        step: VbicChargeStep<'_>,
         seed_internal: Option<&[Value; BJT_INTERNAL_STATE_DIM]>,
     ) -> Option<(
         crate::device::semiconductor::BjtChargeSnapshot,
         VbicTransientLinearization,
         [[Value; BJT_EXTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
     )> {
+        let VbicChargeStep {
+            coeff,
+            dt,
+            q_prev,
+            q_prev_prev,
+            cq_prev,
+        } = step;
         if !bjt.uses_vbic_dynamic_charges() {
             return None;
         }
@@ -227,11 +244,13 @@ impl Engine {
                 vb,
                 ve,
                 vs,
-                coeff,
-                dt,
-                &scaled_q_prev,
-                &scaled_q_prev_prev,
-                &scaled_cq_prev,
+                VbicChargeStep {
+                    coeff,
+                    dt,
+                    q_prev: &scaled_q_prev,
+                    q_prev_prev: &scaled_q_prev_prev,
+                    cq_prev: &scaled_cq_prev,
+                },
                 Some(&initial_seed),
             )?
         };
@@ -248,11 +267,13 @@ impl Engine {
                 vb,
                 ve,
                 vs,
-                coeff,
-                dt,
-                &scaled_q_prev,
-                &scaled_q_prev_prev,
-                &scaled_cq_prev,
+                VbicChargeStep {
+                    coeff,
+                    dt,
+                    q_prev: &scaled_q_prev,
+                    q_prev_prev: &scaled_q_prev_prev,
+                    cq_prev: &scaled_cq_prev,
+                },
                 Some(&previous_internal),
             ) else {
                 if step <= Self::VBIC_HOMOTOPY_MIN_LAMBDA_STEP {
@@ -275,17 +296,20 @@ impl Engine {
         vb: Value,
         ve: Value,
         vs: Value,
-        coeff: &CompanionCoefficients,
-        dt: Value,
-        q_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
-        q_prev_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
-        cq_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
+        step: VbicChargeStep<'_>,
         seed_internal: Option<&[Value; BJT_INTERNAL_STATE_DIM]>,
     ) -> Option<(
         crate::device::semiconductor::BjtChargeSnapshot,
         VbicTransientLinearization,
         [[Value; BJT_EXTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
     )> {
+        let VbicChargeStep {
+            coeff,
+            dt,
+            q_prev,
+            q_prev_prev,
+            cq_prev,
+        } = step;
         if !bjt.uses_vbic_dynamic_charges() || bjt.td <= 0.0 {
             return None;
         }
@@ -330,11 +354,13 @@ impl Engine {
             vb,
             ve,
             vs,
-            coeff,
-            dt,
-            &base_q_prev,
-            &base_q_prev_prev,
-            &base_cq_prev,
+            VbicChargeStep {
+                coeff,
+                dt,
+                q_prev: &base_q_prev,
+                q_prev_prev: &base_q_prev_prev,
+                cq_prev: &base_cq_prev,
+            },
             base_seed.as_ref(),
         );
         let live_base_result = Self::solve_vbic_dynamic_snapshot_best_effort(
@@ -343,11 +369,13 @@ impl Engine {
             vb,
             ve,
             vs,
-            coeff,
-            dt,
-            &base_q_prev,
-            &base_q_prev_prev,
-            &base_cq_prev,
+            VbicChargeStep {
+                coeff,
+                dt,
+                q_prev: &base_q_prev,
+                q_prev_prev: &base_q_prev_prev,
+                cq_prev: &base_cq_prev,
+            },
             Some(&live_base_seed),
         );
         current_result = Self::choose_preferred_vbic_best_effort_result(
@@ -381,11 +409,13 @@ impl Engine {
                 vb,
                 ve,
                 vs,
-                coeff,
-                dt,
-                &candidate_q_prev,
-                &candidate_q_prev_prev,
-                &candidate_cq_prev,
+                VbicChargeStep {
+                    coeff,
+                    dt,
+                    q_prev: &candidate_q_prev,
+                    q_prev_prev: &candidate_q_prev_prev,
+                    cq_prev: &candidate_cq_prev,
+                },
                 Some(&previous_internal),
             );
             let live_candidate_result = Self::solve_vbic_dynamic_snapshot_best_effort(
@@ -394,11 +424,13 @@ impl Engine {
                 vb,
                 ve,
                 vs,
-                coeff,
-                dt,
-                &candidate_q_prev,
-                &candidate_q_prev_prev,
-                &candidate_cq_prev,
+                VbicChargeStep {
+                    coeff,
+                    dt,
+                    q_prev: &candidate_q_prev,
+                    q_prev_prev: &candidate_q_prev_prev,
+                    cq_prev: &candidate_cq_prev,
+                },
                 Some(&live_candidate_seed),
             );
             candidate_result = Self::choose_preferred_vbic_best_effort_result(
@@ -449,11 +481,13 @@ impl Engine {
                         vb,
                         ve,
                         vs,
-                        coeff,
-                        dt,
-                        &target_q_prev,
-                        &target_q_prev_prev,
-                        &target_cq_prev,
+                        VbicChargeStep {
+                            coeff,
+                            dt,
+                            q_prev: &target_q_prev,
+                            q_prev_prev: &target_q_prev_prev,
+                            cq_prev: &target_cq_prev,
+                        },
                         Some(&target_internal),
                     ),
                     Self::solve_vbic_dynamic_snapshot_best_effort(
@@ -462,11 +496,13 @@ impl Engine {
                         vb,
                         ve,
                         vs,
-                        coeff,
-                        dt,
-                        &target_q_prev,
-                        &target_q_prev_prev,
-                        &target_cq_prev,
+                        VbicChargeStep {
+                            coeff,
+                            dt,
+                            q_prev: &target_q_prev,
+                            q_prev_prev: &target_q_prev_prev,
+                            cq_prev: &target_cq_prev,
+                        },
                         Some(&live_target_seed),
                     ),
                     |result| {
@@ -505,17 +541,20 @@ impl Engine {
         vb: Value,
         ve: Value,
         vs: Value,
-        coeff: &CompanionCoefficients,
-        dt: Value,
-        q_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
-        q_prev_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
-        cq_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
+        step: VbicChargeStep<'_>,
         seed_internal: Option<&[Value; BJT_INTERNAL_STATE_DIM]>,
     ) -> Option<(
         crate::device::semiconductor::BjtChargeSnapshot,
         VbicTransientLinearization,
         [[Value; BJT_EXTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
     )> {
+        let VbicChargeStep {
+            coeff,
+            dt,
+            q_prev,
+            q_prev_prev,
+            cq_prev,
+        } = step;
         let (snapshot, linearization, base_static_g, _residual_norm) =
             Self::solve_vbic_dynamic_snapshot_best_effort(
                 bjt,
@@ -523,11 +562,13 @@ impl Engine {
                 vb,
                 ve,
                 vs,
-                coeff,
-                dt,
-                q_prev,
-                q_prev_prev,
-                cq_prev,
+                VbicChargeStep {
+                    coeff,
+                    dt,
+                    q_prev,
+                    q_prev_prev,
+                    cq_prev,
+                },
                 seed_internal,
             )?;
         Self::vbic_dynamic_snapshot_solution_is_acceptable(
@@ -545,13 +586,16 @@ impl Engine {
         vb: Value,
         ve: Value,
         vs: Value,
-        coeff: &CompanionCoefficients,
-        dt: Value,
-        q_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
-        q_prev_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
-        cq_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
+        step: VbicChargeStep<'_>,
         seed_internal: Option<&[Value; BJT_INTERNAL_STATE_DIM]>,
     ) -> Option<VbicBestEffortSolve> {
+        let VbicChargeStep {
+            coeff,
+            dt,
+            q_prev,
+            q_prev_prev,
+            cq_prev,
+        } = step;
         let mut seeded_snapshot = if let Some(seed_internal) = seed_internal {
             bjt.charge_snapshot_for_dynamic_state(vc, vb, ve, vs, *seed_internal)
         } else {
@@ -563,22 +607,26 @@ impl Engine {
             vb,
             ve,
             vs,
-            coeff,
-            dt,
-            q_prev,
-            q_prev_prev,
-            cq_prev,
+            VbicChargeStep {
+                coeff,
+                dt,
+                q_prev,
+                q_prev_prev,
+                cq_prev,
+            },
             &mut seeded_snapshot,
         );
         let mut base_static_g = seeded_snapshot.reduction.g_reduced;
         let mut transient_linearization = Self::assemble_vbic_transient_linearization(
             bjt,
             &seeded_snapshot,
-            coeff,
-            dt,
-            q_prev,
-            q_prev_prev,
-            cq_prev,
+            VbicChargeStep {
+                coeff,
+                dt,
+                q_prev,
+                q_prev_prev,
+                cq_prev,
+            },
         )?;
         let initial_residual = Self::vbic_internal_equation_residual(
             &transient_linearization,
@@ -591,11 +639,13 @@ impl Engine {
             vb,
             ve,
             vs,
-            coeff,
-            dt,
-            q_prev,
-            q_prev_prev,
-            cq_prev,
+            VbicChargeStep {
+                coeff,
+                dt,
+                q_prev,
+                q_prev_prev,
+                cq_prev,
+            },
             (
                 seeded_snapshot,
                 transient_linearization,
@@ -687,11 +737,13 @@ impl Engine {
                 vb,
                 ve,
                 vs,
-                coeff,
-                dt,
-                q_prev,
-                q_prev_prev,
-                cq_prev,
+                VbicChargeStep {
+                    coeff,
+                    dt,
+                    q_prev,
+                    q_prev_prev,
+                    cq_prev,
+                },
                 current_internal,
                 current_residual_norm,
                 current_residual_objective,
@@ -709,11 +761,13 @@ impl Engine {
                 vb,
                 ve,
                 vs,
-                coeff,
-                dt,
-                q_prev,
-                q_prev_prev,
-                cq_prev,
+                VbicChargeStep {
+                    coeff,
+                    dt,
+                    q_prev,
+                    q_prev_prev,
+                    cq_prev,
+                },
                 (
                     solved_snapshot,
                     solved_linearization,
@@ -738,11 +792,13 @@ impl Engine {
                 vb,
                 ve,
                 vs,
-                coeff,
-                dt,
-                q_prev,
-                q_prev_prev,
-                cq_prev,
+                VbicChargeStep {
+                    coeff,
+                    dt,
+                    q_prev,
+                    q_prev_prev,
+                    cq_prev,
+                },
                 seeded_snapshot.reduction.internal_voltages,
             )
             .unwrap_or((
@@ -785,11 +841,13 @@ impl Engine {
                         vb,
                         ve,
                         vs,
-                        coeff,
-                        dt,
-                        q_prev,
-                        q_prev_prev,
-                        cq_prev,
+                        VbicChargeStep {
+                            coeff,
+                            dt,
+                            q_prev,
+                            q_prev_prev,
+                            cq_prev,
+                        },
                         current_internal,
                         current_state.4,
                         current_residual_objective,
@@ -804,11 +862,13 @@ impl Engine {
                             vb,
                             ve,
                             vs,
-                            coeff,
-                            dt,
-                            q_prev,
-                            q_prev_prev,
-                            cq_prev,
+                            VbicChargeStep {
+                                coeff,
+                                dt,
+                                q_prev,
+                                q_prev_prev,
+                                cq_prev,
+                            },
                             candidate_state,
                             4,
                         )
@@ -837,11 +897,13 @@ impl Engine {
                         vb,
                         ve,
                         vs,
-                        coeff,
-                        dt,
-                        q_prev,
-                        q_prev_prev,
-                        cq_prev,
+                        VbicChargeStep {
+                            coeff,
+                            dt,
+                            q_prev,
+                            q_prev_prev,
+                            cq_prev,
+                        },
                         plus_internal,
                     ) else {
                         continue;
@@ -862,11 +924,13 @@ impl Engine {
                             vb,
                             ve,
                             vs,
-                            coeff,
-                            dt,
-                            q_prev,
-                            q_prev_prev,
-                            cq_prev,
+                            VbicChargeStep {
+                                coeff,
+                                dt,
+                                q_prev,
+                                q_prev_prev,
+                                cq_prev,
+                            },
                             minus_internal,
                         ) else {
                             continue;
@@ -936,11 +1000,13 @@ impl Engine {
                         vb,
                         ve,
                         vs,
-                        coeff,
-                        dt,
-                        q_prev,
-                        q_prev_prev,
-                        cq_prev,
+                        VbicChargeStep {
+                            coeff,
+                            dt,
+                            q_prev,
+                            q_prev_prev,
+                            cq_prev,
+                        },
                         current_internal,
                         current_state.4,
                         current_residual_objective,
@@ -955,11 +1021,13 @@ impl Engine {
                             vb,
                             ve,
                             vs,
-                            coeff,
-                            dt,
-                            q_prev,
-                            q_prev_prev,
-                            cq_prev,
+                            VbicChargeStep {
+                                coeff,
+                                dt,
+                                q_prev,
+                                q_prev_prev,
+                                cq_prev,
+                            },
                             candidate_state,
                             4,
                         )
@@ -1039,11 +1107,13 @@ impl Engine {
                             vb,
                             ve,
                             vs,
-                            coeff,
-                            dt,
-                            q_prev,
-                            q_prev_prev,
-                            cq_prev,
+                            VbicChargeStep {
+                                coeff,
+                                dt,
+                                q_prev,
+                                q_prev_prev,
+                                cq_prev,
+                            },
                             current_internal,
                             current_state.4,
                             current_residual_objective,
@@ -1058,11 +1128,13 @@ impl Engine {
                                 vb,
                                 ve,
                                 vs,
-                                coeff,
-                                dt,
-                                q_prev,
-                                q_prev_prev,
-                                cq_prev,
+                                VbicChargeStep {
+                                    coeff,
+                                    dt,
+                                    q_prev,
+                                    q_prev_prev,
+                                    cq_prev,
+                                },
                                 candidate_state,
                                 4,
                             )

@@ -10,13 +10,16 @@ impl Engine {
         vb: Value,
         ve: Value,
         vs: Value,
-        coeff: &CompanionCoefficients,
-        dt: Value,
-        q_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
-        q_prev_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
-        cq_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
+        step: VbicChargeStep<'_>,
         snapshot: &mut crate::device::semiconductor::BjtChargeSnapshot,
     ) {
+        let VbicChargeStep {
+            coeff,
+            dt,
+            q_prev,
+            q_prev_prev,
+            cq_prev,
+        } = step;
         let mut internal = snapshot.reduction.internal_voltages;
         let original_vrth = internal[BJT_THERMAL_STATE_INDEX];
         let minimum_vrth = bjt.minimum_thermal_rise();
@@ -31,11 +34,13 @@ impl Engine {
                 ve,
                 vs,
                 internal,
-                coeff,
-                dt,
-                q_prev,
-                q_prev_prev,
-                cq_prev,
+                VbicChargeStep {
+                    coeff,
+                    dt,
+                    q_prev,
+                    q_prev_prev,
+                    cq_prev,
+                },
             );
             let residual_abs = residual.abs();
             if residual_abs.is_finite() && residual_abs < best_residual {
@@ -75,11 +80,13 @@ impl Engine {
                     ve,
                     vs,
                     candidate,
-                    coeff,
-                    dt,
-                    q_prev,
-                    q_prev_prev,
-                    cq_prev,
+                    VbicChargeStep {
+                        coeff,
+                        dt,
+                        q_prev,
+                        q_prev_prev,
+                        cq_prev,
+                    },
                 );
                 let candidate_abs = candidate_residual.abs();
                 if candidate_abs.is_finite() && candidate_abs < best_candidate_residual {
@@ -120,12 +127,15 @@ impl Engine {
         ve: Value,
         vs: Value,
         internal: [Value; BJT_INTERNAL_STATE_DIM],
-        coeff: &CompanionCoefficients,
-        dt: Value,
-        q_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
-        q_prev_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
-        cq_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
+        step: VbicChargeStep<'_>,
     ) -> (Value, Value) {
+        let VbicChargeStep {
+            coeff,
+            dt,
+            q_prev,
+            q_prev_prev,
+            cq_prev,
+        } = step;
         let thermal_charge_idx = BJT_DYNAMIC_CHARGE_COUNT - 3;
         let (mut residual, mut derivative) =
             bjt.vbic_dynamic_thermal_residual_and_derivative(vc, vb, ve, vs, internal);
@@ -152,12 +162,15 @@ impl Engine {
     pub(in crate::engine::transient) fn assemble_vbic_transient_linearization(
         bjt: &crate::device::Bjt,
         snapshot: &crate::device::semiconductor::BjtChargeSnapshot,
-        coeff: &CompanionCoefficients,
-        dt: Value,
-        q_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
-        q_prev_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
-        cq_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
+        step: VbicChargeStep<'_>,
     ) -> Option<VbicTransientLinearization> {
+        let VbicChargeStep {
+            coeff,
+            dt,
+            q_prev,
+            q_prev_prev,
+            cq_prev,
+        } = step;
         let charge_factor = Self::jfet_companion_geq(coeff, 1.0, dt);
         if charge_factor <= 0.0 {
             return None;
@@ -167,11 +180,13 @@ impl Engine {
             return Self::assemble_legacy_bjt_ngspice_transient_linearization(
                 bjt,
                 snapshot,
-                coeff,
-                dt,
-                q_prev,
-                q_prev_prev,
-                cq_prev,
+                VbicChargeStep {
+                    coeff,
+                    dt,
+                    q_prev,
+                    q_prev_prev,
+                    cq_prev,
+                },
             );
         }
 
@@ -342,12 +357,15 @@ impl Engine {
     pub(in crate::engine::transient) fn assemble_legacy_bjt_ngspice_transient_linearization(
         bjt: &crate::device::Bjt,
         snapshot: &crate::device::semiconductor::BjtChargeSnapshot,
-        coeff: &CompanionCoefficients,
-        dt: Value,
-        q_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
-        q_prev_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
-        cq_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
+        step: VbicChargeStep<'_>,
     ) -> Option<VbicTransientLinearization> {
+        let VbicChargeStep {
+            coeff,
+            dt,
+            q_prev,
+            q_prev_prev,
+            cq_prev,
+        } = step;
         let charge_factor = Self::jfet_companion_geq(coeff, 1.0, dt);
         if charge_factor <= 0.0 {
             return None;
@@ -392,12 +410,14 @@ impl Engine {
                     BJT_VEI_STATE_INDEX,
                     geqbe,
                     i_eq,
-                    &mut g_ii,
-                    &mut g_ie,
-                    &mut g_ei,
-                    &mut g_ee,
-                    &mut z_i,
-                    &mut z_e,
+                    VbicCompanionSystem {
+                        g_ii: &mut g_ii,
+                        g_ie: &mut g_ie,
+                        g_ei: &mut g_ei,
+                        g_ee: &mut g_ee,
+                        z_i: &mut z_i,
+                        z_e: &mut z_e,
+                    },
                 );
                 has_dynamic_charge = true;
             }
@@ -416,12 +436,14 @@ impl Engine {
                     BJT_VCI_STATE_INDEX,
                     geqcb,
                     i_eq,
-                    &mut g_ii,
-                    &mut g_ie,
-                    &mut g_ei,
-                    &mut g_ee,
-                    &mut z_i,
-                    &mut z_e,
+                    VbicCompanionSystem {
+                        g_ii: &mut g_ii,
+                        g_ie: &mut g_ie,
+                        g_ei: &mut g_ei,
+                        g_ee: &mut g_ee,
+                        z_i: &mut z_i,
+                        z_e: &mut z_e,
+                    },
                 );
                 has_dynamic_charge = true;
             }
@@ -450,12 +472,14 @@ impl Engine {
                 BJT_VCI_STATE_INDEX,
                 geqbc,
                 i_eq,
-                &mut g_ii,
-                &mut g_ie,
-                &mut g_ei,
-                &mut g_ee,
-                &mut z_i,
-                &mut z_e,
+                VbicCompanionSystem {
+                    g_ii: &mut g_ii,
+                    g_ie: &mut g_ie,
+                    g_ei: &mut g_ei,
+                    g_ee: &mut g_ee,
+                    z_i: &mut z_i,
+                    z_e: &mut z_e,
+                },
             );
             has_dynamic_charge = true;
         }
@@ -475,12 +499,14 @@ impl Engine {
                 &qbx_branch,
                 geqbx,
                 i_eq,
-                &mut g_ii,
-                &mut g_ie,
-                &mut g_ei,
-                &mut g_ee,
-                &mut z_i,
-                &mut z_e,
+                VbicCompanionSystem {
+                    g_ii: &mut g_ii,
+                    g_ie: &mut g_ie,
+                    g_ei: &mut g_ei,
+                    g_ee: &mut g_ee,
+                    z_i: &mut z_i,
+                    z_e: &mut z_e,
+                },
             );
             has_dynamic_charge = true;
         }
@@ -500,12 +526,14 @@ impl Engine {
                 &qcs_branch,
                 geqcs,
                 i_eq,
-                &mut g_ii,
-                &mut g_ie,
-                &mut g_ei,
-                &mut g_ee,
-                &mut z_i,
-                &mut z_e,
+                VbicCompanionSystem {
+                    g_ii: &mut g_ii,
+                    g_ie: &mut g_ie,
+                    g_ei: &mut g_ei,
+                    g_ee: &mut g_ee,
+                    z_i: &mut z_i,
+                    z_e: &mut z_e,
+                },
             );
             has_dynamic_charge = true;
         }
@@ -536,25 +564,30 @@ impl Engine {
         control_neg_internal: usize,
         geq: Value,
         i_eq: Value,
-        g_ii: &mut [[Value; BJT_INTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM],
-        g_ie: &mut [[Value; BJT_EXTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM],
-        g_ei: &mut [[Value; BJT_INTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
-        g_ee: &mut [[Value; BJT_EXTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
-        z_i: &mut [Value; BJT_INTERNAL_STATE_DIM],
-        z_e: &mut [Value; BJT_EXTERNAL_STATE_DIM],
+        system: VbicCompanionSystem<'_>,
     ) {
-        Self::stamp_legacy_bjt_controlled_companion(
-            branch,
-            control_pos_internal,
-            control_neg_internal,
-            geq,
-            i_eq,
+        let VbicCompanionSystem {
             g_ii,
             g_ie,
             g_ei,
             g_ee,
             z_i,
             z_e,
+        } = system;
+        Self::stamp_legacy_bjt_controlled_companion(
+            branch,
+            control_pos_internal,
+            control_neg_internal,
+            geq,
+            i_eq,
+            VbicCompanionSystem {
+                g_ii,
+                g_ie,
+                g_ei,
+                g_ee,
+                z_i,
+                z_e,
+            },
         );
     }
 
@@ -565,13 +598,16 @@ impl Engine {
         control_neg_internal: usize,
         transconductance: Value,
         i_eq: Value,
-        g_ii: &mut [[Value; BJT_INTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM],
-        g_ie: &mut [[Value; BJT_EXTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM],
-        g_ei: &mut [[Value; BJT_INTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
-        g_ee: &mut [[Value; BJT_EXTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
-        z_i: &mut [Value; BJT_INTERNAL_STATE_DIM],
-        z_e: &mut [Value; BJT_EXTERNAL_STATE_DIM],
+        system: VbicCompanionSystem<'_>,
     ) {
+        let VbicCompanionSystem {
+            g_ii,
+            g_ie,
+            g_ei,
+            g_ee,
+            z_i,
+            z_e,
+        } = system;
         let mut d_internal = [0.0; BJT_INTERNAL_STATE_DIM];
         let d_external = [0.0; BJT_EXTERNAL_STATE_DIM];
         d_internal[control_pos_internal] += transconductance;
@@ -581,12 +617,14 @@ impl Engine {
             &d_internal,
             &d_external,
             i_eq,
-            g_ii,
-            g_ie,
-            g_ei,
-            g_ee,
-            z_i,
-            z_e,
+            VbicCompanionSystem {
+                g_ii,
+                g_ie,
+                g_ei,
+                g_ee,
+                z_i,
+                z_e,
+            },
         );
     }
 
@@ -595,13 +633,16 @@ impl Engine {
         branch: &BjtChargeBranch,
         transconductance: Value,
         i_eq: Value,
-        g_ii: &mut [[Value; BJT_INTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM],
-        g_ie: &mut [[Value; BJT_EXTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM],
-        g_ei: &mut [[Value; BJT_INTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
-        g_ee: &mut [[Value; BJT_EXTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
-        z_i: &mut [Value; BJT_INTERNAL_STATE_DIM],
-        z_e: &mut [Value; BJT_EXTERNAL_STATE_DIM],
+        system: VbicCompanionSystem<'_>,
     ) {
+        let VbicCompanionSystem {
+            g_ii,
+            g_ie,
+            g_ei,
+            g_ee,
+            z_i,
+            z_e,
+        } = system;
         let mut d_internal = [0.0; BJT_INTERNAL_STATE_DIM];
         let mut d_external = [0.0; BJT_EXTERNAL_STATE_DIM];
         Self::add_legacy_bjt_terminal_control(
@@ -623,12 +664,14 @@ impl Engine {
             &d_internal,
             &d_external,
             i_eq,
-            g_ii,
-            g_ie,
-            g_ei,
-            g_ee,
-            z_i,
-            z_e,
+            VbicCompanionSystem {
+                g_ii,
+                g_ie,
+                g_ei,
+                g_ee,
+                z_i,
+                z_e,
+            },
         );
     }
 
@@ -653,13 +696,16 @@ impl Engine {
         d_internal: &[Value; BJT_INTERNAL_STATE_DIM],
         d_external: &[Value; BJT_EXTERNAL_STATE_DIM],
         i_eq: Value,
-        g_ii: &mut [[Value; BJT_INTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM],
-        g_ie: &mut [[Value; BJT_EXTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM],
-        g_ei: &mut [[Value; BJT_INTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
-        g_ee: &mut [[Value; BJT_EXTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
-        z_i: &mut [Value; BJT_INTERNAL_STATE_DIM],
-        z_e: &mut [Value; BJT_EXTERNAL_STATE_DIM],
+        system: VbicCompanionSystem<'_>,
     ) {
+        let VbicCompanionSystem {
+            g_ii,
+            g_ie,
+            g_ei,
+            g_ee,
+            z_i,
+            z_e,
+        } = system;
         for (row_sign, row_internal, row_external) in [
             (
                 1.0,
@@ -1012,14 +1058,17 @@ impl Engine {
         vb: Value,
         ve: Value,
         vs: Value,
-        coeff: &CompanionCoefficients,
-        dt: Value,
-        q_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
-        q_prev_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
-        cq_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
+        step: VbicChargeStep<'_>,
         mut current_state: VbicDynamicStateEvaluation,
         max_iterations: usize,
     ) -> VbicDynamicStateEvaluation {
+        let VbicChargeStep {
+            coeff,
+            dt,
+            q_prev,
+            q_prev_prev,
+            cq_prev,
+        } = step;
         let mut current_objective =
             Self::vbic_dynamic_state_evaluation_residual_objective(&current_state);
         for iteration in 0..max_iterations {
@@ -1059,11 +1108,13 @@ impl Engine {
                 vb,
                 ve,
                 vs,
-                coeff,
-                dt,
-                q_prev,
-                q_prev_prev,
-                cq_prev,
+                VbicChargeStep {
+                    coeff,
+                    dt,
+                    q_prev,
+                    q_prev_prev,
+                    cq_prev,
+                },
                 current_internal,
                 current_state.4,
                 current_objective,
@@ -1152,23 +1203,28 @@ impl Engine {
     pub(in crate::engine::transient) fn reduced_bjt_transient_terminal_currents(
         bjt: &crate::device::Bjt,
         snapshot: &crate::device::semiconductor::BjtChargeSnapshot,
-        coeff: &CompanionCoefficients,
-        dt: Value,
-        q_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
-        q_prev_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
-        cq_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
+        step: VbicChargeStep<'_>,
     ) -> Result<[Value; BJT_EXTERNAL_STATE_DIM], SimulationError> {
+        let VbicChargeStep {
+            coeff,
+            dt,
+            q_prev,
+            q_prev_prev,
+            cq_prev,
+        } = step;
         if !snapshot.branches.iter().any(BjtChargeBranch::is_active) {
             return Ok(bjt.operating_point_terminal_currents());
         }
         let linearization = Self::assemble_vbic_transient_linearization(
             bjt,
             snapshot,
-            coeff,
-            dt,
-            q_prev,
-            q_prev_prev,
-            cq_prev,
+            VbicChargeStep {
+                coeff,
+                dt,
+                q_prev,
+                q_prev_prev,
+                cq_prev,
+            },
         )
         .ok_or_else(|| {
             SimulationError::Circuit(format!(

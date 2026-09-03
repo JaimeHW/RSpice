@@ -901,16 +901,20 @@ impl Engine {
             let Some(snapshot) = Self::resolve_vbic_snapshot_for_external_bias_with_linear_history(
                 bjt,
                 [vc, vb, ve, vs],
-                coeff,
-                dt,
-                &history.charge_q_prev[idx],
-                &history.charge_q_prev_prev[idx],
-                &history.charge_cq_prev[idx],
-                history.dynamic_internal_prev.get(idx),
-                history.dynamic_internal_prev_prev.get(idx),
-                history.dynamic_linear_prev.get(idx),
-                history.dynamic_linear_prev_prev.get(idx),
-                history.accepted_dt_prev,
+                VbicChargeStep {
+                    coeff,
+                    dt,
+                    q_prev: &history.charge_q_prev[idx],
+                    q_prev_prev: &history.charge_q_prev_prev[idx],
+                    cq_prev: &history.charge_cq_prev[idx],
+                },
+                VbicPredictorHistory {
+                    internal_prev: history.dynamic_internal_prev.get(idx),
+                    internal_prev_prev: history.dynamic_internal_prev_prev.get(idx),
+                    linear_prev: history.dynamic_linear_prev.get(idx),
+                    linear_prev_prev: history.dynamic_linear_prev_prev.get(idx),
+                    previous_dt: history.accepted_dt_prev,
+                },
                 cached_snapshot,
                 cache_reuse,
                 snapshot_reuse_abstol,
@@ -923,11 +927,13 @@ impl Engine {
             let Some(linearization) = Self::assemble_vbic_transient_linearization(
                 bjt,
                 &snapshot,
-                coeff,
-                dt,
-                &history.charge_q_prev[idx],
-                &history.charge_q_prev_prev[idx],
-                &history.charge_cq_prev[idx],
+                VbicChargeStep {
+                    coeff,
+                    dt,
+                    q_prev: &history.charge_q_prev[idx],
+                    q_prev_prev: &history.charge_q_prev_prev[idx],
+                    cq_prev: &history.charge_cq_prev[idx],
+                },
             ) else {
                 vbic_snapshot_cache[idx] = None;
                 continue;

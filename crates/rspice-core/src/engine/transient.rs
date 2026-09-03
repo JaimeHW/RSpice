@@ -386,6 +386,7 @@ mod step_control;
 mod truncation;
 use truncation::NgspiceChargeTruncationContext;
 mod vbic;
+use vbic::{VbicChargeStep, VbicPredictorHistory};
 
 pub use self::{
     checkpoint::{
