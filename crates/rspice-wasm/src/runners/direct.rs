@@ -8,9 +8,8 @@
 //! Nothing here mints an identity of its own.
 
 use rspice_core::execution::{
-    AnalysisInstanceId, AnalysisKind, AnalysisRequest, AnalysisResultDocument,
-    AnalysisResultDocumentBuilder, DeckPlan, RunCoordinate, SignalUnit,
-    topology_fingerprint_with_abort,
+    AnalysisInstanceId, AnalysisKind, AnalysisResultDocument, AnalysisResultDocumentBuilder,
+    DeckPlan, RunCoordinate, SignalUnit, topology_fingerprint_with_abort,
 };
 use rspice_core::{AbortSignal, Engine, NoAbort, ResourceKind, ResourceLimits, Value};
 
@@ -86,8 +85,7 @@ fn direct_execution(
     abort: &dyn AbortSignal,
     project: impl FnOnce(AnalysisInstanceId) -> DetailedWasmResult<Vec<AnalysisResultDocumentBuilder>>,
 ) -> DetailedWasmResult<DeckExecution> {
-    let plan = DeckPlan::new(Vec::new(), vec![AnalysisRequest::new(kind)])
-        .map_err(deck_plan_wasm_error)?;
+    let plan = DeckPlan::for_direct_analyses(kind, 1).map_err(deck_plan_wasm_error)?;
     let coordinates: Vec<RunCoordinate> = plan
         .coordinates_with_abort(&resource_limits, abort)
         .map_err(deck_plan_wasm_error)?;
