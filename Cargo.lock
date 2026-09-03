@@ -5341,7 +5341,6 @@ name = "rspice-engine-adapter"
 version = "0.1.0"
 dependencies = [
  "ctrlc",
- "num-complex",
  "rayon",
  "rspice-core",
  "rspice-output",

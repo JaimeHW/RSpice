@@ -1,21 +1,58 @@
-//! Deck execution: analysis-kind gating, engine invocation, measurement
-//! extraction, and bounded result-artifact emission.
+//! Deck execution: request-kind resolution, canonical planning, engine
+//! invocation, typed result publication, and bounded artifact emission.
+//!
+//! # Result contract
+//!
+//! Every analysis this executor runs publishes exactly one
+//! [`rspice_core::execution::AnalysisResultDocument`]. The document names the
+//! canonical analysis identity the planner assigned, the shared-deck
+//! coordinate it was produced at, the elaborated topology fingerprint, and the
+//! output and checkpoint namespaces. The adapter defines no result schema of
+//! its own for those families: the artifact content type is derived from the
+//! core document's schema identifier and version.
+//!
+//! Two adapter-owned documents remain, and neither is a result projection:
+//! [`crate::axis_execution_document`] is the STEP/TEMP orchestration record
+//! and references the typed documents by path, schema, and family, and
+//! [`crate::fft_result_document`] carries transient `.FFT` spectra until core
+//! assigns post-process analysis identities (see that module).
+//!
+//! # Protocol compatibility
+//!
+//! Protocol 4 replaced protocol 3 with this contract. Relative to protocol 3 a
+//! consumer must expect:
+//!
+//! * every analysis family the planner recognizes, not only OP/DC/AC/TRAN/
+//!   NOISE, with `.SP`, `.PNOISE`, and `.FOUR` refused by name rather than
+//!   silently skipped;
+//! * `analysis.kind` `mixed_signal` removed — a mixed-signal deck is a
+//!   transient and is requested as `transient`;
+//! * one typed JSON artifact per analysis instead of a CSV plus an
+//!   `rspice-analog-result-v1` document, with the `rspice-analysis-result`
+//!   content type;
+//! * result artifact names built from the canonical namespace components
+//!   (`op-001.result.json`, `run-<id>__op-001.result.json`);
+//! * `result_manifest.format` `rspice-result-v3`, and measurements projected
+//!   generically from the typed document rather than from a per-family column
+//!   list.
+//!
+//! A protocol-3 consumer is not compatible with this build; the launch
+//! contract refuses a protocol-3 environment before a request is read.
 
 use std::collections::{BTreeMap, HashSet};
-use std::io::{self, Write};
+use std::io;
 use std::path::Path;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::{Duration, Instant};
 
 use rspice_core::abort_signal::AbortSignal;
-use rspice_core::circuit::DeviceOpReport;
 use rspice_core::engine::{SimulationConfig, SpiceDialect};
+use rspice_core::execution::bounded_io::{BoundedAbortWriter, BoundedWriteFailure};
 use rspice_core::execution::{
     AnalysisKind as PlannedAnalysisKind, AxisAssignment, AxisKind, DeckPlan, MaterializedAnalysis,
-    MaterializedRunError, RunAxisValue, RunCoordinate, StepAxisTarget, TopologyFingerprint,
+    MaterializedRunError, ResultCoordinate, ResultNamespaces, RunAxisValue, RunCoordinate,
+    StepAxisTarget, TopologyFingerprint,
 };
-use rspice_core::netlist::{AnalysisCommand, DcSweepSpec, ElementKind, FftFormat};
-use rspice_core::solver::SimulationResult;
 use rspice_core::{Engine, Netlist, SimulationError};
 use rspice_output::AtomicArtifactSet;
 #[cfg(test)]
@@ -26,27 +63,32 @@ use serde_json::Value;
 use crate::axis_execution_document::{
     AnalysisExecution, AxisAnalysisKind, AxisAssignmentDocument, AxisAssignmentKind,
     AxisExecutionDocument, CoordinateExecution, MeasurementDocument, OutputNamespaceDocument,
-    StepTargetDocument,
+    ResultDocumentReference, StepTargetDocument,
 };
 use crate::document::CircuitContent;
+use crate::failure::DirectiveFailure;
+use crate::family::{
+    REQUEST_KINDS, matches_request, planned_kind_for_request, refusal_for_request,
+    request_kind_name, run_directive, unmapped_deck_card,
+};
 use crate::fft_result_document::{
     FFT_RESULT_DOCUMENT_CONTENT_TYPE, FFT_RESULT_DOCUMENT_SCHEMA, FFT_RESULT_DOCUMENT_VERSION,
-    FftResultDocumentError, TransientFftResultDocument,
+    FftResultDocumentError,
 };
-use crate::measure::{
-    Measurement, MeasurementError, canonical_decimal, finalize_measurements, measurement_name,
-};
-use crate::result_document::{
-    AnalogAnalysisKind, AnalogResultDocument, AnalogSignalKind, AxisDocument, ComplexSample,
-    DeviceStateSeries, RESULT_DOCUMENT_CONTENT_TYPE, RESULT_DOCUMENT_SCHEMA,
-    RESULT_DOCUMENT_VERSION, SignalDocument, SignalOwner, SignalUnit, SignalValues,
+use crate::measure::{Measurement, canonical_decimal, finalize_measurements};
+use crate::result_artifact::{
+    PendingArtifact, ResultSchemaSignature, encode_result_artifact, measurements_from_document,
+    result_document_content_type,
 };
 use crate::wire::{
     EngineResponse, EngineResultArtifactDescriptor, MAX_ENGINE_ARTIFACT_BYTES,
     MAX_ENGINE_RESPONSE_BYTES, MAX_ENGINE_RESULT_ARTIFACTS, MAX_ENGINE_RESULT_MANIFEST_BYTES,
     MAX_ENGINE_RETAINED_RESULT_BYTES, valid_result_path,
 };
-use rspice_core::execution::bounded_io::{BoundedAbortWriter, BoundedWriteFailure};
+
+/// Result-manifest format tag. Advanced with the protocol version whenever the
+/// published result contract changes shape.
+pub const RESULT_MANIFEST_FORMAT: &str = "rspice-result-v3";
 
 /// Default wall-clock ceiling for all engine work in one request. The worker
 /// holds the authoritative external deadline; this internal one exists so a
@@ -94,11 +136,6 @@ fn parse_solve_budget(value: &str) -> Result<Duration, String> {
     })
 }
 
-/// Transient runs longer than this many accepted samples stop with the
-/// bounded resource outcome before their waveforms outgrow every downstream
-/// byte budget.
-const MAX_SERIES_SAMPLES: usize = 2_000_000;
-
 /// The engine-owned analysis request. Version 1 selects which deck-carried
 /// directive class runs; directive parameters stay in the deck so the digest
 /// over the revision covers the complete simulation definition.
@@ -106,67 +143,6 @@ const MAX_SERIES_SAMPLES: usize = 2_000_000;
 #[serde(deny_unknown_fields)]
 struct AnalysisRequestV1 {
     kind: String,
-}
-
-/// Classes of deck directives this executor runs, keyed by request kind.
-#[derive(Clone, Copy, PartialEq)]
-enum AnalysisKind {
-    OperatingPoint,
-    DcSweep,
-    Transient,
-    AcSmallSignal,
-    Noise,
-    MixedSignal,
-}
-
-impl AnalysisKind {
-    fn parse(kind: &str) -> Option<Self> {
-        match kind {
-            "operating_point" => Some(Self::OperatingPoint),
-            "dc_sweep" => Some(Self::DcSweep),
-            "transient" => Some(Self::Transient),
-            "ac_small_signal" => Some(Self::AcSmallSignal),
-            "noise" => Some(Self::Noise),
-            "mixed_signal" => Some(Self::MixedSignal),
-            _ => None,
-        }
-    }
-
-    const fn as_str(self) -> &'static str {
-        match self {
-            Self::OperatingPoint => "operating_point",
-            Self::DcSweep => "dc_sweep",
-            Self::Transient => "transient",
-            Self::AcSmallSignal => "ac_small_signal",
-            Self::Noise => "noise",
-            Self::MixedSignal => "mixed_signal",
-        }
-    }
-
-    fn matches_planned(self, kind: PlannedAnalysisKind) -> bool {
-        match self {
-            Self::OperatingPoint => {
-                matches!(
-                    kind,
-                    PlannedAnalysisKind::Op | PlannedAnalysisKind::ImplicitOp
-                )
-            }
-            Self::DcSweep => kind == PlannedAnalysisKind::Dc,
-            Self::Transient | Self::MixedSignal => kind == PlannedAnalysisKind::Tran,
-            Self::AcSmallSignal => kind == PlannedAnalysisKind::Ac,
-            Self::Noise => kind == PlannedAnalysisKind::Noise,
-        }
-    }
-
-    fn supports_command(self, command: &AnalysisCommand) -> bool {
-        match self {
-            Self::OperatingPoint => matches!(command, AnalysisCommand::Op),
-            Self::DcSweep => matches!(command, AnalysisCommand::Dc { .. }),
-            Self::Transient | Self::MixedSignal => matches!(command, AnalysisCommand::Tran { .. }),
-            Self::AcSmallSignal => matches!(command, AnalysisCommand::Ac { .. }),
-            Self::Noise => matches!(command, AnalysisCommand::Noise { .. }),
-        }
-    }
 }
 
 /// Why one request stopped early.
@@ -308,31 +284,45 @@ fn execute_bounded(
             );
         }
     };
-    let Some(kind) = AnalysisKind::parse(&request.kind) else {
+    if let Some(reason) = refusal_for_request(&request.kind) {
+        return Execution::failed("analysis.unsupported_kind", reason);
+    }
+    let Some(kind) = planned_kind_for_request(&request.kind) else {
+        let supported = REQUEST_KINDS
+            .iter()
+            .map(|(name, _)| *name)
+            .collect::<Vec<_>>()
+            .join(", ");
         return Execution::failed(
             "analysis.unsupported_kind",
             &format!(
                 "Analysis kind {:?} is not supported by this engine build; supported kinds are \
-                 operating_point, dc_sweep, transient, ac_small_signal, noise, and mixed_signal.",
+                 {supported}.",
                 request.kind
             ),
         );
     };
+    let request_kind = request_kind_name(kind).unwrap_or(&request.kind);
 
     let expanded_netlist = match content {
         CircuitContent::Empty => {
             // The reserved empty circuit: a well-defined trivial solution for
             // an operating point (this is the deterministic release smoke),
             // and an honest refusal for every waveform analysis.
-            if kind == AnalysisKind::OperatingPoint {
-                return succeeded(kind, engine_build, Vec::new(), Vec::new(), 0, None, abort);
+            if kind == PlannedAnalysisKind::Op {
+                return succeeded(
+                    request_kind,
+                    engine_build,
+                    Vec::new(),
+                    Vec::new(),
+                    0,
+                    None,
+                    abort,
+                );
             }
             return Execution::failed(
                 "analysis.empty_circuit",
-                &format!(
-                    "An empty circuit has no {} response to compute.",
-                    kind.as_str()
-                ),
+                &format!("An empty circuit has no {request_kind} response to compute."),
             );
         }
         CircuitContent::Deck { expanded_netlist } => expanded_netlist,
@@ -356,32 +346,21 @@ fn execute_bounded(
         ..SimulationConfig::default()
     });
 
-    execute_planned_netlist(kind, &netlist, engine_build, &engine, abort)
+    execute_planned_netlist(kind, request_kind, &netlist, engine_build, &engine, abort)
 }
 
-/// Dot-command spelling of a card this adapter has no result mapping for.
-fn unsupported_deck_analysis_card(command: &AnalysisCommand) -> Option<&'static str> {
-    match command {
-        AnalysisCommand::Pss(_) => Some(".PSS"),
-        AnalysisCommand::Pac(_) => Some(".PAC"),
-        AnalysisCommand::Pnoise(_) => Some(".PNOISE"),
-        AnalysisCommand::Envelope(_) => Some(".ENVELOPE"),
-        _ => None,
-    }
-}
-
-/// Refuse a deck that authors a periodic large-signal card.
+/// Refuse a deck that authors a card this build cannot represent losslessly.
 ///
-/// The adapter runs the requested kind only, but skipping a card it cannot
-/// represent would drop authored intent from the response without saying so,
-/// so the whole request is refused with the card and its canonical identity.
-fn unsupported_deck_analysis_detail(netlist: &Netlist, plan: &DeckPlan) -> Option<String> {
+/// The adapter runs the requested kind only, but leaving a card it cannot
+/// publish unexecuted would drop authored intent from the response without
+/// saying so, so the whole request is refused with the card, its canonical
+/// identity, and the exact reason.
+fn unmapped_deck_analysis_detail(netlist: &Netlist, plan: &DeckPlan) -> Option<String> {
     for (command, id) in plan.authored_analyses(netlist) {
-        if let Some(card) = unsupported_deck_analysis_card(command) {
+        if let Some((card, reason)) = unmapped_deck_card(command) {
             let instance = id.map(|id| format!(" ({id})")).unwrap_or_default();
             return Some(format!(
-                "The deck authors a {card} card{instance}; this engine build has no result \
-                 mapping for the periodic large-signal analysis family."
+                "The deck authors a {card} card{instance}. {reason}"
             ));
         }
     }
@@ -389,7 +368,8 @@ fn unsupported_deck_analysis_detail(netlist: &Netlist, plan: &DeckPlan) -> Optio
 }
 
 fn execute_planned_netlist(
-    kind: AnalysisKind,
+    kind: PlannedAnalysisKind,
+    request_kind: &str,
     netlist: &Netlist,
     engine_build: &str,
     engine: &Engine,
@@ -406,7 +386,7 @@ fn execute_planned_netlist(
     if let Err(detail) = validate_adapter_axes(&plan) {
         return Execution::failed("analysis.axis_unsupported", &detail);
     }
-    if let Some(detail) = unsupported_deck_analysis_detail(netlist, &plan) {
+    if let Some(detail) = unmapped_deck_analysis_detail(netlist, &plan) {
         return Execution::failed("analysis.unsupported_kind", &detail);
     }
     let materializer =
@@ -415,27 +395,26 @@ fn execute_planned_netlist(
             Err(error) => return materialization_failure(&error),
         };
     let has_axes = !plan.axes().is_empty();
-    if kind == AnalysisKind::MixedSignal && has_axes {
-        return Execution::failed(
-            "analysis.axis_unsupported",
-            "Mixed-signal run axes are not exposed until the adapter has a lossless typed mixed-domain result contract.",
-        );
-    }
     let matching_directive_count = materializer
         .analyses()
         .iter()
-        .filter(|analysis| kind.matches_planned(analysis.id().kind()))
+        .filter(|analysis| matches_request(kind, analysis.id().kind()))
         .count();
     if matching_directive_count == 0 {
         return Execution::failed(
             "analysis.directive_missing",
             &format!(
-                "The requested {} analysis needs a matching directive in the deck, \
-                 and the deck declares none.",
-                kind.as_str()
+                "The requested {request_kind} analysis needs a matching directive in the deck, \
+                 and the deck declares none."
             ),
         );
     }
+    let Some(axis_kind) = axis_analysis_kind(kind) else {
+        return Execution::failed(
+            "analysis.unsupported_kind",
+            "The requested analysis family has no orchestration record in this build.",
+        );
+    };
     if let Err(failure) = preflight_planned_artifact_count(
         materializer.len(),
         matching_directive_count,
@@ -482,8 +461,9 @@ fn execute_planned_netlist(
             }
         }
         let coordinate = materialized.coordinate().clone();
+        let run_topology = materialized.topology_fingerprint();
         let (_coordinate, coordinate_netlist, _topology, analyses) = materialized.into_parts();
-        if has_axes && kind == AnalysisKind::Transient {
+        if has_axes && kind == PlannedAnalysisKind::Tran {
             let coordinate_fft_signature = fft_schema_signature(&coordinate_netlist);
             if let Some(expected) = &fft_signature {
                 if expected != &coordinate_fft_signature {
@@ -510,171 +490,97 @@ fn execute_planned_netlist(
         }
         for analysis in analyses
             .iter()
-            .filter(|analysis| kind.matches_planned(analysis.id().kind()))
+            .filter(|analysis| matches_request(kind, analysis.id().kind()))
         {
-            let implicit_op = AnalysisCommand::Op;
-            let directive = match analysis.command() {
-                Some(directive) => directive,
-                None if kind == AnalysisKind::OperatingPoint
-                    && analysis.id().kind() == PlannedAnalysisKind::ImplicitOp =>
-                {
-                    &implicit_op
-                }
-                None => {
-                    return Execution::failed(
-                        "analysis.axis_materialization",
-                        "The canonical materializer omitted a requested authored directive.",
-                    );
-                }
-            };
-            if !kind.supports_command(directive) {
-                return Execution::failed(
-                    "analysis.unsupported_form",
-                    "The requested analysis uses a deck form that this adapter cannot represent losslessly.",
-                );
-            }
-            let ordinal = analysis.id().ordinal() as usize;
-            match run_directive(
+            let budget = MAX_ENGINE_RETAINED_RESULT_BYTES.saturating_sub(retained_artifact_bytes);
+            let outcome = match execute_analysis(
                 engine,
                 &coordinate_netlist,
-                directive,
-                kind,
-                ordinal,
+                analysis,
+                &analyses,
+                &coordinate,
+                run_topology,
+                has_axes,
                 deadline,
-                MAX_ENGINE_RETAINED_RESULT_BYTES.saturating_sub(retained_artifact_bytes),
+                budget,
             ) {
-                Ok(outcome) => {
-                    let mut outcome = outcome;
-                    let analysis_id = analysis.output_namespace().analysis_component();
-                    if has_axes && let Some(signature) = outcome.schema_signature.take() {
-                        if let Some(expected) = result_schemas.get(&analysis_id) {
-                            if expected != &signature {
-                                return Execution::failed(
-                                    "results.conditional_schema",
-                                    "A run axis conditionally changes an analog result signal schema.",
-                                );
-                            }
-                        } else {
-                            result_schemas.insert(analysis_id.clone(), signature);
-                        }
-                    } else if has_axes && kind != AnalysisKind::MixedSignal {
-                        return Execution::failed(
-                            "results.schema_mismatch",
-                            "A supported analog analysis did not produce its typed result document.",
-                        );
-                    }
-                    if has_axes {
-                        namespace_artifacts(&mut outcome.artifacts, &coordinate, analysis);
-                    }
-                    let Some(combined_count) = artifacts.len().checked_add(outcome.artifacts.len())
-                    else {
-                        return Execution::failed(
-                            "resource.result_artifact_limit",
-                            "The run produced more result artifacts than the protocol permits.",
-                        );
-                    };
-                    if let Err(failure) = validate_artifact_budget(
-                        combined_count,
-                        artifacts
-                            .iter()
-                            .chain(&outcome.artifacts)
-                            .map(|artifact| artifact.content.len() as u64),
-                    ) {
-                        return resource_failure(failure);
-                    }
-                    let outcome_bytes =
-                        match outcome.artifacts.iter().try_fold(0u64, |total, artifact| {
-                            total.checked_add(artifact.content.len() as u64)
-                        }) {
-                            Some(bytes) => bytes,
-                            None => return resource_failure(DirectiveFailure::ResultSetBytes),
-                        };
-                    retained_artifact_bytes =
-                        match retained_artifact_bytes.checked_add(outcome_bytes) {
-                            Some(bytes) if bytes <= MAX_ENGINE_RETAINED_RESULT_BYTES => bytes,
-                            _ => return resource_failure(DirectiveFailure::ResultSetBytes),
-                        };
-                    let outcome_measurements = if has_axes {
-                        finalize_measurements(outcome.measurements)
-                    } else {
-                        outcome.measurements
-                    };
-                    let mut artifact_paths = Vec::new();
-                    let mut measurement_documents = Vec::new();
-                    if has_axes {
-                        if artifact_paths
-                            .try_reserve_exact(outcome.artifacts.len())
-                            .is_err()
-                            || measurement_documents
-                                .try_reserve_exact(outcome_measurements.len())
-                                .is_err()
-                        {
-                            return Execution::failed(
-                                "resource.allocation",
-                                "The adapter could not allocate bounded execution provenance.",
-                            );
-                        }
-                        artifact_paths.extend(
-                            outcome
-                                .artifacts
-                                .iter()
-                                .map(|artifact| format!("results/{}", artifact.file_name)),
-                        );
-                        measurement_documents
-                            .extend(outcome_measurements.iter().map(measurement_document));
-                    }
-                    if !has_axes {
-                        measurements.extend(outcome_measurements);
-                    }
-                    artifacts.extend(outcome.artifacts);
-                    if has_axes {
-                        analysis_records.push(AnalysisExecution {
-                            analysis_id,
-                            output_namespace: OutputNamespaceDocument {
-                                coordinate: analysis.output_namespace().coordinate_component(),
-                                analysis: analysis.output_namespace().analysis_component(),
-                            },
-                            artifacts: artifact_paths,
-                            measurements: measurement_documents,
-                        });
-                    }
-                }
-                Err(DirectiveFailure::Engine(error)) => return failure_execution(&error),
-                Err(DirectiveFailure::NonFinite) => {
+                Ok(outcome) => outcome,
+                Err(failure) => return directive_failure(failure),
+            };
+            let analysis_id = analysis.output_namespace().analysis_component();
+            if let Some(expected) = result_schemas.get(&analysis_id) {
+                if expected != &outcome.schema_signature {
                     return Execution::failed(
-                        "results.nonfinite",
-                        "The analysis completed with non-finite values; the operating region \
-                     of this circuit is outside the solver's validated range.",
+                        "results.conditional_schema",
+                        "A run axis conditionally changes a typed result signal schema.",
                     );
                 }
-                Err(DirectiveFailure::SeriesBudget) => {
+            } else {
+                result_schemas.insert(analysis_id.clone(), outcome.schema_signature.clone());
+            }
+
+            let Some(combined_count) = artifacts.len().checked_add(outcome.artifacts.len()) else {
+                return Execution::failed(
+                    "resource.result_artifact_limit",
+                    "The run produced more result artifacts than the protocol permits.",
+                );
+            };
+            if let Err(failure) = validate_artifact_budget(
+                combined_count,
+                artifacts
+                    .iter()
+                    .chain(&outcome.artifacts)
+                    .map(|artifact: &PendingArtifact| artifact.content.len() as u64),
+            ) {
+                return resource_failure(failure);
+            }
+            let outcome_bytes = match outcome.artifacts.iter().try_fold(0u64, |total, artifact| {
+                total.checked_add(artifact.content.len() as u64)
+            }) {
+                Some(bytes) => bytes,
+                None => return resource_failure(DirectiveFailure::ResultSetBytes),
+            };
+            retained_artifact_bytes = match retained_artifact_bytes.checked_add(outcome_bytes) {
+                Some(bytes) if bytes <= MAX_ENGINE_RETAINED_RESULT_BYTES => bytes,
+                _ => return resource_failure(DirectiveFailure::ResultSetBytes),
+            };
+            let outcome_measurements = if has_axes {
+                finalize_measurements(outcome.measurements)
+            } else {
+                outcome.measurements
+            };
+            let mut artifact_references = Vec::new();
+            let mut measurement_documents = Vec::new();
+            if has_axes {
+                if artifact_references
+                    .try_reserve_exact(outcome.artifacts.len())
+                    .is_err()
+                    || measurement_documents
+                        .try_reserve_exact(outcome_measurements.len())
+                        .is_err()
+                {
                     return Execution::failed(
-                        "resource.series_limit",
-                        "The analysis produced more samples than one run may retain; \
-                     shorten the window or relax the timestep.",
+                        "resource.allocation",
+                        "The adapter could not allocate bounded execution provenance.",
                     );
                 }
-                Err(DirectiveFailure::ResultDocument(detail)) => {
-                    return Execution::failed("results.schema_mismatch", &detail);
-                }
-                Err(DirectiveFailure::ResultArtifactLimit) => {
-                    return Execution::failed(
-                        "resource.result_artifact_limit",
-                        "The run produced more result artifacts than the protocol permits.",
-                    );
-                }
-                Err(
-                    failure @ (DirectiveFailure::ResultArtifactBytes
-                    | DirectiveFailure::ResultSetBytes),
-                ) => {
-                    return resource_failure(failure);
-                }
-                Err(DirectiveFailure::FrequencyGrid(error)) => {
-                    return frequency_grid_failure(error);
-                }
-                Err(DirectiveFailure::InvalidAnalysis(detail)) => {
-                    return Execution::failed("analysis.invalid_configuration", &detail);
-                }
+                artifact_references.extend(outcome.artifacts.iter().map(artifact_reference));
+                measurement_documents.extend(outcome_measurements.iter().map(measurement_document));
+            }
+            if !has_axes {
+                measurements.extend(outcome_measurements);
+            }
+            artifacts.extend(outcome.artifacts);
+            if has_axes {
+                analysis_records.push(AnalysisExecution {
+                    analysis_id,
+                    output_namespace: OutputNamespaceDocument {
+                        coordinate: analysis.output_namespace().coordinate_component(),
+                        analysis: analysis.output_namespace().analysis_component(),
+                    },
+                    artifacts: artifact_references,
+                    measurements: measurement_documents,
+                });
             }
         }
         if has_axes && analysis_records.len() != matching_directive_count {
@@ -697,7 +603,7 @@ fn execute_planned_netlist(
     }
 
     let axis_execution = if has_axes {
-        match AxisExecutionDocument::new_with_abort(axis_analysis_kind(kind), runs, deadline) {
+        match AxisExecutionDocument::new_with_abort(axis_kind, runs, deadline) {
             Ok(document) => Some(document),
             Err(error) => {
                 return Execution::failed("results.schema_mismatch", &error.to_string());
@@ -707,7 +613,7 @@ fn execute_planned_netlist(
         None
     };
     succeeded(
-        kind,
+        request_kind,
         engine_build,
         finalize_measurements(measurements),
         artifacts,
@@ -717,15 +623,151 @@ fn execute_planned_netlist(
     )
 }
 
-fn axis_analysis_kind(kind: AnalysisKind) -> AxisAnalysisKind {
-    match kind {
-        AnalysisKind::OperatingPoint => AxisAnalysisKind::OperatingPoint,
-        AnalysisKind::DcSweep => AxisAnalysisKind::DcSweep,
-        AnalysisKind::Transient => AxisAnalysisKind::Transient,
-        AnalysisKind::AcSmallSignal => AxisAnalysisKind::AcSmallSignal,
-        AnalysisKind::Noise => AxisAnalysisKind::Noise,
-        AnalysisKind::MixedSignal => AxisAnalysisKind::Transient,
+/// Everything one executed analysis contributes to the response.
+struct AnalysisOutcome {
+    measurements: Vec<Measurement>,
+    artifacts: Vec<PendingArtifact>,
+    schema_signature: ResultSchemaSignature,
+}
+
+/// Run one materialized analysis and stage its typed artifacts.
+#[allow(clippy::too_many_arguments)]
+// The identity a result document carries — analysis, coordinate, topology,
+// namespaces — is exactly this many independent inputs, and threading them
+// through a struct would only move the same list one call earlier.
+fn execute_analysis(
+    engine: &Engine,
+    netlist: &Netlist,
+    analysis: &MaterializedAnalysis,
+    peers: &[MaterializedAnalysis],
+    coordinate: &RunCoordinate,
+    topology: TopologyFingerprint,
+    has_axes: bool,
+    abort: &dyn AbortSignal,
+    byte_limit: u64,
+) -> Result<AnalysisOutcome, DirectiveFailure> {
+    let projection = run_directive(engine, netlist, analysis, peers, abort)?;
+    let mut builder = projection
+        .builder
+        .topology_fingerprint(topology)
+        .namespaces(ResultNamespaces {
+            output: analysis.output_namespace().components().join("/"),
+            checkpoint: analysis.checkpoint_namespace().components().join("/"),
+        });
+    if has_axes {
+        builder = builder.coordinate(ResultCoordinate::from_run_coordinate(coordinate));
     }
+    let document = builder
+        .build_with_abort(abort)
+        .map_err(crate::failure::map_result_document_error)?;
+    let schema_signature = ResultSchemaSignature::from_document(&document);
+    let measurements = measurements_from_document(&document, abort)?;
+
+    let file_stem = artifact_stem(analysis, coordinate, has_axes);
+    let artifact = encode_result_artifact(
+        format!("{file_stem}.result.json"),
+        &document,
+        abort,
+        byte_limit,
+    )?;
+    let mut artifacts = vec![artifact];
+
+    // Transient `.FFT` spectra keep their adapter-owned bundle until core
+    // assigns post-process analysis identities; see `fft_result_document`.
+    if let Some(fft) = projection.fft {
+        let remaining = remaining_bytes(&artifacts, byte_limit)?;
+        let content = fft
+            .to_json_with_abort(abort, remaining.min(MAX_ENGINE_ARTIFACT_BYTES))
+            .map_err(map_fft_document_error)?;
+        artifacts.push(PendingArtifact {
+            file_name: format!("{file_stem}.fft.result.json"),
+            content_type: FFT_RESULT_DOCUMENT_CONTENT_TYPE.to_owned(),
+            result_kind: "fft".to_owned(),
+            content,
+        });
+    }
+    remaining_bytes(&artifacts, byte_limit)?;
+
+    Ok(AnalysisOutcome {
+        measurements,
+        artifacts,
+        schema_signature,
+    })
+}
+
+/// Bytes of the analysis budget still unused after the staged artifacts.
+fn remaining_bytes(
+    artifacts: &[PendingArtifact],
+    byte_limit: u64,
+) -> Result<u64, DirectiveFailure> {
+    artifacts
+        .iter()
+        .try_fold(0u64, |total, artifact| {
+            total.checked_add(artifact.content.len() as u64)
+        })
+        .and_then(|used| byte_limit.checked_sub(used))
+        .ok_or(DirectiveFailure::ResultSetBytes)
+}
+
+/// Canonical artifact stem for one analysis at one coordinate.
+fn artifact_stem(
+    analysis: &MaterializedAnalysis,
+    coordinate: &RunCoordinate,
+    has_axes: bool,
+) -> String {
+    let analysis_component = analysis.output_namespace().analysis_component();
+    if has_axes {
+        format!("{}__{analysis_component}", coordinate.stable_tag())
+    } else {
+        analysis_component
+    }
+}
+
+fn artifact_reference(artifact: &PendingArtifact) -> ResultDocumentReference {
+    let (schema, schema_version, result_kind) =
+        if artifact.content_type == FFT_RESULT_DOCUMENT_CONTENT_TYPE {
+            (
+                FFT_RESULT_DOCUMENT_SCHEMA.to_owned(),
+                FFT_RESULT_DOCUMENT_VERSION,
+                "fft".to_owned(),
+            )
+        } else {
+            (
+                rspice_core::execution::ANALYSIS_RESULT_DOCUMENT_SCHEMA.to_owned(),
+                rspice_core::execution::ANALYSIS_RESULT_DOCUMENT_VERSION,
+                artifact.result_kind.clone(),
+            )
+        };
+    ResultDocumentReference {
+        path: format!("results/{}", artifact.file_name),
+        content_type: artifact.content_type.clone(),
+        schema,
+        schema_version,
+        result_kind,
+    }
+}
+
+fn axis_analysis_kind(kind: PlannedAnalysisKind) -> Option<AxisAnalysisKind> {
+    Some(match kind {
+        PlannedAnalysisKind::Op | PlannedAnalysisKind::ImplicitOp => {
+            AxisAnalysisKind::OperatingPoint
+        }
+        PlannedAnalysisKind::Dc => AxisAnalysisKind::DcSweep,
+        PlannedAnalysisKind::Tran => AxisAnalysisKind::Transient,
+        PlannedAnalysisKind::Ac => AxisAnalysisKind::AcSmallSignal,
+        PlannedAnalysisKind::Noise => AxisAnalysisKind::Noise,
+        PlannedAnalysisKind::Distortion => AxisAnalysisKind::Distortion,
+        PlannedAnalysisKind::TransferFunction => AxisAnalysisKind::TransferFunction,
+        PlannedAnalysisKind::Stb => AxisAnalysisKind::Stability,
+        PlannedAnalysisKind::Sensitivity => AxisAnalysisKind::Sensitivity,
+        PlannedAnalysisKind::PoleZero => AxisAnalysisKind::PoleZero,
+        PlannedAnalysisKind::MonteCarlo => AxisAnalysisKind::MonteCarlo,
+        PlannedAnalysisKind::HarmonicBalance => AxisAnalysisKind::HarmonicBalance,
+        PlannedAnalysisKind::Pss => AxisAnalysisKind::Pss,
+        PlannedAnalysisKind::Pac => AxisAnalysisKind::Pac,
+        PlannedAnalysisKind::Envelope => AxisAnalysisKind::Envelope,
+        _ => return None,
+    })
 }
 
 fn deck_plan_failure(error: &rspice_core::execution::DeckPlanError) -> Execution {
@@ -805,14 +847,11 @@ fn validate_adapter_axes(plan: &DeckPlan) -> Result<(), String> {
 fn preflight_planned_artifact_count(
     coordinate_count: usize,
     directive_count: usize,
-    kind: AnalysisKind,
+    kind: PlannedAnalysisKind,
     has_fft: bool,
 ) -> Result<(), DirectiveFailure> {
-    let artifacts_per_directive = if kind == AnalysisKind::MixedSignal {
-        1
-    } else {
-        2usize + usize::from(has_fft && kind == AnalysisKind::Transient)
-    };
+    let artifacts_per_directive =
+        1usize + usize::from(has_fft && kind == PlannedAnalysisKind::Tran);
     let count = coordinate_count
         .checked_mul(directive_count)
         .and_then(|count| count.checked_mul(artifacts_per_directive))
@@ -838,6 +877,36 @@ fn resource_failure(failure: DirectiveFailure) -> Execution {
             "results.resource_accounting",
             "The adapter encountered an inconsistent result-resource accounting outcome.",
         ),
+    }
+}
+
+/// Map one directive refusal onto the bounded wire failure vocabulary.
+fn directive_failure(failure: DirectiveFailure) -> Execution {
+    match failure {
+        DirectiveFailure::Engine(error) => failure_execution(&error),
+        DirectiveFailure::NonFinite => Execution::failed(
+            "results.nonfinite",
+            "The analysis completed with non-finite values; the operating region of this circuit \
+             is outside the solver's validated range.",
+        ),
+        DirectiveFailure::SeriesBudget => Execution::failed(
+            "resource.series_limit",
+            "The analysis produced more samples than one run may retain; shorten the window or \
+             relax the timestep.",
+        ),
+        DirectiveFailure::ResultDocument(detail) => {
+            Execution::failed("results.schema_mismatch", &detail)
+        }
+        DirectiveFailure::FrequencyGrid(error) => frequency_grid_failure(error),
+        DirectiveFailure::InvalidAnalysis(detail) => {
+            Execution::failed("analysis.invalid_configuration", &detail)
+        }
+        DirectiveFailure::UnsupportedForm(detail) => {
+            Execution::failed("analysis.unsupported_form", &detail)
+        }
+        resource @ (DirectiveFailure::ResultArtifactLimit
+        | DirectiveFailure::ResultArtifactBytes
+        | DirectiveFailure::ResultSetBytes) => resource_failure(resource),
     }
 }
 
@@ -872,138 +941,11 @@ fn validate_pending_artifact_budget(artifacts: &[PendingArtifact]) -> Result<(),
     )
 }
 
-/// Everything one executed directive contributes to the response.
-struct DirectiveOutcome {
-    measurements: Vec<Measurement>,
-    artifacts: Vec<PendingArtifact>,
-    schema_signature: Option<ResultSchemaSignature>,
-}
-
-#[derive(Clone, PartialEq, Eq)]
-struct ResultSchemaSignature {
-    axes: Vec<(String, Option<SignalUnit>)>,
-    signals: Vec<(
-        String,
-        AnalogSignalKind,
-        SignalOwner,
-        Option<SignalUnit>,
-        &'static str,
-    )>,
-    device_states: Vec<(String, Option<String>)>,
-}
-
-impl ResultSchemaSignature {
-    fn from_document(document: &AnalogResultDocument) -> Self {
-        Self {
-            axes: document
-                .axes
-                .iter()
-                .map(|axis| (axis.name.to_ascii_lowercase(), axis.unit))
-                .collect(),
-            signals: document
-                .signals
-                .iter()
-                .map(|signal| {
-                    (
-                        signal.canonical_name.to_ascii_lowercase(),
-                        signal.kind,
-                        signal.owner.clone(),
-                        signal.unit,
-                        match &signal.values {
-                            SignalValues::Real { .. } => "real",
-                            SignalValues::Complex { .. } => "complex",
-                        },
-                    )
-                })
-                .collect(),
-            device_states: document
-                .device_states
-                .iter()
-                .map(|state| {
-                    (
-                        state.device_name.to_ascii_lowercase(),
-                        state.device_kind.clone(),
-                    )
-                })
-                .collect(),
-        }
-    }
-}
-
-/// A results file staged in memory. Files are only written after every
-/// directive has succeeded, so a failed run leaves `results/` empty and the
-/// response is the single source of truth about declared outputs.
-pub struct PendingArtifact {
-    pub file_name: String,
-    pub content_type: &'static str,
-    pub content: String,
-}
-
-enum DirectiveFailure {
-    Engine(SimulationError),
-    NonFinite,
-    SeriesBudget,
-    ResultDocument(String),
-    ResultArtifactLimit,
-    ResultArtifactBytes,
-    ResultSetBytes,
-    FrequencyGrid(rspice_core::analysis::FrequencyGridError),
-    InvalidAnalysis(String),
-}
-
-impl From<SimulationError> for DirectiveFailure {
-    fn from(error: SimulationError) -> Self {
-        Self::Engine(error)
-    }
-}
-
 fn map_fft_document_error(error: FftResultDocumentError) -> DirectiveFailure {
     match error {
         FftResultDocumentError::Aborted => DirectiveFailure::Engine(SimulationError::Aborted),
         FftResultDocumentError::ArtifactTooLarge { .. } => DirectiveFailure::ResultArtifactBytes,
         other => DirectiveFailure::ResultDocument(other.to_string()),
-    }
-}
-
-fn map_result_document_error(
-    error: crate::result_document::ResultDocumentError,
-) -> DirectiveFailure {
-    match error {
-        crate::result_document::ResultDocumentError::Aborted => {
-            DirectiveFailure::Engine(SimulationError::Aborted)
-        }
-        crate::result_document::ResultDocumentError::ArtifactTooLarge { .. } => {
-            DirectiveFailure::ResultSetBytes
-        }
-        other => DirectiveFailure::ResultDocument(other.to_string()),
-    }
-}
-
-fn remaining_outcome_bytes(
-    outcome: &DirectiveOutcome,
-    limit: u64,
-) -> Result<u64, DirectiveFailure> {
-    let used = outcome.artifacts.iter().try_fold(0u64, |total, artifact| {
-        total.checked_add(artifact.content.len() as u64)
-    });
-    used.and_then(|used| limit.checked_sub(used))
-        .ok_or(DirectiveFailure::ResultSetBytes)
-}
-
-fn map_measurement_error(error: MeasurementError) -> DirectiveFailure {
-    match error {
-        MeasurementError::Aborted => DirectiveFailure::Engine(SimulationError::Aborted),
-        MeasurementError::NonFinite => DirectiveFailure::NonFinite,
-    }
-}
-
-fn map_bounded_write_failure(writer: &BoundedAbortWriter<'_>) -> DirectiveFailure {
-    match writer.failure() {
-        Some(BoundedWriteFailure::Aborted) => DirectiveFailure::Engine(SimulationError::Aborted),
-        Some(BoundedWriteFailure::ByteLimitExceeded { .. }) => DirectiveFailure::ResultSetBytes,
-        Some(BoundedWriteFailure::AllocationFailed) | None => DirectiveFailure::ResultDocument(
-            "bounded result serialization could not allocate its output".to_owned(),
-        ),
     }
 }
 
@@ -1025,1272 +967,6 @@ fn frequency_grid_failure(error: rspice_core::analysis::FrequencyGridError) -> E
     }
 }
 
-fn analog_document(kind: AnalysisKind, ordinal: usize) -> Option<AnalogResultDocument> {
-    let analog_kind = match kind {
-        AnalysisKind::OperatingPoint => AnalogAnalysisKind::OperatingPoint,
-        AnalysisKind::DcSweep => AnalogAnalysisKind::DcSweep,
-        AnalysisKind::Transient => AnalogAnalysisKind::Transient,
-        AnalysisKind::AcSmallSignal => AnalogAnalysisKind::AcSmallSignal,
-        AnalysisKind::Noise => AnalogAnalysisKind::Noise,
-        AnalysisKind::MixedSignal => return None,
-    };
-    Some(AnalogResultDocument::new(
-        analog_kind,
-        kind.as_str(),
-        ordinal + 1,
-    ))
-}
-
-fn add_typed_artifact(
-    outcome: &mut DirectiveOutcome,
-    kind: AnalysisKind,
-    ordinal: usize,
-    document: AnalogResultDocument,
-    abort: &dyn AbortSignal,
-    byte_limit: u64,
-) -> Result<(), DirectiveFailure> {
-    let signature = ResultSchemaSignature::from_document(&document);
-    let content = document
-        .to_json_with_abort(abort, byte_limit.min(MAX_ENGINE_ARTIFACT_BYTES))
-        .map_err(map_result_document_error)?;
-    outcome.artifacts.push(PendingArtifact {
-        file_name: format!("{}-{}.result.json", kind.as_str(), ordinal + 1),
-        content_type: RESULT_DOCUMENT_CONTENT_TYPE,
-        content,
-    });
-    outcome.schema_signature = Some(signature);
-    Ok(())
-}
-
-fn add_fft_typed_artifact(
-    outcome: &mut DirectiveOutcome,
-    ordinal: usize,
-    document: TransientFftResultDocument,
-    abort: &dyn AbortSignal,
-    byte_limit: u64,
-) -> Result<(), DirectiveFailure> {
-    let content = document
-        .to_json_with_abort(abort, byte_limit.min(MAX_ENGINE_ARTIFACT_BYTES))
-        .map_err(map_fft_document_error)?;
-    outcome.artifacts.push(PendingArtifact {
-        file_name: format!("transient-{}.fft.result.json", ordinal + 1),
-        content_type: FFT_RESULT_DOCUMENT_CONTENT_TYPE,
-        content,
-    });
-    Ok(())
-}
-
-fn validate_fft_result_sequence(
-    netlist: &Netlist,
-    results: &[rspice_core::engine::TransientFftResult],
-    transient_stop: f64,
-    abort: &dyn AbortSignal,
-) -> Result<(), DirectiveFailure> {
-    if results.len() != netlist.fft_analyses.len() {
-        return Err(DirectiveFailure::ResultDocument(
-            "transient FFT results do not match the source directive count".to_owned(),
-        ));
-    }
-    let expected_mode = netlist.options.fft_mode.unwrap_or_default();
-    let expected_accurate = netlist.options.fft_accurate.unwrap_or(true)
-        && netlist.options.output_interval_schedule.is_none();
-    let expected_metrics = netlist.options.fft_output_metrics.unwrap_or(false);
-    for (result, authored) in results.iter().zip(&netlist.fft_analyses) {
-        if abort.is_aborted() {
-            return Err(DirectiveFailure::Engine(SimulationError::Aborted));
-        }
-        let expected_format = authored.format.unwrap_or(match expected_mode {
-            rspice_core::netlist::XyceFftMode::HspiceCompatible => FftFormat::Normalized,
-            rspice_core::netlist::XyceFftMode::SpectreCompatible => FftFormat::Unnormalized,
-        });
-        if result.output != authored.output
-            || result.point_count != authored.points
-            || !fft_float_equal(result.start_time, authored.start.unwrap_or(0.0))
-            || !fft_float_equal(result.stop_time, authored.stop.unwrap_or(transient_stop))
-            || result.format != expected_format
-            || result.mode != expected_mode
-            || result.accurate_sampling != expected_accurate
-            || result.window != authored.window
-            || result.window_name != authored.window_name
-            || !fft_float_equal(result.alpha, authored.alpha)
-            || result.metrics.is_some() != expected_metrics
-        {
-            return Err(DirectiveFailure::ResultDocument(
-                "transient FFT result controls do not match their source directive".to_owned(),
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn fft_float_equal(left: f64, right: f64) -> bool {
-    let scale = left.abs().max(right.abs());
-    if scale == 0.0 {
-        left == right
-    } else {
-        (left - right).abs() <= 1.0e-12 * scale
-    }
-}
-
-struct RealSolutionPoint<'a> {
-    result: &'a SimulationResult,
-    report: Option<&'a DeviceOpReport>,
-}
-
-struct ComplexSolutionPoint<'a> {
-    node_names: &'a [String],
-    voltages: &'a [num_complex::Complex64],
-    branch_names: &'a [String],
-    currents: &'a [num_complex::Complex64],
-}
-
-fn append_complex_solution<'a>(
-    document: &mut AnalogResultDocument,
-    points: impl IntoIterator<Item = ComplexSolutionPoint<'a>>,
-) -> Result<(), DirectiveFailure> {
-    let points: Vec<_> = points.into_iter().collect();
-    let mut nodes = BTreeMap::<String, String>::new();
-    let mut branches = BTreeMap::<String, String>::new();
-    for point in &points {
-        validate_pair(
-            "complex node voltage",
-            point.node_names.len(),
-            point.voltages.len(),
-        )?;
-        validate_pair(
-            "complex branch current",
-            point.branch_names.len(),
-            point.currents.len(),
-        )?;
-        extend_name_union(&mut nodes, point.node_names);
-        extend_name_union(&mut branches, point.branch_names);
-    }
-    for (canonical, display) in nodes {
-        let samples = points
-            .iter()
-            .map(|point| named_complex(point.node_names, point.voltages, &canonical))
-            .collect();
-        document.signals.push(SignalDocument {
-            canonical_name: format!("v({canonical})"),
-            display_name: format!("V({display})"),
-            kind: AnalogSignalKind::Voltage,
-            owner: SignalOwner::Node { name: display },
-            unit: Some(SignalUnit::Volt),
-            values: SignalValues::Complex { samples },
-        });
-    }
-    for (canonical, display) in branches {
-        let samples = points
-            .iter()
-            .map(|point| named_complex(point.branch_names, point.currents, &canonical))
-            .collect();
-        document.signals.push(SignalDocument {
-            canonical_name: format!("i({canonical})"),
-            display_name: format!("I({display})"),
-            kind: AnalogSignalKind::BranchCurrent,
-            owner: SignalOwner::Branch { name: display },
-            unit: Some(SignalUnit::Ampere),
-            values: SignalValues::Complex { samples },
-        });
-    }
-    Ok(())
-}
-
-fn named_complex(
-    names: &[String],
-    values: &[num_complex::Complex64],
-    canonical: &str,
-) -> Option<ComplexSample> {
-    names
-        .iter()
-        .position(|name| name.eq_ignore_ascii_case(canonical))
-        .and_then(|index| values.get(index))
-        .map(|value| ComplexSample {
-            real: value.re,
-            imaginary: value.im,
-        })
-}
-
-/// Append the union of all real node/branch solution columns. A name absent at
-/// a particular point is retained as an explicit missing sample.
-fn append_real_solution(
-    document: &mut AnalogResultDocument,
-    points: &[RealSolutionPoint<'_>],
-) -> Result<(), DirectiveFailure> {
-    let mut nodes = BTreeMap::<String, String>::new();
-    let mut branches = BTreeMap::<String, String>::new();
-    for point in points {
-        validate_pair(
-            "node voltage",
-            point.result.node_names.len(),
-            point.result.node_voltages.len(),
-        )?;
-        validate_pair(
-            "branch current",
-            point.result.branch_names.len(),
-            point.result.branch_currents.len(),
-        )?;
-        extend_name_union(&mut nodes, &point.result.node_names);
-        extend_name_union(&mut branches, &point.result.branch_names);
-    }
-
-    for (canonical, display) in nodes {
-        let samples = points
-            .iter()
-            .map(|point| {
-                named_real(
-                    &point.result.node_names,
-                    &point.result.node_voltages,
-                    &canonical,
-                )
-            })
-            .collect();
-        document.signals.push(SignalDocument {
-            canonical_name: format!("v({canonical})"),
-            display_name: format!("V({display})"),
-            kind: AnalogSignalKind::Voltage,
-            owner: SignalOwner::Node { name: display },
-            unit: Some(SignalUnit::Volt),
-            values: SignalValues::Real { samples },
-        });
-    }
-    for (canonical, display) in branches {
-        let samples = points
-            .iter()
-            .map(|point| {
-                named_real(
-                    &point.result.branch_names,
-                    &point.result.branch_currents,
-                    &canonical,
-                )
-            })
-            .collect();
-        document.signals.push(SignalDocument {
-            canonical_name: format!("i({canonical})"),
-            display_name: format!("I({display})"),
-            kind: AnalogSignalKind::BranchCurrent,
-            owner: SignalOwner::Branch { name: display },
-            unit: Some(SignalUnit::Ampere),
-            values: SignalValues::Real { samples },
-        });
-    }
-    append_device_reports(document, points);
-    append_dc_observables(document, points);
-    Ok(())
-}
-
-fn append_dc_observables(document: &mut AnalogResultDocument, points: &[RealSolutionPoint<'_>]) {
-    let mut observables = BTreeMap::<String, String>::new();
-    for point in points {
-        for (name, _) in &point.result.dc_observables {
-            observables
-                .entry(name.to_ascii_lowercase())
-                .or_insert_with(|| name.clone());
-        }
-    }
-    for (canonical, display) in observables {
-        if has_signal(document, &canonical) {
-            continue;
-        }
-        let samples = points
-            .iter()
-            .map(|point| {
-                point
-                    .result
-                    .dc_observables
-                    .iter()
-                    .find(|(name, _)| name.eq_ignore_ascii_case(&canonical))
-                    .map(|(_, value)| *value)
-            })
-            .collect();
-        let (device, parameter) = observable_owner(&display);
-        document.signals.push(SignalDocument {
-            canonical_name: canonical.clone(),
-            display_name: display,
-            kind: AnalogSignalKind::DeviceObservable,
-            owner: SignalOwner::Device {
-                device,
-                parameter,
-                device_kind: None,
-            },
-            unit: observable_unit(&canonical),
-            values: SignalValues::Real { samples },
-        });
-    }
-}
-
-fn append_device_reports(document: &mut AnalogResultDocument, points: &[RealSolutionPoint<'_>]) {
-    let mut devices = BTreeMap::<String, (String, String)>::new();
-    let mut parameters = BTreeMap::<String, (String, String, String)>::new();
-    for point in points {
-        let Some(report) = point.report else {
-            continue;
-        };
-        for entry in &report.entries {
-            let device_key = entry.name.to_ascii_lowercase();
-            devices
-                .entry(device_key.clone())
-                .or_insert_with(|| (entry.name.clone(), entry.device_kind.to_owned()));
-            for (parameter, _) in &entry.params {
-                let canonical = format!("@{}[{}]", device_key, parameter.to_ascii_lowercase());
-                parameters.entry(canonical).or_insert_with(|| {
-                    (
-                        entry.name.clone(),
-                        (*parameter).to_owned(),
-                        entry.device_kind.to_owned(),
-                    )
-                });
-            }
-        }
-    }
-
-    for (device_key, (display, device_kind)) in devices {
-        let regions = points
-            .iter()
-            .map(|point| {
-                point.report.and_then(|report| {
-                    report
-                        .entries
-                        .iter()
-                        .find(|entry| entry.name.eq_ignore_ascii_case(&device_key))
-                        .and_then(|entry| entry.region.map(str::to_owned))
-                })
-            })
-            .collect();
-        document.device_states.push(DeviceStateSeries {
-            device_name: display,
-            device_kind: Some(device_kind),
-            regions,
-        });
-    }
-    for (canonical, (device, parameter, device_kind)) in parameters {
-        if has_signal(document, &canonical) {
-            continue;
-        }
-        let samples = points
-            .iter()
-            .map(|point| {
-                point.report.and_then(|report| {
-                    report
-                        .entries
-                        .iter()
-                        .find(|entry| entry.name.eq_ignore_ascii_case(&device))
-                        .and_then(|entry| {
-                            entry
-                                .params
-                                .iter()
-                                .find(|(name, _)| name.eq_ignore_ascii_case(&parameter))
-                                .map(|(_, value)| *value)
-                        })
-                })
-            })
-            .collect();
-        document.signals.push(SignalDocument {
-            canonical_name: canonical.clone(),
-            display_name: format!("@{device}[{parameter}]"),
-            kind: AnalogSignalKind::DeviceObservable,
-            owner: SignalOwner::Device {
-                device: Some(device),
-                parameter: Some(parameter.clone()),
-                device_kind: Some(device_kind),
-            },
-            unit: device_parameter_unit(&parameter),
-            values: SignalValues::Real { samples },
-        });
-    }
-}
-
-fn has_signal(document: &AnalogResultDocument, canonical_name: &str) -> bool {
-    document
-        .signals
-        .iter()
-        .any(|signal| signal.canonical_name.eq_ignore_ascii_case(canonical_name))
-}
-
-fn validate_pair(label: &str, names: usize, values: usize) -> Result<(), DirectiveFailure> {
-    if names == values {
-        Ok(())
-    } else {
-        Err(DirectiveFailure::ResultDocument(format!(
-            "{label} result has {names} names but {values} values"
-        )))
-    }
-}
-
-fn extend_name_union(union: &mut BTreeMap<String, String>, names: &[String]) {
-    for name in names {
-        union
-            .entry(name.to_ascii_lowercase())
-            .or_insert_with(|| name.clone());
-    }
-}
-
-fn named_real(names: &[String], values: &[f64], canonical: &str) -> Option<f64> {
-    names
-        .iter()
-        .position(|name| name.eq_ignore_ascii_case(canonical))
-        .and_then(|index| values.get(index).copied())
-}
-
-fn observable_owner(name: &str) -> (Option<String>, Option<String>) {
-    if let Some((device, parameter)) = name
-        .strip_prefix('@')
-        .and_then(|tail| tail.strip_suffix(']'))
-        .and_then(|tail| tail.split_once('['))
-    {
-        return (Some(device.to_owned()), Some(parameter.to_owned()));
-    }
-    if let Some((device, parameter)) = name.split_once(':') {
-        return (Some(device.to_owned()), Some(parameter.to_owned()));
-    }
-    let argument = name
-        .split_once('(')
-        .and_then(|(_, tail)| tail.strip_suffix(')'));
-    (argument.map(str::to_owned), None)
-}
-
-fn observable_unit(name: &str) -> Option<SignalUnit> {
-    let lower = name.to_ascii_lowercase();
-    if lower.starts_with("i(") {
-        Some(SignalUnit::Ampere)
-    } else if lower.starts_with("p(") {
-        Some(SignalUnit::Watt)
-    } else if let Some((_, parameter)) = lower.rsplit_once(':') {
-        device_parameter_unit(parameter)
-    } else {
-        None
-    }
-}
-
-fn device_parameter_unit(parameter: &str) -> Option<SignalUnit> {
-    match parameter.to_ascii_lowercase().as_str() {
-        "v" | "vd" | "vds" | "vgs" | "vbs" | "vbe" | "vbc" | "vce" | "vth" | "vdsat" => {
-            Some(SignalUnit::Volt)
-        }
-        "i" | "id" | "ig" | "is" | "ib" | "ic" | "ie" => Some(SignalUnit::Ampere),
-        "gm" | "gds" | "gmb" | "gd" | "go" => Some(SignalUnit::Siemens),
-        "r" | "rd" | "rs" | "rb" | "rc" | "ro" => Some(SignalUnit::Ohm),
-        "c" | "cgs" | "cgd" | "cgb" | "cbs" | "cbd" => Some(SignalUnit::Farad),
-        "p" | "power" | "pd" => Some(SignalUnit::Watt),
-        "q" | "qg" | "qd" | "qs" | "qb" => Some(SignalUnit::Coulomb),
-        "l" | "w" => Some(SignalUnit::Meter),
-        "m" | "nf" | "beta" => Some(SignalUnit::Dimensionless),
-        _ => None,
-    }
-}
-
-fn dc_axis_unit(netlist: &Netlist, source: &str) -> Option<SignalUnit> {
-    if source.eq_ignore_ascii_case("temp") || source.eq_ignore_ascii_case("temper") {
-        return Some(SignalUnit::DegreeCelsius);
-    }
-    netlist
-        .elements
-        .iter()
-        .find(|element| element.name.eq_ignore_ascii_case(source))
-        .and_then(|element| match &element.kind {
-            ElementKind::VoltageSource(_) | ElementKind::VoltageSourceDeferred(_) => {
-                Some(SignalUnit::Volt)
-            }
-            ElementKind::CurrentSource(_) | ElementKind::CurrentSourceDeferred(_) => {
-                Some(SignalUnit::Ampere)
-            }
-            _ => None,
-        })
-}
-
-fn analysis_scalar_signal(
-    canonical_name: &str,
-    display_name: &str,
-    unit: Option<SignalUnit>,
-    samples: Vec<Option<f64>>,
-) -> SignalDocument {
-    SignalDocument {
-        canonical_name: canonical_name.to_owned(),
-        display_name: display_name.to_owned(),
-        kind: AnalogSignalKind::Scalar,
-        owner: SignalOwner::Analysis,
-        unit,
-        values: SignalValues::Real { samples },
-    }
-}
-
-fn append_noise_contributions(
-    document: &mut AnalogResultDocument,
-    points: &[rspice_core::analysis::noise::NoiseResult],
-) {
-    let mut identities = BTreeMap::<String, (String, Option<String>)>::new();
-    for point in points {
-        for identity in point.contribution_catalog.iter().chain(
-            point
-                .contributions
-                .iter()
-                .map(|contribution| &contribution.identity),
-        ) {
-            let key = noise_identity_key(&identity.device, identity.mechanism.as_deref());
-            identities
-                .entry(key)
-                .or_insert_with(|| (identity.device.clone(), identity.mechanism.clone()));
-        }
-    }
-    for (key, (device, mechanism)) in identities {
-        let values = |select: fn(&rspice_core::analysis::noise::NoiseContribution) -> f64| {
-            points
-                .iter()
-                .map(|point| {
-                    let matching: Vec<_> = point
-                        .contributions
-                        .iter()
-                        .filter(|contribution| {
-                            contribution.identity.device.eq_ignore_ascii_case(&device)
-                                && match (
-                                    contribution.identity.mechanism.as_deref(),
-                                    mechanism.as_deref(),
-                                ) {
-                                    (Some(actual), Some(expected)) => {
-                                        actual.eq_ignore_ascii_case(expected)
-                                    }
-                                    (None, None) => true,
-                                    _ => false,
-                                }
-                        })
-                        .collect();
-                    (!matching.is_empty()).then(|| matching.into_iter().map(select).sum::<f64>())
-                })
-                .collect::<Vec<_>>()
-        };
-        let owner = || SignalOwner::Device {
-            device: Some(device.clone()),
-            parameter: mechanism.clone(),
-            device_kind: None,
-        };
-        document.signals.extend([
-            SignalDocument {
-                canonical_name: format!("noise({key}).output_density"),
-                display_name: format!("Noise({key}) output density"),
-                kind: AnalogSignalKind::Scalar,
-                owner: owner(),
-                unit: Some(SignalUnit::VoltSquaredPerHertz),
-                values: SignalValues::Real {
-                    samples: values(|contribution| contribution.output_contribution),
-                },
-            },
-            SignalDocument {
-                canonical_name: format!("noise({key}).input_density"),
-                display_name: format!("Noise({key}) input density"),
-                kind: AnalogSignalKind::Scalar,
-                owner: owner(),
-                unit: Some(SignalUnit::VoltSquaredPerHertz),
-                values: SignalValues::Real {
-                    samples: values(|contribution| contribution.input_contribution),
-                },
-            },
-            SignalDocument {
-                canonical_name: format!("noise({key}).percentage"),
-                display_name: format!("Noise({key}) percentage"),
-                kind: AnalogSignalKind::Scalar,
-                owner: owner(),
-                unit: Some(SignalUnit::Dimensionless),
-                values: SignalValues::Real {
-                    samples: values(|contribution| contribution.percentage),
-                },
-            },
-        ]);
-    }
-}
-
-fn noise_identity_key(device: &str, mechanism: Option<&str>) -> String {
-    match mechanism {
-        Some(mechanism) => format!(
-            "{},{}",
-            device.to_ascii_lowercase(),
-            mechanism.to_ascii_lowercase()
-        ),
-        None => device.to_ascii_lowercase(),
-    }
-}
-
-fn run_directive(
-    engine: &Engine,
-    netlist: &Netlist,
-    directive: &AnalysisCommand,
-    kind: AnalysisKind,
-    ordinal: usize,
-    deadline: &dyn AbortSignal,
-    result_byte_limit: u64,
-) -> Result<DirectiveOutcome, DirectiveFailure> {
-    match directive {
-        AnalysisCommand::Op => {
-            let (result, report) = engine.run_dc_op_with_report_and_abort(netlist, deadline)?;
-            validate_pair(
-                "node voltage",
-                result.node_names.len(),
-                result.node_voltages.len(),
-            )?;
-            validate_pair(
-                "branch current",
-                result.branch_names.len(),
-                result.branch_currents.len(),
-            )?;
-            let mut measurements = Vec::new();
-            for (index, name) in result.node_names.iter().enumerate().skip(1) {
-                let value = result.node_voltages[index];
-                if !value.is_finite() {
-                    return Err(DirectiveFailure::NonFinite);
-                }
-                measurements.extend(Measurement::scalar(measurement_name("v", name), "V", value));
-            }
-            for (index, name) in result.branch_names.iter().enumerate() {
-                let value = result.branch_currents[index];
-                if !value.is_finite() {
-                    return Err(DirectiveFailure::NonFinite);
-                }
-                measurements.extend(Measurement::scalar(measurement_name("i", name), "A", value));
-            }
-            // The operating point publishes its solution as a results table,
-            // like every sweep class: downstream evidence contracts require
-            // each successful run to retain at least one result artifact.
-            let mut writer =
-                BoundedAbortWriter::new(deadline, result_byte_limit.min(MAX_ENGINE_ARTIFACT_BYTES));
-            if writer.write_all(b"name,unit,value\n").is_err() {
-                return Err(map_bounded_write_failure(&writer));
-            }
-            for measurement in &measurements {
-                if writeln!(
-                    &mut writer,
-                    "{},{},{}",
-                    measurement.name, measurement.unit, measurement.value_decimal,
-                )
-                .is_err()
-                {
-                    return Err(map_bounded_write_failure(&writer));
-                }
-            }
-            let content = writer.into_string().map_err(|error| {
-                DirectiveFailure::ResultDocument(format!("OP CSV was not UTF-8: {error}"))
-            })?;
-            let artifacts = vec![PendingArtifact {
-                file_name: format!("{}-{}.csv", kind.as_str(), ordinal + 1),
-                content_type: "text/csv",
-                content,
-            }];
-            let mut outcome = DirectiveOutcome {
-                measurements,
-                artifacts,
-                schema_signature: None,
-            };
-            let mut document = analog_document(kind, ordinal).expect("OP is analog");
-            document.point_count = 1;
-            append_real_solution(
-                &mut document,
-                &[RealSolutionPoint {
-                    result: &result,
-                    report: Some(&report),
-                }],
-            )?;
-            let remaining = remaining_outcome_bytes(&outcome, result_byte_limit)?;
-            add_typed_artifact(&mut outcome, kind, ordinal, document, deadline, remaining)?;
-            Ok(outcome)
-        }
-        AnalysisCommand::Dc {
-            source,
-            start,
-            stop,
-            step,
-            mode,
-            sweep2,
-        } => {
-            let primary = DcSweepSpec {
-                start: *start,
-                stop: *stop,
-                step: *step,
-                mode: mode.clone(),
-            };
-            let points = engine.run_dc_sweep2_spec_with_report_and_abort(
-                netlist,
-                source,
-                &primary,
-                sweep2.as_ref(),
-                deadline,
-            )?;
-            if points.is_empty() {
-                return Err(DirectiveFailure::NonFinite);
-            }
-            for point in &points {
-                validate_pair(
-                    "DC node voltage",
-                    point.result.node_names.len(),
-                    point.result.node_voltages.len(),
-                )?;
-                validate_pair(
-                    "DC branch current",
-                    point.result.branch_names.len(),
-                    point.result.branch_currents.len(),
-                )?;
-            }
-            let sweep: Vec<f64> = points.iter().map(|point| point.sweep_value).collect();
-            let first = &points[0].result;
-            let mut columns: Vec<(String, &'static str, Vec<f64>)> = Vec::new();
-            columns.push((
-                format!("sweep({})", source.to_ascii_lowercase()),
-                match dc_axis_unit(netlist, source) {
-                    Some(SignalUnit::Ampere) => "A",
-                    Some(SignalUnit::DegreeCelsius) => "degC",
-                    _ => "V",
-                },
-                sweep,
-            ));
-            for name in first.node_names.iter().skip(1) {
-                let series: Option<Vec<f64>> = points
-                    .iter()
-                    .map(|point| {
-                        named_real(&point.result.node_names, &point.result.node_voltages, name)
-                    })
-                    .collect();
-                if let Some(series) = series {
-                    columns.push((measurement_name("v", name), "V", series));
-                }
-            }
-            for name in &first.branch_names {
-                let series: Option<Vec<f64>> = points
-                    .iter()
-                    .map(|point| {
-                        named_real(
-                            &point.result.branch_names,
-                            &point.result.branch_currents,
-                            name,
-                        )
-                    })
-                    .collect();
-                if let Some(series) = series {
-                    columns.push((measurement_name("i", name), "A", series));
-                }
-            }
-            let mut outcome = columns_outcome(kind, ordinal, columns, deadline, result_byte_limit)?;
-            let mut document = analog_document(kind, ordinal).expect("DC is analog");
-            document.point_count = points.len();
-            document.axes.push(AxisDocument {
-                name: source.clone(),
-                unit: dc_axis_unit(netlist, source),
-                values: points.iter().map(|point| Some(point.sweep_value)).collect(),
-            });
-            if let Some(outer) = sweep2 {
-                let outer_points = outer.spec().points();
-                let inner_count = primary.points().len();
-                let values: Vec<Option<f64>> = outer_points
-                    .into_iter()
-                    .flat_map(|value| std::iter::repeat_n(Some(value), inner_count))
-                    .collect();
-                if values.len() != points.len() {
-                    return Err(DirectiveFailure::ResultDocument(
-                        "nested DC result shape does not match its declared sweep grid".to_owned(),
-                    ));
-                }
-                document.axes.push(AxisDocument {
-                    name: outer.source.clone(),
-                    unit: dc_axis_unit(netlist, &outer.source),
-                    values,
-                });
-            }
-            let solution_points: Vec<RealSolutionPoint<'_>> = points
-                .iter()
-                .map(|point| RealSolutionPoint {
-                    result: &point.result,
-                    report: Some(&point.device_op_report),
-                })
-                .collect();
-            append_real_solution(&mut document, &solution_points)?;
-            let remaining = remaining_outcome_bytes(&outcome, result_byte_limit)?;
-            add_typed_artifact(&mut outcome, kind, ordinal, document, deadline, remaining)?;
-            Ok(outcome)
-        }
-        AnalysisCommand::Tran {
-            step,
-            stop,
-            start,
-            max_step,
-            uic,
-        } => {
-            let ceiling = rspice_core::execution::resolve_transient_maximum_step(
-                *step, *stop, *start, *max_step,
-            )
-            .map_err(|error| DirectiveFailure::InvalidAnalysis(error.to_string()))?;
-            let result = engine.run_tran_with_startup_mode_and_abort(
-                netlist,
-                *stop,
-                ceiling,
-                rspice_core::engine::TransientStartupMode::from_uic(*uic),
-                deadline,
-            )?;
-            if result.time.is_empty() {
-                return Err(DirectiveFailure::NonFinite);
-            }
-            if result.time.len() > MAX_SERIES_SAMPLES {
-                return Err(DirectiveFailure::SeriesBudget);
-            }
-            validate_fft_result_sequence(netlist, &result.fft_results, *stop, deadline)?;
-            let mut columns: Vec<(String, &'static str, Vec<f64>)> = Vec::new();
-            columns.push(("time".to_owned(), "s", result.time.clone()));
-            for (index, name) in result.node_names.iter().enumerate() {
-                let waveform = result.voltages.get(index).ok_or_else(|| {
-                    DirectiveFailure::ResultDocument(
-                        "transient node names and voltage waveforms are misaligned".to_owned(),
-                    )
-                })?;
-                if waveform.len() == result.time.len() {
-                    columns.push((measurement_name("v", name), "V", waveform.clone()));
-                } else if !waveform.is_empty() {
-                    return Err(DirectiveFailure::ResultDocument(format!(
-                        "transient voltage {name:?} has {} samples for {} times",
-                        waveform.len(),
-                        result.time.len()
-                    )));
-                }
-            }
-            for (index, name) in result.branch_names.iter().enumerate() {
-                let waveform = result.branch_currents.get(index).ok_or_else(|| {
-                    DirectiveFailure::ResultDocument(
-                        "transient branch names and current waveforms are misaligned".to_owned(),
-                    )
-                })?;
-                if waveform.len() == result.time.len() {
-                    columns.push((measurement_name("i", name), "A", waveform.clone()));
-                } else if !waveform.is_empty() {
-                    return Err(DirectiveFailure::ResultDocument(format!(
-                        "transient branch current {name:?} has {} samples for {} times",
-                        waveform.len(),
-                        result.time.len()
-                    )));
-                }
-            }
-            let mut outcome = columns_outcome(kind, ordinal, columns, deadline, result_byte_limit)?;
-            if let Some(mut document) = analog_document(kind, ordinal) {
-                document.point_count = result.time.len();
-                document.axes.push(AxisDocument {
-                    name: "time".to_owned(),
-                    unit: Some(SignalUnit::Second),
-                    values: result.time.iter().copied().map(Some).collect(),
-                });
-                for (index, name) in result.node_names.iter().enumerate() {
-                    let waveform = &result.voltages[index];
-                    let samples = if waveform.is_empty() {
-                        vec![None; result.time.len()]
-                    } else {
-                        waveform.iter().copied().map(Some).collect()
-                    };
-                    document.signals.push(SignalDocument {
-                        canonical_name: format!("v({})", name.to_ascii_lowercase()),
-                        display_name: format!("V({name})"),
-                        kind: AnalogSignalKind::Voltage,
-                        owner: SignalOwner::Node { name: name.clone() },
-                        unit: Some(SignalUnit::Volt),
-                        values: SignalValues::Real { samples },
-                    });
-                }
-                for (index, name) in result.branch_names.iter().enumerate() {
-                    let waveform = &result.branch_currents[index];
-                    let samples = if waveform.is_empty() {
-                        vec![None; result.time.len()]
-                    } else {
-                        waveform.iter().copied().map(Some).collect()
-                    };
-                    document.signals.push(SignalDocument {
-                        canonical_name: format!("i({})", name.to_ascii_lowercase()),
-                        display_name: format!("I({name})"),
-                        kind: AnalogSignalKind::BranchCurrent,
-                        owner: SignalOwner::Branch { name: name.clone() },
-                        unit: Some(SignalUnit::Ampere),
-                        values: SignalValues::Real { samples },
-                    });
-                }
-                for trace in &result.device_op_traces {
-                    validate_pair(
-                        "transient device observable",
-                        result.time.len(),
-                        trace.values.len(),
-                    )?;
-                    document.signals.push(SignalDocument {
-                        canonical_name: format!(
-                            "@{}[{}]",
-                            trace.device_name.to_ascii_lowercase(),
-                            trace.parameter.to_ascii_lowercase()
-                        ),
-                        display_name: format!("@{}[{}]", trace.device_name, trace.parameter),
-                        kind: AnalogSignalKind::DeviceObservable,
-                        owner: SignalOwner::Device {
-                            device: Some(trace.device_name.clone()),
-                            parameter: Some(trace.parameter.clone()),
-                            device_kind: None,
-                        },
-                        unit: device_parameter_unit(&trace.parameter),
-                        values: SignalValues::Real {
-                            samples: trace.values.iter().copied().map(Some).collect(),
-                        },
-                    });
-                }
-                for trace in &result.store_traces {
-                    validate_pair(
-                        "transient device store",
-                        result.time.len(),
-                        trace.values.len(),
-                    )?;
-                    document.signals.push(SignalDocument {
-                        canonical_name: trace.name.to_ascii_lowercase(),
-                        display_name: trace.name.clone(),
-                        kind: AnalogSignalKind::DeviceObservable,
-                        owner: SignalOwner::Device {
-                            device: None,
-                            parameter: Some(trace.name.clone()),
-                            device_kind: None,
-                        },
-                        unit: None,
-                        values: SignalValues::Real {
-                            samples: trace.values.iter().copied().map(Some).collect(),
-                        },
-                    });
-                }
-                let parent_analysis = document.analysis.clone();
-                let remaining = remaining_outcome_bytes(&outcome, result_byte_limit)?;
-                add_typed_artifact(&mut outcome, kind, ordinal, document, deadline, remaining)?;
-                if !result.fft_results.is_empty() {
-                    let fft_document = TransientFftResultDocument::from_engine_results_with_abort(
-                        parent_analysis,
-                        &result.fft_results,
-                        &netlist.fft_analyses,
-                        netlist.options.fft_mode.unwrap_or_default(),
-                        deadline,
-                    )
-                    .map_err(map_fft_document_error)?;
-                    let remaining = remaining_outcome_bytes(&outcome, result_byte_limit)?;
-                    add_fft_typed_artifact(
-                        &mut outcome,
-                        ordinal,
-                        fft_document,
-                        deadline,
-                        remaining,
-                    )?;
-                }
-            }
-            Ok(outcome)
-        }
-        AnalysisCommand::Ac {
-            variation,
-            points,
-            start_freq,
-            stop_freq,
-        } => {
-            let frequencies = rspice_core::analysis::ac::try_ac_sweep_frequencies_with_abort(
-                *variation,
-                *points,
-                *start_freq,
-                *stop_freq,
-                deadline,
-            )
-            .map_err(DirectiveFailure::FrequencyGrid)?;
-            let results = engine.run_ac_with_abort(netlist, &frequencies, deadline)?;
-            if results.is_empty() {
-                return Err(DirectiveFailure::NonFinite);
-            }
-            for point in &results {
-                validate_pair(
-                    "AC node voltage",
-                    point.node_names.len(),
-                    point.voltages.len(),
-                )?;
-                validate_pair(
-                    "AC branch current",
-                    point.branch_names.len(),
-                    point.currents.len(),
-                )?;
-            }
-            let mut columns: Vec<(String, &'static str, Vec<f64>)> = Vec::new();
-            columns.push((
-                "frequency".to_owned(),
-                "Hz",
-                results.iter().map(|point| point.frequency).collect(),
-            ));
-            let first = &results[0];
-            for name in &first.node_names {
-                let values = results.iter().map(|point| {
-                    point
-                        .node_names
-                        .iter()
-                        .position(|candidate| candidate.eq_ignore_ascii_case(name))
-                        .and_then(|index| point.voltages.get(index))
-                });
-                let complex: Option<Vec<_>> = values.collect();
-                if let Some(complex) = complex {
-                    columns.push((
-                        measurement_name("vm", name),
-                        "V",
-                        complex.iter().map(|value| value.norm()).collect(),
-                    ));
-                    columns.push((
-                        measurement_name("vp", name),
-                        "deg",
-                        complex
-                            .iter()
-                            .map(|value| value.arg().to_degrees())
-                            .collect(),
-                    ));
-                }
-            }
-            for name in &first.branch_names {
-                let values = results.iter().map(|point| {
-                    point
-                        .branch_names
-                        .iter()
-                        .position(|candidate| candidate.eq_ignore_ascii_case(name))
-                        .and_then(|index| point.currents.get(index))
-                });
-                let complex: Option<Vec<_>> = values.collect();
-                if let Some(complex) = complex {
-                    columns.push((
-                        measurement_name("im", name),
-                        "A",
-                        complex.iter().map(|value| value.norm()).collect(),
-                    ));
-                    columns.push((
-                        measurement_name("ip", name),
-                        "deg",
-                        complex
-                            .iter()
-                            .map(|value| value.arg().to_degrees())
-                            .collect(),
-                    ));
-                }
-            }
-            let mut outcome = columns_outcome(kind, ordinal, columns, deadline, result_byte_limit)?;
-            let mut document = analog_document(kind, ordinal).expect("AC is analog");
-            document.point_count = results.len();
-            document.axes.push(AxisDocument {
-                name: "frequency".to_owned(),
-                unit: Some(SignalUnit::Hertz),
-                values: results.iter().map(|point| Some(point.frequency)).collect(),
-            });
-            append_complex_solution(
-                &mut document,
-                results.iter().map(|point| ComplexSolutionPoint {
-                    node_names: &point.node_names,
-                    voltages: &point.voltages,
-                    branch_names: &point.branch_names,
-                    currents: &point.currents,
-                }),
-            )?;
-            let remaining = remaining_outcome_bytes(&outcome, result_byte_limit)?;
-            add_typed_artifact(&mut outcome, kind, ordinal, document, deadline, remaining)?;
-            Ok(outcome)
-        }
-        AnalysisCommand::Noise {
-            output_node,
-            reference_node,
-            input_source,
-            variation,
-            points,
-            start_freq,
-            stop_freq,
-        } => {
-            let frequencies = rspice_core::analysis::ac::try_ac_sweep_frequencies_with_abort(
-                *variation,
-                *points,
-                *start_freq,
-                *stop_freq,
-                deadline,
-            )
-            .map_err(DirectiveFailure::FrequencyGrid)?;
-            let results = engine.run_noise_named_with_input_source_and_abort(
-                netlist,
-                output_node,
-                reference_node.as_deref(),
-                input_source,
-                &frequencies,
-                netlist
-                    .options
-                    .temp
-                    .map_or(engine.config().temperature, |temp| {
-                        rspice_core::constants::celsius_to_kelvin(temp)
-                    }),
-                deadline,
-            )?;
-            if results.is_empty() {
-                return Err(DirectiveFailure::NonFinite);
-            }
-            for point in &results {
-                validate_pair(
-                    "noise node voltage",
-                    point.node_names.len(),
-                    point.voltages.len(),
-                )?;
-                validate_pair(
-                    "noise branch current",
-                    point.branch_names.len(),
-                    point.currents.len(),
-                )?;
-            }
-            let columns: Vec<(String, &'static str, Vec<f64>)> = vec![
-                (
-                    "frequency".to_owned(),
-                    "Hz",
-                    results.iter().map(|point| point.frequency).collect(),
-                ),
-                (
-                    // The engine's density is a power quantity (V^2/Hz);
-                    // the declared unit is the amplitude density every
-                    // commercial noise report uses.
-                    "onoise".to_owned(),
-                    "V/Hz0.5",
-                    results
-                        .iter()
-                        .map(|point| point.output_noise_rms())
-                        .collect(),
-                ),
-            ];
-            let mut outcome = columns_outcome(kind, ordinal, columns, deadline, result_byte_limit)?;
-            let mut document = analog_document(kind, ordinal).expect("noise is analog");
-            document.point_count = results.len();
-            document.axes.push(AxisDocument {
-                name: "frequency".to_owned(),
-                unit: Some(SignalUnit::Hertz),
-                values: results.iter().map(|point| Some(point.frequency)).collect(),
-            });
-            append_complex_solution(
-                &mut document,
-                results.iter().map(|point| ComplexSolutionPoint {
-                    node_names: &point.node_names,
-                    voltages: &point.voltages,
-                    branch_names: &point.branch_names,
-                    currents: &point.currents,
-                }),
-            )?;
-            document.signals.extend([
-                analysis_scalar_signal(
-                    "output_noise_density",
-                    "Output noise density",
-                    Some(SignalUnit::VoltSquaredPerHertz),
-                    results
-                        .iter()
-                        .map(|point| Some(point.output_noise_density))
-                        .collect(),
-                ),
-                analysis_scalar_signal(
-                    "input_referred_noise_density",
-                    "Input-referred noise density",
-                    Some(SignalUnit::VoltSquaredPerHertz),
-                    results
-                        .iter()
-                        .map(|point| Some(point.input_referred_density))
-                        .collect(),
-                ),
-                analysis_scalar_signal(
-                    "input_gain_squared",
-                    "Input gain squared",
-                    Some(SignalUnit::Dimensionless),
-                    results
-                        .iter()
-                        .map(|point| Some(point.input_gain_squared))
-                        .collect(),
-                ),
-            ]);
-            append_noise_contributions(&mut document, &results);
-            let remaining = remaining_outcome_bytes(&outcome, result_byte_limit)?;
-            add_typed_artifact(&mut outcome, kind, ordinal, document, deadline, remaining)?;
-            Ok(outcome)
-        }
-        // Directive classes are filtered before dispatch, so any other
-        // variant reaching here is an executor logic error, not deck content.
-        _ => Err(DirectiveFailure::Engine(SimulationError::Circuit(
-            "unreachable directive class".to_owned(),
-        ))),
-    }
-}
-
-/// Converts named series columns into measurements plus one CSV artifact.
-fn columns_outcome(
-    kind: AnalysisKind,
-    ordinal: usize,
-    columns: Vec<(String, &'static str, Vec<f64>)>,
-    abort: &dyn AbortSignal,
-    byte_limit: u64,
-) -> Result<DirectiveOutcome, DirectiveFailure> {
-    let mut measurements = Vec::new();
-    for (name, unit, series) in &columns {
-        if abort.is_aborted() {
-            return Err(DirectiveFailure::Engine(SimulationError::Aborted));
-        }
-        if series.iter().any(|value| !value.is_finite()) {
-            return Err(DirectiveFailure::NonFinite);
-        }
-        measurements.extend(
-            Measurement::series_with_abort(name.clone(), unit, series, abort)
-                .map_err(map_measurement_error)?,
-        );
-    }
-
-    let rows = columns.first().map_or(0, |(_, _, series)| series.len());
-    if columns.iter().any(|(_, _, series)| series.len() != rows) {
-        return Err(DirectiveFailure::ResultDocument(
-            "legacy result columns do not share a common point count".to_owned(),
-        ));
-    }
-    let mut writer = BoundedAbortWriter::new(abort, byte_limit.min(MAX_ENGINE_ARTIFACT_BYTES));
-    for (index, (name, _, _)) in columns.iter().enumerate() {
-        if index > 0 && writer.write_all(b",").is_err() {
-            return Err(map_bounded_write_failure(&writer));
-        }
-        if writer.write_all(name.as_bytes()).is_err() {
-            return Err(map_bounded_write_failure(&writer));
-        }
-    }
-    if writer.write_all(b"\n").is_err() {
-        return Err(map_bounded_write_failure(&writer));
-    }
-    for row in 0..rows {
-        for (index, (_, _, series)) in columns.iter().enumerate() {
-            if index > 0 && writer.write_all(b",").is_err() {
-                return Err(map_bounded_write_failure(&writer));
-            }
-            let decimal = canonical_decimal(series[row]).ok_or(DirectiveFailure::NonFinite)?;
-            if writer.write_all(decimal.as_bytes()).is_err() {
-                return Err(map_bounded_write_failure(&writer));
-            }
-        }
-        if writer.write_all(b"\n").is_err() {
-            return Err(map_bounded_write_failure(&writer));
-        }
-    }
-    let content = writer.into_string().map_err(|error| {
-        DirectiveFailure::ResultDocument(format!("result CSV was not UTF-8: {error}"))
-    })?;
-
-    Ok(DirectiveOutcome {
-        measurements,
-        artifacts: vec![PendingArtifact {
-            file_name: format!("{}-{}.csv", kind.as_str(), ordinal + 1),
-            content_type: "text/csv",
-            content,
-        }],
-        schema_signature: None,
-    })
-}
-
-fn namespace_artifacts(
-    artifacts: &mut [PendingArtifact],
-    coordinate: &RunCoordinate,
-    analysis: &MaterializedAnalysis,
-) {
-    let coordinate_component = coordinate.stable_tag();
-    let analysis_component = analysis.output_namespace().analysis_component();
-    for artifact in artifacts {
-        let suffix = if artifact.content_type == "text/csv" {
-            ".csv"
-        } else if artifact.content_type == FFT_RESULT_DOCUMENT_CONTENT_TYPE {
-            ".fft.result.json"
-        } else {
-            ".result.json"
-        };
-        artifact.file_name = format!("{coordinate_component}__{analysis_component}{suffix}");
-    }
-}
-
 fn fft_schema_signature(netlist: &Netlist) -> Vec<String> {
     let mut signature = vec![format!(
         "mode={:?};metrics={:?}",
@@ -2308,7 +984,7 @@ fn fft_schema_signature(netlist: &Netlist) -> Vec<String> {
 fn measurement_document(measurement: &Measurement) -> MeasurementDocument {
     MeasurementDocument {
         name: measurement.name.clone(),
-        unit: measurement.unit.to_owned(),
+        unit: measurement.unit.clone(),
         value_decimal: measurement.value_decimal.clone(),
         sample_count: measurement.sample_count,
         series_sha256: measurement.series_sha256.clone(),
@@ -2389,7 +1065,7 @@ fn step_target_manifest(target: &StepAxisTarget) -> Result<StepTargetDocument, S
 }
 
 fn succeeded(
-    kind: AnalysisKind,
+    request_kind: &str,
     engine_build: &str,
     measurements: Vec<Measurement>,
     artifacts: Vec<PendingArtifact>,
@@ -2398,12 +1074,13 @@ fn succeeded(
     abort: &dyn AbortSignal,
 ) -> Execution {
     let mut manifest = serde_json::json!({
-        "format": if axis_execution.is_some() { "rspice-result-v2" } else { "rspice-result-v1" },
-        "analysis_kind": kind.as_str(),
+        "format": RESULT_MANIFEST_FORMAT,
+        "analysis_kind": request_kind,
         "engine": {"name": "rspice", "build": engine_build},
         "typed_result_schema": {
-            "name": RESULT_DOCUMENT_SCHEMA,
-            "version": RESULT_DOCUMENT_VERSION,
+            "name": rspice_core::execution::ANALYSIS_RESULT_DOCUMENT_SCHEMA,
+            "version": rspice_core::execution::ANALYSIS_RESULT_DOCUMENT_VERSION,
+            "content_type": result_document_content_type(),
         },
         "directives": directive_count,
         "measurements": measurements
@@ -2440,13 +1117,14 @@ fn succeeded(
         manifest["typed_fft_result_schema"] = serde_json::json!({
             "name": FFT_RESULT_DOCUMENT_SCHEMA,
             "version": FFT_RESULT_DOCUMENT_VERSION,
+            "content_type": FFT_RESULT_DOCUMENT_CONTENT_TYPE,
         });
     }
     let descriptors = artifacts
         .iter()
         .map(|artifact| EngineResultArtifactDescriptor {
             path: format!("results/{}", artifact.file_name),
-            content_type: artifact.content_type.to_owned(),
+            content_type: artifact.content_type.clone(),
         })
         .collect();
     Execution {
@@ -2597,7 +1275,6 @@ pub fn write_artifacts(results_dir: &Path, artifacts: &[PendingArtifact]) -> Res
             return Err("result artifact set contains duplicate destinations".to_owned());
         }
     }
-
     let mut transaction = AtomicArtifactSet::new();
     for artifact in artifacts {
         let destination = results_dir.join(&artifact.file_name);
@@ -2625,9 +1302,8 @@ where
 mod artifact_publication_tests {
     use super::*;
     use rspice_output::{AtomicArtifactError, stale_artifacts};
-    use std::io;
     use std::path::PathBuf;
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::atomic::AtomicU64;
 
     static NEXT_TEST_DIRECTORY: AtomicU64 = AtomicU64::new(0);
 
@@ -2652,6 +1328,15 @@ mod artifact_publication_tests {
     impl Drop for TestDirectory {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn artifact(file_name: &str, content: &str) -> PendingArtifact {
+        PendingArtifact {
+            file_name: file_name.to_owned(),
+            content_type: "application/json".to_owned(),
+            result_kind: "op".to_owned(),
+            content: content.to_owned(),
         }
     }
 
@@ -2706,13 +1391,12 @@ mod artifact_publication_tests {
             let directory = TestDirectory::new("success");
             let destination = directory.destination();
             seed(&destination, preexisting);
-            let artifact = PendingArtifact {
-                file_name: "result.json".to_string(),
-                content_type: "application/json",
-                content: "{\"complete\":true}\n".to_string(),
-            };
 
-            write_artifacts(&directory.0, &[artifact]).expect("publish adapter artifact");
+            write_artifacts(
+                &directory.0,
+                &[artifact("result.json", "{\"complete\":true}\n")],
+            )
+            .expect("publish adapter artifact");
 
             assert_eq!(
                 std::fs::read(&destination).expect("read published adapter artifact"),
@@ -2791,27 +1475,14 @@ mod artifact_publication_tests {
             "sub\\escape.json",
             "C:escape",
         ] {
-            let artifact = PendingArtifact {
-                file_name: invalid.to_owned(),
-                content_type: "application/json",
-                content: "complete".to_owned(),
-            };
-            let error = write_artifacts(&directory.0, &[artifact])
+            let error = write_artifacts(&directory.0, &[artifact(invalid, "complete")])
                 .expect_err("invalid artifact destination must fail closed");
             assert!(error.contains("invalid destination name"), "{error}");
         }
 
         let duplicate = [
-            PendingArtifact {
-                file_name: "Result.json".to_owned(),
-                content_type: "application/json",
-                content: "first".to_owned(),
-            },
-            PendingArtifact {
-                file_name: "result.json".to_owned(),
-                content_type: "application/json",
-                content: "second".to_owned(),
-            },
+            artifact("Result.json", "first"),
+            artifact("result.json", "second"),
         ];
         let error = write_artifacts(&directory.0, &duplicate)
             .expect_err("case-folded duplicate destinations must fail closed");
@@ -2833,16 +1504,8 @@ mod artifact_publication_tests {
             let invalid_second = directory.0.join("second.json");
             std::fs::create_dir(&invalid_second).expect("create commit-failing destination");
             let artifacts = [
-                PendingArtifact {
-                    file_name: "first.json".to_owned(),
-                    content_type: "application/json",
-                    content: "new first".to_owned(),
-                },
-                PendingArtifact {
-                    file_name: "second.json".to_owned(),
-                    content_type: "application/json",
-                    content: "new second".to_owned(),
-                },
+                artifact("first.json", "new first"),
+                artifact("second.json", "new second"),
             ];
 
             let error = write_artifacts(&directory.0, &artifacts)
@@ -2874,16 +1537,8 @@ mod artifact_publication_tests {
         let socket = directory.0.join("second.json");
         let _listener = UnixListener::bind(&socket).expect("bind predecessor socket");
         let artifacts = [
-            PendingArtifact {
-                file_name: "first.json".to_owned(),
-                content_type: "application/json",
-                content: "new first".to_owned(),
-            },
-            PendingArtifact {
-                file_name: "second.json".to_owned(),
-                content_type: "application/json",
-                content: "new second".to_owned(),
-            },
+            artifact("first.json", "new first"),
+            artifact("second.json", "new second"),
         ];
 
         let error = write_artifacts(&directory.0, &artifacts)
@@ -2897,42 +1552,6 @@ mod artifact_publication_tests {
             b"old first"
         );
         assert!(socket.exists());
-    }
-
-    #[test]
-    fn cancelled_transient_fft_returns_no_partial_directive_outcome() {
-        let netlist = Netlist::parse_validated(
-            "cancelled transient FFT\n\
-             V1 out 0 SIN(0 1 1k)\n\
-             R1 out 0 1k\n\
-             .tran 1u 1m\n\
-             .fft v(out) np=8\n\
-             .end\n",
-        )
-        .expect("cancelled FFT fixture parses");
-        let directive = netlist
-            .analyses
-            .iter()
-            .find(|directive| matches!(directive, AnalysisCommand::Tran { .. }))
-            .expect("transient directive");
-        let engine = Engine::new(SimulationConfig {
-            spice_dialect: SpiceDialect::Ngspice,
-            ..SimulationConfig::default()
-        });
-
-        match run_directive(
-            &engine,
-            &netlist,
-            directive,
-            AnalysisKind::Transient,
-            0,
-            &rspice_core::abort_signal::ImmediateAbort,
-            MAX_ENGINE_RETAINED_RESULT_BYTES,
-        ) {
-            Err(DirectiveFailure::Engine(SimulationError::Aborted)) => {}
-            Err(_) => panic!("cancellation returned the wrong bounded failure"),
-            Ok(_) => panic!("cancellation returned a partially completed directive outcome"),
-        }
     }
 
     #[test]
@@ -2952,7 +1571,8 @@ mod artifact_publication_tests {
             ..SimulationConfig::default()
         });
         let execution = execute_planned_netlist(
-            AnalysisKind::OperatingPoint,
+            PlannedAnalysisKind::Op,
+            "operating_point",
             &netlist,
             "test",
             &engine,

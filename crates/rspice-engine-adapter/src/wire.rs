@@ -1,5 +1,17 @@
-//! Engine wire contract: the exact protocol-3 request/response boundary the
+//! Engine wire contract: the exact protocol-4 request/response boundary the
 //! RSpice Cloud worker speaks to a self-contained engine executor.
+//!
+//! # Protocol 4
+//!
+//! The request envelope is unchanged from protocol 3: the same digest
+//! versions, the same artifact manifest, the same byte bounds. The version was
+//! advanced because the *response* contract changed — every analysis family
+//! the planner recognizes now executes, each publishing one shared
+//! `rspice-analysis-result` document instead of a CSV plus an adapter-owned
+//! analog document, and `analysis.kind` `mixed_signal` was removed. See
+//! [`crate::execute`] for the complete consumer-visible difference. Protocol 3
+//! is refused here rather than served with a response its reader cannot
+//! interpret.
 //!
 //! This module deliberately reimplements the `rspice-cloud-engine-contract`
 //! crate rather than depending on it across repositories. Byte-for-byte
@@ -20,7 +32,7 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 use uuid::Uuid;
 
-pub const INTEGRITY_ENGINE_PROTOCOL_VERSION: u8 = 3;
+pub const INTEGRITY_ENGINE_PROTOCOL_VERSION: u8 = 4;
 pub const CURRENT_SIMULATION_REQUEST_DIGEST_VERSION: i16 = 1;
 pub const CURRENT_REVISION_CONTENT_DIGEST_VERSION: i16 = 2;
 pub const MAX_ENGINE_REQUEST_BYTES: usize = 2 * 1024 * 1024;
@@ -42,13 +54,14 @@ pub const MAX_SIMULATION_ATTEMPTS: i32 = 20;
 pub const MAX_FAILURE_CODE_BYTES: usize = 120;
 pub const MAX_FAILURE_DETAIL_CHARS: usize = 1_024;
 
-/// Exact protocol-3 request delivered on standard input.
+/// Exact protocol-4 request delivered on standard input.
 ///
 /// The worker validated this envelope before launch; the adapter validates it
 /// again so a compromised or drifted controller cannot feed it content whose
-/// integrity digests do not match. Protocols 1 and 2 are worker-side legacy
-/// forms; this executor accepts only protocol 3, and the worker never sends
-/// an older protocol to a protocol-3 component set.
+/// integrity digests do not match. Protocols 1, 2, and 3 are earlier response
+/// contracts; this executor accepts only protocol 4, and any other version —
+/// older or newer — is refused as controller drift rather than served a
+/// response its reader cannot interpret.
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct EngineRequest {
@@ -163,8 +176,9 @@ fn validate_engine_request(request: &EngineRequest) -> Result<(), RequestError> 
         return Err(RequestError::InvalidStructure);
     }
 
-    // A protocol-3 component set only ever receives protocol 3 with both
-    // digest versions explicit; anything else is controller drift.
+    // A protocol-4 component set only ever receives protocol 4 with both
+    // digest versions explicit; anything else — including a future protocol
+    // this build has never seen — is controller drift.
     if request.protocol_version != INTEGRITY_ENGINE_PROTOCOL_VERSION
         || request.request_digest_version != Some(CURRENT_SIMULATION_REQUEST_DIGEST_VERSION)
         || request.revision.content_digest_version != Some(CURRENT_REVISION_CONTENT_DIGEST_VERSION)
@@ -414,7 +428,7 @@ mod tests {
     /// here proves this module's canonicalization is byte-identical.
     pub(crate) fn release_smoke_request_bytes() -> Vec<u8> {
         serde_json::to_vec(&serde_json::json!({
-            "protocol_version": 3,
+            "protocol_version": 4,
             "simulation_run_id": "019f76ae-0000-7000-8000-000000000703",
             "circuit_id": "019f76ae-0000-7000-8000-000000000701",
             "attempt": 1,
@@ -493,6 +507,27 @@ mod tests {
     }
 
     #[test]
+    fn the_superseded_and_the_unseen_protocol_are_both_refused() {
+        // Protocol 3 is the response contract this build replaced, and any
+        // higher number is a controller this build has never been reviewed
+        // against. Serving either would publish a result set the caller
+        // cannot interpret, so both fail closed on the same code.
+        for version in [
+            INTEGRITY_ENGINE_PROTOCOL_VERSION - 1,
+            INTEGRITY_ENGINE_PROTOCOL_VERSION + 1,
+        ] {
+            let mut drifted: Value =
+                serde_json::from_slice(&release_smoke_request_bytes()).expect("request JSON");
+            drifted["protocol_version"] = serde_json::json!(version);
+            assert_eq!(
+                parse_engine_request(&serde_json::to_vec(&drifted).expect("request bytes")).err(),
+                Some(RequestError::InvalidProtocol),
+                "protocol {version} must be refused"
+            );
+        }
+    }
+
+    #[test]
     fn artifact_manifests_bind_ids_paths_and_digests() {
         // A single-artifact request with digests recomputed through this
         // module's own functions must round-trip its validation, and every
@@ -518,7 +553,7 @@ mod tests {
             simulation_request_digest(circuit_id, revision_id, &revision_digest, &analysis)
                 .expect("request digest");
         let request = serde_json::json!({
-            "protocol_version": 3,
+            "protocol_version": 4,
             "simulation_run_id": Uuid::from_u128(4),
             "circuit_id": circuit_id,
             "attempt": 1,
@@ -555,7 +590,7 @@ mod tests {
     #[test]
     fn responses_serialize_to_the_strict_wire_shape() {
         let succeeded = serde_json::to_value(EngineResponse::Succeeded {
-            result_manifest: serde_json::json!({"format": "rspice-result-v1"}),
+            result_manifest: serde_json::json!({"format": "rspice-result-v3"}),
             result_artifacts: Vec::new(),
         })
         .expect("response JSON");
@@ -563,7 +598,7 @@ mod tests {
             succeeded,
             serde_json::json!({
                 "status": "succeeded",
-                "result_manifest": {"format": "rspice-result-v1"},
+                "result_manifest": {"format": "rspice-result-v3"},
             })
         );
 

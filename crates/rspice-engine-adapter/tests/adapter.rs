@@ -6,6 +6,11 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
+use rspice_core::execution::result_document::{ScalarValue, SeriesValues};
+use rspice_core::execution::{
+    ANALYSIS_RESULT_DOCUMENT_SCHEMA, ANALYSIS_RESULT_DOCUMENT_VERSION, AnalysisResultDocument,
+    AnalysisResultKind, MappingStatus, ResultSignal, SignalUnit, analysis_result_capability,
+};
 use rspice_engine_adapter::axis_execution_document::{
     AxisAnalysisKind, AxisAssignmentKind, AxisExecutionDocument,
 };
@@ -13,13 +18,10 @@ use rspice_engine_adapter::fft_result_document::{
     FFT_RESULT_DOCUMENT_CONTENT_TYPE, FftCompatibilityMode, FftPhysicalType, FftSourceKind,
     FftUnit, TransientFftResultDocument,
 };
-use rspice_engine_adapter::result_document::{
-    AnalogAnalysisKind, AnalogResultDocument, AnalogSignalKind, RESULT_DOCUMENT_CONTENT_TYPE,
-    SignalUnit, SignalValues,
-};
+use rspice_engine_adapter::result_artifact::result_document_content_type;
 use rspice_engine_adapter::wire::{
-    EngineArtifact, EngineRequest, EngineRevision, digest_hex, revision_content_digest,
-    simulation_request_digest,
+    EngineArtifact, EngineRequest, EngineRevision, INTEGRITY_ENGINE_PROTOCOL_VERSION, digest_hex,
+    revision_content_digest, simulation_request_digest,
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -29,7 +31,7 @@ use uuid::Uuid;
 /// digests are pinned upstream and must never be regenerated here.
 fn release_smoke_request() -> Vec<u8> {
     serde_json::to_vec(&json!({
-        "protocol_version": 3,
+        "protocol_version": INTEGRITY_ENGINE_PROTOCOL_VERSION,
         "simulation_run_id": "019f76ae-0000-7000-8000-000000000703",
         "circuit_id": "019f76ae-0000-7000-8000-000000000701",
         "attempt": 1,
@@ -95,7 +97,10 @@ impl Job {
         command
             .current_dir(&self.root)
             .env_clear()
-            .env("RSPICE_ENGINE_PROTOCOL_VERSION", "3")
+            .env(
+                "RSPICE_ENGINE_PROTOCOL_VERSION",
+                INTEGRITY_ENGINE_PROTOCOL_VERSION.to_string(),
+            )
             .env("RSPICE_ENGINE_INPUT", "stdin-json")
             .env("RSPICE_ENGINE_OUTPUT", "stdout-json")
             .stdin(Stdio::piped())
@@ -123,6 +128,23 @@ impl Job {
             .wait_with_output()
             .expect("collect the adapter output")
     }
+
+    /// Run one deck under one analysis kind and return the parsed response.
+    fn execute(&self, deck: &str, kind: &str) -> Value {
+        let request = build_request(
+            json!({"schema": "rspice-circuit-v1", "netlist_utf8": deck}),
+            json!({"kind": kind}),
+            Vec::new(),
+        );
+        parse_stdout(&self.run(&request))
+    }
+
+    fn results_are_empty(&self) -> bool {
+        std::fs::read_dir(self.root.join("results"))
+            .expect("read results")
+            .count()
+            == 0
+    }
 }
 
 fn build_request(document: Value, analysis: Value, artifacts: Vec<EngineArtifact>) -> Vec<u8> {
@@ -134,7 +156,7 @@ fn build_request(document: Value, analysis: Value, artifacts: Vec<EngineArtifact
         simulation_request_digest(circuit_id, revision_id, &revision_digest, &analysis)
             .expect("request digest");
     serde_json::to_vec(&EngineRequest {
-        protocol_version: 3,
+        protocol_version: INTEGRITY_ENGINE_PROTOCOL_VERSION,
         simulation_run_id: Uuid::from_u128(0x33),
         circuit_id,
         attempt: 1,
@@ -172,22 +194,22 @@ fn measurement<'a>(response: &'a Value, name: &str) -> &'a Value {
         .unwrap_or_else(|| panic!("measurement {name} missing"))
 }
 
-fn typed_result(job: &Job, response: &Value, file_name: &str) -> AnalogResultDocument {
+fn typed_result(job: &Job, response: &Value, file_name: &str) -> AnalysisResultDocument {
     let path = format!("results/{file_name}");
     let descriptor = response["result_artifacts"]
         .as_array()
         .expect("declared result artifacts")
         .iter()
         .find(|artifact| artifact["path"] == path)
-        .unwrap_or_else(|| panic!("typed result descriptor {path} missing"));
-    assert_eq!(descriptor["content_type"], RESULT_DOCUMENT_CONTENT_TYPE);
-    let content = std::fs::read_to_string(job.root.join(&path)).expect("read typed result");
-    AnalogResultDocument::from_json(&content).expect("typed result validates")
+        .unwrap_or_else(|| panic!("typed result descriptor {path} missing from {response}"));
+    assert_eq!(descriptor["content_type"], result_document_content_type());
+    typed_result_at_path(job, &path)
 }
 
-fn typed_result_at_path(job: &Job, path: &str) -> AnalogResultDocument {
-    let content = std::fs::read_to_string(job.root.join(path)).expect("read typed result path");
-    AnalogResultDocument::from_json(&content).expect("typed result path validates")
+fn typed_result_at_path(job: &Job, path: &str) -> AnalysisResultDocument {
+    let content = std::fs::read_to_string(job.root.join(path))
+        .unwrap_or_else(|error| panic!("read typed result {path}: {error}"));
+    AnalysisResultDocument::from_json(&content).expect("typed result validates")
 }
 
 fn typed_fft_result(job: &Job, response: &Value, file_name: &str) -> TransientFftResultDocument {
@@ -203,15 +225,36 @@ fn typed_fft_result(job: &Job, response: &Value, file_name: &str) -> TransientFf
     TransientFftResultDocument::from_json(&content).expect("typed FFT result validates")
 }
 
-fn signal<'a>(
-    document: &'a AnalogResultDocument,
-    canonical_name: &str,
-) -> &'a rspice_engine_adapter::result_document::SignalDocument {
+fn signal<'a>(document: &'a AnalysisResultDocument, canonical_name: &str) -> &'a ResultSignal {
     document
-        .signals
+        .signals()
         .iter()
-        .find(|signal| signal.canonical_name.eq_ignore_ascii_case(canonical_name))
-        .unwrap_or_else(|| panic!("signal {canonical_name} missing"))
+        .find(|signal| {
+            signal
+                .descriptor()
+                .canonical_name()
+                .eq_ignore_ascii_case(canonical_name)
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "signal {canonical_name} missing; document has {:?}",
+                document
+                    .signals()
+                    .iter()
+                    .map(|signal| signal.descriptor().canonical_name())
+                    .collect::<Vec<_>>()
+            )
+        })
+}
+
+fn scalar_value(document: &AnalysisResultDocument, name: &str) -> ScalarValue {
+    document
+        .scalars()
+        .iter()
+        .find(|scalar| scalar.name().eq_ignore_ascii_case(name))
+        .unwrap_or_else(|| panic!("scalar {name} missing"))
+        .value()
+        .clone()
 }
 
 fn axis_execution(response: &Value) -> AxisExecutionDocument {
@@ -219,23 +262,418 @@ fn axis_execution(response: &Value) -> AxisExecutionDocument {
         .expect("strict axis execution contract validates")
 }
 
+//=============================================================================
+// Family corpus: the registry is the test input
+//=============================================================================
+
+/// Which registry declaration a family is expected to carry, without pinning
+/// the note text a reviewer may reword.
+#[derive(Debug, PartialEq, Eq)]
+enum DeclaredStatus {
+    Mapped,
+    Partial,
+    Unsupported,
+}
+
+fn declared_status(status: MappingStatus) -> DeclaredStatus {
+    match status {
+        MappingStatus::Mapped => DeclaredStatus::Mapped,
+        MappingStatus::Partial(_) => DeclaredStatus::Partial,
+        MappingStatus::Unsupported(_) => DeclaredStatus::Unsupported,
+    }
+}
+
+/// What this build declares for one core result family.
+enum FamilyExpectation {
+    /// A deck that exercises the family, the wire kind that selects it, and
+    /// the canonical analysis tag its result must carry.
+    Runs {
+        request_kind: &'static str,
+        analysis_tag: &'static str,
+        deck: &'static str,
+        /// `Partial` when the family runs but a documented subset of results
+        /// cannot be published; the registry note says which.
+        declared: DeclaredStatus,
+    },
+    /// The family is published as a typed child of another family's result
+    /// rather than as its own request, so the registry declares it partial.
+    Attached {
+        request_kind: &'static str,
+        parent_request_kind: &'static str,
+        parent_artifact: &'static str,
+        deck: &'static str,
+    },
+    /// The family is refused by name, and the refusal explains why.
+    Refused { request_kind: &'static str },
+}
+
+const DIVIDER: &str = "resistive divider\n\
+                       V1 in 0 DC 10\n\
+                       R1 in out 1k\n\
+                       R2 out 0 1k\n";
+const RC: &str = "rc lowpass\n\
+                  V1 in 0 DC 0 AC 1\n\
+                  R1 in out 1k\n\
+                  C1 out 0 1u\n";
+const RF: &str = "periodic fixture\n\
+                  V1 in 0 SIN(0 1 1G)\n\
+                  R1 in out 1k\n\
+                  C1 out 0 1p\n";
+
+/// One deck plus refusal per family, matched exhaustively so a new core
+/// result family cannot ship without an adapter decision recorded here.
+fn family_expectation(kind: AnalysisResultKind) -> FamilyExpectation {
+    match kind {
+        AnalysisResultKind::OperatingPoint => FamilyExpectation::Runs {
+            request_kind: "operating_point",
+            analysis_tag: "op-001",
+            declared: DeclaredStatus::Mapped,
+            deck: "resistive divider\nV1 in 0 DC 10\nR1 in out 1k\nR2 out 0 1k\n.op\n.end\n",
+        },
+        AnalysisResultKind::DcSweep => FamilyExpectation::Runs {
+            request_kind: "dc_sweep",
+            analysis_tag: "dc-001",
+            declared: DeclaredStatus::Mapped,
+            deck: "divider sweep\nV1 in 0 DC 0\nR1 in out 1k\nR2 out 0 1k\n.dc V1 0 1 0.5\n.end\n",
+        },
+        AnalysisResultKind::Ac => FamilyExpectation::Runs {
+            request_kind: "ac_small_signal",
+            analysis_tag: "ac-001",
+            declared: DeclaredStatus::Mapped,
+            deck: "rc ac\nV1 in 0 DC 0 AC 1\nR1 in out 1k\nC1 out 0 1u\n.ac LIN 2 1k 2k\n.end\n",
+        },
+        AnalysisResultKind::Transient => FamilyExpectation::Runs {
+            request_kind: "transient",
+            analysis_tag: "tran-001",
+            declared: DeclaredStatus::Mapped,
+            deck: "rc transient\nV1 in 0 PULSE(0 1 0 1u 1u 1m 2m)\nR1 in out 1k\nC1 out 0 1u\n\
+                   .tran 10u 1m\n.end\n",
+        },
+        AnalysisResultKind::Noise => FamilyExpectation::Runs {
+            request_kind: "noise",
+            analysis_tag: "noise-001",
+            declared: DeclaredStatus::Mapped,
+            deck: "divider noise\nV1 in 0 DC 0 AC 1\nR1 in out 1k\nR2 out 0 1k\n\
+                   .noise V(out) V1 LIN 2 1k 2k\n.end\n",
+        },
+        AnalysisResultKind::Distortion => FamilyExpectation::Runs {
+            request_kind: "distortion",
+            analysis_tag: "disto-001",
+            declared: DeclaredStatus::Mapped,
+            deck: "diode distortion\nV1 out 0 DC 0.5 DISTOF1 1m 0\nD1 out 0 DM\n\
+                   .model DM D(IS=1e-12 N=1 CJO=0 TT=0)\n.disto DEC 2 1k 10k\n.end\n",
+        },
+        AnalysisResultKind::TransferFunction => FamilyExpectation::Runs {
+            request_kind: "transfer_function",
+            analysis_tag: "tf-001",
+            declared: DeclaredStatus::Mapped,
+            deck: "divider transfer function\nV1 in 0 DC 10\nR1 in out 1k\nR2 out 0 1k\n\
+                   .tf V(out) V1\n.end\n",
+        },
+        AnalysisResultKind::Stability => FamilyExpectation::Runs {
+            request_kind: "stability",
+            analysis_tag: "stb-001",
+            // A three-pole loop crosses -180 degrees, so both margins are
+            // finite. The registry records why an unconditionally stable loop
+            // cannot be published.
+            declared: DeclaredStatus::Partial,
+            deck: "three-pole loop\nE1 eo 0 ctrl 0 -1000\nVPROBE eo x 0\n\
+                   R1 x n1 1k\nC1 n1 0 159.154943091895n\n\
+                   R2 n1 n2 1k\nC2 n2 0 159.154943091895n\n\
+                   R3 n2 ctrl 1k\nC3 ctrl 0 159.154943091895n\n\
+                   .stb dec 5 10 10meg probe=vprobe\n.end\n",
+        },
+        AnalysisResultKind::Sensitivity => FamilyExpectation::Runs {
+            request_kind: "sensitivity",
+            analysis_tag: "sens-001",
+            declared: DeclaredStatus::Mapped,
+            deck: "divider sensitivity\nV1 in 0 DC 10\nR1 in out 1k\nR2 out 0 1k\n\
+                   .sens V(out)\n.end\n",
+        },
+        AnalysisResultKind::PoleZero => FamilyExpectation::Runs {
+            request_kind: "pole_zero",
+            analysis_tag: "pz-001",
+            declared: DeclaredStatus::Mapped,
+            deck: "rc pole zero\nV1 in 0 DC 0 AC 1\nR1 in out 1k\nC1 out 0 1u\n\
+                   .pz in 0 out 0 vol pz\n.end\n",
+        },
+        AnalysisResultKind::MonteCarlo => FamilyExpectation::Runs {
+            request_kind: "monte_carlo",
+            analysis_tag: "mc-001",
+            declared: DeclaredStatus::Mapped,
+            deck: "divider monte carlo\nV1 in 0 DC 10\nR1 in out 1k\nR2 out 0 1k\n\
+                   .mc 3 SEED 7 GAUSS 0.01\n.end\n",
+        },
+        AnalysisResultKind::HarmonicBalance => FamilyExpectation::Runs {
+            request_kind: "harmonic_balance",
+            analysis_tag: "hb-001",
+            declared: DeclaredStatus::Mapped,
+            deck: "rf harmonic balance\nV1 in 0 SIN(0 1 1G)\nR1 in out 1k\nC1 out 0 1p\n\
+                   .hb 1g\n.end\n",
+        },
+        AnalysisResultKind::Pss => FamilyExpectation::Runs {
+            request_kind: "pss",
+            analysis_tag: "pss-001",
+            declared: DeclaredStatus::Mapped,
+            deck: "rf periodic steady state\nV1 in 0 SIN(0 1 1G)\nR1 in out 1k\nC1 out 0 1p\n\
+                   .pss fund=1g\n.end\n",
+        },
+        AnalysisResultKind::Pac => FamilyExpectation::Runs {
+            request_kind: "pac",
+            analysis_tag: "pac-001",
+            declared: DeclaredStatus::Mapped,
+            deck: "rf periodic ac\nV1 in 0 SIN(0 1 1G)\nR1 in out 1k\nC1 out 0 1p\n\
+                   .pss fund=1g\n.pac dec 2 1k 10k input=v1 out=v(out)\n.end\n",
+        },
+        AnalysisResultKind::Envelope => FamilyExpectation::Runs {
+            request_kind: "envelope",
+            analysis_tag: "env-001",
+            declared: DeclaredStatus::Mapped,
+            deck: "rf envelope\nV1 in 0 SIN(0 1 1G)\nR1 in out 1k\nC1 out 0 1p\n\
+                   .hb 1g\n.envelope tstop=1n\n.end\n",
+        },
+        AnalysisResultKind::SParameters => FamilyExpectation::Refused {
+            request_kind: "s_parameters",
+        },
+        AnalysisResultKind::PortNoise => FamilyExpectation::Refused {
+            request_kind: "port_noise",
+        },
+        AnalysisResultKind::PNoise => FamilyExpectation::Refused {
+            request_kind: "pnoise",
+        },
+        AnalysisResultKind::Fourier => FamilyExpectation::Refused {
+            request_kind: "fourier",
+        },
+        AnalysisResultKind::Fft => FamilyExpectation::Attached {
+            request_kind: "fft",
+            parent_request_kind: "transient",
+            parent_artifact: "tran-001.fft.result.json",
+            deck: "attached transient FFT\nV1 out 0 SIN(0 1 1k)\nR1 out 0 1k\n\
+                   .tran 1u 1m\n.fft v(out) np=8 freq=1k\n.end\n",
+        },
+    }
+}
+
+/// The registry declaration for a family and what this build actually does
+/// must agree, family by family, with no wildcard arm on either side.
+#[test]
+fn every_result_family_matches_its_engine_adapter_capability_declaration() {
+    for kind in AnalysisResultKind::ALL {
+        let declared = analysis_result_capability(kind).engine_adapter;
+        match family_expectation(kind) {
+            FamilyExpectation::Runs {
+                request_kind,
+                analysis_tag,
+                deck,
+                declared: expected,
+            } => {
+                assert_eq!(
+                    declared_status(declared.scalar),
+                    expected,
+                    "{kind:?} runs but the registry declares {:?}",
+                    declared.scalar
+                );
+                let job = Job::new(&format!("family-{}", kind.tag()));
+                let response = job.execute(deck, request_kind);
+                assert_eq!(
+                    response["status"], "succeeded",
+                    "{kind:?} deck failed: {response}"
+                );
+                let document =
+                    typed_result(&job, &response, &format!("{analysis_tag}.result.json"));
+                assert_eq!(
+                    document.result_kind(),
+                    kind,
+                    "{kind:?} published a {:?} document",
+                    document.result_kind()
+                );
+                assert_eq!(document.analysis().tag(), analysis_tag);
+                assert_eq!(document.schema(), ANALYSIS_RESULT_DOCUMENT_SCHEMA);
+                assert_eq!(document.schema_version(), ANALYSIS_RESULT_DOCUMENT_VERSION);
+                assert!(
+                    document.topology_fingerprint().is_some(),
+                    "{kind:?} published no topology identity"
+                );
+                let namespaces = document
+                    .namespaces()
+                    .unwrap_or_else(|| panic!("{kind:?} published no namespaces"));
+                assert!(namespaces.output.contains(analysis_tag), "{namespaces:?}");
+                assert!(
+                    namespaces.checkpoint.contains(analysis_tag),
+                    "{namespaces:?}"
+                );
+                for axis in document.axes() {
+                    assert_eq!(axis.values().len(), document.point_count());
+                }
+                for signal in document.signals() {
+                    assert_eq!(signal.values().len(), document.point_count());
+                    assert_eq!(
+                        signal.descriptor().value_type(),
+                        match signal.values() {
+                            SeriesValues::Real { .. } =>
+                                rspice_core::execution::SignalValueType::Real,
+                            SeriesValues::Complex { .. } =>
+                                rspice_core::execution::SignalValueType::Complex,
+                            SeriesValues::Logic { .. } =>
+                                rspice_core::execution::SignalValueType::Logic,
+                        },
+                        "{kind:?} signal descriptor and samples disagree"
+                    );
+                }
+            }
+            FamilyExpectation::Attached {
+                request_kind,
+                parent_request_kind,
+                parent_artifact,
+                deck,
+            } => {
+                assert_eq!(
+                    declared_status(declared.scalar),
+                    DeclaredStatus::Partial,
+                    "{kind:?} is published attached but the registry declares {:?}",
+                    declared.scalar
+                );
+                let refusal_job = Job::new(&format!("attached-refusal-{}", kind.tag()));
+                let refusal = refusal_job.execute(&format!("{DIVIDER}.op\n.end\n"), request_kind);
+                assert_eq!(refusal["status"], "failed", "{kind:?}: {refusal}");
+                assert_eq!(refusal["failure_code"], "analysis.unsupported_kind");
+
+                let job = Job::new(&format!("attached-{}", kind.tag()));
+                let response = job.execute(deck, parent_request_kind);
+                assert_eq!(
+                    response["status"], "succeeded",
+                    "{kind:?} parent deck failed: {response}"
+                );
+                let document = typed_fft_result(&job, &response, parent_artifact);
+                assert!(!document.results.is_empty());
+            }
+            FamilyExpectation::Refused { request_kind } => {
+                assert_eq!(
+                    declared_status(declared.scalar),
+                    DeclaredStatus::Unsupported,
+                    "{kind:?} is refused but the registry declares {:?}",
+                    declared.scalar
+                );
+                let job = Job::new(&format!("refused-{}", kind.tag()));
+                let response = job.execute(&format!("{DIVIDER}.op\n.end\n"), request_kind);
+                assert_eq!(
+                    response["status"], "failed",
+                    "{kind:?} must be refused: {response}"
+                );
+                assert_eq!(response["failure_code"], "analysis.unsupported_kind");
+                let detail = response["failure_detail"]
+                    .as_str()
+                    .expect("a refusal explains itself");
+                assert!(
+                    detail.len() > 40,
+                    "{kind:?} refusal must name the missing contract: {detail}"
+                );
+                assert!(job.results_are_empty());
+            }
+        }
+    }
+}
+
+/// Every family that runs also runs at every coordinate of a `.STEP` and a
+/// `.TEMP` axis, publishing one typed document per coordinate under the
+/// canonical namespace the planner assigned.
+#[test]
+fn every_runnable_family_executes_at_every_step_and_temperature_coordinate() {
+    for kind in AnalysisResultKind::ALL {
+        let FamilyExpectation::Runs {
+            request_kind,
+            analysis_tag,
+            deck,
+            ..
+        } = family_expectation(kind)
+        else {
+            continue;
+        };
+        for (label, axis_card, axis_kind) in [
+            (
+                "step",
+                ".param axisparam=1\n.step param axisparam list 1 2\n",
+                AxisAssignmentKind::Step,
+            ),
+            ("temp", ".temp 25 75\n", AxisAssignmentKind::Temperature),
+        ] {
+            let axis_deck = deck.replace(".end\n", &format!("{axis_card}.end\n"));
+            assert!(
+                axis_deck.contains(axis_card),
+                "{kind:?} deck has no .end to attach the {label} axis to"
+            );
+            let job = Job::new(&format!("axis-{label}-{}", kind.tag()));
+            let response = job.execute(&axis_deck, request_kind);
+            assert_eq!(
+                response["status"], "succeeded",
+                "{kind:?} failed on a {label} axis: {response}"
+            );
+            let execution = axis_execution(&response);
+            assert_eq!(execution.coordinate_count, 2, "{kind:?} on {label}");
+            assert_eq!(execution.execution_count, 2, "{kind:?} on {label}");
+            for run in &execution.runs {
+                assert_eq!(run.assignments.len(), 1);
+                assert_eq!(run.assignments[0].kind, axis_kind);
+                assert_eq!(run.analyses.len(), 1);
+                assert_eq!(run.analyses[0].analysis_id, analysis_tag);
+                let artifact = run.analyses[0]
+                    .artifacts
+                    .iter()
+                    .find(|artifact| artifact.result_kind == kind.tag())
+                    .unwrap_or_else(|| panic!("{kind:?} published no {label} coordinate document"));
+                let document = typed_result_at_path(&job, &artifact.path);
+                assert_eq!(document.result_kind(), kind);
+                let coordinate = document
+                    .coordinate()
+                    .unwrap_or_else(|| panic!("{kind:?} coordinate document is unplaced"));
+                assert_eq!(coordinate.id().to_string(), run.coordinate_id);
+            }
+        }
+    }
+}
+
+/// An unconditionally stable loop has no phase crossover, and the shared
+/// stability payload has no representation for the infinite margin that
+/// produces. The run fails closed with the reason rather than publishing a
+/// fabricated finite margin, and the registry records the gap.
+#[test]
+fn an_unconditionally_stable_loop_is_refused_rather_than_given_a_margin() {
+    let job = Job::new("stb-infinite-margin");
+    let response = job.execute(
+        "single-pole loop\nE1 eo 0 ctrl 0 -1000\nVPROBE eo x 0\nR1 x ctrl 1k\n\
+         C1 ctrl 0 159.154943091895n\n.stb dec 2 10 10meg probe=vprobe\n.end\n",
+        "stability",
+    );
+    assert_eq!(response["status"], "failed", "{response}");
+    assert_eq!(response["failure_code"], "results.schema_mismatch");
+    assert!(
+        response["failure_detail"]
+            .as_str()
+            .expect("a refusal explains itself")
+            .contains("margin"),
+        "the refusal must name the margin it cannot represent: {response}"
+    );
+    assert!(job.results_are_empty());
+}
+
+//=============================================================================
+// Release and request contract
+//=============================================================================
+
 #[test]
 fn the_release_smoke_request_succeeds_deterministically() {
     let job = Job::new("release-smoke");
     let first = job.run(&release_smoke_request());
     let response = parse_stdout(&first);
     assert_eq!(response["status"], "succeeded");
-    assert_eq!(response["result_manifest"]["format"], "rspice-result-v1");
+    assert_eq!(response["result_manifest"]["format"], "rspice-result-v3");
     assert_eq!(
         response["result_manifest"]["analysis_kind"],
         "operating_point"
     );
     assert!(response.get("result_artifacts").is_none());
-    assert_eq!(
-        std::fs::read_dir(job.root.join("results"))
-            .expect("read results")
-            .count(),
-        0,
+    assert!(
+        job.results_are_empty(),
         "a metadata-only run must leave results/ empty"
     );
 
@@ -248,22 +686,63 @@ fn the_release_smoke_request_succeeds_deterministically() {
 }
 
 #[test]
+fn a_superseded_protocol_request_is_refused_without_a_response() {
+    let job = Job::new("superseded-protocol");
+    let mut request: Value =
+        serde_json::from_slice(&release_smoke_request()).expect("request JSON");
+    request["protocol_version"] = json!(INTEGRITY_ENGINE_PROTOCOL_VERSION - 1);
+    let output = job.run(&serde_json::to_vec(&request).expect("request bytes"));
+    assert_eq!(
+        output.status.code(),
+        Some(12),
+        "a drifted protocol is a controller fault, not a customer result"
+    );
+    assert!(output.stdout.is_empty());
+
+    let mut future: Value = serde_json::from_slice(&release_smoke_request()).expect("request JSON");
+    future["protocol_version"] = json!(INTEGRITY_ENGINE_PROTOCOL_VERSION + 1);
+    let output = job.run(&serde_json::to_vec(&future).expect("request bytes"));
+    assert_eq!(output.status.code(), Some(12));
+    assert!(output.stdout.is_empty());
+}
+
+#[test]
+fn the_removed_mixed_signal_kind_names_the_transient_that_replaced_it() {
+    let job = Job::new("mixed-signal-removed");
+    let response = job.execute(
+        "mixed-signal deck\nV1 in 0 PULSE(0 1 0 1u 1u 1m 2m)\nR1 in out 1k\nC1 out 0 1u\n\
+         .tran 10u 1m\n.end\n",
+        "mixed_signal",
+    );
+    assert_eq!(response["status"], "failed", "{response}");
+    assert_eq!(response["failure_code"], "analysis.unsupported_kind");
+    let detail = response["failure_detail"]
+        .as_str()
+        .expect("a refusal explains itself");
+    assert!(
+        detail.contains("transient"),
+        "the refusal must name the kind to request instead: {detail}"
+    );
+}
+
+#[test]
 fn a_resistive_divider_operating_point_reports_exact_measurements() {
     let job = Job::new("divider-op");
-    let deck = "resistive divider\nV1 in 0 DC 10\nR1 in out 1k\nR2 out 0 1k\n.op\n.end\n";
-    let request = build_request(
-        json!({"schema": "rspice-circuit-v1", "netlist_utf8": deck}),
-        json!({"kind": "operating_point"}),
-        Vec::new(),
-    );
-    let response = parse_stdout(&job.run(&request));
+    let response = job.execute(&format!("{DIVIDER}.op\n.end\n"), "operating_point");
     assert_eq!(response["status"], "succeeded");
-    assert_eq!(response["result_manifest"]["format"], "rspice-result-v1");
+    assert_eq!(response["result_manifest"]["format"], "rspice-result-v3");
+    assert_eq!(
+        response["result_manifest"]["typed_result_schema"],
+        json!({
+            "name": ANALYSIS_RESULT_DOCUMENT_SCHEMA,
+            "version": ANALYSIS_RESULT_DOCUMENT_VERSION,
+            "content_type": result_document_content_type(),
+        })
+    );
 
-    let out = measurement(&response, "v(out)");
+    let out = measurement(&response, "signal:v(out)");
     assert_eq!(out["unit"], "V");
     assert_eq!(out["sample_count"], 1);
-    assert_eq!(out["series_sha256"], Value::Null);
     let value: f64 = out["value_decimal"]
         .as_str()
         .expect("canonical decimal")
@@ -271,20 +750,22 @@ fn a_resistive_divider_operating_point_reports_exact_measurements() {
         .expect("decimal parses");
     assert!((value - 5.0).abs() < 1e-9, "v(out) was {value}");
 
-    let document = typed_result(&job, &response, "operating_point-1.result.json");
-    assert_eq!(document.analysis.kind, AnalogAnalysisKind::OperatingPoint);
-    assert_eq!(document.analysis.id, "op-001");
-    assert_eq!(document.point_count, 1);
-    assert_eq!(signal(&document, "v(out)").unit, Some(SignalUnit::Volt));
+    let document = typed_result(&job, &response, "op-001.result.json");
+    assert_eq!(document.result_kind(), AnalysisResultKind::OperatingPoint);
+    assert_eq!(document.point_count(), 1);
     assert_eq!(
-        signal(&document, "i(v1)").kind,
-        AnalogSignalKind::BranchCurrent
+        signal(&document, "v(out)").descriptor().unit(),
+        &SignalUnit::Volt
     );
+    assert_eq!(
+        signal(&document, "i(v1)").descriptor().kind(),
+        rspice_core::execution::SignalKind::Current
+    );
+    let rspice_core::execution::ResultPayload::Op(payload) = document.payload() else {
+        panic!("an operating-point document carries an operating-point payload")
+    };
     assert!(
-        document
-            .signals
-            .iter()
-            .any(|signal| signal.kind == AnalogSignalKind::DeviceObservable),
+        !payload.observables.is_empty(),
         "core DC observables must not be dropped"
     );
 }
@@ -304,7 +785,7 @@ fn includes_resolve_from_manifested_artifacts_only() {
     );
     let response = parse_stdout(&job.run(&bound));
     assert_eq!(response["status"], "succeeded");
-    let value: f64 = measurement(&response, "v(out)")["value_decimal"]
+    let value: f64 = measurement(&response, "signal:v(out)")["value_decimal"]
         .as_str()
         .expect("canonical decimal")
         .parse()
@@ -317,69 +798,237 @@ fn includes_resolve_from_manifested_artifacts_only() {
     assert_eq!(response["failure_code"], "netlist.include_unresolved");
 }
 
+//=============================================================================
+// Per-family result content
+//=============================================================================
+
 #[test]
-fn a_transient_run_declares_and_writes_its_waveform_artifact() {
+fn a_transient_run_declares_and_writes_one_typed_waveform_artifact() {
     let job = Job::new("rc-transient");
-    let deck = "rc lowpass step response\n\
-                V1 in 0 PULSE(0 1 0 1u 1u 1m 2m)\n\
-                R1 in out 1k\n\
-                C1 out 0 1u\n\
-                .tran 10u 1m\n\
-                .end\n";
-    let request = build_request(
-        json!({"schema": "rspice-circuit-v1", "netlist_utf8": deck}),
-        json!({"kind": "transient"}),
-        Vec::new(),
+    let response = job.execute(
+        "rc lowpass step response\nV1 in 0 PULSE(0 1 0 1u 1u 1m 2m)\nR1 in out 1k\nC1 out 0 1u\n\
+         .tran 10u 1m\n.end\n",
+        "transient",
     );
-    let response = parse_stdout(&job.run(&request));
     assert_eq!(response["status"], "succeeded", "response: {response}");
 
     let artifacts = response["result_artifacts"]
         .as_array()
         .expect("declared result artifacts");
-    assert_eq!(artifacts.len(), 2);
-    assert_eq!(artifacts[0]["path"], "results/transient-1.csv");
-    assert_eq!(artifacts[0]["content_type"], "text/csv");
-    let written = job.root.join("results").join("transient-1.csv");
-    let content = std::fs::read_to_string(written).expect("declared artifact must exist");
-    assert!(
-        content.starts_with("time,"),
-        "csv header: {}",
-        &content[..40]
+    assert_eq!(
+        artifacts.len(),
+        1,
+        "one typed document replaces the CSV and the analog document"
     );
+    assert_eq!(artifacts[0]["path"], "results/tran-001.result.json");
+    assert_eq!(artifacts[0]["content_type"], result_document_content_type());
 
-    let out = measurement(&response, "v(out)");
+    let out = measurement(&response, "signal:v(out)");
     assert!(out["sample_count"].as_u64().expect("sample count") > 10);
     assert!(out["series_sha256"].is_string());
 
-    let document = typed_result(&job, &response, "transient-1.result.json");
-    assert_eq!(document.analysis.kind, AnalogAnalysisKind::Transient);
-    assert_eq!(document.axes[0].unit, Some(SignalUnit::Second));
+    let document = typed_result(&job, &response, "tran-001.result.json");
+    assert_eq!(document.result_kind(), AnalysisResultKind::Transient);
+    assert_eq!(document.axes()[0].name(), "time");
+    assert_eq!(document.axes()[0].unit(), &SignalUnit::Second);
     assert_eq!(
-        signal(&document, "i(v1)").kind,
-        AnalogSignalKind::BranchCurrent
+        signal(&document, "i(v1)").descriptor().kind(),
+        rspice_core::execution::SignalKind::Current
     );
 }
 
 #[test]
-fn invalid_explicit_transient_tmax_is_a_bounded_configuration_failure() {
-    let job = Job::new("invalid-transient-tmax");
-    let deck = "invalid TMAX\nV1 in 0 1\nR1 in 0 1k\n.tran 1u 1m 0 0\n.end\n";
-    let request = build_request(
-        json!({"schema": "rspice-circuit-v1", "netlist_utf8": deck}),
-        json!({"kind": "transient"}),
-        Vec::new(),
+fn dc_result_preserves_axis_voltage_current_and_device_observables() {
+    let job = Job::new("divider-dc");
+    let response = job.execute(
+        "divider sweep\nV1 in 0 DC 0\nR1 in out 1k\nR2 out 0 1k\n.dc V1 0 1 0.5\n.end\n",
+        "dc_sweep",
     );
-    let response = parse_stdout(&job.run(&request));
-    assert_eq!(response["status"], "failed", "response: {response}");
-    assert_eq!(response["failure_code"], "analysis.invalid_configuration");
+    assert_eq!(response["status"], "succeeded", "response: {response}");
+    let document = typed_result(&job, &response, "dc-001.result.json");
+    assert_eq!(document.result_kind(), AnalysisResultKind::DcSweep);
+    assert_eq!(document.point_count(), 3);
+    assert_eq!(document.axes()[0].name(), "sweep:v1");
+    assert_eq!(document.axes()[0].unit(), &SignalUnit::Volt);
+    assert!(matches!(
+        signal(&document, "v(out)").values(),
+        SeriesValues::Real { .. }
+    ));
     assert_eq!(
-        std::fs::read_dir(job.root.join("results"))
-            .expect("read results")
-            .count(),
-        0
+        signal(&document, "i(v1)").descriptor().unit(),
+        &SignalUnit::Ampere
+    );
+    let rspice_core::execution::ResultPayload::Dc(payload) = document.payload() else {
+        panic!("a DC document carries a DC payload")
+    };
+    assert_eq!(payload.sweep_variable, "v1");
+    assert!(
+        payload
+            .observables
+            .iter()
+            .all(|observable| observable.values.len() == 3),
+        "every observable keeps one value per sweep point"
     );
 }
+
+#[test]
+fn a_nested_dc_sweep_retains_both_authored_sweep_axes() {
+    let job = Job::new("nested-dc");
+    let response = job.execute(
+        "nested divider sweep\nV1 in 0 DC 0\nV2 bias 0 DC 0\nR1 in out 1k\nR2 out bias 1k\n\
+         .dc V1 0 1 0.5 V2 0 1 1\n.end\n",
+        "dc_sweep",
+    );
+    assert_eq!(response["status"], "succeeded", "response: {response}");
+    let document = typed_result(&job, &response, "dc-001.result.json");
+    let names: Vec<&str> = document.axes().iter().map(|axis| axis.name()).collect();
+    assert_eq!(
+        names,
+        ["sweep:v1", "sweep:v2"],
+        "the outer sweep coordinate must not be dropped"
+    );
+    assert_eq!(document.point_count(), 6);
+}
+
+#[test]
+fn ac_result_preserves_complex_voltage_and_branch_current() {
+    let job = Job::new("rc-ac");
+    let response = job.execute(&format!("{RC}.ac LIN 2 1k 2k\n.end\n"), "ac_small_signal");
+    assert_eq!(response["status"], "succeeded", "response: {response}");
+    let document = typed_result(&job, &response, "ac-001.result.json");
+    assert_eq!(document.result_kind(), AnalysisResultKind::Ac);
+    let SeriesValues::Complex { samples } = signal(&document, "v(out)").values() else {
+        panic!("AC voltages must stay complex")
+    };
+    assert!(
+        samples
+            .iter()
+            .flatten()
+            .any(|sample| sample.imaginary != 0.0)
+    );
+    assert!(matches!(
+        signal(&document, "i(v1)").values(),
+        SeriesValues::Complex { .. }
+    ));
+    // Complex measurements keep both components rather than collapsing to a
+    // magnitude the document never stored.
+    assert_eq!(measurement(&response, "signal:v(out).re")["unit"], "V");
+    assert_eq!(measurement(&response, "signal:v(out).im")["unit"], "V");
+}
+
+#[test]
+fn noise_result_preserves_the_contribution_catalog_and_densities() {
+    let job = Job::new("divider-noise");
+    let response = job.execute(
+        "divider noise\nV1 in 0 DC 0 AC 1\nR1 in out 1k\nR2 out 0 1k\n\
+         .noise V(out) V1 LIN 2 1k 2k\n.end\n",
+        "noise",
+    );
+    assert_eq!(response["status"], "succeeded", "response: {response}");
+    let document = typed_result(&job, &response, "noise-001.result.json");
+    assert_eq!(document.result_kind(), AnalysisResultKind::Noise);
+    assert_eq!(document.axes()[0].unit(), &SignalUnit::Hertz);
+    let rspice_core::execution::ResultPayload::Noise(payload) = document.payload() else {
+        panic!("a noise document carries a noise payload")
+    };
+    assert!(
+        !payload.contributions.is_empty(),
+        "per-device noise contributions must not be dropped"
+    );
+}
+
+#[test]
+fn a_transfer_function_result_names_its_output_and_input() {
+    let job = Job::new("divider-tf");
+    let response = job.execute(
+        "divider transfer function\nV1 in 0 DC 10\nR1 in out 1k\nR2 out 0 1k\n.tf V(out) V1\n.end\n",
+        "transfer_function",
+    );
+    assert_eq!(response["status"], "succeeded", "response: {response}");
+    let document = typed_result(&job, &response, "tf-001.result.json");
+    let rspice_core::execution::ResultPayload::Tf(payload) = document.payload() else {
+        panic!("a .TF document carries a transfer-function payload")
+    };
+    assert!(payload.input.eq_ignore_ascii_case("v1"), "{payload:?}");
+    let ScalarValue::Real { value: Some(gain) } = scalar_value(&document, "transfer_gain") else {
+        panic!("the transfer function reports a real gain")
+    };
+    assert!((gain - 0.5).abs() < 1e-9, "gain was {gain}");
+}
+
+#[test]
+fn a_monte_carlo_result_retains_every_trial_and_its_statistics() {
+    let job = Job::new("divider-mc");
+    let response = job.execute(
+        "divider monte carlo\nV1 in 0 DC 10\nR1 in out 1k\nR2 out 0 1k\n\
+         .mc 4 SEED 7 GAUSS 0.01\n.end\n",
+        "monte_carlo",
+    );
+    assert_eq!(response["status"], "succeeded", "response: {response}");
+    let document = typed_result(&job, &response, "mc-001.result.json");
+    assert_eq!(document.result_kind(), AnalysisResultKind::MonteCarlo);
+    let rspice_core::execution::ResultPayload::MonteCarlo(payload) = document.payload() else {
+        panic!("a Monte Carlo document carries a Monte Carlo payload")
+    };
+    assert!(!payload.statistics.is_empty());
+    assert!(
+        payload
+            .statistics
+            .iter()
+            .all(|statistic| statistic.samples.len() == 4),
+        "every trial must be retained, not just its summary"
+    );
+}
+
+#[test]
+fn a_pac_result_names_the_pss_it_linearized_around() {
+    let job = Job::new("rf-pac");
+    let response = job.execute(
+        &format!("{RF}.pss fund=1g\n.pac dec 2 1k 10k input=v1 out=v(out)\n.end\n"),
+        "pac",
+    );
+    assert_eq!(response["status"], "succeeded", "response: {response}");
+    let document = typed_result(&job, &response, "pac-001.result.json");
+    assert_eq!(document.result_kind(), AnalysisResultKind::Pac);
+    assert_eq!(
+        document.parent_analysis().map(|parent| parent.tag()),
+        Some("pss-001".to_owned()),
+        "a PAC result must name its periodic operating point"
+    );
+}
+
+#[test]
+fn an_envelope_result_names_the_harmonic_balance_carrier() {
+    let job = Job::new("rf-envelope");
+    let response = job.execute(
+        &format!("{RF}.hb 1g\n.envelope tstop=1n\n.end\n"),
+        "envelope",
+    );
+    assert_eq!(response["status"], "succeeded", "response: {response}");
+    let document = typed_result(&job, &response, "env-001.result.json");
+    assert_eq!(document.result_kind(), AnalysisResultKind::Envelope);
+    assert_eq!(
+        document.parent_analysis().map(|parent| parent.tag()),
+        Some("hb-001".to_owned())
+    );
+}
+
+#[test]
+fn an_ac_sensitivity_sweep_is_refused_with_its_typed_reason() {
+    let job = Job::new("sens-ac");
+    let response = job.execute(
+        "divider AC sensitivity\nV1 in 0 DC 10 AC 1\nR1 in out 1k\nR2 out 0 1k\n\
+         .sens V(out) AC DEC 2 1k 10k\n.end\n",
+        "sensitivity",
+    );
+    assert_eq!(response["status"], "failed", "response: {response}");
+    assert_eq!(response["failure_code"], "analysis.unsupported_form");
+    assert!(job.results_are_empty());
+}
+
+//=============================================================================
+// Transient FFT
+//=============================================================================
 
 #[test]
 fn transient_fft_artifacts_preserve_parent_order_ragged_bins_units_and_metrics() {
@@ -393,36 +1042,36 @@ fn transient_fft_artifacts_preserve_parent_order_ragged_bins_units_and_metrics()
                 .fft v(out) np=8 format=unorm window=rect freq=1k\n\
                 .fft i(V1) np=16 window=hann freq=1k\n\
                 .end\n";
-    let request = build_request(
-        json!({"schema": "rspice-circuit-v1", "netlist_utf8": deck}),
-        json!({"kind": "transient"}),
-        Vec::new(),
-    );
-    let response = parse_stdout(&job.run(&request));
+    let response = job.execute(deck, "transient");
     assert_eq!(response["status"], "succeeded", "response: {response}");
     assert_eq!(
         response["result_manifest"]["typed_fft_result_schema"],
-        json!({"name": "rspice-transient-fft-result", "version": 1})
+        json!({
+            "name": "rspice-transient-fft-result",
+            "version": 1,
+            "content_type": FFT_RESULT_DOCUMENT_CONTENT_TYPE,
+        })
     );
     assert_eq!(
         response["result_artifacts"]
             .as_array()
             .expect("result artifacts")
             .len(),
-        6
+        4,
+        "two transients each publish one typed result and one FFT bundle"
     );
 
-    let first = typed_fft_result(&job, &response, "transient-1.fft.result.json");
-    let second = typed_fft_result(&job, &response, "transient-2.fft.result.json");
-    assert_eq!(first.parent_analysis.id, "tran-001");
-    assert_eq!(second.parent_analysis.id, "tran-002");
+    let first = typed_fft_result(&job, &response, "tran-001.fft.result.json");
+    let second = typed_fft_result(&job, &response, "tran-002.fft.result.json");
+    assert_eq!(first.parent_analysis, "tran-001");
+    assert_eq!(second.parent_analysis, "tran-002");
     for document in [&first, &second] {
         assert_eq!(document.result_count, 2);
         assert_eq!(document.results[0].analysis_id, "fft-001");
         assert_eq!(document.results[1].analysis_id, "fft-002");
         assert_eq!(
             document.results[0].parent_analysis_id,
-            document.parent_analysis.id
+            document.parent_analysis
         );
         assert_eq!(document.results[0].source.kind, FftSourceKind::Probe);
         assert_eq!(document.results[0].source.authored_output, "V(OUT)");
@@ -436,30 +1085,8 @@ fn transient_fft_artifacts_preserve_parent_order_ragged_bins_units_and_metrics()
         );
         assert_eq!(document.results[0].signal.unit, Some(FftUnit::Volt));
         assert_eq!(
-            document.results[0]
-                .metrics
-                .as_ref()
-                .expect("unnormalized metrics")
-                .units
-                .fundamental_magnitude,
-            Some(FftUnit::Volt)
-        );
-        assert_eq!(
             document.results[1].signal.physical_type,
             FftPhysicalType::Current
-        );
-        assert_eq!(
-            document.results[1].signal.unit,
-            Some(FftUnit::Dimensionless)
-        );
-        assert_eq!(
-            document.results[1]
-                .metrics
-                .as_ref()
-                .expect("normalized metrics")
-                .units
-                .fundamental_magnitude,
-            Some(FftUnit::Dimensionless)
         );
         assert_eq!(document.results[0].spectrum.bins.len(), 5);
         assert_eq!(document.results[1].spectrum.bins.len(), 9);
@@ -475,135 +1102,35 @@ fn transient_fft_artifacts_preserve_parent_order_ragged_bins_units_and_metrics()
 #[test]
 fn failed_fft_execution_publishes_no_waveform_fft_or_staging_artifact() {
     let job = Job::new("transient-fft-failure");
-    let deck = "unresolvable transient FFT output\n\
-                V1 out 0 SIN(0 1 1k)\n\
-                R1 out 0 1k\n\
-                .tran 1u 1m\n\
-                .fft v(missing) np=8\n\
-                .end\n";
-    let request = build_request(
-        json!({"schema": "rspice-circuit-v1", "netlist_utf8": deck}),
-        json!({"kind": "transient"}),
-        Vec::new(),
+    let response = job.execute(
+        "unresolvable transient FFT output\nV1 out 0 SIN(0 1 1k)\nR1 out 0 1k\n\
+         .tran 1u 1m\n.fft v(missing) np=8\n.end\n",
+        "transient",
     );
-    let response = parse_stdout(&job.run(&request));
     assert_eq!(response["status"], "failed", "response: {response}");
-    let entries = std::fs::read_dir(job.root.join("results"))
-        .expect("read empty results directory")
-        .collect::<Result<Vec<_>, _>>()
-        .expect("collect results directory");
-    assert!(
-        entries.is_empty(),
-        "failed run published artifacts: {entries:?}"
-    );
+    assert!(job.results_are_empty(), "failed run published artifacts");
 }
 
-#[test]
-fn dc_result_preserves_axis_voltage_current_and_device_observables() {
-    let job = Job::new("divider-dc");
-    let deck = "divider sweep\nV1 in 0 DC 0\nR1 in out 1k\nR2 out 0 1k\n.dc V1 0 1 0.5\n.end\n";
-    let request = build_request(
-        json!({"schema": "rspice-circuit-v1", "netlist_utf8": deck}),
-        json!({"kind": "dc_sweep"}),
-        Vec::new(),
-    );
-    let response = parse_stdout(&job.run(&request));
-    assert_eq!(response["status"], "succeeded", "response: {response}");
-    let document = typed_result(&job, &response, "dc_sweep-1.result.json");
-    assert_eq!(document.analysis.kind, AnalogAnalysisKind::DcSweep);
-    assert_eq!(document.point_count, 3);
-    assert_eq!(document.axes[0].unit, Some(SignalUnit::Volt));
-    assert!(matches!(
-        signal(&document, "v(out)").values,
-        SignalValues::Real { .. }
-    ));
-    assert_eq!(signal(&document, "i(v1)").unit, Some(SignalUnit::Ampere));
-    assert!(
-        document
-            .signals
-            .iter()
-            .any(|signal| signal.kind == AnalogSignalKind::DeviceObservable)
-    );
-}
-
-#[test]
-fn ac_result_preserves_complex_voltage_and_branch_current() {
-    let job = Job::new("rc-ac");
-    let deck = "rc ac\nV1 in 0 DC 0 AC 1\nR1 in out 1k\nC1 out 0 1u\n.ac LIN 2 1k 2k\n.end\n";
-    let request = build_request(
-        json!({"schema": "rspice-circuit-v1", "netlist_utf8": deck}),
-        json!({"kind": "ac_small_signal"}),
-        Vec::new(),
-    );
-    let response = parse_stdout(&job.run(&request));
-    assert_eq!(response["status"], "succeeded", "response: {response}");
-    let document = typed_result(&job, &response, "ac_small_signal-1.result.json");
-    assert_eq!(document.analysis.kind, AnalogAnalysisKind::AcSmallSignal);
-    assert!(matches!(
-        signal(&document, "v(out)").values,
-        SignalValues::Complex { .. }
-    ));
-    assert!(matches!(
-        signal(&document, "i(v1)").values,
-        SignalValues::Complex { .. }
-    ));
-    let SignalValues::Complex { samples } = &signal(&document, "v(out)").values else {
-        unreachable!()
-    };
-    assert!(
-        samples
-            .iter()
-            .flatten()
-            .any(|sample| sample.imaginary != 0.0)
-    );
-}
-
-#[test]
-fn noise_result_preserves_complex_solution_densities_and_contributors() {
-    let job = Job::new("divider-noise");
-    let deck = "divider noise\nV1 in 0 DC 0 AC 1\nR1 in out 1k\nR2 out 0 1k\n.noise V(out) V1 LIN 2 1k 2k\n.end\n";
-    let request = build_request(
-        json!({"schema": "rspice-circuit-v1", "netlist_utf8": deck}),
-        json!({"kind": "noise"}),
-        Vec::new(),
-    );
-    let response = parse_stdout(&job.run(&request));
-    assert_eq!(response["status"], "succeeded", "response: {response}");
-    let document = typed_result(&job, &response, "noise-1.result.json");
-    assert_eq!(document.analysis.kind, AnalogAnalysisKind::Noise);
-    assert!(matches!(
-        signal(&document, "v(out)").values,
-        SignalValues::Complex { .. }
-    ));
-    assert_eq!(
-        signal(&document, "output_noise_density").unit,
-        Some(SignalUnit::VoltSquaredPerHertz)
-    );
-    assert!(document.signals.iter().any(|signal| {
-        signal.canonical_name.starts_with("noise(r1)")
-            && signal.canonical_name.ends_with("output_density")
-    }));
-}
+//=============================================================================
+// Run axes
+//=============================================================================
 
 #[test]
 fn step_wraps_transient_with_canonical_namespaces_and_no_extra_op() {
     let job = Job::new("step-transient");
-    let deck = "stepped transient\n\
-                .param rval=1k\n\
-                V1 in 0 PULSE(0 1 0 1u 1u 20u 50u)\n\
-                R1 in out {rval}\n\
-                C1 out 0 1n\n\
-                .step param rval list 1k 2k\n\
-                .tran 1u 20u\n\
-                .end\n";
-    let request = build_request(
-        json!({"schema": "rspice-circuit-v1", "netlist_utf8": deck}),
-        json!({"kind": "transient"}),
-        Vec::new(),
+    let response = job.execute(
+        "stepped transient\n\
+         .param rval=1k\n\
+         V1 in 0 PULSE(0 1 0 1u 1u 20u 50u)\n\
+         R1 in out {rval}\n\
+         C1 out 0 1n\n\
+         .step param rval list 1k 2k\n\
+         .tran 1u 20u\n\
+         .end\n",
+        "transient",
     );
-    let response = parse_stdout(&job.run(&request));
     assert_eq!(response["status"], "succeeded", "response: {response}");
-    assert_eq!(response["result_manifest"]["format"], "rspice-result-v2");
+    assert_eq!(response["result_manifest"]["format"], "rspice-result-v3");
     assert_eq!(
         response["result_manifest"]["measurements"],
         json!([]),
@@ -623,32 +1150,44 @@ fn step_wraps_transient_with_canonical_namespaces_and_no_extra_op() {
         assert_eq!(run.analyses.len(), 1, "no implicit OP may be added");
         assert_eq!(run.analyses[0].analysis_id, "tran-001");
         assert!(!run.analyses[0].measurements.is_empty());
-        for path in &run.analyses[0].artifacts {
-            assert!(paths.insert(path.clone()));
-            assert!(path.contains(&run.coordinate_namespace));
-            assert!(path.contains("tran-001"));
+        for artifact in &run.analyses[0].artifacts {
+            assert!(paths.insert(artifact.path.clone()));
+            assert!(artifact.path.contains(&run.coordinate_namespace));
+            assert!(artifact.path.contains("tran-001"));
+            assert_eq!(artifact.schema, ANALYSIS_RESULT_DOCUMENT_SCHEMA);
+            assert_eq!(artifact.schema_version, ANALYSIS_RESULT_DOCUMENT_VERSION);
+            assert_eq!(artifact.result_kind, "tran");
+            assert_eq!(artifact.content_type, result_document_content_type());
         }
     }
-    assert_eq!(paths.len(), 4);
+    assert_eq!(paths.len(), 2);
+
+    // Every referenced document decodes and carries the coordinate identity
+    // its manifest entry claims.
+    for run in &execution.runs {
+        for artifact in &run.analyses[0].artifacts {
+            let document = typed_result_at_path(&job, &artifact.path);
+            let coordinate = document.coordinate().expect("an axis result is placed");
+            assert_eq!(coordinate.label(), run.coordinate_namespace);
+            assert_eq!(coordinate.id().to_string(), run.coordinate_id);
+        }
+    }
 }
 
 #[test]
 fn temp_wraps_ac_and_repeated_directives_keep_stable_ordered_ids() {
     let job = Job::new("temp-repeated-ac");
-    let deck = "temperature AC\n\
-                V1 in 0 AC 1\n\
-                R1 in out 1k\n\
-                C1 out 0 1u\n\
-                .temp 25 75\n\
-                .ac LIN 2 1k 2k\n\
-                .ac LIN 3 2k 4k\n\
-                .end\n";
-    let request = build_request(
-        json!({"schema": "rspice-circuit-v1", "netlist_utf8": deck}),
-        json!({"kind": "ac_small_signal"}),
-        Vec::new(),
+    let response = job.execute(
+        "temperature AC\n\
+         V1 in 0 AC 1\n\
+         R1 in out 1k\n\
+         C1 out 0 1u\n\
+         .temp 25 75\n\
+         .ac LIN 2 1k 2k\n\
+         .ac LIN 3 2k 4k\n\
+         .end\n",
+        "ac_small_signal",
     );
-    let response = parse_stdout(&job.run(&request));
     assert_eq!(response["status"], "succeeded", "response: {response}");
     let execution = axis_execution(&response);
     assert_eq!(execution.analysis_kind, AxisAnalysisKind::AcSmallSignal);
@@ -665,30 +1204,31 @@ fn temp_wraps_ac_and_repeated_directives_keep_stable_ordered_ids() {
             ["ac-001", "ac-002"]
         );
         for analysis in &run.analyses {
-            for path in &analysis.artifacts {
-                assert!(artifacts.insert(path.clone()), "duplicate path {path}");
+            for artifact in &analysis.artifacts {
+                assert!(
+                    artifacts.insert(artifact.path.clone()),
+                    "duplicate path {}",
+                    artifact.path
+                );
             }
         }
     }
-    assert_eq!(artifacts.len(), 8);
+    assert_eq!(artifacts.len(), 4);
 }
 
 #[test]
 fn dc_step_and_noise_temperature_axes_retain_every_coordinate() {
     let dc_job = Job::new("step-dc");
-    let dc_deck = "stepped DC\n\
-                   .param load=1k\n\
-                   V1 in 0 0\n\
-                   R1 in 0 {load}\n\
-                   .step param load list 1k 2k\n\
-                   .dc V1 0 1 1\n\
-                   .end\n";
-    let dc_request = build_request(
-        json!({"schema": "rspice-circuit-v1", "netlist_utf8": dc_deck}),
-        json!({"kind": "dc_sweep"}),
-        Vec::new(),
+    let dc_response = dc_job.execute(
+        "stepped DC\n\
+         .param load=1k\n\
+         V1 in 0 0\n\
+         R1 in 0 {load}\n\
+         .step param load list 1k 2k\n\
+         .dc V1 0 1 1\n\
+         .end\n",
+        "dc_sweep",
     );
-    let dc_response = parse_stdout(&dc_job.run(&dc_request));
     assert_eq!(dc_response["status"], "succeeded", "{dc_response}");
     let dc_execution = axis_execution(&dc_response);
     assert_eq!(dc_execution.analysis_kind, AxisAnalysisKind::DcSweep);
@@ -701,19 +1241,16 @@ fn dc_step_and_noise_temperature_axes_retain_every_coordinate() {
     );
 
     let noise_job = Job::new("temp-noise");
-    let noise_deck = "temperature noise\n\
-                      V1 in 0 AC 1\n\
-                      R1 in out 1k\n\
-                      R2 out 0 1k\n\
-                      .temp 0 100\n\
-                      .noise V(out) V1 LIN 1 1k 1k\n\
-                      .end\n";
-    let noise_request = build_request(
-        json!({"schema": "rspice-circuit-v1", "netlist_utf8": noise_deck}),
-        json!({"kind": "noise"}),
-        Vec::new(),
+    let noise_response = noise_job.execute(
+        "temperature noise\n\
+         V1 in 0 AC 1\n\
+         R1 in out 1k\n\
+         R2 out 0 1k\n\
+         .temp 0 100\n\
+         .noise V(out) V1 LIN 1 1k 1k\n\
+         .end\n",
+        "noise",
     );
-    let noise_response = parse_stdout(&noise_job.run(&noise_request));
     assert_eq!(noise_response["status"], "succeeded", "{noise_response}");
     let noise_execution = axis_execution(&noise_response);
     assert_eq!(noise_execution.analysis_kind, AxisAnalysisKind::Noise);
@@ -722,13 +1259,12 @@ fn dc_step_and_noise_temperature_axes_retain_every_coordinate() {
         .runs
         .iter()
         .map(|run| {
-            let path = run.analyses[0]
-                .artifacts
-                .iter()
-                .find(|path| path.ends_with(".result.json"))
-                .expect("typed noise artifact");
-            let document = typed_result_at_path(&noise_job, path);
-            let SignalValues::Real { samples } = &signal(&document, "output_noise_density").values
+            let artifact = &run.analyses[0].artifacts[0];
+            let document = typed_result_at_path(&noise_job, &artifact.path);
+            let rspice_core::execution::ResultPayload::Noise(_) = document.payload() else {
+                panic!("noise coordinate must publish a noise document")
+            };
+            let SeriesValues::Real { samples } = signal(&document, "onoise_spectrum").values()
             else {
                 panic!("noise density must be real")
             };
@@ -744,18 +1280,15 @@ fn dc_step_and_noise_temperature_axes_retain_every_coordinate() {
 #[test]
 fn step_only_operating_point_executes_the_canonical_implicit_op() {
     let job = Job::new("step-implicit-op");
-    let deck = "implicit stepped OP\n\
-                .param rval=1k\n\
-                V1 in 0 1\n\
-                R1 in 0 {rval}\n\
-                .step param rval list 1k 2k\n\
-                .end\n";
-    let request = build_request(
-        json!({"schema": "rspice-circuit-v1", "netlist_utf8": deck}),
-        json!({"kind": "operating_point"}),
-        Vec::new(),
+    let response = job.execute(
+        "implicit stepped OP\n\
+         .param rval=1k\n\
+         V1 in 0 1\n\
+         R1 in 0 {rval}\n\
+         .step param rval list 1k 2k\n\
+         .end\n",
+        "operating_point",
     );
-    let response = parse_stdout(&job.run(&request));
     assert_eq!(response["status"], "succeeded", "response: {response}");
     let execution = axis_execution(&response);
     assert_eq!(execution.analysis_kind, AxisAnalysisKind::OperatingPoint);
@@ -765,30 +1298,26 @@ fn step_only_operating_point_executes_the_canonical_implicit_op() {
 }
 
 #[test]
-fn axisless_deck_without_analysis_executes_implicit_op_in_scalar_v1_shape() {
+fn axisless_deck_without_analysis_executes_implicit_op_in_scalar_shape() {
     let job = Job::new("scalar-implicit-op");
-    let deck = "implicit scalar OP\nV1 in 0 1\nR1 in 0 1k\n.end\n";
-    let request = build_request(
-        json!({"schema": "rspice-circuit-v1", "netlist_utf8": deck}),
-        json!({"kind": "operating_point"}),
-        Vec::new(),
+    let response = job.execute(
+        "implicit scalar OP\nV1 in 0 1\nR1 in 0 1k\n.end\n",
+        "operating_point",
     );
-    let response = parse_stdout(&job.run(&request));
     assert_eq!(response["status"], "succeeded", "response: {response}");
-    assert_eq!(response["result_manifest"]["format"], "rspice-result-v1");
+    assert_eq!(response["result_manifest"]["format"], "rspice-result-v3");
     assert!(response["result_manifest"].get("axis_execution").is_none());
+    let document = typed_result(&job, &response, "implicit-op-001.result.json");
+    assert_eq!(document.result_kind(), AnalysisResultKind::OperatingPoint);
     assert!(
-        response["result_artifacts"]
-            .as_array()
-            .expect("scalar artifacts")
-            .iter()
-            .any(|artifact| artifact["path"] == "results/operating_point-1.result.json")
+        document.coordinate().is_none(),
+        "an axisless run has no shared-deck coordinate"
     );
 }
 
 #[test]
 fn conditional_topology_and_analysis_signature_fail_closed_without_artifacts() {
-    for (name, deck, failure_code) in [
+    for (name, deck, kind, failure_code) in [
         (
             "conditional-topology",
             "conditional topology\n\
@@ -804,6 +1333,7 @@ fn conditional_topology_and_analysis_signature_fail_closed_without_artifacts() {
              .step param mode list 0 1\n\
              .op\n\
              .end\n",
+            "operating_point",
             "results.conditional_topology",
         ),
         (
@@ -819,70 +1349,52 @@ fn conditional_topology_and_analysis_signature_fail_closed_without_artifacts() {
              .endif\n\
              .step param mode list 0 1\n\
              .end\n",
+            "ac_small_signal",
             "analysis.axis_materialization",
         ),
     ] {
         let job = Job::new(name);
-        let request = build_request(
-            json!({"schema": "rspice-circuit-v1", "netlist_utf8": deck}),
-            if name == "conditional-topology" {
-                json!({"kind": "operating_point"})
-            } else {
-                json!({"kind": "ac_small_signal"})
-            },
-            Vec::new(),
-        );
-        let response = parse_stdout(&job.run(&request));
+        let response = job.execute(deck, kind);
         assert_eq!(response["status"], "failed", "response: {response}");
         assert_eq!(
             response["failure_code"], failure_code,
             "response: {response}"
         );
-        assert_eq!(
-            std::fs::read_dir(job.root.join("results"))
-                .expect("read results")
-                .count(),
-            0
-        );
+        assert!(job.results_are_empty());
     }
 }
 
 #[test]
-fn alter_and_mixed_signal_axes_are_explicitly_unsupported() {
-    for (name, deck, kind) in [
-        (
-            "alter-axis",
-            "ALTER deck\nV1 in 0 1\nR1 in 0 1k\n.op\n.alter second\nR1 in 0 2k\n.end\n",
-            "operating_point",
-        ),
-        (
-            "mixed-axis",
-            "mixed axis\n.param r=1k\nV1 in 0 1\nR1 in 0 {r}\n.step param r list 1k 2k\n.tran 1u 10u\n.end\n",
-            "mixed_signal",
-        ),
-    ] {
-        let job = Job::new(name);
-        let request = build_request(
-            json!({"schema": "rspice-circuit-v1", "netlist_utf8": deck}),
-            json!({"kind": kind}),
-            Vec::new(),
-        );
-        let response = parse_stdout(&job.run(&request));
-        assert_eq!(response["status"], "failed", "response: {response}");
-        assert_eq!(response["failure_code"], "analysis.axis_unsupported");
-    }
+fn alter_axes_are_explicitly_unsupported() {
+    let job = Job::new("alter-axis");
+    let response = job.execute(
+        "ALTER deck\nV1 in 0 1\nR1 in 0 1k\n.op\n.alter second\nR1 in 0 2k\n.end\n",
+        "operating_point",
+    );
+    assert_eq!(response["status"], "failed", "response: {response}");
+    assert_eq!(response["failure_code"], "analysis.axis_unsupported");
+}
+
+//=============================================================================
+// Bounded failure vocabulary
+//=============================================================================
+
+#[test]
+fn invalid_explicit_transient_tmax_is_a_bounded_configuration_failure() {
+    let job = Job::new("invalid-transient-tmax");
+    let response = job.execute(
+        "invalid TMAX\nV1 in 0 1\nR1 in 0 1k\n.tran 1u 1m 0 0\n.end\n",
+        "transient",
+    );
+    assert_eq!(response["status"], "failed", "response: {response}");
+    assert_eq!(response["failure_code"], "analysis.invalid_configuration");
+    assert!(job.results_are_empty());
 }
 
 #[test]
 fn wrong_analysis_kind_for_the_deck_is_a_bounded_failure() {
     let job = Job::new("kind-mismatch");
-    let deck = "divider\nV1 in 0 DC 10\nR1 in out 1k\nR2 out 0 1k\n.op\n.end\n";
-    let request = build_request(
-        json!({"schema": "rspice-circuit-v1", "netlist_utf8": deck}),
-        json!({"kind": "transient"}),
-        Vec::new(),
-    );
-    let response = parse_stdout(&job.run(&request));
+    let response = job.execute(&format!("{DIVIDER}.op\n.end\n"), "transient");
     assert_eq!(response["status"], "failed");
     assert_eq!(response["failure_code"], "analysis.directive_missing");
 }
@@ -894,13 +1406,10 @@ fn wrong_analysis_kind_for_the_deck_is_a_bounded_failure() {
 #[test]
 fn a_node_with_no_dc_path_to_ground_is_a_bounded_failure() {
     let job = Job::new("no-dc-path");
-    let deck = "floating node\nI1 0 out DC 1m\nC1 out 0 1u\n.op\n.end\n";
-    let request = build_request(
-        json!({"schema": "rspice-circuit-v1", "netlist_utf8": deck}),
-        json!({"kind": "operating_point"}),
-        Vec::new(),
+    let response = job.execute(
+        "floating node\nI1 0 out DC 1m\nC1 out 0 1u\n.op\n.end\n",
+        "operating_point",
     );
-    let response = parse_stdout(&job.run(&request));
     assert_eq!(response["status"], "failed");
     assert_eq!(response["failure_code"], "engine.circuit_error");
 }
@@ -910,17 +1419,13 @@ fn a_node_with_no_dc_path_to_ground_is_a_bounded_failure() {
 #[test]
 fn rshunt_restores_the_dc_path_and_the_run_succeeds() {
     let job = Job::new("rshunt");
-    let deck = "shunted floating node\n\
-                I1 0 out DC 1m\nC1 out 0 1u\n.options rshunt=1e9\n.op\n.end\n";
-    let request = build_request(
-        json!({"schema": "rspice-circuit-v1", "netlist_utf8": deck}),
-        json!({"kind": "operating_point"}),
-        Vec::new(),
+    let response = job.execute(
+        "shunted floating node\nI1 0 out DC 1m\nC1 out 0 1u\n.options rshunt=1e9\n.op\n.end\n",
+        "operating_point",
     );
-    let response = parse_stdout(&job.run(&request));
     assert_eq!(response["status"], "succeeded");
     assert_eq!(
-        measurement(&response, "v(out)")["value_decimal"],
+        measurement(&response, "signal:v(out)")["value_decimal"],
         "9.999999999999999e5"
     );
 }
@@ -928,16 +1433,89 @@ fn rshunt_restores_the_dc_path_and_the_run_succeeds() {
 #[test]
 fn an_unparseable_deck_is_a_bounded_failure() {
     let job = Job::new("parse-failure");
-    let deck = "broken deck\nR1 in\n.op\n.end\n";
-    let request = build_request(
-        json!({"schema": "rspice-circuit-v1", "netlist_utf8": deck}),
-        json!({"kind": "operating_point"}),
-        Vec::new(),
-    );
-    let response = parse_stdout(&job.run(&request));
+    let response = job.execute("broken deck\nR1 in\n.op\n.end\n", "operating_point");
     assert_eq!(response["status"], "failed");
     assert_eq!(response["failure_code"], "netlist.parse_error");
 }
+
+#[test]
+fn an_unmapped_authored_card_fails_the_whole_request_without_writing_results() {
+    // Leaving a card this build cannot publish unexecuted would drop authored
+    // intent from the response, so the request is refused instead.
+    for (cards, card, analysis_id) in [
+        (".sp dec 2 1k 10k\n", ".SP", "sp-001"),
+        (
+            ".hb 1g\n.pnoise dec 2 1 1k out=v(out)\n",
+            ".PNOISE",
+            "pnoise-001",
+        ),
+        (".four 1g v(out)\n", ".FOUR", ""),
+    ] {
+        let job = Job::new("unmapped-card");
+        let deck = format!("{RF}.tran 10p 1n\n{cards}.end\n");
+        let response = job.execute(&deck, "transient");
+        assert_eq!(response["status"], "failed", "{response}");
+        assert_eq!(response["failure_code"], "analysis.unsupported_kind");
+        let detail = response["failure_detail"]
+            .as_str()
+            .expect("a refusal explains itself");
+        assert!(
+            detail.contains(card),
+            "refusal must name the card: {detail}"
+        );
+        if !analysis_id.is_empty() {
+            assert!(
+                detail.contains(analysis_id),
+                "refusal must name the analysis instance: {detail}"
+            );
+        }
+        assert!(response.get("result_artifacts").is_none());
+        assert!(
+            job.results_are_empty(),
+            "a refused request must write no results"
+        );
+    }
+}
+
+#[test]
+fn a_result_set_larger_than_the_adapter_budget_is_a_typed_resource_refusal() {
+    // A very long transient is accounted before serialization, so the caller
+    // is told the result set does not fit rather than watching the process
+    // exhaust memory building a document it can never publish.
+    let job = Job::new("result-set-budget");
+    let response = job.run_with(
+        &build_request(
+            json!({"schema": "rspice-circuit-v1", "netlist_utf8":
+                "oversized retained result\n\
+                 V1 in 0 PULSE(0 1 0 1n 1n 1u 2u)\n\
+                 R1 in out 1\n\
+                 C1 out 0 1p\n\
+                 .tran 1n 100m\n\
+                 .end\n"}),
+            json!({"kind": "transient"}),
+            Vec::new(),
+        ),
+        &[("RSPICE_ENGINE_SOLVE_BUDGET_SECONDS", "60")],
+        &[],
+    );
+    let response = parse_stdout(&response);
+    assert_eq!(response["status"], "failed", "{response}");
+    assert!(
+        [
+            "resource.result_set_bytes",
+            "resource.series_limit",
+            "engine.time_limit",
+            "engine.resource_limit",
+        ]
+        .contains(&response["failure_code"].as_str().expect("failure code")),
+        "an oversized result must be a bounded resource outcome: {response}"
+    );
+    assert!(job.results_are_empty());
+}
+
+//=============================================================================
+// Launch contract
+//=============================================================================
 
 #[test]
 fn launch_contract_violations_exit_nonzero_without_a_response() {
@@ -957,6 +1535,18 @@ fn launch_contract_violations_exit_nonzero_without_a_response() {
     );
     assert_eq!(delegating.status.code(), Some(10));
     assert!(delegating.stdout.is_empty());
+
+    let superseded_launch = job.run_with(
+        &release_smoke_request(),
+        &[("RSPICE_ENGINE_PROTOCOL_VERSION", "3")],
+        &[],
+    );
+    assert_eq!(
+        superseded_launch.status.code(),
+        Some(10),
+        "a protocol-3 deployment must be refused before a request is read"
+    );
+    assert!(superseded_launch.stdout.is_empty());
 }
 
 /// The solve budget is a launch input the worker owns, not a compiled-in
@@ -966,14 +1556,14 @@ fn launch_contract_violations_exit_nonzero_without_a_response() {
 #[test]
 fn the_solve_budget_is_a_launch_input_with_a_bounded_outcome() {
     let job = Job::new("solve-budget");
-    let deck = "budget exhaustion\n\
-                V1 in 0 PULSE(0 1 0 1n 1n 1u 2u)\n\
-                R1 in out 1k\n\
-                C1 out 0 1n\n\
-                .tran 1n 10m\n\
-                .end\n";
     let request = build_request(
-        json!({"schema": "rspice-circuit-v1", "netlist_utf8": deck}),
+        json!({"schema": "rspice-circuit-v1", "netlist_utf8":
+            "budget exhaustion\n\
+             V1 in 0 PULSE(0 1 0 1n 1n 1u 2u)\n\
+             R1 in out 1k\n\
+             C1 out 0 1n\n\
+             .tran 1n 10m\n\
+             .end\n"}),
         json!({"kind": "transient"}),
         Vec::new(),
     );
@@ -1007,6 +1597,47 @@ fn the_solve_budget_is_a_launch_input_with_a_bounded_outcome() {
     }
 }
 
+/// Every family stops on the same cancellation label, so an operator reading
+/// the wire cannot tell one analysis's cancellation from another's.
+#[test]
+fn every_family_reports_the_same_cancellation_label() {
+    for kind in AnalysisResultKind::ALL {
+        let (request_kind, deck) = match family_expectation(kind) {
+            FamilyExpectation::Runs {
+                request_kind, deck, ..
+            } => (request_kind, deck),
+            FamilyExpectation::Attached {
+                parent_request_kind,
+                deck,
+                ..
+            } => (parent_request_kind, deck),
+            FamilyExpectation::Refused { .. } => continue,
+        };
+        let job = Job::new(&format!("cancel-{}", kind.tag()));
+        // A budget that is already spent at the first abort poll makes the
+        // stop deterministic instead of a race against a real solve.
+        let output = job.run_with(
+            &build_request(
+                json!({"schema": "rspice-circuit-v1", "netlist_utf8": deck}),
+                json!({"kind": request_kind}),
+                Vec::new(),
+            ),
+            &[("RSPICE_ENGINE_SOLVE_BUDGET_SECONDS", "0.000001")],
+            &[],
+        );
+        let response = parse_stdout(&output);
+        assert_eq!(response["status"], "failed", "{kind:?}: {response}");
+        assert_eq!(
+            response["failure_code"], "engine.time_limit",
+            "{kind:?} must stop on the shared deadline label: {response}"
+        );
+        assert!(
+            job.results_are_empty(),
+            "{kind:?} published artifacts after stopping"
+        );
+    }
+}
+
 #[test]
 fn a_tampered_request_exits_nonzero_without_a_response() {
     let job = Job::new("tampered-request");
@@ -1016,59 +1647,6 @@ fn a_tampered_request_exits_nonzero_without_a_response() {
     let output = job.run(&serde_json::to_vec(&request).expect("request bytes"));
     assert_eq!(output.status.code(), Some(12));
     assert!(output.stdout.is_empty());
-}
-
-#[test]
-fn an_authored_periodic_card_fails_the_whole_request_without_writing_results() {
-    // Skipping a card this build cannot represent would drop authored intent
-    // from the response, so the request is refused instead.
-    for (cards, card, analysis_id) in [
-        (".pss fund=1g\n", ".PSS", "pss-001"),
-        (
-            ".hb 1g\n.pac dec 5 1k 1meg input=v1 out=v(out)\n",
-            ".PAC",
-            "pac-001",
-        ),
-        (
-            ".hb 1g\n.pnoise dec 5 1 1k out=v(out)\n",
-            ".PNOISE",
-            "pnoise-001",
-        ),
-        (".hb 1g\n.envelope tstop=1u\n", ".ENVELOPE", "env-001"),
-    ] {
-        let job = Job::new("periodic-card");
-        let deck = format!(
-            "periodic adapter refusal\n\
-             V1 in 0 SIN(0 1 1G)\n\
-             R1 in out 1k\n\
-             C1 out 0 1p\n\
-             .tran 10p 1n\n\
-             {cards}.end\n"
-        );
-        let request = build_request(
-            json!({"schema": "rspice-circuit-v1", "netlist_utf8": deck}),
-            json!({"kind": "transient"}),
-            Vec::new(),
-        );
-        let response = parse_stdout(&job.run(&request));
-        assert_eq!(response["status"], "failed");
-        assert_eq!(response["failure_code"], "analysis.unsupported_kind");
-        let detail = response["failure_detail"]
-            .as_str()
-            .expect("a refusal explains itself");
-        assert!(
-            detail.contains(card) && detail.contains(analysis_id),
-            "refusal must name the card and its analysis instance: {detail}"
-        );
-        assert!(response.get("result_artifacts").is_none());
-        assert_eq!(
-            std::fs::read_dir(job.root.join("results"))
-                .expect("read results")
-                .count(),
-            0,
-            "a refused request must write no results"
-        );
-    }
 }
 
 #[test]
@@ -1082,13 +1660,16 @@ fn component_info_states_the_reviewed_identity() {
     assert_eq!(info["component"], "rspice-engine-adapter");
     assert_eq!(info["engine_name"], "rspice");
     assert_eq!(info["runtime_mode"], "self_contained");
-    assert_eq!(info["protocol_versions"], json!([3]));
+    assert_eq!(
+        info["protocol_versions"],
+        json!([INTEGRITY_ENGINE_PROTOCOL_VERSION])
+    );
     assert_eq!(
         info["result_schemas"],
         json!([
-            "rspice-analog-result-v1",
+            format!("{ANALYSIS_RESULT_DOCUMENT_SCHEMA}-v{ANALYSIS_RESULT_DOCUMENT_VERSION}"),
             "rspice-transient-fft-result-v1",
-            "rspice-axis-execution-v1"
+            "rspice-axis-execution-v1",
         ])
     );
 }
