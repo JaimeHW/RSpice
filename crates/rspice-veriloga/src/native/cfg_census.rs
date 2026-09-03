@@ -221,6 +221,12 @@ impl OperatingPoint {
         self
     }
 
+    /// What a compiled prelude published into those slots, for a census that
+    /// compares them against another evaluation of the same program.
+    pub(super) fn prelude_slot_readings(&self) -> &[f64] {
+        &self.prelude_slots
+    }
+
     pub(super) fn interpreter_inputs(
         &self,
         node_count: usize,
@@ -758,11 +764,18 @@ fn the_cfg_block_lowering_agrees_with_the_reference_interpreter() {
     );
     if filter.is_none() {
         assert_eq!(tally.models, 43, "the shipped census is 43 modules");
+        assert!(
+            tally.comparisons > 0,
+            "the census must actually execute the lowered programs"
+        );
+    } else if tally.comparisons == 0 {
+        // A slice narrowed to one module that refuses every output has nothing
+        // to compare, and that is a reported outcome rather than a failed run:
+        // the refusals are on the module's own line above. Only the unfiltered
+        // run, which reaches all forty-three, can read a zero here as the
+        // census having stopped executing anything.
+        println!("cfg-census filtered_slice_executed_nothing=1 filter={filter:?}");
     }
-    assert!(
-        tally.comparisons > 0,
-        "the census must actually execute the lowered programs"
-    );
 
     let mut findings = Vec::new();
     for (module, worst) in &per_module {
