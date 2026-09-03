@@ -354,11 +354,7 @@ pub const ANALYSIS_CAPABILITY_MATRIX: &[AnalysisResultCapability] = &[
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Fft,
-        cli: SurfaceCapability::new(
-            MappingStatus::Mapped,
-            MappingStatus::Mapped,
-            MappingStatus::Mapped,
-        ),
+        cli: cli_mapped_axes(),
         python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_attached_fft(),
