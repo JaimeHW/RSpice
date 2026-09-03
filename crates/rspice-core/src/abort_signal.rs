@@ -367,6 +367,14 @@ impl AbortSignal for CountingAbort {
 /// that need to tell the two apart — and tell either apart from malformed
 /// content — inspect [`was_cancelled`](Self::was_cancelled) and
 /// [`exceeded_cap`](Self::exceeded_cap) afterwards.
+///
+/// # Do not drain this with `read_to_end`
+///
+/// [`Read::read_to_end`] treats [`io::ErrorKind::Interrupted`] as a spurious
+/// signal-interrupted syscall and retries, which against this reader means
+/// spinning forever instead of stopping. Drain it with a loop that propagates
+/// every error — `crate::resource::read_bytes_limited` is the one this crate
+/// uses — or by calling [`Read::read`] directly.
 pub struct AbortReader<'a, R> {
     inner: R,
     abort: &'a dyn AbortSignal,
@@ -533,9 +541,11 @@ mod tests {
     fn abort_reader_reports_cancellation_before_the_cap() {
         let abort = ImmediateAbort;
         let mut reader = AbortReader::with_byte_cap(&b"abcd"[..], &abort, "test stream", 1);
-        let mut sink = Vec::new();
+        // Deliberately `read`, not `read_to_end`: the latter retries
+        // `Interrupted` and would spin here rather than observe the stop.
+        let mut sink = [0_u8; 4];
         let error = reader
-            .read_to_end(&mut sink)
+            .read(&mut sink)
             .expect_err("cancellation precedes the cap");
         assert_eq!(error.kind(), io::ErrorKind::Interrupted);
         assert!(reader.was_cancelled());
