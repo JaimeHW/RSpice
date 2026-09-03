@@ -33,12 +33,12 @@ pub mod veriloga_builtins;
 
 // Re-export from subdirectories for backwards compatibility
 pub use mosfet::{
-    B3SoiDd, B3SoiDdModel, B3SoiDdNodes, B3SoiFd, B3SoiFdModel, B3SoiPd, B3SoiPdModel,
-    B3SoiPdNodes, BodyMode, Bsim3v3, Bsim3v3Device, Bsim3v3EquationSet, Bsim3v3Model, Bsim4v8,
-    Bsim4v8Device, Bsim4v8Model, Ekv3Device, Ekv3Op, EkvMosfet, Jfet, JfetChannelModel, JfetParams,
-    JfetType, MosBodyJunctionModel, MosParams, MosRegion, MosTerminals, MosType, Mosfet,
-    MosfetIndices, Vdmos, VdmosRegion, VdmosType,
+    B3SoiDd, B3SoiDdModel, B3SoiFd, B3SoiFdModel, B3SoiPd, B3SoiPdModel, BodyMode, Bsim3v3,
+    Bsim3v3Device, Bsim3v3EquationSet, Bsim3v3Model, Bsim4v8, Bsim4v8Device, Bsim4v8Model,
+    Ekv3Device, Ekv3Op, EkvMosfet, Jfet, JfetChannelModel, JfetParams, JfetType, MosParams,
+    MosTerminals, MosType, Mosfet, Vdmos, VdmosRegion, VdmosType,
 };
+pub(crate) use mosfet::{B3SoiDdNodes, B3SoiPdNodes, MosBodyJunctionModel};
 pub use passive::{
     Capacitor, CoupledInductorPair, Inductor, InductorCoupling, MultiWindingTransformer, Resistor,
     SaturableInductor, SolutionDependentCapacitor, SolutionDependentCapacitorLinearization,
@@ -76,11 +76,11 @@ pub(crate) use memristor_team::{
 pub use sources::{CurrentSource, VoltageSource};
 pub use switch::{CurrentSwitch, GenericSwitch, SwitchState, VoltageSwitch};
 pub use traits::*;
+pub use transmission_line::TransmissionLine;
 pub(crate) use transmission_line::{
-    DISTRIBUTED_RLC_COMPACT_ABSTOL_DEFAULT, DISTRIBUTED_RLC_COMPACT_RELTOL_DEFAULT, LtraRgTwoPort,
-    TransmissionLineCheckpoint,
+    DISTRIBUTED_RLC_COMPACT_ABSTOL_DEFAULT, DISTRIBUTED_RLC_COMPACT_RELTOL_DEFAULT,
+    DistributedRlgc, LtraRgTwoPort, TransmissionLineCheckpoint,
 };
-pub use transmission_line::{DistributedRlgc, LossyTransmissionLine, TransmissionLine};
 pub(crate) use transmission_line::{TlineTransientResponse, TxlTransientStamp};
 
 use crate::Value;

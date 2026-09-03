@@ -3,7 +3,7 @@ use super::*;
 /// Snapshot of a MOSFET's cached small-signal operating point, for
 /// device operating-point reporting (the Spectre-style OP info table).
 #[derive(Debug, Clone, Copy)]
-pub struct MosfetOpValues {
+pub(crate) struct MosfetOpValues {
     /// Operating region: cutoff, linear or saturation.
     pub region: crate::op_label::OpLabel,
     /// Drain current (A).
@@ -28,7 +28,7 @@ pub struct MosfetOpValues {
 
 impl Mosfet {
     /// Cached operating-point values from the last accepted Newton solution.
-    pub fn op_values(&self) -> MosfetOpValues {
+    pub(crate) fn op_values(&self) -> MosfetOpValues {
         let (vth, vdsat, gm, gds, gmb) = self.model_space_op_values();
         let id = if self.uses_mos3_core() {
             self.polarity() * self.id
@@ -91,12 +91,12 @@ impl Mosfet {
     }
 
     /// Return the cached transconductance magnitude at the operating point.
-    pub fn transconductance(&self) -> Value {
+    pub(crate) fn transconductance(&self) -> Value {
         self.gm.abs()
     }
 
     /// Return the current thermal-noise coefficient used for channel noise.
-    pub fn channel_thermal_noise_gamma(&self) -> Value {
+    pub(crate) fn channel_thermal_noise_gamma(&self) -> Value {
         self.thermal_noise_gamma.max(0.0)
     }
 
@@ -110,7 +110,7 @@ impl Mosfet {
     ///
     /// `Leff = L − 2·LATD`; a zero oxide capacitance falls back to the
     /// 100 nm-oxide default exactly as mos1noi.c does.
-    pub fn flicker_noise_source_terms(&self) -> Option<(Value, Value, Value, Value)> {
+    pub(crate) fn flicker_noise_source_terms(&self) -> Option<(Value, Value, Value, Value)> {
         if self.kf <= 0.0 || !self.kf.is_finite() {
             return None;
         }
@@ -163,6 +163,12 @@ impl Mosfet {
     /// - Smooth transitions between operating regions
     ///
     /// Returns (Qgs, Qgd, Qgb) in Coulombs
+    ///
+    /// Stays `pub` rather than `pub(crate)` because no in-crate caller
+    /// consumes it yet: the classic transient path stamps from
+    /// `ac_capacitances`, so narrowing it would turn a physical model into
+    /// dead code that `-D warnings` then deletes. Whether that path should
+    /// read these charges is a numerics question, not a visibility one.
     pub fn gate_charges(&self) -> (Value, Value, Value) {
         let (cgs_ov, cgd_ov, cgb_ov) = self.overlap_capacitances();
         let p = self.polarity();
@@ -241,31 +247,13 @@ impl Mosfet {
         }
     }
 
-    /// Gate-source charge Qgs in Coulombs
-    #[inline]
-    pub fn qgs(&self) -> Value {
-        self.gate_charges().0
-    }
-
-    /// Gate-drain charge Qgd in Coulombs
-    #[inline]
-    pub fn qgd(&self) -> Value {
-        self.gate_charges().1
-    }
-
-    /// Gate-bulk charge Qgb in Coulombs
-    #[inline]
-    pub fn qgb(&self) -> Value {
-        self.gate_charges().2
-    }
-
     /// Calculate W/L ratio
-    pub fn wl_ratio(&self) -> Value {
+    pub(crate) fn wl_ratio(&self) -> Value {
         self.w / self.l
     }
 
     /// Beta = KP * W/L
-    pub fn beta(&self) -> Value {
+    pub(crate) fn beta(&self) -> Value {
         self.kp * self.wl_ratio()
     }
 }

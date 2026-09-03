@@ -485,7 +485,7 @@ impl B3SoiFd {
     /// floating/contact FD body: the gate, drain-prime, source-prime and back-gate
     /// (E) charge entries — but NO body row/column (FD has no body charge node).
     #[allow(clippy::too_many_arguments)]
-    pub fn stamp_charge_companion(
+    pub(crate) fn stamp_charge_companion(
         &self,
         charge: &eval::B3SoiFdCharge,
         ag0: Value,

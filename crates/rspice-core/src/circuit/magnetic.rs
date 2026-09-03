@@ -28,7 +28,7 @@ fn node_voltage(solution: &[Value], node_pos: NodeId, node_neg: NodeId) -> Value
 /// and whether the magnetization variable may advance. The three booleans are
 /// read together and are easy to transpose as bare arguments.
 #[derive(Clone, Copy)]
-pub struct XyceCoreCompanionMode {
+pub(crate) struct XyceCoreCompanionMode {
     pub one_step: bool,
     pub one_step_order2: bool,
     pub advance_magvar_update: bool,
@@ -251,7 +251,7 @@ impl CircuitData {
     /// constitutive mid-factor is negative near zero field. This routine
     /// replaces only the branch-row linearization; KCL rows remain the normal
     /// MNA inductor rows.
-    pub fn stamp_xyce_core_transient_companion(
+    pub(crate) fn stamp_xyce_core_transient_companion(
         &mut self,
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],

@@ -238,7 +238,7 @@ pub struct Resistors {
 /// `.op`/`.print` reports. They diverge for thermal and behavioural resistors,
 /// so passing them as three bare `Value`s invites a silent transposition.
 #[derive(Clone, Copy)]
-pub struct ResistorValues {
+pub(crate) struct ResistorValues {
     pub resistance: Value,
     pub small_signal_resistance: Value,
     pub reported_resistance: Value,
@@ -276,7 +276,7 @@ impl Resistors {
     /// Add a resistor whose electrical and reportable resistance values are
     /// intentionally distinct. Native resistor construction uses this path
     /// so parameter observation never has to reconstruct `R` from `1/G`.
-    pub fn add_with_small_signal_and_reported(
+    pub(crate) fn add_with_small_signal_and_reported(
         &mut self,
         name: String,
         node_pos: NodeId,
@@ -487,7 +487,7 @@ impl ResistorBranches {
         );
     }
 
-    pub fn add_with_reported(
+    pub(crate) fn add_with_reported(
         &mut self,
         name: String,
         node_pos: NodeId,
@@ -758,7 +758,7 @@ pub(crate) struct SolutionDependentCapacitorSpec {
 }
 
 /// The step a solution-dependent companion stamp is written for.
-pub struct SolutionDependentCompanionStep<'a> {
+pub(crate) struct SolutionDependentCompanionStep<'a> {
     pub time: Value,
     pub dt: Value,
     pub coeff: &'a CompanionCoefficients,
@@ -1088,7 +1088,7 @@ impl Capacitors {
     /// coefficients to `q` and `dQ/dX`. Terminal derivatives are always
     /// replaced by `+/-C`; the integrated `dC/dX*dV` term is only used for
     /// non-terminal dependencies.
-    pub fn stamp_solution_dependent_transient_companion(
+    pub(crate) fn stamp_solution_dependent_transient_companion(
         &mut self,
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],

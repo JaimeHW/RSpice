@@ -425,7 +425,12 @@ impl Mosfet {
     }
 
     /// Stamp using O(1) direct indexing (call after link).
-    pub fn stamp_direct(&self, matrix: &mut StaticMatrix, rhs: &mut [Value], voltages: &[Value]) {
+    pub(crate) fn stamp_direct(
+        &self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        voltages: &[Value],
+    ) {
         let (vgs, vds, vbs) = self.branch_voltages(voltages);
         let (eval_vgs, eval_vds, eval_vbs) = self.limited_branch_voltages_for_eval(vgs, vds, vbs);
         let cache_matches = self.cached_linearization_matches_eval(eval_vgs, eval_vds, eval_vbs);
@@ -888,7 +893,7 @@ impl Mosfet {
     }
 
     /// Get polarity multiplier (+1 for NMOS, -1 for PMOS)
-    pub fn polarity(&self) -> Value {
+    pub(crate) fn polarity(&self) -> Value {
         match self.mos_type {
             MosType::Nmos => 1.0,
             MosType::Pmos => -1.0,

@@ -5,7 +5,7 @@ const DEFAULT_MOS_CHANNEL_WIDTH: Value = 1.0e-4;
 
 impl Mosfet {
     /// Create a new NMOS with default parameters
-    pub fn new_nmos(
+    pub(crate) fn new_nmos(
         name: String,
         drain: NodeId,
         gate: NodeId,
@@ -16,7 +16,7 @@ impl Mosfet {
     }
 
     /// Create a new PMOS with default parameters
-    pub fn new_pmos(
+    pub(crate) fn new_pmos(
         name: String,
         drain: NodeId,
         gate: NodeId,
@@ -236,7 +236,7 @@ impl Mosfet {
     }
 
     #[inline]
-    pub fn set_junction_gmin(&mut self, gmin: Value) {
+    pub(crate) fn set_junction_gmin(&mut self, gmin: Value) {
         let gmin = gmin.max(0.0);
         if gmin.to_bits() != self.junction_gmin.to_bits() {
             self.junction_gmin = gmin;
@@ -653,7 +653,7 @@ impl Mosfet {
     }
 
     /// Set model parameters from a DeviceModel
-    pub fn with_params(mut self, params: &std::collections::HashMap<String, Value>) -> Self {
+    pub(crate) fn with_params(mut self, params: &std::collections::HashMap<String, Value>) -> Self {
         const EPS0: Value = 8.854_214_871e-12;
         const EPS_SI_REL: Value = 11.7;
         const EPS_OX_REL: Value = 3.9;
@@ -1189,7 +1189,7 @@ impl Mosfet {
     }
 
     /// Set SPICE MOS model level.
-    pub fn with_level(mut self, level: i32) -> Self {
+    pub(crate) fn with_level(mut self, level: i32) -> Self {
         if matches!(level, 3 | 9) {
             self = self.with_mos3_defaults(level);
         } else {
@@ -1203,7 +1203,7 @@ impl Mosfet {
     }
 
     /// Set the native classic-MOS bulk-junction current compatibility model.
-    pub fn set_body_junction_model(&mut self, model: MosBodyJunctionModel) {
+    pub(crate) fn set_body_junction_model(&mut self, model: MosBodyJunctionModel) {
         if self.body_junction_model != model {
             self.body_junction_model = model;
             self.linearization_cache_valid = false;
@@ -1222,7 +1222,7 @@ impl Mosfet {
     /// the thermal-voltage update.
     ///
     /// Call once, after model and instance parameters are applied.
-    pub fn set_temperature(&mut self, temp_kelvin: Value, tnom_kelvin: Value) {
+    pub(crate) fn set_temperature(&mut self, temp_kelvin: Value, tnom_kelvin: Value) {
         use crate::constants::{K_BOLTZMANN, Q_ELECTRON, TEMP_REFERENCE};
         const KOVERQ: Value = K_BOLTZMANN / Q_ELECTRON;
 
@@ -1426,7 +1426,7 @@ impl Mosfet {
         None
     }
 
-    pub fn with_instance_params(mut self, params: &[(String, Value)]) -> Self {
+    pub(crate) fn with_instance_params(mut self, params: &[(String, Value)]) -> Self {
         let mut width_override: Option<Value> = None;
         let mut length_override: Option<Value> = None;
         let mut multiplier = 1.0;

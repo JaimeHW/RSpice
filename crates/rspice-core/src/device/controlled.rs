@@ -18,7 +18,7 @@ use crate::{NodeId, Value};
 /// sensed branch. They are positional in the netlist (`E<name> n+ n- nc+ nc-`),
 /// and swapping an output pair for a control pair silently inverts the source.
 #[derive(Clone, Copy)]
-pub struct VoltageControlledNodes {
+pub(crate) struct VoltageControlledNodes {
     pub node_pos: NodeId,
     pub node_neg: NodeId,
     pub ctrl_pos: NodeId,
@@ -41,7 +41,7 @@ impl Vcvs {
         Self::default()
     }
 
-    pub fn add(
+    pub(crate) fn add(
         &mut self,
         name: String,
         nodes: VoltageControlledNodes,
@@ -161,7 +161,7 @@ impl Vccs {
         Self::default()
     }
 
-    pub fn add(&mut self, name: String, nodes: VoltageControlledNodes, gm: Value) {
+    pub(crate) fn add(&mut self, name: String, nodes: VoltageControlledNodes, gm: Value) {
         let VoltageControlledNodes {
             node_pos,
             node_neg,

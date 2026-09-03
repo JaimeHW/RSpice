@@ -61,7 +61,7 @@ pub struct InductorCoupling {
 /// positional arguments, where swapping a node between windings changed the
 /// mutual sign without any type error.
 #[derive(Clone, Copy)]
-pub struct CoupledWinding {
+pub(crate) struct CoupledWinding {
     pub node_pos: NodeId,
     pub node_neg: NodeId,
     pub inductance: Value,
@@ -127,7 +127,12 @@ pub struct CoupledInductorPair {
 
 impl CoupledInductorPair {
     /// Create a new coupled inductor pair
-    pub fn new(name: String, first: CoupledWinding, second: CoupledWinding, k: Value) -> Self {
+    pub(crate) fn new(
+        name: String,
+        first: CoupledWinding,
+        second: CoupledWinding,
+        k: Value,
+    ) -> Self {
         let CoupledWinding {
             node_pos: node1_pos,
             node_neg: node1_neg,

@@ -17,7 +17,7 @@ use crate::{Complex64, Value};
 /// swapped pair a runtime type error inside the model instead of a compile
 /// error here.
 #[derive(Clone, Copy)]
-pub struct CodeModelVectorParams<'a> {
+pub(crate) struct CodeModelVectorParams<'a> {
     pub string_params: &'a [(String, String)],
     pub string_vector_params: &'a [(String, Vec<String>)],
     pub real_vector_params: &'a [(String, Vec<Value>)],
@@ -28,7 +28,7 @@ pub struct CodeModelVectorParams<'a> {
 /// and real port values, the times they last changed, and the total load each
 /// event node presents.
 #[derive(Clone, Copy)]
-pub struct XspiceEventInputs<'a> {
+pub(crate) struct XspiceEventInputs<'a> {
     pub digital_values: &'a HashMap<usize, DigitalValue>,
     pub digital_event_times: &'a HashMap<usize, Value>,
     pub event_total_loads: &'a HashMap<usize, Value>,
@@ -971,7 +971,7 @@ impl XspiceInstance {
     }
 
     /// Create a new XSPICE instance with all supported parameter channels.
-    pub fn new_with_string_vectors(
+    pub(crate) fn new_with_string_vectors(
         name: impl Into<String>,
         model: Arc<dyn CodeModel>,
         connections: Vec<PortConnection>,
@@ -1560,12 +1560,17 @@ impl XspiceInstance {
 
     /// Update input values from circuit solution
     ///
+    /// The dispatcher calls `update_inputs_with_analog_transitions` so a
+    /// transition set travels with the values; this no-transition form is how
+    /// the instance tests drive one update in isolation.
+    ///
     /// # Arguments
     /// * `voltages` - Circuit node voltages (index 0 = node 1)
     /// * `digital_values` - Digital node values
     /// * `event_total_loads` - ngspice-style total LOAD() per event node
     /// * `real_values` - Real-valued event node values
-    pub fn update_inputs(
+    #[cfg(test)]
+    pub(crate) fn update_inputs(
         &mut self,
         solution: &[Value],
         num_nodes: usize,

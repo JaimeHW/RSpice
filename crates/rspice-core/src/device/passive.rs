@@ -12,9 +12,8 @@ mod saturable_inductor;
 pub use capacitor::{
     Capacitor, SolutionDependentCapacitor, SolutionDependentCapacitorLinearization,
 };
-pub use coupled_inductors::{
-    CoupledInductorPair, CoupledWinding, InductorCoupling, MultiWindingTransformer,
-};
+pub(crate) use coupled_inductors::CoupledWinding;
+pub use coupled_inductors::{CoupledInductorPair, InductorCoupling, MultiWindingTransformer};
 pub use inductor::Inductor;
 pub use jiles_atherton::{JilesAthertonInductor, JilesAthertonParams};
 pub(crate) use jiles_atherton::{XyceCoreStep, XyceCoreTrial};
