@@ -301,6 +301,15 @@ through the core materializer, coordinate-local failure attribution,
 compression certificates, direct-entry-point planning and argument validation,
 and the periodic large-signal cards.
 
+A `wasm-bindgen-test` module in `exports` covers what only the real JavaScript
+boundary can show: that window columns arrive as `Float64Array`/`Uint8Array`,
+that absent metadata is explicit `null` rather than an omitted field, that a
+pre-set `sharedInt32` control word cancels an export while a clear one does
+not, that a DOM `AbortSignal` and an ordinary `ArrayBuffer` are rejected before
+any work, and that a refused family throws the typed refusal naming the card
+and the missing core API. It builds for `wasm32-unknown-unknown` in CI and runs
+under Node with `wasm-pack test --node`.
+
 CI also builds the real `wasm32-unknown-unknown` artifact. The static browser
 contract is guarded by `tools/ci/test_wasm_playground.py`, which verifies that
 the canonical playground routes engine calls through `engine-worker.js`, that
