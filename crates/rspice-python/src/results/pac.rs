@@ -85,11 +85,15 @@ pub struct PyPacResult {
 }
 
 impl CarriesDocumentEvidence for PyPacResult {
-    fn bind_analysis(&mut self, analysis: rspice_core::execution::AnalysisInstanceId) {
+    fn bind_execution(
+        &mut self,
+        analysis: rspice_core::execution::AnalysisInstanceId,
+        coordinate: Option<&rspice_core::execution::ResultCoordinate>,
+    ) {
         self.evidence = self
             .evidence
             .take()
-            .map(|evidence| evidence.with_analysis(analysis));
+            .map(|evidence| evidence.with_execution(analysis, coordinate));
     }
 }
 
@@ -107,9 +111,9 @@ impl PyPacResult {
 
     /// The shared result document, projected from the retained sidebands.
     fn shared_document(&self, py: Python<'_>) -> PyResult<AnalysisResultDocument> {
-        let analysis = document::evidence(&self.evidence, "PAC")?.analysis;
-        document::build(py, |abort| {
-            AnalysisResultDocument::from_pac(analysis, &self.inner)?.build_with_abort(abort)
+        let (analysis, coordinate) = document::execution(&self.evidence, "PAC")?;
+        document::build(py, coordinate, || {
+            AnalysisResultDocument::from_pac(analysis, &self.inner)
         })
     }
 

@@ -16,11 +16,15 @@ pub struct PyHbResult {
 }
 
 impl CarriesDocumentEvidence for PyHbResult {
-    fn bind_analysis(&mut self, analysis: rspice_core::execution::AnalysisInstanceId) {
+    fn bind_execution(
+        &mut self,
+        analysis: rspice_core::execution::AnalysisInstanceId,
+        coordinate: Option<&rspice_core::execution::ResultCoordinate>,
+    ) {
         self.evidence = self
             .evidence
             .take()
-            .map(|evidence| evidence.with_analysis(analysis));
+            .map(|evidence| evidence.with_execution(analysis, coordinate));
     }
 }
 
@@ -43,10 +47,9 @@ impl PyHbResult {
 
     /// The shared result document, projected from the retained spectra.
     fn shared_document(&self, py: Python<'_>) -> PyResult<AnalysisResultDocument> {
-        let analysis = document::evidence(&self.evidence, "harmonic-balance")?.analysis;
-        document::build(py, |abort| {
-            AnalysisResultDocument::from_harmonic_balance(analysis, &self.inner)?
-                .build_with_abort(abort)
+        let (analysis, coordinate) = document::execution(&self.evidence, "harmonic-balance")?;
+        document::build(py, coordinate, || {
+            AnalysisResultDocument::from_harmonic_balance(analysis, &self.inner)
         })
     }
 

@@ -371,11 +371,15 @@ pub struct PyTransientFftResult {
 }
 
 impl CarriesDocumentEvidence for PyTransientFftResult {
-    fn bind_analysis(&mut self, analysis: rspice_core::execution::AnalysisInstanceId) {
+    fn bind_execution(
+        &mut self,
+        analysis: rspice_core::execution::AnalysisInstanceId,
+        coordinate: Option<&rspice_core::execution::ResultCoordinate>,
+    ) {
         self.evidence = self
             .evidence
             .take()
-            .map(|evidence| evidence.with_analysis(analysis));
+            .map(|evidence| evidence.with_execution(analysis, coordinate));
     }
 }
 
@@ -386,6 +390,7 @@ impl PyTransientFftResult {
     /// spectrum is a ratio here exactly as it is on every other surface.
     fn shared_document(&self, py: Python<'_>) -> PyResult<AnalysisResultDocument> {
         let evidence = document::evidence(&self.evidence, "FFT")?;
+        let coordinate = evidence.coordinate.clone();
         let analysis = evidence.analysis;
         let parent = evidence.core;
         let unit = rspice_core::execution::transient_fft_output_unit(
@@ -393,9 +398,8 @@ impl PyTransientFftResult {
             self.inner.format,
         )
         .map_err(crate::errors::simulation_error_to_pyerr)?;
-        document::build(py, |abort| {
-            AnalysisResultDocument::from_transient_fft(analysis, parent, unit, &self.inner)?
-                .build_with_abort(abort)
+        document::build(py, coordinate, || {
+            AnalysisResultDocument::from_transient_fft(analysis, parent, unit, &self.inner)
         })
     }
 }

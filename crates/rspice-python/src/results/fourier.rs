@@ -120,11 +120,15 @@ pub(crate) struct FourierEvidence {
 }
 
 impl CarriesDocumentEvidence for PyFourierResult {
-    fn bind_analysis(&mut self, analysis: rspice_core::execution::AnalysisInstanceId) {
+    fn bind_execution(
+        &mut self,
+        analysis: rspice_core::execution::AnalysisInstanceId,
+        coordinate: Option<&rspice_core::execution::ResultCoordinate>,
+    ) {
         self.evidence = self
             .evidence
             .take()
-            .map(|evidence| evidence.with_analysis(analysis));
+            .map(|evidence| evidence.with_execution(analysis, coordinate));
     }
 }
 
@@ -175,6 +179,7 @@ impl PyFourierResult {
     /// The shared result document, projected from the retained spectrum.
     fn shared_document(&self, py: Python<'_>) -> PyResult<AnalysisResultDocument> {
         let evidence = document::evidence(&self.evidence, "Fourier")?;
+        let coordinate = evidence.coordinate.clone();
         let analysis = evidence.analysis;
         let core = &evidence.core;
         if core.output.trim().is_empty() {
@@ -183,15 +188,14 @@ impl PyFourierResult {
                  requires",
             ));
         }
-        document::build(py, |abort| {
+        document::build(py, coordinate, || {
             AnalysisResultDocument::from_fourier(
                 analysis,
                 core.parent,
                 &core.output,
                 core.output_unit.clone(),
                 &core.result,
-            )?
-            .build_with_abort(abort)
+            )
         })
     }
 
@@ -247,10 +251,13 @@ impl PyFourierResult {
         projected.parent_analysis_id = parent_analysis_id;
         projected.coordinate = coordinate;
         if let Some(ordinal) = ordinal {
-            projected.bind_analysis(rspice_core::execution::analysis_instance_identity(
-                rspice_core::execution::AnalysisKind::Fourier,
-                ordinal,
-            ));
+            projected.bind_execution(
+                rspice_core::execution::analysis_instance_identity(
+                    rspice_core::execution::AnalysisKind::Fourier,
+                    ordinal,
+                ),
+                None,
+            );
         }
         projected
     }

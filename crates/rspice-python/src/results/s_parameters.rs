@@ -26,11 +26,15 @@ pub struct PySParameterResult {
 }
 
 impl CarriesDocumentEvidence for PySParameterResult {
-    fn bind_analysis(&mut self, analysis: rspice_core::execution::AnalysisInstanceId) {
+    fn bind_execution(
+        &mut self,
+        analysis: rspice_core::execution::AnalysisInstanceId,
+        coordinate: Option<&rspice_core::execution::ResultCoordinate>,
+    ) {
         self.evidence = self
             .evidence
             .take()
-            .map(|evidence| evidence.with_analysis(analysis));
+            .map(|evidence| evidence.with_execution(analysis, coordinate));
     }
 }
 
@@ -193,10 +197,11 @@ impl PySParameterResult {
     /// The shared result document, projected from the retained sweep.
     fn shared_document(&self, py: Python<'_>) -> PyResult<AnalysisResultDocument> {
         let evidence = document::evidence(&self.evidence, "S-parameter")?;
+        let coordinate = evidence.coordinate.clone();
         let analysis = evidence.analysis;
         let scattering = &evidence.core;
-        document::build(py, |abort| {
-            AnalysisResultDocument::from_s_parameters(analysis, scattering)?.build_with_abort(abort)
+        document::build(py, coordinate, || {
+            AnalysisResultDocument::from_s_parameters(analysis, scattering)
         })
     }
 

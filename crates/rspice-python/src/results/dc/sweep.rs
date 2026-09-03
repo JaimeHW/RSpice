@@ -58,11 +58,15 @@ pub struct PyDcSweepResult {
 }
 
 impl CarriesDocumentEvidence for PyDcSweepResult {
-    fn bind_analysis(&mut self, analysis: rspice_core::execution::AnalysisInstanceId) {
+    fn bind_execution(
+        &mut self,
+        analysis: rspice_core::execution::AnalysisInstanceId,
+        coordinate: Option<&rspice_core::execution::ResultCoordinate>,
+    ) {
         self.evidence = self
             .evidence
             .take()
-            .map(|evidence| evidence.with_analysis(analysis));
+            .map(|evidence| evidence.with_execution(analysis, coordinate));
     }
 }
 
@@ -102,6 +106,8 @@ impl PyDcSweepResult {
         use rspice_core::execution::result_document::DcSweepAxisDocument;
 
         let evidence = document::evidence(&self.evidence, "DC-sweep")?;
+
+        let coordinate = evidence.coordinate.clone();
         let analysis = evidence.analysis;
         let primary = self.primary_source.clone().ok_or_else(|| {
             crate::errors::SimulationError::new_err(
@@ -138,8 +144,8 @@ impl PyDcSweepResult {
         let secondary = self.secondary_source.clone();
         let secondary_values = self.secondary_sweep_values.clone();
         let inner_points = self.inner_points;
-        document::build(py, move |abort| {
-            let builder = match (secondary, secondary_values) {
+        document::build(py, coordinate, move || {
+            match (secondary, secondary_values) {
                 (Some(outer), Some(values)) => AnalysisResultDocument::from_nested_dc_sweep(
                     analysis,
                     &[
@@ -155,15 +161,14 @@ impl PyDcSweepResult {
                         },
                     ],
                     &points,
-                )?,
+                ),
                 _ => AnalysisResultDocument::from_dc_sweep(
                     analysis,
                     &primary,
                     rspice_core::execution::sweep_axis_unit(&primary),
                     &points,
-                )?,
-            };
-            builder.build_with_abort(abort)
+                ),
+            }
         })
     }
 

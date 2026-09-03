@@ -27,11 +27,15 @@ pub struct PyAcResult {
 }
 
 impl CarriesDocumentEvidence for PyAcResult {
-    fn bind_analysis(&mut self, analysis: rspice_core::execution::AnalysisInstanceId) {
+    fn bind_execution(
+        &mut self,
+        analysis: rspice_core::execution::AnalysisInstanceId,
+        coordinate: Option<&rspice_core::execution::ResultCoordinate>,
+    ) {
         self.evidence = self
             .evidence
             .take()
-            .map(|evidence| evidence.with_analysis(analysis));
+            .map(|evidence| evidence.with_execution(analysis, coordinate));
     }
 }
 
@@ -55,9 +59,9 @@ impl PyAcResult {
 
     /// The shared result document, projected from the retained AC points.
     fn shared_document(&self, py: Python<'_>) -> PyResult<AnalysisResultDocument> {
-        let analysis = document::evidence(&self.evidence, "AC")?.analysis;
-        document::build(py, |abort| {
-            AnalysisResultDocument::from_ac(analysis, &self.results)?.build_with_abort(abort)
+        let (analysis, coordinate) = document::execution(&self.evidence, "AC")?;
+        document::build(py, coordinate, || {
+            AnalysisResultDocument::from_ac(analysis, &self.results)
         })
     }
 

@@ -17,11 +17,15 @@ pub struct PyCompressedTransientResult {
 }
 
 impl CarriesDocumentEvidence for PyCompressedTransientResult {
-    fn bind_analysis(&mut self, analysis: rspice_core::execution::AnalysisInstanceId) {
+    fn bind_execution(
+        &mut self,
+        analysis: rspice_core::execution::AnalysisInstanceId,
+        coordinate: Option<&rspice_core::execution::ResultCoordinate>,
+    ) {
         self.evidence = self
             .evidence
             .take()
-            .map(|evidence| evidence.with_analysis(analysis));
+            .map(|evidence| evidence.with_execution(analysis, coordinate));
     }
 }
 
@@ -50,10 +54,9 @@ impl PyCompressedTransientResult {
     /// The document carries the compression certificate the run produced, so
     /// a reader always knows which grid the published history is on.
     fn shared_document(&self, py: Python<'_>) -> PyResult<AnalysisResultDocument> {
-        let analysis = document::evidence(&self.evidence, "compressed transient")?.analysis;
-        document::build(py, |abort| {
-            AnalysisResultDocument::from_compressed_transient(analysis, &self.inner, Vec::new())?
-                .build_with_abort(abort)
+        let (analysis, coordinate) = document::execution(&self.evidence, "compressed transient")?;
+        document::build(py, coordinate, || {
+            AnalysisResultDocument::from_compressed_transient(analysis, &self.inner, Vec::new())
         })
     }
 

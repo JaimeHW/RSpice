@@ -27,6 +27,7 @@ pub(super) fn run_materialized_directives(
             analysis_id: Some(analysis.output_namespace().analysis_component()),
             analysis: Some(analysis.id()),
             coordinate_id: Some(coordinate.id),
+            result_coordinate: Some(coordinate.document.clone()),
             coordinate: Some(coordinate.python.clone()),
             transient_startup: TransientStartup::Card,
             upstream_analysis_id: analysis.planned().request().upstream().map(|id| id.tag()),
@@ -51,6 +52,7 @@ pub(super) fn run_materialized_directives(
             let context = ExecutionContext {
                 analysis_id: Some(format!("four-{next_fourier_ordinal:03}")),
                 coordinate_id: Some(coordinate.id),
+                result_coordinate: Some(coordinate.document.clone()),
                 analysis: Some(rspice_core::execution::analysis_instance_identity(
                     rspice_core::execution::AnalysisKind::Fourier,
                     u32::try_from(next_fourier_ordinal.saturating_sub(1)).unwrap_or(u32::MAX),
@@ -108,6 +110,8 @@ pub(super) fn run_axis_plan(
             ));
         }
         let coordinate = PyRunCoordinate::from_core(&core_coordinate);
+        let document_coordinate =
+            rspice_core::execution::ResultCoordinate::from_run_coordinate(&core_coordinate);
         let compatibility_value = compatibility_axis
             .as_ref()
             .and_then(|_| legacy_coordinate_value(&core_coordinate));
@@ -133,6 +137,7 @@ pub(super) fn run_axis_plan(
                 analysis_id: Some(implicit_analysis.output_namespace().analysis_component()),
                 analysis: Some(implicit_analysis.id()),
                 coordinate_id: Some(core_coordinate.stable_id()),
+                result_coordinate: Some(document_coordinate.clone()),
                 coordinate: Some(coordinate.clone()),
                 transient_startup: TransientStartup::Card,
                 upstream_analysis_id: None,
@@ -146,7 +151,12 @@ pub(super) fn run_axis_plan(
                     }
                     let handle = Py::new(
                         py,
-                        crate::results::bind_document_identity(result, context.analysis),
+                        crate::results::bind_document_identity(
+                            result,
+                            context
+                                .analysis
+                                .map(|analysis| (analysis, context.result_coordinate.as_ref())),
+                        ),
                     )?;
                     coordinate_out
                         .op
@@ -176,6 +186,7 @@ pub(super) fn run_axis_plan(
                 MaterializedCoordinate {
                     python: &coordinate,
                     id: core_coordinate.stable_id(),
+                    document: &document_coordinate,
                 },
                 continue_on_error,
                 &mut coordinate_out,

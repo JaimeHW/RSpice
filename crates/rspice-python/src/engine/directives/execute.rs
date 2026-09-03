@@ -8,16 +8,24 @@
 use super::*;
 
 /// Bind one produced result to the identity the canonical plan minted for the
-/// card that produced it.
+/// card that produced it, at the coordinate it was solved at.
 ///
-/// A deck may author several cards of one family, and each result's shared
-/// document has to name its own card. Without this every `.AC` result in a
-/// deck would publish under `ac-001`.
+/// A deck may author several cards of one family, once per coordinate of a run
+/// axis, and each result's shared document has to name its own card and place.
+/// Without this every `.AC` result in a deck would publish under `ac-001` at no
+/// coordinate.
 fn identified<T: crate::results::CarriesDocumentEvidence>(
     result: T,
     context: Option<&ExecutionContext>,
 ) -> T {
-    crate::results::bind_document_identity(result, context.and_then(|context| context.analysis))
+    crate::results::bind_document_identity(
+        result,
+        context.and_then(|context| {
+            context
+                .analysis
+                .map(|analysis| (analysis, context.result_coordinate.as_ref()))
+        }),
+    )
 }
 
 /// Run one directive, recording what it produced.

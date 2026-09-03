@@ -215,11 +215,15 @@ pub struct PyPoleZeroResult {
 }
 
 impl CarriesDocumentEvidence for PyPoleZeroResult {
-    fn bind_analysis(&mut self, analysis: rspice_core::execution::AnalysisInstanceId) {
+    fn bind_execution(
+        &mut self,
+        analysis: rspice_core::execution::AnalysisInstanceId,
+        coordinate: Option<&rspice_core::execution::ResultCoordinate>,
+    ) {
         self.evidence = self
             .evidence
             .take()
-            .map(|evidence| evidence.with_analysis(analysis));
+            .map(|evidence| evidence.with_execution(analysis, coordinate));
     }
 }
 
@@ -244,10 +248,11 @@ impl PyPoleZeroResult {
     /// The shared result document, projected from the retained root sets.
     fn shared_document(&self, py: Python<'_>) -> PyResult<AnalysisResultDocument> {
         let evidence = document::evidence(&self.evidence, "pole-zero")?;
+        let coordinate = evidence.coordinate.clone();
         let analysis = evidence.analysis;
         let result = &evidence.core;
-        document::build(py, |abort| {
-            AnalysisResultDocument::from_pole_zero(analysis, result)?.build_with_abort(abort)
+        document::build(py, coordinate, || {
+            AnalysisResultDocument::from_pole_zero(analysis, result)
         })
     }
 }
@@ -530,11 +535,15 @@ pub struct PyStbResult {
 }
 
 impl CarriesDocumentEvidence for PyStbResult {
-    fn bind_analysis(&mut self, analysis: rspice_core::execution::AnalysisInstanceId) {
+    fn bind_execution(
+        &mut self,
+        analysis: rspice_core::execution::AnalysisInstanceId,
+        coordinate: Option<&rspice_core::execution::ResultCoordinate>,
+    ) {
         self.evidence = self
             .evidence
             .take()
-            .map(|evidence| evidence.with_analysis(analysis));
+            .map(|evidence| evidence.with_execution(analysis, coordinate));
     }
 }
 
@@ -542,10 +551,11 @@ impl PyStbResult {
     /// The shared result document, projected from the retained loop gain.
     fn shared_document(&self, py: Python<'_>) -> PyResult<AnalysisResultDocument> {
         let evidence = document::evidence(&self.evidence, "stability")?;
+        let coordinate = evidence.coordinate.clone();
         let analysis = evidence.analysis;
         let result = &evidence.core;
-        document::build(py, |abort| {
-            AnalysisResultDocument::from_stability(analysis, result)?.build_with_abort(abort)
+        document::build(py, coordinate, || {
+            AnalysisResultDocument::from_stability(analysis, result)
         })
     }
 
@@ -762,11 +772,15 @@ pub struct PyTransferFunctionResult {
 }
 
 impl CarriesDocumentEvidence for PyTransferFunctionResult {
-    fn bind_analysis(&mut self, analysis: rspice_core::execution::AnalysisInstanceId) {
+    fn bind_execution(
+        &mut self,
+        analysis: rspice_core::execution::AnalysisInstanceId,
+        coordinate: Option<&rspice_core::execution::ResultCoordinate>,
+    ) {
         self.evidence = self
             .evidence
             .take()
-            .map(|evidence| evidence.with_analysis(analysis));
+            .map(|evidence| evidence.with_execution(analysis, coordinate));
     }
 }
 
@@ -788,11 +802,11 @@ impl PyTransferFunctionResult {
     /// The shared result document, projected from the retained ratios.
     fn shared_document(&self, py: Python<'_>) -> PyResult<AnalysisResultDocument> {
         let evidence = document::evidence(&self.evidence, "transfer-function")?;
+        let coordinate = evidence.coordinate.clone();
         let analysis = evidence.analysis;
         let result = &evidence.core;
-        document::build(py, |abort| {
-            AnalysisResultDocument::from_transfer_function(analysis, result)?
-                .build_with_abort(abort)
+        document::build(py, coordinate, || {
+            AnalysisResultDocument::from_transfer_function(analysis, result)
         })
     }
 }

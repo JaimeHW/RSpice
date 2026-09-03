@@ -38,11 +38,15 @@ pub struct PyTransientResult {
 }
 
 impl CarriesDocumentEvidence for PyTransientResult {
-    fn bind_analysis(&mut self, analysis: rspice_core::execution::AnalysisInstanceId) {
+    fn bind_execution(
+        &mut self,
+        analysis: rspice_core::execution::AnalysisInstanceId,
+        coordinate: Option<&rspice_core::execution::ResultCoordinate>,
+    ) {
         self.evidence = self
             .evidence
             .take()
-            .map(|evidence| evidence.with_analysis(analysis));
+            .map(|evidence| evidence.with_execution(analysis, coordinate));
     }
 }
 
@@ -72,10 +76,9 @@ impl PyTransientResult {
     /// `FftResult`, reachable from `fft_results`, rather than as a separate
     /// document with an identity of its own.
     fn shared_document(&self, py: Python<'_>) -> PyResult<AnalysisResultDocument> {
-        let analysis = document::evidence(&self.evidence, "transient")?.analysis;
-        document::build(py, |abort| {
-            AnalysisResultDocument::from_transient(analysis, &self.inner, None, Vec::new())?
-                .build_with_abort(abort)
+        let (analysis, coordinate) = document::execution(&self.evidence, "transient")?;
+        document::build(py, coordinate, || {
+            AnalysisResultDocument::from_transient(analysis, &self.inner, None, Vec::new())
         })
     }
 

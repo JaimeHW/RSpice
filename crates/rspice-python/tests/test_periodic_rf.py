@@ -404,14 +404,76 @@ def test_a_deck_envelope_publishes_its_carrier_and_continued_transient():
     assert report.all_envelope == [envelope] or len(report.all_envelope) == 1
 
 
-def test_a_deck_pnoise_around_an_autonomous_carrier_is_refused_by_family():
-    """Phase noise is a different result family, not a relabelled sideband noise."""
-    netlist = periodic_card_deck(
-        ".PSS AUTONOMOUS=TRUE PERIODGUESS=1u\n.PNOISE DEC 3 1 1k OUT=V(out)"
+def test_a_deck_pnoise_around_an_autonomous_carrier_reports_phase_noise():
+    """Phase noise is its own result family, not a relabelled sideband noise."""
+    netlist = parse(
+        """
+L1 osc 0 1u
+C1 osc 0 1u
+R1 osc 0 1k
+B1 osc 0 I=-0.051*v(osc)+0.025*v(osc)*v(osc)*v(osc)
+I1 0 osc PULSE(0 1 10u 10n 10n 1u 1)
+.PSS AUTONOMOUS=TRUE PERIODGUESS=6.3u TSTABPERIODS=30 MAXITER=60 DAMPING=0.8 \
+MAXPERIODCHANGE=0.05
+.PNOISE DEC 1 1k 100k OUT=V(osc)
+.end
+"""
+    )
+    report = rspice.Engine().run(netlist, continue_on_error=False)
+
+    result = report.oscillator_noise
+    assert isinstance(result, rspice.OscillatorNoiseResult)
+    assert report.all_oscillator_noise == [result] or len(report.all_oscillator_noise) == 1
+    # A driven `pnoise` field would be an output power spectral density; an
+    # autonomous carrier produces neither that nor a value in that field.
+    assert report.pnoise is None
+    assert report.all_pnoise == []
+    assert result.carrier_frequency == pytest.approx(159.155e3, rel=5e-3)
+    assert result.diffusion_constant > 0.0
+    assert result.corner_frequency > 0.0
+    assert np.diff(result.phase_noise_dbc).tolist() == pytest.approx([-20.0, -20.0], abs=0.5)
+    assert [record.kind for record in report.records if record.kind.startswith("pnoise")] == [
+        "pnoise_oscillator"
+    ]
+
+    # The shared document publishes the spectrum and the Demir phase-diffusion
+    # evidence that makes it checkable, under the card's planned identity.
+    document = result.document()
+    assert document["resultKind"] == "pnoise"
+    assert document["analysis"]["tag"] == "pnoise-001"
+    oscillator = document["payload"]["oscillator"]
+    assert oscillator["diffusionConstant"] == pytest.approx(result.diffusion_constant)
+    assert oscillator["period"] == pytest.approx(result.period)
+    assert oscillator["cornerFrequency"] == pytest.approx(result.corner_frequency)
+    assert document["payload"]["outputNode"] == "V(OSC)"
+    assert [signal.name for signal in result.signals()] == ["phase_noise"]
+    assert {scalar.name for scalar in result.scalars()} >= {"carrier_frequency", "converged"}
+
+
+def test_an_oscillator_noise_result_without_a_probe_has_no_shared_document():
+    """A direct orbit analysis names no probe, so it publishes no document."""
+    netlist = parse(
+        """
+L1 osc 0 1u
+C1 osc 0 1u
+R1 osc 0 1k
+B1 osc 0 I=-0.051*v(osc)+0.025*v(osc)*v(osc)*v(osc)
+I1 0 osc PULSE(0 1 10u 10n 10n 1u 1)
+.end
+"""
+    )
+    result = rspice.Engine().run_oscillator_noise(
+        netlist,
+        [1.0e3, 1.0e4],
+        period_guess=6.3e-6,
+        tstab_periods=30,
+        max_iterations=60,
+        damping=0.8,
+        max_period_change=0.05,
     )
     with pytest.raises(rspice.RSpiceNotImplementedError) as excinfo:
-        rspice.Engine().run(netlist, continue_on_error=False)
-    assert "run_oscillator_noise" in str(excinfo.value)
+        result.document()
+    assert "no output probe" in str(excinfo.value)
 
 
 def test_a_malformed_periodic_card_is_a_typed_parse_error():

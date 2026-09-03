@@ -30,11 +30,15 @@ pub struct PyEnvelopeResult {
 }
 
 impl CarriesDocumentEvidence for PyEnvelopeResult {
-    fn bind_analysis(&mut self, analysis: rspice_core::execution::AnalysisInstanceId) {
+    fn bind_execution(
+        &mut self,
+        analysis: rspice_core::execution::AnalysisInstanceId,
+        coordinate: Option<&rspice_core::execution::ResultCoordinate>,
+    ) {
         self.evidence = self
             .evidence
             .take()
-            .map(|evidence| evidence.with_analysis(analysis));
+            .map(|evidence| evidence.with_execution(analysis, coordinate));
     }
 }
 
@@ -80,10 +84,11 @@ impl PyEnvelopeResult {
     /// The shared result document, projected from the retained continuation.
     fn shared_document(&self, py: Python<'_>) -> PyResult<AnalysisResultDocument> {
         let evidence = document::evidence(&self.evidence, "envelope")?;
+        let coordinate = evidence.coordinate.clone();
         let analysis = evidence.analysis;
         let result = &evidence.core;
-        document::build(py, |abort| {
-            AnalysisResultDocument::from_envelope(analysis, result)?.build_with_abort(abort)
+        document::build(py, coordinate, || {
+            AnalysisResultDocument::from_envelope(analysis, result)
         })
     }
 }

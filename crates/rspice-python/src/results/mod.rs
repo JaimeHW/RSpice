@@ -104,7 +104,7 @@ pub(crate) use hb::PyHbResult;
 pub(crate) use monte_carlo::{PyMonteCarloResult, PyVariableStatistics};
 pub(crate) use noise::{
     PyNoiseContribution, PyNoiseResult, PyOscillatorNoiseResult, PyPeriodicNoiseContribution,
-    PyPeriodicNoiseResult,
+    PyPeriodicNoiseResult, periodic_noise_probe,
 };
 pub(crate) use pac::PyPacResult;
 pub(crate) use projection::PyProjectedSignal;

@@ -206,11 +206,15 @@ pub struct PyMonteCarloResult {
 }
 
 impl CarriesDocumentEvidence for PyMonteCarloResult {
-    fn bind_analysis(&mut self, analysis: rspice_core::execution::AnalysisInstanceId) {
+    fn bind_execution(
+        &mut self,
+        analysis: rspice_core::execution::AnalysisInstanceId,
+        coordinate: Option<&rspice_core::execution::ResultCoordinate>,
+    ) {
         self.evidence = self
             .evidence
             .take()
-            .map(|evidence| evidence.with_analysis(analysis));
+            .map(|evidence| evidence.with_execution(analysis, coordinate));
     }
 }
 
@@ -237,10 +241,11 @@ impl PyMonteCarloResult {
     /// The shared result document, projected from the retained trials.
     fn shared_document(&self, py: Python<'_>) -> PyResult<AnalysisResultDocument> {
         let evidence = document::evidence(&self.evidence, "Monte Carlo")?;
+        let coordinate = evidence.coordinate.clone();
         let analysis = evidence.analysis;
         let result = &evidence.core;
-        document::build(py, |abort| {
-            AnalysisResultDocument::from_monte_carlo(analysis, result)?.build_with_abort(abort)
+        document::build(py, coordinate, || {
+            AnalysisResultDocument::from_monte_carlo(analysis, result)
         })
     }
 

@@ -31,13 +31,13 @@
 //! survive a pickle pickles that.
 
 use pyo3::prelude::*;
-use rspice_core::abort_signal::AbortSignal;
 use rspice_core::execution::result_document::{
     DeviceParameterSeries, DeviceStateSeries, ScalarValue, SeriesAvailability,
 };
 use rspice_core::execution::{
-    AnalysisInstanceId, AnalysisResultDocument, ResultDocumentError, ResultScalar, ResultSignal,
-    SignalDescriptor, SignalKind, SignalOwner, SignalShape, SignalUnit, SignalValueType,
+    AnalysisInstanceId, AnalysisResultDocument, AnalysisResultDocumentBuilder, ResultCoordinate,
+    ResultDocumentError, ResultScalar, ResultSignal, SignalDescriptor, SignalKind, SignalOwner,
+    SignalShape, SignalUnit, SignalValueType,
 };
 
 use crate::abort::run_interruptible_unregistered;
@@ -61,6 +61,10 @@ const MAX_DOCUMENT_JSON_BYTES: u64 = 512 * 1024 * 1024;
 pub(crate) struct DocumentEvidence<T> {
     /// Identity of the authored card this result came from.
     pub(crate) analysis: AnalysisInstanceId,
+    /// Materialized run coordinate this result was solved at, when the deck
+    /// has a `.STEP` or `.TEMP` axis. A document that did not record it would
+    /// look identical to the same card's result at every other coordinate.
+    pub(crate) coordinate: Option<ResultCoordinate>,
     pub(crate) core: T,
 }
 
@@ -68,40 +72,51 @@ impl<T> DocumentEvidence<T> {
     /// Evidence for a run that authored exactly one card of `kind`.
     ///
     /// A deck route that ran several cards of the family replaces this with
-    /// the plan's own identity through [`Self::with_analysis`]; a convenience
+    /// the plan's own identity through [`Self::with_execution`]; a convenience
     /// call runs one card, for which this is the identity the planner assigns.
     pub(crate) fn sole(kind: rspice_core::execution::AnalysisKind, core: T) -> Self {
         Self {
             analysis: sole_identity(kind),
+            coordinate: None,
             core,
         }
     }
 
-    pub(crate) fn with_analysis(mut self, analysis: AnalysisInstanceId) -> Self {
+    pub(crate) fn with_execution(
+        mut self,
+        analysis: AnalysisInstanceId,
+        coordinate: Option<&ResultCoordinate>,
+    ) -> Self {
         self.analysis = analysis;
+        self.coordinate = coordinate.cloned();
         self
     }
 }
 
 /// A result whose shared document can be bound to the authored card the
-/// canonical deck plan named for it.
+/// canonical deck plan named for it, at the coordinate it was solved at.
 ///
-/// A convenience call runs exactly one card, so its result keeps the identity
-/// [`DocumentEvidence::sole`] gave it. `Engine.run` may execute several cards
-/// of one family, and binds each result to the plan's own identity here rather
-/// than letting every result claim the family's first ordinal.
+/// A convenience call runs exactly one card at no axis coordinate, so its
+/// result keeps what [`DocumentEvidence::sole`] gave it. `Engine.run` may
+/// execute several cards of one family, once per coordinate of a run axis, and
+/// binds each result to its own identity and place here rather than letting
+/// every result claim the family's first ordinal at no coordinate.
 pub(crate) trait CarriesDocumentEvidence {
-    fn bind_analysis(&mut self, analysis: AnalysisInstanceId);
+    fn bind_execution(
+        &mut self,
+        analysis: AnalysisInstanceId,
+        coordinate: Option<&ResultCoordinate>,
+    );
 }
 
-/// Bind one freshly produced result to the identity the plan named, when the
-/// producing route knows one.
+/// Bind one freshly produced result to the identity and coordinate the plan
+/// named, when the producing route knows them.
 pub(crate) fn bound<T: CarriesDocumentEvidence>(
     mut result: T,
-    analysis: Option<AnalysisInstanceId>,
+    execution: Option<(AnalysisInstanceId, Option<&ResultCoordinate>)>,
 ) -> T {
-    if let Some(analysis) = analysis {
-        result.bind_analysis(analysis);
+    if let Some((analysis, coordinate)) = execution {
+        result.bind_execution(analysis, coordinate);
     }
     result
 }
@@ -114,6 +129,15 @@ pub(crate) fn evidence<'result, T>(
     evidence
         .as_ref()
         .ok_or_else(|| restored_result_error(family))
+}
+
+/// The identity and place one result's document is published under.
+pub(crate) fn execution<T>(
+    evidence: &Option<DocumentEvidence<T>>,
+    family: &str,
+) -> PyResult<(AnalysisInstanceId, Option<ResultCoordinate>)> {
+    let evidence = self::evidence(evidence, family)?;
+    Ok((evidence.analysis, evidence.coordinate.clone()))
 }
 
 /// One entry of a result's shared signal inventory.
@@ -513,11 +537,24 @@ pub(crate) fn restored_result_error(family: &str) -> PyErr {
 ///
 /// The projection walks every retained sample, so it is exactly the kind of
 /// call that must not hold the GIL or ignore Ctrl-C.
-pub(crate) fn build<F>(py: Python<'_>, project: F) -> PyResult<AnalysisResultDocument>
+pub(crate) fn build<F>(
+    py: Python<'_>,
+    coordinate: Option<ResultCoordinate>,
+    project: F,
+) -> PyResult<AnalysisResultDocument>
 where
-    F: FnOnce(&dyn AbortSignal) -> Result<AnalysisResultDocument, ResultDocumentError> + Send,
+    F: FnOnce() -> Result<AnalysisResultDocumentBuilder, ResultDocumentError> + Send,
 {
-    run_interruptible_unregistered(py, |abort| Ok(project(abort)))?.map_err(document_error)
+    run_interruptible_unregistered(py, |abort| {
+        Ok(project().and_then(|builder| {
+            match coordinate {
+                Some(coordinate) => builder.coordinate(coordinate),
+                None => builder,
+            }
+            .build_with_abort(abort)
+        }))
+    })?
+    .map_err(document_error)
 }
 
 /// The shared signal inventory of one result.

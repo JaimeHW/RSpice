@@ -81,6 +81,9 @@ struct ExecutionContext {
     /// that stream from this, so each coordinate of a `.STEP` or `.TEMP` sweep
     /// draws its own reproducible sample instead of repeating one.
     coordinate_id: Option<rspice_core::execution::RunCoordinateId>,
+    /// The coordinate in the shape a shared result document records it, so a
+    /// `.STEP` or `.TEMP` result says which point of the axis it was solved at.
+    result_coordinate: Option<rspice_core::execution::ResultCoordinate>,
     coordinate: Option<PyRunCoordinate>,
     /// Startup contract for a `.TRAN` executed under this context.
     transient_startup: TransientStartup,
@@ -110,6 +113,7 @@ enum PeriodicOperatingPoint {
 struct MaterializedCoordinate<'a> {
     python: &'a PyRunCoordinate,
     id: rspice_core::execution::RunCoordinateId,
+    document: &'a rspice_core::execution::ResultCoordinate,
 }
 
 struct PlannedDirectiveRun<'a> {
@@ -435,8 +439,10 @@ fn run_directives(
                 analysis_id,
                 analysis: identity,
                 // This route runs a deck with no run axis, so there is no
-                // coordinate to derive a per-coordinate stream from.
+                // coordinate to derive a per-coordinate stream from and none
+                // for a result document to be placed at.
                 coordinate_id: None,
+                result_coordinate: None,
                 coordinate: planned_run.coordinate.cloned(),
                 transient_startup: planned_run.transient_startup,
                 upstream_analysis_id,

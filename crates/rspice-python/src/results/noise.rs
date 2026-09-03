@@ -106,11 +106,15 @@ pub struct PyNoiseResult {
 }
 
 impl CarriesDocumentEvidence for PyNoiseResult {
-    fn bind_analysis(&mut self, analysis: rspice_core::execution::AnalysisInstanceId) {
+    fn bind_execution(
+        &mut self,
+        analysis: rspice_core::execution::AnalysisInstanceId,
+        coordinate: Option<&rspice_core::execution::ResultCoordinate>,
+    ) {
         self.evidence = self
             .evidence
             .take()
-            .map(|evidence| evidence.with_analysis(analysis));
+            .map(|evidence| evidence.with_execution(analysis, coordinate));
     }
 }
 
@@ -138,10 +142,11 @@ impl PyNoiseResult {
     /// The shared result document of the sweep this row belongs to.
     fn shared_document(&self, py: Python<'_>) -> PyResult<AnalysisResultDocument> {
         let evidence = document::evidence(&self.evidence, "noise")?;
+        let coordinate = evidence.coordinate.clone();
         let analysis = evidence.analysis;
         let sweep = evidence.core.as_slice();
-        document::build(py, |abort| {
-            AnalysisResultDocument::from_noise(analysis, sweep)?.build_with_abort(abort)
+        document::build(py, coordinate, || {
+            AnalysisResultDocument::from_noise(analysis, sweep)
         })
     }
 
@@ -331,20 +336,28 @@ pub struct PyPeriodicNoiseResult {
 }
 
 impl CarriesDocumentEvidence for PyPeriodicNoiseResult {
-    fn bind_analysis(&mut self, analysis: rspice_core::execution::AnalysisInstanceId) {
+    fn bind_execution(
+        &mut self,
+        analysis: rspice_core::execution::AnalysisInstanceId,
+        coordinate: Option<&rspice_core::execution::ResultCoordinate>,
+    ) {
         self.evidence = self
             .evidence
             .take()
-            .map(|evidence| evidence.with_analysis(analysis));
+            .map(|evidence| evidence.with_execution(analysis, coordinate));
     }
 }
 
 impl CarriesDocumentEvidence for PyOscillatorNoiseResult {
-    fn bind_analysis(&mut self, analysis: rspice_core::execution::AnalysisInstanceId) {
+    fn bind_execution(
+        &mut self,
+        analysis: rspice_core::execution::AnalysisInstanceId,
+        coordinate: Option<&rspice_core::execution::ResultCoordinate>,
+    ) {
         self.evidence = self
             .evidence
             .take()
-            .map(|evidence| evidence.with_analysis(analysis));
+            .map(|evidence| evidence.with_execution(analysis, coordinate));
     }
 }
 
@@ -410,9 +423,10 @@ impl PyOscillatorNoiseResult {
             )
         })?;
         let analysis = evidence.analysis;
+        let coordinate = evidence.coordinate.clone();
         let result = &evidence.core;
-        document::build(py, |abort| {
-            AnalysisResultDocument::from_pnoise(analysis, result)?.build_with_abort(abort)
+        document::build(py, coordinate, || {
+            AnalysisResultDocument::from_pnoise(analysis, result)
         })
     }
 }
@@ -508,6 +522,18 @@ impl PyOscillatorNoiseResult {
     }
 }
 
+/// Authored spelling of the probe a periodic-noise run measured.
+///
+/// This is the spelling core's own `.PNOISE` card runner records, so a run
+/// reached through a direct call names its probe exactly as the same run
+/// reached through an authored card does.
+pub(crate) fn periodic_noise_probe(output_node: &str, reference_node: Option<&str>) -> String {
+    match reference_node {
+        Some(reference) => format!("V({output_node},{reference})"),
+        None => format!("V({output_node})"),
+    }
+}
+
 impl PyPeriodicNoiseResult {
     /// Project one driven run, naming the probe it measured.
     pub(crate) fn from_run(
@@ -550,10 +576,11 @@ impl PyPeriodicNoiseResult {
     /// The shared result document, projected from the retained run.
     fn shared_document(&self, py: Python<'_>) -> PyResult<AnalysisResultDocument> {
         let evidence = document::evidence(&self.evidence, "periodic-noise")?;
+        let coordinate = evidence.coordinate.clone();
         let analysis = evidence.analysis;
         let result = &evidence.core;
-        document::build(py, |abort| {
-            AnalysisResultDocument::from_pnoise(analysis, result)?.build_with_abort(abort)
+        document::build(py, coordinate, || {
+            AnalysisResultDocument::from_pnoise(analysis, result)
         })
     }
 }

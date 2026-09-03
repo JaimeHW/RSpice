@@ -151,6 +151,11 @@ returns a `RunReport`:
   `report.tf` / `report.stb` / `report.pz` / `report.monte_carlo` /
   `report.step` / `report.temperature` / `report.sensitivity` /
   `report.sensitivity_ac` / `report.fourier` — the analysis results
+- `report.pnoise` and `report.oscillator_noise` — a `.pnoise` card around a
+  driven carrier reports an output power spectral density; the same card around
+  an autonomous `.pss` carrier reports a carrier-normalized dBc/Hz phase-noise
+  spectrum with the phase-diffusion constant beside it. They are different
+  quantities, so they are different fields rather than one with a mode flag
 - `report.measurements`, `report.measurement(name)`, `report.failures`,
   `report.all_passed` — `.MEAS` outcomes for TRAN, DC, AC, and NOISE analyses
   (`.MEAS AC` supports magnitude, dB, phase, real, and imaginary data;
@@ -505,6 +510,43 @@ Autonomous oscillator noise uses the same complete device-noise model as
 stationary noise analysis, including resistor noise switches and temperature
 offsets, semiconductor thermal/shot/flicker noise, tabulated and Verilog-A
 sources, and correlated BSIM4 thermal noise.
+
+### The shared result document
+
+Every result family also answers four questions the same way, over the one
+`rspice-analysis-result` document the CLI, the WebAssembly build and the engine
+adapter publish. Reach for these when a script has to work across families —
+inventory what a run produced, compare units, or hand a result to another tool
+— rather than for the per-family accessors above:
+
+```python
+for descriptor in tran.signals():               # the complete signal inventory
+    print(descriptor.name, descriptor.kind, descriptor.unit, descriptor.owner)
+    descriptor.availability                     # available / not_projected /
+                                                # absent_at_coordinate
+
+for scalar in stb.scalars():                    # analysis-owned scalars
+    print(scalar.name, scalar.unit, scalar.value)
+    scalar.unavailable_reason                   # set when there is no number
+
+for observable in op.device_observables():      # per-device histories
+    print(observable.device, observable.parameter, observable.unit)
+    observable.values, observable.validity      # absence is a mask, not a zero
+
+document = ac.document()                        # plain JSON-serializable data
+document["analysis"]["tag"], document["coordinate"], document["signals"]
+```
+
+`scalars()` reports a quantity the analysis proved has no finite value — the
+gain margin of a loop whose phase never reaches −180° — as `value is None` with
+an `unavailable_reason`, where the flat accessor carries a large float.
+`document()` names the authored card the result came from and, for a `.STEP` or
+`.TEMP` run, the coordinate it was solved at.
+
+A result restored from `pickle` carries this binding's own projection rather
+than the core result these are built from, and says so with
+`RSpiceNotImplementedError`. Pickle `result.document()` when the document
+itself has to survive a round trip.
 
 ## Exporting Results
 
