@@ -39,8 +39,9 @@ use super::cfg::{
     CfgUnaryOp, CfgValueKind, CfgValueType, CfgVariable, CfgZiPolynomial, SsaBuilder,
 };
 use super::hir::{
-    HirAnalogOperator, HirContribution, HirContributionKind, HirCrossDirection, HirExprKind,
-    HirExpression, HirLaplaceKind, HirLimiterArgument, HirModel, HirRegion, HirZiKind,
+    HirAnalogOperator, HirAssignment, HirContribution, HirContributionKind, HirCrossDirection,
+    HirExprKind, HirExpression, HirLaplaceKind, HirLimiterArgument, HirModel, HirRegion,
+    HirStatement, HirZiKind,
 };
 use super::mir::{MirEquationKind, MirModel};
 use super::noise::{contains_noise, is_noise_call, string_literal};
@@ -406,6 +407,9 @@ struct CfgLowerer<'a> {
     /// Whether `$port_connected` is a runtime leaf rather than the constant
     /// `1.0`. See [`CfgModel::from_hir_for_executable_backend`].
     per_instance_ports: bool,
+    /// Whether the module prologue is evaluated into the entry block. See
+    /// [`Self::prologue`].
+    lower_prologue: bool,
     metadata_assignment_value: bool,
     /// Whether the expression being lowered is a contribution's right-hand
     /// side. Verilog-AMS 2023 section 4.5.12 requires a strictly positive
@@ -761,21 +765,40 @@ struct CfgLowerMode {
     /// so `$port_connected` is a runtime leaf rather than the constant `1.0`.
     /// See [`CfgModel::from_hir_for_executable_backend`].
     per_instance_ports: bool,
+    /// Evaluate [`HirModel::prologue_statements`] into the entry block before
+    /// the body, so a body read of a localparam or a declaration initializer
+    /// sees what the initializer wrote. See [`CfgLowerer::prologue`].
+    lower_prologue: bool,
 }
 
 impl CfgLowerMode {
+    /// # Why the generated backend does not lower the prologue *yet*
+    ///
+    /// It has the same hole, and for the same reason — it is built from the
+    /// body too — so this is not a difference the two consumers have earned,
+    /// the way `per_instance_ports` is. It is a frozen artifact: the forty-three
+    /// shipped devices are checked in as generated Rust under a `bundle_digest`,
+    /// and `hisimsotb`'s body reads three localparams (`TN`, `QN`, `QB` —
+    /// `hisimsotb.va:657`), so turning this on here changes that device's
+    /// emitted code. Flipping it is a one-word change plus a regeneration, and
+    /// it is a *fix*: today those reads compile to zero.
     const GENERATED: Self = Self {
         noise_metadata_only: false,
         per_instance_ports: false,
+        lower_prologue: false,
     };
     #[cfg(any(feature = "native", feature = "wasm-jit"))]
     const EXECUTABLE: Self = Self {
         noise_metadata_only: false,
         per_instance_ports: true,
+        lower_prologue: true,
     };
+    /// Raw grouped-noise metadata is lowered for the generated backend and is
+    /// part of the same frozen output, so it stays with `GENERATED` here.
     const NOISE_METADATA: Self = Self {
         noise_metadata_only: true,
         per_instance_ports: true,
+        lower_prologue: false,
     };
 }
 
@@ -814,6 +837,7 @@ impl<'a> CfgLowerer<'a> {
             noise_processes: Vec::new(),
             noise_metadata_only: mode.noise_metadata_only,
             per_instance_ports: mode.per_instance_ports,
+            lower_prologue: mode.lower_prologue,
             metadata_assignment_value: false,
             zi_direct_assignment: false,
             diagnostics: Vec::new(),
@@ -866,6 +890,10 @@ impl<'a> CfgLowerer<'a> {
                 self.builder
                     .write_variable(CfgVariable::Activation(contribution), entry, zero);
             }
+        }
+
+        if self.lower_prologue {
+            self.prologue();
         }
 
         let body = self.hir.body.clone();
@@ -997,27 +1025,7 @@ impl<'a> CfgLowerer<'a> {
 
     fn region(&mut self, region: &HirRegion, dynamic_topology_ancestor: bool) {
         match region {
-            HirRegion::Assignment(assignment) => {
-                if assignment.index.is_some() {
-                    self.unsupported(
-                        assignment.span,
-                        format!(
-                            "assignment to '{}' at a run-time array index",
-                            assignment.target_name
-                        ),
-                    );
-                    return;
-                }
-                let was_assignment = self.metadata_assignment_value;
-                self.metadata_assignment_value = self.noise_metadata_only;
-                let value = self.expr(assignment.expr.id);
-                self.metadata_assignment_value = was_assignment;
-                self.builder.write_variable(
-                    CfgVariable::Local(assignment.target),
-                    self.block,
-                    value,
-                );
-            }
+            HirRegion::Assignment(assignment) => self.assignment(assignment),
             HirRegion::Contribution(contribution) => {
                 if self.noise_metadata_only {
                     self.metadata_noise_expr(contribution.expression.id);
@@ -1056,6 +1064,69 @@ impl<'a> CfgLowerer<'a> {
                     dynamic_topology_ancestor || !condition_static,
                 );
             }
+        }
+    }
+
+    /// Evaluate one assignment into its variable's reaching definition.
+    ///
+    /// Shared by the structured body and by the module prologue
+    /// ([`Self::prologue`]), which is the same construct at a different program
+    /// point: `HirStatement::Assignment` and `HirRegion::Assignment` are the
+    /// same [`HirAssignment`], so there is one lowering of it rather than two
+    /// that could drift.
+    fn assignment(&mut self, assignment: &HirAssignment) {
+        if assignment.index.is_some() {
+            self.unsupported(
+                assignment.span,
+                format!(
+                    "assignment to '{}' at a run-time array index",
+                    assignment.target_name
+                ),
+            );
+            return;
+        }
+        let was_assignment = self.metadata_assignment_value;
+        self.metadata_assignment_value = self.noise_metadata_only;
+        let value = self.expr(assignment.expr.id);
+        self.metadata_assignment_value = was_assignment;
+        self.builder
+            .write_variable(CfgVariable::Local(assignment.target), self.block, value);
+    }
+
+    /// Evaluate the module prologue into the entry block.
+    ///
+    /// The localparam and module-scope variable initializers run before the
+    /// `analog` keyword, so [`HirModel::body`] has no position for them and a
+    /// CFG built from the body alone has no definition of what they write. The
+    /// flat route runs them by simply executing its statement list in order;
+    /// this is the same thing at the one program point the body has for
+    /// "before anything else". A body assignment to the same variable then
+    /// overwrites the reaching definition exactly as a later statement
+    /// overwrites the slot, so a conditionally-reassigned initializer keeps its
+    /// declared value on the arm that does not assign it.
+    ///
+    /// Only the initializers themselves are here. A prologue initializer whose
+    /// right-hand side hoists a side effect — an analog function call with an
+    /// output argument — pushes that side effect into the flat list *and*
+    /// records it as a body region, because the analyzer's region stack is
+    /// already open when the prologue runs. Lowering it here as well would
+    /// duplicate every operator in it, and duplicating a `ddt` allocates a
+    /// second state record for one source operator. So the side effect stays
+    /// where the body has it, which leaves the initializer that reads it
+    /// reading a definition that does not reach the entry block:
+    /// [`Self::identifier`] warns and takes the language's zero, which is what
+    /// it did for the whole prologue before this existed.
+    fn prologue(&mut self) {
+        let statements = self.hir.statements.clone();
+        for index in &self.hir.prologue_statements {
+            let Some(HirStatement::Assignment(assignment)) =
+                statements.get(usize::try_from(*index).unwrap_or(usize::MAX))
+            else {
+                // A prologue statement is an initializer, never a loop, and the
+                // index came from the analyzer. Nothing to lower either way.
+                continue;
+            };
+            self.assignment(assignment);
         }
     }
 

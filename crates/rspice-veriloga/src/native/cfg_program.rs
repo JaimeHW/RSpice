@@ -1355,6 +1355,7 @@ mod tests {
             branches: Vec::new(),
             contributions: Vec::new(),
             statements: Vec::new(),
+            prologue_statements: Vec::new(),
             body: Vec::new(),
             executed_correspondence: Default::default(),
             expressions: Vec::new(),

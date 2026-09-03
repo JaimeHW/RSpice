@@ -518,12 +518,22 @@ impl<'a> HierarchyElaborator<'a> {
             .analog_site_count
             .checked_add(child.analog_site_count)
             .ok_or_else(|| internal_error("hierarchy analog site count overflow".to_string()))?;
+        // The child's statements are appended after everything already
+        // flattened, so its prologue indices move by that many. Rebased before
+        // the append, while the offset is still the parent's own length.
+        let statement_base = self.flattened.statements.len();
         self.flattened.statements.extend(
             child
                 .statements
                 .iter()
                 .map(|statement| rewrite_statement(statement, &scope, base))
                 .collect::<CompileResult<Vec<_>>>()?,
+        );
+        self.flattened.prologue_statements.extend(
+            child
+                .prologue_statements
+                .iter()
+                .map(|index| index + statement_base),
         );
         self.flattened.body.extend(
             child

@@ -90,7 +90,7 @@
 //! because "the shipped program is identically zero" is a claim about the
 //! corpus and not a theorem.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use super::cfg_lanes::scalarize_lanes;
 use super::cfg_program::{CfgRuntimeBindings, lower_cfg_function};
@@ -111,7 +111,6 @@ use crate::canonical_ir::{
 use crate::codegen::state_renumbering::StateSlotMapping;
 use crate::codegen::{ColumnAxis, CompiledModel};
 use crate::rust_backend::canonical::stored_charges;
-use smol_str::SmolStr;
 
 /// Why the CFG route cannot build a plan for a module.
 ///
@@ -375,10 +374,16 @@ const DERIVATIVE_RULE_HOLES: &[CfgBinaryOp] = &[CfgBinaryOp::Hypot, CfgBinaryOp:
 /// red, and each one is a wrong Jacobian or a wrong residual, not a rounding
 /// difference.
 ///
-/// Two entries have come off the list, and how they came off is the pattern the
-/// rest are meant to follow — the divergence was a lowering decision one route
-/// had and the other did not, and the fix was to give the CFG route the same
-/// decision rather than a better screen. `$port_connected` folded to `1.0`
+/// Three entries have come off the list, and how they came off is the pattern
+/// the rest are meant to follow — the divergence was a lowering decision one
+/// route had and the other did not, and the fix was to give the CFG route the
+/// same decision rather than a better screen. A **prologue-only definition** —
+/// a localparam or a declaration initializer the body reads — took Verilog-AMS
+/// zero because the CFG had no definition of it at all; W-F4b gave the
+/// executable lowering the module prologue, so the entry block writes what the
+/// initializer wrote and the body overwrites it exactly where a later statement
+/// would ([`crate::canonical_ir::HirModel::prologue_statements`]).
+/// `$port_connected` folded to `1.0`
 /// because the generated backend builds every instance it evaluates;
 /// [`CfgModel::from_hir_for_executable_backend`](crate::canonical_ir::CfgModel::from_hir_for_executable_backend)
 /// is where a backend that cannot promise that says so, and the fold stays
@@ -394,12 +399,6 @@ const DERIVATIVE_RULE_HOLES: &[CfgBinaryOp] = &[CfgBinaryOp::Hypot, CfgBinaryOp:
 ///   measured 4.5 against 2.5 on one entry. Detected as a shipped value entry
 ///   with a non-empty contribution-current read set, which is what "this entry
 ///   probes a current" means in the plan.
-/// * **A prologue-only definition.** A localparam, or a module-scope variable
-///   with a declaration initializer: the MIR route's assignment pass runs it and
-///   its value entries read the slot it wrote, and the CFG, built from the
-///   analog body alone, has no definition of the variable at all. See
-///   [`prologue_only_definition`], which also records the two shapes of this the
-///   estate did not cover.
 /// * **An event-controlled variable.** The CFG recomputes a variable inline
 ///   where the postfix plan reads the slot the assignment pass wrote, and for a
 ///   variable whose value is an accepted event state those are different
@@ -414,17 +413,7 @@ const DERIVATIVE_RULE_HOLES: &[CfgBinaryOp] = &[CfgBinaryOp::Hypot, CfgBinaryOp:
 /// the forty-three-module CFG-versus-MIR census, which has never run past nine
 /// modules. Until it does, a construct no test covers can still diverge, and
 /// this function will not say so.
-fn route_divergence(
-    hir: &crate::canonical_ir::HirModel,
-    function: &CfgFunction,
-    postfix: &NativeModelPlan,
-) -> Option<String> {
-    if let Some(name) = prologue_only_definition(hir) {
-        return Some(format!(
-            "'{name}' is defined only by a module prologue statement, which the MIR route's \
-             assignment pass runs and the CFG has no definition of at all"
-        ));
-    }
+fn route_divergence(function: &CfgFunction, postfix: &NativeModelPlan) -> Option<String> {
     let dependencies = &postfix.current_dependencies;
     let flat = |rows: &[Vec<usize>]| rows.iter().any(|set| !set.is_empty());
     let nested = |rows: &[Vec<Vec<usize>>]| {
@@ -462,138 +451,6 @@ fn route_divergence(
         ),
         _ => None,
     })
-}
-
-/// A variable this module defines only in its prologue, if the body reads one.
-///
-/// The general form of what was recorded here as "an array variable", and the
-/// array was only the case an estate test happened to cover.
-/// [`crate::canonical_ir::HirExecutedCorrespondence`] states the shape:
-/// "module prologue statements (localparam and module-scope variable
-/// initializers, `$bound_step` resets) exist only in the executed copy and pair
-/// with nothing in the body". The MIR route's assignment pass runs them and its
-/// value entries read the slots they wrote. The CFG is built from the body
-/// alone, so it has no definition of such a variable and a read of one falls
-/// through to Verilog-AMS zero initialisation — a wrong number, not a refusal.
-///
-/// W-F4 measured three shapes of it on the `Cfg` route, each against the same
-/// module on `Postfix`:
-///
-/// * an array declaration initializer, `real c[0:2] = '{...}` — the entry this
-///   screen used to name, found by `assignment_pattern_initializer_fills_elements`;
-/// * a scalar declaration initializer, `real g = 4.5;` — a residual of 0.0
-///   against 9.0 at `V(p, n) = 2`;
-/// * a `localparam` read from the body, `localparam real K = 3.0; g = K;` — a
-///   residual of 0.0 against 6.0.
-///
-/// The last two were not screened and no estate test covered them, which is the
-/// same lesson [`route_divergence`] records about its own list: it names what
-/// the estate exposed. See `a_prologue_only_definition_falls_the_module_back`.
-///
-/// # The read test is by name, over both copies
-///
-/// [`crate::canonical_ir::HirModel`]'s expression arena holds the executed copy
-/// and the structured body together, so a name found in it may have been read
-/// by another prologue statement rather than by the body. That over-refuses a
-/// module whose prologue variable only the prologue mentions, and it does not
-/// under-refuse, which is the direction a screen has to be wrong in. No estate
-/// module is in that position today — `lpsize`'s `localparam integer SIZE` is
-/// folded into the array bound before the arena sees it, so the name is not
-/// there to be found — so the cost is potential rather than measured, and the
-/// exact test is a walk of the body's expression roots when one is worth it.
-/// Whether `name` is a variable the analyzer minted for the executed copy
-/// rather than one the source declared.
-///
-/// Both spellings are reserved: `$bound_step` is a task variable, and no source
-/// identifier begins with `$`; `__guardN` is the snapshot
-/// `SemanticAnalyzer::stabilize_condition` takes of a guard expression, minted
-/// under a counter.
-///
-/// Neither is a divergence, and that is a statement about what they are for. A
-/// guard snapshot exists because the executed copy has no control flow to carry
-/// a condition in — the structured body does, so the CFG derives the same
-/// condition from the branch it is a condition *of*, which is
-/// [`crate::canonical_ir::HirExecutedCorrespondence`]'s "`selector == match`
-/// against `__guardN == match`" in the other direction. `$bound_step` bounds the
-/// next timestep and appears in no residual. Without this, sixteen of the
-/// estate's modules refused on a variable the CFG is right not to have.
-fn analyzer_synthesized(name: &str) -> bool {
-    name.starts_with('$') || name.starts_with("__guard")
-}
-
-fn prologue_only_definition(hir: &crate::canonical_ir::HirModel) -> Option<SmolStr> {
-    fn assigned(statements: &[crate::canonical_ir::hir::HirStatement], into: &mut HashSet<u32>) {
-        for statement in statements {
-            match statement {
-                crate::canonical_ir::hir::HirStatement::Assignment(assignment) => {
-                    into.insert(assignment.target.index());
-                }
-                crate::canonical_ir::hir::HirStatement::Loop(body) => assigned(&body.body, into),
-            }
-        }
-    }
-    fn assigned_in_body(regions: &[crate::canonical_ir::hir::HirRegion], into: &mut HashSet<u32>) {
-        for region in regions {
-            match region {
-                crate::canonical_ir::hir::HirRegion::Assignment(assignment) => {
-                    into.insert(assignment.target.index());
-                }
-                crate::canonical_ir::hir::HirRegion::Conditional {
-                    then_body,
-                    else_body,
-                    ..
-                } => {
-                    assigned_in_body(then_body, into);
-                    assigned_in_body(else_body, into);
-                }
-                crate::canonical_ir::hir::HirRegion::Loop { body, .. } => {
-                    assigned_in_body(body, into)
-                }
-                crate::canonical_ir::hir::HirRegion::Contribution(_) => {}
-            }
-        }
-    }
-
-    let mut prologue = HashSet::new();
-    assigned(&hir.statements, &mut prologue);
-    let mut body = HashSet::new();
-    assigned_in_body(&hir.body, &mut body);
-    prologue.retain(|target| !body.contains(target));
-    if prologue.is_empty() {
-        return None;
-    }
-
-    // Both spellings of a read: an identifier, and an array access whose index
-    // the analyzer did not fold to an element variable.
-    let read: HashSet<&SmolStr> = hir
-        .expressions
-        .iter()
-        .filter_map(|expression| match &expression.kind {
-            crate::canonical_ir::hir::HirExprKind::Identifier { name } => Some(name),
-            crate::canonical_ir::hir::HirExprKind::ArrayAccess { array, .. } => Some(array),
-            _ => None,
-        })
-        .collect();
-    // An array element is a variable of its own, named `c[0]`, so a read of one
-    // is found either under that name or under the array's.
-    let array_of = |target: u32| {
-        hir.arrays.iter().find(|array| {
-            let base = array.base.index();
-            target >= base && target < base + array.len
-        })
-    };
-    hir.variables
-        .iter()
-        .filter(|variable| prologue.contains(&variable.id.index()))
-        .filter(|variable| !analyzer_synthesized(&variable.name))
-        .find_map(|variable| {
-            if read.contains(&variable.name) {
-                return Some(variable.name.clone());
-            }
-            array_of(variable.id.index())
-                .filter(|array| read.contains(&array.name))
-                .map(|array| array.name.clone())
-        })
 }
 
 /// The first operation of `function` the derivative pass has no rule for.
@@ -708,7 +565,7 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
             format!("the CFG derivative pass has no rule for {op:?}"),
         ));
     }
-    if let Some(divergence) = route_divergence(&artifact.hir, &cfg.function, &plan) {
+    if let Some(divergence) = route_divergence(&cfg.function, &plan) {
         return Err(refuse(CfgPlanRefusal::KnownDivergence, divergence));
     }
 
@@ -1120,10 +977,10 @@ pub(crate) enum PlanRoute {
 /// ```
 ///
 /// The thirteen are the two closed constructs and the array screen's
-/// over-refusal: [`prologue_only_definition`] names a variable rather than
-/// counting a module's arrays, so `polysum`, `gsel`, `desc` and `lpsize` — which
-/// declare arrays and fill every element inside the analog block — take the CFG
-/// route now. What is left under `known-divergence` is eleven
+/// over-refusal: the prologue screen named a variable rather than counting a
+/// module's arrays, so `polysum`, `gsel`, `desc` and `lpsize` — which declare
+/// arrays and fill every element inside the analog block — took the CFG route
+/// from W-F4 on. What was left under `known-divergence` was eleven
 /// contribution-current probes, three event-controlled variables, and `cinit`,
 /// whose array really is filled by a declaration initializer.
 ///
@@ -1483,10 +1340,53 @@ module cfg_closed_simparam_bare(p, n);
 endmodule
 "#,
             ),
-            // A guarded contribution, which mints the `__guard1` snapshot
-            // [`analyzer_synthesized`] excludes. Without that exclusion this is
-            // a prologue-only definition and sixteen of the estate's modules
-            // refuse on it.
+            // The three prologue shapes W-F4 measured and W-F4b closed. The
+            // numbers they produce are pinned by
+            // [`the_prologue_reaches_a_body_read`]; this pins that they build
+            // at all, which is what a reinstated screen would break.
+            (
+                "array-initializer",
+                r#"
+module cfg_div_array(p, n);
+  inout p, n;
+  electrical p, n;
+  real c[0:1] = '{0.5e-3, 1.5e-3};
+  analog I(p, n) <+ (c[0] + c[1]) * V(p, n);
+endmodule
+"#,
+            ),
+            (
+                "scalar-initializer",
+                r#"
+module cfg_div_scalar_init(p, n);
+  inout p, n;
+  electrical p, n;
+  real g = 4.5;
+  analog I(p, n) <+ g * V(p, n);
+endmodule
+"#,
+            ),
+            (
+                "localparam",
+                r#"
+module cfg_div_localparam(p, n);
+  inout p, n;
+  electrical p, n;
+  localparam real k = 3.0;
+  real g;
+  analog begin
+    g = k;
+    I(p, n) <+ g * V(p, n);
+  end
+endmodule
+"#,
+            ),
+            // A guarded contribution, which mints a `__guard1` snapshot. The
+            // screen that used to name a prologue-only definition by variable
+            // read that snapshot as one and refused sixteen of the estate's
+            // modules over it; the prologue is now a list the analyzer records
+            // rather than a set inferred from assignment targets, so a
+            // synthesized name cannot be mistaken for one.
             (
                 "guarded-contribution",
                 r#"
@@ -1523,44 +1423,60 @@ endmodule
         }
     }
 
-    /// Each construct in [`route_divergence`] falls the module back, and says
-    /// which construct did it.
+    /// A body read of a prologue definition sees what the prologue wrote.
     ///
-    /// One source per entry rather than one source carrying all of them, so a
-    /// screen that stopped working is attributed rather than covered for by the
-    /// next one in the list.
+    /// The value half of the prologue class, evaluated on the *executable*
+    /// lowering — the one [`build_model_plan_from_canonical_cfg`] builds — at a
+    /// bias where the expected residual is a number a reader can check by hand.
+    /// Each of these returned `0.0` before W-F4b, on a route that built the
+    /// module and computed a wrong number rather than refusing it.
+    ///
+    /// The reference numbers are the flat route's, which is the language's:
+    /// `cinit` is the fixture `array_vars::assignment_pattern_initializer_fills_elements`
+    /// stamps at `4.0e-3`, and the scalar and localparam shapes are the two
+    /// W-F4 measured at `9.0` and `6.0` against `Postfix`.
+    ///
+    /// The last case is the one a "run the prologue only where the body never
+    /// assigns" fix would get wrong: `g` has a declaration initializer *and* a
+    /// conditional body assignment, and on the arm that does not assign it the
+    /// initializer's value must survive.
     #[test]
-    fn every_known_divergence_falls_the_module_back() {
-        let cases: &[(&str, &str, &str)] = &[
+    fn the_prologue_reaches_a_body_read() {
+        use crate::canonical_ir::{CfgEvalInputs, CfgModel, evaluate_cfg};
+        use std::collections::{HashMap, HashSet};
+
+        // (case, source, V(p, n), residual of `I(p, n)`)
+        let cases: &[(&str, &str, f64, f64)] = &[
             (
-                "array-initializer",
-                "'c[0]' is defined only by a module prologue statement",
+                "declaration-initializer",
                 r#"
-module cfg_div_array(p, n);
+module cinit(p, n);
   inout p, n;
   electrical p, n;
-  real c[0:1] = '{0.5e-3, 1.5e-3};
-  analog I(p, n) <+ (c[0] + c[1]) * V(p, n);
+  real c[0:2] = '{0.5e-3, 1.5e-3, 2.0e-3};
+  analog I(p, n) <+ (c[0] + c[1] + c[2]) * V(p, n);
 endmodule
 "#,
+                1.0,
+                4.0e-3,
             ),
             (
                 "scalar-initializer",
-                "'g' is defined only by a module prologue statement",
                 r#"
-module cfg_div_scalar_init(p, n);
+module cfg_prologue_scalar(p, n);
   inout p, n;
   electrical p, n;
   real g = 4.5;
   analog I(p, n) <+ g * V(p, n);
 endmodule
 "#,
+                2.0,
+                9.0,
             ),
             (
                 "localparam",
-                "'k' is defined only by a module prologue statement",
                 r#"
-module cfg_div_localparam(p, n);
+module cfg_prologue_localparam(p, n);
   inout p, n;
   electrical p, n;
   localparam real k = 3.0;
@@ -1571,11 +1487,86 @@ module cfg_div_localparam(p, n);
   end
 endmodule
 "#,
+                2.0,
+                6.0,
             ),
             (
-                "current-probe",
-                "contribution current",
+                "initializer-a-body-arm-overwrites",
                 r#"
+module cfg_prologue_overwritten(p, n);
+  inout p, n;
+  electrical p, n;
+  real g = 4.5;
+  analog begin
+    if (V(p, n) > 10.0)
+      g = 1.0;
+    I(p, n) <+ g * V(p, n);
+  end
+endmodule
+"#,
+                2.0,
+                9.0,
+            ),
+        ];
+
+        for (case, source, voltage, expected) in cases {
+            let (_, artifact) = compile(source);
+            let cfg = CfgModel::from_hir_for_executable_backend(&artifact.hir, &artifact.mir)
+                .unwrap_or_else(|diagnostics| panic!("{case}: lowers: {diagnostics:?}"));
+            let mut node_potentials = vec![0.0; artifact.mir.nodes.len()];
+            node_potentials[0] = *voltage;
+            let inputs = CfgEvalInputs {
+                parameters: artifact
+                    .mir
+                    .parameters
+                    .iter()
+                    .map(|parameter| parameter.default.unwrap_or(0.0))
+                    .collect(),
+                parameter_given: vec![false; artifact.mir.parameters.len()],
+                port_connected: vec![true; artifact.hir.ports.len()],
+                event_state: Vec::new(),
+                event_controls: HashMap::new(),
+                node_potentials,
+                branch_flows: vec![0.0; artifact.mir.branches.len()],
+                branch_unknown_flows: vec![0.0; artifact.mir.branch_unknowns.len()],
+                temperature: 300.15,
+                thermal_voltage: 300.15 * 8.617_333_262e-5,
+                multiplicity: 1.0,
+                time: 0.0,
+                analyses: HashSet::new(),
+                simparams: HashMap::new(),
+                ddt: 0.0,
+                ddt_scale: 0.0,
+                idt: 0.0,
+                idt_scale: 0.0,
+                staged: Vec::new(),
+            };
+            let snapshot = evaluate_cfg(&cfg.function, &inputs)
+                .unwrap_or_else(|error| panic!("{case}: evaluates: {error:?}"));
+            let residual = cfg
+                .residuals
+                .first()
+                .and_then(|value| snapshot.value(*value))
+                .unwrap_or_else(|| panic!("{case}: the residual is defined on every path"));
+            assert_eq!(
+                residual, *expected,
+                "{case}: the executable CFG reads the prologue's value"
+            );
+        }
+    }
+
+    /// Each construct in [`route_divergence`] falls the module back, and says
+    /// which construct did it.
+    ///
+    /// One source per entry rather than one source carrying all of them, so a
+    /// screen that stopped working is attributed rather than covered for by the
+    /// next one in the list.
+    #[test]
+    fn every_known_divergence_falls_the_module_back() {
+        let cases: &[(&str, &str, &str)] = &[(
+            "current-probe",
+            "contribution current",
+            r#"
 module cfg_div_probe(p, n);
   inout p, n;
   electrical p, n;
@@ -1586,8 +1577,7 @@ module cfg_div_probe(p, n);
   end
 endmodule
 "#,
-            ),
-        ];
+        )];
         for (case, expected, source) in cases {
             let (model, artifact) = compile(source);
             let (plan, refused) =

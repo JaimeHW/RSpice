@@ -77,6 +77,27 @@ pub struct AnalyzedModule {
     /// Ordered evaluation statements (assignments and runtime loops),
     /// executed before the contributions on every device evaluation
     pub statements: Vec<AnalyzedStatement>,
+    /// Indices into [`Self::statements`] of the module *prologue*: the
+    /// localparam and module-scope variable initializers that run before the
+    /// analog block.
+    ///
+    /// These are the statements [`Self::body`] has no counterpart for at all.
+    /// The analog block's own steps are recorded twice — once here with the
+    /// enclosing guard folded in, once in `body` with the control flow intact —
+    /// but a prologue statement runs *before* the `analog` keyword, so the
+    /// region tree has no position to hold it. A consumer that reads only
+    /// `body` therefore has no definition of a prologue variable, and a read of
+    /// one falls through to Verilog-AMS zero initialisation. This list is what
+    /// such a consumer evaluates first; see
+    /// [`crate::canonical_ir::HirModel::prologue_statements`].
+    ///
+    /// Recorded rather than inferred, for the same reason
+    /// [`AnalyzedAssignment::site`] is: the analyzer is the only level that
+    /// knows which phase emitted a statement. It is a prefix of `statements` as
+    /// one module is analyzed, and stops being one as soon as hierarchy
+    /// elaboration appends an instance's statements after the parent's, which
+    /// is why it is a list of indices and not a count.
+    pub prologue_statements: Vec<usize>,
     /// The same analog block with its control flow intact.
     ///
     /// [`Self::statements`] is the historical form: conditionals dissolved into
