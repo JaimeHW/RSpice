@@ -15,7 +15,6 @@ use rspice_core::analysis::s_param;
 
 use super::RunContext;
 use super::basic::run_dc_op;
-use super::shared::generate_frequency_sweep;
 use crate::cli::{CliError, map_atomic_output_error};
 use crate::commands::publish;
 
@@ -33,18 +32,6 @@ fn map_advanced_simulation_error(
     error: rspice_core::SimulationError,
 ) -> CliError {
     if matches!(error, rspice_core::SimulationError::Aborted) {
-        super::cancellation_cli_error(ctx.args.timeout)
-    } else {
-        CliError::simulation_error_in(error.to_string(), analysis)
-    }
-}
-
-fn map_advanced_string_error(
-    ctx: &RunContext<'_>,
-    analysis: &str,
-    error: impl std::fmt::Display,
-) -> CliError {
-    if crate::abort::reason().is_some() {
         super::cancellation_cli_error(ctx.args.timeout)
     } else {
         CliError::simulation_error_in(error.to_string(), analysis)
@@ -1265,348 +1252,159 @@ fn corner_output_path(
     Some(path.with_file_name(file_name))
 }
 
-#[derive(Debug)]
-struct SParameterSweepData {
-    frequencies: Vec<f64>,
-    ports: Vec<s_param::SParameterPort>,
-    s: Vec<Vec<Vec<rspice_core::Complex64>>>,
-    noise: Option<SParameterNoiseData>,
-}
-
-#[derive(Debug)]
-struct SParameterNoiseData {
-    reference_temperature_kelvin: f64,
-    current_correlation: Vec<Vec<Vec<rspice_core::Complex64>>>,
-    two_port_parameters: Option<Vec<s_param::TwoPortNoise>>,
-}
-
-/// Map a shared S-parameter failure onto the CLI's error type.
+/// Run one authored `.SP` card and publish its scattering sweep.
 ///
-/// Both port validation and the Y-to-S conversion now report through
-/// `rspice_core`, including the singular-normalization case this command used
-/// to swallow by emitting a zero-filled matrix.
-fn sparameter_error(error: impl std::fmt::Display) -> CliError {
-    CliError::SimulationError {
-        message: error.to_string(),
-        analysis: Some("S-Parameters".to_string()),
-    }
-}
-
+/// Port collection, the excitation sweep, the wave-to-scattering conversion
+/// and — under `DONOISE` — the port-noise covariance solve and its two-port
+/// derivation are all one core operation with one validity policy. This
+/// command supplies the artifact destination and the output representation
+/// and nothing else; it does not decide what a `.SP` card means.
 pub(super) fn run_sparam_from_command(
     ctx: &RunContext<'_>,
-    variation: rspice_core::netlist::FreqVariation,
-    points: usize,
-    start_freq: f64,
-    stop_freq: f64,
-    do_noise: bool,
+    card: &rspice_core::netlist::AnalysisCommand,
 ) -> Result<(), CliError> {
     ensure_not_cancelled(ctx)?;
-    let frequencies = generate_frequency_sweep(variation, points, start_freq, stop_freq)?;
-    let ports = s_param::collect_ports(ctx.netlist).map_err(sparameter_error)?;
+    let run = ctx
+        .engine
+        .run_sp_with_abort(ctx.netlist, card, &crate::abort::ProcessAbort)
+        .map_err(|error| map_advanced_simulation_error(ctx, "S-Parameters", error))?;
+    ensure_not_cancelled(ctx)?;
+
+    let frequencies = run
+        .scattering
+        .data
+        .iter()
+        .map(|matrix| matrix.frequency)
+        .collect::<Vec<_>>();
+    let scattering = scattering_cube(&run.scattering);
     if !ctx.quiet {
         println!(
             "Running {}-port S-parameter analysis: {} frequency points",
-            ports.len(),
+            run.ports.len(),
             frequencies.len()
         );
-    }
-
-    let data = solve_netlist_sparameters(ctx, ports, frequencies, do_noise)?;
-    ensure_not_cancelled(ctx)?;
-    if !ctx.quiet
-        && let Some(first) = data
-            .s
+        if let Some(first) = scattering
             .first()
             .and_then(|row| row.first())
-            .and_then(|v| v.first())
-    {
-        println!(
-            "  @ {:e} Hz: |S_1_1|={:.4}",
-            data.frequencies.first().copied().unwrap_or(0.0),
-            first.norm()
-        );
+            .and_then(|series| series.first())
+        {
+            println!(
+                "  @ {:e} Hz: |S_1_1|={:.4}",
+                frequencies.first().copied().unwrap_or(0.0),
+                first.norm()
+            );
+        }
     }
 
-    if let Some(resolved) = ctx.resolve_output("sp") {
-        let analysis_id = resolved.analysis("sp")?;
-        let output_path = &resolved.path;
-        if touchstone_extension_matches(output_path, data.ports.len()) {
-            if data.noise.is_some() {
-                return Err(CliError::InvalidArgument {
-                    message: format!(
-                        "{} cannot retain the full .SP DONOISE covariance and normalization provenance",
-                        output_path.display()
-                    ),
-                    suggestion: Some(
-                        "use CSV, TSV, raw, or HDF5 output for .SP DONOISE".to_string(),
-                    ),
-                });
-            }
-            write_touchstone_nport(output_path, &data.ports, &data.frequencies, &data.s)?;
-        } else {
-            // The shared S-parameter document declares the scattering matrix
-            // and its ports. `.SP DONOISE` additionally publishes the current
-            // covariance, its reference temperature, the 4kT normalization,
-            // and the two-port noise figures, none of which that document can
-            // hold — so the typed representation is refused rather than
-            // published with the noise provenance dropped.
-            if matches!(ctx.format, crate::cli::OutputFormat::Json) && data.noise.is_some() {
-                return Err(CliError::InvalidArgument {
-                    message: "the shared S-parameter result document cannot retain the .SP DONOISE covariance, reference temperature, or two-port noise figures"
-                        .to_string(),
-                    suggestion: Some(
-                        "export .SP DONOISE with --format csv, tsv, raw, or hdf5".to_string(),
-                    ),
-                });
-            }
-            let signals = sparameter_export_signals(&data);
-            let core_result = sparameter_core_result(&data);
-            super::document::publish_analysis_result(
-                ctx,
-                output_path,
-                analysis_id,
-                super::document::complex_schema(&signals)?,
-                || {
-                    rspice_core::execution::AnalysisResultDocument::from_s_parameters(
-                        analysis_id,
-                        &core_result,
-                    )
-                },
-                |path, format| {
-                    if matches!(format, crate::cli::OutputFormat::Hdf5) {
-                        let mut hdf5 = crate::hdf5::Hdf5SimulationData::new();
-                        hdf5.title = "S-Parameters".to_string();
-                        hdf5.identity = Some(super::document::hdf5_identity(ctx, analysis_id)?);
-                        let mut section = crate::hdf5::Hdf5AcSection::new(data.frequencies.clone());
-                        for signal in &signals {
-                            section.add_signal(
-                                signal.display_name.clone(),
-                                signal.real.clone(),
-                                signal.imag.clone(),
-                            );
-                        }
-                        hdf5.ac = Some(section);
-                        crate::hdf5::write_hdf5(path, &hdf5)
-                            .map_err(|err| super::shared::map_hdf5_output_error(path, err))
-                    } else {
-                        super::export::complex_table(
-                            "sp",
-                            "S-Parameters",
-                            data.frequencies.clone(),
-                            &signals,
-                        )
-                        .write(path, format)
+    let Some(resolved) = ctx.resolve_output("sp") else {
+        return Ok(());
+    };
+    let analysis_id = resolved.analysis("sp")?;
+    let output_path = &resolved.path;
+    if touchstone_extension_matches(output_path, run.ports.len()) {
+        if run.port_noise.is_some() {
+            return Err(CliError::InvalidArgument {
+                message: format!(
+                    "{} cannot retain the full .SP DONOISE covariance and normalization provenance",
+                    output_path.display()
+                ),
+                suggestion: Some("use CSV, TSV, raw, or HDF5 output for .SP DONOISE".to_string()),
+            });
+        }
+        write_touchstone_nport(output_path, &run.ports, &frequencies, &scattering)?;
+    } else {
+        // The shared S-parameter document declares the scattering matrix and
+        // its ports. `.SP DONOISE` additionally publishes the current
+        // covariance, its reference temperature, the 4kT normalization, and
+        // the two-port noise figures, none of which that document can hold —
+        // so the typed representation is refused rather than published with
+        // the noise provenance dropped.
+        if matches!(ctx.format, crate::cli::OutputFormat::Json) && run.port_noise.is_some() {
+            return Err(CliError::InvalidArgument {
+                message: "the shared S-parameter result document cannot retain the .SP DONOISE covariance, reference temperature, or two-port noise figures"
+                    .to_string(),
+                suggestion: Some(
+                    "export .SP DONOISE with --format csv, tsv, raw, or hdf5".to_string(),
+                ),
+            });
+        }
+        let signals = sparameter_export_signals(&run, &frequencies, &scattering);
+        super::document::publish_analysis_result(
+            ctx,
+            output_path,
+            analysis_id,
+            super::document::complex_schema(&signals)?,
+            || {
+                rspice_core::execution::AnalysisResultDocument::from_s_parameters(
+                    analysis_id,
+                    &run.scattering,
+                )
+            },
+            |path, format| {
+                if matches!(format, crate::cli::OutputFormat::Hdf5) {
+                    let mut hdf5 = crate::hdf5::Hdf5SimulationData::new();
+                    hdf5.title = "S-Parameters".to_string();
+                    hdf5.identity = Some(super::document::hdf5_identity(ctx, analysis_id)?);
+                    let mut section = crate::hdf5::Hdf5AcSection::new(frequencies.clone());
+                    for signal in &signals {
+                        section.add_signal(
+                            signal.display_name.clone(),
+                            signal.real.clone(),
+                            signal.imag.clone(),
+                        );
                     }
-                },
-            )?;
-        }
-
-        if !ctx.quiet {
-            println!("  S-parameters exported to: {}", output_path.display());
-        }
+                    hdf5.ac = Some(section);
+                    crate::hdf5::write_hdf5(path, &hdf5)
+                        .map_err(|err| super::shared::map_hdf5_output_error(path, err))
+                } else {
+                    super::export::complex_table(
+                        "sp",
+                        "S-Parameters",
+                        frequencies.clone(),
+                        &signals,
+                    )
+                    .write(path, format)
+                }
+            },
+        )?;
     }
 
+    if !ctx.quiet {
+        println!("  S-parameters exported to: {}", output_path.display());
+    }
     Ok(())
 }
 
-/// Re-assemble the swept scattering matrix into the core result type the
-/// shared document is built from. The numbers are the ones the extraction
-/// produced; only their container changes.
-fn sparameter_core_result(
-    data: &SParameterSweepData,
-) -> rspice_core::analysis::s_param::SParameterResult {
-    use rspice_core::analysis::s_param::{Port, SMatrix, SParameterResult};
-
-    let ports = data
-        .ports
-        .iter()
-        .map(|port| Port {
-            number: port.number,
-            node_pos: port.node_pos.clone(),
-            node_neg: port.node_neg.clone(),
-            z0: port.z0,
+/// The swept scattering matrix in the `[row][column][frequency]` shape the
+/// shared Touchstone writer and the flat column projection both take.
+fn scattering_cube(result: &s_param::SParameterResult) -> Vec<Vec<Vec<rspice_core::Complex64>>> {
+    let count = result.ports.len();
+    (0..count)
+        .map(|row| {
+            (0..count)
+                .map(|column| {
+                    result
+                        .data
+                        .iter()
+                        .map(|matrix| matrix.get(row + 1, column + 1))
+                        .collect()
+                })
+                .collect()
         })
-        .collect::<Vec<_>>();
-    let reference = ports.first().map_or(50.0, |port| port.z0);
-    let mut result = SParameterResult::new(reference, ports);
-    let count = data.ports.len();
-    for (index, frequency) in data.frequencies.iter().enumerate() {
-        let mut matrix = SMatrix::new(*frequency, count);
-        for row in 0..count {
-            for column in 0..count {
-                if let Some(value) = data
-                    .s
-                    .get(row)
-                    .and_then(|entries| entries.get(column))
-                    .and_then(|series| series.get(index))
-                {
-                    matrix.set(row, column, *value);
-                }
-            }
-        }
-        result.data.push(matrix);
-    }
-    result
-}
-
-fn solve_netlist_sparameters(
-    ctx: &RunContext<'_>,
-    ports: Vec<s_param::SParameterPort>,
-    frequencies: Vec<f64>,
-    do_noise: bool,
-) -> Result<SParameterSweepData, CliError> {
-    ensure_not_cancelled(ctx)?;
-    let s = s_param::extract_s_matrix_with_abort(
-        ctx.netlist,
-        &ports,
-        &frequencies,
-        |driven| {
-            ctx.engine
-                .run_ac_with_abort(driven, &frequencies, &crate::abort::ProcessAbort)
-                .map_err(|error| error.to_string())
-        },
-        &crate::abort::ProcessAbort,
-    )
-    .map_err(|error| map_advanced_string_error(ctx, "S-Parameters", error))?;
-    ensure_not_cancelled(ctx)?;
-
-    let noise = do_noise
-        .then(|| solve_sparameter_noise(ctx, &ports, &frequencies, &s))
-        .transpose()?;
-
-    Ok(SParameterSweepData {
-        frequencies,
-        ports,
-        s,
-        noise,
-    })
-}
-
-fn solve_sparameter_noise(
-    ctx: &RunContext<'_>,
-    ports: &[s_param::SParameterPort],
-    frequencies: &[f64],
-    s: &[Vec<Vec<rspice_core::Complex64>>],
-) -> Result<SParameterNoiseData, CliError> {
-    ensure_not_cancelled(ctx)?;
-    let temperature = ctx.engine.config().temperature;
-    let source_names = ports
-        .iter()
-        .map(|port| port.source_name.clone())
-        .collect::<Vec<_>>();
-    let points = ctx
-        .engine
-        .run_port_noise_correlation_with_abort(
-            ctx.netlist,
-            &source_names,
-            frequencies,
-            temperature,
-            &crate::abort::ProcessAbort,
-        )
-        .map_err(|error| map_advanced_simulation_error(ctx, "SP Port Noise", error))?;
-    if points.len() != frequencies.len() {
-        return Err(CliError::simulation_error_in(
-            format!(
-                "port-noise solve returned {} points for {} requested frequencies",
-                points.len(),
-                frequencies.len()
-            ),
-            "SP Port Noise",
-        ));
-    }
-
-    let count = ports.len();
-    let mut current_correlation =
-        vec![vec![vec![rspice_core::Complex64::ZERO; frequencies.len()]; count]; count];
-    for (point_index, (expected_frequency, point)) in frequencies.iter().zip(&points).enumerate() {
-        ensure_not_cancelled(ctx)?;
-        let tolerance = expected_frequency.abs().max(1.0) * f64::EPSILON * 64.0;
-        if (point.frequency - expected_frequency).abs() > tolerance {
-            return Err(CliError::simulation_error_in(
-                format!(
-                    "port-noise point {} is at {:.16e} Hz, expected {:.16e} Hz",
-                    point_index + 1,
-                    point.frequency,
-                    expected_frequency
-                ),
-                "SP Port Noise",
-            ));
-        }
-        if point.current_correlation.len() != count
-            || point
-                .current_correlation
-                .iter()
-                .any(|row| row.len() != count)
-        {
-            return Err(CliError::simulation_error_in(
-                format!(
-                    "port-noise point {} returned a malformed covariance matrix for {count} ports",
-                    point_index + 1
-                ),
-                "SP Port Noise",
-            ));
-        }
-        for (row, correlations) in current_correlation.iter_mut().enumerate() {
-            for (column, values) in correlations.iter_mut().enumerate() {
-                values[point_index] = point.current_correlation[row][column];
-            }
-        }
-    }
-
-    let two_port_parameters = if count == 2 {
-        let reference_impedances = ports.iter().map(|port| port.z0).collect::<Vec<_>>();
-        let mut derived = Vec::with_capacity(frequencies.len());
-        for point_index in 0..frequencies.len() {
-            ensure_not_cancelled(ctx)?;
-            let scattering = (0..count)
-                .map(|row| {
-                    (0..count)
-                        .map(|column| s[row][column][point_index])
-                        .collect::<Vec<_>>()
-                })
-                .collect::<Vec<_>>();
-            let admittance =
-                s_param::y_from_s(&scattering, &reference_impedances).map_err(sparameter_error)?;
-            let covariance = (0..count)
-                .map(|row| {
-                    (0..count)
-                        .map(|column| current_correlation[row][column][point_index])
-                        .collect::<Vec<_>>()
-                })
-                .collect::<Vec<_>>();
-            let parameters =
-                s_param::derive_two_port_noise(&admittance, &covariance, ports[0].z0, temperature);
-            if !parameters.valid {
-                return Err(CliError::simulation_error_in(
-                    format!(
-                        "two-port noise parameters are undefined at {:.16e} Hz; the admittance/noise data do not support a physical finite solution",
-                        frequencies[point_index]
-                    ),
-                    "SP Port Noise",
-                ));
-            }
-            derived.push(parameters);
-        }
-        Some(derived)
-    } else {
-        None
-    };
-
-    Ok(SParameterNoiseData {
-        reference_temperature_kelvin: temperature,
-        current_correlation,
-        two_port_parameters,
-    })
+        .collect()
 }
 
 fn sparameter_export_signals(
-    data: &SParameterSweepData,
+    run: &rspice_core::engine::SParameterRun,
+    frequencies: &[f64],
+    scattering: &[Vec<Vec<rspice_core::Complex64>>],
 ) -> Vec<crate::commands::run_signals::ComplexSignal> {
     use crate::commands::run_signals::{ComplexSignal, SignalKind};
 
-    let count = data.ports.len();
-    let mut signals =
-        Vec::with_capacity(count * count + data.noise.as_ref().map_or(0, |_| count * count + 6));
+    let count = run.ports.len();
+    let mut signals = Vec::with_capacity(
+        count * count + run.port_noise.as_ref().map_or(0, |_| count * count + 6),
+    );
     let mut push = |name: String, values: &[rspice_core::Complex64], kind: SignalKind| {
         signals.push(ComplexSignal {
             display_name: name.clone(),
@@ -1617,28 +1415,39 @@ fn sparameter_export_signals(
         });
     };
 
-    for row in 0..count {
-        for column in 0..count {
+    for (row, columns) in scattering.iter().enumerate() {
+        for (column, series) in columns.iter().enumerate() {
             push(
                 format!("S_{}_{}", row + 1, column + 1),
-                &data.s[row][column],
+                series,
                 SignalKind::Voltage,
             );
         }
     }
 
-    if let Some(noise) = &data.noise {
+    if let Some(noise) = &run.port_noise {
         for row in 0..count {
             for column in 0..count {
+                let series = noise
+                    .points
+                    .iter()
+                    .map(|point| {
+                        point
+                            .current_correlation
+                            .get(row)
+                            .and_then(|entries| entries.get(column))
+                            .copied()
+                            .unwrap_or(rspice_core::Complex64::ZERO)
+                    })
+                    .collect::<Vec<_>>();
                 push(
                     format!("CY_A2_per_Hz_{}_{}", row + 1, column + 1),
-                    &noise.current_correlation[row][column],
+                    &series,
                     SignalKind::Scalar,
                 );
             }
         }
-        let constant =
-            |value| vec![rspice_core::Complex64::new(value, 0.0); data.frequencies.len()];
+        let constant = |value| vec![rspice_core::Complex64::new(value, 0.0); frequencies.len()];
         push(
             "noise_reference_temperature_K".to_string(),
             &constant(noise.reference_temperature_kelvin),
@@ -1651,7 +1460,7 @@ fn sparameter_export_signals(
             ),
             SignalKind::Scalar,
         );
-        if let Some(parameters) = &noise.two_port_parameters {
+        if let Some(parameters) = &noise.two_port {
             let real_values = |project: fn(&s_param::TwoPortNoise) -> f64| {
                 parameters
                     .iter()
