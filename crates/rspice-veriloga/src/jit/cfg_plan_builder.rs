@@ -314,10 +314,13 @@ pub(crate) struct CfgPlanReport {
     /// Whether a branch condition reads one anywhere in the function. On its
     /// own this decides nothing — see [`LiveCurrentTaint`].
     pub(crate) live_current_control_flow: bool,
-    /// Whether the prelude was dropped because its union cone read a current
-    /// after all, leaving every entry on its own cone. The size the CFG route
-    /// had before this lane, for the module it happens to.
-    pub(crate) prelude_live_current: bool,
+    /// Why the prelude was dropped, when one could not be built.
+    ///
+    /// Every entry then keeps its own cone, which is the plan this route built
+    /// before there was a prelude — a size regression for that module and
+    /// nothing more. `None` means either that a prelude was built or that the
+    /// module had no publishable entry to build one from.
+    pub(crate) prelude_refused: Option<CfgPlanRefusal>,
 }
 
 /// One value entry's position in the plan, for a message that names it.
@@ -967,14 +970,18 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
             &slots,
         ) {
             Ok(prelude) => Some(prelude),
-            // The union's own control flow reads a current. Every entry goes
-            // back to its cone — the plan this route built before there was a
-            // prelude — rather than the module going down over a size fix.
-            Err(refused) if refused.class == CfgPlanRefusal::PreludeLiveCurrent => {
-                report.prelude_live_current = true;
+            // A prelude that will not build costs size and nothing else: every
+            // entry goes back to the cone this route lowered before there was
+            // one. Refusing the module instead would take a plan that builds
+            // down over an optimization, and the union is *harder* to lower
+            // than any single cone — it keeps every surviving block's control
+            // flow, so a `ddt` under a condition that no one entry's cone
+            // reaches is in the union's (mvsg_cmc, measured). The class is
+            // recorded rather than swallowed; the size census prints it.
+            Err(refused) => {
+                report.prelude_refused = Some(refused.class);
                 None
             }
-            Err(refused) => return Err(refused),
         }
     };
     report.prelude_slots = prelude.as_ref().map_or(0, CfgPrelude::slot_count);

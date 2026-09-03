@@ -77,8 +77,8 @@ use crate::canonical_ir::{
 use crate::jit::assignment::operation_count;
 use crate::jit::cfg_lanes::scalarize_lanes;
 use crate::jit::cfg_plan_builder::{
-    CfgNoiseScope, CfgPlanEntry, ShippedColumnLanes, build_model_plan_from_canonical_cfg,
-    derivative_seeds,
+    CfgNoiseScope, CfgPlanEntry, CfgPlanRefusal, ShippedColumnLanes,
+    build_model_plan_from_canonical_cfg, derivative_seeds,
 };
 use crate::jit::cfg_program::{CfgRuntimeBindings, lower_cfg_function};
 use crate::jit::plan_builder::{
@@ -558,12 +558,15 @@ fn census_images(module: &str, shipped: &super::census_models::CensusModel) {
             // cone the block above still measures.
             println!(
                 "cfg-size model={module} prelude slots={} instructions={} \
-                 live_current_entries={} live_current_control_flow={} dropped_live_current={}",
+                 live_current_entries={} live_current_control_flow={} refused={}",
                 built.report.prelude_slots,
                 built.report.prelude_instructions,
                 built.report.live_current_entries,
                 built.report.live_current_control_flow,
-                built.report.prelude_live_current,
+                built
+                    .report
+                    .prelude_refused
+                    .map_or("none", CfgPlanRefusal::name),
             );
             crate::native::x64::compile_model_plan(model, &built.plan)
                 .map_err(|error| error.to_string())
