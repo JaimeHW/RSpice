@@ -18,18 +18,17 @@
 //!
 //! A card whose result is more than one document publishes them all, staged in
 //! the same artifact transaction: `.SP DONOISE` publishes the port-noise sweep
-//! beside the scattering one, and a transient publishes one Fourier document
-//! per authored `.FOUR` operand beside its own. A child artifact's file name is
-//! the parent's stem plus its own namespace component — its analysis tag when
-//! it has an identity of its own (`tran-001.four-001.result.json`), and its
-//! result family when it shares the parent's identity, as port noise does
+//! beside the scattering one, and a transient publishes one spectrum per
+//! authored `.FFT` card and one Fourier document per authored `.FOUR` operand
+//! beside its own. A child artifact's file name is the parent's stem plus its
+//! own namespace component — its analysis tag when it has an identity of its
+//! own (`tran-001.fft-001.result.json`, `tran-001.four-001.result.json`), and
+//! its result family when it shares the parent's identity, as port noise does
 //! (`sp-001.port-noise.result.json`).
 //!
-//! Two adapter-owned documents remain, and neither is a result projection:
+//! One adapter-owned document remains, and it is not a result projection:
 //! [`crate::axis_execution_document`] is the STEP/TEMP orchestration record
-//! and references the typed documents by path, schema, and family, and
-//! [`crate::fft_result_document`] carries transient `.FFT` spectra in the
-//! adapter's own schema (see that module).
+//! and references the typed documents by path, schema, and family.
 //!
 //! # Protocol compatibility
 //!
@@ -84,10 +83,6 @@ use crate::failure::DirectiveFailure;
 use crate::family::{
     REQUEST_KINDS, matches_request, planned_kind_for_request, refusal_for_request,
     request_kind_name, run_directive, unmapped_deck_card,
-};
-use crate::fft_result_document::{
-    FFT_RESULT_DOCUMENT_CONTENT_TYPE, FFT_RESULT_DOCUMENT_SCHEMA, FFT_RESULT_DOCUMENT_VERSION,
-    FftResultDocumentError,
 };
 use crate::measure::{Measurement, canonical_decimal, finalize_measurements};
 use crate::result_artifact::{

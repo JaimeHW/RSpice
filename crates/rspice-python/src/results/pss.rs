@@ -229,6 +229,20 @@ pub struct PyPssResult {
     pub residual_norm: f64,
     #[pyo3(get)]
     pub period: f64,
+    evidence: Option<DocumentEvidence<()>>,
+}
+
+impl CarriesDocumentEvidence for PyPssResult {
+    fn bind_execution(
+        &mut self,
+        analysis: rspice_core::execution::AnalysisInstanceId,
+        coordinate: Option<&rspice_core::execution::ResultCoordinate>,
+    ) {
+        self.evidence = self
+            .evidence
+            .take()
+            .map(|evidence| evidence.with_execution(analysis, coordinate));
+    }
 }
 
 impl PyPssResult {
@@ -242,7 +256,19 @@ impl PyPssResult {
             iterations: result.iterations,
             residual_norm: result.final_residual,
             period: result.period,
+            evidence: Some(DocumentEvidence::sole(
+                rspice_core::execution::AnalysisKind::Pss,
+                (),
+            )),
         }
+    }
+
+    /// The shared result document, projected from the retained orbit.
+    fn shared_document(&self, py: Python<'_>) -> PyResult<AnalysisResultDocument> {
+        let (analysis, coordinate) = document::execution(&self.evidence, "PSS")?;
+        document::build(py, coordinate, || {
+            AnalysisResultDocument::from_pss(analysis, &self.inner)
+        })
     }
 
     fn floquet_contract_state(&self) -> PyResult<PssFloquetContractState> {
@@ -511,6 +537,30 @@ impl PyPssResult {
         )
     }
 
+    /// Typed inventory of every signal in this result's shared document.
+    ///
+    /// The descriptors are the ones the CLI, the WASM build and the engine
+    /// adapter publish, so a canonical name, unit, owner, or availability
+    /// means the same thing on every surface.
+    fn signals(&self, py: Python<'_>) -> PyResult<Vec<PySignalDescriptor>> {
+        Ok(document::signals(&self.shared_document(py)?))
+    }
+
+    /// Every analysis-owned scalar this result publishes, with its unit.
+    fn scalars(&self, py: Python<'_>) -> PyResult<Vec<PyResultScalar>> {
+        Ok(document::scalars(&self.shared_document(py)?))
+    }
+
+    /// Every per-device observable history this result captured.
+    fn device_observables(&self, py: Python<'_>) -> PyResult<Vec<PyDeviceObservable>> {
+        Ok(document::device_observables(&self.shared_document(py)?))
+    }
+
+    /// The whole shared result document as JSON-serializable Python data.
+    fn document<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        document::json_view(py, &self.shared_document(py)?)
+    }
+
     /// Rebuild from pickled state. Not part of the public API.
     ///
     /// The orbit group is the converged periodic solution; the diagnostics
@@ -577,6 +627,7 @@ impl PyPssResult {
             iterations: run_iterations,
             residual_norm: run_residual,
             period: run_period,
+            evidence: None,
         })
     }
 

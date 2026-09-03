@@ -23,9 +23,8 @@ use rspice_core::netlist::Netlist;
 use rspice_engine_adapter::axis_execution_document::{
     AXIS_EXECUTION_SCHEMA, AXIS_EXECUTION_VERSION,
 };
-use rspice_engine_adapter::fft_result_document::{
-    FFT_RESULT_DOCUMENT_SCHEMA, FFT_RESULT_DOCUMENT_VERSION,
-};
+use rspice_engine_adapter::document::CIRCUIT_DOCUMENT_SCHEMA;
+use rspice_engine_adapter::execute::RESULT_MANIFEST_FORMAT;
 use rspice_engine_adapter::wire::{
     CURRENT_REVISION_CONTENT_DIGEST_VERSION, CURRENT_SIMULATION_REQUEST_DIGEST_VERSION,
     INTEGRITY_ENGINE_PROTOCOL_VERSION,
@@ -81,13 +80,20 @@ fn unfenced(value: &str) -> String {
 #[test]
 fn the_published_wire_contract_matches_the_constants_it_names() {
     let readme = read_readme("rspice-engine-adapter");
-    let table = two_column_table(&readme, "## Wire contract");
+    let mut table = two_column_table(&readme, "## Wire contract");
+    // The header row parses as an ordinary row; it names no constant.
+    table.remove("Element");
     assert!(
         !table.is_empty(),
         "the adapter README's wire-contract table is empty or was restructured"
     );
 
     let expected: BTreeMap<&str, String> = BTreeMap::from([
+        (
+            "Request document schema",
+            CIRCUIT_DOCUMENT_SCHEMA.to_owned(),
+        ),
+        ("Result manifest format", RESULT_MANIFEST_FORMAT.to_owned()),
         (
             "Protocol version",
             format!(
@@ -109,14 +115,19 @@ fn the_published_wire_contract_matches_the_constants_it_names() {
             ),
         ),
         (
-            "Transient FFT bundle",
-            format!("{FFT_RESULT_DOCUMENT_SCHEMA} v{FFT_RESULT_DOCUMENT_VERSION}"),
-        ),
-        (
             "Run-axis orchestration record",
             format!("{AXIS_EXECUTION_SCHEMA} v{AXIS_EXECUTION_VERSION}"),
         ),
     ]);
+
+    // The table is the complete list, not a subset: a row for a document this
+    // build stopped writing sends an integrator looking for an artifact that
+    // will never be published, which is exactly what a stale schema row does.
+    assert_eq!(
+        table.keys().map(String::as_str).collect::<Vec<_>>(),
+        expected.keys().copied().collect::<Vec<_>>(),
+        "the wire-contract table documents a different set of elements than this build declares"
+    );
 
     for (element, value) in expected {
         let documented = table

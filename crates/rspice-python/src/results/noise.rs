@@ -96,9 +96,60 @@ pub struct PyNoiseResult {
     pub input_referred_density: f64,
     /// Individual noise contributions
     contributions: Vec<PyNoiseContribution>,
+    /// The whole `.NOISE` sweep this point belongs to.
+    ///
+    /// The shared result document describes an analysis, and a `.NOISE`
+    /// analysis is the sweep — this class is one of its rows. Every row of one
+    /// sweep therefore shares one document, held once behind an `Arc` rather
+    /// than copied per point.
+    evidence: Option<DocumentEvidence<std::sync::Arc<Vec<rspice_core::analysis::NoiseResult>>>>,
+}
+
+impl CarriesDocumentEvidence for PyNoiseResult {
+    fn bind_execution(
+        &mut self,
+        analysis: rspice_core::execution::AnalysisInstanceId,
+        coordinate: Option<&rspice_core::execution::ResultCoordinate>,
+    ) {
+        self.evidence = self
+            .evidence
+            .take()
+            .map(|evidence| evidence.with_execution(analysis, coordinate));
+    }
 }
 
 impl PyNoiseResult {
+    /// Project one complete `.NOISE` sweep, one row per solved frequency.
+    ///
+    /// Every row keeps a reference to the sweep it came from, so `signals()`,
+    /// `scalars()` and `document()` describe the analysis rather than a
+    /// one-point sweep that never ran.
+    pub fn sweep_from_core(results: &[rspice_core::analysis::NoiseResult]) -> Vec<Self> {
+        let sweep = std::sync::Arc::new(results.to_vec());
+        results
+            .iter()
+            .map(|result| {
+                let mut point = Self::from_core(result);
+                point.evidence = Some(DocumentEvidence::sole(
+                    rspice_core::execution::AnalysisKind::Noise,
+                    std::sync::Arc::clone(&sweep),
+                ));
+                point
+            })
+            .collect()
+    }
+
+    /// The shared result document of the sweep this row belongs to.
+    fn shared_document(&self, py: Python<'_>) -> PyResult<AnalysisResultDocument> {
+        let evidence = document::evidence(&self.evidence, "noise")?;
+        let coordinate = evidence.coordinate.clone();
+        let analysis = evidence.analysis;
+        let sweep = evidence.core.as_slice();
+        document::build(py, coordinate, || {
+            AnalysisResultDocument::from_noise(analysis, sweep)
+        })
+    }
+
     /// Create from core NoiseResult
     pub fn from_core(result: &rspice_core::analysis::NoiseResult) -> Self {
         let contributions = result
@@ -117,12 +168,39 @@ impl PyNoiseResult {
             output_noise_density: result.output_noise_density,
             input_referred_density: result.input_referred_density,
             contributions,
+            // A single row on its own is not an analysis; only
+            // `sweep_from_core` knows the sweep this row belongs to.
+            evidence: None,
         }
     }
 }
 
 #[pymethods]
 impl PyNoiseResult {
+    /// Typed inventory of every signal in this sweep's shared document.
+    ///
+    /// A `.NOISE` analysis is the whole frequency sweep, and this row is one
+    /// of its points, so the inventory describes the sweep. The descriptors
+    /// are the ones the CLI, the WASM build and the engine adapter publish.
+    fn signals(&self, py: Python<'_>) -> PyResult<Vec<PySignalDescriptor>> {
+        Ok(document::signals(&self.shared_document(py)?))
+    }
+
+    /// Every analysis-owned scalar this sweep publishes, with its unit.
+    fn scalars(&self, py: Python<'_>) -> PyResult<Vec<PyResultScalar>> {
+        Ok(document::scalars(&self.shared_document(py)?))
+    }
+
+    /// Every per-device observable history this sweep captured.
+    fn device_observables(&self, py: Python<'_>) -> PyResult<Vec<PyDeviceObservable>> {
+        Ok(document::device_observables(&self.shared_document(py)?))
+    }
+
+    /// The whole shared result document as JSON-serializable Python data.
+    fn document<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        document::json_view(py, &self.shared_document(py)?)
+    }
+
     /// Get output noise in V/√Hz (RMS voltage noise density)
     #[getter]
     fn output_noise_rms(&self) -> f64 {
@@ -185,6 +263,7 @@ impl PyNoiseResult {
             output_noise_density,
             input_referred_density,
             contributions,
+            evidence: None,
         }
     }
 
@@ -251,6 +330,35 @@ pub struct PyPeriodicNoiseResult {
     pub fundamental_frequency: f64,
     #[pyo3(get)]
     pub converged: bool,
+    /// The core run, kept because the shared document's per-contributor
+    /// offset grids and jitter band are not part of this projection.
+    evidence: Option<DocumentEvidence<rspice_core::engine::PeriodicNoiseResult>>,
+}
+
+impl CarriesDocumentEvidence for PyPeriodicNoiseResult {
+    fn bind_execution(
+        &mut self,
+        analysis: rspice_core::execution::AnalysisInstanceId,
+        coordinate: Option<&rspice_core::execution::ResultCoordinate>,
+    ) {
+        self.evidence = self
+            .evidence
+            .take()
+            .map(|evidence| evidence.with_execution(analysis, coordinate));
+    }
+}
+
+impl CarriesDocumentEvidence for PyOscillatorNoiseResult {
+    fn bind_execution(
+        &mut self,
+        analysis: rspice_core::execution::AnalysisInstanceId,
+        coordinate: Option<&rspice_core::execution::ResultCoordinate>,
+    ) {
+        self.evidence = self
+            .evidence
+            .take()
+            .map(|evidence| evidence.with_execution(analysis, coordinate));
+    }
 }
 
 /// Autonomous-oscillator single-sideband phase noise from PPV projection.
@@ -265,9 +373,26 @@ pub struct PyOscillatorNoiseResult {
     pub period: f64,
     #[pyo3(get)]
     pub corner_frequency: f64,
+    /// The core run and the probe it measured, which the shared document
+    /// records as the phase-diffusion evidence of a `pnoise` result.
+    evidence: Option<DocumentEvidence<rspice_core::engine::PeriodicNoiseResult>>,
 }
 
 impl PyOscillatorNoiseResult {
+    /// Project one autonomous run, naming the probe it measured.
+    pub(crate) fn from_run(output: &str, result: &rspice_core::engine::OscPnoiseResult) -> Self {
+        Self {
+            evidence: Some(DocumentEvidence::sole(
+                rspice_core::execution::AnalysisKind::PNoise,
+                rspice_core::engine::PeriodicNoiseResult::Oscillator {
+                    output: output.to_owned(),
+                    result: result.clone(),
+                },
+            )),
+            ..Self::from_core(result)
+        }
+    }
+
     pub fn from_core(result: &rspice_core::engine::OscPnoiseResult) -> Self {
         Self {
             frequencies: result.frequencies.clone(),
@@ -275,12 +400,67 @@ impl PyOscillatorNoiseResult {
             diffusion_constant: result.diffusion_constant,
             period: result.period,
             corner_frequency: result.corner_hz,
+            // Only a route that knows the authored output probe can publish
+            // this run as a `pnoise` document; the probe is not derivable
+            // from the spectrum.
+            evidence: None,
         }
+    }
+
+    /// The shared result document, projected from the retained run.
+    ///
+    /// The `pnoise` document names the probe the spectrum is referred to, so a
+    /// run that reached this surface without one — a direct
+    /// `run_oscillator_noise` call, which analyzes the orbit itself and takes
+    /// no probe, or a result restored from pickled state — says so rather than
+    /// publishing a document under an invented output name.
+    fn shared_document(&self, py: Python<'_>) -> PyResult<AnalysisResultDocument> {
+        let evidence = self.evidence.as_ref().ok_or_else(|| {
+            crate::errors::not_implemented_error(
+                "this oscillator phase-noise result names no output probe, so it has no shared \
+                 pnoise document; Engine.run publishes one for an authored .PNOISE card around \
+                 an autonomous .PSS carrier",
+            )
+        })?;
+        let analysis = evidence.analysis;
+        let coordinate = evidence.coordinate.clone();
+        let result = &evidence.core;
+        document::build(py, coordinate, || {
+            AnalysisResultDocument::from_pnoise(analysis, result)
+        })
     }
 }
 
 #[pymethods]
 impl PyOscillatorNoiseResult {
+    /// Typed inventory of every signal in this result's shared document.
+    ///
+    /// The descriptors are the ones the CLI, the WASM build and the engine
+    /// adapter publish, so a canonical name, unit, owner, or availability
+    /// means the same thing on every surface.
+    fn signals(&self, py: Python<'_>) -> PyResult<Vec<PySignalDescriptor>> {
+        Ok(document::signals(&self.shared_document(py)?))
+    }
+
+    /// Every analysis-owned scalar this result publishes, with its unit.
+    fn scalars(&self, py: Python<'_>) -> PyResult<Vec<PyResultScalar>> {
+        Ok(document::scalars(&self.shared_document(py)?))
+    }
+
+    /// Every per-device observable history this result captured.
+    fn device_observables(&self, py: Python<'_>) -> PyResult<Vec<PyDeviceObservable>> {
+        Ok(document::device_observables(&self.shared_document(py)?))
+    }
+
+    /// The whole shared result document as JSON-serializable Python data.
+    ///
+    /// The document's `pnoise` payload carries the Demir phase-diffusion
+    /// evidence — the diffusion constant, the solved period and the Lorentzian
+    /// corner — beside the published dBc/Hz spectrum.
+    fn document<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        document::json_view(py, &self.shared_document(py)?)
+    }
+
     #[getter]
     fn frequencies<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
         self.frequencies.to_pyarray(py)
@@ -320,6 +500,7 @@ impl PyOscillatorNoiseResult {
             diffusion_constant,
             period,
             corner_frequency,
+            evidence: None,
         }
     }
 
@@ -341,7 +522,36 @@ impl PyOscillatorNoiseResult {
     }
 }
 
+/// Authored spelling of the probe a periodic-noise run measured.
+///
+/// This is the spelling core's own `.PNOISE` card runner records, so a run
+/// reached through a direct call names its probe exactly as the same run
+/// reached through an authored card does.
+pub(crate) fn periodic_noise_probe(output_node: &str, reference_node: Option<&str>) -> String {
+    match reference_node {
+        Some(reference) => format!("V({output_node},{reference})"),
+        None => format!("V({output_node})"),
+    }
+}
+
 impl PyPeriodicNoiseResult {
+    /// Project one driven run, naming the probe it measured.
+    pub(crate) fn from_run(
+        output: &str,
+        result: &rspice_core::engine::PnoiseAnalysisResult,
+    ) -> Self {
+        Self {
+            evidence: Some(DocumentEvidence::sole(
+                rspice_core::execution::AnalysisKind::PNoise,
+                rspice_core::engine::PeriodicNoiseResult::Driven {
+                    output: output.to_owned(),
+                    result: result.clone(),
+                },
+            )),
+            ..Self::from_core(result)
+        }
+    }
+
     pub fn from_core(result: &rspice_core::engine::PnoiseAnalysisResult) -> Self {
         Self {
             frequencies: result.frequencies.clone(),
@@ -357,12 +567,50 @@ impl PyPeriodicNoiseResult {
                 .collect(),
             fundamental_frequency: result.fundamental_freq,
             converged: result.converged,
+            // Only a route that knows the authored output probe can publish
+            // this run as a `pnoise` document.
+            evidence: None,
         }
+    }
+
+    /// The shared result document, projected from the retained run.
+    fn shared_document(&self, py: Python<'_>) -> PyResult<AnalysisResultDocument> {
+        let evidence = document::evidence(&self.evidence, "periodic-noise")?;
+        let coordinate = evidence.coordinate.clone();
+        let analysis = evidence.analysis;
+        let result = &evidence.core;
+        document::build(py, coordinate, || {
+            AnalysisResultDocument::from_pnoise(analysis, result)
+        })
     }
 }
 
 #[pymethods]
 impl PyPeriodicNoiseResult {
+    /// Typed inventory of every signal in this result's shared document.
+    ///
+    /// The descriptors are the ones the CLI, the WASM build and the engine
+    /// adapter publish, so a canonical name, unit, owner, or availability
+    /// means the same thing on every surface.
+    fn signals(&self, py: Python<'_>) -> PyResult<Vec<PySignalDescriptor>> {
+        Ok(document::signals(&self.shared_document(py)?))
+    }
+
+    /// Every analysis-owned scalar this result publishes, with its unit.
+    fn scalars(&self, py: Python<'_>) -> PyResult<Vec<PyResultScalar>> {
+        Ok(document::scalars(&self.shared_document(py)?))
+    }
+
+    /// Every per-device observable history this result captured.
+    fn device_observables(&self, py: Python<'_>) -> PyResult<Vec<PyDeviceObservable>> {
+        Ok(document::device_observables(&self.shared_document(py)?))
+    }
+
+    /// The whole shared result document as JSON-serializable Python data.
+    fn document<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        document::json_view(py, &self.shared_document(py)?)
+    }
+
     #[getter]
     fn frequencies<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
         self.frequencies.to_pyarray(py)
@@ -430,6 +678,7 @@ impl PyPeriodicNoiseResult {
             contributors,
             fundamental_frequency,
             converged,
+            evidence: None,
         }
     }
 

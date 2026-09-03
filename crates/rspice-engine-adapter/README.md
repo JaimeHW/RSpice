@@ -17,7 +17,6 @@ reads nothing outside the request's own manifested artifacts.
 | Revision content digest version | `2` |
 | Result manifest format | `rspice-result-v3` |
 | Typed result document | `rspice-analysis-result` v1 (`rspice-core`) |
-| Transient FFT bundle | `rspice-transient-fft-result` v1 |
 | Run-axis orchestration record | `rspice-axis-execution` v1 |
 
 A request whose `protocol_version` is anything other than `4` is refused as
@@ -64,6 +63,10 @@ the same artifact transaction as its own, so a failure part-way through
 publishes none of them. A child artifact's name is the parent's stem plus its
 own namespace component:
 
+* one `fft` document per authored `.FFT` card beside its parent transient,
+  under the `fft-NNN` identity the canonical plan minted for that card —
+  `results/tran-001.fft-001.result.json`. The transient's own document lists
+  every one of them by identity and probed column;
 * one Fourier document per authored `.FOUR` operand beside its parent
   transient, under the `four-NNN` identity the canonical plan minted for that
   operand — `results/tran-001.four-001.result.json`;
@@ -71,12 +74,6 @@ own namespace component:
   Port noise is that card's second result and carries the card's own analysis
   identity, so its result family is the component that separates the two —
   `results/sp-001.port-noise.result.json`.
-
-Transient `.FFT` spectra are published beside their parent transient as
-`results/<...>.fft.result.json`. That bundle is the one result schema this
-crate still owns; it already carries instance and coordinate identity plus the
-complete transform contract, so it has not been migrated onto the shared `fft`
-document.
 
 A deck with a run axis also carries an `rspice-axis-execution` record inside
 the result manifest. It is an orchestration record, not a second result
@@ -93,7 +90,11 @@ version, and result family.
   (`op-001.result.json`, `run-<id>__tran-001.result.json`) rather than from the
   request kind and a one-based ordinal, and a second document a card publishes
   extends that stem with its own component
-  (`tran-001.four-001.result.json`, `sp-001.port-noise.result.json`).
+  (`tran-001.fft-001.result.json`, `tran-001.four-001.result.json`,
+  `sp-001.port-noise.result.json`).
+* every published document is an `rspice-analysis-result`: the adapter defines
+  no result schema of its own, so there is no separate transient-FFT bundle and
+  no `result_manifest.typed_fft_result_schema` entry to read.
 * `result_manifest.format` is `rspice-result-v3` for every run, with or without
   a run axis.
 * Manifest measurements are projected generically from the typed document, so

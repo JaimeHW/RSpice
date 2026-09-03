@@ -21,10 +21,12 @@
 //! | [`monte_carlo`]          | `MonteCarloResult`, `VariableStatistics`                        |
 //! | [`verification`]         | `Measurement`, `AnalysisRecord`, `RunReport`                    |
 //!
-//! Three modules are cross-cutting rather than per-analysis, because every
+//! Four modules are cross-cutting rather than per-analysis, because every
 //! family depends on them and none of them belongs to one analysis:
-//! [`access`] owns the error contract, [`state`] the pickle encoding, and
-//! [`export_bridge`] the shared serialization plumbing.
+//! [`access`] owns the error contract, [`state`] the pickle encoding,
+//! [`export_bridge`] the shared serialization plumbing, and [`document`] the
+//! uniform `signals()`/`scalars()`/`device_observables()`/`document()` view
+//! every family answers over the one shared result document.
 //!
 //! Error discipline: every accessor raises `IndexError` for out-of-range
 //! indices and `KeyError` for unknown node/branch names — silent zeros are
@@ -44,6 +46,7 @@ use rspice_core::analysis::{
 };
 use rspice_core::analysis::{FourierAnalysis, FourierConfig};
 use rspice_core::engine::TransientResult;
+use rspice_core::execution::AnalysisResultDocument;
 use rspice_core::solver::SimulationResult;
 use std::path::PathBuf;
 
@@ -51,6 +54,7 @@ mod ac;
 mod access;
 mod dc;
 mod distortion;
+mod document;
 mod envelope;
 mod event_state;
 mod export_bridge;
@@ -78,6 +82,7 @@ mod verification;
 // Cross-cutting helpers, re-imported here so each family module reaches
 // them through its own `use super::*`.
 use access::*;
+use document::DocumentEvidence;
 use event_state::*;
 use export_bridge::*;
 use state::*;
@@ -86,6 +91,10 @@ pub(crate) use ac::{PyAcResult, PyComplexValue, validated_ac_schema};
 pub(crate) use access::{NodeIdentifier, is_ground_name};
 pub(crate) use dc::{PyDcSweepResult, PyDeviceOperatingPoint, PySimulationResult};
 pub(crate) use distortion::PyDistortionResult;
+pub(crate) use document::{
+    CarriesDocumentEvidence, PyDeviceObservable, PyResultScalar, PySignalDescriptor,
+    bound as bind_document_identity,
+};
 pub(crate) use envelope::PyEnvelopeResult;
 pub(crate) use fft::{
     PyTransientFftBin, PyTransientFftHarmonic, PyTransientFftMetrics, PyTransientFftResult,
@@ -95,7 +104,7 @@ pub(crate) use hb::PyHbResult;
 pub(crate) use monte_carlo::{PyMonteCarloResult, PyVariableStatistics};
 pub(crate) use noise::{
     PyNoiseContribution, PyNoiseResult, PyOscillatorNoiseResult, PyPeriodicNoiseContribution,
-    PyPeriodicNoiseResult,
+    PyPeriodicNoiseResult, periodic_noise_probe,
 };
 pub(crate) use pac::PyPacResult;
 pub(crate) use projection::PyProjectedSignal;

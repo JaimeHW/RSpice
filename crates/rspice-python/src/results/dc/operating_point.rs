@@ -22,6 +22,24 @@ pub struct PySimulationResult {
     /// report at all, which is a different fact from "the circuit has no
     /// devices with operating points". An empty list means the latter.
     device_operating_points: Option<Vec<PyDeviceOperatingPoint>>,
+    /// The core device report the shared document's device observables come
+    /// from, kept beside its Python projection because the projection maps
+    /// the report's static parameter names to owned strings and cannot be
+    /// turned back into one.
+    evidence: Option<DocumentEvidence<Option<rspice_core::circuit::DeviceOpReport>>>,
+}
+
+impl CarriesDocumentEvidence for PySimulationResult {
+    fn bind_execution(
+        &mut self,
+        analysis: rspice_core::execution::AnalysisInstanceId,
+        coordinate: Option<&rspice_core::execution::ResultCoordinate>,
+    ) {
+        self.evidence = self
+            .evidence
+            .take()
+            .map(|evidence| evidence.with_execution(analysis, coordinate));
+    }
 }
 
 impl PySimulationResult {
@@ -30,6 +48,10 @@ impl PySimulationResult {
         Self {
             inner,
             device_operating_points: None,
+            evidence: Some(DocumentEvidence::sole(
+                rspice_core::execution::AnalysisKind::Op,
+                None,
+            )),
         }
     }
 
@@ -42,10 +64,15 @@ impl PySimulationResult {
             device_operating_points: Some(
                 report
                     .entries
-                    .into_iter()
+                    .iter()
+                    .cloned()
                     .map(PyDeviceOperatingPoint::from_core)
                     .collect(),
             ),
+            evidence: Some(DocumentEvidence::sole(
+                rspice_core::execution::AnalysisKind::Op,
+                Some(report),
+            )),
         }
     }
 
@@ -56,7 +83,22 @@ impl PySimulationResult {
         Self {
             inner,
             device_operating_points,
+            // Only a route that ran the analysis holds the core device report
+            // the shared document needs, so a result rebuilt from a Python
+            // projection carries no document evidence.
+            evidence: None,
         }
+    }
+
+    /// The shared result document, projected from the retained solution.
+    fn shared_document(&self, py: Python<'_>) -> PyResult<AnalysisResultDocument> {
+        let evidence = document::evidence(&self.evidence, "operating-point")?;
+        let coordinate = evidence.coordinate.clone();
+        let analysis = evidence.analysis;
+        let report = evidence.core.as_ref();
+        document::build(py, coordinate, || {
+            AnalysisResultDocument::from_operating_point(analysis, &self.inner, report)
+        })
     }
 
     fn checked_voltage(&self, node: usize) -> AccessResult<f64> {
@@ -136,6 +178,30 @@ impl PySimulationResult {
     #[getter]
     fn device_operating_points(&self) -> Option<Vec<PyDeviceOperatingPoint>> {
         self.device_operating_points.clone()
+    }
+
+    /// Typed inventory of every signal in this result's shared document.
+    ///
+    /// The descriptors are the ones the CLI, the WASM build and the engine
+    /// adapter publish, so a canonical name, unit, owner, or availability
+    /// means the same thing on every surface.
+    fn signals(&self, py: Python<'_>) -> PyResult<Vec<PySignalDescriptor>> {
+        Ok(document::signals(&self.shared_document(py)?))
+    }
+
+    /// Every analysis-owned scalar this result publishes, with its unit.
+    fn scalars(&self, py: Python<'_>) -> PyResult<Vec<PyResultScalar>> {
+        Ok(document::scalars(&self.shared_document(py)?))
+    }
+
+    /// Every per-device observable history this result captured.
+    fn device_observables(&self, py: Python<'_>) -> PyResult<Vec<PyDeviceObservable>> {
+        Ok(document::device_observables(&self.shared_document(py)?))
+    }
+
+    /// The whole shared result document as JSON-serializable Python data.
+    fn document<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        document::json_view(py, &self.shared_document(py)?)
     }
 
     /// Whether this solution carries a device operating-point report.

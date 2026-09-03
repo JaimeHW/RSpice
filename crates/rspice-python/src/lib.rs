@@ -174,6 +174,9 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<results::PyMeasurement>()?;
     m.add_class::<results::PyAnalysisRecord>()?;
     m.add_class::<results::PyRunReport>()?;
+    m.add_class::<results::PySignalDescriptor>()?;
+    m.add_class::<results::PyResultScalar>()?;
+    m.add_class::<results::PyDeviceObservable>()?;
 
     // Module-level functions
     m.add_function(wrap_pyfunction!(ac_frequencies, m)?)?;
@@ -272,6 +275,9 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
             "RunCoordinate",
             "AnalysisRecord",
             "RunReport",
+            "SignalDescriptor",
+            "ResultScalar",
+            "DeviceObservable",
             "ac_frequencies",
             "RSpiceError",
             "ParseError",

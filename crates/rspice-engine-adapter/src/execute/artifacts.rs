@@ -1,16 +1,15 @@
 //! Staging and publication of one request's result artifacts.
 //!
-//! Everything a card produces -- its own shared result document, the second
-//! documents it publishes beside it, and the transient FFT bundle -- is staged
-//! in memory and written only after every directive has succeeded, so a failed
-//! run leaves `results/` empty and the response is the single source of truth
-//! about declared outputs. The artifact count and the byte budget are checked
-//! before a single solve and again as each document is encoded.
+//! Everything a card produces -- its own shared result document and the second
+//! documents it publishes beside it -- is staged in memory and written only
+//! after every directive has succeeded, so a failed run leaves `results/` empty
+//! and the response is the single source of truth about declared outputs. The
+//! artifact count and the byte budget are checked before a single solve and
+//! again as each document is encoded.
 
 // This module was split out of `execute.rs` and still works against
 // the executor's own wire types, failures and imports, so it takes the
 // parent's imports rather than restating them.
-use super::response::map_fft_document_error;
 use super::*;
 
 /// Everything one executed analysis contributes to the response.
@@ -76,12 +75,12 @@ pub(super) fn execute_analysis(
     )?;
     let mut artifacts = vec![artifact];
 
-    // A card's second results — port noise beside `.SP`, one Fourier spectrum
-    // per authored `.FOUR` operand beside its transient — are complete shared
-    // documents with their own identities. They are staged in this analysis's
-    // own artifact list, so the whole set is published in one transaction or
-    // not at all, and each takes the parent's artifact stem plus its own
-    // namespace component so no two can collide.
+    // A card's second results — port noise beside `.SP`, one spectrum per
+    // authored `.FFT` card and one per authored `.FOUR` operand beside their
+    // transient — are complete shared documents with their own identities. They
+    // are staged in this analysis's own artifact list, so the whole set is
+    // published in one transaction or not at all, and each takes the parent's
+    // artifact stem plus its own namespace component so no two can collide.
     for child in projection.children {
         let document = identify(child.builder)
             .build_with_abort(abort)
@@ -95,20 +94,6 @@ pub(super) fn execute_analysis(
         )?);
     }
 
-    // Transient `.FFT` spectra keep their adapter-owned bundle until core
-    // assigns post-process analysis identities; see `fft_result_document`.
-    if let Some(fft) = projection.fft {
-        let remaining = remaining_bytes(&artifacts, byte_limit)?;
-        let content = fft
-            .to_json_with_abort(abort, remaining.min(MAX_ENGINE_ARTIFACT_BYTES))
-            .map_err(map_fft_document_error)?;
-        artifacts.push(PendingArtifact {
-            file_name: format!("{file_stem}.fft.result.json"),
-            content_type: FFT_RESULT_DOCUMENT_CONTENT_TYPE.to_owned(),
-            result_kind: "fft".to_owned(),
-            content,
-        });
-    }
     // Each artifact was individually bounded; this proves the set together
     // still fits the budget this analysis was given.
     let _remaining = remaining_bytes(&artifacts, byte_limit)?;
@@ -149,57 +134,34 @@ fn artifact_stem(
 }
 
 pub(super) fn artifact_reference(artifact: &PendingArtifact) -> ResultDocumentReference {
-    let (schema, schema_version, result_kind) =
-        if artifact.content_type == FFT_RESULT_DOCUMENT_CONTENT_TYPE {
-            (
-                FFT_RESULT_DOCUMENT_SCHEMA.to_owned(),
-                FFT_RESULT_DOCUMENT_VERSION,
-                "fft".to_owned(),
-            )
-        } else {
-            (
-                rspice_core::execution::ANALYSIS_RESULT_DOCUMENT_SCHEMA.to_owned(),
-                rspice_core::execution::ANALYSIS_RESULT_DOCUMENT_VERSION,
-                artifact.result_kind.clone(),
-            )
-        };
     ResultDocumentReference {
         path: format!("results/{}", artifact.file_name),
         content_type: artifact.content_type.clone(),
-        schema,
-        schema_version,
-        result_kind,
+        schema: rspice_core::execution::ANALYSIS_RESULT_DOCUMENT_SCHEMA.to_owned(),
+        schema_version: rspice_core::execution::ANALYSIS_RESULT_DOCUMENT_VERSION,
+        result_kind: artifact.result_kind.clone(),
     }
 }
 
 /// How many result artifacts one directive of `kind` publishes.
 ///
 /// A directive publishes its own document plus every second document the card
-/// produces: the transient's `.FFT` bundle and one Fourier document per
-/// planned `.FOUR` operand bound to it, and the `.SP` card's port-noise
-/// document when it authored `DONOISE`. Counting them here is what lets the
-/// artifact-count limit be checked before a single solve.
+/// produces: one `.FFT` spectrum per authored `.FFT` card and one Fourier
+/// document per planned `.FOUR` operand bound to it, and the `.SP` card's
+/// port-noise document when it authored `DONOISE`. Counting them here is what
+/// lets the artifact-count limit be checked before a single solve.
 pub(super) fn artifacts_per_directive(
     netlist: &Netlist,
     plan: &DeckPlan,
     kind: PlannedAnalysisKind,
 ) -> Option<usize> {
-    use rspice_core::execution::PostProcessSource;
     use rspice_core::netlist::AnalysisCommand;
 
     let mut count = 1usize;
     if kind == PlannedAnalysisKind::Tran {
-        if !netlist.fft_analyses.is_empty() {
-            count = count.checked_add(1)?;
-        }
-        // The plan binds each operand to one transient, so the worst case for
-        // any single transient is every planned operand of the deck.
-        let operands = plan
-            .post_process_analyses()
-            .iter()
-            .filter(|post| matches!(post.source(), PostProcessSource::FourierOperand { .. }))
-            .count();
-        count = count.checked_add(operands)?;
+        // The plan binds each post-process to one transient, so the worst case
+        // for any single transient is every planned post-process of the deck.
+        count = count.checked_add(plan.post_process_analyses().len())?;
     }
     if kind == PlannedAnalysisKind::Sp
         && netlist

@@ -10,10 +10,13 @@ mod fingerprint;
 mod materialized;
 mod plan;
 mod post_process;
+mod post_process_fft;
 mod projection;
 pub mod result_document;
 mod schema;
 mod seed;
+mod sole_analysis;
+mod sweep_axis;
 mod topology;
 mod transient;
 
@@ -37,6 +40,9 @@ pub use plan::{
 pub use post_process::{
     PlannedFourierResult, evaluate_planned_fourier_with_abort, transient_output_unit,
 };
+pub use post_process_fft::{
+    PlannedFftSpectrum, planned_transient_fft_spectra, transient_fft_output_unit,
+};
 pub use projection::{
     ProjectedSignal, ProjectedSignals, ProjectionSource, ProjectionSourceSignal, ProjectionValues,
     SignalProjection, dc_sweep_observable_series, observable_lookup,
@@ -54,5 +60,7 @@ pub use schema::{
     SignalSchemaError, SignalShape, SignalUnit, SignalValueType,
 };
 pub use seed::monte_carlo_seed_at_coordinate;
+pub use sole_analysis::{analysis_instance_identity, sole_analysis_identity};
+pub use sweep_axis::sweep_axis_unit;
 pub use topology::{TopologyComponent, TopologyFingerprint, TopologyFingerprintError};
 pub use transient::{TransientMaximumStepError, resolve_transient_maximum_step};

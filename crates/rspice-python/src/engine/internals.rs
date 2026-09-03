@@ -81,11 +81,19 @@ impl PyEngine {
     /// An unseeded request draws one seed here, so both surfaces are
     /// reproducible in exactly the same way: a `.MC` card without `SEED=` and
     /// a `run_monte_carlo(seed=None)` call are the same request.
+    /// Run one authored `.MC` card at one materialized run coordinate.
+    ///
+    /// A `.MC` card inside a `.STEP` or `.TEMP` sweep runs once per
+    /// coordinate. Repeating the card's own seed at every coordinate would
+    /// draw the same sample set at each one, so the stream is derived from the
+    /// coordinate through core's own derivation — the same one the CLI and the
+    /// engine adapter use — rather than through a rule invented here.
     pub(super) fn monte_carlo_impl(
         &self,
         py: Python<'_>,
         netlist: &PyNetlist,
         command: &rspice_core::netlist::MonteCarloCommand,
+        coordinate: Option<rspice_core::execution::RunCoordinateId>,
     ) -> PyResult<PyMonteCarloResult> {
         let spread = command.relative_spread;
         let distribution = match command.distribution {
@@ -99,9 +107,18 @@ impl PyEngine {
                 Distribution::WorstCase { tolerance: spread }
             }
         };
-        let seed = command
+        // A card that seeds itself reproduces exactly; one that does not is
+        // documented as drawing a fresh stream per call, and that stays the
+        // base the coordinate derivation is applied to.
+        let base_seed = command
             .seed
             .unwrap_or_else(|| RandomState::new().build_hasher().finish());
+        let seed = match coordinate {
+            Some(coordinate) => {
+                rspice_core::execution::monte_carlo_seed_at_coordinate(base_seed, coordinate)
+            }
+            None => base_seed,
+        };
         let params = (!command.params.is_empty()).then(|| command.params.clone());
         let engine = self.engine_for_netlist(&netlist.inner);
         let result = run_interruptible(py, &self.active_runs, |abort| {
@@ -251,7 +268,7 @@ impl PyEngine {
             frequencies,
             temperature,
         )?;
-        Ok(results.iter().map(PyNoiseResult::from_core).collect())
+        Ok(PyNoiseResult::sweep_from_core(&results))
     }
 
     /// Core transfer-function runner.

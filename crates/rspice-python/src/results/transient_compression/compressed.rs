@@ -13,11 +13,51 @@ use super::*;
 #[derive(Debug, Clone)]
 pub struct PyCompressedTransientResult {
     inner: rspice_core::engine::TransientResultCompressed,
+    evidence: Option<DocumentEvidence<()>>,
+}
+
+impl CarriesDocumentEvidence for PyCompressedTransientResult {
+    fn bind_execution(
+        &mut self,
+        analysis: rspice_core::execution::AnalysisInstanceId,
+        coordinate: Option<&rspice_core::execution::ResultCoordinate>,
+    ) {
+        self.evidence = self
+            .evidence
+            .take()
+            .map(|evidence| evidence.with_execution(analysis, coordinate));
+    }
 }
 
 impl PyCompressedTransientResult {
     pub fn new(inner: rspice_core::engine::TransientResultCompressed) -> Self {
-        Self { inner }
+        Self {
+            inner,
+            evidence: Some(DocumentEvidence::sole(
+                rspice_core::execution::AnalysisKind::Tran,
+                (),
+            )),
+        }
+    }
+
+    /// A compressed trajectory rebuilt from pickled state, which carries no
+    /// analysis identity.
+    fn restored(inner: rspice_core::engine::TransientResultCompressed) -> Self {
+        Self {
+            inner,
+            evidence: None,
+        }
+    }
+
+    /// The shared result document, projected from the retained samples.
+    ///
+    /// The document carries the compression certificate the run produced, so
+    /// a reader always knows which grid the published history is on.
+    fn shared_document(&self, py: Python<'_>) -> PyResult<AnalysisResultDocument> {
+        let (analysis, coordinate) = document::execution(&self.evidence, "compressed transient")?;
+        document::build(py, coordinate, || {
+            AnalysisResultDocument::from_compressed_transient(analysis, &self.inner, Vec::new())
+        })
     }
 
     fn node_index(&self, node: &NodeIdentifier) -> PyResult<Option<usize>> {
@@ -78,6 +118,30 @@ impl PyCompressedTransientResult {
 
 #[pymethods]
 impl PyCompressedTransientResult {
+    /// Typed inventory of every signal in this result's shared document.
+    ///
+    /// The descriptors are the ones the CLI, the WASM build and the engine
+    /// adapter publish, so a canonical name, unit, owner, or availability
+    /// means the same thing on every surface.
+    fn signals(&self, py: Python<'_>) -> PyResult<Vec<PySignalDescriptor>> {
+        Ok(document::signals(&self.shared_document(py)?))
+    }
+
+    /// Every analysis-owned scalar this result publishes, with its unit.
+    fn scalars(&self, py: Python<'_>) -> PyResult<Vec<PyResultScalar>> {
+        Ok(document::scalars(&self.shared_document(py)?))
+    }
+
+    /// Every per-device observable history this result captured.
+    fn device_observables(&self, py: Python<'_>) -> PyResult<Vec<PyDeviceObservable>> {
+        Ok(document::device_observables(&self.shared_document(py)?))
+    }
+
+    /// The whole shared result document as JSON-serializable Python data.
+    fn document<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        document::json_view(py, &self.shared_document(py)?)
+    }
+
     #[getter]
     fn time<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
         self.inner.time.to_pyarray(py)
@@ -676,7 +740,7 @@ impl PyCompressedTransientResult {
             analog_state,
             compression_state,
         )
-        .map(Self::new)
+        .map(Self::restored)
     }
 
     #[allow(clippy::type_complexity)]

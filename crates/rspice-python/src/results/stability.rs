@@ -209,6 +209,22 @@ pub struct PyPoleZeroResult {
     /// Output specification
     #[pyo3(get)]
     pub output: String,
+    /// The core result, kept because this projection splits complex roots
+    /// into its own value type and labels evidence kinds as strings.
+    evidence: Option<DocumentEvidence<rspice_core::analysis::PoleZeroResult>>,
+}
+
+impl CarriesDocumentEvidence for PyPoleZeroResult {
+    fn bind_execution(
+        &mut self,
+        analysis: rspice_core::execution::AnalysisInstanceId,
+        coordinate: Option<&rspice_core::execution::ResultCoordinate>,
+    ) {
+        self.evidence = self
+            .evidence
+            .take()
+            .map(|evidence| evidence.with_execution(analysis, coordinate));
+    }
 }
 
 impl PyPoleZeroResult {
@@ -222,12 +238,51 @@ impl PyPoleZeroResult {
             hf_gain: result.hf_gain,
             input: result.input.clone(),
             output: result.output.clone(),
+            evidence: Some(DocumentEvidence::sole(
+                rspice_core::execution::AnalysisKind::PoleZero,
+                result.clone(),
+            )),
+        })
+    }
+
+    /// The shared result document, projected from the retained root sets.
+    fn shared_document(&self, py: Python<'_>) -> PyResult<AnalysisResultDocument> {
+        let evidence = document::evidence(&self.evidence, "pole-zero")?;
+        let coordinate = evidence.coordinate.clone();
+        let analysis = evidence.analysis;
+        let result = &evidence.core;
+        document::build(py, coordinate, || {
+            AnalysisResultDocument::from_pole_zero(analysis, result)
         })
     }
 }
 
 #[pymethods]
 impl PyPoleZeroResult {
+    /// Typed inventory of every signal in this result's shared document.
+    ///
+    /// The descriptors are the ones the CLI, the WASM build and the engine
+    /// adapter publish, so a canonical name, unit, owner, or availability
+    /// means the same thing on every surface.
+    fn signals(&self, py: Python<'_>) -> PyResult<Vec<PySignalDescriptor>> {
+        Ok(document::signals(&self.shared_document(py)?))
+    }
+
+    /// Every analysis-owned scalar this result publishes, with its unit.
+    fn scalars(&self, py: Python<'_>) -> PyResult<Vec<PyResultScalar>> {
+        Ok(document::scalars(&self.shared_document(py)?))
+    }
+
+    /// Every per-device observable history this result captured.
+    fn device_observables(&self, py: Python<'_>) -> PyResult<Vec<PyDeviceObservable>> {
+        Ok(document::device_observables(&self.shared_document(py)?))
+    }
+
+    /// The whole shared result document as JSON-serializable Python data.
+    fn document<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        document::json_view(py, &self.shared_document(py)?)
+    }
+
     /// Get all poles
     #[getter]
     fn poles(&self) -> Vec<PyComplexValue> {
@@ -413,6 +468,7 @@ impl PyPoleZeroResult {
             hf_gain,
             input,
             output,
+            evidence: None,
         })
     }
 
@@ -472,12 +528,44 @@ pub struct PyStbResult {
     #[pyo3(get)]
     pub warnings: Vec<String>,
     assessment: String,
+    /// The core loop analysis, kept because this projection flattens its
+    /// margins into plain floats that lose the "no crossover" determination
+    /// the shared document publishes as a typed scalar.
+    evidence: Option<DocumentEvidence<rspice_core::analysis::stb::StbResult>>,
+}
+
+impl CarriesDocumentEvidence for PyStbResult {
+    fn bind_execution(
+        &mut self,
+        analysis: rspice_core::execution::AnalysisInstanceId,
+        coordinate: Option<&rspice_core::execution::ResultCoordinate>,
+    ) {
+        self.evidence = self
+            .evidence
+            .take()
+            .map(|evidence| evidence.with_execution(analysis, coordinate));
+    }
 }
 
 impl PyStbResult {
+    /// The shared result document, projected from the retained loop gain.
+    fn shared_document(&self, py: Python<'_>) -> PyResult<AnalysisResultDocument> {
+        let evidence = document::evidence(&self.evidence, "stability")?;
+        let coordinate = evidence.coordinate.clone();
+        let analysis = evidence.analysis;
+        let result = &evidence.core;
+        document::build(py, coordinate, || {
+            AnalysisResultDocument::from_stability(analysis, result)
+        })
+    }
+
     pub fn from_core(result: &rspice_core::engine::StbAnalysisResult) -> Self {
         let margins = &result.result.margins;
         Self {
+            evidence: Some(DocumentEvidence::sole(
+                rspice_core::execution::AnalysisKind::Stb,
+                result.result.clone(),
+            )),
             frequencies: result.frequencies.clone(),
             loop_gains: result.loop_gains.clone(),
             probe_name: result.probe_name.clone(),
@@ -498,6 +586,34 @@ impl PyStbResult {
 
 #[pymethods]
 impl PyStbResult {
+    /// Typed inventory of every signal in this result's shared document.
+    ///
+    /// The descriptors are the ones the CLI, the WASM build and the engine
+    /// adapter publish, so a canonical name, unit, owner, or availability
+    /// means the same thing on every surface.
+    fn signals(&self, py: Python<'_>) -> PyResult<Vec<PySignalDescriptor>> {
+        Ok(document::signals(&self.shared_document(py)?))
+    }
+
+    /// Every analysis-owned scalar this result publishes, with its unit.
+    ///
+    /// A margin the loop's response never defines — the gain margin of a loop
+    /// whose phase never reaches -180 degrees — is reported here as a typed
+    /// determination rather than as the large float the flat accessor carries.
+    fn scalars(&self, py: Python<'_>) -> PyResult<Vec<PyResultScalar>> {
+        Ok(document::scalars(&self.shared_document(py)?))
+    }
+
+    /// Every per-device observable history this result captured.
+    fn device_observables(&self, py: Python<'_>) -> PyResult<Vec<PyDeviceObservable>> {
+        Ok(document::device_observables(&self.shared_document(py)?))
+    }
+
+    /// The whole shared result document as JSON-serializable Python data.
+    fn document<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        document::json_view(py, &self.shared_document(py)?)
+    }
+
     #[getter]
     fn frequencies<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
         self.frequencies.to_pyarray(py)
@@ -584,6 +700,7 @@ impl PyStbResult {
             success,
             warnings,
             assessment,
+            evidence: None,
         }
     }
 
@@ -648,6 +765,23 @@ pub struct PyTransferFunctionResult {
     /// Output impedance (Thevenin) in Ohms
     #[pyo3(get)]
     pub output_impedance: f64,
+    /// The core result, kept because this projection reports an infinite
+    /// impedance as a plain float rather than as the typed determination the
+    /// shared document publishes.
+    evidence: Option<DocumentEvidence<rspice_core::analysis::TransferFunctionResult>>,
+}
+
+impl CarriesDocumentEvidence for PyTransferFunctionResult {
+    fn bind_execution(
+        &mut self,
+        analysis: rspice_core::execution::AnalysisInstanceId,
+        coordinate: Option<&rspice_core::execution::ResultCoordinate>,
+    ) {
+        self.evidence = self
+            .evidence
+            .take()
+            .map(|evidence| evidence.with_execution(analysis, coordinate));
+    }
 }
 
 impl PyTransferFunctionResult {
@@ -658,12 +792,51 @@ impl PyTransferFunctionResult {
             gain: result.gain,
             input_impedance: result.input_impedance,
             output_impedance: result.output_impedance,
+            evidence: Some(DocumentEvidence::sole(
+                rspice_core::execution::AnalysisKind::TransferFunction,
+                result.clone(),
+            )),
         }
+    }
+
+    /// The shared result document, projected from the retained ratios.
+    fn shared_document(&self, py: Python<'_>) -> PyResult<AnalysisResultDocument> {
+        let evidence = document::evidence(&self.evidence, "transfer-function")?;
+        let coordinate = evidence.coordinate.clone();
+        let analysis = evidence.analysis;
+        let result = &evidence.core;
+        document::build(py, coordinate, || {
+            AnalysisResultDocument::from_transfer_function(analysis, result)
+        })
     }
 }
 
 #[pymethods]
 impl PyTransferFunctionResult {
+    /// Typed inventory of every signal in this result's shared document.
+    ///
+    /// The descriptors are the ones the CLI, the WASM build and the engine
+    /// adapter publish, so a canonical name, unit, owner, or availability
+    /// means the same thing on every surface.
+    fn signals(&self, py: Python<'_>) -> PyResult<Vec<PySignalDescriptor>> {
+        Ok(document::signals(&self.shared_document(py)?))
+    }
+
+    /// Every analysis-owned scalar this result publishes, with its unit.
+    fn scalars(&self, py: Python<'_>) -> PyResult<Vec<PyResultScalar>> {
+        Ok(document::scalars(&self.shared_document(py)?))
+    }
+
+    /// Every per-device observable history this result captured.
+    fn device_observables(&self, py: Python<'_>) -> PyResult<Vec<PyDeviceObservable>> {
+        Ok(document::device_observables(&self.shared_document(py)?))
+    }
+
+    /// The whole shared result document as JSON-serializable Python data.
+    fn document<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        document::json_view(py, &self.shared_document(py)?)
+    }
+
     /// Gain in dB (20·log10 |gain|)
     #[getter]
     fn gain_db(&self) -> f64 {
@@ -692,6 +865,7 @@ impl PyTransferFunctionResult {
             gain,
             input_impedance,
             output_impedance,
+            evidence: None,
         }
     }
 

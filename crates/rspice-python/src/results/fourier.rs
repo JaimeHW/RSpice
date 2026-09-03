@@ -104,9 +104,101 @@ pub struct PyFourierResult {
     #[pyo3(get)]
     pub coordinate: Option<PyRunCoordinate>,
     harmonics: Vec<PyHarmonic>,
+    /// The core spectrum plus the parent transient and probed column the
+    /// shared document names; the Python projection drops core's DC harmonic
+    /// row and rescales THD, so neither can be read back from it.
+    evidence: Option<DocumentEvidence<FourierEvidence>>,
+}
+
+/// What a `.FOUR` document needs beyond the spectrum's own identity.
+#[derive(Debug, Clone)]
+pub(crate) struct FourierEvidence {
+    parent: rspice_core::execution::AnalysisInstanceId,
+    output: String,
+    output_unit: rspice_core::execution::SignalUnit,
+    result: rspice_core::analysis::FourierResult,
+}
+
+impl CarriesDocumentEvidence for PyFourierResult {
+    fn bind_execution(
+        &mut self,
+        analysis: rspice_core::execution::AnalysisInstanceId,
+        coordinate: Option<&rspice_core::execution::ResultCoordinate>,
+    ) {
+        self.evidence = self
+            .evidence
+            .take()
+            .map(|evidence| evidence.with_execution(analysis, coordinate));
+    }
+}
+
+/// Declared unit of one authored `.FOUR` operand.
+///
+/// `V(...)` and `I(...)` are the parser's own probe grammar. Anything else is
+/// a device observable or a braced parameter expression, whose unit the deck
+/// never declared — which is `Unspecified` and not dimensionless, exactly as
+/// core's own transient-output rule states it.
+/// Zero-based ordinal of a canonical `four-NNN` tag, when it is one.
+///
+/// The directive runner numbers `.FOUR` operands in authored order and
+/// formats the tag; reading the ordinal back is how the same numbering reaches
+/// the shared document without a second counter.
+fn analysis_ordinal(tag: &str) -> Option<u32> {
+    tag.rsplit_once('-')
+        .and_then(|(_, ordinal)| ordinal.parse::<u32>().ok())
+        .and_then(|ordinal| ordinal.checked_sub(1))
+}
+
+fn fourier_output_unit(output: &str) -> rspice_core::execution::SignalUnit {
+    let trimmed = output.trim();
+    if trimmed.len() >= 2 && trimmed[1..].starts_with('(') {
+        match trimmed.as_bytes()[0].to_ascii_uppercase() {
+            b'V' => return rspice_core::execution::SignalUnit::Volt,
+            b'I' => return rspice_core::execution::SignalUnit::Ampere,
+            _ => {}
+        }
+    }
+    rspice_core::execution::SignalUnit::Unspecified
 }
 
 impl PyFourierResult {
+    /// Name the transient column this spectrum was taken from.
+    ///
+    /// The shared document names the operand a `.FOUR` card analyzed, so a
+    /// spectrum that has not been told which column it came from has no
+    /// document to publish.
+    pub(crate) fn with_output(mut self, output: &str) -> Self {
+        self.source_signal = Some(output.to_owned());
+        if let Some(evidence) = self.evidence.as_mut() {
+            evidence.core.output = output.to_owned();
+            evidence.core.output_unit = fourier_output_unit(output);
+        }
+        self
+    }
+
+    /// The shared result document, projected from the retained spectrum.
+    fn shared_document(&self, py: Python<'_>) -> PyResult<AnalysisResultDocument> {
+        let evidence = document::evidence(&self.evidence, "Fourier")?;
+        let coordinate = evidence.coordinate.clone();
+        let analysis = evidence.analysis;
+        let core = &evidence.core;
+        if core.output.trim().is_empty() {
+            return Err(crate::errors::SimulationError::new_err(
+                "this Fourier result names no analyzed output, which the shared result document \
+                 requires",
+            ));
+        }
+        document::build(py, coordinate, || {
+            AnalysisResultDocument::from_fourier(
+                analysis,
+                core.parent,
+                &core.output,
+                core.output_unit.clone(),
+                &core.result,
+            )
+        })
+    }
+
     pub fn from_core(result: &rspice_core::analysis::FourierResult) -> Self {
         // Core's harmonic 0 is the DC term; expose it via `dc_component`
         // and keep the list at n >= 1 so harmonics[0] is the fundamental.
@@ -132,6 +224,17 @@ impl PyFourierResult {
             parent_analysis_id: None,
             coordinate: None,
             harmonics,
+            evidence: Some(DocumentEvidence::sole(
+                rspice_core::execution::AnalysisKind::Fourier,
+                FourierEvidence {
+                    parent: rspice_core::execution::sole_analysis_identity(
+                        rspice_core::execution::AnalysisKind::Tran,
+                    ),
+                    output: String::new(),
+                    output_unit: rspice_core::execution::SignalUnit::Unspecified,
+                    result: result.clone(),
+                },
+            )),
         }
     }
 
@@ -142,18 +245,50 @@ impl PyFourierResult {
         parent_analysis_id: Option<String>,
         coordinate: Option<PyRunCoordinate>,
     ) -> Self {
-        Self {
-            source_signal: Some(source_signal),
-            analysis_id: Some(analysis_id),
-            parent_analysis_id,
-            coordinate,
-            ..Self::from_core(result)
+        let ordinal = analysis_ordinal(&analysis_id);
+        let mut projected = Self::from_core(result).with_output(&source_signal);
+        projected.analysis_id = Some(analysis_id);
+        projected.parent_analysis_id = parent_analysis_id;
+        projected.coordinate = coordinate;
+        if let Some(ordinal) = ordinal {
+            projected.bind_execution(
+                rspice_core::execution::analysis_instance_identity(
+                    rspice_core::execution::AnalysisKind::Fourier,
+                    ordinal,
+                ),
+                None,
+            );
         }
+        projected
     }
 }
 
 #[pymethods]
 impl PyFourierResult {
+    /// Typed inventory of every signal in this result's shared document.
+    ///
+    /// The descriptors are the ones the CLI, the WASM build and the engine
+    /// adapter publish, so a canonical name, unit, owner, or availability
+    /// means the same thing on every surface.
+    fn signals(&self, py: Python<'_>) -> PyResult<Vec<PySignalDescriptor>> {
+        Ok(document::signals(&self.shared_document(py)?))
+    }
+
+    /// Every analysis-owned scalar this result publishes, with its unit.
+    fn scalars(&self, py: Python<'_>) -> PyResult<Vec<PyResultScalar>> {
+        Ok(document::scalars(&self.shared_document(py)?))
+    }
+
+    /// Every per-device observable history this result captured.
+    fn device_observables(&self, py: Python<'_>) -> PyResult<Vec<PyDeviceObservable>> {
+        Ok(document::device_observables(&self.shared_document(py)?))
+    }
+
+    /// The whole shared result document as JSON-serializable Python data.
+    fn document<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        document::json_view(py, &self.shared_document(py)?)
+    }
+
     /// Total harmonic distortion in percent
     #[getter]
     fn thd_percent(&self) -> Option<f64> {
@@ -211,6 +346,7 @@ impl PyFourierResult {
             parent_analysis_id,
             coordinate,
             harmonics,
+            evidence: None,
         }
     }
 

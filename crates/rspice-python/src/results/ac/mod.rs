@@ -23,6 +23,20 @@ pub struct PyAcResult {
     pub(crate) results: Vec<AcResult>,
     node_names: Vec<String>,
     branch_names: Vec<String>,
+    evidence: Option<DocumentEvidence<()>>,
+}
+
+impl CarriesDocumentEvidence for PyAcResult {
+    fn bind_execution(
+        &mut self,
+        analysis: rspice_core::execution::AnalysisInstanceId,
+        coordinate: Option<&rspice_core::execution::ResultCoordinate>,
+    ) {
+        self.evidence = self
+            .evidence
+            .take()
+            .map(|evidence| evidence.with_execution(analysis, coordinate));
+    }
 }
 
 /// Proof that every frequency point publishes the schema the first one did.
@@ -32,7 +46,23 @@ pub(crate) use schema::validated_ac_schema;
 
 impl PyAcResult {
     pub fn new(frequencies: Vec<f64>, results: Vec<AcResult>) -> PyResult<Self> {
-        Self::checked(frequencies, results).map_err(crate::errors::SimulationError::new_err)
+        Self::checked(frequencies, results)
+            .map(|mut result| {
+                result.evidence = Some(DocumentEvidence::sole(
+                    rspice_core::execution::AnalysisKind::Ac,
+                    (),
+                ));
+                result
+            })
+            .map_err(crate::errors::SimulationError::new_err)
+    }
+
+    /// The shared result document, projected from the retained AC points.
+    fn shared_document(&self, py: Python<'_>) -> PyResult<AnalysisResultDocument> {
+        let (analysis, coordinate) = document::execution(&self.evidence, "AC")?;
+        document::build(py, coordinate, || {
+            AnalysisResultDocument::from_ac(analysis, &self.results)
+        })
     }
 
     fn checked(frequencies: Vec<f64>, results: Vec<AcResult>) -> Result<Self, String> {
@@ -49,6 +79,10 @@ impl PyAcResult {
             results,
             node_names,
             branch_names,
+            // Only a route that knows which authored card produced this
+            // result may claim an identity for it; `new` sets the one a
+            // single-analysis run has, and pickled state carries none.
+            evidence: None,
         })
     }
 
@@ -557,10 +591,35 @@ impl PyAcResult {
         )
     }
 
+    /// Typed inventory of every signal in this result's shared document.
+    ///
+    /// The descriptors are the ones the CLI, the WASM build and the engine
+    /// adapter publish, so a canonical name, unit, owner, or availability
+    /// means the same thing on every surface.
+    fn signals(&self, py: Python<'_>) -> PyResult<Vec<PySignalDescriptor>> {
+        Ok(document::signals(&self.shared_document(py)?))
+    }
+
+    /// Every analysis-owned scalar this result publishes, with its unit.
+    fn scalars(&self, py: Python<'_>) -> PyResult<Vec<PyResultScalar>> {
+        Ok(document::scalars(&self.shared_document(py)?))
+    }
+
+    /// Every per-device observable history this result captured.
+    fn device_observables(&self, py: Python<'_>) -> PyResult<Vec<PyDeviceObservable>> {
+        Ok(document::device_observables(&self.shared_document(py)?))
+    }
+
+    /// The whole shared result document as JSON-serializable Python data.
+    fn document<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        document::json_view(py, &self.shared_document(py)?)
+    }
+
     /// Rebuild from pickled state. Not part of the public API.
     #[staticmethod]
     fn _unpickle(frequencies: Vec<f64>, rows: Vec<AcRowState>) -> PyResult<Self> {
-        Self::new(frequencies, rows.into_iter().map(rebuild_ac_row).collect())
+        Self::checked(frequencies, rows.into_iter().map(rebuild_ac_row).collect())
+            .map_err(crate::errors::SimulationError::new_err)
     }
 
     #[allow(clippy::type_complexity)]

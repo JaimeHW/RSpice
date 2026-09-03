@@ -151,11 +151,6 @@ fn main() -> ExitCode {
                         ),
                         format!(
                             "{}-v{}",
-                            rspice_engine_adapter::fft_result_document::FFT_RESULT_DOCUMENT_SCHEMA,
-                            rspice_engine_adapter::fft_result_document::FFT_RESULT_DOCUMENT_VERSION,
-                        ),
-                        format!(
-                            "{}-v{}",
                             rspice_engine_adapter::axis_execution_document::AXIS_EXECUTION_SCHEMA,
                             rspice_engine_adapter::axis_execution_document::AXIS_EXECUTION_VERSION,
                         ),

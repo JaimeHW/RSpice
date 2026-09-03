@@ -45,7 +45,7 @@ use crate::results::{
     PyOscillatorNoiseResult, PyPacResult, PyPeriodicNoiseResult, PyPoleZeroResult, PyPssResult,
     PyRunCoordinate, PyRunReport, PySParameterResult, PySensitivityResult, PySimulationResult,
     PyStbResult, PyTransferFunctionResult, PyTransientCheckpoint, PyTransientResult,
-    is_ground_name,
+    is_ground_name, periodic_noise_probe,
 };
 
 mod directives;
@@ -1453,7 +1453,8 @@ impl PyEngine {
                 abort,
             ),
         })?;
-        Ok(PyPeriodicNoiseResult::from_core(&result))
+        let probe = periodic_noise_probe(output_node, reference_node);
+        Ok(PyPeriodicNoiseResult::from_run(&probe, &result))
     }
 
     /// Run autonomous-oscillator phase noise using PSS and PPV projection.

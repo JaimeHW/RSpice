@@ -24,6 +24,22 @@ pub struct PyEnvelopeResult {
     slow_time_max_step: f64,
     continued_transient: Py<PyTransientResult>,
     final_checkpoint: Py<PyTransientCheckpoint>,
+    /// The core continuation, kept because this projection splits it into a
+    /// carrier, a transient and a checkpoint that cannot be recombined.
+    evidence: Option<DocumentEvidence<rspice_core::engine::EnvelopeResult>>,
+}
+
+impl CarriesDocumentEvidence for PyEnvelopeResult {
+    fn bind_execution(
+        &mut self,
+        analysis: rspice_core::execution::AnalysisInstanceId,
+        coordinate: Option<&rspice_core::execution::ResultCoordinate>,
+    ) {
+        self.evidence = self
+            .evidence
+            .take()
+            .map(|evidence| evidence.with_execution(analysis, coordinate));
+    }
 }
 
 /// Stable label for the completeness contract the continuation was solved to.
@@ -58,12 +74,51 @@ impl PyEnvelopeResult {
                 py,
                 PyTransientCheckpoint::new(result.final_checkpoint().clone()),
             )?,
+            evidence: Some(DocumentEvidence::sole(
+                rspice_core::execution::AnalysisKind::Envelope,
+                result.clone(),
+            )),
+        })
+    }
+
+    /// The shared result document, projected from the retained continuation.
+    fn shared_document(&self, py: Python<'_>) -> PyResult<AnalysisResultDocument> {
+        let evidence = document::evidence(&self.evidence, "envelope")?;
+        let coordinate = evidence.coordinate.clone();
+        let analysis = evidence.analysis;
+        let result = &evidence.core;
+        document::build(py, coordinate, || {
+            AnalysisResultDocument::from_envelope(analysis, result)
         })
     }
 }
 
 #[pymethods]
 impl PyEnvelopeResult {
+    /// Typed inventory of every signal in this result's shared document.
+    ///
+    /// The descriptors are the ones the CLI, the WASM build and the engine
+    /// adapter publish, so a canonical name, unit, owner, or availability
+    /// means the same thing on every surface.
+    fn signals(&self, py: Python<'_>) -> PyResult<Vec<PySignalDescriptor>> {
+        Ok(document::signals(&self.shared_document(py)?))
+    }
+
+    /// Every analysis-owned scalar this result publishes, with its unit.
+    fn scalars(&self, py: Python<'_>) -> PyResult<Vec<PyResultScalar>> {
+        Ok(document::scalars(&self.shared_document(py)?))
+    }
+
+    /// Every per-device observable history this result captured.
+    fn device_observables(&self, py: Python<'_>) -> PyResult<Vec<PyDeviceObservable>> {
+        Ok(document::device_observables(&self.shared_document(py)?))
+    }
+
+    /// The whole shared result document as JSON-serializable Python data.
+    fn document<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        document::json_view(py, &self.shared_document(py)?)
+    }
+
     /// Converged carrier spectra the continuation started from.
     #[getter]
     fn carrier(&self) -> PyHbResult {

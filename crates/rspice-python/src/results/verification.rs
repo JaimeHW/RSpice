@@ -517,6 +517,16 @@ pub struct PyRunReport {
     /// Driven periodic-noise result (last .pnoise)
     #[pyo3(get)]
     pub pnoise: Option<PyPeriodicNoiseResult>,
+    /// Oscillator phase-noise result (last `.pnoise` around an autonomous
+    /// `.pss` carrier).
+    ///
+    /// An autonomous carrier has no forced reference phase, so its noise is a
+    /// carrier-normalized single-sideband spectrum in dBc/Hz with the Demir
+    /// phase-diffusion constant beside it — a different quantity from the
+    /// output power spectral density `pnoise` carries, which is why the two
+    /// are separate fields rather than one with a mode flag.
+    #[pyo3(get)]
+    pub oscillator_noise: Option<PyOscillatorNoiseResult>,
     /// Envelope-following result (last .envelope)
     #[pyo3(get)]
     pub envelope: Option<Py<PyEnvelopeResult>>,
@@ -588,9 +598,14 @@ pub struct PyRunReport {
     /// Every `.pac` result, in deck/coordinate order. `pac` is the last.
     #[pyo3(get)]
     pub all_pac: Vec<PyPacResult>,
-    /// Every `.pnoise` result, in deck/coordinate order. `pnoise` is the last.
+    /// Every driven `.pnoise` result, in deck/coordinate order. `pnoise` is
+    /// the last.
     #[pyo3(get)]
     pub all_pnoise: Vec<PyPeriodicNoiseResult>,
+    /// Every oscillator phase-noise result, in deck/coordinate order.
+    /// `oscillator_noise` is the last.
+    #[pyo3(get)]
+    pub all_oscillator_noise: Vec<PyOscillatorNoiseResult>,
     /// Every `.envelope` result, in deck/coordinate order. `envelope` is the
     /// last.
     #[pyo3(get)]

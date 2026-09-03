@@ -163,9 +163,36 @@ pub struct PyAcSensitivityResult {
     frequencies: Vec<f64>,
     output_values: Vec<rspice_core::Complex64>,
     sensitivities: Vec<PyAcSensitivity>,
+    /// The core result, kept because this projection derives a dB series and
+    /// formats element types as labels the shared projection cannot read back.
+    evidence: Option<DocumentEvidence<AcSensitivityResult>>,
+}
+
+impl CarriesDocumentEvidence for PyAcSensitivityResult {
+    fn bind_execution(
+        &mut self,
+        analysis: rspice_core::execution::AnalysisInstanceId,
+        coordinate: Option<&rspice_core::execution::ResultCoordinate>,
+    ) {
+        self.evidence = self
+            .evidence
+            .take()
+            .map(|evidence| evidence.with_execution(analysis, coordinate));
+    }
 }
 
 impl PyAcSensitivityResult {
+    /// The shared result document, projected from the retained derivatives.
+    fn shared_document(&self, py: Python<'_>) -> PyResult<AnalysisResultDocument> {
+        let evidence = document::evidence(&self.evidence, "AC sensitivity")?;
+        let coordinate = evidence.coordinate.clone();
+        let analysis = evidence.analysis;
+        let result = &evidence.core;
+        document::build(py, coordinate, || {
+            AnalysisResultDocument::from_ac_sensitivity(analysis, result)
+        })
+    }
+
     pub fn from_core(result: &AcSensitivityResult) -> Self {
         let sensitivities = result
             .sensitivities
@@ -203,12 +230,40 @@ impl PyAcSensitivityResult {
             frequencies: result.frequencies.clone(),
             output_values: result.output_values.clone(),
             sensitivities,
+            evidence: Some(DocumentEvidence::sole(
+                rspice_core::execution::AnalysisKind::Sensitivity,
+                result.clone(),
+            )),
         }
     }
 }
 
 #[pymethods]
 impl PyAcSensitivityResult {
+    /// Typed inventory of every signal in this result's shared document.
+    ///
+    /// The descriptors are the ones the CLI, the WASM build and the engine
+    /// adapter publish, so a canonical name, unit, owner, or availability
+    /// means the same thing on every surface.
+    fn signals(&self, py: Python<'_>) -> PyResult<Vec<PySignalDescriptor>> {
+        Ok(document::signals(&self.shared_document(py)?))
+    }
+
+    /// Every analysis-owned scalar this result publishes, with its unit.
+    fn scalars(&self, py: Python<'_>) -> PyResult<Vec<PyResultScalar>> {
+        Ok(document::scalars(&self.shared_document(py)?))
+    }
+
+    /// Every per-device observable history this result captured.
+    fn device_observables(&self, py: Python<'_>) -> PyResult<Vec<PyDeviceObservable>> {
+        Ok(document::device_observables(&self.shared_document(py)?))
+    }
+
+    /// The whole shared result document as JSON-serializable Python data.
+    fn document<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        document::json_view(py, &self.shared_document(py)?)
+    }
+
     #[getter]
     fn frequencies<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
         self.frequencies.to_pyarray(py)
@@ -322,6 +377,7 @@ impl PyAcSensitivityResult {
             frequencies,
             output_values: complex_from_state(output_values),
             sensitivities,
+            evidence: None,
         }
     }
 
@@ -447,6 +503,22 @@ pub struct PySensitivityResult {
     #[pyo3(get)]
     pub output_value: f64,
     sensitivities: Vec<PyElementSensitivity>,
+    /// The core result, kept because this projection formats each element
+    /// type as a debug label the shared projection cannot read back.
+    evidence: Option<DocumentEvidence<rspice_core::analysis::SensitivityResult>>,
+}
+
+impl CarriesDocumentEvidence for PySensitivityResult {
+    fn bind_execution(
+        &mut self,
+        analysis: rspice_core::execution::AnalysisInstanceId,
+        coordinate: Option<&rspice_core::execution::ResultCoordinate>,
+    ) {
+        self.evidence = self
+            .evidence
+            .take()
+            .map(|evidence| evidence.with_execution(analysis, coordinate));
+    }
 }
 
 impl PySensitivityResult {
@@ -459,12 +531,51 @@ impl PySensitivityResult {
                 .iter()
                 .map(PyElementSensitivity::from_core)
                 .collect(),
+            evidence: Some(DocumentEvidence::sole(
+                rspice_core::execution::AnalysisKind::Sensitivity,
+                result.clone(),
+            )),
         }
+    }
+
+    /// The shared result document, projected from the retained derivatives.
+    fn shared_document(&self, py: Python<'_>) -> PyResult<AnalysisResultDocument> {
+        let evidence = document::evidence(&self.evidence, "DC sensitivity")?;
+        let coordinate = evidence.coordinate.clone();
+        let analysis = evidence.analysis;
+        let result = &evidence.core;
+        document::build(py, coordinate, || {
+            AnalysisResultDocument::from_sensitivity(analysis, result)
+        })
     }
 }
 
 #[pymethods]
 impl PySensitivityResult {
+    /// Typed inventory of every signal in this result's shared document.
+    ///
+    /// The descriptors are the ones the CLI, the WASM build and the engine
+    /// adapter publish, so a canonical name, unit, owner, or availability
+    /// means the same thing on every surface.
+    fn signals(&self, py: Python<'_>) -> PyResult<Vec<PySignalDescriptor>> {
+        Ok(document::signals(&self.shared_document(py)?))
+    }
+
+    /// Every analysis-owned scalar this result publishes, with its unit.
+    fn scalars(&self, py: Python<'_>) -> PyResult<Vec<PyResultScalar>> {
+        Ok(document::scalars(&self.shared_document(py)?))
+    }
+
+    /// Every per-device observable history this result captured.
+    fn device_observables(&self, py: Python<'_>) -> PyResult<Vec<PyDeviceObservable>> {
+        Ok(document::device_observables(&self.shared_document(py)?))
+    }
+
+    /// The whole shared result document as JSON-serializable Python data.
+    fn document<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        document::json_view(py, &self.shared_document(py)?)
+    }
+
     #[getter]
     fn sensitivities(&self) -> Vec<PyElementSensitivity> {
         self.sensitivities.clone()
@@ -534,6 +645,7 @@ impl PySensitivityResult {
             output,
             output_value,
             sensitivities,
+            evidence: None,
         }
     }
 

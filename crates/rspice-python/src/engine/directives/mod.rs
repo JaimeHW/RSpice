@@ -66,6 +66,24 @@ enum TransientStartup {
 #[derive(Clone)]
 struct ExecutionContext {
     analysis_id: Option<String>,
+    /// Canonical identity of the authored card this execution runs, as the
+    /// plan minted it.
+    ///
+    /// `analysis_id` is its display spelling; this is the value the shared
+    /// result document names, so a deck with several cards of one family
+    /// publishes each result under its own identity instead of all of them
+    /// under the family's first ordinal.
+    analysis: Option<rspice_core::execution::AnalysisInstanceId>,
+    /// Stable identity of the materialized run coordinate, when the deck has a
+    /// run axis.
+    ///
+    /// A card whose result depends on a pseudo-random stream — `.MC` — derives
+    /// that stream from this, so each coordinate of a `.STEP` or `.TEMP` sweep
+    /// draws its own reproducible sample instead of repeating one.
+    coordinate_id: Option<rspice_core::execution::RunCoordinateId>,
+    /// The coordinate in the shape a shared result document records it, so a
+    /// `.STEP` or `.TEMP` result says which point of the axis it was solved at.
+    result_coordinate: Option<rspice_core::execution::ResultCoordinate>,
     coordinate: Option<PyRunCoordinate>,
     /// Startup contract for a `.TRAN` executed under this context.
     transient_startup: TransientStartup,
@@ -83,6 +101,19 @@ struct ExecutionContext {
 enum PeriodicOperatingPoint {
     Shooting(Box<rspice_core::engine::PssOperatingPoint>),
     HarmonicBalance(Box<rspice_core::engine::HbOperatingPoint>),
+}
+
+/// One materialized run coordinate, in both the shapes a directive needs.
+///
+/// The Python projection travels into every record and measurement; the stable
+/// identity is what a coordinate-derived pseudo-random stream is derived from.
+/// They are one fact, so they travel together rather than as two parameters
+/// that could be paired wrongly.
+#[derive(Clone, Copy)]
+struct MaterializedCoordinate<'a> {
+    python: &'a PyRunCoordinate,
+    id: rspice_core::execution::RunCoordinateId,
+    document: &'a rspice_core::execution::ResultCoordinate,
 }
 
 struct PlannedDirectiveRun<'a> {
@@ -173,6 +204,11 @@ pub(super) struct DirectiveOutcomes {
     pub(super) pss: LastAndAll<PyPssResult>,
     pac: LastAndAll<PyPacResult>,
     pnoise: LastAndAll<PyPeriodicNoiseResult>,
+    /// Autonomous-carrier `.PNOISE` results. An oscillator's phase noise is a
+    /// carrier-normalized dBc/Hz spectrum with a phase-diffusion constant, not
+    /// an output PSD, so it is kept apart from the driven results rather than
+    /// folded into them under a unit it does not have.
+    oscillator_noise: LastAndAll<PyOscillatorNoiseResult>,
     envelope: LastAndAll<Py<PyEnvelopeResult>>,
     /// Converged periodic operating points, keyed by the canonical identity of
     /// the analysis that produced them, so a dependent card consumes exactly
@@ -213,6 +249,7 @@ impl DirectiveOutcomes {
         self.pss.append(other.pss);
         self.pac.append(other.pac);
         self.pnoise.append(other.pnoise);
+        self.oscillator_noise.append(other.oscillator_noise);
         self.envelope.append(other.envelope);
         // Operating points are deliberately not merged across coordinates: a
         // dependent card must linearize around the carrier solved at its own
@@ -377,23 +414,35 @@ fn run_directives(
         ) {
             continue;
         }
-        let (analysis_id, upstream_analysis_id) =
-            if matches!(analysis, AnalysisCommand::Four { .. }) {
-                let analysis_id = format!("four-{next_fourier_ordinal:03}");
-                next_fourier_ordinal += 1;
-                (Some(analysis_id), None)
-            } else {
-                match planned.next() {
-                    Some(planned) => (
-                        Some(planned.id().tag()),
-                        planned.request().upstream().map(|id| id.tag()),
-                    ),
-                    None => (None, None),
-                }
-            };
+        let (identity, upstream_analysis_id) = if matches!(analysis, AnalysisCommand::Four { .. }) {
+            let ordinal = u32::try_from(next_fourier_ordinal.saturating_sub(1)).unwrap_or(u32::MAX);
+            next_fourier_ordinal += 1;
+            (
+                Some(rspice_core::execution::analysis_instance_identity(
+                    rspice_core::execution::AnalysisKind::Fourier,
+                    ordinal,
+                )),
+                None,
+            )
+        } else {
+            match planned.next() {
+                Some(planned) => (
+                    Some(planned.id()),
+                    planned.request().upstream().map(|id| id.tag()),
+                ),
+                None => (None, None),
+            }
+        };
+        let analysis_id = identity.map(|identity| identity.tag());
         let context =
             (analysis_id.is_some() || planned_run.coordinate.is_some()).then(|| ExecutionContext {
                 analysis_id,
+                analysis: identity,
+                // This route runs a deck with no run axis, so there is no
+                // coordinate to derive a per-coordinate stream from and none
+                // for a result document to be placed at.
+                coordinate_id: None,
+                result_coordinate: None,
                 coordinate: planned_run.coordinate.cloned(),
                 transient_startup: planned_run.transient_startup,
                 upstream_analysis_id,
@@ -487,6 +536,7 @@ fn into_report(out: DirectiveOutcomes, measurements: Vec<PyMeasurement>) -> PyRu
     let (pss, all_pss) = out.pss.into_parts();
     let (pac, all_pac) = out.pac.into_parts();
     let (pnoise, all_pnoise) = out.pnoise.into_parts();
+    let (oscillator_noise, all_oscillator_noise) = out.oscillator_noise.into_parts();
     let (envelope, all_envelope) = out.envelope.into_parts();
     let (s_parameters, all_s_parameters) = out.s_parameters.into_parts();
     let (tf, all_tf) = out.tf.into_parts();
@@ -506,6 +556,7 @@ fn into_report(out: DirectiveOutcomes, measurements: Vec<PyMeasurement>) -> PyRu
         pss,
         pac,
         pnoise,
+        oscillator_noise,
         envelope,
         s_parameters,
         noise,
@@ -530,6 +581,7 @@ fn into_report(out: DirectiveOutcomes, measurements: Vec<PyMeasurement>) -> PyRu
         all_pss,
         all_pac,
         all_pnoise,
+        all_oscillator_noise,
         all_envelope,
         all_s_parameters,
         all_tf,

@@ -12,6 +12,20 @@ use super::*;
 #[derive(Debug, Clone)]
 pub struct PyHbResult {
     inner: rspice_core::analysis::HbResult,
+    evidence: Option<DocumentEvidence<()>>,
+}
+
+impl CarriesDocumentEvidence for PyHbResult {
+    fn bind_execution(
+        &mut self,
+        analysis: rspice_core::execution::AnalysisInstanceId,
+        coordinate: Option<&rspice_core::execution::ResultCoordinate>,
+    ) {
+        self.evidence = self
+            .evidence
+            .take()
+            .map(|evidence| evidence.with_execution(analysis, coordinate));
+    }
 }
 
 impl PyHbResult {
@@ -24,7 +38,19 @@ impl PyHbResult {
     pub(crate) fn from_spectra(result: &rspice_core::analysis::HbResult) -> Self {
         Self {
             inner: result.clone(),
+            evidence: Some(DocumentEvidence::sole(
+                rspice_core::execution::AnalysisKind::HarmonicBalance,
+                (),
+            )),
         }
+    }
+
+    /// The shared result document, projected from the retained spectra.
+    fn shared_document(&self, py: Python<'_>) -> PyResult<AnalysisResultDocument> {
+        let (analysis, coordinate) = document::execution(&self.evidence, "harmonic-balance")?;
+        document::build(py, coordinate, || {
+            AnalysisResultDocument::from_harmonic_balance(analysis, &self.inner)
+        })
     }
 
     fn spectral_voltage(
@@ -140,6 +166,30 @@ impl PyHbResult {
         )
     }
 
+    /// Typed inventory of every signal in this result's shared document.
+    ///
+    /// The descriptors are the ones the CLI, the WASM build and the engine
+    /// adapter publish, so a canonical name, unit, owner, or availability
+    /// means the same thing on every surface.
+    fn signals(&self, py: Python<'_>) -> PyResult<Vec<PySignalDescriptor>> {
+        Ok(document::signals(&self.shared_document(py)?))
+    }
+
+    /// Every analysis-owned scalar this result publishes, with its unit.
+    fn scalars(&self, py: Python<'_>) -> PyResult<Vec<PyResultScalar>> {
+        Ok(document::scalars(&self.shared_document(py)?))
+    }
+
+    /// Every per-device observable history this result captured.
+    fn device_observables(&self, py: Python<'_>) -> PyResult<Vec<PyDeviceObservable>> {
+        Ok(document::device_observables(&self.shared_document(py)?))
+    }
+
+    /// The whole shared result document as JSON-serializable Python data.
+    fn document<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        document::json_view(py, &self.shared_document(py)?)
+    }
+
     /// Rebuild from pickled state. Not part of the public API.
     ///
     /// Branch-current and reactive spectra are carried even though this class
@@ -205,6 +255,7 @@ impl PyHbResult {
                     .map(|label| hb_limitation_from_label(label))
                     .collect::<PyResult<Vec<_>>>()?,
             },
+            evidence: None,
         })
     }
 

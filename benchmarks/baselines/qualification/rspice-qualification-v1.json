@@ -8,16 +8,13 @@
           "surfaces": {
             "CLI": {
               "scalar": {
-                "reason": "CSV/text artifact exists, but no shared typed result document",
-                "status": "partial"
+                "status": "mapped"
               },
               "stepped": {
-                "reason": "shared deck axes execute, but the CLI artifact does not retain a typed coordinate document",
-                "status": "partial"
+                "status": "mapped"
               },
               "temperature": {
-                "reason": "shared deck axes execute, but the CLI artifact does not retain a typed coordinate document",
-                "status": "partial"
+                "status": "mapped"
               }
             },
             "Engine adapter": {
@@ -60,16 +57,13 @@
           "surfaces": {
             "CLI": {
               "scalar": {
-                "reason": "CSV/text artifact exists, but no shared typed result document",
-                "status": "partial"
+                "status": "mapped"
               },
               "stepped": {
-                "reason": "shared deck axes execute, but the CLI artifact does not retain a typed coordinate document",
-                "status": "partial"
+                "status": "mapped"
               },
               "temperature": {
-                "reason": "shared deck axes execute, but the CLI artifact does not retain a typed coordinate document",
-                "status": "partial"
+                "status": "mapped"
               }
             },
             "Engine adapter": {
@@ -112,16 +106,13 @@
           "surfaces": {
             "CLI": {
               "scalar": {
-                "reason": "CSV/text artifact exists, but no shared typed result document",
-                "status": "partial"
+                "status": "mapped"
               },
               "stepped": {
-                "reason": "shared deck axes execute, but the CLI artifact does not retain a typed coordinate document",
-                "status": "partial"
+                "status": "mapped"
               },
               "temperature": {
-                "reason": "shared deck axes execute, but the CLI artifact does not retain a typed coordinate document",
-                "status": "partial"
+                "status": "mapped"
               }
             },
             "Engine adapter": {
@@ -164,16 +155,13 @@
           "surfaces": {
             "CLI": {
               "scalar": {
-                "reason": "CSV/text artifact exists, but no shared typed result document",
-                "status": "partial"
+                "status": "mapped"
               },
               "stepped": {
-                "reason": "shared deck axes execute, but the CLI artifact does not retain a typed coordinate document",
-                "status": "partial"
+                "status": "mapped"
               },
               "temperature": {
-                "reason": "shared deck axes execute, but the CLI artifact does not retain a typed coordinate document",
-                "status": "partial"
+                "status": "mapped"
               }
             },
             "Engine adapter": {
@@ -216,16 +204,13 @@
           "surfaces": {
             "CLI": {
               "scalar": {
-                "reason": "CSV/text artifact exists, but no shared typed result document",
-                "status": "partial"
+                "status": "mapped"
               },
               "stepped": {
-                "reason": "shared deck axes execute, but the CLI artifact does not retain a typed coordinate document",
-                "status": "partial"
+                "status": "mapped"
               },
               "temperature": {
-                "reason": "shared deck axes execute, but the CLI artifact does not retain a typed coordinate document",
-                "status": "partial"
+                "status": "mapped"
               }
             },
             "Engine adapter": {
@@ -268,30 +253,24 @@
           "surfaces": {
             "CLI": {
               "scalar": {
-                "reason": "CSV/text artifact exists, but no shared typed result document",
-                "status": "partial"
+                "status": "mapped"
               },
               "stepped": {
-                "reason": "shared deck axes execute, but the CLI artifact does not retain a typed coordinate document",
-                "status": "partial"
+                "status": "mapped"
               },
               "temperature": {
-                "reason": "shared deck axes execute, but the CLI artifact does not retain a typed coordinate document",
-                "status": "partial"
+                "status": "mapped"
               }
             },
             "Engine adapter": {
               "scalar": {
-                "reason": "no Engine::run_* entry point produces an SParameterResult, so the protocol-4 adapter cannot publish the shared sp/port-noise document without deciding the .SP projection itself",
-                "status": "unsupported"
+                "status": "mapped"
               },
               "stepped": {
-                "reason": "no Engine::run_* entry point produces an SParameterResult, so the protocol-4 adapter cannot publish the shared sp/port-noise document without deciding the .SP projection itself",
-                "status": "unsupported"
+                "status": "mapped"
               },
               "temperature": {
-                "reason": "no Engine::run_* entry point produces an SParameterResult, so the protocol-4 adapter cannot publish the shared sp/port-noise document without deciding the .SP projection itself",
-                "status": "unsupported"
+                "status": "mapped"
               }
             },
             "Python": {
@@ -307,16 +286,13 @@
             },
             "WASM": {
               "scalar": {
-                "reason": "no Engine runner returns an SParameterResult, so the browser deck route refuses .SP by name",
-                "status": "unsupported"
+                "status": "mapped"
               },
               "stepped": {
-                "reason": "no Engine runner returns an SParameterResult, so the browser deck route refuses .SP by name",
-                "status": "unsupported"
+                "status": "mapped"
               },
               "temperature": {
-                "reason": "no Engine runner returns an SParameterResult, so the browser deck route refuses .SP by name",
-                "status": "unsupported"
+                "status": "mapped"
               }
             }
           }
@@ -326,30 +302,24 @@
           "surfaces": {
             "CLI": {
               "scalar": {
-                "reason": "CSV/text artifact exists, but no shared typed result document",
-                "status": "partial"
+                "status": "mapped"
               },
               "stepped": {
-                "reason": "shared deck axes execute, but the CLI artifact does not retain a typed coordinate document",
-                "status": "partial"
+                "status": "mapped"
               },
               "temperature": {
-                "reason": "shared deck axes execute, but the CLI artifact does not retain a typed coordinate document",
-                "status": "partial"
+                "status": "mapped"
               }
             },
             "Engine adapter": {
               "scalar": {
-                "reason": "no Engine::run_* entry point produces an SParameterResult, so the protocol-4 adapter cannot publish the shared sp/port-noise document without deciding the .SP projection itself",
-                "status": "unsupported"
+                "status": "mapped"
               },
               "stepped": {
-                "reason": "no Engine::run_* entry point produces an SParameterResult, so the protocol-4 adapter cannot publish the shared sp/port-noise document without deciding the .SP projection itself",
-                "status": "unsupported"
+                "status": "mapped"
               },
               "temperature": {
-                "reason": "no Engine::run_* entry point produces an SParameterResult, so the protocol-4 adapter cannot publish the shared sp/port-noise document without deciding the .SP projection itself",
-                "status": "unsupported"
+                "status": "mapped"
               }
             },
             "Python": {
@@ -365,16 +335,13 @@
             },
             "WASM": {
               "scalar": {
-                "reason": "no Engine runner returns an SParameterResult, so the browser deck route refuses .SP by name",
-                "status": "unsupported"
+                "status": "mapped"
               },
               "stepped": {
-                "reason": "no Engine runner returns an SParameterResult, so the browser deck route refuses .SP by name",
-                "status": "unsupported"
+                "status": "mapped"
               },
               "temperature": {
-                "reason": "no Engine runner returns an SParameterResult, so the browser deck route refuses .SP by name",
-                "status": "unsupported"
+                "status": "mapped"
               }
             }
           }
@@ -384,16 +351,13 @@
           "surfaces": {
             "CLI": {
               "scalar": {
-                "reason": "CSV/text artifact exists, but no shared typed result document",
-                "status": "partial"
+                "status": "mapped"
               },
               "stepped": {
-                "reason": "shared deck axes execute, but the CLI artifact does not retain a typed coordinate document",
-                "status": "partial"
+                "status": "mapped"
               },
               "temperature": {
-                "reason": "shared deck axes execute, but the CLI artifact does not retain a typed coordinate document",
-                "status": "partial"
+                "status": "mapped"
               }
             },
             "Engine adapter": {
@@ -436,16 +400,13 @@
           "surfaces": {
             "CLI": {
               "scalar": {
-                "reason": "CSV/text artifact exists, but no shared typed result document",
-                "status": "partial"
+                "status": "mapped"
               },
               "stepped": {
-                "reason": "shared deck axes execute, but the CLI artifact does not retain a typed coordinate document",
-                "status": "partial"
+                "status": "mapped"
               },
               "temperature": {
-                "reason": "shared deck axes execute, but the CLI artifact does not retain a typed coordinate document",
-                "status": "partial"
+                "status": "mapped"
               }
             },
             "Engine adapter": {
@@ -488,30 +449,24 @@
           "surfaces": {
             "CLI": {
               "scalar": {
-                "reason": "CSV/text artifact exists, but no shared typed result document",
-                "status": "partial"
+                "status": "mapped"
               },
               "stepped": {
-                "reason": "shared deck axes execute, but the CLI artifact does not retain a typed coordinate document",
-                "status": "partial"
+                "status": "mapped"
               },
               "temperature": {
-                "reason": "shared deck axes execute, but the CLI artifact does not retain a typed coordinate document",
-                "status": "partial"
+                "status": "mapped"
               }
             },
             "Engine adapter": {
               "scalar": {
-                "reason": "loops with finite margins publish the shared stability document, but an unconditionally stable loop reports an infinite margin and from_stability refuses a non-finite scalar rather than recording the absent crossover",
-                "status": "partial"
+                "status": "mapped"
               },
               "stepped": {
-                "reason": "loops with finite margins publish the shared stability document, but an unconditionally stable loop reports an infinite margin and from_stability refuses a non-finite scalar rather than recording the absent crossover",
-                "status": "partial"
+                "status": "mapped"
               },
               "temperature": {
-                "reason": "loops with finite margins publish the shared stability document, but an unconditionally stable loop reports an infinite margin and from_stability refuses a non-finite scalar rather than recording the absent crossover",
-                "status": "partial"
+                "status": "mapped"
               }
             },
             "Python": {
@@ -527,16 +482,13 @@
             },
             "WASM": {
               "scalar": {
-                "reason": "the browser deck route executes .STB and publishes the shared stability document, but a loop with no gain or phase crossover has an infinite Tian margin that a finite ResultScalar cannot encode, so such a run fails closed instead of publishing a different margin",
-                "status": "partial"
+                "status": "mapped"
               },
               "stepped": {
-                "reason": "the browser deck route executes .STB and publishes the shared stability document, but a loop with no gain or phase crossover has an infinite Tian margin that a finite ResultScalar cannot encode, so such a run fails closed instead of publishing a different margin",
-                "status": "partial"
+                "status": "mapped"
               },
               "temperature": {
-                "reason": "the browser deck route executes .STB and publishes the shared stability document, but a loop with no gain or phase crossover has an infinite Tian margin that a finite ResultScalar cannot encode, so such a run fails closed instead of publishing a different margin",
-                "status": "partial"
+                "status": "mapped"
               }
             }
           }
@@ -546,16 +498,13 @@
           "surfaces": {
             "CLI": {
               "scalar": {
-                "reason": "CSV/text artifact exists, but no shared typed result document",
-                "status": "partial"
+                "status": "mapped"
               },
               "stepped": {
-                "reason": "shared deck axes execute, but the CLI artifact does not retain a typed coordinate document",
-                "status": "partial"
+                "status": "mapped"
               },
               "temperature": {
-                "reason": "shared deck axes execute, but the CLI artifact does not retain a typed coordinate document",
-                "status": "partial"
+                "status": "mapped"
               }
             },
             "Engine adapter": {
@@ -582,16 +531,13 @@
             },
             "WASM": {
               "scalar": {
-                "reason": "core takes node indices here and exposes no authored-name to node-index resolver, so the browser deck route refuses the card by name",
-                "status": "unsupported"
+                "status": "mapped"
               },
               "stepped": {
-                "reason": "core takes node indices here and exposes no authored-name to node-index resolver, so the browser deck route refuses the card by name",
-                "status": "unsupported"
+                "status": "mapped"
               },
               "temperature": {
-                "reason": "core takes node indices here and exposes no authored-name to node-index resolver, so the browser deck route refuses the card by name",
-                "status": "unsupported"
+                "status": "mapped"
               }
             }
           }
@@ -601,16 +547,13 @@
           "surfaces": {
             "CLI": {
               "scalar": {
-                "reason": "CSV/text artifact exists, but no shared typed result document",
-                "status": "partial"
+                "status": "mapped"
               },
               "stepped": {
-                "reason": "shared deck axes execute, but the CLI artifact does not retain a typed coordinate document",
-                "status": "partial"
+                "status": "mapped"
               },
               "temperature": {
-                "reason": "shared deck axes execute, but the CLI artifact does not retain a typed coordinate document",
-                "status": "partial"
+                "status": "mapped"
               }
             },
             "Engine adapter": {
@@ -637,16 +580,13 @@
             },
             "WASM": {
               "scalar": {
-                "reason": "core takes node indices here and exposes no authored-name to node-index resolver, so the browser deck route refuses the card by name",
-                "status": "unsupported"
+                "status": "mapped"
               },
               "stepped": {
-                "reason": "core takes node indices here and exposes no authored-name to node-index resolver, so the browser deck route refuses the card by name",
-                "status": "unsupported"
+                "status": "mapped"
               },
               "temperature": {
-                "reason": "core takes node indices here and exposes no authored-name to node-index resolver, so the browser deck route refuses the card by name",
-                "status": "unsupported"
+                "status": "mapped"
               }
             }
           }
@@ -656,30 +596,24 @@
           "surfaces": {
             "CLI": {
               "scalar": {
-                "reason": "CSV/text artifact exists, but no shared typed result document",
-                "status": "partial"
+                "status": "mapped"
               },
               "stepped": {
-                "reason": "shared deck axes execute, but the CLI artifact does not retain a typed coordinate document",
-                "status": "partial"
+                "status": "mapped"
               },
               "temperature": {
-                "reason": "shared deck axes execute, but the CLI artifact does not retain a typed coordinate document",
-                "status": "partial"
+                "status": "mapped"
               }
             },
             "Engine adapter": {
               "scalar": {
-                "reason": "DeckPlan mints no AnalysisInstanceId for .FOUR or .FFT, so the shared post-process document cannot be named",
-                "status": "unsupported"
+                "status": "mapped"
               },
               "stepped": {
-                "reason": "DeckPlan mints no AnalysisInstanceId for .FOUR or .FFT, so the shared post-process document cannot be named",
-                "status": "unsupported"
+                "status": "mapped"
               },
               "temperature": {
-                "reason": "DeckPlan mints no AnalysisInstanceId for .FOUR or .FFT, so the shared post-process document cannot be named",
-                "status": "unsupported"
+                "status": "mapped"
               }
             },
             "Python": {
@@ -695,16 +629,13 @@
             },
             "WASM": {
               "scalar": {
-                "reason": "core exposes no resolver from a .FOUR output specification to a TransientResult column, so the browser deck route refuses .FOUR by name",
-                "status": "unsupported"
+                "status": "mapped"
               },
               "stepped": {
-                "reason": "core exposes no resolver from a .FOUR output specification to a TransientResult column, so the browser deck route refuses .FOUR by name",
-                "status": "unsupported"
+                "status": "mapped"
               },
               "temperature": {
-                "reason": "core exposes no resolver from a .FOUR output specification to a TransientResult column, so the browser deck route refuses .FOUR by name",
-                "status": "unsupported"
+                "status": "mapped"
               }
             }
           }
@@ -725,16 +656,13 @@
             },
             "Engine adapter": {
               "scalar": {
-                "reason": "a complete typed FFT bundle is published beside its parent transient, but it is the adapter's own schema rather than the shared fft result document",
-                "status": "partial"
+                "status": "mapped"
               },
               "stepped": {
-                "reason": "a complete typed FFT bundle is published beside its parent transient, but it is the adapter's own schema rather than the shared fft result document",
-                "status": "partial"
+                "status": "mapped"
               },
               "temperature": {
-                "reason": "a complete typed FFT bundle is published beside its parent transient, but it is the adapter's own schema rather than the shared fft result document",
-                "status": "partial"
+                "status": "mapped"
               }
             },
             "Python": {
@@ -766,16 +694,13 @@
           "surfaces": {
             "CLI": {
               "scalar": {
-                "reason": "CSV/text artifact exists, but no shared typed result document",
-                "status": "partial"
+                "status": "mapped"
               },
               "stepped": {
-                "reason": "CLI has no authored deck-axis route for this analysis family",
-                "status": "unsupported"
+                "status": "mapped"
               },
               "temperature": {
-                "reason": "CLI has no authored deck-axis route for this analysis family",
-                "status": "unsupported"
+                "status": "mapped"
               }
             },
             "Engine adapter": {
@@ -783,12 +708,10 @@
                 "status": "mapped"
               },
               "stepped": {
-                "reason": "shared deck axes execute, but coordinate-derived Monte Carlo seed semantics are undefined",
-                "status": "partial"
+                "status": "mapped"
               },
               "temperature": {
-                "reason": "shared deck axes execute, but coordinate-derived Monte Carlo seed semantics are undefined",
-                "status": "partial"
+                "status": "mapped"
               }
             },
             "Python": {
@@ -796,12 +719,10 @@
                 "status": "mapped"
               },
               "stepped": {
-                "reason": "nested STEP executes, but coordinate-derived Monte Carlo seed semantics are undefined",
-                "status": "partial"
+                "status": "mapped"
               },
               "temperature": {
-                "reason": "nested TEMP executes, but coordinate-derived Monte Carlo seed semantics are undefined",
-                "status": "partial"
+                "status": "mapped"
               }
             },
             "WASM": {
@@ -809,12 +730,10 @@
                 "status": "mapped"
               },
               "stepped": {
-                "reason": "the axis executes, but coordinate-derived Monte Carlo seed semantics are undefined",
-                "status": "partial"
+                "status": "mapped"
               },
               "temperature": {
-                "reason": "the axis executes, but coordinate-derived Monte Carlo seed semantics are undefined",
-                "status": "partial"
+                "status": "mapped"
               }
             }
           }
@@ -824,16 +743,13 @@
           "surfaces": {
             "CLI": {
               "scalar": {
-                "reason": "CSV/text artifact exists, but no shared typed result document",
-                "status": "partial"
+                "status": "mapped"
               },
               "stepped": {
-                "reason": "CLI has no authored deck-axis route for this analysis family",
-                "status": "unsupported"
+                "status": "mapped"
               },
               "temperature": {
-                "reason": "CLI has no authored deck-axis route for this analysis family",
-                "status": "unsupported"
+                "status": "mapped"
               }
             },
             "Engine adapter": {
@@ -876,16 +792,13 @@
           "surfaces": {
             "CLI": {
               "scalar": {
-                "reason": "CLI has no PAC execution or result adapter",
-                "status": "unsupported"
+                "status": "mapped"
               },
               "stepped": {
-                "reason": "CLI has no PAC execution or result adapter",
-                "status": "unsupported"
+                "status": "mapped"
               },
               "temperature": {
-                "reason": "CLI has no PAC execution or result adapter",
-                "status": "unsupported"
+                "status": "mapped"
               }
             },
             "Engine adapter": {
@@ -928,30 +841,24 @@
           "surfaces": {
             "CLI": {
               "scalar": {
-                "reason": "CLI has no PNoise execution or result adapter",
-                "status": "unsupported"
+                "status": "mapped"
               },
               "stepped": {
-                "reason": "CLI has no PNoise execution or result adapter",
-                "status": "unsupported"
+                "status": "mapped"
               },
               "temperature": {
-                "reason": "CLI has no PNoise execution or result adapter",
-                "status": "unsupported"
+                "status": "mapped"
               }
             },
             "Engine adapter": {
               "scalar": {
-                "reason": "the driven .PNOISE runners return PnoiseAnalysisResult and the autonomous one returns OscPnoiseResult, while from_pnoise accepts only analysis::pnoise::PnoiseResult",
-                "status": "unsupported"
+                "status": "mapped"
               },
               "stepped": {
-                "reason": "the driven .PNOISE runners return PnoiseAnalysisResult and the autonomous one returns OscPnoiseResult, while from_pnoise accepts only analysis::pnoise::PnoiseResult",
-                "status": "unsupported"
+                "status": "mapped"
               },
               "temperature": {
-                "reason": "the driven .PNOISE runners return PnoiseAnalysisResult and the autonomous one returns OscPnoiseResult, while from_pnoise accepts only analysis::pnoise::PnoiseResult",
-                "status": "unsupported"
+                "status": "mapped"
               }
             },
             "Python": {
@@ -959,26 +866,21 @@
                 "status": "mapped"
               },
               "stepped": {
-                "reason": "deck-axis .PNOISE executes around a driven carrier only; an autonomous PSS carrier's oscillator phase noise has no run-report field",
-                "status": "partial"
+                "status": "mapped"
               },
               "temperature": {
-                "reason": "deck-axis .PNOISE executes around a driven carrier only; an autonomous PSS carrier's oscillator phase noise has no run-report field",
-                "status": "partial"
+                "status": "mapped"
               }
             },
             "WASM": {
               "scalar": {
-                "reason": "no Engine runner returns analysis::pnoise::PnoiseResult, so the browser deck route refuses .PNOISE by name",
-                "status": "unsupported"
+                "status": "mapped"
               },
               "stepped": {
-                "reason": "no Engine runner returns analysis::pnoise::PnoiseResult, so the browser deck route refuses .PNOISE by name",
-                "status": "unsupported"
+                "status": "mapped"
               },
               "temperature": {
-                "reason": "no Engine runner returns analysis::pnoise::PnoiseResult, so the browser deck route refuses .PNOISE by name",
-                "status": "unsupported"
+                "status": "mapped"
               }
             }
           }
@@ -988,16 +890,13 @@
           "surfaces": {
             "CLI": {
               "scalar": {
-                "reason": "CSV/text artifact exists, but no shared typed result document",
-                "status": "partial"
+                "status": "mapped"
               },
               "stepped": {
-                "reason": "shared deck axes execute, but the CLI artifact does not retain a typed coordinate document",
-                "status": "partial"
+                "status": "mapped"
               },
               "temperature": {
-                "reason": "shared deck axes execute, but the CLI artifact does not retain a typed coordinate document",
-                "status": "partial"
+                "status": "mapped"
               }
             },
             "Engine adapter": {
@@ -1040,16 +939,13 @@
           "surfaces": {
             "CLI": {
               "scalar": {
-                "reason": "CLI has no envelope result adapter",
-                "status": "unsupported"
+                "status": "mapped"
               },
               "stepped": {
-                "reason": "CLI has no envelope result adapter",
-                "status": "unsupported"
+                "status": "mapped"
               },
               "temperature": {
-                "reason": "CLI has no envelope result adapter",
-                "status": "unsupported"
+                "status": "mapped"
               }
             },
             "Engine adapter": {
@@ -1093,8 +989,7 @@
           "signal": "Voltage",
           "surfaces": {
             "CLI": {
-              "reason": "export exists, but it is not a shared SignalDescriptor document",
-              "status": "partial"
+              "status": "mapped"
             },
             "Engine adapter": {
               "status": "mapped"
@@ -1111,8 +1006,7 @@
           "signal": "Current",
           "surfaces": {
             "CLI": {
-              "reason": "export exists, but it is not a shared SignalDescriptor document",
-              "status": "partial"
+              "status": "mapped"
             },
             "Engine adapter": {
               "status": "mapped"
@@ -1129,15 +1023,13 @@
           "signal": "DeviceObservable",
           "surfaces": {
             "CLI": {
-              "reason": "mapped for a subset of result families only",
-              "status": "partial"
+              "status": "mapped"
             },
             "Engine adapter": {
               "status": "mapped"
             },
             "Python": {
-              "reason": "mapped for operating-point, DC-sweep and transient results, which are the families whose solvers capture per-device observables; the frequency-domain and periodic families compute none to expose",
-              "status": "partial"
+              "status": "mapped"
             },
             "WASM": {
               "status": "mapped"
@@ -1148,15 +1040,13 @@
           "signal": "Scalar",
           "surfaces": {
             "CLI": {
-              "reason": "export exists, but it is not a shared SignalDescriptor document",
-              "status": "partial"
+              "status": "mapped"
             },
             "Engine adapter": {
               "status": "mapped"
             },
             "Python": {
-              "reason": "mapped as named accessors on the noise, transfer-function, stability, pole-zero, distortion, S-parameter, harmonic-balance, PSS, Monte Carlo and envelope results, not as a shared SignalDescriptor lookup; AC and operating-point results publish no analysis-owned scalar",
-              "status": "partial"
+              "status": "mapped"
             },
             "WASM": {
               "status": "mapped"

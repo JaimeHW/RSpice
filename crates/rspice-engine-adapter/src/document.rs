@@ -23,6 +23,9 @@ use crate::wire::{EngineArtifact, decode_digest};
 /// worker image binds.
 pub const MODEL_LIBRARY_INCLUDE_NAME: &str = "rspice-model-library";
 
+/// The only revision-document schema this build interprets.
+pub const CIRCUIT_DOCUMENT_SCHEMA: &str = "rspice-circuit-v1";
+
 /// A bounded customer-facing rejection: becomes a `status: failed` response.
 pub struct CircuitRejection {
     pub failure_code: &'static str,
@@ -73,11 +76,11 @@ pub fn interpret_document(
             "The circuit document is not a valid rspice-circuit-v1 object.",
         )
     })?;
-    if document.schema != "rspice-circuit-v1" {
+    if document.schema != CIRCUIT_DOCUMENT_SCHEMA {
         return Err(CircuitRejection::new(
             "document.unsupported_schema",
             format!(
-                "This engine supports circuit documents with schema rspice-circuit-v1; \
+                "This engine supports circuit documents with schema {CIRCUIT_DOCUMENT_SCHEMA}; \
                  the revision declares {:?}.",
                 document.schema
             ),
