@@ -159,13 +159,17 @@ fn is_valid_manifest(manifest: &SimulationExecutionManifest) -> bool {
         _ => return false,
     }
 
-    let expected_engine_protocol = match manifest.revision.content_digest_version {
-        LEGACY_REVISION_CONTENT_DIGEST_VERSION if manifest.artifacts.is_empty() => 1,
-        LEGACY_REVISION_CONTENT_DIGEST_VERSION => 2,
-        CURRENT_REVISION_CONTENT_DIGEST_VERSION => 3,
+    // Engine protocol 4 replaced protocol 3 when the adapter moved every
+    // analysis family onto the shared typed result document. The request
+    // envelope did not change, so both pair with revision content digest 2 and
+    // retained protocol-3 execution evidence stays readable.
+    let expected_engine_protocols: &[u8] = match manifest.revision.content_digest_version {
+        LEGACY_REVISION_CONTENT_DIGEST_VERSION if manifest.artifacts.is_empty() => &[1],
+        LEGACY_REVISION_CONTENT_DIGEST_VERSION => &[2],
+        CURRENT_REVISION_CONTENT_DIGEST_VERSION => &[3, 4],
         _ => return false,
     };
-    if manifest.engine_protocol_version != expected_engine_protocol {
+    if !expected_engine_protocols.contains(&manifest.engine_protocol_version) {
         return false;
     }
 
@@ -325,6 +329,16 @@ mod tests {
             malformed[mutation.0] = mutation.1;
             assert!(!is_valid_simulation_execution_manifest(&malformed));
         }
+
+        // The adapter's protocol-4 result contract shares the version-2
+        // revision digest, so both engine protocols read back; neither an
+        // older nor a newer one does.
+        let mut protocol_four = baseline.clone();
+        protocol_four["engine_protocol_version"] = json!(4);
+        assert!(is_valid_simulation_execution_manifest(&protocol_four));
+        let mut protocol_five = baseline.clone();
+        protocol_five["engine_protocol_version"] = json!(5);
+        assert!(!is_valid_simulation_execution_manifest(&protocol_five));
 
         let mut duplicate = baseline.clone();
         duplicate["artifacts"] = json!([
