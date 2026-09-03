@@ -5212,6 +5212,39 @@ mod tests {
         }
     }
 
+    /// A loop whose carried value is bound in an empty block, executed.
+    ///
+    /// The companion to the swapping-back-edge fixture, for the case an
+    /// instruction boundary cannot decide: the carried value is a *block
+    /// parameter*, bound at the entry terminator, and the block that binds it
+    /// has no instructions, so the binding boundary and the loop header's
+    /// first instruction are the same number. A scan that reads that as "the
+    /// parameter is defined inside the loop" ends its interval at its one
+    /// reader, and `v * 2` inherits its location — after which the second
+    /// iteration doubles the first iteration's product. That is a number, not
+    /// a crash, so the assertion is on the value.
+    #[test]
+    fn a_loop_carrying_a_value_through_an_empty_block_computes_what_it_says() {
+        for (trips, value) in [(3.0_f64, 5.0_f64), (1.0, -2.5), (0.0, 7.0), (6.0, 0.25)] {
+            let ssa = X64SsaProgram::empty_block_loop_fixture_for_test(trips)
+                .expect("build the empty-block loop");
+            let artifact = compile_value_function_artifact_from_ssa(&ssa)
+                .expect("compile the empty-block loop");
+            let memory = ExecutableMemory::allocate(artifact.bytes()).expect("publish the loop");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let function: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+            let params = [value];
+            let context = eval_context(&params, &[], &[], &[]);
+            let expected = X64SsaProgram::empty_block_loop_fixture_expectation(trips, value);
+            assert_eq!(
+                function(&context, std::ptr::null()).to_bits(),
+                expected.to_bits(),
+                "empty-block loop with trips={trips} value={value}"
+            );
+        }
+    }
+
     #[test]
     fn generated_value_leaf_evaluates_native_expression() {
         let program = native_program(

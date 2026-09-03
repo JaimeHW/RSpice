@@ -3610,6 +3610,36 @@ mod tests {
         }
     }
 
+    /// The empty-block loop, structurized and executed.
+    ///
+    /// The defect this fixture was written for is the native allocator's — a
+    /// block parameter bound just before an empty preheader read as if it were
+    /// defined inside the loop, so its register was handed to its own reader.
+    /// WebAssembly gives every value a local and allocates nothing, so it
+    /// cannot have that defect; running the fixture here is what says so
+    /// rather than assuming it, and it pins the structurizer against a loop
+    /// whose carried value enters through a block with no instructions.
+    #[test]
+    fn a_loop_carrying_a_value_through_an_empty_block_computes_what_it_says() {
+        let engine = Engine::default();
+        for (trips, value) in [(3.0_f64, 5.0_f64), (1.0, -2.5), (0.0, 7.0), (6.0, 0.25)] {
+            let ssa = Program::empty_block_loop_fixture_for_test(trips)
+                .expect("build the empty-block loop");
+            let body = encode_value_body_from_ssa(&ssa).expect("encode the loop body");
+            let bytes = encode_value_module(body).expect("assemble the module");
+            Validator::new()
+                .validate_all(&bytes)
+                .expect("the loop module is valid WebAssembly");
+            let (mut store, memory, instance) = instantiate_value_module(&engine, &bytes);
+            let expected = Program::empty_block_loop_fixture_expectation(trips, value);
+            assert_eq!(
+                call_value_entry(&mut store, &memory, &instance, &[value]).to_bits(),
+                expected.to_bits(),
+                "empty-block loop with trips={trips} value={value}"
+            );
+        }
+    }
+
     #[test]
     fn a_structured_branch_binds_its_join_parameter_from_both_arms() {
         let source = program(

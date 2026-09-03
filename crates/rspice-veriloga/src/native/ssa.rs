@@ -475,6 +475,107 @@ impl Program {
         builder.finish(entry, exit)
     }
 
+    /// The loop fixture whose carried value enters through an *empty* block.
+    ///
+    /// The same claim as [`Self::loop_fixture_for_test`] makes for an
+    /// instruction — a value defined before a loop and read inside it must
+    /// keep its location to the next iteration — asked of a *block parameter*,
+    /// which is the case an instruction boundary cannot decide:
+    ///
+    /// ```text
+    /// v = param0; n = trips; s = 0;          // entry
+    ///                                        // empty block, binds v, n, s
+    /// while (k > 0) { s = s + v * 2; k = k - 1 }
+    /// return s;
+    /// ```
+    ///
+    /// The empty block is the whole fixture. `v` is bound at the entry
+    /// terminator, and with nothing between that terminator and the loop
+    /// header the two share an instruction boundary, so a scan that asks where
+    /// `v` was defined by comparing boundaries places it *inside* the loop and
+    /// lets `v * 2` — its last reader — inherit its location. The second
+    /// iteration then doubles the previous product instead of `v`, which is a
+    /// number rather than a crash, which is why the assertion is on the value.
+    #[cfg(test)]
+    pub(crate) fn empty_block_loop_fixture_for_test(trips: f64) -> JitResult<Self> {
+        let mut builder = ProgramBuilder::new(&[
+            Vec::new(),
+            vec![ValueType::F64; 3],
+            vec![ValueType::F64; 2],
+            Vec::new(),
+            vec![ValueType::F64; 1],
+        ])?;
+        let entry = BlockId::new(0)?;
+        let bind = BlockId::new(1)?;
+        let header = BlockId::new(2)?;
+        let body = BlockId::new(3)?;
+        let exit = BlockId::new(4)?;
+
+        builder.begin_block(entry)?;
+        let carried = builder.push(NativeOp::LoadParam(0), &[], ValueType::F64)?;
+        let count = builder.push(NativeOp::Const(trips), &[], ValueType::F64)?;
+        let zero = builder.push(NativeOp::Const(0.0), &[], ValueType::F64)?;
+        builder.end_block(BuilderTerminator::Jump {
+            target: bind,
+            arguments: vec![carried, count, zero],
+        })?;
+
+        // No instructions here: this block exists to make the parameter's
+        // binding boundary and the loop header's first instruction the same
+        // number.
+        let value = builder.parameter(bind, 0)?;
+        let trip_count = builder.parameter(bind, 1)?;
+        let seed = builder.parameter(bind, 2)?;
+        builder.begin_block(bind)?;
+        builder.end_block(BuilderTerminator::Jump {
+            target: header,
+            arguments: vec![trip_count, seed],
+        })?;
+
+        let remaining = builder.parameter(header, 0)?;
+        let total = builder.parameter(header, 1)?;
+        builder.begin_block(header)?;
+        let test = builder.push(
+            NativeOp::CompareConst(CompareOp::Gt, 0.0),
+            &[remaining],
+            ValueType::F64,
+        )?;
+        builder.end_block(BuilderTerminator::Branch {
+            condition: test,
+            then_target: body,
+            then_arguments: Vec::new(),
+            else_target: exit,
+            else_arguments: vec![total],
+        })?;
+
+        builder.begin_block(body)?;
+        let doubled = builder.push(NativeOp::MulConst(2.0), &[value], ValueType::F64)?;
+        let advanced = builder.push(NativeOp::Add, &[total, doubled], ValueType::F64)?;
+        let stepped = builder.push(NativeOp::SubConst(1.0), &[remaining], ValueType::F64)?;
+        builder.end_block(BuilderTerminator::Jump {
+            target: header,
+            arguments: vec![stepped, advanced],
+        })?;
+
+        let result = builder.parameter(exit, 0)?;
+        builder.begin_block(exit)?;
+        let returned = builder.push(NativeOp::MulConst(1.0), &[result], ValueType::F64)?;
+        builder.end_block(BuilderTerminator::Return(returned))?;
+        builder.finish(entry, exit)
+    }
+
+    /// What [`Self::empty_block_loop_fixture_for_test`] must compute.
+    #[cfg(test)]
+    pub(crate) fn empty_block_loop_fixture_expectation(trips: f64, value: f64) -> f64 {
+        let mut remaining = trips;
+        let mut total = 0.0_f64;
+        while remaining > 0.0 {
+            total += value * 2.0;
+            remaining -= 1.0;
+        }
+        total * 1.0
+    }
+
     /// What [`Self::loop_fixture_for_test`] must compute.
     #[cfg(test)]
     pub(crate) fn loop_fixture_expectation(limit: f64, k: f64, first: f64, second: f64) -> f64 {
@@ -2905,20 +3006,25 @@ impl RegisterAllocation {
         // value live around the back edge occupies anyway.
         let loops = program.loop_ranges()?;
         if !loops.is_empty() {
-            // Where each value first holds its definition, on the same scale
-            // as `last_use_position`. A value defined inside a loop is
-            // redefined on every iteration and needs no extension; only one
+            // Which *block* defines each value. A value defined inside a loop
+            // is redefined on every iteration and needs no extension; only one
             // that enters the loop already defined can be read after the scan
             // has released it.
-            let definition_position: Vec<usize> = (0..value_count)
-                .map(|index| {
-                    if index < instruction_count {
-                        index * 2
-                    } else {
-                        parameter_definition[index - instruction_count] * 2
-                    }
-                })
-                .collect();
+            //
+            // The block, not an instruction position, because a block with no
+            // instructions shares its instruction boundary with its
+            // neighbours. A block parameter is bound at the earliest
+            // predecessor terminator that binds it, so a parameter bound just
+            // before an empty block that precedes a loop header carries the
+            // header's own start position and reads as if it were defined
+            // *inside* the loop. It is not — it is read on every iteration —
+            // and the scan then hands its location to the first value defined
+            // after its last read. That was a miscompile: a fourteen-thousand
+            // instruction cone of `hisimsotb_va` returned NaN where both the
+            // reference interpreter and a walk of the same block program
+            // returned zero, because a `MulConst` inherited the location of
+            // the parameter it reads and overwrote it for the next iteration.
+            let definition_block = program.definition_blocks();
             let extent = |range: &LoopRange| {
                 let blocks = program.blocks();
                 (
@@ -2934,8 +3040,9 @@ impl RegisterAllocation {
                 let mut changed = false;
                 for range in &loops {
                     let (start, end) = extent(range);
+                    let header = range.header();
                     for (value, position) in last_use_position.iter_mut().enumerate() {
-                        if definition_position[value] < start
+                        if definition_block[value] < header
                             && *position >= start
                             && *position < end
                         {
@@ -4288,6 +4395,38 @@ mod tests {
                 .to_string()
                 .contains("unreachable")
         );
+    }
+
+    /// A value carried into a loop through an empty block keeps its location.
+    ///
+    /// The scan asks where a value was defined so that it can hold one that
+    /// enters a loop already defined across the whole loop. A block parameter
+    /// is bound at its earliest predecessor's terminator, and an empty block
+    /// between that terminator and the loop header leaves the two at the same
+    /// instruction boundary — so the question has to be asked about blocks. If
+    /// it is asked about boundaries the parameter reads as loop-local, its
+    /// interval ends at its last read, and the reader inherits the location the
+    /// next iteration still needs.
+    #[test]
+    fn a_value_carried_into_a_loop_through_an_empty_block_keeps_its_location() {
+        let program =
+            Program::empty_block_loop_fixture_for_test(3.0).expect("build the empty-block loop");
+        let carried = program.parameters(&program.blocks()[1])[0].value();
+        let reader = program.instructions()[program.blocks()[3].instruction_start()]
+            .result
+            .index();
+        for bank in [CALLER_SAVED_BANK, WIN64_BANK] {
+            let allocation = RegisterAllocation::build(&program, bank).expect("allocate the loop");
+            let carried_at = allocation.location(carried).expect("carried location");
+            let reader_at = allocation
+                .location(ValueId::new(reader).expect("reader id"))
+                .expect("reader location");
+            assert_ne!(
+                carried_at, reader_at,
+                "the loop's carried value and the instruction that reads it share {carried_at:?}, \
+                 so the second iteration reads what the first wrote"
+            );
+        }
     }
 
     #[test]
