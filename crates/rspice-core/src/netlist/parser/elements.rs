@@ -6086,14 +6086,13 @@ pub(super) fn parse_subcircuit_instance(
 
     let subckt_name = fields[param_start - 1].clone();
     if parenthesized_node_count.is_none()
-        && params_ctx.expression_dialect() == ExpressionDialect::Xyce
         && fields[1..param_start - 1]
             .iter()
             .any(|field| field.contains(['(', ')']))
     {
         return Err(ParseError::Syntax {
             line: line_num,
-            message: "a Xyce parenthesized subcircuit-instance actual-node list must be one balanced outer list immediately after the instance name".to_string(),
+            message: "a parenthesized subcircuit-instance actual-node list must be one balanced outer list immediately after the instance name".to_string(),
         });
     }
     let nodes = fields[1..param_start - 1]
@@ -6128,75 +6127,85 @@ pub(super) fn parse_subcircuit_instance(
     Ok(())
 }
 
-/// Split an X-instance while recognizing Xyce's `Xname (actual ...) subckt`
-/// form as a structural actual-node list.
+/// How one structural parenthesized name group is spelled and diagnosed.
 ///
-/// Parentheses in the parameter tail are deliberately handled only after the
-/// subcircuit name. This prevents an expression such as `P=pow(2, 3)` from
-/// being mistaken for node-list syntax. Ordinary X-instance syntax uses the
-/// historical splitter unchanged.
-fn split_subcircuit_instance_fields(
-    line: &str,
+/// `.SUBCKT CELL (a b)` and `X1 (a b) CELL` are the same lexical construct
+/// around different heads, so both go through
+/// [`scan_parenthesized_name_group`]; only the nouns in the diagnostics and
+/// the comma rule differ.
+#[derive(Debug, Clone, Copy)]
+struct ParenthesizedGroupSyntax {
+    /// Noun for the group itself, e.g. `subcircuit-instance actual-node list`.
+    list: &'static str,
+    /// Noun for what the group must follow, e.g. `the instance name`.
+    head: &'static str,
+    /// Noun for what may follow the closing `)`, e.g. `the subcircuit name`.
+    tail: &'static str,
+    /// Xyce forbids a comma as a separator inside the group; the ngspice
+    /// front-end splits on commas everywhere and keeps that leniency.
+    reject_commas: bool,
+}
+
+/// One structural parenthesized name group, or its absence.
+#[derive(Debug)]
+enum ParenthesizedNameGroup<'a> {
+    /// No `(` followed the head. The caller keeps its ordinary field split.
+    Absent,
+    Present {
+        names: Vec<String>,
+        /// Everything after the closing `)`, still unsplit.
+        tail: &'a str,
+    },
+}
+
+/// Scan the structural parenthesized name group that may follow `head_end`.
+///
+/// `source` must already be left-trimmed and `head_end` must be the byte
+/// offset just past the head token. Only one balanced outer pair is
+/// structural: parentheses inside the tail belong to parameter expressions
+/// such as `P=pow(2, 3)` and are never consumed here.
+fn scan_parenthesized_name_group<'a>(
+    source: &'a str,
+    head_end: usize,
     line_num: usize,
-    xyce_syntax: bool,
-) -> Result<(Vec<String>, Option<usize>), ParseError> {
-    let ordinary = || coalesce_assignment_fields(split_spice_fields(line));
-    if !xyce_syntax {
-        return Ok((ordinary(), None));
-    }
-
-    let trimmed = line.trim_start();
-    let mut cursor = 0usize;
-    while cursor < trimmed.len() {
-        let character = trimmed[cursor..]
-            .chars()
-            .next()
-            .expect("cursor remains on a character boundary");
-        if character.is_whitespace() || character == ',' {
-            break;
-        }
-        cursor += character.len_utf8();
-    }
-    let instance_name = &trimmed[..cursor];
-    if instance_name.contains(['(', ')']) {
-        return Err(ParseError::Syntax {
-            line: line_num,
-            message: "a parenthesized subcircuit-instance actual-node list must be separated from the instance name by whitespace".to_string(),
-        });
-    }
-
-    let separator_start = cursor;
-    let wrapper_may_follow = trimmed[cursor..]
+    syntax: ParenthesizedGroupSyntax,
+) -> Result<ParenthesizedNameGroup<'a>, ParseError> {
+    let ParenthesizedGroupSyntax {
+        list,
+        head,
+        tail: tail_noun,
+        reject_commas,
+    } = syntax;
+    let separator_is_whitespace = source[head_end..]
         .chars()
         .next()
         .is_some_and(char::is_whitespace);
-    cursor = skip_subckt_header_separators(trimmed, cursor);
-    let Some(first_after_name) = trimmed[cursor..].chars().next() else {
-        return Ok((ordinary(), None));
+    let group_start = skip_subckt_header_separators(source, head_end);
+    let Some(first_after_head) = source[group_start..].chars().next() else {
+        return Ok(ParenthesizedNameGroup::Absent);
     };
-    if first_after_name == ')' {
+    if first_after_head == ')' {
         return Err(ParseError::Syntax {
             line: line_num,
-            message:
-                "closing ')' has no matching parenthesized subcircuit-instance actual-node list"
-                    .to_string(),
+            message: format!("closing ')' has no matching parenthesized {list}"),
         });
     }
-    if first_after_name != '(' {
-        return Ok((ordinary(), None));
+    if first_after_head != '(' {
+        return Ok(ParenthesizedNameGroup::Absent);
     }
-    if !wrapper_may_follow || trimmed[separator_start..cursor].contains(',') {
+    if !separator_is_whitespace || source[head_end..group_start].contains(',') {
         return Err(ParseError::Syntax {
             line: line_num,
-            message: "a parenthesized subcircuit-instance actual-node list must be separated from the instance name by whitespace only".to_string(),
+            message: format!(
+                "a parenthesized {list} must be separated from {head} by whitespace only"
+            ),
         });
     }
 
-    let open = cursor;
-    cursor += '('.len_utf8();
+    let mut cursor = group_start + '('.len_utf8();
     let mut close = None;
-    while cursor < trimmed.len() {
-        let character = trimmed[cursor..]
+    while cursor < source.len() {
+        let character = source[cursor..]
             .chars()
             .next()
             .expect("cursor remains on a character boundary");
@@ -6204,8 +6213,7 @@ fn split_subcircuit_instance_fields(
             '(' => {
                 return Err(ParseError::Syntax {
                     line: line_num,
-                    message: "nested parentheses are not allowed in a subcircuit-instance actual-node list"
-                        .to_string(),
+                    message: format!("nested parentheses are not allowed in a {list}"),
                 });
             }
             ')' => {
@@ -6218,26 +6226,103 @@ fn split_subcircuit_instance_fields(
     let Some(close) = close else {
         return Err(ParseError::Syntax {
             line: line_num,
-            message: "unterminated parenthesized subcircuit-instance actual-node list".to_string(),
+            message: format!("unterminated parenthesized {list}"),
         });
     };
 
-    let actual_node_source = &trimmed[open + '('.len_utf8()..close];
-    if actual_node_source.contains(',') {
+    let group_source = &source[group_start + '('.len_utf8()..close];
+    if reject_commas && group_source.contains(',') {
         return Err(ParseError::Syntax {
             line: line_num,
-            message: "commas are not separators in a Xyce parenthesized subcircuit-instance actual-node list"
-                .to_string(),
+            message: format!("commas are not separators in a Xyce parenthesized {list}"),
         });
     }
-    let actual_nodes = split_spice_fields(actual_node_source);
-    if actual_nodes.is_empty() {
+    let names = split_spice_fields(group_source);
+    if names.is_empty() {
         return Err(ParseError::Syntax {
             line: line_num,
-            message: "parenthesized subcircuit-instance actual-node list cannot be empty"
-                .to_string(),
+            message: format!("parenthesized {list} cannot be empty"),
         });
     }
+
+    let after_close = close + ')'.len_utf8();
+    if let Some(character) = source[after_close..].chars().next()
+        && !character.is_whitespace()
+    {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "{tail_noun} after a parenthesized {list} must be separated by whitespace"
+            ),
+        });
+    }
+    Ok(ParenthesizedNameGroup::Present {
+        names,
+        tail: &source[after_close..],
+    })
+}
+
+/// Byte offset just past the first token of `source`, which must already be
+/// left-trimmed. Whitespace and commas both end a token.
+fn subckt_header_token_end(source: &str) -> usize {
+    let mut cursor = 0usize;
+    while cursor < source.len() {
+        let character = source[cursor..]
+            .chars()
+            .next()
+            .expect("cursor remains on a character boundary");
+        if character.is_whitespace() || character == ',' {
+            break;
+        }
+        cursor += character.len_utf8();
+    }
+    cursor
+}
+
+/// Split an X-instance while recognizing the `Xname (actual ...) subckt` form
+/// as a structural actual-node list.
+///
+/// Both reference front-ends accept it: Xyce parses it directly, and
+/// ngspice's `inp_subcktexpand` blanks the first balanced outer pair on every
+/// non-directive card before its own tokenizer runs. Reading it as two node
+/// names spelled `(IN` and `0)` is therefore a misparse in every dialect, not
+/// a dialect difference. Parentheses in the parameter tail are deliberately
+/// handled only after the subcircuit name so that an expression such as
+/// `P=pow(2, 3)` is never mistaken for node-list syntax.
+fn split_subcircuit_instance_fields(
+    line: &str,
+    line_num: usize,
+    xyce_syntax: bool,
+) -> Result<(Vec<String>, Option<usize>), ParseError> {
+    let trimmed = line.trim_start();
+    let name_end = subckt_header_token_end(trimmed);
+    let instance_name = &trimmed[..name_end];
+    if instance_name.contains(['(', ')']) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "a parenthesized subcircuit-instance actual-node list must be separated from the instance name by whitespace".to_string(),
+        });
+    }
+
+    let group = scan_parenthesized_name_group(
+        trimmed,
+        name_end,
+        line_num,
+        ParenthesizedGroupSyntax {
+            list: "subcircuit-instance actual-node list",
+            head: "the instance name",
+            tail: "the subcircuit name",
+            reject_commas: xyce_syntax,
+        },
+    )?;
+    let ParenthesizedNameGroup::Present {
+        names: actual_nodes,
+        tail: tail_source,
+    } = group
+    else {
+        return Ok((coalesce_assignment_fields(split_spice_fields(line)), None));
+    };
+
     if let Some(ambiguous) = actual_nodes.iter().find(|node| {
         node.contains('=')
             || node.contains(['{', '}', '\'', '"'])
@@ -6252,17 +6337,6 @@ fn split_subcircuit_instance_fields(
         });
     }
 
-    let after_close = close + ')'.len_utf8();
-    if let Some(character) = trimmed[after_close..].chars().next()
-        && !character.is_whitespace()
-    {
-        return Err(ParseError::Syntax {
-            line: line_num,
-            message: "the subcircuit name after a parenthesized actual-node list must be separated by whitespace"
-                .to_string(),
-        });
-    }
-    let tail_source = &trimmed[after_close..];
     validate_parenthesized_subcircuit_instance_tail(tail_source, line_num)?;
     let tail = coalesce_assignment_fields(split_subckt_header_tail_fields(tail_source));
     let Some(subckt_name) = tail.first() else {
@@ -8346,7 +8420,8 @@ pub(super) fn parse_subckt_def(
 /// Only the outer formal-port delimiters are removed. Parentheses in default
 /// parameter expressions remain byte-for-byte intact for the expression
 /// parser, and malformed/nested lists are rejected rather than inheriting
-/// Xyce's historical blanket deletion of standalone parenthesis tokens.
+/// Xyce's historical blanket deletion of standalone parenthesis tokens. The
+/// group itself is scanned by the same primitive the X-instance form uses.
 fn split_subckt_definition_fields(
     line: &str,
     line_num: usize,
@@ -8355,10 +8430,8 @@ fn split_subckt_definition_fields(
     let trimmed = line.trim_start();
     let directive_end = trimmed.find(char::is_whitespace).unwrap_or(trimmed.len());
     let directive = &trimmed[..directive_end];
-    let mut cursor = directive_end;
-    let directive_separator_start = cursor;
-    cursor = skip_subckt_header_separators(trimmed, cursor);
-    if trimmed[directive_separator_start..cursor].contains(',') {
+    let name_start = skip_subckt_header_separators(trimmed, directive_end);
+    if trimmed[directive_end..name_start].contains(',') {
         return Err(ParseError::Syntax {
             line: line_num,
             message: ".SUBCKT name must be separated from the directive by whitespace only"
@@ -8366,121 +8439,37 @@ fn split_subckt_definition_fields(
         });
     }
 
-    if cursor >= trimmed.len() {
+    if name_start >= trimmed.len() {
         return Ok((split_spice_fields(line), None));
     }
-    let name_start = cursor;
-    while cursor < trimmed.len() {
-        let character = trimmed[cursor..]
-            .chars()
-            .next()
-            .expect("cursor remains on a character boundary");
-        if character.is_whitespace() || character == ',' {
-            break;
-        }
-        cursor += character.len_utf8();
-    }
-    let name = &trimmed[name_start..cursor];
-    let separator_start = cursor;
-    let wrapper_may_follow = trimmed[cursor..]
-        .chars()
-        .next()
-        .is_some_and(char::is_whitespace);
-    cursor = skip_subckt_header_separators(trimmed, cursor);
+    let name_end = name_start + subckt_header_token_end(&trimmed[name_start..]);
+    let name = &trimmed[name_start..name_end];
 
-    let Some(first_after_name) = trimmed[cursor..].chars().next() else {
+    let group = scan_parenthesized_name_group(
+        trimmed,
+        name_end,
+        line_num,
+        ParenthesizedGroupSyntax {
+            list: ".SUBCKT formal-port list",
+            head: "its name",
+            tail: "content",
+            reject_commas: xyce_syntax,
+        },
+    )?;
+    let ParenthesizedNameGroup::Present { names, tail } = group else {
         return Ok((
-            assemble_unwrapped_subckt_definition_fields(directive, name, ""),
+            assemble_unwrapped_subckt_definition_fields(directive, name, &trimmed[name_end..]),
             None,
         ));
     };
-    if first_after_name == ')' {
-        return Err(ParseError::Syntax {
-            line: line_num,
-            message: "closing ')' has no matching parenthesized .SUBCKT formal-port list"
-                .to_string(),
-        });
-    }
-    if first_after_name != '(' || !wrapper_may_follow {
-        return Ok((
-            assemble_unwrapped_subckt_definition_fields(
-                directive,
-                name,
-                &trimmed[separator_start..],
-            ),
-            None,
-        ));
-    }
-    if trimmed[separator_start..cursor].contains(',') {
-        return Err(ParseError::Syntax {
-            line: line_num,
-            message: "a parenthesized .SUBCKT formal-port list must be separated from its name by whitespace only"
-                .to_string(),
-        });
-    }
 
-    let open = cursor;
-    cursor += first_after_name.len_utf8();
-    let mut close = None;
-    while cursor < trimmed.len() {
-        let character = trimmed[cursor..]
-            .chars()
-            .next()
-            .expect("cursor remains on a character boundary");
-        match character {
-            '(' => {
-                return Err(ParseError::Syntax {
-                    line: line_num,
-                    message: "nested parentheses are not allowed in a .SUBCKT formal-port list"
-                        .to_string(),
-                });
-            }
-            ')' => {
-                close = Some(cursor);
-                break;
-            }
-            _ => cursor += character.len_utf8(),
-        }
-    }
-    let Some(close) = close else {
-        return Err(ParseError::Syntax {
-            line: line_num,
-            message: "unterminated parenthesized .SUBCKT formal-port list".to_string(),
-        });
-    };
-
-    let formal_port_source = &trimmed[open + 1..close];
-    if xyce_syntax && formal_port_source.contains(',') {
-        return Err(ParseError::Syntax {
-            line: line_num,
-            message: "commas are not separators in a Xyce parenthesized .SUBCKT formal-port list"
-                .to_string(),
-        });
-    }
-    let formal_ports = split_spice_fields(formal_port_source);
-    if formal_ports.is_empty() {
-        return Err(ParseError::Syntax {
-            line: line_num,
-            message: "parenthesized .SUBCKT formal-port list cannot be empty".to_string(),
-        });
-    }
-
-    let mut fields = Vec::with_capacity(2 + formal_ports.len());
+    let mut fields = Vec::with_capacity(2 + names.len());
     fields.push(directive.to_string());
     fields.push(name.to_string());
-    fields.extend(formal_ports.iter().cloned());
-    let after_close = close + ')'.len_utf8();
-    if let Some(character) = trimmed[after_close..].chars().next()
-        && !character.is_whitespace()
-    {
-        return Err(ParseError::Syntax {
-            line: line_num,
-            message: "content after a parenthesized .SUBCKT formal-port list must be separated by whitespace"
-                .to_string(),
-        });
-    }
-    fields.extend(split_subckt_header_tail_fields(&trimmed[after_close..]));
-    Ok((fields, Some(formal_ports.len())))
+    let formal_port_count = names.len();
+    fields.extend(names);
+    fields.extend(split_subckt_header_tail_fields(tail));
+    Ok((fields, Some(formal_port_count)))
 }
 
 fn assemble_unwrapped_subckt_definition_fields(

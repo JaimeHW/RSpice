@@ -213,3 +213,95 @@ fn ordinary_x_instance_syntax_is_unchanged_in_xyce_and_default_dialects() {
         flattened_snapshot(&default.elements)
     );
 }
+
+/// ngspice's `inp_subcktexpand` blanks the first balanced outer parenthesis
+/// pair on every non-directive card before its tokenizer runs, so the
+/// parenthesized actual-node list is part of the default dialect's grammar
+/// too. Reading it as node names `(IN` and `0)` was a misparse, not a dialect
+/// difference.
+#[test]
+fn parenthesized_actual_nodes_are_accepted_in_the_default_dialect() {
+    let source = "default-dialect parenthesized instance\n\
+                  .SUBCKT CELL p n\n\
+                  R1 p n 1k\n\
+                  .ENDS CELL\n\
+                  X1 (in 0) CELL\n\
+                  .END\n";
+    let default = Netlist::parse(source).expect("default dialect accepts the parenthesized form");
+    assert_eq!(default.elements[0].nodes, ["IN", "0"]);
+
+    let xyce = parse_xyce(source).expect("Xyce accepts the parenthesized form");
+    let default = flatten_netlist_with_models(&default).expect("default flattens");
+    let xyce = flatten_netlist_with_models(&xyce).expect("Xyce flattens");
+    assert_eq!(
+        flattened_snapshot(&default.elements),
+        flattened_snapshot(&xyce.elements)
+    );
+}
+
+#[test]
+fn default_dialect_parenthesized_instance_keeps_its_parameter_expressions() {
+    let source = "default-dialect parenthesized parameters\n\
+                  .SUBCKT CELL p n PARAMS: RVAL=1k\n\
+                  R1 p n {RVAL}\n\
+                  .ENDS CELL\n\
+                  X1 (in 0) CELL PARAMS: RVAL=pow(2, 3)\n\
+                  .END\n";
+    let netlist = Netlist::parse(source).expect("parenthesized instance with parameters parses");
+    let ElementKind::Subcircuit { params, .. } = &netlist.elements[0].kind else {
+        panic!("X1 must remain a subcircuit instance");
+    };
+    let (_, value) = params
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("RVAL"))
+        .expect("RVAL is retained");
+    assert!(
+        matches!(value, ParametricValue::Expression(expression) if expression.contains("pow")),
+        "expected the pow() expression to survive, got {value:?}"
+    );
+}
+
+#[test]
+fn default_dialect_rejects_unbalanced_actual_node_parentheses() {
+    for instance in [
+        "X1 in 0) CELL",
+        "X1 (in 0 CELL",
+        "X1 ((in 0)) CELL",
+        "X1 () CELL",
+    ] {
+        let source = format!(
+            "default-dialect malformed parenthesized actual nodes\n\
+             .SUBCKT CELL p n\n\
+             R1 p n 1k\n\
+             .ENDS CELL\n\
+             {instance}\n\
+             .END\n"
+        );
+        let error = Netlist::parse(&source)
+            .expect_err("malformed parenthesized actual nodes must fail in every dialect")
+            .to_string();
+        assert!(
+            error.contains("line 5") && error.to_ascii_lowercase().contains("parenthes"),
+            "'{instance}' returned the wrong default-dialect diagnostic: {error}"
+        );
+    }
+}
+
+/// Xyce forbids a comma as an actual-node separator; ngspice's tokenizer
+/// splits on commas everywhere, so the default dialect keeps that leniency.
+#[test]
+fn comma_separated_actual_nodes_follow_the_dialect_that_authored_them() {
+    let source = "comma-separated actual nodes\n\
+                  .SUBCKT CELL p n\n\
+                  R1 p n 1k\n\
+                  .ENDS CELL\n\
+                  X1 (in, 0) CELL\n\
+                  .END\n";
+    let default = Netlist::parse(source).expect("the default dialect splits on commas");
+    assert_eq!(default.elements[0].nodes, ["IN", "0"]);
+
+    let error = parse_xyce(source)
+        .expect_err("Xyce rejects commas inside the actual-node list")
+        .to_string();
+    assert!(error.contains("commas are not separators"), "{error}");
+}
