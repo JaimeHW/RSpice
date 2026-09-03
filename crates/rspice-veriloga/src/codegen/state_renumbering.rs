@@ -945,6 +945,8 @@ fn for_each_program_mut(model: &mut CompiledModel, visit: &mut impl FnMut(&mut B
         zi_filter_definitions,
         noise_process_schema: _,
         noise_sources,
+        // Slot indices and statement ordinals; no program of its own.
+        reaching_snapshots: _,
     } = model;
 
     for parameter in parameters.iter_mut() {

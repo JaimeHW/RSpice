@@ -474,6 +474,7 @@ impl CodeGenerator {
             zi_filter_definitions: Vec::new(),
             noise_process_schema: 1,
             noise_sources: Vec::new(),
+            reaching_snapshots: ir.reaching_snapshots.clone(),
         };
 
         // Generate evaluation steps (executed in order before contributions)

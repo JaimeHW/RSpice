@@ -57,7 +57,10 @@
 //! fails closed if the statement sites it is handed are not ascending.
 
 use crate::error::{CodeGenError, CodeGenErrorKind, CompileResult};
-use crate::ir::{ArrayDef, IrAssignmentItem, IrExpr, VarAssignment, VarDef};
+use crate::ir::{
+    ArrayDef, EquationSnapshotReads, IrAssignmentItem, IrExpr, ReachingSnapshotCopy,
+    ReachingSnapshotPlan, VarAssignment, VarDef,
+};
 use crate::semantic::AnalogSiteId;
 use smol_str::SmolStr;
 use std::collections::HashMap;
@@ -78,8 +81,14 @@ pub(crate) const SNAPSHOT_MARKER: &str = "@snap";
 /// `assignments` and `statement_sites` are index-aligned over the module's
 /// top-level statements; `equations` and `equation_sites` likewise over its
 /// contributions. Both `assignments` and `equations` are rewritten in place.
-/// Returns how many snapshot slots the module needed — zero for a module whose
-/// bytecode this pass leaves byte-identical.
+/// Returns the plan a route that replays statements needs to place the copies
+/// and resolve the redirected reads — empty for a module whose bytecode this
+/// pass leaves byte-identical.
+///
+/// The plan's statement indices are into the sequence handed in here, which is
+/// the sequence *before* the copies are spliced: they name the definition each
+/// copy follows, so they stay meaningful for a route that never sees the
+/// splice.
 ///
 /// Called between contribution conversion and `build_shadow_assignments`; see
 /// the module comment for why that window and no other.
@@ -90,7 +99,7 @@ pub(crate) fn insert_equation_snapshots(
     statement_sites: &[AnalogSiteId],
     equations: &mut [IrExpr],
     equation_sites: &[AnalogSiteId],
-) -> CompileResult<usize> {
+) -> CompileResult<ReachingSnapshotPlan> {
     if assignments.len() != statement_sites.len() || equations.len() != equation_sites.len() {
         return Err(internal(format!(
             "analog site alignment lost: {} statements against {} sites, \
@@ -118,7 +127,7 @@ pub(crate) fn insert_equation_snapshots(
         record_writes(item, index, &mut writes);
     }
     if writes.is_empty() {
-        return Ok(0);
+        return Ok(ReachingSnapshotPlan::default());
     }
 
     // Duplicate names resolve to the last slot, matching how the code
@@ -139,6 +148,7 @@ pub(crate) fn insert_equation_snapshots(
     // pays for the values it snapshots rather than the reads it makes.
     let mut snapshots: HashMap<(usize, Option<usize>), SmolStr> = HashMap::new();
     let mut splices: Vec<(usize, VarAssignment)> = Vec::new();
+    let mut plan = ReachingSnapshotPlan::default();
 
     for (equation, expr) in equations.iter_mut().enumerate() {
         // Statements before the contribution are exactly those minted earlier,
@@ -180,6 +190,10 @@ pub(crate) fn insert_equation_snapshots(
                 .or_insert_with(|| {
                     let snapshot: SmolStr =
                         format!("{name}{SNAPSHOT_MARKER}{}", variables.len()).into();
+                    plan.copies.push(ReachingSnapshotCopy {
+                        definition_statement: reaching,
+                        slot: variables.len(),
+                    });
                     variables.push(VarDef {
                         name: snapshot.clone(),
                         is_state: false,
@@ -203,14 +217,21 @@ pub(crate) fn insert_equation_snapshots(
         }
 
         if !renames.is_empty() {
+            let mut reads = renames
+                .iter()
+                .map(|(name, snapshot)| (name.clone(), snapshot.clone()))
+                .collect::<Vec<_>>();
+            // Ordered so the plan an equation carries is a function of the
+            // module and not of a hash iteration.
+            reads.sort_unstable();
+            plan.reads.push(EquationSnapshotReads { equation, reads });
             *expr = rename_variable_reads(expr, &renames);
         }
     }
 
     if splices.is_empty() {
-        return Ok(0);
+        return Ok(ReachingSnapshotPlan::default());
     }
-    let allocated = splices.len();
 
     // Splice back to front so the untouched prefix keeps the indices the plan
     // was built against. Equal points retain the order they were planned in,
@@ -219,7 +240,7 @@ pub(crate) fn insert_equation_snapshots(
     for (point, assignment) in splices.into_iter().rev() {
         assignments.insert(point, IrAssignmentItem::Assign(assignment));
     }
-    Ok(allocated)
+    Ok(plan)
 }
 
 /// Whether any statement at or after `point` writes `slot`.

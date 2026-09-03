@@ -105,6 +105,20 @@ pub struct CompiledModel {
     pub noise_process_schema: u32,
     /// Small-signal noise sources extracted from contributions
     pub noise_sources: Vec<CompiledNoiseSource>,
+    /// Where the reaching-definition snapshot copies belong, and which read of
+    /// which equation each snapshot answers.
+    ///
+    /// `assignment_steps` already holds the copies in place and the stamp
+    /// programs already read them, so every route that executes this artifact
+    /// as it stands ignores this. The canonical route replays the module's
+    /// statements from the canonical HIR instead, and a spliced copy has no
+    /// statement of its own; see [`crate::ir::ReachingSnapshotPlan`].
+    ///
+    /// Empty for a module that reads no reassigned variable — which is all but
+    /// five of the shipped estate — so its serialized artifact is the one the
+    /// pre-repair compiler wrote.
+    #[serde(default)]
+    pub reaching_snapshots: crate::ir::ReachingSnapshotPlan,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

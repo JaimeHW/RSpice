@@ -5912,6 +5912,7 @@ endmodule
             zi_filter_definitions: Vec::new(),
             noise_process_schema: 1,
             noise_sources: Vec::new(),
+            reaching_snapshots: crate::ir::ReachingSnapshotPlan::default(),
         }
     }
 

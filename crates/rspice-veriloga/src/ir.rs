@@ -7,8 +7,66 @@
 use crate::ast::{BinaryOp, UnaryOp};
 use crate::error::CompileResult;
 use crate::semantic::AnalyzedModule;
+use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 use std::collections::{HashMap, HashSet};
+
+/// Where the reaching-definition snapshots belong on a route that replays the
+/// module's *statements* rather than the compiled step list.
+///
+/// [`crate::reaching_definition`] splices each snapshot copy into
+/// [`DeviceIR::assignments`], so the VM — and every other route that executes
+/// [`crate::codegen::CompiledModel::assignment_steps`] in order — needs nothing
+/// here: the copy is already in the sequence, in place. The canonical route
+/// does need it. It walks the canonical HIR's statements and pulls each one's
+/// compiled program by variable slot, and a spliced copy has no statement to be
+/// pulled by; its equation entries are lowered from the canonical IR, which
+/// names the variable the author wrote rather than the snapshot. This plan says
+/// which statement each copy runs after, and which read of which equation the
+/// snapshot answers, which is all that route is missing.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReachingSnapshotPlan {
+    /// One entry per snapshot slot, in the order the slots were allocated.
+    pub copies: Vec<ReachingSnapshotCopy>,
+    /// The redirected reads, one entry per equation that has any.
+    pub reads: Vec<EquationSnapshotReads>,
+}
+
+impl ReachingSnapshotPlan {
+    /// Whether this module allocated no snapshot — the state every module
+    /// without the construct is in, and the one that leaves every route's
+    /// output exactly as it was.
+    pub fn is_empty(&self) -> bool {
+        self.copies.is_empty() && self.reads.is_empty()
+    }
+}
+
+/// One copy of a definition into the slot the equations reading it were
+/// redirected to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReachingSnapshotCopy {
+    /// Index, in the module's top-level statement sequence, of the definition
+    /// this copy captures. The copy runs immediately after that statement, so
+    /// no write to the captured slot separates the definition from the copy.
+    /// `None` when no statement precedes the equations reading it.
+    pub definition_statement: Option<usize>,
+    /// The variable slot the copy writes.
+    pub slot: usize,
+}
+
+/// The reads one equation had redirected to a snapshot.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EquationSnapshotReads {
+    /// The equation's index among the module's contributions, which is also
+    /// its stamp index and its canonical equation id.
+    pub equation: usize,
+    /// The name the equation was written with, and the snapshot holding the
+    /// definition that reaches it. A route resolving the equation's reads by
+    /// name substitutes the second for the first; a derivative shadow's name is
+    /// built by appending axes to the value's, so one substitution carries the
+    /// whole family.
+    pub reads: Vec<(SmolStr, SmolStr)>,
+}
 
 /// Stable identity of one logical Zi operator in the source tree. The same
 /// identity is retained by value and every generated Jacobian expression so
@@ -189,6 +247,10 @@ pub struct DeviceIR {
     pub branch_unknowns: Vec<BranchUnknownDef>,
     /// Noise sources
     pub noise_sources: Vec<NoiseSourceDef>,
+    /// Where the spliced reaching-definition copies belong for a route that
+    /// replays statements rather than steps. Empty for a module that reads no
+    /// reassigned variable.
+    pub reaching_snapshots: ReachingSnapshotPlan,
 }
 
 /// Terminal (port) definition
@@ -806,6 +868,7 @@ impl DeviceIR {
             equations: Vec::new(),
             branch_unknowns: Vec::new(),
             noise_sources: Vec::new(),
+            reaching_snapshots: ReachingSnapshotPlan::default(),
         };
 
         // Build terminals from ports
@@ -1074,7 +1137,7 @@ impl DeviceIR {
             .iter()
             .map(|contribution| contribution.site)
             .collect::<Vec<_>>();
-        let snapshots = crate::reaching_definition::insert_equation_snapshots(
+        ir.reaching_snapshots = crate::reaching_definition::insert_equation_snapshots(
             &mut ir.assignments,
             &mut ir.variables,
             &ir.arrays,
@@ -1083,8 +1146,9 @@ impl DeviceIR {
             &equation_sites,
         )?;
         span.finish(&format!(
-            "module={} reaching_snapshots={snapshots}",
-            module.name
+            "module={} reaching_snapshots={}",
+            module.name,
+            ir.reaching_snapshots.copies.len()
         ));
 
         let span = crate::metrics::FineSpan::new("ir.noise_collect");
