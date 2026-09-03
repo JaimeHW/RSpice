@@ -184,6 +184,9 @@ struct Tally {
     /// asserted. See [`is_grouped_noise_entry`].
     grouped_noise_entries: usize,
     grouped_noise_exact: usize,
+    /// Matrix entries nine or more orders below the largest entry of their own
+    /// row: measured and printed, not asserted. See [`ROW_SIGNIFICANCE`].
+    insignificant: usize,
 }
 
 /// Whether this entry is one the two routes are entitled to disagree about.
@@ -296,6 +299,74 @@ fn run_entry(
     value
 }
 
+/// Below this share of its own matrix row, a Jacobian entry carries no
+/// significant figures.
+///
+/// The estate's existing figure, under the estate's existing name:
+/// `tests/cfg_derivatives.rs` and [`super::cfg_census`] both call it
+/// `ORACLE_SIGNIFICANCE`, and both use it for the same judgement — whether a
+/// derivative reading is a number or the residue of a cancellation. A
+/// difference of two nearly equal quantities carries no significant figures,
+/// and demanding that two independent chain rules agree about it manufactures
+/// failures rather than finding them.
+///
+/// What is new here is only the scale it is taken against. The oracle censuses
+/// scale an entry against the residual it differentiates; this one scales it
+/// against the largest entry of its own row, which is the same judgement stated
+/// where it is dimensionally exact — a conductance nine orders below the
+/// largest conductance in its row is invisible to the solve that consumes the
+/// row, whatever the residual happens to be. The reactive matrix has no
+/// residual to scale against at all, so the row is the only scale that serves
+/// both.
+const ROW_SIGNIFICANCE: f64 = 1.0e-9;
+
+/// The largest magnitude in each matrix row at one operating point.
+#[derive(Default)]
+struct RowScales {
+    jacobians: Vec<f64>,
+    reactive_jacobians: Vec<f64>,
+}
+
+impl RowScales {
+    fn of(readings: &[(CfgPlanEntry, f64, f64)]) -> Self {
+        let mut scales = Self::default();
+        // Both routes' readings, because an entry one route calls large and the
+        // other calls zero must not be gated away by the route that dropped it.
+        for (entry, mir, cfg) in readings {
+            let magnitude = mir.abs().max(cfg.abs());
+            let (row, stamp) = match entry {
+                CfgPlanEntry::Jacobian(stamp, _) => (&mut scales.jacobians, *stamp),
+                CfgPlanEntry::ReactiveJacobian(stamp, _) => {
+                    (&mut scales.reactive_jacobians, *stamp)
+                }
+                _ => continue,
+            };
+            if row.len() <= stamp {
+                row.resize(stamp + 1, 0.0);
+            }
+            row[stamp] = row[stamp].max(magnitude);
+        }
+        scales
+    }
+
+    /// Whether this reading is large enough, within its own row, for the two
+    /// routes to be held to agreeing about it.
+    ///
+    /// Always true for anything that is not a matrix entry: a residual and a
+    /// noise magnitude are the quantity itself rather than one term of a row,
+    /// so there is nothing to be insignificant against.
+    fn is_significant(&self, comparison: &Comparison) -> bool {
+        let (row, stamp) = match comparison.entry {
+            CfgPlanEntry::Jacobian(stamp, _) => (&self.jacobians, stamp),
+            CfgPlanEntry::ReactiveJacobian(stamp, _) => (&self.reactive_jacobians, stamp),
+            _ => return true,
+        };
+        let scale = row.get(stamp).copied().unwrap_or(0.0);
+        let magnitude = comparison.mir.abs().max(comparison.cfg.abs());
+        magnitude > scale * ROW_SIGNIFICANCE
+    }
+}
+
 /// What a structurally absent entry has to satisfy.
 ///
 /// The CFG route carries no value for it, so its plan entry is the constant
@@ -350,8 +421,17 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
         .unwrap_or_else(|error| panic!("{module}: shipped plan: {error}"));
     let mir_native = crate::native::x64::compile_model_plan(model, &mir_plan)
         .unwrap_or_else(|error| panic!("{module}: shipped plan codegen: {error}"));
-    let cfg_native = crate::native::x64::compile_model_plan(model, &cfg_plan.plan)
-        .unwrap_or_else(|error| panic!("{module}: CFG plan codegen: {error}"));
+    // A backend that will not emit the CFG plan is a finding about that plan,
+    // counted like a refusal rather than raised as a panic: aborting here would
+    // take the other forty-two modules' measurements with it.
+    let cfg_native = match crate::native::x64::compile_model_plan(model, &cfg_plan.plan) {
+        Ok(native) => native,
+        Err(error) => {
+            tally.refused += 1;
+            println!("cfg-mir model={module} refused=x64-codegen detail={error}");
+            return None;
+        }
+    };
     tally.built += 1;
 
     let structural_zeros: HashSet<CfgPlanEntry> =
@@ -408,6 +488,9 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
     let mut nonzero_structural: Option<Comparison> = None;
     let mut grouped_noise_worst = 0.0_f64;
     let mut grouped_noise_case: Option<Comparison> = None;
+    let mut insignificant_worst = 0.0_f64;
+    let mut insignificant_case: Option<Comparison> = None;
+    let mut insignificant_here = 0_usize;
 
     for (index, point) in points.iter_mut().enumerate() {
         let mut context = point.context();
@@ -422,6 +505,10 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
         mir_native.run_assignments(&context, variables.as_mut_ptr());
         let _ = context.take_runtime_error();
 
+        // Read every entry on both plans first, then compare. Two passes
+        // because a matrix entry's significance is a property of the row it
+        // sits in, and the row is not known until it has been read.
+        let mut readings = Vec::with_capacity(positions.len());
         for entry in &positions {
             let entry = *entry;
             let (Some(mir), Some(cfg)) = (
@@ -431,6 +518,11 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
                 tally.runtime_errors += 1;
                 continue;
             };
+            readings.push((entry, mir, cfg));
+        }
+        let rows = RowScales::of(&readings);
+
+        for (entry, mir, cfg) in readings {
             compared += 1;
             let operations = entry_operations(&mir_plan, &cfg_plan.plan, entry);
             let comparison = Comparison {
@@ -460,6 +552,15 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
                 if !check_structural_zero(&comparison) {
                     tally.nonzero_structural_zeros += 1;
                     nonzero_structural.get_or_insert(comparison);
+                }
+                continue;
+            }
+            if !rows.is_significant(&comparison) {
+                tally.insignificant += 1;
+                insignificant_here += 1;
+                if comparison.deviation > insignificant_worst {
+                    insignificant_worst = comparison.deviation;
+                    insignificant_case = Some(comparison);
                 }
                 continue;
             }
@@ -514,6 +615,13 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
             .map(|over| format!(" OVER_BOUND[{}]", over.describe()))
             .unwrap_or_default(),
     );
+    if let Some(case) = insignificant_case.as_ref() {
+        println!(
+            "cfg-mir model={module} insignificant_row_entries={insignificant_here} \
+             max_deviation={insignificant_worst:.3e} case[{}]",
+            case.describe()
+        );
+    }
     if cfg_plan.report.grouped_noise {
         println!(
             "cfg-mir model={module} grouped_noise=1 noise_entries={} max_deviation={grouped_noise_worst:.3e}{}",
@@ -596,7 +704,7 @@ fn the_cfg_built_plan_agrees_with_the_shipped_plan_within_the_reassociation_boun
     println!(
         "cfg-mir models={} built={} refused={} entries={} comparisons={} exact={} \
          runtime_errors={} structural_zeros={} over_bound={} nonzero_structural_zeros={} \
-         grouped_noise_entries={} grouped_noise_exact={}",
+         grouped_noise_entries={} grouped_noise_exact={} insignificant_row_entries={}",
         tally.models,
         tally.built,
         tally.refused,
@@ -609,6 +717,7 @@ fn the_cfg_built_plan_agrees_with_the_shipped_plan_within_the_reassociation_boun
         tally.nonzero_structural_zeros,
         tally.grouped_noise_entries,
         tally.grouped_noise_exact,
+        tally.insignificant,
     );
     if filter.is_none() {
         assert_eq!(tally.models, 43, "the shipped census is 43 modules");

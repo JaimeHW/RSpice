@@ -410,6 +410,24 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
             .ok_or_else(|| refuse(CfgPlanRefusal::NoScalar, entry.to_string()))
     };
 
+    // The lane a shipped column stands for, refusing the module if the two
+    // routes have numbered the unknowns differently. The limiter correction is
+    // a displacement rather than a coordinate, so a shipped column landing on
+    // it would mean the same thing.
+    let require_lane = |axis: &ColumnAxis,
+                        node_count: usize,
+                        entry: CfgPlanEntry|
+     -> Result<usize, CfgPlanRefused> {
+        let lane = shipped_entry_lane(axis, node_count);
+        if lane >= seeds.len() || Some(lane) == correction_lane {
+            return Err(refuse(
+                CfgPlanRefusal::LaneUnmapped,
+                format!("{entry}: lane {lane} of {} seeds", seeds.len()),
+            ));
+        }
+        Ok(lane)
+    };
+
     // ---- stamp values and Jacobians ------------------------------------
     //
     // Both come off the *scalarized differentiated* body rather than the
@@ -421,26 +439,55 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
     let mut jacobians = Vec::with_capacity(model.stamp_programs.len());
     let mut reactive_jacobians = Vec::with_capacity(model.stamp_programs.len());
     for (stamp_index, stamp) in model.stamp_programs.iter().enumerate() {
+        // Slice the whole equation out of the body once, then each of its
+        // entries out of that slice. Pruning is linear in the function it is
+        // given, so slicing per entry from the *model* would cost the entry
+        // count times a compact model's whole body — quadratic, and measured:
+        // it took asmhemt past twenty gigabytes of working set and into paging
+        // before this loop was written this way. Slicing the equation first
+        // makes every inner pass linear in the equation instead. The result is
+        // the same function either way: pruning is idempotent, and composing
+        // two slices keeps exactly what the inner one asked for.
         let residual = cfg.residuals[stamp_index];
-        let entry = CfgPlanEntry::StampValue(stamp_index);
-        let output = scalar(residual, entry)?;
-        stamp_values.push(lower(&scalarized.function, output, entry, &mut report)?);
+        let stamp_entry = CfgPlanEntry::StampValue(stamp_index);
+        let mut row_entries: Vec<(CfgPlanEntry, ValueId)> =
+            vec![(stamp_entry, scalar(residual, stamp_entry)?)];
+        for (entry_index, jacobian) in stamp.jacobian_programs.iter().enumerate() {
+            let entry = CfgPlanEntry::Jacobian(stamp_index, entry_index);
+            let lane = require_lane(&jacobian.col_axis, node_count, entry)?;
+            if let Some(value) = jacobian_rows[stamp_index].get(lane).copied().flatten() {
+                row_entries.push((entry, scalar(value, entry)?));
+            }
+        }
+        for (entry_index, reactive) in stamp.reactive_jacobians.iter().enumerate() {
+            let entry = CfgPlanEntry::ReactiveJacobian(stamp_index, entry_index);
+            let lane = require_lane(&reactive.col_axis, node_count, entry)?;
+            if let Some(value) = reactive_rows[stamp_index].get(lane).copied().flatten() {
+                row_entries.push((entry, scalar(value, entry)?));
+            }
+        }
+        let row_outputs: Vec<ValueId> = row_entries.iter().map(|(_, value)| *value).collect();
+        let (row_function, row_mapped) = prune_cfg_to_outputs(&scalarized.function, &row_outputs);
+        let row_values: HashMap<CfgPlanEntry, ValueId> = row_entries
+            .iter()
+            .map(|(entry, _)| *entry)
+            .zip(row_mapped)
+            .collect();
+
+        stamp_values.push(lower(
+            &row_function,
+            row_values[&stamp_entry],
+            stamp_entry,
+            &mut report,
+        )?);
         report.stamp_values += 1;
 
         let mut row = Vec::with_capacity(stamp.jacobian_programs.len());
-        for (entry_index, jacobian) in stamp.jacobian_programs.iter().enumerate() {
+        for entry_index in 0..stamp.jacobian_programs.len() {
             let entry = CfgPlanEntry::Jacobian(stamp_index, entry_index);
-            let lane = shipped_entry_lane(&jacobian.col_axis, node_count);
-            if lane >= seeds.len() || Some(lane) == correction_lane {
-                return Err(refuse(
-                    CfgPlanRefusal::LaneUnmapped,
-                    format!("{entry}: lane {lane} of {} seeds", seeds.len()),
-                ));
-            }
-            match jacobian_rows[stamp_index].get(lane).copied().flatten() {
-                Some(value) => {
-                    let output = scalar(value, entry)?;
-                    row.push(lower(&scalarized.function, output, entry, &mut report)?);
+            match row_values.get(&entry).copied() {
+                Some(output) => {
+                    row.push(lower(&row_function, output, entry, &mut report)?);
                     report.jacobians += 1;
                 }
                 None => {
@@ -472,19 +519,11 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
                 ),
             ));
         }
-        for (entry_index, reactive) in stamp.reactive_jacobians.iter().enumerate() {
+        for entry_index in 0..stamp.reactive_jacobians.len() {
             let entry = CfgPlanEntry::ReactiveJacobian(stamp_index, entry_index);
-            let lane = shipped_entry_lane(&reactive.col_axis, node_count);
-            if lane >= seeds.len() || Some(lane) == correction_lane {
-                return Err(refuse(
-                    CfgPlanRefusal::LaneUnmapped,
-                    format!("{entry}: lane {lane} of {} seeds", seeds.len()),
-                ));
-            }
-            match reactive_rows[stamp_index].get(lane).copied().flatten() {
-                Some(value) => {
-                    let output = scalar(value, entry)?;
-                    reactive_row.push(lower(&scalarized.function, output, entry, &mut report)?);
+            match row_values.get(&entry).copied() {
+                Some(output) => {
+                    reactive_row.push(lower(&row_function, output, entry, &mut report)?);
                     report.reactive_jacobians += 1;
                 }
                 None => {
