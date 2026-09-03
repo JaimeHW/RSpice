@@ -58,7 +58,7 @@ const A64_ALLOCATABLE_VALUE_REGISTERS: usize = 15;
 /// D0-D7 and D16-D22, every one of them volatile: the host convention keeps
 /// the nonvolatile D8-D15 out of the bank entirely, so a value live across a
 /// helper call has nowhere to sit but a spill slot.
-const A64_VALUE_BANK: RegisterBank =
+pub(crate) const A64_VALUE_BANK: RegisterBank =
     RegisterBank::all_caller_saved(A64_ALLOCATABLE_VALUE_REGISTERS);
 /// Every logical register the allocator can hand out, as a mask.
 ///
@@ -70,6 +70,7 @@ const A64_ALLOCATED_REGISTER_MASK: u32 = (1_u32 << A64_ALLOCATABLE_VALUE_REGISTE
 const VOLTAGES_OFFSET: usize = std::mem::offset_of!(EvalContext, voltages);
 const INTERNAL_VOLTAGES_OFFSET: usize = std::mem::offset_of!(EvalContext, internal_voltages);
 const PARAMS_OFFSET: usize = std::mem::offset_of!(EvalContext, params);
+const PRELUDE_SLOTS_OFFSET: usize = std::mem::offset_of!(EvalContext, prelude_slots);
 const BRANCH_CURRENTS_OFFSET: usize = std::mem::offset_of!(EvalContext, branch_currents);
 const BRANCH_CURRENTS_LEN_OFFSET: usize = std::mem::offset_of!(EvalContext, branch_currents_len);
 const CURRENTS_OFFSET: usize = std::mem::offset_of!(EvalContext, currents);
@@ -1284,6 +1285,15 @@ impl FunctionCompiler {
             NativeOp::LoadInternalVoltage(index) => {
                 self.emit_context_array_load(result, INTERNAL_VOLTAGES_OFFSET, index)?
             }
+            NativeOp::LoadPreludeSlot(index) => {
+                self.emit_context_array_load(result, PRELUDE_SLOTS_OFFSET, index)?
+            }
+            // An identity on its operand. `prepare` has already moved operand
+            // zero into `result`, so the value to publish is `result` itself and
+            // the store is the whole of the operation.
+            NativeOp::StorePreludeSlot(index) => {
+                self.emit_context_array_store(result, PRELUDE_SLOTS_OFFSET, index)?
+            }
             NativeOp::LoadVariable(index) => {
                 self.emit_array_load(result, self.variables_register(), index)?
             }
@@ -2321,6 +2331,20 @@ impl FunctionCompiler {
             self.encoder.add_x(XReg::X17, base, XReg::X17)?;
             self.encoder.ldr_d_unsigned(result, XReg::X17, 0)
         }
+    }
+
+    fn emit_context_array_store(
+        &mut self,
+        source: DReg,
+        pointer_offset: usize,
+        index: usize,
+    ) -> JitResult<()> {
+        self.encoder.ldr_x_unsigned(
+            HOST_ABI.indirect_call_scratch,
+            self.context_register(),
+            pointer_offset,
+        )?;
+        self.emit_array_store(source, HOST_ABI.indirect_call_scratch, index)
     }
 
     fn emit_array_store(&mut self, source: DReg, base: XReg, index: usize) -> JitResult<()> {

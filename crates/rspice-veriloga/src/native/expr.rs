@@ -57,12 +57,19 @@ pub(crate) enum NativeOp {
     LoadParam(usize),
     LoadParamGiven(usize),
     LoadPortConnected(usize),
-    LoadVoltage { pos: VoltageNode, neg: VoltageNode },
+    LoadVoltage {
+        pos: VoltageNode,
+        neg: VoltageNode,
+    },
     LoadCurrent(usize),
     LoadPriorCurrent(usize),
     LoadInternalVoltage(usize),
     LoadVariable(usize),
-    LoadVariableDyn { base: usize, len: usize, lower: i64 },
+    LoadVariableDyn {
+        base: usize,
+        len: usize,
+        lower: i64,
+    },
     LoadBranchUnknown(usize),
     LoadTemperature,
     LoadThermalVoltage,
@@ -125,6 +132,22 @@ pub(crate) enum NativeOp {
     IdtState(usize),
     IdtJacobian,
     IdtModState(usize),
+    /// Read one per-evaluation prelude slot.
+    ///
+    /// The slot array is `EvalContext::prelude_slots`: scratch a CFG prelude
+    /// publishes its shared values into once per evaluation, so an entry that
+    /// needs one reads it rather than recomputing its whole cone. Neither
+    /// analog state nor a model variable — it lives exactly as long as one
+    /// evaluation.
+    LoadPreludeSlot(usize),
+    /// Publish one value into a per-evaluation prelude slot, and yield it.
+    ///
+    /// The only operation in this vocabulary whose point is its side effect.
+    /// It is an identity on its operand so that it needs no new value kind and
+    /// no publication metadata beside the program: the store rides in the
+    /// instruction stream where the value is computed, which is what keeps
+    /// that value’s live range from stretching to the exit.
+    StorePreludeSlot(usize),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -267,7 +290,7 @@ impl NativeIdentifierIndex {
     /// hold the definitions reaching it.
     ///
     /// `reads` pairs the name the equation was written with against the
-    /// snapshot capturing the definition it reads — see
+    /// snapshot capturing the definition it reads â see
     /// [`crate::ir::EquationSnapshotReads`]. The lowerer reaches a derivative
     /// shadow by appending axis suffixes to the value's name, so re-pointing
     /// the bare name alone would give the equation the reaching *value* and the
@@ -7046,9 +7069,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
 
     /// `$simparam`, answered at compile time.
     ///
-    /// The generated-Rust backend answers it at run time instead — the CFG
+    /// The generated-Rust backend answers it at run time instead â the CFG
     /// carries a `SimParam` value and the emitter turns it into a
-    /// `simparam("gmin", fallback)` call — so the two backends disagree about
+    /// `simparam("gmin", fallback)` call â so the two backends disagree about
     /// exactly the parameter that moves: a model reading `$simparam("gmin")`
     /// follows gmin stepping when it is generated and does not when it is
     /// compiled here. Closing that needs a `NativeOp` and a place for the
@@ -8271,6 +8294,8 @@ pub(crate) fn native_op_name(op: &NativeOp) -> &'static str {
         NativeOp::IdtState(_) => "IdtState",
         NativeOp::IdtJacobian => "IdtJacobian",
         NativeOp::IdtModState(_) => "IdtModState",
+        NativeOp::LoadPreludeSlot(_) => "LoadPreludeSlot",
+        NativeOp::StorePreludeSlot(_) => "StorePreludeSlot",
     }
 }
 
@@ -9166,7 +9191,8 @@ pub(crate) fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
         | NativeOp::LoadThermalVoltage
         | NativeOp::LoadTime
         | NativeOp::Analysis(_)
-        | NativeOp::LoadMfactor => (0, 1),
+        | NativeOp::LoadMfactor
+        | NativeOp::LoadPreludeSlot(_) => (0, 1),
 
         NativeOp::LoadVariableDyn { .. }
         | NativeOp::AddConst(_)
@@ -9196,7 +9222,8 @@ pub(crate) fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
         | NativeOp::WhiteNoise
         | NativeOp::DdtState(_)
         | NativeOp::DdtJacobian
-        | NativeOp::IdtJacobian => (1, 1),
+        | NativeOp::IdtJacobian
+        | NativeOp::StorePreludeSlot(_) => (1, 1),
 
         NativeOp::ZiState(layout) | NativeOp::ZiStateDerivative(layout) => {
             (layout.operand_count(), 1)

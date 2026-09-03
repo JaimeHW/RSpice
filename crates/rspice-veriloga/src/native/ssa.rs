@@ -3409,6 +3409,8 @@ fn op_preserves_context_pointer_cache(op: NativeOp) -> bool {
                 | NativeOp::LoadInternalVoltage(_)
                 | NativeOp::LoadBranchUnknown(_)
                 | NativeOp::LoadVariable(_)
+                | NativeOp::LoadPreludeSlot(_)
+                | NativeOp::StorePreludeSlot(_)
                 | NativeOp::Add
                 | NativeOp::Sub
                 | NativeOp::Mul
@@ -3475,7 +3477,8 @@ fn op_reads_state(op: NativeOp) -> bool {
 fn op_writes_state(op: NativeOp) -> bool {
     matches!(
         op,
-        NativeOp::LimiterStore(_)
+        NativeOp::StorePreludeSlot(_)
+            | NativeOp::LimiterStore(_)
             | NativeOp::LimitState(_)
             | NativeOp::LaplaceState(_)
             | NativeOp::ZiState(_)

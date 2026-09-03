@@ -113,9 +113,52 @@ pub(crate) struct NativeRequiredStorage {
     pub slew_filters: usize,
     pub delay_buffers: usize,
     pub cross_detectors: usize,
+    /// `f64` slots the plan's CFG prelude publishes into, once per evaluation.
+    ///
+    /// Sized by the *plan*, not by the module, which is why nothing derives it
+    /// here: [`Self::for_model`] reads bytecode, and a prelude exists only in a
+    /// plan built through
+    /// [`CfgPrelude`](crate::jit::cfg_prelude::CfgPrelude). Zero for every plan
+    /// the shipped route builds. W-F10b-2 sets it from the plan when it wires
+    /// the prelude into compilation.
+    pub prelude_slots: usize,
 }
 
 impl NativeRequiredStorage {
+    /// The same requirement with room for a prelude's slots.
+    ///
+    /// Separate from [`Self::for_model`] because the two are read off different
+    /// things: everything else is a property of the compiled module, and this
+    /// is a property of the plan that module was compiled through.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn with_prelude_slots(mut self, slots: usize) -> Self {
+        self.prelude_slots = slots;
+        self
+    }
+
+    /// Refuse a prelude slot array too small for the plan that will write it.
+    ///
+    /// The analogue of `VerilogADevice::validate_native_variable_storage`, and
+    /// it exists for the same reason: generated code addresses the array by a
+    /// compile-time index and cannot check it, so the one place that can check
+    /// it must, before the first store rather than after it. A larger array is
+    /// accepted; the requirement is a floor.
+    /// Called by the device once W-F10b-2 gives a plan a prelude to size.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn validate_prelude_slot_storage(&self, provided: usize) -> JitResult<()> {
+        if provided < self.prelude_slots {
+            return Err(JitError::Verifier {
+                model: "native".into(),
+                detail: format!(
+                    "prelude slot storage holds {provided} values but the plan publishes {}",
+                    self.prelude_slots
+                )
+                .into(),
+            });
+        }
+        Ok(())
+    }
+
     pub(crate) fn for_model(model: &CompiledModel) -> Self {
         #[inline]
         fn update_max(max_slot: &mut Option<usize>, index: usize) {
@@ -206,6 +249,7 @@ impl NativeRequiredStorage {
             slew_filters: required_count(max_slew_filter),
             delay_buffers: required_count(max_delay_buffer),
             cross_detectors: required_count(max_cross_detector),
+            prelude_slots: 0,
         }
     }
 }
@@ -1836,6 +1880,8 @@ mod tests {
             state_candidate_valid_len: 0,
             state_older_candidate: std::ptr::null_mut(),
             state_older_candidate_len: 0,
+            prelude_slots: std::ptr::null_mut(),
+            prelude_slots_len: 0,
         }
     }
 }

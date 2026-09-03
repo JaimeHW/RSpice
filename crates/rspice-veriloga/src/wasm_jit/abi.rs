@@ -19,7 +19,7 @@ pub const WASM_JIT_STATUS_RUNTIME_ERROR: i32 = -2;
 /// Fixed start of the authenticated, frame-relative variable-arity operand
 /// region. The stable header remains independently addressable at its original
 /// offsets.
-pub const WASM_JIT_SLICE_OPERANDS_OFFSET: u32 = 160;
+pub const WASM_JIT_SLICE_OPERANDS_OFFSET: u32 = 168;
 /// Browser helper resource limit. This carries 1,020 coefficient values or 510
 /// complex-root tuples in addition to Zi's four fixed runtime operands.
 pub const WASM_JIT_MAX_SLICE_OPERANDS: usize = crate::zfilter::MAX_ZI_RUNTIME_OPERANDS;
@@ -72,6 +72,11 @@ pub(crate) struct WasmJitEvalFrame {
     pub thermal_voltage: f64,
     pub time: f64,
     pub m_factor: f64,
+    /// Per-evaluation slot array a CFG prelude publishes its shared values
+    /// into, and every entry built against that prelude reads. Zero-length for
+    /// a plan with no prelude, which is every plan the shipped route builds.
+    pub prelude_slots_ptr: u32,
+    pub prelude_slots_len: u32,
 }
 
 /// Complete primary-module dispatch allocation. Generated modules receive a
@@ -133,6 +138,8 @@ impl Default for WasmJitEvalFrame {
             thermal_voltage: 0.0,
             time: 0.0,
             m_factor: 1.0,
+            prelude_slots_ptr: 0,
+            prelude_slots_len: 0,
         }
     }
 }
@@ -188,13 +195,17 @@ pub const FRAME_TEMPERATURE_OFFSET: u64 = offset_of!(WasmJitEvalFrame, temperatu
 pub const FRAME_THERMAL_VOLTAGE_OFFSET: u64 = offset_of!(WasmJitEvalFrame, thermal_voltage) as u64;
 pub const FRAME_TIME_OFFSET: u64 = offset_of!(WasmJitEvalFrame, time) as u64;
 pub const FRAME_M_FACTOR_OFFSET: u64 = offset_of!(WasmJitEvalFrame, m_factor) as u64;
+pub const FRAME_PRELUDE_SLOTS_PTR_OFFSET: u64 =
+    offset_of!(WasmJitEvalFrame, prelude_slots_ptr) as u64;
+pub const FRAME_PRELUDE_SLOTS_LEN_OFFSET: u64 =
+    offset_of!(WasmJitEvalFrame, prelude_slots_len) as u64;
 
 const _: () = {
     assert!(WASM_JIT_MAX_SLICE_OPERANDS == crate::zfilter::MAX_ZI_RUNTIME_OPERANDS);
-    assert!(WASM_JIT_EVAL_FRAME_BYTES == 160);
+    assert!(WASM_JIT_EVAL_FRAME_BYTES == 168);
     assert!(WASM_JIT_SLICE_OPERANDS_OFFSET == WASM_JIT_EVAL_FRAME_BYTES);
-    assert!(offset_of!(WasmJitDispatchFrame, slice_operands) == 160);
-    assert!(WASM_JIT_MAX_EVAL_FRAME_BYTES == 8_352);
+    assert!(offset_of!(WasmJitDispatchFrame, slice_operands) == 168);
+    assert!(WASM_JIT_MAX_EVAL_FRAME_BYTES == 8_360);
     assert!(FRAME_RESULT_OFFSET == 16);
     assert!(FRAME_SESSION_TOKEN_OFFSET == 28);
     assert!(FRAME_PARAMETERS_PTR_OFFSET == 32);
@@ -204,6 +215,8 @@ const _: () = {
     assert!(FRAME_JACOBIANS_PTR_OFFSET == 120);
     assert!(FRAME_TEMPERATURE_OFFSET == 128);
     assert!(FRAME_M_FACTOR_OFFSET == 152);
+    assert!(FRAME_PRELUDE_SLOTS_PTR_OFFSET == 160);
+    assert!(FRAME_PRELUDE_SLOTS_LEN_OFFSET == 164);
 };
 
 const ZI_LAYOUT_LENGTH_MASK: usize = (1 << 14) - 1;
@@ -268,14 +281,16 @@ mod tests {
         let frame = WasmJitEvalFrame::default();
         assert_eq!(frame.magic, WASM_JIT_FRAME_MAGIC);
         assert_eq!(frame.abi_version, WASM_JIT_ABI_VERSION);
-        assert_eq!(frame.byte_len, 160);
-        assert_eq!(size_of::<WasmJitEvalFrame>(), 160);
+        assert_eq!(frame.byte_len, 168);
+        assert_eq!(size_of::<WasmJitEvalFrame>(), 168);
         assert_eq!(FRAME_VARIABLES_PTR_OFFSET, 96);
         assert_eq!(FRAME_VARIABLES_LEN_OFFSET, 100);
         assert_eq!(FRAME_PROGRAM_ACTIVE_LEN_OFFSET, 116);
         assert_eq!(FRAME_JACOBIANS_LEN_OFFSET, 124);
-        assert_eq!(WASM_JIT_SLICE_OPERANDS_OFFSET, 160);
-        assert_eq!(WASM_JIT_MAX_EVAL_FRAME_BYTES, 8_352);
+        assert_eq!(WASM_JIT_SLICE_OPERANDS_OFFSET, 168);
+        assert_eq!(WASM_JIT_MAX_EVAL_FRAME_BYTES, 8_360);
+        assert_eq!(FRAME_PRELUDE_SLOTS_PTR_OFFSET, 160);
+        assert_eq!(FRAME_PRELUDE_SLOTS_LEN_OFFSET, 164);
         let dispatch = WasmJitDispatchFrame::new(frame);
         assert_eq!(dispatch.frame.byte_len, WASM_JIT_MAX_EVAL_FRAME_BYTES);
         assert_eq!(dispatch.slice_operands.len(), WASM_JIT_MAX_SLICE_OPERANDS);

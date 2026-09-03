@@ -61,6 +61,7 @@ const MODEL: &str = "native-x64";
 const VOLTAGES_OFFSET: i32 = std::mem::offset_of!(EvalContext, voltages) as i32;
 const INTERNAL_VOLTAGES_OFFSET: i32 = std::mem::offset_of!(EvalContext, internal_voltages) as i32;
 const PARAMS_OFFSET: i32 = std::mem::offset_of!(EvalContext, params) as i32;
+const PRELUDE_SLOTS_OFFSET: i32 = std::mem::offset_of!(EvalContext, prelude_slots) as i32;
 const BRANCH_CURRENTS_OFFSET: i32 = std::mem::offset_of!(EvalContext, branch_currents) as i32;
 const BRANCH_CURRENTS_LEN_OFFSET: i32 =
     std::mem::offset_of!(EvalContext, branch_currents_len) as i32;
@@ -129,7 +130,7 @@ const CALLER_SAVED_XMM_COUNT: usize = HOST_ABI.caller_saved_xmm_count;
 /// the end of the bank. Touching one obliges the prologue to preserve it,
 /// which [`callee_saved_xmm_count_for_allocation`] already derives from the
 /// highest register the allocation reaches.
-const X64_VALUE_BANK: RegisterBank =
+pub(crate) const X64_VALUE_BANK: RegisterBank =
     RegisterBank::with_callee_saved_from(ALLOCATABLE_VALUE_REGISTERS, CALLER_SAVED_XMM_COUNT);
 const XMM_STACK: [Xmm; 16] = [
     Xmm::Xmm0,
@@ -875,6 +876,32 @@ impl FunctionCompiler {
                     }
                     NativeOp::LoadPriorCurrent(current_index) => {
                         self.emit_prior_current_load(current_index, &mut context_pointer_cache)?;
+                    }
+                    NativeOp::LoadPreludeSlot(index) => {
+                        let dst = self.push_register()?;
+                        self.emit_context_pointer_load_cached(
+                            PRELUDE_SLOTS_OFFSET,
+                            &mut context_pointer_cache,
+                        );
+                        self.encoder
+                            .movsd_xmm_m64_base_disp32(dst, Gpr::Rax, byte_disp(index)?);
+                    }
+                    NativeOp::StorePreludeSlot(index) => {
+                        // An identity on its operand: the value stays where the
+                        // allocator put it and the store is the whole effect.
+                        if self.depth == 0 {
+                            return Err(JitError::Encoding {
+                                model: MODEL.into(),
+                                detail: "prelude slot store requires stack depth 1, found 0".into(),
+                            });
+                        }
+                        let source = self.register_stack[self.depth - 1];
+                        self.emit_context_pointer_load_cached(
+                            PRELUDE_SLOTS_OFFSET,
+                            &mut context_pointer_cache,
+                        );
+                        self.encoder
+                            .movsd_m64_base_disp32_xmm(Gpr::Rax, byte_disp(index)?, source);
                     }
                     NativeOp::LoadInternalVoltage(index) => {
                         let dst = self.push_register()?;
@@ -13247,6 +13274,8 @@ mod tests {
             state_candidate_valid_len: 0,
             state_older_candidate: std::ptr::null_mut(),
             state_older_candidate_len: 0,
+            prelude_slots: std::ptr::null_mut(),
+            prelude_slots_len: 0,
         }
     }
 

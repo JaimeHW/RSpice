@@ -1352,6 +1352,8 @@ fn eval_context_from_vm_context(context: &mut VmContext) -> EvalContext {
             context.state_older_candidate.as_mut_ptr()
         },
         state_older_candidate_len: context.state_older_candidate.len(),
+        prelude_slots: std::ptr::null_mut(),
+        prelude_slots_len: 0,
     }
 }
 
