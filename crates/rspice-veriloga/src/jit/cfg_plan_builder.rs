@@ -372,20 +372,19 @@ const DERIVATIVE_RULE_HOLES: &[CfgBinaryOp] = &[CfgBinaryOp::Hypot, CfgBinaryOp:
 /// simply computes a different number — so nothing below this function can
 /// catch it. Each entry here was found by an estate test that the flip turned
 /// red, and each one is a wrong Jacobian or a wrong residual, not a rounding
-/// difference:
+/// difference.
 ///
-/// * **`$port_connected`.** `cfg_lower` folds it to the constant `1.0` outside
-///   its noise-metadata mode, and says so: "a consumer of this level that also
-///   has to serve partially connected instances needs a real value here, not
-///   this constant". A runtime instance may omit a trailing terminal, and then
-///   the CFG residual answers as though it were connected —
-///   `port_connected_reflects_omitted_trailing_terminal` measured 6.0 against
-///   0.0. Detected on the HIR, because by CFG time it is indistinguishable from
-///   a literal.
-/// * **`$simparam`.** `cfg_program` lowers it to the model's own fallback and
-///   records the divergence: the MIR route folds the simulator's table instead.
-///   `native_device_with_canonical_ir_executes_simparam_current_without_fallback`
-///   measured 0.0 against a gmin of 1e-12.
+/// Two entries have come off the list, and how they came off is the pattern the
+/// rest are meant to follow — the divergence was a lowering decision one route
+/// had and the other did not, and the fix was to give the CFG route the same
+/// decision rather than a better screen. `$port_connected` folded to `1.0`
+/// because the generated backend builds every instance it evaluates;
+/// [`CfgModel::from_hir_for_executable_backend`](crate::canonical_ir::CfgModel::from_hir_for_executable_backend)
+/// is where a backend that cannot promise that says so, and the fold stays
+/// where it is earned. `$simparam` with no source fallback took zero where the
+/// bytecode route folded the language's default; both now read
+/// `simparam_source_default`. What remains:
+///
 /// * **A contribution-current probe.** `I(p, mid)` read inside another
 ///   contribution: the MIR route reads the current the other equation wrote and
 ///   treats it as frozen, and the CFG route inlines that equation and
@@ -419,19 +418,6 @@ fn route_divergence(
     function: &CfgFunction,
     postfix: &NativeModelPlan,
 ) -> Option<String> {
-    if hir.expressions.iter().any(|expression| {
-        matches!(
-            &expression.kind,
-            crate::canonical_ir::hir::HirExprKind::SystemFunction { name, .. }
-                if name == "$port_connected"
-        )
-    }) {
-        return Some(
-            "$port_connected is folded to the constant 1.0 by the CFG lowering, which is wrong \
-             for an instance that omits a terminal"
-                .to_string(),
-        );
-    }
     if !hir.arrays.is_empty() {
         return Some(
             "an array variable is filled by the MIR route's assignment pass, which the CFG \
@@ -464,11 +450,6 @@ fn route_divergence(
         );
     }
     function.values.iter().find_map(|value| match value.kind {
-        CfgValueKind::SimParam { .. } => Some(
-            "$simparam takes the model's fallback on the CFG route and the simulator's value on \
-             the MIR route"
-                .to_string(),
-        ),
         CfgValueKind::BranchFlow(_) => Some(
             "a branch-flow probe is frozen by the MIR route and differentiated through by the \
              CFG route"
@@ -551,14 +532,19 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
     let mut plan = build_model_plan_with_canonical_ir(model, artifact)
         .map_err(|error| refuse(CfgPlanRefusal::ShippedPlan, error.to_string()))?;
 
-    let mut cfg = CfgModel::from_hir(&artifact.hir, &artifact.mir).map_err(|diagnostics| {
-        refuse(
-            CfgPlanRefusal::CfgLowering,
-            diagnostics
-                .first()
-                .map_or_else(|| "unknown".to_string(), |first| first.message.to_string()),
-        )
-    })?;
+    // The executable lowering, not the generated one: this plan is executed by
+    // `VerilogADevice`, which builds instances from whatever terminal list the
+    // netlist supplied.
+    let mut cfg = CfgModel::from_hir_for_executable_backend(&artifact.hir, &artifact.mir).map_err(
+        |diagnostics| {
+            refuse(
+                CfgPlanRefusal::CfgLowering,
+                diagnostics
+                    .first()
+                    .map_or_else(|| "unknown".to_string(), |first| first.message.to_string()),
+            )
+        },
+    )?;
     if model.stamp_programs.len() != cfg.residuals.len() {
         return Err(refuse(
             CfgPlanRefusal::EquationsUnpaired,
@@ -981,16 +967,20 @@ pub(crate) enum PlanRoute {
 /// rejected step (2.0 against 1.0), and `hypot`/`atan2` under a `ddx`, where
 /// the scalar derivative rules fall through to a zero.
 ///
-/// [`route_divergence`] and [`DERIVATIVE_RULE_HOLES`] screen all six, and with
-/// them the estate is green. But that screen is *empirical*: it names what
-/// about twelve hundred tests happened to expose, not what a proof would name,
-/// and finding six on the first pass over an estate never written to test this
-/// route is the reason it is not enough. The instrument that would bound the
-/// rest is the forty-three-module CFG-versus-MIR census
+/// W-F4 *closed* the first two rather than screening them, and
+/// [`a_closed_divergence_takes_the_cfg_route`] is where they moved to:
+/// `$port_connected` is a runtime leaf for a backend that evaluates instances
+/// it did not build, and `$simparam` reads the same default table on both
+/// routes. [`route_divergence`] and [`DERIVATIVE_RULE_HOLES`] screen the other
+/// four, and with them the estate is green. But that screen is *empirical*: it
+/// names what about twelve hundred tests happened to expose, not what a proof
+/// would name, and finding six on the first pass over an estate never written
+/// to test this route is the reason it is not enough. The instrument that would
+/// bound the rest is the forty-three-module CFG-versus-MIR census
 /// ([`crate::native::cfg_mir_census`]), which has never run past nine modules.
 ///
 /// So the switch sits here at `Postfix` until that census runs 43/43 and the
-/// six classes are *closed* rather than screened. Flipping it is a one-line
+/// remaining classes are closed rather than screened. Flipping it is a one-line
 /// change and everything behind [`PlanRoute::Cfg`] is live, tested and pinned.
 ///
 /// # What `Postfix` reaches, and why the shipped plan is byte-identical
@@ -1277,26 +1267,84 @@ endmodule
         }
     }
 
-    /// Each construct in [`route_divergence`] falls the module back, and says
-    /// which construct did it.
+    /// A construct that *was* a known divergence and no longer is takes the CFG
+    /// route, and takes it for the values the route owns.
     ///
-    /// One source per entry rather than one source carrying all four, so a
-    /// screen that stopped working is attributed rather than covered for by the
-    /// next one in the list.
+    /// The pin the closed entries move to when they come off
+    /// [`route_divergence`]. Refusing one of these again — by reinstating a
+    /// screen, or by a lowering change that makes the construct unbuildable —
+    /// fails here rather than passing quietly as a fallback, which is the only
+    /// way a closed divergence can regress without being noticed.
+    ///
+    /// The *numbers* these modules produce are pinned where the divergence was
+    /// found, against the executed device: `$port_connected` by
+    /// `port_connected_reflects_omitted_trailing_terminal` in `device_eval`,
+    /// `$simparam` by
+    /// `native_device_with_canonical_ir_executes_simparam_current_without_fallback`
+    /// in `native_contract`. This test pins the route; those pin the value.
     #[test]
-    fn every_known_divergence_falls_the_module_back() {
-        let cases: &[(&str, &str, &str)] = &[
+    fn a_closed_divergence_takes_the_cfg_route() {
+        let cases: &[(&str, &str)] = &[
             (
                 "port-connected",
-                "$port_connected",
                 r#"
-module cfg_div_port(p, n, opt);
+module cfg_closed_port(p, n, opt);
   inout p, n, opt;
   electrical p, n, opt;
   analog I(p, n) <+ ($port_connected(opt) ? 10.0 : 1.0) * V(p, n);
 endmodule
 "#,
             ),
+            (
+                "simparam-with-fallback",
+                r#"
+module cfg_closed_simparam(p, n);
+  inout p, n;
+  electrical p, n;
+  analog I(p, n) <+ $simparam("gmin", 1.0e-15) * V(p, n);
+endmodule
+"#,
+            ),
+            (
+                "simparam-without-fallback",
+                r#"
+module cfg_closed_simparam_bare(p, n);
+  inout p, n;
+  electrical p, n;
+  analog I(p, n) <+ $simparam("gmin") * V(p, n);
+endmodule
+"#,
+            ),
+        ];
+        for (case, source) in cases {
+            let (model, artifact) = compile(source);
+            let (plan, refused) =
+                build_default_model_plan_reported(&model, &artifact, PlanRoute::Cfg)
+                    .unwrap_or_else(|error| panic!("{case}: the default plan builds: {error}"));
+            assert!(
+                refused.is_none(),
+                "{case}: this construct is no longer a known divergence, so the CFG route must \
+                 build it: {refused:?}"
+            );
+            for (field, form) in forms(&plan) {
+                let expected = match field {
+                    "stamp_values" | "jacobians" | "reactive_jacobians" => "block",
+                    _ => "postfix",
+                };
+                assert_eq!(form, expected, "{case}: {field} entries are {expected}");
+            }
+        }
+    }
+
+    /// Each construct in [`route_divergence`] falls the module back, and says
+    /// which construct did it.
+    ///
+    /// One source per entry rather than one source carrying all of them, so a
+    /// screen that stopped working is attributed rather than covered for by the
+    /// next one in the list.
+    #[test]
+    fn every_known_divergence_falls_the_module_back() {
+        let cases: &[(&str, &str, &str)] = &[
             (
                 "array",
                 "array variable",
@@ -1321,17 +1369,6 @@ module cfg_div_probe(p, n);
     I(p, mid) <+ V(p, mid);
     I(p) <+ I(p, mid) * V(p);
   end
-endmodule
-"#,
-            ),
-            (
-                "simparam",
-                "$simparam",
-                r#"
-module cfg_div_simparam(p, n);
-  inout p, n;
-  electrical p, n;
-  analog I(p, n) <+ $simparam("gmin", 1.0e-15) * V(p, n);
 endmodule
 "#,
             ),
