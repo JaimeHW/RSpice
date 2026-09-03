@@ -263,9 +263,57 @@ impl NativeIdentifierIndex {
         Self { slots }
     }
 
+    /// The same index with one equation's reads answered by the snapshots that
+    /// hold the definitions reaching it.
+    ///
+    /// `reads` pairs the name the equation was written with against the
+    /// snapshot capturing the definition it reads — see
+    /// [`crate::ir::EquationSnapshotReads`]. The lowerer reaches a derivative
+    /// shadow by appending axis suffixes to the value's name, so re-pointing
+    /// the bare name alone would give the equation the reaching *value* and the
+    /// final *derivative*. Every shadow name of the read is re-pointed with it,
+    /// and a shadow the snapshot does not have is dropped rather than left
+    /// pointing at the original's: the lowerer reads a missing shadow as a zero
+    /// derivative, which is what the absence means.
+    pub(crate) fn with_snapshot_reads(&self, reads: &[(SmolStr, SmolStr)]) -> Self {
+        let mut slots = self.slots.clone();
+        for (read, snapshot) in reads {
+            for name in self.slots.keys() {
+                let Some(suffix) = name.as_str().strip_prefix(read.as_str()) else {
+                    continue;
+                };
+                if !suffix.is_empty() && !is_derivative_shadow_suffix(suffix) {
+                    continue;
+                }
+                let target = SmolStr::new(format!("{snapshot}{suffix}"));
+                match self.slots.get(&target) {
+                    Some(redirected) => slots.insert(name.clone(), *redirected),
+                    None => slots.remove(name),
+                };
+            }
+        }
+        Self { slots }
+    }
+
     fn get(&self, name: &str) -> Option<NativeIdentifierSlot> {
         self.slots.get(name).copied()
     }
+}
+
+/// Whether `suffix` is the derivative-axis tail
+/// [`MirEquationLowerer::lower_identifier_derivative`] and its higher-order
+/// siblings append to a value's name to name its shadow: one or more `@d<node>`
+/// or `@dI<branch>` groups and nothing else.
+fn is_derivative_shadow_suffix(suffix: &str) -> bool {
+    let Some(axes) = suffix.strip_prefix('@') else {
+        return false;
+    };
+    axes.split('@').all(|axis| {
+        let index = axis.strip_prefix("dI").or_else(|| axis.strip_prefix('d'));
+        index.is_some_and(|index| {
+            !index.is_empty() && index.bytes().all(|byte| byte.is_ascii_digit())
+        })
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -410,6 +458,14 @@ impl<'a> NativeLoweringLimits<'a> {
                     .unwrap_or_else(|| "MIR validation failed".into())
                     .into(),
             })
+    }
+
+    /// The name table these limits resolve identifiers through, when the
+    /// lowering has one. A caller redirecting one equation's reads derives its
+    /// own table from this and hands it back through
+    /// [`Self::with_identifier_index`].
+    pub(crate) fn identifier_index(self) -> Option<&'a NativeIdentifierIndex> {
+        self.identifier_index
     }
 
     fn identifier_slot(self, mir: &MirModel, name: &str) -> Option<NativeIdentifierSlot> {

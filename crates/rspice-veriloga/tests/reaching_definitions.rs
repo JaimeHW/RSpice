@@ -12,28 +12,24 @@
 //! observable in a reporting variable, so a run that passed because the write
 //! was optimised away would fail on the very next assertion.
 //!
-//! # Which route each pin currently holds
+//! # Which route each pin holds
 //!
-//! Bare, these exercise the bytecode VM, and they pass: the compiler splices
-//! the snapshot into `CompiledModel::assignment_steps` and redirects the stamp
-//! programs to read it.
+//! Every route, unconditionally. Bare, these exercise the bytecode VM: the
+//! compiler splices the snapshot into `CompiledModel::assignment_steps` and
+//! redirects the stamp programs to read it, and the VM executes that sequence
+//! as it stands.
 //!
-//! Under `native` they do not, and the three that read a reassigned variable
-//! are `ignore`d there rather than deleted or weakened. The executable plan
-//! does not lower the bytecode when a canonical artifact is present — which is
-//! every production build. `jit::plan_builder::lower_assignment_phases` takes
-//! `lower_live_canonical_assignment_statements`, which walks `hir.statements`
-//! and pulls each statement's *program* from `model.assignment_steps` through
-//! `AssignmentProgramCursor`; a spliced step has no HIR statement, so no
-//! statement claims it and the snapshot slot is never written. The entries are
-//! lowered from the same canonical source and resolve the variable by name, so
-//! they still read the slot the pass finishes with. Measured on the first pin:
-//! the conductance is 1.25 where the block says 0.0025, and the snapshot slot
-//! holds 0.
+//! Under `native` — and under `wasm-jit`, which takes the same plan — the
+//! executable plan does not lower the bytecode when a canonical artifact is
+//! present, which is every production build. It replays the canonical HIR's
+//! statements instead, and a spliced copy has no statement of its own, so
+//! `CompiledModel::reaching_snapshots` tells `jit::plan_builder` which
+//! statement each copy belongs after and which read of which equation the
+//! snapshot answers. Without that the conductance the first pin measures was
+//! 1.25 where the block says 0.0025, with the snapshot slot holding 0.
 //!
-//! Closing that is a canonical-IR change — the same splice at the HIR level —
-//! and these `ignore`s come off with it. The `cfg_mir` census slice over
-//! `ekv3_rf` measures the same gap on the real model.
+//! The `cfg_mir` census slice over `ekv3_rf` measures the same property on a
+//! shipped model.
 
 use rspice_veriloga::device::VerilogADevice;
 use std::collections::HashMap;
@@ -82,10 +78,6 @@ endmodule
 "#;
 
 #[test]
-#[cfg_attr(
-    feature = "native",
-    ignore = "the executable plan lowers the canonical IR, which carries no snapshot yet"
-)]
 fn a_conductance_is_stamped_from_the_definition_reaching_the_contribution() {
     let fixture = DeviceFixture::compile(REUSED_AFTER_READ);
     let mut device = fixture.device("R1", &[1, 0]);
@@ -126,10 +118,6 @@ endmodule
 "#;
 
 #[test]
-#[cfg_attr(
-    feature = "native",
-    ignore = "the executable plan lowers the canonical IR, which carries no snapshot yet"
-)]
 fn a_reassignment_under_a_taken_condition_does_not_reach_the_equation_above_it() {
     let fixture = DeviceFixture::compile(REASSIGNED_UNDER_A_CONDITION);
     let mut device = fixture.device("R1", &[1, 0]);
@@ -170,10 +158,6 @@ endmodule
 "#;
 
 #[test]
-#[cfg_attr(
-    feature = "native",
-    ignore = "the executable plan lowers the canonical IR, which carries no snapshot yet"
-)]
 fn a_jacobian_entry_and_a_noise_magnitude_read_the_reaching_definition() {
     let fixture = DeviceFixture::compile(REASSIGNED_FEEDS_A_JACOBIAN_AND_A_NOISE_MAGNITUDE);
     let mut device = fixture.device("R1", &[1, 0]);

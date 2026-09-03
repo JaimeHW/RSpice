@@ -147,6 +147,14 @@ fn build_model_plan_inner(
     let mut prior_current_probes = Vec::new();
 
     for (stamp_index, stamp) in model.stamp_programs.iter().enumerate() {
+        // Every entry of this equation — condition, residual, Jacobian,
+        // reactive Jacobian — reads one program point, so one table serves all
+        // of them.
+        let snapshot_identifiers = equation_snapshot_identifiers(model, base_limits, stamp_index);
+        let base_limits = match &snapshot_identifiers {
+            Some(identifiers) => base_limits.with_identifier_index(identifiers),
+            None => base_limits,
+        };
         let static_condition = stamp
             .static_condition
             .as_ref()
@@ -536,6 +544,30 @@ fn lower_reactive_jacobian_program(
         &reactive_jacobian.program,
         limits,
     )
+}
+
+/// The name table one equation's entries resolve identifiers through.
+///
+/// `None` — the case for every equation of every module that reads no
+/// reassigned variable — leaves the lowering on the model-wide table, so the
+/// programs it produces are exactly the ones it produced before snapshots
+/// existed. An equation the compiler redirected gets a table of its own, in
+/// which the names it was written with answer with the snapshot slots holding
+/// the definitions that reach it.
+fn equation_snapshot_identifiers(
+    model: &CompiledModel,
+    limits: NativeLoweringLimits<'_>,
+    equation: usize,
+) -> Option<NativeIdentifierIndex> {
+    if model.reaching_snapshots.reads.is_empty() {
+        return None;
+    }
+    let reads = model
+        .reaching_snapshots
+        .reads
+        .iter()
+        .find(|entry| entry.equation == equation)?;
+    Some(limits.identifier_index()?.with_snapshot_reads(&reads.reads))
 }
 
 fn canonical_equation_id(model: &CompiledModel, stamp_index: usize) -> JitResult<EquationId> {
@@ -3204,16 +3236,127 @@ fn lower_live_canonical_assignment_statements(
     let live = live_canonical_assignment_slots(model, mir, limits)?;
     let shadow_index = AssignmentShadowIndex::for_model(model)?;
     let mut program_cursor = AssignmentProgramCursor::for_steps(&model.assignment_steps);
-    lower_canonical_assignment_statements(
-        model,
-        hir,
-        mir,
-        &hir.statements,
-        &live,
-        &shadow_index,
-        &mut program_cursor,
-        limits,
-    )
+    let snapshots = ReachingSnapshotCopies::for_model(model)?;
+    let mut assignments = snapshots.lower_after(model, None, &live, &mut program_cursor, limits)?;
+    for (index, statement) in hir.statements.iter().enumerate() {
+        assignments.extend(lower_canonical_assignment_statement(
+            model,
+            hir,
+            mir,
+            statement,
+            &live,
+            &shadow_index,
+            &mut program_cursor,
+            limits,
+        )?);
+        assignments.extend(snapshots.lower_after(
+            model,
+            Some(index),
+            &live,
+            &mut program_cursor,
+            limits,
+        )?);
+    }
+    Ok(assignments)
+}
+
+/// The snapshot copies this route has to place, grouped by the statement each
+/// one follows.
+///
+/// The copies are in `model.assignment_steps` and nowhere in the canonical HIR,
+/// because [`crate::reaching_definition`] splices them into the compiled
+/// sequence after the canonical IR is built from the same analyzed module. A
+/// route that replays statements therefore never reaches them, and the slots
+/// they write stay zero — which is the whole defect on this route.
+/// [`crate::ir::ReachingSnapshotPlan`] says which statement each copy belongs
+/// after; this places it there, with the copy's own compiled program.
+struct ReachingSnapshotCopies {
+    /// Slots to copy, keyed by the statement they follow. `None` is the group
+    /// that runs before the block's first statement.
+    groups: HashMap<Option<usize>, Vec<usize>>,
+}
+
+impl ReachingSnapshotCopies {
+    fn for_model(model: &CompiledModel) -> JitResult<Self> {
+        let mut groups: HashMap<Option<usize>, Vec<usize>> = HashMap::new();
+        for copy in &model.reaching_snapshots.copies {
+            let name = model
+                .variable_names
+                .get(copy.slot)
+                .ok_or_else(|| JitError::InvalidCanonicalIr {
+                    model: model.name.clone(),
+                    detail: format!(
+                        "reaching-definition snapshot slot {} is outside the compiled variable table",
+                        copy.slot
+                    )
+                    .into(),
+                })?
+                .clone();
+            let group = groups.entry(copy.definition_statement).or_default();
+            group.push(copy.slot);
+            // The copy's own derivative shadows are copies too — the shadow
+            // build differentiated the spliced statement like any other — and
+            // they belong at the same point, so the Jacobian reads the
+            // definition the residual does.
+            let prefix = format!("{name}@");
+            for (slot, shadow) in model.variable_names.iter().enumerate() {
+                if shadow.starts_with(prefix.as_str()) {
+                    group.push(slot);
+                }
+            }
+        }
+        for group in groups.values_mut() {
+            group.sort_unstable();
+            group.dedup();
+        }
+        Ok(Self { groups })
+    }
+
+    /// Lower the copies that follow `statement`, advancing the shared program
+    /// cursor over their compiled programs.
+    ///
+    /// Every slot here is written exactly once in the whole module — a snapshot
+    /// captures one definition and a shadow of one — so the cursor's occurrence
+    /// counting resolves each to the copy's own program whatever order the
+    /// statements around it claimed theirs in.
+    fn lower_after(
+        &self,
+        model: &CompiledModel,
+        statement: Option<usize>,
+        live: &[bool],
+        program_cursor: &mut AssignmentProgramCursor<'_>,
+        limits: NativeLoweringLimits<'_>,
+    ) -> JitResult<Vec<NativeAssignment>> {
+        let Some(group) = self.groups.get(&statement) else {
+            return Ok(Vec::new());
+        };
+        let mut assignments = Vec::with_capacity(group.len());
+        for &slot in group {
+            let program = program_cursor.next_scalar(slot);
+            if !live.get(slot).copied().unwrap_or(false) {
+                continue;
+            }
+            validate_assignment_target(model, slot)?;
+            let program = program.ok_or_else(|| JitError::InvalidCanonicalIr {
+                model: model.name.clone(),
+                detail: format!(
+                    "reaching-definition snapshot '{}' has no compiled assignment program",
+                    model.variable_names[slot]
+                )
+                .into(),
+            })?;
+            assignments.push(NativeAssignment::Direct {
+                var_index: slot,
+                program: NativeProgram::from_bytecode(
+                    model.name.clone(),
+                    EntryKind::Assignment,
+                    program,
+                    limits,
+                )?,
+            });
+        }
+        Ok(assignments)
+    }
 }
 
 fn lower_canonical_assignment_statements(
@@ -3950,6 +4093,15 @@ fn mark_canonical_entry_variable_roots(
     let mut prior_current_probes = Vec::new();
 
     for (stamp_index, stamp) in model.stamp_programs.iter().enumerate() {
+        // Liveness is read off the lowered entries, so it has to be read off
+        // the same lowering the plan will use: an entry redirected to a
+        // snapshot keeps that snapshot's slot alive, and the slot the author
+        // named alive through the copy.
+        let snapshot_identifiers = equation_snapshot_identifiers(model, limits, stamp_index);
+        let limits = match &snapshot_identifiers {
+            Some(identifiers) => limits.with_identifier_index(identifiers),
+            None => limits,
+        };
         if let Some(condition) = &stamp.static_condition {
             let program =
                 lower_static_condition_program(model, Some(mir), stamp_index, condition, limits)?;
@@ -4585,6 +4737,132 @@ endmodule
         assert!(canonical_noise_intrinsic_kind("noise_table").is_some());
         assert!(canonical_noise_intrinsic_kind("white_noise_").is_none());
         assert!(canonical_noise_intrinsic_kind("exp").is_none());
+    }
+
+    /// The shape `ekv3_302.00` has: a scratch variable a contribution reads
+    /// and a later statement reassigns.
+    const REUSED_AFTER_READ: &str = r#"
+`include "disciplines.vams"
+module plan_reuse(p, n);
+  inout p, n;
+  electrical p, n;
+  real tmp;
+  real reported;
+  analog begin
+    tmp = 2.5e-3;
+    I(p, n) <+ V(p, n) * tmp;
+    tmp = 1.25;
+    reported = tmp;
+  end
+endmodule
+"#;
+
+    fn direct_assignment_targets(plan: &NativeModelPlan) -> Vec<usize> {
+        plan.assignments
+            .iter()
+            .filter_map(|assignment| match assignment {
+                NativeAssignment::Direct { var_index, .. } => Some(*var_index),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn slot_of(model: &CompiledModel, name: &str) -> usize {
+        model
+            .variable_names
+            .iter()
+            .position(|variable| variable == name)
+            .unwrap_or_else(|| panic!("no variable '{name}' in {:?}", model.variable_names))
+    }
+
+    /// The property that keeps every model without the construct exactly where
+    /// it was.
+    ///
+    /// Both decisions this repair adds to the canonical route are keyed off the
+    /// plan the compiler recorded — one places the copies, the other rebuilds
+    /// one equation's name table — and a module that reads no reassigned
+    /// variable records neither. Nothing is placed, no table is rebuilt, and
+    /// every program in the plan is the one the pre-repair builder emitted.
+    #[test]
+    fn a_module_without_reuse_leaves_the_canonical_plan_exactly_where_it_was() {
+        let (model, plan) = plan(RESISTOR, "plan_resistor");
+        assert!(
+            model.reaching_snapshots.is_empty(),
+            "{:?}",
+            model.reaching_snapshots
+        );
+        assert!(
+            !model
+                .variable_names
+                .iter()
+                .any(|name| name.contains("@snap")),
+            "{:?}",
+            model.variable_names
+        );
+        assert!(
+            ReachingSnapshotCopies::for_model(&model)
+                .expect("snapshot copies")
+                .groups
+                .is_empty(),
+            "no copy is placed on a module that captured none"
+        );
+        assert!(
+            model.reaching_snapshots.reads.is_empty(),
+            "no equation's name table is rebuilt"
+        );
+        let targets = direct_assignment_targets(&plan);
+        assert!(
+            targets.contains(&slot_of(&model, "voltage")),
+            "the plan assigns the variable the module declares: {targets:?}"
+        );
+        assert!(
+            targets.iter().all(|target| {
+                let name = model.variable_names[*target].as_str();
+                name == "voltage" || name.starts_with("voltage@d")
+            }),
+            "and nothing else — no copy and no shadow of one: {:?}",
+            targets
+                .iter()
+                .map(|target| model.variable_names[*target].as_str())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// The same assertion with the construct present, so the one above is a
+    /// measurement rather than a tautology: here a copy *is* placed, and it is
+    /// placed immediately after the definition it captures — before the
+    /// statement that overwrites it.
+    #[test]
+    fn a_snapshot_copy_is_planned_immediately_after_the_definition_it_captures() {
+        let (model, plan) = plan(REUSED_AFTER_READ, "plan_reuse");
+        let snapshot = model
+            .variable_names
+            .iter()
+            .position(|name| name.contains("@snap"))
+            .expect("the module captures one definition");
+        assert_eq!(model.reaching_snapshots.copies.len(), 1);
+        assert_eq!(model.reaching_snapshots.copies[0].slot, snapshot);
+        assert_eq!(
+            model.reaching_snapshots.reads.len(),
+            1,
+            "one contribution reads the captured definition"
+        );
+
+        let targets = direct_assignment_targets(&plan);
+        let tmp = slot_of(&model, "tmp");
+        let copy = targets
+            .iter()
+            .position(|target| *target == snapshot)
+            .expect("the copy is planned");
+        assert_eq!(
+            targets[copy - 1],
+            tmp,
+            "the copy runs straight after the definition it captures: {targets:?}"
+        );
+        assert!(
+            targets[copy + 1..].contains(&tmp),
+            "and before the statement that overwrites it: {targets:?}"
+        );
     }
 
     #[test]
