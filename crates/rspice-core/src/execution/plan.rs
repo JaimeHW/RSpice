@@ -1347,10 +1347,9 @@ impl fmt::Display for DeckPlanError {
             Self::TemperatureAxisWithStep => formatter.write_str(
                 "the legacy temperature-only execution adapter cannot compose .TEMP with .STEP; use the canonical run-axis plan",
             ),
-            Self::MissingUpstreamAnalysis { card, required } => write!(
-                formatter,
-                "{card} requires {required} in the same deck to linearize around"
-            ),
+            Self::MissingUpstreamAnalysis { card, required } => {
+                write!(formatter, "{card} requires {required} in the same deck")
+            }
             Self::AnalysisCountOverflow(kind) => {
                 write!(
                     formatter,
@@ -1441,7 +1440,7 @@ fn plan_post_processes(
             .copied()
             .ok_or(DeckPlanError::MissingUpstreamAnalysis {
                 card,
-                required: "a .TRAN analysis to post-process",
+                required: "a completed authored .TRAN to post-process",
             })
     };
 
