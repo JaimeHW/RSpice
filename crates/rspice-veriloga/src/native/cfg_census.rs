@@ -27,12 +27,12 @@ use super::census_models::shipped_census_models_matching;
 use crate::canonical_ir::cfg_lower::{CfgModel, CfgNoiseProcess};
 use crate::canonical_ir::{
     AdFunction, AdSeed, CanonicalNoiseSourceKind, CanonicalStateFamily, CanonicalStateLayout,
-    CfgEvalInputs, CfgEvalSnapshot, CfgFunction, CfgScalar, CfgStateAllocation, CfgValueKind,
-    ComplexStep, EmissionCensus, MirModel, ValueId, differentiate, evaluate_cfg,
-    prune_cfg_to_outputs,
+    CfgEvalInputs, CfgEvalSnapshot, CfgFunction, CfgScalar, CfgStateAllocation, ComplexStep,
+    EmissionCensus, ValueId, differentiate, evaluate_cfg, prune_cfg_to_outputs,
 };
-use crate::codegen::{AssignmentStep, BytecodeProgram, ColumnAxis, CompiledModel, Instruction};
+use crate::codegen::{AssignmentStep, BytecodeProgram, CompiledModel, Instruction};
 use crate::jit::cfg_lanes::{ScalarLanes, scalarize_lanes};
+use crate::jit::cfg_plan_builder::{derivative_seeds, shipped_entry_lane};
 use crate::jit::cfg_program::{CfgRuntimeBindings, lower_cfg_function};
 use crate::jit::expr::BranchUnknownRuntimeMapping;
 use crate::jit::plan_builder::canonical_branch_unknown_runtime_map;
@@ -79,7 +79,7 @@ impl Rng {
 }
 
 /// Everything both routes read, filled once per operating point.
-struct OperatingPoint {
+pub(super) struct OperatingPoint {
     parameters: Vec<f64>,
     parameter_given: Vec<u8>,
     port_connected: Vec<u8>,
@@ -115,7 +115,7 @@ struct OperatingPoint {
 const BOLTZMANN_OVER_ELECTRON: f64 = 1.380_649e-23 / 1.602_176_634e-19;
 
 impl OperatingPoint {
-    fn new(
+    pub(super) fn new(
         seed: u64,
         analysis: u8,
         parameter_defaults: &[Option<f64>],
@@ -140,7 +140,13 @@ impl OperatingPoint {
             .map(|(default, sampled)| default.unwrap_or(sampled))
             .collect();
         let canonical_flows = fill(branch_unknowns.len());
-        let mut runtime_flows = vec![0.0; branch_unknowns.len()];
+        // Slack past the canonical count, because the *runtime* branch-source
+        // array is numbered by the compiled model rather than by the canonical
+        // map, and this array has no length field in the context for a
+        // compiled program to be bounds-checked against. Trailing zeros change
+        // no indexed read; running off the end would decide whether the census
+        // process survives.
+        let mut runtime_flows = vec![0.0; branch_unknowns.len() + 64];
         for (mapping, flow) in branch_unknowns.iter().zip(&canonical_flows) {
             if let Some(slot) = runtime_flows.get_mut(mapping.runtime_index) {
                 *slot = if mapping.inverted { -*flow } else { *flow };
@@ -251,7 +257,7 @@ impl OperatingPoint {
         }
     }
 
-    fn context(&mut self) -> EvalContext {
+    pub(super) fn context(&mut self) -> EvalContext {
         let mut context = EvalContext::empty_for_test();
         context.params = self.parameters.as_ptr();
         context.param_given = self.parameter_given.as_ptr();
@@ -330,7 +336,7 @@ struct Tally {
 /// Relative deviation, treating two NaNs and two identical infinities as
 /// agreement: the two routes must agree about a model leaving the reals, not
 /// about which NaN payload it produced.
-fn deviation(expected: f64, actual: f64) -> Option<f64> {
+pub(super) fn deviation(expected: f64, actual: f64) -> Option<f64> {
     if expected.is_nan() && actual.is_nan() {
         return None;
     }
@@ -339,43 +345,6 @@ fn deviation(expected: f64, actual: f64) -> Option<f64> {
     }
     let scale = expected.abs().max(actual.abs()).max(f64::MIN_POSITIVE);
     Some((expected - actual).abs() / scale)
-}
-
-/// The seed list, in the order every consumer of the derivative pass already
-/// uses: node potentials, then branch unknowns, then the limiter correction if
-/// the model limits at all.
-///
-/// Read off the generated-Rust backend rather than invented here, because it is
-/// the one shipped consumer of CFG-level AD and the lane index means "unknown
-/// number n" only if both agree. Its own words for putting the correction last:
-/// "a model without `$limit` carries no lane for it and every other lane index
-/// still means 'unknown number n'".
-fn derivative_seeds(cfg: &CfgModel, mir: &MirModel) -> (Vec<AdSeed>, Option<usize>) {
-    let limits = cfg
-        .function
-        .values
-        .iter()
-        .any(|value| matches!(value.kind, CfgValueKind::Limit { .. }));
-    let seeds: Vec<AdSeed> = (0..mir.nodes.len())
-        .map(|index| AdSeed::NodePotential(index.into()))
-        .chain((0..mir.branch_unknowns.len()).map(|index| AdSeed::BranchUnknownFlow(index.into())))
-        .chain(limits.then_some(AdSeed::LimiterCorrection))
-        .collect();
-    let correction = limits.then(|| seeds.len() - 1);
-    (seeds, correction)
-}
-
-/// Which lane each shipped Jacobian entry stands for.
-///
-/// The inverse of the seed-list construction, and the same arithmetic the
-/// generated backend's `emit_row` performs when it splits a lane index back
-/// into a node column and a branch column: below the node count it is a node,
-/// above it a branch unknown rebased by that count.
-fn shipped_entry_lane(axis: &ColumnAxis, node_count: usize) -> usize {
-    match axis {
-        ColumnAxis::Node(node) => *node,
-        ColumnAxis::Branch(branch) => node_count + *branch,
-    }
 }
 
 /// What the two routes each say exists.
@@ -418,11 +387,31 @@ struct SparsityTally {
     shipped_only_unmapped: usize,
 }
 
+/// Modules whose residuals are allowed to deviate from the reference
+/// interpreter, and by how much.
+///
+/// Empty, and that is the measurement rather than an aspiration: the block
+/// lowering reproduces the interpreter *exactly* — bit for bit, at every
+/// operating point, on all forty-three shipped modules. The one module that
+/// ever deviated was `vbic_4T_et_cf`, and the cause was not the lowering: the
+/// x64 backend split `limexp` at 40 while the interpreter split it at 80. W-F3a
+/// (`84ba2c2bb`) ruled that threshold once for the whole estate and the
+/// deviation went to zero.
+///
+/// # Checked in both directions
+///
+/// A module listed here that comes back at zero fails the gate until it is
+/// removed. An allowlist that only ever grows is a record of what someone once
+/// tolerated; one that has to shrink when the defect is fixed is a statement
+/// about the tree as it is now.
+const RESIDUAL_DEVIATION_ALLOWLIST: &[(&str, f64)] = &[];
+
 #[test]
 #[ignore = "release qualification; run with --release --features native -- --ignored --nocapture"]
 fn the_cfg_block_lowering_agrees_with_the_reference_interpreter() {
     let mut tally = Tally::default();
     let mut worst_overall = 0.0_f64;
+    let mut per_module: Vec<(String, f64)> = Vec::new();
     // The same affordance the emitted-code benchmark carries: a substring that
     // narrows repeated runs to one model while it is being investigated. The
     // corpus assertion below is skipped whenever it is set, so a filtered run
@@ -617,6 +606,7 @@ fn the_cfg_block_lowering_agrees_with_the_reference_interpreter() {
         tally.lowered_outputs += lowered;
         tally.executed_outputs += executed;
         worst_overall = worst_overall.max(worst);
+        per_module.push((module.clone(), worst));
         println!(
             "cfg-census model={module} outputs={} lowered={lowered} executed={executed} max_relative_deviation={worst:.3e} seconds={:.1}{}{}{}",
             cfg.residuals.len(),
@@ -657,6 +647,44 @@ fn the_cfg_block_lowering_agrees_with_the_reference_interpreter() {
     assert!(
         tally.comparisons > 0,
         "the census must actually execute the lowered programs"
+    );
+
+    let mut findings = Vec::new();
+    for (module, worst) in &per_module {
+        let allowed = RESIDUAL_DEVIATION_ALLOWLIST
+            .iter()
+            .find(|(name, _)| name == module)
+            .map(|(_, allowed)| *allowed);
+        match allowed {
+            None if *worst != 0.0 => findings.push(format!(
+                "{module} deviates from the reference interpreter by {worst:.3e}; the module's \
+                 own line above names the residual, the point and both readings"
+            )),
+            Some(allowed) if *worst == 0.0 => findings.push(format!(
+                "{module} is on RESIDUAL_DEVIATION_ALLOWLIST at {allowed:.3e} and now deviates by \
+                 nothing; remove it from the list"
+            )),
+            Some(allowed) if *worst > allowed => findings.push(format!(
+                "{module} deviates by {worst:.3e}, past the {allowed:.3e} it is allowed"
+            )),
+            _ => {}
+        }
+    }
+    // A listed module the run never reached is the third direction: it would
+    // leave an entry in the list that nothing can ever clear. Only a full run
+    // can say so — a filtered one skips modules on purpose.
+    if filter.is_none() {
+        for (module, _) in RESIDUAL_DEVIATION_ALLOWLIST {
+            assert!(
+                per_module.iter().any(|(name, _)| name == module),
+                "{module} is on RESIDUAL_DEVIATION_ALLOWLIST but the census never reached it"
+            );
+        }
+    }
+    assert!(
+        findings.is_empty(),
+        "the block lowering no longer reproduces the reference interpreter exactly:\n{}",
+        findings.join("\n")
     );
 }
 
