@@ -8,6 +8,7 @@ pub mod bounded_io;
 mod capability;
 mod materialized;
 mod plan;
+pub mod result_document;
 mod schema;
 mod topology;
 
@@ -26,6 +27,11 @@ pub use plan::{
     AnalysisInstanceId, AnalysisKind, AnalysisRequest, AxisAssignment, AxisKind, DataBinding,
     DeckPlan, DeckPlanError, PlannedAnalysis, RunAxis, RunAxisValue, RunCoordinate,
     RunCoordinateId, StepAxisTarget,
+};
+pub use result_document::{
+    ANALYSIS_RESULT_DOCUMENT_SCHEMA, ANALYSIS_RESULT_DOCUMENT_VERSION, AnalysisResultDocument,
+    AnalysisResultDocumentBuilder, ResultAxis, ResultAxisKind, ResultCoordinate,
+    ResultDocumentError, ResultNamespaces, ResultPayload, ResultScalar, ResultSignal, ResultWindow,
 };
 pub use schema::{
     CoordinateSchema, SchemaUnion, SignalDescriptor, SignalKind, SignalOwner, SignalSchema,

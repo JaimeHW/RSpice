@@ -116,6 +116,16 @@ impl TopologyFingerprint {
     pub const fn bytes(self) -> [u8; 32] {
         self.0
     }
+
+    /// Rebuild a fingerprint that this crate previously emitted.
+    ///
+    /// This is deliberately crate-private: a fingerprint may only enter the
+    /// public API from a real elaborated topology or from decoding a document
+    /// that a run produced. There is no public path from arbitrary bytes to a
+    /// structural identity.
+    pub(crate) const fn from_bytes(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
 }
 
 impl fmt::Display for TopologyFingerprint {
