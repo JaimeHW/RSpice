@@ -46,7 +46,7 @@ pub use builder::{
     build_native_xyce_memristor, validate_native_xyce_ltra_model_contract,
 };
 
-pub(crate) mod config_resolver;
+mod config_resolver;
 mod convergence;
 mod core;
 mod data;

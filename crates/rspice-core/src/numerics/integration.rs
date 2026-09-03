@@ -27,7 +27,7 @@ mod timestep;
 
 pub(crate) use breakpoint::XYCE_BREAKPOINT_TOLERANCE;
 pub use breakpoint::{BreakpointManager, BreakpointStepPolicy};
-pub use companion::{CompanionCoefficients, IntegrationMethod};
+pub use companion::{CompanionCoefficients, IntegrationMethod, parse_integration_method};
 pub(crate) use lte::{
     ACCEPTED_BOUNDARY_LTE_ESTIMATOR_CHECKPOINT_VERSION, AcceptedBoundaryLteEstimatorCheckpoint,
 };

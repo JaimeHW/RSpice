@@ -378,4 +378,76 @@ mod companion_coefficients_tests {
             assert!(CompanionCoefficients::trapezoidal_with_xmu(invalid).is_none());
         }
     }
+
+    #[test]
+    fn every_accepted_method_spelling_selects_its_variant() {
+        for spelling in ["TRAP", "trapezoidal", "TrapeZoid", "onestep", "7"] {
+            assert_eq!(
+                parse_integration_method(spelling),
+                Some(IntegrationMethod::Trapezoidal),
+                "{spelling}"
+            );
+        }
+        for spelling in ["EULER", "be", "BackwardEuler"] {
+            assert_eq!(
+                parse_integration_method(spelling),
+                Some(IntegrationMethod::BackwardEuler),
+                "{spelling}"
+            );
+        }
+        for spelling in ["GEAR", "bdf", "Gear2", "8"] {
+            assert_eq!(
+                parse_integration_method(spelling),
+                Some(IntegrationMethod::Gear2),
+                "{spelling}"
+            );
+        }
+        for spelling in ["TRAPGEAR", "auto"] {
+            assert_eq!(
+                parse_integration_method(spelling),
+                Some(IntegrationMethod::TrapGear),
+                "{spelling}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unknown_method_spelling_selects_nothing() {
+        for spelling in ["", "simpson", "6", "9", "trap gear"] {
+            assert_eq!(parse_integration_method(spelling), None, "{spelling}");
+        }
+    }
+}
+
+/// Decode an authored integration-method spelling.
+///
+/// Deck text names a method in several dialects: SPICE's `TRAP`/`GEAR`, Xyce's
+/// numeric `.OPTIONS TIMEINT METHOD=7|8`, and the hybrid RSpice defaults to.
+/// The table lives beside the enum rather than in a parser or in the engine
+/// facade: a spelling-to-variant map is data about this enum, so every layer
+/// that reads a method name reads down into it instead of sideways.
+pub fn parse_integration_method(spelling: &str) -> Option<IntegrationMethod> {
+    if spelling.eq_ignore_ascii_case("TRAP")
+        || spelling.eq_ignore_ascii_case("TRAPEZOIDAL")
+        || spelling.eq_ignore_ascii_case("TRAPEZOID")
+        || spelling.eq_ignore_ascii_case("ONESTEP")
+        || spelling == "7"
+    {
+        Some(IntegrationMethod::Trapezoidal)
+    } else if spelling.eq_ignore_ascii_case("EULER")
+        || spelling.eq_ignore_ascii_case("BE")
+        || spelling.eq_ignore_ascii_case("BACKWARDEULER")
+    {
+        Some(IntegrationMethod::BackwardEuler)
+    } else if spelling.eq_ignore_ascii_case("GEAR")
+        || spelling.eq_ignore_ascii_case("BDF")
+        || spelling.eq_ignore_ascii_case("GEAR2")
+        || spelling == "8"
+    {
+        Some(IntegrationMethod::Gear2)
+    } else if spelling.eq_ignore_ascii_case("TRAPGEAR") || spelling.eq_ignore_ascii_case("AUTO") {
+        Some(IntegrationMethod::TrapGear)
+    } else {
+        None
+    }
 }

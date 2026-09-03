@@ -339,3 +339,146 @@ impl Default for PssConfig {
         Self::new(1e9) // 1 GHz default
     }
 }
+
+impl From<&crate::netlist::PssCard> for PssConfig {
+    /// Convert an authored `.PSS` card into the configuration the shooting
+    /// solver takes.
+    ///
+    /// The conversion lives here rather than in the parser because a parsed
+    /// deck sits below the analyses and may not name them. The card was
+    /// validated where it was authored, so this is a total mapping; the
+    /// exhaustive literal makes a new configuration field a compile error
+    /// here instead of a silently defaulted one.
+    fn from(card: &crate::netlist::PssCard) -> Self {
+        Self {
+            fundamental_freq: card.fundamental_freq,
+            num_harmonics: card.num_harmonics,
+            tstab: card.tstab,
+            max_iterations: card.max_iterations,
+            tolerance: card.tolerance,
+            abstol: card.abstol,
+            auto_period: card.auto_period,
+            oscillator_node: card.oscillator_node.clone(),
+            period_guess: card.period_guess,
+            tstab_periods: card.tstab_periods,
+            damping_factor: card.damping_factor,
+            max_period_change: card.max_period_change,
+            integration_method: card.integration_method,
+            points_per_period: card.points_per_period,
+            verbose: card.verbose,
+        }
+    }
+}
+
+#[cfg(test)]
+mod card_conversion_tests {
+    use super::*;
+    use crate::netlist::{AnalysisCommand, Netlist, PssCard};
+
+    const CIRCUIT: &str = "pss card conversion\n\
+                           V1 in 0 SIN(0 1 1G)\n\
+                           R1 in out 1k\n\
+                           C1 out 0 1p\n";
+
+    fn card(cards: &str) -> PssCard {
+        let netlist =
+            Netlist::parse(&format!("{CIRCUIT}{cards}\n.end\n")).expect("PSS deck parses");
+        match netlist.analyses.into_iter().next() {
+            Some(AnalysisCommand::Pss(card)) => *card,
+            other => panic!("expected a .PSS card, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_card_defaults_are_the_configuration_defaults() {
+        // The netlist layer cannot read these constants from here, so this is
+        // what keeps the two copies from drifting apart.
+        assert_eq!(
+            PssConfig::from(&PssCard::driven(1.0e9)),
+            PssConfig::new(1.0e9)
+        );
+        assert_eq!(
+            PssConfig::from(&PssCard::autonomous()),
+            PssConfig::autonomous()
+        );
+    }
+
+    #[test]
+    fn an_authored_driven_card_converts_to_the_direct_configuration() {
+        assert_eq!(
+            PssConfig::from(&card(".PSS FUND=1G")),
+            PssConfig::new(1.0e9)
+        );
+    }
+
+    #[test]
+    fn an_authored_autonomous_card_converts_to_the_direct_configuration() {
+        let mut expected = PssConfig::autonomous();
+        expected.period_guess = 1e-9;
+        expected.fundamental_freq = 1.0 / 1e-9;
+        expected.oscillator_node = Some("OUT".to_string());
+        expected.num_harmonics = 12;
+        assert_eq!(
+            PssConfig::from(&card(
+                ".PSS AUTONOMOUS=TRUE PERIODGUESS=1n OSCNODE=OUT HARMS=12"
+            )),
+            expected
+        );
+    }
+
+    #[test]
+    fn every_authored_field_survives_the_conversion() {
+        let converted = PssConfig::from(&card(
+            ".pss fund=2.5g harms=15 tstab=3n tstabperiods=7 maxiter=250 tol=1e-8 \
+             abstol=1e-15 damping=0.75 maxperiodchange=0.25 points=1024 method=trap verbose=true",
+        ));
+        assert_eq!(converted.fundamental_freq, 2.5e9);
+        assert_eq!(converted.num_harmonics, 15);
+        assert_eq!(converted.tstab_periods, 7);
+        assert_eq!(converted.max_iterations, 250);
+        assert_eq!(converted.tolerance, 1e-8);
+        assert_eq!(converted.abstol, 1e-15);
+        assert_eq!(converted.damping_factor, 0.75);
+        assert_eq!(converted.max_period_change, 0.25);
+        assert_eq!(converted.points_per_period, 1024);
+        assert_eq!(
+            converted.integration_method,
+            Some(crate::numerics::integration::IntegrationMethod::Trapezoidal)
+        );
+        assert!(converted.verbose);
+        assert!(converted.validate().is_ok());
+    }
+
+    #[test]
+    fn the_ngspice_positional_card_converts_to_an_autonomous_configuration() {
+        let converted = PssConfig::from(&card(".pss 3.1e6 500e-6 out 256 10 50"));
+        assert!(converted.is_autonomous());
+        assert_eq!(converted.fundamental_freq, 3.1e6);
+        assert_eq!(converted.period_guess, 1.0 / 3.1e6);
+        assert_eq!(converted.tstab, 500e-6);
+        assert_eq!(converted.oscillator_node.as_deref(), Some("OUT"));
+        assert_eq!(converted.points_per_period, 256);
+        assert_eq!(converted.num_harmonics, 10);
+        assert_eq!(converted.max_iterations, 50);
+        assert!(converted.validate().is_ok());
+    }
+
+    #[test]
+    fn a_card_the_parser_accepted_always_passes_the_configuration_validator() {
+        for source in [
+            ".PSS FUND=1G",
+            ".PSS FUND=1G HARMS=128 POINTS=256",
+            ".PSS AUTONOMOUS=TRUE",
+            ".PSS AUTONOMOUS=TRUE PERIODGUESS=1n OSCNODE=out",
+            ".PSS FUND=1G DAMPING=0.1 TOL=1e-12 ABSTOL=1e-18 MAXITER=1",
+            ".pss 1e6 0 osc 32 16 40",
+        ] {
+            let converted = PssConfig::from(&card(source));
+            assert!(
+                converted.validate().is_ok(),
+                "'{source}' converted to a configuration the validator rejects: {:?}",
+                converted.validate()
+            );
+        }
+    }
+}

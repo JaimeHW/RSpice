@@ -1,13 +1,12 @@
 //! Authored cards for the periodic large-signal analysis family:
 //! `.PSS`, `.PAC`, `.PNOISE` and `.ENVELOPE`.
 //!
-//! Every card is fully validated here, so the resulting AST already carries
-//! the same typed configuration the direct engine entry points take. A field
-//! another simulator accepts but RSpice cannot honour is refused with a
-//! source-located [`AnalysisCardError`] rather than parsed and dropped.
+//! Every card is fully validated here, so the analysis layer converts the AST
+//! rather than re-deriving what the deck asked for. A field another simulator
+//! accepts but RSpice cannot honour is refused with a source-located
+//! [`AnalysisCardError`] rather than parsed and dropped.
 
 use super::*;
-use crate::analysis::{PacConfig, PacSweepType, PssConfig};
 
 //=============================================================================
 // Shared card scanning
@@ -322,11 +321,6 @@ fn card_output_probe(
     })
 }
 
-/// Map a core configuration rejection onto the card that authored it.
-fn reject_config(card: AnalysisCard, line: usize, reason: String) -> ParseError {
-    card_error(card, line, AnalysisCardIssue::Rejected { reason })
-}
-
 //=============================================================================
 // .PSS
 //=============================================================================
@@ -352,7 +346,7 @@ pub(super) fn parse_pss_command(
 
     let positional = !at_card_end(stream) && !at_keyword(stream);
     let mut positional_fields: Vec<&'static str> = Vec::new();
-    let mut config = if positional {
+    let mut card = if positional {
         let gfreq = card_number(
             stream,
             line_num,
@@ -378,14 +372,14 @@ pub(super) fn parse_pss_command(
 
         // The positional form is ngspice's autonomous oscillator card: it
         // names the node the period is detected on, so period detection is on.
-        let mut config = PssConfig::autonomous();
-        config.fundamental_freq = gfreq;
-        config.period_guess = 1.0 / gfreq;
-        config.tstab = tstab;
-        config.points_per_period = points;
-        config.num_harmonics = harmonics;
-        config.max_iterations = iterations;
-        config.oscillator_node = Some(oscnode);
+        let mut card = PssCard::autonomous();
+        card.fundamental_freq = gfreq;
+        card.period_guess = 1.0 / gfreq;
+        card.tstab = tstab;
+        card.points_per_period = points;
+        card.num_harmonics = harmonics;
+        card.max_iterations = iterations;
+        card.oscillator_node = Some(oscnode);
         positional_fields.extend([
             "FUND",
             "PERIODGUESS",
@@ -396,9 +390,10 @@ pub(super) fn parse_pss_command(
             "MAXITER",
             "AUTONOMOUS",
         ]);
-        config
+        card
     } else {
-        PssConfig::new(0.0)
+        // Replaced below once the keywords say whether the card is driven.
+        PssCard::driven(0.0)
     };
 
     let mut fund = None;
@@ -588,19 +583,18 @@ pub(super) fn parse_pss_command(
             )?,
             "METHOD" => {
                 let spelling = card_name(stream, line_num, CARD, "METHOD")?;
-                let decoded =
-                    crate::engine::config_resolver::parse_integration_method_option(&spelling)
-                        .ok_or_else(|| {
-                            card_error(
-                                CARD,
-                                line_num,
-                                AnalysisCardIssue::InvalidChoice {
-                                    field: "METHOD",
-                                    value: spelling.clone(),
-                                    expected: "TRAP, GEAR, EULER or TRAPGEAR",
-                                },
-                            )
-                        })?;
+                let decoded = crate::numerics::integration::parse_integration_method(&spelling)
+                    .ok_or_else(|| {
+                        card_error(
+                            CARD,
+                            line_num,
+                            AnalysisCardIssue::InvalidChoice {
+                                field: "METHOD",
+                                value: spelling.clone(),
+                                expected: "TRAP, GEAR, EULER or TRAPGEAR",
+                            },
+                        )
+                    })?;
                 bind_once(&mut method, decoded, CARD, line_num, "METHOD")?
             }
             "VERBOSE" => bind_once(
@@ -643,16 +637,16 @@ pub(super) fn parse_pss_command(
                 },
             ));
         }
-        config = if is_autonomous {
-            let mut config = PssConfig::autonomous();
+        card = if is_autonomous {
+            let mut card = PssCard::autonomous();
             if let Some(period) = period_guess {
-                config.period_guess = period;
-                config.fundamental_freq = 1.0 / period;
+                card.period_guess = period;
+                card.fundamental_freq = 1.0 / period;
             } else if let Some(frequency) = fund {
-                config.period_guess = 1.0 / frequency;
-                config.fundamental_freq = frequency;
+                card.period_guess = 1.0 / frequency;
+                card.fundamental_freq = frequency;
             }
-            config
+            card
         } else {
             if period_guess.is_some() {
                 return Err(card_error(
@@ -671,51 +665,77 @@ pub(super) fn parse_pss_command(
                     AnalysisCardIssue::MissingField { field: "FUND" },
                 ));
             };
-            PssConfig::new(frequency)
+            PssCard::driven(frequency)
         };
-        config.auto_period = is_autonomous;
-        config.oscillator_node = oscillator_node;
+        card.auto_period = is_autonomous;
+        card.oscillator_node = oscillator_node;
     }
 
     if let Some(value) = harmonics {
-        config.num_harmonics = value;
+        card.num_harmonics = value;
     }
     if let Some(value) = tstab {
-        config.tstab = value;
+        card.tstab = value;
     }
     if let Some(value) = tstab_periods {
-        config.tstab_periods = value;
+        card.tstab_periods = value;
     }
     if let Some(value) = max_iterations {
-        config.max_iterations = value;
+        card.max_iterations = value;
     }
     if let Some(value) = tolerance {
-        config.tolerance = value;
+        card.tolerance = value;
     }
     if let Some(value) = abstol {
-        config.abstol = value;
+        card.abstol = value;
     }
     if let Some(value) = damping {
-        config.damping_factor = value;
+        card.damping_factor = value;
     }
     if let Some(value) = max_period_change {
-        config.max_period_change = value;
+        card.max_period_change = value;
     }
     if let Some(value) = points {
-        config.points_per_period = value;
+        card.points_per_period = value;
     }
     if let Some(value) = method {
-        config.integration_method = Some(value);
+        card.integration_method = Some(value);
     }
     if let Some(value) = verbose {
-        config.verbose = value;
+        card.verbose = value;
     }
 
-    config
-        .validate()
-        .map_err(|reason| reject_config(CARD, line_num, reason))?;
+    // Both remaining rules span two fields, so they cannot be checked while
+    // reading one. Every other constraint the shooting configuration states is
+    // per-field and was enforced as each field was read.
+    if card
+        .num_harmonics
+        .checked_mul(2)
+        .is_none_or(|samples| samples > card.points_per_period)
+    {
+        return Err(card_error(
+            CARD,
+            line_num,
+            AnalysisCardIssue::InvalidNumber {
+                field: "POINTS",
+                value: card.points_per_period as Value,
+                expected: "at least twice HARMS, so the retained harmonics do not alias",
+            },
+        ));
+    }
+    if !card.effective_tstab().is_finite() {
+        return Err(card_error(
+            CARD,
+            line_num,
+            AnalysisCardIssue::InvalidNumber {
+                field: "TSTABPERIODS",
+                value: card.tstab_periods as Value,
+                expected: "small enough that TSTABPERIODS periods is a finite time",
+            },
+        ));
+    }
 
-    Ok(AnalysisCommand::Pss(Box::new(PssAnalysis { config })))
+    Ok(AnalysisCommand::Pss(Box::new(card)))
 }
 
 /// Diagnose the ngspice `.pss` tail fields RSpice cannot honour.
@@ -896,12 +916,11 @@ pub(super) fn parse_pac_command(
         ));
     };
 
-    let defaults = PacConfig::default();
     let (sideband_min, sideband_max) = match max_sideband {
         Some(bound) => (-bound, bound),
         None => (
-            sideband_min.unwrap_or(defaults.sideband_min),
-            sideband_max.unwrap_or(defaults.sideband_max),
+            sideband_min.unwrap_or(PacCard::DEFAULT_SIDEBAND_MIN),
+            sideband_max.unwrap_or(PacCard::DEFAULT_SIDEBAND_MAX),
         ),
     };
     if sideband_min > sideband_max {
@@ -915,29 +934,15 @@ pub(super) fn parse_pac_command(
         ));
     }
 
-    let mut config = PacConfig::new()
-        .with_sweep(sweep.start_freq, sweep.stop_freq, sweep.points)
-        .with_sweep_type(match sweep.variation {
-            FreqVariation::Lin => PacSweepType::Linear,
-            FreqVariation::Dec => PacSweepType::Decade,
-            FreqVariation::Oct => PacSweepType::Octave,
-        })
-        .with_sidebands(sideband_min, sideband_max)
-        .with_tolerances(
-            reltol.unwrap_or(defaults.reltol),
-            abstol.unwrap_or(defaults.abstol),
-        )
-        .with_input_source(&input_source)
-        .with_output_node(&output_node);
-    if let Some(reference) = &output_ref {
-        config = config.with_output_ref(reference);
-    }
-    config
-        .validate()
-        .map_err(|reason| reject_config(CARD, line_num, reason))?;
-
-    Ok(AnalysisCommand::Pac(Box::new(PacAnalysis {
-        config,
+    Ok(AnalysisCommand::Pac(Box::new(PacCard {
+        sweep,
+        input_source: input_source.to_ascii_uppercase(),
+        output_node: output_node.to_ascii_uppercase(),
+        output_ref: output_ref.map(|node| node.to_ascii_uppercase()),
+        sideband_min,
+        sideband_max,
+        reltol: reltol.unwrap_or(PacCard::DEFAULT_RELTOL),
+        abstol: abstol.unwrap_or(PacCard::DEFAULT_ABSTOL),
         source: source.unwrap_or_default(),
     })))
 }
@@ -1028,7 +1033,7 @@ pub(super) fn parse_pnoise_command(
         ));
     };
 
-    Ok(AnalysisCommand::Pnoise(Box::new(PnoiseAnalysis {
+    Ok(AnalysisCommand::Pnoise(Box::new(PnoiseCard {
         sweep,
         output_node: output_node.to_ascii_uppercase(),
         reference_node: reference_node.map(|node| node.to_ascii_uppercase()),
@@ -1139,7 +1144,7 @@ pub(super) fn parse_envelope_command(
         ));
     }
 
-    Ok(AnalysisCommand::Envelope(Box::new(EnvelopeAnalysis {
+    Ok(AnalysisCommand::Envelope(Box::new(EnvelopeCard {
         duration,
         max_step,
         frozen_sources: frozen_sources.unwrap_or_default(),
@@ -1195,8 +1200,8 @@ fn card_source_list(
 #[cfg(test)]
 mod tests {
     use crate::netlist::{
-        AnalysisCard, AnalysisCardIssue, AnalysisCommand, EnvelopeAnalysis, FreqVariation, Netlist,
-        PacAnalysis, ParseError, PeriodicSourceSelector, PnoiseAnalysis, PssAnalysis,
+        AnalysisCard, AnalysisCardIssue, AnalysisCommand, EnvelopeCard, FreqVariation, Netlist,
+        PacCard, ParseError, PeriodicSourceSelector, PnoiseCard, PssCard,
     };
 
     const CIRCUIT: &str = "periodic card parser\n\
@@ -1223,14 +1228,14 @@ mod tests {
         }
     }
 
-    fn pss(card: &str) -> Box<PssAnalysis> {
+    fn pss(card: &str) -> Box<PssCard> {
         match parse_one(card) {
             AnalysisCommand::Pss(card) => card,
             other => panic!("expected .PSS, got {other:?}"),
         }
     }
 
-    fn pac(card: &str) -> Box<PacAnalysis> {
+    fn pac(card: &str) -> Box<PacCard> {
         let netlist = Netlist::parse(&deck(card)).expect("card parses");
         match netlist.analyses.into_iter().next_back() {
             Some(AnalysisCommand::Pac(card)) => card,
@@ -1238,7 +1243,7 @@ mod tests {
         }
     }
 
-    fn pnoise(card: &str) -> Box<PnoiseAnalysis> {
+    fn pnoise(card: &str) -> Box<PnoiseCard> {
         let netlist = Netlist::parse(&deck(card)).expect("card parses");
         match netlist.analyses.into_iter().next_back() {
             Some(AnalysisCommand::Pnoise(card)) => card,
@@ -1246,7 +1251,7 @@ mod tests {
         }
     }
 
-    fn envelope(card: &str) -> Box<EnvelopeAnalysis> {
+    fn envelope(card: &str) -> Box<EnvelopeCard> {
         let netlist = Netlist::parse(&deck(card)).expect("card parses");
         match netlist.analyses.into_iter().next_back() {
             Some(AnalysisCommand::Envelope(card)) => card,
@@ -1262,37 +1267,36 @@ mod tests {
     fn pss_positional_form_binds_every_ngspice_field() {
         // ngspice's own oscillator card shape, minus the fields RSpice refuses.
         let card = pss(".pss 3.1e6 500e-6 out 256 10 50");
-        let config = &card.config;
-        assert_eq!(config.fundamental_freq, 3.1e6);
-        assert_eq!(config.period_guess, 1.0 / 3.1e6);
-        assert_eq!(config.tstab, 500e-6);
-        assert_eq!(config.oscillator_node.as_deref(), Some("OUT"));
-        assert_eq!(config.points_per_period, 256);
-        assert_eq!(config.num_harmonics, 10);
-        assert_eq!(config.max_iterations, 50);
-        assert!(config.auto_period, "the positional form is autonomous");
-        assert!(config.is_autonomous());
-        // Autonomous defaults come from the constructor the direct API uses.
-        assert_eq!(config.tstab_periods, 20);
+        assert_eq!(card.fundamental_freq, 3.1e6);
+        assert_eq!(card.period_guess, 1.0 / 3.1e6);
+        assert_eq!(card.tstab, 500e-6);
+        assert_eq!(card.oscillator_node.as_deref(), Some("OUT"));
+        assert_eq!(card.points_per_period, 256);
+        assert_eq!(card.num_harmonics, 10);
+        assert_eq!(card.max_iterations, 50);
+        assert!(card.auto_period, "the positional form is autonomous");
+        assert!(card.is_autonomous());
+        assert_eq!(
+            card.tstab_periods,
+            PssCard::DEFAULT_AUTONOMOUS_TSTAB_PERIODS
+        );
     }
 
     #[test]
     fn pss_positional_form_accepts_rspice_only_keywords_after_the_fields() {
         let card = pss(".PSS 1e6 0 osc 512 8 40 TOL=1e-9 ABSTOL=1e-14 DAMPING=0.5 METHOD=GEAR");
-        let config = &card.config;
-        assert_eq!(config.tolerance, 1e-9);
-        assert_eq!(config.abstol, 1e-14);
-        assert_eq!(config.damping_factor, 0.5);
+        assert_eq!(card.tolerance, 1e-9);
+        assert_eq!(card.abstol, 1e-14);
+        assert_eq!(card.damping_factor, 0.5);
         assert_eq!(
-            config.integration_method,
+            card.integration_method,
             Some(crate::numerics::integration::IntegrationMethod::Gear2)
         );
     }
 
     #[test]
-    fn pss_keyword_form_defaults_match_the_direct_driven_configuration() {
-        let card = pss(".PSS FUND=1G");
-        assert_eq!(card.config, crate::analysis::PssConfig::new(1.0e9));
+    fn pss_keyword_form_defaults_every_optional_field() {
+        assert_eq!(*pss(".PSS FUND=1G"), PssCard::driven(1.0e9));
     }
 
     #[test]
@@ -1301,44 +1305,45 @@ mod tests {
             ".pss fund=2.5g harms=15 tstab=3n tstabperiods=7 maxiter=250 tol=1e-8 \
              abstol=1e-15 damping=0.75 maxperiodchange=0.25 points=1024 method=trap verbose=true",
         );
-        let config = &card.config;
-        assert_eq!(config.fundamental_freq, 2.5e9);
-        assert_eq!(config.num_harmonics, 15);
+        assert_eq!(card.fundamental_freq, 2.5e9);
+        assert_eq!(card.num_harmonics, 15);
         assert!(
-            (config.tstab - 3e-9).abs() <= 1e-24,
+            (card.tstab - 3e-9).abs() <= 1e-24,
             "tstab was {}",
-            config.tstab
+            card.tstab
         );
-        assert_eq!(config.tstab_periods, 7);
-        assert_eq!(config.max_iterations, 250);
-        assert_eq!(config.tolerance, 1e-8);
-        assert_eq!(config.abstol, 1e-15);
-        assert_eq!(config.damping_factor, 0.75);
-        assert_eq!(config.max_period_change, 0.25);
-        assert_eq!(config.points_per_period, 1024);
+        assert_eq!(card.tstab_periods, 7);
+        assert_eq!(card.max_iterations, 250);
+        assert_eq!(card.tolerance, 1e-8);
+        assert_eq!(card.abstol, 1e-15);
+        assert_eq!(card.damping_factor, 0.75);
+        assert_eq!(card.max_period_change, 0.25);
+        assert_eq!(card.points_per_period, 1024);
         assert_eq!(
-            config.integration_method,
+            card.integration_method,
             Some(crate::numerics::integration::IntegrationMethod::Trapezoidal)
         );
-        assert!(config.verbose);
-        assert!(!config.auto_period);
+        assert!(card.verbose);
+        assert!(!card.auto_period);
     }
 
     #[test]
-    fn pss_autonomous_keyword_form_matches_the_direct_autonomous_configuration() {
+    fn pss_autonomous_keyword_form_seeds_the_period_from_its_guess() {
         let card = pss(".PSS AUTONOMOUS=TRUE PERIODGUESS=1n OSCNODE=OUT HARMS=12");
-        let config = &card.config;
-        assert!(config.auto_period);
-        assert_eq!(config.period_guess, 1e-9);
-        assert_eq!(config.fundamental_freq, 1.0 / 1e-9);
-        assert_eq!(config.oscillator_node.as_deref(), Some("OUT"));
-        assert_eq!(config.num_harmonics, 12);
-        assert_eq!(config.tstab_periods, 20);
+        assert!(card.auto_period);
+        assert_eq!(card.period_guess, 1e-9);
+        assert_eq!(card.fundamental_freq, 1.0 / 1e-9);
+        assert_eq!(card.oscillator_node.as_deref(), Some("OUT"));
+        assert_eq!(card.num_harmonics, 12);
+        assert_eq!(
+            card.tstab_periods,
+            PssCard::DEFAULT_AUTONOMOUS_TSTAB_PERIODS
+        );
     }
 
     #[test]
     fn pss_oscnode_alone_selects_period_detection() {
-        assert!(pss(".PSS OSCNODE=out FUND=1G").config.auto_period);
+        assert!(pss(".PSS OSCNODE=out FUND=1G").auto_period);
     }
 
     #[test]
@@ -1348,8 +1353,8 @@ mod tests {
         let [AnalysisCommand::Pss(card)] = netlist.analyses.as_slice() else {
             panic!("expected one .PSS, got {:?}", netlist.analyses);
         };
-        assert_eq!(card.config.num_harmonics, 11);
-        assert_eq!(card.config.tolerance, 1e-7);
+        assert_eq!(card.num_harmonics, 11);
+        assert_eq!(card.tolerance, 1e-7);
     }
 
     #[test]
@@ -1481,11 +1486,40 @@ mod tests {
     }
 
     #[test]
-    fn pss_refuses_a_configuration_the_core_validator_rejects() {
-        // Nine harmonics need at least eighteen samples per period.
+    fn pss_refuses_a_harmonic_bandwidth_its_sampling_would_alias() {
+        // Nine harmonics need at least eighteen samples per period, whether
+        // the samples are authored or defaulted.
         assert!(matches!(
             card_failure(".PSS FUND=1G HARMS=9 POINTS=16").2,
-            AnalysisCardIssue::Rejected { .. }
+            AnalysisCardIssue::InvalidNumber {
+                field: "POINTS",
+                ..
+            }
+        ));
+        assert!(matches!(
+            card_failure(".PSS FUND=1G HARMS=200").2,
+            AnalysisCardIssue::InvalidNumber {
+                field: "POINTS",
+                ..
+            }
+        ));
+        assert!(matches!(
+            card_failure(".pss 1e6 0 osc 16 9 40").2,
+            AnalysisCardIssue::InvalidNumber {
+                field: "POINTS",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn pss_refuses_a_stabilization_window_that_is_not_a_finite_time() {
+        assert!(matches!(
+            card_failure(".PSS AUTONOMOUS=TRUE PERIODGUESS=1e300 TSTABPERIODS=1000000000000").2,
+            AnalysisCardIssue::InvalidNumber {
+                field: "TSTABPERIODS",
+                ..
+            }
         ));
     }
 
@@ -1505,23 +1539,19 @@ mod tests {
     //-------------------------------------------------------------------------
 
     #[test]
-    fn pac_defaults_match_the_direct_configuration() {
+    fn pac_defaults_every_optional_field() {
         let card = pac(".HB 1G\n.PAC DEC 10 1k 1G INPUT=VRF OUT=V(out)");
-        let defaults = crate::analysis::PacConfig::default();
-        let config = &card.config;
-        assert_eq!(config.sweep_start, 1.0e3);
-        assert_eq!(config.sweep_stop, 1.0e9);
-        assert_eq!(config.num_points, 10);
-        assert_eq!(config.sweep_type, crate::analysis::PacSweepType::Decade);
-        assert_eq!(config.sideband_min, defaults.sideband_min);
-        assert_eq!(config.sideband_max, defaults.sideband_max);
-        assert_eq!(config.reltol, defaults.reltol);
-        assert_eq!(config.abstol, defaults.abstol);
-        assert_eq!(config.input_source.as_deref(), Some("VRF"));
-        assert_eq!(config.output_node.as_deref(), Some("OUT"));
-        assert_eq!(config.output_ref, None);
-        // The fundamental is bound from the upstream analysis, not the card.
-        assert_eq!(config.fundamental_freq, 0.0);
+        assert_eq!(card.sweep.variation, FreqVariation::Dec);
+        assert_eq!(card.sweep.points, 10);
+        assert_eq!(card.sweep.start_freq, 1.0e3);
+        assert_eq!(card.sweep.stop_freq, 1.0e9);
+        assert_eq!(card.sideband_min, PacCard::DEFAULT_SIDEBAND_MIN);
+        assert_eq!(card.sideband_max, PacCard::DEFAULT_SIDEBAND_MAX);
+        assert_eq!(card.reltol, PacCard::DEFAULT_RELTOL);
+        assert_eq!(card.abstol, PacCard::DEFAULT_ABSTOL);
+        assert_eq!(card.input_source, "VRF");
+        assert_eq!(card.output_node, "OUT");
+        assert_eq!(card.output_ref, None);
         assert_eq!(card.source, PeriodicSourceSelector::Preceding);
     }
 
@@ -1531,29 +1561,25 @@ mod tests {
             ".hb 1G\n.pac lin 21 1meg 5meg input=vrf out=v(out,ref) sidebandmin=-3 \
              sidebandmax=7 reltol=1e-5 abstol=1e-15 from=hb",
         );
-        let config = &card.config;
-        assert_eq!(config.sweep_type, crate::analysis::PacSweepType::Linear);
-        assert_eq!(config.num_points, 21);
-        assert_eq!(config.sweep_start, 1.0e6);
-        assert_eq!(config.sweep_stop, 5.0e6);
-        assert_eq!(config.sideband_min, -3);
-        assert_eq!(config.sideband_max, 7);
-        assert_eq!(config.reltol, 1e-5);
-        assert_eq!(config.abstol, 1e-15);
-        assert_eq!(config.output_node.as_deref(), Some("OUT"));
-        assert_eq!(config.output_ref.as_deref(), Some("REF"));
+        assert_eq!(card.sweep.variation, FreqVariation::Lin);
+        assert_eq!(card.sweep.points, 21);
+        assert_eq!(card.sweep.start_freq, 1.0e6);
+        assert_eq!(card.sweep.stop_freq, 5.0e6);
+        assert_eq!(card.sideband_min, -3);
+        assert_eq!(card.sideband_max, 7);
+        assert_eq!(card.reltol, 1e-5);
+        assert_eq!(card.abstol, 1e-15);
+        assert_eq!(card.output_node, "OUT");
+        assert_eq!(card.output_ref.as_deref(), Some("REF"));
         assert_eq!(card.source, PeriodicSourceSelector::Hb);
     }
 
     #[test]
     fn pac_maxsideband_sets_a_symmetric_range() {
         let card = pac(".HB 1G\n.PAC OCT 4 1k 1meg INPUT=VRF OUT=out MAXSIDEBAND=3");
-        assert_eq!(card.config.sideband_min, -3);
-        assert_eq!(card.config.sideband_max, 3);
-        assert_eq!(
-            card.config.sweep_type,
-            crate::analysis::PacSweepType::Octave
-        );
+        assert_eq!(card.sideband_min, -3);
+        assert_eq!(card.sideband_max, 3);
+        assert_eq!(card.sweep.variation, FreqVariation::Oct);
     }
 
     #[test]
@@ -1629,7 +1655,7 @@ mod tests {
     //-------------------------------------------------------------------------
 
     #[test]
-    fn pnoise_defaults_match_the_direct_configuration() {
+    fn pnoise_defaults_every_optional_field() {
         let card = pnoise(".HB 1G\n.PNOISE DEC 10 1 1meg OUT=V(out)");
         assert_eq!(card.sweep.variation, FreqVariation::Dec);
         assert_eq!(card.sweep.points, 10);
@@ -1684,7 +1710,7 @@ mod tests {
     //-------------------------------------------------------------------------
 
     #[test]
-    fn envelope_defaults_its_maximum_step_like_the_direct_continuation() {
+    fn envelope_defaults_its_maximum_step_to_a_fiftieth_of_the_window() {
         let card = envelope(".HB 1G\n.ENVELOPE TSTOP=1u");
         assert_eq!(card.duration, 1e-6);
         assert_eq!(card.max_step, 1e-6 / 50.0);

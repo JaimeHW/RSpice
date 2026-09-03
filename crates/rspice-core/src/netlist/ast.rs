@@ -2236,17 +2236,17 @@ pub enum AnalysisCommand {
     Temp { temperatures: Vec<Value> },
 
     /// Shooting periodic steady state: `.PSS`.
-    Pss(Box<PssAnalysis>),
+    Pss(Box<PssCard>),
 
     /// Periodic small-signal AC around a periodic operating point: `.PAC`.
-    Pac(Box<PacAnalysis>),
+    Pac(Box<PacCard>),
 
     /// Periodic (cyclostationary) noise around a periodic operating
     /// point: `.PNOISE`.
-    Pnoise(Box<PnoiseAnalysis>),
+    Pnoise(Box<PnoiseCard>),
 
     /// Harmonic-balance envelope continuation: `.ENVELOPE`.
-    Envelope(Box<EnvelopeAnalysis>),
+    Envelope(Box<EnvelopeCard>),
 }
 
 //=============================================================================
@@ -2255,26 +2255,161 @@ pub enum AnalysisCommand {
 
 /// Authored `.PSS` card.
 ///
-/// The card carries the same configuration the direct PSS entry points take;
-/// it is fully validated by the parser, so no later stage re-derives what the
-/// deck asked for.
-#[derive(Debug, Clone)]
-pub struct PssAnalysis {
-    /// Validated shooting configuration.
-    pub config: crate::analysis::pss::PssConfig,
+/// Every field is validated by the parser, so the analysis layer converts
+/// rather than re-deriving what the deck asked for. The field set mirrors the
+/// shooting configuration one-for-one; the conversion and the test pinning
+/// these defaults to that configuration's own live beside it, because a
+/// parsed deck may not reach up into the analysis layer.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PssCard {
+    /// Fundamental frequency in Hz. Zero only for an autonomous card that
+    /// authored no frequency, where `period_guess` seeds the search instead.
+    pub fundamental_freq: Value,
+    /// Harmonics retained in the result.
+    pub num_harmonics: usize,
+    /// Stabilization time in seconds before shooting begins.
+    pub tstab: Value,
+    /// Stabilization periods used when `tstab` is zero.
+    pub tstab_periods: usize,
+    /// Maximum shooting iterations.
+    pub max_iterations: usize,
+    /// Relative periodicity convergence tolerance.
+    pub tolerance: Value,
+    /// Absolute convergence tolerance.
+    pub abstol: Value,
+    /// Detect the period instead of taking `fundamental_freq` as exact.
+    pub auto_period: bool,
+    /// Node the autonomous period is detected on.
+    pub oscillator_node: Option<String>,
+    /// Autonomous period seed in seconds.
+    pub period_guess: Value,
+    /// Newton damping factor.
+    pub damping_factor: Value,
+    /// Maximum relative period change per autonomous iteration.
+    pub max_period_change: Value,
+    /// Integration method override; `None` keeps the engine default.
+    pub integration_method: Option<crate::numerics::integration::IntegrationMethod>,
+    /// Samples per period retained for the periodic waveforms.
+    pub points_per_period: usize,
+    /// Log convergence progress.
+    pub verbose: bool,
+}
+
+impl PssCard {
+    /// Harmonics retained when the card does not say.
+    pub const DEFAULT_HARMONICS: usize = 9;
+    /// Samples per period retained when the card does not say.
+    pub const DEFAULT_POINTS_PER_PERIOD: usize = 256;
+    /// Maximum shooting iterations when the card does not say.
+    pub const DEFAULT_MAX_ITERATIONS: usize = 100;
+    /// Relative periodicity tolerance when the card does not say.
+    pub const DEFAULT_TOLERANCE: Value = 1e-6;
+    /// Absolute tolerance when the card does not say.
+    pub const DEFAULT_ABSTOL: Value = 1e-12;
+    /// Newton damping when the card does not say.
+    pub const DEFAULT_DAMPING: Value = 1.0;
+    /// Relative period-change bound when the card does not say.
+    pub const DEFAULT_MAX_PERIOD_CHANGE: Value = 0.1;
+    /// Autonomous period seed when the card does not say.
+    pub const DEFAULT_PERIOD_GUESS: Value = 1e-9;
+    /// Stabilization periods for a driven card that does not say.
+    pub const DEFAULT_DRIVEN_TSTAB_PERIODS: usize = 10;
+    /// Stabilization periods for an autonomous card that does not say.
+    /// Detecting a period needs more startup than tracking a known one.
+    pub const DEFAULT_AUTONOMOUS_TSTAB_PERIODS: usize = 20;
+
+    /// A driven card at `fundamental_freq`, every optional field defaulted.
+    pub fn driven(fundamental_freq: Value) -> Self {
+        Self {
+            fundamental_freq,
+            num_harmonics: Self::DEFAULT_HARMONICS,
+            tstab: 0.0,
+            tstab_periods: Self::DEFAULT_DRIVEN_TSTAB_PERIODS,
+            max_iterations: Self::DEFAULT_MAX_ITERATIONS,
+            tolerance: Self::DEFAULT_TOLERANCE,
+            abstol: Self::DEFAULT_ABSTOL,
+            auto_period: false,
+            oscillator_node: None,
+            period_guess: Self::DEFAULT_PERIOD_GUESS,
+            damping_factor: Self::DEFAULT_DAMPING,
+            max_period_change: Self::DEFAULT_MAX_PERIOD_CHANGE,
+            integration_method: None,
+            points_per_period: Self::DEFAULT_POINTS_PER_PERIOD,
+            verbose: false,
+        }
+    }
+
+    /// An autonomous card with period detection on, every optional field
+    /// defaulted.
+    pub fn autonomous() -> Self {
+        Self {
+            fundamental_freq: 0.0,
+            auto_period: true,
+            tstab_periods: Self::DEFAULT_AUTONOMOUS_TSTAB_PERIODS,
+            ..Self::driven(0.0)
+        }
+    }
+
+    /// Whether the period is a solver unknown rather than authored input.
+    pub fn is_autonomous(&self) -> bool {
+        self.auto_period || self.fundamental_freq <= 0.0
+    }
+
+    /// Period the stabilization run is measured in.
+    pub fn period(&self) -> Value {
+        if self.fundamental_freq > 0.0 {
+            1.0 / self.fundamental_freq
+        } else {
+            self.period_guess
+        }
+    }
+
+    /// Stabilization time the card asks for, resolving the period form.
+    pub fn effective_tstab(&self) -> Value {
+        if self.tstab > 0.0 {
+            self.tstab
+        } else {
+            self.tstab_periods as Value * self.period()
+        }
+    }
 }
 
 /// Authored `.PAC` card.
-#[derive(Debug, Clone)]
-pub struct PacAnalysis {
-    /// Validated periodic-AC configuration.
-    ///
-    /// `fundamental_freq` stays zero here: it is bound from the upstream
-    /// `.PSS`/`.HB` instance when the analysis runs, exactly as the direct
-    /// PAC entry points bind it from their operating point.
-    pub config: crate::analysis::pac::PacConfig,
+///
+/// The large-signal fundamental is deliberately absent: it comes from the
+/// upstream `.PSS`/`.HB` instance when the analysis runs, exactly as the
+/// direct PAC entry points bind it from their operating point.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PacCard {
+    /// Input-frequency sweep.
+    pub sweep: PeriodicSweep,
+    /// Small-signal source swept across the sweep.
+    pub input_source: String,
+    /// Output probe node.
+    pub output_node: String,
+    /// Reference node of a differential `V(out,ref)` probe.
+    pub output_ref: Option<String>,
+    /// Lowest output sideband index relative to the input.
+    pub sideband_min: i32,
+    /// Highest output sideband index relative to the input.
+    pub sideband_max: i32,
+    /// Relative tolerance for the frequency-domain solve.
+    pub reltol: Value,
+    /// Absolute tolerance for small-signal currents, in amps.
+    pub abstol: Value,
     /// Which upstream periodic analysis this card linearizes around.
     pub source: PeriodicSourceSelector,
+}
+
+impl PacCard {
+    /// Lowest sideband index when the card does not say.
+    pub const DEFAULT_SIDEBAND_MIN: i32 = -5;
+    /// Highest sideband index when the card does not say.
+    pub const DEFAULT_SIDEBAND_MAX: i32 = 5;
+    /// Relative tolerance when the card does not say.
+    pub const DEFAULT_RELTOL: Value = 1e-3;
+    /// Absolute tolerance when the card does not say.
+    pub const DEFAULT_ABSTOL: Value = 1e-12;
 }
 
 /// Authored `.PNOISE` card.
@@ -2282,8 +2417,8 @@ pub struct PacAnalysis {
 /// There is no single core configuration struct for periodic noise: the
 /// runners take the offset grid, the output probe, an optional input source
 /// and the folded sideband bound directly, so the card carries exactly those.
-#[derive(Debug, Clone)]
-pub struct PnoiseAnalysis {
+#[derive(Debug, Clone, PartialEq)]
+pub struct PnoiseCard {
     /// Offset-frequency sweep; generates the offsets the runners consume.
     pub sweep: PeriodicSweep,
     /// Output voltage probe node.
@@ -2299,8 +2434,8 @@ pub struct PnoiseAnalysis {
 }
 
 /// Authored `.ENVELOPE` card: harmonic-balance envelope continuation.
-#[derive(Debug, Clone)]
-pub struct EnvelopeAnalysis {
+#[derive(Debug, Clone, PartialEq)]
+pub struct EnvelopeCard {
     /// Slow-time continuation length in seconds.
     pub duration: Value,
     /// Maximum continued timestep in seconds.
@@ -2398,8 +2533,6 @@ pub enum AnalysisCardIssue {
     },
     /// Tokens remain after the card's grammar is complete.
     TrailingToken { token: String },
-    /// The assembled configuration failed its core validation.
-    Rejected { reason: String },
 }
 
 impl std::fmt::Display for AnalysisCardIssue {
@@ -2433,7 +2566,6 @@ impl std::fmt::Display for AnalysisCardIssue {
             Self::TrailingToken { token } => {
                 write!(formatter, "unexpected trailing token '{token}'")
             }
-            Self::Rejected { reason } => write!(formatter, "{reason}"),
         }
     }
 }

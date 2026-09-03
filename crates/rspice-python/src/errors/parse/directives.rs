@@ -62,7 +62,6 @@ fn analysis_card_issue_kind(issue: &rspice_core::netlist::AnalysisCardIssue) -> 
         Issue::InvalidName { .. } => "invalid_name",
         Issue::UnhonourableField { .. } => "unhonourable_field",
         Issue::TrailingToken { .. } => "trailing_token",
-        Issue::Rejected { .. } => "rejected_configuration",
     }
 }
 
@@ -78,7 +77,7 @@ fn analysis_card_field(issue: &rspice_core::netlist::AnalysisCardIssue) -> Optio
         Issue::DuplicateKeyword { keyword } => Some((*keyword).to_string()),
         Issue::UnknownKeyword { keyword } => Some(keyword.clone()),
         Issue::ConflictingFields { first, .. } => Some((*first).to_string()),
-        Issue::TrailingToken { .. } | Issue::Rejected { .. } => None,
+        Issue::TrailingToken { .. } => None,
     }
 }
 

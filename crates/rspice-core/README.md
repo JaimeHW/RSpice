@@ -212,8 +212,11 @@ only.
 
 ### Periodic large-signal cards
 
-`.PSS`, `.PAC`, `.PNOISE` and `.ENVELOPE` are parsed and validated into the
-same typed configuration the engine entry points take. Every card is
+`.PSS`, `.PAC`, `.PNOISE` and `.ENVELOPE` are parsed into typed, fully
+validated cards in `netlist`. The analysis layer converts a card into the
+configuration its entry point takes (`PssConfig::from(&PssCard)`,
+`PacConfig::from(&PacCard)`) — a parsed deck sits below the analyses and
+never names them. Every card is
 case-insensitive and continues across `+` lines. A field another simulator
 accepts here that RSpice cannot honour is refused with a source-located
 error rather than parsed and dropped.

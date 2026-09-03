@@ -9,7 +9,7 @@ use super::{ConvergenceConfig, JfetLevel2Model, SimulationConfig, SpiceDialect};
 use crate::Value;
 use crate::netlist::SimulationOptions as NetlistSimulationOptions;
 use crate::numerics::integration::{
-    IntegrationMethod, TransientErrorControl, TransientLteReference,
+    IntegrationMethod, TransientErrorControl, TransientLteReference, parse_integration_method,
 };
 
 /// Convergence preset selection used by frontends.
@@ -197,11 +197,7 @@ pub fn resolve_simulation_config(
         if let Some(itl4) = opts.itl4 {
             transient_max_iterations = itl4;
         }
-        if let Some(method) = opts
-            .method
-            .as_deref()
-            .and_then(parse_integration_method_option)
-        {
+        if let Some(method) = opts.method.as_deref().and_then(parse_integration_method) {
             integration_method = method;
         }
         if let Some(trtol) = opts.trtol {
@@ -502,32 +498,6 @@ pub fn resolve_simulation_config(
     }
 
     resolved
-}
-
-pub(crate) fn parse_integration_method_option(method: &str) -> Option<IntegrationMethod> {
-    if method.eq_ignore_ascii_case("TRAP")
-        || method.eq_ignore_ascii_case("TRAPEZOIDAL")
-        || method.eq_ignore_ascii_case("TRAPEZOID")
-        || method.eq_ignore_ascii_case("ONESTEP")
-        || method == "7"
-    {
-        Some(IntegrationMethod::Trapezoidal)
-    } else if method.eq_ignore_ascii_case("EULER")
-        || method.eq_ignore_ascii_case("BE")
-        || method.eq_ignore_ascii_case("BACKWARDEULER")
-    {
-        Some(IntegrationMethod::BackwardEuler)
-    } else if method.eq_ignore_ascii_case("GEAR")
-        || method.eq_ignore_ascii_case("BDF")
-        || method.eq_ignore_ascii_case("GEAR2")
-        || method == "8"
-    {
-        Some(IntegrationMethod::Gear2)
-    } else if method.eq_ignore_ascii_case("TRAPGEAR") || method.eq_ignore_ascii_case("AUTO") {
-        Some(IntegrationMethod::TrapGear)
-    } else {
-        None
-    }
 }
 
 #[cfg(test)]
@@ -874,19 +844,26 @@ mod tests {
     }
 
     #[test]
-    fn xyce_numeric_timeint_method_selectors_resolve_to_active_methods() {
-        assert_eq!(
-            parse_integration_method_option("7"),
-            Some(IntegrationMethod::Trapezoidal)
-        );
-        assert_eq!(
-            parse_integration_method_option("ONESTEP"),
-            Some(IntegrationMethod::Trapezoidal)
-        );
-        assert_eq!(
-            parse_integration_method_option("8"),
-            Some(IntegrationMethod::Gear2)
-        );
+    fn xyce_numeric_timeint_method_selectors_resolve_through_options() {
+        for (spelling, expected) in [
+            ("7", IntegrationMethod::Trapezoidal),
+            ("ONESTEP", IntegrationMethod::Trapezoidal),
+            ("8", IntegrationMethod::Gear2),
+        ] {
+            let options = NetlistSimulationOptions {
+                method: Some(spelling.to_string()),
+                ..Default::default()
+            };
+            let resolved = resolve_simulation_config(
+                &SimulationConfig::default(),
+                Some(&options),
+                &SimulationConfigOverrides::default(),
+            );
+            assert_eq!(
+                resolved.integration_method, expected,
+                "{spelling} must select {expected:?}"
+            );
+        }
     }
 
     #[test]

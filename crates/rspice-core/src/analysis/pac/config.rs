@@ -277,6 +277,124 @@ impl PacConfig {
     }
 }
 
+impl From<&crate::netlist::PacCard> for PacConfig {
+    /// Convert an authored `.PAC` card into the periodic-AC configuration.
+    ///
+    /// The conversion lives here rather than in the parser because a parsed
+    /// deck sits below the analyses and may not name them. `fundamental_freq`
+    /// stays zero: the runner binds it from the upstream `.PSS`/`.HB`
+    /// operating point, exactly as the direct entry points do.
+    fn from(card: &crate::netlist::PacCard) -> Self {
+        Self {
+            sweep_start: card.sweep.start_freq,
+            sweep_stop: card.sweep.stop_freq,
+            num_points: card.sweep.points,
+            sweep_type: match card.sweep.variation {
+                crate::netlist::FreqVariation::Lin => PacSweepType::Linear,
+                crate::netlist::FreqVariation::Dec => PacSweepType::Decade,
+                crate::netlist::FreqVariation::Oct => PacSweepType::Octave,
+            },
+            sideband_min: card.sideband_min,
+            sideband_max: card.sideband_max,
+            input_source: Some(card.input_source.to_uppercase()),
+            output_node: Some(card.output_node.to_uppercase()),
+            output_ref: card.output_ref.as_ref().map(|node| node.to_uppercase()),
+            reltol: card.reltol,
+            abstol: card.abstol,
+            include_dc: Self::default().include_dc,
+            fundamental_freq: 0.0,
+        }
+    }
+}
+
+#[cfg(test)]
+mod card_conversion_tests {
+    use super::*;
+    use crate::netlist::{AnalysisCommand, Netlist, PacCard};
+
+    const CIRCUIT: &str = "pac card conversion\n\
+                           V1 in 0 SIN(0 1 1G)\n\
+                           R1 in out 1k\n\
+                           C1 out 0 1p\n";
+
+    fn card(cards: &str) -> PacCard {
+        let netlist =
+            Netlist::parse(&format!("{CIRCUIT}.HB 1G\n{cards}\n.end\n")).expect("PAC deck parses");
+        match netlist.analyses.into_iter().next_back() {
+            Some(AnalysisCommand::Pac(card)) => *card,
+            other => panic!("expected a .PAC card, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_card_defaults_are_the_configuration_defaults() {
+        // The netlist layer cannot read these constants from here, so this is
+        // what keeps the two copies from drifting apart.
+        let defaults = PacConfig::default();
+        assert_eq!(PacCard::DEFAULT_SIDEBAND_MIN, defaults.sideband_min);
+        assert_eq!(PacCard::DEFAULT_SIDEBAND_MAX, defaults.sideband_max);
+        assert_eq!(PacCard::DEFAULT_RELTOL, defaults.reltol);
+        assert_eq!(PacCard::DEFAULT_ABSTOL, defaults.abstol);
+    }
+
+    #[test]
+    fn a_minimal_card_converts_to_the_direct_defaults() {
+        let converted = PacConfig::from(&card(".PAC DEC 10 1k 1G INPUT=VRF OUT=V(out)"));
+        let defaults = PacConfig::default();
+        assert_eq!(converted.sweep_start, 1.0e3);
+        assert_eq!(converted.sweep_stop, 1.0e9);
+        assert_eq!(converted.num_points, 10);
+        assert_eq!(converted.sweep_type, PacSweepType::Decade);
+        assert_eq!(converted.sideband_min, defaults.sideband_min);
+        assert_eq!(converted.sideband_max, defaults.sideband_max);
+        assert_eq!(converted.reltol, defaults.reltol);
+        assert_eq!(converted.abstol, defaults.abstol);
+        assert_eq!(converted.include_dc, defaults.include_dc);
+        assert_eq!(converted.input_source.as_deref(), Some("VRF"));
+        assert_eq!(converted.output_node.as_deref(), Some("OUT"));
+        assert_eq!(converted.output_ref, None);
+        // Bound from the upstream operating point, never from the card.
+        assert_eq!(converted.fundamental_freq, 0.0);
+        assert!(converted.validate().is_ok());
+    }
+
+    #[test]
+    fn every_authored_field_survives_the_conversion() {
+        let converted = PacConfig::from(&card(
+            ".pac lin 21 1meg 5meg input=vrf out=v(out,ref) sidebandmin=-3 \
+             sidebandmax=7 reltol=1e-5 abstol=1e-15 from=hb",
+        ));
+        assert_eq!(converted.sweep_type, PacSweepType::Linear);
+        assert_eq!(converted.num_points, 21);
+        assert_eq!(converted.sweep_start, 1.0e6);
+        assert_eq!(converted.sweep_stop, 5.0e6);
+        assert_eq!(converted.sideband_min, -3);
+        assert_eq!(converted.sideband_max, 7);
+        assert_eq!(converted.reltol, 1e-5);
+        assert_eq!(converted.abstol, 1e-15);
+        assert_eq!(converted.output_node.as_deref(), Some("OUT"));
+        assert_eq!(converted.output_ref.as_deref(), Some("REF"));
+        assert!(converted.validate().is_ok());
+    }
+
+    #[test]
+    fn a_card_the_parser_accepted_always_passes_the_configuration_validator() {
+        for source in [
+            ".PAC DEC 10 1k 1G INPUT=VRF OUT=out",
+            ".PAC OCT 4 1k 1meg INPUT=VRF OUT=out MAXSIDEBAND=3",
+            ".PAC LIN 2 1k 1k INPUT=VRF OUT=out SIDEBANDMIN=0 SIDEBANDMAX=0",
+            ".PAC DEC 1 1 1G INPUT=VRF OUT=out RELTOL=1e-9 ABSTOL=1e-18",
+        ] {
+            let converted = PacConfig::from(&card(source));
+            assert!(
+                converted.validate().is_ok(),
+                "'{source}' converted to a configuration the validator rejects: {:?}",
+                converted.validate()
+            );
+        }
+    }
+}
+
 //=============================================================================
 // Tests
 //=============================================================================
