@@ -552,6 +552,19 @@ fn census_images(module: &str, shipped: &super::census_models::CensusModel) {
     match build_model_plan_from_canonical_cfg(model, artifact, CfgNoiseScope::Postfix)
         .map_err(|refused| refused.to_string())
         .and_then(|built| {
+            // The prelude's figures are the ones that replaced Σ cone: every
+            // entry it publishes for is one instruction, so what the image
+            // holds once is this, and what it used to hold per entry was the
+            // cone the block above still measures.
+            println!(
+                "cfg-size model={module} prelude slots={} instructions={} \
+                 live_current_entries={} live_current_control_flow={} dropped_live_current={}",
+                built.report.prelude_slots,
+                built.report.prelude_instructions,
+                built.report.live_current_entries,
+                built.report.live_current_control_flow,
+                built.report.prelude_live_current,
+            );
             crate::native::x64::compile_model_plan(model, &built.plan)
                 .map_err(|error| error.to_string())
         }) {

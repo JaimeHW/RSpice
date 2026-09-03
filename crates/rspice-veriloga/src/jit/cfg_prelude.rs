@@ -84,13 +84,18 @@ use crate::jit::ssa::{BlockId, BuilderTerminator, Program, ProgramBuilder, Value
 /// and every other entry of the same module still wants a slot. So the entries
 /// that read one keep the cone they have always had and the rest take slots.
 ///
-/// # Control dependence
+/// # Control dependence, and why it is not decided here
 ///
-/// A cone contains every surviving block's branch condition — `prune_to_outputs`
-/// marks them live whether or not anything downstream reads them — so a
-/// condition derived from a contributed current is in *every* entry's cone.
-/// [`Self::control`] records that, and taints the whole function rather than
-/// pretending the data-flow answer covers it.
+/// A cone contains every *surviving* block's branch condition —
+/// `prune_to_outputs` marks them live whether or not anything downstream reads
+/// them — so a condition derived from a contributed current would put the read
+/// into the union whatever this analysis says about the outputs. Which blocks
+/// survive is a property of the union prune, not of the whole function, so
+/// deciding it here would refuse a prelude over a branch the union never
+/// reaches. [`Self::taints_control_flow`] therefore only *reports* that the
+/// function has such a branch; what decides it is the guard in
+/// [`CfgPrelude::build`], read off the operations the prelude actually emitted,
+/// and a prelude that trips it is dropped rather than taking the module down.
 #[derive(Debug, Clone)]
 pub(crate) struct LiveCurrentTaint {
     tainted: Vec<bool>,
@@ -181,11 +186,12 @@ impl LiveCurrentTaint {
 
     /// Whether a prelude may publish `value`.
     pub(crate) fn publishable(&self, value: ValueId) -> bool {
-        !self.control && !self.tainted[usize::from(value)]
+        !self.tainted[usize::from(value)]
     }
 
-    /// Whether a branch this function takes depends on a contributed current,
-    /// which taints every cone at once.
+    /// Whether any branch of this function depends on a contributed current.
+    ///
+    /// Reported, not acted on: see the type documentation.
     pub(crate) fn taints_control_flow(&self) -> bool {
         self.control
     }
@@ -275,7 +281,7 @@ impl CfgPrelude {
             || !reads.prior_current_dependencies().is_empty()
         {
             return Err(refuse(
-                CfgPlanRefusal::Lowering,
+                CfgPlanRefusal::PreludeLiveCurrent,
                 format!(
                     "the prelude reads contribution currents {:?}/{:?}, which are published after \
                      it runs",

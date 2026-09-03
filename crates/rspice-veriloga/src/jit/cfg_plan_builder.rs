@@ -195,6 +195,20 @@ pub(crate) enum CfgPlanRefusal {
     /// A block program addresses a state slot the module's
     /// [`StateSlotMapping`] never allocated.
     SlotUnclaimed,
+    /// The prelude's union cone reads a contribution current the evaluation
+    /// publishes after the prelude runs.
+    ///
+    /// The one refusal that does *not* take the module down: the plan is built
+    /// without a prelude and every entry keeps the cone it has always had, so
+    /// this is a size refusal rather than a correctness one. It reaches the
+    /// caller only through [`CfgPrelude::build`]; the plan builder catches it
+    /// by class and records it in [`CfgPlanReport::prelude_live_current`].
+    ///
+    /// A value read through a `ContributedCurrent` leaf is normally kept off the
+    /// prelude entry by entry ([`LiveCurrentTaint`]). What this names is the
+    /// case that cannot be: a *branch condition* on the union's own path reads
+    /// one, and a cone carries every condition of every surviving block.
+    PreludeLiveCurrent,
 }
 
 impl CfgPlanRefusal {
@@ -213,6 +227,7 @@ impl CfgPlanRefusal {
             Self::ChargeMissing => "charge-missing",
             Self::NoiseUnpaired => "noise-unpaired",
             Self::SlotUnclaimed => "slot-unclaimed",
+            Self::PreludeLiveCurrent => "prelude-live-current",
         }
     }
 }
@@ -296,9 +311,13 @@ pub(crate) struct CfgPlanReport {
     /// current the evaluation publishes after the prelude runs. Each keeps its
     /// own cone; see [`LiveCurrentTaint`].
     pub(crate) live_current_entries: usize,
-    /// Whether a branch condition reads one, which taints every cone at once
-    /// and leaves the module with no prelude at all.
+    /// Whether a branch condition reads one anywhere in the function. On its
+    /// own this decides nothing — see [`LiveCurrentTaint`].
     pub(crate) live_current_control_flow: bool,
+    /// Whether the prelude was dropped because its union cone read a current
+    /// after all, leaving every entry on its own cone. The size the CFG route
+    /// had before this lane, for the module it happens to.
+    pub(crate) prelude_live_current: bool,
 }
 
 /// One value entry's position in the plan, for a message that names it.
@@ -939,14 +958,24 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
     let prelude = if published.is_empty() {
         None
     } else {
-        Some(CfgPrelude::build(
+        match CfgPrelude::build(
             module.as_str(),
             &scalarized.function,
             &published,
             &state,
             &bindings,
             &slots,
-        )?)
+        ) {
+            Ok(prelude) => Some(prelude),
+            // The union's own control flow reads a current. Every entry goes
+            // back to its cone — the plan this route built before there was a
+            // prelude — rather than the module going down over a size fix.
+            Err(refused) if refused.class == CfgPlanRefusal::PreludeLiveCurrent => {
+                report.prelude_live_current = true;
+                None
+            }
+            Err(refused) => return Err(refused),
+        }
     };
     report.prelude_slots = prelude.as_ref().map_or(0, CfgPrelude::slot_count);
     report.prelude_instructions = prelude
@@ -957,6 +986,11 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
     // entry inside that slice — the same two-level prune the whole loop used
     // before, kept because it is what bounds the cost of a module that does
     // have probes.
+    let deferred: Vec<(CfgPlanEntry, ValueId)> = if prelude.is_some() {
+        deferred
+    } else {
+        entries.clone()
+    };
     let deferred_outputs: Vec<ValueId> = deferred.iter().map(|(_, value)| *value).collect();
     let (deferred_function, deferred_mapped) =
         prune_cfg_to_outputs(&scalarized.function, &deferred_outputs);
