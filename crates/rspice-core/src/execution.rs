@@ -5,6 +5,7 @@
 //! signal that is absent at one coordinate is represented.
 
 mod capability;
+mod fingerprint;
 mod materialized;
 mod plan;
 mod schema;
@@ -16,6 +17,7 @@ pub use capability::{
     analysis_result_capability, analysis_result_kind, render_non_ui_capability_matrix,
     signal_capability,
 };
+pub use fingerprint::{topology_fingerprint, topology_fingerprint_with_abort};
 pub use materialized::{
     ArtifactNamespace, DeckPlanMaterializer, MaterializedAnalysis, MaterializedRun,
     MaterializedRunError,

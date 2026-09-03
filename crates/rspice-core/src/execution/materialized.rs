@@ -8,8 +8,8 @@
 
 use super::plan::analysis_kind;
 use super::{
-    AnalysisInstanceId, AnalysisKind, DeckPlan, DeckPlanError, PlannedAnalysis, RunCoordinate,
-    RunCoordinateId,
+    AnalysisInstanceId, AnalysisKind, AxisAssignment, DeckPlan, DeckPlanError, PlannedAnalysis,
+    RunCoordinate, RunCoordinateId,
 };
 use crate::Netlist;
 use crate::abort_signal::{AbortSignal, NoAbort};
@@ -206,7 +206,14 @@ impl DeckPlanMaterializer<'_> {
         let mut netlist = match &self.step_plan {
             Some(step_plan) => {
                 let indices_match = step_plan
-                    .coordinate_indices_match(run_index, &coordinate, abort)
+                    .coordinate_indices_match(
+                        run_index,
+                        coordinate
+                            .assignments()
+                            .iter()
+                            .map(AxisAssignment::value_index),
+                        abort,
+                    )
                     .map_err(materialization_simulation_error)?
                     .ok_or(MaterializedRunError::CoordinateIndex {
                         index: run_index,
@@ -286,10 +293,9 @@ impl DeckPlanMaterializer<'_> {
             }
         }
 
-        let topology = self
-            .engine
-            .topology_fingerprint_with_abort(&netlist, abort)
-            .map_err(materialization_simulation_error)?;
+        let topology =
+            super::fingerprint::topology_fingerprint_with_abort(&self.engine, &netlist, abort)
+                .map_err(materialization_simulation_error)?;
         if abort.is_aborted() {
             return Err(MaterializedRunError::Aborted);
         }
