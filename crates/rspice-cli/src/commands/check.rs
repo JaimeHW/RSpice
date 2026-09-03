@@ -46,7 +46,6 @@ pub fn execute(
         println!("Checking: {}", args.input.display());
     }
 
-    crate::abort::install_interrupt_handler();
     let resource_limits = config.resources.limits();
     let parsed =
         crate::commands::parse_netlist_input(&args.input, resource_limits).and_then(|netlist| {
@@ -118,11 +117,14 @@ pub fn execute(
 
 /// Elaborate an XSPICE deck to prove it builds.
 ///
-/// This is the one part of `check` that runs the engine's circuit builder, so
-/// it runs under the process abort source: Ctrl-C during a large hierarchical
-/// build stops the check. A cancelled build is returned as an interrupt, never
-/// recorded as a validation error — reporting a cancelled run as a defect in
-/// the customer's deck would be a false negative.
+/// This is the one part of `check` that runs the engine's circuit builder and
+/// so the one part whose duration the deck controls, which is why the
+/// interrupt handler is installed here rather than for the whole command:
+/// everything else finishes promptly and keeps the default disposition, while
+/// a Ctrl-C during a large hierarchical build stops it at the next poll. A
+/// cancelled build is returned as an interrupt, never recorded as a validation
+/// error — reporting a cancelled run as a defect in the customer's deck would
+/// be a false negative.
 fn check_xspice_build(
     netlist: &Netlist,
     result: &mut ValidationResult,
@@ -131,6 +133,7 @@ fn check_xspice_build(
     if !netlist_contains_xspice(netlist) {
         return Ok(());
     }
+    crate::abort::install_interrupt_handler();
 
     let _external_guard = XspiceCheckExternalRuntimeGuard::install();
     let config = rspice_core::SimulationConfig {
