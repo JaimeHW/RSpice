@@ -76,7 +76,7 @@ fn assert_unavailable(error: SimulationError, instance: &str) {
         panic!("expected a typed unavailable-signal error");
     };
     assert_eq!(detail.signal, AUTHORED_SYMBOL);
-    assert_eq!(detail.analysis, instance);
+    assert_eq!(detail.analysis_label, instance);
 }
 
 #[test]
