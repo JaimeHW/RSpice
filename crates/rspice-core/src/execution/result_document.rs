@@ -180,10 +180,11 @@ pub use payload::{
     NoiseMechanismTag, NoisePayload, NoiseSourceIdentityDocument, NyquistSample,
     OperatingPointPayload, OscillatorPhaseNoiseDocument, PNoiseBandwidth, PNoiseContribution,
     PNoiseContributor, PNoisePayload, PacConversionEntry, PacConversionMatrixDocument, PacPayload,
-    PacSidebandDescriptor, PoleZeroPayload, PortDocument, PortNoisePayload, PssPayload,
-    RealEventPoint, RealEventTrace, ResultPayload, RootSetEvidenceDocument, SParameterPayload,
-    SensitivityElementTag, SensitivityEntry, SensitivityPayload, SpectrumCertificateDocument,
-    StabilityPayload, TransferFunctionPayload, TransientPayload,
+    PacSidebandDescriptor, PoleZeroPayload, PortDocument, PortNoiseCovarianceNormalization,
+    PortNoisePayload, PssPayload, RealEventPoint, RealEventTrace, ResultPayload,
+    RootSetEvidenceDocument, SParameterPayload, SensitivityElementTag, SensitivityEntry,
+    SensitivityPayload, SpectrumCertificateDocument, StabilityPayload, TransferFunctionPayload,
+    TransientPayload, TwoPortNoiseEntry,
 };
 
 use crate::abort_signal::{AbortSignal, NoAbort};

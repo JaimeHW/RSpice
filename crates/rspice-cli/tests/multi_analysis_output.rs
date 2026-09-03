@@ -1,26 +1,15 @@
 //! With several analysis cards in one deck, `-o` must produce one file per
 //! analysis instead of silently overwriting the same path.
 
-use std::path::PathBuf;
+mod common;
+
+use common::test_dir;
+
 use std::process::Command;
-use std::sync::atomic::{AtomicUsize, Ordering};
-
-static NEXT_TEST_DIR: AtomicUsize = AtomicUsize::new(0);
-
-fn test_dir() -> PathBuf {
-    let id = NEXT_TEST_DIR.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!(
-        "rspice_multi_analysis_{}_{}",
-        std::process::id(),
-        id
-    ));
-    std::fs::create_dir_all(&dir).expect("create test dir");
-    dir
-}
 
 #[test]
 fn each_analysis_gets_its_own_output_file() {
-    let dir = test_dir();
+    let dir = test_dir("multi");
     let deck = dir.join("multi.sp");
     std::fs::write(
         &deck,
@@ -86,8 +75,7 @@ fn each_analysis_gets_its_own_output_file() {
 
 #[test]
 fn single_analysis_keeps_exact_output_path() {
-    let dir = test_dir().join("single");
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = test_dir("single");
     let deck = dir.join("single.sp");
     std::fs::write(
         &deck,
@@ -122,8 +110,7 @@ fn single_analysis_keeps_exact_output_path() {
 /// coordinate's are — one identity scheme, not two.
 #[test]
 fn repeated_cards_use_the_canonical_plan_identity_without_axes() {
-    let dir = test_dir().join("repeated");
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = test_dir("repeated");
     let deck = dir.join("repeated.sp");
     std::fs::write(
         &deck,

@@ -1,39 +1,12 @@
 //! Typed CLI publication contract for source-authored transient `.FFT`.
 
-use serde_json::Value;
+mod common;
+
+use common::{read_json, test_dir};
+
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
-use std::sync::atomic::{AtomicU64, Ordering};
-
-struct TestDirectory(PathBuf);
-
-impl std::ops::Deref for TestDirectory {
-    type Target = Path;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl Drop for TestDirectory {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-fn test_dir(tag: &str) -> TestDirectory {
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-    let serial = NEXT.fetch_add(1, Ordering::Relaxed);
-    let path = std::env::temp_dir().join(format!(
-        "rspice_fft_output_{}_{}_{}",
-        std::process::id(),
-        tag,
-        serial
-    ));
-    std::fs::create_dir_all(&path).expect("create FFT output test directory");
-    TestDirectory(path)
-}
 
 fn run(deck: &Path, output: &Path, format: &str, extra: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_rspice"));
@@ -71,11 +44,6 @@ fn coordinate_fft_artifacts(directory: &Path) -> Vec<PathBuf> {
         .collect::<Vec<_>>();
     artifacts.sort();
     artifacts
-}
-
-fn read_json(path: &Path) -> Value {
-    serde_json::from_slice(&std::fs::read(path).expect("read JSON artifact"))
-        .expect("parse JSON artifact")
 }
 
 fn assert_no_staging_file(directory: &Path) {

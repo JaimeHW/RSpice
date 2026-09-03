@@ -34,20 +34,22 @@ coordinate of the deck's `.STEP` and `.TEMP` axes.
 
 Runnable kinds: `operating_point`, `dc_sweep`, `ac_small_signal`, `transient`,
 `noise`, `distortion`, `transfer_function`, `stability`, `sensitivity`,
-`pole_zero`, `monte_carlo`, `harmonic_balance`, `pss`, `pac`, `envelope`.
+`pole_zero`, `monte_carlo`, `harmonic_balance`, `pss`, `pac`, `pnoise`,
+`s_parameters`, `envelope`.
 
-Refused kinds, each with the reason on the wire: `s_parameters`, `port_noise`,
-`pnoise`, `fourier`, `fft`, and `mixed_signal`. A mixed-signal deck is a
-transient and is requested as `transient`. A deck that authors a card this
-build cannot publish — `.SP`, `.PNOISE`, `.FOUR` — fails the whole request
-rather than leaving that card unexecuted and unmentioned.
+Refused kinds, each with the reason on the wire: `mixed_signal`, `port_noise`,
+`fourier`, and `fft`. A mixed-signal deck is a transient and is requested as
+`transient`. The other three are results a card produces beside its own rather
+than analyses of their own: the canonical plan mints no analysis slot for
+them, so no deck contains a directive such a request could select. They are
+published — see below — by requesting the parent family.
 
 The authoritative per-family declaration, including the exact reason for every
 gap, is `rspice_core::execution::capability`'s engine-adapter column.
 
 ## Results
 
-Every analysis publishes exactly one
+Every analysis publishes at least one
 `rspice_core::execution::AnalysisResultDocument` as
 `results/<analysis>.result.json`, or
 `results/<coordinate>__<analysis>.result.json` when the deck has a run axis.
@@ -57,10 +59,24 @@ namespaces, and represents a sample that does not exist as `null` rather than
 as a plausible number. The artifact's declared content type is derived from
 that document's own schema identifier and version.
 
+A card whose result is more than one document publishes them all, staged in
+the same artifact transaction as its own, so a failure part-way through
+publishes none of them. A child artifact's name is the parent's stem plus its
+own namespace component:
+
+* one Fourier document per authored `.FOUR` operand beside its parent
+  transient, under the `four-NNN` identity the canonical plan minted for that
+  operand — `results/tran-001.four-001.result.json`;
+* the port-noise sweep beside the scattering sweep of a `.SP DONOISE` card.
+  Port noise is that card's second result and carries the card's own analysis
+  identity, so its result family is the component that separates the two —
+  `results/sp-001.port-noise.result.json`.
+
 Transient `.FFT` spectra are published beside their parent transient as
 `results/<...>.fft.result.json`. That bundle is the one result schema this
-crate still owns: the shared `fft` document must be named by an
-`AnalysisInstanceId`, and `DeckPlan` mints none for a `.FFT` post-process.
+crate still owns; it already carries instance and coordinate identity plus the
+complete transform contract, so it has not been migrated onto the shared `fft`
+document.
 
 A deck with a run axis also carries an `rspice-axis-execution` record inside
 the result manifest. It is an orchestration record, not a second result
@@ -75,7 +91,9 @@ version, and result family.
   replaced by one `rspice-analysis-result` document.
 * Result files are named from the canonical namespace components
   (`op-001.result.json`, `run-<id>__tran-001.result.json`) rather than from the
-  request kind and a one-based ordinal.
+  request kind and a one-based ordinal, and a second document a card publishes
+  extends that stem with its own component
+  (`tran-001.four-001.result.json`, `sp-001.port-noise.result.json`).
 * `result_manifest.format` is `rspice-result-v3` for every run, with or without
   a run axis.
 * Manifest measurements are projected generically from the typed document, so

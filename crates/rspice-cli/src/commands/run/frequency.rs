@@ -1481,13 +1481,14 @@ pub(super) fn run_pz_from_command(
 pub(super) fn run_sensitivity(
     ctx: &RunContext<'_>,
     output_node: usize,
+    output_name: &str,
     param_name: &str,
     param_value: f64,
 ) -> Result<(), CliError> {
     if !ctx.quiet {
         println!(
             "Running Sensitivity analysis: âˆ‚V({})/âˆ‚{} at {}={:.6e}",
-            output_node, param_name, param_name, param_value
+            output_name, param_name, param_name, param_value
         );
     }
 
@@ -1504,7 +1505,7 @@ pub(super) fn run_sensitivity(
                 println!("âœ“ Sensitivity analysis complete");
                 println!(
                     "  âˆ‚V({})/âˆ‚{} = {:.6e} V/unit",
-                    output_node, param_name, sensitivity
+                    output_name, param_name, sensitivity
                 );
 
                 if ctx.verbose {
@@ -1516,7 +1517,14 @@ pub(super) fn run_sensitivity(
                 }
             }
 
-            export_dc_sensitivities(ctx, &[(param_name.to_string(), sensitivity)])?;
+            export_parameter_sensitivity(
+                ctx,
+                output_node,
+                output_name,
+                param_name,
+                param_value,
+                sensitivity,
+            )?;
             Ok(())
         }
         Err(source) => Err(map_frequency_error(ctx, "Sensitivity", source)),
@@ -1625,19 +1633,6 @@ pub(super) fn run_sensitivity_from_command(
             }
         }
 
-        // The shared sensitivity payload declares one derivative per element
-        // at the operating point. An AC sweep produces a complex derivative at
-        // every frequency, which that payload cannot hold, so the typed
-        // document is refused rather than published with the sweep collapsed.
-        if matches!(ctx.format, OutputFormat::Json) && ctx.output.is_some() {
-            return Err(CliError::InvalidArgument {
-                message: "the shared sensitivity result document holds one operating-point derivative per element, so an AC .SENS sweep cannot be published as one"
-                    .to_string(),
-                suggestion: Some(
-                    "export the AC sensitivity sweep with --format csv, tsv, or raw".to_string(),
-                ),
-            });
-        }
         if let Some(resolved) = ctx.resolve_output("sens") {
             reject_hdf5(ctx.format, "sensitivity")?;
             let analysis_id = resolved.analysis("sens")?;
@@ -1663,12 +1658,23 @@ pub(super) fn run_sensitivity_from_command(
                     .collect(),
             };
             let schema = table_schema(&table)?;
-            ctx.record_published(super::PublishedResult {
-                analysis_id: analysis_id.tag(),
+            // The shared sensitivity payload carries a complex derivative
+            // trace per parameter beside the operating-point derivatives, so
+            // an AC sweep publishes the same typed document a DC card does;
+            // the flat table remains the projection for the other formats.
+            super::document::publish_table_result(
+                ctx,
+                &resolved.path,
+                analysis_id,
                 schema,
-                artifact: resolved.path.clone(),
-            });
-            table.write(&resolved.path, ctx.format)?;
+                &table,
+                || {
+                    rspice_core::execution::AnalysisResultDocument::from_ac_sensitivity(
+                        analysis_id,
+                        &result,
+                    )
+                },
+            )?;
 
             if !ctx.quiet {
                 println!("  Sensitivities exported to: {}", resolved.path.display());
@@ -1725,52 +1731,80 @@ pub(super) fn run_sensitivity_from_command(
 
 /// Write the single derivative the `--sens-*` command-line probe computed.
 ///
-/// The probe returns one number, not a complete `.SENS` result: it carries no
-/// element identity, no operating-point output value, and therefore no
-/// normalized sensitivity. That is enough for the flat table and not enough
-/// for a typed result document, so JSON is refused here rather than published
-/// as something narrower than the format promises.
-fn export_dc_sensitivities(
+/// The probe differentiates the output with respect to one netlist parameter
+/// rather than one device instance parameter, which is what the shared payload
+/// declares as a parameter sensitivity: the parameter's own nominal value, the
+/// absolute derivative, and the normalized derivative against the operating
+/// point the same deck settles at. The operating point is solved here because
+/// the probe's own two perturbed solves deliberately do not report it.
+fn export_parameter_sensitivity(
     ctx: &RunContext<'_>,
-    results: &[(String, f64)],
+    output_node: usize,
+    output_name: &str,
+    param_name: &str,
+    param_value: f64,
+    absolute: f64,
 ) -> Result<(), CliError> {
-    if matches!(ctx.format, OutputFormat::Json) {
-        return Err(CliError::InvalidArgument {
-            message: "--sens-param computes one derivative, which cannot fill a typed sensitivity result document".to_string(),
-            suggestion: Some(
-                "author a .SENS card for the typed JSON document, or export the probe with --format csv, tsv, or raw"
-                    .to_string(),
-            ),
-        });
-    }
-    export_dc_sensitivity_table(ctx, "V", results, None)
-}
-
-/// Write a complete `.SENS` result using the selected probe identity in every
-/// derivative column (for example `dV(out)/d(R1)` or `dI(V1)/d(R1)`).
-fn export_dc_sensitivity_result(
-    ctx: &RunContext<'_>,
-    output: &str,
-    result: &rspice_core::analysis::SensitivityResult,
-    results: &[(String, f64)],
-) -> Result<(), CliError> {
-    export_dc_sensitivity_table(ctx, output, results, Some(result))
-}
-
-fn export_dc_sensitivity_table(
-    ctx: &RunContext<'_>,
-    output: &str,
-    results: &[(String, f64)],
-    complete: Option<&rspice_core::analysis::SensitivityResult>,
-) -> Result<(), CliError> {
+    let output_label = format!("V({output_name})");
+    let results = [(param_name.to_string(), absolute)];
     let Some(resolved) = ctx.resolve_output("sens") else {
         return Ok(());
     };
     reject_hdf5(ctx.format, "sensitivity")?;
     let analysis_id = resolved.analysis("sens")?;
+    let table = dc_sensitivity_table(&output_label, &results);
+    let schema = table_schema(&table)?;
+    super::document::publish_table_result(
+        ctx,
+        &resolved.path,
+        analysis_id,
+        schema,
+        &table,
+        || {
+            // Only invoked for the typed representation, so the nominal
+            // operating point is solved only when a consumer asked for a
+            // document that declares it.
+            let nominal = ctx
+                .engine
+                .run_dc_op_with_abort(ctx.netlist, &crate::abort::ProcessAbort)
+                .map_err(
+                    |error| rspice_core::execution::ResultDocumentError::SourceResult {
+                        location: "parameter sensitivity result",
+                        detail: format!(
+                            "the nominal operating point the normalized sensitivity is taken \
+                             against could not be solved: {error}"
+                        ),
+                    },
+                )?;
+            let output_value = nominal.try_voltage(output_node).ok_or(
+                rspice_core::execution::ResultDocumentError::SourceResult {
+                    location: "parameter sensitivity result",
+                    detail: format!("node {output_node} carries no operating-point voltage"),
+                },
+            )?;
+            rspice_core::execution::AnalysisResultDocument::from_parameter_sensitivity(
+                analysis_id,
+                &output_label,
+                output_value,
+                param_name,
+                param_value,
+                absolute,
+            )
+        },
+    )?;
+
+    if !ctx.quiet {
+        println!("  Sensitivities exported to: {}", resolved.path.display());
+    }
+    Ok(())
+}
+
+/// The flat DC sensitivity table: one row, one column per derivative, each
+/// named by the selected probe identity (`dV(out)/d(R1)`, `dI(V1)/d(R1)`).
+fn dc_sensitivity_table(output: &str, results: &[(String, f64)]) -> super::export::ExportTable {
     use super::export::{ColumnData, ExportColumn, ExportTable};
 
-    let table = ExportTable {
+    ExportTable {
         analysis: "sens".to_string(),
         plot_name: "DC Sensitivity".to_string(),
         scale_name: "point".to_string(),
@@ -1784,24 +1818,31 @@ fn export_dc_sensitivity_table(
                 data: ColumnData::Real(vec![*value]),
             })
             .collect(),
-    };
-    let schema = table_schema(&table)?;
-    match complete {
-        Some(complete) => super::document::publish_table_result(
-            ctx,
-            &resolved.path,
-            analysis_id,
-            schema,
-            &table,
-            || {
-                rspice_core::execution::AnalysisResultDocument::from_sensitivity(
-                    analysis_id,
-                    complete,
-                )
-            },
-        )?,
-        None => table.write(&resolved.path, ctx.format)?,
     }
+}
+
+/// Write a complete `.SENS` result.
+fn export_dc_sensitivity_result(
+    ctx: &RunContext<'_>,
+    output: &str,
+    result: &rspice_core::analysis::SensitivityResult,
+    results: &[(String, f64)],
+) -> Result<(), CliError> {
+    let Some(resolved) = ctx.resolve_output("sens") else {
+        return Ok(());
+    };
+    reject_hdf5(ctx.format, "sensitivity")?;
+    let analysis_id = resolved.analysis("sens")?;
+    let table = dc_sensitivity_table(output, results);
+    let schema = table_schema(&table)?;
+    super::document::publish_table_result(
+        ctx,
+        &resolved.path,
+        analysis_id,
+        schema,
+        &table,
+        || rspice_core::execution::AnalysisResultDocument::from_sensitivity(analysis_id, result),
+    )?;
 
     if !ctx.quiet {
         println!("  Sensitivities exported to: {}", resolved.path.display());

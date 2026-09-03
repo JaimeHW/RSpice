@@ -1,46 +1,12 @@
 //! `.TEMP` is a run axis, not an independent operating-point analysis.
 
+mod common;
+
+use common::{AxisRunSet, fixture, read_json, test_dir};
+
 use serde_json::Value;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Command, Output};
-use std::sync::atomic::{AtomicU64, Ordering};
-
-fn fixture(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
-        .join("audit_regressions")
-        .join(name)
-}
-
-struct TestDirectory(PathBuf);
-
-impl std::ops::Deref for TestDirectory {
-    type Target = Path;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl Drop for TestDirectory {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-fn test_dir(tag: &str) -> TestDirectory {
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-    let serial = NEXT.fetch_add(1, Ordering::Relaxed);
-    let path = std::env::temp_dir().join(format!(
-        "rspice_temperature_axis_{}_{}_{}",
-        std::process::id(),
-        tag,
-        serial
-    ));
-    std::fs::create_dir_all(&path).expect("create temperature-axis test directory");
-    TestDirectory(path)
-}
 
 fn run(deck: &Path, output: &Path) -> Output {
     Command::new(env!("CARGO_BIN_EXE_rspice"))
@@ -55,75 +21,6 @@ fn run(deck: &Path, output: &Path) -> Output {
         ])
         .output()
         .expect("run temperature deck")
-}
-
-fn read_json(path: &Path) -> Value {
-    serde_json::from_slice(&std::fs::read(path).expect("read JSON output"))
-        .expect("parse JSON output")
-}
-
-fn tag_output_path(path: &Path, tag: &str) -> PathBuf {
-    let stem = path.file_stem().expect("output stem").to_string_lossy();
-    path.with_file_name(format!(
-        "{stem}.{tag}.{}",
-        path.extension()
-            .expect("output extension")
-            .to_string_lossy()
-    ))
-}
-
-fn sanitize_coordinate_tag(tag: &str) -> String {
-    tag.chars()
-        .map(|character| {
-            if character.is_ascii_alphanumeric() {
-                character.to_ascii_lowercase()
-            } else {
-                '_'
-            }
-        })
-        .collect()
-}
-
-/// Manifest that names the complete coordinate set, published as the last
-/// member of the set's own transaction.
-fn planned_set_manifest(requested: &Path) -> PathBuf {
-    tag_output_path(requested, "run_set").with_extension("json")
-}
-
-fn planned_artifacts(deck: &Path, requested: &Path) -> Vec<PathBuf> {
-    let source = std::fs::read_to_string(deck).expect("read planned deck");
-    let netlist = rspice_core::Netlist::parse(&source).expect("parse planned deck");
-    let limits = rspice_core::ResourceLimits::default();
-    let plan = rspice_core::execution::DeckPlan::from_netlist_with_abort(
-        &netlist,
-        &limits,
-        &rspice_core::NoAbort,
-    )
-    .expect("plan artifact namespaces");
-    plan.coordinates_with_abort(&limits, &rspice_core::NoAbort)
-        .expect("plan coordinates")
-        .iter()
-        .flat_map(|coordinate| {
-            let coordinate_path = tag_output_path(
-                requested,
-                &sanitize_coordinate_tag(&coordinate.stable_tag()),
-            );
-            plan.analyses()
-                .iter()
-                .map(move |analysis| tag_output_path(&coordinate_path, &analysis.id().tag()))
-        })
-        .collect()
-}
-
-/// Everything a completed axis deck publishes: one artifact per coordinate
-/// and analysis, the schema manifest that says which signals each coordinate
-/// carried, and the manifest that says the set is complete.
-fn planned_directory_contents(deck: &Path, requested: &Path) -> Vec<PathBuf> {
-    let mut contents = planned_artifacts(deck, requested);
-    contents.push(tag_output_path(requested, "step_schema").with_extension("json"));
-    contents.push(planned_set_manifest(requested));
-    contents.sort();
-    contents
 }
 
 /// Values of one named column in the flat swept table an axis deck publishes
@@ -188,7 +85,12 @@ fn multi_temperature_wraps_every_authored_analysis_without_extra_runs() {
     );
     assert!(!requested.exists(), "multi-run base path was overwritten");
 
-    let expected = planned_artifacts(&fixture("temp_wraps_tran_ac.cir"), &requested);
+    // The committed run-set manifest is the run's own statement of what it
+    // published; the directory must contain exactly that and nothing else.
+    let run_set = AxisRunSet::read(&requested);
+    assert_eq!(run_set.axes, ["temperature"]);
+    assert_eq!(run_set.coordinates.len(), 2);
+    let expected = run_set.artifacts();
     let mut actual = std::fs::read_dir(&*dir)
         .expect("list temperature outputs")
         .map(|entry| entry.expect("directory entry").path())
@@ -196,9 +98,18 @@ fn multi_temperature_wraps_every_authored_analysis_without_extra_runs() {
     actual.sort();
     assert_eq!(
         actual,
-        planned_directory_contents(&fixture("temp_wraps_tran_ac.cir"), &requested),
+        run_set.published_files(&requested),
         "unexpected nominal or OP artifact"
     );
+    for coordinate in &run_set.coordinates {
+        assert_eq!(
+            coordinate.artifacts.len(),
+            2,
+            "each temperature wraps both authored analyses: {coordinate:?}"
+        );
+        coordinate.artifact("tran-001");
+        coordinate.artifact("ac-001");
+    }
 
     for path in &expected {
         let document = read_json(path);
@@ -235,13 +146,14 @@ fn single_temperature_configures_transient_without_running_a_temp_op() {
         .map(|entry| entry.expect("directory entry").path())
         .collect::<Vec<_>>();
     files.sort();
-    let deck = fixture("temp_single_tran.cir");
+    let run_set = AxisRunSet::read(&requested);
     assert_eq!(
         files.as_slice(),
-        planned_directory_contents(&deck, &requested).as_slice()
+        run_set.published_files(&requested).as_slice()
     );
-    let expected = planned_artifacts(&deck, &requested);
-    assert_eq!(read_json(&expected[0])["resultKind"], "tran");
+    assert_eq!(run_set.coordinates.len(), 1);
+    let transient = run_set.coordinate(1).only_artifact();
+    assert_eq!(read_json(transient)["resultKind"], "tran");
 }
 
 #[test]
@@ -304,12 +216,10 @@ fn repeated_ac_cards_keep_stable_analysis_namespaces_at_each_temperature() {
     );
     assert!(!requested.exists(), "multi-run base path was overwritten");
 
-    let mut expected = planned_artifacts(&deck, &requested);
-    for pair in expected.chunks_exact(2) {
-        let first = &pair[0];
-        let second = &pair[1];
-        let first_document = read_json(first);
-        let second_document = read_json(second);
+    let run_set = AxisRunSet::read(&requested);
+    for coordinate in &run_set.coordinates {
+        let first_document = read_json(coordinate.artifact("ac-001"));
+        let second_document = read_json(coordinate.artifact("ac-002"));
         assert_eq!(first_document["resultKind"], "ac");
         assert_eq!(second_document["resultKind"], "ac");
         assert_eq!(first_document["analysis"]["tag"], "ac-001");
@@ -333,10 +243,11 @@ fn repeated_ac_cards_keep_stable_analysis_namespaces_at_each_temperature() {
         })
         .collect::<Vec<_>>();
     actual.sort();
-    expected.push(tag_output_path(&requested, "step_schema").with_extension("json"));
-    expected.push(planned_set_manifest(&requested));
-    expected.sort();
-    assert_eq!(actual, expected, "unexpected OP or colliding AC artifact");
+    assert_eq!(
+        actual,
+        run_set.published_files(&requested),
+        "unexpected OP or colliding AC artifact"
+    );
 }
 
 #[test]
@@ -365,7 +276,9 @@ fn two_axis_implicit_op_uses_coordinate_artifacts_and_union_manifest() {
     );
     assert!(!requested.exists(), "Cartesian run overwrote the base path");
 
-    let expected = planned_artifacts(&deck, &requested);
+    let run_set = AxisRunSet::read(&requested);
+    assert_eq!(run_set.axes, ["step", "temperature"]);
+    let expected = run_set.artifacts();
     assert_eq!(expected.len(), 4);
     for artifact in &expected {
         assert!(artifact.exists(), "missing {}", artifact.display());

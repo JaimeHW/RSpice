@@ -7,6 +7,10 @@
 //! - AC (and noise) analyses wrote no output file at all for most formats
 //!   while still reporting "Simulation complete".
 
+mod common;
+
+use common::test_dir;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -144,16 +148,6 @@ c1 out 0 1n
 .noise v(out) v1 dec 2 100k 1meg
 .end
 ";
-
-fn test_dir(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "rspice_output_formats_{}_{}",
-        std::process::id(),
-        tag
-    ));
-    std::fs::create_dir_all(&dir).expect("create test dir");
-    dir
-}
 
 /// Run `rspice run <deck> -o <out> -f <format>` and return the output path.
 fn run_export(dir: &Path, tag: &str, deck: &str, format: &str) -> PathBuf {

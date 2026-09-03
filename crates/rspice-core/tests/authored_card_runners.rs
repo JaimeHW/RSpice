@@ -175,7 +175,7 @@ fn an_authored_sp_card_publishes_the_shared_sp_and_port_noise_documents() {
     assert_eq!(payload.ports.len(), 2);
 
     let noise = run.port_noise.expect("the card requested port noise");
-    let port_noise = AnalysisResultDocument::from_port_noise(id, &noise.points)
+    let port_noise = AnalysisResultDocument::from_port_noise(id, &noise)
         .expect("the shared port-noise document accepts exactly what the runner returns")
         .build()
         .expect("document builds");

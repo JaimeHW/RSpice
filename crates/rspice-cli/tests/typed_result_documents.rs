@@ -7,40 +7,13 @@
 //! real binary — whether the CLI publishes it, and what identity, descriptors,
 //! and units that artifact carries.
 
+mod common;
+
+use common::{read_json, test_dir};
+
 use rspice_core::execution::AnalysisResultKind;
-use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicU64, Ordering};
-
-struct TestDirectory(PathBuf);
-
-impl std::ops::Deref for TestDirectory {
-    type Target = Path;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl Drop for TestDirectory {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-fn test_dir(tag: &str) -> TestDirectory {
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-    let serial = NEXT.fetch_add(1, Ordering::Relaxed);
-    let path = std::env::temp_dir().join(format!(
-        "rspice_typed_documents_{}_{}_{}",
-        std::process::id(),
-        tag,
-        serial
-    ));
-    std::fs::create_dir_all(&path).expect("create typed-document test directory");
-    TestDirectory(path)
-}
 
 /// A small nonlinear divider that every family below can be run against.
 const CIRCUIT: &str = "* typed result document coverage\n\
@@ -78,15 +51,6 @@ struct FamilyRun {
 enum FamilyCoverage {
     /// The family runs and publishes the shared typed document.
     Document(FamilyRun),
-    /// The family runs, but one authored form cannot fill the shared payload,
-    /// so that form is refused rather than published with evidence dropped.
-    /// The refusal must contain each fragment.
-    RefusedFormat {
-        circuit: Option<&'static str>,
-        cards: &'static str,
-        flags: &'static [&'static str],
-        fragments: &'static [&'static str],
-    },
     /// The CLI has no execution route for the family at all.
     RefusedCard {
         cards: &'static str,
@@ -157,15 +121,19 @@ fn coverage(kind: AnalysisResultKind) -> FamilyCoverage {
             series: Some(("s(1,1)", "dimensionless")),
             scalar: None,
         }),
-        // The `.SP DONOISE` covariance, its reference temperature, the 4kT
-        // normalization, and the two-port noise figures have no home in the
-        // shared S-parameter payload.
-        AnalysisResultKind::PortNoise => FamilyCoverage::RefusedFormat {
+        // Port noise is the `.SP DONOISE` card's second result. It shares the
+        // card's identity and publishes as its own document beside the
+        // scattering one, carrying the covariance, its reference temperature,
+        // the 4kT normalization and the two-port figures.
+        AnalysisResultKind::PortNoise => FamilyCoverage::Document(FamilyRun {
             circuit: None,
             cards: ".SP DEC 2 1k 10k DONOISE\n",
             flags: &[],
-            fragments: &["covariance", "two-port noise", "csv"],
-        },
+            artifact: "port-noise",
+            analysis_tag: "sp-001",
+            series: Some(("cy(1,1)", "custom")),
+            scalar: None,
+        }),
         // The Volterra products are normalized to the fundamental, so the
         // deck is driven directly into the nonlinearity: a node with no F1
         // response has no finite ratio and the run refuses rather than
@@ -331,13 +299,6 @@ fn artifact_path(requested: &Path, suffix: &str) -> PathBuf {
     requested.with_file_name(format!("{stem}.{suffix}.{}", extension.to_string_lossy()))
 }
 
-fn read_json(path: &Path) -> Value {
-    serde_json::from_slice(&std::fs::read(path).unwrap_or_else(|error| {
-        panic!("read {}: {error}", path.display());
-    }))
-    .unwrap_or_else(|error| panic!("parse {}: {error}", path.display()))
-}
-
 fn assert_document(kind: AnalysisResultKind, run: &FamilyRun) {
     let dir = test_dir(kind.tag());
     let (output, requested) = run_family(&dir, run);
@@ -487,44 +448,6 @@ fn every_runnable_family_publishes_a_typed_document_and_the_rest_are_typed_refus
     for kind in AnalysisResultKind::ALL {
         match coverage(kind) {
             FamilyCoverage::Document(family) => assert_document(kind, &family),
-            FamilyCoverage::RefusedFormat {
-                circuit,
-                cards,
-                flags,
-                fragments,
-            } => {
-                let dir = test_dir(kind.tag());
-                let (output, requested) = run(&dir, circuit, cards, flags, "json");
-                assert!(
-                    !output.status.success(),
-                    "{}: a format that cannot carry this result published anyway",
-                    kind.tag()
-                );
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                for fragment in fragments {
-                    assert!(
-                        stderr.contains(fragment),
-                        "{}: refusal does not mention {fragment:?}: {stderr}",
-                        kind.tag()
-                    );
-                }
-                assert!(
-                    !requested.exists(),
-                    "{}: the refused run published an artifact",
-                    kind.tag()
-                );
-
-                // The same deck exports completely in a format that can hold
-                // it, so the refusal is about representation, not capability.
-                let (output, requested) = run(&dir, circuit, cards, flags, "csv");
-                assert!(
-                    output.status.success(),
-                    "{}: the flat export failed too:\n{}",
-                    kind.tag(),
-                    String::from_utf8_lossy(&output.stderr)
-                );
-                assert!(requested.exists() || artifact_path(&requested, "sp-001").exists());
-            }
             FamilyCoverage::RefusedCard { cards, fragments } => {
                 let dir = test_dir(kind.tag());
                 let (output, requested) = run(&dir, None, cards, &[], "json");
@@ -580,4 +503,89 @@ fn every_runnable_family_publishes_a_typed_document_and_the_rest_are_typed_refus
             }
         }
     }
+}
+
+/// The AC form of `.SENS` publishes the same shared document the DC form
+/// does: the payload carries a complex derivative trace per parameter beside
+/// the operating-point entries, so a sweep no longer has to be exported flat.
+#[test]
+fn ac_sensitivity_publishes_the_shared_document_with_its_frequency_traces() {
+    let dir = test_dir("sens_ac");
+    let (output, requested) = run(&dir, None, ".SENS V(out) AC DEC 2 1k 10k\n", &[], "json");
+    assert!(
+        output.status.success(),
+        "AC .SENS failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let document = read_json(&requested);
+    assert_eq!(document["resultKind"], "sensitivity");
+    assert_eq!(document["analysis"]["tag"], "sens-001");
+    let payload = &document["payload"];
+    assert!(
+        payload["entries"]
+            .as_array()
+            .expect("DC entry list")
+            .is_empty(),
+        "an AC study must not claim operating-point derivatives"
+    );
+    let ac_entries = payload["acEntries"].as_array().expect("AC entry list");
+    assert!(
+        !ac_entries.is_empty(),
+        "the AC sweep published no derivative traces: {document:#}"
+    );
+    let axis = document["axes"][0]["values"]["values"]
+        .as_array()
+        .expect("frequency axis");
+    for entry in ac_entries {
+        for trace in ["absolute", "normalized", "magnitude", "phase"] {
+            assert_eq!(
+                entry[trace].as_array().map(Vec::len),
+                Some(axis.len()),
+                "trace '{trace}' of {entry:#} does not cover the frequency axis"
+            );
+        }
+    }
+}
+
+/// The `--sens-param` probe differentiates against a netlist parameter rather
+/// than a device instance, and the shared payload says so: the entry is tagged
+/// as a parameter sensitivity and carries the nominal value and the normalized
+/// derivative, not just the raw number.
+#[test]
+fn the_parameter_sensitivity_probe_publishes_the_shared_document() {
+    let dir = test_dir("sens_param");
+    let (output, requested) = run(
+        &dir,
+        None,
+        "",
+        &["--sens-output", "out", "--sens-param", "bias"],
+        "json",
+    );
+    assert!(
+        output.status.success(),
+        "--sens-param failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let document = read_json(&requested);
+    assert_eq!(document["resultKind"], "sensitivity");
+    let entries = document["payload"]["entries"]
+        .as_array()
+        .expect("entry list");
+    assert_eq!(entries.len(), 1, "the probe computes one derivative");
+    assert_eq!(entries[0]["parameter"], "bias");
+    assert_eq!(entries[0]["elementKind"], "parameter");
+    assert!(
+        entries[0]["normalized"]
+            .as_f64()
+            .is_some_and(f64::is_finite),
+        "the probe published no normalized derivative: {document:#}"
+    );
+    assert!(
+        document["scalars"]
+            .as_array()
+            .expect("scalars")
+            .iter()
+            .any(|scalar| scalar["name"] == "output_value"),
+        "the normalized derivative has no operating point to be relative to"
+    );
 }

@@ -1,6 +1,10 @@
 //! Integration tests for `rspice compare`: cross-format golden comparison
 //! and tolerance behavior.
 
+mod common;
+
+use common::test_dir;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -11,16 +15,6 @@ c1 out 0 1u
 .tran 10u 100u
 .end
 ";
-
-fn test_dir(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "rspice_compare_formats_{}_{}",
-        std::process::id(),
-        tag
-    ));
-    std::fs::create_dir_all(&dir).expect("create test dir");
-    dir
-}
 
 fn rspice_ok(args: &[&str]) {
     let output = Command::new(env!("CARGO_BIN_EXE_rspice"))

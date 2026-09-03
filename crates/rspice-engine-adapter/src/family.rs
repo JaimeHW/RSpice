@@ -7,8 +7,13 @@
 //! Nothing here decides what a directive *means*: the configuration types, the
 //! runners, and the result projections all belong to `rspice-core`.
 //!
-//! Families the shared result contract cannot express yet are listed in
-//! [`unmapped_deck_card`] with the exact core API that is missing. They are
+//! A card is not always one document: [`DirectiveProjection`] carries the
+//! card's own result plus every document produced beside it, so `.SP DONOISE`
+//! publishes its port-noise sweep and a transient publishes one Fourier
+//! document per authored `.FOUR` operand.
+//!
+//! A family the shared result contract cannot express is listed in
+//! [`unmapped_deck_card`] with the exact core API that is missing, and is
 //! refused before any solver work rather than executed into a lossy artifact.
 
 use rspice_core::abort_signal::AbortSignal;
@@ -19,8 +24,8 @@ use rspice_core::engine::SensitivityCardResult;
 use rspice_core::execution::result_document::{AxisValues, DcSweepAxisDocument};
 use rspice_core::execution::{
     AnalysisInstanceId, AnalysisKind as PlannedAnalysisKind, AnalysisResultDocument,
-    AnalysisResultDocumentBuilder, MaterializedAnalysis, ResultAxis, ResultAxisKind,
-    RunCoordinateId, SignalUnit,
+    AnalysisResultDocumentBuilder, AnalysisResultKind, DeckPlan, MaterializedAnalysis, ResultAxis,
+    ResultAxisKind, RunCoordinateId, SignalUnit,
 };
 use rspice_core::netlist::{
     AnalysisCommand, DcSweepSpec, ElementKind, FftFormat, FreqVariation, MonteCarloDistribution,
@@ -66,31 +71,29 @@ pub const REQUEST_KINDS: &[(&str, PlannedAnalysisKind)] = &[
 /// with the reason an operator needs to act on it.
 pub const REFUSED_REQUEST_KINDS: &[(&str, &str)] = &[
     ("mixed_signal", MIXED_SIGNAL_IS_TRANSIENT),
-    ("port_noise", SECOND_DOCUMENT_GAP),
-    ("fourier", SECOND_DOCUMENT_GAP),
-    ("fft", SECOND_DOCUMENT_GAP),
+    ("port_noise", PORT_NOISE_IS_AN_SP_RESULT),
+    ("fourier", POST_PROCESS_IS_A_TRANSIENT_RESULT),
+    ("fft", POST_PROCESS_IS_A_TRANSIENT_RESULT),
 ];
 
 const MIXED_SIGNAL_IS_TRANSIENT: &str = "A mixed-signal deck is a transient: request the transient kind. This engine build has no \
      separate mixed-signal analysis, and running one under its own name would report an \
      analysis the deck never authored.";
 
-/// Families whose result is a *second* document produced by another card.
+/// Families whose result is a second document produced by another card.
 ///
-/// The executor stages exactly one shared result document per materialized
-/// card. Port noise is the `.SP` card's optional second result, and `.FOUR`
-/// and `.FFT` are the transient's post-processing products; `rspice-core` now
-/// names and projects all three, but this executor has no slot to publish them
-/// in beside their parent, so a deck that authors one is refused rather than
-/// executed with the second result silently dropped.
-const SECOND_DOCUMENT_GAP: &str = "This executor publishes one shared result document per authored card, and this family is a \
-     second result produced beside another card's: port noise beside .SP, and .FOUR and .FFT \
-     beside their parent transient. rspice-core names and projects all three; the adapter has no \
-     slot to publish them in, and dropping them silently is not an option.";
+/// These are published, but they are not analyses a request selects: the
+/// canonical plan mints no analysis slot for them, so there is no directive in
+/// the deck for a request of this kind to match. Requesting the parent family
+/// runs the card that produces them and publishes them beside its own result.
+const PORT_NOISE_IS_AN_SP_RESULT: &str = "Port noise is the .SP card's second result document, not an analysis of its own: request the \
+     s_parameters kind and author DONOISE on the card. The port-noise document is then published \
+     beside the scattering one under the same analysis identity.";
 
-const SP_DONOISE_GAP: &str = "The .SP card requests DONOISE. Port noise is that card's second result document and this \
-     executor publishes one document per card, so the noise evidence would be dropped. Author \
-     the .SP card without its noise flag.";
+const POST_PROCESS_IS_A_TRANSIENT_RESULT: &str = "\
+     .FOUR and .FFT post-process a transient rather than being analyses of their own: request the \
+     transient kind and author the cards. Their documents are then published beside the \
+     transient's, each under the identity the canonical plan minted for it.";
 
 /// Resolve one wire analysis kind.
 pub fn planned_kind_for_request(kind: &str) -> Option<PlannedAnalysisKind> {
@@ -132,12 +135,13 @@ pub fn matches_request(requested: PlannedAnalysisKind, planned: PlannedAnalysisK
 
 /// Dot-command spelling and refusal reason for an authored card this build has
 /// no lossless result mapping for.
-pub fn unmapped_deck_card(command: &AnalysisCommand) -> Option<(&'static str, &'static str)> {
-    match command {
-        AnalysisCommand::Sp { do_noise: true, .. } => Some((".SP", SP_DONOISE_GAP)),
-        AnalysisCommand::Four { .. } => Some((".FOUR", SECOND_DOCUMENT_GAP)),
-        _ => None,
-    }
+///
+/// Empty for now: every card the planner accepts projects into shared result
+/// documents this executor publishes. The hook stays because refusing a card
+/// before any solver work is how a future family avoids being executed into a
+/// lossy artifact.
+pub fn unmapped_deck_card(_command: &AnalysisCommand) -> Option<(&'static str, &'static str)> {
+    None
 }
 
 //=============================================================================
@@ -145,16 +149,43 @@ pub fn unmapped_deck_card(command: &AnalysisCommand) -> Option<(&'static str, &'
 //=============================================================================
 
 /// One executed card's typed projection.
+///
+/// A card is not always one document. `.SP DONOISE` produces the scattering
+/// sweep and the port-noise sweep, and a transient produces one Fourier
+/// spectrum per authored `.FOUR` operand. Each of those is a complete shared
+/// result document with its own analysis identity, published beside the parent
+/// rather than folded into it, so the whole set is staged in the one artifact
+/// transaction the parent's own document is staged in.
 pub(crate) struct DirectiveProjection {
-    /// The shared result document, staged with its family payload and series.
+    /// The card's own shared result document, with its family payload and
+    /// series.
     pub(crate) builder: AnalysisResultDocumentBuilder,
+    /// Documents this card produced beside its own, in publication order.
+    pub(crate) children: Vec<ChildDocument>,
     /// Transient `.FFT` spectra, when the parent transient authored any.
     pub(crate) fft: Option<TransientFftResultDocument>,
 }
 
+/// One shared result document published beside its parent card's.
+pub(crate) struct ChildDocument {
+    /// Artifact namespace component this document publishes under, appended to
+    /// the parent's own artifact stem.
+    ///
+    /// A child with an analysis identity of its own uses that identity's tag;
+    /// a child that shares its parent's identity — port noise is the `.SP`
+    /// card's second result and carries the card's own identity — uses its
+    /// result family, which is what distinguishes the two.
+    pub(crate) namespace: String,
+    pub(crate) builder: AnalysisResultDocumentBuilder,
+}
+
 impl From<AnalysisResultDocumentBuilder> for DirectiveProjection {
     fn from(builder: AnalysisResultDocumentBuilder) -> Self {
-        Self { builder, fft: None }
+        Self {
+            builder,
+            children: Vec::new(),
+            fft: None,
+        }
     }
 }
 
@@ -163,10 +194,16 @@ impl From<AnalysisResultDocumentBuilder> for DirectiveProjection {
 /// `peers` are the other analyses materialized at the same coordinate; a
 /// `.PAC` or `.ENVELOPE` card reads its upstream periodic card from them so
 /// the large-signal operating point comes from the deck's own configuration
-/// rather than from a re-derived default.
+/// rather than from a re-derived default. `plan` is the deck's canonical plan,
+/// which is what names the post-process documents a card publishes beside its
+/// own.
+#[allow(clippy::too_many_arguments)]
+// Every argument is an independent input the projection needs, and moving the
+// same list into a struct one call earlier would not reduce it.
 pub(crate) fn run_directive(
     engine: &Engine,
     netlist: &Netlist,
+    plan: &DeckPlan,
     analysis: &MaterializedAnalysis,
     peers: &[MaterializedAnalysis],
     coordinate: RunCoordinateId,
@@ -306,9 +343,44 @@ pub(crate) fn run_directive(
                     .map_err(map_fft_document_error)?,
                 )
             };
+            // Each authored `.FOUR` operand is its own analysis instance with
+            // its own identity, bound by the plan to this transient. The core
+            // entry point owns the `.FOUR`-to-transient-column grammar and
+            // returns each spectrum already carrying the identity the planner
+            // minted for it.
+            let fourier = rspice_core::execution::evaluate_planned_fourier_with_abort(
+                plan,
+                netlist,
+                id,
+                &result,
+                engine.config().resource_limits,
+                abort,
+            )?;
+            let mut children = Vec::new();
+            children
+                .try_reserve_exact(fourier.len())
+                .map_err(|_| DirectiveFailure::SeriesBudget)?;
+            for spectrum in &fourier {
+                check_abort(abort)?;
+                children.push(ChildDocument {
+                    namespace: spectrum.analysis.tag(),
+                    builder: AnalysisResultDocument::from_fourier(
+                        spectrum.analysis,
+                        spectrum.parent,
+                        &spectrum.output,
+                        spectrum.output_unit.clone(),
+                        &spectrum.result,
+                    )
+                    .map_err(map_result_document_error)?,
+                });
+            }
             return AnalysisResultDocument::from_transient(id, &result, None, Vec::new())
                 .map_err(map_result_document_error)
-                .map(|builder| DirectiveProjection { builder, fft });
+                .map(|builder| DirectiveProjection {
+                    builder,
+                    children,
+                    fft,
+                });
         }
         AnalysisCommand::Noise {
             output_node,
@@ -428,8 +500,24 @@ pub(crate) fn run_directive(
         }
         AnalysisCommand::Sp { .. } => {
             let run = engine.run_sp_with_abort(netlist, command, abort)?;
-            AnalysisResultDocument::from_s_parameters(id, &run.scattering)
-                .map_err(map_result_document_error)
+            let builder = AnalysisResultDocument::from_s_parameters(id, &run.scattering)
+                .map_err(map_result_document_error)?;
+            // Port noise is the `.SP` card's second result and shares its
+            // analysis identity, exactly as the shared document declares, so
+            // its result family is what separates the two artifacts.
+            let children = match &run.port_noise {
+                Some(noise) => vec![ChildDocument {
+                    namespace: AnalysisResultKind::PortNoise.tag().to_owned(),
+                    builder: AnalysisResultDocument::from_port_noise(id, noise)
+                        .map_err(map_result_document_error)?,
+                }],
+                None => Vec::new(),
+            };
+            return Ok(DirectiveProjection {
+                builder,
+                children,
+                fft: None,
+            });
         }
         AnalysisCommand::MonteCarlo(card) => {
             let distribution = match card.distribution {

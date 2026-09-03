@@ -4,25 +4,14 @@
 //! publishes them. An unavailable probe is a typed execution failure, never a
 //! successful scale-only artifact.
 
+mod common;
+
+use common::{TestDirectory, test_dir};
+
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
-use std::sync::atomic::{AtomicUsize, Ordering};
 
-static NEXT_TEST_DIR: AtomicUsize = AtomicUsize::new(0);
-
-fn test_dir(tag: &str) -> PathBuf {
-    let ordinal = NEXT_TEST_DIR.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!(
-        "rspice_device_observable_{}_{}_{}",
-        std::process::id(),
-        ordinal,
-        tag
-    ));
-    std::fs::create_dir_all(&dir).expect("create device-observable test directory");
-    dir
-}
-
-fn run_fixture(tag: &str, fixture: &str) -> (PathBuf, PathBuf, Output) {
+fn run_fixture(tag: &str, fixture: &str) -> (TestDirectory, PathBuf, Output) {
     let dir = test_dir(tag);
     let deck = dir.join("input.cir");
     let output_path = dir.join("result.csv");

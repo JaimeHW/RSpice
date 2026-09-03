@@ -1,14 +1,11 @@
 //! `--corners` with `--corner-lib` must re-elaborate the deck per corner so
 //! each corner's `.lib` section actually changes the simulated circuit.
 
-use std::path::PathBuf;
-use std::process::Command;
+mod common;
 
-fn test_dir() -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("rspice_corner_lib_{}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("create test dir");
-    dir
-}
+use common::test_dir;
+
+use std::process::Command;
 
 fn read_op_voltage(path: &std::path::Path, signal: &str) -> f64 {
     let text = std::fs::read_to_string(path).expect("read op csv");
@@ -24,7 +21,7 @@ fn read_op_voltage(path: &std::path::Path, signal: &str) -> f64 {
 
 #[test]
 fn corner_lib_sections_change_results() {
-    let dir = test_dir();
+    let dir = test_dir("sections");
 
     std::fs::write(
         dir.join("corners.lib"),
@@ -231,8 +228,7 @@ fn nominal_corners_record_measurements_per_corner() {
 
 #[test]
 fn missing_corner_section_fails_the_corner() {
-    let dir = test_dir().join("missing");
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = test_dir("missing");
 
     std::fs::write(
         dir.join("corners.lib"),

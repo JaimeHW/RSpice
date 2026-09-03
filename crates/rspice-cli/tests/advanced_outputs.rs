@@ -2,14 +2,12 @@
 //! .STEP sweeps, Monte Carlo samples, transfer function, pole-zero, and
 //! sensitivity used to print summaries and discard the data.
 
+mod common;
+
+use common::test_dir;
+
 use std::path::PathBuf;
 use std::process::Command;
-
-fn test_dir(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("rspice_adv_out_{}_{}", std::process::id(), tag));
-    std::fs::create_dir_all(&dir).expect("create test dir");
-    dir
-}
 
 fn run_rspice(args: &[&str]) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_rspice"))
@@ -424,7 +422,7 @@ fn sensitivity_exports_table() {
     );
 
     let csv = std::fs::read_to_string(&out).expect("sensitivity table");
-    assert!(csv.contains("dV/d(rtop)"), "column header: {csv}");
+    assert!(csv.contains("dV(out)/d(rtop)"), "column header: {csv}");
     // dV(out)/dRtop = -V*R2/(R1+R2)^2 = -1.25e-3 V/ohm
     let row = csv.lines().nth(1).expect("data row");
     let value: f64 = row.split(',').nth(1).unwrap().parse().unwrap();

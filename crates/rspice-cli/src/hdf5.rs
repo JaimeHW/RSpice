@@ -457,7 +457,7 @@ impl Hdf5FftSection {
         // The identity of each authored `.FFT` request comes from the
         // canonical planner, so a decoded section is checked against the same
         // minting the writer used rather than a second spelling of it.
-        let canonical_ids = crate::analysis_identity::post_process_ids(
+        let canonical_ids = crate::commands::run::canonical_analysis_identities(
             rspice_core::execution::AnalysisKind::Fft,
             self.results.len(),
         )
@@ -2066,7 +2066,7 @@ mod tests {
             })
             .collect();
         Hdf5FftResult {
-            analysis_id: crate::analysis_identity::post_process_ids(
+            analysis_id: crate::commands::run::canonical_analysis_identities(
                 rspice_core::execution::AnalysisKind::Fft,
                 ordinal,
             )

@@ -6,41 +6,16 @@
 //! runner calls is enforced at lint time by this crate's `clippy.toml`
 //! `disallowed-methods` list, not by reading the runner's source here.
 
+mod common;
+
+use common::test_dir;
+
 use serde_json::Value;
-use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicU64, Ordering};
-
-struct TestDirectory(PathBuf);
-
-impl TestDirectory {
-    fn new(tag: &str) -> Self {
-        static NEXT: AtomicU64 = AtomicU64::new(0);
-        let serial = NEXT.fetch_add(1, Ordering::Relaxed);
-        let path = std::env::temp_dir().join(format!(
-            "rspice_basic_cancel_{}_{}_{}",
-            std::process::id(),
-            tag,
-            serial
-        ));
-        std::fs::create_dir(&path).expect("create basic-cancellation test directory");
-        Self(path)
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TestDirectory {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
 
 #[test]
 fn canonical_temperature_axis_still_completes_and_publishes_each_coordinate() {
-    let directory = TestDirectory::new("success");
+    let directory = test_dir("success");
     let deck = directory.path().join("temperature_success.sp");
     let requested = directory.path().join("temperature.json");
     std::fs::write(
@@ -113,7 +88,7 @@ fn canonical_temperature_axis_still_completes_and_publishes_each_coordinate() {
 
 #[test]
 fn reachable_temperature_axis_timeout_is_typed_and_publishes_no_artifact() {
-    let directory = TestDirectory::new("timeout");
+    let directory = test_dir("timeout");
     let deck = directory.path().join("temperature_timeout.sp");
     let requested = directory.path().join("cancelled.json");
 
@@ -177,7 +152,7 @@ fn reachable_temperature_axis_timeout_is_typed_and_publishes_no_artifact() {
 
 #[test]
 fn a_run_that_finishes_under_its_deadline_announces_no_timeout() {
-    let directory = TestDirectory::new("deadline_latch");
+    let directory = test_dir("deadline_latch");
     let deck = directory.path().join("fast.sp");
     let output = directory.path().join("fast.json");
     std::fs::write(

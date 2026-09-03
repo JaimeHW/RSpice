@@ -659,7 +659,7 @@ fn execute_analysis(
             // its analysis identity, exactly as the shared document declares.
             if let Some(noise) = &run.port_noise {
                 builders.push(
-                    AnalysisResultDocument::from_port_noise(id, &noise.points)
+                    AnalysisResultDocument::from_port_noise(id, noise)
                         .map_err(document_projection_error)?,
                 );
             }

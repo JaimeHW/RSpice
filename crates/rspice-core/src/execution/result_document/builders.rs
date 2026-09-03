@@ -26,9 +26,10 @@ use super::payload::{
     NoiseContributionSeries, NoisePayload, NoiseSourceIdentityDocument, NyquistSample,
     OperatingPointPayload, OscillatorPhaseNoiseDocument, PNoiseBandwidth, PNoiseContribution,
     PNoiseContributor, PNoisePayload, PacConversionEntry, PacConversionMatrixDocument, PacPayload,
-    PacSidebandDescriptor, PoleZeroPayload, PortDocument, PortNoisePayload, RealEventPoint,
-    RealEventTrace, ResultPayload, RootSetEvidenceDocument, SParameterPayload, SensitivityEntry,
-    SensitivityPayload, StabilityPayload, TransferFunctionPayload, TransientPayload,
+    PacSidebandDescriptor, PoleZeroPayload, PortDocument, PortNoiseCovarianceNormalization,
+    PortNoisePayload, RealEventPoint, RealEventTrace, ResultPayload, RootSetEvidenceDocument,
+    SParameterPayload, SensitivityElementTag, SensitivityEntry, SensitivityPayload,
+    StabilityPayload, TransferFunctionPayload, TransientPayload, TwoPortNoiseEntry,
 };
 use super::{
     AnalysisResultDocument, AnalysisResultDocumentBuilder, AxisValues, ComplexSample,
@@ -42,12 +43,12 @@ use crate::analysis::distortion::{DistortionAnalysisResult, DistortionPointResul
 use crate::analysis::fourier::FourierResult;
 use crate::analysis::harmonic_balance::HbResult;
 use crate::analysis::monte_carlo::MonteCarloResult;
-use crate::analysis::noise::{NoiseResult, PortNoiseCorrelationResult};
+use crate::analysis::noise::NoiseResult;
 use crate::analysis::pac::PacResult;
 use crate::analysis::pnoise::{PhaseNoisePoint, PnoiseResult};
 use crate::analysis::pole_zero::PoleZeroResult;
 use crate::analysis::pss::PssResult;
-use crate::analysis::s_param::SParameterResult;
+use crate::analysis::s_param::{PortNoiseAssembly, SParameterResult};
 use crate::analysis::sensitivity::{AcSensitivityResult, SensitivityResult};
 use crate::analysis::stb::StbResult;
 use crate::analysis::transfer::TransferFunctionResult;
@@ -1358,15 +1359,22 @@ impl AnalysisResultDocument {
         )
     }
 
-    /// Project one port-noise correlation sweep.
+    /// Project one port-noise correlation sweep with its provenance.
     ///
     /// The analysis identity is the `.SP` card that produced it, because
     /// port-noise is that card's optional second result.
+    ///
+    /// The whole assembly is projected, not only its covariance: the
+    /// temperature the sweep was evaluated at, the `4kT` thermal reference the
+    /// covariance is normalized against, and — for a two-port network — the
+    /// standard noise figures derived from it are all evidence a consumer
+    /// cannot recover from the matrix alone.
     pub fn from_port_noise(
         analysis: AnalysisInstanceId,
-        points: &[PortNoiseCorrelationResult],
+        assembly: &PortNoiseAssembly,
     ) -> Result<AnalysisResultDocumentBuilder, ResultDocumentError> {
         const LOCATION: &str = "port-noise result";
+        let points = assembly.points.as_slice();
         let first = points
             .first()
             .ok_or_else(|| source_error(LOCATION, "a port-noise sweep needs at least one point"))?;
@@ -1432,9 +1440,43 @@ impl AnalysisResultDocument {
             }
         }
 
+        let two_port = match &assembly.two_port {
+            Some(parameters) => {
+                if parameters.len() != point_count {
+                    return Err(source_error(
+                        LOCATION,
+                        "the two-port noise parameters do not cover every swept frequency",
+                    ));
+                }
+                parameters
+                    .iter()
+                    .zip(&frequencies)
+                    .map(|(parameter, frequency)| TwoPortNoiseEntry {
+                        frequency: *frequency,
+                        noise_resistance_ohm: parameter.noise_resistance,
+                        noise_factor: parameter.noise_factor,
+                        minimum_noise_factor: parameter.minimum_noise_factor,
+                        optimum_source_reflection: ComplexSample {
+                            real: parameter.optimum_source_reflection.re,
+                            imaginary: parameter.optimum_source_reflection.im,
+                        },
+                    })
+                    .collect()
+            }
+            None => Vec::new(),
+        };
+
         Ok(Self::builder(
             analysis,
-            ResultPayload::PortNoise(PortNoisePayload { port_count }),
+            ResultPayload::PortNoise(PortNoisePayload {
+                port_count,
+                reference_temperature_kelvin: assembly.reference_temperature_kelvin,
+                covariance_normalization: PortNoiseCovarianceNormalization::AmpereSquaredPerHertz,
+                thermal_normalization_joule: 4.0
+                    * crate::constants::K_BOLTZMANN
+                    * assembly.reference_temperature_kelvin,
+                two_port,
+            }),
             point_count,
         )
         .axis(axis)
@@ -1833,6 +1875,82 @@ impl AnalysisResultDocument {
         let payload = SensitivityPayload {
             output: result.output.clone(),
             entries,
+            ac_entries: Vec::new(),
+        };
+        Ok(Self::builder(analysis, ResultPayload::Sensitivity(payload), 0).scalars(scalars))
+    }
+
+    /// Project one derivative of an output with respect to one netlist
+    /// parameter.
+    ///
+    /// This is the shape a single-parameter probe produces: a `.PARAM` may
+    /// drive several elements at once, so the derivative belongs to the
+    /// parameter rather than to any device instance, and there is exactly one
+    /// entry. Everything the shared payload declares is still present —
+    /// the authored output, its operating-point value, the parameter's nominal
+    /// value, and both the absolute and the normalized derivative — so the
+    /// probe publishes the same document a `.SENS` card does rather than a
+    /// narrower one.
+    pub fn from_parameter_sensitivity(
+        analysis: AnalysisInstanceId,
+        output: &str,
+        output_value: Value,
+        parameter: &str,
+        nominal_value: Value,
+        absolute: Value,
+    ) -> Result<AnalysisResultDocumentBuilder, ResultDocumentError> {
+        const LOCATION: &str = "parameter sensitivity result";
+        for (label, value) in [
+            ("output value", output_value),
+            ("nominal value", nominal_value),
+            ("absolute sensitivity", absolute),
+        ] {
+            if !value.is_finite() {
+                return Err(source_error(
+                    LOCATION,
+                    format!("{label} of '{parameter}' is {value}"),
+                ));
+            }
+        }
+        // The normalized derivative is a relative-change ratio, so it is only
+        // defined where the operating-point output is non-zero. A zero output
+        // is a real study whose relative sensitivity does not exist; reporting
+        // an infinity or a zero for it would be a claim the numbers do not
+        // support.
+        if output_value == 0.0 {
+            return Err(source_error(
+                LOCATION,
+                format!(
+                    "the operating-point value of '{output}' is zero, so the normalized \
+                     sensitivity to '{parameter}' is undefined"
+                ),
+            ));
+        }
+        let normalized = absolute * nominal_value / output_value;
+        if !normalized.is_finite() {
+            return Err(source_error(
+                LOCATION,
+                format!("normalized sensitivity of '{parameter}' is {normalized}"),
+            ));
+        }
+        let scalars = vec![real_scalar(
+            LOCATION,
+            "output_value",
+            "Output value",
+            SignalUnit::Dimensionless,
+            output_value,
+        )?];
+        let payload = SensitivityPayload {
+            output: output.to_owned(),
+            entries: vec![SensitivityEntry {
+                vector_name: parameter.to_owned(),
+                element: parameter.to_owned(),
+                element_kind: SensitivityElementTag::Parameter,
+                parameter: parameter.to_owned(),
+                nominal_value,
+                absolute,
+                normalized,
+            }],
             ac_entries: Vec::new(),
         };
         Ok(Self::builder(analysis, ResultPayload::Sensitivity(payload), 0).scalars(scalars))

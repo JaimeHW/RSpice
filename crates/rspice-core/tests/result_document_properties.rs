@@ -33,9 +33,10 @@ use rspice_core::execution::result_document::{
     MonteCarloVariableStatistics, NamedObservable, NamedObservableSeries, NoiseContributionSeries,
     NoiseMechanismTag, NoisePayload, NoiseSourceIdentityDocument, NyquistSample,
     OperatingPointPayload, PNoiseBandwidth, PNoiseContribution, PNoiseContributor, PNoisePayload,
-    PacPayload, PacSidebandDescriptor, PoleZeroPayload, PortDocument, PortNoisePayload, PssPayload,
-    ResultAxis, ResultAxisKind, ResultDocumentError, ResultNamespaces, ResultPayload, ResultScalar,
-    ResultSignal, RootSetEvidenceDocument, SParameterPayload, ScalarValue, SensitivityElementTag,
+    PacPayload, PacSidebandDescriptor, PoleZeroPayload, PortDocument,
+    PortNoiseCovarianceNormalization, PortNoisePayload, PssPayload, ResultAxis, ResultAxisKind,
+    ResultDocumentError, ResultNamespaces, ResultPayload, ResultScalar, ResultSignal,
+    RootSetEvidenceDocument, SParameterPayload, ScalarValue, SensitivityElementTag,
     SensitivityEntry, SensitivityPayload, SeriesAvailability, SeriesValues, StabilityPayload,
     TransferFunctionPayload, TransientPayload,
 };
@@ -425,7 +426,13 @@ fn document(family: usize, shape: &Shape) -> AnalysisResultDocument {
             None,
             ResultAxisKind::PortIndex,
             integer_axis.clone(),
-            ResultPayload::PortNoise(PortNoisePayload { port_count: 2 }),
+            ResultPayload::PortNoise(PortNoisePayload {
+                port_count: 2,
+                reference_temperature_kelvin: 300.15,
+                covariance_normalization: PortNoiseCovarianceNormalization::AmpereSquaredPerHertz,
+                thermal_normalization_joule: 4.0 * 1.380_649e-23 * 300.15,
+                two_port: Vec::new(),
+            }),
         ),
         7 => (
             AnalysisKind::Distortion,

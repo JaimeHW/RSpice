@@ -173,11 +173,16 @@ fn s_parameter_result() -> SParameterResult {
     result
 }
 
-fn port_noise_points() -> Vec<PortNoiseCorrelationResult> {
-    vec![PortNoiseCorrelationResult {
-        frequency: 1.0e9,
-        current_correlation: vec![vec![Complex64::new(1.6e-20, 0.0)]],
-    }]
+fn port_noise_assembly() -> crate::analysis::s_param::PortNoiseAssembly {
+    crate::analysis::s_param::PortNoiseAssembly {
+        reference_temperature_kelvin: 300.15,
+        points: vec![PortNoiseCorrelationResult {
+            frequency: 1.0e9,
+            current_correlation: vec![vec![Complex64::new(1.6e-20, 0.0)]],
+        }],
+        // A one-port network has no two-port noise figures.
+        two_port: None,
+    }
 }
 
 fn distortion_result() -> DistortionAnalysisResult {
@@ -405,7 +410,7 @@ fn document_for(kind: AnalysisResultKind) -> AnalysisResultDocument {
         ),
         AnalysisResultKind::PortNoise => AnalysisResultDocument::from_port_noise(
             instance(AnalysisKind::Sp),
-            &port_noise_points(),
+            &port_noise_assembly(),
         ),
         AnalysisResultKind::Distortion => AnalysisResultDocument::from_distortion(
             instance(AnalysisKind::Distortion),

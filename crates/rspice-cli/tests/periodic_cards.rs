@@ -2,38 +2,12 @@
 //! authored `.PSS`/`.PAC`/`.PNOISE`/`.ENVELOPE` card is refused with a typed
 //! unsupported-capability error before anything is written.
 
+mod common;
+
+use common::test_dir;
+
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
-use std::sync::atomic::{AtomicU64, Ordering};
-
-struct TestDirectory(PathBuf);
-
-impl std::ops::Deref for TestDirectory {
-    type Target = Path;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl Drop for TestDirectory {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-fn test_dir(tag: &str) -> TestDirectory {
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-    let serial = NEXT.fetch_add(1, Ordering::Relaxed);
-    let path = std::env::temp_dir().join(format!(
-        "rspice_periodic_cards_{}_{}_{}",
-        std::process::id(),
-        tag,
-        serial
-    ));
-    std::fs::create_dir_all(&path).expect("create test directory");
-    TestDirectory(path)
-}
 
 const CIRCUIT: &str = "* periodic card refusal\n\
                        V1 in 0 SIN(0 1 1G)\n\

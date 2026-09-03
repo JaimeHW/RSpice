@@ -1,15 +1,12 @@
 //! CLI ergonomics: stdin netlists, --save output selection, SPICE-suffix
 //! flag values, static topology checks, and config-file layering.
 
-use std::io::Write;
-use std::path::PathBuf;
-use std::process::{Command, Stdio};
+mod common;
 
-fn test_dir(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("rspice_ergo_{}_{}", std::process::id(), tag));
-    std::fs::create_dir_all(&dir).expect("create test dir");
-    dir
-}
+use common::test_dir;
+
+use std::io::Write;
+use std::process::{Command, Stdio};
 
 fn run_rspice(args: &[&str]) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_rspice"))

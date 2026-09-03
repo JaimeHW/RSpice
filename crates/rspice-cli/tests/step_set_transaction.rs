@@ -6,9 +6,12 @@
 //! that names it, or none of it — never the prefix that finished before the
 //! timeout fired.
 
+mod common;
+
+use common::test_dir;
+
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Coordinates of the swept deck below.
 const COORDINATES: usize = 16;
@@ -22,33 +25,6 @@ const CANCELLABLE_COORDINATES: usize = 32;
 /// the deck offers spans more than a decade, so a handful of attempts is
 /// generous even when the host stalls between two of them.
 const CANCELLATION_ATTEMPTS: usize = 6;
-
-struct TestDirectory(PathBuf);
-
-impl TestDirectory {
-    fn new(tag: &str) -> Self {
-        static NEXT: AtomicU64 = AtomicU64::new(0);
-        let serial = NEXT.fetch_add(1, Ordering::Relaxed);
-        let path = std::env::temp_dir().join(format!(
-            "rspice_step_set_{}_{}_{}",
-            std::process::id(),
-            tag,
-            serial
-        ));
-        std::fs::create_dir_all(&path).expect("create step-set test directory");
-        Self(path)
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TestDirectory {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
 
 /// A deck whose coordinates each cost real solver time, so a sweep of it can
 /// be caught after it has staged a coordinate and before it has published any.
@@ -172,7 +148,7 @@ fn exported_coordinate_count(output: &Output) -> usize {
 
 #[test]
 fn a_timeout_between_coordinates_publishes_the_whole_set_or_nothing() {
-    let directory = TestDirectory::new("timeout");
+    let directory = test_dir("timeout");
     let deck = write_cancellable_deck(directory.path());
     let requested = directory.path().join("results.json");
 
@@ -230,7 +206,7 @@ fn a_timeout_between_coordinates_publishes_the_whole_set_or_nothing() {
     let mut ceiling = sweep_seconds;
     let mut budget = sweep_seconds / (CANCELLABLE_COORDINATES as f64).sqrt();
     for _ in 0..CANCELLATION_ATTEMPTS {
-        let cancelled_directory = TestDirectory::new("cancelled");
+        let cancelled_directory = test_dir("cancelled");
         let cancelled_deck = write_cancellable_deck(cancelled_directory.path());
         let cancelled_output = cancelled_directory.path().join("results.json");
         let cancelled = run(&cancelled_deck, &cancelled_output, Some(budget));
@@ -293,7 +269,7 @@ fn a_timeout_between_coordinates_publishes_the_whole_set_or_nothing() {
 
 #[test]
 fn a_killed_sweep_publishes_nothing_and_the_next_run_reclaims_its_stages() {
-    let directory = TestDirectory::new("killed");
+    let directory = test_dir("killed");
     let deck = write_swept_deck(directory.path());
     let requested = directory.path().join("results.json");
 

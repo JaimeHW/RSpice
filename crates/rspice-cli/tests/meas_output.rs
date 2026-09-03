@@ -2,7 +2,10 @@
 //! must keep SPICE-scale magnitudes visible (a ~220ns risetime used to render
 //! as `0.000000`), and the `--meas-file` writers must keep full precision.
 
-use std::path::PathBuf;
+mod common;
+
+use common::test_dir;
+
 use std::process::Command;
 
 /// RC low-pass with tau = 100ns: risetime (10%..90% of a 5V step) is
@@ -16,12 +19,6 @@ const SUB_MICROSECOND_DECK: &str = "* RC low-pass\n\
      .END\n";
 
 const EXPECTED_RISETIME: f64 = 2.197e-7;
-
-fn test_dir(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("rspice_meas_out_{}_{}", std::process::id(), tag));
-    std::fs::create_dir_all(&dir).expect("create test dir");
-    dir
-}
 
 fn run_rspice(args: &[&str]) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_rspice"))

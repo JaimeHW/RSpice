@@ -1,47 +1,12 @@
 //! End-to-end `.SP DONOISE` coverage for parser compatibility, physical
 //! two-port noise data, format retention, and fail-closed Touchstone policy.
 
-use serde_json::Value;
-use std::path::{Path, PathBuf};
+mod common;
+
+use common::{fixture, read_json, test_dir};
+
+use std::path::Path;
 use std::process::{Command, Output};
-use std::sync::atomic::{AtomicU64, Ordering};
-
-fn fixture(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
-        .join("audit_regressions")
-        .join(name)
-}
-
-struct TestDirectory(PathBuf);
-
-impl std::ops::Deref for TestDirectory {
-    type Target = Path;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl Drop for TestDirectory {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-fn test_dir(tag: &str) -> TestDirectory {
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-    let serial = NEXT.fetch_add(1, Ordering::Relaxed);
-    let path = std::env::temp_dir().join(format!(
-        "rspice_sp_noise_{}_{}_{}",
-        std::process::id(),
-        tag,
-        serial
-    ));
-    std::fs::create_dir_all(&path).expect("create SP noise test directory");
-    TestDirectory(path)
-}
 
 fn run(deck: &Path, output_path: Option<&Path>, format: Option<&str>) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_rspice"));
@@ -53,10 +18,6 @@ fn run(deck: &Path, output_path: Option<&Path>, format: Option<&str>) -> Output 
         command.args(["--format", format]);
     }
     command.output().expect("run rspice SP deck")
-}
-
-fn read_json(path: &Path) -> Value {
-    serde_json::from_slice(&std::fs::read(path).expect("read SP JSON")).expect("parse SP JSON")
 }
 
 /// One `.SP` CSV artifact decoded into its scale and its named columns.
@@ -204,37 +165,90 @@ fn keyword_noise_exports_physical_covariance_and_two_port_parameters() {
     );
 }
 
-/// The shared S-parameter result document declares the scattering matrix and
-/// its ports. `.SP DONOISE` publishes more than that, so the typed format is
-/// refused rather than published with the noise provenance dropped.
+/// `.SP DONOISE` publishes two typed documents: the scattering sweep under the
+/// card's identity, and the port-noise sweep beside it under the same
+/// identity. The noise document carries its own provenance -- the reference
+/// temperature, the 4kT normalization it is measured against, and the two-port
+/// figures -- because none of that is recoverable from the covariance alone.
 #[test]
-fn donoise_refuses_the_typed_document_instead_of_dropping_noise_provenance() {
-    let dir = test_dir("donoise_json_refusal");
-    let path = dir.join("sp.json");
+fn donoise_publishes_the_scattering_and_port_noise_documents_side_by_side() {
+    let dir = test_dir("donoise_json");
+    let requested = dir.join("sp.json");
     let output = run(
         &fixture("sp_donoise_keyword.cir"),
-        Some(&path),
+        Some(&requested),
         Some("json"),
     );
-
     assert!(
-        !output.status.success(),
-        "a typed document that cannot hold the noise result was published anyway"
+        output.status.success(),
+        ".SP DONOISE failed to publish typed documents:\n{}",
+        String::from_utf8_lossy(&output.stderr)
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("covariance")
-            && stderr.contains("two-port noise")
-            && stderr.contains("csv"),
-        "the refusal must name what is lost and where to get it: {stderr}"
-    );
-    assert!(!path.exists(), "the refused run published an artifact");
 
-    // The same deck without DONOISE has a complete typed representation.
-    let typed = dir.join("plain.json");
+    let scattering = read_json(&requested);
+    assert_eq!(scattering["resultKind"], "sp");
+    assert_eq!(scattering["analysis"]["tag"], "sp-001");
+
+    let noise = read_json(&dir.join("sp.port-noise.json"));
+    assert_eq!(noise["resultKind"], "port-noise");
+    assert_eq!(
+        noise["analysis"]["tag"], "sp-001",
+        "port noise is the .SP card's second result and shares its identity"
+    );
+    let payload = &noise["payload"];
+    assert_eq!(payload["portCount"], 2);
+    assert_eq!(
+        payload["covarianceNormalization"], "ampere-squared-per-hertz",
+        "the covariance scale must be declared, not assumed"
+    );
+    let temperature = payload["referenceTemperatureKelvin"]
+        .as_f64()
+        .expect("reference temperature");
+    assert!(
+        (temperature - 300.15).abs() < 1.0e-9,
+        "reference temperature is {temperature} K"
+    );
+    let normalization = payload["thermalNormalizationJoule"]
+        .as_f64()
+        .expect("4kT normalization");
+    assert!(
+        (normalization / (4.0 * 1.380_649e-23 * temperature) - 1.0).abs() < 1.0e-12,
+        "4kT normalization is {normalization} J"
+    );
+
+    let two_port = payload["twoPort"].as_array().expect("two-port figures");
+    assert_eq!(
+        two_port.len(),
+        3,
+        "one entry per swept frequency: {two_port:#?}"
+    );
+    for entry in two_port {
+        // A matched 50 ohm attenuator between 50 ohm ports: F = 2, Fmin = 1,
+        // and the optimum source reflection is the matched load.
+        assert!(
+            (entry["noiseFactor"].as_f64().expect("F") - 2.0).abs() < 1.0e-9,
+            "noise factor: {entry:#?}"
+        );
+        assert!(
+            (entry["minimumNoiseFactor"].as_f64().expect("Fmin") - 1.0).abs() < 1.0e-9,
+            "minimum noise factor: {entry:#?}"
+        );
+        assert!(
+            (entry["optimumSourceReflection"]["real"]
+                .as_f64()
+                .expect("Sopt real")
+                - 1.0)
+                .abs()
+                < 1.0e-9,
+            "optimum source reflection: {entry:#?}"
+        );
+    }
+
+    // The same deck without DONOISE publishes the scattering document alone.
+    let plain = dir.join("plain.json");
     let output = run(
         &fixture("sp_donoise_numeric_false.cir"),
-        Some(&typed),
+        Some(&plain),
         Some("json"),
     );
     assert!(
@@ -242,9 +256,13 @@ fn donoise_refuses_the_typed_document_instead_of_dropping_noise_provenance() {
         "plain .SP failed:\n{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let document = read_json(&typed);
+    let document = read_json(&plain);
     assert_eq!(document["resultKind"], "sp");
     assert_eq!(document["analysis"]["tag"], "sp-001");
+    assert!(
+        !dir.join("plain.port-noise.json").exists(),
+        "a deck that requested no port noise published a port-noise artifact"
+    );
 }
 
 #[test]

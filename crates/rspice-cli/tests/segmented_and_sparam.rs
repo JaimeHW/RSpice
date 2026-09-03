@@ -1,13 +1,10 @@
 //! Checkpoint/resume segmentation and two-port S-parameter extraction.
 
-use std::path::PathBuf;
-use std::process::Command;
+mod common;
 
-fn test_dir(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("rspice_seg_sp_{}_{}", std::process::id(), tag));
-    std::fs::create_dir_all(&dir).expect("create test dir");
-    dir
-}
+use common::test_dir;
+
+use std::process::Command;
 
 fn run_rspice(args: &[&str]) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_rspice"))
@@ -836,5 +833,74 @@ fn native_sp_card_matches_series_resistor_analytics() {
         );
     }
 
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The typed `.SP` document carries the whole scattering matrix, not a matrix
+/// the CLI re-assembled beside the one the engine produced.
+#[test]
+fn native_sp_typed_document_carries_every_matrix_entry() {
+    let dir = test_dir("native_sp_document");
+    let deck = dir.join("twoport_native_sp.cir");
+    std::fs::write(
+        &deck,
+        "* native .sp two-port\n\
+         V1 p1 0 dc 0 ac 1 portnum 1 z0 50\n\
+         R1 p1 p2 50\n\
+         V2 p2 0 dc 0 ac 0 portnum 2 z0 50\n\
+         .sp lin 3 1k 100k\n\
+         .end\n",
+    )
+    .expect("write deck");
+
+    let requested = dir.join("out.json");
+    let output = run_rspice(&[
+        "--quiet",
+        "run",
+        deck.to_str().unwrap(),
+        "-o",
+        requested.to_str().unwrap(),
+        "-f",
+        "json",
+    ]);
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let document: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&requested).expect("typed .SP document"))
+            .expect("valid JSON");
+    assert_eq!(document["resultKind"], "sp");
+    let sample = |name: &str, part: &str| -> f64 {
+        document["signals"]
+            .as_array()
+            .expect("signals array")
+            .iter()
+            .find(|signal| signal["descriptor"]["canonicalName"].as_str() == Some(name))
+            .unwrap_or_else(|| panic!("missing {name} in {document:#}"))["values"]["samples"][0]
+            [part]
+            .as_f64()
+            .unwrap_or_else(|| panic!("missing {part} of {name}"))
+    };
+    // A matched 50 ohm series resistor between two 50 ohm ports: S11 = S22 =
+    // 1/3, S21 = S12 = 2/3. Every entry has to be present -- a document that
+    // repeated one diagonal entry and zero-filled the rest would still be a
+    // well-formed document.
+    for name in ["s(1,1)", "s(2,2)"] {
+        assert!(
+            (sample(name, "real") - 1.0 / 3.0).abs() < 1e-9,
+            "{name} real part is {}",
+            sample(name, "real")
+        );
+    }
+    for name in ["s(2,1)", "s(1,2)"] {
+        assert!(
+            (sample(name, "real") - 2.0 / 3.0).abs() < 1e-9,
+            "{name} real part is {}",
+            sample(name, "real")
+        );
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }

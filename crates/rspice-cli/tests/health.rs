@@ -1,12 +1,8 @@
-use std::path::PathBuf;
-use std::process::Command;
+mod common;
 
-fn test_dir(tag: &str) -> PathBuf {
-    let directory =
-        std::env::temp_dir().join(format!("rspice_health_{}_{}", std::process::id(), tag));
-    std::fs::create_dir_all(&directory).expect("create health test directory");
-    directory
-}
+use common::test_dir;
+
+use std::process::Command;
 
 fn run_rspice(args: &[&str]) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_rspice"))
