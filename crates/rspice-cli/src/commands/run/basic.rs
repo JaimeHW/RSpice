@@ -1089,7 +1089,14 @@ pub(super) fn run_transient(
                 post_results,
             })
         }
-        Err(e) => Err(CliError::simulation_error_in(e.to_string(), "Transient")),
+        // Carry the engine's typed failure rather than its text. Stringifying
+        // here re-decided every transient failure as the simulation category,
+        // so a refused capability and a singular matrix left this process with
+        // the same status.
+        Err(source) => Err(CliError::CoreSimulationError {
+            source,
+            analysis: Some("Transient".to_string()),
+        }),
     }
 }
 
