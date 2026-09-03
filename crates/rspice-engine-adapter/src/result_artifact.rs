@@ -342,6 +342,89 @@ pub(crate) fn unit_symbol(unit: &SignalUnit) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rspice_core::abort_signal::NoAbort;
+    use rspice_core::execution::DeckPlan;
+    use rspice_core::resource::ResourceLimits;
+    use rspice_core::{Engine, Netlist};
+
+    /// One real operating-point document, projected exactly as the executor
+    /// projects it, so the budget and measurement contracts are exercised
+    /// against a document the engine actually produced.
+    fn divider_document() -> AnalysisResultDocument {
+        let netlist = Netlist::parse_validated(
+            "budget fixture\nV1 in 0 DC 10\nR1 in out 1k\nR2 out 0 1k\n.op\n.end\n",
+        )
+        .expect("budget fixture parses");
+        let plan =
+            DeckPlan::from_netlist_with_abort(&netlist, &ResourceLimits::unlimited(), &NoAbort)
+                .expect("budget fixture plans");
+        let analysis = plan.analyses()[0].id();
+        let (result, report) = Engine::default()
+            .run_dc_op_with_report_and_abort(&netlist, &NoAbort)
+            .expect("budget fixture solves");
+        AnalysisResultDocument::from_operating_point(analysis, &result, Some(&report))
+            .expect("budget fixture projects")
+            .build()
+            .expect("budget fixture validates")
+    }
+
+    #[test]
+    fn a_document_that_cannot_fit_is_refused_before_it_is_serialized() {
+        let document = divider_document();
+        let values = document.total_value_count();
+        assert!(values > 0, "the fixture must retain values to budget");
+        assert!(preflight_document_values(&document, u64::MAX).is_ok());
+
+        // The lower bound is the value count times the smallest encoding one
+        // value can have, so a budget one byte under that is provably
+        // unreachable and is refused without allocating the document's JSON.
+        let lower_bound = values as u64 * MINIMUM_ENCODED_BYTES_PER_VALUE;
+        assert!(matches!(
+            preflight_document_values(&document, lower_bound - 1),
+            Err(DirectiveFailure::ResultSetBytes)
+        ));
+        assert!(matches!(
+            encode_result_artifact("op-001.result.json".to_owned(), &document, &NoAbort, 1),
+            Err(DirectiveFailure::ResultSetBytes)
+        ));
+    }
+
+    #[test]
+    fn an_encoded_artifact_declares_the_documents_own_family_and_content_type() {
+        let document = divider_document();
+        let artifact = encode_result_artifact(
+            "op-001.result.json".to_owned(),
+            &document,
+            &NoAbort,
+            u64::MAX,
+        )
+        .expect("the fixture fits an unbounded budget");
+        assert_eq!(artifact.result_kind, document.result_kind().tag());
+        assert_eq!(artifact.content_type, result_document_content_type());
+        assert_eq!(
+            AnalysisResultDocument::from_json(&artifact.content).expect("artifact round-trips"),
+            document
+        );
+    }
+
+    #[test]
+    fn measurements_name_every_axis_signal_and_scalar_of_the_document() {
+        let document = divider_document();
+        let measurements =
+            measurements_from_document(&document, &NoAbort).expect("projection succeeds");
+        let names: Vec<&str> = measurements
+            .iter()
+            .map(|measurement| measurement.name.as_str())
+            .collect();
+        assert!(names.contains(&"signal:v(out)"), "{names:?}");
+        assert!(names.contains(&"signal:i(v1)"), "{names:?}");
+        assert!(
+            measurements.iter().all(|measurement| {
+                !measurement.unit.trim().is_empty() && measurement.sample_count > 0
+            }),
+            "every measurement declares a unit and a shape"
+        );
+    }
 
     #[test]
     fn the_declared_content_type_is_read_off_the_core_document() {

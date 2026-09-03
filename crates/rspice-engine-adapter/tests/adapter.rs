@@ -1477,38 +1477,105 @@ fn an_unmapped_authored_card_fails_the_whole_request_without_writing_results() {
     }
 }
 
+/// A table-driven `.AC DATA=` card is the same AC family with the frequency
+/// grid and per-row parameter overrides coming from the deck's own table.
 #[test]
-fn a_result_set_larger_than_the_adapter_budget_is_a_typed_resource_refusal() {
-    // A very long transient is accounted before serialization, so the caller
-    // is told the result set does not fit rather than watching the process
-    // exhaust memory building a document it can never publish.
-    let job = Job::new("result-set-budget");
-    let response = job.run_with(
-        &build_request(
-            json!({"schema": "rspice-circuit-v1", "netlist_utf8":
-                "oversized retained result\n\
-                 V1 in 0 PULSE(0 1 0 1n 1n 1u 2u)\n\
-                 R1 in out 1\n\
-                 C1 out 0 1p\n\
-                 .tran 1n 100m\n\
-                 .end\n"}),
-            json!({"kind": "transient"}),
-            Vec::new(),
-        ),
-        &[("RSPICE_ENGINE_SOLVE_BUDGET_SECONDS", "60")],
-        &[],
+fn a_table_driven_ac_card_publishes_the_ordinary_ac_document() {
+    let job = Job::new("ac-data-table");
+    let response = job.execute(
+        "AC DATA deck\n\
+         .PARAM RVAL=1k\n\
+         I1 out 0 AC 1\n\
+         R1 out 0 {RVAL}\n\
+         .DATA points\n\
+         + FREQ RVAL\n\
+         + 10 1k\n\
+         + 100 2k\n\
+         .ENDDATA\n\
+         .AC DATA=points\n\
+         .END\n",
+        "ac_small_signal",
     );
-    let response = parse_stdout(&response);
+    assert_eq!(response["status"], "succeeded", "{response}");
+    let document = typed_result(&job, &response, "ac-001.result.json");
+    assert_eq!(document.result_kind(), AnalysisResultKind::Ac);
+    assert_eq!(document.point_count(), 2, "one point per authored row");
+    let rspice_core::execution::result_document::AxisValues::Real { values } =
+        document.axes()[0].values()
+    else {
+        panic!("a frequency axis is real")
+    };
+    assert_eq!(values, &[10.0, 100.0]);
+}
+
+/// The table-driven `.NOISE ... DATA=` card is the same noise family.
+#[test]
+fn a_table_driven_noise_card_publishes_the_ordinary_noise_document() {
+    let job = Job::new("noise-data-table");
+    let response = job.execute(
+        "noise DATA deck\n\
+         .GLOBAL_PARAM mag=1 phase=0\n\
+         V1 in 0 DC 0 AC {mag} {phase}\n\
+         R1 in out 1k\n\
+         R2 out 0 1k\n\
+         .NOISE V(out) V1 DATA=points\n\
+         .DATA points\n\
+         + mag phase HERTZ\n\
+         + 2 20 10\n\
+         + 1 10 1\n\
+         .ENDDATA\n\
+         .END\n",
+        "noise",
+    );
+    assert_eq!(response["status"], "succeeded", "{response}");
+    let document = typed_result(&job, &response, "noise-001.result.json");
+    assert_eq!(document.result_kind(), AnalysisResultKind::Noise);
+    assert_eq!(document.point_count(), 2, "one point per authored row");
+}
+
+/// The request selects one family; the deck may author several, and the
+/// others are simply not the requested run.
+#[test]
+fn a_deck_authoring_several_families_runs_only_the_requested_one() {
+    let job = Job::new("multi-family-deck");
+    let response = job.execute(
+        "several authored families\nV1 in 0 DC 1 AC 1\nR1 in out 1k\nC1 out 0 1u\n\
+         .op\n.tran 10u 1m\n.ac LIN 2 1k 2k\n.end\n",
+        "ac_small_signal",
+    );
+    assert_eq!(response["status"], "succeeded", "{response}");
+    let artifacts = response["result_artifacts"]
+        .as_array()
+        .expect("declared result artifacts");
+    assert_eq!(
+        artifacts.len(),
+        1,
+        "only the requested family publishes: {response}"
+    );
+    assert_eq!(artifacts[0]["path"], "results/ac-001.result.json");
+    let document = typed_result(&job, &response, "ac-001.result.json");
+    assert_eq!(document.result_kind(), AnalysisResultKind::Ac);
+}
+
+/// `.PAC` may attach to a `.HB` carrier, but the shared result document
+/// accepts only a `.PSS` parent for the pac family. Publishing without the
+/// link would drop the provenance that says which large-signal solution the
+/// small-signal response was taken around.
+#[test]
+fn a_pac_card_attached_to_a_harmonic_balance_carrier_is_refused() {
+    let job = Job::new("pac-hb-upstream");
+    let response = job.execute(
+        &format!("{RF}.hb 1g\n.pac dec 2 1k 10k input=v1 out=v(out)\n.end\n"),
+        "pac",
+    );
     assert_eq!(response["status"], "failed", "{response}");
+    assert_eq!(response["failure_code"], "analysis.unsupported_form");
+    let detail = response["failure_detail"]
+        .as_str()
+        .expect("a refusal explains itself");
     assert!(
-        [
-            "resource.result_set_bytes",
-            "resource.series_limit",
-            "engine.time_limit",
-            "engine.resource_limit",
-        ]
-        .contains(&response["failure_code"].as_str().expect("failure code")),
-        "an oversized result must be a bounded resource outcome: {response}"
+        detail.contains("pac-001") && detail.contains("hb-001"),
+        "{detail}"
     );
     assert!(job.results_are_empty());
 }

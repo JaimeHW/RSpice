@@ -36,7 +36,7 @@ const DEFAULT_HB_HARMONICS: usize = 9;
 
 /// Accepted samples one analysis may retain before the bounded resource
 /// outcome replaces an unbounded waveform.
-pub(crate) const MAX_SERIES_SAMPLES: usize = 2_000_000;
+const MAX_SERIES_SAMPLES: usize = 2_000_000;
 
 //=============================================================================
 // Requested families
@@ -260,6 +260,14 @@ pub(crate) fn run_directive(
             let results = engine.run_ac_with_abort(netlist, &frequencies, abort)?;
             AnalysisResultDocument::from_ac(id, &results).map_err(map_result_document_error)
         }
+        AnalysisCommand::AcData { table_name } => {
+            // The table supplies the frequency grid and may override circuit
+            // parameters per row. The per-row netlists the engine returns are
+            // the deck's own materialization, not a second interpretation, so
+            // the result projection is the ordinary AC one.
+            let (_rows, results) = engine.run_ac_data_with_abort(netlist, table_name, abort)?;
+            AnalysisResultDocument::from_ac(id, &results).map_err(map_result_document_error)
+        }
         AnalysisCommand::Tran {
             step,
             stop,
@@ -317,6 +325,28 @@ pub(crate) fn run_directive(
                 reference_node.as_deref(),
                 input_source,
                 &frequencies,
+                netlist
+                    .options
+                    .temp
+                    .map_or(engine.config().temperature, |temp| {
+                        rspice_core::constants::celsius_to_kelvin(temp)
+                    }),
+                abort,
+            )?;
+            AnalysisResultDocument::from_noise(id, &results).map_err(map_result_document_error)
+        }
+        AnalysisCommand::NoiseData {
+            output_node,
+            reference_node,
+            input_source,
+            table_name,
+        } => {
+            let (_rows, results) = engine.run_noise_data_named_with_input_source_and_abort(
+                netlist,
+                output_node,
+                reference_node.as_deref(),
+                input_source,
+                table_name,
                 netlist
                     .options
                     .temp

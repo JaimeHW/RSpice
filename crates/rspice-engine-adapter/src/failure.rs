@@ -10,6 +10,7 @@ use rspice_core::SimulationError;
 use rspice_core::execution::ResultDocumentError;
 
 /// Why one directive stopped without publishing its result.
+#[derive(Debug)]
 pub(crate) enum DirectiveFailure {
     /// The engine itself refused, or the abort source fired.
     Engine(SimulationError),

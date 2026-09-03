@@ -686,7 +686,9 @@ fn execute_analysis(
             content,
         });
     }
-    remaining_bytes(&artifacts, byte_limit)?;
+    // Each artifact was individually bounded; this proves the pair together
+    // still fits the budget this analysis was given.
+    let _remaining = remaining_bytes(&artifacts, byte_limit)?;
 
     Ok(AnalysisOutcome {
         measurements,
