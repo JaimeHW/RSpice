@@ -181,10 +181,10 @@ fn looks_like_xyce_generic_switch_control(stream: &TokenStream) -> bool {
     };
 
     let mut control_offset = 1;
-    if let TokenKind::Ident(state) = &stream.peek_n(control_offset).kind {
-        if state.eq_ignore_ascii_case("ON") || state.eq_ignore_ascii_case("OFF") {
-            control_offset += 1;
-        }
+    if let TokenKind::Ident(state) = &stream.peek_n(control_offset).kind
+        && (state.eq_ignore_ascii_case("ON") || state.eq_ignore_ascii_case("OFF"))
+    {
+        control_offset += 1;
     }
 
     matches!(

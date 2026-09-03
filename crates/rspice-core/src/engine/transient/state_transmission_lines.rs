@@ -254,10 +254,10 @@ impl Engine {
             // transient stamp instead of the modal Norton path below, but we
             // still populate the modal reference state to keep the per-line
             // bookkeeping uniform and harmless for native lines.
-            if tl.uses_native_runtime() {
-                if let Err(err) = tl.native_seed_dc(&near_physical, &far_physical) {
-                    log::warn!("{err}");
-                }
+            if tl.uses_native_runtime()
+                && let Err(err) = tl.native_seed_dc(&near_physical, &far_physical)
+            {
+                log::warn!("{err}");
             }
 
             let near_modal = tl.modalize_port_voltage(&near_physical);

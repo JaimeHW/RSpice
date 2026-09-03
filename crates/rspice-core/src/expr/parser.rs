@@ -871,7 +871,7 @@ impl<'a> Parser<'a> {
                 "{} inline lookup expects an input followed by at least one x/y pair, got {} arguments",
                 function_name, arg_count
             ));
-        } else if arg_count % 2 == 0 {
+        } else if arg_count.is_multiple_of(2) {
             self.errors.push(format!(
                 "{} inline lookup expects complete x/y pairs after its input, got {} arguments",
                 function_name, arg_count

@@ -692,7 +692,8 @@ fn transient_nqs_mode_combinations_are_scoped() {
         .charge
         .expect("CVCHARGEMOD=3 charges");
 
-    for invalid in [2.5] {
+    {
+        let invalid = 2.5;
         let mut card = nmos45();
         card.insert("CVCHARGEMOD".to_string(), invalid);
         let model = Arc::new(Bsim4v8Model::from_params(&card, false, T300));

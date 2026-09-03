@@ -5048,23 +5048,22 @@ fn scan_meas_statement_options(
                 }
                 _ => false,
             };
-        if statement_qualifier_ahead {
-            if let Some(qualifier) =
+        if statement_qualifier_ahead
+            && let Some(qualifier) =
                 consume_meas_statement_qualifier(&mut stream, line_num, params, true)?
-            {
-                match qualifier {
-                    ParsedMeasStatementQualifier::Numeric { key, value } => match key.as_str() {
-                        "GOAL" => options.goal = Some(value),
-                        "TOL" => options.tolerance = Some(value),
-                        "DEFAULT_VAL" => options.default_value = Some(value),
-                        "FAILVALUE" => options.fail_value = Some(value),
-                        "MINVAL" => options.minval = value,
-                        _ => unreachable!(),
-                    },
-                    ParsedMeasStatementQualifier::Print(policy) => options.print_policy = policy,
-                }
-                continue;
+        {
+            match qualifier {
+                ParsedMeasStatementQualifier::Numeric { key, value } => match key.as_str() {
+                    "GOAL" => options.goal = Some(value),
+                    "TOL" => options.tolerance = Some(value),
+                    "DEFAULT_VAL" => options.default_value = Some(value),
+                    "FAILVALUE" => options.fail_value = Some(value),
+                    "MINVAL" => options.minval = value,
+                    _ => unreachable!(),
+                },
+                ParsedMeasStatementQualifier::Print(policy) => options.print_policy = policy,
             }
+            continue;
         }
         match stream.peek().kind {
             TokenKind::LParen => parenthesis_depth += 1,

@@ -194,7 +194,7 @@ fn populate_ac_sweep(
     let mut freq = fstart;
     let mut index = 0_usize;
     while freq <= sweep_limit {
-        if index % 256 == 0 {
+        if index.is_multiple_of(256) {
             ensure_not_aborted(abort)?;
         }
         if frequencies.len() == retained_capacity {
@@ -242,7 +242,7 @@ fn bounded_ac_sweep_point_count(
     let mut retained_count = 0_usize;
     let mut freq = fstart;
     while freq <= sweep_limit {
-        if retained_count % 256 == 0 {
+        if retained_count.is_multiple_of(256) {
             ensure_not_aborted(abort)?;
         }
         if retained_count == max_points {

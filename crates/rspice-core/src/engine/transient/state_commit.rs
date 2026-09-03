@@ -155,19 +155,18 @@ impl Engine {
                 let i1 = accepted_solution.get(br1 - 1).copied().unwrap_or(0.0);
                 let i2 = accepted_solution.get(br2 - 1).copied().unwrap_or(0.0);
                 tl.update_history(accepted_time, v1, i1, v2, i2);
-                if !tl.is_distributed_rc() {
-                    if let Some(arrival) =
+                if !tl.is_distributed_rc()
+                    && let Some(arrival) =
                         tl.ltra_derivative_breakpoint_arrival(voltage_reltol, current_abstol)
-                    {
-                        Self::schedule_dynamic_tline_breakpoint(
-                            breakpoints,
-                            arrival,
-                            tstop,
-                            dynamic_breakpoints_added,
-                            warned_dynamic_breakpoint_cap,
-                            pending_dynamic_breakpoints,
-                        );
-                    }
+                {
+                    Self::schedule_dynamic_tline_breakpoint(
+                        breakpoints,
+                        arrival,
+                        tstop,
+                        dynamic_breakpoints_added,
+                        warned_dynamic_breakpoint_cap,
+                        pending_dynamic_breakpoints,
+                    );
                 }
                 tl.compact_ltra_history_if_straight();
                 continue;

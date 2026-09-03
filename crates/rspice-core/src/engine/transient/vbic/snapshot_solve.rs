@@ -1,7 +1,5 @@
 //! VBIC dynamic snapshot solve paths and homotopy fallbacks.
 
-#![allow(clippy::needless_range_loop)]
-
 use super::*;
 use std::cell::Cell;
 

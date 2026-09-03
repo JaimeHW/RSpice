@@ -129,7 +129,7 @@ fn poll_periodically(
     abort: &dyn AbortSignal,
     operation_index: usize,
 ) -> Result<(), OrdinarySpectrumError> {
-    if operation_index % ABORT_POLL_STRIDE == 0 {
+    if operation_index.is_multiple_of(ABORT_POLL_STRIDE) {
         ensure_not_aborted(abort)?;
     }
     Ok(())

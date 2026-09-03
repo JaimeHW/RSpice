@@ -53,7 +53,7 @@ pub(super) fn strip_inline_semicolon_comment_with_non_semicolon_comments(
             }
             '/' if allow_non_semicolon_comments && !in_single_quote && !in_double_quote => {
                 if matches!(chars.peek(), Some((_, '/')))
-                    && prev_char.map_or(true, |prev: char| prev.is_whitespace())
+                    && prev_char.is_none_or(|prev: char| prev.is_whitespace())
                 {
                     return &line[..idx];
                 }

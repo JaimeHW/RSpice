@@ -4,8 +4,6 @@
 //! - Operating point (DC OP) calculation
 //! - DC sweep for I-V curve generation
 
-#![allow(clippy::too_many_arguments)]
-
 use super::core::DcOpStartup;
 use super::{Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};

@@ -358,7 +358,8 @@ fn complex_csch(value: Complex64) -> Complex64 {
 fn finite_ac_partials<const N: usize>(items: [(&str, Complex64); N]) -> Vec<(String, Complex64)> {
     items
         .into_iter()
-        .filter_map(|(port, partial)| finite_complex(partial).then(|| (port.to_string(), partial)))
+        .filter(|&(_port, partial)| finite_complex(partial))
+        .map(|(port, partial)| (port.to_string(), partial))
         .collect()
 }
 
@@ -1069,6 +1070,9 @@ fn cpmsline_analyse_quasi_static(
     }
 }
 
+// 0.6366 is a published Kirschning-Jansen dispersion coefficient, not a
+// rounded FRAC_2_PI; replacing it would change the fitted model.
+#[allow(clippy::approx_constant)]
 fn cpmsline_analyse_dispersion(
     w: Value,
     h: Value,

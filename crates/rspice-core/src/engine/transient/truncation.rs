@@ -1,7 +1,5 @@
 //! Charge truncation and transient LTE control helpers.
 
-#![allow(clippy::needless_range_loop)]
-
 #[cfg(test)]
 use super::state::MosfetCompanionBiasSource;
 use super::*;

@@ -3,7 +3,6 @@
 //! Includes various MOSFET models (Level 1-3, BSIM3, BSIM4, EKV, VDMOS) and JFETs.
 //! Also contains shared utilities for smooth region transitions.
 
-#![allow(clippy::module_inception)]
 pub mod b3soi;
 pub mod bsim3v3;
 pub mod bsim4v8;

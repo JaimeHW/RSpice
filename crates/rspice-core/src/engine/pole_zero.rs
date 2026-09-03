@@ -1,5 +1,3 @@
-#![allow(clippy::needless_range_loop)]
-
 use super::{Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::pole_zero::{

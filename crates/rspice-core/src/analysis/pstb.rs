@@ -28,7 +28,6 @@
 //! For oscillators, one μ = 0 always (corresponding to phase shifts along orbit).
 //! The other exponents determine amplitude stability.
 
-#![allow(clippy::needless_range_loop)]
 use crate::abort_signal::AbortSignal;
 use crate::analysis::{
     FloquetOrbitKind, FloquetSpectrumEvidence, FloquetStabilityVerdict, classify_floquet_stability,
@@ -669,7 +668,7 @@ fn ensure_not_aborted(abort: &dyn AbortSignal) -> Result<(), SimulationError> {
 #[inline]
 fn poll_periodically(abort: &dyn AbortSignal, index: usize) -> Result<(), SimulationError> {
     const ABORT_POLL_STRIDE: usize = 64;
-    if index % ABORT_POLL_STRIDE == 0 {
+    if index.is_multiple_of(ABORT_POLL_STRIDE) {
         ensure_not_aborted(abort)?;
     }
     Ok(())

@@ -1,7 +1,5 @@
 //! Public BJT intrinsic API, operating-point accessors, and matrix stamping.
 
-#![allow(clippy::needless_range_loop)]
-
 use super::*;
 
 impl Bjt {

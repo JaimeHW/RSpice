@@ -6,7 +6,6 @@
 //! - G: Voltage-Controlled Current Source (VCCS)
 //! - H: Current-Controlled Voltage Source (CCVS)
 
-#![allow(clippy::too_many_arguments)]
 use crate::solver::{StaticMatrix, TripletMatrix};
 use crate::{NodeId, Value};
 

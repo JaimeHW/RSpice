@@ -1749,7 +1749,7 @@ fn evaluate_table3d_data_with_scratch(
     })
 }
 
-fn table_file_param<'a>(ctx: &'a CmContext, kind: TableKind) -> &'a str {
+fn table_file_param(ctx: &CmContext, kind: TableKind) -> &str {
     ctx.string_param("file")
         .filter(|path| !path.trim().is_empty())
         .unwrap_or_else(|| kind.default_file())

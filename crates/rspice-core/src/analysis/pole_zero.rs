@@ -25,7 +25,6 @@
 //! .PZ V(out) Vin CUR PZ    ; Find poles and zeros, current input
 //! ```
 
-#![allow(clippy::needless_range_loop)]
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::{Complex64, Value};
 use faer::{Mat, linalg::solvers::GeneralizedEigen};

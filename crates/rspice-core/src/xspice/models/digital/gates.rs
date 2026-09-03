@@ -294,18 +294,10 @@ fn tristate_direct_revert(
     *output_delay = delay;
 }
 
+#[derive(Default)]
 struct TristatePendingEvents {
     items: [Option<(Value, DigitalValue)>; 2],
     len: usize,
-}
-
-impl Default for TristatePendingEvents {
-    fn default() -> Self {
-        Self {
-            items: [None; 2],
-            len: 0,
-        }
-    }
 }
 
 impl TristatePendingEvents {

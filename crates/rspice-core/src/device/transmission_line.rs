@@ -23,7 +23,6 @@
 //! Uses delay buffers to store past values and interpolates for accurate delays.
 //! The transmission line is modeled as dependent sources with delay.
 
-#![allow(clippy::too_many_arguments)]
 use crate::{NodeId, Value};
 use std::cell::Cell;
 use std::collections::VecDeque;

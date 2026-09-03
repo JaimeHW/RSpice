@@ -34,8 +34,6 @@
 // `abulk0`/`dabulk0_dvb`/`exp_vgst` are computed in the DC path and read by
 // the charge models; ngspice keeps them here, so we retain the
 // assignments for faithful correspondence.
-#![allow(unused_assignments)]
-
 use super::super::common::{EPSSI, EXPL_THRESHOLD, MAX_EXPL, MIN_EXPL};
 use super::temp::B3SoiPdSized;
 use crate::Value;

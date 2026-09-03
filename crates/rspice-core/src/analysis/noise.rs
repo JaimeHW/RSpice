@@ -19,8 +19,6 @@
 //! ```
 //! This computes noise at output node referenced to input source Vin.
 
-#![allow(clippy::needless_range_loop)]
-
 use crate::constants::{K_BOLTZMANN, Q_ELECTRON, XYCE_K_BOLTZMANN, XYCE_Q_ELECTRON};
 use crate::{Complex64, Value};
 

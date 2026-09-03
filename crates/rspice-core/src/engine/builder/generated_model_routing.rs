@@ -775,27 +775,27 @@ fn generated_params(
         Vec::with_capacity(model_count + instance_params.len() + deferred_params.len());
     if let Some(model) = model_def {
         for (name, value) in &model.params {
-            if should_pass_model_param(target, name) {
-                if let Some(assignment) = generated_model_card_assignment(
+            if should_pass_model_param(target, name)
+                && let Some(assignment) = generated_model_card_assignment(
                     target,
                     name,
                     ParametricValue::Resolved(*value),
                     spice_dialect,
-                )? {
-                    params.push(assignment);
-                }
+                )?
+            {
+                params.push(assignment);
             }
         }
         for (name, expr) in &model.expr_params {
-            if should_pass_model_param(target, name) {
-                if let Some(assignment) = generated_model_card_assignment(
+            if should_pass_model_param(target, name)
+                && let Some(assignment) = generated_model_card_assignment(
                     target,
                     name,
                     ParametricValue::Expression(expr.clone()),
                     spice_dialect,
-                )? {
-                    params.push(assignment);
-                }
+                )?
+            {
+                params.push(assignment);
             }
         }
         for (name, value) in &model.string_params {

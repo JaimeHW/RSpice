@@ -1232,10 +1232,10 @@ impl Diode {
         cj0_given: bool,
         sidewall_cj0_given: bool,
     ) {
-        if !rs_given {
-            if let Some(value) = min_resistance.filter(|value| value.is_finite() && *value >= 0.0) {
-                self.rs = value;
-            }
+        if !rs_given
+            && let Some(value) = min_resistance.filter(|value| value.is_finite() && *value >= 0.0)
+        {
+            self.rs = value;
         }
         if let Some(value) = min_capacitance.filter(|value| value.is_finite() && *value >= 0.0) {
             if !cj0_given {

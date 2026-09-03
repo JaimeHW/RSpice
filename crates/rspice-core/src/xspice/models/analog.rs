@@ -2910,16 +2910,17 @@ impl CodeModel for AnalogOneShot {
                 request_oneshot_breakpoints(ctx, &[time1, time2, time3, time4]);
                 // An armed one-shot also needs the crossing itself, which no
                 // other device in the deck has a reason to schedule.
-                if !set && !locked {
-                    if let Some(crossing) = oneshot_predicted_trigger_time(
+                if !set
+                    && !locked
+                    && let Some(crossing) = oneshot_predicted_trigger_time(
                         ctx,
                         old_clock,
                         clock,
                         trigger,
                         positive_edge,
-                    ) {
-                        request_oneshot_breakpoints(ctx, &[crossing]);
-                    }
+                    )
+                {
+                    request_oneshot_breakpoints(ctx, &[crossing]);
                 }
             }
         }

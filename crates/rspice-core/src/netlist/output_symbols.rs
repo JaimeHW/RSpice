@@ -2302,7 +2302,7 @@ fn protect_xyce_output_operands(
     let mut copied_through = 0usize;
     let mut index = 0usize;
     while index < bytes.len() {
-        if index % 64 == 0 && abort.is_aborted() {
+        if index.is_multiple_of(64) && abort.is_aborted() {
             return Err(OutputOperandProtectionError::Aborted);
         }
         if matches!(bytes[index], b'\'' | b'"') {
@@ -2311,7 +2311,7 @@ fn protect_xyce_output_operands(
             while index < bytes.len()
                 && (bytes[index] != delimiter || is_backslash_escaped(bytes, index))
             {
-                if index % 64 == 0 && abort.is_aborted() {
+                if index.is_multiple_of(64) && abort.is_aborted() {
                     return Err(OutputOperandProtectionError::Aborted);
                 }
                 index += 1;
@@ -2827,7 +2827,7 @@ fn is_backslash_escaped(bytes: &[u8], index: usize) -> bool {
         preceding += 1;
         cursor -= 1;
     }
-    preceding % 2 != 0
+    !preceding.is_multiple_of(2)
 }
 
 fn extract_output_dependencies_with_context(

@@ -5,8 +5,6 @@
 //! runtime (cplload.c: right_consts/update_cnv/update_delayed_cnv/get_pvs_vi).
 //! The runtime is driven by [`crate::device::CoupledTransmissionLine`].
 
-#![allow(clippy::excessive_precision, clippy::needless_range_loop)]
-
 use std::{collections::VecDeque, fmt};
 
 use dd::Dd;

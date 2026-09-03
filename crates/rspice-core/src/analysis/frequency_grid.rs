@@ -241,7 +241,7 @@ fn ensure_not_aborted(abort: &dyn AbortSignal) -> Result<(), FrequencyGridError>
 
 #[inline]
 fn poll_abort(abort: &dyn AbortSignal, index: usize) -> Result<(), FrequencyGridError> {
-    if index % ABORT_POLL_STRIDE == 0 {
+    if index.is_multiple_of(ABORT_POLL_STRIDE) {
         ensure_not_aborted(abort)?;
     }
     Ok(())

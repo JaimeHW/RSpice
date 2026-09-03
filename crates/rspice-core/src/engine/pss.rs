@@ -19,7 +19,6 @@
 //!    - Solve for Newton step and update `x0`
 //! 4. Build final `PssResult` with periodic waveform and harmonics
 
-#![allow(clippy::needless_range_loop, clippy::too_many_arguments)]
 use super::{Engine, SimulationError, TransientCheckpoint, TransientResult};
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::{
@@ -466,15 +465,15 @@ impl PssDenseLu {
         }
         for row in 1..self.n {
             let mut value = solution[row];
-            for column in 0..row {
-                value -= self.lu[row * self.n + column] * solution[column];
+            for (column, &entry) in solution.iter().enumerate().take(row) {
+                value -= self.lu[row * self.n + column] * entry;
             }
             solution[row] = value;
         }
         for row in (0..self.n).rev() {
             let mut value = solution[row];
-            for column in (row + 1)..self.n {
-                value -= self.lu[row * self.n + column] * solution[column];
+            for (column, &entry) in solution.iter().enumerate().take(self.n).skip((row + 1)) {
+                value -= self.lu[row * self.n + column] * entry;
             }
             solution[row] = value / self.lu[row * self.n + row];
         }

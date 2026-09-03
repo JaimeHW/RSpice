@@ -261,9 +261,9 @@ fn d_ram_select_code(ctx: &CmContext, shape: DMemoryShape, select_codes: &[i64])
         D_RAM_SELECT_VALUE_MAX,
     )?;
 
-    for bit_idx in 0..shape.select_width {
+    for (bit_idx, &select_code) in select_codes.iter().enumerate().take(shape.select_width) {
         let expected = (select_value >> bit_idx) & 1;
-        if select_codes[bit_idx] != expected {
+        if select_code != expected {
             return Ok(0);
         }
     }
@@ -412,8 +412,8 @@ fn d_ram_write_word(
         return;
     };
 
-    for bit in 0..shape.word_width {
-        let code = data_codes[bit];
+    for (bit, &data_code) in data_codes.iter().enumerate().take(shape.word_width) {
+        let code = data_code;
         d_ram_set_memory_state(ctx, scratch_state, shape, address_index, bit, code);
     }
 }

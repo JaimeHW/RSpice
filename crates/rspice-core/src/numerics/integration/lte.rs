@@ -5,8 +5,6 @@
 //! prediction built from the accepted history, so it needs the same companion
 //! coefficients the devices stamped with.
 
-#![allow(clippy::type_complexity)]
-
 use crate::Value;
 use crate::numerics::integration::IntegrationMethod;
 

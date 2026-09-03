@@ -3,8 +3,6 @@
 //! Implements the Ebers-Moll model for NPN and PNP transistors.
 //! Supports both large-signal DC and small-signal AC analysis.
 
-#![allow(clippy::needless_range_loop)]
-
 use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
 use crate::solver::{CscIndex, StaticMatrix};
 use crate::{NodeId, Value};

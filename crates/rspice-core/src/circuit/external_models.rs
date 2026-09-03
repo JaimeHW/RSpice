@@ -2050,7 +2050,8 @@ impl CircuitData {
         let mut aliases = self
             .node_map
             .iter()
-            .filter_map(|(name, &candidate)| (candidate == node).then(|| name.to_ascii_lowercase()))
+            .filter(|&(_name, &candidate)| candidate == node)
+            .map(|(name, &_candidate)| name.to_ascii_lowercase())
             .collect::<Vec<_>>();
         aliases.sort_unstable();
         aliases.dedup();

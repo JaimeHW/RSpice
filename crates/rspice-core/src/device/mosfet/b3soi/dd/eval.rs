@@ -35,8 +35,6 @@
 // `abulk0`/`dabulk0_dvb`/`exp_vgst` are computed in the DC path but only read
 // by the CAPMOD=2/3 charge model; ngspice keeps them here, so we
 // retain the assignments for a faithful seam rather than dropping them.
-#![allow(unused_assignments)]
-
 use super::super::common::{
     B3SoiDialect, DELT_VBS0DIO, DELT_VBS0EFF, DELT_VBSDIO, DELT_VBSEFF, DELT_VBSMOS, OFF_VBSDIO,
 };

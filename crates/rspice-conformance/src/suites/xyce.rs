@@ -14,8 +14,6 @@
 // comparison mode applies. Bundling them into a struct would hide at the call
 // site which knob a given deck is exercising, which is the one thing these
 // helpers exist to make legible.
-#![allow(clippy::too_many_arguments)]
-
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::analysis::ac::ac_sweep_frequencies;
 use rspice_core::analysis::{AcResult, AcSensitivityOutput};

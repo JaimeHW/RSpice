@@ -78,16 +78,20 @@ impl Engine {
         tstop: Value,
     ) -> Result<(), crate::engine::SimulationError> {
         let mut runtime_breakpoints = Vec::new();
-        if let Some(event_time) = circuit.next_xspice_event_time() {
-            if event_time.is_finite() && event_time >= 0.0 && event_time <= tstop {
-                runtime_breakpoints.push(event_time);
-            }
+        if let Some(event_time) = circuit.next_xspice_event_time()
+            && event_time.is_finite()
+            && event_time >= 0.0
+            && event_time <= tstop
+        {
+            runtime_breakpoints.push(event_time);
         }
         #[cfg(feature = "veriloga")]
-        if let Some(event_time) = circuit.next_mixed_event_time()? {
-            if event_time.is_finite() && event_time >= 0.0 && event_time <= tstop {
-                runtime_breakpoints.push(event_time);
-            }
+        if let Some(event_time) = circuit.next_mixed_event_time()?
+            && event_time.is_finite()
+            && event_time >= 0.0
+            && event_time <= tstop
+        {
+            runtime_breakpoints.push(event_time);
         }
         circuit.drain_xspice_requested_breakpoints(|time| {
             if time.is_finite() && time >= 0.0 && time <= tstop {
@@ -272,12 +276,12 @@ impl Engine {
                                 .to_string(),
                         ));
                     }
-                    if let Some(previous) = previous_cycle_start {
-                        if cycle_start <= previous {
-                            return Err(crate::engine::SimulationError::Circuit(format!(
-                                "transient PULSE period {per:.17e} cannot advance an exactly representable source-event schedule near {previous:.17e}"
-                            )));
-                        }
+                    if let Some(previous) = previous_cycle_start
+                        && cycle_start <= previous
+                    {
+                        return Err(crate::engine::SimulationError::Circuit(format!(
+                            "transient PULSE period {per:.17e} cannot advance an exactly representable source-event schedule near {previous:.17e}"
+                        )));
                     }
                     previous_cycle_start = Some(cycle_start);
                     for offset in edge_offsets {
@@ -526,7 +530,7 @@ impl Engine {
         }
         let mut cycle = 1.0;
         loop {
-            if cycle as usize % 1024 == 0 {
+            if (cycle as usize).is_multiple_of(1024) {
                 Self::check_source_breakpoint_collection(breakpoints, abort, max_points)?;
             }
             let cycle_offset = period * cycle;

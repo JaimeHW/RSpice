@@ -898,8 +898,8 @@ impl CircuitData {
             node
         }
         let mut union = |positive: NodeId, negative: NodeId| {
-            let positive = find(&mut parent, positive as usize);
-            let negative = find(&mut parent, negative as usize);
+            let positive = find(&mut parent, positive);
+            let negative = find(&mut parent, negative);
             if positive != negative {
                 parent[positive] = negative;
             }
@@ -936,8 +936,8 @@ impl CircuitData {
                 seed_current[index] = true;
                 continue;
             }
-            let positive_root = find(&mut parent, positive as usize);
-            let negative_root = find(&mut parent, negative as usize);
+            let positive_root = find(&mut parent, positive);
+            let negative_root = find(&mut parent, negative);
             if positive_root == negative_root {
                 seed_current[index] = true;
                 has_inductor_cycle = true;

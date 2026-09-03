@@ -1,7 +1,5 @@
 //! VBIC local convergence and external-bias matching predicates.
 
-#![allow(clippy::needless_range_loop)]
-
 use super::*;
 
 impl Engine {
@@ -49,8 +47,12 @@ impl Engine {
         }
 
         let mut delta_internal = [0.0; BJT_INTERNAL_STATE_DIM];
-        for idx in 0..BJT_INTERNAL_STATE_DIM {
-            delta_internal[idx] = current_snapshot.reduction.internal_voltages[idx]
+        for (idx, entry) in delta_internal
+            .iter_mut()
+            .enumerate()
+            .take(BJT_INTERNAL_STATE_DIM)
+        {
+            *entry = current_snapshot.reduction.internal_voltages[idx]
                 - previous_snapshot.reduction.internal_voltages[idx];
         }
 

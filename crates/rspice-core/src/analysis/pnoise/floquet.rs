@@ -37,7 +37,6 @@
 //! - ISF/PPV computation for noise sensitivity
 //! - Transfer functions with proper 1/f² behavior near carrier
 
-#![allow(clippy::needless_range_loop)]
 use crate::Value;
 use num_complex::Complex64;
 use std::f64::consts::PI;
@@ -470,11 +469,11 @@ impl FloquetAnalyzer {
             let mut dvdt = vec![0.0; n_samples];
             let mut max_dvdt = 0.0_f64;
 
-            for i in 0..n_samples {
+            for (i, entry) in dvdt.iter_mut().enumerate().take(n_samples) {
                 let v_prev = self.waveform_samples[node][(i + n_samples - 1) % n_samples];
                 let v_next = self.waveform_samples[node][(i + 1) % n_samples];
-                dvdt[i] = (v_next - v_prev) / (2.0 * dt);
-                max_dvdt = max_dvdt.max(dvdt[i].abs());
+                *entry = (v_next - v_prev) / (2.0 * dt);
+                max_dvdt = max_dvdt.max((*entry).abs());
             }
 
             // Compute q_max (max charge = C_eff * V_swing)
@@ -500,8 +499,8 @@ impl FloquetAnalyzer {
             // ISF = normalized dV/dt
             // The ISF peaks at zero crossings (max slew) and is zero at peaks
             if max_dvdt > 1e-20 {
-                for i in 0..n_samples {
-                    self.isf_samples[node][i] = dvdt[i] / max_dvdt;
+                for (i, &entry) in dvdt.iter().enumerate().take(n_samples) {
+                    self.isf_samples[node][i] = entry / max_dvdt;
                 }
             }
 

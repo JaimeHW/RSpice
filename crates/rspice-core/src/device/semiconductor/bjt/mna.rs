@@ -17,8 +17,6 @@
 //! rows are negated when stamped while the thermal and excess-phase rows
 //! already match the MNA orientation.
 
-#![allow(clippy::needless_range_loop)]
-
 use super::*;
 
 /// Operating-point noise description of a promoted VBIC instance,
@@ -632,9 +630,9 @@ impl Bjt {
                     );
                 }
             }
-            for col in 0..EXTERNAL_DIM {
+            for (col, &external_node) in external_nodes.iter().enumerate().take(EXTERNAL_DIM) {
                 if branch.d_external[col] != 0.0 {
-                    stamper.stamp(row_node, external_nodes[col], sign * branch.d_external[col]);
+                    stamper.stamp(row_node, external_node, sign * branch.d_external[col]);
                 }
             }
             stamper.stamp_rhs(row_node, sign * source);

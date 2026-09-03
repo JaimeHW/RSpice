@@ -87,18 +87,18 @@ pub(in crate::engine::builder) fn build_scalar_rlgc_line(
     }
     let mut boundary_nodes = vec![node_near; sections + 1];
     boundary_nodes[sections] = node_far;
-    for section in 1..sections {
+    for (section, boundary_node) in boundary_nodes.iter_mut().enumerate().take(sections).skip(1) {
         let node_name = format!("{}.__rlgc.b{}", instance_name, section);
-        boundary_nodes[section] = circuit.get_or_create_node(&node_name);
+        *boundary_node = circuit.get_or_create_node(&node_name);
     }
 
     let mut boundary_refs = vec![node_near_ref; sections + 1];
     boundary_refs[0] = node_near_ref;
     boundary_refs[sections] = node_far_ref;
     if node_near_ref != node_far_ref {
-        for section in 1..sections {
+        for (section, boundary_ref) in boundary_refs.iter_mut().enumerate().take(sections).skip(1) {
             let node_name = format!("{}.__rlgc.ref{}", instance_name, section);
-            boundary_refs[section] = circuit.get_or_create_node(&node_name);
+            *boundary_ref = circuit.get_or_create_node(&node_name);
         }
         for section in 0..sections {
             circuit.resistors.add(

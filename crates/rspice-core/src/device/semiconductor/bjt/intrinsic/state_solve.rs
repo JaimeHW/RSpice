@@ -1,7 +1,5 @@
 //! Intrinsic-state seed generation, nonlinear solve, and reduced linearization.
 
-#![allow(clippy::too_many_arguments)]
-
 use super::*;
 
 impl Bjt {

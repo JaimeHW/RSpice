@@ -25,7 +25,6 @@
 //! .SENS V(out)      ; Compute DC sensitivity of V(out) to all parameters
 //! ```
 
-#![allow(clippy::needless_range_loop)]
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::{Complex64, Value};
 

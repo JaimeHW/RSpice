@@ -1735,10 +1735,8 @@ fn parse_digital_gate_ic_value(
         return Ok((Some(1.0), None));
     }
 
-    if !defer_simple_param_refs {
-        if let Some(value) = params.get(expression) {
-            return Ok((Some(value), None));
-        }
+    if !defer_simple_param_refs && let Some(value) = params.get(expression) {
+        return Ok((Some(value), None));
     }
 
     match parse_parametric_field_value(expression, params) {
@@ -4277,14 +4275,15 @@ pub(super) fn parse_bjt(
     };
 
     let mut thermal = numeric_thermal;
-    if substrate.is_some() && thermal.is_none() {
-        if let TokenKind::Ident(next_model) = &stream.peek().kind {
-            let next_upper = next_model.to_ascii_uppercase();
-            if !matches!(stream.peek_n(1).kind, TokenKind::Equals) && next_upper != "OFF" {
-                thermal = Some(model);
-                model = next_model.clone();
-                stream.advance();
-            }
+    if substrate.is_some()
+        && thermal.is_none()
+        && let TokenKind::Ident(next_model) = &stream.peek().kind
+    {
+        let next_upper = next_model.to_ascii_uppercase();
+        if !matches!(stream.peek_n(1).kind, TokenKind::Equals) && next_upper != "OFF" {
+            thermal = Some(model);
+            model = next_model.clone();
+            stream.advance();
         }
     }
 
@@ -5376,12 +5375,9 @@ impl XyceYDeviceFamily {
     /// an ordinary transmission-line instance name.
     pub(super) fn classify(token: &str) -> Option<Self> {
         let upper = token.to_ascii_uppercase();
-        Self::ALL.into_iter().find(|family| {
-            family
-                .keywords()
-                .iter()
-                .any(|keyword| *keyword == upper.as_str())
-        })
+        Self::ALL
+            .into_iter()
+            .find(|family| family.keywords().contains(&upper.as_str()))
     }
 }
 

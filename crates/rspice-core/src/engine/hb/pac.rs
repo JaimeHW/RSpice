@@ -7,8 +7,6 @@
 //! `offset + k*f0`. See `harmonic_balance::solver::periodic_ac` for the
 //! conversion-matrix formulation.
 
-#![allow(clippy::needless_range_loop)]
-
 use super::*;
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::harmonic_balance::PeriodicAcExcitation;

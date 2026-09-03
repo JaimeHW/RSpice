@@ -37,7 +37,6 @@
 //! ```
 //! where `[L]` is the inductance matrix with Lij = k*sqrt(Li*Lj) for i≠j.
 
-#![allow(clippy::needless_range_loop, clippy::too_many_arguments)]
 use crate::device::traits::{DynamicDevice, MatrixStamper};
 use crate::numerics::integration::CompanionCoefficients;
 use crate::{NodeId, Value};

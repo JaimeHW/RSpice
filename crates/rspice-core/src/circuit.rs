@@ -5,7 +5,6 @@
 //! - Pre-computed matrix indices for zero-cost stamping in the hot loop
 //! - Separation of topology (static) from values (mutable)
 
-#![allow(clippy::too_many_arguments)]
 use crate::device::behavioral::BehavioralSources;
 use crate::device::{Cccs, Ccvs, MatrixStamper, NonlinearConvergenceCriteria, Vccs, Vcvs};
 use crate::numerics::integration::CompanionCoefficients;

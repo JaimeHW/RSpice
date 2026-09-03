@@ -3,7 +3,6 @@
 //! This module handles the conversion from parsed netlist elements
 //! to the runtime circuit representation.
 
-#![allow(clippy::needless_range_loop)]
 use super::{Engine, JfetLevel2Model, SimulationError, SpiceDialect, extract_dc_value_with_limits};
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::device::{Diode, DiodeLevel, JfetChannelModel, MosBodyJunctionModel};
@@ -4252,2131 +4251,6 @@ fn add_planned_xspice_auto_bridge(
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::SimulationConfig;
-
-    #[test]
-    fn generated_auto_bridge_decks_inherit_resource_limits() {
-        let generated = "generated bridge\n.model adc adc_bridge\n.end\n";
-        let mut limits = ResourceLimits::default();
-        limits.max_netlist_bytes = generated.len() - 1;
-
-        assert!(matches!(
-            parse_generated_xspice_auto_bridge_deck(
-                generated,
-                None,
-                false,
-                limits,
-                &NoAbort,
-            ),
-            Err(ParseWithAbortError::Parse(ParseError::ResourceLimit(
-                ResourceLimitError {
-                    resource: ResourceKind::NetlistBytes,
-                    requested,
-                    limit,
-                }
-            ))) if requested == generated.len() && limit == generated.len() - 1
-        ));
-    }
-
-    #[test]
-    fn generated_auto_bridge_resistor_retains_raw_reportable_value() {
-        let generated = Netlist::parse(
-            "generated bridge resistor\n\
-             RAUTO bridge 0 8 RMOD M=2 TEMP=37\n\
-             .model RMOD R (R=3 TC1=0.1 TNOM=27)\n\
-             .end\n",
-        )
-        .expect("generated bridge resistor deck parses");
-        let element = generated
-            .elements
-            .iter()
-            .find(|element| element.name.eq_ignore_ascii_case("RAUTO"))
-            .expect("generated resistor exists");
-        let mut circuit = CircuitData::new();
-
-        add_generated_xspice_auto_bridge_resistor(
-            &mut circuit,
-            &generated,
-            element,
-            crate::constants::TEMP_REFERENCE,
-            SpiceDialect::Xyce,
-        )
-        .expect("generated resistor is added to the auto-bridge subcircuit");
-
-        assert_eq!(circuit.resistors.names, ["RAUTO"]);
-        assert_eq!(
-            circuit.resistors.conductances[0].recip().to_bits(),
-            24.0_f64.to_bits()
-        );
-        assert_eq!(
-            circuit.resistors.reported_resistances[0].to_bits(),
-            8.0_f64.to_bits()
-        );
-    }
-
-    #[test]
-    fn generated_auto_bridge_resistor_noise_metadata_matches_branch_and_nodal_storage() {
-        let build = |zero_resistance_tolerance: Value| {
-            let generated = Netlist::parse(&format!(
-                "generated bridge resistor noise metadata\n\
-                 RAUTO bridge 0 0.6 RMOD AC=1.2 TEMP=37 DTEMP=999 NOISY=0\n\
-                 .model RMOD R (KF=2e-12 AF=1.3 EF=0.8 TNOM=27)\n\
-                 .options device zeroresistancetol={zero_resistance_tolerance}\n\
-                 .end\n"
-            ))
-            .expect("generated bridge resistor deck parses");
-            let element = generated
-                .elements
-                .iter()
-                .find(|element| element.name.eq_ignore_ascii_case("RAUTO"))
-                .expect("generated resistor exists");
-            let mut circuit = CircuitData::new();
-            add_generated_xspice_auto_bridge_resistor(
-                &mut circuit,
-                &generated,
-                element,
-                crate::constants::TEMP_REFERENCE,
-                SpiceDialect::Xyce,
-            )
-            .expect("generated resistor is added to the auto-bridge subcircuit");
-            circuit
-        };
-
-        let nodal = build(0.0);
-        let branch = build(1.0);
-        assert_eq!(nodal.resistors.len(), 1);
-        assert_eq!(branch.resistor_branches.len(), 1);
-        assert_eq!(
-            nodal
-                .resistors
-                .small_signal_conductance(0)
-                .recip()
-                .to_bits(),
-            branch.resistor_branches.small_signal_resistances[0].to_bits()
-        );
-        assert_eq!(
-            nodal.resistor_absolute_noise_temperature(0),
-            branch.resistor_branches.absolute_noise_temperatures[0]
-        );
-        assert_eq!(
-            nodal.resistors.noise_temperature_offsets[0].to_bits(),
-            branch.resistor_branches.noise_temperature_offsets[0].to_bits()
-        );
-        assert_eq!(nodal.resistors.noisy[0], branch.resistor_branches.noisy[0]);
-        assert_eq!(
-            nodal.resistors.flicker[0],
-            branch.resistor_branches.flicker[0]
-        );
-    }
-
-    #[test]
-    fn xyce_device_minimums_reach_legacy_diode_construction() {
-        let deck = "minimum diode defaults\n\
-            .options device minres=1 mincap=1n\n\
-            V1 in 0 1\n\
-            D1 in 0 D\n\
-            .model D D IS=1e-14\n\
-            .end\n";
-        let netlist = Netlist::parse(deck).expect("minimum diode deck parses");
-        let circuit = Engine::new(SimulationConfig::default())
-            .build_circuit(&netlist)
-            .expect("minimum diode deck builds");
-        let [diode] = circuit.diodes.devices.as_slice() else {
-            panic!("expected one diode");
-        };
-        assert_eq!(diode.rs, 0.0);
-        assert_eq!(diode.cj0, 1.0e-9);
-        let rs_index = circuit
-            .resistors
-            .names
-            .iter()
-            .position(|name| name.eq_ignore_ascii_case("D1.__rs"))
-            .expect("MINRES creates the diode series resistor");
-        assert_eq!(circuit.resistors.conductances[rs_index], 1.0);
-    }
-
-    #[test]
-    fn xyce_jfet_inherits_global_tnom_and_keeps_b_distinct_from_beta() {
-        let deck = "Xyce JFET model options\n\
-            .options tnom=-40\n\
-            VDS d 0 1\n\
-            VGS g 0 0\n\
-            J1 d g 0 JMOD\n\
-            .model JMOD NJF LEVEL=1 B=0.605\n\
-            .end\n";
-        let netlist = Netlist::parse(deck).expect("Xyce JFET deck parses");
-        let mut config = SimulationConfig::default();
-        config.spice_dialect = SpiceDialect::Xyce;
-        let circuit = Engine::new(config)
-            .build_circuit(&netlist)
-            .expect("Xyce JFET deck builds");
-        let [jfet] = circuit.jfets.as_slice() else {
-            panic!("expected one native JFET");
-        };
-        assert_eq!(jfet.params.tnom.to_bits(), (-40.0_f64 + 273.15).to_bits());
-        assert_eq!(jfet.params.beta.to_bits(), 1.0e-4_f64.to_bits());
-        assert_eq!(jfet.params.mes_b.to_bits(), 0.605_f64.to_bits());
-        assert!(matches!(
-            jfet.params.channel_model,
-            JfetChannelModel::XyceSydney
-        ));
-    }
-
-    #[test]
-    fn xyce_four_node_s_iswitch_uses_implicit_voltage_control_and_current_thresholds() {
-        let deck = "Xyce four-node S with ISWITCH model\n\
-            V1 1 0 5\n\
-            VCTRL 3 0 0\n\
-            S1 1 2 3 0 ISW\n\
-            R1 2 0 1k\n\
-            .model ISW ISWITCH (RON=2 ROFF=3MEG ION=10m IOFF=1m IHON=11m IHOFF=.5m)\n\
-            .end\n";
-        let netlist = Netlist::parse(deck).expect("four-node ISWITCH deck parses");
-        let mut config = SimulationConfig::default();
-        config.spice_dialect = SpiceDialect::Xyce;
-        let circuit = Engine::new(config)
-            .build_circuit(&netlist)
-            .expect("four-node ISWITCH deck builds through Xyce's unified switch semantics");
-
-        assert!(circuit.vswitches.is_empty());
-        assert!(circuit.iswitches.is_empty());
-        let [switch] = circuit.generic_switches.as_slice() else {
-            panic!("expected one expression-controlled switch");
-        };
-        assert_eq!(switch.ron.to_bits(), 2.0_f64.to_bits());
-        assert_eq!(switch.roff.to_bits(), 3.0e6_f64.to_bits());
-        assert_eq!(switch.on.to_bits(), 10.0e-3_f64.to_bits());
-        assert_eq!(switch.off.to_bits(), 0.5e-3_f64.to_bits());
-        assert_eq!(switch.onh.to_bits(), 11.0e-3_f64.to_bits());
-        assert_eq!(switch.offh.to_bits(), 0.0_f64.to_bits());
-        assert!(switch.hysteresis_enabled);
-        assert!(switch.program.node_map.contains_key("3"));
-        assert_eq!(switch.program.node_map.len(), 2);
-    }
-
-    #[test]
-    fn xyce_explicit_s_iswitch_keeps_general_expression_control() {
-        let deck = "Xyce explicit S with ISWITCH model\n\
-            V1 1 0 5\n\
-            VCTRL 3 0 0\n\
-            S1 1 2 ISW CONTROL={V(3)+TIME}\n\
-            R1 2 0 1k\n\
-            .model ISW ISWITCH (RON=2 ROFF=3MEG ION=10m IOFF=1m IHON=11m IHOFF=.5m)\n\
-            .end\n";
-        let netlist = Netlist::parse(deck).expect("explicit ISWITCH deck parses");
-        let mut config = SimulationConfig::default();
-        config.spice_dialect = SpiceDialect::Xyce;
-        let circuit = Engine::new(config)
-            .build_circuit(&netlist)
-            .expect("explicit ISWITCH accepts Xyce's general scalar CONTROL expression");
-
-        assert!(circuit.vswitches.is_empty());
-        assert!(circuit.iswitches.is_empty());
-        let [switch] = circuit.generic_switches.as_slice() else {
-            panic!("expected one expression-controlled switch");
-        };
-        assert_eq!(switch.ron.to_bits(), 2.0_f64.to_bits());
-        assert_eq!(switch.roff.to_bits(), 3.0e6_f64.to_bits());
-        assert_eq!(switch.on.to_bits(), 10.0e-3_f64.to_bits());
-        assert_eq!(switch.off.to_bits(), 0.5e-3_f64.to_bits());
-        assert_eq!(switch.onh.to_bits(), 11.0e-3_f64.to_bits());
-        assert_eq!(switch.offh.to_bits(), 0.0_f64.to_bits());
-        assert!(switch.hysteresis_enabled);
-        assert!(switch.program.node_map.contains_key("3"));
-        assert_eq!(switch.program.node_map.len(), 1);
-    }
-
-    #[test]
-    fn xyce_switch_family_defaults_and_hysteresis_precedence_are_exact() {
-        let deck = "Xyce switch family projection\n\
-            SDEFAULT 1 2 3 0 IDEFAULT\n\
-            SCOLLIDE 1 4 3 0 ICOLLIDE\n\
-            SREVERSED 1 7 3 0 IREVERSED\n\
-            SGENERIC 1 5 3 0 IGENERIC\n\
-            SVDEFAULT 1 6 3 0 VDEFAULT_MODEL\n\
-            .model IDEFAULT ISWITCH\n\
-            .model ICOLLIDE ISWITCH (ION=10m IOFF=1m ON=20m OFF=2m IHON=30m IHOFF=3m ONH=40m OFFH=4m)\n\
-            .model IREVERSED ISWITCH (ION=10m IHOFF=3m IOFF=1m)\n\
-            .model IGENERIC ISWITCH (ON=20m OFF=2m ONH=40m OFFH=4m)\n\
-            .model VDEFAULT_MODEL VSWITCH\n\
-            .end\n";
-        let netlist = Netlist::parse(deck).expect("switch-family projection deck parses");
-        let mut config = SimulationConfig::default();
-        config.spice_dialect = SpiceDialect::Xyce;
-        let circuit = Engine::new(config)
-            .build_circuit(&netlist)
-            .expect("all Xyce switch families build through the unified implementation");
-
-        assert!(circuit.vswitches.is_empty());
-        assert!(circuit.iswitches.is_empty());
-        assert_eq!(circuit.generic_switches.len(), 5);
-        let find = |name: &str| {
-            circuit
-                .generic_switches
-                .iter()
-                .find(|switch| switch.name.eq_ignore_ascii_case(name))
-                .unwrap_or_else(|| panic!("missing switch {name}"))
-        };
-
-        let current_default = find("SDEFAULT");
-        assert_eq!(current_default.on.to_bits(), 1.0e-3_f64.to_bits());
-        assert_eq!(current_default.off.to_bits(), 0.0_f64.to_bits());
-        assert_eq!(current_default.onh.to_bits(), 1.0e-3_f64.to_bits());
-        assert_eq!(current_default.offh.to_bits(), 0.0_f64.to_bits());
-        assert!(!current_default.hysteresis_enabled);
-
-        let collisions = find("SCOLLIDE");
-        assert_eq!(collisions.on.to_bits(), 20.0e-3_f64.to_bits());
-        assert_eq!(collisions.off.to_bits(), 2.0e-3_f64.to_bits());
-        assert_eq!(collisions.onh.to_bits(), 30.0e-3_f64.to_bits());
-        assert_eq!(collisions.offh.to_bits(), 0.0_f64.to_bits());
-        assert!(collisions.hysteresis_enabled);
-
-        let reversed_alias_order = find("SREVERSED");
-        assert_eq!(reversed_alias_order.off.to_bits(), 1.0e-3_f64.to_bits());
-        assert_eq!(reversed_alias_order.offh.to_bits(), 0.0_f64.to_bits());
-        assert!(reversed_alias_order.hysteresis_enabled);
-
-        let generic_hysteresis = find("SGENERIC");
-        assert_eq!(generic_hysteresis.on.to_bits(), 20.0e-3_f64.to_bits());
-        assert_eq!(generic_hysteresis.off.to_bits(), 2.0e-3_f64.to_bits());
-        assert_eq!(generic_hysteresis.onh.to_bits(), 20.0e-3_f64.to_bits());
-        assert_eq!(generic_hysteresis.offh.to_bits(), 2.0e-3_f64.to_bits());
-        assert!(generic_hysteresis.hysteresis_enabled);
-
-        let voltage_default = find("SVDEFAULT");
-        assert_eq!(voltage_default.on.to_bits(), 1.0_f64.to_bits());
-        assert_eq!(voltage_default.off.to_bits(), 0.0_f64.to_bits());
-        assert_eq!(voltage_default.onh.to_bits(), 1.0_f64.to_bits());
-        assert_eq!(voltage_default.offh.to_bits(), 0.0_f64.to_bits());
-        assert!(!voltage_default.hysteresis_enabled);
-    }
-
-    #[test]
-    fn four_node_s_iswitch_normalization_is_xyce_scoped() {
-        let deck = "non-Xyce four-node S with ISWITCH model\n\
-            S1 1 2 3 0 ISW\n\
-            .model ISW ISWITCH (RON=1 ROFF=1MEG ION=10m IOFF=0)\n\
-            .end\n";
-        let netlist = Netlist::parse(deck).expect("four-node ISWITCH deck parses");
-        let error = Engine::new(SimulationConfig::default())
-            .build_circuit(&netlist)
-            .expect_err("Xyce four-node normalization must not leak into other dialects");
-        assert!(error.to_string().contains("ISWITCH"));
-        assert!(error.to_string().contains("Voltage-controlled switch"));
-    }
-
-    #[test]
-    fn xyce_unified_switch_rejects_noncanonical_native_switch_parameters() {
-        for (model_type, parameter) in [("VSWITCH", "VT=0"), ("ISWITCH", "IT=1m")] {
-            let deck = format!(
-                "Xyce unified switch parameter policy\nS1 1 2 3 0 SMOD\n.model SMOD {model_type} ({parameter})\n.end\n"
-            );
-            let netlist = Netlist::parse(&deck).expect("switch parameter-policy deck parses");
-            let mut config = SimulationConfig::default();
-            config.spice_dialect = SpiceDialect::Xyce;
-            let error = Engine::new(config)
-                .build_circuit(&netlist)
-                .expect_err("Xyce's unified switch must reject unregistered native parameters");
-            assert!(
-                error
-                    .to_string()
-                    .contains("does not support model parameter")
-            );
-            assert!(
-                error
-                    .to_string()
-                    .contains(parameter.split('=').next().unwrap())
-            );
-        }
-    }
-
-    #[test]
-    fn xyce_unified_switch_rejects_noncanonical_model_aliases() {
-        for (syntax, model_type) in [
-            ("S1 1 2 3 0 SMOD", "SW"),
-            ("S1 1 2 3 0 SMOD", "VSW"),
-            ("S1 1 2 SMOD CONTROL={V(3)}", "ISW"),
-            ("S1 1 2 SMOD CONTROL={V(3)}", "CSW"),
-        ] {
-            let deck = format!(
-                "Xyce strict switch model names\n{syntax}\n.model SMOD {model_type}\n.end\n"
-            );
-            let netlist = Netlist::parse(&deck).expect("switch alias-policy deck parses");
-            let mut config = SimulationConfig::default();
-            config.spice_dialect = SpiceDialect::Xyce;
-            let error = Engine::new(config)
-                .build_circuit(&netlist)
-                .expect_err("Xyce switch syntax must reject unregistered model aliases");
-            assert!(error.to_string().contains(model_type));
-            assert!(
-                error
-                    .to_string()
-                    .contains("expected SWITCH, VSWITCH, ISWITCH")
-            );
-        }
-    }
-
-    #[test]
-    fn native_bjt_inherits_global_tnom_and_model_tnom_overrides_it() {
-        for (model_suffix, expected_celsius) in [("BF=100", -40.0), ("BF=100 TNOM=27", 27.0)] {
-            let deck = format!(
-                "BJT nominal temperature precedence\n.options tnom=-40\nV1 c 0 1\nQ1 c b 0 QMOD\n.model QMOD NPN ({model_suffix})\n.end\n"
-            );
-            let netlist = Netlist::parse(&deck).expect("BJT TNOM precedence deck parses");
-            let mut config = SimulationConfig::default();
-            config.spice_dialect = SpiceDialect::Xyce;
-            let circuit = Engine::new(config)
-                .build_circuit(&netlist)
-                .expect("BJT TNOM precedence deck builds");
-            let [bjt] = circuit.bjts.devices.as_slice() else {
-                panic!("expected one native BJT");
-            };
-            assert_eq!(
-                bjt.tnom.to_bits(),
-                crate::constants::celsius_to_kelvin(expected_celsius).to_bits()
-            );
-        }
-    }
-
-    #[test]
-    fn native_bjt_rejects_invalid_effective_tnom() {
-        let deck = "BJT invalid nominal temperature\n\
-            V1 c 0 1\n\
-            Q1 c b 0 QMOD\n\
-            .model QMOD NPN (BF=100)\n\
-            .end\n";
-        let mut config = SimulationConfig::default();
-        config.spice_dialect = SpiceDialect::Xyce;
-
-        let mut invalid_model = Netlist::parse(deck).expect("BJT invalid-model fixture parses");
-        invalid_model.models[0]
-            .params
-            .push(("TNOM".to_string(), -273.15));
-        let model_error = Engine::new(config.clone())
-            .build_circuit(&invalid_model)
-            .expect_err("absolute-zero BJT model TNOM must fail");
-        assert!(model_error.to_string().contains("TNOM"));
-        assert!(model_error.to_string().contains("absolute zero"));
-
-        let mut invalid_global = Netlist::parse(deck).expect("BJT invalid-global fixture parses");
-        invalid_global.options.tnom = Some(f64::NAN);
-        let global_error = Engine::new(config)
-            .build_circuit(&invalid_global)
-            .expect_err("non-finite global BJT TNOM must fail");
-        assert!(global_error.to_string().contains("TNOM"));
-        assert!(global_error.to_string().contains("finite"));
-    }
-
-    #[test]
-    fn voltlim_false_builds_legacy_bjt_and_rejects_unimplemented_families() {
-        let mut config = SimulationConfig {
-            device_voltage_limiting: false,
-            spice_dialect: SpiceDialect::Xyce,
-            ..Default::default()
-        };
-        let bjt = Netlist::parse(
-            "legacy BJT raw limiting\nV1 c 0 1\nQ1 c c 0 QMOD\n.model QMOD NPN LEVEL=1\n.end\n",
-        )
-        .expect("legacy BJT fixture parses");
-        let circuit = Engine::new(config.clone())
-            .build_circuit(&bjt)
-            .expect("legacy GP BJT supports VOLTLIM=0");
-        let [device] = circuit.bjts.devices.as_slice() else {
-            panic!("expected one native BJT");
-        };
-        assert!(!device.uses_legacy_junction_limiting());
-
-        let diode = Netlist::parse(
-            "unsupported diode limiting\nV1 in 0 1\nD1 in 0 DMOD\n.model DMOD D\n.end\n",
-        )
-        .expect("diode fixture parses");
-        let error = Engine::new(config.clone())
-            .build_circuit(&diode)
-            .expect_err("VOLTLIM=0 must fail closed for diode limiting");
-        assert!(error.to_string().contains("DEVICE.VOLTLIM=0"));
-        assert!(error.to_string().contains("diode"));
-
-        let vbic = Netlist::parse(
-            "unsupported VBIC limiting\nV1 c 0 1\nQ1 c c 0 QMOD\n.model QMOD NPN LEVEL=11\n.end\n",
-        )
-        .expect("VBIC fixture parses");
-        let error = Engine::new(config.clone())
-            .build_circuit(&vbic)
-            .expect_err("VOLTLIM=0 must fail closed for VBIC limiting");
-        assert!(error.to_string().contains("DEVICE.VOLTLIM=0"));
-        assert!(error.to_string().contains("LEVEL=11"));
-
-        config.device_voltage_limiting = true;
-        Engine::new(config)
-            .build_circuit(&bjt)
-            .expect("default limiter policy remains buildable");
-    }
-
-    /// A geometry sitting exactly on a shared bin edge takes the *lower* bin.
-    ///
-    /// ngspice's ranges are inclusive at both ends and it returns the first
-    /// match while walking the model table, so with foundry tables written in
-    /// ascending order the lower bin wins. Selecting by "most specific bin"
-    /// instead quietly picks the upper one and swaps in a different parameter
-    /// set — visible as a few percent of drain current, not as an error.
-    #[test]
-    fn a_geometry_on_a_bin_boundary_takes_the_lower_bin() {
-        let deck = "binned mosfet\n\
-             V1 d 0 1\n\
-             M1 d d 0 0 NCH W=1u L=0.5u\n\
-             .model NCH.0 NMOS LEVEL=1 LMIN=0.28u LMAX=0.5u WMIN=0.5u WMAX=2u VTO=0.4\n\
-             .model NCH.1 NMOS LEVEL=1 LMIN=0.5u LMAX=1.2u WMIN=0.5u WMAX=2u VTO=0.9\n\
-             .end\n";
-        let netlist = Netlist::parse(deck).expect("binned deck parses");
-        let circuit = Engine::new(SimulationConfig::default())
-            .build_circuit(&netlist)
-            .expect("binned deck builds");
-        let [mosfet] = circuit.mosfets.devices.as_slice() else {
-            panic!("expected one mosfet");
-        };
-        assert!(
-            (mosfet.vto - 0.4).abs() < 1e-9,
-            "L on the shared edge must take the lower bin, got VTO={}",
-            mosfet.vto
-        );
-    }
-
-    #[test]
-    fn nfin_is_a_first_class_bin_axis_for_selection_and_inspection() {
-        let deck = "nfin-binned mosfet\n\
-             V1 d 0 1\n\
-             M1 d d 0 0 NCH W=1u L=0.5u NFIN=4\n\
-             .model NCH.0 NMOS LEVEL=1 LMIN=0.28u LMAX=1u WMIN=0.5u WMAX=2u NFINMIN=1 NFINMAX=4 VTO=0.4\n\
-             .model NCH.1 NMOS LEVEL=1 LMIN=0.28u LMAX=1u WMIN=0.5u WMAX=2u NFINMIN=4 NFINMAX=8 VTO=0.9\n\
-             .end\n";
-        let netlist = Netlist::parse(deck).expect("NFIN-binned deck parses");
-        let inspection = Engine::new(SimulationConfig::default())
-            .inspect_model_bins(&netlist)
-            .expect("NFIN-binned deck inspects");
-        let [instance] = inspection.instances.as_slice() else {
-            panic!("expected one inspected MOS instance");
-        };
-        assert_eq!(instance.nfin, Some(4.0));
-        assert_eq!(instance.selected_model, "NCH.0");
-        assert_eq!(instance.selection, ModelBinSelectionKind::SharedBoundary);
-        assert_eq!(inspection.cards[0].geometry.nfin.min, Some(1.0));
-        assert_eq!(inspection.cards[0].geometry.nfin.max, Some(4.0));
-
-        let circuit = Engine::new(SimulationConfig::default())
-            .build_circuit(&netlist)
-            .expect("NFIN bin selection builds");
-        let [mosfet] = circuit.mosfets.devices.as_slice() else {
-            panic!("expected one mosfet");
-        };
-        assert!(
-            (mosfet.vto - 0.4).abs() < 1e-9,
-            "NFIN shared edge must take the lower bin, got VTO={}",
-            mosfet.vto
-        );
-    }
-
-    #[test]
-    fn model_bin_inspection_reports_expression_resolved_cards_and_shared_edges() {
-        let deck = "inspected binned mosfet\n\
-             .param LLO=0.28u LEDGE=0.5u LHI=1.2u\n\
-             V1 d 0 1\n\
-             M1 d d 0 0 NCH W=1u L={LEDGE} M=2\n\
-             .model NCH.0 NMOS LEVEL=1 LMIN={LLO} LMAX={LEDGE} WMIN=0.5u WMAX=2u VTO=0.4\n\
-             .model NCH.1 NMOS LEVEL=1 LMIN={LEDGE} LMAX={LHI} WMIN=0.5u WMAX=2u VTO=0.9\n\
-             .end\n";
-        let netlist = Netlist::parse(deck).expect("binned inspection deck parses");
-        let inspection = Engine::new(SimulationConfig::default())
-            .inspect_model_bins(&netlist)
-            .expect("binned inspection succeeds");
-
-        assert_eq!(inspection.cards.len(), 2);
-        assert_eq!(inspection.cards[0].model, "NCH.0");
-        assert_eq!(inspection.cards[0].family, "NCH");
-        assert_eq!(inspection.cards[0].geometry.length.min, Some(0.28e-6));
-        assert_eq!(inspection.cards[0].geometry.length.max, Some(0.5e-6));
-        let [instance] = inspection.instances.as_slice() else {
-            panic!("expected one inspected MOS instance");
-        };
-        assert_eq!(instance.element, "M1");
-        assert_eq!(instance.requested_model, "NCH");
-        assert_eq!(instance.selected_model, "NCH.0");
-        assert_eq!(instance.selection, ModelBinSelectionKind::SharedBoundary);
-        assert_eq!(instance.match_count, 2);
-        assert_eq!(instance.length, Some(0.5e-6));
-        assert_eq!(instance.width, Some(1.0e-6));
-        assert_eq!(instance.multiplier, Some(2.0));
-    }
-
-    #[test]
-    fn model_bin_inspection_audits_unreferenced_cards() {
-        let deck = "unreferenced binned family\n\
-             V1 d 0 1\n\
-             R1 d 0 1k\n\
-             .model UNUSED.0 NMOS LEVEL=1 LMIN=0.1u LMAX=0.2u WMIN=0.5u WMAX=2u\n\
-             .model UNUSED.1 NMOS LEVEL=1 LMIN=0.2u LMAX=0.4u WMIN=0.5u WMAX=2u\n\
-             .end\n";
-        let netlist = Netlist::parse(deck).expect("unreferenced bin deck parses");
-        let inspection = Engine::new(SimulationConfig::default())
-            .inspect_model_bins(&netlist)
-            .expect("unreferenced cards remain auditable");
-
-        assert_eq!(inspection.cards.len(), 2);
-        assert!(inspection.instances.is_empty());
-        assert!(inspection.cards.iter().all(|card| card.family == "UNUSED"));
-    }
-
-    #[test]
-    fn a_positive_area_model_bin_overlap_fails_closed() {
-        let deck = "ambiguous binned mosfet\n\
-             V1 d 0 1\n\
-             M1 d d 0 0 NCH W=1u L=0.5u\n\
-             .model NCH.0 NMOS LEVEL=1 LMIN=0.28u LMAX=0.7u WMIN=0.5u WMAX=2u VTO=0.4\n\
-             .model NCH.1 NMOS LEVEL=1 LMIN=0.4u LMAX=1.2u WMIN=0.5u WMAX=2u VTO=0.9\n\
-             .end\n";
-        let netlist = Netlist::parse(deck).expect("ambiguous bin deck parses");
-        let error = Engine::new(SimulationConfig::default())
-            .build_circuit(&netlist)
-            .expect_err("positive-area bin overlap must block circuit construction");
-        let message = error.to_string();
-        assert!(message.contains("MOSFET 'M1'"));
-        assert!(message.contains("model family 'NCH' is ambiguous"));
-        assert!(message.contains("'NCH.0' and 'NCH.1'"));
-        assert!(message.contains("positive-area bin region"));
-    }
-
-    #[test]
-    fn an_invalid_model_bin_range_fails_closed() {
-        let deck = "invalid binned mosfet\n\
-             V1 d 0 1\n\
-             M1 d d 0 0 NCH W=1u L=0.5u\n\
-             .model NCH.0 NMOS LEVEL=1 LMIN=0.7u LMAX=0.28u WMIN=0.5u WMAX=2u VTO=0.4\n\
-             .end\n";
-        let netlist = Netlist::parse(deck).expect("invalid bin deck parses");
-        let error = Engine::new(SimulationConfig::default())
-            .build_circuit(&netlist)
-            .expect_err("reversed bin bounds must block circuit construction");
-        let message = error.to_string();
-        assert!(message.contains("Model 'NCH.0'"));
-        assert!(message.contains("reversed geometry-bin range for L"));
-    }
-
-    /// The same netlist built twice must produce the same circuit.
-    ///
-    /// Subcircuit `.param`s calling `agauss` are evaluated during flattening,
-    /// which happens per build. Without rewinding the statistical stream each
-    /// build continues the sequence, so pressing "run" a second time on an
-    /// unchanged deck silently answers differently — which is exactly how the
-    /// GF180MCU corpus behaved, since its device wrappers apply a random
-    /// per-instance `delvto`.
-    #[test]
-    fn rebuilding_one_netlist_redraws_the_same_statistical_values() {
-        let deck = "mismatch reproducibility\n\
-             .subckt biased a b\n\
-             .param offset=agauss(1k, 200, 1)\n\
-             R1 a b 'offset'\n\
-             .ends\n\
-             V1 in 0 1\n\
-             X1 in 0 biased\n\
-             .end\n";
-        let netlist = Netlist::parse(deck).expect("deck parses");
-        let engine = Engine::new(SimulationConfig::default());
-
-        let resistance = |circuit: &CircuitData| -> f64 {
-            let index = circuit
-                .resistors
-                .names
-                .iter()
-                .position(|name| name.to_ascii_uppercase().contains("R1"))
-                .expect("the subcircuit resistor is instantiated");
-            1.0 / circuit.resistors.conductances[index]
-        };
-
-        let first = resistance(&engine.build_circuit(&netlist).expect("first build"));
-        let second = resistance(&engine.build_circuit(&netlist).expect("second build"));
-        let third = resistance(&engine.build_circuit(&netlist).expect("third build"));
-
-        assert_eq!(first, second, "a rebuild must redraw the same sample");
-        assert_eq!(first, third);
-        // The draw is a real statistical sample, not a collapsed nominal: if
-        // this ever equalled 1k exactly the test above would prove nothing.
-        assert!(
-            (first - 1000.0).abs() > 1e-9,
-            "expected an actual agauss draw, got {first}"
-        );
-    }
-
-    #[test]
-    fn native_spectre_process_sample_materializes_the_authored_element_expression() {
-        let plan = crate::netlist::SpectreStatisticsPlan {
-            variations: vec![crate::netlist::SpectreVariation {
-                line: 3,
-                scope: crate::netlist::SpectreVariationScope::Process,
-                parameter: "rv".to_owned(),
-                distribution: crate::netlist::SpectreDistribution::Gaussian,
-                spread: crate::netlist::SpectreSpread::StandardDeviation("5".to_owned()),
-                percent: false,
-            }],
-            correlations: vec![],
-        };
-        let coordinate = crate::netlist::SpectreStatisticalCoordinate {
-            seed: 41,
-            monte_carlo_run: 9,
-            temperature_celsius: 27.0,
-            axes: vec![("corner".into(), 2.0)],
-        };
-        let deck = format!(
-            "native process materialization\n.param rv=100\n.RSPICE_SPECTRE_STAT {}\nR1 in 0 {{rv}}\nV1 in 0 1\n.end\n",
-            plan.encode_internal()
-        );
-        let mut netlist = Netlist::parse(&deck).expect("statistical deck parses");
-        netlist.spectre_statistical_coordinate = Some(coordinate.clone());
-        let expected = plan
-            .sample_process(&netlist.params, &coordinate)
-            .expect("process sample")["RV"];
-        let circuit = Engine::new(SimulationConfig::default())
-            .build_circuit(&netlist)
-            .expect("statistical circuit builds");
-        let resistance = circuit.resistors.conductances[0].recip();
-        assert_eq!(resistance.to_bits(), expected.to_bits());
-        assert_ne!(resistance.to_bits(), 100.0_f64.to_bits());
-    }
-
-    #[test]
-    fn native_spectre_plan_is_nominal_until_a_monte_carlo_coordinate_activates_it() {
-        let plan = crate::netlist::SpectreStatisticsPlan {
-            variations: vec![crate::netlist::SpectreVariation {
-                line: 3,
-                scope: crate::netlist::SpectreVariationScope::Process,
-                parameter: "rv".to_owned(),
-                distribution: crate::netlist::SpectreDistribution::Gaussian,
-                spread: crate::netlist::SpectreSpread::StandardDeviation("5".to_owned()),
-                percent: false,
-            }],
-            correlations: vec![],
-        };
-        let deck = format!(
-            "nominal statistical declaration\n.param rv=100\n.RSPICE_SPECTRE_STAT {}\nR1 in 0 {{rv}}\nV1 in 0 1\n.end\n",
-            plan.encode_internal()
-        );
-        let netlist = Netlist::parse(&deck).expect("statistical deck parses");
-        assert!(netlist.spectre_statistical_coordinate.is_none());
-        let circuit = Engine::new(SimulationConfig::default())
-            .build_circuit(&netlist)
-            .expect("ordinary build remains nominal");
-        assert_eq!(
-            circuit.resistors.conductances[0].recip().to_bits(),
-            100.0_f64.to_bits()
-        );
-    }
-
-    #[test]
-    fn native_spectre_sample_reaches_a_deferred_compact_model_parameter() {
-        let plan = crate::netlist::SpectreStatisticsPlan {
-            variations: vec![crate::netlist::SpectreVariation {
-                line: 3,
-                scope: crate::netlist::SpectreVariationScope::Process,
-                parameter: "factor".to_owned(),
-                distribution: crate::netlist::SpectreDistribution::Gaussian,
-                spread: crate::netlist::SpectreSpread::StandardDeviation("0.2".to_owned()),
-                percent: false,
-            }],
-            correlations: vec![],
-        };
-        let coordinate = crate::netlist::SpectreStatisticalCoordinate {
-            seed: 8,
-            monte_carlo_run: 12,
-            temperature_celsius: 27.0,
-            axes: vec![],
-        };
-        let deck = format!(
-            "statistical model parameter\n.param factor=3\n.RSPICE_SPECTRE_STAT {}\nV1 in 0 1\nR1 in 0 8 RMOD\n.model RMOD R (R={{factor}})\n.end\n",
-            plan.encode_internal()
-        );
-        let mut netlist = Netlist::parse(&deck).expect("statistical model deck parses");
-        let nominal_circuit = Engine::new(SimulationConfig::default())
-            .build_circuit(&netlist)
-            .expect("nominal statistical model deck builds");
-        assert_eq!(
-            nominal_circuit.resistors.conductances[0].recip().to_bits(),
-            24.0_f64.to_bits()
-        );
-        let expected_factor = plan
-            .sample_process(&netlist.params, &coordinate)
-            .expect("model factor samples")["FACTOR"];
-        netlist.spectre_statistical_coordinate = Some(coordinate);
-        let circuit = Engine::new(SimulationConfig::default())
-            .build_circuit(&netlist)
-            .expect("statistical model deck builds");
-        let actual = circuit.resistors.conductances[0].recip();
-        let expected = 8.0 * expected_factor;
-        assert!((actual - expected).abs() <= expected.abs() * 4.0 * Value::EPSILON);
-    }
-
-    #[test]
-    fn native_spectre_sample_materializes_a_deferred_independent_source() {
-        let plan = crate::netlist::SpectreStatisticsPlan {
-            variations: vec![crate::netlist::SpectreVariation {
-                line: 3,
-                scope: crate::netlist::SpectreVariationScope::Process,
-                parameter: "bias".to_owned(),
-                distribution: crate::netlist::SpectreDistribution::Uniform,
-                spread: crate::netlist::SpectreSpread::HalfRange("0.25".to_owned()),
-                percent: false,
-            }],
-            correlations: vec![],
-        };
-        let coordinate = crate::netlist::SpectreStatisticalCoordinate {
-            seed: 81,
-            monte_carlo_run: 2,
-            temperature_celsius: 27.0,
-            axes: vec![],
-        };
-        let deck = format!(
-            "statistical source\n.param bias=1\n.RSPICE_SPECTRE_STAT {}\nV1 out 0 {{bias}}\nR1 out 0 1k\n.end\n",
-            plan.encode_internal()
-        );
-        let mut netlist = Netlist::parse(&deck).expect("statistical source deck parses");
-        assert!(
-            matches!(
-                netlist.elements[0].kind,
-                crate::netlist::ElementKind::VoltageSourceDeferred(_)
-            ),
-            "statistical source must remain deferred, got {:?}",
-            netlist.elements[0].kind
-        );
-        let nominal_circuit = Engine::new(SimulationConfig::default())
-            .build_circuit(&netlist)
-            .expect("nominal statistical source deck builds");
-        assert_eq!(
-            nominal_circuit.voltage_sources.dc_values[0].to_bits(),
-            1.0_f64.to_bits()
-        );
-        let expected = plan
-            .sample_process(&netlist.params, &coordinate)
-            .expect("source bias samples")["BIAS"];
-        netlist.spectre_statistical_coordinate = Some(coordinate);
-        let circuit = Engine::new(SimulationConfig::default())
-            .build_circuit(&netlist)
-            .expect("statistical source deck builds");
-        assert_eq!(
-            circuit.voltage_sources.dc_values[0].to_bits(),
-            expected.to_bits()
-        );
-    }
-
-    #[test]
-    fn native_spectre_process_model_is_materialized_once_for_repeated_devices() {
-        let plan = crate::netlist::SpectreStatisticsPlan {
-            variations: vec![crate::netlist::SpectreVariation {
-                line: 3,
-                scope: crate::netlist::SpectreVariationScope::Process,
-                parameter: "factor".to_owned(),
-                distribution: crate::netlist::SpectreDistribution::Gaussian,
-                spread: crate::netlist::SpectreSpread::StandardDeviation("0.2".to_owned()),
-                percent: false,
-            }],
-            correlations: vec![],
-        };
-        let coordinate = crate::netlist::SpectreStatisticalCoordinate {
-            seed: 64,
-            monte_carlo_run: 9,
-            temperature_celsius: 27.0,
-            axes: vec![],
-        };
-        let deck = format!(
-            "process model cache\n.param factor=3\n.RSPICE_SPECTRE_STAT {}\nV1 in 0 1\nR1 in mid 8 RMOD\nR2 mid 0 8 RMOD\n.model RMOD R (R={{factor}})\n.end\n",
-            plan.encode_internal()
-        );
-        let mut netlist = Netlist::parse(&deck).expect("process model cache deck parses");
-        let process = plan
-            .sample_process(&netlist.params, &coordinate)
-            .expect("process model factor samples");
-        for (name, value) in &process {
-            netlist.params.set(name, *value);
-        }
-        let mut elements = netlist.elements.clone();
-        let initial_model_count = netlist.models.len();
-        materialize_spectre_statistics_after_flattening(
-            &mut netlist,
-            &mut elements,
-            &process,
-            Some(&coordinate),
-            crate::constants::celsius_to_kelvin(coordinate.temperature_celsius),
-            &NoAbort,
-        )
-        .expect("process models materialize");
-
-        assert_eq!(netlist.models.len(), initial_model_count + 1);
-        let generated = elements
-            .iter()
-            .filter_map(|element| match &element.kind {
-                ElementKind::Resistor { model, .. } => model.clone(),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(generated.len(), 2);
-        assert_eq!(generated[0], generated[1]);
-    }
-
-    #[test]
-    fn native_spectre_mismatch_model_is_materialized_once_per_hierarchy_identity() {
-        let plan = crate::netlist::SpectreStatisticsPlan {
-            variations: vec![crate::netlist::SpectreVariation {
-                line: 3,
-                scope: crate::netlist::SpectreVariationScope::Mismatch,
-                parameter: "factor".to_owned(),
-                distribution: crate::netlist::SpectreDistribution::Gaussian,
-                spread: crate::netlist::SpectreSpread::StandardDeviation("0.2".to_owned()),
-                percent: false,
-            }],
-            correlations: vec![],
-        };
-        let coordinate = crate::netlist::SpectreStatisticalCoordinate {
-            seed: 65,
-            monte_carlo_run: 10,
-            temperature_celsius: 27.0,
-            axes: vec![],
-        };
-        let deck = format!(
-            "mismatch model cache\n.param factor=3\n.RSPICE_SPECTRE_STAT {}\n.subckt pair a b\nR1 a mid 8 RMOD\nR2 mid b 8 RMOD\n.ends\n.model RMOD R (R={{factor}})\nV1 in 0 1\nX1 in 0 pair\n.end\n",
-            plan.encode_internal()
-        );
-        let mut netlist = Netlist::parse(&deck).expect("mismatch model cache deck parses");
-        let process = plan
-            .sample_process(&netlist.params, &coordinate)
-            .expect("empty process sample");
-        let expected = plan
-            .sample_mismatch(&netlist.params, &process, "X1", &coordinate)
-            .expect("X1 mismatch factor")["FACTOR"];
-        let flattened = flatten_netlist_with_models(&netlist).expect("hierarchy flattens");
-        let mut elements = flattened.elements;
-        netlist.models.extend(flattened.scoped_models);
-        let initial_model_count = netlist.models.len();
-        materialize_spectre_statistics_after_flattening(
-            &mut netlist,
-            &mut elements,
-            &process,
-            Some(&coordinate),
-            crate::constants::celsius_to_kelvin(coordinate.temperature_celsius),
-            &NoAbort,
-        )
-        .expect("mismatch models materialize");
-
-        assert_eq!(netlist.models.len(), initial_model_count + 1);
-        let generated_names = elements
-            .iter_mut()
-            .filter_map(|element| element_model_name_mut(&mut element.kind).cloned())
-            .collect::<Vec<_>>();
-        assert_eq!(generated_names.len(), 2);
-        assert_eq!(generated_names[0], generated_names[1]);
-        let generated_model = netlist
-            .models
-            .iter()
-            .find(|model| model.name.eq_ignore_ascii_case(&generated_names[0]))
-            .expect("generated mismatch model exists");
-        let resistance_multiplier = generated_model
-            .params
-            .iter()
-            .find(|(name, _)| name.eq_ignore_ascii_case("R"))
-            .map(|(_, value)| *value)
-            .expect("generated model has materialized R");
-        assert_eq!(resistance_multiplier.to_bits(), expected.to_bits());
-    }
-
-    #[test]
-    fn spectre_post_flatten_materialization_honors_preexisting_abort() {
-        let mut netlist = Netlist::default();
-        let coordinate = crate::netlist::SpectreStatisticalCoordinate::default();
-        let mut elements = Vec::new();
-        assert!(matches!(
-            materialize_spectre_statistics_after_flattening(
-                &mut netlist,
-                &mut elements,
-                &BTreeMap::new(),
-                Some(&coordinate),
-                crate::constants::TEMP_REFERENCE,
-                &crate::abort_signal::ImmediateAbort,
-            ),
-            Err(SimulationError::Aborted)
-        ));
-    }
-
-    #[test]
-    fn native_spectre_mismatch_is_shared_per_subcircuit_and_reaches_derived_locals() {
-        let plan = crate::netlist::SpectreStatisticsPlan {
-            variations: vec![crate::netlist::SpectreVariation {
-                line: 3,
-                scope: crate::netlist::SpectreVariationScope::Mismatch,
-                parameter: "rv".to_owned(),
-                distribution: crate::netlist::SpectreDistribution::Gaussian,
-                spread: crate::netlist::SpectreSpread::StandardDeviation("5".to_owned()),
-                percent: false,
-            }],
-            correlations: vec![],
-        };
-        let coordinate = crate::netlist::SpectreStatisticalCoordinate {
-            seed: 72,
-            monte_carlo_run: 4,
-            temperature_celsius: -40.0,
-            axes: vec![],
-        };
-        let deck = format!(
-            "native mismatch materialization\n.param rv=100\n.RSPICE_SPECTRE_STAT {}\n.subckt pair a b\n.param local={{rv*2}}\nR1 a mid {{local}}\nR2 mid b {{local}}\n.ends\nV1 in 0 1\nX1 in 0 pair\nX2 in 0 pair\n.end\n",
-            plan.encode_internal()
-        );
-        let mut netlist = Netlist::parse(&deck).expect("statistical hierarchy parses");
-        netlist.spectre_statistical_coordinate = Some(coordinate.clone());
-        let process = plan
-            .sample_process(&netlist.params, &coordinate)
-            .expect("empty process sample");
-        let expected_x1 = 2.0
-            * plan
-                .sample_mismatch(&netlist.params, &process, "X1", &coordinate)
-                .expect("X1 mismatch")["RV"];
-        let expected_x2 = 2.0
-            * plan
-                .sample_mismatch(&netlist.params, &process, "X2", &coordinate)
-                .expect("X2 mismatch")["RV"];
-        let circuit = Engine::new(SimulationConfig::default())
-            .build_circuit(&netlist)
-            .expect("statistical hierarchy builds");
-        let resistance = |name: &str| {
-            let index = circuit
-                .resistors
-                .names
-                .iter()
-                .position(|candidate| candidate.eq_ignore_ascii_case(name))
-                .expect("flattened resistor exists");
-            circuit.resistors.conductances[index].recip()
-        };
-        assert_eq!(resistance("X1.R1").to_bits(), expected_x1.to_bits());
-        assert_eq!(resistance("X1.R2").to_bits(), expected_x1.to_bits());
-        assert_eq!(resistance("X2.R1").to_bits(), expected_x2.to_bits());
-        assert_eq!(resistance("X2.R2").to_bits(), expected_x2.to_bits());
-        assert_ne!(expected_x1.to_bits(), expected_x2.to_bits());
-    }
-
-    /// LEVEL=3 derives AREA and PJ from the drawn rectangle, and must land on
-    /// the same junction an explicit `AREA`/`PJ` instance would.
-    ///
-    /// `W=10u L=10u` is `AREA=100p PJ=40u`, which is the geometry the vendored
-    /// GF180MCU corpus already holds to ngspice — so pinning the equivalence
-    /// here extends that evidence to the geometric path, which no vendored
-    /// deck exercises.
-    #[test]
-    fn level3_width_and_length_derive_the_explicit_area_and_perimeter() {
-        let build = |instance: &str| {
-            let deck = format!(
-                "level3 geometry\n\
-                 V1 in 0 1\n\
-                 D1 in 0 DGEO {instance}\n\
-                 .model DGEO D LEVEL=3 IS=2.2959e-7 JSW=2.1207e-13 N=1.01 CJ=9.6797e-4\n\
-                 .end\n"
-            );
-            let netlist = Netlist::parse(&deck).expect("geometric diode deck parses");
-            let circuit = Engine::new(SimulationConfig::default())
-                .build_circuit(&netlist)
-                .expect("geometric diode deck builds");
-            let [diode] = circuit.diodes.devices.as_slice() else {
-                panic!("expected one diode");
-            };
-            diode.clone()
-        };
-
-        let drawn = build("W=10u L=10u");
-        let explicit = build("AREA=100p PJ=40u");
-
-        assert_eq!(drawn.level, DiodeLevel::Geometric);
-        assert!(
-            (drawn.is - explicit.is).abs() <= explicit.is * 1e-12,
-            "derived area {} vs explicit {}",
-            drawn.is,
-            explicit.is
-        );
-        assert!(
-            (drawn.sidewall_perimeter - explicit.sidewall_perimeter).abs() <= 1e-18,
-            "derived perimeter {} vs explicit {}",
-            drawn.sidewall_perimeter,
-            explicit.sidewall_perimeter
-        );
-        assert!((drawn.cj0 - explicit.cj0).abs() <= explicit.cj0 * 1e-12);
-
-        // A LEVEL=1 card takes no geometry from W/L, so it stays unit-area.
-        let legacy_deck = "legacy geometry\n\
-             V1 in 0 1\n\
-             D1 in 0 DLEG W=10u L=10u\n\
-             .model DLEG D IS=2.2959e-7\n\
-             .end\n";
-        let netlist = Netlist::parse(legacy_deck).expect("legacy diode deck parses");
-        let circuit = Engine::new(SimulationConfig::default())
-            .build_circuit(&netlist)
-            .expect("legacy diode deck builds");
-        let [legacy] = circuit.diodes.devices.as_slice() else {
-            panic!("expected one diode");
-        };
-        assert!(legacy.is > drawn.is * 1e6, "LEVEL=1 ignores W/L geometry");
-    }
-
-    /// `.options scale` multiplies drawn dimensions, so it enters the derived
-    /// area squared and the derived perimeter linearly.
-    #[test]
-    fn level3_geometry_honours_the_options_scale_factor() {
-        let deck = "scaled level3 geometry\n\
-             .options scale=2\n\
-             V1 in 0 1\n\
-             D1 in 0 DGEO W=10u L=10u\n\
-             .model DGEO D LEVEL=3 IS=2.2959e-7 JSW=2.1207e-13\n\
-             .end\n";
-        let netlist = Netlist::parse(deck).expect("scaled deck parses");
-        assert_eq!(netlist.options.scale, Some(2.0));
-        let circuit = Engine::new(SimulationConfig::default())
-            .build_circuit(&netlist)
-            .expect("scaled deck builds");
-        let [diode] = circuit.diodes.devices.as_slice() else {
-            panic!("expected one diode");
-        };
-
-        // AREA = (20u)^2 = 400p, PJ = 2*(20u+20u) = 80u.
-        assert!((diode.is - 2.2959e-7 * 400e-12).abs() <= diode.is * 1e-12);
-        assert!((diode.sidewall_perimeter - 80e-6).abs() <= 1e-18);
-    }
-
-    struct DiscardingStamper;
-
-    impl crate::device::MatrixStamper for DiscardingStamper {
-        fn stamp(&mut self, _row: crate::NodeId, _col: crate::NodeId, _value: crate::Value) {}
-
-        fn stamp_rhs(&mut self, _index: crate::NodeId, _value: crate::Value) {}
-    }
-
-    fn built_bsim3_equation_set(
-        level: i32,
-        model_tail: &str,
-        dialect: SpiceDialect,
-    ) -> Result<crate::device::Bsim3v3EquationSet, SimulationError> {
-        let deck = format!(
-            "BSIM3 front routing\n\
-             M1 d g s 0 MOD W=1u L=1u\n\
-             .MODEL MOD NMOS LEVEL={level} {model_tail}\n\
-             .END\n"
-        );
-        let netlist = Netlist::parse(&deck).expect("BSIM3 routing deck parses");
-        let engine = Engine::new(SimulationConfig::default().with_spice_dialect(dialect));
-        let circuit = engine.build_circuit(&netlist)?;
-        let [device] = circuit.bsim3v3.devices.as_slice() else {
-            panic!("expected exactly one native BSIM3 device")
-        };
-        Ok(device.core.model.equation_set)
-    }
-
-    fn built_bsim3_geometry(
-        level: i32,
-        instance_tail: &str,
-        model_tail: &str,
-        dialect: SpiceDialect,
-    ) -> Result<(f64, f64), SimulationError> {
-        let deck = format!(
-            "BSIM3 model geometry defaults\n\
-             M1 d g s 0 MOD {instance_tail}\n\
-             .MODEL MOD NMOS LEVEL={level} {model_tail}\n\
-             .END\n"
-        );
-        let netlist = Netlist::parse(&deck).expect("BSIM3 geometry deck parses");
-        let engine = Engine::new(SimulationConfig::default().with_spice_dialect(dialect));
-        let circuit = engine.build_circuit(&netlist)?;
-        let [device] = circuit.bsim3v3.devices.as_slice() else {
-            panic!("expected exactly one native BSIM3 device")
-        };
-        Ok((device.core.geom.l, device.core.geom.w))
-    }
-
-    fn assert_bsim3_geometry(actual: (f64, f64), expected: (f64, f64)) {
-        for (axis, actual, expected) in [("L", actual.0, expected.0), ("W", actual.1, expected.1)] {
-            assert!(
-                (actual - expected).abs() <= 1.0e-18,
-                "BSIM3 {axis} geometry mismatch: actual={actual:.17e}, expected={expected:.17e}"
-            );
-        }
-    }
-
-    #[test]
-    fn bsim3_equation_family_is_selected_by_simulator_front_and_level() {
-        use crate::device::Bsim3v3EquationSet::{NgspiceV330, XyceV322};
-
-        assert_eq!(
-            built_bsim3_equation_set(9, "", SpiceDialect::Xyce).expect("Xyce LEVEL=9 builds"),
-            XyceV322
-        );
-        assert_eq!(
-            built_bsim3_equation_set(49, "", SpiceDialect::Xyce).expect("Xyce LEVEL=49 builds"),
-            XyceV322
-        );
-        assert_eq!(
-            built_bsim3_equation_set(8, "", SpiceDialect::Ngspice).expect("ngspice LEVEL=8 builds"),
-            NgspiceV330
-        );
-        assert_eq!(
-            built_bsim3_equation_set(49, "", SpiceDialect::Ngspice)
-                .expect("ngspice LEVEL=49 builds"),
-            NgspiceV330
-        );
-        assert_eq!(
-            built_bsim3_equation_set(9, "CAPMOD=3", SpiceDialect::BestAvailable)
-                .expect("auto-detected BSIM3 LEVEL=9 builds"),
-            XyceV322
-        );
-    }
-
-    #[test]
-    fn xyce_bsim3_model_geometry_defaults_obey_instance_precedence() {
-        let model_geometry = built_bsim3_geometry(9, "", "L=0.35u W=10u", SpiceDialect::Xyce)
-            .expect("Xyce BSIM3 model geometry builds");
-        assert_bsim3_geometry(model_geometry, (0.35e-6, 10.0e-6));
-
-        let mixed_geometry = built_bsim3_geometry(9, "L=0.4u", "L=0.35u W=10u", SpiceDialect::Xyce)
-            .expect("Xyce BSIM3 mixed instance/model geometry builds");
-        assert_bsim3_geometry(mixed_geometry, (0.4e-6, 10.0e-6));
-
-        let native_defaults = built_bsim3_geometry(9, "", "", SpiceDialect::Xyce)
-            .expect("Xyce BSIM3 native geometry defaults build");
-        assert_bsim3_geometry(native_defaults, (5.0e-6, 5.0e-6));
-    }
-
-    #[test]
-    fn ngspice_bsim3_does_not_inherit_xyce_model_geometry_extension() {
-        let model_geometry = built_bsim3_geometry(8, "", "L=0.35u W=10u", SpiceDialect::Ngspice)
-            .expect("ngspice BSIM3 model with compatibility parameters builds");
-        assert_bsim3_geometry(model_geometry, (5.0e-6, 5.0e-6));
-
-        let instance_geometry =
-            built_bsim3_geometry(8, "L=0.4u W=12u", "L=0.35u W=10u", SpiceDialect::Ngspice)
-                .expect("ngspice BSIM3 instance geometry builds");
-        assert_bsim3_geometry(instance_geometry, (0.4e-6, 12.0e-6));
-    }
-
-    #[test]
-    fn xyce_level8_fails_closed_instead_of_changing_equation_family() {
-        let error = built_bsim3_equation_set(8, "", SpiceDialect::Xyce)
-            .expect_err("Xyce LEVEL=8 must not route to a different BSIM3 family");
-        assert!(
-            error
-                .to_string()
-                .contains("registered at LEVEL=9 and LEVEL=49")
-        );
-    }
-
-    #[test]
-    fn pem_instances_share_one_parsed_table_pair_per_model() {
-        let unique = format!(
-            "builder-pem-share-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("system clock")
-                .as_nanos()
-        );
-        let positive = format!("virtual://pem/{unique}/positive");
-        let negative = format!("virtual://pem/{unique}/negative");
-        crate::xspice::register_data_file(&positive, "0,1\n1,0\n")
-            .expect("register positive table");
-        crate::xspice::register_data_file(&negative, "0,0\n1,1\n")
-            .expect("register negative table");
-        let deck = format!(
-            "shared PEM tables\n\
-             .model pem memristor level=4 fxpdata={positive} fxmdata={negative}\n\
-             YMEMRISTOR first 1 0 pem xo=0.25\n\
-             YMEMRISTOR second 2 0 pem xo=0.75\n\
-             .end\n"
-        );
-        let netlist = Netlist::parse(&deck).expect("shared PEM deck parses");
-        let circuit = Engine::default()
-            .build_circuit(&netlist)
-            .expect("shared PEM circuit builds");
-        crate::xspice::unregister_data_file(&positive).expect("unregister positive table");
-        crate::xspice::unregister_data_file(&negative).expect("unregister negative table");
-
-        let [first, second] = circuit.xyce_memristors.as_slice() else {
-            panic!("expected two PEM instances")
-        };
-        let crate::device::XyceMemristor::Pem(first) = &first.device else {
-            panic!("first instance is PEM")
-        };
-        let crate::device::XyceMemristor::Pem(second) = &second.device else {
-            panic!("second instance is PEM")
-        };
-        assert!(
-            first
-                .positive_table()
-                .shares_storage_with(second.positive_table())
-        );
-        assert!(
-            first
-                .negative_table()
-                .shares_storage_with(second.negative_table())
-        );
-        assert_eq!(first.instance().x0, 0.25);
-        assert_eq!(second.instance().x0, 0.75);
-    }
-
-    #[test]
-    fn behavioral_gmin_uses_resolved_engine_device_option() {
-        let netlist = Netlist::parse_with_options(
-            "resolved behavioral GMIN\nB1 out 0 V={GMIN}\n.END\n",
-            crate::netlist::NetlistParseOptions {
-                expression_dialect: crate::config::ExpressionDialect::Xyce,
-                ..Default::default()
-            },
-        )
-        .expect("Xyce behavioral deck parses");
-        let mut config = crate::engine::SimulationConfig::default();
-        config.convergence_config.junction_gmin_target = 7.5e-9;
-
-        let mut circuit = Engine::new(config)
-            .build_circuit(&netlist)
-            .expect("behavioral circuit builds");
-
-        assert_eq!(
-            circuit.behavioral_sources.voltage_sources[0]
-                .evaluate(&[], 0.0)
-                .expect("finite behavioral voltage"),
-            7.5e-9
-        );
-    }
-
-    fn build_xyce_behavioral_reference_fixture(
-        controlling_source: &str,
-        dependency: &str,
-    ) -> Result<CircuitData, SimulationError> {
-        let source = format!(
-            "behavioral branch reference\n{controlling_source}\nR1 1 0 1\nB2 2 0 I={{I({dependency})*20}}\nR2 2 0 1\n.END\n"
-        );
-        let netlist = Netlist::parse_with_options(
-            &source,
-            crate::netlist::NetlistParseOptions {
-                expression_dialect: crate::config::ExpressionDialect::Xyce,
-                ..Default::default()
-            },
-        )
-        .map_err(|error| SimulationError::Netlist(error.to_string()))?;
-        Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce))
-            .build_circuit(&netlist)
-    }
-
-    #[test]
-    fn behavioral_lead_current_rejects_known_device_without_branch_variable() {
-        let error = build_xyce_behavioral_reference_fixture("B1 1 0 I={1m}", "b1")
-            .expect_err("a current-output B source has no branch-current solution variable");
-        let SimulationError::BehavioralReference(error) = error else {
-            panic!("expected typed behavioral-reference failure, got {error:?}");
-        };
-        assert_eq!(error.owner_name, "B2");
-        assert_eq!(error.canonical_owner_name, "B2");
-        assert_eq!(error.dependency_name, "b1");
-        assert_eq!(error.canonical_dependency_name, "B1");
-        assert_eq!(
-            error.reason,
-            crate::device::BehavioralReferenceReason::LeadCurrentNotSolutionVariable
-        );
-    }
-
-    #[test]
-    fn behavioral_branch_reference_distinguishes_valid_and_missing_devices() {
-        build_xyce_behavioral_reference_fixture("B1 1 0 V={1m}", "b1")
-            .expect("a voltage-output B source owns an MNA branch variable");
-
-        let error = build_xyce_behavioral_reference_fixture("B1 1 0 I={1m}", "missing")
-            .expect_err("an absent behavioral dependency must fail");
-        let SimulationError::BehavioralReference(error) = error else {
-            panic!("expected typed behavioral-reference failure, got {error:?}");
-        };
-        assert_eq!(error.canonical_dependency_name, "MISSING");
-        assert_eq!(
-            error.reason,
-            crate::device::BehavioralReferenceReason::UnknownDevice
-        );
-    }
-
-    #[test]
-    fn generic_switch_retains_scoped_runtime_params_and_resolved_context() {
-        let netlist = Netlist::parse_with_options(
-            "scoped runtime switch control\n\
-             .OPTIONS GMIN=2.5E-8\n\
-             .MODEL SM SWITCH(RON=2 ROFF=1MEG ON=150 OFF=140)\n\
-             X1 out CELL SCALE=2\n\
-             .SUBCKT CELL P SCALE=1\n\
-             .PARAM CONTROL_VALUE={SCALE*(TEMP+VT+GMIN)}\n\
-             S1 P 0 SM CONTROL={CONTROL_VALUE}\n\
-             .ENDS\n\
-             .END\n",
-            crate::netlist::NetlistParseOptions {
-                expression_dialect: crate::config::ExpressionDialect::Xyce,
-                ..Default::default()
-            },
-        )
-        .expect("Xyce scoped generic-switch deck parses");
-        let mut config = crate::engine::SimulationConfig::default();
-        config.temperature = crate::constants::celsius_to_kelvin(80.0);
-        config.convergence_config.junction_gmin_target = 9.0e-7;
-        let engine = Engine::new(config).resolved_for_netlist(&netlist);
-        assert_eq!(
-            engine.config.convergence_config.junction_gmin_target, 2.5e-8,
-            ".OPTIONS GMIN must override the base engine device-option value"
-        );
-
-        let mut circuit = engine
-            .build_circuit(&netlist)
-            .expect("scoped generic-switch circuit builds");
-        assert_eq!(circuit.generic_switches.len(), 1);
-
-        circuit.generic_switches[0].stamp_time_dependent(0.0, &mut DiscardingStamper);
-        assert_eq!(
-            circuit.generic_switches[0].conductance(),
-            0.5,
-            "resolved SCALE, TEMP, VT, and GMIN should drive the switch fully on"
-        );
-    }
-
-    fn xspice_model_count(circuit: &CircuitData, model_name: &str) -> usize {
-        circuit
-            .xspice_instances
-            .iter()
-            .filter(|instance| instance.model_name().eq_ignore_ascii_case(model_name))
-            .count()
-    }
-
-    fn single_xspice_param(circuit: &CircuitData, model_name: &str, param: &str) -> crate::Value {
-        let mut matches = circuit
-            .xspice_instances
-            .iter()
-            .filter(|instance| instance.model_name().eq_ignore_ascii_case(model_name));
-        let instance = matches
-            .next()
-            .unwrap_or_else(|| panic!("expected one {model_name} instance"));
-        assert!(
-            matches.next().is_none(),
-            "expected exactly one {model_name} instance"
-        );
-        instance.param(param)
-    }
-
-    fn single_xspice_instance<'a>(
-        circuit: &'a CircuitData,
-        model_name: &str,
-    ) -> &'a crate::xspice::XspiceInstance {
-        let mut matches = circuit
-            .xspice_instances
-            .iter()
-            .filter(|instance| instance.model_name().eq_ignore_ascii_case(model_name));
-        let instance = matches
-            .next()
-            .unwrap_or_else(|| panic!("expected one {model_name} instance"));
-        assert!(
-            matches.next().is_none(),
-            "expected exactly one {model_name} instance"
-        );
-        instance
-    }
-
-    #[test]
-    fn explicit_adc_does_not_suppress_needed_auto_dac_on_same_node() {
-        let netlist = Netlist::parse(
-            "\
-* explicit adc plus mixed digital-output node
-vctrl ain 0 dc 1
-aadc [ain] [mix] adc
-apull [mix] pullup
-rload mix 0 1k
-.model adc adc_bridge
-.model pullup d_pullup
-.end
-",
-        )
-        .expect("deck parses");
-
-        let circuit = Engine::default()
-            .build_circuit(&netlist)
-            .expect("circuit builds");
-
-        assert_eq!(xspice_model_count(&circuit, "adc_bridge"), 1);
-        assert_eq!(xspice_model_count(&circuit, "d_pullup"), 1);
-        assert_eq!(
-            xspice_model_count(&circuit, "dac_bridge"),
-            1,
-            "explicit adc_bridge only covers analog-to-digital; mixed node 'mix' still needs a generated dac_bridge"
-        );
-    }
-
-    #[test]
-    fn real_input_on_an_analog_node_gets_a_generated_observer() {
-        let netlist = Netlist::parse(
-            "\
-* a real event reader sitting on a node the matrix also owns
-vin mix 0 dc 1.5
-rload mix 0 1k
-again mix robs rg
-.model rg real_gain
-.end
-",
-        )
-        .expect("deck parses");
-
-        let circuit = Engine::default()
-            .build_circuit(&netlist)
-            .expect("circuit builds");
-
-        assert_eq!(xspice_model_count(&circuit, "real_gain"), 1);
-        assert_eq!(
-            xspice_model_count(&circuit, "v_to_real"),
-            1,
-            "nothing drives the real event on 'mix' and the matrix owns the node, so the reader needs the observer"
-        );
-        assert_eq!(
-            xspice_model_count(&circuit, "real_to_v"),
-            0,
-            "the observer direction must not also plan the driver"
-        );
-
-        let observer = single_xspice_instance(&circuit, "v_to_real");
-        let mix = circuit
-            .get_node_by_name("mix")
-            .expect("the deck's mixed node is allocated");
-        assert!(matches!(
-            observer.connection_at(0),
-            Some(crate::xspice::PortConnection::Analog(node)) if *node == mix
-        ));
-        assert!(matches!(
-            observer.connection_at(1),
-            Some(crate::xspice::PortConnection::Real(node)) if *node == mix
-        ));
-    }
-
-    #[test]
-    fn a_real_event_net_with_no_analog_node_gets_no_observer() {
-        let netlist = Netlist::parse(
-            "\
-* the corpus shape: a real event chain the matrix never touches
-avec [dclk] rmid d2r
-again rmid rout rg
-.model d2r d_to_real
-.model rg real_gain
-.end
-",
-        )
-        .expect("deck parses");
-
-        let circuit = Engine::default()
-            .build_circuit(&netlist)
-            .expect("circuit builds");
-
-        assert_eq!(
-            xspice_model_count(&circuit, "v_to_real"),
-            0,
-            "an event-only net has no analog value to observe"
-        );
-    }
-
-    #[test]
-    fn a_driven_real_event_net_keeps_its_driver_and_gains_no_observer() {
-        let netlist = Netlist::parse(
-            "\
-* a real event both produced onto and read from one analog node
-rload mix 0 1k
-avec [dclk] mix d2r
-again mix rout rg
-.model d2r d_to_real
-.model rg real_gain
-.end
-",
-        )
-        .expect("deck parses");
-
-        let circuit = Engine::default()
-            .build_circuit(&netlist)
-            .expect("circuit builds");
-
-        assert_eq!(
-            xspice_model_count(&circuit, "real_to_v"),
-            1,
-            "the driven event still reaches the matrix through the existing driver bridge"
-        );
-        assert_eq!(
-            xspice_model_count(&circuit, "v_to_real"),
-            0,
-            "a driven real net must not also be observed; the two would race on one value"
-        );
-    }
-
-    #[test]
-    fn an_authored_observer_suppresses_the_generated_one() {
-        let netlist = Netlist::parse(
-            "\
-* an author's own observer publishing onto the node a reader reads
-vsrc src 0 dc 2
-rsrc src 0 1k
-rload mix 0 1k
-aobs src mix obs
-again mix rout rg
-.model obs v_to_real
-.model rg real_gain
-.end
-",
-        )
-        .expect("deck parses");
-
-        let circuit = Engine::default()
-            .build_circuit(&netlist)
-            .expect("circuit builds");
-
-        assert_eq!(
-            xspice_model_count(&circuit, "v_to_real"),
-            1,
-            "the authored observer is the only one; real event drivers sum, so a second would double the value"
-        );
-    }
-
-    #[test]
-    fn disabled_auto_bridging_names_the_observer_direction() {
-        let netlist = Netlist::parse(
-            "\
-* auto bridging off, with a node that would need an observer
-.options auto_bridge=0
-vin mix 0 dc 1.5
-rload mix 0 1k
-again mix robs rg
-.model rg real_gain
-.end
-",
-        )
-        .expect("deck parses");
-
-        let error = Engine::default()
-            .build_circuit(&netlist)
-            .expect_err("disabled auto bridging refuses the mixed node");
-        let message = error.to_string();
-        assert!(
-            message.contains("voltage-to-real"),
-            "the refusal must name the bridge the node needs, got: {message}"
-        );
-    }
-
-    #[test]
-    fn auto_bridge_uses_deepest_xspice_subckt_vcc() {
-        let netlist = Netlist::parse(
-            "\
-* auto bridge uses scoped subckt vcc
-.param vcc=3.3
-rload mix 0 1k
-xcell mix dcell vcc=5
-.model pull d_pullup
-.subckt dcell y vcc=5
-apull [y] pull
-.ends
-.end
-",
-        )
-        .expect("deck parses");
-
-        let circuit = Engine::default()
-            .build_circuit(&netlist)
-            .expect("circuit builds");
-
-        assert_eq!(xspice_model_count(&circuit, "d_pullup"), 1);
-        assert_eq!(xspice_model_count(&circuit, "dac_bridge"), 1);
-        assert_eq!(
-            single_xspice_param(&circuit, "dac_bridge", "out_high"),
-            5.0,
-            "generated dac_bridge should use the deepest connected XSPICE subckt vcc, not the top-level vcc"
-        );
-    }
-
-    #[test]
-    fn auto_bridge_uses_family_specific_template() {
-        let netlist = Netlist::parse(
-            "\
-* auto bridge uses family-specific template
-.param vcc=5
-rload mix 0 1k
-.model pull d_pullup(family=\"74HCT\")
-apull [mix] pull
-.control
-set auto_bridge_d_out = ( \".model generic_dac dac_bridge(out_low = -1 out_high = %g)\" \"ageneric%d [ %s ] [ %s ] generic_dac\" 1 )
-set auto_bridge_74HCT_d_out = ( \".model family_dac dac_bridge(out_low = -2 out_high = %g)\" \"afamily%d [ %s ] [ %s ] family_dac\" 1 )
-.endc
-.end
-",
-        )
-        .expect("deck parses");
-
-        let circuit = Engine::default()
-            .build_circuit(&netlist)
-            .expect("circuit builds");
-
-        assert_eq!(xspice_model_count(&circuit, "d_pullup"), 1);
-        assert_eq!(xspice_model_count(&circuit, "dac_bridge"), 1);
-        assert_eq!(single_xspice_param(&circuit, "dac_bridge", "out_low"), -2.0);
-        assert_eq!(single_xspice_param(&circuit, "dac_bridge", "out_high"), 5.0);
-    }
-
-    #[test]
-    fn auto_bridge_uses_standard_family_include_template() {
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("system clock after epoch")
-            .as_nanos();
-        let temp_dir = std::env::temp_dir().join(format!(
-            "rspice-auto-bridge-family-{}-{unique}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&temp_dir).expect("create temp dir");
-        std::fs::write(
-            temp_dir.join("bridge_74HCT_d_out.subcir"),
-            "\
-.subckt bridge_74HCT_d_out dig ana vcc=5
-.model family_dac dac_bridge(out_low = -0.75 out_high = {vcc})
-abuf [ dig ] [ ana ] family_dac
-.ends
-",
-        )
-        .expect("write family bridge include file");
-
-        let deck_path = temp_dir.join("main.cir");
-        let netlist = Netlist::parse_with_path(
-            "\
-* auto bridge uses standard family include
-.param vcc=4.4
-rload mix 0 1k
-.model pull d_pullup(family=\"74HCT\")
-apull [mix] pull
-.end
-",
-            &deck_path,
-        )
-        .expect("deck parses with source path");
-
-        let circuit = Engine::default()
-            .build_circuit(&netlist)
-            .expect("circuit builds");
-
-        assert_eq!(xspice_model_count(&circuit, "d_pullup"), 1);
-        assert_eq!(xspice_model_count(&circuit, "dac_bridge"), 1);
-        assert_eq!(
-            single_xspice_param(&circuit, "dac_bridge", "out_low"),
-            -0.75
-        );
-        assert_eq!(single_xspice_param(&circuit, "dac_bridge", "out_high"), 4.4);
-
-        std::fs::remove_dir_all(temp_dir).expect("remove temp dir");
-    }
-
-    #[test]
-    fn auto_bridge_no_family_uses_generic_template() {
-        let netlist = Netlist::parse(
-            "\
-* auto bridge skips family-specific template when disabled
-.param vcc=5
-rload mix 0 1k
-.model pull d_pullup(family=\"74HCT\")
-apull [mix] pull
-.control
-set no_auto_bridge_family
-set auto_bridge_d_out = ( \".model generic_dac dac_bridge(out_low = -1 out_high = %g)\" \"ageneric%d [ %s ] [ %s ] generic_dac\" 1 )
-set auto_bridge_74HCT_d_out = ( \".model family_dac dac_bridge(out_low = -2 out_high = %g)\" \"afamily%d [ %s ] [ %s ] family_dac\" 1 )
-.endc
-.end
-",
-        )
-        .expect("deck parses");
-
-        let circuit = Engine::default()
-            .build_circuit(&netlist)
-            .expect("circuit builds");
-
-        assert_eq!(xspice_model_count(&circuit, "d_pullup"), 1);
-        assert_eq!(xspice_model_count(&circuit, "dac_bridge"), 1);
-        assert_eq!(single_xspice_param(&circuit, "dac_bridge", "out_low"), -1.0);
-        assert_eq!(single_xspice_param(&circuit, "dac_bridge", "out_high"), 5.0);
-    }
-
-    #[test]
-    fn auto_bridge_template_accepts_printf_width_and_precision() {
-        let netlist = Netlist::parse(
-            "\
-* auto bridge template accepts printf modifiers
-.param vcc=4.567
-rload mix 0 1k
-.model pull d_pullup
-apull [mix] pull
-.control
-set auto_bridge_d_out = ( \".model fmt_dac dac_bridge(out_low = 0 out_high = %.2f)\" \"afmt%03d [ %12s ] [ %12s ] fmt_dac\" 1 )
-.endc
-.end
-",
-        )
-        .expect("deck parses");
-
-        let circuit = Engine::default()
-            .build_circuit(&netlist)
-            .expect("circuit builds");
-
-        let dac = single_xspice_instance(&circuit, "dac_bridge");
-        assert_eq!(dac.name, "AFMT001");
-        assert_eq!(
-            single_xspice_param(&circuit, "dac_bridge", "out_high"),
-            4.57
-        );
-    }
-
-    #[test]
-    fn auto_bridge_template_groups_nodes_up_to_max() {
-        let netlist = Netlist::parse(
-            "\
-* auto bridge template max groups nodes into one vector bridge
-.param vcc=4
-rload0 mix0 0 1k
-rload1 mix1 0 1k
-.model pull d_pullup
-apull0 [mix0] pull
-apull1 [mix1] pull
-.control
-set auto_bridge_d_out = ( \".model grouped_dac dac_bridge(out_low = -0.25 out_high = %g)\" \"agroup%d [ %s ] [ %s ] grouped_dac\" 2 )
-.endc
-.end
-",
-        )
-        .expect("deck parses");
-
-        let circuit = Engine::default()
-            .build_circuit(&netlist)
-            .expect("circuit builds");
-
-        assert_eq!(xspice_model_count(&circuit, "d_pullup"), 2);
-        assert_eq!(xspice_model_count(&circuit, "dac_bridge"), 1);
-        assert_eq!(
-            single_xspice_param(&circuit, "dac_bridge", "out_low"),
-            -0.25
-        );
-        assert_eq!(single_xspice_param(&circuit, "dac_bridge", "out_high"), 4.0);
-
-        let dac = single_xspice_instance(&circuit, "dac_bridge");
-        assert!(
-            matches!(
-                dac.connection("in"),
-                Some(crate::xspice::PortConnection::DigitalVector(nodes)) if nodes.len() == 2
-            ),
-            "grouped template should generate a two-bit digital input vector"
-        );
-        assert!(
-            matches!(
-                dac.connection("out"),
-                Some(crate::xspice::PortConnection::AnalogVector(nodes)) if nodes.len() == 2
-            ),
-            "grouped template should generate a two-node analog output vector"
-        );
-    }
-
-    #[test]
-    fn auto_bridge_template_include_setup_resolves_model_card() {
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("system clock after epoch")
-            .as_nanos();
-        let temp_dir = std::env::temp_dir().join(format!(
-            "rspice-auto-bridge-include-{}-{unique}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&temp_dir).expect("create temp dir");
-        std::fs::write(
-            temp_dir.join("bridge_models.cir"),
-            ".model included_dac dac_bridge(out_low = -0.5 out_high = 4.4)\n",
-        )
-        .expect("write include file");
-
-        let deck_path = temp_dir.join("main.cir");
-        let netlist = Netlist::parse_with_path(
-            "\
-* auto bridge template include setup
-rload mix 0 1k
-.model pull d_pullup
-apull [mix] pull
-.control
-set auto_bridge_d_out = ( \".include bridge_models.cir\" \"ainc%d [ %s ] [ %s ] included_dac\" 1 )
-.endc
-.end
-",
-            &deck_path,
-        )
-        .expect("deck parses with source path");
-
-        let circuit = Engine::default()
-            .build_circuit(&netlist)
-            .expect("circuit builds");
-
-        assert_eq!(xspice_model_count(&circuit, "d_pullup"), 1);
-        assert_eq!(xspice_model_count(&circuit, "dac_bridge"), 1);
-        assert_eq!(single_xspice_param(&circuit, "dac_bridge", "out_low"), -0.5);
-        assert_eq!(single_xspice_param(&circuit, "dac_bridge", "out_high"), 4.4);
-
-        std::fs::remove_dir_all(temp_dir).expect("remove temp dir");
-    }
-
-    #[test]
-    fn auto_bridge_template_include_setup_builds_subcircuit_bridge() {
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("system clock after epoch")
-            .as_nanos();
-        let temp_dir = std::env::temp_dir().join(format!(
-            "rspice-auto-bridge-subckt-{}-{unique}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&temp_dir).expect("create temp dir");
-        std::fs::write(
-            temp_dir.join("bridge_sub.cir"),
-            "\
-.subckt auto_buf dig ana vcc=5
-.model auto_dac dac_bridge(out_low = 0 out_high = {vcc})
-abuf [ dig ] [ internal ] auto_dac
-rint internal ana 100
-.ends
-",
-        )
-        .expect("write bridge subckt include file");
-
-        let deck_path = temp_dir.join("main.cir");
-        let netlist = Netlist::parse_with_path(
-            "\
-* auto bridge template subcircuit setup
-.param vcc=4.4
-rload mix 0 1k
-.model pull d_pullup
-apull [mix] pull
-.control
-set auto_bridge_d_out = ( \".include bridge_sub.cir\" \"xauto_buf%d %s %s auto_buf vcc=%g\" 1 )
-.endc
-.end
-",
-            &deck_path,
-        )
-        .expect("deck parses with source path");
-
-        let circuit = Engine::default()
-            .build_circuit(&netlist)
-            .expect("circuit builds");
-
-        assert_eq!(xspice_model_count(&circuit, "d_pullup"), 1);
-        assert_eq!(xspice_model_count(&circuit, "dac_bridge"), 1);
-        assert_eq!(single_xspice_param(&circuit, "dac_bridge", "out_high"), 4.4);
-        assert!(
-            circuit
-                .resistors
-                .names
-                .iter()
-                .any(|name| name.to_ascii_uppercase().contains("RINT")),
-            "generated bridge subcircuit should add the included rint resistor"
-        );
-
-        std::fs::remove_dir_all(temp_dir).expect("remove temp dir");
-    }
-
-    #[test]
-    fn auto_bridge_uses_custom_digital_param_name() {
-        let netlist = Netlist::parse(
-            "\
-* auto bridge uses auto_bridge_parm_d
-.param vcc=5 vdd=1.8
-rload mix 0 1k
-.model pull d_pullup
-apull [mix] pull
-.control
-set auto_bridge_parm_d = vdd
-.endc
-.end
-",
-        )
-        .expect("deck parses");
-
-        let circuit = Engine::default()
-            .build_circuit(&netlist)
-            .expect("circuit builds");
-
-        assert_eq!(xspice_model_count(&circuit, "d_pullup"), 1);
-        assert_eq!(xspice_model_count(&circuit, "dac_bridge"), 1);
-        assert_eq!(
-            single_xspice_param(&circuit, "dac_bridge", "out_high"),
-            1.8,
-            "auto_bridge_parm_d should select vdd instead of the default vcc parameter"
-        );
-    }
-
-    #[test]
-    fn legacy_bsim1_rsh_uses_unit_default_diffusion_squares() {
-        let netlist = Netlist::parse(
-            "legacy BSIM1 default diffusion squares\n\
-             vds d 0 0.05\n\
-             vgs g 0 1.8\n\
-             m1 d g 0 0 b1 l=10u w=50u\n\
-             .model b1 nmos level=4 tox=0.03 vdd=5 rsh=35\n\
-             .end\n",
-        )
-        .expect("legacy BSIM1 deck parses");
-
-        let circuit = Engine::default()
-            .build_circuit(&netlist)
-            .expect("legacy BSIM1 circuit builds");
-        let drain = circuit.get_node_by_name("d").expect("external drain node");
-        let drain_prime = circuit
-            .get_node_by_name("m1.__dint")
-            .expect("RSH creates a drain prime node");
-        let source_prime = circuit
-            .get_node_by_name("m1.__sint")
-            .expect("RSH creates a source prime node");
-        let mosfet = circuit
-            .mosfets
-            .devices
-            .first()
-            .expect("one legacy BSIM1 device");
-
-        assert!(mosfet.uses_legacy_bsim());
-        assert_eq!(mosfet.node_drain, drain_prime);
-        assert_eq!(mosfet.node_source, source_prime);
-
-        for (name, node_pos, node_neg) in [
-            ("m1.__rd", drain, drain_prime),
-            ("m1.__rs", 0, source_prime),
-        ] {
-            let index = circuit
-                .resistors
-                .names
-                .iter()
-                .position(|candidate| candidate.eq_ignore_ascii_case(name))
-                .unwrap_or_else(|| panic!("expected generated resistor {name}"));
-            let stamp = circuit.resistors.stamps[index];
-            assert_eq!(stamp.pp.row, node_pos, "{name} positive terminal");
-            assert_eq!(stamp.nn.row, node_neg, "{name} negative terminal");
-            assert!(
-                (circuit.resistors.conductances[index] - 1.0 / 35.0).abs() <= 1.0e-15,
-                "{name} must implement RSH times the default one diffusion square"
-            );
-        }
-    }
-
-    #[test]
-    fn legacy_bsim1_explicit_zero_diffusion_squares_disable_prime_nodes() {
-        let netlist = Netlist::parse(
-            "legacy BSIM1 zero diffusion squares\n\
-             vds d 0 0.05\n\
-             vgs g 0 1.8\n\
-             m1 d g 0 0 b1 l=10u w=50u nrd=0 nrs=0\n\
-             .model b1 nmos level=4 tox=0.03 vdd=5 rsh=35\n\
-             .end\n",
-        )
-        .expect("legacy BSIM1 deck parses");
-
-        let circuit = Engine::default()
-            .build_circuit(&netlist)
-            .expect("legacy BSIM1 circuit builds");
-        let drain = circuit.get_node_by_name("d").expect("external drain node");
-        let mosfet = circuit
-            .mosfets
-            .devices
-            .first()
-            .expect("one legacy BSIM1 device");
-
-        assert!(mosfet.uses_legacy_bsim());
-        assert_eq!(mosfet.node_drain, drain);
-        assert_eq!(mosfet.node_source, 0);
-        assert!(circuit.get_node_by_name("m1.__dint").is_none());
-        assert!(circuit.get_node_by_name("m1.__sint").is_none());
-        assert!(
-            circuit.resistors.names.iter().all(|name| {
-                !name.eq_ignore_ascii_case("m1.__rd") && !name.eq_ignore_ascii_case("m1.__rs")
-            }),
-            "explicit zero NRD/NRS must suppress both generated resistors"
-        );
-    }
-
-    #[test]
-    fn circuit_builder_honors_cancellation_before_construction() {
-        let netlist = Netlist::parse("cancelled build\nV1 in 0 1\nR1 in 0 1k\n.end")
-            .expect("cancellation fixture parses");
-
-        assert!(matches!(
-            Engine::default()
-                .build_circuit_with_abort(&netlist, &crate::abort_signal::ImmediateAbort,),
-            Err(SimulationError::Aborted)
-        ));
-    }
-
-    #[test]
-    fn circuit_builder_rechecks_source_limits_from_its_engine_policy() {
-        let source = "strict engine source\nV1 in 0 1\nR1 in 0 1k\n.end\n";
-        let netlist = Netlist::parse(source).expect("fixture parses under default policy");
-        let mut config = crate::engine::SimulationConfig::default();
-        config.resource_limits.max_netlist_bytes = source.len() - 1;
-
-        let error = Engine::new(config)
-            .build_circuit(&netlist)
-            .expect_err("engine-specific source byte ceiling must be authoritative");
-
-        assert!(matches!(
-            error,
-            SimulationError::ResourceLimit(ResourceLimitError {
-                resource: ResourceKind::NetlistBytes,
-                requested,
-                limit,
-            }) if requested == source.len() && limit == source.len() - 1
-        ));
-    }
-
-    #[test]
-    fn circuit_builder_rechecks_source_line_limit_from_its_engine_policy() {
-        let source = "strict engine lines\nV1 in 0 1\nR1 in 0 1k\n.end\n";
-        let netlist = Netlist::parse(source).expect("fixture parses under default policy");
-        let mut config = crate::engine::SimulationConfig::default();
-        config.resource_limits.max_netlist_lines = 2;
-
-        let error = Engine::new(config)
-            .build_circuit(&netlist)
-            .expect_err("engine-specific source line ceiling must be authoritative");
-
-        assert!(matches!(
-            error,
-            SimulationError::ResourceLimit(ResourceLimitError {
-                resource: ResourceKind::NetlistLines,
-                requested: 3,
-                limit: 2,
-            })
-        ));
-    }
-
-    #[test]
-    fn xyce_builder_freezes_bh_source_order_from_reversed_bft() {
-        let deck = "Xyce Core source load order\n\
-            .tran 0 4\n\
-            R1 1 0 1\n\
-            L1 1 0 20\n\
-            I1 1 0 SIN(0 .1 1 1)\n\
-            I2 1 0 SIN(0 .2 1 2)\n\
-            I3 1 0 SIN(0 .8 1 3)\n\
-            K1 L1 1 CORE_MODEL\n\
-            .model CORE_MODEL CORE (LEVEL=2 MS=510K A=62 C=.92 K=25 ALPHA=3.7e-4 AREA=1.12 GAP=0 PATH=8.49)\n\
-            .end\n";
-        let netlist = Netlist::parse(deck).expect("Core load-order fixture parses");
-        let circuit =
-            Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce))
-                .build_circuit(&netlist)
-                .expect("Core load-order fixture builds");
-
-        assert_eq!(circuit.xyce_load_plan().current_sources(), &[2, 1, 0]);
-        assert_eq!(circuit.xyce_load_plan().cores(), &[0]);
-        assert!(circuit.xyce_load_plan().core_groups().is_empty());
-    }
-}
-
 impl Engine {
     /// Effective resistor parameters after parameter substitution.
     ///
@@ -7779,21 +5653,21 @@ impl Engine {
                             })
                         })
                         .flatten();
-                    if !self.config.device_voltage_limiting {
-                        if let Some(device_model) = model_def {
-                            let params_map = model_params_upper_map(&device_model.params);
-                            let level = params_map.get("LEVEL").copied().unwrap_or(1.0);
-                            if resolve_bjt_type_from_model(&device_model.model_type).is_none()
-                                || !legacy_gummel_poon_bjt_level(level)
-                            {
-                                return Err(SimulationError::Circuit(format!(
-                                    "DEVICE.VOLTLIM=0 is not implemented for BJT '{}' model '{}' family '{}' {}; only native legacy Gummel-Poon BJT limiting can currently be disabled",
-                                    element.name,
-                                    model,
-                                    device_model.model_type,
-                                    bjt_level_descriptor(level)
-                                )));
-                            }
+                    if !self.config.device_voltage_limiting
+                        && let Some(device_model) = model_def
+                    {
+                        let params_map = model_params_upper_map(&device_model.params);
+                        let level = params_map.get("LEVEL").copied().unwrap_or(1.0);
+                        if resolve_bjt_type_from_model(&device_model.model_type).is_none()
+                            || !legacy_gummel_poon_bjt_level(level)
+                        {
+                            return Err(SimulationError::Circuit(format!(
+                                "DEVICE.VOLTLIM=0 is not implemented for BJT '{}' model '{}' family '{}' {}; only native legacy Gummel-Poon BJT limiting can currently be disabled",
+                                element.name,
+                                model,
+                                device_model.model_type,
+                                bjt_level_descriptor(level)
+                            )));
                         }
                     }
                     #[cfg(feature = "veriloga-builtins-base")]
@@ -8187,73 +6061,73 @@ impl Engine {
                     // 55 -> FD (fully depleted), 56 -> DD (dynamic depletion),
                     // 57 -> PD (partially depleted). Xyce LEVEL=10 (BSIMSOI3)
                     // uses SOIMOD to select the same native family.
-                    if is_bsimsoi_level(level) {
-                        if let Some(params_map) = params_map.as_ref() {
-                            if element.nodes.len() > 5 {
-                                return Err(SimulationError::Circuit(format!(
-                                    "MOSFET '{}': native BSIMSOI supports four terminals or five terminals with a body contact; {} terminals were provided, and six/seven-terminal forms are not yet represented",
-                                    element.name,
-                                    element.nodes.len()
-                                )));
+                    if is_bsimsoi_level(level)
+                        && let Some(params_map) = params_map.as_ref()
+                    {
+                        if element.nodes.len() > 5 {
+                            return Err(SimulationError::Circuit(format!(
+                                "MOSFET '{}': native BSIMSOI supports four terminals or five terminals with a body contact; {} terminals were provided, and six/seven-terminal forms are not yet represented",
+                                element.name,
+                                element.nodes.len()
+                            )));
+                        }
+                        let bsimsoi_params = native_bsimsoi_model_params_upper_map(
+                            &element.name,
+                            model,
+                            params_map,
+                            native_expr_params,
+                            native_string_params,
+                        )?;
+                        let native_level =
+                            native_bsimsoi_level_for(level, &bsimsoi_params, instance_params)
+                                .map_err(|err| {
+                                    SimulationError::Circuit(format!(
+                                        "MOSFET '{}': model '{}' {err}",
+                                        element.name, model
+                                    ))
+                                })?
+                                .expect("is_bsimsoi_level must map to a native SOI level");
+                        match native_level {
+                            55 => {
+                                Self::build_b3soi_fd(
+                                    &mut circuit,
+                                    element,
+                                    resolved_mos_type,
+                                    model,
+                                    &bsimsoi_params,
+                                    instance_params,
+                                    deferred_params,
+                                    self.config.temperature,
+                                )?;
+                                continue;
                             }
-                            let bsimsoi_params = native_bsimsoi_model_params_upper_map(
-                                &element.name,
-                                model,
-                                params_map,
-                                native_expr_params,
-                                native_string_params,
-                            )?;
-                            let native_level =
-                                native_bsimsoi_level_for(level, &bsimsoi_params, instance_params)
-                                    .map_err(|err| {
-                                        SimulationError::Circuit(format!(
-                                            "MOSFET '{}': model '{}' {err}",
-                                            element.name, model
-                                        ))
-                                    })?
-                                    .expect("is_bsimsoi_level must map to a native SOI level");
-                            match native_level {
-                                55 => {
-                                    Self::build_b3soi_fd(
-                                        &mut circuit,
-                                        element,
-                                        resolved_mos_type,
-                                        model,
-                                        &bsimsoi_params,
-                                        instance_params,
-                                        deferred_params,
-                                        self.config.temperature,
-                                    )?;
-                                    continue;
-                                }
-                                56 => {
-                                    Self::build_b3soi_dd(
-                                        &mut circuit,
-                                        element,
-                                        resolved_mos_type,
-                                        model,
-                                        &bsimsoi_params,
-                                        instance_params,
-                                        deferred_params,
-                                        self.config.temperature,
-                                    )?;
-                                    continue;
-                                }
-                                57 => {
-                                    Self::build_b3soi_pd(
-                                        &mut circuit,
-                                        element,
-                                        resolved_mos_type,
-                                        model,
-                                        &bsimsoi_params,
-                                        instance_params,
-                                        deferred_params,
-                                        self.config.temperature,
-                                    )?;
-                                    continue;
-                                }
-                                _ => {}
+                            56 => {
+                                Self::build_b3soi_dd(
+                                    &mut circuit,
+                                    element,
+                                    resolved_mos_type,
+                                    model,
+                                    &bsimsoi_params,
+                                    instance_params,
+                                    deferred_params,
+                                    self.config.temperature,
+                                )?;
+                                continue;
                             }
+                            57 => {
+                                Self::build_b3soi_pd(
+                                    &mut circuit,
+                                    element,
+                                    resolved_mos_type,
+                                    model,
+                                    &bsimsoi_params,
+                                    instance_params,
+                                    deferred_params,
+                                    self.config.temperature,
+                                )?;
+                                continue;
+                            }
+                            _ => {}
                         }
                     }
 
@@ -10786,5 +8660,2130 @@ impl Engine {
 
         check_build_abort(abort)?;
         Ok(circuit)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::SimulationConfig;
+
+    #[test]
+    fn generated_auto_bridge_decks_inherit_resource_limits() {
+        let generated = "generated bridge\n.model adc adc_bridge\n.end\n";
+        let mut limits = ResourceLimits::default();
+        limits.max_netlist_bytes = generated.len() - 1;
+
+        assert!(matches!(
+            parse_generated_xspice_auto_bridge_deck(
+                generated,
+                None,
+                false,
+                limits,
+                &NoAbort,
+            ),
+            Err(ParseWithAbortError::Parse(ParseError::ResourceLimit(
+                ResourceLimitError {
+                    resource: ResourceKind::NetlistBytes,
+                    requested,
+                    limit,
+                }
+            ))) if requested == generated.len() && limit == generated.len() - 1
+        ));
+    }
+
+    #[test]
+    fn generated_auto_bridge_resistor_retains_raw_reportable_value() {
+        let generated = Netlist::parse(
+            "generated bridge resistor\n\
+             RAUTO bridge 0 8 RMOD M=2 TEMP=37\n\
+             .model RMOD R (R=3 TC1=0.1 TNOM=27)\n\
+             .end\n",
+        )
+        .expect("generated bridge resistor deck parses");
+        let element = generated
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case("RAUTO"))
+            .expect("generated resistor exists");
+        let mut circuit = CircuitData::new();
+
+        add_generated_xspice_auto_bridge_resistor(
+            &mut circuit,
+            &generated,
+            element,
+            crate::constants::TEMP_REFERENCE,
+            SpiceDialect::Xyce,
+        )
+        .expect("generated resistor is added to the auto-bridge subcircuit");
+
+        assert_eq!(circuit.resistors.names, ["RAUTO"]);
+        assert_eq!(
+            circuit.resistors.conductances[0].recip().to_bits(),
+            24.0_f64.to_bits()
+        );
+        assert_eq!(
+            circuit.resistors.reported_resistances[0].to_bits(),
+            8.0_f64.to_bits()
+        );
+    }
+
+    #[test]
+    fn generated_auto_bridge_resistor_noise_metadata_matches_branch_and_nodal_storage() {
+        let build = |zero_resistance_tolerance: Value| {
+            let generated = Netlist::parse(&format!(
+                "generated bridge resistor noise metadata\n\
+                 RAUTO bridge 0 0.6 RMOD AC=1.2 TEMP=37 DTEMP=999 NOISY=0\n\
+                 .model RMOD R (KF=2e-12 AF=1.3 EF=0.8 TNOM=27)\n\
+                 .options device zeroresistancetol={zero_resistance_tolerance}\n\
+                 .end\n"
+            ))
+            .expect("generated bridge resistor deck parses");
+            let element = generated
+                .elements
+                .iter()
+                .find(|element| element.name.eq_ignore_ascii_case("RAUTO"))
+                .expect("generated resistor exists");
+            let mut circuit = CircuitData::new();
+            add_generated_xspice_auto_bridge_resistor(
+                &mut circuit,
+                &generated,
+                element,
+                crate::constants::TEMP_REFERENCE,
+                SpiceDialect::Xyce,
+            )
+            .expect("generated resistor is added to the auto-bridge subcircuit");
+            circuit
+        };
+
+        let nodal = build(0.0);
+        let branch = build(1.0);
+        assert_eq!(nodal.resistors.len(), 1);
+        assert_eq!(branch.resistor_branches.len(), 1);
+        assert_eq!(
+            nodal
+                .resistors
+                .small_signal_conductance(0)
+                .recip()
+                .to_bits(),
+            branch.resistor_branches.small_signal_resistances[0].to_bits()
+        );
+        assert_eq!(
+            nodal.resistor_absolute_noise_temperature(0),
+            branch.resistor_branches.absolute_noise_temperatures[0]
+        );
+        assert_eq!(
+            nodal.resistors.noise_temperature_offsets[0].to_bits(),
+            branch.resistor_branches.noise_temperature_offsets[0].to_bits()
+        );
+        assert_eq!(nodal.resistors.noisy[0], branch.resistor_branches.noisy[0]);
+        assert_eq!(
+            nodal.resistors.flicker[0],
+            branch.resistor_branches.flicker[0]
+        );
+    }
+
+    #[test]
+    fn xyce_device_minimums_reach_legacy_diode_construction() {
+        let deck = "minimum diode defaults\n\
+            .options device minres=1 mincap=1n\n\
+            V1 in 0 1\n\
+            D1 in 0 D\n\
+            .model D D IS=1e-14\n\
+            .end\n";
+        let netlist = Netlist::parse(deck).expect("minimum diode deck parses");
+        let circuit = Engine::new(SimulationConfig::default())
+            .build_circuit(&netlist)
+            .expect("minimum diode deck builds");
+        let [diode] = circuit.diodes.devices.as_slice() else {
+            panic!("expected one diode");
+        };
+        assert_eq!(diode.rs, 0.0);
+        assert_eq!(diode.cj0, 1.0e-9);
+        let rs_index = circuit
+            .resistors
+            .names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("D1.__rs"))
+            .expect("MINRES creates the diode series resistor");
+        assert_eq!(circuit.resistors.conductances[rs_index], 1.0);
+    }
+
+    #[test]
+    fn xyce_jfet_inherits_global_tnom_and_keeps_b_distinct_from_beta() {
+        let deck = "Xyce JFET model options\n\
+            .options tnom=-40\n\
+            VDS d 0 1\n\
+            VGS g 0 0\n\
+            J1 d g 0 JMOD\n\
+            .model JMOD NJF LEVEL=1 B=0.605\n\
+            .end\n";
+        let netlist = Netlist::parse(deck).expect("Xyce JFET deck parses");
+        let mut config = SimulationConfig::default();
+        config.spice_dialect = SpiceDialect::Xyce;
+        let circuit = Engine::new(config)
+            .build_circuit(&netlist)
+            .expect("Xyce JFET deck builds");
+        let [jfet] = circuit.jfets.as_slice() else {
+            panic!("expected one native JFET");
+        };
+        assert_eq!(jfet.params.tnom.to_bits(), (-40.0_f64 + 273.15).to_bits());
+        assert_eq!(jfet.params.beta.to_bits(), 1.0e-4_f64.to_bits());
+        assert_eq!(jfet.params.mes_b.to_bits(), 0.605_f64.to_bits());
+        assert!(matches!(
+            jfet.params.channel_model,
+            JfetChannelModel::XyceSydney
+        ));
+    }
+
+    #[test]
+    fn xyce_four_node_s_iswitch_uses_implicit_voltage_control_and_current_thresholds() {
+        let deck = "Xyce four-node S with ISWITCH model\n\
+            V1 1 0 5\n\
+            VCTRL 3 0 0\n\
+            S1 1 2 3 0 ISW\n\
+            R1 2 0 1k\n\
+            .model ISW ISWITCH (RON=2 ROFF=3MEG ION=10m IOFF=1m IHON=11m IHOFF=.5m)\n\
+            .end\n";
+        let netlist = Netlist::parse(deck).expect("four-node ISWITCH deck parses");
+        let mut config = SimulationConfig::default();
+        config.spice_dialect = SpiceDialect::Xyce;
+        let circuit = Engine::new(config)
+            .build_circuit(&netlist)
+            .expect("four-node ISWITCH deck builds through Xyce's unified switch semantics");
+
+        assert!(circuit.vswitches.is_empty());
+        assert!(circuit.iswitches.is_empty());
+        let [switch] = circuit.generic_switches.as_slice() else {
+            panic!("expected one expression-controlled switch");
+        };
+        assert_eq!(switch.ron.to_bits(), 2.0_f64.to_bits());
+        assert_eq!(switch.roff.to_bits(), 3.0e6_f64.to_bits());
+        assert_eq!(switch.on.to_bits(), 10.0e-3_f64.to_bits());
+        assert_eq!(switch.off.to_bits(), 0.5e-3_f64.to_bits());
+        assert_eq!(switch.onh.to_bits(), 11.0e-3_f64.to_bits());
+        assert_eq!(switch.offh.to_bits(), 0.0_f64.to_bits());
+        assert!(switch.hysteresis_enabled);
+        assert!(switch.program.node_map.contains_key("3"));
+        assert_eq!(switch.program.node_map.len(), 2);
+    }
+
+    #[test]
+    fn xyce_explicit_s_iswitch_keeps_general_expression_control() {
+        let deck = "Xyce explicit S with ISWITCH model\n\
+            V1 1 0 5\n\
+            VCTRL 3 0 0\n\
+            S1 1 2 ISW CONTROL={V(3)+TIME}\n\
+            R1 2 0 1k\n\
+            .model ISW ISWITCH (RON=2 ROFF=3MEG ION=10m IOFF=1m IHON=11m IHOFF=.5m)\n\
+            .end\n";
+        let netlist = Netlist::parse(deck).expect("explicit ISWITCH deck parses");
+        let mut config = SimulationConfig::default();
+        config.spice_dialect = SpiceDialect::Xyce;
+        let circuit = Engine::new(config)
+            .build_circuit(&netlist)
+            .expect("explicit ISWITCH accepts Xyce's general scalar CONTROL expression");
+
+        assert!(circuit.vswitches.is_empty());
+        assert!(circuit.iswitches.is_empty());
+        let [switch] = circuit.generic_switches.as_slice() else {
+            panic!("expected one expression-controlled switch");
+        };
+        assert_eq!(switch.ron.to_bits(), 2.0_f64.to_bits());
+        assert_eq!(switch.roff.to_bits(), 3.0e6_f64.to_bits());
+        assert_eq!(switch.on.to_bits(), 10.0e-3_f64.to_bits());
+        assert_eq!(switch.off.to_bits(), 0.5e-3_f64.to_bits());
+        assert_eq!(switch.onh.to_bits(), 11.0e-3_f64.to_bits());
+        assert_eq!(switch.offh.to_bits(), 0.0_f64.to_bits());
+        assert!(switch.hysteresis_enabled);
+        assert!(switch.program.node_map.contains_key("3"));
+        assert_eq!(switch.program.node_map.len(), 1);
+    }
+
+    #[test]
+    fn xyce_switch_family_defaults_and_hysteresis_precedence_are_exact() {
+        let deck = "Xyce switch family projection\n\
+            SDEFAULT 1 2 3 0 IDEFAULT\n\
+            SCOLLIDE 1 4 3 0 ICOLLIDE\n\
+            SREVERSED 1 7 3 0 IREVERSED\n\
+            SGENERIC 1 5 3 0 IGENERIC\n\
+            SVDEFAULT 1 6 3 0 VDEFAULT_MODEL\n\
+            .model IDEFAULT ISWITCH\n\
+            .model ICOLLIDE ISWITCH (ION=10m IOFF=1m ON=20m OFF=2m IHON=30m IHOFF=3m ONH=40m OFFH=4m)\n\
+            .model IREVERSED ISWITCH (ION=10m IHOFF=3m IOFF=1m)\n\
+            .model IGENERIC ISWITCH (ON=20m OFF=2m ONH=40m OFFH=4m)\n\
+            .model VDEFAULT_MODEL VSWITCH\n\
+            .end\n";
+        let netlist = Netlist::parse(deck).expect("switch-family projection deck parses");
+        let mut config = SimulationConfig::default();
+        config.spice_dialect = SpiceDialect::Xyce;
+        let circuit = Engine::new(config)
+            .build_circuit(&netlist)
+            .expect("all Xyce switch families build through the unified implementation");
+
+        assert!(circuit.vswitches.is_empty());
+        assert!(circuit.iswitches.is_empty());
+        assert_eq!(circuit.generic_switches.len(), 5);
+        let find = |name: &str| {
+            circuit
+                .generic_switches
+                .iter()
+                .find(|switch| switch.name.eq_ignore_ascii_case(name))
+                .unwrap_or_else(|| panic!("missing switch {name}"))
+        };
+
+        let current_default = find("SDEFAULT");
+        assert_eq!(current_default.on.to_bits(), 1.0e-3_f64.to_bits());
+        assert_eq!(current_default.off.to_bits(), 0.0_f64.to_bits());
+        assert_eq!(current_default.onh.to_bits(), 1.0e-3_f64.to_bits());
+        assert_eq!(current_default.offh.to_bits(), 0.0_f64.to_bits());
+        assert!(!current_default.hysteresis_enabled);
+
+        let collisions = find("SCOLLIDE");
+        assert_eq!(collisions.on.to_bits(), 20.0e-3_f64.to_bits());
+        assert_eq!(collisions.off.to_bits(), 2.0e-3_f64.to_bits());
+        assert_eq!(collisions.onh.to_bits(), 30.0e-3_f64.to_bits());
+        assert_eq!(collisions.offh.to_bits(), 0.0_f64.to_bits());
+        assert!(collisions.hysteresis_enabled);
+
+        let reversed_alias_order = find("SREVERSED");
+        assert_eq!(reversed_alias_order.off.to_bits(), 1.0e-3_f64.to_bits());
+        assert_eq!(reversed_alias_order.offh.to_bits(), 0.0_f64.to_bits());
+        assert!(reversed_alias_order.hysteresis_enabled);
+
+        let generic_hysteresis = find("SGENERIC");
+        assert_eq!(generic_hysteresis.on.to_bits(), 20.0e-3_f64.to_bits());
+        assert_eq!(generic_hysteresis.off.to_bits(), 2.0e-3_f64.to_bits());
+        assert_eq!(generic_hysteresis.onh.to_bits(), 20.0e-3_f64.to_bits());
+        assert_eq!(generic_hysteresis.offh.to_bits(), 2.0e-3_f64.to_bits());
+        assert!(generic_hysteresis.hysteresis_enabled);
+
+        let voltage_default = find("SVDEFAULT");
+        assert_eq!(voltage_default.on.to_bits(), 1.0_f64.to_bits());
+        assert_eq!(voltage_default.off.to_bits(), 0.0_f64.to_bits());
+        assert_eq!(voltage_default.onh.to_bits(), 1.0_f64.to_bits());
+        assert_eq!(voltage_default.offh.to_bits(), 0.0_f64.to_bits());
+        assert!(!voltage_default.hysteresis_enabled);
+    }
+
+    #[test]
+    fn four_node_s_iswitch_normalization_is_xyce_scoped() {
+        let deck = "non-Xyce four-node S with ISWITCH model\n\
+            S1 1 2 3 0 ISW\n\
+            .model ISW ISWITCH (RON=1 ROFF=1MEG ION=10m IOFF=0)\n\
+            .end\n";
+        let netlist = Netlist::parse(deck).expect("four-node ISWITCH deck parses");
+        let error = Engine::new(SimulationConfig::default())
+            .build_circuit(&netlist)
+            .expect_err("Xyce four-node normalization must not leak into other dialects");
+        assert!(error.to_string().contains("ISWITCH"));
+        assert!(error.to_string().contains("Voltage-controlled switch"));
+    }
+
+    #[test]
+    fn xyce_unified_switch_rejects_noncanonical_native_switch_parameters() {
+        for (model_type, parameter) in [("VSWITCH", "VT=0"), ("ISWITCH", "IT=1m")] {
+            let deck = format!(
+                "Xyce unified switch parameter policy\nS1 1 2 3 0 SMOD\n.model SMOD {model_type} ({parameter})\n.end\n"
+            );
+            let netlist = Netlist::parse(&deck).expect("switch parameter-policy deck parses");
+            let mut config = SimulationConfig::default();
+            config.spice_dialect = SpiceDialect::Xyce;
+            let error = Engine::new(config)
+                .build_circuit(&netlist)
+                .expect_err("Xyce's unified switch must reject unregistered native parameters");
+            assert!(
+                error
+                    .to_string()
+                    .contains("does not support model parameter")
+            );
+            assert!(
+                error
+                    .to_string()
+                    .contains(parameter.split('=').next().unwrap())
+            );
+        }
+    }
+
+    #[test]
+    fn xyce_unified_switch_rejects_noncanonical_model_aliases() {
+        for (syntax, model_type) in [
+            ("S1 1 2 3 0 SMOD", "SW"),
+            ("S1 1 2 3 0 SMOD", "VSW"),
+            ("S1 1 2 SMOD CONTROL={V(3)}", "ISW"),
+            ("S1 1 2 SMOD CONTROL={V(3)}", "CSW"),
+        ] {
+            let deck = format!(
+                "Xyce strict switch model names\n{syntax}\n.model SMOD {model_type}\n.end\n"
+            );
+            let netlist = Netlist::parse(&deck).expect("switch alias-policy deck parses");
+            let mut config = SimulationConfig::default();
+            config.spice_dialect = SpiceDialect::Xyce;
+            let error = Engine::new(config)
+                .build_circuit(&netlist)
+                .expect_err("Xyce switch syntax must reject unregistered model aliases");
+            assert!(error.to_string().contains(model_type));
+            assert!(
+                error
+                    .to_string()
+                    .contains("expected SWITCH, VSWITCH, ISWITCH")
+            );
+        }
+    }
+
+    #[test]
+    fn native_bjt_inherits_global_tnom_and_model_tnom_overrides_it() {
+        for (model_suffix, expected_celsius) in [("BF=100", -40.0), ("BF=100 TNOM=27", 27.0)] {
+            let deck = format!(
+                "BJT nominal temperature precedence\n.options tnom=-40\nV1 c 0 1\nQ1 c b 0 QMOD\n.model QMOD NPN ({model_suffix})\n.end\n"
+            );
+            let netlist = Netlist::parse(&deck).expect("BJT TNOM precedence deck parses");
+            let mut config = SimulationConfig::default();
+            config.spice_dialect = SpiceDialect::Xyce;
+            let circuit = Engine::new(config)
+                .build_circuit(&netlist)
+                .expect("BJT TNOM precedence deck builds");
+            let [bjt] = circuit.bjts.devices.as_slice() else {
+                panic!("expected one native BJT");
+            };
+            assert_eq!(
+                bjt.tnom.to_bits(),
+                crate::constants::celsius_to_kelvin(expected_celsius).to_bits()
+            );
+        }
+    }
+
+    #[test]
+    fn native_bjt_rejects_invalid_effective_tnom() {
+        let deck = "BJT invalid nominal temperature\n\
+            V1 c 0 1\n\
+            Q1 c b 0 QMOD\n\
+            .model QMOD NPN (BF=100)\n\
+            .end\n";
+        let mut config = SimulationConfig::default();
+        config.spice_dialect = SpiceDialect::Xyce;
+
+        let mut invalid_model = Netlist::parse(deck).expect("BJT invalid-model fixture parses");
+        invalid_model.models[0]
+            .params
+            .push(("TNOM".to_string(), -273.15));
+        let model_error = Engine::new(config.clone())
+            .build_circuit(&invalid_model)
+            .expect_err("absolute-zero BJT model TNOM must fail");
+        assert!(model_error.to_string().contains("TNOM"));
+        assert!(model_error.to_string().contains("absolute zero"));
+
+        let mut invalid_global = Netlist::parse(deck).expect("BJT invalid-global fixture parses");
+        invalid_global.options.tnom = Some(f64::NAN);
+        let global_error = Engine::new(config)
+            .build_circuit(&invalid_global)
+            .expect_err("non-finite global BJT TNOM must fail");
+        assert!(global_error.to_string().contains("TNOM"));
+        assert!(global_error.to_string().contains("finite"));
+    }
+
+    #[test]
+    fn voltlim_false_builds_legacy_bjt_and_rejects_unimplemented_families() {
+        let mut config = SimulationConfig {
+            device_voltage_limiting: false,
+            spice_dialect: SpiceDialect::Xyce,
+            ..Default::default()
+        };
+        let bjt = Netlist::parse(
+            "legacy BJT raw limiting\nV1 c 0 1\nQ1 c c 0 QMOD\n.model QMOD NPN LEVEL=1\n.end\n",
+        )
+        .expect("legacy BJT fixture parses");
+        let circuit = Engine::new(config.clone())
+            .build_circuit(&bjt)
+            .expect("legacy GP BJT supports VOLTLIM=0");
+        let [device] = circuit.bjts.devices.as_slice() else {
+            panic!("expected one native BJT");
+        };
+        assert!(!device.uses_legacy_junction_limiting());
+
+        let diode = Netlist::parse(
+            "unsupported diode limiting\nV1 in 0 1\nD1 in 0 DMOD\n.model DMOD D\n.end\n",
+        )
+        .expect("diode fixture parses");
+        let error = Engine::new(config.clone())
+            .build_circuit(&diode)
+            .expect_err("VOLTLIM=0 must fail closed for diode limiting");
+        assert!(error.to_string().contains("DEVICE.VOLTLIM=0"));
+        assert!(error.to_string().contains("diode"));
+
+        let vbic = Netlist::parse(
+            "unsupported VBIC limiting\nV1 c 0 1\nQ1 c c 0 QMOD\n.model QMOD NPN LEVEL=11\n.end\n",
+        )
+        .expect("VBIC fixture parses");
+        let error = Engine::new(config.clone())
+            .build_circuit(&vbic)
+            .expect_err("VOLTLIM=0 must fail closed for VBIC limiting");
+        assert!(error.to_string().contains("DEVICE.VOLTLIM=0"));
+        assert!(error.to_string().contains("LEVEL=11"));
+
+        config.device_voltage_limiting = true;
+        Engine::new(config)
+            .build_circuit(&bjt)
+            .expect("default limiter policy remains buildable");
+    }
+
+    /// A geometry sitting exactly on a shared bin edge takes the *lower* bin.
+    ///
+    /// ngspice's ranges are inclusive at both ends and it returns the first
+    /// match while walking the model table, so with foundry tables written in
+    /// ascending order the lower bin wins. Selecting by "most specific bin"
+    /// instead quietly picks the upper one and swaps in a different parameter
+    /// set — visible as a few percent of drain current, not as an error.
+    #[test]
+    fn a_geometry_on_a_bin_boundary_takes_the_lower_bin() {
+        let deck = "binned mosfet\n\
+             V1 d 0 1\n\
+             M1 d d 0 0 NCH W=1u L=0.5u\n\
+             .model NCH.0 NMOS LEVEL=1 LMIN=0.28u LMAX=0.5u WMIN=0.5u WMAX=2u VTO=0.4\n\
+             .model NCH.1 NMOS LEVEL=1 LMIN=0.5u LMAX=1.2u WMIN=0.5u WMAX=2u VTO=0.9\n\
+             .end\n";
+        let netlist = Netlist::parse(deck).expect("binned deck parses");
+        let circuit = Engine::new(SimulationConfig::default())
+            .build_circuit(&netlist)
+            .expect("binned deck builds");
+        let [mosfet] = circuit.mosfets.devices.as_slice() else {
+            panic!("expected one mosfet");
+        };
+        assert!(
+            (mosfet.vto - 0.4).abs() < 1e-9,
+            "L on the shared edge must take the lower bin, got VTO={}",
+            mosfet.vto
+        );
+    }
+
+    #[test]
+    fn nfin_is_a_first_class_bin_axis_for_selection_and_inspection() {
+        let deck = "nfin-binned mosfet\n\
+             V1 d 0 1\n\
+             M1 d d 0 0 NCH W=1u L=0.5u NFIN=4\n\
+             .model NCH.0 NMOS LEVEL=1 LMIN=0.28u LMAX=1u WMIN=0.5u WMAX=2u NFINMIN=1 NFINMAX=4 VTO=0.4\n\
+             .model NCH.1 NMOS LEVEL=1 LMIN=0.28u LMAX=1u WMIN=0.5u WMAX=2u NFINMIN=4 NFINMAX=8 VTO=0.9\n\
+             .end\n";
+        let netlist = Netlist::parse(deck).expect("NFIN-binned deck parses");
+        let inspection = Engine::new(SimulationConfig::default())
+            .inspect_model_bins(&netlist)
+            .expect("NFIN-binned deck inspects");
+        let [instance] = inspection.instances.as_slice() else {
+            panic!("expected one inspected MOS instance");
+        };
+        assert_eq!(instance.nfin, Some(4.0));
+        assert_eq!(instance.selected_model, "NCH.0");
+        assert_eq!(instance.selection, ModelBinSelectionKind::SharedBoundary);
+        assert_eq!(inspection.cards[0].geometry.nfin.min, Some(1.0));
+        assert_eq!(inspection.cards[0].geometry.nfin.max, Some(4.0));
+
+        let circuit = Engine::new(SimulationConfig::default())
+            .build_circuit(&netlist)
+            .expect("NFIN bin selection builds");
+        let [mosfet] = circuit.mosfets.devices.as_slice() else {
+            panic!("expected one mosfet");
+        };
+        assert!(
+            (mosfet.vto - 0.4).abs() < 1e-9,
+            "NFIN shared edge must take the lower bin, got VTO={}",
+            mosfet.vto
+        );
+    }
+
+    #[test]
+    fn model_bin_inspection_reports_expression_resolved_cards_and_shared_edges() {
+        let deck = "inspected binned mosfet\n\
+             .param LLO=0.28u LEDGE=0.5u LHI=1.2u\n\
+             V1 d 0 1\n\
+             M1 d d 0 0 NCH W=1u L={LEDGE} M=2\n\
+             .model NCH.0 NMOS LEVEL=1 LMIN={LLO} LMAX={LEDGE} WMIN=0.5u WMAX=2u VTO=0.4\n\
+             .model NCH.1 NMOS LEVEL=1 LMIN={LEDGE} LMAX={LHI} WMIN=0.5u WMAX=2u VTO=0.9\n\
+             .end\n";
+        let netlist = Netlist::parse(deck).expect("binned inspection deck parses");
+        let inspection = Engine::new(SimulationConfig::default())
+            .inspect_model_bins(&netlist)
+            .expect("binned inspection succeeds");
+
+        assert_eq!(inspection.cards.len(), 2);
+        assert_eq!(inspection.cards[0].model, "NCH.0");
+        assert_eq!(inspection.cards[0].family, "NCH");
+        assert_eq!(inspection.cards[0].geometry.length.min, Some(0.28e-6));
+        assert_eq!(inspection.cards[0].geometry.length.max, Some(0.5e-6));
+        let [instance] = inspection.instances.as_slice() else {
+            panic!("expected one inspected MOS instance");
+        };
+        assert_eq!(instance.element, "M1");
+        assert_eq!(instance.requested_model, "NCH");
+        assert_eq!(instance.selected_model, "NCH.0");
+        assert_eq!(instance.selection, ModelBinSelectionKind::SharedBoundary);
+        assert_eq!(instance.match_count, 2);
+        assert_eq!(instance.length, Some(0.5e-6));
+        assert_eq!(instance.width, Some(1.0e-6));
+        assert_eq!(instance.multiplier, Some(2.0));
+    }
+
+    #[test]
+    fn model_bin_inspection_audits_unreferenced_cards() {
+        let deck = "unreferenced binned family\n\
+             V1 d 0 1\n\
+             R1 d 0 1k\n\
+             .model UNUSED.0 NMOS LEVEL=1 LMIN=0.1u LMAX=0.2u WMIN=0.5u WMAX=2u\n\
+             .model UNUSED.1 NMOS LEVEL=1 LMIN=0.2u LMAX=0.4u WMIN=0.5u WMAX=2u\n\
+             .end\n";
+        let netlist = Netlist::parse(deck).expect("unreferenced bin deck parses");
+        let inspection = Engine::new(SimulationConfig::default())
+            .inspect_model_bins(&netlist)
+            .expect("unreferenced cards remain auditable");
+
+        assert_eq!(inspection.cards.len(), 2);
+        assert!(inspection.instances.is_empty());
+        assert!(inspection.cards.iter().all(|card| card.family == "UNUSED"));
+    }
+
+    #[test]
+    fn a_positive_area_model_bin_overlap_fails_closed() {
+        let deck = "ambiguous binned mosfet\n\
+             V1 d 0 1\n\
+             M1 d d 0 0 NCH W=1u L=0.5u\n\
+             .model NCH.0 NMOS LEVEL=1 LMIN=0.28u LMAX=0.7u WMIN=0.5u WMAX=2u VTO=0.4\n\
+             .model NCH.1 NMOS LEVEL=1 LMIN=0.4u LMAX=1.2u WMIN=0.5u WMAX=2u VTO=0.9\n\
+             .end\n";
+        let netlist = Netlist::parse(deck).expect("ambiguous bin deck parses");
+        let error = Engine::new(SimulationConfig::default())
+            .build_circuit(&netlist)
+            .expect_err("positive-area bin overlap must block circuit construction");
+        let message = error.to_string();
+        assert!(message.contains("MOSFET 'M1'"));
+        assert!(message.contains("model family 'NCH' is ambiguous"));
+        assert!(message.contains("'NCH.0' and 'NCH.1'"));
+        assert!(message.contains("positive-area bin region"));
+    }
+
+    #[test]
+    fn an_invalid_model_bin_range_fails_closed() {
+        let deck = "invalid binned mosfet\n\
+             V1 d 0 1\n\
+             M1 d d 0 0 NCH W=1u L=0.5u\n\
+             .model NCH.0 NMOS LEVEL=1 LMIN=0.7u LMAX=0.28u WMIN=0.5u WMAX=2u VTO=0.4\n\
+             .end\n";
+        let netlist = Netlist::parse(deck).expect("invalid bin deck parses");
+        let error = Engine::new(SimulationConfig::default())
+            .build_circuit(&netlist)
+            .expect_err("reversed bin bounds must block circuit construction");
+        let message = error.to_string();
+        assert!(message.contains("Model 'NCH.0'"));
+        assert!(message.contains("reversed geometry-bin range for L"));
+    }
+
+    /// The same netlist built twice must produce the same circuit.
+    ///
+    /// Subcircuit `.param`s calling `agauss` are evaluated during flattening,
+    /// which happens per build. Without rewinding the statistical stream each
+    /// build continues the sequence, so pressing "run" a second time on an
+    /// unchanged deck silently answers differently — which is exactly how the
+    /// GF180MCU corpus behaved, since its device wrappers apply a random
+    /// per-instance `delvto`.
+    #[test]
+    fn rebuilding_one_netlist_redraws_the_same_statistical_values() {
+        let deck = "mismatch reproducibility\n\
+             .subckt biased a b\n\
+             .param offset=agauss(1k, 200, 1)\n\
+             R1 a b 'offset'\n\
+             .ends\n\
+             V1 in 0 1\n\
+             X1 in 0 biased\n\
+             .end\n";
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let engine = Engine::new(SimulationConfig::default());
+
+        let resistance = |circuit: &CircuitData| -> f64 {
+            let index = circuit
+                .resistors
+                .names
+                .iter()
+                .position(|name| name.to_ascii_uppercase().contains("R1"))
+                .expect("the subcircuit resistor is instantiated");
+            1.0 / circuit.resistors.conductances[index]
+        };
+
+        let first = resistance(&engine.build_circuit(&netlist).expect("first build"));
+        let second = resistance(&engine.build_circuit(&netlist).expect("second build"));
+        let third = resistance(&engine.build_circuit(&netlist).expect("third build"));
+
+        assert_eq!(first, second, "a rebuild must redraw the same sample");
+        assert_eq!(first, third);
+        // The draw is a real statistical sample, not a collapsed nominal: if
+        // this ever equalled 1k exactly the test above would prove nothing.
+        assert!(
+            (first - 1000.0).abs() > 1e-9,
+            "expected an actual agauss draw, got {first}"
+        );
+    }
+
+    #[test]
+    fn native_spectre_process_sample_materializes_the_authored_element_expression() {
+        let plan = crate::netlist::SpectreStatisticsPlan {
+            variations: vec![crate::netlist::SpectreVariation {
+                line: 3,
+                scope: crate::netlist::SpectreVariationScope::Process,
+                parameter: "rv".to_owned(),
+                distribution: crate::netlist::SpectreDistribution::Gaussian,
+                spread: crate::netlist::SpectreSpread::StandardDeviation("5".to_owned()),
+                percent: false,
+            }],
+            correlations: vec![],
+        };
+        let coordinate = crate::netlist::SpectreStatisticalCoordinate {
+            seed: 41,
+            monte_carlo_run: 9,
+            temperature_celsius: 27.0,
+            axes: vec![("corner".into(), 2.0)],
+        };
+        let deck = format!(
+            "native process materialization\n.param rv=100\n.RSPICE_SPECTRE_STAT {}\nR1 in 0 {{rv}}\nV1 in 0 1\n.end\n",
+            plan.encode_internal()
+        );
+        let mut netlist = Netlist::parse(&deck).expect("statistical deck parses");
+        netlist.spectre_statistical_coordinate = Some(coordinate.clone());
+        let expected = plan
+            .sample_process(&netlist.params, &coordinate)
+            .expect("process sample")["RV"];
+        let circuit = Engine::new(SimulationConfig::default())
+            .build_circuit(&netlist)
+            .expect("statistical circuit builds");
+        let resistance = circuit.resistors.conductances[0].recip();
+        assert_eq!(resistance.to_bits(), expected.to_bits());
+        assert_ne!(resistance.to_bits(), 100.0_f64.to_bits());
+    }
+
+    #[test]
+    fn native_spectre_plan_is_nominal_until_a_monte_carlo_coordinate_activates_it() {
+        let plan = crate::netlist::SpectreStatisticsPlan {
+            variations: vec![crate::netlist::SpectreVariation {
+                line: 3,
+                scope: crate::netlist::SpectreVariationScope::Process,
+                parameter: "rv".to_owned(),
+                distribution: crate::netlist::SpectreDistribution::Gaussian,
+                spread: crate::netlist::SpectreSpread::StandardDeviation("5".to_owned()),
+                percent: false,
+            }],
+            correlations: vec![],
+        };
+        let deck = format!(
+            "nominal statistical declaration\n.param rv=100\n.RSPICE_SPECTRE_STAT {}\nR1 in 0 {{rv}}\nV1 in 0 1\n.end\n",
+            plan.encode_internal()
+        );
+        let netlist = Netlist::parse(&deck).expect("statistical deck parses");
+        assert!(netlist.spectre_statistical_coordinate.is_none());
+        let circuit = Engine::new(SimulationConfig::default())
+            .build_circuit(&netlist)
+            .expect("ordinary build remains nominal");
+        assert_eq!(
+            circuit.resistors.conductances[0].recip().to_bits(),
+            100.0_f64.to_bits()
+        );
+    }
+
+    #[test]
+    fn native_spectre_sample_reaches_a_deferred_compact_model_parameter() {
+        let plan = crate::netlist::SpectreStatisticsPlan {
+            variations: vec![crate::netlist::SpectreVariation {
+                line: 3,
+                scope: crate::netlist::SpectreVariationScope::Process,
+                parameter: "factor".to_owned(),
+                distribution: crate::netlist::SpectreDistribution::Gaussian,
+                spread: crate::netlist::SpectreSpread::StandardDeviation("0.2".to_owned()),
+                percent: false,
+            }],
+            correlations: vec![],
+        };
+        let coordinate = crate::netlist::SpectreStatisticalCoordinate {
+            seed: 8,
+            monte_carlo_run: 12,
+            temperature_celsius: 27.0,
+            axes: vec![],
+        };
+        let deck = format!(
+            "statistical model parameter\n.param factor=3\n.RSPICE_SPECTRE_STAT {}\nV1 in 0 1\nR1 in 0 8 RMOD\n.model RMOD R (R={{factor}})\n.end\n",
+            plan.encode_internal()
+        );
+        let mut netlist = Netlist::parse(&deck).expect("statistical model deck parses");
+        let nominal_circuit = Engine::new(SimulationConfig::default())
+            .build_circuit(&netlist)
+            .expect("nominal statistical model deck builds");
+        assert_eq!(
+            nominal_circuit.resistors.conductances[0].recip().to_bits(),
+            24.0_f64.to_bits()
+        );
+        let expected_factor = plan
+            .sample_process(&netlist.params, &coordinate)
+            .expect("model factor samples")["FACTOR"];
+        netlist.spectre_statistical_coordinate = Some(coordinate);
+        let circuit = Engine::new(SimulationConfig::default())
+            .build_circuit(&netlist)
+            .expect("statistical model deck builds");
+        let actual = circuit.resistors.conductances[0].recip();
+        let expected = 8.0 * expected_factor;
+        assert!((actual - expected).abs() <= expected.abs() * 4.0 * Value::EPSILON);
+    }
+
+    #[test]
+    fn native_spectre_sample_materializes_a_deferred_independent_source() {
+        let plan = crate::netlist::SpectreStatisticsPlan {
+            variations: vec![crate::netlist::SpectreVariation {
+                line: 3,
+                scope: crate::netlist::SpectreVariationScope::Process,
+                parameter: "bias".to_owned(),
+                distribution: crate::netlist::SpectreDistribution::Uniform,
+                spread: crate::netlist::SpectreSpread::HalfRange("0.25".to_owned()),
+                percent: false,
+            }],
+            correlations: vec![],
+        };
+        let coordinate = crate::netlist::SpectreStatisticalCoordinate {
+            seed: 81,
+            monte_carlo_run: 2,
+            temperature_celsius: 27.0,
+            axes: vec![],
+        };
+        let deck = format!(
+            "statistical source\n.param bias=1\n.RSPICE_SPECTRE_STAT {}\nV1 out 0 {{bias}}\nR1 out 0 1k\n.end\n",
+            plan.encode_internal()
+        );
+        let mut netlist = Netlist::parse(&deck).expect("statistical source deck parses");
+        assert!(
+            matches!(
+                netlist.elements[0].kind,
+                crate::netlist::ElementKind::VoltageSourceDeferred(_)
+            ),
+            "statistical source must remain deferred, got {:?}",
+            netlist.elements[0].kind
+        );
+        let nominal_circuit = Engine::new(SimulationConfig::default())
+            .build_circuit(&netlist)
+            .expect("nominal statistical source deck builds");
+        assert_eq!(
+            nominal_circuit.voltage_sources.dc_values[0].to_bits(),
+            1.0_f64.to_bits()
+        );
+        let expected = plan
+            .sample_process(&netlist.params, &coordinate)
+            .expect("source bias samples")["BIAS"];
+        netlist.spectre_statistical_coordinate = Some(coordinate);
+        let circuit = Engine::new(SimulationConfig::default())
+            .build_circuit(&netlist)
+            .expect("statistical source deck builds");
+        assert_eq!(
+            circuit.voltage_sources.dc_values[0].to_bits(),
+            expected.to_bits()
+        );
+    }
+
+    #[test]
+    fn native_spectre_process_model_is_materialized_once_for_repeated_devices() {
+        let plan = crate::netlist::SpectreStatisticsPlan {
+            variations: vec![crate::netlist::SpectreVariation {
+                line: 3,
+                scope: crate::netlist::SpectreVariationScope::Process,
+                parameter: "factor".to_owned(),
+                distribution: crate::netlist::SpectreDistribution::Gaussian,
+                spread: crate::netlist::SpectreSpread::StandardDeviation("0.2".to_owned()),
+                percent: false,
+            }],
+            correlations: vec![],
+        };
+        let coordinate = crate::netlist::SpectreStatisticalCoordinate {
+            seed: 64,
+            monte_carlo_run: 9,
+            temperature_celsius: 27.0,
+            axes: vec![],
+        };
+        let deck = format!(
+            "process model cache\n.param factor=3\n.RSPICE_SPECTRE_STAT {}\nV1 in 0 1\nR1 in mid 8 RMOD\nR2 mid 0 8 RMOD\n.model RMOD R (R={{factor}})\n.end\n",
+            plan.encode_internal()
+        );
+        let mut netlist = Netlist::parse(&deck).expect("process model cache deck parses");
+        let process = plan
+            .sample_process(&netlist.params, &coordinate)
+            .expect("process model factor samples");
+        for (name, value) in &process {
+            netlist.params.set(name, *value);
+        }
+        let mut elements = netlist.elements.clone();
+        let initial_model_count = netlist.models.len();
+        materialize_spectre_statistics_after_flattening(
+            &mut netlist,
+            &mut elements,
+            &process,
+            Some(&coordinate),
+            crate::constants::celsius_to_kelvin(coordinate.temperature_celsius),
+            &NoAbort,
+        )
+        .expect("process models materialize");
+
+        assert_eq!(netlist.models.len(), initial_model_count + 1);
+        let generated = elements
+            .iter()
+            .filter_map(|element| match &element.kind {
+                ElementKind::Resistor { model, .. } => model.clone(),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(generated.len(), 2);
+        assert_eq!(generated[0], generated[1]);
+    }
+
+    #[test]
+    fn native_spectre_mismatch_model_is_materialized_once_per_hierarchy_identity() {
+        let plan = crate::netlist::SpectreStatisticsPlan {
+            variations: vec![crate::netlist::SpectreVariation {
+                line: 3,
+                scope: crate::netlist::SpectreVariationScope::Mismatch,
+                parameter: "factor".to_owned(),
+                distribution: crate::netlist::SpectreDistribution::Gaussian,
+                spread: crate::netlist::SpectreSpread::StandardDeviation("0.2".to_owned()),
+                percent: false,
+            }],
+            correlations: vec![],
+        };
+        let coordinate = crate::netlist::SpectreStatisticalCoordinate {
+            seed: 65,
+            monte_carlo_run: 10,
+            temperature_celsius: 27.0,
+            axes: vec![],
+        };
+        let deck = format!(
+            "mismatch model cache\n.param factor=3\n.RSPICE_SPECTRE_STAT {}\n.subckt pair a b\nR1 a mid 8 RMOD\nR2 mid b 8 RMOD\n.ends\n.model RMOD R (R={{factor}})\nV1 in 0 1\nX1 in 0 pair\n.end\n",
+            plan.encode_internal()
+        );
+        let mut netlist = Netlist::parse(&deck).expect("mismatch model cache deck parses");
+        let process = plan
+            .sample_process(&netlist.params, &coordinate)
+            .expect("empty process sample");
+        let expected = plan
+            .sample_mismatch(&netlist.params, &process, "X1", &coordinate)
+            .expect("X1 mismatch factor")["FACTOR"];
+        let flattened = flatten_netlist_with_models(&netlist).expect("hierarchy flattens");
+        let mut elements = flattened.elements;
+        netlist.models.extend(flattened.scoped_models);
+        let initial_model_count = netlist.models.len();
+        materialize_spectre_statistics_after_flattening(
+            &mut netlist,
+            &mut elements,
+            &process,
+            Some(&coordinate),
+            crate::constants::celsius_to_kelvin(coordinate.temperature_celsius),
+            &NoAbort,
+        )
+        .expect("mismatch models materialize");
+
+        assert_eq!(netlist.models.len(), initial_model_count + 1);
+        let generated_names = elements
+            .iter_mut()
+            .filter_map(|element| element_model_name_mut(&mut element.kind).cloned())
+            .collect::<Vec<_>>();
+        assert_eq!(generated_names.len(), 2);
+        assert_eq!(generated_names[0], generated_names[1]);
+        let generated_model = netlist
+            .models
+            .iter()
+            .find(|model| model.name.eq_ignore_ascii_case(&generated_names[0]))
+            .expect("generated mismatch model exists");
+        let resistance_multiplier = generated_model
+            .params
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("R"))
+            .map(|(_, value)| *value)
+            .expect("generated model has materialized R");
+        assert_eq!(resistance_multiplier.to_bits(), expected.to_bits());
+    }
+
+    #[test]
+    fn spectre_post_flatten_materialization_honors_preexisting_abort() {
+        let mut netlist = Netlist::default();
+        let coordinate = crate::netlist::SpectreStatisticalCoordinate::default();
+        let mut elements = Vec::new();
+        assert!(matches!(
+            materialize_spectre_statistics_after_flattening(
+                &mut netlist,
+                &mut elements,
+                &BTreeMap::new(),
+                Some(&coordinate),
+                crate::constants::TEMP_REFERENCE,
+                &crate::abort_signal::ImmediateAbort,
+            ),
+            Err(SimulationError::Aborted)
+        ));
+    }
+
+    #[test]
+    fn native_spectre_mismatch_is_shared_per_subcircuit_and_reaches_derived_locals() {
+        let plan = crate::netlist::SpectreStatisticsPlan {
+            variations: vec![crate::netlist::SpectreVariation {
+                line: 3,
+                scope: crate::netlist::SpectreVariationScope::Mismatch,
+                parameter: "rv".to_owned(),
+                distribution: crate::netlist::SpectreDistribution::Gaussian,
+                spread: crate::netlist::SpectreSpread::StandardDeviation("5".to_owned()),
+                percent: false,
+            }],
+            correlations: vec![],
+        };
+        let coordinate = crate::netlist::SpectreStatisticalCoordinate {
+            seed: 72,
+            monte_carlo_run: 4,
+            temperature_celsius: -40.0,
+            axes: vec![],
+        };
+        let deck = format!(
+            "native mismatch materialization\n.param rv=100\n.RSPICE_SPECTRE_STAT {}\n.subckt pair a b\n.param local={{rv*2}}\nR1 a mid {{local}}\nR2 mid b {{local}}\n.ends\nV1 in 0 1\nX1 in 0 pair\nX2 in 0 pair\n.end\n",
+            plan.encode_internal()
+        );
+        let mut netlist = Netlist::parse(&deck).expect("statistical hierarchy parses");
+        netlist.spectre_statistical_coordinate = Some(coordinate.clone());
+        let process = plan
+            .sample_process(&netlist.params, &coordinate)
+            .expect("empty process sample");
+        let expected_x1 = 2.0
+            * plan
+                .sample_mismatch(&netlist.params, &process, "X1", &coordinate)
+                .expect("X1 mismatch")["RV"];
+        let expected_x2 = 2.0
+            * plan
+                .sample_mismatch(&netlist.params, &process, "X2", &coordinate)
+                .expect("X2 mismatch")["RV"];
+        let circuit = Engine::new(SimulationConfig::default())
+            .build_circuit(&netlist)
+            .expect("statistical hierarchy builds");
+        let resistance = |name: &str| {
+            let index = circuit
+                .resistors
+                .names
+                .iter()
+                .position(|candidate| candidate.eq_ignore_ascii_case(name))
+                .expect("flattened resistor exists");
+            circuit.resistors.conductances[index].recip()
+        };
+        assert_eq!(resistance("X1.R1").to_bits(), expected_x1.to_bits());
+        assert_eq!(resistance("X1.R2").to_bits(), expected_x1.to_bits());
+        assert_eq!(resistance("X2.R1").to_bits(), expected_x2.to_bits());
+        assert_eq!(resistance("X2.R2").to_bits(), expected_x2.to_bits());
+        assert_ne!(expected_x1.to_bits(), expected_x2.to_bits());
+    }
+
+    /// LEVEL=3 derives AREA and PJ from the drawn rectangle, and must land on
+    /// the same junction an explicit `AREA`/`PJ` instance would.
+    ///
+    /// `W=10u L=10u` is `AREA=100p PJ=40u`, which is the geometry the vendored
+    /// GF180MCU corpus already holds to ngspice — so pinning the equivalence
+    /// here extends that evidence to the geometric path, which no vendored
+    /// deck exercises.
+    #[test]
+    fn level3_width_and_length_derive_the_explicit_area_and_perimeter() {
+        let build = |instance: &str| {
+            let deck = format!(
+                "level3 geometry\n\
+                 V1 in 0 1\n\
+                 D1 in 0 DGEO {instance}\n\
+                 .model DGEO D LEVEL=3 IS=2.2959e-7 JSW=2.1207e-13 N=1.01 CJ=9.6797e-4\n\
+                 .end\n"
+            );
+            let netlist = Netlist::parse(&deck).expect("geometric diode deck parses");
+            let circuit = Engine::new(SimulationConfig::default())
+                .build_circuit(&netlist)
+                .expect("geometric diode deck builds");
+            let [diode] = circuit.diodes.devices.as_slice() else {
+                panic!("expected one diode");
+            };
+            diode.clone()
+        };
+
+        let drawn = build("W=10u L=10u");
+        let explicit = build("AREA=100p PJ=40u");
+
+        assert_eq!(drawn.level, DiodeLevel::Geometric);
+        assert!(
+            (drawn.is - explicit.is).abs() <= explicit.is * 1e-12,
+            "derived area {} vs explicit {}",
+            drawn.is,
+            explicit.is
+        );
+        assert!(
+            (drawn.sidewall_perimeter - explicit.sidewall_perimeter).abs() <= 1e-18,
+            "derived perimeter {} vs explicit {}",
+            drawn.sidewall_perimeter,
+            explicit.sidewall_perimeter
+        );
+        assert!((drawn.cj0 - explicit.cj0).abs() <= explicit.cj0 * 1e-12);
+
+        // A LEVEL=1 card takes no geometry from W/L, so it stays unit-area.
+        let legacy_deck = "legacy geometry\n\
+             V1 in 0 1\n\
+             D1 in 0 DLEG W=10u L=10u\n\
+             .model DLEG D IS=2.2959e-7\n\
+             .end\n";
+        let netlist = Netlist::parse(legacy_deck).expect("legacy diode deck parses");
+        let circuit = Engine::new(SimulationConfig::default())
+            .build_circuit(&netlist)
+            .expect("legacy diode deck builds");
+        let [legacy] = circuit.diodes.devices.as_slice() else {
+            panic!("expected one diode");
+        };
+        assert!(legacy.is > drawn.is * 1e6, "LEVEL=1 ignores W/L geometry");
+    }
+
+    /// `.options scale` multiplies drawn dimensions, so it enters the derived
+    /// area squared and the derived perimeter linearly.
+    #[test]
+    fn level3_geometry_honours_the_options_scale_factor() {
+        let deck = "scaled level3 geometry\n\
+             .options scale=2\n\
+             V1 in 0 1\n\
+             D1 in 0 DGEO W=10u L=10u\n\
+             .model DGEO D LEVEL=3 IS=2.2959e-7 JSW=2.1207e-13\n\
+             .end\n";
+        let netlist = Netlist::parse(deck).expect("scaled deck parses");
+        assert_eq!(netlist.options.scale, Some(2.0));
+        let circuit = Engine::new(SimulationConfig::default())
+            .build_circuit(&netlist)
+            .expect("scaled deck builds");
+        let [diode] = circuit.diodes.devices.as_slice() else {
+            panic!("expected one diode");
+        };
+
+        // AREA = (20u)^2 = 400p, PJ = 2*(20u+20u) = 80u.
+        assert!((diode.is - 2.2959e-7 * 400e-12).abs() <= diode.is * 1e-12);
+        assert!((diode.sidewall_perimeter - 80e-6).abs() <= 1e-18);
+    }
+
+    struct DiscardingStamper;
+
+    impl crate::device::MatrixStamper for DiscardingStamper {
+        fn stamp(&mut self, _row: crate::NodeId, _col: crate::NodeId, _value: crate::Value) {}
+
+        fn stamp_rhs(&mut self, _index: crate::NodeId, _value: crate::Value) {}
+    }
+
+    fn built_bsim3_equation_set(
+        level: i32,
+        model_tail: &str,
+        dialect: SpiceDialect,
+    ) -> Result<crate::device::Bsim3v3EquationSet, SimulationError> {
+        let deck = format!(
+            "BSIM3 front routing\n\
+             M1 d g s 0 MOD W=1u L=1u\n\
+             .MODEL MOD NMOS LEVEL={level} {model_tail}\n\
+             .END\n"
+        );
+        let netlist = Netlist::parse(&deck).expect("BSIM3 routing deck parses");
+        let engine = Engine::new(SimulationConfig::default().with_spice_dialect(dialect));
+        let circuit = engine.build_circuit(&netlist)?;
+        let [device] = circuit.bsim3v3.devices.as_slice() else {
+            panic!("expected exactly one native BSIM3 device")
+        };
+        Ok(device.core.model.equation_set)
+    }
+
+    fn built_bsim3_geometry(
+        level: i32,
+        instance_tail: &str,
+        model_tail: &str,
+        dialect: SpiceDialect,
+    ) -> Result<(f64, f64), SimulationError> {
+        let deck = format!(
+            "BSIM3 model geometry defaults\n\
+             M1 d g s 0 MOD {instance_tail}\n\
+             .MODEL MOD NMOS LEVEL={level} {model_tail}\n\
+             .END\n"
+        );
+        let netlist = Netlist::parse(&deck).expect("BSIM3 geometry deck parses");
+        let engine = Engine::new(SimulationConfig::default().with_spice_dialect(dialect));
+        let circuit = engine.build_circuit(&netlist)?;
+        let [device] = circuit.bsim3v3.devices.as_slice() else {
+            panic!("expected exactly one native BSIM3 device")
+        };
+        Ok((device.core.geom.l, device.core.geom.w))
+    }
+
+    fn assert_bsim3_geometry(actual: (f64, f64), expected: (f64, f64)) {
+        for (axis, actual, expected) in [("L", actual.0, expected.0), ("W", actual.1, expected.1)] {
+            assert!(
+                (actual - expected).abs() <= 1.0e-18,
+                "BSIM3 {axis} geometry mismatch: actual={actual:.17e}, expected={expected:.17e}"
+            );
+        }
+    }
+
+    #[test]
+    fn bsim3_equation_family_is_selected_by_simulator_front_and_level() {
+        use crate::device::Bsim3v3EquationSet::{NgspiceV330, XyceV322};
+
+        assert_eq!(
+            built_bsim3_equation_set(9, "", SpiceDialect::Xyce).expect("Xyce LEVEL=9 builds"),
+            XyceV322
+        );
+        assert_eq!(
+            built_bsim3_equation_set(49, "", SpiceDialect::Xyce).expect("Xyce LEVEL=49 builds"),
+            XyceV322
+        );
+        assert_eq!(
+            built_bsim3_equation_set(8, "", SpiceDialect::Ngspice).expect("ngspice LEVEL=8 builds"),
+            NgspiceV330
+        );
+        assert_eq!(
+            built_bsim3_equation_set(49, "", SpiceDialect::Ngspice)
+                .expect("ngspice LEVEL=49 builds"),
+            NgspiceV330
+        );
+        assert_eq!(
+            built_bsim3_equation_set(9, "CAPMOD=3", SpiceDialect::BestAvailable)
+                .expect("auto-detected BSIM3 LEVEL=9 builds"),
+            XyceV322
+        );
+    }
+
+    #[test]
+    fn xyce_bsim3_model_geometry_defaults_obey_instance_precedence() {
+        let model_geometry = built_bsim3_geometry(9, "", "L=0.35u W=10u", SpiceDialect::Xyce)
+            .expect("Xyce BSIM3 model geometry builds");
+        assert_bsim3_geometry(model_geometry, (0.35e-6, 10.0e-6));
+
+        let mixed_geometry = built_bsim3_geometry(9, "L=0.4u", "L=0.35u W=10u", SpiceDialect::Xyce)
+            .expect("Xyce BSIM3 mixed instance/model geometry builds");
+        assert_bsim3_geometry(mixed_geometry, (0.4e-6, 10.0e-6));
+
+        let native_defaults = built_bsim3_geometry(9, "", "", SpiceDialect::Xyce)
+            .expect("Xyce BSIM3 native geometry defaults build");
+        assert_bsim3_geometry(native_defaults, (5.0e-6, 5.0e-6));
+    }
+
+    #[test]
+    fn ngspice_bsim3_does_not_inherit_xyce_model_geometry_extension() {
+        let model_geometry = built_bsim3_geometry(8, "", "L=0.35u W=10u", SpiceDialect::Ngspice)
+            .expect("ngspice BSIM3 model with compatibility parameters builds");
+        assert_bsim3_geometry(model_geometry, (5.0e-6, 5.0e-6));
+
+        let instance_geometry =
+            built_bsim3_geometry(8, "L=0.4u W=12u", "L=0.35u W=10u", SpiceDialect::Ngspice)
+                .expect("ngspice BSIM3 instance geometry builds");
+        assert_bsim3_geometry(instance_geometry, (0.4e-6, 12.0e-6));
+    }
+
+    #[test]
+    fn xyce_level8_fails_closed_instead_of_changing_equation_family() {
+        let error = built_bsim3_equation_set(8, "", SpiceDialect::Xyce)
+            .expect_err("Xyce LEVEL=8 must not route to a different BSIM3 family");
+        assert!(
+            error
+                .to_string()
+                .contains("registered at LEVEL=9 and LEVEL=49")
+        );
+    }
+
+    #[test]
+    fn pem_instances_share_one_parsed_table_pair_per_model() {
+        let unique = format!(
+            "builder-pem-share-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock")
+                .as_nanos()
+        );
+        let positive = format!("virtual://pem/{unique}/positive");
+        let negative = format!("virtual://pem/{unique}/negative");
+        crate::xspice::register_data_file(&positive, "0,1\n1,0\n")
+            .expect("register positive table");
+        crate::xspice::register_data_file(&negative, "0,0\n1,1\n")
+            .expect("register negative table");
+        let deck = format!(
+            "shared PEM tables\n\
+             .model pem memristor level=4 fxpdata={positive} fxmdata={negative}\n\
+             YMEMRISTOR first 1 0 pem xo=0.25\n\
+             YMEMRISTOR second 2 0 pem xo=0.75\n\
+             .end\n"
+        );
+        let netlist = Netlist::parse(&deck).expect("shared PEM deck parses");
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("shared PEM circuit builds");
+        crate::xspice::unregister_data_file(&positive).expect("unregister positive table");
+        crate::xspice::unregister_data_file(&negative).expect("unregister negative table");
+
+        let [first, second] = circuit.xyce_memristors.as_slice() else {
+            panic!("expected two PEM instances")
+        };
+        let crate::device::XyceMemristor::Pem(first) = &first.device else {
+            panic!("first instance is PEM")
+        };
+        let crate::device::XyceMemristor::Pem(second) = &second.device else {
+            panic!("second instance is PEM")
+        };
+        assert!(
+            first
+                .positive_table()
+                .shares_storage_with(second.positive_table())
+        );
+        assert!(
+            first
+                .negative_table()
+                .shares_storage_with(second.negative_table())
+        );
+        assert_eq!(first.instance().x0, 0.25);
+        assert_eq!(second.instance().x0, 0.75);
+    }
+
+    #[test]
+    fn behavioral_gmin_uses_resolved_engine_device_option() {
+        let netlist = Netlist::parse_with_options(
+            "resolved behavioral GMIN\nB1 out 0 V={GMIN}\n.END\n",
+            crate::netlist::NetlistParseOptions {
+                expression_dialect: crate::config::ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        )
+        .expect("Xyce behavioral deck parses");
+        let mut config = crate::engine::SimulationConfig::default();
+        config.convergence_config.junction_gmin_target = 7.5e-9;
+
+        let mut circuit = Engine::new(config)
+            .build_circuit(&netlist)
+            .expect("behavioral circuit builds");
+
+        assert_eq!(
+            circuit.behavioral_sources.voltage_sources[0]
+                .evaluate(&[], 0.0)
+                .expect("finite behavioral voltage"),
+            7.5e-9
+        );
+    }
+
+    fn build_xyce_behavioral_reference_fixture(
+        controlling_source: &str,
+        dependency: &str,
+    ) -> Result<CircuitData, SimulationError> {
+        let source = format!(
+            "behavioral branch reference\n{controlling_source}\nR1 1 0 1\nB2 2 0 I={{I({dependency})*20}}\nR2 2 0 1\n.END\n"
+        );
+        let netlist = Netlist::parse_with_options(
+            &source,
+            crate::netlist::NetlistParseOptions {
+                expression_dialect: crate::config::ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        )
+        .map_err(|error| SimulationError::Netlist(error.to_string()))?;
+        Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce))
+            .build_circuit(&netlist)
+    }
+
+    #[test]
+    fn behavioral_lead_current_rejects_known_device_without_branch_variable() {
+        let error = build_xyce_behavioral_reference_fixture("B1 1 0 I={1m}", "b1")
+            .expect_err("a current-output B source has no branch-current solution variable");
+        let SimulationError::BehavioralReference(error) = error else {
+            panic!("expected typed behavioral-reference failure, got {error:?}");
+        };
+        assert_eq!(error.owner_name, "B2");
+        assert_eq!(error.canonical_owner_name, "B2");
+        assert_eq!(error.dependency_name, "b1");
+        assert_eq!(error.canonical_dependency_name, "B1");
+        assert_eq!(
+            error.reason,
+            crate::device::BehavioralReferenceReason::LeadCurrentNotSolutionVariable
+        );
+    }
+
+    #[test]
+    fn behavioral_branch_reference_distinguishes_valid_and_missing_devices() {
+        build_xyce_behavioral_reference_fixture("B1 1 0 V={1m}", "b1")
+            .expect("a voltage-output B source owns an MNA branch variable");
+
+        let error = build_xyce_behavioral_reference_fixture("B1 1 0 I={1m}", "missing")
+            .expect_err("an absent behavioral dependency must fail");
+        let SimulationError::BehavioralReference(error) = error else {
+            panic!("expected typed behavioral-reference failure, got {error:?}");
+        };
+        assert_eq!(error.canonical_dependency_name, "MISSING");
+        assert_eq!(
+            error.reason,
+            crate::device::BehavioralReferenceReason::UnknownDevice
+        );
+    }
+
+    #[test]
+    fn generic_switch_retains_scoped_runtime_params_and_resolved_context() {
+        let netlist = Netlist::parse_with_options(
+            "scoped runtime switch control\n\
+             .OPTIONS GMIN=2.5E-8\n\
+             .MODEL SM SWITCH(RON=2 ROFF=1MEG ON=150 OFF=140)\n\
+             X1 out CELL SCALE=2\n\
+             .SUBCKT CELL P SCALE=1\n\
+             .PARAM CONTROL_VALUE={SCALE*(TEMP+VT+GMIN)}\n\
+             S1 P 0 SM CONTROL={CONTROL_VALUE}\n\
+             .ENDS\n\
+             .END\n",
+            crate::netlist::NetlistParseOptions {
+                expression_dialect: crate::config::ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        )
+        .expect("Xyce scoped generic-switch deck parses");
+        let mut config = crate::engine::SimulationConfig::default();
+        config.temperature = crate::constants::celsius_to_kelvin(80.0);
+        config.convergence_config.junction_gmin_target = 9.0e-7;
+        let engine = Engine::new(config).resolved_for_netlist(&netlist);
+        assert_eq!(
+            engine.config.convergence_config.junction_gmin_target, 2.5e-8,
+            ".OPTIONS GMIN must override the base engine device-option value"
+        );
+
+        let mut circuit = engine
+            .build_circuit(&netlist)
+            .expect("scoped generic-switch circuit builds");
+        assert_eq!(circuit.generic_switches.len(), 1);
+
+        circuit.generic_switches[0].stamp_time_dependent(0.0, &mut DiscardingStamper);
+        assert_eq!(
+            circuit.generic_switches[0].conductance(),
+            0.5,
+            "resolved SCALE, TEMP, VT, and GMIN should drive the switch fully on"
+        );
+    }
+
+    fn xspice_model_count(circuit: &CircuitData, model_name: &str) -> usize {
+        circuit
+            .xspice_instances
+            .iter()
+            .filter(|instance| instance.model_name().eq_ignore_ascii_case(model_name))
+            .count()
+    }
+
+    fn single_xspice_param(circuit: &CircuitData, model_name: &str, param: &str) -> crate::Value {
+        let mut matches = circuit
+            .xspice_instances
+            .iter()
+            .filter(|instance| instance.model_name().eq_ignore_ascii_case(model_name));
+        let instance = matches
+            .next()
+            .unwrap_or_else(|| panic!("expected one {model_name} instance"));
+        assert!(
+            matches.next().is_none(),
+            "expected exactly one {model_name} instance"
+        );
+        instance.param(param)
+    }
+
+    fn single_xspice_instance<'a>(
+        circuit: &'a CircuitData,
+        model_name: &str,
+    ) -> &'a crate::xspice::XspiceInstance {
+        let mut matches = circuit
+            .xspice_instances
+            .iter()
+            .filter(|instance| instance.model_name().eq_ignore_ascii_case(model_name));
+        let instance = matches
+            .next()
+            .unwrap_or_else(|| panic!("expected one {model_name} instance"));
+        assert!(
+            matches.next().is_none(),
+            "expected exactly one {model_name} instance"
+        );
+        instance
+    }
+
+    #[test]
+    fn explicit_adc_does_not_suppress_needed_auto_dac_on_same_node() {
+        let netlist = Netlist::parse(
+            "\
+* explicit adc plus mixed digital-output node
+vctrl ain 0 dc 1
+aadc [ain] [mix] adc
+apull [mix] pullup
+rload mix 0 1k
+.model adc adc_bridge
+.model pullup d_pullup
+.end
+",
+        )
+        .expect("deck parses");
+
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("circuit builds");
+
+        assert_eq!(xspice_model_count(&circuit, "adc_bridge"), 1);
+        assert_eq!(xspice_model_count(&circuit, "d_pullup"), 1);
+        assert_eq!(
+            xspice_model_count(&circuit, "dac_bridge"),
+            1,
+            "explicit adc_bridge only covers analog-to-digital; mixed node 'mix' still needs a generated dac_bridge"
+        );
+    }
+
+    #[test]
+    fn real_input_on_an_analog_node_gets_a_generated_observer() {
+        let netlist = Netlist::parse(
+            "\
+* a real event reader sitting on a node the matrix also owns
+vin mix 0 dc 1.5
+rload mix 0 1k
+again mix robs rg
+.model rg real_gain
+.end
+",
+        )
+        .expect("deck parses");
+
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("circuit builds");
+
+        assert_eq!(xspice_model_count(&circuit, "real_gain"), 1);
+        assert_eq!(
+            xspice_model_count(&circuit, "v_to_real"),
+            1,
+            "nothing drives the real event on 'mix' and the matrix owns the node, so the reader needs the observer"
+        );
+        assert_eq!(
+            xspice_model_count(&circuit, "real_to_v"),
+            0,
+            "the observer direction must not also plan the driver"
+        );
+
+        let observer = single_xspice_instance(&circuit, "v_to_real");
+        let mix = circuit
+            .get_node_by_name("mix")
+            .expect("the deck's mixed node is allocated");
+        assert!(matches!(
+            observer.connection_at(0),
+            Some(crate::xspice::PortConnection::Analog(node)) if *node == mix
+        ));
+        assert!(matches!(
+            observer.connection_at(1),
+            Some(crate::xspice::PortConnection::Real(node)) if *node == mix
+        ));
+    }
+
+    #[test]
+    fn a_real_event_net_with_no_analog_node_gets_no_observer() {
+        let netlist = Netlist::parse(
+            "\
+* the corpus shape: a real event chain the matrix never touches
+avec [dclk] rmid d2r
+again rmid rout rg
+.model d2r d_to_real
+.model rg real_gain
+.end
+",
+        )
+        .expect("deck parses");
+
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("circuit builds");
+
+        assert_eq!(
+            xspice_model_count(&circuit, "v_to_real"),
+            0,
+            "an event-only net has no analog value to observe"
+        );
+    }
+
+    #[test]
+    fn a_driven_real_event_net_keeps_its_driver_and_gains_no_observer() {
+        let netlist = Netlist::parse(
+            "\
+* a real event both produced onto and read from one analog node
+rload mix 0 1k
+avec [dclk] mix d2r
+again mix rout rg
+.model d2r d_to_real
+.model rg real_gain
+.end
+",
+        )
+        .expect("deck parses");
+
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("circuit builds");
+
+        assert_eq!(
+            xspice_model_count(&circuit, "real_to_v"),
+            1,
+            "the driven event still reaches the matrix through the existing driver bridge"
+        );
+        assert_eq!(
+            xspice_model_count(&circuit, "v_to_real"),
+            0,
+            "a driven real net must not also be observed; the two would race on one value"
+        );
+    }
+
+    #[test]
+    fn an_authored_observer_suppresses_the_generated_one() {
+        let netlist = Netlist::parse(
+            "\
+* an author's own observer publishing onto the node a reader reads
+vsrc src 0 dc 2
+rsrc src 0 1k
+rload mix 0 1k
+aobs src mix obs
+again mix rout rg
+.model obs v_to_real
+.model rg real_gain
+.end
+",
+        )
+        .expect("deck parses");
+
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("circuit builds");
+
+        assert_eq!(
+            xspice_model_count(&circuit, "v_to_real"),
+            1,
+            "the authored observer is the only one; real event drivers sum, so a second would double the value"
+        );
+    }
+
+    #[test]
+    fn disabled_auto_bridging_names_the_observer_direction() {
+        let netlist = Netlist::parse(
+            "\
+* auto bridging off, with a node that would need an observer
+.options auto_bridge=0
+vin mix 0 dc 1.5
+rload mix 0 1k
+again mix robs rg
+.model rg real_gain
+.end
+",
+        )
+        .expect("deck parses");
+
+        let error = Engine::default()
+            .build_circuit(&netlist)
+            .expect_err("disabled auto bridging refuses the mixed node");
+        let message = error.to_string();
+        assert!(
+            message.contains("voltage-to-real"),
+            "the refusal must name the bridge the node needs, got: {message}"
+        );
+    }
+
+    #[test]
+    fn auto_bridge_uses_deepest_xspice_subckt_vcc() {
+        let netlist = Netlist::parse(
+            "\
+* auto bridge uses scoped subckt vcc
+.param vcc=3.3
+rload mix 0 1k
+xcell mix dcell vcc=5
+.model pull d_pullup
+.subckt dcell y vcc=5
+apull [y] pull
+.ends
+.end
+",
+        )
+        .expect("deck parses");
+
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("circuit builds");
+
+        assert_eq!(xspice_model_count(&circuit, "d_pullup"), 1);
+        assert_eq!(xspice_model_count(&circuit, "dac_bridge"), 1);
+        assert_eq!(
+            single_xspice_param(&circuit, "dac_bridge", "out_high"),
+            5.0,
+            "generated dac_bridge should use the deepest connected XSPICE subckt vcc, not the top-level vcc"
+        );
+    }
+
+    #[test]
+    fn auto_bridge_uses_family_specific_template() {
+        let netlist = Netlist::parse(
+            "\
+* auto bridge uses family-specific template
+.param vcc=5
+rload mix 0 1k
+.model pull d_pullup(family=\"74HCT\")
+apull [mix] pull
+.control
+set auto_bridge_d_out = ( \".model generic_dac dac_bridge(out_low = -1 out_high = %g)\" \"ageneric%d [ %s ] [ %s ] generic_dac\" 1 )
+set auto_bridge_74HCT_d_out = ( \".model family_dac dac_bridge(out_low = -2 out_high = %g)\" \"afamily%d [ %s ] [ %s ] family_dac\" 1 )
+.endc
+.end
+",
+        )
+        .expect("deck parses");
+
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("circuit builds");
+
+        assert_eq!(xspice_model_count(&circuit, "d_pullup"), 1);
+        assert_eq!(xspice_model_count(&circuit, "dac_bridge"), 1);
+        assert_eq!(single_xspice_param(&circuit, "dac_bridge", "out_low"), -2.0);
+        assert_eq!(single_xspice_param(&circuit, "dac_bridge", "out_high"), 5.0);
+    }
+
+    #[test]
+    fn auto_bridge_uses_standard_family_include_template() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos();
+        let temp_dir = std::env::temp_dir().join(format!(
+            "rspice-auto-bridge-family-{}-{unique}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&temp_dir).expect("create temp dir");
+        std::fs::write(
+            temp_dir.join("bridge_74HCT_d_out.subcir"),
+            "\
+.subckt bridge_74HCT_d_out dig ana vcc=5
+.model family_dac dac_bridge(out_low = -0.75 out_high = {vcc})
+abuf [ dig ] [ ana ] family_dac
+.ends
+",
+        )
+        .expect("write family bridge include file");
+
+        let deck_path = temp_dir.join("main.cir");
+        let netlist = Netlist::parse_with_path(
+            "\
+* auto bridge uses standard family include
+.param vcc=4.4
+rload mix 0 1k
+.model pull d_pullup(family=\"74HCT\")
+apull [mix] pull
+.end
+",
+            &deck_path,
+        )
+        .expect("deck parses with source path");
+
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("circuit builds");
+
+        assert_eq!(xspice_model_count(&circuit, "d_pullup"), 1);
+        assert_eq!(xspice_model_count(&circuit, "dac_bridge"), 1);
+        assert_eq!(
+            single_xspice_param(&circuit, "dac_bridge", "out_low"),
+            -0.75
+        );
+        assert_eq!(single_xspice_param(&circuit, "dac_bridge", "out_high"), 4.4);
+
+        std::fs::remove_dir_all(temp_dir).expect("remove temp dir");
+    }
+
+    #[test]
+    fn auto_bridge_no_family_uses_generic_template() {
+        let netlist = Netlist::parse(
+            "\
+* auto bridge skips family-specific template when disabled
+.param vcc=5
+rload mix 0 1k
+.model pull d_pullup(family=\"74HCT\")
+apull [mix] pull
+.control
+set no_auto_bridge_family
+set auto_bridge_d_out = ( \".model generic_dac dac_bridge(out_low = -1 out_high = %g)\" \"ageneric%d [ %s ] [ %s ] generic_dac\" 1 )
+set auto_bridge_74HCT_d_out = ( \".model family_dac dac_bridge(out_low = -2 out_high = %g)\" \"afamily%d [ %s ] [ %s ] family_dac\" 1 )
+.endc
+.end
+",
+        )
+        .expect("deck parses");
+
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("circuit builds");
+
+        assert_eq!(xspice_model_count(&circuit, "d_pullup"), 1);
+        assert_eq!(xspice_model_count(&circuit, "dac_bridge"), 1);
+        assert_eq!(single_xspice_param(&circuit, "dac_bridge", "out_low"), -1.0);
+        assert_eq!(single_xspice_param(&circuit, "dac_bridge", "out_high"), 5.0);
+    }
+
+    #[test]
+    fn auto_bridge_template_accepts_printf_width_and_precision() {
+        let netlist = Netlist::parse(
+            "\
+* auto bridge template accepts printf modifiers
+.param vcc=4.567
+rload mix 0 1k
+.model pull d_pullup
+apull [mix] pull
+.control
+set auto_bridge_d_out = ( \".model fmt_dac dac_bridge(out_low = 0 out_high = %.2f)\" \"afmt%03d [ %12s ] [ %12s ] fmt_dac\" 1 )
+.endc
+.end
+",
+        )
+        .expect("deck parses");
+
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("circuit builds");
+
+        let dac = single_xspice_instance(&circuit, "dac_bridge");
+        assert_eq!(dac.name, "AFMT001");
+        assert_eq!(
+            single_xspice_param(&circuit, "dac_bridge", "out_high"),
+            4.57
+        );
+    }
+
+    #[test]
+    fn auto_bridge_template_groups_nodes_up_to_max() {
+        let netlist = Netlist::parse(
+            "\
+* auto bridge template max groups nodes into one vector bridge
+.param vcc=4
+rload0 mix0 0 1k
+rload1 mix1 0 1k
+.model pull d_pullup
+apull0 [mix0] pull
+apull1 [mix1] pull
+.control
+set auto_bridge_d_out = ( \".model grouped_dac dac_bridge(out_low = -0.25 out_high = %g)\" \"agroup%d [ %s ] [ %s ] grouped_dac\" 2 )
+.endc
+.end
+",
+        )
+        .expect("deck parses");
+
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("circuit builds");
+
+        assert_eq!(xspice_model_count(&circuit, "d_pullup"), 2);
+        assert_eq!(xspice_model_count(&circuit, "dac_bridge"), 1);
+        assert_eq!(
+            single_xspice_param(&circuit, "dac_bridge", "out_low"),
+            -0.25
+        );
+        assert_eq!(single_xspice_param(&circuit, "dac_bridge", "out_high"), 4.0);
+
+        let dac = single_xspice_instance(&circuit, "dac_bridge");
+        assert!(
+            matches!(
+                dac.connection("in"),
+                Some(crate::xspice::PortConnection::DigitalVector(nodes)) if nodes.len() == 2
+            ),
+            "grouped template should generate a two-bit digital input vector"
+        );
+        assert!(
+            matches!(
+                dac.connection("out"),
+                Some(crate::xspice::PortConnection::AnalogVector(nodes)) if nodes.len() == 2
+            ),
+            "grouped template should generate a two-node analog output vector"
+        );
+    }
+
+    #[test]
+    fn auto_bridge_template_include_setup_resolves_model_card() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos();
+        let temp_dir = std::env::temp_dir().join(format!(
+            "rspice-auto-bridge-include-{}-{unique}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&temp_dir).expect("create temp dir");
+        std::fs::write(
+            temp_dir.join("bridge_models.cir"),
+            ".model included_dac dac_bridge(out_low = -0.5 out_high = 4.4)\n",
+        )
+        .expect("write include file");
+
+        let deck_path = temp_dir.join("main.cir");
+        let netlist = Netlist::parse_with_path(
+            "\
+* auto bridge template include setup
+rload mix 0 1k
+.model pull d_pullup
+apull [mix] pull
+.control
+set auto_bridge_d_out = ( \".include bridge_models.cir\" \"ainc%d [ %s ] [ %s ] included_dac\" 1 )
+.endc
+.end
+",
+            &deck_path,
+        )
+        .expect("deck parses with source path");
+
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("circuit builds");
+
+        assert_eq!(xspice_model_count(&circuit, "d_pullup"), 1);
+        assert_eq!(xspice_model_count(&circuit, "dac_bridge"), 1);
+        assert_eq!(single_xspice_param(&circuit, "dac_bridge", "out_low"), -0.5);
+        assert_eq!(single_xspice_param(&circuit, "dac_bridge", "out_high"), 4.4);
+
+        std::fs::remove_dir_all(temp_dir).expect("remove temp dir");
+    }
+
+    #[test]
+    fn auto_bridge_template_include_setup_builds_subcircuit_bridge() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos();
+        let temp_dir = std::env::temp_dir().join(format!(
+            "rspice-auto-bridge-subckt-{}-{unique}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&temp_dir).expect("create temp dir");
+        std::fs::write(
+            temp_dir.join("bridge_sub.cir"),
+            "\
+.subckt auto_buf dig ana vcc=5
+.model auto_dac dac_bridge(out_low = 0 out_high = {vcc})
+abuf [ dig ] [ internal ] auto_dac
+rint internal ana 100
+.ends
+",
+        )
+        .expect("write bridge subckt include file");
+
+        let deck_path = temp_dir.join("main.cir");
+        let netlist = Netlist::parse_with_path(
+            "\
+* auto bridge template subcircuit setup
+.param vcc=4.4
+rload mix 0 1k
+.model pull d_pullup
+apull [mix] pull
+.control
+set auto_bridge_d_out = ( \".include bridge_sub.cir\" \"xauto_buf%d %s %s auto_buf vcc=%g\" 1 )
+.endc
+.end
+",
+            &deck_path,
+        )
+        .expect("deck parses with source path");
+
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("circuit builds");
+
+        assert_eq!(xspice_model_count(&circuit, "d_pullup"), 1);
+        assert_eq!(xspice_model_count(&circuit, "dac_bridge"), 1);
+        assert_eq!(single_xspice_param(&circuit, "dac_bridge", "out_high"), 4.4);
+        assert!(
+            circuit
+                .resistors
+                .names
+                .iter()
+                .any(|name| name.to_ascii_uppercase().contains("RINT")),
+            "generated bridge subcircuit should add the included rint resistor"
+        );
+
+        std::fs::remove_dir_all(temp_dir).expect("remove temp dir");
+    }
+
+    #[test]
+    fn auto_bridge_uses_custom_digital_param_name() {
+        let netlist = Netlist::parse(
+            "\
+* auto bridge uses auto_bridge_parm_d
+.param vcc=5 vdd=1.8
+rload mix 0 1k
+.model pull d_pullup
+apull [mix] pull
+.control
+set auto_bridge_parm_d = vdd
+.endc
+.end
+",
+        )
+        .expect("deck parses");
+
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("circuit builds");
+
+        assert_eq!(xspice_model_count(&circuit, "d_pullup"), 1);
+        assert_eq!(xspice_model_count(&circuit, "dac_bridge"), 1);
+        assert_eq!(
+            single_xspice_param(&circuit, "dac_bridge", "out_high"),
+            1.8,
+            "auto_bridge_parm_d should select vdd instead of the default vcc parameter"
+        );
+    }
+
+    #[test]
+    fn legacy_bsim1_rsh_uses_unit_default_diffusion_squares() {
+        let netlist = Netlist::parse(
+            "legacy BSIM1 default diffusion squares\n\
+             vds d 0 0.05\n\
+             vgs g 0 1.8\n\
+             m1 d g 0 0 b1 l=10u w=50u\n\
+             .model b1 nmos level=4 tox=0.03 vdd=5 rsh=35\n\
+             .end\n",
+        )
+        .expect("legacy BSIM1 deck parses");
+
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("legacy BSIM1 circuit builds");
+        let drain = circuit.get_node_by_name("d").expect("external drain node");
+        let drain_prime = circuit
+            .get_node_by_name("m1.__dint")
+            .expect("RSH creates a drain prime node");
+        let source_prime = circuit
+            .get_node_by_name("m1.__sint")
+            .expect("RSH creates a source prime node");
+        let mosfet = circuit
+            .mosfets
+            .devices
+            .first()
+            .expect("one legacy BSIM1 device");
+
+        assert!(mosfet.uses_legacy_bsim());
+        assert_eq!(mosfet.node_drain, drain_prime);
+        assert_eq!(mosfet.node_source, source_prime);
+
+        for (name, node_pos, node_neg) in [
+            ("m1.__rd", drain, drain_prime),
+            ("m1.__rs", 0, source_prime),
+        ] {
+            let index = circuit
+                .resistors
+                .names
+                .iter()
+                .position(|candidate| candidate.eq_ignore_ascii_case(name))
+                .unwrap_or_else(|| panic!("expected generated resistor {name}"));
+            let stamp = circuit.resistors.stamps[index];
+            assert_eq!(stamp.pp.row, node_pos, "{name} positive terminal");
+            assert_eq!(stamp.nn.row, node_neg, "{name} negative terminal");
+            assert!(
+                (circuit.resistors.conductances[index] - 1.0 / 35.0).abs() <= 1.0e-15,
+                "{name} must implement RSH times the default one diffusion square"
+            );
+        }
+    }
+
+    #[test]
+    fn legacy_bsim1_explicit_zero_diffusion_squares_disable_prime_nodes() {
+        let netlist = Netlist::parse(
+            "legacy BSIM1 zero diffusion squares\n\
+             vds d 0 0.05\n\
+             vgs g 0 1.8\n\
+             m1 d g 0 0 b1 l=10u w=50u nrd=0 nrs=0\n\
+             .model b1 nmos level=4 tox=0.03 vdd=5 rsh=35\n\
+             .end\n",
+        )
+        .expect("legacy BSIM1 deck parses");
+
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("legacy BSIM1 circuit builds");
+        let drain = circuit.get_node_by_name("d").expect("external drain node");
+        let mosfet = circuit
+            .mosfets
+            .devices
+            .first()
+            .expect("one legacy BSIM1 device");
+
+        assert!(mosfet.uses_legacy_bsim());
+        assert_eq!(mosfet.node_drain, drain);
+        assert_eq!(mosfet.node_source, 0);
+        assert!(circuit.get_node_by_name("m1.__dint").is_none());
+        assert!(circuit.get_node_by_name("m1.__sint").is_none());
+        assert!(
+            circuit.resistors.names.iter().all(|name| {
+                !name.eq_ignore_ascii_case("m1.__rd") && !name.eq_ignore_ascii_case("m1.__rs")
+            }),
+            "explicit zero NRD/NRS must suppress both generated resistors"
+        );
+    }
+
+    #[test]
+    fn circuit_builder_honors_cancellation_before_construction() {
+        let netlist = Netlist::parse("cancelled build\nV1 in 0 1\nR1 in 0 1k\n.end")
+            .expect("cancellation fixture parses");
+
+        assert!(matches!(
+            Engine::default()
+                .build_circuit_with_abort(&netlist, &crate::abort_signal::ImmediateAbort,),
+            Err(SimulationError::Aborted)
+        ));
+    }
+
+    #[test]
+    fn circuit_builder_rechecks_source_limits_from_its_engine_policy() {
+        let source = "strict engine source\nV1 in 0 1\nR1 in 0 1k\n.end\n";
+        let netlist = Netlist::parse(source).expect("fixture parses under default policy");
+        let mut config = crate::engine::SimulationConfig::default();
+        config.resource_limits.max_netlist_bytes = source.len() - 1;
+
+        let error = Engine::new(config)
+            .build_circuit(&netlist)
+            .expect_err("engine-specific source byte ceiling must be authoritative");
+
+        assert!(matches!(
+            error,
+            SimulationError::ResourceLimit(ResourceLimitError {
+                resource: ResourceKind::NetlistBytes,
+                requested,
+                limit,
+            }) if requested == source.len() && limit == source.len() - 1
+        ));
+    }
+
+    #[test]
+    fn circuit_builder_rechecks_source_line_limit_from_its_engine_policy() {
+        let source = "strict engine lines\nV1 in 0 1\nR1 in 0 1k\n.end\n";
+        let netlist = Netlist::parse(source).expect("fixture parses under default policy");
+        let mut config = crate::engine::SimulationConfig::default();
+        config.resource_limits.max_netlist_lines = 2;
+
+        let error = Engine::new(config)
+            .build_circuit(&netlist)
+            .expect_err("engine-specific source line ceiling must be authoritative");
+
+        assert!(matches!(
+            error,
+            SimulationError::ResourceLimit(ResourceLimitError {
+                resource: ResourceKind::NetlistLines,
+                requested: 3,
+                limit: 2,
+            })
+        ));
+    }
+
+    #[test]
+    fn xyce_builder_freezes_bh_source_order_from_reversed_bft() {
+        let deck = "Xyce Core source load order\n\
+            .tran 0 4\n\
+            R1 1 0 1\n\
+            L1 1 0 20\n\
+            I1 1 0 SIN(0 .1 1 1)\n\
+            I2 1 0 SIN(0 .2 1 2)\n\
+            I3 1 0 SIN(0 .8 1 3)\n\
+            K1 L1 1 CORE_MODEL\n\
+            .model CORE_MODEL CORE (LEVEL=2 MS=510K A=62 C=.92 K=25 ALPHA=3.7e-4 AREA=1.12 GAP=0 PATH=8.49)\n\
+            .end\n";
+        let netlist = Netlist::parse(deck).expect("Core load-order fixture parses");
+        let circuit =
+            Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce))
+                .build_circuit(&netlist)
+                .expect("Core load-order fixture builds");
+
+        assert_eq!(circuit.xyce_load_plan().current_sources(), &[2, 1, 0]);
+        assert_eq!(circuit.xyce_load_plan().cores(), &[0]);
+        assert!(circuit.xyce_load_plan().core_groups().is_empty());
     }
 }

@@ -47,8 +47,6 @@
 //! anchor (t=0, ~0.0917 V) and tracks the transient (the fast-edge body
 //! amplitude is still being calibrated against ngspice's body LTE).
 
-#![allow(clippy::too_many_arguments)]
-
 pub use super::common;
 pub use params::B3SoiDdModel;
 
@@ -473,10 +471,10 @@ impl B3SoiDd {
         let op = eval::eval_dc(&sized, &self.consts, bias, self.mtype);
         let vds = if op.mode >= 0 { bias.vds } else { -bias.vds };
         let delta_temp = (op.ids * vds * self.sized.rth).clamp(0.0, 1.0e3);
-        if delta_temp.is_finite() {
-            if let Some(slot) = solution.get_mut(self.node_temp - 1) {
-                *slot = delta_temp;
-            }
+        if delta_temp.is_finite()
+            && let Some(slot) = solution.get_mut(self.node_temp - 1)
+        {
+            *slot = delta_temp;
         }
     }
 

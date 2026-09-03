@@ -14,7 +14,6 @@
 //! - Hierarchical node naming for waveform access
 //! - Proper parameter scoping with precedence resolution
 
-#![allow(clippy::too_many_arguments)]
 use super::expr::{
     behavioral_expression_references_runtime_quantity, prepare_behavioral_expression,
     prepare_behavioral_expression_preserving_spelling,
@@ -3309,9 +3308,9 @@ fn resolve_string_parametric_value(
                     expr
                 ))
             }),
-        ParametricValue::Resolved(_) => Err(ParseError::InvalidValue(format!(
-            "numeric parameter value cannot be used as a string value"
-        ))),
+        ParametricValue::Resolved(_) => Err(ParseError::InvalidValue(
+            "numeric parameter value cannot be used as a string value".to_string(),
+        )),
     }
 }
 

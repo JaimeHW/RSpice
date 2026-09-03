@@ -1,5 +1,3 @@
-#![allow(clippy::needless_range_loop)]
-
 use num_complex::Complex64;
 use rspice_matrix::{
     ComplexMatrix, KluSolver, RealSolverBackend, SolverOptions, StaticMatrix, Value,

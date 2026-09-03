@@ -133,7 +133,7 @@ fn resolve_resistor_model_level(
     }
 
     match rounded as i32 {
-        0 | 1 | 2 => Ok(rounded as i32),
+        0..=2 => Ok(rounded as i32),
         level => Err(SimulationError::Circuit(format!(
             "Resistor '{}' model '{}' requests unsupported resistor LEVEL={}",
             element_name, model_name, level

@@ -24,8 +24,6 @@
 //! also why KLU-class solvers are famously non-BLAS), and an
 //! allocation-free solve path.
 
-#![allow(clippy::needless_range_loop)]
-
 use crate::{SolverError, Value};
 
 #[inline]

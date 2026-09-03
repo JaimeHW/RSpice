@@ -3,8 +3,6 @@
 //! Core data types for eye diagram construction and analysis.
 //! Supports alignment of transient waveforms to bit period for overlay display.
 
-#![allow(clippy::too_many_arguments)]
-
 // =============================================================================
 // Eye Trace
 // =============================================================================

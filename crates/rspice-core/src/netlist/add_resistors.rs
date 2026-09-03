@@ -1260,7 +1260,8 @@ mod tests {
                 if name == "RONETERM1"
         ));
 
-        for raw in ["{UNKNOWN+}"] {
+        {
+            let raw = "{UNKNOWN+}";
             let source = format!(
                 "invalid resistance\n.PREPROCESS ADDRESISTORS ONETERMINAL {raw}\nV1 1 0 1\n.END\n"
             );

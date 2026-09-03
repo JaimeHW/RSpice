@@ -5857,8 +5857,8 @@ pub fn evaluate_tran_remeasurements(
 /// producer wrote the wrapped probe or the underlying solution name. Distinct
 /// columns that describe the same voltage fail closed instead of depending on
 /// input-column or hash iteration order.
-fn augment_remeasure_voltage_spellings<'a>(
-    signals: &mut HashMap<String, &'a [Value]>,
+fn augment_remeasure_voltage_spellings(
+    signals: &mut HashMap<String, &[Value]>,
 ) -> Result<(), String> {
     let index = CanonicalMeasureSignalIndex::new(signals);
     let aliases = signals
@@ -5869,14 +5869,13 @@ fn augment_remeasure_voltage_spellings<'a>(
         .collect::<Vec<_>>();
 
     for (alias, waveform) in aliases {
-        if let Some(existing) = index.get(&alias)? {
-            if existing.len() != waveform.len()
-                || !std::ptr::eq(existing.as_ptr(), waveform.as_ptr())
-            {
-                return Err(format!(
-                    "serialized voltage column '{alias}' conflicts with an equivalent column"
-                ));
-            }
+        if let Some(existing) = index.get(&alias)?
+            && (existing.len() != waveform.len()
+                || !std::ptr::eq(existing.as_ptr(), waveform.as_ptr()))
+        {
+            return Err(format!(
+                "serialized voltage column '{alias}' conflicts with an equivalent column"
+            ));
         }
         insert_case_variants(signals, &alias, waveform);
     }
@@ -6416,10 +6415,10 @@ fn normalize_dc_measurement_window(mut statement: MeasureStatement) -> MeasureSt
         | MeasureType::FallTime { .. }
         | MeasureType::Integ { .. } => None,
     };
-    if let Some((Some(from), Some(to))) = bounds {
-        if *from > *to {
-            std::mem::swap(from, to);
-        }
+    if let Some((Some(from), Some(to))) = bounds
+        && *from > *to
+    {
+        std::mem::swap(from, to);
     }
     statement
 }

@@ -1,7 +1,5 @@
 //! Intrinsic solve, thermal residual, convergence, and terminal stamping helpers.
 
-#![allow(clippy::needless_range_loop)]
-
 use super::*;
 
 impl Bjt {

@@ -5,7 +5,6 @@
 //! - Source stepping for convergence
 //! - Linear and nonlinear solver interfaces
 
-#![allow(clippy::too_many_arguments)]
 use super::{DampingStrategy, Engine, SimulationError};
 use crate::abort_signal::AbortSignal;
 use crate::device::NonlinearConvergenceCriteria;

@@ -16,7 +16,6 @@
 //!     └── run_suite()          - Run all tests in directory
 //! ```
 
-#![allow(clippy::needless_range_loop, clippy::too_many_arguments)]
 use rspice_core::engine::{ConvergenceConfig, SimulationConfig};
 use rspice_core::{Complex64, Engine, Netlist, Value};
 use std::collections::{BTreeMap, BTreeSet, HashMap};

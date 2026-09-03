@@ -737,13 +737,12 @@ impl CodeModel for XyceDTff {
             transition_from.map(|value| !value),
         );
 
-        if ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe {
-            if let Some(q) = q
-                && let Some(end) = transition_time_for_state(q, transition_start, params)
-                && end > ctx.time + 1.0e-18
-            {
-                ctx.request_breakpoint(end);
-            }
+        if ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe
+            && let Some(q) = q
+            && let Some(end) = transition_time_for_state(q, transition_start, params)
+            && end > ctx.time + 1.0e-18
+        {
+            ctx.request_breakpoint(end);
         }
         Ok(())
     }
@@ -3644,21 +3643,22 @@ impl XyceDSequential {
         let current_voltage = ctx.input(port_name);
         let low_rail = ctx.input("dgnd");
         let high_rail = ctx.input("dpwr");
-        if ctx.is_transient() && ctx.time == 0.0 {
-            if ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe {
-                ctx.set_initial_state(previous_low_voltage_state, current_voltage - low_rail);
-                ctx.set_initial_state(previous_high_voltage_state, current_voltage - high_rail);
-                ctx.set_initial_state(
-                    previous_previous_low_voltage_state,
-                    current_voltage - low_rail,
-                );
-                ctx.set_initial_state(
-                    previous_previous_high_voltage_state,
-                    current_voltage - high_rail,
-                );
-                ctx.set_initial_state(previous_low_current_state, 0.0);
-                ctx.set_initial_state(previous_high_current_state, 0.0);
-            }
+        if ctx.is_transient()
+            && ctx.time == 0.0
+            && ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe
+        {
+            ctx.set_initial_state(previous_low_voltage_state, current_voltage - low_rail);
+            ctx.set_initial_state(previous_high_voltage_state, current_voltage - high_rail);
+            ctx.set_initial_state(
+                previous_previous_low_voltage_state,
+                current_voltage - low_rail,
+            );
+            ctx.set_initial_state(
+                previous_previous_high_voltage_state,
+                current_voltage - high_rail,
+            );
+            ctx.set_initial_state(previous_low_current_state, 0.0);
+            ctx.set_initial_state(previous_high_current_state, 0.0);
         }
 
         if ctx.is_transient() && ctx.timestep.is_finite() && ctx.timestep > 0.0 {

@@ -33,7 +33,6 @@
 //! .MODEL JMOD NJF(VTO=-2 BETA=1E-3 LAMBDA=0.01)
 //! ```
 
-#![allow(clippy::too_many_arguments)]
 use crate::NodeId;
 use crate::Value;
 use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};

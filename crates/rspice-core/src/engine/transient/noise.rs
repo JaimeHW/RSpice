@@ -16,8 +16,6 @@
 //! bit-identical; and every analysis that consumes the netlist sees one
 //! consistent waveform.
 
-#![allow(clippy::needless_range_loop)]
-
 use crate::Value;
 use crate::netlist::{Element, ElementKind, Netlist, SourceSpec};
 
@@ -380,9 +378,9 @@ fn kasdin_one_over_f(n: usize, alpha: Value, amplitude: Value, rng: &mut SplitMi
     // Impulse response of the fractional integrator.
     let mut hk = 1.0f64;
     h[0].re = 1.0;
-    for k in 1..n {
+    for (k, entry) in h.iter_mut().enumerate().take(n).skip(1) {
         hk *= (k as f64 - 1.0 + alpha / 2.0) / k as f64;
-        h[k].re = hk;
+        (*entry).re = hk;
     }
     for item in w.iter_mut().take(n) {
         item.re = amplitude * rng.gaussian();

@@ -187,7 +187,7 @@ fn resolve_inline_lookup_function(
     interpolation: InterpolationKind,
     resource_limits: crate::resource::ResourceLimits,
 ) -> Result<Expr, String> {
-    if args.len() < 3 || args.len() % 2 == 0 {
+    if args.len() < 3 || args.len().is_multiple_of(2) {
         return Err(format!(
             "{} inline lookup requires an input followed by one or more x/y pairs; got {} arguments",
             function_name(func),

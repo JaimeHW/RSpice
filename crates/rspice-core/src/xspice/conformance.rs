@@ -1563,10 +1563,10 @@ pub fn verify_model_partials(
 pub fn context_with_model_defaults(model: &dyn CodeModel) -> CmContext {
     let mut ctx = CmContext::new();
     for port in model.ports() {
-        if port.is_vector {
-            if let Some(min_len) = port.vector_min_len {
-                ctx.set_port_width(&port.name, min_len.max(1));
-            }
+        if port.is_vector
+            && let Some(min_len) = port.vector_min_len
+        {
+            ctx.set_port_width(&port.name, min_len.max(1));
         }
     }
     for param in model.parameters() {

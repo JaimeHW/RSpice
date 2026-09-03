@@ -11,7 +11,6 @@
 //! - **Bathtub Curves**: BER vs sampling point
 //! - **Eye Metrics**: Height, width, opening, mask margins
 
-#![allow(clippy::needless_range_loop)]
 use crate::Value;
 
 mod eye_data;
@@ -304,11 +303,15 @@ impl EyeDiagram {
         let mid_v = self.config.v_resolution / 2;
         let tolerance = self.config.v_resolution / 20; // 5% window
 
-        for h in 0..self.config.h_resolution {
+        for (h, entry) in crossing_hist
+            .iter_mut()
+            .enumerate()
+            .take(self.config.h_resolution)
+        {
             for v in mid_v.saturating_sub(tolerance)
                 ..=(mid_v + tolerance).min(self.config.v_resolution - 1)
             {
-                crossing_hist[h] += self.histogram[h][v];
+                (*entry) += self.histogram[h][v];
             }
         }
 

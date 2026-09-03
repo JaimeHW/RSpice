@@ -4,8 +4,6 @@
 //! frequency-domain analysis at each specified frequency. Supports
 //! parallel frequency sweeps when the `parallel` feature is enabled.
 
-#![allow(clippy::needless_range_loop)]
-
 use super::data::{FrequencyDataOverridePlan, materialize_frequency_data_row_with_abort};
 use super::{Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};

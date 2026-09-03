@@ -71,30 +71,6 @@
 //! Doctests are likewise off (`doctest = false`), so examples here are
 //! checked by review rather than by `cargo test`.
 
-#![allow(
-    clippy::approx_constant,
-    clippy::collapsible_if,
-    clippy::derivable_impls,
-    clippy::field_reassign_with_default,
-    clippy::filter_map_bool_then,
-    clippy::if_same_then_else,
-    clippy::items_after_test_module,
-    clippy::manual_contains,
-    clippy::manual_is_multiple_of,
-    clippy::manual_range_patterns,
-    clippy::manual_strip,
-    clippy::needless_lifetimes,
-    clippy::needless_pub_self,
-    clippy::needless_range_loop,
-    clippy::never_loop,
-    clippy::single_element_loop,
-    clippy::too_many_arguments,
-    clippy::type_complexity,
-    clippy::unnecessary_cast,
-    clippy::unnecessary_map_or,
-    clippy::useless_format
-)]
-
 pub mod analysis;
 /// Starter model cards embedded in the binary; a leaf with no dependencies so
 /// that library, netlist and engine can all share one copy.

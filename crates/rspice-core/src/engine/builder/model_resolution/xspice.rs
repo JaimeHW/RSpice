@@ -698,35 +698,35 @@ fn reject_native_xtradev_non_scalar_params(
     model_name: &str,
     model_def: &crate::netlist::ModelDef,
 ) -> Result<(), SimulationError> {
-    for (name, _) in &model_def.string_params {
+    if let Some((name, _)) = model_def.string_params.first() {
         validate_native_xtradev_param_name(kind, element_name, model_name, name)?;
         return Err(SimulationError::Circuit(format!(
             "XSPICE xtradev {kind} instance '{element_name}' model '{model_name}' parameter \
              '{name}' must be a scalar numeric value"
         )));
     }
-    for (name, _) in &model_def.string_vector_params {
+    if let Some((name, _)) = model_def.string_vector_params.first() {
         validate_native_xtradev_param_name(kind, element_name, model_name, name)?;
         return Err(SimulationError::Circuit(format!(
             "XSPICE xtradev {kind} instance '{element_name}' model '{model_name}' parameter \
              '{name}' must be a scalar numeric value"
         )));
     }
-    for (name, _) in &model_def.real_vector_params {
+    if let Some((name, _)) = model_def.real_vector_params.first() {
         validate_native_xtradev_param_name(kind, element_name, model_name, name)?;
         return Err(SimulationError::Circuit(format!(
             "XSPICE xtradev {kind} instance '{element_name}' model '{model_name}' parameter \
              '{name}' must be a scalar numeric value"
         )));
     }
-    for (name, _) in &model_def.real_vector_expr_params {
+    if let Some((name, _)) = model_def.real_vector_expr_params.first() {
         validate_native_xtradev_param_name(kind, element_name, model_name, name)?;
         return Err(SimulationError::Circuit(format!(
             "XSPICE xtradev {kind} instance '{element_name}' model '{model_name}' parameter \
              '{name}' must be a scalar numeric value"
         )));
     }
-    for (name, _) in &model_def.integer_vector_params {
+    if let Some((name, _)) = model_def.integer_vector_params.first() {
         validate_native_xtradev_param_name(kind, element_name, model_name, name)?;
         return Err(SimulationError::Circuit(format!(
             "XSPICE xtradev {kind} instance '{element_name}' model '{model_name}' parameter \
@@ -747,42 +747,42 @@ fn reject_native_xtradev_instance_string_params(
     real_vector_params: &[(String, Vec<f64>)],
     real_vector_expr_params: &[(String, Vec<String>)],
 ) -> Result<(), SimulationError> {
-    for (name, _) in string_params {
+    if let Some((name, _)) = string_params.first() {
         validate_native_xtradev_param_name(kind, element_name, model_name, name)?;
         return Err(SimulationError::Circuit(format!(
             "XSPICE xtradev {kind} instance '{element_name}' model '{model_name}' parameter \
              '{name}' must be a scalar numeric value"
         )));
     }
-    for (name, _) in string_expr_params {
+    if let Some((name, _)) = string_expr_params.first() {
         validate_native_xtradev_param_name(kind, element_name, model_name, name)?;
         return Err(SimulationError::Circuit(format!(
             "XSPICE xtradev {kind} instance '{element_name}' model '{model_name}' parameter \
              '{name}' must be a scalar numeric value"
         )));
     }
-    for (name, _) in string_vector_params {
+    if let Some((name, _)) = string_vector_params.first() {
         validate_native_xtradev_param_name(kind, element_name, model_name, name)?;
         return Err(SimulationError::Circuit(format!(
             "XSPICE xtradev {kind} instance '{element_name}' model '{model_name}' parameter \
              '{name}' must be a scalar numeric value"
         )));
     }
-    for (name, _) in string_vector_expr_params {
+    if let Some((name, _)) = string_vector_expr_params.first() {
         validate_native_xtradev_param_name(kind, element_name, model_name, name)?;
         return Err(SimulationError::Circuit(format!(
             "XSPICE xtradev {kind} instance '{element_name}' model '{model_name}' parameter \
              '{name}' must be a scalar numeric value"
         )));
     }
-    for (name, _) in real_vector_params {
+    if let Some((name, _)) = real_vector_params.first() {
         validate_native_xtradev_param_name(kind, element_name, model_name, name)?;
         return Err(SimulationError::Circuit(format!(
             "XSPICE xtradev {kind} instance '{element_name}' model '{model_name}' parameter \
              '{name}' must be a scalar numeric value"
         )));
     }
-    for (name, _) in real_vector_expr_params {
+    if let Some((name, _)) = real_vector_expr_params.first() {
         validate_native_xtradev_param_name(kind, element_name, model_name, name)?;
         return Err(SimulationError::Circuit(format!(
             "XSPICE xtradev {kind} instance '{element_name}' model '{model_name}' parameter \
@@ -1029,88 +1029,86 @@ pub(in crate::engine::builder) fn resolve_xspice_model_instance(
 ) -> Result<ResolvedXspiceModel, SimulationError> {
     let model_def = find_model_def(netlist, model_name);
 
-    if model_def.is_none() {
-        if let Some(code_model) = registry.get(model_name) {
-            reject_scalar_params_for_vector_specs(code_model.as_ref(), instance_params)?;
-            reject_param_names_for_vector_specs(
-                code_model.as_ref(),
-                instance_string_params
-                    .iter()
-                    .map(|(name, _)| name.as_str())
-                    .chain(
-                        instance_string_expr_params
-                            .iter()
-                            .map(|(name, _)| name.as_str()),
-                    ),
-                "string",
-            )?;
-            let resolved_instance_real_vector_expr_params =
-                resolve_instance_real_vector_expression_params(
-                    netlist,
-                    None,
-                    model_name,
-                    instance_params,
-                    instance_real_vector_expr_params,
-                )?;
-            let resolved_instance_string_vector_expr_params =
-                resolve_instance_string_vector_expression_params(
-                    netlist,
-                    model_name,
-                    instance_string_vector_expr_params,
-                )?;
-            let instance_real_vector_params = merge_vector_params(
-                instance_real_vector_params,
-                &resolved_instance_real_vector_expr_params,
-            );
-            let instance_string_vector_params = merge_vector_params(
-                instance_string_vector_params,
-                &resolved_instance_string_vector_expr_params,
-            );
-            let (instance_string_vector_params, string_params_from_string_vectors) =
-                split_string_vectors_for_scalar_strings(
-                    code_model.as_ref(),
-                    &instance_string_vector_params,
-                );
-            let (instance_real_vector_params, string_params_from_real_vectors) =
-                split_real_vectors_for_scalar_strings(
-                    code_model.as_ref(),
-                    &instance_real_vector_params,
-                )?;
-            let (real_vector_params, integer_vector_params) =
-                resolve_vector_params(code_model.as_ref(), &instance_real_vector_params)?;
-            let string_vector_params =
-                resolve_string_vector_params(code_model.as_ref(), &instance_string_vector_params)?;
-            let instance_expr_params = resolve_scalar_instance_expression_params(
+    if model_def.is_none()
+        && let Some(code_model) = registry.get(model_name)
+    {
+        reject_scalar_params_for_vector_specs(code_model.as_ref(), instance_params)?;
+        reject_param_names_for_vector_specs(
+            code_model.as_ref(),
+            instance_string_params
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .chain(
+                    instance_string_expr_params
+                        .iter()
+                        .map(|(name, _)| name.as_str()),
+                ),
+            "string",
+        )?;
+        let resolved_instance_real_vector_expr_params =
+            resolve_instance_real_vector_expression_params(
                 netlist,
                 None,
-                code_model.as_ref(),
                 model_name,
                 instance_params,
-                instance_expr_params,
+                instance_real_vector_expr_params,
             )?;
-            let numeric_params = merge_numeric_params(instance_params, &instance_expr_params);
-            let resolved_instance_string_expr_params = resolve_instance_string_expression_params(
+        let resolved_instance_string_vector_expr_params =
+            resolve_instance_string_vector_expression_params(
                 netlist,
                 model_name,
-                instance_string_expr_params,
+                instance_string_vector_expr_params,
             )?;
-            let string_params = merge_string_params(
-                instance_string_params,
-                &resolved_instance_string_expr_params,
+        let instance_real_vector_params = merge_vector_params(
+            instance_real_vector_params,
+            &resolved_instance_real_vector_expr_params,
+        );
+        let instance_string_vector_params = merge_vector_params(
+            instance_string_vector_params,
+            &resolved_instance_string_vector_expr_params,
+        );
+        let (instance_string_vector_params, string_params_from_string_vectors) =
+            split_string_vectors_for_scalar_strings(
+                code_model.as_ref(),
+                &instance_string_vector_params,
             );
-            let string_params =
-                merge_string_params(&string_params, &string_params_from_string_vectors);
-            let string_params =
-                merge_string_params(&string_params, &string_params_from_real_vectors);
-            return Ok(ResolvedXspiceModel {
-                code_model,
-                numeric_params,
-                string_params,
-                string_vector_params,
-                real_vector_params,
-                integer_vector_params,
-            });
-        }
+        let (instance_real_vector_params, string_params_from_real_vectors) =
+            split_real_vectors_for_scalar_strings(
+                code_model.as_ref(),
+                &instance_real_vector_params,
+            )?;
+        let (real_vector_params, integer_vector_params) =
+            resolve_vector_params(code_model.as_ref(), &instance_real_vector_params)?;
+        let string_vector_params =
+            resolve_string_vector_params(code_model.as_ref(), &instance_string_vector_params)?;
+        let instance_expr_params = resolve_scalar_instance_expression_params(
+            netlist,
+            None,
+            code_model.as_ref(),
+            model_name,
+            instance_params,
+            instance_expr_params,
+        )?;
+        let numeric_params = merge_numeric_params(instance_params, &instance_expr_params);
+        let resolved_instance_string_expr_params = resolve_instance_string_expression_params(
+            netlist,
+            model_name,
+            instance_string_expr_params,
+        )?;
+        let string_params = merge_string_params(
+            instance_string_params,
+            &resolved_instance_string_expr_params,
+        );
+        let string_params = merge_string_params(&string_params, &string_params_from_string_vectors);
+        let string_params = merge_string_params(&string_params, &string_params_from_real_vectors);
+        return Ok(ResolvedXspiceModel {
+            code_model,
+            numeric_params,
+            string_params,
+            string_vector_params,
+            real_vector_params,
+            integer_vector_params,
+        });
     }
 
     let model_def = model_def.ok_or_else(|| unknown_xspice_model_error(model_name, None))?;

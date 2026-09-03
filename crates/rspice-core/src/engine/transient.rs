@@ -6,7 +6,6 @@
 //! - Optional waveform compression for long simulations
 //! - Cooperative abort for responsive cancellation
 
-#![allow(clippy::too_many_arguments)]
 mod fft;
 mod post_results;
 use super::{Engine, SimulationError, SpiceDialect, TransientPostResults, TransientResult};
@@ -362,9 +361,9 @@ fn capture_transient_merit_rollback(
 mod breakpoints;
 mod checkpoint;
 mod companion_stamps;
-pub(self) use companion_stamps::{CompactTwoTerminalStampSlots, TwoTerminalStampSlots};
+use companion_stamps::{CompactTwoTerminalStampSlots, TwoTerminalStampSlots};
 mod charge_stamper;
-pub(self) use charge_stamper::StaticMatrixChargeStamper;
+use charge_stamper::StaticMatrixChargeStamper;
 mod damped_status;
 mod globalization;
 mod noise;
@@ -375,7 +374,7 @@ mod restart;
 mod startup;
 mod state;
 mod xyce_dae;
-pub(self) use state::{
+use state::{
     AcceptedJunctionHistoryRestart, MosfetCompanionBranchTerms, MosfetGateCompanionCharges,
     ReactiveHistorySeed,
 };
@@ -385,7 +384,7 @@ mod state_recovery;
 mod state_transmission_lines;
 mod step_control;
 mod truncation;
-pub(self) use truncation::NgspiceChargeTruncationContext;
+use truncation::NgspiceChargeTruncationContext;
 mod vbic;
 
 pub use self::{
@@ -411,7 +410,7 @@ pub(crate) use checkpoint::{
 pub use fft::transient_fft_window_coherent_gain;
 
 mod history;
-pub(self) use history::*;
+use history::*;
 
 #[derive(Debug, Clone, Copy)]
 struct DerivedTransientBranchCurrent {
@@ -4873,7 +4872,7 @@ impl Engine {
             }
 
             // Abort check every few step attempts for minimal overhead.
-            if total_step_attempts % ABORT_CHECK_INTERVAL == 0 {
+            if total_step_attempts.is_multiple_of(ABORT_CHECK_INTERVAL) {
                 if tstop > 0.0 {
                     abort.observe_progress((t / tstop).clamp(0.0, 1.0));
                 }
@@ -6720,7 +6719,7 @@ impl Engine {
                     failed_voltage_conv += 1;
                 }
                 // Diagnostic logging for debugging timestep issues
-                if total_step_attempts < 100 || total_step_attempts % 10000 == 0 {
+                if total_step_attempts < 100 || total_step_attempts.is_multiple_of(10000) {
                     log::debug!(
                         "Newton non-convergence at t={:.3e}s, step_attempt={}, dt={:.3e}s, reducing to {:.3e}s",
                         t,
@@ -8584,14 +8583,13 @@ impl Engine {
             // supported step. Invalid negative/non-finite requests fail in
             // the device API rather than disappearing here.
             #[cfg(feature = "veriloga")]
-            if circuit.has_veriloga_devices() {
-                if let Some(bound) = circuit
+            if circuit.has_veriloga_devices()
+                && let Some(bound) = circuit
                     .veriloga_timestep_bound()
                     .map_err(SimulationError::Circuit)?
-                    && bound.max(timestep.hard_min_dt()) < timestep.dt()
-                {
-                    timestep.force_step(bound.max(timestep.hard_min_dt()).min(max_step));
-                }
+                && bound.max(timestep.hard_min_dt()) < timestep.dt()
+            {
+                timestep.force_step(bound.max(timestep.hard_min_dt()).min(max_step));
             }
             if first_accepted_transient_step
                 && matches!(

@@ -284,7 +284,7 @@ fn xfer_table_from_model(ctx: &CmContext) -> CmResult<Vec<XferPoint>> {
     if offset < 1 || span < offset + 2 {
         return Ok(Vec::new());
     }
-    if table.len() % span != 0 {
+    if !table.len().is_multiple_of(span) {
         return Ok(Vec::new());
     }
 
@@ -615,10 +615,10 @@ fn cache_xfer_table(ctx: &mut CmContext) -> CmResult<Arc<XferTableData>> {
 }
 
 fn xfer_table(ctx: &CmContext) -> CmResult<Arc<XferTableData>> {
-    if let Some(resource) = ctx.resource::<XferTableResource>(XFER_TABLE_RESOURCE) {
-        if xfer_table_signature_matches(ctx, &resource.signature) {
-            return resource.result.clone();
-        }
+    if let Some(resource) = ctx.resource::<XferTableResource>(XFER_TABLE_RESOURCE)
+        && xfer_table_signature_matches(ctx, &resource.signature)
+    {
+        return resource.result.clone();
     }
     let (_, result) = xfer_table_uncached(ctx);
     result.map(xfer_table_data).map(Arc::new)
@@ -914,10 +914,10 @@ fn cache_s_xfer_coefficients(ctx: &mut CmContext) -> CmResult<Option<Arc<SXferCo
 }
 
 fn s_xfer_coefficients_for_context(ctx: &CmContext) -> CmResult<Option<Arc<SXferCoefficients>>> {
-    if let Some(resource) = ctx.resource::<SXferCoefficientResource>(SXFER_COEFFICIENT_RESOURCE) {
-        if s_xfer_coefficient_signature_matches(ctx, &resource.signature) {
-            return Ok(resource.coefficients.clone());
-        }
+    if let Some(resource) = ctx.resource::<SXferCoefficientResource>(SXFER_COEFFICIENT_RESOURCE)
+        && s_xfer_coefficient_signature_matches(ctx, &resource.signature)
+    {
+        return Ok(resource.coefficients.clone());
     }
     if s_xfer_has_improper_order(ctx) {
         Ok(None)
@@ -1049,8 +1049,8 @@ fn s_xfer_ngspice_transient_eval(
             state[index - 1] = ctx.state_prev(index - 1) + dt * state[index];
         }
     } else {
-        for index in 0..order {
-            state[index] = ctx.state_prev(index);
+        for (index, entry) in state.iter_mut().enumerate().take(order) {
+            *entry = ctx.state_prev(index);
         }
     }
 

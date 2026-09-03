@@ -2111,6 +2111,9 @@ fn ilimit_eval_from_signature(signature: &IlimitEvalSignature) -> IlimitEval {
     }
 }
 
+// 1.57079 rad is XSPICE's published `angle` ceiling for `seegen`, not a
+// rounded FRAC_PI_2; substituting the constant would change the clamp.
+#[allow(clippy::approx_constant)]
 fn seegen_params(ctx: &CmContext) -> CmResult<SeeGeneratorParams> {
     let tfall = finite_param(ctx, "tfall", 500.0e-12)?;
     let trise = finite_param(ctx, "trise", 20.0e-12)?;
@@ -3228,9 +3231,8 @@ impl CodeModel for Ilimit {
         fn partials(items: [(&str, Value); 4]) -> Vec<(String, Value)> {
             items
                 .into_iter()
-                .filter_map(|(port, partial)| {
-                    (partial != 0.0 && partial.is_finite()).then(|| (port.to_string(), partial))
-                })
+                .filter(|&(_port, partial)| partial != 0.0 && partial.is_finite())
+                .map(|(port, partial)| (port.to_string(), partial))
                 .collect()
         }
 

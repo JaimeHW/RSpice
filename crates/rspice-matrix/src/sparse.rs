@@ -6,7 +6,6 @@
 //! Key optimization: Static structure matrix that caches topology
 //! and allows updates to values only, avoiding O(N log N) rebuild.
 
-#![allow(clippy::needless_range_loop)]
 use crate::{
     CircuitLuOrientation, CircuitLuRobustness, CircuitLuRowScaling, DivisionPolicy,
     FactorizationRequest, NumericFactorizationPolicy, RealSolverBackend, SolverError,

@@ -1491,6 +1491,114 @@ impl NonlinearDevice for EkvMosfet {
     }
 }
 
+fn known_param(name: &str, supported: &[&str]) -> bool {
+    supported
+        .iter()
+        .any(|supported_name| supported_name.eq_ignore_ascii_case(name))
+}
+
+fn reject_unsupported_map_params(
+    params: &HashMap<String, Value>,
+    supported: &[&str],
+    context: &str,
+) -> Result<(), String> {
+    if let Some(name) = params.keys().find(|name| {
+        !known_param(name, supported)
+            && !zero_inert_model_param(name, params.get(*name).copied().unwrap_or(0.0))
+    }) {
+        return Err(format!(
+            "EKV26 {context} parameter {name} is unsupported by the current native slice; \
+             unsupported EKV parameters must not be silently ignored"
+        ));
+    }
+    Ok(())
+}
+
+fn zero_inert_model_param(name: &str, value: Value) -> bool {
+    value == 0.0 && known_param(name, EKV26_ZERO_INERT_MODEL_PARAMS)
+}
+
+fn reject_unsupported_list_params(
+    params: &[(String, Value)],
+    supported: &[&str],
+    context: &str,
+) -> Result<(), String> {
+    if let Some((name, value)) = params
+        .iter()
+        .find(|(name, _)| !known_param(name, supported))
+    {
+        return Err(format!(
+            "EKV26 {context} parameter {name}={value} is unsupported by the current native slice; \
+             unsupported EKV parameters must not be silently ignored"
+        ));
+    }
+    Ok(())
+}
+
+fn map_param(params: &HashMap<String, Value>, names: &[&str]) -> Option<Value> {
+    params.iter().find_map(|(name, value)| {
+        names
+            .iter()
+            .any(|candidate| name.eq_ignore_ascii_case(candidate))
+            .then_some(*value)
+    })
+}
+
+fn list_param(params: &[(String, Value)], names: &[&str]) -> Option<Value> {
+    params.iter().find_map(|(name, value)| {
+        names
+            .iter()
+            .any(|candidate| name.eq_ignore_ascii_case(candidate))
+            .then_some(*value)
+    })
+}
+
+fn bandgap(temp_k: Value) -> Value {
+    1.16 - 7.02e-4 * temp_k * temp_k / (temp_k + 1108.0)
+}
+
+fn safe_sqrt(value: Value) -> Value {
+    value.max(0.0).sqrt()
+}
+
+fn lim_exp(value: Value) -> Value {
+    value.clamp(-80.0, 80.0).exp()
+}
+
+fn junction_depletion_capacitance(
+    voltage: Value,
+    zero_bias_capacitance: Value,
+    grading: Value,
+    potential: Value,
+) -> Value {
+    if voltage > 0.0 {
+        zero_bias_capacitance * (-(grading) * (1.0 + voltage / potential).ln()).exp()
+    } else {
+        zero_bias_capacitance * (1.0 - grading * voltage / potential)
+    }
+}
+
+fn ekv_norm(x: Value) -> EkvNorm {
+    let y = if x > -0.35 {
+        let z0 = 2.0 / (1.3 + x - (x + 1.6).ln());
+        let zk = (2.0 + z0) / (1.0 + x + z0.ln());
+        (1.0 + x + zk.ln()) / (2.0 + zk)
+    } else if x > -15.0 {
+        let z0 = 1.55 + (-x).exp();
+        let zk = (2.0 + z0) / (1.0 + x + z0.ln());
+        (1.0 + x + zk.ln()) / (2.0 + zk)
+    } else if x > -23.0 {
+        1.0 / (2.0 + (-x).exp())
+    } else {
+        x.exp() + 1.0e-64
+    };
+    let current = y * (1.0 + y);
+    EkvNorm {
+        current,
+        sqrt_current: current.sqrt(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1713,113 +1821,5 @@ mod tests {
 
         device.set_eval_gmin(-1.0);
         assert_eq!(device.setup.xd_gmin, 2.0e-9);
-    }
-}
-
-fn known_param(name: &str, supported: &[&str]) -> bool {
-    supported
-        .iter()
-        .any(|supported_name| supported_name.eq_ignore_ascii_case(name))
-}
-
-fn reject_unsupported_map_params(
-    params: &HashMap<String, Value>,
-    supported: &[&str],
-    context: &str,
-) -> Result<(), String> {
-    if let Some(name) = params.keys().find(|name| {
-        !known_param(name, supported)
-            && !zero_inert_model_param(name, params.get(*name).copied().unwrap_or(0.0))
-    }) {
-        return Err(format!(
-            "EKV26 {context} parameter {name} is unsupported by the current native slice; \
-             unsupported EKV parameters must not be silently ignored"
-        ));
-    }
-    Ok(())
-}
-
-fn zero_inert_model_param(name: &str, value: Value) -> bool {
-    value == 0.0 && known_param(name, EKV26_ZERO_INERT_MODEL_PARAMS)
-}
-
-fn reject_unsupported_list_params(
-    params: &[(String, Value)],
-    supported: &[&str],
-    context: &str,
-) -> Result<(), String> {
-    if let Some((name, value)) = params
-        .iter()
-        .find(|(name, _)| !known_param(name, supported))
-    {
-        return Err(format!(
-            "EKV26 {context} parameter {name}={value} is unsupported by the current native slice; \
-             unsupported EKV parameters must not be silently ignored"
-        ));
-    }
-    Ok(())
-}
-
-fn map_param(params: &HashMap<String, Value>, names: &[&str]) -> Option<Value> {
-    params.iter().find_map(|(name, value)| {
-        names
-            .iter()
-            .any(|candidate| name.eq_ignore_ascii_case(candidate))
-            .then_some(*value)
-    })
-}
-
-fn list_param(params: &[(String, Value)], names: &[&str]) -> Option<Value> {
-    params.iter().find_map(|(name, value)| {
-        names
-            .iter()
-            .any(|candidate| name.eq_ignore_ascii_case(candidate))
-            .then_some(*value)
-    })
-}
-
-fn bandgap(temp_k: Value) -> Value {
-    1.16 - 7.02e-4 * temp_k * temp_k / (temp_k + 1108.0)
-}
-
-fn safe_sqrt(value: Value) -> Value {
-    value.max(0.0).sqrt()
-}
-
-fn lim_exp(value: Value) -> Value {
-    value.clamp(-80.0, 80.0).exp()
-}
-
-fn junction_depletion_capacitance(
-    voltage: Value,
-    zero_bias_capacitance: Value,
-    grading: Value,
-    potential: Value,
-) -> Value {
-    if voltage > 0.0 {
-        zero_bias_capacitance * (-(grading) * (1.0 + voltage / potential).ln()).exp()
-    } else {
-        zero_bias_capacitance * (1.0 - grading * voltage / potential)
-    }
-}
-
-fn ekv_norm(x: Value) -> EkvNorm {
-    let y = if x > -0.35 {
-        let z0 = 2.0 / (1.3 + x - (x + 1.6).ln());
-        let zk = (2.0 + z0) / (1.0 + x + z0.ln());
-        (1.0 + x + zk.ln()) / (2.0 + zk)
-    } else if x > -15.0 {
-        let z0 = 1.55 + (-x).exp();
-        let zk = (2.0 + z0) / (1.0 + x + z0.ln());
-        (1.0 + x + zk.ln()) / (2.0 + zk)
-    } else if x > -23.0 {
-        1.0 / (2.0 + (-x).exp())
-    } else {
-        x.exp() + 1.0e-64
-    };
-    let current = y * (1.0 + y);
-    EkvNorm {
-        current,
-        sqrt_current: current.sqrt(),
     }
 }

@@ -1012,17 +1012,16 @@ impl LibParser {
                 return Ok(());
             }
         };
-        if let Some(owner) = self.current_file.clone() {
-            if let Err(message) =
+        if let Some(owner) = self.current_file.clone()
+            && let Err(message) =
                 self.record_resolved_dependency(owner, include_literal, canonical_path.clone())
-            {
-                self.errors.push(ParseError {
-                    message,
-                    file: self.current_file.clone(),
-                    line: Some(directive_line),
-                });
-                return Ok(());
-            }
+        {
+            self.errors.push(ParseError {
+                message,
+                file: self.current_file.clone(),
+                line: Some(directive_line),
+            });
+            return Ok(());
         }
 
         if self.include_stack.contains(&canonical_path) {

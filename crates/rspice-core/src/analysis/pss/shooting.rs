@@ -3,7 +3,6 @@
 //! Implements the shooting method for finding periodic steady-state solutions.
 //! The core algorithm solves the boundary value problem: find x(0) such that x(T) = x(0).
 
-#![allow(clippy::needless_range_loop)]
 use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::{FloquetSpectrumCertificate, FloquetSpectrumEvidence};
@@ -95,8 +94,8 @@ impl ShootingState {
     /// Applies Newton step: x0_new = x0 + damping * delta
     /// Note: delta is pre-computed as -J^(-1)*F by compute_newton_step
     pub fn update_x0(&mut self, delta: &[Value], damping: Value) {
-        for i in 0..self.n_states {
-            self.x0[i] += damping * delta[i];
+        for (i, &entry) in delta.iter().enumerate().take(self.n_states) {
+            self.x0[i] += damping * entry;
         }
     }
 }

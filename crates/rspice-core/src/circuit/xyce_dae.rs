@@ -173,7 +173,7 @@ impl CircuitData {
         let branch_ordinal = binding.branch_ordinal;
         let branch_row = self
             .num_nodes
-            .checked_add(branch_ordinal as usize)
+            .checked_add(branch_ordinal)
             .and_then(|row| row.checked_sub(1))
             .filter(|&row| row < self.matrix_size())
             .ok_or_else(|| "direct Xyce Core branch row is outside the matrix".to_owned())?;
@@ -240,7 +240,7 @@ impl CircuitData {
                 })?;
             let branch_row = self
                 .num_nodes
-                .checked_add(branch_ordinal as usize)
+                .checked_add(branch_ordinal)
                 .and_then(|row| row.checked_sub(1))
                 .filter(|&row| row < dimension)
                 .ok_or_else(|| "direct Xyce Core branch row is outside the matrix".to_owned())?;

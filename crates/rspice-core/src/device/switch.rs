@@ -1542,10 +1542,9 @@ impl GenericSwitch {
                         | Function::Le0
                         | Function::Eq0
                         | Function::Ne0
-                ) {
-                    if let Some(arg) = args.first() {
-                        Self::push_affine_zero_crossing(arg, breakpoints);
-                    }
+                ) && let Some(arg) = args.first()
+                {
+                    Self::push_affine_zero_crossing(arg, breakpoints);
                 }
                 if matches!(func, Function::Table | Function::Pwl) {
                     Self::collect_table_time_breakpoints(args, breakpoints);

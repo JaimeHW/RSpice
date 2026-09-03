@@ -9,8 +9,6 @@
 //! the `smooth` module to ensure Newton-Raphson convergence.
 
 // These utility functions are kept for future mosfet.rs integration
-#![allow(dead_code)]
-
 use super::mosfet::{MosRegion, Mosfet};
 use super::smooth::{SMOOTH_VOLTAGE, smooth_max, smooth_min, smooth_positive, smooth_step};
 use crate::Value;

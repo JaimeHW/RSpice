@@ -3,7 +3,6 @@
 //! Core solver for Harmonic Balance analysis using Newton-Raphson iteration.
 //! Solves the frequency-domain circuit equations: G*X + jω*C*X + F_NL(X) = I_S
 
-#![allow(clippy::needless_range_loop, clippy::too_many_arguments)]
 use super::config::{HbConfig, HbConfigError};
 use super::fft::HbFft;
 use super::result::{HbResult, SpectralBranchCurrent, SpectralVoltage};

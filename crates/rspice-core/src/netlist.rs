@@ -752,7 +752,7 @@ pub enum GroundPolicy {
 impl GroundPolicy {
     /// Return the canonical execution node name for this dialect policy.
     /// Non-ground names retain their authored spelling.
-    pub fn canonical_node<'a>(self, node: &'a str) -> &'a str {
+    pub fn canonical_node(self, node: &str) -> &str {
         let canonical = node.trim().to_ascii_uppercase();
         let aliases_ground = match self {
             Self::OnlyZero => false,
@@ -8326,7 +8326,7 @@ mod tests {
             "path-like simulation should resolve relative to deck dir: {simulations:?}"
         );
         assert!(
-            simulations.iter().any(|value| *value == "ivlng"),
+            simulations.contains(&"ivlng"),
             "provider-style simulation id should remain symbolic: {simulations:?}"
         );
     }

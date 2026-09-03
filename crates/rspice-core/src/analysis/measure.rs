@@ -16,7 +16,6 @@
 //! .MEAS TRAN vavg AVG V(out)
 //! ```
 
-#![allow(clippy::too_many_arguments)]
 use crate::Value;
 use crate::netlist::canonical_symbol;
 use crate::netlist::measure::XYCE_DEFAULT_MEASURE_MINVAL;

@@ -1,7 +1,5 @@
 //! Reactive companion state and transient recovery helpers.
 
-#![allow(clippy::needless_range_loop)]
-
 use super::*;
 
 /// Which startup a reactive history is being seeded for.

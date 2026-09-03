@@ -231,7 +231,7 @@ impl Engine {
         };
 
         for &branch_ordinal in &circuit.voltage_sources.branch_indices {
-            restore_branch(branch_ordinal as usize);
+            restore_branch(branch_ordinal);
         }
         // Keep dependent-source algebraic currents from the latest solver
         // candidate. Their output-branch currents directly close KCL at the

@@ -24,8 +24,6 @@
 //! whose corner sits at f_c = pi f0^2 c (the paper's Section 10 example) and
 //! whose integral preserves the carrier power exactly.
 
-#![allow(clippy::needless_range_loop)]
-
 use super::{Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::{NoiseSource, NoiseSourceType, PssConfig};

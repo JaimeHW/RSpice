@@ -657,12 +657,12 @@ pub(super) fn validate_bjt_model_level(
     }
 
     let level = params.get("LEVEL").copied();
-    if let Some(level_value) = level {
-        if !level_value.is_finite() {
-            return Err(SimulationError::Circuit(format!(
-                "BJT '{element_name}': model '{model}' has invalid LEVEL={level_value}"
-            )));
-        }
+    if let Some(level_value) = level
+        && !level_value.is_finite()
+    {
+        return Err(SimulationError::Circuit(format!(
+            "BJT '{element_name}': model '{model}' has invalid LEVEL={level_value}"
+        )));
     }
 
     validate_bjt_model_alias_groups(element_name, model, params, expr_params, string_params)?;
@@ -781,13 +781,13 @@ pub(super) fn reject_deferred_native_bjt_model_params(
     expr_params: &[(String, String)],
     string_params: &[(String, String)],
 ) -> Result<(), SimulationError> {
-    for (name, expr) in expr_params {
+    if let Some((name, expr)) = expr_params.first() {
         return Err(SimulationError::Circuit(format!(
             "BJT '{element_name}': native {family} model '{model}' uses unresolved model parameter {name}={expr}; \
              native {family} model parameters must be finite numeric literals"
         )));
     }
-    for (name, value) in string_params {
+    if let Some((name, value)) = string_params.first() {
         return Err(SimulationError::Circuit(format!(
             "BJT '{element_name}': native {family} model '{model}' uses non-numeric model parameter {name}=\"{value}\"; \
              native {family} model parameters must be finite numeric literals"
@@ -1357,7 +1357,7 @@ pub(super) fn reject_deferred_native_mos_model_params(
     expr_params: &[(String, String)],
     string_params: &[(String, String)],
 ) -> Result<(), SimulationError> {
-    for (name, expr) in expr_params {
+    if let Some((name, expr)) = expr_params.first() {
         let param = name.to_ascii_uppercase();
         return Err(SimulationError::Circuit(format!(
             "MOSFET '{element_name}': native {family} model '{model}' uses unresolved model parameter {param}={expr}; \
@@ -1399,7 +1399,7 @@ pub(super) fn native_bsimsoi_model_params_upper_map(
 ) -> Result<HashMap<String, f64>, SimulationError> {
     let mut resolved = params.clone();
 
-    for (name, expr) in expr_params {
+    if let Some((name, expr)) = expr_params.first() {
         let param = name.to_ascii_uppercase();
         return Err(SimulationError::Circuit(format!(
             "MOSFET '{element_name}': native BSIMSOI model '{model}' uses unresolved model parameter {param}={expr}; \
@@ -1454,7 +1454,7 @@ pub(super) fn native_bsim3_model_params_upper_map(
 ) -> Result<HashMap<String, f64>, SimulationError> {
     let mut resolved = params.clone();
 
-    for (name, expr) in expr_params {
+    if let Some((name, expr)) = expr_params.first() {
         let param = name.to_ascii_uppercase();
         return Err(SimulationError::Circuit(format!(
             "MOSFET '{element_name}': native BSIM3 model '{model}' uses unresolved model parameter {param}={expr}; \
@@ -1503,7 +1503,7 @@ pub(super) fn native_bsim4_model_params_upper_map(
 ) -> Result<HashMap<String, f64>, SimulationError> {
     let mut resolved = params.clone();
 
-    for (name, expr) in expr_params {
+    if let Some((name, expr)) = expr_params.first() {
         let param = name.to_ascii_uppercase();
         return Err(SimulationError::Circuit(format!(
             "MOSFET '{element_name}': native BSIM4 model '{model}' uses unresolved model parameter {param}={expr}; \

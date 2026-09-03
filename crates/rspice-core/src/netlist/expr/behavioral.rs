@@ -410,14 +410,14 @@ fn references_defined_function_with_abort(
     let chars = expression.chars().collect::<Vec<_>>();
     let mut index = 0usize;
     while index < chars.len() {
-        if index % 64 == 0 && abort.is_aborted() {
+        if index.is_multiple_of(64) && abort.is_aborted() {
             return Err(BehavioralPreparationError::Aborted);
         }
         if chars[index] == '"' {
             index += 1;
             let mut escaped = false;
             while index < chars.len() {
-                if index % 64 == 0 && abort.is_aborted() {
+                if index.is_multiple_of(64) && abort.is_aborted() {
                     return Err(BehavioralPreparationError::Aborted);
                 }
                 let character = chars[index];
@@ -439,14 +439,14 @@ fn references_defined_function_with_abort(
         let start = index;
         index += 1;
         while index < chars.len() && is_ident_continue(chars[index]) {
-            if index % 64 == 0 && abort.is_aborted() {
+            if index.is_multiple_of(64) && abort.is_aborted() {
                 return Err(BehavioralPreparationError::Aborted);
             }
             index += 1;
         }
         let name = chars[start..index].iter().collect::<String>();
         while index < chars.len() && chars[index].is_whitespace() {
-            if index % 64 == 0 && abort.is_aborted() {
+            if index.is_multiple_of(64) && abort.is_aborted() {
                 return Err(BehavioralPreparationError::Aborted);
             }
             index += 1;
@@ -1026,7 +1026,7 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
         let mut expanded_nodes = 0usize;
 
         while let Some(task) = tasks.pop() {
-            if expanded_nodes % 64 == 0 && self.abort.is_aborted() {
+            if expanded_nodes.is_multiple_of(64) && self.abort.is_aborted() {
                 return Err("behavioral expression preparation was cancelled".to_string());
             }
             match task {
@@ -1396,7 +1396,7 @@ impl ProbeProtector {
         let mut i = 0usize;
 
         while i < chars.len() {
-            if i % 64 == 0 && abort.is_aborted() {
+            if i.is_multiple_of(64) && abort.is_aborted() {
                 return Err(BehavioralPreparationError::Aborted);
             }
             let c = chars[i];
@@ -1405,7 +1405,7 @@ impl ProbeProtector {
                 i += 1;
                 let mut escaped = false;
                 while i < chars.len() {
-                    if i % 64 == 0 && abort.is_aborted() {
+                    if i.is_multiple_of(64) && abort.is_aborted() {
                         return Err(BehavioralPreparationError::Aborted);
                     }
                     let current = chars[i];
@@ -1426,7 +1426,7 @@ impl ProbeProtector {
                 let ident_start = i;
                 i += 1;
                 while i < chars.len() && is_ident_continue(chars[i]) {
-                    if i % 64 == 0 && abort.is_aborted() {
+                    if i.is_multiple_of(64) && abort.is_aborted() {
                         return Err(BehavioralPreparationError::Aborted);
                     }
                     i += 1;
@@ -1438,7 +1438,7 @@ impl ProbeProtector {
                     }
                     i = segment_start + 1;
                     while i < chars.len() && is_ident_continue(chars[i]) {
-                        if i % 64 == 0 && abort.is_aborted() {
+                        if i.is_multiple_of(64) && abort.is_aborted() {
                             return Err(BehavioralPreparationError::Aborted);
                         }
                         i += 1;
@@ -1457,7 +1457,7 @@ impl ProbeProtector {
 
                 let mut ws_idx = i;
                 while ws_idx < chars.len() && chars[ws_idx].is_whitespace() {
-                    if ws_idx % 64 == 0 && abort.is_aborted() {
+                    if ws_idx.is_multiple_of(64) && abort.is_aborted() {
                         return Err(BehavioralPreparationError::Aborted);
                     }
                     ws_idx += 1;
@@ -1535,7 +1535,7 @@ impl ProbeProtector {
         let mut output = String::with_capacity(expression.len());
         let mut index = 0usize;
         while index < expression.len() {
-            if index % 64 == 0 && abort.is_aborted() {
+            if index.is_multiple_of(64) && abort.is_aborted() {
                 return Err(BehavioralPreparationError::Aborted);
             }
             if expression[index..].starts_with("__RSPICE_")

@@ -1738,14 +1738,14 @@ impl Engine {
                 ctx.analysis_final_step,
             )?;
         }
-        if ctx.xyce_one_step_order2 {
-            if let Some(history) = ctx.xyce_static_history {
-                debug_assert_eq!(history.len(), rhs.len());
-                for (rhs_value, previous_residual) in rhs.iter_mut().zip(history) {
-                    // The assembled system is A*x = b, while OneStep adds
-                    // +0.5*(F_prev-B_prev) to its residual A*x-b.
-                    *rhs_value -= 0.5 * previous_residual;
-                }
+        if ctx.xyce_one_step_order2
+            && let Some(history) = ctx.xyce_static_history
+        {
+            debug_assert_eq!(history.len(), rhs.len());
+            for (rhs_value, previous_residual) in rhs.iter_mut().zip(history) {
+                // The assembled system is A*x = b, while OneStep adds
+                // +0.5*(F_prev-B_prev) to its residual A*x-b.
+                *rhs_value -= 0.5 * previous_residual;
             }
         }
         if ctx.baseline_diag_gmin == 0.0 && extra_diag_gmin == 0.0 {

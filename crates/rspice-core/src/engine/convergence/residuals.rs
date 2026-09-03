@@ -155,10 +155,7 @@ impl Engine {
             let Some(component) = circuit.dc_floating_component_for_matrix_row(row) else {
                 continue;
             };
-            if singular_components
-                .iter()
-                .any(|candidate| *candidate == component)
-            {
+            if singular_components.contains(&component) {
                 continue;
             }
 
@@ -194,10 +191,7 @@ impl Engine {
             })
             .filter_map(|(row, _)| {
                 let component = circuit.dc_floating_component_for_matrix_row(row)?;
-                if !singular_components
-                    .iter()
-                    .any(|candidate| *candidate == component)
-                {
+                if !singular_components.contains(&component) {
                     return None;
                 }
                 let name = names
