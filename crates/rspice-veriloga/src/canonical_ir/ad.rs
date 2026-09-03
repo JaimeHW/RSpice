@@ -1426,6 +1426,16 @@ impl<'a> ScalarDdxBuilder<'a> {
                 }
             }
             CfgBinaryOp::Mod => d_left,
+            // A selection, written as a mask over both arms.
+            //
+            // `db + (da - db)*c` is the same algebra in three operations rather
+            // than four, and it is not the same number: with `c = 1` it
+            // evaluates `db + fl(da - db)`, whose error is `2*u*|db|` against a
+            // result of `|da|`. Where the losing arm's derivative is orders
+            // above the winner's — which is what a `max` guarding a compact
+            // model's floor is for — that is not rounding but the whole answer:
+            // `da = 1`, `db = 1e17` returns zero. The masked form below is
+            // exact for `c` in `{0, 1}`, because `x*1` and `x + 0` are exact.
             CfgBinaryOp::Min | CfgBinaryOp::Max => {
                 let comparison = if op == CfgBinaryOp::Min {
                     CfgBinaryOp::Le
@@ -1435,9 +1445,10 @@ impl<'a> ScalarDdxBuilder<'a> {
                 let takes_left = self.push_typed(CfgValueType::Boolean, comparison, left, right);
                 match (d_left, d_right) {
                     (Some(a), Some(b)) => {
-                        let difference = self.push_binary(CfgBinaryOp::Sub, a, b);
-                        let selected = self.push_binary(CfgBinaryOp::Mul, difference, takes_left);
-                        Some(self.push_binary(CfgBinaryOp::Add, b, selected))
+                        let takes_right = self.push_binary(CfgBinaryOp::Sub, self.one, takes_left);
+                        let from_left = self.push_binary(CfgBinaryOp::Mul, a, takes_left);
+                        let from_right = self.push_binary(CfgBinaryOp::Mul, b, takes_right);
+                        Some(self.push_binary(CfgBinaryOp::Add, from_left, from_right))
                     }
                     (Some(a), None) => Some(self.push_binary(CfgBinaryOp::Mul, a, takes_left)),
                     (None, Some(b)) => {
@@ -2543,11 +2554,17 @@ impl<'a> AdBuilder<'a> {
                 };
                 let takes_left = self.push_typed(CfgValueType::Boolean, comparison, left, right);
                 match (d_left, d_right) {
+                    // Masked over both arms rather than blended. The scalar
+                    // rule above carries the reason: `db + (da - db)*c` loses
+                    // the winner's derivative whenever the loser's is orders
+                    // larger, and a `max` against a floor is exactly that
+                    // shape.
                     (Some(d_left), Some(d_right)) => {
-                        let difference =
-                            self.lane_binary(CfgBinaryOp::Sub, d_left, d_right, target);
-                        let selected = self.scale(difference, takes_left);
-                        Some(self.lane_binary(CfgBinaryOp::Add, d_right, selected, target))
+                        let one = self.one;
+                        let takes_right = self.push_binary(CfgBinaryOp::Sub, one, takes_left);
+                        let from_left = self.scale(d_left, takes_left);
+                        let from_right = self.scale(d_right, takes_right);
+                        Some(self.lane_binary(CfgBinaryOp::Add, from_left, from_right, target))
                     }
                     (Some(d_left), None) => Some(self.scale(d_left, takes_left)),
                     // db + c*(0 - db) is db*(1 - c).
