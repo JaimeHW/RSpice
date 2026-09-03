@@ -1,10 +1,9 @@
 //! Public fail-closed contracts for transient-waveform Fourier analysis.
 
 use std::f64::consts::PI;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use rspice_core::Netlist;
-use rspice_core::abort_signal::AbortSignal;
+use rspice_core::abort_signal::CountingAbort;
 use rspice_core::analysis::fourier::{FourierAnalysis, FourierConfig, FourierError, FourierResult};
 use rspice_core::netlist::ParseError;
 
@@ -18,18 +17,6 @@ fn full_period_fixture() -> (Vec<f64>, Vec<f64>) {
     (time, values)
 }
 
-struct AbortAfterChecks(AtomicUsize);
-
-impl AbortSignal for AbortAfterChecks {
-    fn is_aborted(&self) -> bool {
-        self.0
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |remaining| {
-                remaining.checked_sub(1)
-            })
-            .is_err()
-    }
-}
-
 #[test]
 fn cooperative_abort_stops_fourier_qualification_before_completion() {
     let samples = 8_193usize;
@@ -40,12 +27,18 @@ fn cooperative_abort_stops_fourier_qualification_before_completion() {
         .iter()
         .map(|time| (2.0 * PI * time).sin())
         .collect::<Vec<_>>();
-    let abort = AbortAfterChecks(AtomicUsize::new(5));
+    let abort = CountingAbort::new(5);
 
     assert!(matches!(
         analyzer(1.0, 16).analyze_with_abort(&time, &values, &abort),
         Err(FourierError::Aborted)
     ));
+    assert_eq!(abort.observed_at(), Some(6));
+    assert_eq!(
+        abort.polls_after_abort(),
+        0,
+        "qualification must return at the poll that reported cancellation"
+    );
 }
 
 #[test]

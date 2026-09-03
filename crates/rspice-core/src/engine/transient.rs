@@ -11948,13 +11948,6 @@ D1 D 0 DMOD
 
     #[test]
     fn compression_report_verification_observes_abort() {
-        struct AlwaysAbort;
-        impl AbortSignal for AlwaysAbort {
-            fn is_aborted(&self) -> bool {
-                true
-            }
-        }
-
         let result = TransientResult {
             time: vec![0.0, 0.5, 1.0],
             step_sizes: vec![0.0, 0.5, 0.5],
@@ -11973,7 +11966,7 @@ D1 D 0 DMOD
             &result,
             &CompressionConfig::default(),
             &[0, 2],
-            &AlwaysAbort,
+            &crate::abort_signal::ImmediateAbort,
         )
         .expect_err("final-grid certificate verification must be cancellable");
         assert!(matches!(error, SimulationError::Aborted));
@@ -12027,18 +12020,6 @@ D1 D 0 DMOD
 
     #[test]
     fn transient_compression_polls_abort_during_large_waveform_scans() {
-        struct PollAbort {
-            polls: std::sync::atomic::AtomicUsize,
-        }
-
-        impl AbortSignal for PollAbort {
-            fn is_aborted(&self) -> bool {
-                self.polls
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-                    >= 2
-            }
-        }
-
         let time = (0..10_000).map(|index| index as Value).collect::<Vec<_>>();
         let result = TransientResult {
             step_sizes: std::iter::once(0.0)
@@ -12056,9 +12037,7 @@ D1 D 0 DMOD
             store_traces: Vec::new(),
             fft_results: Vec::new(),
         };
-        let abort = PollAbort {
-            polls: std::sync::atomic::AtomicUsize::new(0),
-        };
+        let abort = crate::abort_signal::CountingAbort::new(2);
         let error = compress_transient_result(
             &result,
             &CompressionConfig {
@@ -12074,9 +12053,14 @@ D1 D 0 DMOD
 
         assert!(matches!(error, SimulationError::Aborted));
         assert_eq!(
-            abort.polls.load(std::sync::atomic::Ordering::Relaxed),
-            3,
+            abort.observed_at(),
+            Some(3),
             "the long scan should observe cancellation at its second interior poll"
+        );
+        assert_eq!(
+            abort.polls_after_abort(),
+            0,
+            "compression must return at the poll that reported cancellation"
         );
     }
 

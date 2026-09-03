@@ -265,18 +265,6 @@ fn authored_tokens(source_line: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    struct AbortAfterChecks {
-        checks_before_abort: usize,
-        checks: AtomicUsize,
-    }
-
-    impl AbortSignal for AbortAfterChecks {
-        fn is_aborted(&self) -> bool {
-            self.checks.fetch_add(1, Ordering::Relaxed) >= self.checks_before_abort
-        }
-    }
 
     fn undefined_error(source: &str) -> Box<UndefinedMutualInductorReferenceError> {
         match Netlist::parse(source).expect_err("undefined mutual reference must fail") {
@@ -434,15 +422,14 @@ mod tests {
             referenced_inductors: vec!["L0".into(), "L1".into()],
             origin: NetlistSourceLocation::in_memory(132),
         });
-        let abort = AbortAfterChecks {
-            checks_before_abort: 5,
-            checks: AtomicUsize::new(0),
-        };
+        let abort = crate::abort_signal::CountingAbort::new(5);
 
         assert!(matches!(
             validate_mutual_inductor_semantic_records_with_abort(&records, &abort),
             Err(ParseWithAbortError::Aborted)
         ));
+        assert_eq!(abort.observed_at(), Some(6));
+        assert_eq!(abort.polls_after_abort(), 0);
     }
 
     #[test]
