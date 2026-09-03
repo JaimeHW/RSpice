@@ -1125,6 +1125,68 @@ rload out 0 1k
     );
 }
 
+#[test]
+fn every_checkpoint_blocker_is_reported_under_exactly_one_source() {
+    // The accepted-runtime inventory a checkpoint stores is one flat string
+    // list — a resume compares it by equality — so the extension-owned
+    // messages sit in it beside the device-integration ones. A capability
+    // report is not that list. A frontend groups it by owner, so a message
+    // arriving under two owners would read as two blocked subsystems, and an
+    // XSPICE model would look like a defect in the integrator.
+    let uri = "virtual://transient_checkpoint/blocker_source_partition";
+    register_data_file(uri, "0 0s\n1n 1s\n").expect("register virtual d_source data");
+    let deck = format!(
+        "\
+* one extension-owned blocker and one integration-owned blocker in one deck
+a_src [d] src
+a_dac [d] [out] dac
+.model src d_source (input_file=\"{uri}\")
+.model dac dac_bridge (out_low=0 out_high=5 out_undef=2.5 t_rise=1p t_fall=1p)
+rload out 0 1k
+l1 out mid 1u
+l2 mid 0 1u
+k1 l1 l2 0.5
+.tran 100p 2n
+.end
+"
+    );
+    let netlist = Netlist::parse(&deck).expect("the mixed-blocker deck parses");
+    let capability = Engine::new(SimulationConfig::default())
+        .preflight_transient_checkpoint(&netlist)
+        .expect("checkpoint capability preflight elaborates the deck");
+    let _ = unregister_data_file(uri);
+
+    let blockers = capability.blockers();
+    for blocker in blockers {
+        let sources: Vec<_> = blockers
+            .iter()
+            .filter(|other| other.message == blocker.message)
+            .map(|other| other.source)
+            .collect();
+        assert_eq!(
+            sources.len(),
+            1,
+            "'{}' must be reported under exactly one source, saw {sources:?}",
+            blocker.message
+        );
+    }
+    assert!(
+        blockers.iter().any(|blocker| {
+            blocker.source == rspice_core::engine::TransientCheckpointBlockerSource::ExtensionState
+                && blocker.message.contains("event node values")
+        }),
+        "an XSPICE model's pending state is owned by an extension runtime: {blockers:?}"
+    );
+    assert!(
+        blockers.iter().any(|blocker| {
+            blocker.source
+                == rspice_core::engine::TransientCheckpointBlockerSource::IntegrationRuntime
+                && blocker.message.contains("coupled-inductor")
+        }),
+        "a coupled inductor's accepted history is owned by the integration runtime: {blockers:?}"
+    );
+}
+
 #[cfg(feature = "veriloga-builtins")]
 #[test]
 fn generated_veriloga_checkpoint_preserves_reactive_history_and_provenance() {

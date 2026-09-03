@@ -277,6 +277,17 @@ pub(super) struct AcceptedTransientRuntime {
     pub accepted_integration_runtime: AcceptedIntegrationRuntime,
 }
 
+/// The mixed Verilog-AMS host's accepted-state blocker, spelled once.
+///
+/// `Engine::exact_integration_runtime_resume_blockers` folds this message into
+/// the flat string list a checkpoint stores and a resume compares, and the
+/// capability layer reads the same message back out to classify it under the
+/// extension runtime that owns the state. Both sides have to agree on the
+/// exact bytes — the resume comparison is a string equality over the stored
+/// list — so this is one constant rather than two literals.
+pub(crate) const MIXED_SIGNAL_ACCEPTED_STATE_BLOCKER: &str =
+    "mixed Verilog-AMS accepted digital state is not checkpointed";
+
 /// One deterministic reason a transient checkpoint cannot be resumed.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TransientCheckpointBlocker {
@@ -4809,6 +4820,12 @@ impl TransientCheckpoint {
     /// metadata that guarantees the normal resume path will reject the image.
     /// It does not replace exact netlist/configuration identity validation,
     /// which is performed again when a checkpoint is captured or resumed.
+    ///
+    /// Every message arrives under exactly one source. The stored accepted
+    /// integration runtime carries one flat inventory that already includes
+    /// the extension-owned messages, so those are recognized on the way back
+    /// out by [`TransientCheckpoint::accepted_runtime_blocker_source`] rather
+    /// than reported a second time as an integration-runtime blocker.
     pub fn capability(&self) -> TransientCheckpointCapability {
         let mut blockers = Vec::new();
         let mut push = |source, message: String| {
@@ -4847,7 +4864,7 @@ impl TransientCheckpoint {
             AcceptedIntegrationRuntime::RestartNormalized(runtime) => {
                 for blocker in &runtime.resume_blockers {
                     push(
-                        TransientCheckpointBlockerSource::IntegrationRuntime,
+                        self.accepted_runtime_blocker_source(blocker),
                         blocker.clone(),
                     );
                 }
@@ -4855,7 +4872,7 @@ impl TransientCheckpoint {
             AcceptedIntegrationRuntime::Exact(runtime) => {
                 for blocker in &runtime.resume_blockers {
                     push(
-                        TransientCheckpointBlockerSource::IntegrationRuntime,
+                        self.accepted_runtime_blocker_source(blocker),
                         blocker.clone(),
                     );
                 }
@@ -4896,6 +4913,29 @@ impl TransientCheckpoint {
         }
 
         TransientCheckpointCapability::from_blockers(blockers)
+    }
+
+    /// Which state owner one stored accepted-runtime blocker message belongs
+    /// to.
+    ///
+    /// The captured accepted-integration-runtime list is deliberately flat:
+    /// the extension-owned messages are folded in beside the device-integration
+    /// ones so the thing a resume compares stays a single sorted string list,
+    /// and that encoding may not change. Classification therefore happens on
+    /// the way out, by identity: the mixed Verilog-AMS message, and whatever
+    /// the image recorded as its own XSPICE inventory, are extension state.
+    /// Everything else is the integration runtime's.
+    fn accepted_runtime_blocker_source(&self, message: &str) -> TransientCheckpointBlockerSource {
+        if message == MIXED_SIGNAL_ACCEPTED_STATE_BLOCKER
+            || self
+                .xspice_resume_blockers
+                .iter()
+                .any(|blocker| blocker == message)
+        {
+            TransientCheckpointBlockerSource::ExtensionState
+        } else {
+            TransientCheckpointBlockerSource::IntegrationRuntime
+        }
     }
 
     /// Refuse to persist a checkpoint that capture already proved cannot be
@@ -11240,6 +11280,59 @@ mod tests {
                 )
             );
         }
+    }
+
+    #[test]
+    fn a_stored_runtime_blocker_reaches_the_capability_under_one_owner() {
+        // The captured accepted-runtime list carries the extension-owned
+        // messages beside the device-integration ones, because that list is
+        // the thing a resume compares by equality. Read back out, each message
+        // must still name exactly one owner, or a report grouped by owner
+        // would show an XSPICE model as a second, imaginary integrator defect.
+        let xspice = "A1(gain): model owns pending state".to_string();
+        let mosfet =
+            "classic MOSFET accepted transient integration history is not checkpointed".to_string();
+        let mixed = MIXED_SIGNAL_ACCEPTED_STATE_BLOCKER.to_string();
+
+        let mut checkpoint = sample();
+        checkpoint.xspice_resume_blockers = vec![xspice.clone()];
+        let AcceptedIntegrationRuntime::Exact(accepted) =
+            &mut checkpoint.accepted_integration_runtime
+        else {
+            unreachable!("sample has exact accepted integration runtime")
+        };
+        accepted.resume_blockers = vec![mixed.clone(), mosfet.clone(), xspice.clone()];
+
+        let capability = checkpoint.capability();
+        let owners = |message: &str| -> Vec<TransientCheckpointBlockerSource> {
+            capability
+                .blockers()
+                .iter()
+                .filter(|blocker| blocker.message == message)
+                .map(|blocker| blocker.source)
+                .collect()
+        };
+        assert_eq!(
+            owners(&xspice),
+            vec![TransientCheckpointBlockerSource::ExtensionState],
+            "an XSPICE model owns extension state"
+        );
+        assert_eq!(
+            owners(&mixed),
+            vec![TransientCheckpointBlockerSource::ExtensionState],
+            "a mixed Verilog-AMS host owns extension state"
+        );
+        assert_eq!(
+            owners(&mosfet),
+            vec![TransientCheckpointBlockerSource::IntegrationRuntime],
+            "a device history is the integration runtime's"
+        );
+        assert_eq!(
+            capability.blockers().len(),
+            3,
+            "three messages, three blockers: {:?}",
+            capability.blockers()
+        );
     }
 
     #[test]

@@ -39,7 +39,15 @@ fn unusable_explicit_checkpoint_is_refused_before_write_and_preserves_destinatio
         checkpoint.to_str().unwrap(),
     ]);
 
-    assert_eq!(output.status.code(), Some(80));
+    // `ExitCode::Capability` (69): the deck is well formed and this build
+    // declines to checkpoint it, which is a different outcome from a run that
+    // failed, and automation sorts the two differently.
+    assert_eq!(
+        output.status.code(),
+        Some(69),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("checkpoint capability preflight failed")

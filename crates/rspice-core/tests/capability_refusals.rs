@@ -167,6 +167,40 @@ fn xyce_y_device_families_are_refused_by_the_grammar_with_their_span() {
 }
 
 #[test]
+fn a_checkpoint_request_this_deck_cannot_satisfy_is_refused_before_the_run() {
+    // A behavioral source with an SDT integrator accumulates accepted state
+    // the checkpoint format does not carry, so asking for a checkpoint is a
+    // capability gap — not a bad deck, which is why the same deck must still
+    // run. The refusal comes before any solver work: the only consumer of a
+    // checkpoint is a resume, so there is nothing to be gained by solving to
+    // tstop first and refusing then.
+    let netlist = parse(
+        "checkpoint capability\n\
+         V1 in 0 1\n\
+         B1 out 0 V={SDT(V(in))}\n\
+         R1 out 0 1k\n\
+         .end\n",
+    );
+    let error = Engine::default()
+        .run_tran_checkpointed(&netlist, 10.0e-9, 1.0e-9)
+        .expect_err("a deck whose accepted state cannot be captured has no checkpoint to return");
+    assert_eq!(
+        capability_token(&error),
+        "analysis.tran.checkpoint_capability"
+    );
+    assert!(
+        error
+            .to_string()
+            .contains("behavioral-source accepted SDT state is not checkpointed"),
+        "the refusal must name the state owner that blocks the checkpoint: {error}"
+    );
+
+    Engine::default()
+        .run_tran(&netlist, 10.0e-9, 1.0e-9)
+        .expect("the same deck runs when nothing asks for a checkpoint");
+}
+
+#[test]
 fn a_capability_refusal_keeps_its_category_across_the_parse_boundary() {
     // The parser and the elaborator raise refusals through different error
     // types. Both must arrive at a caller as the same category, otherwise a
