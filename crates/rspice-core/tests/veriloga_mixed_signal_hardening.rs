@@ -15,12 +15,13 @@
 //! for. Four attacks, one per engine path that could take a copy of, restart,
 //! or abandon a running module:
 //!
-//! * **Checkpoint and resume.** A saved-and-resumed mixed transient does *not*
-//!   reproduce the baseline trace, and cannot: the checkpoint format carries no
-//!   digital state. Before this suite it also did not say so — a module with no
-//!   pending self-scheduled activation resumed with its `initial` blocks run
-//!   again at time zero and produced a plausible, inverted trace. Both refusals
-//!   are pinned here.
+//! * **Checkpoint and resume.** A mixed transient has no checkpoint to resume:
+//!   the format carries no digital state, so a run that asks for one is refused
+//!   before it solves anything, naming the state it cannot carry. Before this
+//!   suite it was not refused at all — a module with no pending self-scheduled
+//!   activation resumed with its `initial` blocks run again at time zero and
+//!   produced a plausible, inverted trace. The refusal is pinned here at the
+//!   capability, which is where it now happens.
 //! * **Circuit clones.** Every analysis that hands a worker thread its own
 //!   `CircuitData` refuses a mixed module first, by name, before any clone.
 //! * **Swept re-runs.** A `.STEP` expansion runs one deck many times through one
@@ -47,11 +48,13 @@
 //! seconds become an accepted analog timepoint bit-exactly.
 #![cfg(feature = "veriloga")]
 
-use rspice_core::engine::{TransientResult, TransientStartupMode};
+use rspice_core::engine::{
+    TransientCheckpointBlockerSource, TransientResult, TransientStartupMode,
+};
 use rspice_core::netlist::{StepCommand, StepSweep, StepTarget};
 use rspice_core::xspice::event_scheduler::{SchedulerLimits, TimeResolution};
 use rspice_core::xspice::verilog::{MixedSignalError, MixedSignalHost};
-use rspice_core::{Engine, Netlist, SimulationConfig};
+use rspice_core::{Engine, Netlist, SimulationConfig, SimulationError};
 use rspice_veriloga::vm::IntegrationCoefficients;
 use std::io::Write;
 use std::path::PathBuf;
@@ -231,8 +234,27 @@ fn external_toggle_deck(model: &ModelFile) -> String {
 // Attack 1 — checkpoint and resume
 //=============================================================================
 
-/// **Attack 1.** A mixed transient's checkpoint refuses resume, and says which
-/// state it does not carry.
+/// The refusal every checkpoint-asking entry point owes a mixed deck.
+///
+/// Typed, so a frontend can route it as a capability gap rather than parse a
+/// sentence, and specific, so the sentence still names the state.
+fn assert_mixed_checkpoint_refusal(entry: &str, error: &SimulationError) {
+    let SimulationError::UnsupportedCapability(refusal) = error else {
+        panic!("{entry} must be refused as a capability, got {error}");
+    };
+    assert_eq!(
+        refusal.capability, "analysis.tran.checkpoint_capability",
+        "{entry} must be refused by the checkpoint capability boundary"
+    );
+    let lowered = error.to_string().to_lowercase();
+    assert!(
+        lowered.contains("mixed verilog-ams") && lowered.contains("digital state"),
+        "{entry} must name the state the checkpoint cannot carry: {error}"
+    );
+}
+
+/// **Attack 1.** A mixed deck that asks for a checkpoint is refused before the
+/// solver runs, and the refusal says which state cannot be carried.
 ///
 /// The checkpoint format is a numeric store: solutions, histories, limiter
 /// anchors, per-instance vectors. A mixed module's accepted state is not that.
@@ -242,20 +264,61 @@ fn external_toggle_deck(model: &ModelFile) -> String {
 /// compiled analog device and a live scheduler, which is not a thing this
 /// format writes.
 ///
-/// So resume is refused. What makes this a *hardening* pin rather than a
-/// statement of a limitation is what it replaced: a module with nothing pending
-/// resumed, restarted its `initial` blocks at time zero, and produced a trace
-/// that was inverted against the baseline from the checkpoint onward, with
-/// nothing saying so. This test is written against that specific deck, so a
-/// change that removes the refusal has to remove this too.
+/// So there is no such checkpoint to take, and the request for one is answered
+/// at `t = 0` rather than at `tstop`: the only consumer of a checkpoint is a
+/// resume, so a run that solved to the end and *then* said the image was
+/// unusable would have spent the whole run to deliver the same answer. What
+/// makes this a *hardening* pin rather than a statement of a limitation is what
+/// it replaced: a module with nothing pending checkpointed and resumed,
+/// restarted its `initial` blocks at time zero, and produced a trace inverted
+/// against the baseline from the checkpoint onward, with nothing saying so.
+/// This test is written against that specific deck, so a change that removes
+/// the refusal has to remove this too — including the unsegmented run below,
+/// which is what proves the module had live state to lose.
 #[test]
-fn a_mixed_checkpoint_refuses_resume_by_naming_the_state_it_does_not_carry() {
+fn a_mixed_checkpoint_schedule_is_refused_before_solving_by_naming_the_state_it_cannot_carry() {
     let model = ModelFile::new("checkpoint_external", EXTERNAL_TOGGLE);
     let deck = external_toggle_deck(&model);
     let netlist = Netlist::parse(&deck).expect("the deck parses");
     let engine = Engine::new(SimulationConfig::default());
 
-    let (baseline, scheduled) = engine
+    // Unsegmented, the deck runs, and the module moves several times before
+    // the time a checkpoint was being asked for. That is the state a resume
+    // would have restarted, so the refusal is protecting something real.
+    let baseline = run(&deck, 200.0e-9, 1.0e-9);
+    let before: Vec<_> = digital_points(&baseline, "qs")
+        .into_iter()
+        .filter(|(time, _)| *time < 100.0e-9)
+        .collect();
+    assert!(
+        before.len() >= 4,
+        "the module must toggle several times before the checkpoint time, saw {before:?}"
+    );
+
+    let capability = engine
+        .preflight_transient_checkpoint(&netlist)
+        .expect("the capability preflight elaborates this deck rather than running it");
+    assert!(
+        !capability.is_resumable(),
+        "a mixed deck has no resumable checkpoint"
+    );
+    let blockers = capability.blockers();
+    assert_eq!(
+        blockers.len(),
+        1,
+        "the mixed host is the only thing blocking this deck's checkpoint: {blockers:?}"
+    );
+    assert_eq!(
+        blockers[0].source,
+        TransientCheckpointBlockerSource::ExtensionState,
+        "the digital half is owned by an extension runtime, not by the integrator"
+    );
+    assert_eq!(
+        blockers[0].message,
+        "mixed Verilog-AMS accepted digital state is not checkpointed"
+    );
+
+    let scheduled = engine
         .run_tran_checkpoint_schedule_with_startup_mode(
             &netlist,
             200.0e-9,
@@ -263,54 +326,36 @@ fn a_mixed_checkpoint_refuses_resume_by_naming_the_state_it_does_not_carry() {
             TransientStartupMode::OperatingPoint,
             &[100.0e-9],
         )
-        .expect("the scheduled baseline run completes");
-    assert_eq!(
-        scheduled.len(),
-        1,
-        "the run must actually produce the checkpoint this attacks"
-    );
-    // The module moved before the checkpoint, so a resume that restarted it
-    // would be restarting something that had state to lose.
-    let before: Vec<_> = digital_points(&baseline, "qs")
-        .into_iter()
-        .filter(|(time, _)| *time < scheduled[0].checkpoint.time)
-        .collect();
-    assert!(
-        before.len() >= 4,
-        "the module must have toggled several times before the checkpoint, saw {before:?}"
-    );
-
-    let error = engine
-        .run_tran_resume(&netlist, &scheduled[0].checkpoint, 200.0e-9, 1.0e-9)
         .err()
-        .map(|error| error.to_string())
-        .expect(
-            "a resume that restarts the module's initial blocks beside a continuing analog \
-             solution must be refused, not answered",
-        );
-    let lowered = error.to_lowercase();
-    assert!(
-        lowered.contains("mixed verilog-ams") && lowered.contains("digital state"),
-        "the refusal must name the state the checkpoint lacks: {error}"
-    );
+        .expect("a scheduled mixed checkpoint must be refused, not produced");
+    assert_mixed_checkpoint_refusal("a scheduled mixed checkpoint", &scheduled);
+
+    let retained = engine
+        .run_tran_checkpointed(&netlist, 200.0e-9, 1.0e-9)
+        .err()
+        .expect("a retained mixed checkpoint must be refused, not produced");
+    assert_mixed_checkpoint_refusal("a retained mixed checkpoint", &retained);
 }
 
 /// **Attack 1, self-scheduled half.** The same refusal reaches a module whose
-/// event wheel is not empty.
+/// event wheel is not empty, and it is still the capability's.
 ///
-/// This deck used to be refused too, but by `MissedDigitalBreakpoint` — the
+/// This deck used to be refused on resume by `MissedDigitalBreakpoint` — the
 /// rebuilt module still held the activation its `initial` block placed at time
 /// zero, and the first trial at the resume time stepped past it. That is a
-/// guard noticing a symptom. The refusal has to come from the checkpoint, so
-/// it arrives whether or not the module happens to have something pending.
+/// guard noticing a symptom, and it fires only for modules that happen to have
+/// something pending. The refusal has to be the capability's, so it arrives for
+/// every mixed deck; and it now arrives before any step is taken, so the guard
+/// is not even reachable on this path. Both halves are asserted: the message is
+/// the capability's, and it is not the guard's.
 #[test]
-fn a_self_scheduling_module_is_refused_by_the_checkpoint_not_by_a_missed_breakpoint() {
+fn a_self_scheduling_module_is_refused_by_the_preflight_not_by_a_missed_breakpoint() {
     let model = ModelFile::new("checkpoint_divider", CLOCK_DIVIDER);
     let deck = divider_deck(&model, 200);
     let netlist = Netlist::parse(&deck).expect("the deck parses");
     let engine = Engine::new(SimulationConfig::default());
 
-    let (_, scheduled) = engine
+    let error = engine
         .run_tran_checkpoint_schedule_with_startup_mode(
             &netlist,
             200.0e-9,
@@ -318,20 +363,12 @@ fn a_self_scheduling_module_is_refused_by_the_checkpoint_not_by_a_missed_breakpo
             TransientStartupMode::OperatingPoint,
             &[100.0e-9],
         )
-        .expect("the scheduled baseline run completes");
-    let error = engine
-        .run_tran_resume(&netlist, &scheduled[0].checkpoint, 200.0e-9, 1.0e-9)
         .err()
-        .map(|error| error.to_string())
-        .expect("a mixed resume is refused");
-    let lowered = error.to_lowercase();
+        .expect("a scheduled mixed checkpoint must be refused, not produced");
+    assert_mixed_checkpoint_refusal("a self-scheduling mixed checkpoint", &error);
     assert!(
-        lowered.contains("mixed verilog-ams") && lowered.contains("digital state"),
-        "the refusal must be the checkpoint's, not the breakpoint guard's: {error}"
-    );
-    assert!(
-        !lowered.contains("stepped past"),
-        "the missed-breakpoint guard must no longer be what refuses this: {error}"
+        !error.to_string().to_lowercase().contains("stepped past"),
+        "the missed-breakpoint guard must not be what refuses this; no step is taken: {error}"
     );
 }
 
@@ -374,6 +411,16 @@ endmodule
     );
     let netlist = Netlist::parse(&deck).expect("the deck parses");
     let engine = Engine::new(SimulationConfig::default());
+    // The refusal above is decided by the capability preflight, so the control
+    // has to clear that same preflight — otherwise the schedule below would be
+    // refused for the reason this test exists to rule out.
+    assert!(
+        engine
+            .preflight_transient_checkpoint(&netlist)
+            .expect("the capability preflight elaborates this deck")
+            .is_resumable(),
+        "an analog-only Verilog-A deck must have a resumable checkpoint"
+    );
     let (baseline, scheduled) = engine
         .run_tran_checkpoint_schedule_with_startup_mode(
             &netlist,
