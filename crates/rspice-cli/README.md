@@ -36,6 +36,8 @@ rspice health --json
 
 `.OP`, `.DC`, `.TRAN`, `.AC`, `.HB`, `.SP`, `.STB`, `.DISTO`, `.NOISE`, `.TF`, `.SENS`, `.PZ`, `.STEP`, `.FOUR`, `.TEMP`, and Monte Carlo cards. `.AC` and `.NOISE` additionally accept the `DATA=<table>` form, sweeping the frequencies listed in a `.DATA` table instead of a generated sweep. If the netlist contains no analysis cards, a DC operating point is run by default.
 
+`.PSS`, `.PAC`, `.PNOISE` and `.ENVELOPE` parse and validate (their grammar is in the [core README](../rspice-core/README.md)), but this CLI has no execution route or result artifact for them yet: a deck that authors one is refused with an `unsupported_deck_analysis` error naming the card and its analysis instance, and writes nothing. Reach those analyses through the Python API, or run PSS with `--pss-freq` below.
+
 Frequency-domain analysis notes:
 
 - `.DISTO` runs the third-order Volterra solver in harmonic or two-tone mode and exports each physical product (`2f1`, `3f1`, `f1+f2`, `f1-f2`, or `2f1-f2`) as an actual sinusoidal peak phasor with magnitude, phase, product frequency, and an explicit magnitude ratio to the F1 response. Two-tone cards use the SPICE ratio contract `0 < f2/f1 < 1`, with F2 fixed relative to the first swept F1 point.
@@ -53,7 +55,7 @@ A handful of analyses can instead be requested from the command line. When one o
 | Two-port S-parameters | `--sparam "P1+,P1-,P2+,P2-"` (needs a `.AC` card for the sweep) |
 | Process corners | `--corners tt,ss,ff` |
 
-Each mode's tuning flags are listed under **Analysis-mode options** below.
+Each mode's tuning flags are listed under **Analysis-mode options** below. `--pss-freq` and an authored `.PSS` card both request a periodic steady state, so combining them is an explicit error rather than one route silently winning.
 
 Numeric flag values accept SPICE magnitude suffixes everywhere: `--pss-freq 2.4G`, `--max-step 1u`, `-D RLOAD=4.7k`.
 
