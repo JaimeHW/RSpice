@@ -56,7 +56,9 @@ use crate::device::veriloga_builtins::{
 use crate::device::{
     TransmissionLine, TransmissionLineCheckpoint, XyceTeamResistanceNoiseCheckpoint,
 };
-use crate::engine::SimulationConfig;
+use crate::engine::{
+    OutputCommitError, OutputCommitPhase, PersistenceIncompatibleError, SimulationConfig,
+};
 use crate::expr::{Expr, Function, parse_expression_strict};
 use crate::netlist::expr::prepare_behavioral_expression;
 use crate::netlist::{
@@ -179,6 +181,10 @@ const GENERATED_STATEFUL_TRANSACTION_FORMAT_VERSION: u32 = 22;
 const GENERATED_TERMINAL_CURRENT_FORMAT_VERSION: u32 = 25;
 const GENERATED_EVENT_STATE_FORMAT_VERSION: u32 = 26;
 const GENERATED_IDENTITY_FORMAT_VERSION: u32 = 28;
+
+/// Canonical text header. One owner, so the writer, the parser, and the
+/// format-version gate below cannot drift apart.
+const TEXT_HEADER_PREFIX: &str = "RSPICE-CHECKPOINT ";
 
 const PACKED_MAGIC: &[u8; 16] = b"RSPICE-CPACK\0\0\0\0";
 const PACKED_ENVELOPE_VERSION: u32 = 1;
@@ -6747,7 +6753,7 @@ impl TransientCheckpoint {
     pub fn to_text_with_abort(&self, abort: &dyn AbortSignal) -> Result<String, SimulationError> {
         check_checkpoint_abort(abort)?;
         let mut out = String::new();
-        out.push_str(&format!("RSPICE-CHECKPOINT {FORMAT_VERSION}\n"));
+        out.push_str(&format!("{TEXT_HEADER_PREFIX}{FORMAT_VERSION}\n"));
         out.push_str(&format!("fingerprint {:#018x}\n", self.netlist_fingerprint));
         out.push_str(&format!(
             "netlist_identity {}\n",
@@ -7378,7 +7384,7 @@ impl TransientCheckpoint {
     ) -> Result<Self, String> {
         let header = lines.next().ok_or("empty checkpoint file")?;
         let version: u32 = header
-            .strip_prefix("RSPICE-CHECKPOINT ")
+            .strip_prefix(TEXT_HEADER_PREFIX)
             .and_then(|v| v.trim().parse().ok())
             .ok_or_else(|| format!("not a checkpoint file (header: '{header}')"))?;
         if !(1..=FORMAT_VERSION).contains(&version) {
@@ -8183,6 +8189,7 @@ impl TransientCheckpoint {
         abort: &dyn AbortSignal,
     ) -> Result<Self, SimulationError> {
         check_checkpoint_abort(abort)?;
+        checkpoint_format_version_gate(bytes)?;
         if bytes.starts_with(PACKED_MAGIC) {
             let canonical = decode_packed_checkpoint_with_abort(bytes, max_unpacked_bytes, abort)?;
             parse_canonical_checkpoint_with_abort(&canonical, max_unpacked_bytes, abort)
@@ -8267,13 +8274,7 @@ impl TransientCheckpoint {
         check_checkpoint_abort(abort)?;
         checkpoint_operation_result(self.validate_persistence_preflight(), abort)?;
         let bytes = self.to_bytes_with_abort(encoding, abort)?;
-        atomic_write_checkpoint_with_abort(path, &bytes, abort).map_err(|error| match error {
-            AbortableCheckpointIoError::Aborted => SimulationError::Aborted,
-            AbortableCheckpointIoError::Io(error) => SimulationError::Circuit(format!(
-                "cannot write checkpoint '{}': {error}",
-                path.display()
-            )),
-        })
+        atomic_write_checkpoint_with_abort(path, &bytes, abort)
     }
 
     /// Read and auto-detect a checkpoint using the production default byte budget.
@@ -8326,6 +8327,57 @@ impl TransientCheckpoint {
             })?;
         Self::from_bytes_with_limit_and_abort(&bytes, max_unpacked_bytes, abort)
     }
+}
+
+/// Refuse an artifact whose declared format version this build cannot read,
+/// before any of its payload is parsed.
+///
+/// A version mismatch is a compatibility boundary an operator resolves by
+/// using the matching build, not by repairing the file, so the typed loading
+/// path reports it as a persistence failure instead of an opaque parse
+/// message. Anything else — a missing header, a corrupt envelope, a truncated
+/// file — stays with the parsers, which describe it precisely. The
+/// string-returning legacy loaders keep their own inner version checks.
+fn checkpoint_format_version_gate(bytes: &[u8]) -> Result<(), PersistenceIncompatibleError> {
+    if bytes.starts_with(PACKED_MAGIC) {
+        let start = PACKED_MAGIC.len();
+        let Some(field) = bytes.get(start..start.saturating_add(4)) else {
+            return Ok(());
+        };
+        let Ok(field) = <[u8; 4]>::try_from(field) else {
+            return Ok(());
+        };
+        let version = u32::from_le_bytes(field);
+        if version != PACKED_ENVELOPE_VERSION {
+            return Err(PersistenceIncompatibleError::new(
+                "packed transient checkpoint envelope",
+                Some(version),
+                PACKED_ENVELOPE_VERSION.to_string(),
+            ));
+        }
+        return Ok(());
+    }
+
+    // Probe only the first line: a checkpoint can be hundreds of megabytes and
+    // the header is the first few dozen bytes of it.
+    const HEADER_PROBE_BYTES: usize = 128;
+    let probe = String::from_utf8_lossy(&bytes[..bytes.len().min(HEADER_PROBE_BYTES)]);
+    let Some(version) = probe
+        .lines()
+        .next()
+        .and_then(|line| line.strip_prefix(TEXT_HEADER_PREFIX))
+        .and_then(|version| version.trim().parse::<u32>().ok())
+    else {
+        return Ok(());
+    };
+    if !(1..=FORMAT_VERSION).contains(&version) {
+        return Err(PersistenceIncompatibleError::new(
+            "transient checkpoint",
+            Some(version),
+            format!("1..={FORMAT_VERSION}"),
+        ));
+    }
+    Ok(())
 }
 
 fn parse_canonical_checkpoint(
@@ -8860,34 +8912,53 @@ fn atomic_write_checkpoint_with_abort(
     path: &std::path::Path,
     bytes: &[u8],
     abort: &dyn AbortSignal,
-) -> Result<(), AbortableCheckpointIoError> {
+) -> Result<(), SimulationError> {
     use std::io::Write as _;
 
-    fn io_error(error: impl std::fmt::Display) -> AbortableCheckpointIoError {
-        AbortableCheckpointIoError::Io(error.to_string())
-    }
+    // A checkpoint that solved correctly and could not be published is an
+    // output-commit failure, not a circuit failure: nothing about the deck
+    // needs to change, and the phase says whether the previous checkpoint
+    // survived.
+    let staging_failed = |phase: OutputCommitPhase, error: std::io::Error| -> SimulationError {
+        OutputCommitError::new(path, phase, error.to_string()).into()
+    };
+    let publication_failed =
+        |error: rspice_output::AtomicArtifactError<std::io::Error>| -> SimulationError {
+            OutputCommitError::from_atomic(path, &error).into()
+        };
 
     if abort.is_aborted() {
-        return Err(AbortableCheckpointIoError::Aborted);
+        return Err(SimulationError::Aborted);
     }
-    reject_checkpoint_destination(path).map_err(io_error)?;
-    let mut staged = rspice_output::AtomicArtifactFile::prepare(path).map_err(io_error)?;
+    reject_checkpoint_destination(path)
+        .map_err(|error| staging_failed(OutputCommitPhase::Prepare, error))?;
+    let mut staged =
+        rspice_output::AtomicArtifactFile::prepare(path).map_err(publication_failed)?;
     for chunk in bytes.chunks(CHECKPOINT_IO_CHUNK_BYTES) {
         if abort.is_aborted() {
-            return Err(AbortableCheckpointIoError::Aborted);
+            return Err(SimulationError::Aborted);
         }
-        staged.write_all(chunk).map_err(io_error)?;
+        staged
+            .write_all(chunk)
+            .map_err(|error| staging_failed(OutputCommitPhase::Write, error))?;
     }
     if abort.is_aborted() {
-        return Err(AbortableCheckpointIoError::Aborted);
+        return Err(SimulationError::Aborted);
     }
-    let staged = staged.prepare_for_commit().map_err(io_error)?;
+    let staged = staged.prepare_for_commit().map_err(publication_failed)?;
 
     if abort.is_aborted() {
-        return Err(AbortableCheckpointIoError::Aborted);
+        return Err(SimulationError::Aborted);
     }
-    reject_checkpoint_destination(path).map_err(io_error)?;
-    staged.commit().map_err(io_error)
+    reject_checkpoint_destination(path).map_err(|error| {
+        staging_failed(
+            OutputCommitPhase::Commit {
+                destination_intact: true,
+            },
+            error,
+        )
+    })?;
+    staged.commit().map_err(publication_failed)
 }
 
 fn reject_checkpoint_destination(path: &std::path::Path) -> std::io::Result<()> {
