@@ -90,7 +90,7 @@
 //! because "the shipped program is identically zero" is a claim about the
 //! corpus and not a theorem.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::cfg_lanes::scalarize_lanes;
 use super::cfg_program::{CfgRuntimeBindings, lower_cfg_function};
@@ -111,6 +111,7 @@ use crate::canonical_ir::{
 use crate::codegen::state_renumbering::StateSlotMapping;
 use crate::codegen::{ColumnAxis, CompiledModel};
 use crate::rust_backend::canonical::stored_charges;
+use smol_str::SmolStr;
 
 /// Why the CFG route cannot build a plan for a module.
 ///
@@ -393,12 +394,12 @@ const DERIVATIVE_RULE_HOLES: &[CfgBinaryOp] = &[CfgBinaryOp::Hypot, CfgBinaryOp:
 ///   measured 4.5 against 2.5 on one entry. Detected as a shipped value entry
 ///   with a non-empty contribution-current read set, which is what "this entry
 ///   probes a current" means in the plan.
-/// * **An array variable.** The MIR route's value entries read the slots its
-///   assignment pass filled, including from a declaration initializer that is
-///   not part of the analog body at all; the CFG route recomputes inline and has
-///   nothing to recompute a declaration initializer from —
-///   `assignment_pattern_initializer_fills_elements` measured a conductance the
-///   initializer never reached.
+/// * **A prologue-only definition.** A localparam, or a module-scope variable
+///   with a declaration initializer: the MIR route's assignment pass runs it and
+///   its value entries read the slot it wrote, and the CFG, built from the
+///   analog body alone, has no definition of the variable at all. See
+///   [`prologue_only_definition`], which also records the two shapes of this the
+///   estate did not cover.
 /// * **An event-controlled variable.** The CFG recomputes a variable inline
 ///   where the postfix plan reads the slot the assignment pass wrote, and for a
 ///   variable whose value is an accepted event state those are different
@@ -418,12 +419,11 @@ fn route_divergence(
     function: &CfgFunction,
     postfix: &NativeModelPlan,
 ) -> Option<String> {
-    if !hir.arrays.is_empty() {
-        return Some(
-            "an array variable is filled by the MIR route's assignment pass, which the CFG \
-             route's inline recomputation does not reproduce for a declaration initializer"
-                .to_string(),
-        );
+    if let Some(name) = prologue_only_definition(hir) {
+        return Some(format!(
+            "'{name}' is defined only by a module prologue statement, which the MIR route's \
+             assignment pass runs and the CFG has no definition of at all"
+        ));
     }
     let dependencies = &postfix.current_dependencies;
     let flat = |rows: &[Vec<usize>]| rows.iter().any(|set| !set.is_empty());
@@ -462,6 +462,115 @@ fn route_divergence(
         ),
         _ => None,
     })
+}
+
+/// A variable this module defines only in its prologue, if the body reads one.
+///
+/// The general form of what was recorded here as "an array variable", and the
+/// array was only the case an estate test happened to cover.
+/// [`crate::canonical_ir::HirExecutedCorrespondence`] states the shape:
+/// "module prologue statements (localparam and module-scope variable
+/// initializers, `$bound_step` resets) exist only in the executed copy and pair
+/// with nothing in the body". The MIR route's assignment pass runs them and its
+/// value entries read the slots they wrote. The CFG is built from the body
+/// alone, so it has no definition of such a variable and a read of one falls
+/// through to Verilog-AMS zero initialisation — a wrong number, not a refusal.
+///
+/// W-F4 measured three shapes of it on the `Cfg` route, each against the same
+/// module on `Postfix`:
+///
+/// * an array declaration initializer, `real c[0:2] = '{...}` — the entry this
+///   screen used to name, found by `assignment_pattern_initializer_fills_elements`;
+/// * a scalar declaration initializer, `real g = 4.5;` — a residual of 0.0
+///   against 9.0 at `V(p, n) = 2`;
+/// * a `localparam` read from the body, `localparam real K = 3.0; g = K;` — a
+///   residual of 0.0 against 6.0.
+///
+/// The last two were not screened and no estate test covered them, which is the
+/// same lesson [`route_divergence`] records about its own list: it names what
+/// the estate exposed. See `a_prologue_only_definition_falls_the_module_back`.
+///
+/// # The read test is by name, over both copies
+///
+/// [`crate::canonical_ir::HirModel`]'s expression arena holds the executed copy
+/// and the structured body together, so a name found in it may have been read
+/// by another prologue statement rather than by the body. That over-refuses a
+/// module whose prologue variable the body never mentions — `lpsize`, whose
+/// `localparam integer SIZE` survives only in an array bound the analyzer has
+/// already folded — and it does not under-refuse, which is the direction a
+/// screen has to be wrong in.
+fn prologue_only_definition(hir: &crate::canonical_ir::HirModel) -> Option<SmolStr> {
+    fn assigned(statements: &[crate::canonical_ir::hir::HirStatement], into: &mut HashSet<u32>) {
+        for statement in statements {
+            match statement {
+                crate::canonical_ir::hir::HirStatement::Assignment(assignment) => {
+                    into.insert(assignment.target.index());
+                }
+                crate::canonical_ir::hir::HirStatement::Loop(body) => assigned(&body.body, into),
+            }
+        }
+    }
+    fn assigned_in_body(regions: &[crate::canonical_ir::hir::HirRegion], into: &mut HashSet<u32>) {
+        for region in regions {
+            match region {
+                crate::canonical_ir::hir::HirRegion::Assignment(assignment) => {
+                    into.insert(assignment.target.index());
+                }
+                crate::canonical_ir::hir::HirRegion::Conditional {
+                    then_body,
+                    else_body,
+                    ..
+                } => {
+                    assigned_in_body(then_body, into);
+                    assigned_in_body(else_body, into);
+                }
+                crate::canonical_ir::hir::HirRegion::Loop { body, .. } => {
+                    assigned_in_body(body, into)
+                }
+                crate::canonical_ir::hir::HirRegion::Contribution(_) => {}
+            }
+        }
+    }
+
+    let mut prologue = HashSet::new();
+    assigned(&hir.statements, &mut prologue);
+    let mut body = HashSet::new();
+    assigned_in_body(&hir.body, &mut body);
+    prologue.retain(|target| !body.contains(target));
+    if prologue.is_empty() {
+        return None;
+    }
+
+    // Both spellings of a read: an identifier, and an array access whose index
+    // the analyzer did not fold to an element variable.
+    let read: HashSet<&SmolStr> = hir
+        .expressions
+        .iter()
+        .filter_map(|expression| match &expression.kind {
+            crate::canonical_ir::hir::HirExprKind::Identifier { name } => Some(name),
+            crate::canonical_ir::hir::HirExprKind::ArrayAccess { array, .. } => Some(array),
+            _ => None,
+        })
+        .collect();
+    // An array element is a variable of its own, named `c[0]`, so a read of one
+    // is found either under that name or under the array's.
+    let array_of = |target: u32| {
+        hir.arrays.iter().find(|array| {
+            let base = array.base.index();
+            target >= base && target < base + array.len
+        })
+    };
+    hir.variables
+        .iter()
+        .filter(|variable| prologue.contains(&variable.id.index()))
+        .find_map(|variable| {
+            if read.contains(&variable.name) {
+                return Some(variable.name.clone());
+            }
+            array_of(variable.id.index())
+                .filter(|array| read.contains(&array.name))
+                .map(|array| array.name.clone())
+        })
 }
 
 /// The first operation of `function` the derivative pass has no rule for.
@@ -1346,14 +1455,42 @@ endmodule
     fn every_known_divergence_falls_the_module_back() {
         let cases: &[(&str, &str, &str)] = &[
             (
-                "array",
-                "array variable",
+                "array-initializer",
+                "'c[0]' is defined only by a module prologue statement",
                 r#"
 module cfg_div_array(p, n);
   inout p, n;
   electrical p, n;
   real c[0:1] = '{0.5e-3, 1.5e-3};
   analog I(p, n) <+ (c[0] + c[1]) * V(p, n);
+endmodule
+"#,
+            ),
+            (
+                "scalar-initializer",
+                "'g' is defined only by a module prologue statement",
+                r#"
+module cfg_div_scalar_init(p, n);
+  inout p, n;
+  electrical p, n;
+  real g = 4.5;
+  analog I(p, n) <+ g * V(p, n);
+endmodule
+"#,
+            ),
+            (
+                "localparam",
+                "'k' is defined only by a module prologue statement",
+                r#"
+module cfg_div_localparam(p, n);
+  inout p, n;
+  electrical p, n;
+  localparam real k = 3.0;
+  real g;
+  analog begin
+    g = k;
+    I(p, n) <+ g * V(p, n);
+  end
 endmodule
 "#,
             ),
