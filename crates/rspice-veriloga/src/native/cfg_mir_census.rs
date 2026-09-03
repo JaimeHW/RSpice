@@ -50,6 +50,24 @@
 //! and printed rather than asserted: see [`MATRIX_SIGNIFICANCE`]. Every
 //! per-module line says how many entries that was.
 //!
+//! # Noise, which used to be measured and is now asserted
+//!
+//! Every noise magnitude is held to one of two criteria and none is exempt. A
+//! magnitude the plan builder took at its own site is one expression lowered
+//! twice, and takes the reassociation bound like a residual. A magnitude it had
+//! to take at the exit block, under a guard, takes the weaker criterion in
+//! [`check_guarded_noise`]: the shipped quantity, or the inactive zero, and
+//! nothing else.
+//!
+//! What was there before was a `grouped_noise` class that was executed,
+//! printed, and asserted nothing, on the argument that a grouped process folds
+//! its routing amplitude into its injection and so holds a different quantity
+//! from the shipped PSD. That argument was wrong twice: `noise_process_schema`
+//! is `1` on everything this compiler produces, so the class was every module
+//! with any noise source, and the amplitude was never the difference — see
+//! [`crate::jit::cfg_plan_builder`], whose noise slice now names what the
+//! difference actually was.
+//!
 //! `#[ignore]`d: this is release-qualification work. Run it with
 //! `--release --features native -- --ignored --nocapture`.
 
@@ -186,38 +204,62 @@ struct Tally {
     structural_zeros: usize,
     over_bound: usize,
     nonzero_structural_zeros: usize,
-    /// Noise entries of grouped-noise modules: measured and printed, not
-    /// asserted. See [`is_grouped_noise_entry`].
-    grouped_noise_entries: usize,
-    grouped_noise_exact: usize,
+    /// Noise magnitudes lowered from the exit read under a guard: asserted, on
+    /// the weaker of the two noise criteria. See [`check_guarded_noise`].
+    guarded_noise_entries: usize,
+    /// Of those, the ones that agreed with the shipped route anyway rather than
+    /// reading the inactive zero.
+    guarded_noise_agreed: usize,
+    /// Guarded noise magnitudes that were neither the shipped quantity nor the
+    /// inactive zero. Any is a failure.
+    guarded_noise_third_value: usize,
     /// Entries nine or more orders below the largest magnitude of their own
     /// kind anywhere in the model at that operating point: measured and
     /// printed, not asserted. See [`MATRIX_SIGNIFICANCE`].
     insignificant: usize,
 }
 
-/// Whether this entry is one the two routes are entitled to disagree about.
+/// What a noise magnitude the CFG route took at the *exit block*, under a
+/// guard, has to satisfy.
 ///
-/// `CompiledModel::noise_process_schema >= 1` means the module's noise reaches
-/// the runtime as a grouped complex injection, and that changes what the
-/// shipped `psd_program` holds: the routing amplitude is carried by the
-/// injection rather than folded into the power. The CFG route's
-/// `CfgNoiseProcess::psd` is the raw syntactic power — the CFG lowering's own
-/// documentation says the amplitude is not folded into it. The two are
-/// therefore not two computations of one number, and asserting that they agree
-/// would assert something false.
+/// Every other entry — every residual, every Jacobian, and every noise
+/// magnitude the plan builder hoisted to its site — is held to the ordinary
+/// bound. This class is the one the builder could not make an identity, and its
+/// criterion is one step weaker rather than absent:
 ///
-/// Such an entry is still executed and still reported, with the count that
-/// agree exactly, because that is the measurement W-F3c needs to decide what
-/// the CFG route's noise entries have to become before the flip. Thirty-four of
-/// the forty-three shipped modules are in this class, which is also why the
-/// plan builder records the schema instead of refusing on it.
-fn is_grouped_noise_entry(entry: CfgPlanEntry, grouped: bool) -> bool {
-    grouped
-        && matches!(
-            entry,
-            CfgPlanEntry::NoisePsd(_) | CfgPlanEntry::NoiseExponent(_)
-        )
+/// > the CFG reads the shipped quantity, or it reads exactly zero.
+///
+/// Zero is the *inactive* reading, and it is admissible for one reason that is
+/// a property of the plan and not of the corpus: the shipped runtime decides a
+/// source's activity from its injection gains, and an injection gain is the
+/// derivative of the contribution with respect to the noise process. A source
+/// the body did not reach appears in that contribution only under a condition
+/// MIR dissolved into a select, so the derivative carries the same condition
+/// and is zero. The magnitude is then multiplied by a zero gain on both routes,
+/// and the injected noise is identical whichever number the plan held.
+///
+/// What the criterion forbids is a *third* value — a magnitude that is neither
+/// what the shipped route computes nor the inactive zero — which is the only
+/// reading that could change what the runtime injects. That is asserted, not
+/// measured.
+fn check_guarded_noise(comparison: &Comparison, bound: f64) -> GuardedNoise {
+    if comparison.deviation <= bound {
+        GuardedNoise::Agreed
+    } else if comparison.cfg == 0.0 {
+        GuardedNoise::Inactive
+    } else {
+        GuardedNoise::ThirdValue
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GuardedNoise {
+    /// The two routes hold the same number after all.
+    Agreed,
+    /// The CFG holds the inactive zero, which no gain will multiply.
+    Inactive,
+    /// Neither. A failure.
+    ThirdValue,
 }
 
 /// Every entry position the two plans both carry, in plan order.
@@ -464,6 +506,12 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
 
     let structural_zeros: HashSet<CfgPlanEntry> =
         cfg_plan.report.structural_zeros.iter().copied().collect();
+    let guarded_noise: HashSet<CfgPlanEntry> = cfg_plan
+        .report
+        .noise_guarded_reads
+        .iter()
+        .copied()
+        .collect();
 
     // Sized to whichever route asks for more, so neither is executed against an
     // array the other decided the size of.
@@ -514,8 +562,10 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
     let mut compared = 0_usize;
     let mut over: Option<Comparison> = None;
     let mut nonzero_structural: Option<Comparison> = None;
-    let mut grouped_noise_worst = 0.0_f64;
-    let mut grouped_noise_case: Option<Comparison> = None;
+    let mut guarded_noise_worst = 0.0_f64;
+    let mut guarded_noise_case: Option<Comparison> = None;
+    let mut guarded_noise_third: Option<Comparison> = None;
+    let mut guarded_here = 0_usize;
     let mut insignificant_worst = 0.0_f64;
     let mut insignificant_case: Option<Comparison> = None;
     let mut insignificant_here = 0_usize;
@@ -564,14 +614,21 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
             if comparison.deviation == 0.0 {
                 exact += 1;
             }
-            if is_grouped_noise_entry(entry, cfg_plan.report.grouped_noise) {
-                tally.grouped_noise_entries += 1;
-                if comparison.deviation == 0.0 {
-                    tally.grouped_noise_exact += 1;
+            if guarded_noise.contains(&entry) {
+                tally.guarded_noise_entries += 1;
+                guarded_here += 1;
+                if comparison.deviation > guarded_noise_worst {
+                    guarded_noise_worst = comparison.deviation;
                 }
-                if comparison.deviation > grouped_noise_worst {
-                    grouped_noise_worst = comparison.deviation;
-                    grouped_noise_case = Some(comparison);
+                match check_guarded_noise(&comparison, comparison.bound()) {
+                    GuardedNoise::Agreed => tally.guarded_noise_agreed += 1,
+                    GuardedNoise::Inactive => {
+                        guarded_noise_case.get_or_insert(comparison);
+                    }
+                    GuardedNoise::ThirdValue => {
+                        tally.guarded_noise_third_value += 1;
+                        guarded_noise_third.get_or_insert(comparison);
+                    }
                 }
                 continue;
             }
@@ -651,17 +708,27 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
             case.describe()
         );
     }
-    if cfg_plan.report.grouped_noise {
+    if !model.noise_sources.is_empty() {
         println!(
-            "cfg-mir model={module} grouped_noise=1 noise_entries={} max_deviation={grouped_noise_worst:.3e}{}",
+            "cfg-mir model={module} noise_sources={} noise_hoisted={} guarded_reads={} \
+             guarded_compared={guarded_here} guarded_max_deviation={guarded_noise_worst:.3e}{}",
             model.noise_sources.len(),
-            grouped_noise_case
+            cfg_plan.report.noise_hoisted,
+            cfg_plan.report.noise_guarded_reads.len(),
+            guarded_noise_case
                 .as_ref()
-                .map(|case| format!(" case[{}]", case.describe()))
+                .map(|case| format!(" inactive_case[{}]", case.describe()))
                 .unwrap_or_default(),
         );
     }
 
+    if let Some(third) = guarded_noise_third {
+        return Some(format!(
+            "{module}: {} is neither the shipped magnitude nor the inactive zero: {}",
+            third.entry,
+            third.describe()
+        ));
+    }
     if let Some(nonzero) = nonzero_structural {
         return Some(format!(
             "{module}: the CFG route found {} structurally absent but the shipped route does not \
@@ -733,7 +800,8 @@ fn the_cfg_built_plan_agrees_with_the_shipped_plan_within_the_reassociation_boun
     println!(
         "cfg-mir models={} built={} refused={} entries={} comparisons={} exact={} \
          runtime_errors={} structural_zeros={} over_bound={} nonzero_structural_zeros={} \
-         grouped_noise_entries={} grouped_noise_exact={} below_significance={}",
+         guarded_noise_entries={} guarded_noise_agreed={} guarded_noise_third_value={} \
+         below_significance={}",
         tally.models,
         tally.built,
         tally.refused,
@@ -744,8 +812,9 @@ fn the_cfg_built_plan_agrees_with_the_shipped_plan_within_the_reassociation_boun
         tally.structural_zeros,
         tally.over_bound,
         tally.nonzero_structural_zeros,
-        tally.grouped_noise_entries,
-        tally.grouped_noise_exact,
+        tally.guarded_noise_entries,
+        tally.guarded_noise_agreed,
+        tally.guarded_noise_third_value,
         tally.insignificant,
     );
     if filter.is_none() {

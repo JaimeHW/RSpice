@@ -33,18 +33,47 @@
 //!
 //! # Why noise stays postfix in the default plan
 //!
-//! Not conservatism: the two routes hold *different quantities* there, and the
-//! difference is measured rather than argued. `noise_process_schema >= 1` on
-//! thirty-four of the forty-three shipped modules, and under that schema the
-//! routing amplitude is folded into the grouped complex injection instead of
-//! into the PSD, so the shipped `psd_program` and the CFG process's `psd` stop
-//! being the same number — `angelov`'s `noise_exponents[9]` reads 2.0 through
-//! MIR and 0.0 through the CFG, `bsimsoi_va`'s `noise_psd[1]` reads 7.19e-28
-//! against 0.0. Taking the CFG's noise today would change what the runtime
-//! injects across most of the corpus, which is exactly the silently-wrong class
-//! this program refuses. Closing the CFG noise slice is its own lane; until it
-//! lands, production asks for [`CfgNoiseScope::Postfix`] and the CFG-versus-MIR
-//! census asks for [`CfgNoiseScope::Cfg`] so the gap stays measured.
+//! Because the flip that takes it has not run its censuses yet, and for no
+//! other reason. Production asks for [`CfgNoiseScope::Postfix`] and the
+//! CFG-versus-MIR census asks for [`CfgNoiseScope::Cfg`]; the two switches move
+//! together or not at all.
+//!
+//! ## What the gap was, and what it actually is
+//!
+//! This module used to say the two routes held different quantities because a
+//! *grouped* noise process folds its routing amplitude into the injection
+//! instead of into the PSD. That is not the difference, and the corpus says so
+//! twice over. `noise_process_schema` is written as `1` by every compiler this
+//! crate has — `tests/support` states it outright — so "thirty-four of
+//! forty-three carry schema 1" was counting the modules that have any noise
+//! source at all, not a grouping. And `crate::native::cfg_noise_pins` compiles
+//! one module carrying each shape and reads both routes at one bias: a plain
+//! white source, one scaled by a factor, a flicker exponent and a process
+//! routed into two equations agree **bit for bit**. The amplitude was never the
+//! problem.
+//!
+//! The difference is the **activation guard**. A `CfgNoiseProcess`'s `psd` and
+//! `exponent` are read at the exit block, so a source the body did not reach
+//! reads back the zero its variables were seeded with; the shipped
+//! `psd_program` is the magnitude expression and the runtime evaluates it
+//! unconditionally. `angelov`'s `flicker_noise(NoisePwrG, 2, "gate")` sits
+//! under `case (Noimod) 1:` with `Noimod` defaulting to `0`, which is why its
+//! `noise_exponents[9]` read 2.0 through MIR and 0.0 through the CFG.
+//! `bsimsoi_va`'s `noise_psd[1]` is the same shape.
+//!
+//! ## What closes it, and what is left
+//!
+//! The lowering now publishes each magnitude twice — merged at the exit, and as
+//! the site itself computed it — and this builder takes whichever one the
+//! shipped plan holds, read off the shipped program rather than guessed. On
+//! `angelov` and `angelov_gan` that makes every noise entry read the same
+//! double on both routes, thirty comparisons that were not exact before.
+//!
+//! What it does not close is the magnitude whose operands reach the shipped
+//! program through a *variable* assigned outside the guard the source sits
+//! under: `bsimsoi_va`'s `noise_psd[1]` is the case, and [`NoiseMagnitude`]
+//! names what closing it needs. The census asserts that class rather than
+//! measuring it, which is the part that matters for the flip.
 //!
 //! # All or nothing, per module
 //!
@@ -56,12 +85,12 @@
 //! source with no CFG process all refuse the whole module by name — see
 //! [`CfgPlanRefusal`] for the list.
 //!
-//! What is *not* a refusal is a difference the two routes are entitled to:
-//! grouped noise, where the shipped PSD program and the CFG process hold
-//! different quantities on purpose. That is recorded on the report
-//! ([`CfgPlanReport::grouped_noise`]) for the census to classify, because
-//! refusing it would refuse thirty-four of the forty-three shipped modules and
-//! take every entry they *do* agree on down with them.
+//! What is *not* a refusal is a noise magnitude whose site value could not be
+//! hoisted out of its guard. That entry keeps the exit read — the quantity this
+//! route has always lowered — and is counted
+//! ([`CfgPlanReport::noise_guarded_reads`]) for the census to hold to its
+//! weaker criterion. Refusing it instead would take a module's residual and
+//! Jacobian entries down over one noise entry nothing has shown to be wrong.
 //!
 //! # The fallback is loud
 //!
@@ -90,7 +119,7 @@
 //! because "the shipped program is identically zero" is a claim about the
 //! corpus and not a theorem.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::cfg_lanes::scalarize_lanes;
 use super::cfg_program::{CfgRuntimeBindings, lower_cfg_function};
@@ -105,8 +134,9 @@ use super::{JitError, JitResult};
 use crate::canonical_ir::cfg_lower::CfgModel;
 use crate::canonical_ir::cfg_lower::CfgNoiseProcess;
 use crate::canonical_ir::{
-    AdSeed, CanonicalIrArtifact, CfgBinaryOp, CfgFunction, CfgStateAllocation, CfgValueKind,
-    MirModel, ValueId, differentiate, prune_cfg_to_outputs,
+    AdSeed, CanonicalIrArtifact, CfgBinaryOp, CfgBlock, CfgFunction, CfgInstruction,
+    CfgStateAllocation, CfgTerminator, CfgValueKind, MirModel, ValueId, differentiate,
+    prune_cfg_to_outputs,
 };
 use crate::codegen::state_renumbering::StateSlotMapping;
 use crate::codegen::{ColumnAxis, CompiledModel};
@@ -227,24 +257,20 @@ pub(crate) struct CfgPlanReport {
     pub(crate) jacobians: usize,
     pub(crate) reactive_jacobians: usize,
     pub(crate) noise_values: usize,
-    /// Whether this module's noise reaches the runtime as a grouped complex
-    /// injection.
+    /// Noise magnitudes taken at their own site rather than at the exit block,
+    /// so that they hold the unconditional quantity the shipped route holds.
+    /// See [`NoiseMagnitude`].
+    pub(crate) noise_hoisted: usize,
+    /// Noise magnitudes lowered from the exit read while the source is under a
+    /// guard — the class where the two routes can still hold different numbers.
     ///
-    /// It changes what the shipped `psd_program` *is*. Under the flat schema it
-    /// is the syntactic noise power, which is also what the CFG process's `psd`
-    /// value holds; under the grouped schema the routing amplitude is folded
-    /// into the injection instead, and the two are no longer the same quantity.
-    /// Recorded rather than refused, because refusing here would refuse almost
-    /// the whole shipped corpus — measured: thirty-four of the forty-three
-    /// modules carry schema 1 — and the entries that *are* the same quantity on
-    /// those modules would go unmeasured with them.
-    ///
-    /// Written on every build and read only by the census, because production
-    /// asks for [`CfgNoiseScope::Postfix`] and so takes no noise from the CFG
-    /// to classify. The lane that closes the CFG noise slice is what gives this
-    /// a production reader.
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) grouped_noise: bool,
+    /// It is not "different by design": where the shipped magnitude is a
+    /// `LoadVariable`, the slot the guarded noise assignment pass wrote holds
+    /// the same zero the exit read does, and the two agree. What this names is
+    /// the entries where that is not established by construction, and it is
+    /// what the census asserts the weaker of its two noise criteria on. Keyed
+    /// like [`Self::structural_zeros`], so the census names each one.
+    pub(crate) noise_guarded_reads: Vec<CfgPlanEntry>,
     /// Shipped Jacobian and reactive-Jacobian entries the CFG route's liveness
     /// found no value for, given the constant zero its analysis implies. Keyed
     /// so the census can name each one it checks.
@@ -366,6 +392,218 @@ fn derivative_rule_hole(function: &CfgFunction) -> Option<CfgBinaryOp> {
             Some(op)
         }
         _ => None,
+    })
+}
+
+/// Which of a noise process's two magnitudes the plan entry holds.
+///
+/// # The measurement this exists for
+///
+/// A `CfgNoiseProcess` publishes each magnitude twice: read at the exit block,
+/// where the control flow that reached the source has been merged into it, and
+/// as [`CfgNoiseProcessSite`](crate::canonical_ir::cfg_lower::CfgNoiseProcessSite)
+/// — the value the site itself computed, with no merge.
+///
+/// The shipped plan holds neither one consistently, and that is not a reading
+/// of the code but of the corpus. `crate::native::cfg_noise_pins` compiles one
+/// module carrying each shape and reads both routes at one bias: an unguarded
+/// white source, one scaled by a factor, a flicker exponent, and a process
+/// routed into two equations all agree *bit for bit* between the two routes
+/// today. Only a source under a guard disagrees, and there the shipped
+/// behaviour splits:
+///
+/// * where the front end wrote the magnitude operand inline — a literal, a
+///   parameter expression — the shipped `psd_program` is that expression and
+///   the runtime evaluates it **unconditionally**. `angelov`'s `flicker_noise(
+///   NoisePwrG, 2, "gate")` sits under `case (Noimod) 1:` with `Noimod`
+///   defaulting to 0, and its shipped exponent still reads 2.0 while the exit
+///   read is the seeded zero. The site value is the quantity to take.
+/// * where the operand reaches the program through a variable, the shipped
+///   magnitude is that *slot*, filled by the noise assignment pass — and the
+///   CFG route recomputes a variable inline from the definition reaching the
+///   read, which is a different thing under a guard. Hoisting there would put a
+///   recomputed value against a slot read and disagree in the other direction,
+///   so the exit read is taken instead.
+///
+/// So the shipped route is not self-consistent about the guard: whether it
+/// applies is decided by whether a variable happened to carry the operand. This
+/// reads that decision off the shipped program itself, which is the only place
+/// it is recorded, rather than guessing it from the source.
+///
+/// # What is left, named
+///
+/// Taking the exit read for the variable-carried case is a *conservative*
+/// choice and not a proof that the two agree there. It is exact when the
+/// variable is assigned inside the same guard — the slot then holds the zero
+/// the exit read holds — and `bsimsoi_va` is the case where it is not:
+/// `noise_psd[1]`'s operands are assigned outside the guard the source sits
+/// under, so the shipped program evaluates them to `7.19e-28` while the exit
+/// read is the seeded zero. Its cfg-mir line says `noise_hoisted=0
+/// guarded_reads=10`.
+///
+/// Closing that needs the CFG's noise cone to read a variable as the runtime
+/// *slot* rather than as its reaching definition — the `frozen_event_state`
+/// split generalized from event-controlled variables to every variable a noise
+/// magnitude reads — which is a new `CfgValueKind` and a rule for it in the
+/// derivative pass, the interpreter and the block lowering. Until then the
+/// census holds the class to its second criterion, which is what makes the
+/// difference harmless rather than merely unmeasured: see `check_guarded_noise`
+/// in [`crate::native::cfg_mir_census`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NoiseMagnitude {
+    /// The value the site computed, evaluated unconditionally.
+    Site,
+    /// The value read at the exit block, with the activation guard folded in.
+    Exit,
+}
+
+fn noise_magnitude_source(plan: &NativeModelPlan, entry: CfgPlanEntry) -> NoiseMagnitude {
+    let program = match entry {
+        CfgPlanEntry::NoisePsd(source) => plan.noise_psd.get(source),
+        CfgPlanEntry::NoiseExponent(source) => {
+            plan.noise_exponents.get(source).and_then(Option::as_ref)
+        }
+        _ => None,
+    };
+    // Anything but a postfix program is a shape this route did not build, so
+    // the exit read — what it has always lowered — is the conservative answer.
+    let Some(PlanProgram::Postfix(program)) = program else {
+        return NoiseMagnitude::Exit;
+    };
+    if program.ops().iter().any(|op| {
+        matches!(
+            op,
+            NativeOp::LoadVariable(_) | NativeOp::LoadVariableDyn { .. }
+        )
+    }) {
+        NoiseMagnitude::Exit
+    } else {
+        NoiseMagnitude::Site
+    }
+}
+
+/// Whether the body reaches this process on every path.
+///
+/// The lowering writes a process's activation as the constant one at its site
+/// and seeds it with zero in the entry block, so a source no control flow
+/// guards has the constant one and nothing else does.
+fn process_is_unconditional(function: &CfgFunction, active: ValueId) -> bool {
+    matches!(
+        function.value(active).kind,
+        CfgValueKind::RealConstant(value) if value == 1.0
+    )
+}
+
+/// A straight-line copy of `function` carrying every value `roots` reads.
+///
+/// A site value is defined in the block the source was written in, which a
+/// guard may keep off the path to the exit. [`lower_cfg_function`] returns the
+/// value its exit block holds, so it cannot be asked for one defined under a
+/// branch. This builds the function that *can* be asked: one block, the cones
+/// of `roots` in an order that defines each value before it is read, and a
+/// `Return`.
+///
+/// Copying the whole value table keeps every id valid, so a caller holds on to
+/// the roots it already had; the values no root reads are simply pinned to no
+/// block and never emitted.
+///
+/// # What it will not hoist, and why that is not a refusal
+///
+/// A cone containing a block parameter — a merge of two paths — is exactly the
+/// control flow this is trying to leave behind, and a single block cannot carry
+/// it. Such a root is left out and its entry falls back to the exit read, which
+/// is what this route lowered before the site values existed: a magnitude the
+/// two routes may disagree about, never a wrong one. Refusing the module
+/// instead would take its residual and Jacobian entries down over a noise entry
+/// nothing has yet shown to be wrong.
+struct HoistedSites {
+    function: CfgFunction,
+    pinned: HashSet<ValueId>,
+}
+
+impl HoistedSites {
+    /// Whether the single block defines `value`, or `value` is a leaf it may
+    /// read. Either way the function can be asked for it.
+    fn pins(&self, value: ValueId) -> bool {
+        self.pinned.contains(&value)
+    }
+}
+
+fn hoisted_site_function(function: &CfgFunction, roots: &[ValueId]) -> Option<HoistedSites> {
+    if roots.is_empty() {
+        return None;
+    }
+    // Which values the original function defines by an instruction. Everything
+    // else a cone reaches is a leaf, which the block model materializes in the
+    // entry block itself.
+    let mut instruction: HashSet<ValueId> = HashSet::new();
+    for block in &function.blocks {
+        for value in &block.instructions {
+            instruction.insert(value.result);
+        }
+    }
+
+    let mut order: Vec<ValueId> = Vec::new();
+    let mut placed: HashSet<ValueId> = HashSet::new();
+    let mut pinned: HashSet<ValueId> = HashSet::new();
+    for root in roots {
+        // Post-order, iteratively: a compact model's cone is deep enough that
+        // recursion here is a stack-overflow waiting for one more model.
+        let mut stack = vec![(*root, false)];
+        let mut cone = Vec::new();
+        let mut hoistable = true;
+        let mut seen: HashSet<ValueId> = HashSet::new();
+        while let Some((value, expanded)) = stack.pop() {
+            if expanded {
+                if instruction.contains(&value) && !placed.contains(&value) {
+                    cone.push(value);
+                }
+                continue;
+            }
+            if !seen.insert(value) {
+                continue;
+            }
+            if matches!(function.value(value).kind, CfgValueKind::BlockParameter) {
+                hoistable = false;
+                break;
+            }
+            stack.push((value, true));
+            for operand in function.value(value).kind.operands() {
+                stack.push((operand, false));
+            }
+        }
+        if !hoistable {
+            continue;
+        }
+        for value in cone {
+            if placed.insert(value) {
+                order.push(value);
+            }
+        }
+        pinned.insert(*root);
+    }
+    if pinned.is_empty() {
+        return None;
+    }
+    pinned.extend(order.iter().copied());
+
+    let block = CfgBlock {
+        id: crate::canonical_ir::BlockId::from(0usize),
+        params: Vec::new(),
+        instructions: order
+            .into_iter()
+            .map(|result| CfgInstruction { result })
+            .collect(),
+        terminator: CfgTerminator::Return,
+    };
+    Some(HoistedSites {
+        function: CfgFunction {
+            entry: crate::canonical_ir::BlockId::from(0usize),
+            blocks: vec![block],
+            values: function.values.clone(),
+            shapes: function.shapes.clone(),
+        },
+        pinned,
     })
 }
 
@@ -512,10 +750,7 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
     );
     let slots = StateSlotMapping::build(model, &artifact.hir, &artifact.mir);
 
-    let mut report = CfgPlanReport {
-        grouped_noise: model.noise_process_schema >= 1 && !model.noise_sources.is_empty(),
-        ..CfgPlanReport::default()
-    };
+    let mut report = CfgPlanReport::default();
     let node_count = artifact.mir.nodes.len();
 
     // One lowering closure, so every entry reaches the block model by the same
@@ -690,6 +925,10 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
     // models read a `ddx` inside a noise power and only the AD pass resolves
     // one.
     //
+    // Which *value* is lowered is the whole of the noise slice, and
+    // [`noise_magnitude_source`] is where that is decided. See it for the
+    // measurement.
+    //
     // Skipped entirely under `CfgNoiseScope::Postfix`: nothing here would be
     // kept, and running it would only let a noise-only refusal take a module's
     // residual and Jacobian entries down with it.
@@ -705,6 +944,38 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
                         .map(|id| (id, process))
                 })
                 .collect();
+
+            // The magnitudes taken at their own site, gathered before anything
+            // is lowered: they are hoisted together, into one straight-line
+            // copy of the body per function, so a module with eighteen sources
+            // pays for one walk rather than eighteen.
+            let mut site_roots = Vec::new();
+            for (source_index, source) in model.noise_sources.iter().enumerate() {
+                let Some(process) = processes.get(&source.process_id) else {
+                    continue;
+                };
+                let Some(site) = process.site else { continue };
+                if noise_magnitude_source(&plan, CfgPlanEntry::NoisePsd(source_index))
+                    == NoiseMagnitude::Site
+                {
+                    site_roots.push(site.psd);
+                }
+                if let Some(exponent) = site.exponent
+                    && noise_magnitude_source(&plan, CfgPlanEntry::NoiseExponent(source_index))
+                        == NoiseMagnitude::Site
+                {
+                    site_roots.push(exponent);
+                }
+            }
+            let primal_sites = hoisted_site_function(&cfg.function, &site_roots);
+            let scalarized_sites = hoisted_site_function(
+                &scalarized.function,
+                &site_roots
+                    .iter()
+                    .filter_map(|root| scalarized.scalar(*root))
+                    .collect::<Vec<_>>(),
+            );
+
             let mut noise_psd = Vec::with_capacity(model.noise_sources.len());
             let mut noise_exponents = Vec::with_capacity(model.noise_sources.len());
             for (source_index, source) in model.noise_sources.iter().enumerate() {
@@ -717,14 +988,56 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
                         ),
                     )
                 })?;
-                let lower_noise = |value: ValueId,
-                                   entry: CfgPlanEntry,
-                                   report: &mut CfgPlanReport|
+                // Site value where the shipped route computes the magnitude
+                // unconditionally, exit read where it reads a slot the guarded
+                // noise assignment pass wrote. A site value the hoist could not
+                // take falls back to the exit read, which is what this route
+                // has always lowered.
+                let magnitude = |site: Option<ValueId>,
+                                 exit: ValueId,
+                                 entry: CfgPlanEntry,
+                                 report: &mut CfgPlanReport|
                  -> Result<PlanProgram, CfgPlanRefused> {
-                    match lower(&cfg.function, value, entry, report) {
+                    let hoisted = match (site, noise_magnitude_source(&plan, entry)) {
+                        (Some(site), NoiseMagnitude::Site) => primal_sites
+                            .as_ref()
+                            .filter(|function| function.pins(site))
+                            .map(|function| (&function.function, site)),
+                        _ => None,
+                    };
+                    if let Some((function, value)) = hoisted {
+                        report.noise_hoisted += 1;
+                        match lower(function, value, entry, report) {
+                            Ok(program) => return Ok(program),
+                            Err(primal) if primal.class != CfgPlanRefusal::Lowering => {
+                                return Err(primal);
+                            }
+                            // A `ddx` inside the magnitude, resolved only by the
+                            // derivative pass: the same two-pass rule the exit
+                            // read follows, over the hoisted copy.
+                            Err(primal) => {
+                                let resolved = site.and_then(|site| scalarized.scalar(site));
+                                if let Some(resolved) = resolved
+                                    && let Some(function) = scalarized_sites
+                                        .as_ref()
+                                        .filter(|function| function.pins(resolved))
+                                {
+                                    let program =
+                                        lower(&function.function, resolved, entry, report)?;
+                                    report.noise_from_differentiated += 1;
+                                    return Ok(program);
+                                }
+                                return Err(primal);
+                            }
+                        }
+                    }
+                    if !process_is_unconditional(&cfg.function, process.active) {
+                        report.noise_guarded_reads.push(entry);
+                    }
+                    match lower(&cfg.function, exit, entry, report) {
                         Ok(program) => Ok(program),
                         Err(primal) if primal.class == CfgPlanRefusal::Lowering => {
-                            let Some(resolved) = scalarized.scalar(value) else {
+                            let Some(resolved) = scalarized.scalar(exit) else {
                                 return Err(primal);
                             };
                             let program = lower(&scalarized.function, resolved, entry, report)?;
@@ -734,7 +1047,8 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
                         Err(other) => Err(other),
                     }
                 };
-                noise_psd.push(lower_noise(
+                noise_psd.push(magnitude(
+                    process.site.map(|site| site.psd),
                     process.psd,
                     CfgPlanEntry::NoisePsd(source_index),
                     &mut report,
@@ -743,7 +1057,8 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
                 let exponent = match (process.exponent, source.exponent_program.as_ref()) {
                     (Some(exponent), Some(_)) => {
                         report.noise_values += 1;
-                        Some(lower_noise(
+                        Some(magnitude(
+                            process.site.and_then(|site| site.exponent),
                             exponent,
                             CfgPlanEntry::NoiseExponent(source_index),
                             &mut report,
