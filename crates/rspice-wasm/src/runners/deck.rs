@@ -31,8 +31,9 @@ use rspice_core::engine::{
 use rspice_core::execution::result_document::{DcSweepAxisDocument, FftChildReference};
 use rspice_core::execution::{
     AnalysisInstanceId, AnalysisKind, AnalysisResultDocument, AnalysisResultDocumentBuilder,
-    DeckPlan, DeckPlanError, MaterializedRunError, ResultCoordinate, ResultDocumentError,
-    ResultNamespaces, RunCoordinate, RunCoordinateId, SignalUnit,
+    DeckPlan, DeckPlanError, MaterializedRunError, PlannedPostProcess, PostProcessSource,
+    ResultCoordinate, ResultDocumentError, ResultNamespaces, RunCoordinate, RunCoordinateId,
+    SignalUnit,
 };
 use rspice_core::netlist::{
     AnalysisCommand, DcSweepSpec, FftFormat, FreqVariation, MonteCarloDistribution,
@@ -129,7 +130,6 @@ pub fn run_authored_deck_document_with_options_and_abort_detailed(
         })?;
         let result_coordinate = ResultCoordinate::from_run_coordinate(&coordinate);
         let mut periodic = PeriodicOperatingPoints::default();
-        let mut post_process_ordinal = 0usize;
 
         for analysis in analyses {
             ensure_not_aborted(external_abort)?;
@@ -158,7 +158,6 @@ pub fn run_authored_deck_document_with_options_and_abort_detailed(
                     resource_limits,
                 },
                 &mut periodic,
-                &mut post_process_ordinal,
                 external_abort,
             )
             .map_err(name_the_failure)?;
@@ -273,7 +272,6 @@ fn execute_analysis(
     netlist: &Netlist,
     context: AnalysisContext<'_>,
     periodic: &mut PeriodicOperatingPoints,
-    post_process_ordinal: &mut usize,
     abort: &dyn AbortSignal,
 ) -> DetailedWasmResult<Vec<AnalysisResultDocumentBuilder>> {
     let AnalysisContext {
@@ -391,7 +389,6 @@ fn execute_analysis(
                 max_step: *max_step,
                 uic: *uic,
             },
-            post_process_ordinal,
             compression.cloned(),
             resource_limits,
             abort,
@@ -777,7 +774,6 @@ fn transient_builders(
     plan: &DeckPlan,
     id: AnalysisInstanceId,
     card: TransientCard,
-    post_process_ordinal: &mut usize,
     compression: Option<CompressionConfig>,
     resource_limits: ResourceLimits,
     abort: &dyn AbortSignal,
@@ -826,17 +822,24 @@ fn transient_builders(
     spectra
         .try_reserve_exact(result.fft_results.len())
         .map_err(|_| allocation_error("attached FFT spectra"))?;
-    // `.FFT` spectra are attached to a transient rather than planned, so the
-    // canonical `fft-NNN` identities are minted from a one-family plan instead
-    // of being invented here.
-    let fft_ids = post_process_ids(
-        AnalysisKind::Fft,
-        *post_process_ordinal,
-        result.fft_results.len(),
-    )?;
-    *post_process_ordinal = post_process_ordinal
-        .checked_add(result.fft_results.len())
-        .ok_or_else(|| allocation_error("attached FFT identities"))?;
+    // The canonical plan already named every authored `.FFT` card and bound it
+    // to the transient it post-processes, so the identities are read from it
+    // rather than counted a second time here.
+    let fft_ids = plan
+        .post_process_analyses()
+        .iter()
+        .filter(|post| {
+            post.parent() == id && matches!(post.source(), PostProcessSource::Fft { .. })
+        })
+        .map(PlannedPostProcess::id)
+        .collect::<Vec<_>>();
+    if fft_ids.len() != result.fft_results.len() {
+        return Err(document_error(format!(
+            "the canonical plan names {} .FFT spectra for {id} but the transient produced {}",
+            fft_ids.len(),
+            result.fft_results.len()
+        )));
+    }
     for (fft_id, spectrum) in fft_ids.into_iter().zip(&result.fft_results) {
         ensure_not_aborted(abort)?;
         children.push(FftChildReference {
@@ -900,33 +903,6 @@ fn transient_builders(
     builders.extend(spectra);
     builders.extend(harmonics);
     Ok(builders)
-}
-
-/// Mint canonical instance identities for a post-process family the authored
-/// plan does not carry.
-///
-/// `AnalysisInstanceId` is deliberately not constructible outside core, so the
-/// identities come from the core's own one-family plan constructor rather than
-/// from a widened constructor or a locally invented ordinal scheme.
-fn post_process_ids(
-    kind: AnalysisKind,
-    already_minted: usize,
-    count: usize,
-) -> DetailedWasmResult<Vec<AnalysisInstanceId>> {
-    if count == 0 {
-        return Ok(Vec::new());
-    }
-    let total = already_minted
-        .checked_add(count)
-        .ok_or_else(|| allocation_error("post-process analysis identities"))?;
-    let plan = DeckPlan::for_direct_analyses(kind, total).map_err(deck_plan_wasm_error)?;
-    let mut ids = Vec::new();
-    ids.try_reserve_exact(count)
-        .map_err(|_| allocation_error("post-process analysis identities"))?;
-    for planned in plan.analyses().iter().skip(already_minted) {
-        ids.push(planned.id());
-    }
-    Ok(ids)
 }
 
 /// Which authored analyses this build cannot execute, and why.
