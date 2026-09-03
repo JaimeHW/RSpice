@@ -374,6 +374,11 @@ enum LeafKey {
     NodePotential(NodeId),
     BranchFlow(BranchId),
     BranchUnknownFlow(BranchUnknownId),
+    ContributedCurrent {
+        pos: Option<NodeId>,
+        neg: Option<NodeId>,
+        through: ContributionId,
+    },
     NoiseProcess(u32),
 }
 
@@ -416,6 +421,17 @@ struct CfgLowerer<'a> {
     /// when that leaf is what a read of the variable means. Empty unless
     /// [`Self::frozen_event_state`].
     frozen_event_states: HashMap<VariableId, ValueId>,
+    /// See [`CfgLowerMode::frozen_contribution_current`].
+    frozen_contribution_current: bool,
+    /// The current contributions the walk has already completed, in walk order.
+    ///
+    /// Walk order, not reachability: a contribution under an untaken guard has
+    /// still *happened* as far as a probe below it is concerned, because the
+    /// storage the probe reads holds that contribution's slot either way — zero
+    /// when the guard did not take. That is what the shipped route does, whose
+    /// prior-current probe set grows by equation index and knows nothing about
+    /// guards, and matching it here is the whole point.
+    completed_current_contributions: Vec<ContributionId>,
     metadata_assignment_value: bool,
     /// Whether the expression being lowered is a contribution's right-hand
     /// side. Verilog-AMS 2023 section 4.5.12 requires a strictly positive
@@ -803,6 +819,35 @@ struct CfgLowerMode {
     /// [`CfgModel::event_state_candidates`] reads, which only the generated
     /// backend consumes.
     frozen_event_state: bool,
+    /// Whether a probe of a branch nothing solves for is the frozen
+    /// [`CfgValueKind::ContributedCurrent`] leaf rather than the running sum of
+    /// the contributions themselves.
+    ///
+    /// # Which consumer owns the contributed current
+    ///
+    /// The same question `frozen_event_state` answers, with the same answer: it
+    /// depends on whether the consumer computes the other equation.
+    ///
+    /// A generated device does. Its residual for one branch and its probe of
+    /// another are two expressions in one emitted function, so inlining the
+    /// contribution is not just correct, it is the only thing that *is* — the
+    /// device has no per-contribution current storage to read instead.
+    ///
+    /// An executable plan does not. It keeps the shipped route's equation
+    /// order and its `currents` storage, so by the time a later entry runs, the
+    /// earlier contribution's current is a number the runtime is holding, and
+    /// `crate::native`'s `lower_branch_access` reads it — never recomputes it.
+    /// The difference is a whole matrix and not a rounding: inlining makes the
+    /// probe differentiable, so
+    /// `native_device_stamps_internal_node_current_probe_alias_jacobian_without_fallback`
+    /// counted 4.5 where the shipped route counts 2.5.
+    ///
+    /// So the executable lowering emits the leaf, whose derivative is zero, and
+    /// [`crate::native::cfg_program`] translates it to the same
+    /// `LoadCurrent`/`LoadPriorCurrent` the shipped route chose. The two routes
+    /// then agree by identity of leaf and op, which is the standard the
+    /// `$port_connected` and event-state splits were held to.
+    frozen_contribution_current: bool,
 }
 
 impl CfgLowerMode {
@@ -821,6 +866,7 @@ impl CfgLowerMode {
         per_instance_ports: false,
         lower_prologue: false,
         frozen_event_state: false,
+        frozen_contribution_current: false,
     };
     #[cfg(any(feature = "native", feature = "wasm-jit"))]
     const EXECUTABLE: Self = Self {
@@ -828,6 +874,7 @@ impl CfgLowerMode {
         per_instance_ports: true,
         lower_prologue: true,
         frozen_event_state: true,
+        frozen_contribution_current: true,
     };
     /// Raw grouped-noise metadata is lowered for the generated backend and is
     /// part of the same frozen output, so it stays with `GENERATED` here.
@@ -836,6 +883,7 @@ impl CfgLowerMode {
         per_instance_ports: true,
         lower_prologue: false,
         frozen_event_state: false,
+        frozen_contribution_current: false,
     };
 }
 
@@ -877,6 +925,8 @@ impl<'a> CfgLowerer<'a> {
             lower_prologue: mode.lower_prologue,
             frozen_event_state: mode.frozen_event_state,
             frozen_event_states: HashMap::new(),
+            frozen_contribution_current: mode.frozen_contribution_current,
+            completed_current_contributions: Vec::new(),
             metadata_assignment_value: false,
             zi_direct_assignment: false,
             diagnostics: Vec::new(),
@@ -1191,6 +1241,14 @@ impl<'a> CfgLowerer<'a> {
         // in the same block, so which runs first cannot change what either sees,
         // and this order keeps the contribution itself the first thing here.
         self.noise_sources(contribution.id, contribution.expression.id);
+
+        // After the expression, so a flow probe *inside* this contribution
+        // reads what came before it and not itself — which is the read the
+        // shipped route allows and the one every model that senses its own
+        // terminal current writes.
+        if contribution.kind == HirContributionKind::Current {
+            self.completed_current_contributions.push(contribution.id);
+        }
     }
 
     fn activate_contribution(&mut self, contribution: ContributionId) {
@@ -2577,24 +2635,15 @@ impl<'a> CfgLowerer<'a> {
     /// HICUM's and BJT505's operating-point sections. Seven of the nine models
     /// that did not lower were this one construct.
     fn contributed_flow(&mut self, pos: Option<NodeId>, neg: Option<NodeId>) -> Option<ValueId> {
-        let contributions: Vec<(ContributionId, bool)> = self
-            .mir
-            .equations
-            .iter()
-            .filter(|equation| equation.kind == MirEquationKind::Current)
-            .filter_map(|equation| {
-                let branch = &equation.branch;
-                if branch.pos_node == pos && branch.neg_node == neg {
-                    return Some((equation.contribution, false));
-                }
-                if branch.pos_node == neg && branch.neg_node == pos {
-                    return Some((equation.contribution, true));
-                }
-                None
-            })
-            .collect();
+        let contributions = self.branch_current_contributions(pos, neg);
         if contributions.is_empty() {
             return None;
+        }
+
+        if self.frozen_contribution_current
+            && let Some(frozen) = self.frozen_contributed_flow(pos, neg, &contributions)
+        {
+            return Some(frozen);
         }
 
         let mut total: Option<ValueId> = None;
@@ -2612,6 +2661,66 @@ impl<'a> CfgLowerer<'a> {
             });
         }
         total
+    }
+
+    /// Every current contribution to one branch, with whether it drives the
+    /// branch the way the probe reads it.
+    fn branch_current_contributions(
+        &self,
+        pos: Option<NodeId>,
+        neg: Option<NodeId>,
+    ) -> Vec<(ContributionId, bool)> {
+        self.mir
+            .equations
+            .iter()
+            .filter(|equation| equation.kind == MirEquationKind::Current)
+            .filter_map(|equation| {
+                let branch = &equation.branch;
+                if branch.pos_node == pos && branch.neg_node == neg {
+                    return Some((equation.contribution, false));
+                }
+                if branch.pos_node == neg && branch.neg_node == pos {
+                    return Some((equation.contribution, true));
+                }
+                None
+            })
+            .collect()
+    }
+
+    /// The same probe, for a consumer that reads the contribution's current out
+    /// of storage instead of recomputing it.
+    ///
+    /// See [`CfgLowerMode::frozen_contribution_current`] for why the two
+    /// consumers differ.
+    ///
+    /// `None` when the walk has completed no matching contribution yet, and the
+    /// caller then takes the accumulator sum it always did. That is not a
+    /// second answer to the same question: every accumulator in that sum still
+    /// holds the entry block's zero, so the value and its derivative are the
+    /// zero the language gives a forward read, and there is no storage slot to
+    /// freeze it against — the shipped route registers a probe only for a
+    /// contribution it has already lowered. Refusing instead would drop a
+    /// module for an expression that is constant.
+    fn frozen_contributed_flow(
+        &mut self,
+        pos: Option<NodeId>,
+        neg: Option<NodeId>,
+        contributions: &[(ContributionId, bool)],
+    ) -> Option<ValueId> {
+        let through = *self
+            .completed_current_contributions
+            .iter()
+            .rev()
+            .find(|completed| {
+                contributions
+                    .iter()
+                    .any(|(contribution, _)| contribution == *completed)
+            })?;
+        Some(self.leaf(
+            LeafKey::ContributedCurrent { pos, neg, through },
+            CfgValueType::Real,
+            CfgValueKind::ContributedCurrent { pos, neg, through },
+        ))
     }
 
     /// The current entering the module at a terminal — `I(<p>)`.
@@ -2645,6 +2754,11 @@ impl<'a> CfgLowerer<'a> {
         // `self` while the builder is being written.
         let mir = self.mir;
         let mut terms: Vec<(ValueId, bool)> = Vec::new();
+        // Which branches this sum has already taken whole, so a branch carrying
+        // two contributions contributes its total once. Only the frozen route
+        // groups: the accumulator route sums the contributions themselves, and
+        // each of those is one term.
+        let mut frozen_branches: HashSet<(Option<NodeId>, Option<NodeId>)> = HashSet::new();
         for equation in &mir.equations {
             if equation.kind != MirEquationKind::Current {
                 continue;
@@ -2656,6 +2770,26 @@ impl<'a> CfgLowerer<'a> {
             } else {
                 continue;
             };
+            let branch = (equation.branch.pos_node, equation.branch.neg_node);
+            if self.frozen_contribution_current {
+                if frozen_branches.contains(&branch) {
+                    continue;
+                }
+                // The whole branch, through everything contributed to it so
+                // far, is one leaf — the same one a direct probe of that branch
+                // would read. `None` means nothing has been contributed to it
+                // yet, and then the accumulators below are still the entry
+                // block's zero, which is the same number with no storage to
+                // freeze it against.
+                let contributions = self.branch_current_contributions(branch.0, branch.1);
+                if let Some(frozen) =
+                    self.frozen_contributed_flow(branch.0, branch.1, &contributions)
+                {
+                    frozen_branches.insert(branch);
+                    terms.push((frozen, reversed));
+                    continue;
+                }
+            }
             let variable = CfgVariable::Residual(equation.contribution);
             let accumulated = self.builder.read_variable(variable, self.block)?;
             terms.push((accumulated, reversed));

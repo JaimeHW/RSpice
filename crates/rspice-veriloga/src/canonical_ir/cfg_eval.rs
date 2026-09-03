@@ -739,6 +739,19 @@ impl<S: CfgScalar> Evaluator<'_, S> {
                     "branch unknown",
                     usize::from(unknown),
                 ))?,
+            // Frozen contribution currents are storage an executable plan
+            // keeps and this interpreter does not: it evaluates one body to a
+            // number and has no per-contribution slots to read. The lowering
+            // that produces them is the executable one, which never routes
+            // here, so this is a missing input rather than a case to answer —
+            // and answering it with the contribution's own expression would
+            // undo exactly the freezing the kind exists to state.
+            CfgValueKind::ContributedCurrent { through, .. } => {
+                return Err(CfgEvalError::MissingInput(
+                    "contributed current",
+                    usize::from(through),
+                ));
+            }
             // Noise primitives have no large-signal value. Their unit
             // derivative is materialized only by the AD pass.
             CfgValueKind::NoiseProcess(_) => S::from_f64(0.0),

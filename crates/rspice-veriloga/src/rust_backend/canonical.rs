@@ -427,6 +427,23 @@ fn kernel_region_metrics(
             CfgValueKind::BranchUnknownFlow(branch) => {
                 write!(out, "unknown:{}", unknown_indices[branch])
             }
+            // Only the executable lowering emits one, and this signature
+            // describes what the generated backend emits. Written out in full
+            // anyway, because a signature that is total cannot collide two
+            // different values onto one string.
+            CfgValueKind::ContributedCurrent { pos, neg, through } => {
+                let endpoint = |node: &Option<NodeId>| match node {
+                    Some(node) => node_indices[node].to_string(),
+                    None => "ground".to_string(),
+                };
+                write!(
+                    out,
+                    "contributed-current:{}:{}:{}",
+                    endpoint(pos),
+                    endpoint(neg),
+                    usize::from(*through)
+                )
+            }
             CfgValueKind::NoiseProcess(process) => write!(out, "noise-process:{process}"),
             CfgValueKind::Ddt { operator, .. } => {
                 write!(out, "ddt:{}", operator_indices[operator])

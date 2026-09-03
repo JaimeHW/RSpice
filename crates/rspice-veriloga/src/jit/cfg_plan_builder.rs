@@ -144,12 +144,6 @@ pub(crate) enum CfgPlanRefusal {
     ///
     /// See [`DERIVATIVE_RULE_HOLES`] for the list and the rules that empty it.
     DerivativeRuleMissing,
-    /// The module contains a construct the two routes are known to disagree
-    /// about, so the CFG plan would build and be wrong.
-    ///
-    /// See [`route_divergence`] for the list, each entry with the measurement
-    /// that put it there.
-    KnownDivergence,
     /// The lane scalarizer refused the differentiated body.
     Scalarize,
     /// A value the plan needs has no scalar after lane scalarization.
@@ -180,7 +174,6 @@ impl CfgPlanRefusal {
             Self::StateAllocation => "state-allocation",
             Self::Differentiate => "differentiate",
             Self::DerivativeRuleMissing => "derivative-rule-missing",
-            Self::KnownDivergence => "known-divergence",
             Self::Scalarize => "scalarize",
             Self::NoScalar => "no-scalar",
             Self::Lowering => "lowering",
@@ -362,109 +355,6 @@ pub(crate) fn derivative_seeds(cfg: &CfgModel, mir: &MirModel) -> (Vec<AdSeed>, 
 /// pass, emits nothing that depends on the hole today.
 const DERIVATIVE_RULE_HOLES: &[CfgBinaryOp] = &[CfgBinaryOp::Hypot, CfgBinaryOp::Atan2];
 
-/// The construct in this module the two routes are known to disagree about, if
-/// there is one.
-///
-/// # Why a list rather than an argument
-///
-/// The CFG is a second lowering of the same source, and the two lowerings do
-/// not agree everywhere. Where they disagree the CFG plan still *builds* — it
-/// simply computes a different number — so nothing below this function can
-/// catch it. Each entry here was found by an estate test that the flip turned
-/// red, and each one is a wrong Jacobian or a wrong residual, not a rounding
-/// difference.
-///
-/// Four entries have come off the list, and how they came off is the pattern
-/// the rest are meant to follow — the divergence was a lowering decision one
-/// route had and the other did not, and the fix was to give the CFG route the
-/// same decision rather than a better screen. An **event-controlled variable**
-/// was applied twice on this route: the assignment pass this plan keeps had
-/// already run the guard-folded event body into the variable's slot, and the
-/// CFG then applied it again on top of the leaf that reads that slot, counting
-/// 2.0 where the shipped route counts 1.0. A read of one is now the leaf
-/// itself, which is the `LoadVariable` the postfix route's own read lowers to —
-/// `CfgLowerMode::frozen_event_state` in `canonical_ir::cfg_lower` is where the
-/// two consumers part company, and why.
-///
-/// A **prologue-only definition** — a localparam or a declaration initializer
-/// the body reads — took Verilog-AMS zero because the CFG had no definition of
-/// it at all; W-F4b gave the executable lowering the module prologue, so the
-/// entry block writes what the initializer wrote and the body overwrites it
-/// exactly where a later statement would
-/// ([`crate::canonical_ir::HirModel::prologue_statements`]).
-///
-/// `$port_connected` folded to `1.0`
-/// because the generated backend builds every instance it evaluates;
-/// [`CfgModel::from_hir_for_executable_backend`](crate::canonical_ir::CfgModel::from_hir_for_executable_backend)
-/// is where a backend that cannot promise that says so, and the fold stays
-/// where it is earned. `$simparam` with no source fallback took zero where the
-/// bytecode route folded the language's default; both now read
-/// `simparam_source_default`. What remains:
-///
-/// * **A contribution-current probe.** `I(p, mid)` read inside another
-///   contribution: the MIR route reads the current the other equation wrote and
-///   treats it as frozen, and the CFG route inlines that equation and
-///   differentiates through it, so the two Jacobians are different matrices —
-///   `native_device_stamps_internal_node_current_probe_alias_jacobian_without_fallback`
-///   measured 4.5 against 2.5 on one entry. Detected as a shipped value entry
-///   with a non-empty contribution-current read set, which is what "this entry
-///   probes a current" means in the plan.
-///
-///   Closing it means the same thing closing the other four meant: give the
-///   CFG route the decision the MIR route made. The MIR route's read is
-///   `NativeOp::LoadCurrent(pair)` or `LoadPriorCurrent(index)`, chosen in
-///   [`crate::native`]'s `lower_branch_access` from the compiled model's
-///   terminal pairing — knowledge the CFG level must not have. So the leaf
-///   [`CfgLowerer::contributed_flow`](crate::canonical_ir::cfg_lower) emits has
-///   to name the node pair canonically and
-///   [`CfgRuntimeBindings`](crate::jit::cfg_program::CfgRuntimeBindings) has to
-///   carry the translation, exactly as it already carries the branch-unknown
-///   and event-state maps. The derivative then needs no rule: a leaf's
-///   derivative is zero, which is what "frozen" means. The generated backend
-///   keeps inlining — it has no prior-current runtime to read.
-///
-/// # This list is empirical, and that is a bound on what it is worth
-///
-/// It names what the estate's tests exposed, not what a proof of the CFG
-/// route's soundness would name. The instrument that would bound the rest is
-/// the forty-three-module CFG-versus-MIR census, which has never run past nine
-/// modules. Until it does, a construct no test covers can still diverge, and
-/// this function will not say so.
-fn route_divergence(function: &CfgFunction, postfix: &NativeModelPlan) -> Option<String> {
-    let dependencies = &postfix.current_dependencies;
-    let flat = |rows: &[Vec<usize>]| rows.iter().any(|set| !set.is_empty());
-    let nested = |rows: &[Vec<Vec<usize>>]| {
-        rows.iter()
-            .flatten()
-            .any(|set: &Vec<usize>| !set.is_empty())
-    };
-    let probes_a_current = !dependencies.assignment_current_pairs.is_empty()
-        || !dependencies.assignment_prior_currents.is_empty()
-        || !dependencies.post_assignment_current_pairs.is_empty()
-        || !dependencies.post_assignment_prior_currents.is_empty()
-        || flat(&dependencies.stamp_values)
-        || flat(&dependencies.stamp_value_prior_currents)
-        || nested(&dependencies.jacobians)
-        || nested(&dependencies.jacobian_prior_currents)
-        || nested(&dependencies.reactive_jacobians)
-        || nested(&dependencies.reactive_jacobian_prior_currents);
-    if probes_a_current {
-        return Some(
-            "a shipped value entry probes a contribution current, which the MIR route freezes \
-             and the CFG route differentiates through"
-                .to_string(),
-        );
-    }
-    function.values.iter().find_map(|value| match value.kind {
-        CfgValueKind::BranchFlow(_) => Some(
-            "a branch-flow probe is frozen by the MIR route and differentiated through by the \
-             CFG route"
-                .to_string(),
-        ),
-        _ => None,
-    })
-}
-
 /// The first operation of `function` the derivative pass has no rule for.
 fn derivative_rule_hole(function: &CfgFunction) -> Option<CfgBinaryOp> {
     function.values.iter().find_map(|value| match value.kind {
@@ -577,10 +467,6 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
             format!("the CFG derivative pass has no rule for {op:?}"),
         ));
     }
-    if let Some(divergence) = route_divergence(&cfg.function, &plan) {
-        return Err(refuse(CfgPlanRefusal::KnownDivergence, divergence));
-    }
-
     let (seeds, correction_lane) = derivative_seeds(&cfg, &artifact.mir);
     let mut differentiated = differentiate(&cfg.function, &seeds)
         .map_err(|error| refuse(CfgPlanRefusal::Differentiate, format!("{error:?}")))?;
@@ -968,29 +854,58 @@ pub(crate) enum PlanRoute {
 /// rejected step (2.0 against 1.0), and `hypot`/`atan2` under a `ddx`, where
 /// the scalar derivative rules fall through to a zero.
 ///
-/// W-F4 *closed* the first two rather than screening them, and
-/// [`a_closed_divergence_takes_the_cfg_route`] is where they moved to:
-/// `$port_connected` is a runtime leaf for a backend that evaluates instances
-/// it did not build, and `$simparam` reads the same default table on both
-/// routes. W-F4b closed two more, the way this section says to: a body read of
-/// a **prologue-only definition** now sees the prologue, evaluated into the
-/// entry block, and a read of an **event-controlled variable** is the entry
-/// block's leaf rather than a second application of the event body.
-/// [`route_divergence`] and [`DERIVATIVE_RULE_HOLES`] screen the other two, and
-/// with them the estate is green — `--test-threads=1`, `--features native`,
-/// `--no-fail-fast`, fifty-seven test binaries, exit 0 with this constant
-/// reading `Cfg`.
+/// Every one of them has since been *closed* rather than screened, and
+/// [`a_closed_divergence_takes_the_cfg_route`] is where they moved to. The
+/// pattern each followed is the same one: the divergence was a lowering
+/// decision one route had and the other did not, and the fix was to give the
+/// CFG route the same decision.
 ///
-/// The fallback census taken on that run, against W-F4's and W-F3c's:
+/// * `$port_connected` folded to `1.0` because the generated backend builds
+///   every instance it evaluates. It is a runtime leaf for a backend that
+///   cannot promise that —
+///   [`CfgModel::from_hir_for_executable_backend`](crate::canonical_ir::CfgModel::from_hir_for_executable_backend)
+///   is where the two consumers part company — and `$simparam` with no source
+///   now reads the same `simparam_source_default` table on both routes. (W-F4)
+/// * A **prologue-only definition** — a localparam or a declaration
+///   initializer the body reads — took Verilog-AMS zero because the CFG had no
+///   definition of it at all. The executable lowering now evaluates
+///   [`HirModel::prologue_statements`](crate::canonical_ir::HirModel) into the
+///   entry block. (W-F4b)
+/// * An **event-controlled variable** was applied twice: the assignment pass
+///   this plan keeps had already run the guard-folded event body into the
+///   variable's slot, and the CFG applied it again on top of the leaf that
+///   reads that slot, counting 2.0 where the shipped route counts 1.0. A read
+///   of one is now the leaf itself, which is the `LoadVariable` the postfix
+///   route's own read lowers to. (W-F4b)
+/// * A **contribution-current probe** — `I(p, mid)` read inside another
+///   contribution — was frozen by the MIR route and inlined and differentiated
+///   through by the CFG route, so the two Jacobians were different matrices:
+///   `native_device_stamps_internal_node_current_probe_alias_jacobian_without_fallback`
+///   measured 4.5 against 2.5 on one entry.
+///   [`CfgValueKind::ContributedCurrent`](crate::canonical_ir::CfgValueKind)
+///   names the probe's endpoints canonically and the contribution it was taken
+///   after;
+///   [`CfgRuntimeBindings`](crate::native::cfg_program::CfgRuntimeBindings)
+///   carries the translation to the `LoadCurrent(pair)` or summed
+///   `LoadPriorCurrent(index)` that `lower_branch_access` chose — the same op,
+///   the same order, the same signs — and a leaf's derivative is zero, which is
+///   what frozen means. Pinned by
+///   [`a_contribution_current_probe_reads_the_shipped_routes_storage`]. (W-F5)
+///
+/// So there is no divergence screen any more, and no refusal class for one.
+/// [`DERIVATIVE_RULE_HOLES`] screens what is left, which is a construct one
+/// route cannot lower rather than one they lower differently.
+///
+/// The fallback census, W-F3c through W-F5:
 ///
 /// ```text
-///                          W-F3c   W-F4  W-F4b
-/// lowering                    63     63     63
-/// cfg-lowering                24     24     24
-/// known-divergence            28     15     11
-/// derivative-rule-missing      7      7      7
-///                            ---    ---    ---
-///                            122    109    105
+///                          W-F3c   W-F4  W-F4b   W-F5
+/// lowering                    63     63     63     63
+/// cfg-lowering                24     24     24     24
+/// known-divergence            28     15     11      0
+/// derivative-rule-missing      7      7      7      7
+///                            ---    ---    ---    ---
+///                            122    109    105     94
 /// ```
 ///
 /// W-F4's thirteen were its two closed constructs and the array screen's
@@ -998,11 +913,10 @@ pub(crate) enum PlanRoute {
 /// module's arrays, so `polysum`, `gsel`, `desc` and `lpsize` — which declare
 /// arrays and fill every element inside the analog block — took the CFG route
 /// from W-F4 on. W-F4b's four are `cinit`, whose array really is filled by a
-/// declaration initializer, and the three event-controlled variables. Every one
-/// of the eleven left is a contribution-current probe: that class is now the
-/// whole of what [`route_divergence`] names.
+/// declaration initializer, and the three event-controlled variables. W-F5's
+/// eleven were the whole contribution-current class.
 ///
-/// # The screen is empirical, and that is a bound on what it is worth
+/// # The screen was empirical, and that is a bound on what it is worth
 ///
 /// It names what about twelve hundred tests happened to expose, not what a
 /// proof would name. W-F4 went looking for what they did not: a module-scope
@@ -1314,9 +1228,10 @@ endmodule
     /// A construct that *was* a known divergence and no longer is takes the CFG
     /// route, and takes it for the values the route owns.
     ///
-    /// The pin the closed entries move to when they come off
-    /// [`route_divergence`]. Refusing one of these again — by reinstating a
-    /// screen, or by a lowering change that makes the construct unbuildable —
+    /// The pin every closed entry moved to as it came off the divergence
+    /// screen, which is why there is no screen left. Refusing one of these
+    /// again — by reinstating one, or by a lowering change that makes the
+    /// construct unbuildable —
     /// fails here rather than passing quietly as a fallback, which is the only
     /// way a closed divergence can regress without being noticed.
     ///
@@ -1440,6 +1355,73 @@ module cfg_closed_guard(p, n);
 endmodule
 "#,
             ),
+            // The contribution-current probe, in each of the four shapes the
+            // estate had of it. Their storage is pinned by
+            // [`a_contribution_current_probe_reads_the_shipped_route_s_storage`]
+            // and their numbers by the `native_contract` device tests, which
+            // run whatever [`DEFAULT_PLAN_ROUTE`] says.
+            (
+                "current-probe-terminal-pair",
+                r#"
+module cfg_closed_current_probe(p, n);
+  inout p, n;
+  electrical p, n;
+  analog begin
+    I(p, n) <+ V(p, n);
+    I(p, n) <+ I(p, n) * 0.1;
+  end
+endmodule
+"#,
+            ),
+            (
+                "current-probe-internal-node",
+                r#"
+module cfg_closed_internal_current_probe(p, n);
+  inout p, n;
+  electrical p, n;
+  electrical mid;
+  analog begin
+    I(p, mid) <+ V(p, mid);
+    I(p) <+ I(p, mid) * V(p);
+  end
+endmodule
+"#,
+            ),
+            (
+                "current-probe-named-branch",
+                r#"
+module cfg_closed_named_current_probe(p, n);
+  inout p, n;
+  electrical p, n, sense_node;
+  branch (sense_node) sense;
+  analog begin
+    I(sense) <+ V(p, n);
+    I(p, n) <+ 2.0 * I(sense);
+  end
+endmodule
+"#,
+            ),
+            // A probe read back into a variable rather than into a residual.
+            // The assignment passes stay postfix on this route, so what this
+            // pins is that carrying the probe in the CFG at all no longer
+            // refuses the module.
+            (
+                "current-probe-in-an-assignment",
+                r#"
+module cfg_closed_assigned_current_probe(p, n);
+  inout p, n;
+  electrical p, n, x;
+  real sensed, reverse, port_n;
+  analog begin
+    I(x, n) <+ 2.0 * V(p, n);
+    I(x, n) <+ 1.0;
+    sensed = I(x, n);
+    reverse = I(n, x);
+    port_n = I(<n>);
+  end
+endmodule
+"#,
+            ),
         ];
         for (case, source) in cases {
             let (model, artifact) = compile(source);
@@ -1458,6 +1440,152 @@ endmodule
                 };
                 assert_eq!(form, expected, "{case}: {field} entries are {expected}");
             }
+        }
+    }
+
+    /// A contribution-current probe reads the storage the shipped route reads,
+    /// and nothing of the equation that filled it.
+    ///
+    /// The identity half of the closure, and the reason the class is closed
+    /// rather than bounded. The two routes are held to two things here.
+    ///
+    /// *The same storage.* A plan's current read-sets are recomputed from the
+    /// programs it actually carries — see the `read_set` calls above — so the
+    /// CFG plan's sets are a statement about the block programs and the postfix
+    /// plan's are a statement about the streams. Equal sets mean the two routes
+    /// load the same slots for the same entries, which is what
+    /// [`CfgRuntimeBindings`](crate::native::cfg_program::CfgRuntimeBindings)
+    /// is translating for.
+    ///
+    /// *Frozen, not recomputed.* The read-sets would also be equal if the CFG
+    /// program loaded the slot and then went on to inline the equation anyway,
+    /// so the second assertion is over the instructions: the entry holds the
+    /// load and holds nothing the inlined equation would have brought with it.
+    /// That is the assertion the 4.5-against-2.5 Jacobian was a symptom of —
+    /// `native_device_stamps_internal_node_current_probe_alias_jacobian_without_fallback`
+    /// in `native_contract` measures the matrix itself, on whichever route
+    /// [`DEFAULT_PLAN_ROUTE`] names.
+    #[test]
+    fn a_contribution_current_probe_reads_the_shipped_routes_storage() {
+        use crate::jit::expr::{NativeOp, VoltageNode};
+        use crate::jit::plan_program::PlanProgram;
+
+        // A two-terminal probe of a pair of terminals: the shipped route reads
+        // the pair's own running total, and `I(p, n)` on terminals 0 and 1 of a
+        // two-terminal module is pair `0 * (2 + 1) + 1`.
+        let terminal_pair = r#"
+module cfg_probe_terminal_pair(p, n);
+  inout p, n;
+  electrical p, n;
+  analog begin
+    I(p, n) <+ V(p, n);
+    I(p, n) <+ I(p, n) * 0.1;
+  end
+endmodule
+"#;
+        // A probe with an internal endpoint, which has no pair total, so the
+        // shipped route reads the contributing equation's own slot. The
+        // fixture is `native_internal_current_probe_alias_jacobian`, whose
+        // Jacobian is where the divergence was measured.
+        let internal_node = r#"
+module cfg_probe_internal_node(p, n);
+  inout p, n;
+  electrical p, n;
+  electrical mid;
+  analog begin
+    I(p, mid) <+ V(p, mid);
+    I(p) <+ I(p, mid) * V(p);
+  end
+endmodule
+"#;
+
+        for (case, source, expected, forbidden) in [
+            (
+                "terminal-pair",
+                terminal_pair,
+                NativeOp::LoadCurrent(1),
+                // Inlining `I(p, n)` would bring the first equation's
+                // `V(p, n)` with it, and the second equation reads no
+                // potential of its own.
+                "a node potential" as &str,
+            ),
+            (
+                "internal-node",
+                internal_node,
+                NativeOp::LoadPriorCurrent(0),
+                // This equation does read `V(p)`, so what inlining would add
+                // is the internal node the probed branch ends on.
+                "the internal node's potential",
+            ),
+        ] {
+            let (model, artifact) = compile(source);
+            let (cfg, refused) =
+                build_default_model_plan_reported(&model, &artifact, PlanRoute::Cfg)
+                    .unwrap_or_else(|error| panic!("{case}: the CFG plan builds: {error}"));
+            assert!(
+                refused.is_none(),
+                "{case}: a contribution-current probe is no longer a divergence: {refused:?}"
+            );
+            let postfix = build_model_plan_with_canonical_ir(&model, &artifact)
+                .unwrap_or_else(|error| panic!("{case}: the postfix plan builds: {error}"));
+
+            let cfg_reads = &cfg.current_dependencies;
+            let postfix_reads = &postfix.current_dependencies;
+            assert_eq!(
+                (
+                    &cfg_reads.stamp_values,
+                    &cfg_reads.stamp_value_prior_currents
+                ),
+                (
+                    &postfix_reads.stamp_values,
+                    &postfix_reads.stamp_value_prior_currents
+                ),
+                "{case}: the two routes read the same current storage for every residual"
+            );
+            assert_eq!(
+                (&cfg_reads.jacobians, &cfg_reads.jacobian_prior_currents),
+                (
+                    &postfix_reads.jacobians,
+                    &postfix_reads.jacobian_prior_currents
+                ),
+                "{case}: the two routes read the same current storage for every Jacobian entry"
+            );
+
+            // The probing equation is the second one, and it is the entry the
+            // structural claim is about.
+            let PlanProgram::Blocks(probe) = &cfg.stamp_values[1] else {
+                panic!("{case}: the CFG route's residuals are block programs");
+            };
+            let ops: Vec<NativeOp> = probe
+                .ssa()
+                .instructions()
+                .iter()
+                .map(|instruction| instruction.op())
+                .collect();
+            assert!(
+                ops.contains(&expected),
+                "{case}: the probing residual loads the frozen current {expected:?}: {ops:?}"
+            );
+            let inlined = ops.iter().any(|op| match (case, op) {
+                ("terminal-pair", NativeOp::LoadVoltage { .. }) => true,
+                (
+                    "internal-node",
+                    NativeOp::LoadVoltage {
+                        pos: VoltageNode::Internal(_),
+                        ..
+                    }
+                    | NativeOp::LoadVoltage {
+                        neg: VoltageNode::Internal(_),
+                        ..
+                    },
+                ) => true,
+                _ => false,
+            });
+            assert!(
+                !inlined,
+                "{case}: the probing residual holds the load and not the equation behind it, so \
+                 it must not read {forbidden}: {ops:?}"
+            );
         }
     }
 
@@ -1657,45 +1785,36 @@ endmodule
         );
     }
 
-    /// Each construct in [`route_divergence`] falls the module back, and says
-    /// which construct did it.
+    /// A declared branch nothing contributes to — the one construct the CFG
+    /// route would have lowered differently and the screen that is gone used to
+    /// name — is refused by the *shipped* route, before a CFG plan is asked
+    /// for.
     ///
-    /// One source per entry rather than one source carrying all of them, so a
-    /// screen that stopped working is attributed rather than covered for by the
-    /// next one in the list.
+    /// This is why there is no divergence screen any more, and it is the
+    /// assertion that keeps that true. `I(sense)` on a branch with no
+    /// contribution and no branch unknown is `CfgValueKind::BranchFlow`, a
+    /// runtime-supplied flow that only the generated backend can answer; the
+    /// shipped route has no probe registered for it and says so. A module that
+    /// starts building here would be one carrying a construct nothing has
+    /// compared the two routes on, and this test would go red rather than let
+    /// it through quietly.
     #[test]
-    fn every_known_divergence_falls_the_module_back() {
-        let cases: &[(&str, &str, &str)] = &[(
-            "current-probe",
-            "contribution current",
-            r#"
-module cfg_div_probe(p, n);
+    fn a_branch_nothing_contributes_to_is_refused_before_a_cfg_plan_is_asked_for() {
+        let source = r#"
+module cfg_div_branch_flow(p, n);
   inout p, n;
-  electrical p, n;
-  electrical mid;
-  analog begin
-    I(p, mid) <+ V(p, mid);
-    I(p) <+ I(p, mid) * V(p);
-  end
+  electrical p, n, s;
+  branch (s) sense;
+  analog I(p, n) <+ I(sense) * 2.0;
 endmodule
-"#,
-        )];
-        for (case, expected, source) in cases {
-            let (model, artifact) = compile(source);
-            let (plan, refused) =
-                build_default_model_plan_reported(&model, &artifact, PlanRoute::Cfg)
-                    .unwrap_or_else(|error| panic!("{case}: the default plan builds: {error}"));
-            let refused =
-                refused.unwrap_or_else(|| panic!("{case}: the CFG route must refuse this module"));
-            assert_eq!(refused.class, CfgPlanRefusal::KnownDivergence, "{case}");
-            assert!(
-                refused.detail.contains(expected),
-                "{case}: {} names the construct",
-                refused.detail
-            );
-            for (field, form) in forms(&plan) {
-                assert_eq!(form, "postfix", "{case}: {field} stay postfix");
-            }
-        }
+"#;
+        let (model, artifact) = compile(source);
+        let error = build_default_model_plan_reported(&model, &artifact, PlanRoute::Cfg)
+            .expect_err("the shipped route cannot lower a probe of a branch with no current");
+        let message = error.to_string();
+        assert!(
+            message.contains("named branch current sense"),
+            "the refusal names the branch: {message}"
+        );
     }
 }

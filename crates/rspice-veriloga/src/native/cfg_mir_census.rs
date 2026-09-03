@@ -773,7 +773,6 @@ fn every_refusal_class_has_a_name() {
         CfgPlanRefusal::StateAllocation,
         CfgPlanRefusal::Differentiate,
         CfgPlanRefusal::DerivativeRuleMissing,
-        CfgPlanRefusal::KnownDivergence,
         CfgPlanRefusal::Scalarize,
         CfgPlanRefusal::NoScalar,
         CfgPlanRefusal::Lowering,
