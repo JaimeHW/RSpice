@@ -1,11 +1,13 @@
 //! Lossless, versioned transient `.FFT` result contract.
 //!
-//! FFT spectra are intentionally published separately from
-//! `rspice-analog-result-v1`. Adding FFT-only fields to that strict schema
-//! without changing its version would make existing version-1 readers reject
-//! otherwise ordinary transient results. This bundle therefore preserves the
-//! established analog document while giving every source-authored transform a
-//! complete typed representation of its own.
+//! This is the one typed artifact the adapter still owns. Every other family
+//! publishes `rspice_core::execution::AnalysisResultDocument`; the FFT family
+//! cannot yet, because the shared `fft` result document must be named by an
+//! `AnalysisInstanceId` and `DeckPlan` mints none for a `.FFT` post-process
+//! (`AnalysisInstanceId` also has no public constructor). Until core assigns
+//! post-process identities, deleting this bundle would drop every authored
+//! `.FFT` spectrum from the response, so it stays and names its parent
+//! transient by that transient's canonical analysis tag.
 
 use std::collections::HashSet;
 
@@ -19,7 +21,6 @@ use rspice_core::netlist::{FftAnalysis, FftFormat, FftOutput, FftWindow, XyceFft
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::result_document::{AnalogAnalysisKind, AnalysisIdentity};
 use crate::wire::MAX_ENGINE_RETAINED_RESULT_BYTES;
 
 /// Stable schema identity for a bundle of transient FFT results.
@@ -39,7 +40,9 @@ const MAX_RANKED_HARMONICS: usize = 30;
 pub struct TransientFftResultDocument {
     pub schema: String,
     pub schema_version: u32,
-    pub parent_analysis: AnalysisIdentity,
+    /// Canonical analysis tag of the transient these spectra were taken from,
+    /// exactly as `AnalysisInstanceId::tag` spells it (for example `tran-001`).
+    pub parent_analysis: String,
     pub result_count: usize,
     /// Source order is significant and matches the deck's `.FFT` directives.
     pub results: Vec<FftResultDocument>,
@@ -49,7 +52,7 @@ impl TransientFftResultDocument {
     /// Map engine-owned transient FFT results into the public adapter schema.
     /// Unsupported physical types and inconsistent data fail closed.
     pub fn from_engine_results(
-        parent_analysis: AnalysisIdentity,
+        parent_analysis: String,
         results: &[TransientFftResult],
         authored: &[FftAnalysis],
         authored_mode: XyceFftMode,
@@ -64,7 +67,7 @@ impl TransientFftResultDocument {
     }
 
     pub fn from_engine_results_with_abort(
-        parent_analysis: AnalysisIdentity,
+        parent_analysis: String,
         results: &[TransientFftResult],
         authored: &[FftAnalysis],
         authored_mode: XyceFftMode,
@@ -91,7 +94,7 @@ impl TransientFftResultDocument {
         }
         let mut results = mapped;
         for result in &mut results {
-            result.parent_analysis_id = parent_analysis.id.clone();
+            result.parent_analysis_id = parent_analysis.clone();
         }
         let document = Self {
             schema: FFT_RESULT_DOCUMENT_SCHEMA.to_owned(),
@@ -200,13 +203,9 @@ impl TransientFftResultDocument {
                 current: FFT_RESULT_DOCUMENT_VERSION,
             });
         }
-        if self.parent_analysis.kind != AnalogAnalysisKind::Transient
-            || self.parent_analysis.ordinal == 0
-            || self.parent_analysis.id != format!("tran-{:03}", self.parent_analysis.ordinal)
-            || self.parent_analysis.request_kind != "transient"
-        {
+        if !valid_transient_analysis_tag(&self.parent_analysis) {
             return Err(invalid(
-                "parent analysis must be the canonical transient directive identity",
+                "parent analysis must be the canonical transient directive tag",
             ));
         }
         if self.results.is_empty() || self.result_count != self.results.len() {
@@ -221,7 +220,7 @@ impl TransientFftResultDocument {
             let ordinal = index + 1;
             if result.ordinal != ordinal
                 || result.analysis_id != format!("fft-{ordinal:03}")
-                || result.parent_analysis_id != self.parent_analysis.id
+                || result.parent_analysis_id != self.parent_analysis
                 || !identities.insert(result.analysis_id.clone())
             {
                 return Err(invalid("FFT identity or source ordering is invalid"));
@@ -1271,6 +1270,22 @@ fn window_name_matches(window: FftWindowKind, name: &str) -> bool {
     )
 }
 
+/// Whether a string is the canonical tag of an authored transient analysis.
+///
+/// The shape is `AnalysisInstanceId::tag`'s: the kind tag, a hyphen, and a
+/// one-based ordinal of at least three digits with no leading zero beyond the
+/// fixed width. Checking it here keeps the parent link verifiable by a reader
+/// that never saw the plan.
+fn valid_transient_analysis_tag(tag: &str) -> bool {
+    let Some(ordinal) = tag.strip_prefix("tran-") else {
+        return false;
+    };
+    ordinal.len() >= 3
+        && ordinal.bytes().all(|byte| byte.is_ascii_digit())
+        && (ordinal.len() == 3 || !ordinal.starts_with('0'))
+        && ordinal.parse::<u64>().is_ok_and(|value| value >= 1)
+}
+
 fn check_abort(abort: &dyn AbortSignal) -> Result<(), FftResultDocumentError> {
     if abort.is_aborted() {
         Err(FftResultDocumentError::Aborted)
@@ -1305,12 +1320,24 @@ mod tests {
     use rspice_core::abort_signal::{CountingAbort, NoAbort};
     use rspice_core::{Engine, Netlist, SimulationConfig};
 
-    fn parent() -> AnalysisIdentity {
-        AnalysisIdentity {
-            id: "tran-002".to_owned(),
-            kind: AnalogAnalysisKind::Transient,
-            request_kind: "transient".to_owned(),
-            ordinal: 2,
+    fn parent() -> String {
+        "tran-002".to_owned()
+    }
+
+    #[test]
+    fn only_a_canonical_transient_tag_names_a_parent() {
+        for accepted in ["tran-001", "tran-002", "tran-1000"] {
+            assert!(valid_transient_analysis_tag(accepted), "{accepted}");
+        }
+        for refused in [
+            "tran-00",
+            "tran-000",
+            "tran-0001",
+            "ac-001",
+            "tran-",
+            "tran-01a",
+        ] {
+            assert!(!valid_transient_analysis_tag(refused), "{refused}");
         }
     }
 
@@ -1427,7 +1454,7 @@ mod tests {
         )
         .expect("map FFT bundle");
         for result in &mut document.results {
-            result.parent_analysis_id = document.parent_analysis.id.clone();
+            result.parent_analysis_id = document.parent_analysis.clone();
         }
         document.validate().expect("complete bundle validates");
         let json = document.to_json().expect("serialize FFT bundle");
@@ -1484,7 +1511,7 @@ mod tests {
             XyceFftMode::HspiceCompatible,
         )
         .unwrap();
-        document.results[0].parent_analysis_id = document.parent_analysis.id.clone();
+        document.results[0].parent_analysis_id = document.parent_analysis.clone();
         document.results[0].spectrum.bins.pop();
         assert!(matches!(
             document.validate(),

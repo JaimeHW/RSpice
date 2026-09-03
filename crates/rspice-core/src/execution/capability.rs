@@ -216,7 +216,12 @@ const PY_AXIS_UNAVAILABLE: &str =
     "typed direct API exists, but Engine.run has no authored axis route";
 const WASM_UNAVAILABLE: &str = "browser API has no result adapter for this family";
 const WASM_AXIS_UNAVAILABLE: &str = "browser API does not consume DeckPlan axes";
-const ADAPTER_UNAVAILABLE: &str = "protocol-3 adapter has no result mapping for this family";
+const ADAPTER_SP_UNAVAILABLE: &str = "no Engine::run_* entry point produces an SParameterResult, so the protocol-4 adapter cannot \
+     publish the shared sp/port-noise document without deciding the .SP projection itself";
+const ADAPTER_PNOISE_UNAVAILABLE: &str = "the driven .PNOISE runners return PnoiseAnalysisResult and the autonomous one returns \
+     OscPnoiseResult, while from_pnoise accepts only analysis::pnoise::PnoiseResult";
+const ADAPTER_POST_PROCESS_UNAVAILABLE: &str = "DeckPlan mints no AnalysisInstanceId for .FOUR or .FFT, so the shared post-process document \
+     cannot be named";
 
 const fn cli_artifact_axes() -> SurfaceCapability {
     SurfaceCapability::new(
@@ -274,6 +279,40 @@ const fn adapter_typed_axes() -> SurfaceCapability {
     )
 }
 
+const ADAPTER_MC_AXIS_SEED: &str =
+    "shared deck axes execute, but coordinate-derived Monte Carlo seed semantics are undefined";
+
+const fn adapter_typed_scalar_only(axis_note: &'static str) -> SurfaceCapability {
+    SurfaceCapability::new(
+        MappingStatus::Mapped,
+        MappingStatus::Partial(axis_note),
+        MappingStatus::Partial(axis_note),
+    )
+}
+
+const ADAPTER_STB_MARGIN: &str = "loops with finite margins publish the shared stability document, but an unconditionally \
+     stable loop reports an infinite margin and from_stability refuses a non-finite scalar rather \
+     than recording the absent crossover";
+
+const fn adapter_partial_axes(note: &'static str) -> SurfaceCapability {
+    SurfaceCapability::new(
+        MappingStatus::Partial(note),
+        MappingStatus::Partial(note),
+        MappingStatus::Partial(note),
+    )
+}
+
+const ADAPTER_FFT_ATTACHED: &str = "a complete typed FFT bundle is published beside its parent transient, but it is the adapter's \
+     own schema rather than the shared fft result document";
+
+const fn adapter_attached_fft() -> SurfaceCapability {
+    SurfaceCapability::new(
+        MappingStatus::Partial(ADAPTER_FFT_ATTACHED),
+        MappingStatus::Partial(ADAPTER_FFT_ATTACHED),
+        MappingStatus::Partial(ADAPTER_FFT_ATTACHED),
+    )
+}
+
 /// One authoritative row per core result family.
 ///
 /// Every constructor is deliberately visible in source: unsupported cells are
@@ -319,56 +358,56 @@ pub const ANALYSIS_CAPABILITY_MATRIX: &[AnalysisResultCapability] = &[
         cli: cli_artifact_axes(),
         python: python_mapped_axes(),
         wasm: SurfaceCapability::unsupported(WASM_UNAVAILABLE),
-        engine_adapter: SurfaceCapability::unsupported(ADAPTER_UNAVAILABLE),
+        engine_adapter: SurfaceCapability::unsupported(ADAPTER_SP_UNAVAILABLE),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::PortNoise,
         cli: cli_artifact_axes(),
         python: python_mapped_axes(),
         wasm: SurfaceCapability::unsupported(WASM_UNAVAILABLE),
-        engine_adapter: SurfaceCapability::unsupported(ADAPTER_UNAVAILABLE),
+        engine_adapter: SurfaceCapability::unsupported(ADAPTER_SP_UNAVAILABLE),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Distortion,
         cli: cli_artifact_axes(),
         python: python_mapped_axes(),
         wasm: SurfaceCapability::unsupported(WASM_UNAVAILABLE),
-        engine_adapter: SurfaceCapability::unsupported(ADAPTER_UNAVAILABLE),
+        engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::TransferFunction,
         cli: cli_artifact_axes(),
         python: python_mapped_axes(),
         wasm: SurfaceCapability::unsupported(WASM_UNAVAILABLE),
-        engine_adapter: SurfaceCapability::unsupported(ADAPTER_UNAVAILABLE),
+        engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Stability,
         cli: cli_artifact_axes(),
         python: python_mapped_axes(),
         wasm: wasm_direct_only(),
-        engine_adapter: SurfaceCapability::unsupported(ADAPTER_UNAVAILABLE),
+        engine_adapter: adapter_partial_axes(ADAPTER_STB_MARGIN),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Sensitivity,
         cli: cli_artifact_axes(),
         python: python_mapped_axes(),
         wasm: SurfaceCapability::unsupported(WASM_UNAVAILABLE),
-        engine_adapter: SurfaceCapability::unsupported(ADAPTER_UNAVAILABLE),
+        engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::PoleZero,
         cli: cli_artifact_axes(),
         python: python_mapped_axes(),
         wasm: SurfaceCapability::unsupported(WASM_UNAVAILABLE),
-        engine_adapter: SurfaceCapability::unsupported(ADAPTER_UNAVAILABLE),
+        engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Fourier,
         cli: cli_artifact_axes(),
         python: python_mapped_axes(),
         wasm: SurfaceCapability::unsupported(WASM_UNAVAILABLE),
-        engine_adapter: SurfaceCapability::unsupported(ADAPTER_UNAVAILABLE),
+        engine_adapter: SurfaceCapability::unsupported(ADAPTER_POST_PROCESS_UNAVAILABLE),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Fft,
@@ -379,7 +418,7 @@ pub const ANALYSIS_CAPABILITY_MATRIX: &[AnalysisResultCapability] = &[
         ),
         python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
-        engine_adapter: adapter_typed_axes(),
+        engine_adapter: adapter_attached_fft(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::MonteCarlo,
@@ -394,35 +433,35 @@ pub const ANALYSIS_CAPABILITY_MATRIX: &[AnalysisResultCapability] = &[
             ),
         ),
         wasm: SurfaceCapability::unsupported(WASM_UNAVAILABLE),
-        engine_adapter: SurfaceCapability::unsupported(ADAPTER_UNAVAILABLE),
+        engine_adapter: adapter_typed_scalar_only(ADAPTER_MC_AXIS_SEED),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Pss,
         cli: cli_artifact_scalar_only(),
         python: python_direct_only(),
         wasm: SurfaceCapability::unsupported(WASM_UNAVAILABLE),
-        engine_adapter: SurfaceCapability::unsupported(ADAPTER_UNAVAILABLE),
+        engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Pac,
         cli: SurfaceCapability::unsupported("CLI has no PAC execution or result adapter"),
         python: python_direct_only(),
         wasm: SurfaceCapability::unsupported(WASM_UNAVAILABLE),
-        engine_adapter: SurfaceCapability::unsupported(ADAPTER_UNAVAILABLE),
+        engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::PNoise,
         cli: SurfaceCapability::unsupported("CLI has no PNoise execution or result adapter"),
         python: python_direct_only(),
         wasm: SurfaceCapability::unsupported(WASM_UNAVAILABLE),
-        engine_adapter: SurfaceCapability::unsupported(ADAPTER_UNAVAILABLE),
+        engine_adapter: SurfaceCapability::unsupported(ADAPTER_PNOISE_UNAVAILABLE),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::HarmonicBalance,
         cli: cli_artifact_axes(),
         python: python_mapped_axes(),
         wasm: SurfaceCapability::unsupported(WASM_UNAVAILABLE),
-        engine_adapter: SurfaceCapability::unsupported(ADAPTER_UNAVAILABLE),
+        engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Envelope,
@@ -435,7 +474,7 @@ pub const ANALYSIS_CAPABILITY_MATRIX: &[AnalysisResultCapability] = &[
             MappingStatus::Unsupported(PY_AXIS_UNAVAILABLE),
         ),
         wasm: SurfaceCapability::unsupported(WASM_UNAVAILABLE),
-        engine_adapter: SurfaceCapability::unsupported(ADAPTER_UNAVAILABLE),
+        engine_adapter: adapter_typed_axes(),
     },
 ];
 

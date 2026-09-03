@@ -294,11 +294,11 @@ impl AxisExecutionDocument {
                 {
                     return Err(invalid("analysis identity or output namespace is invalid"));
                 }
-                for path in &analysis.artifacts {
+                for artifact in &analysis.artifacts {
                     check_abort(abort)?;
-                    if !valid_result_path(path) || !artifact_paths.insert(path.to_ascii_lowercase())
-                    {
-                        return Err(invalid("result artifact path is invalid or duplicated"));
+                    artifact.validate()?;
+                    if !artifact_paths.insert(artifact.path.to_ascii_lowercase()) {
+                        return Err(invalid("result artifact path is duplicated"));
                     }
                 }
                 let mut measurement_names = HashSet::new();
@@ -359,6 +359,11 @@ impl AxisExecutionDocument {
     }
 }
 
+/// The analysis family every coordinate of one axis execution ran.
+///
+/// One variant per family the executor runs. The `authored_prefix` is the core
+/// `AnalysisKind::tag`, so the analysis identities this manifest validates are
+/// the canonical planner's, not a second naming scheme.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AxisAnalysisKind {
@@ -367,6 +372,75 @@ pub enum AxisAnalysisKind {
     Transient,
     AcSmallSignal,
     Noise,
+    Distortion,
+    TransferFunction,
+    Stability,
+    Sensitivity,
+    PoleZero,
+    MonteCarlo,
+    HarmonicBalance,
+    Pss,
+    Pac,
+    Envelope,
+}
+
+impl AxisAnalysisKind {
+    /// Canonical planner tag every authored analysis identity of this family
+    /// starts with.
+    pub const fn authored_prefix(self) -> &'static str {
+        match self {
+            Self::OperatingPoint => "op",
+            Self::DcSweep => "dc",
+            Self::Transient => "tran",
+            Self::AcSmallSignal => "ac",
+            Self::Noise => "noise",
+            Self::Distortion => "disto",
+            Self::TransferFunction => "tf",
+            Self::Stability => "stb",
+            Self::Sensitivity => "sens",
+            Self::PoleZero => "pz",
+            Self::MonteCarlo => "mc",
+            Self::HarmonicBalance => "hb",
+            Self::Pss => "pss",
+            Self::Pac => "pac",
+            Self::Envelope => "env",
+        }
+    }
+}
+
+/// One typed result document an executed analysis published.
+///
+/// The manifest is an orchestration record, not a second result schema: it
+/// names each artifact and the exact document schema and family inside it, so
+/// a reader can pick the documents it understands without opening them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResultDocumentReference {
+    /// `results/`-relative path, exactly as the response declares it.
+    pub path: String,
+    /// Declared MIME type of the artifact.
+    pub content_type: String,
+    /// Schema identifier written inside the document.
+    pub schema: String,
+    /// Schema version written inside the document.
+    pub schema_version: u32,
+    /// Result family tag the document declares.
+    pub result_kind: String,
+}
+
+impl ResultDocumentReference {
+    fn validate(&self) -> Result<(), AxisExecutionDocumentError> {
+        if !valid_result_path(&self.path)
+            || self.content_type.trim().is_empty()
+            || self.schema.trim().is_empty()
+            || self.result_kind.trim().is_empty()
+        {
+            return Err(invalid(
+                "result document reference path, content type, schema, or family is invalid",
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -384,7 +458,7 @@ pub struct CoordinateExecution {
 pub struct AnalysisExecution {
     pub analysis_id: String,
     pub output_namespace: OutputNamespaceDocument,
-    pub artifacts: Vec<String>,
+    pub artifacts: Vec<ResultDocumentReference>,
     pub measurements: Vec<MeasurementDocument>,
 }
 
@@ -571,13 +645,7 @@ fn validate_analysis_ids(
     kind: AxisAnalysisKind,
     ids: &[String],
 ) -> Result<(), AxisExecutionDocumentError> {
-    let authored_prefix = match kind {
-        AxisAnalysisKind::OperatingPoint => "op",
-        AxisAnalysisKind::DcSweep => "dc",
-        AxisAnalysisKind::Transient => "tran",
-        AxisAnalysisKind::AcSmallSignal => "ac",
-        AxisAnalysisKind::Noise => "noise",
-    };
+    let authored_prefix = kind.authored_prefix();
     let implicit_op =
         kind == AxisAnalysisKind::OperatingPoint && ids.len() == 1 && ids[0] == "implicit-op-001";
     if implicit_op {
@@ -642,7 +710,14 @@ mod tests {
                         coordinate: format!("run-{coordinate_id}"),
                         analysis: "tran-001".to_owned(),
                     },
-                    artifacts: vec!["results/run-a__tran-001.csv".to_owned()],
+                    artifacts: vec![ResultDocumentReference {
+                        path: "results/run-a__tran-001.result.json".to_owned(),
+                        content_type: "application/vnd.rspice.analysis-result+json;version=1"
+                            .to_owned(),
+                        schema: "rspice-analysis-result".to_owned(),
+                        schema_version: 1,
+                        result_kind: "tran".to_owned(),
+                    }],
                     measurements: vec![MeasurementDocument {
                         name: "v(out)".to_owned(),
                         unit: "V".to_owned(),
@@ -669,8 +744,8 @@ mod tests {
             canonical_decimal(2_000.0).expect("finite fixture value");
         for analysis in &mut second.analyses {
             analysis.output_namespace.coordinate = second.coordinate_namespace.clone();
-            for path in &mut analysis.artifacts {
-                *path = path.replace("run-a", "run-b");
+            for artifact in &mut analysis.artifacts {
+                artifact.path = artifact.path.replace("run-a", "run-b");
             }
         }
         AxisExecutionDocument::new(AxisAnalysisKind::Transient, vec![first, second])
@@ -773,8 +848,8 @@ mod tests {
         second.assignments[0].value_index = 1;
         for analysis in &mut second.analyses {
             analysis.output_namespace.coordinate = second.coordinate_namespace.clone();
-            for path in &mut analysis.artifacts {
-                *path = path.replace("run-a", "run-b");
+            for artifact in &mut analysis.artifacts {
+                artifact.path = artifact.path.replace("run-a", "run-b");
             }
         }
         second.analyses[0].analysis_id = "tran-002".to_owned();
@@ -796,8 +871,8 @@ mod tests {
         });
         for analysis in &mut second.analyses {
             analysis.output_namespace.coordinate = second.coordinate_namespace.clone();
-            for path in &mut analysis.artifacts {
-                *path = path.replace("run-a", "run-c");
+            for artifact in &mut analysis.artifacts {
+                artifact.path = artifact.path.replace("run-a", "run-c");
             }
         }
         axis_drift.runs.push(second);

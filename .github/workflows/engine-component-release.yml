@@ -132,27 +132,27 @@ jobs:
           test "$(jq -r .engine_name component-info.json)" = "rspice"
           test "$(jq -r .engine_build component-info.json)" = "${version}+${GITHUB_SHA}"
           test "$(jq -r .runtime_mode component-info.json)" = "self_contained"
-          test "$(jq -c .protocol_versions component-info.json)" = "[3]"
+          test "$(jq -c .protocol_versions component-info.json)" = "[4]"
 
-          # The exact deterministic protocol-3 request the RSpice-Cloud
+          # The exact deterministic protocol-4 request the RSpice-Cloud
           # release probe replays, launched under the same contract: cleared
           # environment, protocol flags only, pre-created artifacts/ and
           # results/, one request on stdin. Its digests are pinned upstream.
           job_directory="$(mktemp -d)"
           mkdir -m 0700 "$job_directory/artifacts" "$job_directory/results"
           cat >"$job_directory/request.json" <<'REQUEST'
-          {"protocol_version":3,"simulation_run_id":"019f76ae-0000-7000-8000-000000000703","circuit_id":"019f76ae-0000-7000-8000-000000000701","attempt":1,"request_digest_version":1,"request_sha256":"62ed89a0528762860da1f9897b6ecd35e0fa5c6e7eb7568f575034f92c6d7d1c","analysis":{"kind":"operating_point"},"revision":{"id":"019f76ae-0000-7000-8000-000000000702","schema_version":1,"content_digest_version":2,"content_sha256":"88767794c6fcedd647712673b43e3f4c409697cd4e4a133377ba45af4dd25bcc","document":{"components":[],"schema":"rspice-circuit-v1"},"artifacts":[]}}
+          {"protocol_version":4,"simulation_run_id":"019f76ae-0000-7000-8000-000000000703","circuit_id":"019f76ae-0000-7000-8000-000000000701","attempt":1,"request_digest_version":1,"request_sha256":"62ed89a0528762860da1f9897b6ecd35e0fa5c6e7eb7568f575034f92c6d7d1c","analysis":{"kind":"operating_point"},"revision":{"id":"019f76ae-0000-7000-8000-000000000702","schema_version":1,"content_digest_version":2,"content_sha256":"88767794c6fcedd647712673b43e3f4c409697cd4e4a133377ba45af4dd25bcc","document":{"components":[],"schema":"rspice-circuit-v1"},"artifacts":[]}}
           REQUEST
           run_smoke() {
             (cd "$job_directory" && env -i \
-              RSPICE_ENGINE_PROTOCOL_VERSION=3 \
+              RSPICE_ENGINE_PROTOCOL_VERSION=4 \
               RSPICE_ENGINE_INPUT=stdin-json \
               RSPICE_ENGINE_OUTPUT=stdout-json \
               "$binary" <request.json)
           }
           run_smoke >first-response.json
           test "$(jq -r .status first-response.json)" = "succeeded"
-          test "$(jq -r .result_manifest.format first-response.json)" = "rspice-result-v1"
+          test "$(jq -r .result_manifest.format first-response.json)" = "rspice-result-v3"
           test "$(jq -r .result_manifest.analysis_kind first-response.json)" = "operating_point"
           test "$(jq 'has("result_artifacts")' first-response.json)" = "false"
           test -z "$(ls -A "$job_directory/results")"
@@ -164,7 +164,7 @@ jobs:
           # The launch contract fails closed: a delegated-solver deployment
           # shape must be refused without emitting a response.
           if (cd "$job_directory" && env -i \
-              RSPICE_ENGINE_PROTOCOL_VERSION=3 \
+              RSPICE_ENGINE_PROTOCOL_VERSION=4 \
               RSPICE_ENGINE_INPUT=stdin-json \
               RSPICE_ENGINE_OUTPUT=stdout-json \
               RSPICE_ENGINE_SOLVER_PATH=/nonexistent \
@@ -248,7 +248,7 @@ jobs:
               exported_file_sha256: $exported_file_sha256,
               engine_name: $engine_name,
               engine_build: $engine_build,
-              protocol_versions: [3],
+              protocol_versions: [4],
               source_repository: $source_repository,
               source_sha: $source_sha,
               build_recipe_sha256: $build_recipe_sha256,

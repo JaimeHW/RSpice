@@ -3,13 +3,13 @@
   "component": "rspice-engine-adapter",
   "role": "adapter",
   "runtime_mode": "self_contained",
-  "protocol_versions": [3],
+  "protocol_versions": [4],
   "document_schemas": ["rspice-circuit-v1"],
   "network": "none",
   "subprocesses": "none",
   "environment": {
     "requires": [
-      "RSPICE_ENGINE_PROTOCOL_VERSION=3",
+      "RSPICE_ENGINE_PROTOCOL_VERSION=4",
       "RSPICE_ENGINE_INPUT=stdin-json",
       "RSPICE_ENGINE_OUTPUT=stdout-json"
     ],

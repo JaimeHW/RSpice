@@ -1,7 +1,7 @@
 //! Self-contained RSpice engine executor for the cloud worker protocol.
 //!
 //! The worker launches this binary with a cleared environment, writes exactly
-//! one protocol-3 JSON request to standard input, and reads exactly one JSON
+//! one protocol-4 JSON request to standard input, and reads exactly one JSON
 //! response from standard output. Standard error carries private diagnostics
 //! only. A zero exit status means a well-formed response was emitted —
 //! including canonical `status: failed` outcomes for customer circuits the
@@ -141,12 +141,24 @@ fn main() -> ExitCode {
                     "engine_name": "rspice",
                     "engine_build": engine_build(),
                     "runtime_mode": "self_contained",
-                    "protocol_versions": [3],
+                    "protocol_versions": [4],
                     "document_schemas": ["rspice-circuit-v1"],
                     "result_schemas": [
-                        "rspice-analog-result-v1",
-                        "rspice-transient-fft-result-v1",
-                        "rspice-axis-execution-v1"
+                        format!(
+                            "{}-v{}",
+                            rspice_core::execution::ANALYSIS_RESULT_DOCUMENT_SCHEMA,
+                            rspice_core::execution::ANALYSIS_RESULT_DOCUMENT_VERSION,
+                        ),
+                        format!(
+                            "{}-v{}",
+                            rspice_engine_adapter::fft_result_document::FFT_RESULT_DOCUMENT_SCHEMA,
+                            rspice_engine_adapter::fft_result_document::FFT_RESULT_DOCUMENT_VERSION,
+                        ),
+                        format!(
+                            "{}-v{}",
+                            rspice_engine_adapter::axis_execution_document::AXIS_EXECUTION_SCHEMA,
+                            rspice_engine_adapter::axis_execution_document::AXIS_EXECUTION_VERSION,
+                        ),
                     ],
                 })
             );
@@ -330,7 +342,7 @@ fn emit(response: &EngineResponse) -> ExitCode {
 /// model bundle. Anything else means this binary is running under a
 /// deployment it was not reviewed for.
 fn validate_launch_environment() -> Result<Option<PathBuf>, String> {
-    expect_env("RSPICE_ENGINE_PROTOCOL_VERSION", "3")?;
+    expect_env("RSPICE_ENGINE_PROTOCOL_VERSION", "4")?;
     expect_env("RSPICE_ENGINE_INPUT", "stdin-json")?;
     expect_env("RSPICE_ENGINE_OUTPUT", "stdout-json")?;
     if std::env::var_os("RSPICE_ENGINE_SOLVER_PATH").is_some() {
