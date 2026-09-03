@@ -251,6 +251,62 @@ fn stability_stops_inside_its_sweep() {
     });
 }
 
+/// S-parameter extraction owns two loops of its own — one per driven port,
+/// one per frequency of the projection that reads the port voltages back — on
+/// top of the caller's AC solves.
+#[test]
+fn s_parameter_extraction_stops_inside_its_port_and_projection_loops() {
+    let netlist = Netlist::parse(
+        "s-parameter iteration bound\n\
+         P1 p1 0 PORT=1 Z0=50 AC 1\n\
+         R1 p1 p2 50\n\
+         P2 p2 0 PORT=2 Z0=50\n\
+         .ac lin 1 1 1\n\
+         .end\n",
+    )
+    .expect("S-parameter fixture parses");
+    let ports = rspice_core::analysis::s_param::collect_ports(&netlist).expect("ports collect");
+    let engine = Engine::new(SimulationConfig::default());
+    let frequencies = decade_sweep(80);
+    let extract = |abort: &CountingAbort| {
+        rspice_core::analysis::s_param::extract_s_matrix_with_abort(
+            &netlist,
+            &ports,
+            &frequencies,
+            |driven| {
+                engine
+                    .run_ac_with_abort(driven, &frequencies, abort)
+                    .map_err(|error| error.to_string())
+            },
+            abort,
+        )
+    };
+
+    let total = poll_count("S-parameter extraction", extract);
+    assert_polls_repeatedly("S-parameter extraction", total);
+
+    let threshold = interior(total);
+    let abort = CountingAbort::new(threshold);
+    let outcome = serialized(|| extract(&abort));
+    // The abort can be seen either by the extraction's own loops or by the AC
+    // solve it drives; both are cancellations, and neither may be reported as
+    // a bad measurement.
+    assert!(
+        matches!(
+            outcome,
+            Err(rspice_core::analysis::s_param::ExtractError::Aborted)
+                | Err(rspice_core::analysis::s_param::ExtractError::AcSolve(_))
+        ),
+        "S-parameter extraction did not stop when cancelled: {outcome:?}"
+    );
+    assert_eq!(abort.observed_at(), Some(threshold + 1));
+    assert_eq!(
+        abort.polls_after_abort(),
+        0,
+        "S-parameter extraction kept working after observing cancellation"
+    );
+}
+
 #[test]
 fn pole_zero_stops_inside_its_root_search() {
     let (engine, netlist) = fixture();
