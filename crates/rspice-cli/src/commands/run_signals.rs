@@ -1,12 +1,12 @@
 //! Turn engine results into named export signals.
 //!
-//! This module builds the inventory one analysis result materialized — the
-//! rawfile name (`v(out)`, `i(v1)`), the display name, digital XSPICE states
-//! as numeric values — validates that the inventory keeps a stable schema
-//! across sweep coordinates, and then hands it to the one core
-//! [`SignalProjection`] that decides what the deck's
-//! `.SAVE`/`.PROBE`/`.PRINT`/`.PLOT` cards select. The CLI never decides that
-//! itself: it only flattens the projected columns into each output format.
+//! Core builds the inventory one analysis result materialized and the one
+//! [`SignalProjection`] decides which of it the deck's
+//! `.SAVE`/`.PROBE`/`.PRINT`/`.PLOT` cards select. This module owns only the
+//! CLI's side of that boundary: it flattens core columns into the row type the
+//! output writers consume, and it proves that a swept result keeps the schema
+//! its first coordinate established, so a renamed or vanished signal fails
+//! before an artifact is written instead of shifting a column.
 
 use std::collections::{BTreeMap, HashMap};
 
