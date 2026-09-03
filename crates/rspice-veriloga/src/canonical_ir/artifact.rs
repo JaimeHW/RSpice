@@ -62,7 +62,9 @@ impl CanonicalIrArtifact {
             return Err(diagnostics);
         }
 
+        let span = crate::metrics::FineSpan::new("artifact.phase_digests");
         let (hir_digest, mir_digest) = phase_digests(&hir, &mir);
+        span.finish(&format!("expressions={}", hir.expressions.len()));
 
         Ok(Self {
             metadata,
@@ -186,15 +188,23 @@ fn validate_parts(
         return diagnostics;
     }
 
+    let span = crate::metrics::FineSpan::new("artifact.hir_validate");
     if let Err(mut child) = hir.validate() {
         diagnostics.append(&mut child);
     }
+    span.finish(&format!("expressions={}", hir.expressions.len()));
+    let span = crate::metrics::FineSpan::new("artifact.mir_validate");
     if let Err(mut child) = mir.validate() {
         diagnostics.append(&mut child);
     }
+    span.finish(&format!("expressions={}", mir.expressions.len()));
+    let span = crate::metrics::FineSpan::new("artifact.noise_diagnostics");
     diagnostics.extend(noise_sources.diagnostics(hir, mir));
+    span.finish(&format!("sources={}", noise_sources.sources.len()));
 
+    let span = crate::metrics::FineSpan::new("artifact.diagnostics");
     diagnostics.extend(artifact_diagnostics(metadata, hir, mir));
+    span.finish(&format!("expressions={}", hir.expressions.len()));
     diagnostics
 }
 

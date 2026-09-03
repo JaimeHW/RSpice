@@ -126,8 +126,11 @@ pub struct MirModel {
 
 impl MirModel {
     pub fn from_hir(hir: &HirModel) -> Result<Self, Vec<IrDiagnostic>> {
+        let span = crate::metrics::FineSpan::new("mir.hir_validate");
         hir.validate()?;
+        span.finish(&format!("expressions={}", hir.expressions.len()));
 
+        let span = crate::metrics::FineSpan::new("mir.build");
         let mut nodes: Vec<_> = hir
             .ports
             .iter()
@@ -210,6 +213,11 @@ impl MirModel {
             })
             .collect();
         let branch_unknowns = collect_branch_unknowns(&equations);
+        span.finish(&format!("equations={}", equations.len()));
+
+        let span = crate::metrics::FineSpan::new("mir.arena_clone");
+        let expressions = hir.expressions.clone();
+        span.finish(&format!("expressions={}", expressions.len()));
 
         let mir = Self {
             module_name: hir.module_name.clone(),
@@ -219,13 +227,16 @@ impl MirModel {
             branch_unknowns,
             state_slots: Vec::new(),
             equations,
-            expressions: hir.expressions.clone(),
+            expressions,
             default_transition: hir.default_transition,
             value_symbols: sorted_value_symbols(hir),
             ground_nodes: hir.ground_nodes.clone(),
         };
 
-        mir.validate().map(|()| mir)
+        let span = crate::metrics::FineSpan::new("mir.validate");
+        let validated = mir.validate();
+        span.finish(&format!("expressions={}", mir.expressions.len()));
+        validated.map(|()| mir)
     }
 
     pub fn validate(&self) -> IrValidationResult {

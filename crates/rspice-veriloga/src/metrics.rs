@@ -98,6 +98,73 @@ pub struct KernelRegionMetric {
     pub newton_instruction_count: u64,
 }
 
+/// Whether the intra-phase spans print.
+///
+/// [`PipelineMetrics::phases`] resolves a compile to nine phases, which says
+/// *that* a phase is expensive and never *which pass inside it* is. The spans
+/// below fill that in, under the two switches the phase-level trace already
+/// reads, so a cost investigation turns one variable on and gets both
+/// granularities. The answer is cached because a span sits inside per-equation
+/// loops, where an environment lookup would itself be measurable.
+pub(crate) fn fine_span_trace_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var_os("RSPICE_VERILOGA_PHASE_TRACE").is_some()
+            || std::env::var_os("RSPICE_VERILOGA_CANONICAL_IR_PHASE_TRACE").is_some()
+            || std::env::var_os("RSPICE_VERILOGA_COMPILE_TIMINGS").is_some()
+    })
+}
+
+/// One named region inside a pipeline phase.
+///
+/// Disabled it holds `None` and does no clock reads at all, so a span may be
+/// opened per equation without changing what an untraced compile costs. It
+/// prints in the `timing <label> ...` shape [`crate::codegen`] already uses, so
+/// one grep collects both.
+pub(crate) struct FineSpan {
+    label: &'static str,
+    started: Option<web_time::Instant>,
+}
+
+impl FineSpan {
+    #[inline]
+    pub(crate) fn new(label: &'static str) -> Self {
+        Self {
+            label,
+            started: fine_span_trace_enabled().then(web_time::Instant::now),
+        }
+    }
+
+    /// Elapsed time so far, for a span whose total is accumulated across
+    /// loop iterations rather than printed per iteration.
+    #[inline]
+    pub(crate) fn elapsed(&self) -> Duration {
+        self.started
+            .map_or(Duration::ZERO, |started| started.elapsed())
+    }
+
+    pub(crate) fn finish(self, detail: &str) {
+        let Some(started) = self.started else {
+            return;
+        };
+        report_fine_span(self.label, started.elapsed(), detail);
+    }
+}
+
+/// Report a region whose time was accumulated by the caller.
+pub(crate) fn report_fine_span(label: &str, elapsed: Duration, detail: &str) {
+    if !fine_span_trace_enabled() {
+        return;
+    }
+    eprintln!(
+        "timing {label} elapsed={:.3}s{}{detail}",
+        elapsed.as_secs_f64(),
+        if detail.is_empty() { "" } else { " " }
+    );
+    use std::io::Write as _;
+    let _ = std::io::stderr().flush();
+}
+
 /// Cooperative control surface for long-running compiler pipelines.
 ///
 /// Implementations must make [`Self::is_cancelled`] cheap and thread-safe.

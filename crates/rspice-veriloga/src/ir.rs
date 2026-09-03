@@ -937,6 +937,7 @@ impl DeviceIR {
 
         // Convert evaluation statements (assignments and runtime loops) to
         // IR, in order
+        let span = crate::metrics::FineSpan::new("ir.statements");
         let mut items = Vec::with_capacity(module.statements.len());
         Self::convert_statements(&module.statements, &converter, &mut items)?;
         let mut zi_site_ordinal = 0_u32;
@@ -953,6 +954,11 @@ impl DeviceIR {
         );
         autodiff::assign_absdelay_site_ordinals_in_items(&mut items, &mut absdelay_site_ordinal);
         ir.assignments = items;
+        span.finish(&format!(
+            "module={} statements={}",
+            module.name,
+            module.statements.len()
+        ));
 
         // Pre-pass over contributions: parse branch refs and register a
         // branch-current unknown per node pair receiving a potential
@@ -1025,6 +1031,7 @@ impl DeviceIR {
         // duplicate stateful-operator identities, this makes the preorder
         // noise process ids assigned below identical for metadata,
         // assignment shadows, and final equation gains.
+        let span = crate::metrics::FineSpan::new("ir.contributions");
         let mut converted_contribs = Vec::with_capacity(module.contributions.len());
         for contrib in &module.contributions {
             let mut expr = converter.convert_contribution(&contrib.expression)?;
@@ -1035,7 +1042,13 @@ impl DeviceIR {
             autodiff::assign_absdelay_site_ordinals(&mut expr, &mut absdelay_site_ordinal);
             converted_contribs.push(autodiff::rewrite_branch_probes(&expr, &branch_table));
         }
+        span.finish(&format!(
+            "module={} contributions={}",
+            module.name,
+            module.contributions.len()
+        ));
 
+        let span = crate::metrics::FineSpan::new("ir.noise_collect");
         Self::collect_noise_processes_in_items(&ir.assignments, &mut ir.noise_sources)?;
         for expr in &converted_contribs {
             Self::collect_noise_processes(expr, &mut ir.noise_sources)?;
@@ -1052,6 +1065,11 @@ impl DeviceIR {
                 .into());
             }
         }
+        span.finish(&format!(
+            "module={} processes={}",
+            module.name,
+            ir.noise_sources.len()
+        ));
 
         // Current probes I(a,b) of a branch that carries a potential
         // contribution read the branch unknown (exact), not the inferred
@@ -1062,7 +1080,13 @@ impl DeviceIR {
 
         // Variables that are fixed per instance (computed purely from
         // parameters) may participate in topology guards
+        let span = crate::metrics::FineSpan::new("ir.static_vars");
         let static_vars = Self::compute_instance_static_vars(&ir.assignments, &ir.variables);
+        span.finish(&format!(
+            "module={} static={}",
+            module.name,
+            static_vars.len()
+        ));
 
         // Shadow liveness roots: only variables that contribution
         // expressions (the equation Jacobians chain through them) or
@@ -1084,6 +1108,7 @@ impl DeviceIR {
         // Jacobians chain through intermediate variables. Shadow updates
         // recurse into loop bodies so loop-carried dependencies
         // differentiate correctly.
+        let span = crate::metrics::FineSpan::new("ir.shadow_assignments");
         let mut shadows = autodiff::build_shadow_assignments(
             &mut ir,
             num_nodes,
@@ -1091,6 +1116,12 @@ impl DeviceIR {
             &shadow_roots,
             &second_shadow_roots,
         );
+        span.finish(&format!(
+            "module={} shadow_variables={}",
+            module.name,
+            ir.variables.len()
+        ));
+        let span = crate::metrics::FineSpan::new("ir.noise_shadow_assignments");
         if !ir.noise_sources.is_empty() {
             let noise_process_count = ir.noise_sources.len();
             let ordinary_assignments = ir.assignments.clone();
@@ -1102,12 +1133,33 @@ impl DeviceIR {
             );
             ir.noise_assignments = std::mem::replace(&mut ir.assignments, ordinary_assignments);
         }
+        span.finish(&format!(
+            "module={} processes={}",
+            module.name,
+            ir.noise_sources.len()
+        ));
 
         // Resolve ddx() operators now that the shadow context exists
+        let span = crate::metrics::FineSpan::new("ir.resolve_ddx");
         autodiff::resolve_ddx_in_items(&mut ir.assignments, &shadows);
+        span.finish(&format!(
+            "module={} assignments={}",
+            module.name,
+            ir.assignments.len()
+        ));
+        let span = crate::metrics::FineSpan::new("ir.resolve_ddx_noise");
         autodiff::resolve_ddx_in_items(&mut ir.noise_assignments, &shadows);
+        span.finish(&format!(
+            "module={} assignments={}",
+            module.name,
+            ir.noise_assignments.len()
+        ));
 
         // Convert contributions to equations
+        let equation_span = crate::metrics::FineSpan::new("ir.equations");
+        let mut derivative_elapsed = std::time::Duration::ZERO;
+        let mut reactive_elapsed = std::time::Duration::ZERO;
+        let mut noise_gain_elapsed = std::time::Duration::ZERO;
         for ((contrib, branch_ref), expr) in module
             .contributions
             .iter()
@@ -1166,21 +1218,26 @@ impl DeviceIR {
 
             // Generate derivatives for Jacobian (over node voltages and
             // branch-current unknowns)
+            let span = crate::metrics::FineSpan::new("ir.equation_derivatives");
             let derivatives = Self::generate_derivatives(&expr, num_nodes, num_branches, &shadows);
+            derivative_elapsed += span.elapsed();
 
             // Reactive (charge/flux) derivatives for AC analysis: extract
             // the ddt() operand and differentiate it
+            let span = crate::metrics::FineSpan::new("ir.equation_reactive");
             let reactive_derivatives = match Self::extract_charge(&expr) {
                 Some(charge) => {
                     Self::generate_derivatives(&charge, num_nodes, num_branches, &shadows)
                 }
                 None => Vec::new(),
             };
+            reactive_elapsed += span.elapsed();
 
             // Extract small-signal noise sources (white_noise /
             // flicker_noise terms) for noise analysis; they evaluate to
             // zero in the large-signal programs
             let equation_index = ir.equations.len();
+            let span = crate::metrics::FineSpan::new("ir.equation_noise_gains");
             for process in &mut ir.noise_sources {
                 let gain = autodiff::simplify(autodiff::differentiate_with_shadows(
                     &expr,
@@ -1205,6 +1262,7 @@ impl DeviceIR {
                 }
                 process.injections.push(injection);
             }
+            noise_gain_elapsed += span.elapsed();
 
             ir.equations.push(BranchEquation {
                 branch: branch_ref,
@@ -1217,6 +1275,15 @@ impl DeviceIR {
                 reactive_derivatives,
             });
         }
+        equation_span.finish(&format!(
+            "module={} equations={}",
+            module.name,
+            ir.equations.len()
+        ));
+        let detail = format!("module={}", module.name);
+        crate::metrics::report_fine_span("ir.equation_derivatives", derivative_elapsed, &detail);
+        crate::metrics::report_fine_span("ir.equation_reactive", reactive_elapsed, &detail);
+        crate::metrics::report_fine_span("ir.equation_noise_gains", noise_gain_elapsed, &detail);
 
         Ok(ir)
     }
@@ -2223,75 +2290,134 @@ pub mod autodiff {
         }
     }
 
-    /// Backward liveness step for shadow pruning: every variable read by
-    /// an assignment to a live variable becomes live (indexed writes use
-    /// the array name; the caller expands families afterwards)
-    fn propagate_liveness(
+    /// The read edges shadow liveness closes over, extracted once.
+    ///
+    /// Liveness here is a reachability question — a variable is live when
+    /// some chain of writes carries it into a contribution — and reachability
+    /// wants a graph, not a rescan. Reading the edges out of the assignment
+    /// trees once and then closing over them keeps the two things that used to
+    /// be entangled apart: the expression walk happens a fixed number of
+    /// times, and the fixpoint iterates over names.
+    ///
+    /// The distinction matters because the walk was the expensive half.
+    /// Liveness flows *backward* through a forward-ordered assignment list, so
+    /// a straight-line chain of `n` writes advanced the answer by exactly one
+    /// write per sweep and re-walked every live expression on each of the `n`
+    /// sweeps — and the walk went through `map_expr`, which rebuilds the tree,
+    /// so each sweep also copied and dropped the live half of the program.
+    /// That is quadratic in the assignment count times the expression size.
+    ///
+    /// What this buys on the shipped corpus is small and should be stated as
+    /// such: the old sweep cost 1.31s across all 43 models against 0.12s here,
+    /// because a shipped model's live set converges in a few sweeps, and the
+    /// second call site — inside `build_noise_shadow_assignments`, where the
+    /// list has already been expanded by shadow interleaving — is never
+    /// reached, since no shipped model has a noise process feeding a variable.
+    /// The bound is the point. A user model that does reach it would sweep a
+    /// million-assignment list once per link of its dependency chain.
+    struct LivenessGraph {
+        /// Names read by the writes to each target, deduplicated. Sorted so
+        /// the structure is a function of the module and not of hash order.
+        reads_by_target: HashMap<SmolStr, Vec<SmolStr>>,
+        /// Array element families: one live member makes the family live.
+        families: Vec<Vec<SmolStr>>,
+        /// Family index of an array name or one of its element names.
+        family_of: HashMap<SmolStr, usize>,
+    }
+
+    impl LivenessGraph {
+        fn build(
+            items: &[IrAssignmentItem],
+            variables: &[VarDef],
+            arrays: &[ArrayDef],
+        ) -> Self {
+            let mut reads_by_target: HashMap<SmolStr, Vec<SmolStr>> = HashMap::new();
+            collect_liveness_edges(items, variables, &mut reads_by_target);
+            for reads in reads_by_target.values_mut() {
+                reads.sort_unstable();
+                reads.dedup();
+            }
+
+            let mut families = Vec::with_capacity(arrays.len());
+            let mut family_of = HashMap::new();
+            for array in arrays {
+                let index = families.len();
+                let mut members = Vec::with_capacity(array.len + 1);
+                members.push(array.name.clone());
+                for k in array.lower..array.lower + array.len as i64 {
+                    members.push(format!("{}[{k}]", array.name).into());
+                }
+                for member in &members {
+                    family_of.insert(member.clone(), index);
+                }
+                families.push(members);
+            }
+
+            Self {
+                reads_by_target,
+                families,
+                family_of,
+            }
+        }
+
+        /// Least set containing `roots` and closed under both relations: a
+        /// live target makes everything its writes read live, and a live
+        /// family member makes the whole family live.
+        fn live_from(&self, roots: &HashSet<SmolStr>) -> HashSet<SmolStr> {
+            let mut live = HashSet::with_capacity(roots.len());
+            let mut pending: Vec<SmolStr> = Vec::with_capacity(roots.len());
+            for root in roots {
+                if live.insert(root.clone()) {
+                    pending.push(root.clone());
+                }
+            }
+            while let Some(name) = pending.pop() {
+                if let Some(&family) = self.family_of.get(&name) {
+                    for member in &self.families[family] {
+                        if live.insert(member.clone()) {
+                            pending.push(member.clone());
+                        }
+                    }
+                }
+                if let Some(reads) = self.reads_by_target.get(&name) {
+                    for read in reads {
+                        if live.insert(read.clone()) {
+                            pending.push(read.clone());
+                        }
+                    }
+                }
+            }
+            live
+        }
+    }
+
+    /// Record, per write target, every name the write reads. An indexed write
+    /// is attributed to the array name, since a runtime index may land in any
+    /// element; a loop's condition is not a read here, exactly as before.
+    fn collect_liveness_edges(
         items: &[IrAssignmentItem],
         variables: &[VarDef],
-        live: &mut HashSet<SmolStr>,
-        changed: &mut bool,
+        out: &mut HashMap<SmolStr, Vec<SmolStr>>,
     ) {
         for item in items {
             match item {
                 IrAssignmentItem::Assign(assign) => {
-                    let target_live = match &assign.index {
-                        Some(target) => live.contains(&target.array),
-                        None => live.contains(&variables[assign.var_index].name),
+                    let target = match &assign.index {
+                        Some(target) => target.array.clone(),
+                        None => variables[assign.var_index].name.clone(),
                     };
-                    if !target_live {
-                        continue;
-                    }
                     let mut reads = HashSet::new();
                     collect_var_names(&assign.expr, &mut reads);
                     if let Some(target) = &assign.index {
                         collect_var_names(&target.index, &mut reads);
                     }
-                    for name in reads {
-                        if live.insert(name) {
-                            *changed = true;
-                        }
-                    }
+                    out.entry(target).or_default().extend(reads);
                 }
                 IrAssignmentItem::Loop { body, .. } => {
-                    propagate_liveness(body, variables, live, changed);
+                    collect_liveness_edges(body, variables, out);
                 }
             }
         }
-    }
-
-    fn shadow_liveness(
-        items: &[IrAssignmentItem],
-        variables: &[VarDef],
-        arrays: &[ArrayDef],
-        roots: &HashSet<SmolStr>,
-    ) -> HashSet<SmolStr> {
-        let mut live = roots.clone();
-        loop {
-            let mut changed = false;
-            propagate_liveness(items, variables, &mut live, &mut changed);
-            // Array families share their mask; share liveness the same
-            // way (one live element keeps the whole family).
-            for array in arrays {
-                let family_live = live.contains(&array.name)
-                    || (array.lower..array.lower + array.len as i64)
-                        .any(|k| live.contains(format!("{}[{k}]", array.name).as_str()));
-                if family_live && live.insert(array.name.clone()) {
-                    changed = true;
-                }
-                if family_live {
-                    for k in array.lower..array.lower + array.len as i64 {
-                        if live.insert(format!("{}[{k}]", array.name).into()) {
-                            changed = true;
-                        }
-                    }
-                }
-            }
-            if !changed {
-                break;
-            }
-        }
-        live
     }
 
     /// Interleave shadow derivative updates before each original
@@ -2458,9 +2584,12 @@ pub mod autodiff {
     ) -> ShadowContext {
         // Fixpoint: a variable depends on an axis if any assignment to it
         // reads a probe of that axis or another variable depending on it.
+        let span = crate::metrics::FineSpan::new("ir.shadow_axis_fixpoint");
         let mut deps: HashMap<SmolStr, AxisMask> = HashMap::new();
+        let mut axis_passes = 0_usize;
         loop {
             let mut changed = false;
+            axis_passes += 1;
             scan_shadowed(
                 &ir.assignments,
                 &ir.variables,
@@ -2473,19 +2602,22 @@ pub mod autodiff {
                 break;
             }
         }
+        span.finish(&format!("passes={axis_passes} shadowed={}", deps.len()));
 
         // Backward liveness: a shadow matters only when the equation
         // Jacobians can reach it — the variable feeds a contribution (or
         // ddx operand) directly, or feeds an assignment to a live
         // variable. Dead shadows (operating-point reporting chains) are
         // dropped before any slot is allocated.
-        let live = shadow_liveness(&ir.assignments, &ir.variables, &ir.arrays, shadow_roots);
-        let second_live = shadow_liveness(
-            &ir.assignments,
-            &ir.variables,
-            &ir.arrays,
-            second_shadow_roots,
-        );
+        let span = crate::metrics::FineSpan::new("ir.shadow_liveness");
+        let liveness = LivenessGraph::build(&ir.assignments, &ir.variables, &ir.arrays);
+        let live = liveness.live_from(shadow_roots);
+        let second_live = liveness.live_from(second_shadow_roots);
+        span.finish(&format!(
+            "live={} second_live={}",
+            live.len(),
+            second_live.len()
+        ));
         deps.retain(|name, _| live.contains(name) || second_live.contains(name));
         let second_deps: HashMap<SmolStr, AxisMask> = deps
             .iter()
@@ -2496,6 +2628,8 @@ pub mod autodiff {
         if deps.is_empty() {
             return ShadowContext::default();
         }
+
+        let span = crate::metrics::FineSpan::new("ir.shadow_layout");
 
         // Register shadow variables along each variable's live axes only:
         // a value computed from V(g) and V(s) never varies with the drain
@@ -2660,10 +2794,12 @@ pub mod autodiff {
             num_nodes,
             noise_shadowed: HashMap::new(),
         };
+        span.finish(&format!("shadow_slots={}", shadow_index.len()));
 
         // Interleave shadow updates before each original assignment.
         // Both the derivative and the original expression read the
         // pre-assignment values, so the shadows must be written first.
+        let span = crate::metrics::FineSpan::new("ir.shadow_interleave");
         let originals = std::mem::take(&mut ir.assignments);
         ir.assignments = interleave_shadows(
             originals,
@@ -2674,6 +2810,7 @@ pub mod autodiff {
             num_nodes,
             num_branches,
         );
+        span.finish(&format!("assignments={}", ir.assignments.len()));
 
         ctx
     }
@@ -3166,9 +3303,12 @@ pub mod autodiff {
         if num_processes == 0 {
             return;
         }
+        let span = crate::metrics::FineSpan::new("ir.noise_axis_fixpoint");
         let mut deps = HashMap::new();
+        let mut passes = 0_usize;
         loop {
             let mut changed = false;
+            passes += 1;
             scan_noise_shadowed(
                 &ir.assignments,
                 &ir.variables,
@@ -3181,15 +3321,24 @@ pub mod autodiff {
                 break;
             }
         }
+        span.finish(&format!("passes={passes} shadowed={}", deps.len()));
         if deps.is_empty() {
             return;
         }
-        let live = shadow_liveness(&ir.assignments, &ir.variables, &ir.arrays, shadow_roots);
+        let span = crate::metrics::FineSpan::new("ir.noise_liveness");
+        let liveness = LivenessGraph::build(&ir.assignments, &ir.variables, &ir.arrays);
+        let live = liveness.live_from(shadow_roots);
+        span.finish(&format!(
+            "assignments={} live={}",
+            ir.assignments.len(),
+            live.len()
+        ));
         deps.retain(|name, _| live.contains(name));
         if deps.is_empty() {
             return;
         }
 
+        let span = crate::metrics::FineSpan::new("ir.noise_shadow_layout");
         let array_members = ir
             .arrays
             .iter()
@@ -3239,8 +3388,11 @@ pub mod autodiff {
             }
         }
         ctx.noise_shadowed = deps;
+        span.finish(&format!("shadow_slots={}", shadow_index.len()));
+        let span = crate::metrics::FineSpan::new("ir.noise_shadow_interleave");
         let originals = std::mem::take(&mut ir.assignments);
         ir.assignments = interleave_noise_shadows(originals, &ir.variables, &shadow_index, ctx);
+        span.finish(&format!("assignments={}", ir.assignments.len()));
     }
 
     /// Rewrite I(a,b) probes of branches carrying potential contributions
