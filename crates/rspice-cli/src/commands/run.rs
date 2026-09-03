@@ -2417,6 +2417,7 @@ fn run_implicit_step_op_table(
     verbose: bool,
     quiet: bool,
     engine: &Engine,
+    plan: &DeckPlan,
     materializer: &DeckPlanMaterializer<'_>,
     run_label: Option<&str>,
 ) -> Result<DeckOutcome, CliError> {
@@ -2657,6 +2658,7 @@ fn run_implicit_step_op_table(
         // coordinate artifact that a cancellation left unwritten.
         let transaction = publish::begin()?;
         let mut coordinate_publications = Vec::with_capacity(preflight.len());
+        let mut set_coordinates = Vec::with_capacity(preflight.len());
         for run in &preflight {
             let coordinate_path =
                 tag_output_path(&base_output, &sanitize_run_tag(&run.coordinate_tag));
@@ -2704,16 +2706,30 @@ fn run_implicit_step_op_table(
                     artifact: path.clone(),
                 }],
             });
+            set_coordinates.push(AxisSetCoordinate {
+                identity: ArtifactCoordinate::from_run_coordinate(&run.canonical),
+                artifacts: vec![path.clone()],
+            });
             outputs.push(path);
         }
         let manifest_path = conditional_step_schema_path(&base_output);
         write_step_schema_manifest(&manifest_path, &coordinate_publications)?;
+        // This is a coordinate set like any other, so it commits the same
+        // manifest declaring the set complete. Without it a reader could not
+        // tell a finished implicit-operating-point set from one a cancellation
+        // stopped part-way, and would have to re-derive the artifact names it
+        // expected instead of reading the ones the run published.
+        let set_manifest_path = axis_set_manifest_path(args, config, run_label)?;
+        if let Some(set_manifest_path) = &set_manifest_path {
+            write_axis_set_manifest(set_manifest_path, args, plan, &set_coordinates)?;
+        }
         if crate::abort::reason().is_some() {
             drop(transaction);
             return Err(cancellation_cli_error(args.timeout));
         }
         transaction.commit()?;
         outputs.push(manifest_path);
+        outputs.extend(set_manifest_path);
     }
     ctx.record_unevaluated_measurements();
     let measurements = ctx.measurements.borrow().clone();
@@ -3073,6 +3089,7 @@ fn run_deck(
             verbose,
             quiet,
             &engine,
+            &canonical_plan,
             &materializer,
             run_label,
         );
@@ -3210,6 +3227,27 @@ fn run_deck(
                 reports.len(),
                 materializer.len()
             ),
+        });
+    }
+    // A coordinate that failed published nothing, so the set is not the
+    // complete one the manifests would declare. Committing them anyway would
+    // leave a reader a `run_set` naming a set it can never load: dropping the
+    // transaction leaves the destination exactly as it was.
+    if reports.iter().any(|report| report.error.is_some()) {
+        drop(transaction);
+        if !quiet {
+            println!(
+                "{} of {} coordinates failed: the incomplete set was discarded and no coordinate artifact was published",
+                reports
+                    .iter()
+                    .filter(|report| report.error.is_some())
+                    .count(),
+                materializer.len()
+            );
+        }
+        return Ok(DeckOutcome {
+            reports,
+            outputs: Vec::new(),
         });
     }
 

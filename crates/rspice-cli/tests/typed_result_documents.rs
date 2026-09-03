@@ -7,40 +7,13 @@
 //! real binary — whether the CLI publishes it, and what identity, descriptors,
 //! and units that artifact carries.
 
+mod common;
+
+use common::{read_json, test_dir};
+
 use rspice_core::execution::AnalysisResultKind;
-use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicU64, Ordering};
-
-struct TestDirectory(PathBuf);
-
-impl std::ops::Deref for TestDirectory {
-    type Target = Path;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl Drop for TestDirectory {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-fn test_dir(tag: &str) -> TestDirectory {
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-    let serial = NEXT.fetch_add(1, Ordering::Relaxed);
-    let path = std::env::temp_dir().join(format!(
-        "rspice_typed_documents_{}_{}_{}",
-        std::process::id(),
-        tag,
-        serial
-    ));
-    std::fs::create_dir_all(&path).expect("create typed-document test directory");
-    TestDirectory(path)
-}
 
 /// A small nonlinear divider that every family below can be run against.
 const CIRCUIT: &str = "* typed result document coverage\n\
@@ -324,13 +297,6 @@ fn artifact_path(requested: &Path, suffix: &str) -> PathBuf {
         .to_string_lossy();
     let extension = requested.extension().expect("output extension");
     requested.with_file_name(format!("{stem}.{suffix}.{}", extension.to_string_lossy()))
-}
-
-fn read_json(path: &Path) -> Value {
-    serde_json::from_slice(&std::fs::read(path).unwrap_or_else(|error| {
-        panic!("read {}: {error}", path.display());
-    }))
-    .unwrap_or_else(|error| panic!("parse {}: {error}", path.display()))
 }
 
 fn assert_document(kind: AnalysisResultKind, run: &FamilyRun) {

@@ -1,47 +1,12 @@
 //! `.FOUR` is a post-process of an authored transient, never an independently
 //! invented simulation.
 
+mod common;
+
+use common::{fixture, read_json, test_dir};
+
 use serde_json::Value;
-use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicU64, Ordering};
-
-fn fixture(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
-        .join("audit_regressions")
-        .join(name)
-}
-
-struct TestDirectory(PathBuf);
-
-impl std::ops::Deref for TestDirectory {
-    type Target = Path;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl Drop for TestDirectory {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-fn test_dir(tag: &str) -> TestDirectory {
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-    let serial = NEXT.fetch_add(1, Ordering::Relaxed);
-    let path = std::env::temp_dir().join(format!(
-        "rspice_fourier_parent_{}_{}_{}",
-        std::process::id(),
-        tag,
-        serial
-    ));
-    std::fs::create_dir_all(&path).expect("create Fourier test directory");
-    TestDirectory(path)
-}
 
 /// Real samples of one named series in a typed result document.
 fn samples(document: &Value, name: &str) -> Vec<f64> {
@@ -75,11 +40,6 @@ fn harmonic_magnitude(document: &Value, harmonic: i64) -> f64 {
         .position(|value| value.as_i64() == Some(harmonic))
         .unwrap_or_else(|| panic!("harmonic {harmonic} is not on the axis of {document:#}"));
     samples(document, "harmonic_magnitude")[index]
-}
-
-fn read_json(path: &Path) -> Value {
-    serde_json::from_slice(&std::fs::read(path).expect("read JSON artifact"))
-        .expect("parse JSON artifact")
 }
 
 #[test]

@@ -1,14 +1,12 @@
 //! Integration tests for `rspice run` netlist-input flags:
 //! `-D/--define` parameter overrides and `-I/--include` search directories.
 
-use std::path::{Path, PathBuf};
-use std::process::Command;
+mod common;
 
-fn test_dir(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("rspice_run_flags_{}_{}", std::process::id(), tag));
-    std::fs::create_dir_all(&dir).expect("create test dir");
-    dir
-}
+use common::test_dir;
+
+use std::path::Path;
+use std::process::Command;
 
 fn run_rspice(args: &[&str]) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_rspice"))

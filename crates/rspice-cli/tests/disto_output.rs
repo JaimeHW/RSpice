@@ -3,10 +3,13 @@
 //! semantics, physical product frequencies, peak phasors, normalization, and
 //! the dedicated HDF5 round trip.
 
+mod common;
+
+use common::{fixture, read_json, test_dir};
+
 use serde_json::Value;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Command, Output};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 const BIAS: f64 = 0.5;
 const IS: f64 = 1.0e-12;
@@ -15,43 +18,6 @@ const A2: f64 = 2.0e-3;
 const TEMP_K: f64 = 300.15;
 const BOLTZMANN: f64 = 1.380_649e-23;
 const ELECTRON_CHARGE: f64 = 1.602_176_634e-19;
-
-fn fixture(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
-        .join("audit_regressions")
-        .join(name)
-}
-
-struct TestDirectory(PathBuf);
-
-impl std::ops::Deref for TestDirectory {
-    type Target = Path;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl Drop for TestDirectory {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-fn test_dir(tag: &str) -> TestDirectory {
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-    let serial = NEXT.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!(
-        "rspice_disto_output_{}_{}_{}",
-        std::process::id(),
-        tag,
-        serial
-    ));
-    std::fs::create_dir_all(&dir).expect("create DISTO test directory");
-    TestDirectory(dir)
-}
 
 fn run(deck: &Path, output: Option<(&Path, &str)>) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_rspice"));
@@ -65,11 +31,6 @@ fn run(deck: &Path, output: Option<(&Path, &str)>) -> Output {
         ]);
     }
     command.output().expect("run rspice DISTO deck")
-}
-
-fn read_json(path: &Path) -> Value {
-    serde_json::from_slice(&std::fs::read(path).expect("read JSON output"))
-        .expect("parse JSON output")
 }
 
 /// The complex samples of one distortion series.

@@ -2,6 +2,10 @@
 //! be readable, conversions must preserve values, and `--variables` /
 //! `--start` / `--stop` must subset the data.
 
+mod common;
+
+use common::test_dir;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -20,16 +24,6 @@ c1 out 0 1n
 .ac dec 2 100k 1meg
 .end
 ";
-
-fn test_dir(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "rspice_convert_roundtrip_{}_{}",
-        std::process::id(),
-        tag
-    ));
-    std::fs::create_dir_all(&dir).expect("create test dir");
-    dir
-}
 
 fn rspice(args: &[&str]) {
     let output = Command::new(env!("CARGO_BIN_EXE_rspice"))

@@ -2,18 +2,12 @@
 //! analyses. Every coordinate owns a complete child analysis and a distinct
 //! output artifact; the first authored STEP dimension varies fastest.
 
+mod common;
+
+use common::{AxisRunSet, test_dir};
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
-
-fn test_dir(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "rspice_step_cartesian_{}_{}",
-        std::process::id(),
-        tag
-    ));
-    std::fs::create_dir_all(&dir).expect("create test directory");
-    dir
-}
 
 fn run_rspice(args: &[&str]) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_rspice"))
@@ -22,96 +16,56 @@ fn run_rspice(args: &[&str]) -> std::process::Output {
         .expect("run rspice")
 }
 
-fn tag_output_path(base: &Path, tag: &str) -> PathBuf {
-    let stem = base.file_stem().expect("output stem").to_string_lossy();
-    base.with_file_name(format!(
-        "{stem}.{tag}.{}",
-        base.extension()
-            .expect("output extension")
-            .to_string_lossy()
-    ))
+/// The artifact one coordinate of a completed axis run published.
+///
+/// The coordinate identity and the artifact name both come from the run-set
+/// manifest the run committed after its last coordinate, so this never has to
+/// reproduce the coordinate-tag sanitizer or the namespace composition rule.
+fn step_output(base: &Path, one_based_index: usize) -> PathBuf {
+    AxisRunSet::read(base)
+        .coordinate(one_based_index)
+        .only_artifact()
+        .to_path_buf()
 }
 
-fn sanitize_coordinate_tag(tag: &str) -> String {
-    tag.chars()
-        .map(|character| {
-            if character.is_ascii_alphanumeric() {
-                character.to_ascii_lowercase()
-            } else {
-                '_'
-            }
+/// The artifact one coordinate published for one analysis identity.
+fn step_analysis_output(base: &Path, one_based_index: usize, analysis_id: &str) -> PathBuf {
+    AxisRunSet::read(base)
+        .coordinate(one_based_index)
+        .artifact(analysis_id)
+        .to_path_buf()
+}
+
+/// How many coordinates the run published, or none when it committed no set.
+fn published_coordinate_count(base: &Path) -> usize {
+    AxisRunSet::try_read(base).map_or(0, |set| set.coordinates.len())
+}
+
+/// Every artifact in the output directory, sorted, so a test can assert that
+/// the run published exactly the set its own manifest declares.
+fn directory_contents(directory: &Path) -> Vec<PathBuf> {
+    let mut files = std::fs::read_dir(directory)
+        .expect("list output directory")
+        .map(|entry| entry.expect("directory entry").path())
+        .collect::<Vec<_>>();
+    files.sort();
+    files
+}
+
+/// Files beside a checkpoint destination, which is not an artifact the run-set
+/// manifest names.
+fn checkpoint_siblings(checkpoint: &Path) -> Vec<PathBuf> {
+    let stem = checkpoint.file_stem().expect("checkpoint stem");
+    directory_contents(checkpoint.parent().expect("checkpoint parent"))
+        .into_iter()
+        .filter(|path| {
+            path != checkpoint
+                && path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with(&format!("{}.", stem.to_string_lossy())))
         })
         .collect()
-}
-
-fn planned_coordinate(base: &Path, one_based_index: usize) -> Option<(String, Vec<String>)> {
-    let parent = base.parent().expect("output parent");
-    let deck = std::fs::read_dir(parent)
-        .expect("list test directory")
-        .map(|entry| entry.expect("test directory entry").path())
-        .find(|path| {
-            path.extension()
-                .and_then(|extension| extension.to_str())
-                .is_some_and(|extension| {
-                    extension.eq_ignore_ascii_case("sp") || extension.eq_ignore_ascii_case("cir")
-                })
-        })
-        .expect("test deck beside output");
-    let source = std::fs::read_to_string(deck).expect("read test deck");
-    let netlist = rspice_core::Netlist::parse(&source).expect("parse test deck");
-    let limits = rspice_core::ResourceLimits::default();
-    let plan = rspice_core::execution::DeckPlan::from_netlist_with_abort(
-        &netlist,
-        &limits,
-        &rspice_core::NoAbort,
-    )
-    .expect("plan test deck");
-    let coordinates = plan
-        .coordinates_with_abort(&limits, &rspice_core::NoAbort)
-        .expect("plan test coordinates");
-    coordinates
-        .get(one_based_index.checked_sub(1)?)
-        .map(|coordinate| {
-            (
-                coordinate.stable_tag(),
-                plan.analyses()
-                    .iter()
-                    .map(|analysis| analysis.id().tag())
-                    .collect(),
-            )
-        })
-}
-
-fn step_output(base: &Path, one_based_index: usize) -> PathBuf {
-    let Some((coordinate, analyses)) = planned_coordinate(base, one_based_index) else {
-        return tag_output_path(base, &format!("missing-coordinate-{one_based_index}"));
-    };
-    let [analysis] = analyses.as_slice() else {
-        panic!("step_output requires exactly one planned analysis, got {analyses:?}");
-    };
-    tag_output_path(
-        &tag_output_path(base, &sanitize_coordinate_tag(&coordinate)),
-        analysis,
-    )
-}
-
-fn coordinate_output(base: &Path, one_based_index: usize) -> PathBuf {
-    let (coordinate, _) = planned_coordinate(base, one_based_index)
-        .unwrap_or_else(|| panic!("missing planned coordinate {one_based_index}"));
-    tag_output_path(base, &sanitize_coordinate_tag(&coordinate))
-}
-
-fn step_analysis_output(base: &Path, one_based_index: usize, analysis_id: &str) -> PathBuf {
-    let (coordinate, analyses) = planned_coordinate(base, one_based_index)
-        .unwrap_or_else(|| panic!("missing planned coordinate {one_based_index}"));
-    assert!(
-        analyses.iter().any(|planned| planned == analysis_id),
-        "analysis {analysis_id} is not planned in {analyses:?}"
-    );
-    tag_output_path(
-        &tag_output_path(base, &sanitize_coordinate_tag(&coordinate)),
-        analysis_id,
-    )
 }
 
 fn csv_column(csv: &str, name: &str) -> Vec<f64> {
@@ -303,8 +257,9 @@ fn assert_conditional_implicit_step_topology_is_typed(
         semantic[&0].topology_fingerprint, semantic[&1].topology_fingerprint,
         "conditional component/node membership must change topology identity"
     );
-    assert!(
-        !step_output(&output_path, modes_len(values) + 1).exists(),
+    assert_eq!(
+        published_coordinate_count(&output_path),
+        modes_len(values),
         "only planned coordinate artifacts may be published"
     );
 
@@ -464,7 +419,7 @@ fn canonical_data_step_temp_order_drives_cli_coordinate_namespaces() {
             index + 1
         );
     }
-    assert!(!step_output(&output_path, 9).exists());
+    assert_eq!(published_coordinate_count(&output_path), 8);
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -604,8 +559,9 @@ fn femto_step_runs_exactly_six_fresh_transient_analyses() {
         assert_eq!(time.first().copied(), Some(0.0), "fresh transient: {csv}");
         assert!(time.last().is_some_and(|value| *value >= 500.0e-12));
     }
-    assert!(
-        !step_output(&output_path, 7).exists(),
+    assert_eq!(
+        published_coordinate_count(&output_path),
+        6,
         "the femto grid must contain exactly six coordinates"
     );
 
@@ -675,8 +631,9 @@ fn authored_hb_runs_once_per_step_coordinate_with_distinct_spectra() {
             index + 1
         );
     }
-    assert!(
-        !step_output(&output_path, 3).exists(),
+    assert_eq!(
+        published_coordinate_count(&output_path),
+        2,
         "the bounded plan must contain exactly two HB coordinates"
     );
 
@@ -729,7 +686,22 @@ fn repeated_ac_cards_use_analysis_ordinals_inside_each_step_coordinate() {
         assert_eq!(csv_column(&first_csv, "frequency"), vec![1.0e3]);
         assert_eq!(csv_column(&second_csv, "frequency"), vec![1.0e4]);
     }
-    assert!(!coordinate_output(&output_path, 1).exists());
+    // Every artifact the run published is analysis-qualified: an artifact
+    // named by the coordinate alone would let two `.AC` cards of one
+    // coordinate overwrite each other.
+    let run_set = AxisRunSet::read(&output_path);
+    assert_eq!(
+        directory_contents(&dir),
+        {
+            let mut expected = run_set.artifacts();
+            expected.push(deck.clone());
+            expected.push(common::axis_run_set_path(&output_path));
+            expected.push(common::axis_schema_manifest_path(&output_path));
+            expected.sort();
+            expected
+        },
+        "an artifact outside the published coordinate set was written"
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -823,8 +795,7 @@ fn conditional_hb_signature_change_fails_before_any_step_output() {
         String::from_utf8_lossy(&run.stderr)
     );
     assert!(!output_path.exists());
-    assert!(!step_output(&output_path, 1).exists());
-    assert!(!step_output(&output_path, 2).exists());
+    assert_eq!(published_coordinate_count(&output_path), 0);
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -869,7 +840,7 @@ fn default_ngspice_cli_does_not_apply_xyce_print_voltage_wildcard() {
         String::from_utf8_lossy(&run.stderr)
     );
     assert!(!output_path.exists());
-    assert!(!step_output(&output_path, 1).exists());
+    assert_eq!(published_coordinate_count(&output_path), 0);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -964,8 +935,7 @@ fn conditional_child_analysis_change_fails_before_any_step_output() {
         String::from_utf8_lossy(&run.stderr)
     );
     assert!(!output_path.exists());
-    assert!(!step_output(&output_path, 1).exists());
-    assert!(!step_output(&output_path, 2).exists());
+    assert_eq!(published_coordinate_count(&output_path), 0);
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -1133,17 +1103,14 @@ fn transient_step_checkpoints_are_coordinate_local_and_resumable() {
         "coordinate checkpoints must save; stderr: {}",
         String::from_utf8_lossy(&initial.stderr)
     );
-    let first = step_output(&checkpoint, 1);
-    let second = step_output(&checkpoint, 2);
-    assert!(
-        first.exists(),
-        "missing first checkpoint {}",
-        first.display()
-    );
-    assert!(
-        second.exists(),
-        "missing second checkpoint {}",
-        second.display()
+    // A checkpoint is not a published result, so the run-set manifest does not
+    // name it; what matters is that each coordinate wrote its own and none
+    // shared the unqualified destination.
+    let checkpoints = checkpoint_siblings(&checkpoint);
+    assert_eq!(
+        checkpoints.len(),
+        2,
+        "each coordinate must checkpoint separately: {checkpoints:?}"
     );
     assert!(
         !checkpoint.exists(),
@@ -1198,12 +1165,25 @@ fn repeated_transient_checkpoints_compose_analysis_and_coordinate_ids() {
         "repeated transient checkpoints must save; stderr: {}",
         String::from_utf8_lossy(&initial.stderr)
     );
-    for coordinate in 1..=2 {
-        for analysis in 1..=2 {
-            let path =
-                step_analysis_output(&checkpoint, coordinate, &format!("tran-{analysis:03}"));
-            assert!(path.exists(), "missing checkpoint {}", path.display());
-        }
+    let checkpoints = checkpoint_siblings(&checkpoint);
+    assert_eq!(
+        checkpoints.len(),
+        4,
+        "two coordinates times two transients: {checkpoints:?}"
+    );
+    for analysis in 1..=2 {
+        let tag = format!(".tran-{analysis:03}.");
+        assert_eq!(
+            checkpoints
+                .iter()
+                .filter(|path| path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.contains(&tag)))
+                .count(),
+            2,
+            "each authored transient checkpoints at each coordinate: {checkpoints:?}"
+        );
     }
     assert!(!checkpoint.exists());
 
@@ -1316,10 +1296,18 @@ fn stepped_measurement_exports_identify_every_coordinate_run() {
     )
     .expect("write measured STEP deck");
 
+    // The run also publishes results, so the coordinate identities the
+    // measurement labels must carry can be read out of the run-set manifest
+    // rather than re-derived from the plan.
+    let output_path = dir.join("measured.csv");
     let json_run = run_rspice(&[
         "--quiet",
         "run",
         deck.to_str().unwrap(),
+        "-o",
+        output_path.to_str().unwrap(),
+        "-f",
+        "csv",
         "--meas-file",
         json_path.to_str().unwrap(),
     ]);
@@ -1333,22 +1321,16 @@ fn stepped_measurement_exports_identify_every_coordinate_run() {
             .expect("parse measurement JSON");
     let measurements = json["measurements"].as_array().expect("measurement array");
     assert_eq!(measurements.len(), 2);
-    let first_coordinate = planned_coordinate(&json_path, 1)
-        .expect("first coordinate")
-        .0;
-    let second_coordinate = planned_coordinate(&json_path, 2)
-        .expect("second coordinate")
-        .0;
-    assert!(
-        measurements[0]["run"]
-            .as_str()
-            .is_some_and(|run| run.ends_with(&format!("[{first_coordinate}]")))
-    );
-    assert!(
-        measurements[1]["run"]
-            .as_str()
-            .is_some_and(|run| run.ends_with(&format!("[{second_coordinate}]")))
-    );
+    let run_set = AxisRunSet::read(&output_path);
+    assert_eq!(run_set.coordinates.len(), 2);
+    for (measurement, coordinate) in measurements.iter().zip(&run_set.coordinates) {
+        let label = measurement["run"].as_str().expect("measurement run label");
+        assert!(
+            label.ends_with(&format!("[{}]", coordinate.tag)),
+            "measurement label {label} does not name coordinate {}",
+            coordinate.tag
+        );
+    }
 
     let csv_run = run_rspice(&[
         "--quiet",
@@ -1374,18 +1356,17 @@ fn stepped_measurement_exports_identify_every_coordinate_run() {
         .split(',')
         .position(|column| column == "run")
         .expect("measurement CSV has a run column");
-    assert!(
-        lines[1]
+    for (line, coordinate) in lines[1..=2].iter().zip(&run_set.coordinates) {
+        let label = line
             .split(',')
             .nth(run_column)
-            .is_some_and(|run| run.ends_with(&format!("[{first_coordinate}]")))
-    );
-    assert!(
-        lines[2]
-            .split(',')
-            .nth(run_column)
-            .is_some_and(|run| run.ends_with(&format!("[{second_coordinate}]")))
-    );
+            .expect("measurement CSV run column");
+        assert!(
+            label.ends_with(&format!("[{}]", coordinate.tag)),
+            "measurement label {label} does not name coordinate {}",
+            coordinate.tag
+        );
+    }
 
     let _ = std::fs::remove_dir_all(&dir);
 }

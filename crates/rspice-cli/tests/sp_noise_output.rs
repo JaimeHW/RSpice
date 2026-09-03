@@ -1,47 +1,12 @@
 //! End-to-end `.SP DONOISE` coverage for parser compatibility, physical
 //! two-port noise data, format retention, and fail-closed Touchstone policy.
 
-use serde_json::Value;
-use std::path::{Path, PathBuf};
+mod common;
+
+use common::{fixture, read_json, test_dir};
+
+use std::path::Path;
 use std::process::{Command, Output};
-use std::sync::atomic::{AtomicU64, Ordering};
-
-fn fixture(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
-        .join("audit_regressions")
-        .join(name)
-}
-
-struct TestDirectory(PathBuf);
-
-impl std::ops::Deref for TestDirectory {
-    type Target = Path;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl Drop for TestDirectory {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-fn test_dir(tag: &str) -> TestDirectory {
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-    let serial = NEXT.fetch_add(1, Ordering::Relaxed);
-    let path = std::env::temp_dir().join(format!(
-        "rspice_sp_noise_{}_{}_{}",
-        std::process::id(),
-        tag,
-        serial
-    ));
-    std::fs::create_dir_all(&path).expect("create SP noise test directory");
-    TestDirectory(path)
-}
 
 fn run(deck: &Path, output_path: Option<&Path>, format: Option<&str>) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_rspice"));
@@ -53,10 +18,6 @@ fn run(deck: &Path, output_path: Option<&Path>, format: Option<&str>) -> Output 
         command.args(["--format", format]);
     }
     command.output().expect("run rspice SP deck")
-}
-
-fn read_json(path: &Path) -> Value {
-    serde_json::from_slice(&std::fs::read(path).expect("read SP JSON")).expect("parse SP JSON")
 }
 
 /// One `.SP` CSV artifact decoded into its scale and its named columns.

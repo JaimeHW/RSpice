@@ -1,42 +1,12 @@
 //! Production lifecycle checks for Xyce ADDRESISTORS derived-copy artifacts.
 
+mod common;
+
+use common::test_dir;
+
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
-
-struct TestDirectory(PathBuf);
-
-impl TestDirectory {
-    fn join(&self, path: impl AsRef<Path>) -> PathBuf {
-        self.0.join(path)
-    }
-}
-
-impl AsRef<Path> for TestDirectory {
-    fn as_ref(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TestDirectory {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-fn test_dir(tag: &str) -> TestDirectory {
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-    let id = NEXT.fetch_add(1, Ordering::Relaxed);
-    let directory = std::env::temp_dir().join(format!(
-        "rspice_addresistors_artifact_{}_{}_{}",
-        std::process::id(),
-        tag,
-        id
-    ));
-    std::fs::create_dir_all(&directory).expect("create isolated test directory");
-    TestDirectory(directory)
-}
 
 fn artifact_path(deck: &Path) -> PathBuf {
     let mut path = deck.as_os_str().to_os_string();

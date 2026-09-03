@@ -1,39 +1,15 @@
 //! Advanced CLI analyses must propagate process cancellation into core and
 //! must not publish result artifacts after cancellation.
 
-use std::path::{Path, PathBuf};
+mod common;
+
+use common::test_dir;
+
 use std::process::Command;
-
-struct TestDirectory(PathBuf);
-
-impl TestDirectory {
-    fn new(tag: &str) -> Self {
-        let path = std::env::temp_dir().join(format!(
-            "rspice_advanced_cancel_{}_{}_{tag}",
-            std::process::id(),
-            std::thread::current().name().unwrap_or("test")
-        ));
-        if path.exists() {
-            std::fs::remove_dir_all(&path).expect("remove stale test directory");
-        }
-        std::fs::create_dir_all(&path).expect("create test directory");
-        Self(path)
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TestDirectory {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
 
 #[test]
 fn monte_carlo_timeout_is_typed_prompt_and_does_not_publish_an_artifact() {
-    let directory = TestDirectory::new("monte_carlo");
+    let directory = test_dir("monte_carlo");
     let deck = directory.path().join("long_monte_carlo.sp");
     let artifact = directory.path().join("monte_carlo.json");
     std::fs::write(

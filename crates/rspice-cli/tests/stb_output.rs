@@ -1,14 +1,11 @@
 //! `.STB` end to end through the CLI: the card runs, the margins print,
 //! and the export carries the loop-gain sweep with magnitude and phase.
 
-use std::path::PathBuf;
-use std::process::Command;
+mod common;
 
-fn test_dir() -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("rspice_stb_output_{}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("create test dir");
-    dir
-}
+use common::test_dir;
+
+use std::process::Command;
 
 /// Single-pole inverting loop: T(f) = 1000/(1 + j f/1kHz). DC gain 60 dB,
 /// unity crossover at ~1 MHz, phase margin ~90.06 degrees.
@@ -23,7 +20,7 @@ c1 ctrl 0 159.154943091895n
 
 #[test]
 fn stb_card_runs_and_exports_loop_gain() {
-    let dir = test_dir();
+    let dir = test_dir("stb");
     let deck = dir.join("stb_loop.sp");
     std::fs::write(&deck, SINGLE_POLE_STB).expect("write deck");
 
@@ -113,7 +110,7 @@ fn stb_card_runs_and_exports_loop_gain() {
 
 #[test]
 fn stb_missing_probe_source_fails_with_guidance() {
-    let dir = test_dir();
+    let dir = test_dir("stb");
     let deck = dir.join("stb_bad_probe.sp");
     std::fs::write(
         &deck,

@@ -8,36 +8,11 @@
 //! signal, at what time, in absolute and relative terms, and how much of the
 //! declared tolerance it consumed — alongside the ratio.
 
-use std::path::{Path, PathBuf};
+mod common;
+
+use common::{TestDirectory, test_dir};
+
 use std::process::Command;
-use std::sync::atomic::{AtomicU64, Ordering};
-
-struct TestDirectory(PathBuf);
-
-impl TestDirectory {
-    fn new(tag: &str) -> Self {
-        static NEXT: AtomicU64 = AtomicU64::new(0);
-        let serial = NEXT.fetch_add(1, Ordering::Relaxed);
-        let path = std::env::temp_dir().join(format!(
-            "rspice_compression_report_{}_{}_{}",
-            std::process::id(),
-            tag,
-            serial
-        ));
-        std::fs::create_dir(&path).expect("create compression-report test directory");
-        Self(path)
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TestDirectory {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
 
 /// An RC low-pass driven well above its corner, sampled far more finely than
 /// the compressor's tolerance requires, so samples are genuinely discarded and
@@ -81,7 +56,7 @@ fn run_compressed(directory: &TestDirectory, tolerance: &str) -> (String, String
 
 #[test]
 fn a_compressed_run_reports_its_worst_error_beside_the_ratio() {
-    let directory = TestDirectory::new("certificate");
+    let directory = test_dir("certificate");
     let (stdout, stderr) = run_compressed(&directory, "1e-4");
 
     assert!(
@@ -209,7 +184,7 @@ fn run_post_process_deck(
 /// move a single digit of them.
 #[test]
 fn post_process_artifacts_are_byte_identical_with_and_without_compression() {
-    let directory = TestDirectory::new("post_process_equivalence");
+    let directory = test_dir("post_process_equivalence");
     let plain = run_post_process_deck(&directory, "plain", &[]);
     let compressed = run_post_process_deck(
         &directory,
@@ -260,7 +235,7 @@ fn post_process_artifacts_are_byte_identical_with_and_without_compression() {
 
 #[test]
 fn a_run_that_discarded_nothing_says_so_rather_than_omitting_the_certificate() {
-    let directory = TestDirectory::new("lossless");
+    let directory = test_dir("lossless");
     // A tolerance far below the solver's own accuracy leaves every accepted
     // sample in place. Silence would be indistinguishable from a report that
     // was never computed, so the line still has to appear.

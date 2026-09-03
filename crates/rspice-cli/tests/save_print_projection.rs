@@ -8,30 +8,19 @@
 //! The `.STEP` sweep table, PSS, and HB used to apply the save set without
 //! checking it, so an unknown symbol silently vanished from those exports.
 
+mod common;
+
+use common::{TestDirectory, test_dir};
+
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
-use std::sync::atomic::{AtomicUsize, Ordering};
-
-static NEXT_TEST_DIR: AtomicUsize = AtomicUsize::new(0);
-
-fn test_dir(tag: &str) -> PathBuf {
-    let ordinal = NEXT_TEST_DIR.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!(
-        "rspice_save_print_{}_{}_{}",
-        std::process::id(),
-        ordinal,
-        tag
-    ));
-    std::fs::create_dir_all(&dir).expect("create save/print projection test directory");
-    dir
-}
 
 fn cleanup(dir: &Path) {
     let _ = std::fs::remove_dir_all(dir);
 }
 
 struct Run {
-    dir: PathBuf,
+    dir: TestDirectory,
     output_path: PathBuf,
     output: Output,
 }

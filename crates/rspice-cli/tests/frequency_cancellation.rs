@@ -1,39 +1,15 @@
 //! Frequency-domain CLI analyses must propagate the process abort into core
 //! execution and must not publish a result artifact after cancellation.
 
-use std::path::{Path, PathBuf};
+mod common;
+
+use common::test_dir;
+
 use std::process::Command;
-
-struct TestDirectory(PathBuf);
-
-impl TestDirectory {
-    fn new(tag: &str) -> Self {
-        let path = std::env::temp_dir().join(format!(
-            "rspice_frequency_cancel_{}_{}_{tag}",
-            std::process::id(),
-            std::thread::current().name().unwrap_or("test")
-        ));
-        if path.exists() {
-            std::fs::remove_dir_all(&path).expect("remove stale test directory");
-        }
-        std::fs::create_dir_all(&path).expect("create test directory");
-        Self(path)
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TestDirectory {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
 
 #[test]
 fn noise_timeout_is_typed_prompt_and_does_not_publish_an_artifact() {
-    let directory = TestDirectory::new("noise");
+    let directory = test_dir("noise");
     let deck = directory.path().join("long_noise.sp");
     let artifact = directory.path().join("noise.csv");
     std::fs::write(

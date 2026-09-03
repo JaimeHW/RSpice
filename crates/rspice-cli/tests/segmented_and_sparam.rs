@@ -1,13 +1,10 @@
 //! Checkpoint/resume segmentation and two-port S-parameter extraction.
 
-use std::path::PathBuf;
-use std::process::Command;
+mod common;
 
-fn test_dir(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("rspice_seg_sp_{}_{}", std::process::id(), tag));
-    std::fs::create_dir_all(&dir).expect("create test dir");
-    dir
-}
+use common::test_dir;
+
+use std::process::Command;
 
 fn run_rspice(args: &[&str]) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_rspice"))

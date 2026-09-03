@@ -106,11 +106,16 @@ anything else it publishes:
 - `<run label>` appears only for an outer `.ALTER` or textual `.DATA` variant.
 - A complete coordinate set is described by `<output stem>.run_set.json`,
   published last, so a reader that finds the manifest is guaranteed every
-  artifact it names is present and complete.
+  artifact it names is present and complete. A coordinate that failed publishes
+  nothing, and the whole set — manifests included — is discarded rather than
+  leaving a manifest that names artifacts a reader cannot load.
 
 The `.FOUR` family publishes one artifact per resolved operand, because RSpice
 evaluates one spectrum per operand: `.FOUR 1k V(out) I(V1)` writes `four-001`
-and `four-002`. Command-line analysis modes (`--monte-carlo`, `--sparam`,
+and `four-002`. Each operand's identity, and the transient it post-processes,
+come from the canonical plan, so a deck with two `.TRAN` cards attaches each
+`.FOUR` card to the transient that precedes it rather than to whichever ran
+last. Command-line analysis modes (`--monte-carlo`, `--sparam`,
 `--pss-freq`, `--sens-*`, `--pz-*`) are single by construction and publish
 under their bare mode tag.
 
@@ -126,14 +131,25 @@ sample that does not exist is encoded as absent, never as zero, and a channel
 the authored output projection did not retain keeps its descriptor and declares
 that it was not retained.
 
-Three forms are refused in `json` rather than published with evidence dropped,
-each naming what is lost and where to get it:
+A card whose result is more than one document publishes them all. `.SP DONOISE`
+writes the scattering sweep and, beside it, the port-noise sweep under the same
+analysis identity, at the scattering artifact's own path with `port-noise`
+composed into it (`out.json` and `out.port-noise.json`, or `out.sp-001.json`
+and `out.sp-001.port-noise.json` in a multi-analysis deck). The port-noise
+document carries the covariance matrix together with the reference temperature
+it was evaluated at, the `4kT` thermal reference it is measured against, and —
+for a two-port — the `Rn`/`F`/`Fmin`/`Sopt` figures at every frequency. The flat
+formats keep both in one table, because they have no per-family payload to
+separate.
 
-| Refused | Why | Use instead |
-| :--- | :--- | :--- |
-| `.SP DONOISE` | the covariance matrix, its reference temperature, the 4kT normalization, and the two-port noise figures have no home in the shared S-parameter payload | `csv`, `tsv`, `raw`, `hdf5` |
-| AC `.SENS` | the sensitivity payload declares one operating-point derivative per element, not a complex sweep | `csv`, `tsv`, `raw` |
-| `--sens-param` | the probe returns one number, with no element identity or output value | `csv`, `tsv`, `raw`, or author a `.SENS` card |
+Both forms of `.SENS` publish the shared document too: a DC card fills the
+per-element operating-point derivatives, an AC card fills the complex
+derivative traces sampled on the document's own frequency axis, and the
+`--sens-param` probe fills a single parameter entry — a `.PARAM` may drive
+several elements, so the derivative is attributed to the parameter rather than
+to any one device, and the entry carries the parameter's nominal value together
+with the normalized derivative against the operating point the same deck
+settles at.
 
 `.FFT` keeps its own versioned bundle (`schema_version: 2`), which already
 carries instance and coordinate identity plus the complete transform contract,
