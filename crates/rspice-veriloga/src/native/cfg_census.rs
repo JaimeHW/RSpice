@@ -362,7 +362,10 @@ impl OperatingPoint {
 /// It did not show while the only interpreted census (`cfg_census`) never asked
 /// for an initial step. Any mixed comparison does, so the flag belongs here
 /// rather than in each caller.
-fn analysis_names(analysis: u8, initial_step: bool) -> std::collections::HashSet<smol_str::SmolStr> {
+fn analysis_names(
+    analysis: u8,
+    initial_step: bool,
+) -> std::collections::HashSet<smol_str::SmolStr> {
     let names: &[&str] = match analysis {
         0 => &["dc", "op", "static"],
         1 => &["ac", "smallsig", "smallsignal", "small_signal"],

@@ -77,9 +77,7 @@ use super::census_models::{CensusModel, shipped_census_models_matching};
 use super::cfg_census::{OperatingPoint, deviation};
 use super::cfg_error_lane::{ErrorBounded, lift_inputs};
 use crate::canonical_ir::cfg_lower::CfgModel;
-use crate::canonical_ir::{
-    ValueId, differentiate, evaluate_cfg, prune_cfg_to_outputs,
-};
+use crate::canonical_ir::{ValueId, differentiate, evaluate_cfg, prune_cfg_to_outputs};
 use crate::jit::cfg_lanes::scalarize_lanes;
 use crate::jit::cfg_plan_builder::{
     CfgNoiseScope, CfgPlanEntry, CfgPlanRefusal, ShippedColumnLanes,
@@ -288,8 +286,7 @@ impl Comparison {
         };
         let magnitude = self.magnitude();
         magnitude > 0.0
-            && (!bound.error.is_finite()
-                || AGREEMENT_ERROR_FACTOR * bound.error / magnitude >= 1.0)
+            && (!bound.error.is_finite() || AGREEMENT_ERROR_FACTOR * bound.error / magnitude >= 1.0)
     }
 
     fn bound(&self) -> f64 {
@@ -775,7 +772,9 @@ fn row_conditioning(
             )
             .with_initial_step();
             point.set_event_state_slots(cfg.event_state_candidates.len());
-            lift_inputs(&point.interpreter_inputs(artifact.mir.nodes.len(), artifact.mir.branches.len()))
+            lift_inputs(
+                &point.interpreter_inputs(artifact.mir.nodes.len(), artifact.mir.branches.len()),
+            )
         })
         .collect();
 

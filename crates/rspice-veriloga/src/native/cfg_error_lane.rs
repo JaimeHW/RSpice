@@ -37,13 +37,18 @@
 //!   an ill-conditioned intermediate shows up — a subtraction of two nearly
 //!   equal large numbers returns a small result while carrying both operands'
 //!   errors forward undiminished.
-//! * **rounding**, `u · |op(x)|` with `u = f64::EPSILON / 2`: the unit
-//!   round-off this operation itself commits. It is exact for the
-//!   correctly-rounded operations (`+ − × ÷ √`, and `%`, which is exact), and it
-//!   is the nominal charge for the library transcendentals, whose worst-case
-//!   error is about one unit in the last place — twice `u`. The census's
-//!   [`AGREEMENT_ERROR_FACTOR`](super::cfg_mir_census) carries that factor of
-//!   two rather than this module inflating every operation by it.
+//! * **rounding**, what this operation itself commits. For `+ − × ÷ √` it is
+//!   recovered *exactly* by an error-free transformation — 2Sum for a sum, an
+//!   FMA residual for a product, a quotient and a square root — rather than
+//!   bounded, because a derivative cone is mostly exact operations (`x * 1`,
+//!   `x + 0`, and by Sterbenz's lemma the subtraction of two nearby
+//!   quantities) and charging each of them a half-ulp puts a fictitious error
+//!   on the largest intermediate in the cone. Everything else takes the
+//!   worst case, `u · |op(x)|` with `u = f64::EPSILON / 2`: one unit round-off,
+//!   which is also the nominal charge for the library transcendentals, whose
+//!   worst-case error is about one unit in the last place — twice `u`. The
+//!   census's [`AGREEMENT_ERROR_FACTOR`](super::cfg_mir_census) carries that
+//!   factor of two rather than this module inflating every operation by it.
 //!
 //! Three op classes carry no rounding at all, and each for a reason rather than
 //! for convenience:
@@ -68,6 +73,21 @@
 //! exactly at a kink. A cone sitting on a kink is not a place where two chain
 //! rules can be asked to agree in the first place — the census's significance
 //! gate is what excludes those — so the assumption is shared rather than new.
+//!
+//! # What the analysis cannot do
+//!
+//! Two operands that descend from a common ancestor carry the *same* rounding
+//! error, and a subtraction of them cancels it. A scalar bound cannot see that:
+//! it adds the two magnitudes. On a cone of a few thousand operations the
+//! difference does not show — `vbic13_4t`'s worst entry comes out at eight units
+//! in the last place — but `l_utsoi_102`'s twenty-six-thousand-operation
+//! Jacobian entry subtracts quantities at `1e28` and the bound reports
+//! `E/|entry| = 4.4` for a derivative three independent computations agree on
+//! to eight figures. Tracking the correlation needs an error term per rounding
+//! event — affine arithmetic — which is quadratic in the cone and not
+//! affordable here. [`super::cfg_mir_census`] therefore refuses a floor at or
+//! above the entry's own magnitude rather than passing an entry on a bound that
+//! could not have failed it.
 
 use crate::canonical_ir::{CfgEvalInputs, CfgScalar};
 
@@ -89,7 +109,11 @@ impl ErrorBounded {
     /// census compares against a relative deviation.
     pub(super) fn relative(self) -> f64 {
         if self.value == 0.0 {
-            return if self.error == 0.0 { 0.0 } else { f64::INFINITY };
+            return if self.error == 0.0 {
+                0.0
+            } else {
+                f64::INFINITY
+            };
         }
         self.error / self.value.abs()
     }
@@ -222,8 +246,7 @@ impl CfgScalar for ErrorBounded {
         let value = self.value / rhs.value;
         measured(
             value,
-            term(1.0 / rhs.value, self.error)
-                + term(self.value / rhs.value / rhs.value, rhs.error),
+            term(1.0 / rhs.value, self.error) + term(self.value / rhs.value / rhs.value, rhs.error),
             (-value).mul_add(rhs.value, self.value) / rhs.value,
         )
     }
@@ -425,20 +448,20 @@ mod tests {
     /// within a few units in the last place of it.
     #[test]
     fn a_well_conditioned_chain_stays_within_a_few_ulp() {
-        let x = seed(3.0);
-        let y = seed(7.0);
+        let x = seed(1.0).div(seed(3.0));
+        let y = seed(7.1);
         let product = x.mul(y);
-        let sum = product.add(seed(1.0));
-        let scaled = sum.div(seed(2.0));
-        assert_eq!(seed(3.0).error, 0.0);
-        // Three roundings, each at most `u` of its own result. Charged against
+        let sum = product.add(seed(1.3));
+        let scaled = sum.div(seed(2.9));
+        assert_eq!(seed(3.0).error, 0.0, "an input is exact as given");
+        assert!(scaled.error > 0.0, "and a rounding chain is not");
+        // Four roundings, each at most `u` of its own result. Charged against
         // the final magnitude the bound is a small multiple of `u`.
         assert!(
-            scaled.relative() <= 4.0 * UNIT_ROUNDOFF,
+            scaled.relative() <= 5.0 * UNIT_ROUNDOFF,
             "{:e}",
             scaled.relative()
         );
-        assert_eq!(scaled.value, 11.0);
     }
 
     /// Cancellation is what the lane exists to see: the operands' errors carry
@@ -488,13 +511,39 @@ mod tests {
     /// `%` and the sign-bit operations charge nothing of their own.
     #[test]
     fn the_exact_operations_charge_no_rounding() {
-        let x = seed(7.5).mul(seed(1.0));
+        // A division that genuinely rounds, so there is an error to carry.
+        let x = seed(7.5).div(seed(7.0));
         assert!(x.error > 0.0);
         assert_eq!(x.neg().error, x.error);
         assert_eq!(x.abs().error, x.error);
         assert_eq!(x.rem(seed(2.0)).error, x.error);
         assert_eq!(seed(2.7).floor().error, 0.0);
         assert_eq!(seed(2.7).ceil().error, 0.0);
+    }
+
+    /// An arithmetic step that commits no rounding is charged none.
+    ///
+    /// This is what the error-free transformations buy, and it is most of what
+    /// a chain rule emits: multiplying by a mask, adding a structural zero, and
+    /// — by Sterbenz's lemma — subtracting two nearby quantities. Charging each
+    /// a worst-case half-ulp puts a fictitious error on the largest
+    /// intermediate in a cone and propagates it forward.
+    #[test]
+    fn an_exact_step_is_charged_nothing() {
+        let inexact = seed(1.0).div(seed(3.0));
+        assert!(inexact.error > 0.0);
+
+        assert_eq!(inexact.mul(seed(1.0)).error, inexact.error, "x * 1");
+        assert_eq!(inexact.mul(seed(2.0)).error, 2.0 * inexact.error, "x * 2");
+        assert_eq!(inexact.add(seed(0.0)).error, inexact.error, "x + 0");
+        // Sterbenz: two doubles within a factor of two subtract exactly.
+        let near = seed(1.000_000_000_1);
+        assert_eq!(near.sub(seed(1.0)).error, 0.0, "a Sterbenz subtraction");
+        // And an addition that does round is charged its actual residual, which
+        // is at most the half-ulp the worst case would have charged.
+        let rounding = seed(1.0).add(seed(1.0e-20));
+        assert!(rounding.error > 0.0);
+        assert!(rounding.error <= UNIT_ROUNDOFF * rounding.value.abs());
     }
 
     /// `limexp`'s default trait body is built from `sub`, `add` and `mul`, so
