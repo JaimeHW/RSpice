@@ -1585,12 +1585,13 @@ fn blended_max_derivative(da: f64, db: f64, takes_left: f64) -> f64 {
 /// would be a fitted tolerance wearing a derivation, so the thing to
 /// demonstrate is that it stays narrow exactly where it must: at a *selection*.
 ///
-/// A mask is `0.0` or `1.0` and carries no error, `x * 1` and `x + 0` are
-/// exact, so the error lane's bound on `da*c + db*(1-c)` is a couple of units
-/// in the last place of `da` — it does not see `db` at all. The pre-`31be31f82`
+/// A mask is `0.0` or `1.0` and carries no error, and `x * 1`, `x * 0` and
+/// `x + 0` commit none, so the lane's bound on `da*c + db*(1-c)` is *exactly
+/// zero* — it does not see `db` at all, whatever `db` is. The pre-`31be31f82`
 /// blend `db + (da - db)*c` returns exactly zero here, which is not a rounding
-/// distance from `da` under any bound: the criterion rejects it by nine orders
-/// against [`DERIVATIVE_AGREEMENT`] and by fifteen against the floor.
+/// distance from `da` under any bound: the floor contributes nothing and the
+/// criterion rejects the reading by nine orders on
+/// [`DERIVATIVE_AGREEMENT`] alone.
 #[test]
 fn the_criterion_rejects_a_mis_differentiated_max() {
     use crate::canonical_ir::{AdSeed, CfgEvalInputs};
@@ -1651,12 +1652,13 @@ fn the_criterion_rejects_a_mis_differentiated_max() {
         "the fixture has to select the shallow arm: {:e}",
         bound.value
     );
-    // And the bound on it is a handful of ulp: a mask is exact, so the losing
-    // arm's eighteen-orders-larger derivative contributes nothing.
-    assert!(
-        bound.relative() < 100.0 * f64::EPSILON,
-        "a selection's floor must stay at ulp scale: {:e}",
-        bound.relative()
+    // And the bound on it is zero: every step of a masked selection is exact,
+    // so the losing arm's eighteen-orders-larger derivative contributes
+    // nothing to the floor however large it is.
+    assert_eq!(
+        bound.error, 0.0,
+        "a masked selection commits no rounding: {:e}",
+        bound.error
     );
 
     // The defect, in the arithmetic it was written in.
