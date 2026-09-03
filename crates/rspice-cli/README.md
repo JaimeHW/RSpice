@@ -393,7 +393,7 @@ Available on every subcommand:
 | `--config <FILE>` | Use this configuration file instead of the discovered user and project files |
 | `--log-level <LEVEL>` | Set log level: `off`, `error`, `warn`, `info`, `debug`, `trace` |
 | `--log-format <FORMAT>` | Log format: `text` (default) or newline-delimited `json` with timestamp, source, process, thread, and `run_id` |
-| `--error-format <FORMAT>` | Fatal diagnostic format: `text` (default) or versioned `json` with stable code/category, retry policy, exit code, and numeric resource/convergence details |
+| `--error-format <FORMAT>` | Fatal diagnostic format: `text` (default) or versioned `json` (`schema_version: 2`) with stable code/category, retry policy, exit code, the failing analysis and run-coordinate ids, the deck path and line, the refused capability token, and numeric resource/convergence details |
 
 `rspice --version` reports the crate version, build target, profile, and exact
 source commit. The same commit appears in health documents, structured fatal
@@ -481,21 +481,35 @@ Environment variable overrides:
 
 ## Exit Codes
 
-The exit status is the verification contract — a deck whose measurements fail, or whose results are non-finite, does not exit 0:
+The exit status is the verification contract — a deck whose measurements fail, or whose results are non-finite, does not exit 0.
 
-| Code | Meaning |
-| :--- | :--- |
-| 0 | Success: simulation ran and every check passed |
-| 1 | Simulation error (convergence failure, non-finite results, Verilog-A compile failure, conversion failure) |
-| 2 | Usage error (invalid arguments, or warnings under `check --strict`) |
-| 3 | Verification failure: a `.MEAS` failed or did not evaluate, or `compare` found mismatches |
-| 65 | Input format error (netlist parse failure, singular topology from `check`) |
-| 66 | Input file not found |
-| 70 | Internal error |
-| 74 | I/O error (failed to read input or write output) |
-| 78 | Configuration error |
-| 124 | Run exceeded `--timeout` |
-| 130 | Interrupted (Ctrl-C) |
+Every nonzero code is derived from one **failure category**, and for anything the engine produced that category is the engine's own (`rspice_core::SimulationErrorCategory`), so the exit status, the `--error-format json` `category` field, and the `--summary` report always agree. Automation can branch on the number alone:
+
+| Code | Category | Meaning |
+| :--- | :--- | :--- |
+| 0 | — | Success: simulation ran and every check passed |
+| 1 | `compilation`, `conversion` | A failure with no engine category: Verilog-A compile failure, result-format conversion failure |
+| 2 | `usage` | Usage error (invalid arguments, or warnings under `check --strict`) |
+| 3 | `verification` | A `.MEAS` failed or did not evaluate, or `compare` found mismatches |
+| 65 | `netlist` | Invalid authored input: netlist parse failure, singular topology from `check` |
+| 66 | `input_not_found` | Input file not found |
+| 69 | `capability` | The deck is well formed and this build does not execute it — an unsupported analysis/device combination, model family, or netlist construct |
+| 70 | `internal` | Internal error |
+| 73 | `output_commit` | The run produced correct results and publishing them failed; the previous artifact is intact unless the message says otherwise |
+| 74 | `io` | I/O error outside a publication transaction (failed to read input) |
+| 75 | `resource_limit` | A configured resource budget was exceeded; the same workload succeeds under a larger budget |
+| 76 | `persistence` | A checkpoint or other persisted artifact was written by an incompatible format version |
+| 78 | `configuration` | Configuration error |
+| 80 | `simulation` | Circuit construction or device evaluation failed |
+| 81 | `solver` | The numerical solver failed |
+| 82 | `convergence` | An iterative analysis exhausted its convergence strategy |
+| 83 | `signal_unavailable` | A valid authored output symbol is absent from the produced result |
+| 84 | `result_schema` | A produced result violates its own published schema |
+| 85 | `materialization` | A materialized `.STEP`/`.TEMP` run disagrees with the plan that produced it |
+| 124 | `timeout` | Run exceeded `--timeout` |
+| 130 | `cancellation` | Interrupted (Ctrl-C) |
+
+65-78 keep their `sysexits.h` meanings; 80-85 are an RSpice block for engine-domain outcomes `sysexits` has no name for. No engine category exits 1 — a `1` means only the two frontend failures listed above.
 
 ## CI Integration
 

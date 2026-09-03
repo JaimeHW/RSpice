@@ -805,13 +805,14 @@ fn conditional_hb_signature_change_fails_before_any_step_output() {
     ]);
     assert_eq!(
         run.status.code(),
-        Some(2),
+        Some(85),
         "stdout: {}; stderr: {}",
         String::from_utf8_lossy(&run.stdout),
         String::from_utf8_lossy(&run.stderr)
     );
     assert!(
-        String::from_utf8_lossy(&run.stderr).contains("conditionally changes"),
+        String::from_utf8_lossy(&run.stderr)
+            .contains("must be unconditional across every coordinate"),
         "stderr: {}",
         String::from_utf8_lossy(&run.stderr)
     );
@@ -945,13 +946,14 @@ fn conditional_child_analysis_change_fails_before_any_step_output() {
     ]);
     assert_eq!(
         run.status.code(),
-        Some(2),
+        Some(85),
         "stdout: {}; stderr: {}",
         String::from_utf8_lossy(&run.stdout),
         String::from_utf8_lossy(&run.stderr)
     );
     assert!(
-        String::from_utf8_lossy(&run.stderr).contains("conditionally changes"),
+        String::from_utf8_lossy(&run.stderr)
+            .contains("must be unconditional across every coordinate"),
         "stderr: {}",
         String::from_utf8_lossy(&run.stderr)
     );
@@ -1076,7 +1078,7 @@ fn outer_alter_step_cross_product_obeys_one_global_batch_budget() {
         "-f",
         "csv",
     ]);
-    assert_eq!(run.status.code(), Some(65));
+    assert_eq!(run.status.code(), Some(75));
     let diagnostic: serde_json::Value =
         serde_json::from_slice(&run.stderr).expect("structured diagnostic");
     assert_eq!(diagnostic["error"]["code"], "resource_limit");
@@ -1244,7 +1246,7 @@ fn step_batch_limit_retains_typed_resource_metadata() {
         "run",
         deck.to_str().unwrap(),
     ]);
-    assert_eq!(run.status.code(), Some(1));
+    assert_eq!(run.status.code(), Some(75));
     let diagnostic: serde_json::Value =
         serde_json::from_slice(&run.stderr).expect("structured diagnostic");
     assert_eq!(diagnostic["error"]["code"], "resource_limit");

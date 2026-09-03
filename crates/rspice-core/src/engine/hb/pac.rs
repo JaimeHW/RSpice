@@ -274,9 +274,12 @@ impl Engine {
         if let Some(summary) =
             periodic_capability::summarize(&periodic_capability::periodic_descriptor_gaps(&circuit))
         {
-            return Err(SimulationError::Circuit(format!(
-                "PAC exact periodic MNA is unavailable because the circuit contains {summary}"
-            )));
+            return Err(SimulationError::unsupported_capability(
+                "analysis.pac.periodic_mna",
+                format!(
+                    "PAC exact periodic MNA is unavailable because the circuit contains {summary}"
+                ),
+            ));
         }
 
         let drive_tones = Self::hb_collect_drive_tones(&hb_config)?;

@@ -97,6 +97,16 @@ fn map_build_parse_error(context: &str, error: ParseWithAbortError) -> Simulatio
         ParseWithAbortError::Parse(ParseError::ResourceLimit(error)) => {
             SimulationError::ResourceLimit(error)
         }
+        // A refusal the grammar recognized keeps its capability category
+        // across the parse/elaboration boundary instead of flattening into a
+        // netlist error that reads like an authoring mistake.
+        ParseWithAbortError::Parse(ParseError::UnsupportedCapability {
+            origin,
+            capability,
+            detail,
+        }) => crate::engine::UnsupportedCapabilityError::new(capability, detail)
+            .at(origin)
+            .into(),
         ParseWithAbortError::Parse(error) => {
             SimulationError::Netlist(format!("{context} error: {error}"))
         }

@@ -81,13 +81,13 @@ fn assert_typed_refusal(cards: &str, card: &str, analysis_id: &str, tag: &str) {
 
     assert_eq!(
         output.status.code(),
-        Some(65),
-        "refusal must use the input-error exit status; stderr: {}",
+        Some(69),
+        "refusal must use the capability exit status; stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     let json = error_document(&output);
     assert_eq!(json["error"]["code"], "unsupported_deck_analysis");
-    assert_eq!(json["error"]["category"], "unsupported_capability");
+    assert_eq!(json["error"]["category"], "capability");
     assert_eq!(json["error"]["retryable"], false);
     assert_eq!(json["error"]["analysis"], analysis_id);
     let message = json["error"]["message"]
@@ -142,7 +142,7 @@ fn a_periodic_card_is_refused_before_a_preceding_transient_publishes() {
     let dir = test_dir("before_tran");
     let (output, artifact) = run_deck(&dir, ".TRAN 1n 10n\n.PSS FUND=1G\n", &[]);
 
-    assert_eq!(output.status.code(), Some(65));
+    assert_eq!(output.status.code(), Some(69));
     assert_eq!(
         error_document(&output)["error"]["code"],
         "unsupported_deck_analysis"

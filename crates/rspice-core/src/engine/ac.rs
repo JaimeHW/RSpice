@@ -2765,9 +2765,9 @@ impl Engine {
         // CPL registers none and its AC solve fails with a singular matrix);
         // refuse explicitly instead of returning silently dead ports.
         if !circuit.coupled_tlines.is_empty() {
-            return Err(SimulationError::Circuit(
-                "AC analysis does not support coupled multiconductor (CPL) transmission lines"
-                    .to_string(),
+            return Err(SimulationError::unsupported_capability(
+                "analysis.ac.device.coupled_transmission_line",
+                "AC analysis does not support coupled multiconductor (CPL) transmission lines",
             ));
         }
         Self::ensure_supported_ac_dynamic_charges(&circuit)?;

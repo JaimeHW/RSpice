@@ -494,6 +494,20 @@ pub enum ParseError {
     #[error("Syntax error at line {line}: {message}")]
     Syntax { line: usize, message: String },
 
+    /// A construct the grammar recognizes and this build declines to lower.
+    ///
+    /// Separate from [`Self::Syntax`] because the deck is not wrong: an
+    /// unsupported Xyce Y-device family or Spectre construct is a capability
+    /// boundary, and a frontend reports it as a gap rather than as an
+    /// authoring mistake. `capability` is the same stable dotted token the
+    /// engine's [`crate::UnsupportedCapabilityError`] publishes.
+    #[error("{origin}: unsupported capability [{capability}]: {detail}")]
+    UnsupportedCapability {
+        origin: NetlistSourceLocation,
+        capability: &'static str,
+        detail: String,
+    },
+
     #[error("Unknown device type: {0}")]
     UnknownDevice(String),
 
@@ -568,6 +582,48 @@ pub enum ParseError {
 
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
+}
+
+impl ParseError {
+    /// Where in the source this failure was raised, when one location says it.
+    ///
+    /// Frontends print a file and line beside the message rather than leaving
+    /// the operator to find "line N" inside prose. The match is exhaustive so
+    /// a new variant has to declare whether it has a location; `None` means
+    /// the failure genuinely has no single point in the source — a resolution
+    /// failure discovered after flattening, or a conflict that spans two
+    /// declarations, whose message names both.
+    pub fn source_location(&self) -> Option<NetlistSourceLocation> {
+        match self {
+            Self::Syntax { line, .. } => Some(NetlistSourceLocation::in_memory(*line)),
+            Self::UnsupportedCapability { origin, .. } => Some(origin.clone()),
+            Self::DuplicateName { duplicate_line, .. } => {
+                Some(NetlistSourceLocation::in_memory(*duplicate_line))
+            }
+            Self::ParameterRedefinition(error) => Some(error.duplicate_origin.clone()),
+            Self::DuplicateModelParameter(error) => Some(error.model_origin.clone()),
+            Self::MissingSubcircuitEnds(error) => Some(error.detected_at.clone()),
+            Self::MissingDeviceModel(error) => Some(NetlistSourceLocation::in_memory(error.line)),
+            Self::AnalysisCard(error) => Some(NetlistSourceLocation::in_memory(error.line)),
+            Self::UndefinedMutualInductorReference(error) => Some(error.origin.clone()),
+            Self::ResourceLimit(_)
+            | Self::UnknownDevice(_)
+            | Self::InvalidNode(_)
+            | Self::DuplicateSubcircuitPortBinding(_)
+            | Self::GlobalSubcircuitPortBinding(_)
+            | Self::UndefinedSubcircuit(_)
+            | Self::UnresolvedSubcircuitParameter(_)
+            | Self::OutputSymbolValidation(_)
+            | Self::OutputExpressionValidation(_)
+            | Self::StartupDirectiveConflict(_)
+            | Self::StartupConstraintConflict(_)
+            | Self::DeviceInitialCondition(_)
+            | Self::MissingParameter(_)
+            | Self::UndefinedParameter(_)
+            | Self::InvalidValue(_)
+            | Self::Io(_) => None,
+        }
+    }
 }
 
 /// Error returned by cooperative, abort-aware netlist parsing APIs.

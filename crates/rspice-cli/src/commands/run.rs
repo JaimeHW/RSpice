@@ -1018,7 +1018,10 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
     let start_time = Instant::now();
     let mut reports = Vec::with_capacity(plan.len());
     let mut outputs: Vec<PathBuf> = Vec::new();
-    let mut first_error: Option<String> = None;
+    // Both the message and the typed details a failing report published, so
+    // the plan-level exit status keeps the category a single-deck run would
+    // have produced.
+    let mut first_error: Option<(String, Option<crate::cli::ErrorDetails>)> = None;
 
     let workers = effective_jobs(args.jobs, plan.len(), config.resources.max_parallel_workers)?;
     if workers > 1 {
@@ -1069,10 +1072,7 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
                 }
             }
             if first_error.is_none() {
-                first_error = outcome
-                    .reports
-                    .iter()
-                    .find_map(|report| report.error.clone());
+                first_error = first_reported_failure(&outcome.reports);
             }
             reports.extend(outcome.reports);
             outputs.extend(outcome.outputs);
@@ -1097,10 +1097,7 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
                 deck.label.as_deref(),
             )?;
             if first_error.is_none() {
-                first_error = outcome
-                    .reports
-                    .iter()
-                    .find_map(|report| report.error.clone());
+                first_error = first_reported_failure(&outcome.reports);
             }
             reports.extend(outcome.reports);
             outputs.extend(outcome.outputs);
@@ -1158,8 +1155,8 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
         println!("\nSimulation complete in {:.3}s.", duration);
     }
 
-    if let Some(err_msg) = first_error {
-        return Err(CliError::simulation_error(err_msg));
+    if let Some((message, details)) = first_error {
+        return Err(CliError::reported(message, details));
     }
 
     // The simulation itself succeeded; failed .MEAS checks still fail the
@@ -1687,27 +1684,6 @@ fn map_materialized_run_error(
         MaterializedRunError::Simulation(error) => {
             map_step_core_error(error, args.timeout, analysis)
         }
-        MaterializedRunError::AlterUnsupported => CliError::InvalidArgument {
-            message: "textual .ALTER must be expanded before canonical deck materialization"
-                .to_string(),
-            suggestion: Some(
-                "run the source through the CLI multi-run expander before materializing coordinates"
-                .to_string(),
-            ),
-        },
-        MaterializedRunError::AnalysisIdentityMismatch {
-            coordinate,
-            expected,
-            actual,
-        } => CliError::InvalidArgument {
-            message: format!(
-                ".STEP coordinate {coordinate} conditionally changes the child-analysis signature from {expected:?} to {actual:?}"
-            ),
-            suggestion: Some(
-                "keep the authored physical-analysis and post-processing card set unconditional across every coordinate"
-                    .to_string(),
-            ),
-        },
         error => CliError::InternalError {
             message: format!("canonical deck materialization failed: {error}"),
         },
@@ -2810,12 +2786,35 @@ fn simulation_error_message(e: &CliError) -> String {
     }
 }
 
+/// The first recorded failure in a plan's reports, with the typed details it
+/// published.
+///
+/// The message alone used to be all that survived, which turned every deck
+/// failure — a capability refusal, a convergence failure, an exceeded budget —
+/// into one undifferentiated simulation error at the process boundary.
+fn first_reported_failure(
+    reports: &[SimulationReport],
+) -> Option<(String, Option<crate::cli::ErrorDetails>)> {
+    reports.iter().find_map(|report| {
+        report
+            .error
+            .clone()
+            .map(|message| (message, report.error_details.clone()))
+    })
+}
+
 fn is_run_setup_or_output_error(error: &CliError) -> bool {
     matches!(
         error,
         CliError::InvalidArgument { .. }
             | CliError::OutputError { .. }
             | CliError::OutputSerializationError { .. }
+    ) || matches!(
+        error.category(),
+        // A failed publication is an output failure however it was typed:
+        // demoting it into a run report would report a successful simulation
+        // whose results never reached the disk.
+        crate::cli::FailureCategory::Engine(rspice_core::SimulationErrorCategory::OutputCommit)
     )
 }
 
@@ -3476,7 +3475,7 @@ mod step_cancellation_report_tests {
                 .error_details
                 .as_ref()
                 .map(|details| (details.code, details.category)),
-            Some(("timed_out", "cancellation"))
+            Some(("timed_out", "timeout"))
         );
         assert_eq!(reports[1].measurements.len(), 1);
         assert_eq!(reports[1].measurements[0].name, "__rspice_run_status__");

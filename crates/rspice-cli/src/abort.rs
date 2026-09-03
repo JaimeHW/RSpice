@@ -73,6 +73,24 @@ impl AbortSignal for ProcessAbort {
     fn is_aborted(&self) -> bool {
         matches!(STATE.load(Ordering::Relaxed), INTERRUPT | TIMEOUT)
     }
+
+    fn abort_reason(&self) -> rspice_core::AbortReason {
+        process_abort_reason()
+    }
+}
+
+/// The engine's view of why this process is stopping.
+///
+/// The engine's inner loops raise a reason-free stop because only the owner of
+/// the flag knows what set it. This is that owner, so the reason it records is
+/// what re-labels a propagated stop as a cancellation or an expired budget.
+/// No recorded reason means nothing asked for a stop, and a stop that arrives
+/// anyway is treated as a cancellation.
+pub fn process_abort_reason() -> rspice_core::AbortReason {
+    match reason() {
+        Some(AbortReason::Timeout) => rspice_core::AbortReason::TimeLimit,
+        Some(AbortReason::Interrupt) | None => rspice_core::AbortReason::Cancelled,
+    }
 }
 
 /// Abort signal that also drives a progress bar from the engine's

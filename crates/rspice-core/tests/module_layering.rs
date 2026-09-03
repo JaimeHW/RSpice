@@ -96,6 +96,11 @@ const LAYERS: &[(&str, u32)] = &[
     // SPICE engineering-suffix semantics. Both expression parsers and the
     // deck lexer consume this leaf so numeric text has one semantic owner.
     ("spice_number", 0),
+    // Analysis-instance and run-coordinate identity. A vocabulary of names,
+    // like `codemodels` and `op_label`: the planner in `execution` mints them
+    // and the engine's typed errors carry them, so a leaf is what keeps the
+    // error taxonomy from reaching up into the orchestration layer.
+    ("identity", 0),
     // A kernel library beneath the solvers.
     ("simd", 1),
     // SPICE RAW waveform files, read and written. A leaf by construction:

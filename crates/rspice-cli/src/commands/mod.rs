@@ -138,6 +138,15 @@ pub(crate) fn parse_netlist_input(
 
 /// Preserve typed semantic context when crossing the core/CLI boundary.
 pub(crate) fn map_parse_error(error: rspice_core::error::ParseError) -> crate::cli::CliError {
+    // A construct the grammar recognized and this build declines to lower is
+    // a capability gap, not a malformed deck; the typed conversion keeps its
+    // token, span, and exit code.
+    if matches!(
+        error,
+        rspice_core::netlist::ParseError::UnsupportedCapability { .. }
+    ) {
+        return crate::cli::CliError::from(error);
+    }
     let (message, line) = match &error {
         rspice_core::netlist::ParseError::OutputSymbolValidation(validation) => {
             let mut message = String::from("undefined output symbols:");
@@ -171,7 +180,10 @@ pub(crate) fn map_parse_error(error: rspice_core::error::ParseError) -> crate::c
         rspice_core::netlist::ParseError::MissingDeviceModel(error) => {
             (error.to_string(), (error.line != 0).then_some(error.line))
         }
-        _ => (error.to_string(), None),
+        _ => (
+            error.to_string(),
+            error.source_location().map(|origin| origin.line),
+        ),
     };
     crate::cli::CliError::ParseError {
         message,

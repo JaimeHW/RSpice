@@ -1283,7 +1283,7 @@ mod tests {
             panic!("missing typed unavailable-signal error");
         };
         assert_eq!(detail.signal, "@Mdriver[Id]");
-        assert_eq!(detail.analysis, "AC");
+        assert_eq!(detail.analysis_label, "AC");
 
         let missing_voltage = SaveSet {
             signals: vec![SaveSignal::Voltage("MissingNode".to_string())],

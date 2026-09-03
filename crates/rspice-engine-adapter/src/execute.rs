@@ -743,10 +743,6 @@ fn materialization_failure(error: &MaterializedRunError) -> Execution {
     match error {
         MaterializedRunError::Aborted => failure_execution(&SimulationError::Aborted),
         MaterializedRunError::Simulation(error) => failure_execution(error),
-        MaterializedRunError::AlterUnsupported => Execution::failed(
-            "analysis.axis_unsupported",
-            "Textual .ALTER variants are not representable by this adapter contract.",
-        ),
         other => Execution::failed(
             "analysis.axis_materialization",
             &format!("The canonical deck materializer failed: {other}"),
@@ -2551,6 +2547,9 @@ pub const TIME_LIMIT_FAILURE_CODE: &str = "engine.time_limit";
 fn failure_execution(error: &SimulationError) -> Execution {
     let code = match error.descriptor().code {
         rspice_core::engine::SimulationErrorCode::Aborted => CANCELLED_FAILURE_CODE.to_owned(),
+        rspice_core::engine::SimulationErrorCode::TimeLimitExceeded => {
+            TIME_LIMIT_FAILURE_CODE.to_owned()
+        }
         stable => format!("engine.{}", stable.as_str()),
     };
     Execution::failed(&code, &error.to_string())

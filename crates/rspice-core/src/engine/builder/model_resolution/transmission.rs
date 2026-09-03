@@ -298,10 +298,13 @@ pub fn validate_native_xyce_ltra_model_contract(
         || !model.real_vector_expr_params.is_empty()
         || !model.integer_vector_params.is_empty()
     {
-        return Err(SimulationError::Circuit(format!(
-            "LTRA model '{}' contains deferred, string, or vector parameters not supported by the native scalar runtime",
-            model.name
-        )));
+        return Err(SimulationError::unsupported_capability(
+            "device.ltra.model_parameter",
+            format!(
+                "LTRA model '{}' contains deferred, string, or vector parameters not supported by the native scalar runtime",
+                model.name
+            ),
+        ));
     }
 
     const SUPPORTED: &[&str] = &[
@@ -326,10 +329,13 @@ pub fn validate_native_xyce_ltra_model_contract(
     for (name, value) in &model.params {
         let authored = name.to_ascii_uppercase();
         if !SUPPORTED.contains(&authored.as_str()) {
-            return Err(SimulationError::Circuit(format!(
-                "LTRA model '{}' uses unsupported parameter '{}'",
-                model.name, name
-            )));
+            return Err(SimulationError::unsupported_capability(
+                "device.ltra.model_parameter",
+                format!(
+                    "LTRA model '{}' uses unsupported parameter '{}'",
+                    model.name, name
+                ),
+            ));
         }
         let canonical = match authored.as_str() {
             "G0" => "G".to_string(),
@@ -441,10 +447,13 @@ fn classify_ltra_model_params(
         if rg {
             return Ok(LtraModelClass::Rg);
         }
-        return Err(SimulationError::Circuit(format!(
-            "LTRA model '{}' uses finite nonzero G={}; nonzero G is valid only for a pure RG line with R>0 and L=C=0",
-            model_name, g
-        )));
+        return Err(SimulationError::unsupported_capability(
+            "device.ltra.rlgc_conductance",
+            format!(
+                "LTRA model '{}' uses finite nonzero G={} together with L or C; neither ngspice nor Xyce defines an RLGC line with shunt conductance, so nonzero G is valid only for a pure RG line with R>0 and L=C=0",
+                model_name, g
+            ),
+        ));
     }
     if l > 0.0 && c > 0.0 {
         return Ok(LtraModelClass::RlcLc);
@@ -453,10 +462,13 @@ fn classify_ltra_model_params(
         return Ok(LtraModelClass::Rc);
     }
 
-    Err(SimulationError::Circuit(format!(
-        "LTRA model '{}' has unsupported or ambiguous RLGC combination R={}, L={}, G={}, C={}, LEN={}; expected finite RLC/LC, RC, RG, or LEN=0 RC/RG semantics",
-        model_name, r, l, g, c, len
-    )))
+    Err(SimulationError::unsupported_capability(
+        "device.ltra.rlgc_class",
+        format!(
+            "LTRA model '{}' has unsupported or ambiguous RLGC combination R={}, L={}, G={}, C={}, LEN={}; expected finite RLC/LC, RC, RG, or LEN=0 RC/RG semantics",
+            model_name, r, l, g, c, len
+        ),
+    ))
 }
 
 fn finalize_ltra_model_params(

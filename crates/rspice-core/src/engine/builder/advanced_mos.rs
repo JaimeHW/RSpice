@@ -944,11 +944,14 @@ impl Engine {
                 // Reject unknown CVCHARGEMOD selectors up front when intrinsic charge is active;
                 // XPART<0 (intrinsic charge suppression) remains honored.
                 if !model.cvcharge_mod_supported_for_charges() && model.xpart >= 0.0 {
-                    return Err(SimulationError::Circuit(format!(
-                        "MOSFET '{}': BSIM4 model '{}' requests CVCHARGEMOD={} which is \
-                         not implemented (only integer CVCHARGEMOD=0, 1, 2, or 3)",
-                        element.name, model_key, model.cvcharge_mod_value
-                    )));
+                    return Err(SimulationError::unsupported_capability(
+                        "device.bsim4.cvchargemod",
+                        format!(
+                            "MOSFET '{}': BSIM4 model '{}' requests CVCHARGEMOD={} which is \
+                             not implemented (only integer CVCHARGEMOD=0, 1, 2, or 3)",
+                            element.name, model_key, model.cvcharge_mod_value
+                        ),
+                    ));
                 }
                 let model_temp = std::sync::Arc::new(Bsim4v8ModelTemp::new(&model, temp_k));
                 vacant.insert(Bsim4v8SharedModel {

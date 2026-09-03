@@ -563,16 +563,22 @@ impl Engine {
         if let Some(summary) =
             periodic_capability::summarize(&periodic_capability::periodic_descriptor_gaps(&circuit))
         {
-            return Err(SimulationError::Circuit(format!(
-                "pnoise exact periodic MNA is unavailable because the circuit contains {summary}"
-            )));
+            return Err(SimulationError::unsupported_capability(
+                "analysis.pnoise.periodic_mna",
+                format!(
+                    "pnoise exact periodic MNA is unavailable because the circuit contains {summary}"
+                ),
+            ));
         }
         if let Some(summary) = periodic_capability::summarize(
             &periodic_capability::cyclostationary_noise_gaps(&circuit),
         ) {
-            return Err(SimulationError::Circuit(format!(
-                "driven pnoise requires exact cyclostationary colored-noise folding, which is not implemented for {summary}; set the listed noise coefficient exactly to zero to disable that mechanism"
-            )));
+            return Err(SimulationError::unsupported_capability(
+                "analysis.pnoise.colored_noise",
+                format!(
+                    "driven pnoise requires exact cyclostationary colored-noise folding, which is not implemented for {summary}; set the listed noise coefficient exactly to zero to disable that mechanism"
+                ),
+            ));
         }
         let temperature = self.config.temperature;
         let physical_constants = pnoise_physical_constants(self.config.spice_dialect);

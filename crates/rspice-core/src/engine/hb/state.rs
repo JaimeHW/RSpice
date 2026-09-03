@@ -241,9 +241,12 @@ impl Engine {
     fn ensure_hb_envelope_linear_subset(circuit: &CircuitData) -> Result<(), SimulationError> {
         match periodic_capability::summarize(&periodic_capability::envelope_gaps(circuit)) {
             None => Ok(()),
-            Some(blockers) => Err(SimulationError::Circuit(format!(
-                "HB Envelope continuation is unavailable because the circuit contains {blockers}; the exact initializer currently supports only ordinary R/C elements and independent voltage/current sources"
-            ))),
+            Some(blockers) => Err(SimulationError::unsupported_capability(
+                "analysis.hb.envelope.continuation",
+                format!(
+                    "HB Envelope continuation is unavailable because the circuit contains {blockers}; the exact initializer currently supports only ordinary R/C elements and independent voltage/current sources"
+                ),
+            )),
         }
     }
 

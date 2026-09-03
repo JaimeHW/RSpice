@@ -112,6 +112,10 @@ pub mod diagnostics;
 pub mod engine;
 pub mod execution;
 pub mod expr;
+/// Stable analysis and run-coordinate identities, named by both the engine's
+/// error taxonomy and the deck planner. A leaf, so neither has to reach for
+/// the other to say which analysis or sweep point a value belongs to.
+pub mod identity;
 pub mod io;
 pub mod library;
 /// SPICE naming rules: what a name means in a deck, independent of dialect.
@@ -137,16 +141,17 @@ pub mod resource;
 pub mod simd;
 
 // Re-export primary types for convenience
-pub use abort_signal::{AbortSignal, AtomicAbort, NoAbort};
+pub use abort_signal::{AbortReason, AbortSignal, AtomicAbort, NoAbort};
 pub use analysis::{DcAnalysis, MeasureEngine, MeasureResult};
 pub use circuit::CircuitData;
 pub use device::{Device, DeviceModel, engine_capabilities, engine_supports_capability};
 pub use engine::{
     ConvergenceConfig, ConvergencePreset, DampingStrategy, Engine, EngineHealthReport,
-    JfetLevel2Model, RequestedSignalUnavailableError, ResultSchemaMismatchError, SimulationConfig,
-    SimulationConfigError, SimulationConfigOverrides, SimulationError, SimulationErrorCategory,
-    SimulationErrorCode, SimulationErrorDescriptor, SpiceDialect, XyceTraInterpolation,
-    resolve_simulation_config,
+    JfetLevel2Model, MaterializationMismatchError, OutputCommitError, OutputCommitPhase,
+    PersistenceIncompatibleError, RequestedSignalUnavailableError, ResultSchemaMismatchError,
+    SimulationConfig, SimulationConfigError, SimulationConfigOverrides, SimulationError,
+    SimulationErrorCategory, SimulationErrorCode, SimulationErrorDescriptor, SpiceDialect,
+    UnsupportedCapabilityError, XyceTraInterpolation, resolve_simulation_config,
 };
 #[cfg(feature = "veriloga")]
 pub use engine::{

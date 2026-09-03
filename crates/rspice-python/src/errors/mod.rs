@@ -6,6 +6,8 @@
 //! - `SimulationError` - General simulation failures
 //! - `ConvergenceError` - Newton-Raphson convergence failures
 //! - `CancelledError` - Programmatic simulation cancellation
+//! - `TimeoutError` - An expired time budget; a `CancelledError` subclass, so
+//!   a handler that means "the run did not finish" still catches both
 //! - `MeasurementError` - Failed .MEAS verification (raised by
 //!   `RunReport.assert_passed`)
 //!
@@ -106,6 +108,17 @@ create_exception!(
     CancelledError,
     SimulationError,
     "Raised in a simulation's calling thread after Engine.cancel()."
+);
+
+// An expired budget, which is not a cancellation: nobody asked this run to
+// stop, and the same workload succeeds under a longer budget. Derived from
+// `CancelledError` so existing `except CancelledError` handlers that mean
+// "the run did not finish" keep working.
+create_exception!(
+    rspice,
+    TimeoutError,
+    CancelledError,
+    "Raised when a simulation stops because its time budget expired."
 );
 
 // Measurement verification failures

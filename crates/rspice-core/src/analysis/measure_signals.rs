@@ -9093,12 +9093,12 @@ mod tests {
         let SimulationError::ResultSchemaMismatch(detail) = error else {
             panic!("typed result-schema detail was lost");
         };
-        assert_eq!(detail.analysis, "AC");
+        assert_eq!(detail.analysis_label, "AC");
         assert_eq!(detail.signal_family, "branch currents");
         assert_eq!(detail.expected_value_count, 1);
         assert_eq!(detail.actual_value_count, 0);
         assert_eq!(
-            detail.coordinate.as_deref(),
+            detail.coordinate_label.as_deref(),
             Some("frequency point 1 (2.0000000000000000e0 Hz)")
         );
     }
@@ -9902,7 +9902,7 @@ mod tests {
         let SimulationError::ResultSchemaMismatch(detail) = error else {
             panic!("typed result-schema detail was lost");
         };
-        assert_eq!(detail.analysis, "NOISE");
+        assert_eq!(detail.analysis_label, "NOISE");
         assert_eq!(detail.signal_family, "node voltages");
         assert_eq!(detail.expected_value_count, 1);
         assert_eq!(detail.actual_value_count, 0);
@@ -9999,10 +9999,10 @@ mod tests {
         let SimulationError::ResultSchemaMismatch(detail) = error else {
             panic!("catalog mismatch must retain typed schema detail");
         };
-        assert_eq!(detail.analysis, "NOISE");
+        assert_eq!(detail.analysis_label, "NOISE");
         assert_eq!(detail.signal_family, "noise contribution catalog");
         assert_eq!(
-            detail.coordinate.as_deref(),
+            detail.coordinate_label.as_deref(),
             Some("frequency point 1 (2.0000000000000000e1 Hz)")
         );
     }
@@ -10098,12 +10098,12 @@ mod tests {
         let SimulationError::ResultSchemaMismatch(detail) = error else {
             panic!("typed result-schema detail was lost");
         };
-        assert_eq!(detail.analysis, "DC");
+        assert_eq!(detail.analysis_label, "DC");
         assert_eq!(detail.signal_family, "node voltages");
         assert_eq!(detail.expected_value_count, 2);
         assert_eq!(detail.actual_value_count, 1);
         assert_eq!(
-            detail.coordinate.as_deref(),
+            detail.coordinate_label.as_deref(),
             Some("sweep point 1 (1.0000000000000000e0)")
         );
     }

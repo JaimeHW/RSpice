@@ -395,9 +395,10 @@ impl Engine {
         let gaps = crate::engine::periodic_capability::dynamic_state_descriptor_gaps(circuit);
         match crate::engine::periodic_capability::summarize(&gaps) {
             None => Ok(()),
-            Some(summary) => Err(SimulationError::Circuit(format!(
-                "Pole-zero analysis does not yet support {summary}"
-            ))),
+            Some(summary) => Err(SimulationError::unsupported_capability(
+                "analysis.pz.device",
+                format!("Pole-zero analysis does not yet support {summary}"),
+            )),
         }
     }
 

@@ -853,6 +853,11 @@ impl From<HbError> for SimulationError {
             HbError::ConvergenceFailed { iterations, .. } => {
                 SimulationError::ConvergenceFailed(iterations)
             }
+            // A device HB cannot stamp is a capability boundary, not a
+            // malformed circuit: the deck is valid and this build declines it.
+            HbError::UnsupportedNonlinearDevices(_) => {
+                SimulationError::unsupported_capability("analysis.hb.device", e.to_string())
+            }
             _ => SimulationError::Circuit(e.to_string()),
         }
     }
@@ -1378,9 +1383,10 @@ impl Engine {
         if let Some(summary) =
             periodic_capability::summarize(&periodic_capability::periodic_descriptor_gaps(&circuit))
         {
-            return Err(SimulationError::Circuit(format!(
-                "exact HB MNA is unavailable because the circuit contains {summary}"
-            )));
+            return Err(SimulationError::unsupported_capability(
+                "analysis.hb.periodic_mna",
+                format!("exact HB MNA is unavailable because the circuit contains {summary}"),
+            ));
         }
         let periodic_branches = circuit
             .num_branches()

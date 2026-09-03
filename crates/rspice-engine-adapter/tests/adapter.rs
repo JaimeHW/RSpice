@@ -819,7 +819,9 @@ fn conditional_topology_and_analysis_signature_fail_closed_without_artifacts() {
              .endif\n\
              .step param mode list 0 1\n\
              .end\n",
-            "analysis.axis_materialization",
+            // The materializer's own mismatch is typed by the engine now, so it
+            // arrives with the engine's category rather than a coarse adapter code.
+            "engine.materialization_mismatch",
         ),
     ] {
         let job = Job::new(name);
@@ -849,16 +851,35 @@ fn conditional_topology_and_analysis_signature_fail_closed_without_artifacts() {
 
 #[test]
 fn alter_and_mixed_signal_axes_are_explicitly_unsupported() {
-    for (name, deck, kind) in [
+    for (name, deck, kind, failure_code) in [
         (
             "alter-axis",
-            "ALTER deck\nV1 in 0 1\nR1 in 0 1k\n.op\n.alter second\nR1 in 0 2k\n.end\n",
+            "ALTER deck
+V1 in 0 1
+R1 in 0 1k
+.op
+.alter second
+R1 in 0 2k
+.end
+",
             "operating_point",
+            // Source-variant expansion is a capability the engine declines, and
+            // the wire code says so instead of naming an adapter-local axis rule.
+            "engine.unsupported_capability",
         ),
         (
             "mixed-axis",
-            "mixed axis\n.param r=1k\nV1 in 0 1\nR1 in 0 {r}\n.step param r list 1k 2k\n.tran 1u 10u\n.end\n",
+            "mixed axis
+.param r=1k
+V1 in 0 1
+R1 in 0 {r}
+.step param r list 1k 2k
+.tran 1u 10u
+.end
+",
             "mixed_signal",
+            // The adapter's own contract refuses this axis before the engine sees it.
+            "analysis.axis_unsupported",
         ),
     ] {
         let job = Job::new(name);
@@ -869,7 +890,10 @@ fn alter_and_mixed_signal_axes_are_explicitly_unsupported() {
         );
         let response = parse_stdout(&job.run(&request));
         assert_eq!(response["status"], "failed", "response: {response}");
-        assert_eq!(response["failure_code"], "analysis.axis_unsupported");
+        assert_eq!(
+            response["failure_code"], failure_code,
+            "response: {response}"
+        );
     }
 }
 

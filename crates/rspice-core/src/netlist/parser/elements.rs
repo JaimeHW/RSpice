@@ -5428,36 +5428,42 @@ fn lower_xyce_ydevice(
                 parse_xyce_y_legacy_dff(stream, line_num, elements, params)
             }
         },
-        XyceYDeviceOwnership::AnalogModelProgramMissing => Err(ParseError::Syntax {
-            line: line_num,
-            message: format!(
-                "unsupported capability: the Xyce Y-device keyword '{keyword}' names the \
+        XyceYDeviceOwnership::AnalogModelProgramMissing => Err(ParseError::UnsupportedCapability {
+            origin: NetlistSourceLocation::in_memory(line_num),
+            capability: "netlist.xyce.ydevice.no_model_program",
+            detail: format!(
+                "the Xyce Y-device keyword '{keyword}' names the \
                  {description} family ({canonical}), which has no native RSpice model program; \
                  refusing to parse it as a Y-line transmission line"
             ),
         }),
-        XyceYDeviceOwnership::DigitalSeparateEffort => Err(ParseError::Syntax {
-            line: line_num,
-            message: format!(
-                "unsupported capability: the Xyce Y-device keyword '{keyword}' names the \
+        XyceYDeviceOwnership::DigitalSeparateEffort => Err(ParseError::UnsupportedCapability {
+            origin: NetlistSourceLocation::in_memory(line_num),
+            capability: "netlist.xyce.ydevice.digital_separate_effort",
+            detail: format!(
+                "the Xyce Y-device keyword '{keyword}' names the \
                  {description} family ({canonical}), which is owned by the separate \
                  digital/mixed-signal effort and is not parsed by the analog netlist grammar"
             ),
         }),
-        XyceYDeviceOwnership::ExternalCouplingSeparateEffort => Err(ParseError::Syntax {
-            line: line_num,
-            message: format!(
-                "unsupported capability: the Xyce Y-device keyword '{keyword}' names the \
+        XyceYDeviceOwnership::ExternalCouplingSeparateEffort => {
+            Err(ParseError::UnsupportedCapability {
+                origin: NetlistSourceLocation::in_memory(line_num),
+                capability: "netlist.xyce.ydevice.external_coupling_separate_effort",
+                detail: format!(
+                    "the Xyce Y-device keyword '{keyword}' names the \
                  {description} family ({canonical}), which is owned by the separate \
                  Verilog-A/external-coupling effort and is not parsed by the analog netlist \
                  grammar"
-            ),
-        }),
+                ),
+            })
+        }
         XyceYDeviceOwnership::InternalRewriteOfNativeElement { canonical: element } => {
-            Err(ParseError::Syntax {
-                line: line_num,
-                message: format!(
-                    "unsupported capability: the Xyce Y-device keyword '{keyword}' names the \
+            Err(ParseError::UnsupportedCapability {
+                origin: NetlistSourceLocation::in_memory(line_num),
+                capability: "netlist.xyce.ydevice.internal_rewrite_of_native_element",
+                detail: format!(
+                    "the Xyce Y-device keyword '{keyword}' names the \
                      {description} family ({canonical}), which Xyce synthesizes internally from \
                      a '{element}' card; write the canonical '{element}' element instead"
                 ),
