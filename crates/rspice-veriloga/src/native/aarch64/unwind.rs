@@ -418,20 +418,19 @@ fn last_instruction_boundary(code: &[u8], start: usize, limit: usize) -> JitResu
 #[cfg(any(windows, test))]
 fn instruction_unit_end(code: &[u8], offset: usize) -> JitResult<usize> {
     let instruction = word(code, offset)?;
-    if instruction & 0xFC00_0000 == 0x1400_0000 {
-        if let Ok(marker) = word(code, offset + 4) {
-            if marker & 0xFFE0_001F == 0xD420_0000 {
-                let data_words = ((marker >> 5) & 0xFFFF) as usize;
-                return offset
-                    .checked_add(8 + data_words * 8)
-                    .filter(|end| *end <= code.len())
-                    .ok_or_else(|| {
-                        unwind_error(format!(
-                            "A64 constant island at byte {offset} runs past its own function"
-                        ))
-                    });
-            }
-        }
+    if instruction & 0xFC00_0000 == 0x1400_0000
+        && let Ok(marker) = word(code, offset + 4)
+        && marker & 0xFFE0_001F == 0xD420_0000
+    {
+        let data_words = ((marker >> 5) & 0xFFFF) as usize;
+        return offset
+            .checked_add(8 + data_words * 8)
+            .filter(|end| *end <= code.len())
+            .ok_or_else(|| {
+                unwind_error(format!(
+                    "A64 constant island at byte {offset} runs past its own function"
+                ))
+            });
     }
     Ok(offset + 4)
 }
