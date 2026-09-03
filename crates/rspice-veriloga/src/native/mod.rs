@@ -26,6 +26,8 @@ mod cfg_prelude_round_trip;
 mod cfg_size_census;
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod code_identity;
+#[cfg(all(test, feature = "native", target_arch = "x86_64"))]
+mod double_double;
 mod model;
 mod runtime;
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
