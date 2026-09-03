@@ -629,20 +629,6 @@ fn hb_config(netlist: &Netlist, frequencies: &[f64]) -> Result<HbConfig, Directi
         )));
     };
 
-    if frequencies.len() == 1 {
-        let config = HbConfig::new(frequencies[0]).with_harmonics(orders[0]);
-        if requested.is_empty() {
-            return Ok(config);
-        }
-        let points = config.minimum_collocation_points().ok_or_else(|| {
-            DirectiveFailure::InvalidAnalysis(format!(
-                ".OPTIONS HBINT NUMFREQ harmonic count {} exceeds the addressable collocation grid",
-                orders[0]
-            ))
-        })?;
-        return Ok(config.with_collocation_points(points));
-    }
-
     let mut seen = std::collections::BTreeSet::new();
     let mut tones = Vec::with_capacity(frequencies.len());
     for (index, (frequency, order)) in frequencies.iter().zip(&orders).enumerate() {
@@ -659,7 +645,24 @@ fn hb_config(netlist: &Netlist, frequencies: &[f64]) -> Result<HbConfig, Directi
         }
         tones.push(HbTone::new(*frequency, *order).with_name(format!("tone{}", index + 1)));
     }
-    Ok(HbConfig::multi_tone(tones))
+
+    // A single tone whose order the deck stated explicitly also pins the
+    // minimal bilateral `2N+1` collocation grid; every other shape uses the
+    // configuration's own default grid.
+    let [tone] = tones.as_slice() else {
+        return Ok(HbConfig::multi_tone(tones));
+    };
+    let config = HbConfig::new(tone.frequency).with_harmonics(tone.num_harmonics);
+    if requested.is_empty() {
+        return Ok(config);
+    }
+    let points = config.minimum_collocation_points().ok_or_else(|| {
+        DirectiveFailure::InvalidAnalysis(format!(
+            ".OPTIONS HBINT NUMFREQ harmonic count {} exceeds the addressable collocation grid",
+            tone.num_harmonics
+        ))
+    })?;
+    Ok(config.with_collocation_points(points))
 }
 
 /// Declared unit of one `.DC` sweep axis.

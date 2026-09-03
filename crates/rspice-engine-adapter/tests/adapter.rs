@@ -6,6 +6,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
+use rspice_core::abort_signal::ImmediateAbort;
 use rspice_core::execution::result_document::{ScalarValue, SeriesValues};
 use rspice_core::execution::{
     ANALYSIS_RESULT_DOCUMENT_SCHEMA, ANALYSIS_RESULT_DOCUMENT_VERSION, AnalysisResultDocument,
@@ -14,14 +15,19 @@ use rspice_core::execution::{
 use rspice_engine_adapter::axis_execution_document::{
     AxisAnalysisKind, AxisAssignmentKind, AxisExecutionDocument,
 };
+use rspice_engine_adapter::document::CircuitContent;
+use rspice_engine_adapter::execute::{
+    CANCELLED_FAILURE_CODE, DEFAULT_SOLVE_BUDGET, execute_with_abort,
+};
 use rspice_engine_adapter::fft_result_document::{
     FFT_RESULT_DOCUMENT_CONTENT_TYPE, FftCompatibilityMode, FftPhysicalType, FftSourceKind,
     FftUnit, TransientFftResultDocument,
 };
 use rspice_engine_adapter::result_artifact::result_document_content_type;
 use rspice_engine_adapter::wire::{
-    EngineArtifact, EngineRequest, EngineRevision, INTEGRITY_ENGINE_PROTOCOL_VERSION, digest_hex,
-    revision_content_digest, simulation_request_digest,
+    EngineArtifact, EngineRequest, EngineResponse, EngineRevision,
+    INTEGRITY_ENGINE_PROTOCOL_VERSION, digest_hex, revision_content_digest,
+    simulation_request_digest,
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -1701,6 +1707,53 @@ fn every_family_reports_the_same_cancellation_label() {
         assert!(
             job.results_are_empty(),
             "{kind:?} published artifacts after stopping"
+        );
+    }
+}
+
+/// A caller-requested stop is reported as a cancellation, not as a deadline,
+/// for every family, and no family declares an artifact on the way out.
+///
+/// The label is asserted in process because the packaged binary's stop request
+/// is a signal there is no portable way to send from a test. The deadline test
+/// above is the mid-solve counterpart: every family reaching
+/// `engine.time_limit` proves its runner honours the abort source once the
+/// solve has started.
+#[test]
+fn every_family_reports_a_caller_stop_as_a_cancellation() {
+    for kind in AnalysisResultKind::ALL {
+        let (request_kind, deck) = match family_expectation(kind) {
+            FamilyExpectation::Runs {
+                request_kind, deck, ..
+            } => (request_kind, deck),
+            FamilyExpectation::Attached {
+                parent_request_kind,
+                deck,
+                ..
+            } => (parent_request_kind, deck),
+            FamilyExpectation::Refused { .. } => continue,
+        };
+        let execution = execute_with_abort(
+            &json!({"kind": request_kind}),
+            &CircuitContent::Deck {
+                expanded_netlist: deck.to_owned(),
+            },
+            "test",
+            &ImmediateAbort,
+            DEFAULT_SOLVE_BUDGET,
+        );
+        match &execution.response {
+            EngineResponse::Failed { failure_code, .. } => assert_eq!(
+                failure_code, CANCELLED_FAILURE_CODE,
+                "{kind:?} mislabelled a caller stop"
+            ),
+            EngineResponse::Succeeded { .. } => {
+                panic!("{kind:?} reported success after a caller stop")
+            }
+        }
+        assert!(
+            execution.artifacts.is_empty(),
+            "{kind:?} declared artifacts after a caller stop"
         );
     }
 }
