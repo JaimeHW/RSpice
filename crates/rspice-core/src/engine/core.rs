@@ -1144,7 +1144,10 @@ C1 mid out 1u
         assert_ne!(cold, other_cold, "the two decks force different voltages");
 
         let outer = engine.startup_directive_scope(&netlist);
-        assert_eq!(engine.collect_initial_condition_hints(&netlist, &circuit), cold);
+        assert_eq!(
+            engine.collect_initial_condition_hints(&netlist, &circuit),
+            cold
+        );
         // A netlist the open scope does not name is collected from scratch
         // rather than served the cached entry.
         assert_eq!(

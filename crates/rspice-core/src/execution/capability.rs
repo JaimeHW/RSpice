@@ -215,9 +215,6 @@ const PY_PNOISE_DRIVEN_AXIS_ONLY: &str = "deck-axis .PNOISE executes around a dr
 /// naming and projection are no longer what is missing: the executor has no
 /// slot to publish a second document beside its parent.
 const ADAPTER_SECOND_DOCUMENT: &str = "the protocol-4 executor publishes one shared result document per authored card, and this      family is a second result produced beside another card's; core names and projects it, but      the adapter has no slot for it and refuses the deck rather than dropping it";
-const CLI_SENSITIVITY_AC: &str = "the DC .SENS card publishes the shared document; an AC sweep cannot, because the sensitivity payload declares one operating-point derivative per element";
-const CLI_SP_DONOISE: &str = "plain .SP publishes the shared document; .SP DONOISE is refused in that format because the covariance, reference temperature, and two-port noise figures have no home in it";
-const CLI_PORT_NOISE: &str = "the .SP DONOISE covariance is published in the flat formats; the shared port-noise payload cannot also carry its reference temperature, 4kT normalization, or two-port figures";
 
 /// The CLI publishes the shared typed result document for this family, under
 /// its canonical analysis identity, for a scalar deck and for every coordinate
@@ -237,17 +234,6 @@ const fn cli_mapped_scalar_only() -> SurfaceCapability {
         MappingStatus::Mapped,
         MappingStatus::Unsupported(CLI_AXIS_UNAVAILABLE),
         MappingStatus::Unsupported(CLI_AXIS_UNAVAILABLE),
-    )
-}
-
-/// The family executes and publishes at every coordinate, but one of its
-/// authored forms cannot fill the shared payload and is refused in that
-/// format rather than published with evidence dropped.
-const fn cli_partial_axes(reason: &'static str) -> SurfaceCapability {
-    SurfaceCapability::new(
-        MappingStatus::Partial(reason),
-        MappingStatus::Partial(reason),
-        MappingStatus::Partial(reason),
     )
 }
 
@@ -328,14 +314,14 @@ pub const ANALYSIS_CAPABILITY_MATRIX: &[AnalysisResultCapability] = &[
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::SParameters,
-        cli: cli_partial_axes(CLI_SP_DONOISE),
+        cli: cli_mapped_axes(),
         python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::PortNoise,
-        cli: cli_partial_axes(CLI_PORT_NOISE),
+        cli: cli_mapped_axes(),
         python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: SurfaceCapability::unsupported(ADAPTER_SECOND_DOCUMENT),
@@ -363,7 +349,7 @@ pub const ANALYSIS_CAPABILITY_MATRIX: &[AnalysisResultCapability] = &[
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Sensitivity,
-        cli: cli_partial_axes(CLI_SENSITIVITY_AC),
+        cli: cli_mapped_axes(),
         python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),

@@ -509,6 +509,12 @@ impl<'a> RunContext<'a> {
         Ok(Some(fingerprint))
     }
 
+    /// Record one artifact this run wrote outside `resolve_output`, so the
+    /// `--summary` manifest names it too.
+    fn record_output(&self, path: std::path::PathBuf) {
+        self.outputs.borrow_mut().push(path);
+    }
+
     /// Record one typed result this run published.
     fn record_published(&self, published: PublishedResult) {
         self.published.borrow_mut().push(published);
@@ -3615,6 +3621,18 @@ fn effective_jobs(
 
 /// `out.csv` + `hot` -> `out.hot.csv` (run-level analog of the
 /// per-analysis tagging in `output_path_for`).
+/// Where a second document published beside an analysis artifact goes.
+///
+/// A card whose result is two documents — `.SP DONOISE` publishes the
+/// scattering sweep and the port-noise sweep — keeps them under one analysis
+/// identity and separates them by file name. Composing the child's name into
+/// the parent artifact's own path is what guarantees they differ even for a
+/// deck that authors nothing else and therefore publishes under the bare
+/// requested path.
+pub(super) fn sibling_output_path(path: &std::path::Path, child: &str) -> PathBuf {
+    tag_output_path(path, child)
+}
+
 fn tag_output_path(path: &std::path::Path, tag: &str) -> PathBuf {
     let mut file_name = path
         .file_stem()
@@ -4089,8 +4107,15 @@ fn run_requested_mode(
         ctx.args.sens_output.as_deref(),
         ctx.args.sens_param.as_deref(),
     ) {
+        let output_name = output_node;
         let output_node = resolve_node(ctx, output_node, "--sens-output")?;
-        frequency::run_sensitivity(ctx, output_node, param, ctx.args.sens_value.unwrap_or(1.0))?;
+        frequency::run_sensitivity(
+            ctx,
+            output_node,
+            output_name,
+            param,
+            ctx.args.sens_value.unwrap_or(1.0),
+        )?;
         return Ok(RequestedModeOutcome::RanNeedsMeasurementFinalization);
     }
 

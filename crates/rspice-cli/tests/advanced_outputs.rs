@@ -424,7 +424,7 @@ fn sensitivity_exports_table() {
     );
 
     let csv = std::fs::read_to_string(&out).expect("sensitivity table");
-    assert!(csv.contains("dV/d(rtop)"), "column header: {csv}");
+    assert!(csv.contains("dV(out)/d(rtop)"), "column header: {csv}");
     // dV(out)/dRtop = -V*R2/(R1+R2)^2 = -1.25e-3 V/ohm
     let row = csv.lines().nth(1).expect("data row");
     let value: f64 = row.split(',').nth(1).unwrap().parse().unwrap();

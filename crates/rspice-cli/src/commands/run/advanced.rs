@@ -1313,21 +1313,6 @@ pub(super) fn run_sparam_from_command(
         }
         write_touchstone_nport(output_path, &run.ports, &frequencies, &scattering)?;
     } else {
-        // The shared S-parameter document declares the scattering matrix and
-        // its ports. `.SP DONOISE` additionally publishes the current
-        // covariance, its reference temperature, the 4kT normalization, and
-        // the two-port noise figures, none of which that document can hold —
-        // so the typed representation is refused rather than published with
-        // the noise provenance dropped.
-        if matches!(ctx.format, crate::cli::OutputFormat::Json) && run.port_noise.is_some() {
-            return Err(CliError::InvalidArgument {
-                message: "the shared S-parameter result document cannot retain the .SP DONOISE covariance, reference temperature, or two-port noise figures"
-                    .to_string(),
-                suggestion: Some(
-                    "export .SP DONOISE with --format csv, tsv, raw, or hdf5".to_string(),
-                ),
-            });
-        }
         let signals = sparameter_export_signals(&run, &frequencies, &scattering);
         super::document::publish_analysis_result(
             ctx,
@@ -1367,6 +1352,33 @@ pub(super) fn run_sparam_from_command(
                 }
             },
         )?;
+
+        // Port noise is the `.SP` card's second result. It shares the card's
+        // analysis identity, exactly as the shared document declares, and is
+        // published as its own typed artifact beside the scattering one: the
+        // S-parameter payload has no room for a covariance sweep, and folding
+        // one into the other would make each document describe two studies.
+        // The flat formats keep both in one table, because they have no
+        // per-family payload to separate.
+        if let Some(noise) = &run.port_noise
+            && matches!(ctx.format, crate::cli::OutputFormat::Json)
+        {
+            // The noise document is a sibling of the scattering one, so it
+            // takes that artifact's own path with `port-noise` composed into
+            // it. Resolving a second output namespace would give the two
+            // documents the same path whenever the deck authors only this
+            // card, and the second would overwrite the first.
+            let noise_path = super::sibling_output_path(output_path, "port-noise");
+            ctx.record_output(noise_path.clone());
+            let builder =
+                rspice_core::execution::AnalysisResultDocument::from_port_noise(analysis_id, noise)
+                    .map_err(|error| super::document::document_error(ctx, analysis_id, error))?;
+            let document = super::document::finish(ctx, analysis_id, builder)?;
+            super::document::write_document(ctx, &noise_path, &document)?;
+            if !ctx.quiet {
+                println!("  Port noise exported to: {}", noise_path.display());
+            }
+        }
     }
 
     if !ctx.quiet {

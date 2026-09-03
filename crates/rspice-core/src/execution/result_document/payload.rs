@@ -106,7 +106,7 @@ impl ResultPayload {
                 .map(NoiseContributionSeries::value_count)
                 .fold(0, usize::saturating_add),
             Self::Sp(payload) => payload.ports.len().saturating_mul(2),
-            Self::PortNoise(_) => 0,
+            Self::PortNoise(payload) => payload.two_port.len().saturating_mul(5),
             Self::Distortion(payload) => payload
                 .products
                 .iter()
@@ -152,7 +152,8 @@ impl ResultPayload {
         match self {
             Self::Op(payload) => payload.validate(),
             Self::Dc(payload) => payload.validate(),
-            Self::Ac(_) | Self::PortNoise(_) => Ok(()),
+            Self::Ac(_) => Ok(()),
+            Self::PortNoise(payload) => payload.validate(),
             Self::Tran(payload) => payload.validate(),
             Self::Noise(payload) => payload.validate(),
             Self::Sp(payload) => payload.validate(),
@@ -866,11 +867,107 @@ pub struct PortDocument {
     pub reference_impedance: f64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PortNoisePayload {
     /// Dimension of the Hermitian current-noise covariance matrix.
     pub port_count: usize,
+    /// Circuit temperature the covariance and every figure derived from it
+    /// were evaluated at, in kelvin.
+    ///
+    /// Port noise is meaningless without it: the same network reports a
+    /// different covariance at 27 °C and at 85 °C, and a consumer cannot
+    /// renormalize or compare two sweeps it cannot date.
+    pub reference_temperature_kelvin: f64,
+    /// Convention the published covariance follows.
+    pub covariance_normalization: PortNoiseCovarianceNormalization,
+    /// `4kT` at [`Self::reference_temperature_kelvin`], in joule.
+    ///
+    /// The thermal reference a consumer divides an absolute covariance by to
+    /// obtain the dimensionless normalized correlation matrix. It is published
+    /// rather than left to be recomputed, so a reader never has to guess which
+    /// Boltzmann constant or which temperature the producer used.
+    pub thermal_normalization_joule: f64,
+    /// Standard two-port noise parameters, one entry per swept frequency, in
+    /// the document axis's order.
+    ///
+    /// Empty for any port count other than two: `Rn`, `F`, `Fmin` and `Sopt`
+    /// are two-port quantities, and deriving them from a sub-matrix of a
+    /// larger network would describe a different device.
+    #[serde(default)]
+    pub two_port: Vec<TwoPortNoiseEntry>,
+}
+
+/// How the published current-noise covariance is scaled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PortNoiseCovarianceNormalization {
+    /// Absolute one-sided current spectral densities, in A²/Hz, exactly as the
+    /// port-noise solve produced them. Nothing has been divided out.
+    AmpereSquaredPerHertz,
+}
+
+/// The standard two-port noise parameters at one frequency.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TwoPortNoiseEntry {
+    /// Frequency in hertz, matching the document's axis coordinate.
+    pub frequency: f64,
+    /// Equivalent noise resistance, in ohm.
+    pub noise_resistance_ohm: f64,
+    /// Noise factor at port 1's reference impedance, linear rather than dB.
+    pub noise_factor: f64,
+    /// Minimum noise factor over all source admittances, linear rather than
+    /// dB.
+    pub minimum_noise_factor: f64,
+    /// Source reflection coefficient that achieves the minimum noise factor.
+    pub optimum_source_reflection: ComplexSample,
+}
+
+impl PortNoisePayload {
+    fn validate(&self) -> Result<(), ResultDocumentError> {
+        finite(
+            "port-noise reference temperature",
+            self.reference_temperature_kelvin,
+        )?;
+        if self.reference_temperature_kelvin <= 0.0 {
+            return Err(ResultDocumentError::Malformed {
+                location: "port-noise payload",
+                detail: format!(
+                    "reference temperature {} K is not a physical noise temperature",
+                    self.reference_temperature_kelvin
+                ),
+            });
+        }
+        finite(
+            "port-noise thermal normalization",
+            self.thermal_normalization_joule,
+        )?;
+        if !self.two_port.is_empty() && self.port_count != 2 {
+            return Err(ResultDocumentError::Malformed {
+                location: "port-noise payload",
+                detail: format!(
+                    "two-port noise parameters are published for a {}-port network",
+                    self.port_count
+                ),
+            });
+        }
+        for entry in &self.two_port {
+            finite("two-port noise frequency", entry.frequency)?;
+            finite("two-port noise resistance", entry.noise_resistance_ohm)?;
+            finite("two-port noise factor", entry.noise_factor)?;
+            finite("two-port minimum noise factor", entry.minimum_noise_factor)?;
+            finite(
+                "two-port optimum source reflection",
+                entry.optimum_source_reflection.real,
+            )?;
+            finite(
+                "two-port optimum source reflection",
+                entry.optimum_source_reflection.imaginary,
+            )?;
+        }
+        Ok(())
+    }
 }
 
 //=============================================================================
@@ -1150,6 +1247,14 @@ pub enum SensitivityElementTag {
     Coupling,
     Xspice,
     Model,
+    /// A netlist `.PARAM` or model-card value the derivative was taken with
+    /// respect to, rather than a device instance parameter.
+    ///
+    /// A parameter can drive several elements at once, so the derivative is
+    /// attributed to the parameter itself; naming one of the elements it
+    /// happens to reach would claim a device sensitivity the study did not
+    /// compute.
+    Parameter,
     Other,
 }
 
@@ -1179,9 +1284,22 @@ impl From<ElementType> for SensitivityElementTag {
     }
 }
 
-impl From<SensitivityElementTag> for ElementType {
-    fn from(kind: SensitivityElementTag) -> Self {
-        match kind {
+/// A published sensitivity target that names no circuit element.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("a sensitivity to a netlist parameter names no circuit element type")]
+pub struct NotAnElementSensitivity;
+
+impl TryFrom<SensitivityElementTag> for ElementType {
+    type Error = NotAnElementSensitivity;
+
+    /// Recover the element type a published sensitivity entry names.
+    ///
+    /// A parameter sensitivity has none: a `.PARAM` may drive several elements
+    /// at once, so mapping it onto one element kind would attribute the
+    /// derivative to a device the study never differentiated.
+    fn try_from(kind: SensitivityElementTag) -> Result<Self, Self::Error> {
+        Ok(match kind {
+            SensitivityElementTag::Parameter => return Err(NotAnElementSensitivity),
             SensitivityElementTag::Resistor => Self::Resistor,
             SensitivityElementTag::Capacitor => Self::Capacitor,
             SensitivityElementTag::Inductor => Self::Inductor,
@@ -1201,7 +1319,7 @@ impl From<SensitivityElementTag> for ElementType {
             SensitivityElementTag::Xspice => Self::Xspice,
             SensitivityElementTag::Model => Self::Model,
             SensitivityElementTag::Other => Self::Other,
-        }
+        })
     }
 }
 
