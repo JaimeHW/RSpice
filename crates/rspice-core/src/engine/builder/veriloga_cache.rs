@@ -210,7 +210,15 @@ use super::*;
 // stamp programs, and nothing in the record distinguishes one written before
 // the repair from one written after — reading it would silently stamp the
 // defective value on the VM and JIT routes. Rebuilding is the only reading.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 41;
+// Version 42 carries the same repair onto the JIT and WASM routes. A version-41
+// record holds the snapshot slots and the redirected stamp programs but not the
+// plan saying where each copy belongs in the statement sequence, and the
+// executable routes replay statements rather than steps: they would run a
+// version-41 model with the copies never made and the equations still reading
+// the slot the assignment pass finishes with. The plan is not recoverable from
+// the record — it names the statement each definition was written at, and the
+// record keeps no statement sequence. Rebuilding is the only reading.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 42;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
