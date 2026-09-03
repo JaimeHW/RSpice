@@ -349,10 +349,15 @@ fn run_implicit_step_op_table(
         let coordinate_engine =
             Engine::try_new(build_sim_config(args, config, materialized.netlist()))?;
         let topology = materialized.topology_fingerprint();
-        let result = match coordinate_engine
-            .run_dc_op_with_abort(materialized.netlist(), &crate::abort::ProcessAbort)
+        // The device operating-point report is taken at every coordinate, not
+        // only for a scalar deck: it is what carries the complete typed
+        // device-observable inventory into the coordinate's typed document, and
+        // a sweep that dropped it would publish fewer observables than the same
+        // deck run without an axis.
+        let (result, device_report) = match coordinate_engine
+            .run_dc_op_with_report_and_abort(materialized.netlist(), &crate::abort::ProcessAbort)
         {
-            Ok(result) => result,
+            Ok(solved) => solved,
             Err(rspice_core::SimulationError::Aborted) if crate::abort::reason().is_some() => {
                 break;
             }
@@ -423,6 +428,7 @@ fn run_implicit_step_op_table(
             analysis_id: implicit_analysis.output_namespace().analysis_component(),
             topology,
             result,
+            device_report,
             signals,
             schema,
             validity: Vec::new(),
@@ -520,7 +526,7 @@ fn run_implicit_step_op_table(
                 let builder = rspice_core::execution::AnalysisResultDocument::from_operating_point(
                     run.analysis,
                     &run.result,
-                    None,
+                    Some(&run.device_report),
                 )
                 .map_err(|error| document::document_error(&ctx, run.analysis, error))?;
                 let built = document::finish_at_coordinate(
@@ -619,6 +625,9 @@ struct ImplicitStepCoordinate {
     pub(super) analysis_id: String,
     pub(super) topology: rspice_core::execution::TopologyFingerprint,
     pub(super) result: rspice_core::solver::SimulationResult,
+    /// The coordinate's complete device operating-point inventory, published in
+    /// its typed document beside the node and branch series.
+    device_report: rspice_core::circuit::DeviceOpReport,
     pub(super) signals: Vec<crate::commands::run_signals::ScalarSignal>,
     pub(super) schema: rspice_core::execution::SignalSchema,
     pub(super) validity: Vec<bool>,

@@ -468,7 +468,6 @@ impl SignalCapability {
     }
 }
 
-const CLI_DEVICE_OBSERVABLE: &str = "the operating point publishes device observables in its typed payload; the sweep families export the ones their authored projection selected, not the complete device inventory";
 /// The Python device-observable and analysis-scalar gaps, stated by family.
 ///
 /// These are deliberately specific rather than "a subset of result families":
@@ -505,7 +504,7 @@ pub const SIGNAL_CAPABILITY_MATRIX: &[SignalCapability] = &[
     },
     SignalCapability {
         signal: SignalKind::DeviceObservable,
-        cli: MappingStatus::Partial(CLI_DEVICE_OBSERVABLE),
+        cli: MappingStatus::Mapped,
         python: MappingStatus::Partial(PY_DEVICE_OBSERVABLE_SUBSET),
         wasm: MappingStatus::Mapped,
         engine_adapter: MappingStatus::Mapped,
