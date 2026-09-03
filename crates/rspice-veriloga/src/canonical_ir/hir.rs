@@ -20,7 +20,6 @@ use crate::ast::{
     AnalogOperator, ArrayLiteralElement, BinaryOp, BranchAccess, CrossDirection, Expression,
     LaplaceKind, LimiterArgument, NoiseSource, PortDirection, UnaryOp, ZiKind,
 };
-use crate::ir::TransitionSiteId;
 use crate::numeric_literal::parse_integer_literal;
 use crate::semantic::{
     AnalogSiteGuard, AnalogSiteId, AnalyzedModule, AnalyzedRegion, AnalyzedStatement,
@@ -266,23 +265,6 @@ pub enum HirAnalogOperator {
         expr: ExprId,
         delay: ExprId,
         max_delay: Option<ExprId>,
-    },
-    Transition {
-        site: TransitionSiteId,
-        expr: ExprId,
-        delay: Option<ExprId>,
-        rise: Option<ExprId>,
-        fall: Option<ExprId>,
-        tolerance: Option<ExprId>,
-    },
-    /// Read-only local Jacobian action for the correlated transition site.
-    TransitionDerivative {
-        site: TransitionSiteId,
-        input: ExprId,
-        input_derivative: ExprId,
-        delay: Option<ExprId>,
-        rise: Option<ExprId>,
-        fall: Option<ExprId>,
     },
     Slew {
         expr: ExprId,
@@ -825,10 +807,9 @@ fn same_expression_kind(left: &HirExprKind, right: &HirExprKind) -> bool {
 
 /// Whether two analog operators are the same operator.
 ///
-/// Deliberately blind to [`TransitionSiteId`]: the ordinal counter runs across
-/// both copies, so a `transition`'s two lowerings carry *different* ordinals by
-/// construction. That difference is exactly what the correspondence exists to
-/// bridge, so demanding equality here would refuse every module that transitions.
+/// Operators compare by discriminant alone; only the payload-bearing `Limit`,
+/// `LimiterArgument`, and `LastCrossing` cases also compare their selector,
+/// argument, or edge.
 fn same_analog_operator(left: &HirAnalogOperator, right: &HirAnalogOperator) -> bool {
     match (left, right) {
         (
@@ -1522,44 +1503,6 @@ impl HirModel {
                     "max_delay",
                     *max_delay,
                 );
-            }
-            HirAnalogOperator::Transition {
-                expr,
-                delay,
-                rise,
-                fall,
-                tolerance,
-                ..
-            } => {
-                self.validate_expression_child(diagnostics, expression, "expr", *expr);
-                self.validate_optional_expression_child(diagnostics, expression, "delay", *delay);
-                self.validate_optional_expression_child(diagnostics, expression, "rise", *rise);
-                self.validate_optional_expression_child(diagnostics, expression, "fall", *fall);
-                self.validate_optional_expression_child(
-                    diagnostics,
-                    expression,
-                    "tolerance",
-                    *tolerance,
-                );
-            }
-            HirAnalogOperator::TransitionDerivative {
-                input,
-                input_derivative,
-                delay,
-                rise,
-                fall,
-                ..
-            } => {
-                self.validate_expression_child(diagnostics, expression, "input", *input);
-                self.validate_expression_child(
-                    diagnostics,
-                    expression,
-                    "input_derivative",
-                    *input_derivative,
-                );
-                self.validate_optional_expression_child(diagnostics, expression, "delay", *delay);
-                self.validate_optional_expression_child(diagnostics, expression, "rise", *rise);
-                self.validate_optional_expression_child(diagnostics, expression, "fall", *fall);
             }
             HirAnalogOperator::Slew {
                 expr,
@@ -2781,7 +2724,6 @@ struct HirLowerer {
     expressions: Vec<HirExpression>,
     declared_branches: HashSet<SmolStr>,
     replication_work: usize,
-    next_transition_site: u32,
 }
 
 impl HirLowerer {
@@ -2790,7 +2732,6 @@ impl HirLowerer {
             expressions: Vec::new(),
             declared_branches,
             replication_work: 0,
-            next_transition_site: 0,
         }
     }
 
@@ -3088,29 +3029,6 @@ impl HirLowerer {
                 delay: self.lower_expr(delay).id,
                 max_delay: self.lower_optional_expr_id(max_delay),
             },
-            AnalogOperator::Transition {
-                expr,
-                delay,
-                rise,
-                fall,
-                tolerance,
-                span,
-            } => {
-                let mut site = TransitionSiteId::from_span(*span);
-                site.ordinal = self.next_transition_site;
-                self.next_transition_site = self
-                    .next_transition_site
-                    .checked_add(1)
-                    .expect("canonical transition site ordinal overflow");
-                HirAnalogOperator::Transition {
-                    site,
-                    expr: self.lower_expr(expr).id,
-                    delay: self.lower_optional_expr_id(delay),
-                    rise: self.lower_optional_expr_id(rise),
-                    fall: self.lower_optional_expr_id(fall),
-                    tolerance: self.lower_optional_expr_id(tolerance),
-                }
-            }
             AnalogOperator::Slew {
                 expr,
                 max_rise,

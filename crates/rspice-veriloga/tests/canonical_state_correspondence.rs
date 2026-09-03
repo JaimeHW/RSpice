@@ -13,15 +13,13 @@
 //! BSIM-CMG is worth nothing, and the only way to know is to walk every model
 //! and refuse to round up.
 
-use rspice_veriloga::canonical_ir::cfg::{CfgStateSite, CfgValueKind};
+use rspice_veriloga::canonical_ir::cfg::CfgStateSite;
 use rspice_veriloga::canonical_ir::cfg_lower::CfgModel;
 use rspice_veriloga::canonical_ir::{
     CanonicalIrArtifact, CanonicalStateFamily, CanonicalStateOperator, CfgInvalidationClass,
     CfgStateAllocation, CfgStateAllocationError, ExprId, schedule_cfg,
 };
-use rspice_veriloga::ir::TransitionSiteId;
 use rspice_veriloga::rust_backend::discover_veriloga_sources;
-use rspice_veriloga::source::Span;
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -318,9 +316,8 @@ endmodule
         let Some(site) = value.kind.state_site() else {
             continue;
         };
-        if let CfgStateSite::Operator(_, kind) = site {
-            kinds.insert(kind.name());
-        }
+        let CfgStateSite(_, kind) = site;
+        kinds.insert(kind.name());
         let class = schedule.class(value.id);
         assert_eq!(
             class,
@@ -353,18 +350,11 @@ endmodule
     }
 }
 
-/// `transition` never reaches the CFG level, and the allocator refuses it by
-/// name if one ever does.
+/// `transition` never reaches the CFG level, and the refusal names it.
 ///
-/// Two separate facts, both worth pinning. The front end lowers `transition` to
-/// an ordinary `Call` — the parser produces no `AnalogOperator::Transition` node
-/// and the semantic analyzer's arms for one are unreachable — so `cfg_lower`
-/// meets it in the call arm and says so. And `CfgValueKind::Transition` is
-/// nevertheless a live IR variant that `ad` and `cfg_eval` handle, so the
-/// allocator has to answer for it: it is the one operator the CFG names by its
-/// own site identity rather than by expression, the two lowerings mint different
-/// ordinals for one source site, and the correspondence is a map over
-/// expressions. Refused, never guessed.
+/// The front end lowers `transition` to an ordinary `Call`, so `cfg_lower` meets
+/// it in the call arm and refuses it there rather than lowering a filter it has
+/// no state site for.
 #[test]
 fn the_cfg_level_refuses_transition_by_name() {
     let ramped = artifact(
@@ -384,46 +374,6 @@ endmodule
             .iter()
             .any(|diagnostic| diagnostic.message.contains("transition")),
         "the refusal must name the construct: {diagnostics:?}"
-    );
-
-    // Now the allocator's own refusal, over a CFG that does carry one. Built by
-    // planting the value rather than by compiling one, because the front end
-    // cannot produce it — which is exactly why the refusal needs a test.
-    let base = artifact(
-        r#"
-module plain(p, n);
-  inout p, n;
-  electrical p, n;
-  analog I(p, n) <+ ddt(V(p, n));
-endmodule
-"#,
-    );
-    let mut cfg = lower(&base);
-    let victim = cfg
-        .function
-        .values
-        .iter()
-        .position(|value| matches!(value.kind, CfgValueKind::Ddt { .. }))
-        .expect("the fixture has a ddt");
-    let CfgValueKind::Ddt { input, .. } = cfg.function.values[victim].kind else {
-        unreachable!("just matched")
-    };
-    cfg.function.values[victim].kind = CfgValueKind::Transition {
-        site: TransitionSiteId::from_span(Span::dummy()),
-        input,
-        delay: input,
-        rise: input,
-        fall: input,
-    };
-
-    let errors = CfgStateAllocation::build(&base.hir, &cfg.function)
-        .expect_err("a transition must be refused, not allocated");
-    assert!(
-        errors
-            .iter()
-            .any(|error| matches!(error, CfgStateAllocationError::UnsupportedTransition { .. })),
-        "the refusal must name transition: {}",
-        render_allocation_errors(&errors)
     );
 }
 
@@ -557,17 +507,6 @@ fn survey(include_root: &Path, roots: &[PathBuf]) -> Census {
                     *kinds.entry(kind.name()).or_default() += 1;
                     census.operators += 1;
                 }
-                let transitions = cfg
-                    .function
-                    .values
-                    .iter()
-                    .filter_map(|value| value.kind.state_site())
-                    .filter(|site| matches!(site, CfgStateSite::Transition(_)))
-                    .count();
-                if transitions > 0 {
-                    *kinds.entry("transition").or_default() += transitions;
-                    census.operators += transitions;
-                }
                 census.per_model.insert(module.to_string(), kinds);
 
                 if let Err(errors) = CfgStateAllocation::build(&artifact.hir, &cfg.function) {
@@ -590,7 +529,7 @@ fn cfg_state_operators(cfg: &CfgModel) -> Vec<(ExprId, CanonicalStateOperator)> 
     let mut seen = BTreeSet::new();
     let mut operators = Vec::new();
     for value in &cfg.function.values {
-        if let Some(CfgStateSite::Operator(operator, kind)) = value.kind.state_site()
+        if let Some(CfgStateSite(operator, kind)) = value.kind.state_site()
             && seen.insert(operator)
         {
             operators.push((operator, kind));

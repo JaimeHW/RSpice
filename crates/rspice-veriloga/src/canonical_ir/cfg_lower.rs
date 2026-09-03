@@ -312,10 +312,8 @@ fn noise_substitution_is_zero(hir: &HirModel, id: ExprId) -> bool {
         HirExprKind::AnalogOperator { op } => match op {
             HirAnalogOperator::Ddt { expr, .. }
             | HirAnalogOperator::Absdelay { expr, .. }
-            | HirAnalogOperator::Transition { expr, .. }
             | HirAnalogOperator::Slew { expr, .. } => zero(*expr),
             HirAnalogOperator::Ddx { expr, .. } => zero(*expr),
-            HirAnalogOperator::TransitionDerivative { input, .. } => zero(*input),
             HirAnalogOperator::Idt { .. }
             | HirAnalogOperator::IdtMod { .. }
             | HirAnalogOperator::Limit { .. }
@@ -1150,33 +1148,6 @@ impl<'a> CfgLowerer<'a> {
                     } => {
                         children.extend([expr, delay]);
                         children.extend(max_delay);
-                    }
-                    HirAnalogOperator::Transition {
-                        expr,
-                        delay,
-                        rise,
-                        fall,
-                        tolerance,
-                        ..
-                    } => {
-                        children.push(expr);
-                        children.extend(delay);
-                        children.extend(rise);
-                        children.extend(fall);
-                        children.extend(tolerance);
-                    }
-                    HirAnalogOperator::TransitionDerivative {
-                        input,
-                        input_derivative,
-                        delay,
-                        rise,
-                        fall,
-                        ..
-                    } => {
-                        children.extend([input, input_derivative]);
-                        children.extend(delay);
-                        children.extend(rise);
-                        children.extend(fall);
                     }
                     HirAnalogOperator::Slew {
                         expr,
@@ -3172,76 +3143,6 @@ impl<'a> CfgLowerer<'a> {
                     return self.real_constant(0.0);
                 }
                 self.idt(expression.id, *expr, *ic)
-            }
-            HirAnalogOperator::Transition {
-                site,
-                expr,
-                delay,
-                rise,
-                fall,
-                tolerance,
-            } => {
-                if tolerance.is_some() {
-                    self.unsupported(
-                        span,
-                        "transition time_tol requires exact tolerance-controlled corner placement"
-                            .to_string(),
-                    );
-                    return self.real_constant(0.0);
-                }
-                let input = self.expr(*expr);
-                let delay = delay
-                    .map(|value| self.expr(value))
-                    .unwrap_or_else(|| self.real_constant(0.0));
-                let rise = rise
-                    .map(|value| self.expr(value))
-                    .unwrap_or_else(|| self.real_constant(0.0));
-                let fall = fall
-                    .map(|value| self.expr(value))
-                    .unwrap_or_else(|| self.real_constant(0.0));
-                self.builder.push(
-                    self.block,
-                    CfgValueType::Real,
-                    CfgValueKind::Transition {
-                        site: *site,
-                        input,
-                        delay,
-                        rise,
-                        fall,
-                    },
-                )
-            }
-            HirAnalogOperator::TransitionDerivative {
-                site,
-                input,
-                input_derivative,
-                delay,
-                rise,
-                fall,
-            } => {
-                let input = self.expr(*input);
-                let input_derivative = self.expr(*input_derivative);
-                let delay = delay
-                    .map(|value| self.expr(value))
-                    .unwrap_or_else(|| self.real_constant(0.0));
-                let rise = rise
-                    .map(|value| self.expr(value))
-                    .unwrap_or_else(|| self.real_constant(0.0));
-                let fall = fall
-                    .map(|value| self.expr(value))
-                    .unwrap_or_else(|| self.real_constant(0.0));
-                self.builder.push(
-                    self.block,
-                    CfgValueType::Real,
-                    CfgValueKind::TransitionDerivative {
-                        site: *site,
-                        input,
-                        input_derivative,
-                        delay,
-                        rise,
-                        fall,
-                    },
-                )
             }
             HirAnalogOperator::IdtMod {
                 expr,

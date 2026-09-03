@@ -1486,21 +1486,6 @@ fn rewrite_analog_operator(
             max_delay: optional(max_delay)?,
             span: *span,
         },
-        AnalogOperator::Transition {
-            expr,
-            delay,
-            rise,
-            fall,
-            tolerance,
-            span,
-        } => AnalogOperator::Transition {
-            expr: Box::new(rewrite_expression(expr, scope)?),
-            delay: optional(delay)?,
-            rise: optional(rise)?,
-            fall: optional(fall)?,
-            tolerance: optional(tolerance)?,
-            span: *span,
-        },
         AnalogOperator::Slew {
             expr,
             max_rise,

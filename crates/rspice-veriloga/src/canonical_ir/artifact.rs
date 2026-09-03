@@ -1139,44 +1139,6 @@ fn analog_operator_label(op: &HirAnalogOperator) -> String {
             delay.index(),
             option_expr_id(*max_delay)
         ),
-        HirAnalogOperator::Transition {
-            site,
-            expr,
-            delay,
-            rise,
-            fall,
-            tolerance,
-        } => format!(
-            "analog_operator transition site:{}:{}:{}:{} expr:{} delay:{} rise:{} fall:{} tolerance:{}",
-            site.source,
-            site.start,
-            site.end,
-            site.ordinal,
-            expr.index(),
-            option_expr_id(*delay),
-            option_expr_id(*rise),
-            option_expr_id(*fall),
-            option_expr_id(*tolerance)
-        ),
-        HirAnalogOperator::TransitionDerivative {
-            site,
-            input,
-            input_derivative,
-            delay,
-            rise,
-            fall,
-        } => format!(
-            "analog_operator transition_derivative site:{}:{}:{}:{} input:{} derivative:{} delay:{} rise:{} fall:{}",
-            site.source,
-            site.start,
-            site.end,
-            site.ordinal,
-            input.index(),
-            input_derivative.index(),
-            option_expr_id(*delay),
-            option_expr_id(*rise),
-            option_expr_id(*fall)
-        ),
         HirAnalogOperator::Slew {
             expr,
             max_rise,

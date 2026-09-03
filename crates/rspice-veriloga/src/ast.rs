@@ -1364,15 +1364,6 @@ pub enum AnalogOperator {
         max_delay: Option<Box<Expression>>,
         span: Span,
     },
-    /// Transition filter: transition(expr, delay, rise, fall, tol)
-    Transition {
-        expr: Box<Expression>,
-        delay: Option<Box<Expression>>,
-        rise: Option<Box<Expression>>,
-        fall: Option<Box<Expression>>,
-        tolerance: Option<Box<Expression>>,
-        span: Span,
-    },
     /// Slew rate limiter: slew(expr, max_pos_rate, max_neg_rate)
     Slew {
         expr: Box<Expression>,
@@ -1420,7 +1411,6 @@ impl AnalogOperator {
             | AnalogOperator::Ddx { span, .. }
             | AnalogOperator::Limexp { span, .. }
             | AnalogOperator::Absdelay { span, .. }
-            | AnalogOperator::Transition { span, .. }
             | AnalogOperator::Slew { span, .. }
             | AnalogOperator::LastCrossing { span, .. }
             | AnalogOperator::Laplace { span, .. }

@@ -404,7 +404,6 @@ impl ExprEmitter<'_> {
                     | HirAnalogOperator::Idt { .. }
                     | HirAnalogOperator::IdtMod { .. }
                     | HirAnalogOperator::Absdelay { .. }
-                    | HirAnalogOperator::Transition { .. }
                     | HirAnalogOperator::LastCrossing { .. },
             } => Ok(true),
             _ => expression_children(&expression.kind).into_iter().try_fold(
@@ -1296,28 +1295,6 @@ fn push_analog_operator_children(op: &HirAnalogOperator, children: &mut Vec<Expr
             children.push(*expr);
             children.push(*delay);
             children.extend(max_delay.iter().copied());
-        }
-        HirAnalogOperator::Transition {
-            expr,
-            delay,
-            rise,
-            fall,
-            tolerance,
-            ..
-        } => {
-            children.push(*expr);
-            children.extend([*delay, *rise, *fall, *tolerance].into_iter().flatten());
-        }
-        HirAnalogOperator::TransitionDerivative {
-            input,
-            input_derivative,
-            delay,
-            rise,
-            fall,
-            ..
-        } => {
-            children.extend([*input, *input_derivative]);
-            children.extend([*delay, *rise, *fall].into_iter().flatten());
         }
         HirAnalogOperator::Slew {
             expr,

@@ -587,32 +587,15 @@ impl<S: CfgScalar> Evaluator<'_, S> {
                     .map(|lane| apply_binary(op, lane, scalar))
                     .collect()
             }
-            // The CFG interpreter is a static/DC oracle. At equilibrium a
-            // transition has the exact direct coefficient one, so its packed
-            // Jacobian action is the input derivative unchanged.
-            CfgValueKind::TransitionDerivative {
-                input,
-                input_derivative,
-                delay,
-                rise,
-                fall,
-                ..
-            } => {
-                self.read(input)?;
-                self.read(delay)?;
-                self.read(rise)?;
-                self.read(fall)?;
-                self.read_lanes(input_derivative)?
-            }
-            // The same equilibrium argument as the transition above: a
-            // transport delay whose input is not moving reproduces it exactly,
-            // so its packed Jacobian action is the input's own. The delay's own
-            // derivative multiplies `dx/dt`, which is zero at equilibrium — it
-            // is read, because the graph defines it, and contributes nothing.
+            // The CFG interpreter is a static/DC oracle: a transport delay whose
+            // input is not moving reproduces it exactly, so its packed Jacobian
+            // action is the input's own. The delay's own derivative multiplies
+            // `dx/dt`, which is zero at equilibrium — it is read, because the
+            // graph defines it, and contributes nothing.
             //
             // Every derivative operand is packed here and scalar in
             // [`Self::compute`]: which one a node carries follows from its own
-            // value type, exactly as it does for a transition.
+            // value type.
             CfgValueKind::AbsDelayDerivative {
                 input,
                 input_derivative,
@@ -797,9 +780,8 @@ impl<S: CfgScalar> Evaluator<'_, S> {
                 self.inputs.idt
             }
             // At equilibrium a transport delay is an exact passthrough: a
-            // signal that is not moving is its own history. This is the same
-            // static reading `Transition` takes below, and it is what makes the
-            // difference oracles' `d/dv` come out as the input's own.
+            // signal that is not moving is its own history, and that is what
+            // makes the difference oracles' `d/dv` come out as the input's own.
             CfgValueKind::AbsDelay {
                 input,
                 delay,
@@ -927,33 +909,6 @@ impl<S: CfgScalar> Evaluator<'_, S> {
                     .get(&operator)
                     .copied()
                     .unwrap_or_else(|| S::from_f64(-1.0))
-            }
-            CfgValueKind::Transition {
-                input,
-                delay,
-                rise,
-                fall,
-                ..
-            } => {
-                let value = self.read(input)?;
-                self.read(delay)?;
-                self.read(rise)?;
-                self.read(fall)?;
-                value
-            }
-            CfgValueKind::TransitionDerivative {
-                input,
-                input_derivative,
-                delay,
-                rise,
-                fall,
-                ..
-            } => {
-                self.read(input)?;
-                self.read(delay)?;
-                self.read(rise)?;
-                self.read(fall)?;
-                self.read(input_derivative)?
             }
             CfgValueKind::Cross {
                 operator,

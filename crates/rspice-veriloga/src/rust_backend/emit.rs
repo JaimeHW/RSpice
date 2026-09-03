@@ -147,9 +147,6 @@ pub enum EmitError {
     /// than a missing feature. `ModelPlan::build` refuses a module carrying a
     /// process before it reaches here; this is the backstop.
     DigitalValueInAnalogEmitter(ValueId),
-    /// Stateful transition runtime is provided by the VM/native/WASM paths;
-    /// direct generated Rust must reject it before emission.
-    UnsupportedTransition(ValueId),
     /// A stateful analog operator whose accepted history this backend does not
     /// own, named by the operator the source wrote.
     ///
@@ -157,9 +154,9 @@ pub enum EmitError {
     /// `last_crossing`; running one needs the history queues and the
     /// speculative-candidate discipline that the VM, the native JIT and the
     /// WebAssembly JIT keep. `ModelPlan::build` refuses a module carrying one
-    /// before it reaches here, exactly as it does for a transition; this is the
-    /// backstop that makes silently emitting a stateless approximation
-    /// impossible rather than merely unlikely.
+    /// before it reaches here; this is the backstop that makes silently
+    /// emitting a stateless approximation impossible rather than merely
+    /// unlikely.
     UnsupportedStatefulOperator {
         value: ValueId,
         operator: &'static str,
@@ -189,10 +186,6 @@ impl std::fmt::Display for EmitError {
             Self::DigitalValueInAnalogEmitter(value) => write!(
                 f,
                 "{value} is a discrete-domain value and has no analog form to emit"
-            ),
-            Self::UnsupportedTransition(value) => write!(
-                f,
-                "{value} is a stateful transition unsupported by the direct generated-Rust runtime"
             ),
             Self::UnsupportedStatefulOperator { value, operator } => write!(
                 f,
@@ -1716,9 +1709,6 @@ impl Emitter<'_> {
                 self.numeric_operand(*proposed)
             ),
             CfgValueKind::Ddx { .. } => return Err(EmitError::UnresolvedDdx(value)),
-            CfgValueKind::Transition { .. } | CfgValueKind::TransitionDerivative { .. } => {
-                return Err(EmitError::UnsupportedTransition(value));
-            }
             CfgValueKind::IdtMod { .. } => {
                 return Err(EmitError::UnsupportedStatefulOperator {
                     value,
