@@ -1843,10 +1843,11 @@ mod tests {
     use crate::abort_signal::ImmediateAbort;
 
     fn coordinate_limits(maximum_coordinates: usize, maximum_assignments: usize) -> ResourceLimits {
-        let mut limits = ResourceLimits::default();
-        limits.max_batch_runs = maximum_coordinates;
-        limits.max_result_values = maximum_assignments;
-        limits
+        ResourceLimits {
+            max_batch_runs: maximum_coordinates,
+            max_result_values: maximum_assignments,
+            ..Default::default()
+        }
     }
 
     fn numeric_coordinate_ids(
@@ -2408,8 +2409,10 @@ mod tests {
              .end\n",
         )
         .expect("bounded axis deck parses");
-        let mut limits = ResourceLimits::default();
-        limits.max_batch_runs = 5;
+        let mut limits = ResourceLimits {
+            max_batch_runs: 5,
+            ..Default::default()
+        };
         assert!(matches!(
             DeckPlan::from_netlist(&netlist, &limits),
             Err(DeckPlanError::ResourceLimit(ResourceLimitError {
@@ -2774,10 +2777,10 @@ mod tests {
         let plan = DeckPlan::from_netlist(&netlist, &ResourceLimits::default()).expect("plans");
         let named = plan
             .authored_analyses(&netlist)
-            .filter_map(|(command, id)| {
+            .filter(|&(command, _id)| {
                 matches!(command, crate::netlist::AnalysisCommand::Four { .. })
-                    .then(|| id.map(|id| id.tag()))
             })
+            .map(|(_command, id)| id.map(|id| id.tag()))
             .collect::<Vec<_>>();
         assert_eq!(named, [Some("four-001".to_string())]);
     }

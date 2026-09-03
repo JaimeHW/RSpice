@@ -12,11 +12,11 @@ const XYCE_K_OVER_Q: Value = XYCE_BOLTZMANN / XYCE_CHARGE;
 const PHYSICAL_K_OVER_Q: Value = crate::constants::K_BOLTZMANN / crate::constants::Q_ELECTRON;
 
 #[derive(Debug, Clone, Copy)]
-pub(in crate::device::mosfet::mosfet) struct Mos2Evaluation {
-    pub(in crate::device::mosfet::mosfet) id: Value,
-    pub(in crate::device::mosfet::mosfet) region: MosRegion,
-    pub(in crate::device::mosfet::mosfet) von: Value,
-    pub(in crate::device::mosfet::mosfet) vdsat: Value,
+pub(in crate::device::mosfet::classic) struct Mos2Evaluation {
+    pub(in crate::device::mosfet::classic) id: Value,
+    pub(in crate::device::mosfet::classic) region: MosRegion,
+    pub(in crate::device::mosfet::classic) von: Value,
+    pub(in crate::device::mosfet::classic) vdsat: Value,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -298,12 +298,12 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn level2_effective_length(&self) -> Value {
+    pub(in crate::device::mosfet::classic) fn level2_effective_length(&self) -> Value {
         (self.l - 2.0 * self.ld).max(1.0e-12)
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn level2_model_space_onset_voltage(
+    pub(in crate::device::mosfet::classic) fn level2_model_space_onset_voltage(
         &self,
         vgs: Value,
         vds: Value,
@@ -313,7 +313,7 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn level2_operating_point(
+    pub(in crate::device::mosfet::classic) fn level2_operating_point(
         &self,
         vgs: Value,
         vds: Value,
@@ -353,7 +353,7 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn level2_evaluate(
+    pub(in crate::device::mosfet::classic) fn level2_evaluate(
         &self,
         vgs: Value,
         vds: Value,

@@ -380,7 +380,7 @@ fn kasdin_one_over_f(n: usize, alpha: Value, amplitude: Value, rng: &mut SplitMi
     h[0].re = 1.0;
     for (k, entry) in h.iter_mut().enumerate().take(n).skip(1) {
         hk *= (k as f64 - 1.0 + alpha / 2.0) / k as f64;
-        (*entry).re = hk;
+        entry.re = hk;
     }
     for item in w.iter_mut().take(n) {
         item.re = amplitude * rng.gaussian();

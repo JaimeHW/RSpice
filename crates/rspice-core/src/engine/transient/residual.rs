@@ -524,13 +524,15 @@ impl Engine {
         Self::stamp_nodal_gmin(circuit, matrix, baseline_diag_gmin.max(0.0));
         circuit.stamp_transient_linear_direct(matrix, rhs);
 
-        let mut cache = ClassicMosTransientStampCache::default();
-        cache.stamp_pattern = Some(matrix.pattern_token());
-        cache.cached_devices_support_direct_values = circuit
-            .mosfets
-            .devices
-            .iter()
-            .all(|mosfet| mosfet.node_bulk == 0);
+        let mut cache = ClassicMosTransientStampCache {
+            stamp_pattern: Some(matrix.pattern_token()),
+            cached_devices_support_direct_values: circuit
+                .mosfets
+                .devices
+                .iter()
+                .all(|mosfet| mosfet.node_bulk == 0),
+            ..Default::default()
+        };
         cache.device_constants.extend(
             circuit
                 .mosfets

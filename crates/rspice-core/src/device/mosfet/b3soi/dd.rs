@@ -1273,9 +1273,7 @@ impl NonlinearDevice for B3SoiDd {
             return;
         }
         let raw_bias = self.branch_voltages(voltages);
-        let (op, bias) = if self.bias_was_limited.get() {
-            (self.op.clone(), self.bias)
-        } else if biases_match(raw_bias, self.bias) {
+        let (op, bias) = if self.bias_was_limited.get() || biases_match(raw_bias, self.bias) {
             (self.op.clone(), self.bias)
         } else {
             (self.eval_op_for_bias(raw_bias), raw_bias)

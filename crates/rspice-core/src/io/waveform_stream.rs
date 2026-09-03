@@ -557,8 +557,10 @@ mod tests {
     fn invalid_writer_policy_does_not_truncate_destination() {
         let path = temporary_path("no-truncate");
         std::fs::write(&path, b"existing").expect("seed destination");
-        let mut limits = ResourceLimits::default();
-        limits.max_result_values = 3;
+        let limits = ResourceLimits {
+            max_result_values: 3,
+            ..Default::default()
+        };
 
         let error = StreamingWaveformWriter::new_with_limits(&path, &["V(out)"], 2, limits)
             .expect_err("four-value buffer must exceed the policy");
@@ -581,8 +583,10 @@ mod tests {
         for preexisting in [false, true] {
             let path = temporary_path("point-limit");
             seed_destination(&path, preexisting);
-            let mut limits = ResourceLimits::default();
-            limits.max_analysis_points = 1;
+            let limits = ResourceLimits {
+                max_analysis_points: 1,
+                ..Default::default()
+            };
             let mut writer =
                 StreamingWaveformWriter::new_with_limits(&path, &["V(out)"], 1, limits)
                     .expect("create limited writer");
@@ -705,8 +709,10 @@ mod tests {
         writer.finalize().expect("finalize");
         let file_bytes = usize::try_from(std::fs::metadata(&path).expect("metadata").len())
             .expect("test file fits usize");
-        let mut limits = ResourceLimits::default();
-        limits.max_external_data_bytes = file_bytes - 1;
+        let limits = ResourceLimits {
+            max_external_data_bytes: file_bytes - 1,
+            ..Default::default()
+        };
 
         let error = crate::io::ltspice_raw::parse_raw_file_with_limits(path.as_path(), limits)
             .expect_err("file byte policy must reject before decoding");

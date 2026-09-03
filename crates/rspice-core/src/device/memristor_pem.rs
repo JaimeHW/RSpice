@@ -1057,8 +1057,10 @@ mod tests {
 
     #[test]
     fn validation_rejects_nonfinite_and_zero_voltage_scales() {
-        let mut model = XycePemModelParams::default();
-        model.v1 = 0.0;
+        let mut model = XycePemModelParams {
+            v1: 0.0,
+            ..Default::default()
+        };
         assert!(matches!(
             model.validate(),
             Err(XycePemMemristorError::InvalidParameter { name: "V1", .. })

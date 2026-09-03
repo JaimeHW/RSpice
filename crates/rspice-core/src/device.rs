@@ -235,6 +235,12 @@ impl XyceMemristor {
 }
 
 /// A device instance in the circuit
+// The MOSFET variant dwarfs the passives, but nothing holds a collection of
+// these: the circuit stores devices in typed per-family columns (`Capacitors`,
+// `Bjts`, `Mosfets`, ...) and this enum exists as a public, one-at-a-time
+// description at the API boundary. Boxing the variant would change the shape
+// of a public enum to save padding on a value that is never held in bulk.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum Device {
     Resistor(Resistor),

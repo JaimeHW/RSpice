@@ -1226,9 +1226,7 @@ impl VoltageSources {
         };
         let pw = if width_was_omitted && xyce_defaults {
             stop_default
-        } else if xyce_defaults {
-            width
-        } else if width.is_finite() && width >= 0.0 {
+        } else if xyce_defaults || (width.is_finite() && width >= 0.0) {
             width
         } else if width_was_omitted && !width_defaults_to_zero {
             // Holding an omitted PW to the transient stop is not an ngspice
@@ -1261,9 +1259,7 @@ impl VoltageSources {
             } else {
                 tr + pw + tf
             }
-        } else if xyce_defaults {
-            period
-        } else if period.is_finite() && period > 0.0 {
+        } else if xyce_defaults || (period.is_finite() && period > 0.0) {
             period
         } else {
             tr + pw + tf
@@ -2495,8 +2491,10 @@ mod tests {
         let path = std::env::temp_dir().join(format!("rspice-pwl-cache-{unique}.csv"));
         std::fs::write(&path, "0 0\n1 1\n").expect("write PWL cache fixture");
         let path_text = path.to_string_lossy().into_owned();
-        let mut limits = crate::resource::ResourceLimits::default();
-        limits.max_shared_cache_bytes = 0;
+        let limits = crate::resource::ResourceLimits {
+            max_shared_cache_bytes: 0,
+            ..Default::default()
+        };
 
         let waveform = VoltageSources::load_pwl_waveform_cached_with_limits(
             &path_text, 1.0, 1.0, 0.0, 0.0, limits,

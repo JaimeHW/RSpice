@@ -1917,9 +1917,11 @@ mod tests {
              .end\n",
         )
         .expect("deck parses");
-        let mut config = crate::engine::SimulationConfig::default();
-        config.temperature = 125.0 + 273.15;
-        config.tolerance = 1.0e-7;
+        let config = crate::engine::SimulationConfig {
+            temperature: 125.0 + 273.15,
+            tolerance: 1.0e-7,
+            ..Default::default()
+        };
         let engine = Engine::try_new_with_resolved_config(config).unwrap();
         let (result, _) = engine
             .run_dc_op_with_report_and_abort(&netlist, &NoAbort)
@@ -2621,8 +2623,10 @@ RLOAD out 0 2
 .end
 "#;
         let netlist = Netlist::parse(deck).expect("deck parses");
-        let mut config = crate::engine::SimulationConfig::default();
-        config.temperature = crate::constants::celsius_to_kelvin(37.0);
+        let config = crate::engine::SimulationConfig {
+            temperature: crate::constants::celsius_to_kelvin(37.0),
+            ..Default::default()
+        };
         let result = Engine::new(config)
             .run_dc_op(&netlist)
             .expect("modeled solution-dependent resistor solves");

@@ -16,60 +16,6 @@ pub(crate) struct SourceContinuationPolicy {
     maximum_steps: usize,
     corrector_iterations: usize,
 }
-
-#[cfg(test)]
-mod source_continuation_policy_tests {
-    use super::{SourceContinuationPolicy, explicit_source_continuation_policy};
-    use crate::config::NonlinearContinuationMode;
-
-    #[test]
-    fn xyce_simultaneous_policy_matches_loca_defaults() {
-        let policy = SourceContinuationPolicy::XYCE_SIMULTANEOUS;
-        assert_eq!(policy.initial_step, 0.2);
-        assert_eq!(policy.maximum_step, 0.2);
-        assert_eq!(policy.minimum_step, 1.0e-4);
-        assert_eq!(policy.aggressiveness, 1.0);
-        assert_eq!(policy.maximum_steps, 400);
-        assert_eq!(policy.corrector_iterations, 20);
-    }
-
-    #[test]
-    fn xyce_success_adapts_from_corrector_work_and_clips_to_maximum() {
-        let policy = SourceContinuationPolicy::XYCE_SIMULTANEOUS;
-
-        // 10/20 unused iterations gives a 1 + (1/2)^2 = 1.25 factor.
-        assert!((policy.step_after_success(0.1, 10) - 0.125).abs() < 1.0e-15);
-        // A zero-iteration corrector doubles the step, then the configured
-        // maximum clips it.
-        assert!((policy.step_after_success(0.15, 0) - 0.2).abs() < 1.0e-15);
-        // A fully spent corrector budget neither grows nor shrinks a success.
-        assert!((policy.step_after_success(0.1, 20) - 0.1).abs() < 1.0e-15);
-    }
-
-    #[test]
-    fn xyce_failure_halves_until_the_minimum_step() {
-        let policy = SourceContinuationPolicy::XYCE_SIMULTANEOUS;
-        assert_eq!(policy.step_after_failure(0.2), Some(0.1));
-        assert_eq!(policy.step_after_failure(2.0e-4), Some(1.0e-4));
-        assert_eq!(policy.step_after_failure(1.0e-4), None);
-    }
-
-    #[test]
-    fn only_explicit_simultaneous_source_step_selects_this_policy() {
-        assert_eq!(
-            explicit_source_continuation_policy(Some(
-                NonlinearContinuationMode::SimultaneousSourceStep
-            )),
-            Some(SourceContinuationPolicy::XYCE_SIMULTANEOUS)
-        );
-        assert_eq!(
-            explicit_source_continuation_policy(Some(NonlinearContinuationMode::Natural)),
-            None
-        );
-        assert_eq!(explicit_source_continuation_policy(None), None);
-    }
-}
-
 impl SourceContinuationPolicy {
     /// Xyce/LOCA natural-parameter defaults used by simultaneous source
     /// stepping when the deck explicitly requests continuation.
@@ -1066,5 +1012,58 @@ impl Engine {
         }
 
         Ok((solution, false, used_iterations))
+    }
+}
+
+#[cfg(test)]
+mod source_continuation_policy_tests {
+    use super::{SourceContinuationPolicy, explicit_source_continuation_policy};
+    use crate::config::NonlinearContinuationMode;
+
+    #[test]
+    fn xyce_simultaneous_policy_matches_loca_defaults() {
+        let policy = SourceContinuationPolicy::XYCE_SIMULTANEOUS;
+        assert_eq!(policy.initial_step, 0.2);
+        assert_eq!(policy.maximum_step, 0.2);
+        assert_eq!(policy.minimum_step, 1.0e-4);
+        assert_eq!(policy.aggressiveness, 1.0);
+        assert_eq!(policy.maximum_steps, 400);
+        assert_eq!(policy.corrector_iterations, 20);
+    }
+
+    #[test]
+    fn xyce_success_adapts_from_corrector_work_and_clips_to_maximum() {
+        let policy = SourceContinuationPolicy::XYCE_SIMULTANEOUS;
+
+        // 10/20 unused iterations gives a 1 + (1/2)^2 = 1.25 factor.
+        assert!((policy.step_after_success(0.1, 10) - 0.125).abs() < 1.0e-15);
+        // A zero-iteration corrector doubles the step, then the configured
+        // maximum clips it.
+        assert!((policy.step_after_success(0.15, 0) - 0.2).abs() < 1.0e-15);
+        // A fully spent corrector budget neither grows nor shrinks a success.
+        assert!((policy.step_after_success(0.1, 20) - 0.1).abs() < 1.0e-15);
+    }
+
+    #[test]
+    fn xyce_failure_halves_until_the_minimum_step() {
+        let policy = SourceContinuationPolicy::XYCE_SIMULTANEOUS;
+        assert_eq!(policy.step_after_failure(0.2), Some(0.1));
+        assert_eq!(policy.step_after_failure(2.0e-4), Some(1.0e-4));
+        assert_eq!(policy.step_after_failure(1.0e-4), None);
+    }
+
+    #[test]
+    fn only_explicit_simultaneous_source_step_selects_this_policy() {
+        assert_eq!(
+            explicit_source_continuation_policy(Some(
+                NonlinearContinuationMode::SimultaneousSourceStep
+            )),
+            Some(SourceContinuationPolicy::XYCE_SIMULTANEOUS)
+        );
+        assert_eq!(
+            explicit_source_continuation_policy(Some(NonlinearContinuationMode::Natural)),
+            None
+        );
+        assert_eq!(explicit_source_continuation_policy(None), None);
     }
 }

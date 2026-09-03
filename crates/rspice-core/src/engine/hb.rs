@@ -1649,8 +1649,10 @@ mod tests {
              .end\n",
         )
         .expect("typed HB deck parses");
-        let mut simulation = SimulationConfig::default();
-        simulation.max_iterations = 37;
+        let simulation = SimulationConfig {
+            max_iterations: 37,
+            ..Default::default()
+        };
         let engine = Engine::new(simulation);
         let caller_config = HbConfig::new(1.0e3).with_max_iterations(19);
 
@@ -1880,8 +1882,10 @@ mod tests {
                 .collect(),
         )
         .with_collocation_points(13);
-        let mut simulation = SimulationConfig::default();
-        simulation.spice_dialect = SpiceDialect::Xyce;
+        let simulation = SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            ..Default::default()
+        };
         let analysis = Engine::new(simulation)
             .run_hb(&netlist, config)
             .expect("parser-authored TAHB/APFT deck runs through the production engine");

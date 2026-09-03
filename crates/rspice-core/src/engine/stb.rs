@@ -476,8 +476,10 @@ mod tests {
         let mut limits = crate::ResourceLimits::unlimited();
         limits.max_analysis_points = usize::MAX;
         limits.max_result_values = usize::MAX;
-        let mut simulation_config = crate::engine::SimulationConfig::default();
-        simulation_config.resource_limits = limits;
+        let simulation_config = crate::engine::SimulationConfig {
+            resource_limits: limits,
+            ..Default::default()
+        };
         let engine = Engine::new(simulation_config);
         let abort = crate::abort_signal::CountingAbort::new(usize::MAX);
         let error = engine
@@ -506,8 +508,10 @@ mod tests {
     #[test]
     fn stb_frequency_allocation_failure_precedes_circuit_work() {
         let netlist = Netlist::parse(RESOURCE_LIMIT_DECK).expect("STB resource deck parses");
-        let mut simulation_config = crate::engine::SimulationConfig::default();
-        simulation_config.resource_limits = crate::ResourceLimits::unlimited();
+        let simulation_config = crate::engine::SimulationConfig {
+            resource_limits: crate::ResourceLimits::unlimited(),
+            ..Default::default()
+        };
         let engine = Engine::new(simulation_config);
         let point_count = isize::MAX as usize / std::mem::size_of::<Value>() + 1;
         let abort = crate::abort_signal::CountingAbort::new(usize::MAX);

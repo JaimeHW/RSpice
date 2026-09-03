@@ -573,8 +573,10 @@ mod tests {
 
         let mut manager = LibraryManager::new();
         let initial_models = manager.model_count();
-        let mut limits = ResourceLimits::default();
-        limits.max_netlist_bytes = 8;
+        let limits = ResourceLimits {
+            max_netlist_bytes: 8,
+            ..Default::default()
+        };
         let limit_error = manager
             .load_external_lib_with_limits_and_abort(&lib_path, None, limits, &NoAbort)
             .expect_err("resource violation must reject the entire import");

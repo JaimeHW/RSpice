@@ -3342,7 +3342,7 @@ mod tests {
         let runtime = cpl3_4_line_runtime();
         let h3 = runtime.h3t[0][0][3].as_ref().expect("h3[0][0][3] present");
         let slow_pole = h3.tm[2].x;
-        let dd_true = -5.2738988766680034e-6;
+        let dd_true = -5.273_898_876_668_003e-6;
         // Tight tolerance: this is the deterministic dd output, pinned to guard
         // against regressions in the dd setup chain.
         assert!(
@@ -3354,7 +3354,7 @@ mod tests {
         // value: confirm the dd setup actually changed the pole and lands on the
         // accurate branch (between the two prior values, nearer the true root).
         let ngspice_roundoff = -5.6852265592287934e-6;
-        let old_f64 = -5.4435560366884854e-6;
+        let old_f64 = -5.443_556_036_688_485e-6;
         assert!(
             (slow_pole - ngspice_roundoff).abs() > 1.0e-7,
             "slow pole unexpectedly matches ngspice roundoff value"

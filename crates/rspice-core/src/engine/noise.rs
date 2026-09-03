@@ -4065,26 +4065,19 @@ impl Engine {
         let has_input_source = match input_source {
             None => false,
             Some(source_name) => {
-                if circuit
+                let matches_independent_source = circuit
                     .voltage_sources
                     .names
                     .iter()
-                    .any(|name| name.eq_ignore_ascii_case(source_name))
-                {
-                    true
-                } else if circuit
-                    .current_sources
-                    .names
-                    .iter()
-                    .any(|name| name.eq_ignore_ascii_case(source_name))
-                {
-                    true
-                } else {
+                    .chain(circuit.current_sources.names.iter())
+                    .any(|name| name.eq_ignore_ascii_case(source_name));
+                if !matches_independent_source {
                     return Err(SimulationError::Circuit(format!(
                         "Noise input source '{}' not found (expected independent V/I source)",
                         source_name
                     )));
                 }
+                true
             }
         };
 

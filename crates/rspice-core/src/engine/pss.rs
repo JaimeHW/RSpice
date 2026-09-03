@@ -472,7 +472,7 @@ impl PssDenseLu {
         }
         for row in (0..self.n).rev() {
             let mut value = solution[row];
-            for (column, &entry) in solution.iter().enumerate().take(self.n).skip((row + 1)) {
+            for (column, &entry) in solution.iter().enumerate().take(self.n).skip(row + 1) {
                 value -= self.lu[row * self.n + column] * entry;
             }
             solution[row] = value / self.lu[row * self.n + row];

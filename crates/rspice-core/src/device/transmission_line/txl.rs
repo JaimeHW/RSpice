@@ -966,7 +966,7 @@ mod tests {
 
         assert!(!txl.if_img);
         assert_close(txl.taul * 1.0e12, 1036.7822220698038, 1.0e-9);
-        assert_close(txl.h1c, -5011045.9477987709, 1.0e-5);
+        assert_close(txl.h1c, -5_011_045.947_798_771, 1.0e-5);
         assert_close(txl.h2_aten, 0.48707085781090975, 1.0e-15);
         assert_close(txl.h3_aten, 0.0035177942924281133, 1.0e-15);
         assert_close(txl.sqt_cd_l, 0.0072223460632370425, 1.0e-16);

@@ -6868,8 +6868,10 @@ mod tests {
         result.num_nodes = 2;
         result.node_names = vec!["a".into(), "b".into()];
         result.voltages = vec![vec![0.0; 4], vec![1.0; 4]];
-        let mut limits = ResourceLimits::default();
-        limits.max_result_values = 11;
+        let limits = ResourceLimits {
+            max_result_values: 11,
+            ..Default::default()
+        };
         let error = evaluate_tran_output_requests_with_abort(&netlist, &result, limits, &NoAbort)
             .expect_err("axis plus two expanded columns require twelve values");
         assert!(matches!(
@@ -7005,8 +7007,10 @@ mod tests {
              .END\n",
         )
         .expect("bounded output deck parses");
-        let mut limits = ResourceLimits::default();
-        limits.max_result_values = 11;
+        let limits = ResourceLimits {
+            max_result_values: 11,
+            ..Default::default()
+        };
         let error =
             evaluate_tran_output_requests_with_abort(&netlist, &tran_result(), limits, &NoAbort)
                 .expect_err("axis plus two columns require twelve values");
@@ -7075,8 +7079,10 @@ mod tests {
             .map(|value| (Value::from(value), point(Value::from(value))))
             .collect::<Vec<_>>();
 
-        let mut limits = ResourceLimits::default();
-        limits.max_result_values = 8;
+        let limits = ResourceLimits {
+            max_result_values: 8,
+            ..Default::default()
+        };
         let error = evaluate_dc_output_requests_with_abort(&netlist, &sweep, limits, &NoAbort)
             .expect_err("intermediate DC projection storage must share the result-value budget");
         assert!(matches!(

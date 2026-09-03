@@ -3584,16 +3584,15 @@ fn validate_runtime_policy(
             "accepted integration runtime livelock streak {livelock_streak} reaches restart threshold {LIVELOCK_STREAK_RESTART}"
         ));
     }
-    if let Some(last_restart) = livelock_last_restart_time {
-        if !last_restart.is_finite()
+    if let Some(last_restart) = livelock_last_restart_time
+        && (!last_restart.is_finite()
             || last_restart < 0.0
             || last_restart > checkpoint_time
-            || (last_restart == 0.0 && last_restart.to_bits() != 0.0_f64.to_bits())
-        {
-            return Err(format!(
-                "accepted integration runtime last livelock restart time {last_restart} is outside [0, {checkpoint_time}] or noncanonical"
-            ));
-        }
+            || (last_restart == 0.0 && last_restart.to_bits() != 0.0_f64.to_bits()))
+    {
+        return Err(format!(
+            "accepted integration runtime last livelock restart time {last_restart} is outside [0, {checkpoint_time}] or noncanonical"
+        ));
     }
     if (checkpoint_time == 0.0 && accepted_interval_count != 0)
         || (checkpoint_time > 0.0 && accepted_interval_count == 0)

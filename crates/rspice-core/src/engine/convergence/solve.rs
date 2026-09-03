@@ -892,12 +892,11 @@ impl Engine {
                         iteration + 1
                     );
                 }
-                if self.config.spice_dialect != crate::engine::SpiceDialect::Xyce {
-                    if let Some(refined) =
+                if self.config.spice_dialect != crate::engine::SpiceDialect::Xyce
+                    && let Some(refined) =
                         self.refine_fallback_candidate(circuit, matrix, &solution, abort)?
-                    {
-                        return Ok(refined);
-                    }
+                {
+                    return Ok(refined);
                 }
                 return Ok(solution);
             }

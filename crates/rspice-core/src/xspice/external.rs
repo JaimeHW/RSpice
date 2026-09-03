@@ -281,13 +281,9 @@ fn validate_digital_process_spec(spec: &DigitalProcessSpec) -> CmResult<(usize, 
 
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 fn d_process_fifo_base_name(process_file: &str) -> Option<&str> {
-    if process_file.ends_with("||") {
-        Some(&process_file[..process_file.len() - 2])
-    } else if process_file.ends_with('|') {
-        Some(&process_file[..process_file.len() - 1])
-    } else {
-        None
-    }
+    process_file
+        .strip_suffix("||")
+        .or_else(|| process_file.strip_suffix('|'))
 }
 
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]

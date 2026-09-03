@@ -536,8 +536,10 @@ mod tests {
     fn virtual_data_files_enforce_per_file_and_reader_limits() {
         let _guard = test_registry_guard();
         clear_registered_data_files().expect("clear registry before limit test");
-        let mut limits = crate::resource::ResourceLimits::default();
-        limits.max_external_data_bytes = 3;
+        let limits = crate::resource::ResourceLimits {
+            max_external_data_bytes: 3,
+            ..Default::default()
+        };
 
         let error = register_data_file_with_limits("virtual://limited/register", "1234", limits)
             .expect_err("oversized registration must fail");
@@ -554,8 +556,10 @@ mod tests {
     fn virtual_data_file_registry_enforces_aggregate_retention() {
         let _guard = test_registry_guard();
         clear_registered_data_files().expect("clear registry before aggregate test");
-        let mut limits = crate::resource::ResourceLimits::default();
-        limits.max_shared_cache_bytes = 7;
+        let limits = crate::resource::ResourceLimits {
+            max_shared_cache_bytes: 7,
+            ..Default::default()
+        };
 
         register_data_file_with_limits("virtual://limited/first", "1234", limits)
             .expect("first file fits aggregate limit");

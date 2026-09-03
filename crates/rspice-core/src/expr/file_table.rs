@@ -785,15 +785,19 @@ mod tests {
         let expression =
             || parse_expression_strict("tablefile(\"wave.dat\")").expect("table expression parses");
 
-        let mut byte_limits = crate::resource::ResourceLimits::default();
-        byte_limits.max_external_data_bytes = contents.len() - 1;
+        let byte_limits = crate::resource::ResourceLimits {
+            max_external_data_bytes: contents.len() - 1,
+            ..Default::default()
+        };
         let byte_error =
             resolve_file_lookup_functions_with_limits(expression(), Some(&deck_path), byte_limits)
                 .expect_err("oversized table file must fail");
         assert!(byte_error.contains("external_data_bytes limit exceeded"));
 
-        let mut value_limits = crate::resource::ResourceLimits::default();
-        value_limits.max_external_data_values = 3;
+        let value_limits = crate::resource::ResourceLimits {
+            max_external_data_values: 3,
+            ..Default::default()
+        };
         let value_error =
             resolve_file_lookup_functions_with_limits(expression(), Some(&deck_path), value_limits)
                 .expect_err("oversized table value set must fail");
@@ -1201,8 +1205,10 @@ mod tests {
 
         let expression = parse_expression_strict("akima(v(a),0,1,0.5,2.25,1,4)")
             .expect("resource-limited expression parses");
-        let mut limits = crate::resource::ResourceLimits::default();
-        limits.max_external_data_values = 11;
+        let limits = crate::resource::ResourceLimits {
+            max_external_data_values: 11,
+            ..Default::default()
+        };
         let error = resolve_file_lookup_functions_with_limits(expression, None, limits)
             .expect_err("precomputed coefficients must honor resource limits")
             .to_string();

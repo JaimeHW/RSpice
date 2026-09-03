@@ -2635,10 +2635,12 @@ mod tests {
 
     #[test]
     fn xyce_level2_trial_honors_orig_flag_magnetization_limiter() {
-        let mut params = JilesAthertonParams::default();
-        params.xyce_core = true;
-        params.xyce_core_level2 = true;
-        params.ms = 100.0;
+        let params = JilesAthertonParams {
+            xyce_core: true,
+            xyce_core_level2: true,
+            ms: 100.0,
+            ..Default::default()
+        };
         let mut device = JilesAthertonInductor::new("Lcore".to_owned(), 0, 0).with_params(params);
 
         let trial = |magnetization_update| XyceCoreTrial {

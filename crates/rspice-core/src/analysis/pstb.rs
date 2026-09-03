@@ -725,8 +725,10 @@ mod tests {
         }
 
         for threshold in [0.999, 0.0, -1.0, Value::NAN, Value::INFINITY] {
-            let mut config = PstbConfig::default();
-            config.stability_threshold = threshold;
+            let config = PstbConfig {
+                stability_threshold: threshold,
+                ..Default::default()
+            };
             let mut analyzer = PstbAnalyzer::new(config);
             assert!(
                 analyzer
@@ -787,8 +789,10 @@ mod tests {
 
     #[test]
     fn wide_outer_threshold_cannot_manufacture_stability() {
-        let mut config = PstbConfig::default();
-        config.stability_threshold = 2.0;
+        let config = PstbConfig {
+            stability_threshold: 2.0,
+            ..Default::default()
+        };
         let mut analyzer = PstbAnalyzer::new(config);
         let result = analyzer
             .analyze_monodromy_with_abort(&[vec![1.5]], 1.0, &NoAbort)
@@ -893,8 +897,10 @@ mod tests {
 
     #[test]
     fn subharmonic_reporting_honors_configuration() {
-        let mut config = PstbConfig::default();
-        config.detect_subharmonics = false;
+        let config = PstbConfig {
+            detect_subharmonics: false,
+            ..Default::default()
+        };
         let mut analyzer = PstbAnalyzer::new(config);
         let result = analyzer
             .analyze_monodromy_with_abort(&[vec![-1.0]], 1.0, &NoAbort)

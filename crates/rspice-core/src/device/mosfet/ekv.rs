@@ -4,7 +4,7 @@
 //! quasi-static terminal charge and junction depletion storage. Noise remains
 //! intentionally fail-closed outside this slice.
 
-use super::mosfet::MosType;
+use super::classic::MosType;
 use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
 use crate::{NodeId, Value};
 use std::collections::HashMap;

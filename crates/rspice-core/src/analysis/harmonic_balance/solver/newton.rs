@@ -49,821 +49,6 @@ struct ExactHbOperator<'a> {
     periodic_networks: &'a [ExactPeriodicNetwork],
 }
 
-#[cfg(test)]
-mod exact_matrix_free_tests {
-    use super::*;
-
-    fn fixture<'a>(
-        g: &'a [(usize, usize, Value)],
-        c: &'a [(usize, usize, Value)],
-        g_spectra: &'a [PeriodicSpectrum],
-        c_spectra: &'a [PeriodicSpectrum],
-    ) -> ExactHbOperator<'a> {
-        ExactHbOperator {
-            num_nodes: 2,
-            num_components: 3,
-            real_width: 5,
-            omega0: 2.0 * PI * 1.0e6,
-            gmin: 1e-12,
-            g_matrix: g,
-            c_matrix: c,
-            l_matrix: &[],
-            g_spectra,
-            c_spectra,
-            mna_branches: &[],
-            mna_static_entries: &[],
-            mna_inductance_entries: &[],
-            periodic_networks: &[],
-        }
-    }
-
-    fn assert_close(actual: Complex64, expected: Complex64) {
-        let scale = actual.norm().max(expected.norm()).max(1.0);
-        assert!(
-            (actual - expected).norm() <= 3e-12 * scale,
-            "actual={actual:?}, expected={expected:?}"
-        );
-    }
-
-    #[test]
-    fn exact_real_split_operator_matches_toeplitz_plus_hankel_definition() {
-        let g = vec![(0, 0, 7.0), (0, 1, -0.8), (1, 0, -0.3), (1, 1, 6.0)];
-        let c = vec![(0, 0, 2e-12), (1, 1, 1e-12)];
-        let g_spectra = vec![
-            (
-                0,
-                0,
-                vec![
-                    Complex64::new(0.5, 0.0),
-                    Complex64::new(0.04, -0.02),
-                    Complex64::new(-0.01, 0.006),
-                    Complex64::new(0.004, -0.002),
-                    Complex64::new(0.001, 0.0005),
-                ],
-            ),
-            (
-                1,
-                0,
-                vec![
-                    Complex64::new(-0.1, 0.0),
-                    Complex64::new(0.02, 0.01),
-                    Complex64::new(0.005, -0.003),
-                    Complex64::new(0.001, 0.002),
-                    Complex64::new(-0.0005, 0.0),
-                ],
-            ),
-        ];
-        let c_spectra = vec![(
-            1,
-            1,
-            vec![
-                Complex64::new(1e-12, 0.0),
-                Complex64::new(0.1e-12, 0.04e-12),
-                Complex64::new(0.03e-12, -0.01e-12),
-                Complex64::new(0.01e-12, 0.0),
-                Complex64::new(0.002e-12, 0.001e-12),
-            ],
-        )];
-        let operator = fixture(&g, &c, &g_spectra, &c_spectra);
-        let input = (0..10)
-            .map(|index| Complex64::new(index as Value * 0.11 - 0.35, 0.0))
-            .collect::<Vec<_>>();
-        let actual = operator.apply(&input);
-
-        let n = operator.num_nodes;
-        let h = operator.num_components;
-        let mut x = vec![Complex64::new(0.0, 0.0); n * h];
-        for node in 0..n {
-            x[node * h] = Complex64::new(input[node * 5].re, 0.0);
-            for k in 1..h {
-                x[node * h + k] =
-                    Complex64::new(input[node * 5 + 2 * k - 1].re, input[node * 5 + 2 * k].re);
-            }
-        }
-        let mut toeplitz = vec![vec![Complex64::new(0.0, 0.0); n * h]; n * h];
-        let mut hankel = vec![vec![Complex64::new(0.0, 0.0); n * h]; n * h];
-        for k in 0..h {
-            let jw = Complex64::new(0.0, k as Value * operator.omega0);
-            for &(i, j, value) in &g {
-                toeplitz[i * h + k][j * h + k] -= value;
-            }
-            for &(i, j, value) in &c {
-                toeplitz[i * h + k][j * h + k] -= jw * value;
-            }
-            for node in 0..n {
-                toeplitz[node * h + k][node * h + k] -= operator.gmin;
-            }
-        }
-        for &(i, j, ref spectrum) in &g_spectra {
-            for k in 0..h {
-                for l in 0..h {
-                    let d = k as isize - l as isize;
-                    let coefficient = spectrum[d.unsigned_abs()];
-                    toeplitz[i * h + k][j * h + l] -= if d >= 0 {
-                        coefficient
-                    } else {
-                        coefficient.conj()
-                    };
-                }
-                for m in 1..h {
-                    hankel[i * h + k][j * h + m] -= spectrum[k + m];
-                }
-            }
-        }
-        for &(i, j, ref spectrum) in &c_spectra {
-            for k in 0..h {
-                let jw = Complex64::new(0.0, k as Value * operator.omega0);
-                for l in 0..h {
-                    let d = k as isize - l as isize;
-                    let coefficient = spectrum[d.unsigned_abs()];
-                    toeplitz[i * h + k][j * h + l] -= jw
-                        * if d >= 0 {
-                            coefficient
-                        } else {
-                            coefficient.conj()
-                        };
-                }
-                for m in 1..h {
-                    hankel[i * h + k][j * h + m] -= jw * spectrum[k + m];
-                }
-            }
-        }
-        let mut expected_complex = vec![Complex64::new(0.0, 0.0); n * h];
-        for row in 0..n * h {
-            for col in 0..n * h {
-                expected_complex[row] +=
-                    toeplitz[row][col] * x[col] + hankel[row][col] * x[col].conj();
-            }
-        }
-        for node in 0..n {
-            assert_close(
-                actual[node * 5],
-                Complex64::new(expected_complex[node * h].re, 0.0),
-            );
-            for k in 1..h {
-                assert_close(
-                    actual[node * 5 + 2 * k - 1],
-                    Complex64::new(expected_complex[node * h + k].re, 0.0),
-                );
-                assert_close(
-                    actual[node * 5 + 2 * k],
-                    Complex64::new(expected_complex[node * h + k].im, 0.0),
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn exact_matrix_free_gmres_matches_direct_real_lu() {
-        let g = vec![(0, 0, 9.0), (0, 1, -0.5), (1, 0, -0.25), (1, 1, 8.0)];
-        let g_spectra = vec![(
-            0,
-            0,
-            vec![
-                Complex64::new(0.4, 0.0),
-                Complex64::new(0.008, -0.003),
-                Complex64::new(0.002, 0.001),
-                Complex64::new(0.0005, 0.0),
-                Complex64::new(0.0001, 0.0),
-            ],
-        )];
-        let operator = fixture(&g, &[], &g_spectra, &[]);
-        let preconditioner = ExactHbPreconditioner::build(&operator);
-        let rhs = (0..10)
-            .map(|index| Complex64::new(0.2 - index as Value * 0.017, 0.0))
-            .collect::<Vec<_>>();
-        let outcome = super::super::krylov::gmres(
-            &|input| operator.apply(input),
-            &preconditioner,
-            &rhs,
-            10,
-            6,
-        );
-        assert!(outcome.converged, "relative={}", outcome.relative_residual);
-
-        let size = rhs.len();
-        let mut dense = vec![Complex64::new(0.0, 0.0); size * size];
-        let mut basis = vec![Complex64::new(0.0, 0.0); size];
-        for column in 0..size {
-            basis[column] = Complex64::new(1.0, 0.0);
-            let image = operator.apply(&basis);
-            for row in 0..size {
-                dense[row * size + column] = image[row];
-            }
-            basis[column] = Complex64::new(0.0, 0.0);
-        }
-        let factors = super::super::krylov::LuFactors::factor(dense, size);
-        let mut direct = rhs.clone();
-        factors.solve_in_place(&mut direct);
-        for (actual, expected) in outcome.solution.into_iter().zip(direct) {
-            assert_close(actual, expected);
-        }
-    }
-
-    #[test]
-    fn branch_aware_operator_matches_explicit_mna_orientation_and_dense_stream() {
-        let g = vec![(0, 0, 3.0), (1, 1, 4.0)];
-        let branches = vec![
-            ExactMnaBranch::VoltageSource {
-                branch_ordinal: 1,
-                node_pos: 1,
-                node_neg: 0,
-                source_index: 0,
-                source: None,
-            },
-            ExactMnaBranch::Inductor {
-                branch_ordinal: 2,
-                node_pos: 2,
-                node_neg: 1,
-                inductance: 2.5e-6,
-            },
-        ];
-        let base = fixture(&g, &[], &[], &[]);
-        let operator = ExactHbOperator {
-            mna_branches: &branches,
-            ..fixture(&g, &[], &[], &[])
-        };
-        operator.validate().expect("branch-aware operator is valid");
-
-        let size = operator.entity_count() * operator.real_width;
-        let input = (0..size)
-            .map(|index| Complex64::new(0.03 * index as Value - 0.2, 0.0))
-            .collect::<Vec<_>>();
-        let actual = operator.apply(&input);
-
-        // Start from the independently checked nodal operator, then apply
-        // the canonical branch equations explicitly in complex form.
-        let mut expected = vec![Complex64::new(0.0, 0.0); size];
-        expected[..2 * operator.real_width]
-            .copy_from_slice(&base.apply(&input[..2 * operator.real_width]));
-        let coefficient = |entity: usize, harmonic: usize| {
-            let re = input[operator.re_idx(entity, harmonic)].re;
-            let im = if harmonic == 0 {
-                0.0
-            } else {
-                input[operator.im_idx(entity, harmonic)].re
-            };
-            Complex64::new(re, im)
-        };
-        let mut add = |entity: usize, harmonic: usize, value: Complex64| {
-            expected[operator.re_idx(entity, harmonic)] += value.re;
-            if harmonic > 0 {
-                expected[operator.im_idx(entity, harmonic)] += value.im;
-            }
-        };
-        for harmonic in 0..operator.num_components {
-            let v0 = coefficient(0, harmonic);
-            let v1 = coefficient(1, harmonic);
-            let source_current = coefficient(2, harmonic);
-            let inductor_current = coefficient(3, harmonic);
-            add(0, harmonic, -source_current + inductor_current);
-            add(1, harmonic, -inductor_current);
-            add(2, harmonic, -v0);
-            add(
-                3,
-                harmonic,
-                v0 - v1
-                    + Complex64::new(0.0, harmonic as Value * operator.omega0 * 2.5e-6)
-                        * inductor_current,
-            );
-        }
-        for (&value, &reference) in actual.iter().zip(&expected) {
-            assert_close(value, reference);
-        }
-
-        let mut streamed_dense = vec![0.0; size * size];
-        operator.visit_entries(|row, column, value| {
-            streamed_dense[row * size + column] += value;
-        });
-        for row in 0..size {
-            let value = (0..size)
-                .map(|column| streamed_dense[row * size + column] * input[column])
-                .sum();
-            assert_close(actual[row], value);
-        }
-        assert_eq!(actual[operator.im_idx(3, 1)].im, 0.0);
-    }
-
-    #[test]
-    fn matrix_free_operator_applies_mutual_inductance_to_cross_branch_currents() {
-        let branches = vec![
-            ExactMnaBranch::Inductor {
-                branch_ordinal: 1,
-                node_pos: 1,
-                node_neg: 0,
-                inductance: 100.0e-6,
-            },
-            ExactMnaBranch::Inductor {
-                branch_ordinal: 2,
-                node_pos: 2,
-                node_neg: 0,
-                inductance: 25.0e-6,
-            },
-        ];
-        let mutual = 40.0e-6;
-        let mutual_entries = [(2, 3, mutual), (3, 2, mutual)];
-        let uncoupled = ExactHbOperator {
-            mna_branches: &branches,
-            ..fixture(&[], &[], &[], &[])
-        };
-        let coupled = ExactHbOperator {
-            mna_branches: &branches,
-            mna_inductance_entries: &mutual_entries,
-            ..fixture(&[], &[], &[], &[])
-        };
-        coupled.validate().expect("mutual operator is valid");
-        let size = coupled.entity_count() * coupled.real_width;
-        let input = (0..size)
-            .map(|index| Complex64::new(0.02 * index as Value - 0.1, 0.0))
-            .collect::<Vec<_>>();
-        let actual = coupled.apply(&input);
-        let baseline = uncoupled.apply(&input);
-        let coefficient = |entity: usize, harmonic: usize| {
-            Complex64::new(
-                input[coupled.re_idx(entity, harmonic)].re,
-                if harmonic == 0 {
-                    0.0
-                } else {
-                    input[coupled.im_idx(entity, harmonic)].re
-                },
-            )
-        };
-        for harmonic in 0..coupled.num_components {
-            let jw_m = Complex64::new(0.0, harmonic as Value * coupled.omega0 * mutual);
-            for (row_entity, column_entity) in [(2, 3), (3, 2)] {
-                let expected = jw_m * coefficient(column_entity, harmonic);
-                assert_close(
-                    actual[coupled.re_idx(row_entity, harmonic)]
-                        - baseline[coupled.re_idx(row_entity, harmonic)],
-                    Complex64::new(expected.re, 0.0),
-                );
-                if harmonic > 0 {
-                    assert_close(
-                        actual[coupled.im_idx(row_entity, harmonic)]
-                            - baseline[coupled.im_idx(row_entity, harmonic)],
-                        Complex64::new(expected.im, 0.0),
-                    );
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn matrix_free_operator_applies_exact_delay_line_branch_rows() {
-        let branches = vec![
-            ExactMnaBranch::NetworkPort {
-                branch_ordinal: 1,
-                node_pos: 1,
-                node_neg: 0,
-            },
-            ExactMnaBranch::NetworkPort {
-                branch_ordinal: 2,
-                node_pos: 2,
-                node_neg: 0,
-            },
-        ];
-        let delay = 137.0e-9;
-        let impedance = 50.0;
-        let network = ExactPeriodicNetwork::ScalarWave {
-            name: "T1".to_string(),
-            node1_pos: 1,
-            node1_neg: 0,
-            node2_pos: 2,
-            node2_neg: 0,
-            branch1: 2,
-            branch2: 3,
-            impedance,
-            delay,
-            attenuation: 1.0,
-        };
-        let networks = [network];
-        let operator = ExactHbOperator {
-            gmin: 0.0,
-            mna_branches: &branches,
-            periodic_networks: &networks,
-            ..fixture(&[], &[], &[], &[])
-        };
-        operator.validate().expect("delay-line operator is valid");
-        let size = operator.entity_count() * operator.real_width;
-        let input = (0..size)
-            .map(|index| Complex64::new(0.07 * index as Value - 0.4, 0.0))
-            .collect::<Vec<_>>();
-        let actual = operator.apply(&input);
-        let coefficient = |entity: usize, harmonic: usize| {
-            Complex64::new(
-                input[operator.re_idx(entity, harmonic)].re,
-                if harmonic == 0 {
-                    0.0
-                } else {
-                    input[operator.im_idx(entity, harmonic)].re
-                },
-            )
-        };
-        let output = |entity: usize, harmonic: usize| {
-            Complex64::new(
-                actual[operator.re_idx(entity, harmonic)].re,
-                if harmonic == 0 {
-                    0.0
-                } else {
-                    actual[operator.im_idx(entity, harmonic)].re
-                },
-            )
-        };
-        for harmonic in 0..operator.num_components {
-            let q = Complex64::from_polar(1.0, -(harmonic as Value) * operator.omega0 * delay);
-            let v1 = coefficient(0, harmonic);
-            let v2 = coefficient(1, harmonic);
-            let i1 = coefficient(2, harmonic);
-            let i2 = coefficient(3, harmonic);
-            assert_close(output(0, harmonic), -i1);
-            assert_close(output(1, harmonic), -i2);
-            assert_close(
-                output(2, harmonic),
-                -v1 + q * v2 + impedance * i1 + q * impedance * i2,
-            );
-            assert_close(
-                output(3, harmonic),
-                -v2 + q * v1 + impedance * i2 + q * impedance * i1,
-            );
-        }
-    }
-
-    #[test]
-    fn nonlinear_residual_and_dense_jacobian_include_mutual_inductance() {
-        let fundamental = 1.0e6;
-        let mut solver = HbSolver::new(HbConfig::new(fundamental).with_harmonics(2), 2);
-        solver
-            .try_add_periodic_inductor_branch(1, 0, 100.0e-6, 1, "L1")
-            .expect("first winding registers");
-        solver
-            .try_add_periodic_inductor_branch(2, 0, 25.0e-6, 2, "L2")
-            .expect("second winding registers");
-        let mutual = 40.0e-6;
-        solver
-            .try_add_exact_mna_inductance_entry(2, 3, mutual, "K1")
-            .expect("forward mutual entry registers");
-        solver
-            .try_add_exact_mna_inductance_entry(3, 2, mutual, "K1")
-            .expect("reverse mutual entry registers");
-        let mut state = HbSolverState::new(2, 2);
-        state
-            .try_prepare_mna_branches(2, 2)
-            .expect("branch spectra allocate");
-        state.mna_branch_currents[0][2] = Complex64::new(0.3, -0.2);
-        state.mna_branch_currents[1][2] = Complex64::new(-0.1, 0.4);
-        solver
-            .add_exact_mna_residual(&mut state, 1.0)
-            .expect("exact residual evaluates");
-        let jw = Complex64::new(0.0, 2.0 * 2.0 * PI * fundamental);
-        assert_close(
-            state.mna_branch_residual[0][2],
-            jw * (100.0e-6 * state.mna_branch_currents[0][2]
-                + mutual * state.mna_branch_currents[1][2]),
-        );
-        assert_close(
-            state.mna_branch_residual[1][2],
-            jw * (mutual * state.mna_branch_currents[0][2]
-                + 25.0e-6 * state.mna_branch_currents[1][2]),
-        );
-
-        let jacobian = solver
-            .build_full_jacobian(&state)
-            .expect("dense exact Jacobian evaluates");
-        let h = 3;
-        assert_close(jacobian[(2 * h) + 2][(3 * h) + 2], jw * mutual);
-        assert_close(jacobian[(3 * h) + 2][(2 * h) + 2], jw * mutual);
-    }
-
-    #[test]
-    fn nonlinear_residual_and_dense_jacobian_include_exact_delay_line() {
-        let fundamental = 1.0e6;
-        let delay = 137.0e-9;
-        let impedance = 50.0;
-        let mut solver = HbSolver::new(HbConfig::new(fundamental).with_harmonics(2), 2);
-        solver
-            .try_add_periodic_network_port_branch(1, 0, 1, "T1#port1")
-            .expect("first line port registers");
-        solver
-            .try_add_periodic_network_port_branch(2, 0, 2, "T1#port2")
-            .expect("second line port registers");
-        solver
-            .try_add_exact_periodic_network(ExactPeriodicNetwork::ScalarWave {
-                name: "T1".to_string(),
-                node1_pos: 1,
-                node1_neg: 0,
-                node2_pos: 2,
-                node2_neg: 0,
-                branch1: 2,
-                branch2: 3,
-                impedance,
-                delay,
-                attenuation: 1.0,
-            })
-            .expect("delay-line equations register");
-        let mut state = HbSolverState::new(2, 2);
-        state
-            .try_prepare_mna_branches(2, 2)
-            .expect("port-current spectra allocate");
-        state.x[0][2] = Complex64::new(0.3, -0.2);
-        state.x[1][2] = Complex64::new(-0.1, 0.4);
-        state.mna_branch_currents[0][2] = Complex64::new(0.02, 0.01);
-        state.mna_branch_currents[1][2] = Complex64::new(-0.03, 0.04);
-        solver
-            .add_exact_mna_residual(&mut state, 1.0)
-            .expect("exact delay-line residual evaluates");
-
-        let q = Complex64::from_polar(1.0, -2.0 * 2.0 * PI * fundamental * delay);
-        let expected_row1 = -state.x[0][2]
-            + q * state.x[1][2]
-            + impedance * state.mna_branch_currents[0][2]
-            + q * impedance * state.mna_branch_currents[1][2];
-        assert_close(state.mna_branch_residual[0][2], expected_row1);
-        assert_close(state.residual[0][2], -state.mna_branch_currents[0][2]);
-
-        let jacobian = solver
-            .build_full_jacobian(&state)
-            .expect("dense exact delay-line Jacobian evaluates");
-        let h = 3;
-        let row = 2 * h + 2;
-        assert_close(jacobian[row][2], Complex64::new(-1.0, 0.0));
-        assert_close(jacobian[row][h + 2], q);
-        assert_close(jacobian[row][2 * h + 2], Complex64::new(impedance, 0.0));
-        assert_close(jacobian[row][3 * h + 2], q * impedance);
-    }
-
-    #[test]
-    fn branch_aware_matrix_free_gmres_matches_direct_real_lu() {
-        let g = vec![(0, 0, 5.0), (1, 1, 7.0)];
-        let branches = vec![ExactMnaBranch::VoltageSource {
-            branch_ordinal: 1,
-            node_pos: 1,
-            node_neg: 0,
-            source_index: 0,
-            source: None,
-        }];
-        let operator = ExactHbOperator {
-            mna_branches: &branches,
-            ..fixture(&g, &[], &[], &[])
-        };
-        let preconditioner = ExactHbPreconditioner::build(&operator);
-        let size = operator.entity_count() * operator.real_width;
-        let rhs = (0..size)
-            .map(|index| Complex64::new(0.1 - index as Value * 0.006, 0.0))
-            .collect::<Vec<_>>();
-        let outcome = super::super::krylov::gmres(
-            &|input| operator.apply(input),
-            &preconditioner,
-            &rhs,
-            size,
-            4,
-        );
-        assert!(outcome.converged, "relative={}", outcome.relative_residual);
-        rspice_matrix::certify_complex_transpose_solution_by_entry_visitor(
-            size,
-            size,
-            &outcome.solution,
-            &rhs,
-            |visitor| {
-                operator.visit_entries(|row, column, value| {
-                    visitor(column, row, Complex64::new(value, 0.0));
-                });
-            },
-        )
-        .expect("branch-aware Krylov candidate is componentwise certified");
-
-        let mut dense = vec![Complex64::new(0.0, 0.0); size * size];
-        operator.visit_entries(|row, column, value| {
-            dense[row * size + column] += value;
-        });
-        let factors = super::super::krylov::LuFactors::factor(dense, size);
-        let mut direct = rhs.clone();
-        factors.solve_in_place(&mut direct);
-        for (value, reference) in outcome.solution.iter().zip(&direct) {
-            assert_close(*value, *reference);
-        }
-    }
-
-    #[test]
-    fn grounded_voltage_singleton_projection_is_exact_and_topology_limited() {
-        let branches = vec![
-            ExactMnaBranch::VoltageSource {
-                branch_ordinal: 1,
-                node_pos: 1,
-                node_neg: 0,
-                source_index: 0,
-                source: None,
-            },
-            ExactMnaBranch::VoltageSource {
-                branch_ordinal: 2,
-                node_pos: 0,
-                node_neg: 2,
-                source_index: 1,
-                source: None,
-            },
-            ExactMnaBranch::VoltageSource {
-                branch_ordinal: 3,
-                node_pos: 1,
-                node_neg: 2,
-                source_index: 2,
-                source: None,
-            },
-            ExactMnaBranch::Inductor {
-                branch_ordinal: 4,
-                node_pos: 2,
-                node_neg: 0,
-                inductance: 1.0e-6,
-            },
-        ];
-        let operator = ExactHbOperator {
-            mna_branches: &branches,
-            ..fixture(&[], &[], &[], &[])
-        };
-        operator.validate().expect("projection fixture is valid");
-        let size = operator.entity_count() * operator.real_width;
-        let mut solution = (0..size)
-            .map(|index| Complex64::new(index as Value + 1.0, -(index as Value) - 0.5))
-            .collect::<Vec<_>>();
-        let original = solution.clone();
-        let mut rhs = vec![Complex64::new(7.0, 0.0); size];
-
-        let positive_grounded_branch = operator.num_nodes;
-        rhs[operator.re_idx(positive_grounded_branch, 0)] = Complex64::new(-0.0, -0.0);
-        rhs[operator.im_idx(positive_grounded_branch, 1)] = Complex64::new(0.0, 0.0);
-        let negative_grounded_branch = operator.num_nodes + 1;
-        rhs[operator.re_idx(negative_grounded_branch, 1)] = Complex64::new(0.0, 0.0);
-        for branch_entity in [operator.num_nodes + 2, operator.num_nodes + 3] {
-            for harmonic in 0..operator.num_components {
-                rhs[operator.re_idx(branch_entity, harmonic)] = Complex64::new(0.0, 0.0);
-                if harmonic > 0 {
-                    rhs[operator.im_idx(branch_entity, harmonic)] = Complex64::new(0.0, 0.0);
-                }
-            }
-        }
-
-        operator.project_homogeneous_grounded_voltage_singletons(&mut solution, &rhs);
-
-        for index in [
-            operator.re_idx(0, 0),
-            operator.im_idx(0, 1),
-            operator.re_idx(1, 1),
-        ] {
-            assert_eq!(solution[index].re.to_bits(), 0);
-            assert_eq!(solution[index].im.to_bits(), 0);
-        }
-        // A nonzero grounded-source row is not projected, even though the
-        // same coordinate also appears in a homogeneous floating constraint.
-        assert_eq!(
-            solution[operator.re_idx(0, 1)],
-            original[operator.re_idx(0, 1)]
-        );
-        // A grounded inductor row is not an ideal-voltage-source singleton.
-        assert_eq!(
-            solution[operator.re_idx(1, 0)],
-            original[operator.re_idx(1, 0)]
-        );
-        // Branch-current coordinates are never canonicalized.
-        assert_eq!(
-            solution[operator.re_idx(positive_grounded_branch, 0)],
-            original[operator.re_idx(positive_grounded_branch, 0)]
-        );
-    }
-
-    #[test]
-    fn candidate_report_certifies_and_renorms_after_singleton_projection() {
-        let g = vec![(0, 0, 2.0), (1, 1, 4.0)];
-        let branches = vec![ExactMnaBranch::VoltageSource {
-            branch_ordinal: 1,
-            node_pos: 1,
-            node_neg: 0,
-            source_index: 0,
-            source: None,
-        }];
-        let operator = ExactHbOperator {
-            gmin: 0.0,
-            mna_branches: &branches,
-            ..fixture(&g, &[], &[], &[])
-        };
-        let size = operator.entity_count() * operator.real_width;
-        let mut exact = vec![Complex64::new(0.0, 0.0); size];
-        for harmonic in 0..operator.num_components {
-            exact[operator.re_idx(1, harmonic)] = Complex64::new(2.0 + harmonic as Value, 0.0);
-            if harmonic > 0 {
-                exact[operator.im_idx(1, harmonic)] = Complex64::new(-2.0 - harmonic as Value, 0.0);
-            }
-            let branch_entity = operator.num_nodes;
-            exact[operator.re_idx(branch_entity, harmonic)] =
-                Complex64::new(1.0 + harmonic as Value, 0.0);
-            if harmonic > 0 {
-                exact[operator.im_idx(branch_entity, harmonic)] =
-                    Complex64::new(-1.0 - harmonic as Value, 0.0);
-            }
-        }
-        let rhs = operator.apply(&exact);
-        let mut candidate = exact;
-        candidate[operator.re_idx(0, 1)] = Complex64::new(1.0e-30, -1.0e-30);
-
-        let (report, relative_residual) =
-            exact_hb_candidate_report(&operator, &mut candidate, &rhs)
-                .expect("canonical candidate has a finite full certificate");
-
-        assert!(report.is_accepted());
-        assert_eq!(relative_residual.to_bits(), 0);
-        assert_eq!(candidate[operator.re_idx(0, 1)].re.to_bits(), 0);
-        assert_eq!(candidate[operator.re_idx(0, 1)].im.to_bits(), 0);
-    }
-
-    #[test]
-    fn exact_matrix_free_step_returns_positive_zero_for_grounded_homogeneous_source() {
-        let mut config = HbConfig::new(1.0e6).with_harmonics(1);
-        config.use_krylov = true;
-        let mut solver = HbSolver::new(config, 2);
-        solver.add_conductance(0, 0, 3.0);
-        solver.add_conductance(1, 1, 5.0);
-        let source_index = solver
-            .try_add_named_voltage_source_branch_harmonics(1, 0, 0.0, &[], "VZERO")
-            .expect("zero source registers");
-        solver
-            .try_add_periodic_voltage_source_branch(1, 0, source_index, 1, "VZERO")
-            .expect("exact branch registers");
-        let mut state = HbSolverState::new(2, 1);
-        state
-            .try_prepare_mna_branches(1, 1)
-            .expect("exact branch state is allocated");
-        state.residual[0][0] = Complex64::new(1.0, 0.0);
-        state.residual[0][1] = Complex64::new(2.0, -3.0);
-        state.residual[1][0] = Complex64::new(-4.0, 0.0);
-        state.residual[1][1] = Complex64::new(5.0, 6.0);
-
-        let step = solver
-            .solve_jacobian_system_exact(&state, 0.0, &NoAbort)
-            .expect("homogeneous grounded-source step is certified");
-
-        for coordinate in [
-            step.node_voltages[0][0].re,
-            step.node_voltages[0][0].im,
-            step.node_voltages[0][1].re,
-            step.node_voltages[0][1].im,
-        ] {
-            assert_eq!(coordinate.to_bits(), 0);
-        }
-        assert!(
-            step.branch_currents[0]
-                .iter()
-                .any(|value| value.norm() > 0.0)
-        );
-    }
-
-    #[test]
-    fn large_or_structurally_invalid_krylov_steps_never_select_dense_recovery() {
-        use rspice_matrix::SolverError;
-
-        assert!(exact_krylov_dense_recovery_allowed(
-            super::super::krylov::KRYLOV_AUTO_THRESHOLD - 1,
-            &SolverError::ConvergenceFailed(7),
-        ));
-        assert!(!exact_krylov_dense_recovery_allowed(
-            super::super::krylov::KRYLOV_AUTO_THRESHOLD,
-            &SolverError::InaccurateSolution(1.0e-8),
-        ));
-        assert!(!exact_krylov_dense_recovery_allowed(
-            1,
-            &SolverError::Overflow,
-        ));
-        assert!(!exact_krylov_dense_recovery_allowed(
-            1,
-            &SolverError::InvalidCircuit("malformed operator".to_string()),
-        ));
-        assert!(!exact_krylov_dense_recovery_allowed(
-            1,
-            &SolverError::OutOfMemory,
-        ));
-    }
-
-    #[test]
-    fn line_search_rejects_unrepresentable_dc_imaginary_state() {
-        let mut solver = HbSolver::new(HbConfig::new(1.0e6).with_harmonics(1), 1);
-        solver.add_conductance(0, 0, 1.0);
-        solver.add_dc_source(0, 1.0);
-        let mut state = HbSolverState::new(1, 1);
-        state.x[0][0] = Complex64::new(1.0, 1.0);
-        solver
-            .compute_full_residual_with_gmin(&mut state, 0.0, 1.0)
-            .expect("finite linear residual");
-        assert!(state.residual_norm > 0.0);
-
-        let delta = HbNewtonStep {
-            node_voltages: vec![vec![Complex64::new(0.0, 0.0); 2]],
-            branch_currents: Vec::new(),
-        };
-        let reltol = solver.config.tolerance;
-        let abstol = solver.config.abstol;
-        let error = solver
-            .apply_line_search_with_gmin(&mut state, &delta, 0.0, 1.0, reltol, abstol, &NoAbort)
-            .expect_err("non-real DC evidence must fail closed before line search");
-        assert!(error.to_string().contains("imaginary DC"), "{error}");
-    }
-}
-
 impl ExactHbOperator<'_> {
     #[inline]
     fn entity_count(&self) -> usize {
@@ -3211,5 +2396,820 @@ impl HbSolver {
             );
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod exact_matrix_free_tests {
+    use super::*;
+
+    fn fixture<'a>(
+        g: &'a [(usize, usize, Value)],
+        c: &'a [(usize, usize, Value)],
+        g_spectra: &'a [PeriodicSpectrum],
+        c_spectra: &'a [PeriodicSpectrum],
+    ) -> ExactHbOperator<'a> {
+        ExactHbOperator {
+            num_nodes: 2,
+            num_components: 3,
+            real_width: 5,
+            omega0: 2.0 * PI * 1.0e6,
+            gmin: 1e-12,
+            g_matrix: g,
+            c_matrix: c,
+            l_matrix: &[],
+            g_spectra,
+            c_spectra,
+            mna_branches: &[],
+            mna_static_entries: &[],
+            mna_inductance_entries: &[],
+            periodic_networks: &[],
+        }
+    }
+
+    fn assert_close(actual: Complex64, expected: Complex64) {
+        let scale = actual.norm().max(expected.norm()).max(1.0);
+        assert!(
+            (actual - expected).norm() <= 3e-12 * scale,
+            "actual={actual:?}, expected={expected:?}"
+        );
+    }
+
+    #[test]
+    fn exact_real_split_operator_matches_toeplitz_plus_hankel_definition() {
+        let g = vec![(0, 0, 7.0), (0, 1, -0.8), (1, 0, -0.3), (1, 1, 6.0)];
+        let c = vec![(0, 0, 2e-12), (1, 1, 1e-12)];
+        let g_spectra = vec![
+            (
+                0,
+                0,
+                vec![
+                    Complex64::new(0.5, 0.0),
+                    Complex64::new(0.04, -0.02),
+                    Complex64::new(-0.01, 0.006),
+                    Complex64::new(0.004, -0.002),
+                    Complex64::new(0.001, 0.0005),
+                ],
+            ),
+            (
+                1,
+                0,
+                vec![
+                    Complex64::new(-0.1, 0.0),
+                    Complex64::new(0.02, 0.01),
+                    Complex64::new(0.005, -0.003),
+                    Complex64::new(0.001, 0.002),
+                    Complex64::new(-0.0005, 0.0),
+                ],
+            ),
+        ];
+        let c_spectra = vec![(
+            1,
+            1,
+            vec![
+                Complex64::new(1e-12, 0.0),
+                Complex64::new(0.1e-12, 0.04e-12),
+                Complex64::new(0.03e-12, -0.01e-12),
+                Complex64::new(0.01e-12, 0.0),
+                Complex64::new(0.002e-12, 0.001e-12),
+            ],
+        )];
+        let operator = fixture(&g, &c, &g_spectra, &c_spectra);
+        let input = (0..10)
+            .map(|index| Complex64::new(index as Value * 0.11 - 0.35, 0.0))
+            .collect::<Vec<_>>();
+        let actual = operator.apply(&input);
+
+        let n = operator.num_nodes;
+        let h = operator.num_components;
+        let mut x = vec![Complex64::new(0.0, 0.0); n * h];
+        for node in 0..n {
+            x[node * h] = Complex64::new(input[node * 5].re, 0.0);
+            for k in 1..h {
+                x[node * h + k] =
+                    Complex64::new(input[node * 5 + 2 * k - 1].re, input[node * 5 + 2 * k].re);
+            }
+        }
+        let mut toeplitz = vec![vec![Complex64::new(0.0, 0.0); n * h]; n * h];
+        let mut hankel = vec![vec![Complex64::new(0.0, 0.0); n * h]; n * h];
+        for k in 0..h {
+            let jw = Complex64::new(0.0, k as Value * operator.omega0);
+            for &(i, j, value) in &g {
+                toeplitz[i * h + k][j * h + k] -= value;
+            }
+            for &(i, j, value) in &c {
+                toeplitz[i * h + k][j * h + k] -= jw * value;
+            }
+            for node in 0..n {
+                toeplitz[node * h + k][node * h + k] -= operator.gmin;
+            }
+        }
+        for &(i, j, ref spectrum) in &g_spectra {
+            for k in 0..h {
+                for l in 0..h {
+                    let d = k as isize - l as isize;
+                    let coefficient = spectrum[d.unsigned_abs()];
+                    toeplitz[i * h + k][j * h + l] -= if d >= 0 {
+                        coefficient
+                    } else {
+                        coefficient.conj()
+                    };
+                }
+                for m in 1..h {
+                    hankel[i * h + k][j * h + m] -= spectrum[k + m];
+                }
+            }
+        }
+        for &(i, j, ref spectrum) in &c_spectra {
+            for k in 0..h {
+                let jw = Complex64::new(0.0, k as Value * operator.omega0);
+                for l in 0..h {
+                    let d = k as isize - l as isize;
+                    let coefficient = spectrum[d.unsigned_abs()];
+                    toeplitz[i * h + k][j * h + l] -= jw
+                        * if d >= 0 {
+                            coefficient
+                        } else {
+                            coefficient.conj()
+                        };
+                }
+                for m in 1..h {
+                    hankel[i * h + k][j * h + m] -= jw * spectrum[k + m];
+                }
+            }
+        }
+        let mut expected_complex = vec![Complex64::new(0.0, 0.0); n * h];
+        for row in 0..n * h {
+            for col in 0..n * h {
+                expected_complex[row] +=
+                    toeplitz[row][col] * x[col] + hankel[row][col] * x[col].conj();
+            }
+        }
+        for node in 0..n {
+            assert_close(
+                actual[node * 5],
+                Complex64::new(expected_complex[node * h].re, 0.0),
+            );
+            for k in 1..h {
+                assert_close(
+                    actual[node * 5 + 2 * k - 1],
+                    Complex64::new(expected_complex[node * h + k].re, 0.0),
+                );
+                assert_close(
+                    actual[node * 5 + 2 * k],
+                    Complex64::new(expected_complex[node * h + k].im, 0.0),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn exact_matrix_free_gmres_matches_direct_real_lu() {
+        let g = vec![(0, 0, 9.0), (0, 1, -0.5), (1, 0, -0.25), (1, 1, 8.0)];
+        let g_spectra = vec![(
+            0,
+            0,
+            vec![
+                Complex64::new(0.4, 0.0),
+                Complex64::new(0.008, -0.003),
+                Complex64::new(0.002, 0.001),
+                Complex64::new(0.0005, 0.0),
+                Complex64::new(0.0001, 0.0),
+            ],
+        )];
+        let operator = fixture(&g, &[], &g_spectra, &[]);
+        let preconditioner = ExactHbPreconditioner::build(&operator);
+        let rhs = (0..10)
+            .map(|index| Complex64::new(0.2 - index as Value * 0.017, 0.0))
+            .collect::<Vec<_>>();
+        let outcome = super::super::krylov::gmres(
+            &|input| operator.apply(input),
+            &preconditioner,
+            &rhs,
+            10,
+            6,
+        );
+        assert!(outcome.converged, "relative={}", outcome.relative_residual);
+
+        let size = rhs.len();
+        let mut dense = vec![Complex64::new(0.0, 0.0); size * size];
+        let mut basis = vec![Complex64::new(0.0, 0.0); size];
+        for column in 0..size {
+            basis[column] = Complex64::new(1.0, 0.0);
+            let image = operator.apply(&basis);
+            for row in 0..size {
+                dense[row * size + column] = image[row];
+            }
+            basis[column] = Complex64::new(0.0, 0.0);
+        }
+        let factors = super::super::krylov::LuFactors::factor(dense, size);
+        let mut direct = rhs.clone();
+        factors.solve_in_place(&mut direct);
+        for (actual, expected) in outcome.solution.into_iter().zip(direct) {
+            assert_close(actual, expected);
+        }
+    }
+
+    #[test]
+    fn branch_aware_operator_matches_explicit_mna_orientation_and_dense_stream() {
+        let g = vec![(0, 0, 3.0), (1, 1, 4.0)];
+        let branches = vec![
+            ExactMnaBranch::VoltageSource {
+                branch_ordinal: 1,
+                node_pos: 1,
+                node_neg: 0,
+                source_index: 0,
+                source: None,
+            },
+            ExactMnaBranch::Inductor {
+                branch_ordinal: 2,
+                node_pos: 2,
+                node_neg: 1,
+                inductance: 2.5e-6,
+            },
+        ];
+        let base = fixture(&g, &[], &[], &[]);
+        let operator = ExactHbOperator {
+            mna_branches: &branches,
+            ..fixture(&g, &[], &[], &[])
+        };
+        operator.validate().expect("branch-aware operator is valid");
+
+        let size = operator.entity_count() * operator.real_width;
+        let input = (0..size)
+            .map(|index| Complex64::new(0.03 * index as Value - 0.2, 0.0))
+            .collect::<Vec<_>>();
+        let actual = operator.apply(&input);
+
+        // Start from the independently checked nodal operator, then apply
+        // the canonical branch equations explicitly in complex form.
+        let mut expected = vec![Complex64::new(0.0, 0.0); size];
+        expected[..2 * operator.real_width]
+            .copy_from_slice(&base.apply(&input[..2 * operator.real_width]));
+        let coefficient = |entity: usize, harmonic: usize| {
+            let re = input[operator.re_idx(entity, harmonic)].re;
+            let im = if harmonic == 0 {
+                0.0
+            } else {
+                input[operator.im_idx(entity, harmonic)].re
+            };
+            Complex64::new(re, im)
+        };
+        let mut add = |entity: usize, harmonic: usize, value: Complex64| {
+            expected[operator.re_idx(entity, harmonic)] += value.re;
+            if harmonic > 0 {
+                expected[operator.im_idx(entity, harmonic)] += value.im;
+            }
+        };
+        for harmonic in 0..operator.num_components {
+            let v0 = coefficient(0, harmonic);
+            let v1 = coefficient(1, harmonic);
+            let source_current = coefficient(2, harmonic);
+            let inductor_current = coefficient(3, harmonic);
+            add(0, harmonic, -source_current + inductor_current);
+            add(1, harmonic, -inductor_current);
+            add(2, harmonic, -v0);
+            add(
+                3,
+                harmonic,
+                v0 - v1
+                    + Complex64::new(0.0, harmonic as Value * operator.omega0 * 2.5e-6)
+                        * inductor_current,
+            );
+        }
+        for (&value, &reference) in actual.iter().zip(&expected) {
+            assert_close(value, reference);
+        }
+
+        let mut streamed_dense = vec![0.0; size * size];
+        operator.visit_entries(|row, column, value| {
+            streamed_dense[row * size + column] += value;
+        });
+        for row in 0..size {
+            let value = (0..size)
+                .map(|column| streamed_dense[row * size + column] * input[column])
+                .sum();
+            assert_close(actual[row], value);
+        }
+        assert_eq!(actual[operator.im_idx(3, 1)].im, 0.0);
+    }
+
+    #[test]
+    fn matrix_free_operator_applies_mutual_inductance_to_cross_branch_currents() {
+        let branches = vec![
+            ExactMnaBranch::Inductor {
+                branch_ordinal: 1,
+                node_pos: 1,
+                node_neg: 0,
+                inductance: 100.0e-6,
+            },
+            ExactMnaBranch::Inductor {
+                branch_ordinal: 2,
+                node_pos: 2,
+                node_neg: 0,
+                inductance: 25.0e-6,
+            },
+        ];
+        let mutual = 40.0e-6;
+        let mutual_entries = [(2, 3, mutual), (3, 2, mutual)];
+        let uncoupled = ExactHbOperator {
+            mna_branches: &branches,
+            ..fixture(&[], &[], &[], &[])
+        };
+        let coupled = ExactHbOperator {
+            mna_branches: &branches,
+            mna_inductance_entries: &mutual_entries,
+            ..fixture(&[], &[], &[], &[])
+        };
+        coupled.validate().expect("mutual operator is valid");
+        let size = coupled.entity_count() * coupled.real_width;
+        let input = (0..size)
+            .map(|index| Complex64::new(0.02 * index as Value - 0.1, 0.0))
+            .collect::<Vec<_>>();
+        let actual = coupled.apply(&input);
+        let baseline = uncoupled.apply(&input);
+        let coefficient = |entity: usize, harmonic: usize| {
+            Complex64::new(
+                input[coupled.re_idx(entity, harmonic)].re,
+                if harmonic == 0 {
+                    0.0
+                } else {
+                    input[coupled.im_idx(entity, harmonic)].re
+                },
+            )
+        };
+        for harmonic in 0..coupled.num_components {
+            let jw_m = Complex64::new(0.0, harmonic as Value * coupled.omega0 * mutual);
+            for (row_entity, column_entity) in [(2, 3), (3, 2)] {
+                let expected = jw_m * coefficient(column_entity, harmonic);
+                assert_close(
+                    actual[coupled.re_idx(row_entity, harmonic)]
+                        - baseline[coupled.re_idx(row_entity, harmonic)],
+                    Complex64::new(expected.re, 0.0),
+                );
+                if harmonic > 0 {
+                    assert_close(
+                        actual[coupled.im_idx(row_entity, harmonic)]
+                            - baseline[coupled.im_idx(row_entity, harmonic)],
+                        Complex64::new(expected.im, 0.0),
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn matrix_free_operator_applies_exact_delay_line_branch_rows() {
+        let branches = vec![
+            ExactMnaBranch::NetworkPort {
+                branch_ordinal: 1,
+                node_pos: 1,
+                node_neg: 0,
+            },
+            ExactMnaBranch::NetworkPort {
+                branch_ordinal: 2,
+                node_pos: 2,
+                node_neg: 0,
+            },
+        ];
+        let delay = 137.0e-9;
+        let impedance = 50.0;
+        let network = ExactPeriodicNetwork::ScalarWave {
+            name: "T1".to_string(),
+            node1_pos: 1,
+            node1_neg: 0,
+            node2_pos: 2,
+            node2_neg: 0,
+            branch1: 2,
+            branch2: 3,
+            impedance,
+            delay,
+            attenuation: 1.0,
+        };
+        let networks = [network];
+        let operator = ExactHbOperator {
+            gmin: 0.0,
+            mna_branches: &branches,
+            periodic_networks: &networks,
+            ..fixture(&[], &[], &[], &[])
+        };
+        operator.validate().expect("delay-line operator is valid");
+        let size = operator.entity_count() * operator.real_width;
+        let input = (0..size)
+            .map(|index| Complex64::new(0.07 * index as Value - 0.4, 0.0))
+            .collect::<Vec<_>>();
+        let actual = operator.apply(&input);
+        let coefficient = |entity: usize, harmonic: usize| {
+            Complex64::new(
+                input[operator.re_idx(entity, harmonic)].re,
+                if harmonic == 0 {
+                    0.0
+                } else {
+                    input[operator.im_idx(entity, harmonic)].re
+                },
+            )
+        };
+        let output = |entity: usize, harmonic: usize| {
+            Complex64::new(
+                actual[operator.re_idx(entity, harmonic)].re,
+                if harmonic == 0 {
+                    0.0
+                } else {
+                    actual[operator.im_idx(entity, harmonic)].re
+                },
+            )
+        };
+        for harmonic in 0..operator.num_components {
+            let q = Complex64::from_polar(1.0, -(harmonic as Value) * operator.omega0 * delay);
+            let v1 = coefficient(0, harmonic);
+            let v2 = coefficient(1, harmonic);
+            let i1 = coefficient(2, harmonic);
+            let i2 = coefficient(3, harmonic);
+            assert_close(output(0, harmonic), -i1);
+            assert_close(output(1, harmonic), -i2);
+            assert_close(
+                output(2, harmonic),
+                -v1 + q * v2 + impedance * i1 + q * impedance * i2,
+            );
+            assert_close(
+                output(3, harmonic),
+                -v2 + q * v1 + impedance * i2 + q * impedance * i1,
+            );
+        }
+    }
+
+    #[test]
+    fn nonlinear_residual_and_dense_jacobian_include_mutual_inductance() {
+        let fundamental = 1.0e6;
+        let mut solver = HbSolver::new(HbConfig::new(fundamental).with_harmonics(2), 2);
+        solver
+            .try_add_periodic_inductor_branch(1, 0, 100.0e-6, 1, "L1")
+            .expect("first winding registers");
+        solver
+            .try_add_periodic_inductor_branch(2, 0, 25.0e-6, 2, "L2")
+            .expect("second winding registers");
+        let mutual = 40.0e-6;
+        solver
+            .try_add_exact_mna_inductance_entry(2, 3, mutual, "K1")
+            .expect("forward mutual entry registers");
+        solver
+            .try_add_exact_mna_inductance_entry(3, 2, mutual, "K1")
+            .expect("reverse mutual entry registers");
+        let mut state = HbSolverState::new(2, 2);
+        state
+            .try_prepare_mna_branches(2, 2)
+            .expect("branch spectra allocate");
+        state.mna_branch_currents[0][2] = Complex64::new(0.3, -0.2);
+        state.mna_branch_currents[1][2] = Complex64::new(-0.1, 0.4);
+        solver
+            .add_exact_mna_residual(&mut state, 1.0)
+            .expect("exact residual evaluates");
+        let jw = Complex64::new(0.0, 2.0 * 2.0 * PI * fundamental);
+        assert_close(
+            state.mna_branch_residual[0][2],
+            jw * (100.0e-6 * state.mna_branch_currents[0][2]
+                + mutual * state.mna_branch_currents[1][2]),
+        );
+        assert_close(
+            state.mna_branch_residual[1][2],
+            jw * (mutual * state.mna_branch_currents[0][2]
+                + 25.0e-6 * state.mna_branch_currents[1][2]),
+        );
+
+        let jacobian = solver
+            .build_full_jacobian(&state)
+            .expect("dense exact Jacobian evaluates");
+        let h = 3;
+        assert_close(jacobian[(2 * h) + 2][(3 * h) + 2], jw * mutual);
+        assert_close(jacobian[(3 * h) + 2][(2 * h) + 2], jw * mutual);
+    }
+
+    #[test]
+    fn nonlinear_residual_and_dense_jacobian_include_exact_delay_line() {
+        let fundamental = 1.0e6;
+        let delay = 137.0e-9;
+        let impedance = 50.0;
+        let mut solver = HbSolver::new(HbConfig::new(fundamental).with_harmonics(2), 2);
+        solver
+            .try_add_periodic_network_port_branch(1, 0, 1, "T1#port1")
+            .expect("first line port registers");
+        solver
+            .try_add_periodic_network_port_branch(2, 0, 2, "T1#port2")
+            .expect("second line port registers");
+        solver
+            .try_add_exact_periodic_network(ExactPeriodicNetwork::ScalarWave {
+                name: "T1".to_string(),
+                node1_pos: 1,
+                node1_neg: 0,
+                node2_pos: 2,
+                node2_neg: 0,
+                branch1: 2,
+                branch2: 3,
+                impedance,
+                delay,
+                attenuation: 1.0,
+            })
+            .expect("delay-line equations register");
+        let mut state = HbSolverState::new(2, 2);
+        state
+            .try_prepare_mna_branches(2, 2)
+            .expect("port-current spectra allocate");
+        state.x[0][2] = Complex64::new(0.3, -0.2);
+        state.x[1][2] = Complex64::new(-0.1, 0.4);
+        state.mna_branch_currents[0][2] = Complex64::new(0.02, 0.01);
+        state.mna_branch_currents[1][2] = Complex64::new(-0.03, 0.04);
+        solver
+            .add_exact_mna_residual(&mut state, 1.0)
+            .expect("exact delay-line residual evaluates");
+
+        let q = Complex64::from_polar(1.0, -2.0 * 2.0 * PI * fundamental * delay);
+        let expected_row1 = -state.x[0][2]
+            + q * state.x[1][2]
+            + impedance * state.mna_branch_currents[0][2]
+            + q * impedance * state.mna_branch_currents[1][2];
+        assert_close(state.mna_branch_residual[0][2], expected_row1);
+        assert_close(state.residual[0][2], -state.mna_branch_currents[0][2]);
+
+        let jacobian = solver
+            .build_full_jacobian(&state)
+            .expect("dense exact delay-line Jacobian evaluates");
+        let h = 3;
+        let row = 2 * h + 2;
+        assert_close(jacobian[row][2], Complex64::new(-1.0, 0.0));
+        assert_close(jacobian[row][h + 2], q);
+        assert_close(jacobian[row][2 * h + 2], Complex64::new(impedance, 0.0));
+        assert_close(jacobian[row][3 * h + 2], q * impedance);
+    }
+
+    #[test]
+    fn branch_aware_matrix_free_gmres_matches_direct_real_lu() {
+        let g = vec![(0, 0, 5.0), (1, 1, 7.0)];
+        let branches = vec![ExactMnaBranch::VoltageSource {
+            branch_ordinal: 1,
+            node_pos: 1,
+            node_neg: 0,
+            source_index: 0,
+            source: None,
+        }];
+        let operator = ExactHbOperator {
+            mna_branches: &branches,
+            ..fixture(&g, &[], &[], &[])
+        };
+        let preconditioner = ExactHbPreconditioner::build(&operator);
+        let size = operator.entity_count() * operator.real_width;
+        let rhs = (0..size)
+            .map(|index| Complex64::new(0.1 - index as Value * 0.006, 0.0))
+            .collect::<Vec<_>>();
+        let outcome = super::super::krylov::gmres(
+            &|input| operator.apply(input),
+            &preconditioner,
+            &rhs,
+            size,
+            4,
+        );
+        assert!(outcome.converged, "relative={}", outcome.relative_residual);
+        rspice_matrix::certify_complex_transpose_solution_by_entry_visitor(
+            size,
+            size,
+            &outcome.solution,
+            &rhs,
+            |visitor| {
+                operator.visit_entries(|row, column, value| {
+                    visitor(column, row, Complex64::new(value, 0.0));
+                });
+            },
+        )
+        .expect("branch-aware Krylov candidate is componentwise certified");
+
+        let mut dense = vec![Complex64::new(0.0, 0.0); size * size];
+        operator.visit_entries(|row, column, value| {
+            dense[row * size + column] += value;
+        });
+        let factors = super::super::krylov::LuFactors::factor(dense, size);
+        let mut direct = rhs.clone();
+        factors.solve_in_place(&mut direct);
+        for (value, reference) in outcome.solution.iter().zip(&direct) {
+            assert_close(*value, *reference);
+        }
+    }
+
+    #[test]
+    fn grounded_voltage_singleton_projection_is_exact_and_topology_limited() {
+        let branches = vec![
+            ExactMnaBranch::VoltageSource {
+                branch_ordinal: 1,
+                node_pos: 1,
+                node_neg: 0,
+                source_index: 0,
+                source: None,
+            },
+            ExactMnaBranch::VoltageSource {
+                branch_ordinal: 2,
+                node_pos: 0,
+                node_neg: 2,
+                source_index: 1,
+                source: None,
+            },
+            ExactMnaBranch::VoltageSource {
+                branch_ordinal: 3,
+                node_pos: 1,
+                node_neg: 2,
+                source_index: 2,
+                source: None,
+            },
+            ExactMnaBranch::Inductor {
+                branch_ordinal: 4,
+                node_pos: 2,
+                node_neg: 0,
+                inductance: 1.0e-6,
+            },
+        ];
+        let operator = ExactHbOperator {
+            mna_branches: &branches,
+            ..fixture(&[], &[], &[], &[])
+        };
+        operator.validate().expect("projection fixture is valid");
+        let size = operator.entity_count() * operator.real_width;
+        let mut solution = (0..size)
+            .map(|index| Complex64::new(index as Value + 1.0, -(index as Value) - 0.5))
+            .collect::<Vec<_>>();
+        let original = solution.clone();
+        let mut rhs = vec![Complex64::new(7.0, 0.0); size];
+
+        let positive_grounded_branch = operator.num_nodes;
+        rhs[operator.re_idx(positive_grounded_branch, 0)] = Complex64::new(-0.0, -0.0);
+        rhs[operator.im_idx(positive_grounded_branch, 1)] = Complex64::new(0.0, 0.0);
+        let negative_grounded_branch = operator.num_nodes + 1;
+        rhs[operator.re_idx(negative_grounded_branch, 1)] = Complex64::new(0.0, 0.0);
+        for branch_entity in [operator.num_nodes + 2, operator.num_nodes + 3] {
+            for harmonic in 0..operator.num_components {
+                rhs[operator.re_idx(branch_entity, harmonic)] = Complex64::new(0.0, 0.0);
+                if harmonic > 0 {
+                    rhs[operator.im_idx(branch_entity, harmonic)] = Complex64::new(0.0, 0.0);
+                }
+            }
+        }
+
+        operator.project_homogeneous_grounded_voltage_singletons(&mut solution, &rhs);
+
+        for index in [
+            operator.re_idx(0, 0),
+            operator.im_idx(0, 1),
+            operator.re_idx(1, 1),
+        ] {
+            assert_eq!(solution[index].re.to_bits(), 0);
+            assert_eq!(solution[index].im.to_bits(), 0);
+        }
+        // A nonzero grounded-source row is not projected, even though the
+        // same coordinate also appears in a homogeneous floating constraint.
+        assert_eq!(
+            solution[operator.re_idx(0, 1)],
+            original[operator.re_idx(0, 1)]
+        );
+        // A grounded inductor row is not an ideal-voltage-source singleton.
+        assert_eq!(
+            solution[operator.re_idx(1, 0)],
+            original[operator.re_idx(1, 0)]
+        );
+        // Branch-current coordinates are never canonicalized.
+        assert_eq!(
+            solution[operator.re_idx(positive_grounded_branch, 0)],
+            original[operator.re_idx(positive_grounded_branch, 0)]
+        );
+    }
+
+    #[test]
+    fn candidate_report_certifies_and_renorms_after_singleton_projection() {
+        let g = vec![(0, 0, 2.0), (1, 1, 4.0)];
+        let branches = vec![ExactMnaBranch::VoltageSource {
+            branch_ordinal: 1,
+            node_pos: 1,
+            node_neg: 0,
+            source_index: 0,
+            source: None,
+        }];
+        let operator = ExactHbOperator {
+            gmin: 0.0,
+            mna_branches: &branches,
+            ..fixture(&g, &[], &[], &[])
+        };
+        let size = operator.entity_count() * operator.real_width;
+        let mut exact = vec![Complex64::new(0.0, 0.0); size];
+        for harmonic in 0..operator.num_components {
+            exact[operator.re_idx(1, harmonic)] = Complex64::new(2.0 + harmonic as Value, 0.0);
+            if harmonic > 0 {
+                exact[operator.im_idx(1, harmonic)] = Complex64::new(-2.0 - harmonic as Value, 0.0);
+            }
+            let branch_entity = operator.num_nodes;
+            exact[operator.re_idx(branch_entity, harmonic)] =
+                Complex64::new(1.0 + harmonic as Value, 0.0);
+            if harmonic > 0 {
+                exact[operator.im_idx(branch_entity, harmonic)] =
+                    Complex64::new(-1.0 - harmonic as Value, 0.0);
+            }
+        }
+        let rhs = operator.apply(&exact);
+        let mut candidate = exact;
+        candidate[operator.re_idx(0, 1)] = Complex64::new(1.0e-30, -1.0e-30);
+
+        let (report, relative_residual) =
+            exact_hb_candidate_report(&operator, &mut candidate, &rhs)
+                .expect("canonical candidate has a finite full certificate");
+
+        assert!(report.is_accepted());
+        assert_eq!(relative_residual.to_bits(), 0);
+        assert_eq!(candidate[operator.re_idx(0, 1)].re.to_bits(), 0);
+        assert_eq!(candidate[operator.re_idx(0, 1)].im.to_bits(), 0);
+    }
+
+    #[test]
+    fn exact_matrix_free_step_returns_positive_zero_for_grounded_homogeneous_source() {
+        let mut config = HbConfig::new(1.0e6).with_harmonics(1);
+        config.use_krylov = true;
+        let mut solver = HbSolver::new(config, 2);
+        solver.add_conductance(0, 0, 3.0);
+        solver.add_conductance(1, 1, 5.0);
+        let source_index = solver
+            .try_add_named_voltage_source_branch_harmonics(1, 0, 0.0, &[], "VZERO")
+            .expect("zero source registers");
+        solver
+            .try_add_periodic_voltage_source_branch(1, 0, source_index, 1, "VZERO")
+            .expect("exact branch registers");
+        let mut state = HbSolverState::new(2, 1);
+        state
+            .try_prepare_mna_branches(1, 1)
+            .expect("exact branch state is allocated");
+        state.residual[0][0] = Complex64::new(1.0, 0.0);
+        state.residual[0][1] = Complex64::new(2.0, -3.0);
+        state.residual[1][0] = Complex64::new(-4.0, 0.0);
+        state.residual[1][1] = Complex64::new(5.0, 6.0);
+
+        let step = solver
+            .solve_jacobian_system_exact(&state, 0.0, &NoAbort)
+            .expect("homogeneous grounded-source step is certified");
+
+        for coordinate in [
+            step.node_voltages[0][0].re,
+            step.node_voltages[0][0].im,
+            step.node_voltages[0][1].re,
+            step.node_voltages[0][1].im,
+        ] {
+            assert_eq!(coordinate.to_bits(), 0);
+        }
+        assert!(
+            step.branch_currents[0]
+                .iter()
+                .any(|value| value.norm() > 0.0)
+        );
+    }
+
+    #[test]
+    fn large_or_structurally_invalid_krylov_steps_never_select_dense_recovery() {
+        use rspice_matrix::SolverError;
+
+        assert!(exact_krylov_dense_recovery_allowed(
+            super::super::krylov::KRYLOV_AUTO_THRESHOLD - 1,
+            &SolverError::ConvergenceFailed(7),
+        ));
+        assert!(!exact_krylov_dense_recovery_allowed(
+            super::super::krylov::KRYLOV_AUTO_THRESHOLD,
+            &SolverError::InaccurateSolution(1.0e-8),
+        ));
+        assert!(!exact_krylov_dense_recovery_allowed(
+            1,
+            &SolverError::Overflow,
+        ));
+        assert!(!exact_krylov_dense_recovery_allowed(
+            1,
+            &SolverError::InvalidCircuit("malformed operator".to_string()),
+        ));
+        assert!(!exact_krylov_dense_recovery_allowed(
+            1,
+            &SolverError::OutOfMemory,
+        ));
+    }
+
+    #[test]
+    fn line_search_rejects_unrepresentable_dc_imaginary_state() {
+        let mut solver = HbSolver::new(HbConfig::new(1.0e6).with_harmonics(1), 1);
+        solver.add_conductance(0, 0, 1.0);
+        solver.add_dc_source(0, 1.0);
+        let mut state = HbSolverState::new(1, 1);
+        state.x[0][0] = Complex64::new(1.0, 1.0);
+        solver
+            .compute_full_residual_with_gmin(&mut state, 0.0, 1.0)
+            .expect("finite linear residual");
+        assert!(state.residual_norm > 0.0);
+
+        let delta = HbNewtonStep {
+            node_voltages: vec![vec![Complex64::new(0.0, 0.0); 2]],
+            branch_currents: Vec::new(),
+        };
+        let reltol = solver.config.tolerance;
+        let abstol = solver.config.abstol;
+        let error = solver
+            .apply_line_search_with_gmin(&mut state, &delta, 0.0, 1.0, reltol, abstol, &NoAbort)
+            .expect_err("non-real DC evidence must fail closed before line search");
+        assert!(error.to_string().contains("imaginary DC"), "{error}");
     }
 }

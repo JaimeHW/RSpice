@@ -18,6 +18,11 @@ pub enum LegacyBsimRegion {
     Saturation,
 }
 
+// The BSIM2 parameter set is far larger than BSIM1's, but every owner already
+// holds this behind a pointer -- `Mosfet` stores `Option<Box<LegacyBsimModel>>`
+// -- so the padding costs one boxed allocation's tail, not a field on every
+// MOSFET. Boxing the variant would add a second indirection to reach it.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum LegacyBsimModel {
     Bsim1(LegacyBsim1Model),

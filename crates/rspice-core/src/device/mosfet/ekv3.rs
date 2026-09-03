@@ -16,7 +16,7 @@
 //! that says `M1 d g s b NMOS150` with `LEVEL=301` has no route to it. Retiring
 //! this file means giving those decks one, not reimplementing the physics.
 
-use super::mosfet::MosType;
+use super::classic::MosType;
 use crate::NodeId;
 use crate::Value;
 use crate::device::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};

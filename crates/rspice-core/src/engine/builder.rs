@@ -8671,8 +8671,10 @@ mod tests {
     #[test]
     fn generated_auto_bridge_decks_inherit_resource_limits() {
         let generated = "generated bridge\n.model adc adc_bridge\n.end\n";
-        let mut limits = ResourceLimits::default();
-        limits.max_netlist_bytes = generated.len() - 1;
+        let limits = ResourceLimits {
+            max_netlist_bytes: generated.len() - 1,
+            ..Default::default()
+        };
 
         assert!(matches!(
             parse_generated_xspice_auto_bridge_deck(
@@ -8819,8 +8821,10 @@ mod tests {
             .model JMOD NJF LEVEL=1 B=0.605\n\
             .end\n";
         let netlist = Netlist::parse(deck).expect("Xyce JFET deck parses");
-        let mut config = SimulationConfig::default();
-        config.spice_dialect = SpiceDialect::Xyce;
+        let config = SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            ..Default::default()
+        };
         let circuit = Engine::new(config)
             .build_circuit(&netlist)
             .expect("Xyce JFET deck builds");
@@ -8846,8 +8850,10 @@ mod tests {
             .model ISW ISWITCH (RON=2 ROFF=3MEG ION=10m IOFF=1m IHON=11m IHOFF=.5m)\n\
             .end\n";
         let netlist = Netlist::parse(deck).expect("four-node ISWITCH deck parses");
-        let mut config = SimulationConfig::default();
-        config.spice_dialect = SpiceDialect::Xyce;
+        let config = SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            ..Default::default()
+        };
         let circuit = Engine::new(config)
             .build_circuit(&netlist)
             .expect("four-node ISWITCH deck builds through Xyce's unified switch semantics");
@@ -8878,8 +8884,10 @@ mod tests {
             .model ISW ISWITCH (RON=2 ROFF=3MEG ION=10m IOFF=1m IHON=11m IHOFF=.5m)\n\
             .end\n";
         let netlist = Netlist::parse(deck).expect("explicit ISWITCH deck parses");
-        let mut config = SimulationConfig::default();
-        config.spice_dialect = SpiceDialect::Xyce;
+        let config = SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            ..Default::default()
+        };
         let circuit = Engine::new(config)
             .build_circuit(&netlist)
             .expect("explicit ISWITCH accepts Xyce's general scalar CONTROL expression");
@@ -8915,8 +8923,10 @@ mod tests {
             .model VDEFAULT_MODEL VSWITCH\n\
             .end\n";
         let netlist = Netlist::parse(deck).expect("switch-family projection deck parses");
-        let mut config = SimulationConfig::default();
-        config.spice_dialect = SpiceDialect::Xyce;
+        let config = SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            ..Default::default()
+        };
         let circuit = Engine::new(config)
             .build_circuit(&netlist)
             .expect("all Xyce switch families build through the unified implementation");
@@ -8987,8 +8997,10 @@ mod tests {
                 "Xyce unified switch parameter policy\nS1 1 2 3 0 SMOD\n.model SMOD {model_type} ({parameter})\n.end\n"
             );
             let netlist = Netlist::parse(&deck).expect("switch parameter-policy deck parses");
-            let mut config = SimulationConfig::default();
-            config.spice_dialect = SpiceDialect::Xyce;
+            let config = SimulationConfig {
+                spice_dialect: SpiceDialect::Xyce,
+                ..Default::default()
+            };
             let error = Engine::new(config)
                 .build_circuit(&netlist)
                 .expect_err("Xyce's unified switch must reject unregistered native parameters");
@@ -9017,8 +9029,10 @@ mod tests {
                 "Xyce strict switch model names\n{syntax}\n.model SMOD {model_type}\n.end\n"
             );
             let netlist = Netlist::parse(&deck).expect("switch alias-policy deck parses");
-            let mut config = SimulationConfig::default();
-            config.spice_dialect = SpiceDialect::Xyce;
+            let config = SimulationConfig {
+                spice_dialect: SpiceDialect::Xyce,
+                ..Default::default()
+            };
             let error = Engine::new(config)
                 .build_circuit(&netlist)
                 .expect_err("Xyce switch syntax must reject unregistered model aliases");
@@ -9038,8 +9052,10 @@ mod tests {
                 "BJT nominal temperature precedence\n.options tnom=-40\nV1 c 0 1\nQ1 c b 0 QMOD\n.model QMOD NPN ({model_suffix})\n.end\n"
             );
             let netlist = Netlist::parse(&deck).expect("BJT TNOM precedence deck parses");
-            let mut config = SimulationConfig::default();
-            config.spice_dialect = SpiceDialect::Xyce;
+            let config = SimulationConfig {
+                spice_dialect: SpiceDialect::Xyce,
+                ..Default::default()
+            };
             let circuit = Engine::new(config)
                 .build_circuit(&netlist)
                 .expect("BJT TNOM precedence deck builds");
@@ -9060,8 +9076,10 @@ mod tests {
             Q1 c b 0 QMOD\n\
             .model QMOD NPN (BF=100)\n\
             .end\n";
-        let mut config = SimulationConfig::default();
-        config.spice_dialect = SpiceDialect::Xyce;
+        let config = SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            ..Default::default()
+        };
 
         let mut invalid_model = Netlist::parse(deck).expect("BJT invalid-model fixture parses");
         invalid_model.models[0]
@@ -10029,8 +10047,10 @@ mod tests {
             },
         )
         .expect("Xyce scoped generic-switch deck parses");
-        let mut config = crate::engine::SimulationConfig::default();
-        config.temperature = crate::constants::celsius_to_kelvin(80.0);
+        let mut config = crate::engine::SimulationConfig {
+            temperature: crate::constants::celsius_to_kelvin(80.0),
+            ..Default::default()
+        };
         config.convergence_config.junction_gmin_target = 9.0e-7;
         let engine = Engine::new(config).resolved_for_netlist(&netlist);
         assert_eq!(

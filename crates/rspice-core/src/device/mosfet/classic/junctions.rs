@@ -63,12 +63,12 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn body_junction_thermal_voltage(&self) -> Value {
+    pub(in crate::device::mosfet::classic) fn body_junction_thermal_voltage(&self) -> Value {
         self.vt.max(1e-12)
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn uses_xyce_classic_reverse_body_junction(
+    pub(in crate::device::mosfet::classic) fn uses_xyce_classic_reverse_body_junction(
         &self,
     ) -> bool {
         self.body_junction_model == MosBodyJunctionModel::XyceClassicLinearizedReverse
@@ -77,7 +77,7 @@ impl Mosfet {
 
     #[inline]
     #[cfg(test)]
-    pub(in crate::device::mosfet::mosfet) fn junction_diode_current(
+    pub(in crate::device::mosfet::classic) fn junction_diode_current(
         &self,
         isat: Value,
         v: Value,
@@ -103,7 +103,7 @@ impl Mosfet {
 
     #[inline]
     #[cfg(test)]
-    pub(in crate::device::mosfet::mosfet) fn junction_diode_conductance(
+    pub(in crate::device::mosfet::classic) fn junction_diode_conductance(
         &self,
         isat: Value,
         v: Value,
@@ -128,7 +128,7 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn effective_body_junction_saturation_current(
+    pub(in crate::device::mosfet::classic) fn effective_body_junction_saturation_current(
         &self,
         area: Value,
     ) -> Value {
@@ -145,7 +145,7 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn source_zero_bias_bottom_junction_capacitance(
+    pub(in crate::device::mosfet::classic) fn source_zero_bias_bottom_junction_capacitance(
         &self,
     ) -> Value {
         self.source_bulk_cap_zero_bias
@@ -154,7 +154,7 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn drain_zero_bias_bottom_junction_capacitance(
+    pub(in crate::device::mosfet::classic) fn drain_zero_bias_bottom_junction_capacitance(
         &self,
     ) -> Value {
         self.drain_bulk_cap_zero_bias
@@ -163,21 +163,21 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn source_zero_bias_sidewall_junction_capacitance(
+    pub(in crate::device::mosfet::classic) fn source_zero_bias_sidewall_junction_capacitance(
         &self,
     ) -> Value {
         (self.cjsw * self.source_perimeter).max(0.0)
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn drain_zero_bias_sidewall_junction_capacitance(
+    pub(in crate::device::mosfet::classic) fn drain_zero_bias_sidewall_junction_capacitance(
         &self,
     ) -> Value {
         (self.cjsw * self.drain_perimeter).max(0.0)
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn junction_depletion_scaling(
+    pub(in crate::device::mosfet::classic) fn junction_depletion_scaling(
         arg: Value,
         grading: Value,
     ) -> Value {
@@ -192,7 +192,7 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn junction_depletion_charge_term(
+    pub(in crate::device::mosfet::classic) fn junction_depletion_charge_term(
         c0: Value,
         bulk_potential: Value,
         grading: Value,
@@ -210,7 +210,7 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn junction_depletion_charge_and_capacitance(
+    pub(in crate::device::mosfet::classic) fn junction_depletion_charge_and_capacitance(
         junction_voltage: Value,
         bottom_zero_bias_cap: Value,
         sidewall_zero_bias_cap: Value,
@@ -286,7 +286,7 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn body_source_diode_nodes(&self) -> (NodeId, NodeId) {
+    pub(in crate::device::mosfet::classic) fn body_source_diode_nodes(&self) -> (NodeId, NodeId) {
         match self.mos_type {
             MosType::Nmos => (self.node_bulk, self.node_source),
             MosType::Pmos => (self.node_source, self.node_bulk),
@@ -294,7 +294,7 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn body_drain_diode_nodes(&self) -> (NodeId, NodeId) {
+    pub(in crate::device::mosfet::classic) fn body_drain_diode_nodes(&self) -> (NodeId, NodeId) {
         match self.mos_type {
             MosType::Nmos => (self.node_bulk, self.node_drain),
             MosType::Pmos => (self.node_drain, self.node_bulk),
@@ -302,7 +302,10 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn body_source_diode_voltage(&self, vbs: Value) -> Value {
+    pub(in crate::device::mosfet::classic) fn body_source_diode_voltage(
+        &self,
+        vbs: Value,
+    ) -> Value {
         match self.mos_type {
             MosType::Nmos => vbs,
             MosType::Pmos => -vbs,
@@ -310,7 +313,7 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn body_drain_diode_voltage(
+    pub(in crate::device::mosfet::classic) fn body_drain_diode_voltage(
         &self,
         vds: Value,
         vbs: Value,
@@ -366,7 +369,7 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn body_source_junction_current_and_conductance(
+    pub(in crate::device::mosfet::classic) fn body_source_junction_current_and_conductance(
         &self,
         vbs: Value,
     ) -> (Value, Value) {
@@ -376,7 +379,7 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn body_source_junction_current_and_conductance_with_constants(
+    pub(in crate::device::mosfet::classic) fn body_source_junction_current_and_conductance_with_constants(
         &self,
         vbs: Value,
         constants: &ClassicMosTransientConstants,
@@ -390,7 +393,7 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn body_drain_junction_current_and_conductance(
+    pub(in crate::device::mosfet::classic) fn body_drain_junction_current_and_conductance(
         &self,
         vds: Value,
         vbs: Value,
@@ -401,7 +404,7 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn body_drain_junction_current_and_conductance_with_constants(
+    pub(in crate::device::mosfet::classic) fn body_drain_junction_current_and_conductance_with_constants(
         &self,
         vds: Value,
         vbs: Value,
@@ -449,7 +452,7 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn body_source_junction_linearization(
+    pub(in crate::device::mosfet::classic) fn body_source_junction_linearization(
         &self,
         vbs: Value,
     ) -> (NodeId, NodeId, Value, Value) {
@@ -461,7 +464,7 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn body_source_junction_linearization_cached(
+    pub(in crate::device::mosfet::classic) fn body_source_junction_linearization_cached(
         &self,
         vbs: Value,
         cache_matches: bool,
@@ -475,7 +478,7 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn body_drain_junction_linearization(
+    pub(in crate::device::mosfet::classic) fn body_drain_junction_linearization(
         &self,
         vds: Value,
         vbs: Value,
@@ -488,7 +491,7 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn body_drain_junction_linearization_cached(
+    pub(in crate::device::mosfet::classic) fn body_drain_junction_linearization_cached(
         &self,
         vds: Value,
         vbs: Value,
@@ -503,7 +506,7 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn stamp_diode_linearization(
+    pub(in crate::device::mosfet::classic) fn stamp_diode_linearization(
         matrix: &mut impl MatrixStamper,
         anode: NodeId,
         cathode: NodeId,
@@ -523,7 +526,7 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn stamp_diode_linearization_direct(
+    pub(in crate::device::mosfet::classic) fn stamp_diode_linearization_direct(
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],
         anode: NodeId,
@@ -554,7 +557,7 @@ impl Mosfet {
     /// Stamp a source-body junction through its prelinked diagonal when the
     /// bulk is ground. Non-grounded bulks retain the general sparse path.
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn stamp_body_source_linearization_direct(
+    pub(in crate::device::mosfet::classic) fn stamp_body_source_linearization_direct(
         &self,
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],
@@ -584,7 +587,7 @@ impl Mosfet {
     /// Stamp a drain-body junction through its prelinked diagonal when the
     /// bulk is ground. Non-grounded bulks retain the general sparse path.
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn stamp_body_drain_linearization_direct(
+    pub(in crate::device::mosfet::classic) fn stamp_body_drain_linearization_direct(
         &self,
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],
