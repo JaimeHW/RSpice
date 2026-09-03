@@ -2,11 +2,11 @@
 {
   "schema_version": 7,
   "source_tree_digest": "8df45ec06360bbd151ebdbbc41ef5fc08a914156e6d696ae626f667246bea520",
-  "generator_digest": "fa957cd3deafa5888ab9a156ea454dcd2ef5fb789ff5e1bbd8e100f25d59bcaa",
-  "bundle_digest": "538a52c07dbdfd1f8e1c8277cd86a327a12190a4c8628002703e8d050b094938",
+  "generator_digest": "82faf33ac2e3929fe178c11378addf3c3ef18b7f4d6941b9d0c79396104b0264",
+  "bundle_digest": "d8811a08da81b06a855af0cac2688005b847fd4d98cdb9876b82bdbc6671a860",
   "device_count": 43,
   "file_count": 347,
-  "source_bytes": 32716243,
+  "source_bytes": 32717157,
   "devices": [
     {
       "module_name": "DIODE_CMC",
@@ -231,7 +231,7 @@
       "feature_name": "veriloga-model-asmesd",
       "package_name": "rspice-veriloga-model-asmesd",
       "file_count": 5,
-      "source_bytes": 136818,
+      "source_bytes": 136885,
       "workspace": {
         "abi_version": 3,
         "variable_count": 160,
@@ -420,7 +420,7 @@
       "feature_name": "veriloga-model-bsimbulk",
       "package_name": "rspice-veriloga-model-bsimbulk",
       "file_count": 5,
-      "source_bytes": 913505,
+      "source_bytes": 913537,
       "workspace": {
         "abi_version": 3,
         "variable_count": 1839,
@@ -447,7 +447,7 @@
       "feature_name": "veriloga-model-bsimcmg-va",
       "package_name": "rspice-veriloga-model-bsimcmg-va",
       "file_count": 5,
-      "source_bytes": 1419471,
+      "source_bytes": 1419784,
       "workspace": {
         "abi_version": 3,
         "variable_count": 2668,
@@ -474,7 +474,7 @@
       "feature_name": "veriloga-model-bsimimg",
       "package_name": "rspice-veriloga-model-bsimimg",
       "file_count": 5,
-      "source_bytes": 449148,
+      "source_bytes": 449650,
       "workspace": {
         "abi_version": 3,
         "variable_count": 676,
@@ -1323,8 +1323,8 @@
     },
     {
       "relative_path": "models/asmesd/src/asmesd__asmesd__fbe2f3a4/stamp.rs",
-      "bytes": 53570,
-      "blake3": "1fcbe2085d536ac0a2b835478f59095d646ee6c3418200613716c6f8c797578e"
+      "bytes": 53637,
+      "blake3": "3c9303fd7edd375a5b53e472c20857d59d6ff52f1ee937ef26bedb4917aedc75"
     },
     {
       "relative_path": "models/asmesd/src/asmesd__asmesd__fbe2f3a4/state.rs",
@@ -1563,8 +1563,8 @@
     },
     {
       "relative_path": "models/bsimbulk/src/bsimbulk__bsimbulk__0f953aae/stamp.rs",
-      "bytes": 383658,
-      "blake3": "78e7efacf0ddb49d85dbdcad3480bff0fefb360188874922383c66117d8185ba"
+      "bytes": 383690,
+      "blake3": "8b5c4291b4748245c82285fba4307c078f0a2c408d613dcdb43f3342f419df35"
     },
     {
       "relative_path": "models/bsimbulk/src/bsimbulk__bsimbulk__0f953aae/state.rs",
@@ -1598,13 +1598,13 @@
     },
     {
       "relative_path": "models/bsimcmg-va/src/bsimcmg__bsimcmg_va__f3a4082f/noise.rs",
-      "bytes": 420944,
-      "blake3": "a9e6d618596151ef578fa07c1708e84a3703f4d36cdebcfcd4643a24dff4f23b"
+      "bytes": 421020,
+      "blake3": "215826d8e71d1b082bc275fbdcd9320b5f7dee466160291c1ce6559f1788c0dc"
     },
     {
       "relative_path": "models/bsimcmg-va/src/bsimcmg__bsimcmg_va__f3a4082f/stamp.rs",
-      "bytes": 528854,
-      "blake3": "43a566f190d57d38fbb103bff49b4b43945a01c351afdf7fbfdc3c493c9ea348"
+      "bytes": 529091,
+      "blake3": "9c2ac20b7cd4f28db5bb0994d1a8ddfa92fed6ffc1e59bf7e265a670bd7f8b92"
     },
     {
       "relative_path": "models/bsimcmg-va/src/bsimcmg__bsimcmg_va__f3a4082f/state.rs",
@@ -1643,8 +1643,8 @@
     },
     {
       "relative_path": "models/bsimimg/src/bsimimg__bsimimg__25eb6a31/stamp.rs",
-      "bytes": 150383,
-      "blake3": "e60f6005bbfb243d01f8291113986071e2cbac7b9c94866e11ae6ec6e2fa5ffc"
+      "bytes": 150885,
+      "blake3": "69251bdc030d2ace4f6960a442a8a6f4712e56bd12c34def75155f4bd299dd97"
     },
     {
       "relative_path": "models/bsimimg/src/bsimimg__bsimimg__25eb6a31/state.rs",
