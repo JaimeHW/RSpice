@@ -35,8 +35,7 @@ pub use plan::{
     StepAxisTarget, numeric_run_coordinate_id,
 };
 pub use post_process::{
-    PlannedFourierResult, evaluate_planned_fourier, evaluate_planned_fourier_with_abort,
-    post_processes_for, transient_output_unit,
+    PlannedFourierResult, evaluate_planned_fourier_with_abort, transient_output_unit,
 };
 pub use projection::{
     ProjectedSignal, ProjectedSignals, ProjectionSource, ProjectionSourceSignal, ProjectionValues,

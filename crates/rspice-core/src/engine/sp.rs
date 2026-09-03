@@ -7,7 +7,7 @@
 //! places deciding what a `.SP` card means, and it is why the browser API and
 //! the engine adapter refused the family outright rather than guess.
 
-use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::abort_signal::AbortSignal;
 use crate::analysis::s_param::{
     ExtractError, PortNoiseAssembly, SMatrix, SParameterPort, SParameterResult,
     assemble_port_noise, collect_ports, extract_s_matrix_with_abort,
@@ -62,16 +62,6 @@ impl Engine {
         };
         let frequencies = card_frequency_grid(*variation, *points, *start_freq, *stop_freq, abort)?;
         self.run_sp_over_grid_with_abort(netlist, &frequencies, *do_noise, abort)
-    }
-
-    /// Non-abort form of [`Self::run_sp_with_abort`], for embedding with no
-    /// cancellation source of its own.
-    pub fn run_sp(
-        &self,
-        netlist: &Netlist,
-        card: &AnalysisCommand,
-    ) -> Result<SParameterRun, SimulationError> {
-        self.run_sp_with_abort(netlist, card, &NoAbort)
     }
 
     /// Run a scattering sweep over an explicit frequency grid.
@@ -225,7 +215,7 @@ fn map_extract_error(error: ExtractError) -> SimulationError {
 
 #[cfg(test)]
 mod tests {
-    use crate::abort_signal::ImmediateAbort;
+    use crate::abort_signal::{ImmediateAbort, NoAbort};
     use crate::engine::{Engine, SimulationConfig, SimulationError};
     use crate::netlist::{AnalysisCommand, Netlist};
 
@@ -252,7 +242,7 @@ mod tests {
         let netlist = Netlist::parse(TWO_PORT).expect("deck parses");
         let engine = Engine::new(SimulationConfig::default());
         let run = engine
-            .run_sp(&netlist, &sp_card(&netlist))
+            .run_sp_with_abort(&netlist, &sp_card(&netlist), &NoAbort)
             .expect(".SP runs");
         assert_eq!(run.scattering.num_ports, 2);
         assert_eq!(run.scattering.data.len(), 3);
@@ -278,7 +268,7 @@ mod tests {
         let netlist = Netlist::parse(TWO_PORT).expect("deck parses");
         let engine = Engine::new(SimulationConfig::default());
         let run = engine
-            .run_sp(&netlist, &sp_card(&netlist))
+            .run_sp_with_abort(&netlist, &sp_card(&netlist), &NoAbort)
             .expect(".SP runs");
         // A symmetric resistive pad is reciprocal (S21 == S12) and symmetric
         // (S11 == S22) at every frequency; both are properties of the network,
@@ -304,7 +294,7 @@ mod tests {
                 .expect("deck parses");
         let engine = Engine::new(SimulationConfig::default());
         let run = engine
-            .run_sp(&netlist, &sp_card(&netlist))
+            .run_sp_with_abort(&netlist, &sp_card(&netlist), &NoAbort)
             .expect(".SP DONOISE runs");
         let sweep_points = run.scattering.data.len();
         let noise = run.port_noise.expect("the card requested port noise");
@@ -331,7 +321,7 @@ mod tests {
         .expect("deck parses");
         let engine = Engine::new(SimulationConfig::default());
         let error = engine
-            .run_sp(&netlist, &sp_card(&netlist))
+            .run_sp_with_abort(&netlist, &sp_card(&netlist), &NoAbort)
             .expect_err("a deck with no portnum annotations must fail closed");
         assert!(
             error.to_string().contains("portnum"),
@@ -354,7 +344,7 @@ mod tests {
         let netlist = Netlist::parse(TWO_PORT).expect("deck parses");
         let engine = Engine::new(SimulationConfig::default());
         engine
-            .run_sp(&netlist, &AnalysisCommand::Op)
+            .run_sp_with_abort(&netlist, &AnalysisCommand::Op, &NoAbort)
             .expect_err("only a .SP card selects the .SP runner");
     }
 }

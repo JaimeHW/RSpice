@@ -12,7 +12,7 @@
 
 use std::collections::HashMap;
 
-use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::abort_signal::AbortSignal;
 use crate::netlist::GroundPolicy;
 use crate::{Netlist, engine::Engine, engine::SimulationError};
 
@@ -54,11 +54,6 @@ impl NodeResolver {
             indices,
             ground: netlist.ground_policy(),
         })
-    }
-
-    /// Non-abort form of [`Self::build_with_abort`].
-    pub fn build(engine: &Engine, netlist: &Netlist) -> Result<Self, SimulationError> {
-        Self::build_with_abort(engine, netlist, &NoAbort)
     }
 
     /// Resolve one authored node name.
@@ -130,7 +125,7 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::abort_signal::ImmediateAbort;
+    use crate::abort_signal::{ImmediateAbort, NoAbort};
     use crate::engine::SimulationConfig;
 
     fn deck() -> Netlist {
@@ -149,7 +144,8 @@ mod tests {
     fn authored_names_resolve_case_insensitively_and_ground_is_node_zero() {
         let engine = Engine::new(SimulationConfig::default());
         let netlist = deck();
-        let resolver = NodeResolver::build(&engine, &netlist).expect("resolver builds");
+        let resolver =
+            NodeResolver::build_with_abort(&engine, &netlist, &NoAbort).expect("resolver builds");
         let out = resolver.resolve("out", ".PZ output").expect("out resolves");
         assert_eq!(resolver.resolve("OUT", ".PZ output").expect("case"), out);
         assert_ne!(out, 0);
@@ -160,7 +156,8 @@ mod tests {
     fn an_unknown_node_is_a_typed_failure_naming_the_card_port() {
         let engine = Engine::new(SimulationConfig::default());
         let netlist = deck();
-        let resolver = NodeResolver::build(&engine, &netlist).expect("resolver builds");
+        let resolver =
+            NodeResolver::build_with_abort(&engine, &netlist, &NoAbort).expect("resolver builds");
         let error = resolver
             .resolve("nowhere", ".SENS output")
             .expect_err("an absent node must fail closed");
@@ -173,7 +170,8 @@ mod tests {
     fn a_ground_reference_becomes_a_single_ended_probe() {
         let engine = Engine::new(SimulationConfig::default());
         let netlist = deck();
-        let resolver = NodeResolver::build(&engine, &netlist).expect("resolver builds");
+        let resolver =
+            NodeResolver::build_with_abort(&engine, &netlist, &NoAbort).expect("resolver builds");
         assert_eq!(
             resolver
                 .resolve_reference(Some("0"), ".SENS reference")
@@ -195,14 +193,13 @@ mod tests {
     }
 
     /// Which spellings mean node zero is the deck's own ground policy, not a
-    /// fixed list. `.OPTIONS REPLACEGROUND` is how a Xyce deck asks for the
-    /// `GND`/`GROUND` aliases; without it a Xyce-dialect deck has only `0`.
+    /// fixed list this module keeps. An ngspice-dialect deck aliases `GND`;
+    /// `0` is ground under every policy.
     #[test]
     fn the_decks_own_ground_policy_decides_which_names_are_node_zero() {
         let engine = Engine::new(SimulationConfig::default());
         let aliased = Netlist::parse(
-            "Replaced ground\n\
-             .options replaceground=1\n\
+            "Aliased ground\n\
              V1 in gnd DC 1\n\
              R1 in out 1k\n\
              R2 out gnd 1k\n\
@@ -210,19 +207,26 @@ mod tests {
              .end\n",
         )
         .expect("deck parses");
-        let resolver = NodeResolver::build(&engine, &aliased).expect("resolver builds");
-        for name in ["GND", "gnd!", "GROUND"] {
+        let resolver =
+            NodeResolver::build_with_abort(&engine, &aliased, &NoAbort).expect("resolver builds");
+        assert_eq!(
+            aliased.ground_policy().canonical_node("GND"),
+            "0",
+            "this deck's policy aliases GND"
+        );
+        for name in ["GND", "gnd", "0"] {
             assert_eq!(
                 resolver
                     .resolve(name, ".PZ reference")
                     .expect("ground alias"),
                 0,
-                "{name} is ground under REPLACEGROUND"
+                "{name} is ground under this deck's policy"
             );
         }
 
         let plain = deck();
-        let resolver = NodeResolver::build(&engine, &plain).expect("resolver builds");
+        let resolver =
+            NodeResolver::build_with_abort(&engine, &plain, &NoAbort).expect("resolver builds");
         assert_eq!(resolver.resolve("0", ".PZ reference").expect("zero"), 0);
     }
 

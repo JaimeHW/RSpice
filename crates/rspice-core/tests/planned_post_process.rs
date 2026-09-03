@@ -3,8 +3,7 @@
 
 use rspice_core::abort_signal::{ImmediateAbort, NoAbort};
 use rspice_core::execution::{
-    AnalysisResultDocument, DeckPlan, ResultPayload, evaluate_planned_fourier,
-    evaluate_planned_fourier_with_abort,
+    AnalysisResultDocument, DeckPlan, ResultPayload, evaluate_planned_fourier_with_abort,
 };
 use rspice_core::resource::ResourceLimits;
 use rspice_core::{Engine, Netlist, SimulationConfig};
@@ -38,9 +37,15 @@ fn every_authored_four_operand_arrives_with_its_planned_identity_and_unit() {
         .expect("the deck authors one transient")
         .id();
 
-    let spectra =
-        evaluate_planned_fourier(&plan, &netlist, parent, &result, ResourceLimits::default())
-            .expect("the core resolver evaluates every authored .FOUR operand");
+    let spectra = evaluate_planned_fourier_with_abort(
+        &plan,
+        &netlist,
+        parent,
+        &result,
+        ResourceLimits::default(),
+        &NoAbort,
+    )
+    .expect("the core resolver evaluates every authored .FOUR operand");
 
     assert_eq!(
         spectra
@@ -70,9 +75,15 @@ fn every_authored_four_operand_arrives_with_its_planned_identity_and_unit() {
 fn a_planned_fourier_result_publishes_the_shared_document() {
     let (netlist, plan, result) = plan_and_run(DECK);
     let parent = plan.analyses()[0].id();
-    let spectra =
-        evaluate_planned_fourier(&plan, &netlist, parent, &result, ResourceLimits::default())
-            .expect("resolution succeeds");
+    let spectra = evaluate_planned_fourier_with_abort(
+        &plan,
+        &netlist,
+        parent,
+        &result,
+        ResourceLimits::default(),
+        &NoAbort,
+    )
+    .expect("resolution succeeds");
     let first = spectra.first().expect("at least one spectrum");
     let document = AnalysisResultDocument::from_fourier(
         first.analysis,
@@ -106,9 +117,16 @@ fn a_deck_with_no_four_card_resolves_to_no_spectra() {
     );
     let parent = plan.analyses()[0].id();
     assert!(
-        evaluate_planned_fourier(&plan, &netlist, parent, &result, ResourceLimits::default())
-            .expect("resolution succeeds")
-            .is_empty()
+        evaluate_planned_fourier_with_abort(
+            &plan,
+            &netlist,
+            parent,
+            &result,
+            ResourceLimits::default(),
+            &NoAbort
+        )
+        .expect("resolution succeeds")
+        .is_empty()
     );
 }
 

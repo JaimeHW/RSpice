@@ -12,7 +12,7 @@ use crate::engine::{SimulationError, TransientResult, evaluate_transient_fourier
 use crate::netlist::Netlist;
 use crate::resource::ResourceLimits;
 
-use super::plan::{AnalysisInstanceId, DeckPlan, PlannedPostProcess, PostProcessSource};
+use super::plan::{AnalysisInstanceId, DeckPlan, PostProcessSource};
 use super::schema::SignalUnit;
 
 /// One authored `.FOUR` operand evaluated against a transient trajectory,
@@ -130,33 +130,4 @@ pub fn evaluate_planned_fourier_with_abort(
         });
     }
     Ok(results)
-}
-
-/// Non-abort form of [`evaluate_planned_fourier_with_abort`], for tests and
-/// callers with no cancellation source of their own.
-pub fn evaluate_planned_fourier(
-    plan: &DeckPlan,
-    netlist: &Netlist,
-    parent: AnalysisInstanceId,
-    result: &TransientResult,
-    limits: ResourceLimits,
-) -> Result<Vec<PlannedFourierResult>, SimulationError> {
-    evaluate_planned_fourier_with_abort(
-        plan,
-        netlist,
-        parent,
-        result,
-        limits,
-        &crate::abort_signal::NoAbort,
-    )
-}
-
-/// The planned post-processes bound to one transient instance.
-pub fn post_processes_for<'plan>(
-    plan: &'plan DeckPlan,
-    parent: AnalysisInstanceId,
-) -> impl Iterator<Item = &'plan PlannedPostProcess> {
-    plan.post_process_analyses()
-        .iter()
-        .filter(move |post| post.parent() == parent)
 }
