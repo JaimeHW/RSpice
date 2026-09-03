@@ -245,6 +245,36 @@ impl ZiFilter {
         })
     }
 
+    /// Build the unfrozen per-site placeholder a compiled model carries
+    /// until the first evaluation installs an instance's coefficient values.
+    ///
+    /// The widths are the site's declared coefficient counts. A Zi
+    /// definition's coefficients are ordinary expressions evaluated per
+    /// instance, but its polynomial *lengths* are syntactic, so a site's
+    /// coefficient shape - and the input and output histories one element
+    /// shorter than it - is a compile-time quantity. Carrying that shape
+    /// here keeps it the same before and after the freeze, which is what
+    /// lets [`Self::validate_checkpoint`] compare a checkpoint against a
+    /// rebuilt device that has not evaluated yet.
+    ///
+    /// A declared width of zero has no constructible filter at any point in
+    /// an analysis. The freeze-time refusal in [`Self::new_with_timing`]
+    /// stays that site's diagnostic, so the placeholder takes the smallest
+    /// constructible width rather than turning it into a compile error.
+    pub(crate) fn unfrozen_placeholder(
+        numerator_coefficients: usize,
+        denominator_coefficients: usize,
+    ) -> Result<Self, ZiFilterError> {
+        let mut placeholder = Self::new_with_timing(
+            vec![1.0; numerator_coefficients.max(1)],
+            vec![1.0; denominator_coefficients.max(1)],
+            1.0,
+            0.0,
+        )?;
+        placeholder.invalidate_definition();
+        Ok(placeholder)
+    }
+
     /// Validate all serialized definition, history, transition, and schedule
     /// invariants before this filter is admitted to runtime evaluation.
     ///

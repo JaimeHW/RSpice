@@ -190,7 +190,17 @@ use super::*;
 // says which numbering it is in. Deserializing one beside a runtime that
 // allocates per site would read a record at one index and write it at another,
 // so the record has to be rebuilt rather than reinterpreted.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 39;
+//
+// Version 40 changes what a compiled model's Zi placeholder means. A cached
+// version-39 model records every Zi site's unfrozen placeholder as a one-by-one
+// filter regardless of the coefficient lists the source declares; the site's
+// real widths only appeared once an evaluation froze the per-instance values.
+// A transient resume validates a checkpoint against a rebuilt device before it
+// has evaluated anything, so a version-39 placeholder reports the wrong shape
+// at exactly the point the comparison is made. The widths are syntactic, so
+// they now travel with the compiled model. Rebuilding is the only reading: the
+// old record's placeholder shape is not recoverable from the record.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 40;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

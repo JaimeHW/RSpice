@@ -214,14 +214,14 @@ impl TimeResolution {
 
     /// Convert analog seconds to the tick *at or before* them.
     ///
-    /// This is the conversion a mixed-signal interleave uses, and it is a
-    /// separate method rather than a mode of [`Self::seconds_to_ticks`]
-    /// because the two answer different questions and both callers are right.
-    /// Rounding to nearest is what an event *scheduled* in seconds wants: the
-    /// tick closest to the instant asked for. Flooring is what an analog
-    /// timepoint being *delivered* to the digital world wants, and the reason
-    /// is that a `.tran` step controlled by local truncation error does not
-    /// land on the grid at all:
+    /// This is the conversion a mixed-signal interleave *advances the digital
+    /// world* with, and it is a separate method rather than a mode of
+    /// [`Self::seconds_to_ticks`] because the two answer different questions
+    /// and both callers are right. Rounding to nearest is what an event
+    /// *scheduled* in seconds wants: the tick closest to the instant asked
+    /// for. Flooring is what an analog timepoint being *delivered* to the
+    /// digital world wants, and the reason is that a `.tran` step controlled
+    /// by local truncation error does not land on the grid at all:
     ///
     /// * flooring is monotone, so a non-decreasing sequence of accepted analog
     ///   times gives a non-decreasing sequence of ticks;
@@ -234,6 +234,12 @@ impl TimeResolution {
     /// unquantized `f64` the analog side already has, which is what keeps a
     /// breakpoint bit-exact. See the module documentation of
     /// [`crate::xspice::verilog`] for the ruling this implements.
+    ///
+    /// The same interleave is also the caller of [`Self::seconds_to_ticks`],
+    /// for its *other* mapping: an A/D transition's own timestamp names the
+    /// tick its event lands on, which Verilog-AMS LRM 2.4 section 7.3.6.1
+    /// fixes at the nearest tick. Neither call site may be rewritten into the
+    /// other — they quantize different quantities for different reasons.
     ///
     /// # Exactness
     ///
@@ -1124,6 +1130,51 @@ mod tests {
                 "flooring must be monotone: {seconds:e} s gave {tick} after {previous}"
             );
             previous = tick;
+            seconds += 3.7e-11;
+        }
+    }
+
+    /// The two mappings the mixed interleave uses, pinned against each other
+    /// at the half tick, which is the only place they can disagree by a whole
+    /// tick in the *upward* direction.
+    ///
+    /// Rounding is what an A/D transition's own timestamp gets — Verilog-AMS
+    /// LRM 2.4 section 7.3.6.1 puts an analog event on the nearest digital
+    /// tick — and flooring is what the trial timestamp that advances the
+    /// digital world gets. A refactor that unified them would have to break
+    /// one of these two columns.
+    #[test]
+    fn the_half_tick_rounds_up_while_the_floor_stays_put() {
+        let resolution = TimeResolution::new(-9).expect("1 ns");
+
+        // Below the half: both mappings answer with the tick the time is in.
+        assert_eq!(resolution.seconds_to_ticks(2.4e-9), Ok(2));
+        assert_eq!(resolution.seconds_to_floor_ticks(2.4e-9), Ok(2));
+
+        // Exactly the half: `f64::round` is half-away-from-zero, so a tie goes
+        // to the later tick. Stated rather than discovered, because the
+        // direction of the tie is what decides which slot a transition landing
+        // dead centre is published into.
+        assert_eq!(resolution.seconds_to_ticks(2.5e-9), Ok(3));
+        assert_eq!(resolution.seconds_to_floor_ticks(2.5e-9), Ok(2));
+
+        // Above the half: rounding moves on, flooring does not.
+        assert_eq!(resolution.seconds_to_ticks(2.6e-9), Ok(3));
+        assert_eq!(resolution.seconds_to_floor_ticks(2.6e-9), Ok(2));
+
+        // And the rounding never lands more than one tick from the floor, in
+        // either direction, which is what bounds how far forward a transition's
+        // publication can move.
+        let mut seconds = 0.0f64;
+        while seconds < 5.0e-9 {
+            let floor = resolution
+                .seconds_to_floor_ticks(seconds)
+                .expect("in range");
+            let nearest = resolution.seconds_to_ticks(seconds).expect("in range");
+            assert!(
+                nearest == floor || nearest == floor + 1,
+                "{seconds:e} s floored to {floor} but rounded to {nearest}"
+            );
             seconds += 3.7e-11;
         }
     }

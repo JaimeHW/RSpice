@@ -535,7 +535,9 @@ fn runtime_report_deserialization_rejects_malformed_zi_history() {
         .compile_runtime(ZI_STATE_SOURCE, Some("zi_state"))
         .expect("compile Zi runtime report");
     let mut encoded = serde_json::to_value(report).expect("serialize Zi runtime report");
-    encoded["model"]["zi_filters"][0]["x_hist"] = serde_json::json!([0.0]);
+    // The site declares two numerator coefficients, so its input history is
+    // exactly one element. Two is the malformation.
+    encoded["model"]["zi_filters"][0]["x_hist"] = serde_json::json!([0.0, 0.0]);
 
     let error = serde_json::from_value::<rspice_veriloga::RuntimeCompileReport>(encoded)
         .expect_err("malformed compiled-model Zi history must fail deserialization");

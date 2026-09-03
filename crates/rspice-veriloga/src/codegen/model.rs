@@ -140,6 +140,18 @@ impl ZiPolynomialLayout {
         self.checked_value_count().unwrap_or(usize::MAX)
     }
 
+    /// Number of `f64` coefficients this polynomial installs when its site
+    /// freezes. A coefficient list installs its own length; `len` roots
+    /// expand to a monic polynomial of `len + 1` coefficients. Both counts
+    /// are syntactic, so a Zi filter's coefficient widths are fixed at
+    /// compile time even though its values are per-instance.
+    pub fn coefficient_count(self) -> usize {
+        match self {
+            Self::Coefficients { len } => len,
+            Self::Roots { len } => len.saturating_add(1),
+        }
+    }
+
     pub fn definition_len(self) -> usize {
         match self {
             Self::Coefficients { len } | Self::Roots { len } => len,

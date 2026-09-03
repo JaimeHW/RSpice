@@ -685,3 +685,60 @@ endmodule
         assert!(error.contains("4.5.15"), "got: {error}");
     }
 }
+
+/// Two coefficient lists whose widths differ from the one-by-one filter a
+/// compiled model used to carry before its first evaluation.
+const DECLARED_COEFFICIENT_WIDTHS: &str = r#"
+`include "disciplines.vams"
+module ziwidths(p, n);
+    inout p, n;
+    electrical p, n;
+    real y;
+    analog begin
+        y = zi_nd(V(p, n), '{0.5, 0.25}, '{1.0, -0.5}, 1.0e-6, 0.0);
+        I(p, n) <+ y * 1.0e-3;
+    end
+endmodule
+"#;
+
+/// Two zeros and two poles, which the freeze expands into three numerator and
+/// three denominator coefficients.
+const DECLARED_ROOT_WIDTHS: &str = r#"
+`include "disciplines.vams"
+module zirootwidths(p, n);
+    inout p, n;
+    electrical p, n;
+    real y;
+    analog begin
+        y = zi_zp(V(p, n), '{0.0, 0.0, 0.25, 0.0}, '{0.5, 0.0, -0.5, 0.0}, 1.0e-6);
+        I(p, n) <+ y * 1.0e-3;
+    end
+endmodule
+"#;
+
+/// A transient resume primes accepted Verilog-A state into a rebuilt circuit
+/// before the startup solve, so a checkpoint is compared against a device that
+/// has evaluated nothing. A Zi site's coefficient lists are counted rather than
+/// evaluated, so the unfrozen placeholder must already report the widths the
+/// source declares; a one-by-one stand-in refuses a valid checkpoint.
+#[test]
+fn a_rebuilt_device_accepts_a_checkpoint_before_its_zi_definition_freezes() {
+    for (instance, source, form) in [
+        ("ZW1", DECLARED_COEFFICIENT_WIDTHS, "coefficient"),
+        ("ZW2", DECLARED_ROOT_WIDTHS, "root"),
+    ] {
+        let mut accepted = compile_device(instance, source);
+        accepted.set_analysis_type(0);
+        stamp_once(&mut accepted, &[1.5]);
+        let checkpoint = accepted
+            .checkpoint_state()
+            .expect("a frozen Zi definition captures its checkpoint");
+
+        let rebuilt = compile_device(instance, source);
+        rebuilt
+            .validate_checkpoint_state(&checkpoint)
+            .unwrap_or_else(|error| {
+                panic!("rebuilt {form}-form device rejected its own checkpoint: {error}")
+            });
+    }
+}

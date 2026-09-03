@@ -12,13 +12,29 @@
 //!
 //! The analog side names a timepoint in seconds, chosen by a step controller
 //! answering to local truncation error, and it lands wherever it lands. The
-//! digital side counts ticks of a declared precision. The host floors the
-//! former onto the latter — see
+//! digital side counts ticks of a declared precision. Two different questions
+//! cross between them, and they do not quantize the same way. Conflating them
+//! is the mistake this section exists to prevent.
+//!
+//! *How far may the digital world be advanced?* is answered from the trial's
+//! own timestamp, **floored** onto the tick grid — see
 //! [`TimeResolution::seconds_to_floor_ticks`](crate::xspice::event_scheduler::TimeResolution::seconds_to_floor_ticks)
-//! for why flooring rather than rounding — and keeps the unquantized analog
-//! time for everything that is answered in seconds: the trial's own bookkeeping,
-//! the interpolated instant an A/D bridge crossed its threshold, and the
-//! breakpoint [`MixedSignalHost::next_event_time`] hands back.
+//! for why flooring rather than rounding. Rounding up here would run the
+//! digital world past an analog instant the integrator has not accepted, which
+//! is the one thing conservative lockstep forbids.
+//!
+//! *Which tick does an A/D transition's event land on?* is answered from that
+//! transition's own interpolated crossing time, rounded to the **nearest**
+//! tick, because Verilog-AMS LRM 2.4 section 7.3.6.1 places an analog event in
+//! the digital domain at the nearest digital time tick.
+//! [`MixedSignalHost::settle_analog_bridges`] clamps the answer forward
+//! against the trial's tick, so this rounding can move a transition later but
+//! never back into a slot the digital world has left.
+//!
+//! Either way the unquantized analog time is kept for everything that is
+//! answered in seconds: the trial's own bookkeeping, the interpolated instant
+//! an A/D bridge crossed its threshold, and the breakpoint
+//! [`MixedSignalHost::next_event_time`] hands back.
 //!
 //! Several analog timepoints therefore share one tick, which is what a declared
 //! precision means, and the host's monotonicity is enforced on the *analog*
@@ -1089,12 +1105,36 @@ impl MixedSignalHost {
     /// Each transition is dated by interpolating its threshold crossing inside
     /// the trial's step, by the same rule the Xyce DIG code models date theirs
     /// — [`threshold_crossing_time`]. That instant is kept unquantized in the
-    /// accepted state; the digital slot it is published into is its floor,
-    /// which under whole-tick lockstep is this trial's own tick. It cannot be
-    /// an earlier one that matters:
-    /// [`Self::begin_trial`] has already refused a step that passed a scheduled
-    /// event, so nothing is queued between the crossing and here to reorder
-    /// against.
+    /// accepted state, and the digital slot it is published into is the tick
+    /// *nearest* it, because Verilog-AMS LRM 2.4 section 7.3.6.1 places an
+    /// analog event in the digital domain at the nearest digital time tick.
+    ///
+    /// Nearest here and floored in [`Self::begin_trial`] are not a
+    /// contradiction, because they quantize two different quantities — see
+    /// this module's "two time bases". That one floors *the trial's* timestamp
+    /// to bound how far the digital world may be advanced. This one rounds
+    /// *the transition's* timestamp to name the tick its event belongs to, and
+    /// the standard fixes that at the nearest tick.
+    ///
+    /// The `max` is what keeps the rounding one-directional. A crossing in the
+    /// lower half of the trial's tick rounds to the tick before it, which is a
+    /// slot the digital world has already left, so the clamp publishes it here
+    /// instead; a crossing in the upper half rounds to the tick after, which is
+    /// still ahead and is left alone. Nothing is queued between the crossing
+    /// and here to reorder against, because [`Self::begin_trial`] has already
+    /// refused a step that passed a scheduled event.
+    ///
+    /// One consequence to know when reading this, because it is not obvious
+    /// from the clamp: publishing forward also *opens* that later slot.
+    /// [`DigitalHost::force_many`] settles the digital world to whichever tick
+    /// it is handed, so an event already dated at the tick after this trial's
+    /// runs in the same settle, at an analog time short of its own tick's
+    /// seconds. The overshoot is bounded by one tick, because a crossing is
+    /// interpolated inside the trial's own step and so cannot round further
+    /// than the tick above it, and it is confined to the trial: a rejected
+    /// step restores the scheduler with the rest of the state.
+    ///
+    /// [`DigitalHost::force_many`]: super::host::DigitalHost::force_many
     pub fn settle_analog_bridges(
         &mut self,
         circuit_voltages: &[f64],
@@ -1148,9 +1188,14 @@ impl MixedSignalHost {
                 voltage,
                 threshold,
             );
+            // Verilog-AMS LRM 2.4 section 7.3.6.1: an analog event crossing
+            // into the digital domain lands on the *nearest* digital time
+            // tick. This is the transition's own timestamp being quantized,
+            // which is not the mapping `begin_trial` applies to the trial's
+            // timestamp — see this module's "two time bases".
             let crossing_tick = self
                 .resolution
-                .seconds_to_floor_ticks(crossing)
+                .seconds_to_ticks(crossing)
                 .map_err(DigitalRunError::from)?;
             publish_tick = publish_tick.max(crossing_tick);
             drives.push((bridge.signal, next));
@@ -1972,6 +2017,147 @@ endmodule
         assert!(
             crossing < 1.0e-9,
             "an uninterpolated sampler would have dated this at the step's end"
+        );
+    }
+
+    /// Ticks of `MIXED`'s `#2`, which is what makes the published slot
+    /// observable from outside the host.
+    const EDGE_PROCESS_DELAY_TICKS: u64 = 2;
+
+    /// Drive one A/D crossing inside a chosen step and report the tick its
+    /// transition was published into.
+    ///
+    /// The tick is read back through the design rather than from a private
+    /// field. `MIXED`'s `always @(posedge adc or posedge clk)` block suspends
+    /// on `#2` immediately after the edge, so the resume event left behind by
+    /// the settle sits exactly two ticks after the slot the transition was
+    /// published into, and [`MixedSignalHost::next_event_time`] reports it in
+    /// seconds. A publication that moved by a tick moves this by a tick.
+    ///
+    /// `previous_time` and `previous_voltage` are the accepted timepoint the
+    /// crossing is interpolated back towards; `time` and `timestep` are the
+    /// step it is interpolated inside. The sense node reaches 1 V, which is
+    /// over the bridge's 0.6 V high threshold, so the crossing is at
+    /// `time - timestep * (1.0 - 0.6) / (1.0 - previous_voltage)`.
+    fn published_tick_of_one_crossing(
+        previous_time: f64,
+        previous_voltage: f64,
+        time: f64,
+        timestep: f64,
+    ) -> u64 {
+        let mut host = host();
+
+        // Time zero resolves the bridge net from `z` to `0`. That is not a
+        // posedge, so it wakes nothing and leaves the wheel empty — which is
+        // what lets a later resume event be attributed to this crossing alone.
+        begin(&mut host, 0);
+        settle_and_accept(&mut host, &[0.0; 4]);
+        assert_eq!(
+            host.next_event_time().expect("the wheel is readable"),
+            None,
+            "resolving the bridge to `0` must not have woken the edge process"
+        );
+
+        // The far end of the interval: an accepted timepoint whose sense
+        // voltage is still under the high threshold, so the bridge has not
+        // moved and this becomes `accepted_adc_voltages`.
+        host.begin_trial(
+            previous_time,
+            previous_time,
+            IntegrationCoefficients::inactive(),
+            false,
+            false,
+        )
+        .expect("begin the interval's far end");
+        settle_and_accept(&mut host, &[0.0, 0.0, previous_voltage, 0.0]);
+        assert_eq!(
+            host.read_digital("adc").expect("the bridge net exists"),
+            "0",
+            "the far end of the interval must still be below the threshold"
+        );
+
+        // The step the crossing happens inside.
+        host.begin_trial(
+            time,
+            timestep,
+            IntegrationCoefficients::inactive(),
+            false,
+            false,
+        )
+        .expect("begin the crossing step");
+        settle_and_accept(&mut host, &[0.0, 0.0, 1.0, 0.0]);
+        assert_eq!(
+            host.read_digital("adc").expect("the bridge net exists"),
+            "1",
+            "the sense node crossed the high threshold, so the bridge must read `1`"
+        );
+
+        let resume = host
+            .next_event_time()
+            .expect("the wheel is readable")
+            .expect("the edge process suspended on its `#2`");
+        let resume_tick = (resume / 1.0e-9).round() as u64;
+        assert!(
+            resume_tick >= EDGE_PROCESS_DELAY_TICKS,
+            "a `#2` resume cannot be dated before tick {EDGE_PROCESS_DELAY_TICKS}, saw {resume:e} s"
+        );
+        resume_tick - EDGE_PROCESS_DELAY_TICKS
+    }
+
+    /// **Verilog-AMS LRM 2.4 section 7.3.6.1**, upper half: an A/D transition
+    /// whose interpolated crossing is past the middle of its tick belongs to
+    /// the *next* tick, because that is the nearest one.
+    ///
+    /// The trial is at 2.9 ns, so the trial's own tick — the floored one, which
+    /// bounds how far the digital world may advance — is 2. The crossing is at
+    /// 2.86 ns. Flooring the crossing would publish into tick 2 and is the
+    /// behaviour this replaces; the nearest tick is 3.
+    #[test]
+    fn a_crossing_past_the_middle_of_its_tick_publishes_into_the_next_one() {
+        assert_eq!(
+            published_tick_of_one_crossing(2.8e-9, 0.0, 2.9e-9, 0.1e-9),
+            3,
+            "a crossing at 2.86 ns is nearest tick 3, not tick 2"
+        );
+    }
+
+    /// **Section 7.3.6.1**, lower half, and the forward clamp that bounds it.
+    ///
+    /// The trial is at 3.4 ns, so its own tick is 3. The step reaches back to
+    /// 0.9 ns, which puts the crossing at 2.4 ns, whose nearest tick is 2 — a
+    /// slot the digital world has already left. Rounding alone would publish
+    /// into the past; the clamp against the trial's own tick publishes it here
+    /// instead. This is the direction in which nearest and floor must agree,
+    /// and the assertion is that they do.
+    ///
+    /// The trial time is 3.4 ns rather than a round 3.0 ns because a decimal
+    /// literal need not sit on the tick grid: the grid is defined by
+    /// [`TimeResolution::ticks_to_seconds`], and `3.0e-9` parses a hair *below*
+    /// `3.0 * 1e-9`, so it floors to tick 2 and would have made this a test of
+    /// the wrong pair of ticks.
+    #[test]
+    fn a_crossing_before_the_middle_of_its_tick_is_clamped_forward_to_the_trial() {
+        assert_eq!(
+            published_tick_of_one_crossing(0.9e-9, 0.0, 3.4e-9, 2.5e-9),
+            3,
+            "a crossing rounding back to tick 2 must be clamped forward to the trial's tick 3"
+        );
+    }
+
+    /// **Section 7.3.6.1**, the tie. A crossing landing exactly on a half tick
+    /// is equidistant from two ticks, and `f64::round` is half-away-from-zero,
+    /// so it goes to the later one.
+    ///
+    /// The step runs from 2.1 ns at 0.2 V to 2.9 ns at 1.0 V, so the 0.6 V
+    /// threshold is crossed exactly half way, at 2.5 ns. The direction of the
+    /// tie is pinned rather than left to be discovered, because it decides
+    /// which slot a dead-centre transition is published into.
+    #[test]
+    fn a_crossing_exactly_on_the_half_tick_publishes_into_the_later_one() {
+        assert_eq!(
+            published_tick_of_one_crossing(2.1e-9, 0.2, 2.9e-9, 0.8e-9),
+            3,
+            "a crossing at exactly 2.5 ns ties, and the tie goes to tick 3"
         );
     }
 

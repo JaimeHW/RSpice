@@ -44,9 +44,14 @@
 //! mixed host above now implements the time half of them —
 //! [`TimeResolution::seconds_to_floor_ticks`](super::event_scheduler::TimeResolution::seconds_to_floor_ticks)
 //! is the floor, and the crossing an A/D bridge is dated by is interpolated
-//! inside the accepted step rather than snapped to the tick. What a `wreal`
-//! still needs from this section is the *driver-resolution* hazard below,
-//! which is not about time at all.
+//! inside the accepted step rather than snapped to the tick. That host applies
+//! a *second* time mapping the ruling below does not cover, because it is not
+//! about advancing anything: an A/D transition's own timestamp names the tick
+//! its event lands on, and Verilog-AMS LRM 2.4 section 7.3.6.1 fixes that at
+//! the nearest tick rather than the floor — see
+//! [`MixedSignalHost::settle_analog_bridges`].
+//! What a `wreal` still needs from this section is the *driver-resolution*
+//! hazard below, which is not about time at all.
 //!
 //! **The two event worlds do not share a tick encoding**:
 //!
@@ -57,7 +62,8 @@
 //!   at [`TIME_UNIT_RULING`]'s 1 ns is a coarse grid indeed.
 //!
 //! No mapping between the two is exact in both directions, so the choice is
-//! which property to keep, and there is one answer that keeps the right ones:
+//! which property to keep, and there is one answer that keeps the right ones
+//! *for advancing the digital world*:
 //! **floor an analog time to the tick at or before it, and publish an event at
 //! the unquantized analog time.** Flooring is monotone, so a non-decreasing
 //! sequence of accepted analog times gives [`DigitalHost::advance_to`] a

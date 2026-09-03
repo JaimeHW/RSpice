@@ -331,8 +331,18 @@ jobs:
         run: |
           cargo test --locked -p rspice-veriloga --features native native:: -- --test-threads=1
           cargo test --locked -p rspice-veriloga --release --features native native:: -- --test-threads=1
-      - name: Test Verilog-A native core builder route (Linux x64)
-        run: cargo test --locked -p rspice-core --features veriloga-native --test veriloga_transient veriloga_native_builder_ -- --test-threads=1
+      - name: Test Verilog-A core transient suite through the native JIT (Linux x64)
+        # No name filter. This step used to read `veriloga_transient
+        # veriloga_native_builder_`, which is one target and one filter, so it
+        # ran two of the target's nineteen tests. No other job builds this
+        # target with a veriloga feature at all -- the two unfiltered
+        # `-p rspice-core` runs use default features, under which the file's
+        # `#![cfg(feature = "veriloga")]` compiles it to zero tests -- so the
+        # other seventeen ran nowhere. One of them, the Zi checkpoint/resume
+        # pin, was red on main for three days without failing a build. The
+        # whole target costs a fraction of a second once this step has built
+        # it.
+        run: cargo test --locked -p rspice-core --features veriloga-native --test veriloga_transient -- --test-threads=1
       - name: Test Verilog-A native JIT contracts (Linux x64)
         run: cargo test --locked -p rspice-veriloga --features native-bytecode-contract-tests --test native_contract -- --test-threads=1
       - name: Test Verilog-A native multiplicity contracts (Linux x64)
@@ -462,8 +472,18 @@ jobs:
           grep -Fqx $'\t[Key] com.apple.security.cs.jit-write-allowlist' "$RUNNER_TEMP/x64-jit-entitlements.txt"
           test "$(grep -Fxc $'\t\t[Bool] true' "$RUNNER_TEMP/x64-jit-entitlements.txt")" -eq 2
           "$signed_binary" native::x64::tests::compile_model_with_canonical_ir_executes_mir_stamp_value --exact --test-threads=1
-      - name: Test Verilog-A native core builder route
-        run: cargo test --locked -p rspice-core --features veriloga-native --test veriloga_transient veriloga_native_builder_ -- --test-threads=1
+      - name: Test Verilog-A core transient suite through the native JIT
+        # No name filter. This step used to read `veriloga_transient
+        # veriloga_native_builder_`, which is one target and one filter, so it
+        # ran two of the target's nineteen tests. No other job builds this
+        # target with a veriloga feature at all -- the two unfiltered
+        # `-p rspice-core` runs use default features, under which the file's
+        # `#![cfg(feature = "veriloga")]` compiles it to zero tests -- so the
+        # other seventeen ran nowhere. One of them, the Zi checkpoint/resume
+        # pin, was red on main for three days without failing a build. The
+        # whole target costs a fraction of a second once this step has built
+        # it.
+        run: cargo test --locked -p rspice-core --features veriloga-native --test veriloga_transient -- --test-threads=1
       - name: Test Verilog-A native JIT contracts
         run: cargo test --locked -p rspice-veriloga --features native-bytecode-contract-tests --test native_contract -- --test-threads=1
       - name: Gate Verilog-A native JIT performance
@@ -537,8 +557,18 @@ jobs:
         env:
           RUSTFLAGS: -D warnings
         run: cargo test --locked -p rspice-veriloga --features native --test runtime_compile_report -- --test-threads=1
-      - name: Test native core builder route
-        run: cargo test --locked -p rspice-core --features veriloga-native --test veriloga_transient veriloga_native_builder_ -- --test-threads=1
+      - name: Test core transient suite through the native JIT
+        # No name filter. This step used to read `veriloga_transient
+        # veriloga_native_builder_`, which is one target and one filter, so it
+        # ran two of the target's nineteen tests. No other job builds this
+        # target with a veriloga feature at all -- the two unfiltered
+        # `-p rspice-core` runs use default features, under which the file's
+        # `#![cfg(feature = "veriloga")]` compiles it to zero tests -- so the
+        # other seventeen ran nowhere. One of them, the Zi checkpoint/resume
+        # pin, was red on main for three days without failing a build. The
+        # whole target costs a fraction of a second once this step has built
+        # it.
+        run: cargo test --locked -p rspice-core --features veriloga-native --test veriloga_transient -- --test-threads=1
       - name: Qualify full shipped device census through the AArch64 JIT
         env:
           RUSTFLAGS: -D warnings
