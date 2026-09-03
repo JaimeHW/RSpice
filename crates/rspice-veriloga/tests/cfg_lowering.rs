@@ -11,6 +11,7 @@
 
 use rspice_veriloga::canonical_ir::cfg::{CfgBinaryOp, CfgTerminator, CfgUnaryOp, CfgValueKind};
 use rspice_veriloga::canonical_ir::cfg_lower::CfgModel;
+use rspice_veriloga::canonical_ir::hir::HirRegion;
 use rspice_veriloga::canonical_ir::{
     CanonicalIrArtifact, CfgEvalInputs, CfgLaplaceTransfer, CfgZiPolynomial, IrDiagnostic,
     evaluate_cfg,
@@ -19,6 +20,8 @@ use rspice_veriloga::rust_backend::discover_veriloga_sources;
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
+
+mod support;
 
 fn lower(source: &str) -> CfgModel {
     let artifact = artifact(source);
@@ -1118,6 +1121,114 @@ endmodule
 }
 
 // --- numeric equivalence ---------------------------------------------------
+
+/// A named block's local initializer has to run on both lowerings.
+///
+/// `real gain = 7.0;` inside `begin : blk` is one analog step recorded twice —
+/// into the flat sink the runtimes execute, and into the region tree the CFG is
+/// built from. It used to be recorded only into the sink, and the failure was
+/// silent rather than loud: the CFG never saw an assignment to `gain` at all,
+/// so the read of it fell through to the Verilog-AMS zero-initialisation rule,
+/// and this module answered 0 through the canonical route while answering 7
+/// through the executed one. The warning that accompanied it — "read before it
+/// is assigned on any path" — is a real diagnostic for other shapes, so its
+/// absence is asserted too rather than its wording.
+///
+/// The module-scope spelling of the same module is the control: it went through
+/// `analyze_assignment`, which always recorded both copies, and was never wrong.
+#[test]
+fn a_named_block_local_initializer_runs_on_both_routes() {
+    const BLOCK_LOCAL: &str = r#"
+module block_local(p, n);
+    inout p, n;
+    electrical p, n;
+    analog begin : blk
+        real gain = 7.0;
+        I(p, n) <+ gain * V(p, n);
+    end
+endmodule
+"#;
+    const MODULE_SCOPE: &str = r#"
+module module_scope(p, n);
+    inout p, n;
+    electrical p, n;
+    real gain;
+    analog begin
+        gain = 7.0;
+        I(p, n) <+ gain * V(p, n);
+    end
+endmodule
+"#;
+
+    for (label, source) in [
+        ("block-local initializer", BLOCK_LOCAL),
+        ("module-scope assignment", MODULE_SCOPE),
+    ] {
+        // The executed route: the VM runs `hir.statements` and `mir.equations`.
+        let fixture = support::DeviceFixture::compile(source);
+        let mut device = fixture.device("X1", &[1, 0]);
+        device.update_voltages(&[1.0]);
+        let currents = device.evaluate();
+        assert_eq!(currents.len(), 1, "{label}: one branch equation");
+        assert!(
+            (currents[0] - 7.0).abs() < 1.0e-12,
+            "{label}: executed route gave {} rather than 7.0",
+            currents[0]
+        );
+
+        // The canonical route: the CFG is built from `hir.body` and nothing else.
+        let artifact = artifact(source);
+        let cfg = match CfgModel::from_hir(&artifact.hir, &artifact.mir) {
+            Ok(model) => model,
+            Err(diagnostics) => panic!("{label}: {}", render(&diagnostics)),
+        };
+        let bias = bias_point(&artifact);
+        let mut inputs = cfg_inputs(&bias);
+        inputs.node_potentials = artifact
+            .mir
+            .nodes
+            .iter()
+            .map(|node| if node.name == "p" { 1.0 } else { 0.0 })
+            .collect();
+        let snapshot = evaluate_cfg(&cfg.function, &inputs)
+            .unwrap_or_else(|error| panic!("{label}: CFG evaluation failed: {error}"));
+        assert_eq!(cfg.residuals.len(), 1, "{label}: one residual");
+        let residual = snapshot
+            .value(cfg.residuals[0])
+            .unwrap_or_else(|| panic!("{label}: the residual has no value"));
+        assert!(
+            (residual - 7.0).abs() < 1.0e-12,
+            "{label}: canonical route gave {residual} rather than 7.0"
+        );
+        assert!(
+            cfg.warnings.is_empty(),
+            "{label}: the body assigns `gain` before reading it, so nothing is \
+             left to warn about: {:?}",
+            cfg.warnings
+        );
+
+        // Both recordings share one site, so the correspondence pairs them.
+        let assignment = artifact
+            .hir
+            .body
+            .iter()
+            .find_map(|region| match region {
+                HirRegion::Assignment(assignment) if assignment.target_name.starts_with("gain") => {
+                    Some(assignment)
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{label}: the structured body assigns `gain`"));
+        assert!(
+            artifact
+                .hir
+                .executed_correspondence
+                .executed(assignment.expr.id)
+                .is_some(),
+            "{label}: the body's initializer expression pairs with an executed one"
+        );
+    }
+}
 
 /// The two levels must agree on numbers, not just on shape.
 ///
