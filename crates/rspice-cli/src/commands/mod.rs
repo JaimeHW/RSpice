@@ -23,6 +23,7 @@ pub(crate) mod export_table;
 pub mod health;
 pub mod info;
 pub mod models;
+pub(crate) mod publish;
 pub mod run;
 mod run_signals;
 pub(crate) mod waveform_io;

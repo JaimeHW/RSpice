@@ -24,6 +24,7 @@ use crate::report::{
 use crate::cli::{
     CliError, Config, MeasFormat, OutputFormat, PzTransferMode, RunArgs, map_atomic_output_error,
 };
+use crate::commands::publish;
 use rspice_core::execution::{
     AxisAssignment, AxisKind, DeckPlan, DeckPlanError, DeckPlanMaterializer, MaterializedAnalysis,
     MaterializedRunError, RunAxisValue, RunCoordinate, StepAxisTarget,
@@ -33,7 +34,6 @@ use rspice_core::{
     ConvergencePreset, Engine, Netlist, SimulationConfig, SimulationConfigOverrides,
     resolve_simulation_config,
 };
-use rspice_output::{AtomicArtifactOptions, Durability, write_atomic};
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -820,6 +820,17 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
         crate::abort::arm_timeout(seconds);
     }
 
+    // A run that was killed (rather than cancelled) cannot clean up after
+    // itself, so its staging files stay in the output directory. Reclaim the
+    // ones whose writer is gone before this run starts staging its own.
+    if let Some(output) = resolve_output_path(args.output.clone(), config)? {
+        let directory = output
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .map_or_else(|| PathBuf::from("."), std::path::Path::to_path_buf);
+        publish::recover_stale_artifacts(&directory, quiet);
+    }
+
     let resource_limits = config.resources.limits();
     let parse_options = parse_options_for_run(&args, resource_limits);
     log::info!("Loading netlist: {}", args.input.display());
@@ -1180,11 +1191,9 @@ fn materialize_addresistors_artifact(
             CliError::AddResistorsMaterialization { source }
         })?;
     let path = xyce_addresistors_artifact_path(input);
-    write_atomic(
-        &path,
-        AtomicArtifactOptions::new(Durability::SyncFileAndParent),
-        |writer| writer.write_all(materialized.derived_source.as_bytes()),
-    )
+    publish::artifact(&path, |writer| {
+        writer.write_all(materialized.derived_source.as_bytes())
+    })
     .map_err(|source| CliError::AddResistorsArtifactIo {
         path: path.clone(),
         source,
@@ -1377,15 +1386,11 @@ fn write_run_summary(
     let text =
         serde_json::to_string_pretty(&json).map_err(|e| CliError::output_json_error(path, e))?;
     let document = text + "\n";
-    write_atomic(
-        path,
-        AtomicArtifactOptions::new(Durability::SyncFileAndParent),
-        |writer| {
-            writer
-                .write_all(document.as_bytes())
-                .map_err(|error| CliError::output_error(path, error))
-        },
-    )
+    publish::artifact(path, |writer| {
+        writer
+            .write_all(document.as_bytes())
+            .map_err(|error| CliError::output_error(path, error))
+    })
     .map_err(|error| map_atomic_output_error(path, error))?;
     Ok(())
 }
@@ -2052,7 +2057,10 @@ fn run_implicit_step_op_table(
         // Flat artifacts stay coordinate-local when topology changes.  Every
         // coordinate was solved and schema-checked above, before this first
         // write, so coordinate order can neither select columns nor leave a
-        // partial batch due to a late schema mismatch.
+        // partial batch due to a late schema mismatch. The set is published
+        // as one transaction, so the schema manifest can never name a
+        // coordinate artifact that a cancellation left unwritten.
+        let transaction = publish::begin()?;
         for run in &preflight {
             let coordinate_path =
                 tag_output_path(&base_output, &sanitize_run_tag(&run.coordinate_tag));
@@ -2067,6 +2075,11 @@ fn run_implicit_step_op_table(
             &preflight,
             &outputs,
         )?;
+        if crate::abort::reason().is_some() {
+            drop(transaction);
+            return Err(cancellation_cli_error(args.timeout));
+        }
+        transaction.commit()?;
         outputs.push(manifest_path);
     }
     ctx.record_unevaluated_measurements();
@@ -2170,17 +2183,12 @@ fn write_conditional_step_schema_manifest(
     let text = serde_json::to_string_pretty(&document)
         .map_err(|error| CliError::output_json_error(path, error))?
         + "\n";
-    write_atomic(
-        path,
-        AtomicArtifactOptions::new(Durability::SyncFileAndParent),
-        |writer| {
-            writer
-                .write_all(text.as_bytes())
-                .map_err(|error| CliError::output_error(path, error))
-        },
-    )
-    .map_err(|error| map_atomic_output_error(path, error))?;
-    Ok(())
+    publish::set_manifest(path, |writer| {
+        writer
+            .write_all(text.as_bytes())
+            .map_err(|error| CliError::output_error(path, error))
+    })
+    .map_err(|error| map_atomic_output_error(path, error))
 }
 
 fn signal_descriptor_json(
@@ -2325,8 +2333,14 @@ fn run_deck(
             materializer.len()
         );
     }
+    // Every coordinate of one axis deck is one result. The transaction holds
+    // each coordinate's complete artifact in a staging file beside its
+    // destination, so a cancellation or a failure at coordinate k publishes
+    // nothing at all instead of a directory that looks like a shorter sweep.
+    let transaction = publish::begin()?;
     let mut reports = Vec::with_capacity(materializer.len());
     let mut outputs = Vec::new();
+    let mut coordinates = Vec::new();
     for (run_index, expected_signature) in coordinate_signatures.iter().enumerate() {
         if crate::abort::reason().is_some() {
             break;
@@ -2385,12 +2399,25 @@ fn run_deck(
             Err(error) => return Err(error),
         };
         reports.push(report);
+        coordinates.push(AxisSetCoordinate {
+            identity: ArtifactCoordinate::from_run_coordinate(canonical_coordinate),
+            artifacts: run_outputs.clone(),
+        });
         outputs.extend(run_outputs);
         if crate::abort::reason().is_some() {
             break;
         }
     }
-    if reports.len() != materializer.len() && crate::abort::reason().is_none() {
+    if crate::abort::reason().is_some() {
+        // Dropping the transaction removes every staged coordinate, so the
+        // destination directory keeps exactly the artifacts it had before.
+        drop(transaction);
+        return Ok(DeckOutcome {
+            reports,
+            outputs: Vec::new(),
+        });
+    }
+    if reports.len() != materializer.len() {
         return Err(CliError::InternalError {
             message: format!(
                 ".STEP completed {} of {} planned coordinates without a cancellation or error",
@@ -2399,7 +2426,106 @@ fn run_deck(
             ),
         });
     }
+
+    if let Some(manifest_path) = axis_set_manifest_path(args, config, run_label)? {
+        write_axis_set_manifest(&manifest_path, args, &canonical_plan, &coordinates)?;
+        outputs.push(manifest_path);
+    }
+    transaction.commit()?;
     Ok(DeckOutcome { reports, outputs })
+}
+
+/// One coordinate's identity and the artifacts it staged, for the set
+/// manifest published with the coordinate set.
+struct AxisSetCoordinate {
+    identity: ArtifactCoordinate,
+    artifacts: Vec<PathBuf>,
+}
+
+/// Path of the manifest that names a complete axis coordinate set.
+///
+/// A deck without a resolved output path publishes no artifacts, so it has no
+/// set to describe.
+fn axis_set_manifest_path(
+    args: &RunArgs,
+    config: &Config,
+    run_label: Option<&str>,
+) -> Result<Option<PathBuf>, CliError> {
+    let Some(mut base) = resolve_output_path(args.output.clone(), config)? else {
+        return Ok(None);
+    };
+    if let Some(label) = run_label {
+        base = tag_output_path(&base, &sanitize_run_tag(label));
+    }
+    let mut path = tag_output_path(&base, "run_set");
+    path.set_extension("json");
+    Ok(Some(path))
+}
+
+/// Describe the complete coordinate set as the last member of its own
+/// transaction.
+///
+/// The manifest is committed after every coordinate artifact, so a reader
+/// that finds it knows every artifact it names is present and complete.
+fn write_axis_set_manifest(
+    path: &std::path::Path,
+    args: &RunArgs,
+    plan: &DeckPlan,
+    coordinates: &[AxisSetCoordinate],
+) -> Result<(), CliError> {
+    let coordinate_documents = coordinates
+        .iter()
+        .map(|coordinate| {
+            let artifacts = coordinate
+                .artifacts
+                .iter()
+                .map(|artifact| {
+                    artifact
+                        .file_name()
+                        .and_then(std::ffi::OsStr::to_str)
+                        .map(str::to_owned)
+                        .ok_or_else(|| CliError::InternalError {
+                            message: format!(
+                                "coordinate artifact '{}' has no portable UTF-8 filename",
+                                artifact.display()
+                            ),
+                        })
+                })
+                .collect::<Result<Vec<_>, CliError>>()?;
+            Ok(serde_json::json!({
+                "coordinate_id": coordinate.identity.id,
+                "ordinal": coordinate.identity.ordinal,
+                "tag": coordinate.identity.tag,
+                "assignment": coordinate.identity.assignment,
+                "artifacts": artifacts,
+            }))
+        })
+        .collect::<Result<Vec<_>, CliError>>()?;
+    let document = serde_json::json!({
+        "schema_version": 1,
+        "kind": "axis_coordinate_set",
+        "deck": args.input.display().to_string(),
+        "axes": plan
+            .axes()
+            .iter()
+            .map(|axis| match axis.kind() {
+                AxisKind::Temperature => "temperature".to_string(),
+                AxisKind::Step => "step".to_string(),
+                other => format!("{other:?}").to_ascii_lowercase(),
+            })
+            .collect::<Vec<_>>(),
+        "coordinate_count": coordinates.len(),
+        "coordinates": coordinate_documents,
+    });
+    let text = serde_json::to_string_pretty(&document)
+        .map_err(|error| CliError::output_json_error(path, error))?
+        + "\n";
+    publish::set_manifest(path, |writer| {
+        writer
+            .write_all(text.as_bytes())
+            .map_err(|error| CliError::output_error(path, error))
+    })
+    .map_err(|error| map_atomic_output_error(path, error))
 }
 
 /// Run one concrete deck (all of its analyses) and assemble its report.

@@ -8827,169 +8827,67 @@ fn read_checkpoint_file_limited_with_abort(
     Ok(bytes)
 }
 
-struct TemporaryCheckpoint {
-    path: std::path::PathBuf,
-    armed: bool,
-}
-
-impl Drop for TemporaryCheckpoint {
-    fn drop(&mut self) {
-        if self.armed {
-            let _ = std::fs::remove_file(&self.path);
-        }
-    }
-}
-
-fn write_and_close(mut file: std::fs::File, bytes: &[u8]) -> std::io::Result<()> {
+/// Publish checkpoint bytes through the shared transactional artifact writer.
+///
+/// A checkpoint destination has one rule the general writer does not: a
+/// directory is refused up front, so a resume-namespace mistake fails with a
+/// checkpoint diagnostic instead of a platform rename error. The rule is
+/// rechecked after the bytes are staged and synchronized, immediately before
+/// the destination entry is replaced.
+fn atomic_write_checkpoint(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write as _;
 
-    file.write_all(bytes)?;
-    file.flush()?;
-    file.sync_all()
-}
-
-fn atomic_write_checkpoint(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
-    use std::sync::atomic::{AtomicU64, Ordering};
-
-    static NEXT_TEMPORARY: AtomicU64 = AtomicU64::new(0);
+    reject_checkpoint_destination(path)?;
+    let mut staged = rspice_output::AtomicArtifactFile::prepare(path)
+        .map_err(rspice_output::AtomicArtifactError::into_io_error)?;
+    staged.write_all(bytes)?;
+    let staged = staged
+        .prepare_for_commit()
+        .map_err(rspice_output::AtomicArtifactError::into_io_error)?;
 
     reject_checkpoint_destination(path)?;
-    let parent = path.parent().unwrap_or_else(|| std::path::Path::new("."));
-    let file_name = path.file_name().ok_or_else(|| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "checkpoint path has no file name",
-        )
-    })?;
-
-    let mut opened = None;
-    for _ in 0..128 {
-        let sequence = NEXT_TEMPORARY.fetch_add(1, Ordering::Relaxed);
-        let mut temporary_name = file_name.to_os_string();
-        temporary_name.push(format!(
-            ".rspice-checkpoint.tmp.{}.{sequence}",
-            std::process::id()
-        ));
-        let temporary_path = parent.join(temporary_name);
-        match std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temporary_path)
-        {
-            Ok(file) => {
-                opened = Some((temporary_path, file));
-                break;
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(error) => return Err(error),
-        }
-    }
-    let (temporary_path, file) = opened.ok_or_else(|| {
-        std::io::Error::new(
-            std::io::ErrorKind::AlreadyExists,
-            "could not allocate a unique checkpoint temporary file",
-        )
-    })?;
-    let mut guard = TemporaryCheckpoint {
-        path: temporary_path.clone(),
-        armed: true,
-    };
-
-    // Consumed so the handle is closed before the rename: Windows refuses to
-    // replace a file that is still open.
-    write_and_close(file, bytes)?;
-
-    // Recheck immediately before replacing the namespace entry. Rename and
-    // MoveFileEx replace a racing symlink itself; checkpoint bytes are never
-    // opened through the destination.
-    reject_checkpoint_destination(path)?;
-    replace_checkpoint_atomically(&temporary_path, path)?;
-    guard.armed = false;
-    Ok(())
+    staged
+        .commit()
+        .map_err(rspice_output::AtomicArtifactError::into_io_error)
 }
 
+/// Publish checkpoint bytes with cooperative cancellation.
+///
+/// Cancellation is honored between chunks and once more before the
+/// destination entry is replaced. Returning early drops the staging file, so
+/// a cancelled save leaves the previous checkpoint byte-identical.
 fn atomic_write_checkpoint_with_abort(
     path: &std::path::Path,
     bytes: &[u8],
     abort: &dyn AbortSignal,
 ) -> Result<(), AbortableCheckpointIoError> {
     use std::io::Write as _;
-    use std::sync::atomic::{AtomicU64, Ordering};
 
-    static NEXT_ABORTABLE_TEMPORARY: AtomicU64 = AtomicU64::new(0);
+    fn io_error(error: impl std::fmt::Display) -> AbortableCheckpointIoError {
+        AbortableCheckpointIoError::Io(error.to_string())
+    }
 
     if abort.is_aborted() {
         return Err(AbortableCheckpointIoError::Aborted);
     }
-    reject_checkpoint_destination(path)
-        .map_err(|error| AbortableCheckpointIoError::Io(error.to_string()))?;
-    let parent = path.parent().unwrap_or_else(|| std::path::Path::new("."));
-    let file_name = path.file_name().ok_or_else(|| {
-        AbortableCheckpointIoError::Io("checkpoint path has no file name".to_string())
-    })?;
-
-    let mut opened = None;
-    for _ in 0..128 {
+    reject_checkpoint_destination(path).map_err(io_error)?;
+    let mut staged = rspice_output::AtomicArtifactFile::prepare(path).map_err(io_error)?;
+    for chunk in bytes.chunks(CHECKPOINT_IO_CHUNK_BYTES) {
         if abort.is_aborted() {
             return Err(AbortableCheckpointIoError::Aborted);
         }
-        let sequence = NEXT_ABORTABLE_TEMPORARY.fetch_add(1, Ordering::Relaxed);
-        let mut temporary_name = file_name.to_os_string();
-        temporary_name.push(format!(
-            ".rspice-checkpoint.tmp.{}.{sequence}",
-            std::process::id()
-        ));
-        let temporary_path = parent.join(temporary_name);
-        match std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temporary_path)
-        {
-            Ok(file) => {
-                opened = Some((temporary_path, file));
-                break;
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(error) => return Err(AbortableCheckpointIoError::Io(error.to_string())),
-        }
+        staged.write_all(chunk).map_err(io_error)?;
     }
-    let (temporary_path, file) = opened.ok_or_else(|| {
-        AbortableCheckpointIoError::Io(
-            "could not allocate a unique checkpoint temporary file".to_string(),
-        )
-    })?;
-    let mut guard = TemporaryCheckpoint {
-        path: temporary_path.clone(),
-        armed: true,
-    };
-
-    // Keep the handle in a lexical scope so it is closed before the atomic
-    // replacement on Windows without an explicit `drop` that is meaningless
-    // for the wasm filesystem stub.
-    {
-        let mut file = file;
-        for chunk in bytes.chunks(CHECKPOINT_IO_CHUNK_BYTES) {
-            if abort.is_aborted() {
-                return Err(AbortableCheckpointIoError::Aborted);
-            }
-            file.write_all(chunk)
-                .map_err(|error| AbortableCheckpointIoError::Io(error.to_string()))?;
-        }
-        file.flush()
-            .map_err(|error| AbortableCheckpointIoError::Io(error.to_string()))?;
-        file.sync_all()
-            .map_err(|error| AbortableCheckpointIoError::Io(error.to_string()))?;
+    if abort.is_aborted() {
+        return Err(AbortableCheckpointIoError::Aborted);
     }
+    let staged = staged.prepare_for_commit().map_err(io_error)?;
 
     if abort.is_aborted() {
         return Err(AbortableCheckpointIoError::Aborted);
     }
-    reject_checkpoint_destination(path)
-        .map_err(|error| AbortableCheckpointIoError::Io(error.to_string()))?;
-    replace_checkpoint_atomically(&temporary_path, path)
-        .map_err(|error| AbortableCheckpointIoError::Io(error.to_string()))?;
-    guard.armed = false;
-    Ok(())
+    reject_checkpoint_destination(path).map_err(io_error)?;
+    staged.commit().map_err(io_error)
 }
 
 fn reject_checkpoint_destination(path: &std::path::Path) -> std::io::Result<()> {
@@ -9010,51 +8908,6 @@ fn reject_checkpoint_destination(path: &std::path::Path) -> std::io::Result<()> 
         Err(error) => Err(error),
     }
 }
-
-#[cfg(not(windows))]
-fn replace_checkpoint_atomically(
-    from: &std::path::Path,
-    to: &std::path::Path,
-) -> std::io::Result<()> {
-    std::fs::rename(from, to)?;
-    std::fs::File::open(to.parent().unwrap_or_else(|| std::path::Path::new(".")))?.sync_all()
-}
-
-#[cfg(windows)]
-fn replace_checkpoint_atomically(
-    from: &std::path::Path,
-    to: &std::path::Path,
-) -> std::io::Result<()> {
-    use std::os::windows::ffi::OsStrExt as _;
-    use windows_sys::Win32::Storage::FileSystem::{
-        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
-    };
-
-    let from_wide = from
-        .as_os_str()
-        .encode_wide()
-        .chain(Some(0))
-        .collect::<Vec<_>>();
-    let to_wide = to
-        .as_os_str()
-        .encode_wide()
-        .chain(Some(0))
-        .collect::<Vec<_>>();
-    // SAFETY: both paths are NUL-terminated for the duration of the call.
-    let result = unsafe {
-        MoveFileExW(
-            from_wide.as_ptr(),
-            to_wide.as_ptr(),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-        )
-    };
-    if result == 0 {
-        Err(std::io::Error::last_os_error())
-    } else {
-        Ok(())
-    }
-}
-
 fn netlist_has_xspice(netlist: &Netlist) -> bool {
     netlist
         .elements

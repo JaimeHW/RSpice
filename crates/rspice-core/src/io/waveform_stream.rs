@@ -35,7 +35,7 @@
 
 use crate::Value;
 use crate::resource::{ResourceKind, ResourceLimitError, ResourceLimits, ResourceReadError};
-use rspice_output::{AtomicArtifactError, AtomicArtifactFile, AtomicArtifactOptions, Durability};
+use rspice_output::{AtomicArtifactError, AtomicArtifactFile};
 use std::io::{self, BufWriter, Seek, SeekFrom, Write};
 use std::path::Path;
 use thiserror::Error;
@@ -251,11 +251,8 @@ impl StreamingWaveformWriter {
         // Validation and memory reservation intentionally precede staging-file
         // creation. The destination is not changed until `finalize` publishes
         // a complete, synchronized artifact.
-        let artifact = AtomicArtifactFile::prepare(
-            path.as_ref(),
-            AtomicArtifactOptions::new(Durability::SyncFileAndParent),
-        )
-        .map_err(atomic_artifact_io_error)?;
+        let artifact =
+            AtomicArtifactFile::prepare(path.as_ref()).map_err(atomic_artifact_io_error)?;
         let writer = BufWriter::with_capacity(65_536, artifact);
         let mut this = Self {
             writer: Some(writer),

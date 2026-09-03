@@ -6,7 +6,7 @@
 //! - JSON/CSV for measurement results
 
 use crate::cli::{CliError, map_atomic_output_error};
-use rspice_output::{AtomicArtifactOptions, Durability, write_atomic};
+use crate::commands::publish;
 use std::fmt;
 use std::io::Write;
 use std::path::Path;
@@ -528,12 +528,7 @@ fn write_buffered_atomic(
     path: &Path,
     write: impl FnOnce(&mut dyn Write) -> Result<(), CliError>,
 ) -> Result<(), CliError> {
-    write_atomic(
-        path,
-        AtomicArtifactOptions::new(Durability::SyncFileAndParent),
-        write,
-    )
-    .map_err(|error| map_atomic_output_error(path, error))
+    publish::artifact(path, write).map_err(|error| map_atomic_output_error(path, error))
 }
 
 /// Quote a CSV field if it contains separators, quotes, or newlines

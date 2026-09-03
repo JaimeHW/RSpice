@@ -21,7 +21,7 @@
 //! ```
 
 use crate::Value;
-use rspice_output::{AtomicArtifactError, AtomicArtifactOptions, Durability, write_atomic};
+use rspice_output::{AtomicArtifactError, write_atomic};
 use std::io::{self, Write};
 use std::path::Path;
 
@@ -263,22 +263,7 @@ fn publish_raw_file(
     destination: &Path,
     write: impl FnOnce(&mut dyn Write) -> io::Result<()>,
 ) -> io::Result<()> {
-    write_atomic(
-        destination,
-        AtomicArtifactOptions::new(Durability::SyncFileAndParent),
-        write,
-    )
-    .map_err(atomic_artifact_io_error)
-}
-
-fn atomic_artifact_io_error(error: AtomicArtifactError<io::Error>) -> io::Error {
-    let kind = match &error {
-        AtomicArtifactError::Prepare(source) | AtomicArtifactError::Write(source) => source.kind(),
-        AtomicArtifactError::Flush { source, .. } | AtomicArtifactError::Commit { source, .. } => {
-            source.kind()
-        }
-    };
-    io::Error::new(kind, error)
+    write_atomic(destination, write).map_err(AtomicArtifactError::into_io_error)
 }
 
 fn invalid_data(message: impl Into<String>) -> io::Error {

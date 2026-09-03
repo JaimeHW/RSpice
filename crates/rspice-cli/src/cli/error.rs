@@ -369,22 +369,7 @@ pub(crate) fn map_atomic_output_error(
         AtomicArtifactError::Write(error) => error,
         AtomicArtifactError::Prepare(error) => atomic_output_io_error(path, "preparation", error),
         AtomicArtifactError::Flush { source, .. } => atomic_output_io_error(path, "flush", source),
-        AtomicArtifactError::Commit {
-            source,
-            recovery_path,
-            ..
-        } => {
-            let source = if let Some(recovery_path) = recovery_path {
-                std::io::Error::new(
-                    source.kind(),
-                    format!(
-                        "{source}; complete staging artifact retained at {}",
-                        recovery_path.display()
-                    ),
-                )
-            } else {
-                source
-            };
+        AtomicArtifactError::Commit { source, .. } => {
             atomic_output_io_error(path, "commit", source)
         }
     }

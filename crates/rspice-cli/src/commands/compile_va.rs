@@ -3,7 +3,7 @@
 //! Compiles Verilog-A model files and displays model information.
 
 use crate::cli::{CliError, CompileVaArgs, Config, map_atomic_output_error};
-use rspice_output::{AtomicArtifactOptions, Durability, write_atomic};
+use crate::commands::publish;
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 
 /// Execute the compile-va command
@@ -132,15 +132,11 @@ pub fn execute(
         let text = serde_json::to_string_pretty(&json)
             .map_err(|e| CliError::output_json_error(output_path, e))?;
         let document = text + "\n";
-        write_atomic(
-            output_path,
-            AtomicArtifactOptions::new(Durability::SyncFileAndParent),
-            |writer| {
-                writer
-                    .write_all(document.as_bytes())
-                    .map_err(|error| CliError::output_error(output_path, error))
-            },
-        )
+        publish::artifact(output_path, |writer| {
+            writer
+                .write_all(document.as_bytes())
+                .map_err(|error| CliError::output_error(output_path, error))
+        })
         .map_err(|error| map_atomic_output_error(output_path, error))?;
         println!("Interface summary written to: {}", output_path.display());
     }
