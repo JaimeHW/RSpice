@@ -9863,15 +9863,18 @@ impl Engine {
                     let zero_length_pass_through = model_params
                         .map(|params| params.is_zero_length_rc_rg())
                         .unwrap_or(false);
+                    let finite_rg_ltra = model_params
+                        .map(|params| params.is_finite_rg())
+                        .unwrap_or(false);
                     let attenuation = model_params.and_then(|p| {
-                        if txl_lossless_branch || finite_rc_ltra {
+                        if txl_lossless_branch || finite_rc_ltra || finite_rg_ltra {
                             None
                         } else {
                             tline_model_attenuation(p, z0_eff)
                         }
                     });
                     let loss_time_constant = model_params.and_then(|p| {
-                        if txl_lossless_branch || finite_rc_ltra {
+                        if txl_lossless_branch || finite_rc_ltra || finite_rg_ltra {
                             None
                         } else {
                             tline_model_loss_time_constant(p)
@@ -9902,6 +9905,30 @@ impl Engine {
                             Some(r * len)
                         })
                         .unwrap_or(0.0);
+                    // An RG line's ABCD parameters are real constants, so they
+                    // are resolved once here: a nonrepresentable R/G/LEN
+                    // combination must fail before any instance exists rather
+                    // than at the first stamp.
+                    let rg_two_port = match model_params.filter(|params| params.is_finite_rg()) {
+                        Some(params) => {
+                            let (Some(r), Some(g), Some(len)) = (params.r, params.g, params.len)
+                            else {
+                                return Err(SimulationError::Circuit(format!(
+                                    "Transmission line '{}' selects a finite-length RG model without complete R/G/LEN parameters",
+                                    element.name
+                                )));
+                            };
+                            Some(crate::device::LtraRgTwoPort::try_new(r, g, len).map_err(
+                                |reason| {
+                                    SimulationError::Circuit(format!(
+                                        "Transmission line '{}': {reason}",
+                                        element.name
+                                    ))
+                                },
+                            )?)
+                        }
+                        None => None,
+                    };
                     let push_tline = |circuit: &mut CircuitData,
                                       name: String,
                                       p1p: usize,
@@ -10017,6 +10044,12 @@ impl Engine {
                             let branch1 = circuit.allocate_branch_named(&format!("{}#ibr1", name));
                             let branch2 = circuit.allocate_branch_named(&format!("{}#ibr2", name));
                             tline.set_zero_length_branch_ordinals(branch1, branch2);
+                        }
+                        if let Some(two_port) = rg_two_port {
+                            tline.set_ltra_rg_two_port(two_port);
+                            let branch1 = circuit.allocate_branch_named(&format!("{}#ibr1", name));
+                            let branch2 = circuit.allocate_branch_named(&format!("{}#ibr2", name));
+                            tline.set_rg_branch_ordinals(branch1, branch2);
                         }
                         if let Some(att) = attenuation {
                             tline.set_attenuation(att);

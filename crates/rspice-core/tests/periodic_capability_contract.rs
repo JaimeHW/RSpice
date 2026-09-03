@@ -342,7 +342,7 @@ r2 out 0 50
         "the dynamic-state preflight must own this rejection: {message}"
     );
     assert!(
-        message.contains("irrational") && message.contains("scalar transmission lines"),
+        message.contains("irrational") && message.contains("transmission line 'T1'"),
         "the rejection must name the missing dynamic-state capability: {message}"
     );
 }

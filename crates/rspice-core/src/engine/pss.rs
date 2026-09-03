@@ -3105,6 +3105,18 @@ impl Engine {
             .update_transient_rhs(rhs, t_next, |br_ordinal| num_nodes + br_ordinal);
         circuit.current_sources.update_transient_rhs(rhs, t_next);
 
+        // Memoryless transmission lines: the LEN=0 ideal through connection
+        // and the finite-length RG two-port both load a constant matrix with
+        // no history term, so the shooting period map integrates them exactly.
+        // Lines with propagation delay own retained history the period map
+        // cannot carry and are refused by their declared `PssStateMap`
+        // capability before reaching here.
+        for tline in &circuit.tlines {
+            if tline.is_memoryless_two_port() {
+                Self::stamp_tline_companions_for_memoryless_line(matrix, rhs, tline);
+            }
+        }
+
         // Reuse the transient capacitor companion so shooting PSS has exactly
         // the same branch-current convention and numerical scaling as TRAN.
         circuit

@@ -79,7 +79,7 @@ pub use sources::{CurrentSource, VoltageSource};
 pub use switch::{CurrentSwitch, GenericSwitch, SwitchState, VoltageSwitch};
 pub use traits::*;
 pub(crate) use transmission_line::{
-    DISTRIBUTED_RLC_COMPACT_ABSTOL_DEFAULT, DISTRIBUTED_RLC_COMPACT_RELTOL_DEFAULT,
+    DISTRIBUTED_RLC_COMPACT_ABSTOL_DEFAULT, DISTRIBUTED_RLC_COMPACT_RELTOL_DEFAULT, LtraRgTwoPort,
     TransmissionLineCheckpoint,
 };
 pub use transmission_line::{LossyTransmissionLine, TransmissionLine};

@@ -29,6 +29,81 @@ pub(crate) struct TransmissionLineCheckpoint {
     pub(crate) current_time: Value,
 }
 
+/// Exact two-port coefficients of a finite-length RG line (`R > 0`, `G > 0`,
+/// `L = C = 0`), ngspice's `LTRA_MOD_RG` and Xyce's `N_DEV_LTRA` RG case.
+///
+/// The line is memoryless: with no reactance the propagation constant
+/// `gamma = sqrt(R*G)` and characteristic impedance `Z0 = sqrt(R/G)` are real
+/// and frequency independent, so the same ABCD parameters describe the line in
+/// DC, AC, transient and every periodic analysis. `A = D = cosh(theta)`,
+/// `B = Z0*sinh(theta)` and `C = sinh(theta)/Z0` for `theta = len*sqrt(R*G)`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct LtraRgTwoPort {
+    /// `A = D = cosh(theta)`.
+    pub(crate) cosh_theta: Value,
+    /// `B = Z0*sinh(theta)`, the open-circuit transfer impedance (ohms).
+    pub(crate) transfer_impedance: Value,
+    /// `C = sinh(theta)/Z0`, the short-circuit transfer admittance (siemens).
+    pub(crate) transfer_admittance: Value,
+}
+
+impl LtraRgTwoPort {
+    /// Build the coefficients from per-unit-length `R`, `G` and a length.
+    ///
+    /// `B` and `C` are evaluated as `R*len*sinhc(theta)` and
+    /// `G*len*sinhc(theta)` rather than as `sqrt(R/G)*sinh(theta)`. The two
+    /// forms are algebraically identical, but the product form never divides
+    /// one per-unit-length parameter by the other, so it stays exact for the
+    /// extreme `R/G` ratios where ngspice substitutes its `1e-10` cutoff.
+    pub(crate) fn try_new(r: Value, g: Value, len: Value) -> Result<Self, String> {
+        if !r.is_finite() || r <= 0.0 {
+            return Err(format!("RG line requires a finite positive R, got {r}"));
+        }
+        if !g.is_finite() || g <= 0.0 {
+            return Err(format!("RG line requires a finite positive G, got {g}"));
+        }
+        if !len.is_finite() || len <= 0.0 {
+            return Err(format!(
+                "RG line requires a finite positive length, got {len}"
+            ));
+        }
+        let theta = len * (r * g).sqrt();
+        if !theta.is_finite() {
+            return Err(format!(
+                "RG line propagation constant len*sqrt(R*G) is not representable for R={r}, G={g}, LEN={len}"
+            ));
+        }
+        let cosh_theta = theta.cosh();
+        // sinh(theta)/theta, continuous at theta = 0 and evaluated without a
+        // catastrophic cancellation for the small-theta lines that dominate
+        // practical RG cards.
+        let sinhc = if theta == 0.0 {
+            1.0
+        } else {
+            theta.sinh() / theta
+        };
+        let transfer_impedance = r * len * sinhc;
+        let transfer_admittance = g * len * sinhc;
+        if !cosh_theta.is_finite()
+            || !transfer_impedance.is_finite()
+            || !transfer_admittance.is_finite()
+            || cosh_theta < 1.0
+            || transfer_impedance <= 0.0
+            || transfer_admittance <= 0.0
+        {
+            return Err(format!(
+                "RG line two-port coefficients are not representable for R={r}, G={g}, LEN={len} \
+                 (cosh={cosh_theta}, B={transfer_impedance}, C={transfer_admittance})"
+            ));
+        }
+        Ok(Self {
+            cosh_theta,
+            transfer_impedance,
+            transfer_admittance,
+        })
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DelayedInterpolationMode {
     Linear,
@@ -125,6 +200,10 @@ pub struct TransmissionLine {
     zero_length_pass_through: bool,
     /// Branch-current ordinals reserved for the zero-length through case.
     zero_length_branch_ordinals: Option<(NodeId, NodeId)>,
+    /// Exact coefficients of a finite-length memoryless RG line.
+    ltra_rg: Option<LtraRgTwoPort>,
+    /// Branch-current ordinals reserved for the RG two-port.
+    rg_branch_ordinals: Option<(NodeId, NodeId)>,
 
     /// Current simulation time
     current_time: Value,
@@ -569,6 +648,8 @@ impl TransmissionLine {
             ltra_branch_ordinals: None,
             zero_length_pass_through: false,
             zero_length_branch_ordinals: None,
+            ltra_rg: None,
+            rg_branch_ordinals: None,
             current_time: 0.0,
         }
     }
@@ -657,6 +738,57 @@ impl TransmissionLine {
     pub fn zero_length_branch_matrix_indices(&self) -> Option<(NodeId, NodeId)> {
         self.zero_length_pass_through.then_some(())?;
         self.zero_length_branch_ordinals?;
+        Some((self.branch1?, self.branch2?))
+    }
+
+    /// Configure the exact finite-length RG two-port from its model card.
+    ///
+    /// An RG line has no reactance and therefore no propagation history: the
+    /// delayed-wave and distributed kernels are cleared so nothing else can
+    /// claim this instance.
+    pub(crate) fn set_ltra_rg_two_port(&mut self, two_port: LtraRgTwoPort) {
+        self.ltra_rg = Some(two_port);
+        self.txl = None;
+        self.distributed_rlc = None;
+        self.distributed_rc = None;
+        self.distributed_rlc_cache.set(None);
+        self.zero_length_pass_through = false;
+    }
+
+    /// The exact RG two-port coefficients, if this line is an RG line.
+    #[inline]
+    pub(crate) fn ltra_rg_two_port(&self) -> Option<LtraRgTwoPort> {
+        self.ltra_rg
+    }
+
+    /// Whether this line's branch equations are frequency independent and
+    /// carry no propagation history.
+    ///
+    /// Both memoryless cases answer the same question for every analysis that
+    /// must know whether a line contributes retained state: the `LEN=0`
+    /// ideal-through special case and the finite-length RG line.
+    #[inline]
+    pub(crate) fn is_memoryless_two_port(&self) -> bool {
+        self.zero_length_pass_through || self.ltra_rg.is_some()
+    }
+
+    /// Set branch ordinals for the RG two-port.
+    pub(crate) fn set_rg_branch_ordinals(&mut self, branch1: NodeId, branch2: NodeId) {
+        self.rg_branch_ordinals = Some((branch1, branch2));
+    }
+
+    /// Return RG two-port branch ordinals, if configured.
+    #[inline]
+    pub(crate) fn rg_branch_ordinals(&self) -> Option<(NodeId, NodeId)> {
+        self.ltra_rg.as_ref()?;
+        self.rg_branch_ordinals
+    }
+
+    /// Return linked RG two-port branch matrix indices.
+    #[inline]
+    pub(crate) fn rg_branch_matrix_indices(&self) -> Option<(NodeId, NodeId)> {
+        self.ltra_rg.as_ref()?;
+        self.rg_branch_ordinals?;
         Some((self.branch1?, self.branch2?))
     }
 

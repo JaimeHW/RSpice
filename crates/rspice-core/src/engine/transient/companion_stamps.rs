@@ -426,6 +426,48 @@ impl Engine {
         rhs[br2 - 1] = 0.0;
     }
 
+    /// Stamp the exact memoryless RG two-port for one transient candidate.
+    ///
+    /// The RG line carries no propagation history: ngspice loads the same
+    /// constant matrix on every call, DC and transient alike, and never writes
+    /// its RHS. Reproducing that here keeps the transient answer identical to
+    /// the operating point for a static excitation.
+    #[inline]
+    pub(super) fn stamp_rg_branch_runtime(
+        matrix: &mut crate::solver::StaticMatrix,
+        rhs: &mut [Value],
+        tl: &crate::device::TransmissionLine,
+    ) {
+        let (Some((br1, br2)), Some(two_port)) =
+            (tl.rg_branch_matrix_indices(), tl.ltra_rg_two_port())
+        else {
+            return;
+        };
+
+        Self::stamp_txl_branch_kcl(matrix, tl.node1_pos, tl.node1_neg, br1, 1.0);
+        Self::stamp_txl_branch_kcl(matrix, tl.node2_pos, tl.node2_neg, br2, 1.0);
+        Self::stamp_txl_voltage_row(matrix, br1, tl.node1_pos, tl.node1_neg, 1.0);
+        Self::stamp_txl_voltage_row(
+            matrix,
+            br1,
+            tl.node2_pos,
+            tl.node2_neg,
+            -two_port.cosh_theta,
+        );
+        matrix.add(br1 - 1, br2 - 1, two_port.transfer_impedance);
+        Self::stamp_txl_voltage_row(
+            matrix,
+            br2,
+            tl.node2_pos,
+            tl.node2_neg,
+            -two_port.transfer_admittance,
+        );
+        matrix.add(br2 - 1, br1 - 1, 1.0);
+        matrix.add(br2 - 1, br2 - 1, two_port.cosh_theta);
+        rhs[br1 - 1] = 0.0;
+        rhs[br2 - 1] = 0.0;
+    }
+
     #[inline]
     pub(crate) fn stamp_tline_branch_topology(
         triplets: &mut Vec<(usize, usize, Value)>,

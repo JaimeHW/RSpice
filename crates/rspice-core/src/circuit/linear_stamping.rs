@@ -178,6 +178,10 @@ impl CircuitData {
                 self.stamp_zero_length_branch_dc_direct(matrix, tl);
                 continue;
             }
+            if tl.rg_branch_ordinals().is_some() {
+                self.stamp_rg_branch_direct(matrix, tl);
+                continue;
+            }
             if tl.ltra_branch_ordinals().is_some() {
                 self.stamp_ltra_branch_dc_direct(matrix, tl);
                 continue;
@@ -258,6 +262,10 @@ impl CircuitData {
                 self.stamp_zero_length_branch_dc(matrix, tl);
                 continue;
             }
+            if tl.rg_branch_ordinals().is_some() {
+                self.stamp_rg_branch_triplet(matrix, tl);
+                continue;
+            }
             if tl.ltra_branch_ordinals().is_some() {
                 self.stamp_ltra_branch_dc(matrix, tl);
                 continue;
@@ -322,6 +330,106 @@ impl CircuitData {
             -1.0,
         );
         matrix.add(br2 - 1, br1 - 1, -r_series);
+    }
+
+    /// Stamp the exact memoryless RG two-port on its reserved branch rows.
+    ///
+    /// With `A = cosh(theta)`, `B = Z0*sinh(theta)` and `C = sinh(theta)/Z0`
+    /// for `theta = len*sqrt(R*G)`, and with both branch currents defined as
+    /// entering the device at their positive terminals (ngspice `ltraload.c`
+    /// `LTRA_MOD_RG`, Xyce `N_DEV_LTRA`):
+    ///
+    /// ```text
+    /// row ibr1:  V1 - A*V2 + B*I2 = 0
+    /// row ibr2:  I1 + A*I2 - C*V2 = 0
+    /// KCL:       node1 += I1, node2 += I2
+    /// ```
+    ///
+    /// The coefficients are real and frequency independent, so this identical
+    /// stamp is the DC, transient and small-signal load. RSpice omits
+    /// ngspice's `(1 + GMIN)` scaling of `B` and `C`: that is a matrix
+    /// conditioning hack on a nonsingular two-port, and applying it would make
+    /// the physical answer depend on a solver option.
+    #[inline]
+    fn stamp_rg_branch_direct(
+        &self,
+        matrix: &mut StaticMatrix,
+        tl: &crate::device::TransmissionLine,
+    ) {
+        let (Some((br1_ordinal, br2_ordinal)), Some(two_port)) =
+            (tl.rg_branch_ordinals(), tl.ltra_rg_two_port())
+        else {
+            return;
+        };
+        let br1 = self.get_branch_matrix_index(br1_ordinal);
+        let br2 = self.get_branch_matrix_index(br2_ordinal);
+
+        Self::stamp_branch_kcl_direct(matrix, tl.node1_pos, tl.node1_neg, br1, 1.0);
+        Self::stamp_branch_kcl_direct(matrix, tl.node2_pos, tl.node2_neg, br2, 1.0);
+        Self::stamp_branch_voltage_row_direct(
+            matrix,
+            br1,
+            tl.node1_pos,
+            tl.node1_neg,
+            tl.node2_pos,
+            tl.node2_neg,
+            1.0,
+            -two_port.cosh_theta,
+        );
+        matrix.add(br1 - 1, br2 - 1, two_port.transfer_impedance);
+        Self::stamp_branch_voltage_row_direct(
+            matrix,
+            br2,
+            tl.node2_pos,
+            tl.node2_neg,
+            0,
+            0,
+            -two_port.transfer_admittance,
+            0.0,
+        );
+        matrix.add(br2 - 1, br1 - 1, 1.0);
+        matrix.add(br2 - 1, br2 - 1, two_port.cosh_theta);
+    }
+
+    #[inline]
+    fn stamp_rg_branch_triplet(
+        &self,
+        matrix: &mut TripletMatrix,
+        tl: &crate::device::TransmissionLine,
+    ) {
+        let (Some((br1_ordinal, br2_ordinal)), Some(two_port)) =
+            (tl.rg_branch_ordinals(), tl.ltra_rg_two_port())
+        else {
+            return;
+        };
+        let br1 = self.get_branch_matrix_index(br1_ordinal);
+        let br2 = self.get_branch_matrix_index(br2_ordinal);
+
+        Self::stamp_branch_kcl_triplet(matrix, tl.node1_pos, tl.node1_neg, br1, 1.0);
+        Self::stamp_branch_kcl_triplet(matrix, tl.node2_pos, tl.node2_neg, br2, 1.0);
+        Self::stamp_branch_voltage_row_triplet(
+            matrix,
+            br1,
+            tl.node1_pos,
+            tl.node1_neg,
+            tl.node2_pos,
+            tl.node2_neg,
+            1.0,
+            -two_port.cosh_theta,
+        );
+        matrix.push(br1 - 1, br2 - 1, two_port.transfer_impedance);
+        Self::stamp_branch_voltage_row_triplet(
+            matrix,
+            br2,
+            tl.node2_pos,
+            tl.node2_neg,
+            0,
+            0,
+            -two_port.transfer_admittance,
+            0.0,
+        );
+        matrix.push(br2 - 1, br1 - 1, 1.0);
+        matrix.push(br2 - 1, br2 - 1, two_port.cosh_theta);
     }
 
     #[inline]

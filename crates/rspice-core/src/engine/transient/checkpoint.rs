@@ -5920,7 +5920,7 @@ impl TransientCheckpoint {
         }
         let mut restored_tlines = circuit.tlines.clone();
         for (line, state) in restored_tlines.iter_mut().zip(&self.tline_states) {
-            if line.is_zero_length_pass_through() {
+            if line.is_memoryless_two_port() {
                 if state.history_initialized
                     || state.initial_state.is_some()
                     || !state.state_history.is_empty()
@@ -5929,7 +5929,7 @@ impl TransientCheckpoint {
                     || state.current_time.to_bits() != 0.0f64.to_bits()
                 {
                     return Err(format!(
-                        "checkpoint zero-length transmission line '{}' contains noncanonical dynamic history",
+                        "checkpoint memoryless transmission line '{}' contains noncanonical dynamic history",
                         line.name
                     ));
                 }

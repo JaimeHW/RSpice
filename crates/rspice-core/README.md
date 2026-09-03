@@ -146,6 +146,21 @@ submodules; the LTRA path is checked by `tests/ltra_ac_oracle.rs`), and
 coupled multi-conductor lines (`coupled_transmission_line.rs`,
 `cpl_native.rs`).
 
+*LTRA shunt conductance.* A scalar LTRA card is classified exactly from its
+per-unit-length `R`/`L`/`G`/`C`, because those are physical densities and no
+absolute epsilon can decide whether an authored `G` is negligible over an
+arbitrary length. Four classes execute: RLC and lossless LC lines (`G = 0`),
+RC diffusion lines, the memoryless finite-length RG line (`R > 0`, `G > 0`,
+`L = C = 0`), and the `LEN = 0` RC/RG ideal-through special case. An RG line
+has no reactance, so its ABCD parameters are real constants and one
+frequency-independent two-port describes it in DC, AC, transient and the
+periodic analyses; it is admitted wherever a linear resistor is, and it
+contributes no noise source of its own, matching both reference simulators.
+**RLGC with `G != 0` is rejected.** That is a deliberate boundary, not a gap:
+neither ngspice-46 nor Xyce 7.10 implements a lossy line with both shunt
+conductance and reactance, so there is no reference semantics to match, and
+inventing one would produce numbers no oracle can qualify.
+
 **Memristors** — native Xyce `YMEMRISTOR` families: the TEAM model at
 `LEVEL=2` (`memristor_team.rs`) and the threshold-adaptive PEM model at
 `LEVEL=4` (`memristor_pem.rs`), both solving an internal state variable

@@ -967,6 +967,7 @@ impl Engine {
             .iter()
             .filter(|line| {
                 line.zero_length_branch_ordinals().is_none()
+                    && line.rg_branch_ordinals().is_none()
                     && line.ltra_branch_ordinals().is_none()
                     && line.txl_branch_ordinals().is_none()
             })

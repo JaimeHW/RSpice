@@ -571,15 +571,20 @@ pub(crate) const fn periodic_capability_descriptor(
         },
         F::TransmissionLine => PeriodicCapabilityDescriptor {
             residual_jacobian: Inapplicable,
-            dynamic_state: Absent(
-                "a delay line's descriptor is irrational and has no finite explicit state",
+            dynamic_state: Restricted(
+                "a memoryless line contributes no dynamic state at all; every line with \
+                 propagation delay has an irrational descriptor and no finite explicit state",
             ),
             small_signal: Restricted(
                 "lines with exact frequency-domain data: memoryless RG and LEN=0 through \
                  connections, LTRA RLC/RC lines, and lossless delay lines",
             ),
             noise: Inapplicable,
-            pss_state: Absent("transmission-line delay history"),
+            pss_state: Restricted(
+                "a memoryless line (finite-length RG, or the LEN=0 ideal through connection) has \
+                 no propagation history to carry; every other line's delay history is not \
+                 captured",
+            ),
             envelope: Absent(ENVELOPE_LINEAR_SUBSET),
         },
         F::CoupledTransmissionLine => PeriodicCapabilityDescriptor {
@@ -750,7 +755,7 @@ fn tline_has_exact_periodic_descriptor(line: &crate::device::TransmissionLine) -
     if line.has_txl_runtime() {
         return false;
     }
-    if line.is_zero_length_pass_through() || line.ltra_ac_total_rlc().is_some() {
+    if line.is_memoryless_two_port() || line.ltra_ac_total_rlc().is_some() {
         return true;
     }
     line.attenuation() == 1.0
@@ -764,6 +769,7 @@ fn tline_periodic_branch_ordinals(
     line: &crate::device::TransmissionLine,
 ) -> Option<(usize, usize)> {
     line.zero_length_branch_ordinals()
+        .or_else(|| line.rg_branch_ordinals())
         .or_else(|| line.ltra_branch_ordinals())
         .or_else(|| line.txl_branch_ordinals())
 }
@@ -1238,6 +1244,18 @@ pub(in crate::engine) fn pss_state_gaps(circuit: &CircuitData) -> Vec<Capability
                         ));
                     }
                 }
+                F::TransmissionLine => {
+                    if circuit
+                        .tlines
+                        .iter()
+                        .any(|line| !line.is_memoryless_two_port())
+                    {
+                        gaps.push(CapabilityGap::new(
+                            family,
+                            "transmission-line delay history",
+                        ));
+                    }
+                }
                 _ => {}
             },
         }
@@ -1338,6 +1356,16 @@ pub(in crate::engine) fn dynamic_state_descriptor_gaps(
                             gaps.push(CapabilityGap::new(
                                 family,
                                 format!("BSIM4 '{}' with ACNQSMOD=1: {condition}", dev.name),
+                            ));
+                        }
+                    }
+                }
+                F::TransmissionLine => {
+                    for line in &circuit.tlines {
+                        if !line.is_memoryless_two_port() {
+                            gaps.push(CapabilityGap::new(
+                                family,
+                                format!("transmission line '{}': {condition}", line.name),
                             ));
                         }
                     }
@@ -1503,7 +1531,11 @@ mod tests {
             F::XyceMemristor => [A, A, I, A, A, A],
             F::VoltageSwitch => [R, I, C, I, A, A],
             F::CurrentSwitch | F::GenericSwitch => [A, I, I, I, A, A],
-            F::TransmissionLine => [I, A, R, I, A, A],
+            // The dynamic-state and PSS contracts became instance conditional
+            // when the memoryless RG line gained native execution stamps: an
+            // RG line carries neither an irrational descriptor nor delay
+            // history, so it is admitted where a linear resistor is.
+            F::TransmissionLine => [I, R, R, I, R, A],
             F::CoupledTransmissionLine => [I, C, R, I, A, A],
             F::InductorCoupling | F::CoupledInductorPair | F::MultiWindingTransformer => {
                 [I, C, C, I, A, A]
