@@ -15,6 +15,8 @@ mod cfg_census;
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod cfg_mir_census;
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
+mod cfg_noise_pins;
+#[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod code_identity;
 mod model;
 mod runtime;

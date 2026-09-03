@@ -126,6 +126,33 @@ pub struct CfgNoiseProcess {
     pub psd: ValueId,
     pub exponent: Option<ValueId>,
     pub table: Vec<ValueId>,
+    /// The same magnitudes as the *site* computed them, with no exit merge over
+    /// the control flow that reached it.
+    ///
+    /// `psd` and `exponent` above are read at the exit block, so a process the
+    /// body did not reach reads back the zero its variables were seeded with —
+    /// the activation guard is folded into the magnitude. That is the right
+    /// quantity for a consumer that reads [`Self::active`] beside it, which the
+    /// generated backend does.
+    ///
+    /// An executable plan has no such field: its runtime decides a source's
+    /// activity from the injection gains, and its shipped `psd_program` is the
+    /// magnitude expression evaluated *unconditionally*. Reproducing that
+    /// number is what these are for. See
+    /// [`crate::jit::cfg_plan_builder`]'s noise slice.
+    ///
+    /// `None` for every lowering but the executable one. They are outputs, so
+    /// they are liveness roots, and a root the generated backend does not read
+    /// would still change which statements its noise schedule selects — the
+    /// forty-three checked-in devices are frozen under a `bundle_digest`.
+    pub site: Option<CfgNoiseProcessSite>,
+}
+
+/// [`CfgNoiseProcess`]'s magnitudes before the exit merge.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CfgNoiseProcessSite {
+    pub psd: ValueId,
+    pub exponent: Option<ValueId>,
 }
 
 impl CfgModel {
@@ -236,17 +263,31 @@ fn resolve_noise(pending: Vec<PendingNoise>, outputs: &[ValueId]) -> Vec<CfgNois
     sources
 }
 
+/// Re-attach each process to its values once finishing has renumbered them.
+///
+/// `outputs` is every process's variables in `variables()` order, then every
+/// process's site values in `site_values()` order — two runs rather than one
+/// interleaving, because the site values are only present for one lowering
+/// mode and splicing them in per process would make the two walks disagree the
+/// moment one of them forgot the flag.
 fn resolve_noise_processes(
     pending: Vec<PendingNoiseProcess>,
     outputs: &[ValueId],
+    site_outputs: &[ValueId],
 ) -> Vec<CfgNoiseProcess> {
     let mut next = outputs.iter().copied();
+    let mut next_site = site_outputs.iter().copied();
     pending
         .into_iter()
         .map(|process| {
             let mut take = || {
                 next.next()
                     .expect("an output for every noise-process variable")
+            };
+            let mut take_site = || {
+                next_site
+                    .next()
+                    .expect("an output for every noise-process site value")
             };
             CfgNoiseProcess {
                 process_id: process.process_id,
@@ -257,6 +298,10 @@ fn resolve_noise_processes(
                 psd: take(),
                 exponent: process.exponent.map(|_| take()),
                 table: process.table.iter().map(|_| take()).collect(),
+                site: process.site.map(|site| CfgNoiseProcessSite {
+                    psd: take_site(),
+                    exponent: site.exponent.map(|_| take_site()),
+                }),
             }
         })
         .collect()
@@ -409,6 +454,9 @@ struct CfgLowerer<'a> {
     /// Scoped mode used only by the grouped-noise metadata slicer. It never
     /// changes ordinary canonical residual lowering or its diagnostics.
     noise_metadata_only: bool,
+    /// Whether each noise process publishes its site magnitudes as well as its
+    /// exit-merged ones. See [`CfgNoiseProcess::site`].
+    noise_site_values: bool,
     /// Whether `$port_connected` is a runtime leaf rather than the constant
     /// `1.0`. See [`CfgModel::from_hir_for_executable_backend`].
     per_instance_ports: bool,
@@ -463,6 +511,21 @@ struct PendingNoiseProcess {
     psd: CfgVariable,
     exponent: Option<CfgVariable>,
     table: Vec<CfgVariable>,
+    /// The magnitudes as the site itself computed them, before the exit merge
+    /// folded the control flow that reached the site into them.
+    ///
+    /// `None` unless [`CfgLowerMode::noise_site_values`] asked for them, which
+    /// only the executable plan does. Producing them adds liveness roots, and a
+    /// root the generated backend does not read would still change what its
+    /// schedule selection emits — see [`CfgNoiseProcess::psd_at_site`].
+    site: Option<PendingNoiseProcessSite>,
+}
+
+/// The site-block values of one process's magnitudes.
+#[derive(Debug, Clone, Copy)]
+struct PendingNoiseProcessSite {
+    psd: ValueId,
+    exponent: Option<ValueId>,
 }
 
 impl PendingNoise {
@@ -483,6 +546,14 @@ impl PendingNoiseProcess {
             .into_iter()
             .chain(self.exponent)
             .chain(self.table.iter().copied())
+    }
+
+    /// The site values this process contributes to the output list, in the
+    /// order [`resolve_noise_processes`] reads them back.
+    fn site_values(&self) -> impl Iterator<Item = ValueId> + '_ {
+        self.site
+            .into_iter()
+            .flat_map(|site| std::iter::once(site.psd).chain(site.exponent))
     }
 }
 
@@ -783,6 +854,9 @@ pub(crate) fn simparam_source_default(name: &str) -> f64 {
 struct CfgLowerMode {
     /// Lower only what raw grouped-noise metadata needs.
     noise_metadata_only: bool,
+    /// Publish each noise process's magnitudes as its own *site* computed them,
+    /// beside the exit-merged ones. See [`CfgNoiseProcess::site`].
+    noise_site_values: bool,
     /// The consumer may evaluate an instance that omits a trailing terminal,
     /// so `$port_connected` is a runtime leaf rather than the constant `1.0`.
     /// See [`CfgModel::from_hir_for_executable_backend`].
@@ -863,6 +937,7 @@ impl CfgLowerMode {
     /// it is a *fix*: today those reads compile to zero.
     const GENERATED: Self = Self {
         noise_metadata_only: false,
+        noise_site_values: false,
         per_instance_ports: false,
         lower_prologue: false,
         frozen_event_state: false,
@@ -871,6 +946,7 @@ impl CfgLowerMode {
     #[cfg(any(feature = "native", feature = "wasm-jit"))]
     const EXECUTABLE: Self = Self {
         noise_metadata_only: false,
+        noise_site_values: true,
         per_instance_ports: true,
         lower_prologue: true,
         frozen_event_state: true,
@@ -880,6 +956,7 @@ impl CfgLowerMode {
     /// part of the same frozen output, so it stays with `GENERATED` here.
     const NOISE_METADATA: Self = Self {
         noise_metadata_only: true,
+        noise_site_values: false,
         per_instance_ports: true,
         lower_prologue: false,
         frozen_event_state: false,
@@ -921,6 +998,7 @@ impl<'a> CfgLowerer<'a> {
             noise: Vec::new(),
             noise_processes: Vec::new(),
             noise_metadata_only: mode.noise_metadata_only,
+            noise_site_values: mode.noise_site_values,
             per_instance_ports: mode.per_instance_ports,
             lower_prologue: mode.lower_prologue,
             frozen_event_state: mode.frozen_event_state,
@@ -1067,6 +1145,12 @@ impl<'a> CfgLowerer<'a> {
                 outputs.push(self.builder.read_variable(variable, exit).unwrap_or(zero));
             }
         }
+        // After every variable read-back, so the split below stays a suffix
+        // whatever the mode decided. A site value is already a value of the
+        // function, so listing it here only makes it a liveness root.
+        for process in &pending_processes {
+            outputs.extend(process.site_values());
+        }
         self.builder.set_terminator(exit, CfgTerminator::Return);
 
         // Through `finish_with_outputs`, because finishing renumbers values and
@@ -1092,14 +1176,19 @@ impl<'a> CfgLowerer<'a> {
                     .iter()
                     .map(|source| source.variables().count())
                     .sum::<usize>();
-                let (noise, noise_processes) = remaining.split_at(legacy_noise_width);
+                let (noise, remaining) = remaining.split_at(legacy_noise_width);
+                let process_width = pending_processes
+                    .iter()
+                    .map(|process| process.variables().count())
+                    .sum::<usize>();
+                let (noise_processes, process_sites) = remaining.split_at(process_width);
                 Ok((
                     function,
                     residuals.to_vec(),
                     activations,
                     event_state_candidates.to_vec(),
                     resolve_noise(pending, noise),
-                    resolve_noise_processes(pending_processes, noise_processes),
+                    resolve_noise_processes(pending_processes, noise_processes, process_sites),
                 ))
             }
             Err(error) => Err(vec![IrDiagnostic::global_error(
@@ -2383,6 +2472,9 @@ impl<'a> CfgLowerer<'a> {
                 .iter()
                 .map(|_| CfgVariable::Local(self.result_variable()))
                 .collect(),
+            site: self
+                .noise_site_values
+                .then_some(PendingNoiseProcessSite { psd, exponent }),
         };
         let block = self.block;
         let one = self.real_constant(1.0);
