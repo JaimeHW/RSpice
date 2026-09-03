@@ -61,13 +61,19 @@
 //! `noise_exponents[9]` read 2.0 through MIR and 0.0 through the CFG.
 //! `bsimsoi_va`'s `noise_psd[1]` is the same shape.
 //!
-//! ## What closes it
+//! ## What closes it, and what is left
 //!
 //! The lowering now publishes each magnitude twice — merged at the exit, and as
 //! the site itself computed it — and this builder takes whichever one the
-//! shipped plan holds, read off the shipped program rather than guessed. See
-//! [`NoiseMagnitude`], which also records why the shipped route is not
-//! self-consistent about the guard and what is left over.
+//! shipped plan holds, read off the shipped program rather than guessed. On
+//! `angelov` and `angelov_gan` that makes every noise entry read the same
+//! double on both routes, thirty comparisons that were not exact before.
+//!
+//! What it does not close is the magnitude whose operands reach the shipped
+//! program through a *variable* assigned outside the guard the source sits
+//! under: `bsimsoi_va`'s `noise_psd[1]` is the case, and [`NoiseMagnitude`]
+//! names what closing it needs. The census asserts that class rather than
+//! measuring it, which is the part that matters for the flip.
 //!
 //! # All or nothing, per module
 //!
@@ -412,16 +418,37 @@ fn derivative_rule_hole(function: &CfgFunction) -> Option<CfgBinaryOp> {
 ///   NoisePwrG, 2, "gate")` sits under `case (Noimod) 1:` with `Noimod`
 ///   defaulting to 0, and its shipped exponent still reads 2.0 while the exit
 ///   read is the seeded zero. The site value is the quantity to take.
-/// * where the front end routed the operand through a variable, the shipped
-///   program is a `LoadVariable` and the slot was filled by the *noise
-///   assignment pass*, which carries the guard. The shipped magnitude is then
-///   zero exactly when the exit read is, and the exit read is the quantity to
-///   take — hoisting there would disagree in the other direction.
+/// * where the operand reaches the program through a variable, the shipped
+///   magnitude is that *slot*, filled by the noise assignment pass — and the
+///   CFG route recomputes a variable inline from the definition reaching the
+///   read, which is a different thing under a guard. Hoisting there would put a
+///   recomputed value against a slot read and disagree in the other direction,
+///   so the exit read is taken instead.
 ///
 /// So the shipped route is not self-consistent about the guard: whether it
 /// applies is decided by whether a variable happened to carry the operand. This
 /// reads that decision off the shipped program itself, which is the only place
 /// it is recorded, rather than guessing it from the source.
+///
+/// # What is left, named
+///
+/// Taking the exit read for the variable-carried case is a *conservative*
+/// choice and not a proof that the two agree there. It is exact when the
+/// variable is assigned inside the same guard — the slot then holds the zero
+/// the exit read holds — and `bsimsoi_va` is the case where it is not:
+/// `noise_psd[1]`'s operands are assigned outside the guard the source sits
+/// under, so the shipped program evaluates them to `7.19e-28` while the exit
+/// read is the seeded zero. Its cfg-mir line says `noise_hoisted=0
+/// guarded_reads=10`.
+///
+/// Closing that needs the CFG's noise cone to read a variable as the runtime
+/// *slot* rather than as its reaching definition — the `frozen_event_state`
+/// split generalized from event-controlled variables to every variable a noise
+/// magnitude reads — which is a new `CfgValueKind` and a rule for it in the
+/// derivative pass, the interpreter and the block lowering. Until then the
+/// census holds the class to its second criterion, which is what makes the
+/// difference harmless rather than merely unmeasured: see `check_guarded_noise`
+/// in [`crate::native::cfg_mir_census`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum NoiseMagnitude {
     /// The value the site computed, evaluated unconditionally.
