@@ -3043,9 +3043,7 @@ impl RegisterAllocation {
                     let (start, end) = extent(range);
                     let header = range.header();
                     for (value, position) in last_use_position.iter_mut().enumerate() {
-                        if definition_block[value] < header
-                            && *position >= start
-                            && *position < end
+                        if definition_block[value] < header && *position >= start && *position < end
                         {
                             *position = end;
                             changed = true;
