@@ -415,36 +415,51 @@ fn transient_output_time_points_project_the_export_without_truncating_the_solve(
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The compressor keeps every sample an authored `INITIAL_INTERVAL` lattice
+/// reads and fails closed if the retained grid could not reproduce those rows,
+/// so `--compress` composes with the schedule instead of being refused.
 #[test]
-fn compression_refuses_interval_output_before_solver_or_artifact_work() {
-    let dir = test_dir("compressed_interval_refusal");
-    let deck = dir.join("interval.sp");
-    let output_path = dir.join("interval.csv");
-    std::fs::write(&deck, TRAN_OUTPUT_INTERVAL_DECK).expect("write interval deck");
-    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
-        .args([
-            "--quiet",
-            "run",
-            deck.to_str().expect("deck path is UTF-8"),
-            "--compress",
-            "-o",
-            output_path.to_str().expect("output path is UTF-8"),
-            "-f",
-            "csv",
-        ])
-        .output()
-        .expect("run rspice");
+fn compression_preserves_the_authored_interval_output_lattice() {
+    let dir = test_dir("compressed_interval");
+    let uncompressed = run_export(&dir, "interval_plain", TRAN_OUTPUT_INTERVAL_DECK, "csv");
+    let compressed = run_export_with_args(
+        &dir,
+        "interval_compressed",
+        TRAN_OUTPUT_INTERVAL_DECK,
+        "csv",
+        &["--compress"],
+    );
 
-    assert_eq!(output.status.code(), Some(2));
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("INITIAL_INTERVAL") && stderr.contains("--compress"),
-        "refusal must identify the incompatible contracts: {stderr}"
+    let plain_text = std::fs::read_to_string(&uncompressed).expect("read scheduled csv");
+    let compressed_text = std::fs::read_to_string(&compressed).expect("read compressed csv");
+    assert_eq!(
+        compressed_text, plain_text,
+        "INITIAL_INTERVAL must retain its exact rows when compression is requested"
     );
+
+    // The lattice really is the authored one, not an accident of both runs
+    // being uncompressed.
+    let times = plain_text
+        .lines()
+        .skip(1)
+        .map(|line| {
+            line.split(',')
+                .next()
+                .expect("time field")
+                .parse::<f64>()
+                .expect("numeric time")
+        })
+        .collect::<Vec<_>>();
     assert!(
-        !output_path.exists(),
-        "a rejected compression/output contract must not publish an artifact"
+        times.len() > 2,
+        "interval lattice has too few rows: {times:?}"
     );
+    for pair in times.windows(2) {
+        assert!(
+            (pair[1] - pair[0] - 25.0e-6).abs() < 1.0e-12,
+            "interval lattice is not the authored 25us cadence: {times:?}"
+        );
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }
 

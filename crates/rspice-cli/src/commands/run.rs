@@ -121,6 +121,10 @@ struct RunContext<'a> {
 struct RetainedTransient {
     analysis_id: String,
     result: rspice_core::engine::TransientResult,
+    /// Typed post-process products the core evaluated on the exact accepted
+    /// trajectory. Present only for a compressed run, whose retained waveform
+    /// is decimated and therefore cannot reproduce them.
+    post_results: Option<rspice_core::engine::TransientPostResults>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -558,7 +562,7 @@ impl<'a> RunContext<'a> {
                         message: "authored transient ordinal overflowed u32".to_string(),
                     })?;
                 self.next_transient_ordinal.set(next);
-                let result = basic::run_transient(
+                let outcome = basic::run_transient(
                     self,
                     *stop,
                     *step,
@@ -568,7 +572,8 @@ impl<'a> RunContext<'a> {
                 )?;
                 self.last_transient.replace(Some(RetainedTransient {
                     analysis_id: self.current_transient_analysis_id()?,
-                    result,
+                    result: outcome.result,
+                    post_results: outcome.post_results,
                 }));
             }
             AnalysisCommand::Ac {

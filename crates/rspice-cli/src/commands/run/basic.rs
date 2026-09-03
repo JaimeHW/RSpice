@@ -508,6 +508,55 @@ fn describe_compression_error(report: &rspice_core::engine::TransientCompression
     )
 }
 
+/// Announce one compressed result's retained-point ratio and the worst
+/// reconstruction error it observed.
+fn report_compression(
+    ctx: &RunContext<'_>,
+    compressed: &rspice_core::engine::TransientResultCompressed,
+    headline: &str,
+) {
+    if ctx.quiet {
+        return;
+    }
+    println!(
+        "{headline}: {} of {} accepted points (compression ratio: {:.1}x)",
+        compressed.time.len(),
+        compressed.input_points,
+        compressed.compression_ratio
+    );
+    println!(
+        "  {}",
+        describe_compression_error(&compressed.compression_report)
+    );
+}
+
+/// Expand one compressed container into the waveform the artifact writers
+/// publish. The typed post-process products are taken from the container
+/// before this call; the expansion is only the decimated waveform.
+fn expand_compressed(
+    compressed: rspice_core::engine::TransientResultCompressed,
+    what: &str,
+) -> Result<rspice_core::engine::TransientResult, CliError> {
+    compressed
+        .try_into_transient()
+        .map_err(|message| CliError::InternalError {
+            message: format!("core returned a malformed compressed {what}: {message}"),
+        })
+}
+
+/// One completed transient, with the typed post-processing products the core
+/// evaluated on the exact accepted trajectory when the run was compressed.
+///
+/// A compressed run publishes a decimated waveform. Recomputing `.MEASURE` or
+/// `.FOUR` from it would report different numbers than the same deck without
+/// `--compress`, so the core evaluates all three before decimation and the CLI
+/// consumes those. An uncompressed run has no decimation to correct for and
+/// carries `None`.
+pub(super) struct TransientOutcome {
+    pub(super) result: rspice_core::engine::TransientResult,
+    pub(super) post_results: Option<rspice_core::engine::TransientPostResults>,
+}
+
 pub(super) fn run_transient(
     ctx: &RunContext<'_>,
     tstop: f64,
@@ -515,7 +564,7 @@ pub(super) fn run_transient(
     tstart: f64,
     max_step: Option<f64>,
     uic: bool,
-) -> Result<rspice_core::engine::TransientResult, CliError> {
+) -> Result<TransientOutcome, CliError> {
     // --tran-stop overrides the deck's stop time so checkpoint segments can
     // share byte-identical source (the checkpoint fingerprint covers it).
     let tstop = ctx.args.tran_stop.unwrap_or(tstop);
@@ -575,26 +624,9 @@ pub(super) fn run_transient(
             ".OPTIONS RESTART cannot be combined with --checkpoint or --resume; choose one restart control plane",
         ));
     }
-    if authored_restart.is_some() && ctx.compress {
-        return Err(CliError::InvalidArgument {
-            message: "--compress cannot yet preserve authored .OPTIONS RESTART output semantics"
-                .to_string(),
-            suggestion: Some("remove --compress for authored restart runs".to_string()),
-        });
-    }
 
     let checkpointing = checkpoint_path.is_some() || resume_path.is_some();
     let startup_mode = rspice_core::engine::TransientStartupMode::from_uic(uic);
-    if ctx.compress && ctx.netlist.options.output_interval_schedule.is_some() {
-        return Err(CliError::InvalidArgument {
-            message: "--compress cannot yet preserve the exact INITIAL_INTERVAL output lattice"
-                .to_string(),
-            suggestion: Some(
-                "remove --compress; OUTPUTTIMEPOINTS is supported with compression because those solver points are retained exactly"
-                    .to_string(),
-            ),
-        });
-    }
     let resolved_static_solver_ceiling = [
         Some(internal_max_step),
         Some(ctx.engine.config().max_timestep),
@@ -610,11 +642,37 @@ pub(super) fn run_transient(
         rel_tol: ctx.compress_tol,
         maximum_retained_interval: resolved_static_solver_ceiling,
     };
+    // Every compressed entry point returns the typed `.FFT`/`.FOUR`/`.MEASURE`
+    // products the core evaluated on the exact accepted trajectory, before
+    // decimation. They are carried out of this block so the publication path
+    // consumes them instead of recomputing from the decimated expansion, which
+    // is what made a compressed run report different numbers.
+    let mut post_results: Option<rspice_core::engine::TransientPostResults> = None;
     let result = if let Some(restart) = authored_restart {
         let restart_run =
             run_authored_restart(ctx, restart, tstop, internal_max_step, startup_mode, &pb);
         pb.finish_and_clear();
-        Ok(restart_run?)
+        let accepted = restart_run?;
+        if ctx.compress {
+            // The restart schedule writes its checkpoints from the accepted
+            // trajectory, so compressing the published waveform afterwards
+            // leaves every authored restart file byte-identical. This is the
+            // composition point the core documents for exactly this case.
+            let compressed = ctx
+                .engine
+                .compress_transient_result_with_abort(
+                    ctx.netlist,
+                    &accepted,
+                    &compression_config(),
+                    &crate::abort::ProcessAbort,
+                )
+                .map_err(|error| map_restart_simulation_error(ctx, error))?;
+            report_compression(ctx, &compressed, "Transient complete (compressed)");
+            post_results = Some(compressed.post_results.clone());
+            Ok(expand_compressed(compressed, "restart segment")?)
+        } else {
+            Ok(accepted)
+        }
     } else if checkpointing {
         // Segmented integration: restore the saved state (when resuming),
         // run to this segment's stop time, and persist the new state (when
@@ -717,13 +775,8 @@ pub(super) fn run_transient(
                                 describe_compression_error(&compressed.compression_report)
                             );
                         }
-                        compressed.try_into_transient().map_err(|message| {
-                            CliError::InternalError {
-                                message: format!(
-                                    "core returned a malformed compressed checkpoint segment: {message}"
-                                ),
-                            }
-                        })?
+                        post_results = Some(compressed.post_results.clone());
+                        expand_compressed(*compressed, "checkpoint segment")?
                     }
                 };
                 if let Some(ref checkpoint_path) = checkpoint_path {
@@ -760,26 +813,9 @@ pub(super) fn run_transient(
         pb.finish_and_clear();
         match result {
             Ok(compressed) => {
-                if !ctx.quiet {
-                    println!(
-                        "âœ“ Transient complete (compressed): {} points (compression ratio: {:.1}x)",
-                        compressed.time.len(),
-                        compressed.compression_ratio
-                    );
-                    println!(
-                        "  {}",
-                        describe_compression_error(&compressed.compression_report)
-                    );
-                }
-                let expanded =
-                    compressed
-                        .try_into_transient()
-                        .map_err(|message| CliError::InternalError {
-                            message: format!(
-                                "core returned a malformed compressed transient result: {message}"
-                            ),
-                        })?;
-                Ok(expanded)
+                report_compression(ctx, &compressed, "Transient complete (compressed)");
+                post_results = Some(compressed.post_results.clone());
+                Ok(expand_compressed(compressed, "transient result")?)
             }
             Err(e) => Err(e),
         }
@@ -835,15 +871,22 @@ pub(super) fn run_transient(
                 );
             }
 
-            let measurements = rspice_core::analysis::evaluate_tran_measurements_with_abort(
-                ctx.netlist,
-                &result,
-                &crate::abort::ProcessAbort,
-            )
-            .map_err(|source| CliError::CoreSimulationError {
-                source,
-                analysis: Some("Transient measurement projection".to_string()),
-            })?;
+            // A compressed run already carries the `.MEASURE` results the core
+            // evaluated on the exact accepted trajectory. Re-evaluating them
+            // here would measure the decimated expansion and report different
+            // numbers than the same deck run without `--compress`.
+            let measurements = match post_results.as_ref() {
+                Some(post) => post.measurements.clone(),
+                None => rspice_core::analysis::evaluate_tran_measurements_with_abort(
+                    ctx.netlist,
+                    &result,
+                    &crate::abort::ProcessAbort,
+                )
+                .map_err(|source| CliError::CoreSimulationError {
+                    source,
+                    analysis: Some("Transient measurement projection".to_string()),
+                })?,
+            };
             ctx.record_measurements("TRAN", measurements);
             let continuous_measurements =
                 rspice_core::analysis::evaluate_tran_continuous_measurements(ctx.netlist, &result);
@@ -957,7 +1000,10 @@ pub(super) fn run_transient(
                     println!("  Results exported to: {}", output_path.display());
                 }
             }
-            Ok(result)
+            Ok(TransientOutcome {
+                result,
+                post_results,
+            })
         }
         Err(e) => Err(CliError::simulation_error_in(e.to_string(), "Transient")),
     }
@@ -3512,42 +3558,78 @@ pub(super) fn run_fourier(
             "Fourier",
         )
     })?;
-    let columns = rspice_core::analysis::evaluate_tran_four_output_requests_with_abort(
-        ctx.netlist,
-        &retained.result,
-        four_index,
-        ctx.engine.config().resource_limits,
-        &crate::abort::ProcessAbort,
-    )
-    .map_err(|error| map_output_projection_error(ctx, error, "Fourier"))?;
-
-    let config = FourierConfig::new(fundamental).with_harmonics(num_harmonics);
-    let fourier = FourierAnalysis::new(config);
-
-    let mut analyzed: Vec<(String, &'static str, rspice_core::analysis::FourierResult)> =
-        Vec::new();
-    analyzed
-        .try_reserve_exact(columns.len())
-        .map_err(|_| CliError::simulation_error_in("cannot allocate Fourier results", "Fourier"))?;
-    for (output, physical_type, waveform) in columns {
-        let result = fourier
-            .analyze_with_abort(
-                &retained.result.time,
-                &waveform,
+    // A compressed parent transient publishes a decimated waveform, so a DFT
+    // over it would report different harmonics than the same deck without
+    // `--compress`. The core already evaluated this card against the exact
+    // accepted trajectory; consume that instead of re-analyzing.
+    let analyzed: Vec<(String, &'static str, rspice_core::analysis::FourierResult)> = match retained
+        .post_results
+        .as_ref()
+    {
+        Some(post) => {
+            let mut analyzed = Vec::new();
+            for spectrum in post
+                .fourier
+                .iter()
+                .filter(|spectrum| spectrum.card_index == four_index)
+            {
+                if spectrum.fundamental != fundamental || spectrum.harmonic_count != num_harmonics {
+                    return Err(CliError::InternalError {
+                        message: format!(
+                            "retained Fourier spectrum for card {} was evaluated at {} Hz with {} harmonics, but the card authors {fundamental} Hz with {num_harmonics}",
+                            four_index + 1,
+                            spectrum.fundamental,
+                            spectrum.harmonic_count
+                        ),
+                    });
+                }
+                analyzed.push((
+                    spectrum.output.clone(),
+                    spectrum.physical_type,
+                    spectrum.spectrum.clone(),
+                ));
+            }
+            analyzed
+        }
+        None => {
+            let columns = rspice_core::analysis::evaluate_tran_four_output_requests_with_abort(
+                ctx.netlist,
+                &retained.result,
+                four_index,
+                ctx.engine.config().resource_limits,
                 &crate::abort::ProcessAbort,
             )
-            .map_err(|error| {
-                if matches!(error, rspice_core::analysis::FourierError::Aborted) {
-                    super::cancellation_cli_error(ctx.args.timeout)
-                } else {
-                    CliError::simulation_error_in(
-                        format!("Fourier output `{output}` could not be analyzed: {error}"),
-                        "Fourier",
-                    )
-                }
+            .map_err(|error| map_output_projection_error(ctx, error, "Fourier"))?;
+
+            let config = FourierConfig::new(fundamental).with_harmonics(num_harmonics);
+            let fourier = FourierAnalysis::new(config);
+
+            let mut analyzed = Vec::new();
+            analyzed.try_reserve_exact(columns.len()).map_err(|_| {
+                CliError::simulation_error_in("cannot allocate Fourier results", "Fourier")
             })?;
-        analyzed.push((output, physical_type, result));
-    }
+            for (output, physical_type, waveform) in columns {
+                let result = fourier
+                    .analyze_with_abort(
+                        &retained.result.time,
+                        &waveform,
+                        &crate::abort::ProcessAbort,
+                    )
+                    .map_err(|error| {
+                        if matches!(error, rspice_core::analysis::FourierError::Aborted) {
+                            super::cancellation_cli_error(ctx.args.timeout)
+                        } else {
+                            CliError::simulation_error_in(
+                                format!("Fourier output `{output}` could not be analyzed: {error}"),
+                                "Fourier",
+                            )
+                        }
+                    })?;
+                analyzed.push((output, physical_type, result));
+            }
+            analyzed
+        }
+    };
 
     if !ctx.quiet {
         println!(
