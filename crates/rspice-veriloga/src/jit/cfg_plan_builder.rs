@@ -499,6 +499,26 @@ fn route_divergence(
 /// `localparam integer SIZE` survives only in an array bound the analyzer has
 /// already folded — and it does not under-refuse, which is the direction a
 /// screen has to be wrong in.
+/// Whether `name` is a variable the analyzer minted for the executed copy
+/// rather than one the source declared.
+///
+/// Both spellings are reserved: `$bound_step` is a task variable, and no source
+/// identifier begins with `$`; `__guardN` is the snapshot
+/// `SemanticAnalyzer::stabilize_condition` takes of a guard expression, minted
+/// under a counter.
+///
+/// Neither is a divergence, and that is a statement about what they are for. A
+/// guard snapshot exists because the executed copy has no control flow to carry
+/// a condition in — the structured body does, so the CFG derives the same
+/// condition from the branch it is a condition *of*, which is
+/// [`crate::canonical_ir::HirExecutedCorrespondence`]'s "`selector == match`
+/// against `__guardN == match`" in the other direction. `$bound_step` bounds the
+/// next timestep and appears in no residual. Without this, sixteen of the
+/// estate's modules refused on a variable the CFG is right not to have.
+fn analyzer_synthesized(name: &str) -> bool {
+    name.starts_with('$') || name.starts_with("__guard")
+}
+
 fn prologue_only_definition(hir: &crate::canonical_ir::HirModel) -> Option<SmolStr> {
     fn assigned(statements: &[crate::canonical_ir::hir::HirStatement], into: &mut HashSet<u32>) {
         for statement in statements {
@@ -563,6 +583,7 @@ fn prologue_only_definition(hir: &crate::canonical_ir::HirModel) -> Option<SmolS
     hir.variables
         .iter()
         .filter(|variable| prologue.contains(&variable.id.index()))
+        .filter(|variable| !analyzer_synthesized(&variable.name))
         .find_map(|variable| {
             if read.contains(&variable.name) {
                 return Some(variable.name.clone());
@@ -1081,12 +1102,42 @@ pub(crate) enum PlanRoute {
 /// `$port_connected` is a runtime leaf for a backend that evaluates instances
 /// it did not build, and `$simparam` reads the same default table on both
 /// routes. [`route_divergence`] and [`DERIVATIVE_RULE_HOLES`] screen the other
-/// four, and with them the estate is green. But that screen is *empirical*: it
-/// names what about twelve hundred tests happened to expose, not what a proof
-/// would name, and finding six on the first pass over an estate never written
-/// to test this route is the reason it is not enough. The instrument that would
-/// bound the rest is the forty-three-module CFG-versus-MIR census
-/// ([`crate::native::cfg_mir_census`]), which has never run past nine modules.
+/// four, and with them the estate is green — 2080 tests, `--test-threads=1`,
+/// `--features native`, exit 0 with this constant reading `Cfg`.
+///
+/// The fallback census taken on that run, against W-F3c's:
+///
+/// ```text
+///                          W-F3c   W-F4
+/// lowering                    63     63
+/// cfg-lowering                24     24
+/// known-divergence            28     15
+/// derivative-rule-missing      7      7
+///                            ---    ---
+///                            122    109
+/// ```
+///
+/// The thirteen are the two closed constructs and the array screen's
+/// over-refusal: [`prologue_only_definition`] names a variable rather than
+/// counting a module's arrays, so `polysum`, `gsel`, `desc` and `lpsize` — which
+/// declare arrays and fill every element inside the analog block — take the CFG
+/// route now. What is left under `known-divergence` is eleven
+/// contribution-current probes, three event-controlled variables, and `cinit`,
+/// whose array really is filled by a declaration initializer.
+///
+/// # The screen is empirical, and W-F4 measured what that costs
+///
+/// It names what about twelve hundred tests happened to expose, not what a
+/// proof would name. W-F4 went looking for what they did not: a module-scope
+/// `real g = 4.5;` and a `localparam` read from the body both computed a
+/// residual of 0.0 on this route, against 9.0 and 6.0 on `Postfix`, and the
+/// whole estate ran green with both silently wrong. Two more, found by asking,
+/// on top of the six the flip found by failing. That is the argument for the
+/// constant, not the six.
+///
+/// The instrument that would bound the rest is the forty-three-module
+/// CFG-versus-MIR census ([`crate::native::cfg_mir_census`]), which has never
+/// run past nine modules.
 ///
 /// So the switch sits here at `Postfix` until that census runs 43/43 and the
 /// remaining classes are closed rather than screened. Flipping it is a one-line
@@ -1097,13 +1148,19 @@ pub(crate) enum PlanRoute {
 /// The `Postfix` arm of [`build_default_model_plan_reported`] calls
 /// [`build_model_plan_with_canonical_ir`] and nothing else — no wrapper, no
 /// post-pass, no field replaced afterwards. That constructor, and every
-/// function it reaches, is unchanged by this lane: the diff touches
+/// function it reaches, is unchanged: the diff touches
 /// [`build_model_plan_from_canonical_cfg`] and the items below it in this
 /// module, [`crate::jit::plan_program`]'s documentation and one attribute,
 /// [`crate::native::ssa`]'s attributes, and the four call sites' choice of
 /// entry point. `jit::plan_builder` is untouched. A model therefore compiles to
 /// the same plan, and so to the same machine code, as it did before the lane —
 /// which is what keeps [`crate::native::code_identity`]'s digest valid.
+///
+/// W-F4 kept that true through a refactor that could have broken it: the
+/// `$simparam` table `crate::native`'s `lower_simparam_intrinsic` folds is now
+/// read from `canonical_ir`'s `simparam_source_default` rather than written out
+/// twice. The postfix route emits the same `NativeOp::Const` it always did,
+/// which is why the digest still reads what it read.
 pub(crate) const DEFAULT_PLAN_ROUTE: PlanRoute = PlanRoute::Postfix;
 
 /// The plan every backend compiles: [`DEFAULT_PLAN_ROUTE`]'s.
