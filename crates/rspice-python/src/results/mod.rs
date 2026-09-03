@@ -53,6 +53,7 @@ mod access;
 mod dc;
 mod distortion;
 mod envelope;
+mod event_state;
 mod export_bridge;
 mod fft;
 mod fourier;
@@ -72,6 +73,7 @@ mod verification;
 // Cross-cutting helpers, re-imported here so each family module reaches
 // them through its own `use super::*`.
 use access::*;
+use event_state::*;
 use export_bridge::*;
 use state::*;
 

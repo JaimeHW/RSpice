@@ -480,6 +480,19 @@ impl SignalCapability {
 
 const SIGNAL_ARTIFACT: &str = "export exists, but it is not a shared SignalDescriptor document";
 const ADVANCED_SIGNAL_SUBSET: &str = "mapped for a subset of result families only";
+/// The Python device-observable and analysis-scalar gaps, stated by family.
+///
+/// These are deliberately specific rather than "a subset of result families":
+/// the missing cells are missing because the engine computes no such signal
+/// for those families, not because the binding declined to expose one, and a
+/// reader deciding whether to wait for the adapter needs to know which it is.
+const PY_DEVICE_OBSERVABLE_SUBSET: &str = "mapped for operating-point, DC-sweep and transient results, which are the families whose \
+     solvers capture per-device observables; the frequency-domain and periodic families compute \
+     none to expose";
+const PY_SCALAR_SUBSET: &str = "mapped as named accessors on the noise, transfer-function, stability, pole-zero, \
+     distortion, S-parameter, harmonic-balance, PSS, Monte Carlo and envelope results, not as a \
+     shared SignalDescriptor lookup; AC and operating-point results publish no analysis-owned \
+     scalar";
 const DIGITAL_OUT_OF_SCOPE: &str =
     "digital/AMS surface work is owned by the separate digital effort";
 
@@ -503,14 +516,14 @@ pub const SIGNAL_CAPABILITY_MATRIX: &[SignalCapability] = &[
     SignalCapability {
         signal: SignalKind::DeviceObservable,
         cli: MappingStatus::Partial(ADVANCED_SIGNAL_SUBSET),
-        python: MappingStatus::Partial(ADVANCED_SIGNAL_SUBSET),
+        python: MappingStatus::Partial(PY_DEVICE_OBSERVABLE_SUBSET),
         wasm: MappingStatus::Partial("mapped for OP, DC, transient, and noise result documents"),
         engine_adapter: MappingStatus::Mapped,
     },
     SignalCapability {
         signal: SignalKind::Scalar,
         cli: MappingStatus::Partial(SIGNAL_ARTIFACT),
-        python: MappingStatus::Partial(ADVANCED_SIGNAL_SUBSET),
+        python: MappingStatus::Partial(PY_SCALAR_SUBSET),
         wasm: MappingStatus::Partial(
             "mapped for transient integration and noise scalars; other result families remain unavailable",
         ),

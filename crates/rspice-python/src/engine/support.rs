@@ -21,6 +21,106 @@ pub(super) fn validate_frequencies(frequencies: &[f64]) -> PyResult<()> {
     Ok(())
 }
 
+/// Build the `.MC` card a direct Monte Carlo request describes.
+pub(super) fn monte_carlo_card(
+    num_runs: usize,
+    seed: Option<u64>,
+    distribution: &str,
+    spread: f64,
+    params: Option<Vec<String>>,
+) -> PyResult<AnalysisCommand> {
+    if num_runs == 0 {
+        return Err(crate::errors::value_error("num_runs must be at least 1"));
+    }
+    if !spread.is_finite() || spread < 0.0 {
+        return Err(crate::errors::value_error(format!(
+            "spread must be finite and non-negative, got {spread}"
+        )));
+    }
+    let distribution = match distribution.to_ascii_lowercase().as_str() {
+        "gaussian" | "normal" => MonteCarloDistribution::Gaussian,
+        "uniform" => MonteCarloDistribution::Uniform,
+        "worst_case" | "worstcase" | "worst-case" => MonteCarloDistribution::WorstCase,
+        other => {
+            return Err(crate::errors::value_error(format!(
+                "distribution must be 'gaussian', 'uniform', or 'worst_case', got '{other}'"
+            )));
+        }
+    };
+    Ok(AnalysisCommand::MonteCarlo(
+        rspice_core::netlist::MonteCarloCommand {
+            runs: num_runs,
+            seed,
+            distribution,
+            relative_spread: spread,
+            params: params.unwrap_or_default(),
+        },
+    ))
+}
+
+/// Build the `.PZ` card a direct pole-zero request describes.
+///
+/// An omitted differential terminal is ground, which is exactly what a `.PZ`
+/// card spells as node "0": the card carries all four terminals, so the
+/// omission is resolved here rather than becoming a second meaning of "no
+/// reference" further down.
+pub(super) fn pole_zero_card(
+    input_node: &NodeIdentifier,
+    input_negative: Option<&NodeIdentifier>,
+    output_node: &NodeIdentifier,
+    output_negative: Option<&NodeIdentifier>,
+    input_type: &str,
+    analysis: &str,
+) -> PyResult<AnalysisCommand> {
+    let transfer_type = match input_type.to_ascii_lowercase().as_str() {
+        "current" | "cur" | "i" => PoleZeroTransferType::Current,
+        "voltage" | "vol" | "v" => PoleZeroTransferType::Voltage,
+        other => {
+            return Err(crate::errors::value_error(format!(
+                "input_type must be 'current' or 'voltage', got '{other}'"
+            )));
+        }
+    };
+    let analysis_type = match analysis.to_ascii_lowercase().as_str() {
+        "pz" | "pole_zero" | "poles_zeros" => PoleZeroAnalysisType::PoleZero,
+        "pol" | "poles" => PoleZeroAnalysisType::PolesOnly,
+        "zer" | "zeros" => PoleZeroAnalysisType::ZerosOnly,
+        other => {
+            return Err(crate::errors::value_error(format!(
+                "analysis must be 'pz', 'poles', or 'zeros', got '{other}'"
+            )));
+        }
+    };
+    Ok(AnalysisCommand::PoleZero {
+        input_pos: node_identifier_name(input_node),
+        input_neg: input_negative.map_or_else(|| "0".to_string(), node_identifier_name),
+        output_pos: node_identifier_name(output_node),
+        output_neg: output_negative.map_or_else(|| "0".to_string(), node_identifier_name),
+        transfer_type,
+        analysis_type,
+    })
+}
+
+/// Validate a `(stop_time, max_step)` pair and resolve the default ceiling.
+///
+/// The default is `stop_time / 50`, the same fraction of the analysis window
+/// SPICE's `.TRAN` uses when a deck authors no `TMAX`.
+pub(super) fn solver_window(stop_time: f64, max_step: Option<f64>) -> PyResult<f64> {
+    if !stop_time.is_finite() || stop_time <= 0.0 {
+        return Err(crate::errors::value_error(format!(
+            "stop_time must be a positive finite number of seconds, got {stop_time}"
+        )));
+    }
+    if let Some(step) = max_step
+        && (!step.is_finite() || step <= 0.0)
+    {
+        return Err(crate::errors::value_error(format!(
+            "max_step must be a positive finite number of seconds, got {step}"
+        )));
+    }
+    Ok(max_step.unwrap_or(stop_time / 50.0))
+}
+
 /// Spell a node identifier the way an authored card names it.
 ///
 /// A numeric index is a legal node name in SPICE, and `resolve_node` reads it

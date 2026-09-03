@@ -661,34 +661,18 @@ impl PyEngine {
         rel_tol: f64,
         max_interval: f64,
     ) -> PyResult<PyCompressedTransientResult> {
-        if !stop_time.is_finite() || stop_time <= 0.0 {
-            return Err(crate::errors::value_error(format!(
-                "stop_time must be a positive finite number of seconds, got {stop_time}"
-            )));
+        let max_step = solver_window(stop_time, max_step)?;
+        for (name, value) in [
+            ("abs_tol", abs_tol),
+            ("rel_tol", rel_tol),
+            ("max_interval", max_interval),
+        ] {
+            if !value.is_finite() || value < 0.0 {
+                return Err(crate::errors::value_error(format!(
+                    "{name} must be finite and non-negative, got {value}"
+                )));
+            }
         }
-        if let Some(step) = max_step
-            && (!step.is_finite() || step <= 0.0)
-        {
-            return Err(crate::errors::value_error(format!(
-                "max_step must be a positive finite number of seconds, got {step}"
-            )));
-        }
-        if !abs_tol.is_finite() || abs_tol < 0.0 {
-            return Err(crate::errors::value_error(format!(
-                "abs_tol must be finite and non-negative, got {abs_tol}"
-            )));
-        }
-        if !rel_tol.is_finite() || rel_tol < 0.0 {
-            return Err(crate::errors::value_error(format!(
-                "rel_tol must be finite and non-negative, got {rel_tol}"
-            )));
-        }
-        if !max_interval.is_finite() || max_interval < 0.0 {
-            return Err(crate::errors::value_error(format!(
-                "max_interval must be finite and non-negative, got {max_interval}"
-            )));
-        }
-        let max_step = max_step.unwrap_or(stop_time / 50.0);
         let compression = rspice_core::engine::CompressionConfig {
             abs_tol,
             rel_tol,
@@ -723,19 +707,7 @@ impl PyEngine {
         stop_time: f64,
         max_step: Option<f64>,
     ) -> PyResult<(PyTransientResult, PyTransientCheckpoint)> {
-        if !stop_time.is_finite() || stop_time <= 0.0 {
-            return Err(crate::errors::value_error(format!(
-                "stop_time must be a positive finite number of seconds, got {stop_time}"
-            )));
-        }
-        if let Some(step) = max_step
-            && (!step.is_finite() || step <= 0.0)
-        {
-            return Err(crate::errors::value_error(format!(
-                "max_step must be a positive finite number of seconds, got {step}"
-            )));
-        }
-        let max_step = max_step.unwrap_or(stop_time / 50.0);
+        let max_step = solver_window(stop_time, max_step)?;
         let engine = self.engine_for_netlist(&netlist.inner);
         let (result, checkpoint) = run_interruptible(py, &self.active_runs, |abort| {
             engine.run_tran_checkpointed_with_abort(&netlist.inner, stop_time, max_step, abort)
@@ -892,61 +864,17 @@ impl PyEngine {
         input_type: &str,
         analysis: &str,
     ) -> PyResult<PyPoleZeroResult> {
-        let input_is_current = match input_type.to_ascii_lowercase().as_str() {
-            "current" | "cur" | "i" => true,
-            "voltage" | "vol" | "v" => false,
-            other => {
-                return Err(crate::errors::value_error(format!(
-                    "input_type must be 'current' or 'voltage', got '{other}'"
-                )));
-            }
-        };
-        let (compute_poles, compute_zeros) = match analysis.to_ascii_lowercase().as_str() {
-            "pz" | "pole_zero" | "poles_zeros" => (true, true),
-            "pol" | "poles" => (true, false),
-            "zer" | "zeros" => (false, true),
-            other => {
-                return Err(crate::errors::value_error(format!(
-                    "analysis must be 'pz', 'poles', or 'zeros', got '{other}'"
-                )));
-            }
-        };
-        // An omitted differential terminal is ground, which is exactly what a
-        // `.PZ` card spells as node "0": the card form carries all four
-        // terminals, so the omission is resolved here rather than being a
-        // second meaning of "no reference" further down.
-        directives::run_one_card(
-            self,
-            py,
-            netlist,
-            AnalysisCommand::PoleZero {
-                input_pos: node_identifier_name(&input_node),
-                input_neg: input_negative
-                    .as_ref()
-                    .map_or_else(|| "0".to_string(), node_identifier_name),
-                output_pos: node_identifier_name(&output_node),
-                output_neg: output_negative
-                    .as_ref()
-                    .map_or_else(|| "0".to_string(), node_identifier_name),
-                transfer_type: if input_is_current {
-                    PoleZeroTransferType::Current
-                } else {
-                    PoleZeroTransferType::Voltage
-                },
-                analysis_type: match (compute_poles, compute_zeros) {
-                    (true, true) => PoleZeroAnalysisType::PoleZero,
-                    (true, false) => PoleZeroAnalysisType::PolesOnly,
-                    (false, true) => PoleZeroAnalysisType::ZerosOnly,
-                    (false, false) => {
-                        return Err(crate::errors::value_error(
-                            "analysis must compute poles, zeros, or both",
-                        ));
-                    }
-                },
-            },
-        )?
-        .pz
-        .into_single(".pz")
+        let card = pole_zero_card(
+            &input_node,
+            input_negative.as_ref(),
+            &output_node,
+            output_negative.as_ref(),
+            input_type,
+            analysis,
+        )?;
+        directives::run_one_card(self, py, netlist, card)?
+            .pz
+            .into_single(".pz")
     }
 
     /// Run shooting periodic steady-state analysis.
@@ -1195,26 +1123,25 @@ impl PyEngine {
             return Err(crate::errors::value_error("harmonics must be at least 1"));
         }
         let source_names = source_name.map(|name| vec![name.to_string()]);
-        let mut config = hb_config_from_tones(
+        let config = hb_config(
             &[fundamental_frequency],
             &[harmonics],
             source_names.as_deref(),
-        )?;
-        configure_hb_numerics(
-            &mut config,
-            tolerance,
-            abstol,
-            max_iterations,
-            damping,
-            min_damping,
-            oversample,
-            collocation_points,
-            max_mixing_order,
-            use_krylov,
-            gmres_restart,
-            source_stepping,
-            use_exact_jacobian,
-            verbose,
+            HbNumerics {
+                tolerance,
+                abstol,
+                max_iterations,
+                damping,
+                min_damping,
+                oversample,
+                collocation_points,
+                max_mixing_order,
+                use_krylov,
+                gmres_restart,
+                source_stepping,
+                use_exact_jacobian,
+                verbose,
+            },
         )?;
         let engine = self.engine_for_netlist(&netlist.inner);
         let result = run_interruptible(py, &self.active_runs, |abort| {
@@ -1256,22 +1183,25 @@ impl PyEngine {
             harmonics.as_deref(),
             "run_hb_multitone",
         )?;
-        let mut config = hb_config_from_tones(&frequencies, &orders, source_names.as_deref())?;
-        configure_hb_numerics(
-            &mut config,
-            tolerance,
-            abstol,
-            max_iterations,
-            damping,
-            min_damping,
-            oversample,
-            collocation_points,
-            max_mixing_order,
-            use_krylov,
-            gmres_restart,
-            source_stepping,
-            use_exact_jacobian,
-            verbose,
+        let config = hb_config(
+            &frequencies,
+            &orders,
+            source_names.as_deref(),
+            HbNumerics {
+                tolerance,
+                abstol,
+                max_iterations,
+                damping,
+                min_damping,
+                oversample,
+                collocation_points,
+                max_mixing_order,
+                use_krylov,
+                gmres_restart,
+                source_stepping,
+                use_exact_jacobian,
+                verbose,
+            },
         )?;
         let engine = self.engine_for_netlist(&netlist.inner);
         let result = run_interruptible(py, &self.active_runs, |abort| {
@@ -1331,26 +1261,25 @@ impl PyEngine {
             return Err(crate::errors::value_error("harmonics must be at least 1"));
         }
         let source_names = source_name.map(|name| vec![name.to_string()]);
-        let mut config = hb_config_from_tones(
+        let config = hb_config(
             &[fundamental_frequency],
             &[harmonics],
             source_names.as_deref(),
-        )?;
-        configure_hb_numerics(
-            &mut config,
-            tolerance,
-            abstol,
-            max_iterations,
-            damping,
-            min_damping,
-            oversample,
-            collocation_points,
-            max_mixing_order,
-            use_krylov,
-            gmres_restart,
-            source_stepping,
-            use_exact_jacobian,
-            verbose,
+            HbNumerics {
+                tolerance,
+                abstol,
+                max_iterations,
+                damping,
+                min_damping,
+                oversample,
+                collocation_points,
+                max_mixing_order,
+                use_krylov,
+                gmres_restart,
+                source_stepping,
+                use_exact_jacobian,
+                verbose,
+            },
         )?;
 
         let frozen = frozen_sources.unwrap_or_default();
@@ -1440,46 +1369,19 @@ impl PyEngine {
         abstol: f64,
         pss: Option<&PyPssOperatingPoint>,
     ) -> PyResult<PyPacResult> {
-        if !fundamental_frequency.is_finite() || fundamental_frequency <= 0.0 {
-            return Err(crate::errors::value_error(format!(
-                "fundamental_frequency must be positive and finite, got {fundamental_frequency}"
-            )));
-        }
-        if input_source.trim().is_empty() {
-            return Err(crate::errors::value_error("input_source must not be empty"));
-        }
-        if output_node.trim().is_empty() {
-            return Err(crate::errors::value_error("output_node must not be empty"));
-        }
-        let sweep_type = match variation.to_ascii_lowercase().as_str() {
-            "dec" | "decade" => PacSweepType::Decade,
-            "oct" | "octave" => PacSweepType::Octave,
-            "lin" | "linear" => PacSweepType::Linear,
-            other => {
-                return Err(crate::errors::value_error(format!(
-                    "variation must be 'dec', 'oct', or 'lin', got '{other}'"
-                )));
-            }
-        };
-        let sideband_min = sideband_min.unwrap_or(-5);
-        let mut config = PacConfig::new()
-            .with_fundamental(fundamental_frequency)
-            .with_sweep(start_frequency, stop_frequency, points)
-            .with_sweep_type(sweep_type)
-            .with_sidebands(sideband_min, sideband_max)
-            .with_tolerances(reltol, abstol)
-            .with_input_source(input_source)
-            .with_output_node(output_node);
-        if let Some(reference) = reference_node {
-            if reference.trim().is_empty() {
-                return Err(crate::errors::value_error(
-                    "reference_node must not be empty",
-                ));
-            }
-            config = config.with_output_ref(reference);
-        }
-        config.validate().map_err(|message| {
-            crate::errors::value_error(format!("invalid PAC configuration: {message}"))
+        let config = pac_config(PacRequest {
+            fundamental_frequency,
+            start_frequency,
+            stop_frequency,
+            points,
+            input_source,
+            output_node,
+            variation,
+            sideband_min,
+            sideband_max,
+            reference_node,
+            reltol,
+            abstol,
         })?;
         let engine = self.engine_for_netlist(&netlist.inner);
         let result = run_interruptible(py, &self.active_runs, |abort| match pss {
@@ -1587,36 +1489,26 @@ impl PyEngine {
                 "oscillator-noise offsets must be strictly positive",
             ));
         }
-        if !period_guess.is_finite() || period_guess <= 0.0 {
-            return Err(crate::errors::value_error(format!(
-                "period_guess must be positive and finite, got {period_guess}"
-            )));
-        }
-        if harmonics == 0 {
-            return Err(crate::errors::value_error("harmonics must be at least 1"));
-        }
-        let mut config = PssConfig::autonomous();
-        config.period_guess = period_guess;
-        config.fundamental_freq = 1.0 / period_guess;
-        config.num_harmonics = harmonics;
-        config.tstab = tstab;
-        config.tstab_periods = tstab_periods;
-        config.max_iterations = max_iterations;
-        config.tolerance = tolerance;
-        config.abstol = abstol;
-        config.damping_factor = damping;
-        if !max_period_change.is_finite() || max_period_change <= 0.0 {
-            return Err(crate::errors::value_error(format!(
-                "max_period_change must be positive and finite, got {max_period_change}"
-            )));
-        }
-        config.max_period_change = max_period_change;
-        config.points_per_period = points_per_period;
-        config.integration_method = integration_method.map(Into::into);
-        config.verbose = verbose;
-        config.validate().map_err(|message| {
-            crate::errors::value_error(format!("invalid oscillator PSS configuration: {message}"))
-        })?;
+        // An oscillator's carrier is an autonomous shooting solve, so its
+        // configuration is built by the same card constructor every other PSS
+        // entry point uses rather than assembled a second time here.
+        let card = pss_card(
+            None,
+            harmonics,
+            tstab,
+            Some(tstab_periods),
+            max_iterations,
+            tolerance,
+            abstol,
+            damping,
+            max_period_change,
+            points_per_period,
+            integration_method,
+            true,
+            Some(period_guess),
+            verbose,
+        )?;
+        let config = PssConfig::from(&card);
         let engine = self.engine_for_netlist(&netlist.inner);
         let result = run_interruptible(py, &self.active_runs, |abort| {
             engine.run_pnoise_oscillator_with_abort(&netlist.inner, config, &offsets, abort)
@@ -1662,38 +1554,10 @@ impl PyEngine {
         spread: f64,
         params: Option<Vec<String>>,
     ) -> PyResult<PyMonteCarloResult> {
-        if num_runs == 0 {
-            return Err(crate::errors::value_error("num_runs must be at least 1"));
-        }
-        if !spread.is_finite() || spread < 0.0 {
-            return Err(crate::errors::value_error(format!(
-                "spread must be finite and non-negative, got {spread}"
-            )));
-        }
-        let dist = match distribution.to_ascii_lowercase().as_str() {
-            "gaussian" | "normal" => MonteCarloDistribution::Gaussian,
-            "uniform" => MonteCarloDistribution::Uniform,
-            "worst_case" | "worstcase" | "worst-case" => MonteCarloDistribution::WorstCase,
-            other => {
-                return Err(crate::errors::value_error(format!(
-                    "distribution must be 'gaussian', 'uniform', or 'worst_case', got '{other}'"
-                )));
-            }
-        };
-        directives::run_one_card(
-            self,
-            py,
-            netlist,
-            AnalysisCommand::MonteCarlo(rspice_core::netlist::MonteCarloCommand {
-                runs: num_runs,
-                seed,
-                distribution: dist,
-                relative_spread: spread,
-                params: params.unwrap_or_default(),
-            }),
-        )?
-        .monte_carlo
-        .into_single(".mc")
+        let card = monte_carlo_card(num_runs, seed, distribution, spread, params)?;
+        directives::run_one_card(self, py, netlist, card)?
+            .monte_carlo
+            .into_single(".mc")
     }
 
     /// Run DC sensitivity analysis

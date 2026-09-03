@@ -97,23 +97,124 @@ pub(super) fn hb_config_from_tones(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(super) fn configure_hb_numerics(
-    config: &mut HbConfig,
-    tolerance: f64,
-    abstol: f64,
-    max_iterations: usize,
-    damping: f64,
-    min_damping: f64,
-    oversample: usize,
-    collocation_points: Option<usize>,
-    max_mixing_order: usize,
-    use_krylov: bool,
-    gmres_restart: usize,
-    source_stepping: bool,
-    use_exact_jacobian: bool,
-    verbose: bool,
-) -> PyResult<()> {
+/// Everything a direct `.PAC` request states, before validation.
+pub(super) struct PacRequest<'a> {
+    pub fundamental_frequency: f64,
+    pub start_frequency: f64,
+    pub stop_frequency: f64,
+    pub points: usize,
+    pub input_source: &'a str,
+    pub output_node: &'a str,
+    pub variation: &'a str,
+    pub sideband_min: Option<i32>,
+    pub sideband_max: i32,
+    pub reference_node: Option<&'a str>,
+    pub reltol: f64,
+    pub abstol: f64,
+}
+
+/// Build and validate the periodic-AC configuration a direct request states.
+pub(super) fn pac_config(request: PacRequest<'_>) -> PyResult<PacConfig> {
+    if !request.fundamental_frequency.is_finite() || request.fundamental_frequency <= 0.0 {
+        return Err(crate::errors::value_error(format!(
+            "fundamental_frequency must be positive and finite, got {}",
+            request.fundamental_frequency
+        )));
+    }
+    if request.input_source.trim().is_empty() {
+        return Err(crate::errors::value_error("input_source must not be empty"));
+    }
+    if request.output_node.trim().is_empty() {
+        return Err(crate::errors::value_error("output_node must not be empty"));
+    }
+    let sweep_type = match request.variation.to_ascii_lowercase().as_str() {
+        "dec" | "decade" => PacSweepType::Decade,
+        "oct" | "octave" => PacSweepType::Octave,
+        "lin" | "linear" => PacSweepType::Linear,
+        other => {
+            return Err(crate::errors::value_error(format!(
+                "variation must be 'dec', 'oct', or 'lin', got '{other}'"
+            )));
+        }
+    };
+    let sideband_min = request
+        .sideband_min
+        .unwrap_or(rspice_core::netlist::PacCard::DEFAULT_SIDEBAND_MIN);
+    let mut config = PacConfig::new()
+        .with_fundamental(request.fundamental_frequency)
+        .with_sweep(
+            request.start_frequency,
+            request.stop_frequency,
+            request.points,
+        )
+        .with_sweep_type(sweep_type)
+        .with_sidebands(sideband_min, request.sideband_max)
+        .with_tolerances(request.reltol, request.abstol)
+        .with_input_source(request.input_source)
+        .with_output_node(request.output_node);
+    if let Some(reference) = request.reference_node {
+        if reference.trim().is_empty() {
+            return Err(crate::errors::value_error(
+                "reference_node must not be empty",
+            ));
+        }
+        config = config.with_output_ref(reference);
+    }
+    config.validate().map_err(|message| {
+        crate::errors::value_error(format!("invalid PAC configuration: {message}"))
+    })?;
+    Ok(config)
+}
+
+/// The numerical knobs every harmonic-balance entry point exposes.
+///
+/// The three HB methods take the same thirteen values and hand them to the
+/// same validator. Naming that set once keeps the entry points from drifting
+/// into thirteen-argument calls that differ by one forgotten field.
+pub(super) struct HbNumerics {
+    pub tolerance: f64,
+    pub abstol: f64,
+    pub max_iterations: usize,
+    pub damping: f64,
+    pub min_damping: f64,
+    pub oversample: usize,
+    pub collocation_points: Option<usize>,
+    pub max_mixing_order: usize,
+    pub use_krylov: bool,
+    pub gmres_restart: usize,
+    pub source_stepping: bool,
+    pub use_exact_jacobian: bool,
+    pub verbose: bool,
+}
+
+/// Build the validated HB configuration a set of tones and knobs describes.
+pub(super) fn hb_config(
+    frequencies: &[f64],
+    harmonic_orders: &[usize],
+    source_names: Option<&[String]>,
+    numerics: HbNumerics,
+) -> PyResult<HbConfig> {
+    let mut config = hb_config_from_tones(frequencies, harmonic_orders, source_names)?;
+    configure_hb_numerics(&mut config, numerics)?;
+    Ok(config)
+}
+
+pub(super) fn configure_hb_numerics(config: &mut HbConfig, numerics: HbNumerics) -> PyResult<()> {
+    let HbNumerics {
+        tolerance,
+        abstol,
+        max_iterations,
+        damping,
+        min_damping,
+        oversample,
+        collocation_points,
+        max_mixing_order,
+        use_krylov,
+        gmres_restart,
+        source_stepping,
+        use_exact_jacobian,
+        verbose,
+    } = numerics;
     if !tolerance.is_finite() || tolerance <= 0.0 {
         return Err(crate::errors::value_error(format!(
             "tolerance must be positive and finite, got {tolerance}"
