@@ -207,7 +207,10 @@ fn every_noise_shape_reads_the_same_double_on_both_routes() {
     ];
 
     let readings = readings(SHAPES);
-    let found: Vec<&str> = readings.iter().map(|reading| reading.what.as_str()).collect();
+    let found: Vec<&str> = readings
+        .iter()
+        .map(|reading| reading.what.as_str())
+        .collect();
     assert_eq!(
         found,
         expected.iter().map(|(what, _)| *what).collect::<Vec<_>>(),

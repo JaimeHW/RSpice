@@ -50,6 +50,24 @@
 //! and printed rather than asserted: see [`MATRIX_SIGNIFICANCE`]. Every
 //! per-module line says how many entries that was.
 //!
+//! # Noise, which used to be measured and is now asserted
+//!
+//! Every noise magnitude is held to one of two criteria and none is exempt. A
+//! magnitude the plan builder took at its own site is one expression lowered
+//! twice, and takes the reassociation bound like a residual. A magnitude it had
+//! to take at the exit block, under a guard, takes the weaker criterion in
+//! [`check_guarded_noise`]: the shipped quantity, or the inactive zero, and
+//! nothing else.
+//!
+//! What was there before was a `grouped_noise` class that was executed,
+//! printed, and asserted nothing, on the argument that a grouped process folds
+//! its routing amplitude into its injection and so holds a different quantity
+//! from the shipped PSD. That argument was wrong twice: `noise_process_schema`
+//! is `1` on everything this compiler produces, so the class was every module
+//! with any noise source, and the amplitude was never the difference — see
+//! [`crate::jit::cfg_plan_builder`], whose noise slice now names what the
+//! difference actually was.
+//!
 //! `#[ignore]`d: this is release-qualification work. Run it with
 //! `--release --features native -- --ignored --nocapture`.
 
@@ -488,8 +506,12 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
 
     let structural_zeros: HashSet<CfgPlanEntry> =
         cfg_plan.report.structural_zeros.iter().copied().collect();
-    let guarded_noise: HashSet<CfgPlanEntry> =
-        cfg_plan.report.noise_guarded_reads.iter().copied().collect();
+    let guarded_noise: HashSet<CfgPlanEntry> = cfg_plan
+        .report
+        .noise_guarded_reads
+        .iter()
+        .copied()
+        .collect();
 
     // Sized to whichever route asks for more, so neither is executed against an
     // array the other decided the size of.
