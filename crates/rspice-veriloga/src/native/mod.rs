@@ -28,6 +28,8 @@ mod cfg_size_census;
 mod code_identity;
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod double_double;
+#[cfg(all(test, feature = "native", target_arch = "x86_64"))]
+mod mir_postfix;
 mod model;
 mod runtime;
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
