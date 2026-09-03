@@ -56,6 +56,23 @@ fn write_deck(directory: &Path, name: &str, source: &str) -> PathBuf {
     path
 }
 
+/// Every per-coordinate FFT bundle the CLI published next to `results.json`,
+/// in directory order. The names carry the planner's stable coordinate tag,
+/// so the test discovers them instead of re-deriving the naming rule.
+fn coordinate_fft_artifacts(directory: &Path) -> Vec<PathBuf> {
+    let mut artifacts = std::fs::read_dir(directory)
+        .expect("read FFT output directory")
+        .map(|entry| entry.expect("read FFT output entry").path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("results.run_") && name.ends_with(".fft.json"))
+        })
+        .collect::<Vec<_>>();
+    artifacts.sort();
+    artifacts
+}
+
 fn read_json(path: &Path) -> Value {
     serde_json::from_slice(&std::fs::read(path).expect("read JSON artifact"))
         .expect("parse JSON artifact")
@@ -248,22 +265,33 @@ fn step_and_temperature_fft_artifacts_retain_unique_canonical_coordinates() {
         "FFT axis run failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+    let artifacts = coordinate_fft_artifacts(&directory);
+    assert_eq!(
+        artifacts.len(),
+        4,
+        "one FFT bundle per STEP x TEMP coordinate"
+    );
     let mut coordinate_ids = HashSet::new();
-    for coordinate in 1..=4 {
-        let artifact = directory.join(format!("results.step_{coordinate:06}.fft.json"));
-        let document = read_json(&artifact);
+    let mut ordinals = HashSet::new();
+    for artifact in &artifacts {
+        let document = read_json(artifact);
         assert_eq!(document["parent_analysis_id"], "tran-001");
         let metadata = document["coordinate"].as_object().expect("FFT coordinate");
-        assert_eq!(metadata["ordinal"], coordinate);
+        let ordinal = metadata["ordinal"].as_u64().expect("coordinate ordinal");
+        assert!(ordinals.insert(ordinal));
         let id = metadata["coordinate_id"]
             .as_str()
             .expect("stable coordinate ID");
         assert!(coordinate_ids.insert(id.to_string()));
+        let tag = metadata["tag"].as_str().expect("coordinate tag");
+        assert!(tag.starts_with("run-"));
+        let file_name = artifact
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("UTF-8 artifact name");
         assert!(
-            metadata["tag"]
-                .as_str()
-                .expect("coordinate tag")
-                .starts_with("run-")
+            file_name.contains(&tag.replace('-', "_")),
+            "artifact {file_name} must be namespaced by its coordinate tag {tag}"
         );
         let assignment = metadata["assignment"]
             .as_str()
@@ -272,6 +300,7 @@ fn step_and_temperature_fft_artifacts_retain_unique_canonical_coordinates() {
         assert!(assignment.contains("TEMP"));
     }
     assert_eq!(coordinate_ids.len(), 4);
+    assert_eq!(ordinals, (1..=4).collect::<HashSet<_>>());
     assert_no_staging_file(&directory);
 }
 
