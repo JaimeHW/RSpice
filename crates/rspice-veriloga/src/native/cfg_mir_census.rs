@@ -204,6 +204,9 @@ struct Tally {
     structural_zeros: usize,
     over_bound: usize,
     nonzero_structural_zeros: usize,
+    /// Structural zeros the shipped route read as non-finite at a point where
+    /// its own assignment pass produced no model. See [`check_structural_zero`].
+    structural_zeros_not_evaluable: usize,
     /// Noise magnitudes lowered from the exit read under a guard: asserted, on
     /// the weaker of the two noise criteria. See [`check_guarded_noise`].
     guarded_noise_entries: usize,
@@ -441,8 +444,62 @@ impl MatrixScales {
 /// identically zero there, which is a claim about the corpus rather than a
 /// theorem — so it is checked here, at every operating point, rather than
 /// assumed.
-fn check_structural_zero(comparison: &Comparison) -> bool {
-    comparison.cfg == 0.0 && comparison.mir == 0.0
+#[derive(Clone, Copy)]
+enum StructuralZero {
+    /// Both routes read exactly zero. The claim holds here.
+    Absent,
+    /// The shipped route read something else. A finding.
+    Present,
+    /// The shipped route read no number at all. See [`check_structural_zero`].
+    NotEvaluable,
+}
+
+/// # Why a non-finite shipped reading is not a counterexample
+///
+/// "Structurally absent" is a claim about *dependence*: the residual does not
+/// depend on this unknown, so the derivative is zero. What decides it is
+/// whether the dependence exists, and the shipped route's reading is evidence
+/// about that only when it is a number.
+///
+/// It reaches the same entry by a different road — it carries every column the
+/// front end's chain rule emitted, and a column the residual does not depend on
+/// is that rule run with a zero seed. `0 * NaN` and `0 / 0` are NaN, so a dead
+/// column reads NaN wherever the factor it is multiplied by is not a number:
+/// at a bias the model's own domain rejects, and at a kink where the derivative
+/// of the primal is `0/0`. Both are in the corpus. BSIMSOI and HICUM read NaN
+/// at one of the three points from a node potential drawn from `(-1, 1)` — 130
+/// and 4 entries — and HICUM's `jacobians[12][2]` reads NaN out of an
+/// eleven-operation program whose inputs are all finite, which is the kink.
+///
+/// Neither says the residual depends on the unknown. Failing a module on them
+/// would be failing it on the arithmetic of a column that contributes nothing.
+///
+/// So a non-finite shipped reading is excused — but never silently, and never
+/// on its own:
+///
+/// * the CFG's own reading must still be exactly zero, so a CFG entry that
+///   stopped being the constant zero is a finding at every point;
+/// * every excused reading is counted as
+///   [`Tally::structural_zeros_not_evaluable`] and printed per module and in
+///   the totals, so the class cannot grow unseen;
+/// * the entry is still asserted at every operating point where the shipped
+///   route does read a number, so a dependence the CFG really dropped is caught
+///   wherever the shipped route can say so.
+///
+/// A shipped route that stamps NaN into a matrix column is a finding of its
+/// own. It is a finding about the shipped route, not about this comparison,
+/// which is why it is counted here and raised there.
+fn check_structural_zero(comparison: &Comparison) -> StructuralZero {
+    if comparison.cfg != 0.0 {
+        return StructuralZero::Present;
+    }
+    if comparison.mir == 0.0 {
+        return StructuralZero::Absent;
+    }
+    if comparison.mir.is_finite() {
+        return StructuralZero::Present;
+    }
+    StructuralZero::NotEvaluable
 }
 
 /// Storage both routes read, sized once per model.
@@ -570,6 +627,7 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
     let mut insignificant_worst = 0.0_f64;
     let mut insignificant_case: Option<Comparison> = None;
     let mut insignificant_here = 0_usize;
+    let mut not_evaluable_here = 0_usize;
 
     for (index, point) in points.iter_mut().enumerate() {
         let mut context = point.context();
@@ -635,9 +693,16 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
             }
             if structural_zeros.contains(&entry) {
                 tally.structural_zeros += 1;
-                if !check_structural_zero(&comparison) {
-                    tally.nonzero_structural_zeros += 1;
-                    nonzero_structural.get_or_insert(comparison);
+                match check_structural_zero(&comparison) {
+                    StructuralZero::Absent => {}
+                    StructuralZero::NotEvaluable => {
+                        tally.structural_zeros_not_evaluable += 1;
+                        not_evaluable_here += 1;
+                    }
+                    StructuralZero::Present => {
+                        tally.nonzero_structural_zeros += 1;
+                        nonzero_structural.get_or_insert(comparison);
+                    }
                 }
                 continue;
             }
@@ -684,6 +749,7 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
     println!(
         "cfg-mir model={module} entries={} compared={compared} exact={exact} \
          below_significance={insignificant_here} structural_zeros={} \
+         not_evaluable={not_evaluable_here} \
          noise_from_differentiated={} max_deviation_over_bound={worst_ratio:.3e}{}{}{}",
         positions.len(),
         cfg_plan.report.structural_zeros.len(),
@@ -801,6 +867,7 @@ fn the_cfg_built_plan_agrees_with_the_shipped_plan_within_the_reassociation_boun
     println!(
         "cfg-mir models={} built={} refused={} entries={} comparisons={} exact={} \
          runtime_errors={} structural_zeros={} over_bound={} nonzero_structural_zeros={} \
+         structural_zeros_not_evaluable={} \
          guarded_noise_entries={} guarded_noise_agreed={} guarded_noise_third_value={} \
          below_significance={}",
         tally.models,
@@ -813,6 +880,7 @@ fn the_cfg_built_plan_agrees_with_the_shipped_plan_within_the_reassociation_boun
         tally.structural_zeros,
         tally.over_bound,
         tally.nonzero_structural_zeros,
+        tally.structural_zeros_not_evaluable,
         tally.guarded_noise_entries,
         tally.guarded_noise_agreed,
         tally.guarded_noise_third_value,
