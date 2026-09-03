@@ -1008,7 +1008,7 @@ fn json_errors_publish_stable_automation_contract() {
             String::from_utf8_lossy(&output.stderr)
         )
     });
-    assert_eq!(json["schema_version"], 1);
+    assert_eq!(json["schema_version"], 2);
     assert_eq!(json["tool"]["name"], "rspice");
     assert_eq!(json["tool"]["commit"], env!("RSPICE_BUILD_COMMIT"));
     assert_eq!(json["error"]["code"], "input_not_found");

@@ -72,7 +72,11 @@ fn print_cli_error(error: &cli::CliError, format: cli::ErrorFormat) {
         }
         cli::ErrorFormat::Json => {
             let payload = serde_json::json!({
-                "schema_version": 1,
+                // Version 2: the fatal diagnostic's categories are the engine's own,
+                // several category strings changed with them, and the exit codes
+                // they map to are new. Adding fields alone would not have needed
+                // a bump; changing what a category means does.
+                "schema_version": 2,
                 "tool": {
                     "name": "rspice",
                     "version": env!("CARGO_PKG_VERSION"),

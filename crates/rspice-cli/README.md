@@ -391,7 +391,7 @@ Available on every subcommand:
 | `--config <FILE>` | Use this configuration file instead of the discovered user and project files |
 | `--log-level <LEVEL>` | Set log level: `off`, `error`, `warn`, `info`, `debug`, `trace` |
 | `--log-format <FORMAT>` | Log format: `text` (default) or newline-delimited `json` with timestamp, source, process, thread, and `run_id` |
-| `--error-format <FORMAT>` | Fatal diagnostic format: `text` (default) or versioned `json` with stable code/category, retry policy, exit code, and numeric resource/convergence details |
+| `--error-format <FORMAT>` | Fatal diagnostic format: `text` (default) or versioned `json` (`schema_version: 2`) with stable code/category, retry policy, exit code, the failing analysis and run-coordinate ids, the deck path and line, the refused capability token, and numeric resource/convergence details |
 
 `rspice --version` reports the crate version, build target, profile, and exact
 source commit. The same commit appears in health documents, structured fatal
