@@ -1,7 +1,5 @@
 //! Intrinsic solve, thermal residual, convergence, and terminal stamping helpers.
 
-#![allow(clippy::needless_range_loop)]
-
 use super::*;
 
 impl Bjt {
@@ -20,8 +18,8 @@ impl Bjt {
         for pivot in 0..dim {
             let mut best = pivot;
             let mut best_abs = a[pivot][pivot].abs();
-            for row in (pivot + 1)..dim {
-                let value = a[row][pivot].abs();
+            for (row, entries) in a.iter().enumerate().take(dim).skip(pivot + 1) {
+                let value = entries[pivot].abs();
                 if value > best_abs {
                     best = row;
                     best_abs = value;
@@ -37,10 +35,18 @@ impl Bjt {
 
             let pivot_value = a[pivot][pivot];
             for row in (pivot + 1)..dim {
-                let factor = a[row][pivot] / pivot_value;
-                a[row][pivot] = 0.0;
-                for col in (pivot + 1)..dim {
-                    a[row][col] -= factor * a[pivot][col];
+                // `row > pivot`, so the pivot row stays in `above` and the row
+                // being eliminated heads `below`.
+                let (above, below) = a.split_at_mut(row);
+                let pivot_row = &above[pivot];
+                let target_row = &mut below[0];
+                let factor = target_row[pivot] / pivot_value;
+                target_row[pivot] = 0.0;
+                for (target, &value) in target_row[(pivot + 1)..dim]
+                    .iter_mut()
+                    .zip(&pivot_row[(pivot + 1)..dim])
+                {
+                    *target -= factor * value;
                 }
                 b[row] -= factor * b[pivot];
             }
@@ -315,8 +321,20 @@ impl Bjt {
         let solve_vbp = self.vbic_solves_vbp();
 
         let eval = self.evaluate_state(
-            vc, vb, ve, vs, state.vcx, state.vci, state.vbx, state.vbi, state.vei, state.vbp,
-            state.vsi, state.vrth,
+            BjtNodeVoltages {
+                vc,
+                vb,
+                ve,
+                vs,
+                vcx: state.vcx,
+                vci: state.vci,
+                vbx: state.vbx,
+                vbi: state.vbi,
+                vei: state.vei,
+                vbp: state.vbp,
+                vsi: state.vsi,
+            },
+            state.vrth,
         );
         let (collector_d, base_d, emitter_d) = self.intrinsic_terminal_derivatives(eval.linearized);
         let collector_internal = Self::branch_from_internal(eval.linearized.ic, collector_d);
@@ -345,9 +363,7 @@ impl Bjt {
                     collector_internal
                 },
             );
-            for idx in 0..INTERNAL_DIM {
-                jacobian[IDX_VCX][idx] = row.d_internal[idx];
-            }
+            jacobian[IDX_VCX][..INTERNAL_DIM].copy_from_slice(&row.d_internal[..INTERNAL_DIM]);
             external_partials[IDX_VCX] = row.d_external;
         } else {
             jacobian[IDX_VCX][IDX_VCX] = 1.0;
@@ -356,9 +372,7 @@ impl Bjt {
 
         if has_rci {
             let row = Self::sub_branches(eval.irci, collector_internal);
-            for idx in 0..INTERNAL_DIM {
-                jacobian[IDX_VCI][idx] = row.d_internal[idx];
-            }
+            jacobian[IDX_VCI][..INTERNAL_DIM].copy_from_slice(&row.d_internal[..INTERNAL_DIM]);
         } else {
             jacobian[IDX_VCI][IDX_VCI] = 1.0;
             jacobian[IDX_VCI][IDX_VCX] = -1.0;
@@ -378,9 +392,7 @@ impl Bjt {
                 ),
                 eval.iccp,
             );
-            for idx in 0..INTERNAL_DIM {
-                jacobian[IDX_VBX][idx] = row.d_internal[idx];
-            }
+            jacobian[IDX_VBX][..INTERNAL_DIM].copy_from_slice(&row.d_internal[..INTERNAL_DIM]);
             external_partials[IDX_VBX] = row.d_external;
         } else {
             jacobian[IDX_VBX][IDX_VBX] = 1.0;
@@ -389,9 +401,7 @@ impl Bjt {
 
         if has_rbi {
             let row = Self::sub_branches(eval.irbi, base_internal);
-            for idx in 0..INTERNAL_DIM {
-                jacobian[IDX_VBI][idx] = row.d_internal[idx];
-            }
+            jacobian[IDX_VBI][..INTERNAL_DIM].copy_from_slice(&row.d_internal[..INTERNAL_DIM]);
         } else {
             jacobian[IDX_VBI][IDX_VBI] = 1.0;
             jacobian[IDX_VBI][IDX_VBX] = -1.0;
@@ -399,9 +409,7 @@ impl Bjt {
 
         if has_re {
             let row = Self::sub_branches(Self::add_branches(eval.ire, eval.ibex), emitter_internal);
-            for idx in 0..INTERNAL_DIM {
-                jacobian[IDX_VEI][idx] = row.d_internal[idx];
-            }
+            jacobian[IDX_VEI][..INTERNAL_DIM].copy_from_slice(&row.d_internal[..INTERNAL_DIM]);
             external_partials[IDX_VEI] = row.d_external;
         } else {
             jacobian[IDX_VEI][IDX_VEI] = 1.0;
@@ -410,9 +418,7 @@ impl Bjt {
 
         if solve_vbp {
             let row = Self::sub_branches(Self::add_branches(eval.ibep, eval.ibcp), eval.irbp);
-            for idx in 0..INTERNAL_DIM {
-                jacobian[IDX_VBP][idx] = row.d_internal[idx];
-            }
+            jacobian[IDX_VBP][..INTERNAL_DIM].copy_from_slice(&row.d_internal[..INTERNAL_DIM]);
         } else {
             jacobian[IDX_VBP][IDX_VBP] = 1.0;
             jacobian[IDX_VBP][IDX_VCX] = -1.0;
@@ -420,9 +426,7 @@ impl Bjt {
 
         if has_rs {
             let row = Self::sub_branches(Self::add_branches(eval.irs, eval.iccp), eval.ibcp);
-            for idx in 0..INTERNAL_DIM {
-                jacobian[IDX_VSI][idx] = row.d_internal[idx];
-            }
+            jacobian[IDX_VSI][..INTERNAL_DIM].copy_from_slice(&row.d_internal[..INTERNAL_DIM]);
             external_partials[IDX_VSI] = row.d_external;
         } else {
             jacobian[IDX_VSI][IDX_VSI] = 1.0;
@@ -431,9 +435,7 @@ impl Bjt {
 
         if has_self_heat {
             let row = Self::sub_branches(thermal_sink, thermal_power);
-            for idx in 0..INTERNAL_DIM {
-                jacobian[IDX_VRTH][idx] = row.d_internal[idx];
-            }
+            jacobian[IDX_VRTH][..INTERNAL_DIM].copy_from_slice(&row.d_internal[..INTERNAL_DIM]);
             external_partials[IDX_VRTH] = row.d_external;
         } else {
             jacobian[IDX_VRTH][IDX_VRTH] = 1.0;
@@ -661,8 +663,20 @@ impl Bjt {
 
         let state = self.intrinsic_state_from_internal_vector(internal);
         let eval = self.evaluate_state(
-            vc, vb, ve, vs, state.vcx, state.vci, state.vbx, state.vbi, state.vei, state.vbp,
-            state.vsi, state.vrth,
+            BjtNodeVoltages {
+                vc,
+                vb,
+                ve,
+                vs,
+                vcx: state.vcx,
+                vci: state.vci,
+                vbx: state.vbx,
+                vbi: state.vbi,
+                vei: state.vei,
+                vbp: state.vbp,
+                vsi: state.vsi,
+            },
+            state.vrth,
         );
         self.thermal_power_branch(eval, [vc, vb, ve, vs], internal)
             .current
@@ -694,8 +708,20 @@ impl Bjt {
         ];
         let state = self.intrinsic_state_from_internal_vector(static_internal);
         let eval = self.evaluate_state(
-            vc, vb, ve, vs, state.vcx, state.vci, state.vbx, state.vbi, state.vei, state.vbp,
-            state.vsi, state.vrth,
+            BjtNodeVoltages {
+                vc,
+                vb,
+                ve,
+                vs,
+                vcx: state.vcx,
+                vci: state.vci,
+                vbx: state.vbx,
+                vbi: state.vbi,
+                vei: state.vei,
+                vbp: state.vbp,
+                vsi: state.vsi,
+            },
+            state.vrth,
         );
         let static_row = Self::sub_branches(
             self.thermal_sink_branch(state.vrth),
@@ -760,7 +786,22 @@ impl Bjt {
         internal: [Value; INTERNAL_DIM],
     ) -> [BranchLinearization; Self::VBIC_CONVERGENCE_BRANCH_COUNT] {
         let [vcx, vci, vbx, vbi, vei, vbp, vsi, vrth] = internal;
-        let eval = self.evaluate_state(0.0, 0.0, 0.0, 0.0, vcx, vci, vbx, vbi, vei, vbp, vsi, vrth);
+        let eval = self.evaluate_state(
+            BjtNodeVoltages {
+                vc: 0.0,
+                vb: 0.0,
+                ve: 0.0,
+                vs: 0.0,
+                vcx,
+                vci,
+                vbx,
+                vbi,
+                vei,
+                vbp,
+                vsi,
+            },
+            vrth,
+        );
         [
             eval.ibe, eval.ibep, eval.iciei, eval.ibc, eval.irci, eval.irbi, eval.irbp, eval.ibcp,
             eval.iccp, eval.ibex,
@@ -777,7 +818,22 @@ impl Bjt {
     ) -> VbicTransientConvergenceState {
         let [vcx, vci, vbx, vbi, vei, vbp, vsi, vrth, _vxf1, _vxf2] =
             snapshot.reduction.internal_voltages;
-        let eval = self.evaluate_state(vc, vb, ve, vs, vcx, vci, vbx, vbi, vei, vbp, vsi, vrth);
+        let eval = self.evaluate_state(
+            BjtNodeVoltages {
+                vc,
+                vb,
+                ve,
+                vs,
+                vcx,
+                vci,
+                vbx,
+                vbi,
+                vei,
+                vbp,
+                vsi,
+            },
+            vrth,
+        );
         let delay_branches = self.vbic_delay_static_branches(&snapshot.reduction);
 
         let mut currents = [0.0; VBIC_TRANSIENT_CONVERGENCE_BRANCH_COUNT];
@@ -795,9 +851,12 @@ impl Bjt {
 
         if self.uses_vbic_dynamic_charges() && self.td > 0.0 {
             currents[VBIC_TRANSIENT_CONVERGENCE_ICIEI_INDEX] += delay_branches[0].current;
-            for idx in 0..BJT_INTERNAL_STATE_DIM {
-                d_currents_d_internal[VBIC_TRANSIENT_CONVERGENCE_ICIEI_INDEX][idx] +=
-                    delay_branches[0].d_internal[idx];
+            for (accumulated, &derivative) in d_currents_d_internal
+                [VBIC_TRANSIENT_CONVERGENCE_ICIEI_INDEX][..BJT_INTERNAL_STATE_DIM]
+                .iter_mut()
+                .zip(&delay_branches[0].d_internal[..BJT_INTERNAL_STATE_DIM])
+            {
+                *accumulated += derivative;
             }
         }
 

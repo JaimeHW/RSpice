@@ -5,16 +5,19 @@ use super::*;
 impl TestRunner {
     pub(super) fn run_transient_test(
         &self,
-        name: &str,
-        cir_path: &Path,
-        source_path: &Path,
-        source: &str,
+        case: &RegressionCase<'_>,
         tstep: Value,
         tstop: Value,
         tstart: Value,
         tmax: Option<Value>,
-        start: std::time::Instant,
     ) -> TestResult {
+        let RegressionCase {
+            name,
+            cir_path,
+            source_path,
+            source,
+            start,
+        } = *case;
         let netlist = match Self::parse_regression_source(source, source_path) {
             Ok(n) => n,
             Err(e) => {

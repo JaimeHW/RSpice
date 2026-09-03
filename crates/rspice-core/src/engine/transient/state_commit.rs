@@ -2,6 +2,46 @@
 
 use super::*;
 
+/// The accepted step whose reactive history is being committed: the solution
+/// that was accepted, the time it lands at, the step size, and the companion
+/// coefficients the devices stamped with (BSIM4's non-quasi-static branch uses
+/// its own set).
+#[derive(Clone, Copy)]
+pub(super) struct AcceptedReactiveStep<'a> {
+    pub accepted_solution: &'a [Value],
+    pub accepted_time: Value,
+    pub dt: Value,
+    pub coeff: &'a CompanionCoefficients,
+    pub bsim4_trnqs_coeff: &'a CompanionCoefficients,
+}
+
+/// The optional per-family state the commit reseeds from when the step
+/// produced it: the Xyce second-order flag it was taken under, the VBIC charge
+/// snapshots, the accepted capacitor and MOSFET capacitance states, the gate
+/// companion charges and whether to suppress them, and the transmission-line
+/// reference states.
+#[derive(Clone, Copy)]
+pub(super) struct AcceptedReactiveSnapshots<'a> {
+    pub xyce_one_step_order2: bool,
+    pub vbic_snapshots: Option<&'a [Option<BjtChargeSnapshot>]>,
+    pub capacitor_accepted_states: Option<&'a [CapacitorAcceptedState]>,
+    pub mosfet_caps: Option<&'a [(Value, Value, Value)]>,
+    pub mosfet_gate_companion_charges: Option<&'a [MosfetGateCompanionCharges]>,
+    pub suppress_gate_charge_history: bool,
+    pub tline_dc_refs: &'a [(Value, Value)],
+    pub coupled_tline_refs: &'a [CoupledTlineReferenceState],
+}
+
+/// The breakpoint schedule the commit may extend, with the analysis stop time
+/// and the tolerances a new breakpoint is judged against.
+pub(super) struct ReactiveBreakpointScheduling<'a> {
+    pub breakpoints: &'a mut BreakpointManager,
+    pub tstop: Value,
+    pub voltage_reltol: Value,
+    pub voltage_abstol: Value,
+    pub current_abstol: Value,
+}
+
 impl Engine {
     #[inline]
     fn install_cached_mosfet_gate_companion_charges(
@@ -22,37 +62,52 @@ impl Engine {
     pub(super) fn update_reactive_history(
         &self,
         circuit: &mut crate::circuit::CircuitData,
-        accepted_solution: &[Value],
-        accepted_time: Value,
-        dt: Value,
-        coeff: &CompanionCoefficients,
-        bsim4_trnqs_coeff: &CompanionCoefficients,
-        bjt_history: &mut BjtTransientHistory,
-        jfet_history: &mut JfetTransientHistory,
-        diode_history: &mut DiodeTransientHistory,
-        mosfet_history: &mut MosfetTransientHistory,
-        vdmos_history: &mut VdmosTransientHistory,
-        b3soi_history: &mut B3SoiTransientHistory,
-        bsim3_history: &mut Bsim3TransientHistory,
-        bsim4_history: &mut Bsim4TransientHistory,
-        ekv26_history: &mut Ekv26TransientHistory,
-        xyce_one_step_order2: bool,
-        vbic_snapshots: Option<&[Option<BjtChargeSnapshot>]>,
-        capacitor_accepted_states: Option<&[CapacitorAcceptedState]>,
-        mosfet_caps: Option<&[(Value, Value, Value)]>,
-        mosfet_gate_companion_charges: Option<&[MosfetGateCompanionCharges]>,
-        suppress_gate_charge_history: bool,
-        tline_dc_refs: &[(Value, Value)],
-        coupled_tline_refs: &[CoupledTlineReferenceState],
-        breakpoints: &mut BreakpointManager,
-        tstop: Value,
-        voltage_reltol: Value,
-        voltage_abstol: Value,
-        current_abstol: Value,
-        dynamic_breakpoints_added: &mut usize,
-        warned_dynamic_breakpoint_cap: &mut bool,
-        pending_dynamic_breakpoints: &mut Vec<Value>,
+        step: AcceptedReactiveStep<'_>,
+        histories: TransientDeviceHistories<'_>,
+        snapshots: AcceptedReactiveSnapshots<'_>,
+        scheduling: ReactiveBreakpointScheduling<'_>,
+        sink: DynamicBreakpointSink<'_>,
     ) -> Result<(), SimulationError> {
+        let DynamicBreakpointSink {
+            dynamic_breakpoints_added,
+            warned_dynamic_breakpoint_cap,
+            pending_dynamic_breakpoints,
+        } = sink;
+        let ReactiveBreakpointScheduling {
+            breakpoints,
+            tstop,
+            voltage_reltol,
+            voltage_abstol,
+            current_abstol,
+        } = scheduling;
+        let AcceptedReactiveSnapshots {
+            xyce_one_step_order2,
+            vbic_snapshots,
+            capacitor_accepted_states,
+            mosfet_caps,
+            mosfet_gate_companion_charges,
+            suppress_gate_charge_history,
+            tline_dc_refs,
+            coupled_tline_refs,
+        } = snapshots;
+        let TransientDeviceHistories {
+            bjt: bjt_history,
+            jfet: jfet_history,
+            diode: diode_history,
+            mosfet: mosfet_history,
+            vdmos: vdmos_history,
+            b3soi: b3soi_history,
+            bsim3: bsim3_history,
+            bsim4: bsim4_history,
+            ekv26: ekv26_history,
+        } = histories;
+        let AcceptedReactiveStep {
+            accepted_solution,
+            accepted_time,
+            dt,
+            coeff,
+            bsim4_trnqs_coeff,
+        } = step;
         let num_nodes = circuit.num_nodes();
         let capacitor_accepted_states = capacitor_accepted_states
             .filter(|states| states.len() == circuit.capacitors.stamps.len());
@@ -155,19 +210,20 @@ impl Engine {
                 let i1 = accepted_solution.get(br1 - 1).copied().unwrap_or(0.0);
                 let i2 = accepted_solution.get(br2 - 1).copied().unwrap_or(0.0);
                 tl.update_history(accepted_time, v1, i1, v2, i2);
-                if !tl.is_distributed_rc() {
-                    if let Some(arrival) =
+                if !tl.is_distributed_rc()
+                    && let Some(arrival) =
                         tl.ltra_derivative_breakpoint_arrival(voltage_reltol, current_abstol)
-                    {
-                        Self::schedule_dynamic_tline_breakpoint(
-                            breakpoints,
-                            arrival,
-                            tstop,
+                {
+                    Self::schedule_dynamic_tline_breakpoint(
+                        breakpoints,
+                        arrival,
+                        tstop,
+                        DynamicBreakpointSink {
                             dynamic_breakpoints_added,
                             warned_dynamic_breakpoint_cap,
                             pending_dynamic_breakpoints,
-                        );
-                    }
+                        },
+                    );
                 }
                 tl.compact_ltra_history_if_straight();
                 continue;
@@ -184,38 +240,52 @@ impl Engine {
                         breakpoints,
                         arrival,
                         tstop,
-                        dynamic_breakpoints_added,
-                        warned_dynamic_breakpoint_cap,
-                        pending_dynamic_breakpoints,
+                        DynamicBreakpointSink {
+                            dynamic_breakpoints_added,
+                            warned_dynamic_breakpoint_cap,
+                            pending_dynamic_breakpoints,
+                        },
                     );
                 }
                 tl.compact_ltra_history_if_straight();
             } else {
                 Self::maybe_schedule_tline_arrival_breakpoint(
                     breakpoints,
-                    accepted_time,
-                    tl.delay(),
-                    tstop,
-                    previous_forward,
-                    tl.launched_forward_wave(),
-                    voltage_reltol,
-                    voltage_abstol,
-                    dynamic_breakpoints_added,
-                    warned_dynamic_breakpoint_cap,
-                    pending_dynamic_breakpoints,
+                    TlineArrivalEvent {
+                        event_time: accepted_time,
+                        delay: tl.delay(),
+                        tstop,
+                    },
+                    TlineWaveChange {
+                        previous_wave: previous_forward,
+                        current_wave: tl.launched_forward_wave(),
+                        reltol: voltage_reltol,
+                        abstol: voltage_abstol,
+                    },
+                    DynamicBreakpointSink {
+                        dynamic_breakpoints_added,
+                        warned_dynamic_breakpoint_cap,
+                        pending_dynamic_breakpoints,
+                    },
                 );
                 Self::maybe_schedule_tline_arrival_breakpoint(
                     breakpoints,
-                    accepted_time,
-                    tl.delay(),
-                    tstop,
-                    previous_backward,
-                    tl.launched_backward_wave(),
-                    voltage_reltol,
-                    voltage_abstol,
-                    dynamic_breakpoints_added,
-                    warned_dynamic_breakpoint_cap,
-                    pending_dynamic_breakpoints,
+                    TlineArrivalEvent {
+                        event_time: accepted_time,
+                        delay: tl.delay(),
+                        tstop,
+                    },
+                    TlineWaveChange {
+                        previous_wave: previous_backward,
+                        current_wave: tl.launched_backward_wave(),
+                        reltol: voltage_reltol,
+                        abstol: voltage_abstol,
+                    },
+                    DynamicBreakpointSink {
+                        dynamic_breakpoints_added,
+                        warned_dynamic_breakpoint_cap,
+                        pending_dynamic_breakpoints,
+                    },
                 );
             }
         }
@@ -284,29 +354,41 @@ impl Engine {
             {
                 Self::maybe_schedule_tline_arrival_breakpoint(
                     breakpoints,
-                    accepted_time,
-                    delay,
-                    tstop,
-                    previous_forward,
-                    current_forward,
-                    voltage_reltol,
-                    voltage_abstol,
-                    dynamic_breakpoints_added,
-                    warned_dynamic_breakpoint_cap,
-                    pending_dynamic_breakpoints,
+                    TlineArrivalEvent {
+                        event_time: accepted_time,
+                        delay,
+                        tstop,
+                    },
+                    TlineWaveChange {
+                        previous_wave: previous_forward,
+                        current_wave: current_forward,
+                        reltol: voltage_reltol,
+                        abstol: voltage_abstol,
+                    },
+                    DynamicBreakpointSink {
+                        dynamic_breakpoints_added,
+                        warned_dynamic_breakpoint_cap,
+                        pending_dynamic_breakpoints,
+                    },
                 );
                 Self::maybe_schedule_tline_arrival_breakpoint(
                     breakpoints,
-                    accepted_time,
-                    delay,
-                    tstop,
-                    previous_backward,
-                    current_backward,
-                    voltage_reltol,
-                    voltage_abstol,
-                    dynamic_breakpoints_added,
-                    warned_dynamic_breakpoint_cap,
-                    pending_dynamic_breakpoints,
+                    TlineArrivalEvent {
+                        event_time: accepted_time,
+                        delay,
+                        tstop,
+                    },
+                    TlineWaveChange {
+                        previous_wave: previous_backward,
+                        current_wave: current_backward,
+                        reltol: voltage_reltol,
+                        abstol: voltage_abstol,
+                    },
+                    DynamicBreakpointSink {
+                        dynamic_breakpoints_added,
+                        warned_dynamic_breakpoint_cap,
+                        pending_dynamic_breakpoints,
+                    },
                 );
             }
         }
@@ -337,9 +419,11 @@ impl Engine {
                         coeff,
                         dt,
                         branch.charge,
-                        q_prev,
-                        q_prev_prev,
-                        cq_prev,
+                        BranchChargeHistory {
+                            q_prev,
+                            q_prev_prev,
+                            cq_prev,
+                        },
                     );
                     bjt_history.charge_q_prev_prev_prev[idx][branch_idx] = q_prev_prev;
                     bjt_history.charge_q_prev_prev[idx][branch_idx] = q_prev;
@@ -369,20 +453,26 @@ impl Engine {
             let Some(snapshot) = Self::resolve_vbic_snapshot_for_external_bias_with_linear_history(
                 bjt,
                 external,
-                coeff,
-                dt,
-                &bjt_history.charge_q_prev[idx],
-                &bjt_history.charge_q_prev_prev[idx],
-                &bjt_history.charge_cq_prev[idx],
-                bjt_history.dynamic_internal_prev.get(idx),
-                bjt_history.dynamic_internal_prev_prev.get(idx),
-                bjt_history.dynamic_linear_prev.get(idx),
-                bjt_history.dynamic_linear_prev_prev.get(idx),
-                bjt_history.accepted_dt_prev,
+                VbicChargeStep {
+                    coeff,
+                    dt,
+                    q_prev: &bjt_history.charge_q_prev[idx],
+                    q_prev_prev: &bjt_history.charge_q_prev_prev[idx],
+                    cq_prev: &bjt_history.charge_cq_prev[idx],
+                },
+                VbicPredictorHistory {
+                    internal_prev: bjt_history.dynamic_internal_prev.get(idx),
+                    internal_prev_prev: bjt_history.dynamic_internal_prev_prev.get(idx),
+                    linear_prev: bjt_history.dynamic_linear_prev.get(idx),
+                    linear_prev_prev: bjt_history.dynamic_linear_prev_prev.get(idx),
+                    previous_dt: bjt_history.accepted_dt_prev,
+                },
                 cached_snapshot,
                 VbicCachedSnapshotReuse::SeedOnly,
-                snapshot_reuse_abstol,
-                snapshot_reuse_reltol,
+                VbicSnapshotTolerances {
+                    voltage_abstol: snapshot_reuse_abstol,
+                    reltol: snapshot_reuse_reltol,
+                },
             ) else {
                 continue;
             };
@@ -397,11 +487,13 @@ impl Engine {
                 Some(Self::reduced_bjt_transient_terminal_currents(
                     bjt,
                     &snapshot,
-                    coeff,
-                    dt,
-                    &bjt_history.charge_q_prev[idx],
-                    &bjt_history.charge_q_prev_prev[idx],
-                    &bjt_history.charge_cq_prev[idx],
+                    VbicChargeStep {
+                        coeff,
+                        dt,
+                        q_prev: &bjt_history.charge_q_prev[idx],
+                        q_prev_prev: &bjt_history.charge_q_prev_prev[idx],
+                        cq_prev: &bjt_history.charge_cq_prev[idx],
+                    },
                 )?);
             let legacy_charges = bjt.legacy_transient_charge_state_with_vbx(
                 legacy_vbe, legacy_vbc, legacy_vbx, legacy_vcs,
@@ -417,8 +509,16 @@ impl Engine {
                 let q_prev = bjt_history.charge_q_prev[idx][branch_idx];
                 let q_prev_prev = bjt_history.charge_q_prev_prev[idx][branch_idx];
                 let cq_prev = bjt_history.charge_cq_prev[idx][branch_idx];
-                let cq_curr =
-                    Self::jfet_companion_ccap(coeff, dt, charge, q_prev, q_prev_prev, cq_prev);
+                let cq_curr = Self::jfet_companion_ccap(
+                    coeff,
+                    dt,
+                    charge,
+                    BranchChargeHistory {
+                        q_prev,
+                        q_prev_prev,
+                        cq_prev,
+                    },
+                );
                 bjt_history.charge_q_prev_prev_prev[idx][branch_idx] = q_prev_prev;
                 bjt_history.charge_q_prev_prev[idx][branch_idx] = q_prev;
                 bjt_history.charge_q_prev[idx][branch_idx] = charge;
@@ -496,9 +596,11 @@ impl Engine {
                         cgs,
                         vgs_charge,
                         charge.qgs,
-                        jfet_history.qgs_prev[idx],
-                        jfet_history.qgs_prev_prev[idx],
-                        jfet_history.cqgs_prev[idx],
+                        BranchChargeHistory {
+                            q_prev: jfet_history.qgs_prev[idx],
+                            q_prev_prev: jfet_history.qgs_prev_prev[idx],
+                            cq_prev: jfet_history.cqgs_prev[idx],
+                        },
                     )
                 } else {
                     Self::jfet_companion_terms(
@@ -507,9 +609,11 @@ impl Engine {
                         cgs,
                         vgs_charge,
                         jfet_history.vgs_prev_prev[idx],
-                        jfet_history.qgs_prev[idx],
-                        jfet_history.qgs_prev_prev[idx],
-                        jfet_history.cqgs_prev[idx],
+                        BranchChargeHistory {
+                            q_prev: jfet_history.qgs_prev[idx],
+                            q_prev_prev: jfet_history.qgs_prev_prev[idx],
+                            cq_prev: jfet_history.cqgs_prev[idx],
+                        },
                     )
                 };
                 jfet_history.qgs_prev_prev_prev[idx] = jfet_history.qgs_prev_prev[idx];
@@ -524,9 +628,11 @@ impl Engine {
                         cgd,
                         vgd_charge,
                         charge.qgd,
-                        jfet_history.qgd_prev[idx],
-                        jfet_history.qgd_prev_prev[idx],
-                        jfet_history.cqgd_prev[idx],
+                        BranchChargeHistory {
+                            q_prev: jfet_history.qgd_prev[idx],
+                            q_prev_prev: jfet_history.qgd_prev_prev[idx],
+                            cq_prev: jfet_history.cqgd_prev[idx],
+                        },
                     )
                 } else {
                     Self::jfet_companion_terms(
@@ -535,9 +641,11 @@ impl Engine {
                         cgd,
                         vgd_charge,
                         jfet_history.vgd_prev_prev[idx],
-                        jfet_history.qgd_prev[idx],
-                        jfet_history.qgd_prev_prev[idx],
-                        jfet_history.cqgd_prev[idx],
+                        BranchChargeHistory {
+                            q_prev: jfet_history.qgd_prev[idx],
+                            q_prev_prev: jfet_history.qgd_prev_prev[idx],
+                            cq_prev: jfet_history.cqgd_prev[idx],
+                        },
                     )
                 };
                 jfet_history.qgd_prev_prev_prev[idx] = jfet_history.qgd_prev_prev[idx];
@@ -552,9 +660,11 @@ impl Engine {
                     cds,
                     vds_charge,
                     jfet_history.vds_prev_prev[idx],
-                    jfet_history.qds_prev[idx],
-                    jfet_history.qds_prev_prev[idx],
-                    jfet_history.cqds_prev[idx],
+                    BranchChargeHistory {
+                        q_prev: jfet_history.qds_prev[idx],
+                        q_prev_prev: jfet_history.qds_prev_prev[idx],
+                        cq_prev: jfet_history.cqds_prev[idx],
+                    },
                 );
                 jfet_history.qds_prev_prev_prev[idx] = jfet_history.qds_prev_prev[idx];
                 jfet_history.qds_prev_prev[idx] = jfet_history.qds_prev[idx];
@@ -578,9 +688,11 @@ impl Engine {
                     capd,
                     vd,
                     qd,
-                    diode_history.qd_prev[idx],
-                    diode_history.qd_prev_prev[idx],
-                    diode_history.cqd_prev[idx],
+                    BranchChargeHistory {
+                        q_prev: diode_history.qd_prev[idx],
+                        q_prev_prev: diode_history.qd_prev_prev[idx],
+                        cq_prev: diode_history.cqd_prev[idx],
+                    },
                 );
                 diode_history.qd_prev_prev_prev[idx] = diode_history.qd_prev_prev[idx];
                 diode_history.qd_prev_prev[idx] = diode_history.qd_prev[idx];
@@ -773,9 +885,11 @@ impl Engine {
                                                 cgs,
                                                 vgs,
                                                 vgs_prev_prev[idx],
-                                                qgs_prev_prev[idx],
-                                                qgs_prev_prev_prev[idx],
-                                                *cqgs_out,
+                                                BranchChargeHistory {
+                                                    q_prev: qgs_prev_prev[idx],
+                                                    q_prev_prev: qgs_prev_prev_prev[idx],
+                                                    cq_prev: *cqgs_out,
+                                                },
                                             );
                                         *qgs_out = q_curr;
                                         *cqgs_out = cq_curr;
@@ -787,9 +901,11 @@ impl Engine {
                                                 cgd,
                                                 vgd,
                                                 vgd_prev_prev[idx],
-                                                qgd_prev_prev[idx],
-                                                qgd_prev_prev_prev[idx],
-                                                *cqgd_out,
+                                                BranchChargeHistory {
+                                                    q_prev: qgd_prev_prev[idx],
+                                                    q_prev_prev: qgd_prev_prev_prev[idx],
+                                                    cq_prev: *cqgd_out,
+                                                },
                                             );
                                         *qgd_out = q_curr;
                                         *cqgd_out = cq_curr;
@@ -801,9 +917,11 @@ impl Engine {
                                                 cgb,
                                                 vgb,
                                                 vgb_prev_prev[idx],
-                                                qgb_prev_prev[idx],
-                                                qgb_prev_prev_prev[idx],
-                                                *cqgb_out,
+                                                BranchChargeHistory {
+                                                    q_prev: qgb_prev_prev[idx],
+                                                    q_prev_prev: qgb_prev_prev_prev[idx],
+                                                    cq_prev: *cqgb_out,
+                                                },
                                             );
                                         *qgb_out = q_curr;
                                         *cqgb_out = cq_curr;
@@ -822,9 +940,11 @@ impl Engine {
                                             capacitance,
                                             vbs_j,
                                             q_exact,
-                                            *qbs_out,
-                                            *qbs_prev_out,
-                                            *cqbs_out,
+                                            BranchChargeHistory {
+                                                q_prev: *qbs_out,
+                                                q_prev_prev: *qbs_prev_out,
+                                                cq_prev: *cqbs_out,
+                                            },
                                         );
                                     *vbs_j_prev_out = *vbs_j_out;
                                     *vbs_j_out = vbs_j;
@@ -844,9 +964,11 @@ impl Engine {
                                             capacitance,
                                             vbd_j,
                                             q_exact,
-                                            *qbd_out,
-                                            *qbd_prev_out,
-                                            *cqbd_out,
+                                            BranchChargeHistory {
+                                                q_prev: *qbd_out,
+                                                q_prev_prev: *qbd_prev_out,
+                                                cq_prev: *cqbd_out,
+                                            },
                                         );
                                     *vbd_j_prev_out = *vbd_j_out;
                                     *vbd_j_out = vbd_j;
@@ -913,9 +1035,11 @@ impl Engine {
                         cgs,
                         vgs,
                         mosfet_history.vgs_prev_prev[idx],
-                        mosfet_history.qgs_prev_prev[idx],
-                        mosfet_history.qgs_prev_prev_prev[idx],
-                        mosfet_history.cqgs_prev[idx],
+                        BranchChargeHistory {
+                            q_prev: mosfet_history.qgs_prev_prev[idx],
+                            q_prev_prev: mosfet_history.qgs_prev_prev_prev[idx],
+                            cq_prev: mosfet_history.cqgs_prev[idx],
+                        },
                     );
                     mosfet_history.qgs_prev[idx] = qgs_curr;
                     mosfet_history.cqgs_prev[idx] = cqgs_curr;
@@ -926,9 +1050,11 @@ impl Engine {
                         cgd,
                         vgd,
                         mosfet_history.vgd_prev_prev[idx],
-                        mosfet_history.qgd_prev_prev[idx],
-                        mosfet_history.qgd_prev_prev_prev[idx],
-                        mosfet_history.cqgd_prev[idx],
+                        BranchChargeHistory {
+                            q_prev: mosfet_history.qgd_prev_prev[idx],
+                            q_prev_prev: mosfet_history.qgd_prev_prev_prev[idx],
+                            cq_prev: mosfet_history.cqgd_prev[idx],
+                        },
                     );
                     mosfet_history.qgd_prev[idx] = qgd_curr;
                     mosfet_history.cqgd_prev[idx] = cqgd_curr;
@@ -939,9 +1065,11 @@ impl Engine {
                         cgb,
                         vgb,
                         mosfet_history.vgb_prev_prev[idx],
-                        mosfet_history.qgb_prev_prev[idx],
-                        mosfet_history.qgb_prev_prev_prev[idx],
-                        mosfet_history.cqgb_prev[idx],
+                        BranchChargeHistory {
+                            q_prev: mosfet_history.qgb_prev_prev[idx],
+                            q_prev_prev: mosfet_history.qgb_prev_prev_prev[idx],
+                            cq_prev: mosfet_history.cqgb_prev[idx],
+                        },
                     );
                     mosfet_history.qgb_prev[idx] = qgb_curr;
                     mosfet_history.cqgb_prev[idx] = cqgb_curr;
@@ -959,9 +1087,11 @@ impl Engine {
                         cbs,
                         vbs_j,
                         qbs_exact,
-                        mosfet_history.qbs_prev[idx],
-                        mosfet_history.qbs_prev_prev[idx],
-                        mosfet_history.cqbs_prev[idx],
+                        BranchChargeHistory {
+                            q_prev: mosfet_history.qbs_prev[idx],
+                            q_prev_prev: mosfet_history.qbs_prev_prev[idx],
+                            cq_prev: mosfet_history.cqbs_prev[idx],
+                        },
                     );
                 mosfet_history.vbs_j_prev_prev[idx] = mosfet_history.vbs_j_prev[idx];
                 mosfet_history.vbs_j_prev[idx] = vbs_j;
@@ -980,9 +1110,11 @@ impl Engine {
                         cbd,
                         vbd_j,
                         qbd_exact,
-                        mosfet_history.qbd_prev[idx],
-                        mosfet_history.qbd_prev_prev[idx],
-                        mosfet_history.cqbd_prev[idx],
+                        BranchChargeHistory {
+                            q_prev: mosfet_history.qbd_prev[idx],
+                            q_prev_prev: mosfet_history.qbd_prev_prev[idx],
+                            cq_prev: mosfet_history.cqbd_prev[idx],
+                        },
                     );
                 mosfet_history.vbd_j_prev_prev[idx] = mosfet_history.vbd_j_prev[idx];
                 mosfet_history.vbd_j_prev[idx] = vbd_j;
@@ -1012,9 +1144,11 @@ impl Engine {
                 cgs,
                 vgs,
                 vdmos_history.vgs_prev_prev[idx],
-                vdmos_history.qgs_prev[idx],
-                vdmos_history.qgs_prev_prev[idx],
-                vdmos_history.cqgs_prev[idx],
+                BranchChargeHistory {
+                    q_prev: vdmos_history.qgs_prev[idx],
+                    q_prev_prev: vdmos_history.qgs_prev_prev[idx],
+                    cq_prev: vdmos_history.cqgs_prev[idx],
+                },
             );
             vdmos_history.qgs_prev_prev_prev[idx] = vdmos_history.qgs_prev_prev[idx];
             vdmos_history.qgs_prev_prev[idx] = vdmos_history.qgs_prev[idx];
@@ -1029,9 +1163,11 @@ impl Engine {
                 cgd,
                 vgd,
                 vdmos_history.vgd_prev_prev[idx],
-                vdmos_history.qgd_prev[idx],
-                vdmos_history.qgd_prev_prev[idx],
-                vdmos_history.cqgd_prev[idx],
+                BranchChargeHistory {
+                    q_prev: vdmos_history.qgd_prev[idx],
+                    q_prev_prev: vdmos_history.qgd_prev_prev[idx],
+                    cq_prev: vdmos_history.cqgd_prev[idx],
+                },
             );
             vdmos_history.qgd_prev_prev_prev[idx] = vdmos_history.qgd_prev_prev[idx];
             vdmos_history.qgd_prev_prev[idx] = vdmos_history.qgd_prev[idx];
@@ -1046,9 +1182,11 @@ impl Engine {
                 cgb,
                 vgb,
                 vdmos_history.vgb_prev_prev[idx],
-                vdmos_history.qgb_prev[idx],
-                vdmos_history.qgb_prev_prev[idx],
-                vdmos_history.cqgb_prev[idx],
+                BranchChargeHistory {
+                    q_prev: vdmos_history.qgb_prev[idx],
+                    q_prev_prev: vdmos_history.qgb_prev_prev[idx],
+                    cq_prev: vdmos_history.cqgb_prev[idx],
+                },
             );
             vdmos_history.qgb_prev_prev_prev[idx] = vdmos_history.qgb_prev_prev[idx];
             vdmos_history.qgb_prev_prev[idx] = vdmos_history.qgb_prev[idx];
@@ -1063,9 +1201,11 @@ impl Engine {
                 cds,
                 vds,
                 vdmos_history.vds_prev_prev[idx],
-                vdmos_history.qds_prev[idx],
-                vdmos_history.qds_prev_prev[idx],
-                vdmos_history.cqds_prev[idx],
+                BranchChargeHistory {
+                    q_prev: vdmos_history.qds_prev[idx],
+                    q_prev_prev: vdmos_history.qds_prev_prev[idx],
+                    cq_prev: vdmos_history.cqds_prev[idx],
+                },
             );
             vdmos_history.qds_prev_prev_prev[idx] = vdmos_history.qds_prev_prev[idx];
             vdmos_history.qds_prev_prev[idx] = vdmos_history.qds_prev[idx];
@@ -1080,9 +1220,11 @@ impl Engine {
                 cbs,
                 vbs,
                 qbs_exact,
-                vdmos_history.qbs_prev[idx],
-                vdmos_history.qbs_prev_prev[idx],
-                vdmos_history.cqbs_prev[idx],
+                BranchChargeHistory {
+                    q_prev: vdmos_history.qbs_prev[idx],
+                    q_prev_prev: vdmos_history.qbs_prev_prev[idx],
+                    cq_prev: vdmos_history.cqbs_prev[idx],
+                },
             );
             vdmos_history.qbs_prev_prev_prev[idx] = vdmos_history.qbs_prev_prev[idx];
             vdmos_history.qbs_prev_prev[idx] = vdmos_history.qbs_prev[idx];
@@ -1097,9 +1239,11 @@ impl Engine {
                 cbd,
                 vbd,
                 qbd_exact,
-                vdmos_history.qbd_prev[idx],
-                vdmos_history.qbd_prev_prev[idx],
-                vdmos_history.cqbd_prev[idx],
+                BranchChargeHistory {
+                    q_prev: vdmos_history.qbd_prev[idx],
+                    q_prev_prev: vdmos_history.qbd_prev_prev[idx],
+                    cq_prev: vdmos_history.cqbd_prev[idx],
+                },
             );
             vdmos_history.qbd_prev_prev_prev[idx] = vdmos_history.qbd_prev_prev[idx];
             vdmos_history.qbd_prev_prev[idx] = vdmos_history.qbd_prev[idx];
@@ -1114,9 +1258,11 @@ impl Engine {
                 cd1,
                 vd1,
                 qd1_exact,
-                vdmos_history.qd1_prev[idx],
-                vdmos_history.qd1_prev_prev[idx],
-                vdmos_history.cqd1_prev[idx],
+                BranchChargeHistory {
+                    q_prev: vdmos_history.qd1_prev[idx],
+                    q_prev_prev: vdmos_history.qd1_prev_prev[idx],
+                    cq_prev: vdmos_history.cqd1_prev[idx],
+                },
             );
             vdmos_history.qd1_prev_prev_prev[idx] = vdmos_history.qd1_prev_prev[idx];
             vdmos_history.qd1_prev_prev[idx] = vdmos_history.qd1_prev[idx];
@@ -1131,9 +1277,11 @@ impl Engine {
         Self::update_bsim4_history(
             circuit,
             accepted_solution,
-            coeff,
-            bsim4_trnqs_coeff,
-            dt,
+            Bsim4CompanionStep {
+                coeff,
+                trnqs_coeff: bsim4_trnqs_coeff,
+                dt,
+            },
             bsim4_history,
         );
         Self::update_ekv26_history(circuit, accepted_solution, coeff, dt, ekv26_history);

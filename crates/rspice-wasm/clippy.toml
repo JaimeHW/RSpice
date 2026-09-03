@@ -94,3 +94,12 @@ disallowed-methods = [
     { path = "rspice_core::engine::TransientCheckpoint::to_bytes", reason = "use to_bytes_with_abort (plan rule 6)" },
     { path = "rspice_core::engine::TransientCheckpoint::to_text", reason = "use to_text_with_abort (plan rule 6)" },
 ]
+
+# Plan rule 2: no authored-input panic. This crate translates requests from a
+# host language and serializes results back, so every index, name and shape it
+# reads is authored. `src/lib.rs` denies the panic conveniences; these keep the
+# denial on production paths rather than on a test's own preconditions.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-indexing-slicing-in-tests = true

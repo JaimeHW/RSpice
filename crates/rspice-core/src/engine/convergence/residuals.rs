@@ -100,10 +100,12 @@ impl Engine {
                     circuit,
                     probe,
                     rhs,
-                    solution,
-                    time,
-                    crate::xspice::AnalysisType::Transient,
-                    junction_gmin,
+                    OperatingPointProbe {
+                        solution,
+                        time,
+                        analysis: crate::xspice::AnalysisType::Transient,
+                        junction_gmin,
+                    },
                 )?;
             } else {
                 Self::stamp_linear_transient_operating_point_system(
@@ -155,10 +157,7 @@ impl Engine {
             let Some(component) = circuit.dc_floating_component_for_matrix_row(row) else {
                 continue;
             };
-            if singular_components
-                .iter()
-                .any(|candidate| *candidate == component)
-            {
+            if singular_components.contains(&component) {
                 continue;
             }
 
@@ -194,10 +193,7 @@ impl Engine {
             })
             .filter_map(|(row, _)| {
                 let component = circuit.dc_floating_component_for_matrix_row(row)?;
-                if !singular_components
-                    .iter()
-                    .any(|candidate| *candidate == component)
-                {
+                if !singular_components.contains(&component) {
                     return None;
                 }
                 let name = names
@@ -469,15 +465,18 @@ impl Engine {
         &self,
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
-        solution: &[Value],
-        time: Value,
-        analysis: crate::xspice::AnalysisType,
-        junction_gmin: Value,
+        probe: OperatingPointProbe<'_>,
         mut linear_stamp: F,
     ) -> bool
     where
         F: FnMut(&mut CircuitData, &mut StaticMatrix, &mut [Value]),
     {
+        let OperatingPointProbe {
+            solution,
+            time,
+            analysis,
+            junction_gmin,
+        } = probe;
         let size = circuit.matrix_size();
         if solution.len() != size || solution.iter().any(|v| !v.is_finite()) {
             return false;
@@ -491,10 +490,12 @@ impl Engine {
                     circuit,
                     probe,
                     rhs,
-                    solution,
-                    time,
-                    analysis,
-                    junction_gmin,
+                    OperatingPointProbe {
+                        solution,
+                        time,
+                        analysis,
+                        junction_gmin,
+                    },
                 )
                 .is_err()
             {
@@ -667,10 +668,12 @@ impl Engine {
         self.nonlinear_merit_with_linear_stamp_for_operating_point(
             circuit,
             matrix,
-            solution,
-            0.0,
-            crate::xspice::AnalysisType::DcOp,
-            junction_gmin,
+            OperatingPointProbe {
+                solution,
+                time: 0.0,
+                analysis: crate::xspice::AnalysisType::DcOp,
+                junction_gmin,
+            },
             linear_stamp,
         )
     }
@@ -679,15 +682,18 @@ impl Engine {
         &self,
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
-        solution: &[Value],
-        time: Value,
-        analysis: crate::xspice::AnalysisType,
-        junction_gmin: Value,
+        probe: OperatingPointProbe<'_>,
         mut linear_stamp: F,
     ) -> Option<Value>
     where
         F: FnMut(&mut CircuitData, &mut StaticMatrix, &mut [Value]),
     {
+        let OperatingPointProbe {
+            solution,
+            time,
+            analysis,
+            junction_gmin,
+        } = probe;
         let size = circuit.matrix_size();
         if solution.len() != size || solution.iter().any(|v| !v.is_finite()) {
             return None;
@@ -701,10 +707,12 @@ impl Engine {
                     circuit,
                     probe,
                     rhs,
-                    solution,
-                    time,
-                    analysis,
-                    junction_gmin,
+                    OperatingPointProbe {
+                        solution,
+                        time,
+                        analysis,
+                        junction_gmin,
+                    },
                 )
                 .is_err()
             {

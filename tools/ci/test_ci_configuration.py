@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import re
 import subprocess
 import sys
@@ -38,6 +39,19 @@ def cargo_tree_for_target(package: str, target: str) -> str:
             f"cargo tree failed for {package} on {target}:\n{result.stderr}"
         )
     return result.stdout
+
+
+def workspace_member_names() -> list[str]:
+    result = subprocess.run(
+        ["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise AssertionError(f"cargo metadata failed:\n{result.stderr}")
+    return sorted(package["name"] for package in json.loads(result.stdout)["packages"])
 
 
 def xyce_exclusion_fixture():
@@ -457,31 +471,130 @@ class CiConfigurationTests(unittest.TestCase):
             3,
             "Linux fast CI should clean between heavy test groups to stay within runner disk",
         )
-        # The generated Verilog-A model crates are validated against a content
-        # digest of their own bytes, so rustfmt must not touch them. `cargo fmt`
-        # has no --exclude, so the gate names the hand-written members instead.
-        # Assert every one of them is covered, or a new crate could silently
-        # drop out of the format gate.
-        self.assertRegex(workflow, r"- name: Format\s+run: >\s+cargo fmt")
+    def test_format_gate_covers_every_hand_written_workspace_member(self) -> None:
+        """rustfmt runs over the workspace as the manifest defines it.
+
+        The gate used to name its packages by hand and had fallen ten members
+        behind: rspice-output, rspice-engine-adapter, rspice-design-model, the
+        two automation crates, rspice-pack, the three cloud crates and
+        rspice-sheet-publisher were all unformatted by CI. A list nobody
+        updates is a gate that shrinks every time a crate is added, so the
+        step enumerates `cargo metadata` instead.
+
+        The only members it may skip are the generated Verilog-A model crates,
+        whose bytes are validated against a content digest that reformatting
+        would break.
+        """
+        workflow = read_text(".github/workflows/ci.yml")
         format_step = workflow.split("- name: Format", 1)[1].split("- name:", 1)[0]
+
+        self.assertIn("cargo metadata --locked --no-deps --format-version 1", format_step)
+        self.assertIn('cargo fmt -p "$member" -- --check', format_step)
+        self.assertIn(
+            "rspice-veriloga-models|rspice-veriloga-model-*) continue ;;", format_step
+        )
+        self.assertNotIn("-p rspice-core", format_step)
+
+        members = workspace_member_names()
+        covered = sorted(
+            name
+            for name in members
+            if name != "rspice-veriloga-models"
+            and not name.startswith("rspice-veriloga-model-")
+        )
         for package in (
-            "rspice-matrix",
-            "rspice-veriloga-runtime",
+            "rspice-output",
+            "rspice-engine-adapter",
+            "rspice-design-model",
+            "rspice-automation-protocol",
+            "rspice-automation-runtime",
+            "rspice-pack",
+            "rspice-cloud-domain",
+            "rspice-cloud-contract",
+            "rspice-cloud-client",
+            "rspice-sheet-publisher",
             "rspice-core",
-            "rspice-cli",
-            "rspice-publication-contract",
-            "rspice-publish",
-            "rspice-viewer",
             "rspice-ui",
-            "rspice-veriloga",
-            "rspice-python",
-            "rspice-wasm",
-            "rspice-bench",
-            "rspice-conformance",
         ):
-            self.assertIn(f"-p {package}", format_step)
-        self.assertNotIn("-p rspice-veriloga-models", format_step)
-        self.assertIn("-- --check", format_step)
+            self.assertIn(package, covered)
+
+        floor = re.search(r'test "\$checked" -ge (\d+)', format_step)
+        self.assertIsNotNone(floor, "the format step must assert a member-count floor")
+        self.assertEqual(
+            int(floor.group(1)),
+            len(covered),
+            "the format gate's floor must equal the number of hand-written members, "
+            "so an enumeration that silently collapses fails instead of passing",
+        )
+
+    def test_surface_crates_are_linted_and_tested_on_every_change(self) -> None:
+        """rspice-wasm and rspice-engine-adapter gate on pull requests.
+
+        The workspace Clippy lane passes `--exclude rspice-wasm`, and no
+        pull-request lane ran `cargo test` for either crate: the adapter's
+        three integration targets only ran in nightly and release, and
+        rspice-wasm had no test lane at all. Both crates translate requests
+        and serialize results for a first-party surface, which is precisely
+        the code plan rule 5 forbids from drifting.
+        """
+        workflow = read_text(".github/workflows/ci.yml")
+        self.assertIn("surface-gates:", workflow)
+        job = workflow.split("  surface-gates:", 1)[1].split("\n  feature-matrix:", 1)[0]
+
+        for command in (
+            "cargo clippy --locked -p rspice-wasm --all-targets --all-features",
+            "cargo clippy --locked -p rspice-engine-adapter --all-targets --all-features",
+            "cargo test --locked -p rspice-wasm --all-features",
+            "cargo test --locked -p rspice-engine-adapter",
+        ):
+            self.assertIn(command, job)
+        self.assertEqual(
+            job.count("-- -D warnings"),
+            2,
+            "both surface Clippy invocations must deny warnings",
+        )
+        # The wasm32 link check is what proves the crate still builds for the
+        # target it ships to; the host lane above proves its translation is
+        # right. Neither replaces the other.
+        self.assertIn(
+            "cargo check --locked -p rspice-wasm --target wasm32-unknown-unknown",
+            workflow,
+        )
+
+    def test_feature_shards_cover_what_the_workspace_union_cannot(self) -> None:
+        """Every shipped feature configuration is linted by something.
+
+        `cargo clippy --workspace` resolves one unified feature set, and it
+        cannot be `--all-features`: `rspice-core/wasm` plus `veriloga-wasm-jit`
+        describes a browser build and `veriloga-native` a host JIT, and no
+        shipped binary enables both. Unification also forces `parallel`,
+        `simd`, `faer-parallel` and `veriloga` on for the whole workspace, so
+        the `cfg(not(...))` arm of each is code no lane compiles.
+
+        The matrix is the written-down answer to that, one row per
+        configuration something actually builds.
+        """
+        workflow = read_text(".github/workflows/ci.yml")
+        self.assertIn("feature-matrix:", workflow)
+        job = workflow.split("  feature-matrix:", 1)[1]
+
+        self.assertIn("strategy:", job)
+        self.assertIn("fail-fast: false", job)
+        for shard in (
+            ("rspice-core", "--no-default-features\n"),
+            (
+                "rspice-core",
+                "--no-default-features --features wasm,veriloga,veriloga-wasm-jit",
+            ),
+            ("rspice-conformance", "--no-default-features\n"),
+            ("rspice-matrix", "--no-default-features\n"),
+        ):
+            package, features = shard
+            self.assertIn(f"package: {package}", job)
+            self.assertIn(f"features: {features}", job)
+        self.assertIn("target: wasm32-unknown-unknown", job)
+        self.assertIn("-- -D warnings", job)
+        self.assertNotIn("--all-features", job, "a shard that is a union is not a shard")
 
     def test_core_lib_tests_are_explicitly_gated(self) -> None:
         ci_workflow = read_text(".github/workflows/ci.yml")

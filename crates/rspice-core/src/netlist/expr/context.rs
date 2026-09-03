@@ -126,19 +126,14 @@ impl Default for RandomState {
 }
 
 /// Evaluation policy for statistical parameter functions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum StatisticalParamMode {
     /// Evaluate `gauss`/`agauss`/`unif`/`aunif`/2-arg `limit` as seeded draws.
+    #[default]
     Sample,
     /// Evaluate statistical operators at their nominal value, matching Xyce's
     /// non-UQ expression semantics before a sampling engine injects values.
     Nominal,
-}
-
-impl Default for StatisticalParamMode {
-    fn default() -> Self {
-        Self::Sample
-    }
 }
 
 /// Value-selection policy for repeated parameter definitions within one
@@ -150,11 +145,12 @@ impl Default for StatisticalParamMode {
 /// part of the parsed parameter environment. Warning/error handling for a
 /// duplicate is a separate diagnostic policy and is intentionally not encoded
 /// by this value-selection type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ParameterRedefinitionPolicy {
     /// Retain the first definition encountered in the current scope.
     UseFirst,
     /// Replace an earlier definition with the last one encountered.
+    #[default]
     UseLast,
 }
 
@@ -163,9 +159,10 @@ pub enum ParameterRedefinitionPolicy {
 /// This is deliberately independent from [`ParameterRedefinitionPolicy`]:
 /// Xyce exposes modes that select either the first or last value while also
 /// choosing whether the duplicate is silent, warned, or fatal.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ParameterRedefinitionDiagnosticPolicy {
     /// Accept the configured value-selection behavior without a diagnostic.
+    #[default]
     Silent,
     /// Accept the configured value-selection behavior and emit a warning for
     /// every definition after the first.
@@ -174,22 +171,10 @@ pub enum ParameterRedefinitionDiagnosticPolicy {
     Error,
 }
 
-impl Default for ParameterRedefinitionDiagnosticPolicy {
-    fn default() -> Self {
-        Self::Silent
-    }
-}
-
 #[derive(Debug, Clone)]
 pub(crate) struct ParameterDefinitionAcceptance {
     pub(crate) authoritative: bool,
     pub(crate) first_origin: Option<crate::netlist::NetlistSourceLocation>,
-}
-
-impl Default for ParameterRedefinitionPolicy {
-    fn default() -> Self {
-        Self::UseLast
-    }
 }
 
 /// User-defined function definition

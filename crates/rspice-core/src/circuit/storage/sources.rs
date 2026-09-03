@@ -8,6 +8,18 @@
 
 use super::*;
 use crate::circuit::{CircuitError, projection_changed};
+
+/// What an independent source is driving with: its DC operating value, the
+/// small-signal magnitude and phase an `.AC` sweep excites it at, and the
+/// authored waveform specification the transient engine plays. A source built
+/// from a subset of these is a source whose DC point and AC excitation
+/// disagree about which card they came from.
+pub struct SourceExcitation {
+    pub dc_value: Value,
+    pub ac_magnitude: Value,
+    pub ac_phase: Value,
+    pub source_spec: Option<crate::netlist::SourceSpec>,
+}
 use std::cell::Cell;
 use std::collections::VecDeque;
 
@@ -198,20 +210,25 @@ impl VoltageSources {
         node_pos: NodeId,
         node_neg: NodeId,
         branch_idx: NodeId,
-        dc_value: Value,
-        ac_magnitude: Value,
-        ac_phase: Value,
-        source_spec: Option<crate::netlist::SourceSpec>,
+        excitation: SourceExcitation,
     ) {
+        let SourceExcitation {
+            dc_value,
+            ac_magnitude,
+            ac_phase,
+            source_spec,
+        } = excitation;
         self.add_with_ac_spec_and_pwl_waveform(
             name,
             node_pos,
             node_neg,
             branch_idx,
-            dc_value,
-            ac_magnitude,
-            ac_phase,
-            source_spec,
+            SourceExcitation {
+                dc_value,
+                ac_magnitude,
+                ac_phase,
+                source_spec,
+            },
             None,
         );
     }
@@ -222,12 +239,15 @@ impl VoltageSources {
         node_pos: NodeId,
         node_neg: NodeId,
         branch_idx: NodeId,
-        dc_value: Value,
-        ac_magnitude: Value,
-        ac_phase: Value,
-        source_spec: Option<crate::netlist::SourceSpec>,
+        excitation: SourceExcitation,
         pwl_waveform: Option<Arc<crate::device::pwl_file::PwlWaveform>>,
     ) {
+        let SourceExcitation {
+            dc_value,
+            ac_magnitude,
+            ac_phase,
+            source_spec,
+        } = excitation;
         self.names.push(name);
         self.node_pos.push(node_pos);
         self.node_neg.push(node_neg);
@@ -1226,9 +1246,7 @@ impl VoltageSources {
         };
         let pw = if width_was_omitted && xyce_defaults {
             stop_default
-        } else if xyce_defaults {
-            width
-        } else if width.is_finite() && width >= 0.0 {
+        } else if xyce_defaults || (width.is_finite() && width >= 0.0) {
             width
         } else if width_was_omitted && !width_defaults_to_zero {
             // Holding an omitted PW to the transient stop is not an ngspice
@@ -1261,9 +1279,7 @@ impl VoltageSources {
             } else {
                 tr + pw + tf
             }
-        } else if xyce_defaults {
-            period
-        } else if period.is_finite() && period > 0.0 {
+        } else if xyce_defaults || (period.is_finite() && period > 0.0) {
             period
         } else {
             tr + pw + tf
@@ -2088,21 +2104,9 @@ impl CurrentSources {
         name: String,
         node_pos: NodeId,
         node_neg: NodeId,
-        dc_value: Value,
-        ac_magnitude: Value,
-        ac_phase: Value,
-        source_spec: Option<crate::netlist::SourceSpec>,
+        excitation: SourceExcitation,
     ) {
-        self.add_with_ac_spec_and_pwl_waveform(
-            name,
-            node_pos,
-            node_neg,
-            dc_value,
-            ac_magnitude,
-            ac_phase,
-            source_spec,
-            None,
-        );
+        self.add_with_ac_spec_and_pwl_waveform(name, node_pos, node_neg, excitation, None);
     }
 
     pub(crate) fn add_with_ac_spec_and_pwl_waveform(
@@ -2110,12 +2114,15 @@ impl CurrentSources {
         name: String,
         node_pos: NodeId,
         node_neg: NodeId,
-        dc_value: Value,
-        ac_magnitude: Value,
-        ac_phase: Value,
-        source_spec: Option<crate::netlist::SourceSpec>,
+        excitation: SourceExcitation,
         pwl_waveform: Option<Arc<crate::device::pwl_file::PwlWaveform>>,
     ) {
+        let SourceExcitation {
+            dc_value,
+            ac_magnitude,
+            ac_phase,
+            source_spec,
+        } = excitation;
         self.names.push(name);
         self.node_pos.push(node_pos);
         self.node_neg.push(node_neg);
@@ -2474,10 +2481,12 @@ mod tests {
             "I1".to_string(),
             1,
             0,
-            1.0,
-            0.0,
-            0.0,
-            Some(spec),
+            SourceExcitation {
+                dc_value: 1.0,
+                ac_magnitude: 0.0,
+                ac_phase: 0.0,
+                source_spec: Some(spec),
+            },
             Some(waveform),
         );
 
@@ -2495,8 +2504,10 @@ mod tests {
         let path = std::env::temp_dir().join(format!("rspice-pwl-cache-{unique}.csv"));
         std::fs::write(&path, "0 0\n1 1\n").expect("write PWL cache fixture");
         let path_text = path.to_string_lossy().into_owned();
-        let mut limits = crate::resource::ResourceLimits::default();
-        limits.max_shared_cache_bytes = 0;
+        let limits = crate::resource::ResourceLimits {
+            max_shared_cache_bytes: 0,
+            ..Default::default()
+        };
 
         let waveform = VoltageSources::load_pwl_waveform_cached_with_limits(
             &path_text, 1.0, 1.0, 0.0, 0.0, limits,
@@ -2548,22 +2559,24 @@ mod tests {
             1,
             0,
             1,
-            1.44,
-            0.1,
-            0.0,
-            Some(SourceSpec::DcAcTransient {
+            SourceExcitation {
                 dc_value: 1.44,
                 ac_magnitude: 0.1,
                 ac_phase: 0.0,
-                transient: Box::new(SourceSpec::Sin {
-                    offset: 0.0,
-                    amplitude: 1.0,
-                    frequency: 1.0e5,
-                    delay: 0.0,
-                    damping: 0.0,
-                    phase: 0.0,
+                source_spec: Some(SourceSpec::DcAcTransient {
+                    dc_value: 1.44,
+                    ac_magnitude: 0.1,
+                    ac_phase: 0.0,
+                    transient: Box::new(SourceSpec::Sin {
+                        offset: 0.0,
+                        amplitude: 1.0,
+                        frequency: 1.0e5,
+                        delay: 0.0,
+                        damping: 0.0,
+                        phase: 0.0,
+                    }),
                 }),
-            }),
+            },
         );
         sources
             .finalize_constraint_projection(1)
@@ -2663,17 +2676,19 @@ mod tests {
             1,
             0,
             1,
-            2.0,
-            0.0,
-            0.0,
-            Some(SourceSpec::Sin {
-                offset: 1.0,
-                amplitude: 2.0,
-                frequency: 1.0,
-                delay: 0.0,
-                damping: 0.0,
-                phase: 0.0,
-            }),
+            SourceExcitation {
+                dc_value: 2.0,
+                ac_magnitude: 0.0,
+                ac_phase: 0.0,
+                source_spec: Some(SourceSpec::Sin {
+                    offset: 1.0,
+                    amplitude: 2.0,
+                    frequency: 1.0,
+                    delay: 0.0,
+                    damping: 0.0,
+                    phase: 0.0,
+                }),
+            },
         );
         sources.add("vstack".to_string(), 2, 1, 2, 3.0);
         sources
@@ -2813,20 +2828,22 @@ mod tests {
             1,
             0,
             1,
-            0.0,
-            0.0,
-            0.0,
-            Some(SourceSpec::Pulse {
-                v1: 0.0,
-                v2: 1.0,
-                delay: 10.0e-9,
-                rise: 1.0e-9,
-                fall: 1.0e-9,
-                width: 10.0e-9,
-                period: 30.0e-9,
-                pulse_count: 0.0,
-                width_defaults_to_zero: false,
-            }),
+            SourceExcitation {
+                dc_value: 0.0,
+                ac_magnitude: 0.0,
+                ac_phase: 0.0,
+                source_spec: Some(SourceSpec::Pulse {
+                    v1: 0.0,
+                    v2: 1.0,
+                    delay: 10.0e-9,
+                    rise: 1.0e-9,
+                    fall: 1.0e-9,
+                    width: 10.0e-9,
+                    period: 30.0e-9,
+                    pulse_count: 0.0,
+                    width_defaults_to_zero: false,
+                }),
+            },
         );
         sources.set_transient_context_with_dialect(
             1.0e-9,
@@ -2854,20 +2871,22 @@ mod tests {
             1,
             0,
             1,
-            0.0,
-            0.0,
-            0.0,
-            Some(SourceSpec::Pulse {
-                v1: 0.0,
-                v2: 1.0,
-                delay: 10.0e-9,
-                rise: 1.0e-9,
-                fall: 1.0e-9,
-                width: 10.0e-9,
-                period: 30.0e-9,
-                pulse_count: 0.0,
-                width_defaults_to_zero: false,
-            }),
+            SourceExcitation {
+                dc_value: 0.0,
+                ac_magnitude: 0.0,
+                ac_phase: 0.0,
+                source_spec: Some(SourceSpec::Pulse {
+                    v1: 0.0,
+                    v2: 1.0,
+                    delay: 10.0e-9,
+                    rise: 1.0e-9,
+                    fall: 1.0e-9,
+                    width: 10.0e-9,
+                    period: 30.0e-9,
+                    pulse_count: 0.0,
+                    width_defaults_to_zero: false,
+                }),
+            },
         );
 
         sources.set_transient_context_with_dialect(
@@ -2889,17 +2908,19 @@ mod tests {
             1,
             0,
             1,
-            0.0,
-            0.0,
-            0.0,
-            Some(SourceSpec::Sin {
-                offset: 0.0,
-                amplitude: 1.0,
-                frequency: 20.0e6,
-                delay: 0.0,
-                damping: 0.0,
-                phase: 0.0,
-            }),
+            SourceExcitation {
+                dc_value: 0.0,
+                ac_magnitude: 0.0,
+                ac_phase: 0.0,
+                source_spec: Some(SourceSpec::Sin {
+                    offset: 0.0,
+                    amplitude: 1.0,
+                    frequency: 20.0e6,
+                    delay: 0.0,
+                    damping: 0.0,
+                    phase: 0.0,
+                }),
+            },
         );
         sources.set_transient_context_with_dialect(
             1.0e-9,
@@ -3514,14 +3535,16 @@ mod tests {
             "is".to_string(),
             1,
             0,
-            Value::NAN,
-            0.0,
-            0.0,
-            Some(SourceSpec::Pwl {
-                points: vec![(0.0, 0.0), (1.0e-6, 1.0e-3)],
-                delay: 0.0,
-                repeat_from: None,
-            }),
+            SourceExcitation {
+                dc_value: Value::NAN,
+                ac_magnitude: 0.0,
+                ac_phase: 0.0,
+                source_spec: Some(SourceSpec::Pwl {
+                    points: vec![(0.0, 0.0), (1.0e-6, 1.0e-3)],
+                    delay: 0.0,
+                    repeat_from: None,
+                }),
+            },
         );
 
         let mut rhs = vec![0.0];

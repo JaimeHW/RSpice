@@ -2041,15 +2041,21 @@ impl XyceTestRunner {
 
     pub(super) fn transient_probe_matches_reference_time_neighborhood(
         &self,
-        reference: &XycePrnTable,
-        time_column: usize,
-        row_index: usize,
+        row: &XyceReferenceRow<'_>,
         data_column: usize,
         actual: Value,
-        tolerance: XyceComparisonTolerance,
-        time_tolerance: Value,
-        time_scale_factor: Value,
+        tolerance: XyceNeighborhoodTolerance,
     ) -> bool {
+        let XyceReferenceRow {
+            table: reference,
+            time_column,
+            row_index,
+        } = *row;
+        let XyceNeighborhoodTolerance {
+            value: tolerance,
+            time_tolerance,
+            time_scale_factor,
+        } = tolerance;
         if !actual.is_finite()
             || !time_tolerance.is_finite()
             || time_tolerance < 0.0

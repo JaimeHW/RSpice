@@ -6,11 +6,15 @@
 //! - Optional waveform compression for long simulations
 //! - Cooperative abort for responsive cancellation
 
-#![allow(clippy::too_many_arguments)]
 mod fft;
 mod post_results;
 use super::{Engine, SimulationError, SpiceDialect, TransientPostResults, TransientResult};
 use crate::abort_signal::{AbortSignal, NoAbort};
+// Only the unit tests below construct these records directly; the
+// production paths in this module receive them already built.
+use crate::circuit::SolutionDependentCompanionStep;
+#[cfg(test)]
+use crate::device::DistributedRlgc;
 use crate::device::semiconductor::{
     BJT_DYNAMIC_CHARGE_COUNT, BJT_EXTERNAL_STATE_DIM, BJT_INTERNAL_STATE_DIM, BjtChargeBranch,
     BjtChargeSnapshot,
@@ -359,12 +363,22 @@ fn capture_transient_merit_rollback(
     }
 }
 
+pub(in crate::engine) use breakpoints::BreakpointWindow;
+use breakpoints::{DynamicBreakpointSink, TlineArrivalEvent, TlineWaveChange};
+pub(in crate::engine) use checkpoint::CheckpointState;
+use checkpoint::{AcceptedTransientRuntime, CheckpointIdentity, CheckpointIntegrationState};
+use state_advanced_mos::Bsim4CompanionStep;
+use state_commit::{AcceptedReactiveSnapshots, AcceptedReactiveStep, ReactiveBreakpointScheduling};
+use state_recovery::{ForceAcceptLimits, SourceActivityRecovery};
+use step_control::{SourceActivityDeltas, StepBiasFloors};
+use vbic::VbicSnapshotTolerances;
+
 mod breakpoints;
 mod checkpoint;
 mod companion_stamps;
-pub(self) use companion_stamps::{CompactTwoTerminalStampSlots, TwoTerminalStampSlots};
+use companion_stamps::{BranchChargeHistory, CompactTwoTerminalStampSlots, TwoTerminalStampSlots};
 mod charge_stamper;
-pub(self) use charge_stamper::StaticMatrixChargeStamper;
+use charge_stamper::StaticMatrixChargeStamper;
 mod damped_status;
 mod globalization;
 mod noise;
@@ -374,8 +388,10 @@ mod residual;
 mod restart;
 mod startup;
 mod state;
+use crate::circuit::XspiceCompanionPolicy;
+use state::{TransientCompanionStamp, TransientDeviceHistories};
 mod xyce_dae;
-pub(self) use state::{
+use state::{
     AcceptedJunctionHistoryRestart, MosfetCompanionBranchTerms, MosfetGateCompanionCharges,
     ReactiveHistorySeed,
 };
@@ -385,8 +401,11 @@ mod state_recovery;
 mod state_transmission_lines;
 mod step_control;
 mod truncation;
-pub(self) use truncation::NgspiceChargeTruncationContext;
+use truncation::{
+    NgspiceChargeTruncationContext, NgspiceTruncationTolerances, TruncationStep, VoltageLteConfig,
+};
 mod vbic;
+use vbic::{VbicChargeStep, VbicPredictorHistory};
 
 pub use self::{
     checkpoint::{
@@ -411,7 +430,7 @@ pub(crate) use checkpoint::{
 pub use fft::transient_fft_window_coherent_gain;
 
 mod history;
-pub(self) use history::*;
+use history::*;
 
 #[derive(Debug, Clone, Copy)]
 struct DerivedTransientBranchCurrent {
@@ -476,6 +495,100 @@ enum DerivedTransientBranchCurrentKind {
 /// an empty inner vector and therefore costs no per-point memory or append
 /// traffic.
 #[derive(Debug)]
+/// The accepted point one transient sample is recorded at.
+#[derive(Clone, Copy)]
+struct TransientSample<'a> {
+    solution: &'a [Value],
+    num_nodes: usize,
+    time: Value,
+    step_size: Value,
+}
+
+/// The extra series that sample is assembled from.
+#[derive(Clone, Copy)]
+struct TransientSampleSources<'a> {
+    derived_branches: &'a [DerivedTransientBranchCurrent],
+    bjt_history: &'a BjtTransientHistory,
+    diode_history: &'a DiodeTransientHistory,
+}
+
+/// How much of it the run asked to keep.
+#[derive(Clone, Copy)]
+struct TransientCaptureRequest<'a> {
+    record_device_op_traces: bool,
+    capture: &'a TransientCapturePlan,
+    trajectory_point_count: usize,
+}
+
+/// Where the scheduled-checkpoint cursor currently stands.
+struct ScheduledCheckpointPoint<'a> {
+    scheduled_times: &'a [Value],
+    cursor: &'a mut usize,
+    checkpoint_netlist: &'a Netlist,
+    accepted_time: Value,
+}
+
+/// The identity a scheduled checkpoint is stamped with.
+#[derive(Clone, Copy)]
+struct ScheduledCheckpointIdentity<'a> {
+    fingerprint: u64,
+    netlist_identity: &'a Option<String>,
+    restart_identity: &'a Option<String>,
+    simulation_identity: &'a str,
+}
+
+/// The accepted point it captures.
+#[derive(Clone, Copy)]
+struct ScheduledCheckpointState<'a> {
+    solution: &'a [Value],
+    circuit: &'a crate::circuit::CircuitData,
+    startup_mode: TransientStartupMode,
+}
+
+/// The integrator state that goes with it.
+#[derive(Clone, Copy)]
+struct ScheduledCheckpointIntegration<'a> {
+    integration_max_step: Value,
+    integration_continuation: Option<ProposedIntegrationContinuation>,
+    integration_stop_time: Value,
+    pending_tline_arrivals: &'a [Value],
+    dynamic_tline_breakpoints_added: usize,
+}
+
+/// The device histories it must carry.
+struct ScheduledCheckpointHistories<'a> {
+    bjt_history: &'a BjtTransientHistory,
+    diode_history: &'a DiodeTransientHistory,
+    vbic_snapshot_cache: &'a [Option<BjtChargeSnapshot>],
+    accepted_integration_runtime_capture: AcceptedIntegrationRuntimeCapture<'a>,
+}
+
+/// Where the captured checkpoints accumulate, with the retention bookkeeping.
+struct ScheduledCheckpointSink<'a> {
+    retained_result_values: usize,
+    retained_scheduled_checkpoint_values: &'a mut usize,
+    captured: &'a mut Vec<ScheduledTransientCheckpoint>,
+}
+
+/// The interval one resolved transient run covers.
+#[derive(Clone, Copy)]
+struct TransientRunWindow {
+    tstop: Value,
+    max_step: Value,
+    startup_mode: TransientStartupMode,
+}
+
+/// How a resumed run picks up: the checkpoint to resume from, how strictly it
+/// is validated, what to do with the final checkpoint, and the times further
+/// checkpoints are scheduled at.
+#[derive(Clone, Copy)]
+struct TransientResumePlan<'a> {
+    resume: Option<&'a TransientCheckpoint>,
+    resume_validation: ResumeValidation,
+    final_checkpoint_retention: FinalCheckpointRetention,
+    scheduled_checkpoint_times: &'a [Value],
+}
+
 struct TransientCapturePlan {
     voltages: Vec<bool>,
     branch_currents: Vec<bool>,
@@ -1405,18 +1518,27 @@ impl Engine {
         &self,
         result: &mut TransientResult,
         circuit: &mut crate::circuit::CircuitData,
-        solution: &[Value],
-        num_nodes: usize,
-        time: Value,
-        step_size: Value,
-        derived_branches: &[DerivedTransientBranchCurrent],
-        bjt_history: &BjtTransientHistory,
-        diode_history: &DiodeTransientHistory,
-        record_device_op_traces: bool,
-        capture: &TransientCapturePlan,
-        trajectory_point_count: usize,
+        sample: TransientSample<'_>,
+        sources: TransientSampleSources<'_>,
+        request: TransientCaptureRequest<'_>,
         abort: &dyn AbortSignal,
     ) -> Result<usize, SimulationError> {
+        let TransientCaptureRequest {
+            record_device_op_traces,
+            capture,
+            trajectory_point_count,
+        } = request;
+        let TransientSampleSources {
+            derived_branches,
+            bjt_history,
+            diode_history,
+        } = sources;
+        let TransientSample {
+            solution,
+            num_nodes,
+            time,
+            step_size,
+        } = sample;
         let next_point_count = result.time.len().saturating_add(1);
         self.ensure_analysis_points(trajectory_point_count)?;
         self.ensure_result_shape(
@@ -1932,9 +2054,11 @@ impl Engine {
         let mut breakpoints = BreakpointManager::new();
         Self::collect_independent_source_breakpoints(
             &circuit,
-            tstop,
-            source_step_hint,
-            self.config.spice_dialect,
+            BreakpointWindow {
+                tstop,
+                tstep_hint: source_step_hint,
+                dialect: self.config.spice_dialect,
+            },
             (!selected.is_empty()).then_some(&selected),
             &mut breakpoints,
             abort,
@@ -2118,28 +2242,36 @@ impl Engine {
                 .run_tran_resolved_with_resume(
                     &expanded,
                     netlist,
-                    tstop,
-                    max_step,
-                    startup_mode,
+                    TransientRunWindow {
+                        tstop,
+                        max_step,
+                        startup_mode,
+                    },
                     abort,
-                    None,
-                    ResumeValidation::ExactNetlist,
-                    FinalCheckpointRetention::Retained,
-                    &[],
+                    TransientResumePlan {
+                        resume: None,
+                        resume_validation: ResumeValidation::ExactNetlist,
+                        final_checkpoint_retention: FinalCheckpointRetention::Retained,
+                        scheduled_checkpoint_times: &[],
+                    },
                 )
                 .and_then(Self::require_retained_final_checkpoint),
             None => engine
                 .run_tran_resolved_with_resume(
                     netlist,
                     netlist,
-                    tstop,
-                    max_step,
-                    startup_mode,
+                    TransientRunWindow {
+                        tstop,
+                        max_step,
+                        startup_mode,
+                    },
                     abort,
-                    None,
-                    ResumeValidation::ExactNetlist,
-                    FinalCheckpointRetention::Retained,
-                    &[],
+                    TransientResumePlan {
+                        resume: None,
+                        resume_validation: ResumeValidation::ExactNetlist,
+                        final_checkpoint_retention: FinalCheckpointRetention::Retained,
+                        scheduled_checkpoint_times: &[],
+                    },
                 )
                 .and_then(Self::require_retained_final_checkpoint),
         }
@@ -2249,26 +2381,34 @@ impl Engine {
             Some(expanded) => engine.run_tran_resolved_with_resume(
                 &expanded,
                 netlist,
-                tstop,
-                max_step,
-                startup_mode,
+                TransientRunWindow {
+                    tstop,
+                    max_step,
+                    startup_mode,
+                },
                 abort,
-                None,
-                ResumeValidation::ExactNetlist,
-                FinalCheckpointRetention::Discarded,
-                checkpoint_times,
+                TransientResumePlan {
+                    resume: None,
+                    resume_validation: ResumeValidation::ExactNetlist,
+                    final_checkpoint_retention: FinalCheckpointRetention::Discarded,
+                    scheduled_checkpoint_times: checkpoint_times,
+                },
             ),
             None => engine.run_tran_resolved_with_resume(
                 netlist,
                 netlist,
-                tstop,
-                max_step,
-                startup_mode,
+                TransientRunWindow {
+                    tstop,
+                    max_step,
+                    startup_mode,
+                },
                 abort,
-                None,
-                ResumeValidation::ExactNetlist,
-                FinalCheckpointRetention::Discarded,
-                checkpoint_times,
+                TransientResumePlan {
+                    resume: None,
+                    resume_validation: ResumeValidation::ExactNetlist,
+                    final_checkpoint_retention: FinalCheckpointRetention::Discarded,
+                    scheduled_checkpoint_times: checkpoint_times,
+                },
             ),
         }
         .map(|(result, _, checkpoints)| (result, checkpoints))
@@ -2388,28 +2528,36 @@ impl Engine {
                 .run_tran_resolved_with_resume(
                     &expanded,
                     netlist,
-                    tstop,
-                    max_step,
-                    startup_mode,
+                    TransientRunWindow {
+                        tstop,
+                        max_step,
+                        startup_mode,
+                    },
                     abort,
-                    Some(checkpoint),
-                    validation,
-                    FinalCheckpointRetention::Retained,
-                    &[],
+                    TransientResumePlan {
+                        resume: Some(checkpoint),
+                        resume_validation: validation,
+                        final_checkpoint_retention: FinalCheckpointRetention::Retained,
+                        scheduled_checkpoint_times: &[],
+                    },
                 )
                 .and_then(Self::require_retained_final_checkpoint),
             None => engine
                 .run_tran_resolved_with_resume(
                     netlist,
                     netlist,
-                    tstop,
-                    max_step,
-                    startup_mode,
+                    TransientRunWindow {
+                        tstop,
+                        max_step,
+                        startup_mode,
+                    },
                     abort,
-                    Some(checkpoint),
-                    validation,
-                    FinalCheckpointRetention::Retained,
-                    &[],
+                    TransientResumePlan {
+                        resume: Some(checkpoint),
+                        resume_validation: validation,
+                        final_checkpoint_retention: FinalCheckpointRetention::Retained,
+                        scheduled_checkpoint_times: &[],
+                    },
                 )
                 .and_then(Self::require_retained_final_checkpoint),
         }
@@ -2543,14 +2691,18 @@ impl Engine {
         self.run_tran_resolved_with_resume(
             netlist,
             netlist,
-            tstop,
-            max_step,
-            startup_mode,
+            TransientRunWindow {
+                tstop,
+                max_step,
+                startup_mode,
+            },
             abort,
-            None,
-            ResumeValidation::ExactNetlist,
-            FinalCheckpointRetention::Discarded,
-            &[],
+            TransientResumePlan {
+                resume: None,
+                resume_validation: ResumeValidation::ExactNetlist,
+                final_checkpoint_retention: FinalCheckpointRetention::Discarded,
+                scheduled_checkpoint_times: &[],
+            },
         )
         .map(|(result, _, _)| result)
     }
@@ -2784,30 +2936,48 @@ impl Engine {
 
     fn capture_scheduled_checkpoint_if_due(
         &self,
-        scheduled_times: &[Value],
-        cursor: &mut usize,
-        checkpoint_netlist: &Netlist,
-        accepted_time: Value,
-        fingerprint: u64,
-        netlist_identity: &Option<String>,
-        restart_identity: &Option<String>,
-        simulation_identity: &str,
-        solution: &[Value],
-        circuit: &crate::circuit::CircuitData,
-        startup_mode: TransientStartupMode,
-        integration_max_step: Value,
-        integration_continuation: Option<ProposedIntegrationContinuation>,
-        integration_stop_time: Value,
-        pending_tline_arrivals: &[Value],
-        dynamic_tline_breakpoints_added: usize,
-        bjt_history: &BjtTransientHistory,
-        diode_history: &DiodeTransientHistory,
-        vbic_snapshot_cache: &[Option<BjtChargeSnapshot>],
-        accepted_integration_runtime_capture: AcceptedIntegrationRuntimeCapture<'_>,
-        retained_result_values: usize,
-        retained_scheduled_checkpoint_values: &mut usize,
-        captured: &mut Vec<ScheduledTransientCheckpoint>,
+        point: ScheduledCheckpointPoint<'_>,
+        identity: ScheduledCheckpointIdentity<'_>,
+        state: ScheduledCheckpointState<'_>,
+        integration: ScheduledCheckpointIntegration<'_>,
+        histories: ScheduledCheckpointHistories<'_>,
+        sink: ScheduledCheckpointSink<'_>,
     ) -> Result<(), SimulationError> {
+        let ScheduledCheckpointSink {
+            retained_result_values,
+            retained_scheduled_checkpoint_values,
+            captured,
+        } = sink;
+        let ScheduledCheckpointHistories {
+            bjt_history,
+            diode_history,
+            vbic_snapshot_cache,
+            accepted_integration_runtime_capture,
+        } = histories;
+        let ScheduledCheckpointIntegration {
+            integration_max_step,
+            integration_continuation,
+            integration_stop_time,
+            pending_tline_arrivals,
+            dynamic_tline_breakpoints_added,
+        } = integration;
+        let ScheduledCheckpointState {
+            solution,
+            circuit,
+            startup_mode,
+        } = state;
+        let ScheduledCheckpointIdentity {
+            fingerprint,
+            netlist_identity,
+            restart_identity,
+            simulation_identity,
+        } = identity;
+        let ScheduledCheckpointPoint {
+            scheduled_times,
+            cursor,
+            checkpoint_netlist,
+            accepted_time,
+        } = point;
         self.ensure_result_values(
             retained_result_values.saturating_add(*retained_scheduled_checkpoint_values),
         )?;
@@ -2888,20 +3058,28 @@ impl Engine {
         let checkpoint = TransientCheckpoint::capture_resumable(
             checkpoint_netlist,
             &self.config,
-            fingerprint,
-            netlist_identity.clone(),
-            restart_identity.clone(),
-            simulation_identity.to_owned(),
-            accepted_time,
-            solution,
-            circuit,
-            startup_mode,
-            Some(integration_max_step),
-            integration_continuation,
-            pending_tline_arrivals,
-            dynamic_tline_breakpoints_added,
-            accepted_junction_history,
-            accepted_integration_runtime,
+            CheckpointIdentity {
+                fingerprint,
+                netlist_identity: netlist_identity.clone(),
+                restart_identity: restart_identity.clone(),
+                simulation_identity: simulation_identity.to_owned(),
+            },
+            CheckpointState {
+                time: accepted_time,
+                solution,
+                circuit,
+                startup_mode,
+            },
+            CheckpointIntegrationState {
+                integration_max_step: Some(integration_max_step),
+                integration_continuation,
+                pending_tline_arrivals,
+                dynamic_tline_breakpoints_added,
+            },
+            AcceptedTransientRuntime {
+                accepted_junction_history,
+                accepted_integration_runtime,
+            },
             Some(lte_estimator),
         )
         .map_err(SimulationError::Circuit)?;
@@ -2937,14 +3115,9 @@ impl Engine {
         &self,
         netlist: &Netlist,
         checkpoint_netlist: &Netlist,
-        tstop: Value,
-        max_step: Value,
-        startup_mode: TransientStartupMode,
+        window: TransientRunWindow,
         abort: &dyn AbortSignal,
-        resume: Option<&TransientCheckpoint>,
-        resume_validation: ResumeValidation,
-        final_checkpoint_retention: FinalCheckpointRetention,
-        scheduled_checkpoint_times: &[Value],
+        plan: TransientResumePlan<'_>,
     ) -> Result<
         (
             TransientResult,
@@ -2953,6 +3126,17 @@ impl Engine {
         ),
         SimulationError,
     > {
+        let TransientRunWindow {
+            tstop,
+            max_step,
+            startup_mode,
+        } = window;
+        let TransientResumePlan {
+            resume,
+            resume_validation,
+            final_checkpoint_retention,
+            scheduled_checkpoint_times,
+        } = plan;
         // `.IC`/`.NODESET` validation and the scoped-directive flatten are the
         // same work for every hint collector this run reaches: the t=0 startup
         // solve and each of its stepping retries, the UIC override pass, and
@@ -3032,41 +3216,49 @@ impl Engine {
                 let checkpoint = TransientCheckpoint::capture_resumable(
                     checkpoint_netlist,
                     &self.config,
-                    fingerprint,
-                    netlist_identity,
-                    restart_identity,
-                    simulation_identity,
-                    0.0,
-                    &[],
-                    &circuit,
-                    startup_mode,
-                    Some(max_step),
-                    None,
-                    &[],
-                    0,
-                    AcceptedJunctionTransientHistoryCheckpoint {
-                        available: true,
-                        ..AcceptedJunctionTransientHistoryCheckpoint::default()
+                    CheckpointIdentity {
+                        fingerprint,
+                        netlist_identity,
+                        restart_identity,
+                        simulation_identity,
                     },
-                    AcceptedIntegrationRuntime::RestartNormalized(
-                        RestartNormalizedIntegrationRuntimeCheckpoint::capture(
-                            0.0,
-                            RestartNormalizedIntegrationRuntimeCapture {
-                                lte_warmup_skips: 0,
-                                force_accept_cooldown: 0,
-                                livelock_streak: 0,
-                                livelock_last_restart_time: None,
-                                accepted_interval_count: 0,
-                                damped_first_solver_call: true,
-                                damped_status: None,
-                                retry_count: 0,
-                                xyce_step_failure_count: 0,
-                                stale_accept_count: 0,
-                                resume_blockers: &[],
-                            },
-                        )
-                        .map_err(SimulationError::Circuit)?,
-                    ),
+                    CheckpointState {
+                        time: 0.0,
+                        solution: &[],
+                        circuit: &circuit,
+                        startup_mode,
+                    },
+                    CheckpointIntegrationState {
+                        integration_max_step: Some(max_step),
+                        integration_continuation: None,
+                        pending_tline_arrivals: &[],
+                        dynamic_tline_breakpoints_added: 0,
+                    },
+                    AcceptedTransientRuntime {
+                        accepted_junction_history: AcceptedJunctionTransientHistoryCheckpoint {
+                            available: true,
+                            ..AcceptedJunctionTransientHistoryCheckpoint::default()
+                        },
+                        accepted_integration_runtime: AcceptedIntegrationRuntime::RestartNormalized(
+                            RestartNormalizedIntegrationRuntimeCheckpoint::capture(
+                                0.0,
+                                RestartNormalizedIntegrationRuntimeCapture {
+                                    lte_warmup_skips: 0,
+                                    force_accept_cooldown: 0,
+                                    livelock_streak: 0,
+                                    livelock_last_restart_time: None,
+                                    accepted_interval_count: 0,
+                                    damped_first_solver_call: true,
+                                    damped_status: None,
+                                    retry_count: 0,
+                                    xyce_step_failure_count: 0,
+                                    stale_accept_count: 0,
+                                    resume_blockers: &[],
+                                },
+                            )
+                            .map_err(SimulationError::Circuit)?,
+                        ),
+                    },
                     None,
                 )
                 .map_err(SimulationError::Circuit)?;
@@ -3468,9 +3660,11 @@ impl Engine {
         }
         Self::collect_transient_source_breakpoints(
             &circuit,
-            tstop,
-            source_step_hint,
-            self.config.spice_dialect,
+            BreakpointWindow {
+                tstop,
+                tstep_hint: source_step_hint,
+                dialect: self.config.spice_dialect,
+            },
             &mut breakpoints,
             abort,
             self.config.resource_limits.max_analysis_points,
@@ -4591,53 +4785,65 @@ impl Engine {
             .transpose()
             .map_err(SimulationError::Circuit)?;
         self.capture_scheduled_checkpoint_if_due(
-            scheduled_checkpoint_times,
-            &mut scheduled_checkpoint_cursor,
-            checkpoint_netlist,
-            resume_time,
-            fingerprint,
-            &netlist_identity,
-            &restart_identity,
-            &simulation_identity,
-            &solution,
-            &circuit,
-            startup_mode,
-            max_step,
-            Some(ProposedIntegrationContinuation {
-                next_step: timestep.dt(),
-                breakpoint_span_ceiling: xyce_breakpoint_span_ceiling.ceiling(),
-                controller_max_step: timestep.max_dt(),
-                analysis_first_step_pending,
-                xyce_breakpoint_restart_pending: xyce_lte_restart_first_step,
-            }),
-            tstop,
-            &pending_dynamic_tline_breakpoints,
-            dynamic_tline_breakpoints_added,
-            &bjt_history,
-            &diode_history,
-            &vbic_snapshot_cache,
-            AcceptedIntegrationRuntimeCapture {
-                lte_estimator: &lte_estimator,
-                next_trap_order: trap_order,
-                trapgear: fixed_method.is_none().then(|| trapgear.capture_snapshot()),
-                xyce_static_residual: xyce_static_history.as_deref(),
-                direct_dae_accepted_q: xyce_direct_accepted_q.as_deref(),
-                direct_dae_static_residual: xyce_direct_static_history.as_deref(),
-                lte_warmup_skips,
-                force_accept_cooldown,
-                livelock_streak,
-                livelock_last_restart_time: livelock_last_restart_t,
-                accepted_interval_count,
-                damped_first_solver_call: xyce_damped_first_solver_call,
-                damped_status: damped_status_checkpoint,
-                retry_count,
-                xyce_step_failure_count,
-                stale_accept_count,
-                resume_blockers: &runtime_resume_blockers,
+            ScheduledCheckpointPoint {
+                scheduled_times: scheduled_checkpoint_times,
+                cursor: &mut scheduled_checkpoint_cursor,
+                checkpoint_netlist,
+                accepted_time: resume_time,
             },
-            retained_result_values,
-            &mut retained_scheduled_checkpoint_values,
-            &mut scheduled_checkpoints,
+            ScheduledCheckpointIdentity {
+                fingerprint,
+                netlist_identity: &netlist_identity,
+                restart_identity: &restart_identity,
+                simulation_identity: &simulation_identity,
+            },
+            ScheduledCheckpointState {
+                solution: &solution,
+                circuit: &circuit,
+                startup_mode,
+            },
+            ScheduledCheckpointIntegration {
+                integration_max_step: max_step,
+                integration_continuation: Some(ProposedIntegrationContinuation {
+                    next_step: timestep.dt(),
+                    breakpoint_span_ceiling: xyce_breakpoint_span_ceiling.ceiling(),
+                    controller_max_step: timestep.max_dt(),
+                    analysis_first_step_pending,
+                    xyce_breakpoint_restart_pending: xyce_lte_restart_first_step,
+                }),
+                integration_stop_time: tstop,
+                pending_tline_arrivals: &pending_dynamic_tline_breakpoints,
+                dynamic_tline_breakpoints_added,
+            },
+            ScheduledCheckpointHistories {
+                bjt_history: &bjt_history,
+                diode_history: &diode_history,
+                vbic_snapshot_cache: &vbic_snapshot_cache,
+                accepted_integration_runtime_capture: AcceptedIntegrationRuntimeCapture {
+                    lte_estimator: &lte_estimator,
+                    next_trap_order: trap_order,
+                    trapgear: fixed_method.is_none().then(|| trapgear.capture_snapshot()),
+                    xyce_static_residual: xyce_static_history.as_deref(),
+                    direct_dae_accepted_q: xyce_direct_accepted_q.as_deref(),
+                    direct_dae_static_residual: xyce_direct_static_history.as_deref(),
+                    lte_warmup_skips,
+                    force_accept_cooldown,
+                    livelock_streak,
+                    livelock_last_restart_time: livelock_last_restart_t,
+                    accepted_interval_count,
+                    damped_first_solver_call: xyce_damped_first_solver_call,
+                    damped_status: damped_status_checkpoint,
+                    retry_count,
+                    xyce_step_failure_count,
+                    stale_accept_count,
+                    resume_blockers: &runtime_resume_blockers,
+                },
+            },
+            ScheduledCheckpointSink {
+                retained_result_values,
+                retained_scheduled_checkpoint_values: &mut retained_scheduled_checkpoint_values,
+                captured: &mut scheduled_checkpoints,
+            },
         )?;
         let b3soi_first_transient_handoff =
             accepted_interval_count == 0 && circuit.has_b3soi_devices();
@@ -4715,15 +4921,17 @@ impl Engine {
                         &solution,
                         0.0,
                         AcceptedJunctionHistoryRestart::Preserve,
-                        &mut bjt_history,
-                        &mut jfet_history,
-                        &mut diode_history,
-                        &mut mosfet_history,
-                        &mut vdmos_history,
-                        &mut b3soi_history,
-                        &mut bsim3_history,
-                        &mut bsim4_history,
-                        &mut ekv26_history,
+                        TransientDeviceHistories {
+                            bjt: &mut bjt_history,
+                            jfet: &mut jfet_history,
+                            diode: &mut diode_history,
+                            mosfet: &mut mosfet_history,
+                            vdmos: &mut vdmos_history,
+                            b3soi: &mut b3soi_history,
+                            bsim3: &mut bsim3_history,
+                            bsim4: &mut bsim4_history,
+                            ekv26: &mut ekv26_history,
+                        },
                     );
                     vbic_snapshot_cache.fill(None);
                     xyce_static_history = None;
@@ -4784,15 +4992,17 @@ impl Engine {
                         &solution,
                         hinted_max_step,
                         AcceptedJunctionHistoryRestart::Reinitialize,
-                        &mut bjt_history,
-                        &mut jfet_history,
-                        &mut diode_history,
-                        &mut mosfet_history,
-                        &mut vdmos_history,
-                        &mut b3soi_history,
-                        &mut bsim3_history,
-                        &mut bsim4_history,
-                        &mut ekv26_history,
+                        TransientDeviceHistories {
+                            bjt: &mut bjt_history,
+                            jfet: &mut jfet_history,
+                            diode: &mut diode_history,
+                            mosfet: &mut mosfet_history,
+                            vdmos: &mut vdmos_history,
+                            b3soi: &mut b3soi_history,
+                            bsim3: &mut bsim3_history,
+                            bsim4: &mut bsim4_history,
+                            ekv26: &mut ekv26_history,
+                        },
                     );
                     if lte_estimator.uses_accepted_solution_reference() {
                         lte_estimator.restart_history_from(&solution);
@@ -4879,7 +5089,7 @@ impl Engine {
             }
 
             // Abort check every few step attempts for minimal overhead.
-            if total_step_attempts % ABORT_CHECK_INTERVAL == 0 {
+            if total_step_attempts.is_multiple_of(ABORT_CHECK_INTERVAL) {
                 if tstop > 0.0 {
                     abort.observe_progress((t / tstop).clamp(0.0, 1.0));
                 }
@@ -5051,16 +5261,22 @@ impl Engine {
                     dt,
                     tstop - t,
                     at_breakpoint,
-                    expected_source_delta,
-                    interior_source_delta,
-                    Self::source_ramp_tracking_delta(
-                        &circuit,
-                        self.config.transient_node_activity_bound,
-                    ),
-                    practical_min,
-                    timestep.preferred_min_dt(),
-                    Self::should_apply_active_source_recovery_cap(force_accept_cooldown),
-                    nonlinear_source_ramp_cap_enabled,
+                    SourceActivityDeltas {
+                        expected_source_delta,
+                        interior_source_delta,
+                        source_ramp_tracking_delta: Self::source_ramp_tracking_delta(
+                            &circuit,
+                            self.config.transient_node_activity_bound,
+                        ),
+                    },
+                    StepBiasFloors {
+                        practical_min_dt: practical_min,
+                        preferred_min_dt: timestep.preferred_min_dt(),
+                        recovery_cap_enabled: Self::should_apply_active_source_recovery_cap(
+                            force_accept_cooldown,
+                        ),
+                        nonlinear_source_ramp_cap_enabled,
+                    },
                 );
                 if biased_dt + 1e-30 < dt {
                     dt = biased_dt;
@@ -5216,10 +5432,12 @@ impl Engine {
                     mosfet_history.accepted_dt_prev_prev,
                     effective_companion_method,
                     step_trap_order,
-                    transient_lte_reltol,
-                    self.current_abstol(),
-                    self.charge_abstol(),
-                    self.transient_trtol(),
+                    NgspiceTruncationTolerances {
+                        reltol: transient_lte_reltol,
+                        current_abstol: self.current_abstol(),
+                        charge_abstol: self.charge_abstol(),
+                        trtol: self.transient_trtol(),
+                    },
                 )
             } else {
                 None
@@ -6726,7 +6944,7 @@ impl Engine {
                     failed_voltage_conv += 1;
                 }
                 // Diagnostic logging for debugging timestep issues
-                if total_step_attempts < 100 || total_step_attempts % 10000 == 0 {
+                if total_step_attempts < 100 || total_step_attempts.is_multiple_of(10000) {
                     log::debug!(
                         "Newton non-convergence at t={:.3e}s, step_attempt={}, dt={:.3e}s, reducing to {:.3e}s",
                         t,
@@ -6848,16 +7066,20 @@ impl Engine {
                 Self::bjt_ngspice_truncation_limit(
                     &circuit,
                     &new_solution,
-                    current_method,
-                    step_trap_order,
-                    dt,
+                    TruncationStep {
+                        method: current_method,
+                        trap_order: step_trap_order,
+                        dt,
+                    },
                     &bjt_history,
                     &vbic_snapshot_cache,
                     self.voltage_abstol(),
-                    transient_lte_reltol,
-                    self.current_abstol(),
-                    self.charge_abstol(),
-                    self.transient_trtol(),
+                    NgspiceTruncationTolerances {
+                        reltol: transient_lte_reltol,
+                        current_abstol: self.current_abstol(),
+                        charge_abstol: self.charge_abstol(),
+                        trtol: self.transient_trtol(),
+                    },
                 )
                 .filter(|limit| limit.is_finite() && *limit > 0.0)
             } else {
@@ -6872,15 +7094,19 @@ impl Engine {
                     self.capacitor_ngspice_truncation_limit_parallel(
                         &circuit,
                         &new_solution,
-                        current_method,
-                        step_trap_order,
-                        dt,
+                        TruncationStep {
+                            method: current_method,
+                            trap_order: step_trap_order,
+                            dt,
+                        },
                         mosfet_history.accepted_dt_prev,
                         mosfet_history.accepted_dt_prev_prev,
-                        transient_lte_reltol,
-                        self.current_abstol(),
-                        self.charge_abstol(),
-                        self.transient_trtol(),
+                        NgspiceTruncationTolerances {
+                            reltol: transient_lte_reltol,
+                            current_abstol: self.current_abstol(),
+                            charge_abstol: self.charge_abstol(),
+                            trtol: self.transient_trtol(),
+                        },
                         worker_count,
                         &mut capacitor_accepted_states_scratch,
                     )
@@ -6888,15 +7114,19 @@ impl Engine {
                     Self::capacitor_ngspice_truncation_limit(
                         &circuit,
                         &new_solution,
-                        current_method,
-                        step_trap_order,
-                        dt,
+                        TruncationStep {
+                            method: current_method,
+                            trap_order: step_trap_order,
+                            dt,
+                        },
                         mosfet_history.accepted_dt_prev,
                         mosfet_history.accepted_dt_prev_prev,
-                        transient_lte_reltol,
-                        self.current_abstol(),
-                        self.charge_abstol(),
-                        self.transient_trtol(),
+                        NgspiceTruncationTolerances {
+                            reltol: transient_lte_reltol,
+                            current_abstol: self.current_abstol(),
+                            charge_abstol: self.charge_abstol(),
+                            trtol: self.transient_trtol(),
+                        },
                         Some(&mut capacitor_accepted_states_scratch),
                     )
                 };
@@ -6904,15 +7134,19 @@ impl Engine {
                 let limit = Self::capacitor_ngspice_truncation_limit(
                     &circuit,
                     &new_solution,
-                    current_method,
-                    step_trap_order,
-                    dt,
+                    TruncationStep {
+                        method: current_method,
+                        trap_order: step_trap_order,
+                        dt,
+                    },
                     mosfet_history.accepted_dt_prev,
                     mosfet_history.accepted_dt_prev_prev,
-                    transient_lte_reltol,
-                    self.current_abstol(),
-                    self.charge_abstol(),
-                    self.transient_trtol(),
+                    NgspiceTruncationTolerances {
+                        reltol: transient_lte_reltol,
+                        current_abstol: self.current_abstol(),
+                        charge_abstol: self.charge_abstol(),
+                        trtol: self.transient_trtol(),
+                    },
                     Some(&mut capacitor_accepted_states_scratch),
                 );
                 capacitor_accepted_states_valid =
@@ -6928,15 +7162,19 @@ impl Engine {
                 Self::inductor_ngspice_truncation_limit(
                     &circuit,
                     &new_solution,
-                    current_method,
-                    step_trap_order,
-                    dt,
+                    TruncationStep {
+                        method: current_method,
+                        trap_order: step_trap_order,
+                        dt,
+                    },
                     mosfet_history.accepted_dt_prev,
                     mosfet_history.accepted_dt_prev_prev,
-                    transient_lte_reltol,
-                    self.current_abstol(),
-                    self.charge_abstol(),
-                    self.transient_trtol(),
+                    NgspiceTruncationTolerances {
+                        reltol: transient_lte_reltol,
+                        current_abstol: self.current_abstol(),
+                        charge_abstol: self.charge_abstol(),
+                        trtol: self.transient_trtol(),
+                    },
                 )
                 .filter(|limit| limit.is_finite() && *limit > 0.0)
             } else {
@@ -6949,15 +7187,19 @@ impl Engine {
                 Self::jfet_ngspice_truncation_limit(
                     &circuit,
                     &new_solution,
-                    current_method,
-                    step_trap_order,
-                    dt,
+                    TruncationStep {
+                        method: current_method,
+                        trap_order: step_trap_order,
+                        dt,
+                    },
                     &jfet_history,
                     suppress_gate_charge,
-                    transient_lte_reltol,
-                    self.current_abstol(),
-                    self.charge_abstol(),
-                    self.transient_trtol(),
+                    NgspiceTruncationTolerances {
+                        reltol: transient_lte_reltol,
+                        current_abstol: self.current_abstol(),
+                        charge_abstol: self.charge_abstol(),
+                        trtol: self.transient_trtol(),
+                    },
                 )
                 .filter(|limit| limit.is_finite() && *limit > 0.0)
             } else {
@@ -6970,14 +7212,18 @@ impl Engine {
                 Self::diode_ngspice_truncation_limit(
                     &circuit,
                     &new_solution,
-                    current_method,
-                    step_trap_order,
-                    dt,
+                    TruncationStep {
+                        method: current_method,
+                        trap_order: step_trap_order,
+                        dt,
+                    },
                     &diode_history,
-                    transient_lte_reltol,
-                    self.current_abstol(),
-                    self.charge_abstol(),
-                    self.transient_trtol(),
+                    NgspiceTruncationTolerances {
+                        reltol: transient_lte_reltol,
+                        current_abstol: self.current_abstol(),
+                        charge_abstol: self.charge_abstol(),
+                        trtol: self.transient_trtol(),
+                    },
                 )
                 .filter(|limit| limit.is_finite() && *limit > 0.0)
             } else {
@@ -7006,14 +7252,18 @@ impl Engine {
                     Self::mosfet_ngspice_truncation_limit(
                         &circuit,
                         &new_solution,
-                        current_method,
-                        step_trap_order,
-                        dt,
+                        TruncationStep {
+                            method: current_method,
+                            trap_order: step_trap_order,
+                            dt,
+                        },
                         &mosfet_history,
-                        transient_lte_reltol,
-                        self.current_abstol(),
-                        self.charge_abstol(),
-                        self.transient_trtol(),
+                        NgspiceTruncationTolerances {
+                            reltol: transient_lte_reltol,
+                            current_abstol: self.current_abstol(),
+                            charge_abstol: self.charge_abstol(),
+                            trtol: self.transient_trtol(),
+                        },
                         Some((&mut mosfet_caps_scratch, mosfet_caps_valid)),
                     )
                 }
@@ -7030,14 +7280,18 @@ impl Engine {
                 Self::vdmos_ngspice_truncation_limit(
                     &circuit,
                     &new_solution,
-                    current_method,
-                    step_trap_order,
-                    dt,
+                    TruncationStep {
+                        method: current_method,
+                        trap_order: step_trap_order,
+                        dt,
+                    },
                     &vdmos_history,
-                    transient_lte_reltol,
-                    self.current_abstol(),
-                    self.charge_abstol(),
-                    self.transient_trtol(),
+                    NgspiceTruncationTolerances {
+                        reltol: transient_lte_reltol,
+                        current_abstol: self.current_abstol(),
+                        charge_abstol: self.charge_abstol(),
+                        trtol: self.transient_trtol(),
+                    },
                 )
                 .filter(|limit| limit.is_finite() && *limit > 0.0)
             } else {
@@ -7050,14 +7304,18 @@ impl Engine {
                 Self::b3soi_ngspice_truncation_limit(
                     &circuit,
                     &new_solution,
-                    current_method,
-                    step_trap_order,
-                    dt,
+                    TruncationStep {
+                        method: current_method,
+                        trap_order: step_trap_order,
+                        dt,
+                    },
                     &b3soi_history,
-                    transient_lte_reltol,
-                    self.current_abstol(),
-                    self.charge_abstol(),
-                    self.transient_trtol(),
+                    NgspiceTruncationTolerances {
+                        reltol: transient_lte_reltol,
+                        current_abstol: self.current_abstol(),
+                        charge_abstol: self.charge_abstol(),
+                        trtol: self.transient_trtol(),
+                    },
                 )
                 .filter(|limit| limit.is_finite() && *limit > 0.0)
             } else {
@@ -7070,14 +7328,18 @@ impl Engine {
                 Self::bsim3_ngspice_truncation_limit(
                     &circuit,
                     &new_solution,
-                    current_method,
-                    step_trap_order,
-                    dt,
+                    TruncationStep {
+                        method: current_method,
+                        trap_order: step_trap_order,
+                        dt,
+                    },
                     &bsim3_history,
-                    transient_lte_reltol,
-                    self.current_abstol(),
-                    self.charge_abstol(),
-                    self.transient_trtol(),
+                    NgspiceTruncationTolerances {
+                        reltol: transient_lte_reltol,
+                        current_abstol: self.current_abstol(),
+                        charge_abstol: self.charge_abstol(),
+                        trtol: self.transient_trtol(),
+                    },
                 )
                 .filter(|limit| limit.is_finite() && *limit > 0.0)
             } else {
@@ -7090,14 +7352,18 @@ impl Engine {
                 Self::bsim4_ngspice_truncation_limit(
                     &circuit,
                     &new_solution,
-                    current_method,
-                    step_trap_order,
-                    dt,
+                    TruncationStep {
+                        method: current_method,
+                        trap_order: step_trap_order,
+                        dt,
+                    },
                     &bsim4_history,
-                    transient_lte_reltol,
-                    self.current_abstol(),
-                    self.charge_abstol(),
-                    self.transient_trtol(),
+                    NgspiceTruncationTolerances {
+                        reltol: transient_lte_reltol,
+                        current_abstol: self.current_abstol(),
+                        charge_abstol: self.charge_abstol(),
+                        trtol: self.transient_trtol(),
+                    },
                 )
                 .filter(|limit| limit.is_finite() && *limit > 0.0)
             } else {
@@ -7263,13 +7529,17 @@ impl Engine {
                     &circuit,
                     &new_solution,
                     lte_predicted_solution.as_deref(),
-                    dt,
-                    current_method,
-                    step_trap_order,
+                    TruncationStep {
+                        method: current_method,
+                        trap_order: step_trap_order,
+                        dt,
+                    },
                     is_strictly_linear_transient,
-                    &lte_estimator,
-                    &voltage_lte_excluded_nodes,
-                    &xyce_lte_excluded_indices,
+                    VoltageLteConfig {
+                        estimator: &lte_estimator,
+                        excluded_nodes: &voltage_lte_excluded_nodes,
+                        xyce_excluded_indices: &xyce_lte_excluded_indices,
+                    },
                 )
             };
             // Xyce CONSTSTEP still evaluates LTE for integration-order
@@ -7430,10 +7700,12 @@ impl Engine {
                         &solution,
                         &new_solution,
                         step_time,
-                        num_nodes,
-                        force_accept_delta_limit,
-                        &force_accept_protected_nodes,
-                        &ideal_output_pairs,
+                        ForceAcceptLimits {
+                            num_nodes,
+                            force_accept_delta_limit,
+                            protected_nodes: &force_accept_protected_nodes,
+                            ideal_output_pairs: &ideal_output_pairs,
+                        },
                     )?;
                     let unbounded_force_candidate = Self::is_unbounded_step(
                         &solution,
@@ -7576,16 +7848,20 @@ impl Engine {
                         Self::bjt_ngspice_truncation_limit(
                             &circuit,
                             &new_solution,
-                            current_method,
-                            accepted_step_trap_order,
-                            dt,
+                            TruncationStep {
+                                method: current_method,
+                                trap_order: accepted_step_trap_order,
+                                dt,
+                            },
                             &bjt_history,
                             &vbic_snapshot_cache,
                             self.voltage_abstol(),
-                            transient_lte_reltol,
-                            self.current_abstol(),
-                            self.charge_abstol(),
-                            self.transient_trtol(),
+                            NgspiceTruncationTolerances {
+                                reltol: transient_lte_reltol,
+                                current_abstol: self.current_abstol(),
+                                charge_abstol: self.charge_abstol(),
+                                trtol: self.transient_trtol(),
+                            },
                         )
                         .filter(|limit| limit.is_finite() && *limit > 0.0)
                     } else {
@@ -7595,15 +7871,19 @@ impl Engine {
                         Self::jfet_ngspice_truncation_limit(
                             &circuit,
                             &new_solution,
-                            current_method,
-                            accepted_step_trap_order,
-                            dt,
+                            TruncationStep {
+                                method: current_method,
+                                trap_order: accepted_step_trap_order,
+                                dt,
+                            },
                             &jfet_history,
                             suppress_gate_charge,
-                            transient_lte_reltol,
-                            self.current_abstol(),
-                            self.charge_abstol(),
-                            self.transient_trtol(),
+                            NgspiceTruncationTolerances {
+                                reltol: transient_lte_reltol,
+                                current_abstol: self.current_abstol(),
+                                charge_abstol: self.charge_abstol(),
+                                trtol: self.transient_trtol(),
+                            },
                         )
                         .filter(|limit| limit.is_finite() && *limit > 0.0)
                     } else {
@@ -7614,15 +7894,19 @@ impl Engine {
                         Self::capacitor_ngspice_truncation_limit(
                             &circuit,
                             &new_solution,
-                            current_method,
-                            accepted_step_trap_order,
-                            dt,
+                            TruncationStep {
+                                method: current_method,
+                                trap_order: accepted_step_trap_order,
+                                dt,
+                            },
                             mosfet_history.accepted_dt_prev,
                             mosfet_history.accepted_dt_prev_prev,
-                            transient_lte_reltol,
-                            self.current_abstol(),
-                            self.charge_abstol(),
-                            self.transient_trtol(),
+                            NgspiceTruncationTolerances {
+                                reltol: transient_lte_reltol,
+                                current_abstol: self.current_abstol(),
+                                charge_abstol: self.charge_abstol(),
+                                trtol: self.transient_trtol(),
+                            },
                             None,
                         )
                         .filter(|limit| limit.is_finite() && *limit > 0.0)
@@ -7633,15 +7917,19 @@ impl Engine {
                         Self::inductor_ngspice_truncation_limit(
                             &circuit,
                             &new_solution,
-                            current_method,
-                            accepted_step_trap_order,
-                            dt,
+                            TruncationStep {
+                                method: current_method,
+                                trap_order: accepted_step_trap_order,
+                                dt,
+                            },
                             mosfet_history.accepted_dt_prev,
                             mosfet_history.accepted_dt_prev_prev,
-                            transient_lte_reltol,
-                            self.current_abstol(),
-                            self.charge_abstol(),
-                            self.transient_trtol(),
+                            NgspiceTruncationTolerances {
+                                reltol: transient_lte_reltol,
+                                current_abstol: self.current_abstol(),
+                                charge_abstol: self.charge_abstol(),
+                                trtol: self.transient_trtol(),
+                            },
                         )
                         .filter(|limit| limit.is_finite() && *limit > 0.0)
                     } else {
@@ -7651,14 +7939,18 @@ impl Engine {
                         Self::diode_ngspice_truncation_limit(
                             &circuit,
                             &new_solution,
-                            current_method,
-                            accepted_step_trap_order,
-                            dt,
+                            TruncationStep {
+                                method: current_method,
+                                trap_order: accepted_step_trap_order,
+                                dt,
+                            },
                             &diode_history,
-                            transient_lte_reltol,
-                            self.current_abstol(),
-                            self.charge_abstol(),
-                            self.transient_trtol(),
+                            NgspiceTruncationTolerances {
+                                reltol: transient_lte_reltol,
+                                current_abstol: self.current_abstol(),
+                                charge_abstol: self.charge_abstol(),
+                                trtol: self.transient_trtol(),
+                            },
                         )
                         .filter(|limit| limit.is_finite() && *limit > 0.0)
                     } else {
@@ -7669,14 +7961,18 @@ impl Engine {
                             Self::mosfet_ngspice_truncation_limit(
                                 &circuit,
                                 &new_solution,
-                                current_method,
-                                accepted_step_trap_order,
-                                dt,
+                                TruncationStep {
+                                    method: current_method,
+                                    trap_order: accepted_step_trap_order,
+                                    dt,
+                                },
                                 &mosfet_history,
-                                transient_lte_reltol,
-                                self.current_abstol(),
-                                self.charge_abstol(),
-                                self.transient_trtol(),
+                                NgspiceTruncationTolerances {
+                                    reltol: transient_lte_reltol,
+                                    current_abstol: self.current_abstol(),
+                                    charge_abstol: self.charge_abstol(),
+                                    trtol: self.transient_trtol(),
+                                },
                                 None,
                             )
                             .filter(|limit| limit.is_finite() && *limit > 0.0)
@@ -7687,14 +7983,18 @@ impl Engine {
                         Self::vdmos_ngspice_truncation_limit(
                             &circuit,
                             &new_solution,
-                            current_method,
-                            accepted_step_trap_order,
-                            dt,
+                            TruncationStep {
+                                method: current_method,
+                                trap_order: accepted_step_trap_order,
+                                dt,
+                            },
                             &vdmos_history,
-                            transient_lte_reltol,
-                            self.current_abstol(),
-                            self.charge_abstol(),
-                            self.transient_trtol(),
+                            NgspiceTruncationTolerances {
+                                reltol: transient_lte_reltol,
+                                current_abstol: self.current_abstol(),
+                                charge_abstol: self.charge_abstol(),
+                                trtol: self.transient_trtol(),
+                            },
                         )
                         .filter(|limit| limit.is_finite() && *limit > 0.0)
                     } else {
@@ -7704,14 +8004,18 @@ impl Engine {
                         Self::b3soi_ngspice_truncation_limit(
                             &circuit,
                             &new_solution,
-                            current_method,
-                            accepted_step_trap_order,
-                            dt,
+                            TruncationStep {
+                                method: current_method,
+                                trap_order: accepted_step_trap_order,
+                                dt,
+                            },
                             &b3soi_history,
-                            transient_lte_reltol,
-                            self.current_abstol(),
-                            self.charge_abstol(),
-                            self.transient_trtol(),
+                            NgspiceTruncationTolerances {
+                                reltol: transient_lte_reltol,
+                                current_abstol: self.current_abstol(),
+                                charge_abstol: self.charge_abstol(),
+                                trtol: self.transient_trtol(),
+                            },
                         )
                         .filter(|limit| limit.is_finite() && *limit > 0.0)
                     } else {
@@ -7721,14 +8025,18 @@ impl Engine {
                         Self::bsim3_ngspice_truncation_limit(
                             &circuit,
                             &new_solution,
-                            current_method,
-                            accepted_step_trap_order,
-                            dt,
+                            TruncationStep {
+                                method: current_method,
+                                trap_order: accepted_step_trap_order,
+                                dt,
+                            },
                             &bsim3_history,
-                            transient_lte_reltol,
-                            self.current_abstol(),
-                            self.charge_abstol(),
-                            self.transient_trtol(),
+                            NgspiceTruncationTolerances {
+                                reltol: transient_lte_reltol,
+                                current_abstol: self.current_abstol(),
+                                charge_abstol: self.charge_abstol(),
+                                trtol: self.transient_trtol(),
+                            },
                         )
                         .filter(|limit| limit.is_finite() && *limit > 0.0)
                     } else {
@@ -7738,14 +8046,18 @@ impl Engine {
                         Self::bsim4_ngspice_truncation_limit(
                             &circuit,
                             &new_solution,
-                            current_method,
-                            accepted_step_trap_order,
-                            dt,
+                            TruncationStep {
+                                method: current_method,
+                                trap_order: accepted_step_trap_order,
+                                dt,
+                            },
                             &bsim4_history,
-                            transient_lte_reltol,
-                            self.current_abstol(),
-                            self.charge_abstol(),
-                            self.transient_trtol(),
+                            NgspiceTruncationTolerances {
+                                reltol: transient_lte_reltol,
+                                current_abstol: self.current_abstol(),
+                                charge_abstol: self.charge_abstol(),
+                                trtol: self.transient_trtol(),
+                            },
                         )
                         .filter(|limit| limit.is_finite() && *limit > 0.0)
                     } else {
@@ -7812,36 +8124,46 @@ impl Engine {
                     }
                     self.update_reactive_history(
                         &mut circuit,
-                        &new_solution,
-                        t,
-                        dt,
-                        &coeff,
-                        &bsim4_trnqs_coeff,
-                        &mut bjt_history,
-                        &mut jfet_history,
-                        &mut diode_history,
-                        &mut mosfet_history,
-                        &mut vdmos_history,
-                        &mut b3soi_history,
-                        &mut bsim3_history,
-                        &mut bsim4_history,
-                        &mut ekv26_history,
-                        xyce_one_step_order2,
-                        Some(vbic_snapshot_cache.as_slice()),
-                        None,
-                        None,
-                        None,
-                        suppress_gate_charge,
-                        &tline_dc_refs,
-                        &coupled_tline_refs,
-                        &mut breakpoints,
-                        tstop,
-                        self.voltage_reltol(),
-                        self.voltage_abstol(),
-                        self.current_abstol(),
-                        &mut dynamic_tline_breakpoints_added,
-                        &mut warned_dynamic_tline_breakpoint_cap,
-                        &mut pending_dynamic_tline_breakpoints,
+                        AcceptedReactiveStep {
+                            accepted_solution: &new_solution,
+                            accepted_time: t,
+                            dt,
+                            coeff: &coeff,
+                            bsim4_trnqs_coeff: &bsim4_trnqs_coeff,
+                        },
+                        TransientDeviceHistories {
+                            bjt: &mut bjt_history,
+                            jfet: &mut jfet_history,
+                            diode: &mut diode_history,
+                            mosfet: &mut mosfet_history,
+                            vdmos: &mut vdmos_history,
+                            b3soi: &mut b3soi_history,
+                            bsim3: &mut bsim3_history,
+                            bsim4: &mut bsim4_history,
+                            ekv26: &mut ekv26_history,
+                        },
+                        AcceptedReactiveSnapshots {
+                            xyce_one_step_order2,
+                            vbic_snapshots: Some(vbic_snapshot_cache.as_slice()),
+                            capacitor_accepted_states: None,
+                            mosfet_caps: None,
+                            mosfet_gate_companion_charges: None,
+                            suppress_gate_charge_history: suppress_gate_charge,
+                            tline_dc_refs: &tline_dc_refs,
+                            coupled_tline_refs: &coupled_tline_refs,
+                        },
+                        ReactiveBreakpointScheduling {
+                            breakpoints: &mut breakpoints,
+                            tstop,
+                            voltage_reltol: self.voltage_reltol(),
+                            voltage_abstol: self.voltage_abstol(),
+                            current_abstol: self.current_abstol(),
+                        },
+                        DynamicBreakpointSink {
+                            dynamic_breakpoints_added: &mut dynamic_tline_breakpoints_added,
+                            warned_dynamic_breakpoint_cap: &mut warned_dynamic_tline_breakpoint_cap,
+                            pending_dynamic_breakpoints: &mut pending_dynamic_tline_breakpoints,
+                        },
                     )?;
                     if circuit.has_xspice_devices() {
                         if capture_xyce_static_history {
@@ -7849,8 +8171,10 @@ impl Engine {
                                 t,
                                 dt,
                                 &new_solution,
-                                &coeff,
-                                xyce_one_step_order2,
+                                XspiceCompanionPolicy {
+                                    coefficients: &coeff,
+                                    xyce_one_step_order2,
+                                },
                             );
                             circuit.accept_xspice_timestep();
                         } else {
@@ -7858,8 +8182,10 @@ impl Engine {
                                 t,
                                 dt,
                                 &new_solution,
-                                &coeff,
-                                xyce_one_step_order2,
+                                XspiceCompanionPolicy {
+                                    coefficients: &coeff,
+                                    xyce_one_step_order2,
+                                },
                             );
                         }
                         circuit.project_xspice_voltage_outputs(&mut new_solution, num_nodes);
@@ -7984,16 +8310,22 @@ impl Engine {
                         self.record_transient_solution_sample(
                             &mut result,
                             &mut circuit,
-                            &solution,
-                            num_nodes,
-                            t,
-                            dt,
-                            &derived_branch_currents,
-                            &bjt_history,
-                            &diode_history,
-                            record_device_op_traces,
-                            &capture_plan,
-                            trajectory_point_count,
+                            TransientSample {
+                                solution: &solution,
+                                num_nodes,
+                                time: t,
+                                step_size: dt,
+                            },
+                            TransientSampleSources {
+                                derived_branches: &derived_branch_currents,
+                                bjt_history: &bjt_history,
+                                diode_history: &diode_history,
+                            },
+                            TransientCaptureRequest {
+                                record_device_op_traces,
+                                capture: &capture_plan,
+                                trajectory_point_count,
+                            },
                             abort,
                         )?,
                     );
@@ -8057,53 +8389,70 @@ impl Engine {
                         .transpose()
                         .map_err(SimulationError::Circuit)?;
                     self.capture_scheduled_checkpoint_if_due(
-                        scheduled_checkpoint_times,
-                        &mut scheduled_checkpoint_cursor,
-                        checkpoint_netlist,
-                        t,
-                        fingerprint,
-                        &netlist_identity,
-                        &restart_identity,
-                        &simulation_identity,
-                        &solution,
-                        &circuit,
-                        startup_mode,
-                        max_step,
-                        Some(ProposedIntegrationContinuation {
-                            next_step: timestep.dt(),
-                            breakpoint_span_ceiling: xyce_breakpoint_span_ceiling.ceiling(),
-                            controller_max_step: timestep.max_dt(),
-                            analysis_first_step_pending,
-                            xyce_breakpoint_restart_pending: xyce_lte_restart_first_step,
-                        }),
-                        tstop,
-                        &pending_dynamic_tline_breakpoints,
-                        dynamic_tline_breakpoints_added,
-                        &bjt_history,
-                        &diode_history,
-                        &vbic_snapshot_cache,
-                        AcceptedIntegrationRuntimeCapture {
-                            lte_estimator: &lte_estimator,
-                            next_trap_order: trap_order,
-                            trapgear: fixed_method.is_none().then(|| trapgear.capture_snapshot()),
-                            xyce_static_residual: xyce_static_history.as_deref(),
-                            direct_dae_accepted_q: xyce_direct_accepted_q.as_deref(),
-                            direct_dae_static_residual: xyce_direct_static_history.as_deref(),
-                            lte_warmup_skips,
-                            force_accept_cooldown,
-                            livelock_streak,
-                            livelock_last_restart_time: livelock_last_restart_t,
-                            accepted_interval_count,
-                            damped_first_solver_call: xyce_damped_first_solver_call,
-                            damped_status: damped_status_checkpoint,
-                            retry_count,
-                            xyce_step_failure_count,
-                            stale_accept_count,
-                            resume_blockers: &runtime_resume_blockers,
+                        ScheduledCheckpointPoint {
+                            scheduled_times: scheduled_checkpoint_times,
+                            cursor: &mut scheduled_checkpoint_cursor,
+                            checkpoint_netlist,
+                            accepted_time: t,
                         },
-                        retained_result_values,
-                        &mut retained_scheduled_checkpoint_values,
-                        &mut scheduled_checkpoints,
+                        ScheduledCheckpointIdentity {
+                            fingerprint,
+                            netlist_identity: &netlist_identity,
+                            restart_identity: &restart_identity,
+                            simulation_identity: &simulation_identity,
+                        },
+                        ScheduledCheckpointState {
+                            solution: &solution,
+                            circuit: &circuit,
+                            startup_mode,
+                        },
+                        ScheduledCheckpointIntegration {
+                            integration_max_step: max_step,
+                            integration_continuation: Some(ProposedIntegrationContinuation {
+                                next_step: timestep.dt(),
+                                breakpoint_span_ceiling: xyce_breakpoint_span_ceiling.ceiling(),
+                                controller_max_step: timestep.max_dt(),
+                                analysis_first_step_pending,
+                                xyce_breakpoint_restart_pending: xyce_lte_restart_first_step,
+                            }),
+                            integration_stop_time: tstop,
+                            pending_tline_arrivals: &pending_dynamic_tline_breakpoints,
+                            dynamic_tline_breakpoints_added,
+                        },
+                        ScheduledCheckpointHistories {
+                            bjt_history: &bjt_history,
+                            diode_history: &diode_history,
+                            vbic_snapshot_cache: &vbic_snapshot_cache,
+                            accepted_integration_runtime_capture:
+                                AcceptedIntegrationRuntimeCapture {
+                                    lte_estimator: &lte_estimator,
+                                    next_trap_order: trap_order,
+                                    trapgear: fixed_method
+                                        .is_none()
+                                        .then(|| trapgear.capture_snapshot()),
+                                    xyce_static_residual: xyce_static_history.as_deref(),
+                                    direct_dae_accepted_q: xyce_direct_accepted_q.as_deref(),
+                                    direct_dae_static_residual: xyce_direct_static_history
+                                        .as_deref(),
+                                    lte_warmup_skips,
+                                    force_accept_cooldown,
+                                    livelock_streak,
+                                    livelock_last_restart_time: livelock_last_restart_t,
+                                    accepted_interval_count,
+                                    damped_first_solver_call: xyce_damped_first_solver_call,
+                                    damped_status: damped_status_checkpoint,
+                                    retry_count,
+                                    xyce_step_failure_count,
+                                    stale_accept_count,
+                                    resume_blockers: &runtime_resume_blockers,
+                                },
+                        },
+                        ScheduledCheckpointSink {
+                            retained_result_values,
+                            retained_scheduled_checkpoint_values:
+                                &mut retained_scheduled_checkpoint_values,
+                            captured: &mut scheduled_checkpoints,
+                        },
                     )?;
                     reinitialize_xyce_breakpoint_histories!(hit_breakpoint, analysis_final_step);
                 }
@@ -8239,15 +8588,19 @@ impl Engine {
                         &b3soi_history,
                         &bsim3_history,
                         &bsim4_history,
-                        &lte_estimator,
-                        &voltage_lte_excluded_nodes,
-                        &xyce_lte_excluded_indices,
+                        VoltageLteConfig {
+                            estimator: &lte_estimator,
+                            excluded_nodes: &voltage_lte_excluded_nodes,
+                            xyce_excluded_indices: &xyce_lte_excluded_indices,
+                        },
                         &vbic_snapshot_cache,
                         self.voltage_abstol(),
-                        transient_lte_reltol,
-                        self.current_abstol(),
-                        self.charge_abstol(),
-                        self.transient_trtol(),
+                        NgspiceTruncationTolerances {
+                            reltol: transient_lte_reltol,
+                            current_abstol: self.current_abstol(),
+                            charge_abstol: self.charge_abstol(),
+                            trtol: self.transient_trtol(),
+                        },
                     )
                 }
             } else {
@@ -8291,37 +8644,47 @@ impl Engine {
             .then_some(mosfet_companion_charges_scratch.as_slice());
             self.update_reactive_history(
                 &mut circuit,
-                &new_solution,
-                t,
-                dt,
-                &coeff,
-                &bsim4_trnqs_coeff,
-                &mut bjt_history,
-                &mut jfet_history,
-                &mut diode_history,
-                &mut mosfet_history,
-                &mut vdmos_history,
-                &mut b3soi_history,
-                &mut bsim3_history,
-                &mut bsim4_history,
-                &mut ekv26_history,
-                xyce_one_step_order2,
-                Some(vbic_snapshot_cache.as_slice()),
-                capacitor_accepted_states_valid
-                    .then_some(capacitor_accepted_states_scratch.as_slice()),
-                mosfet_caps_valid.then_some(mosfet_caps_scratch.as_slice()),
-                cached_mosfet_gate_companion_charges,
-                suppress_gate_charge,
-                &tline_dc_refs,
-                &coupled_tline_refs,
-                &mut breakpoints,
-                tstop,
-                self.voltage_reltol(),
-                self.voltage_abstol(),
-                self.current_abstol(),
-                &mut dynamic_tline_breakpoints_added,
-                &mut warned_dynamic_tline_breakpoint_cap,
-                &mut pending_dynamic_tline_breakpoints,
+                AcceptedReactiveStep {
+                    accepted_solution: &new_solution,
+                    accepted_time: t,
+                    dt,
+                    coeff: &coeff,
+                    bsim4_trnqs_coeff: &bsim4_trnqs_coeff,
+                },
+                TransientDeviceHistories {
+                    bjt: &mut bjt_history,
+                    jfet: &mut jfet_history,
+                    diode: &mut diode_history,
+                    mosfet: &mut mosfet_history,
+                    vdmos: &mut vdmos_history,
+                    b3soi: &mut b3soi_history,
+                    bsim3: &mut bsim3_history,
+                    bsim4: &mut bsim4_history,
+                    ekv26: &mut ekv26_history,
+                },
+                AcceptedReactiveSnapshots {
+                    xyce_one_step_order2,
+                    vbic_snapshots: Some(vbic_snapshot_cache.as_slice()),
+                    capacitor_accepted_states: capacitor_accepted_states_valid
+                        .then_some(capacitor_accepted_states_scratch.as_slice()),
+                    mosfet_caps: mosfet_caps_valid.then_some(mosfet_caps_scratch.as_slice()),
+                    mosfet_gate_companion_charges: cached_mosfet_gate_companion_charges,
+                    suppress_gate_charge_history: suppress_gate_charge,
+                    tline_dc_refs: &tline_dc_refs,
+                    coupled_tline_refs: &coupled_tline_refs,
+                },
+                ReactiveBreakpointScheduling {
+                    breakpoints: &mut breakpoints,
+                    tstop,
+                    voltage_reltol: self.voltage_reltol(),
+                    voltage_abstol: self.voltage_abstol(),
+                    current_abstol: self.current_abstol(),
+                },
+                DynamicBreakpointSink {
+                    dynamic_breakpoints_added: &mut dynamic_tline_breakpoints_added,
+                    warned_dynamic_breakpoint_cap: &mut warned_dynamic_tline_breakpoint_cap,
+                    pending_dynamic_breakpoints: &mut pending_dynamic_tline_breakpoints,
+                },
             )?;
             total_history_nanos += history_phase_start.elapsed().as_nanos();
             let tail_phase_start = DiagnosticTimer::start(diagnostic_timing_enabled);
@@ -8332,8 +8695,10 @@ impl Engine {
                         t,
                         dt,
                         &new_solution,
-                        &coeff,
-                        xyce_one_step_order2,
+                        XspiceCompanionPolicy {
+                            coefficients: &coeff,
+                            xyce_one_step_order2,
+                        },
                     );
                     circuit.accept_xspice_timestep();
                 } else {
@@ -8341,8 +8706,10 @@ impl Engine {
                         t,
                         dt,
                         &new_solution,
-                        &coeff,
-                        xyce_one_step_order2,
+                        XspiceCompanionPolicy {
+                            coefficients: &coeff,
+                            xyce_one_step_order2,
+                        },
                     );
                 }
                 circuit.project_xspice_voltage_outputs(&mut new_solution, num_nodes);
@@ -8472,16 +8839,22 @@ impl Engine {
                 retained_result_values.saturating_add(self.record_transient_solution_sample(
                     &mut result,
                     &mut circuit,
-                    &solution,
-                    num_nodes,
-                    t,
-                    dt,
-                    &derived_branch_currents,
-                    &bjt_history,
-                    &diode_history,
-                    record_device_op_traces,
-                    &capture_plan,
-                    trajectory_point_count,
+                    TransientSample {
+                        solution: &solution,
+                        num_nodes,
+                        time: t,
+                        step_size: dt,
+                    },
+                    TransientSampleSources {
+                        derived_branches: &derived_branch_currents,
+                        bjt_history: &bjt_history,
+                        diode_history: &diode_history,
+                    },
+                    TransientCaptureRequest {
+                        record_device_op_traces,
+                        capture: &capture_plan,
+                        trajectory_point_count,
+                    },
                     abort,
                 )?);
             if record_xspice_event_traces {
@@ -8538,14 +8911,19 @@ impl Engine {
                         &mut timestep,
                         &lte_estimator,
                         &new_solution,
-                        current_method,
-                        step_trap_order,
-                        dt,
+                        TruncationStep {
+                            method: current_method,
+                            trap_order: step_trap_order,
+                            dt,
+                        },
                         accepted_max_step,
-                        is_strictly_linear_transient,
-                        expected_source_delta,
-                        Self::should_apply_active_source_recovery_cap(force_accept_cooldown),
-                        Some(lte_scale),
+                        SourceActivityRecovery {
+                            is_strictly_linear_transient,
+                            expected_source_delta,
+                            source_activity_growth_cap_enabled:
+                                Self::should_apply_active_source_recovery_cap(force_accept_cooldown),
+                            accepted_scale: Some(lte_scale),
+                        },
                     );
                 }
             }
@@ -8590,14 +8968,13 @@ impl Engine {
             // supported step. Invalid negative/non-finite requests fail in
             // the device API rather than disappearing here.
             #[cfg(feature = "veriloga")]
-            if circuit.has_veriloga_devices() {
-                if let Some(bound) = circuit
+            if circuit.has_veriloga_devices()
+                && let Some(bound) = circuit
                     .veriloga_timestep_bound()
                     .map_err(SimulationError::Circuit)?
-                    && bound.max(timestep.hard_min_dt()) < timestep.dt()
-                {
-                    timestep.force_step(bound.max(timestep.hard_min_dt()).min(max_step));
-                }
+                && bound.max(timestep.hard_min_dt()) < timestep.dt()
+            {
+                timestep.force_step(bound.max(timestep.hard_min_dt()).min(max_step));
             }
             if first_accepted_transient_step
                 && matches!(
@@ -8664,53 +9041,65 @@ impl Engine {
                 .transpose()
                 .map_err(SimulationError::Circuit)?;
             self.capture_scheduled_checkpoint_if_due(
-                scheduled_checkpoint_times,
-                &mut scheduled_checkpoint_cursor,
-                checkpoint_netlist,
-                t,
-                fingerprint,
-                &netlist_identity,
-                &restart_identity,
-                &simulation_identity,
-                &solution,
-                &circuit,
-                startup_mode,
-                max_step,
-                Some(ProposedIntegrationContinuation {
-                    next_step: timestep.dt(),
-                    breakpoint_span_ceiling: xyce_breakpoint_span_ceiling.ceiling(),
-                    controller_max_step: timestep.max_dt(),
-                    analysis_first_step_pending,
-                    xyce_breakpoint_restart_pending: xyce_lte_restart_first_step,
-                }),
-                tstop,
-                &pending_dynamic_tline_breakpoints,
-                dynamic_tline_breakpoints_added,
-                &bjt_history,
-                &diode_history,
-                &vbic_snapshot_cache,
-                AcceptedIntegrationRuntimeCapture {
-                    lte_estimator: &lte_estimator,
-                    next_trap_order: trap_order,
-                    trapgear: fixed_method.is_none().then(|| trapgear.capture_snapshot()),
-                    xyce_static_residual: xyce_static_history.as_deref(),
-                    direct_dae_accepted_q: xyce_direct_accepted_q.as_deref(),
-                    direct_dae_static_residual: xyce_direct_static_history.as_deref(),
-                    lte_warmup_skips,
-                    force_accept_cooldown,
-                    livelock_streak,
-                    livelock_last_restart_time: livelock_last_restart_t,
-                    accepted_interval_count,
-                    damped_first_solver_call: xyce_damped_first_solver_call,
-                    damped_status: damped_status_checkpoint,
-                    retry_count,
-                    xyce_step_failure_count,
-                    stale_accept_count,
-                    resume_blockers: &runtime_resume_blockers,
+                ScheduledCheckpointPoint {
+                    scheduled_times: scheduled_checkpoint_times,
+                    cursor: &mut scheduled_checkpoint_cursor,
+                    checkpoint_netlist,
+                    accepted_time: t,
                 },
-                retained_result_values,
-                &mut retained_scheduled_checkpoint_values,
-                &mut scheduled_checkpoints,
+                ScheduledCheckpointIdentity {
+                    fingerprint,
+                    netlist_identity: &netlist_identity,
+                    restart_identity: &restart_identity,
+                    simulation_identity: &simulation_identity,
+                },
+                ScheduledCheckpointState {
+                    solution: &solution,
+                    circuit: &circuit,
+                    startup_mode,
+                },
+                ScheduledCheckpointIntegration {
+                    integration_max_step: max_step,
+                    integration_continuation: Some(ProposedIntegrationContinuation {
+                        next_step: timestep.dt(),
+                        breakpoint_span_ceiling: xyce_breakpoint_span_ceiling.ceiling(),
+                        controller_max_step: timestep.max_dt(),
+                        analysis_first_step_pending,
+                        xyce_breakpoint_restart_pending: xyce_lte_restart_first_step,
+                    }),
+                    integration_stop_time: tstop,
+                    pending_tline_arrivals: &pending_dynamic_tline_breakpoints,
+                    dynamic_tline_breakpoints_added,
+                },
+                ScheduledCheckpointHistories {
+                    bjt_history: &bjt_history,
+                    diode_history: &diode_history,
+                    vbic_snapshot_cache: &vbic_snapshot_cache,
+                    accepted_integration_runtime_capture: AcceptedIntegrationRuntimeCapture {
+                        lte_estimator: &lte_estimator,
+                        next_trap_order: trap_order,
+                        trapgear: fixed_method.is_none().then(|| trapgear.capture_snapshot()),
+                        xyce_static_residual: xyce_static_history.as_deref(),
+                        direct_dae_accepted_q: xyce_direct_accepted_q.as_deref(),
+                        direct_dae_static_residual: xyce_direct_static_history.as_deref(),
+                        lte_warmup_skips,
+                        force_accept_cooldown,
+                        livelock_streak,
+                        livelock_last_restart_time: livelock_last_restart_t,
+                        accepted_interval_count,
+                        damped_first_solver_call: xyce_damped_first_solver_call,
+                        damped_status: damped_status_checkpoint,
+                        retry_count,
+                        xyce_step_failure_count,
+                        stale_accept_count,
+                        resume_blockers: &runtime_resume_blockers,
+                    },
+                },
+                ScheduledCheckpointSink {
+                    retained_result_values,
+                    retained_scheduled_checkpoint_values: &mut retained_scheduled_checkpoint_values,
+                    captured: &mut scheduled_checkpoints,
+                },
             )?;
             reinitialize_xyce_breakpoint_histories!(hit_breakpoint, analysis_final_step);
             rejected_attempt_nonlinear_state_scratch = rejected_attempt_nonlinear_state.take();
@@ -8862,20 +9251,28 @@ impl Engine {
                 TransientCheckpoint::capture_resumable(
                     checkpoint_netlist,
                     &self.config,
-                    fingerprint,
-                    netlist_identity,
-                    restart_identity,
-                    simulation_identity,
-                    t,
-                    &solution,
-                    &circuit,
-                    startup_mode,
-                    Some(max_step),
-                    None,
-                    &pending_dynamic_tline_breakpoints,
-                    dynamic_tline_breakpoints_added,
-                    final_accepted_junction_history,
-                    final_accepted_integration_runtime,
+                    CheckpointIdentity {
+                        fingerprint,
+                        netlist_identity,
+                        restart_identity,
+                        simulation_identity,
+                    },
+                    CheckpointState {
+                        time: t,
+                        solution: &solution,
+                        circuit: &circuit,
+                        startup_mode,
+                    },
+                    CheckpointIntegrationState {
+                        integration_max_step: Some(max_step),
+                        integration_continuation: None,
+                        pending_tline_arrivals: &pending_dynamic_tline_breakpoints,
+                        dynamic_tline_breakpoints_added,
+                    },
+                    AcceptedTransientRuntime {
+                        accepted_junction_history: final_accepted_junction_history,
+                        accepted_integration_runtime: final_accepted_integration_runtime,
+                    },
                     Some(&lte_estimator),
                 )
                 .map_err(SimulationError::Circuit)?,
@@ -12761,21 +13158,66 @@ D1 D 0 DMOD
         assert_eq!(gear_order_one_geq, backward_euler_geq);
         assert_ne!(gear_order_two_geq, backward_euler_geq);
 
-        let backward_euler_ccap =
-            Engine::jfet_companion_ccap(&backward_euler, dt, q_curr, q_prev, q_prev_prev, cq_prev);
-        let gear_order_one_ccap =
-            Engine::jfet_companion_ccap(&gear_order_one, dt, q_curr, q_prev, q_prev_prev, cq_prev);
-        let gear_order_two_ccap =
-            Engine::jfet_companion_ccap(&gear_order_two, dt, q_curr, q_prev, q_prev_prev, cq_prev);
+        let backward_euler_ccap = Engine::jfet_companion_ccap(
+            &backward_euler,
+            dt,
+            q_curr,
+            BranchChargeHistory {
+                q_prev,
+                q_prev_prev,
+                cq_prev,
+            },
+        );
+        let gear_order_one_ccap = Engine::jfet_companion_ccap(
+            &gear_order_one,
+            dt,
+            q_curr,
+            BranchChargeHistory {
+                q_prev,
+                q_prev_prev,
+                cq_prev,
+            },
+        );
+        let gear_order_two_ccap = Engine::jfet_companion_ccap(
+            &gear_order_two,
+            dt,
+            q_curr,
+            BranchChargeHistory {
+                q_prev,
+                q_prev_prev,
+                cq_prev,
+            },
+        );
         assert_eq!(gear_order_one_ccap, backward_euler_ccap);
         assert_ne!(gear_order_two_ccap, backward_euler_ccap);
 
-        let backward_euler_ieq =
-            Engine::linear_charge_history_ieq(&backward_euler, dt, q_prev, q_prev_prev, cq_prev);
-        let gear_order_one_ieq =
-            Engine::linear_charge_history_ieq(&gear_order_one, dt, q_prev, q_prev_prev, cq_prev);
-        let gear_order_two_ieq =
-            Engine::linear_charge_history_ieq(&gear_order_two, dt, q_prev, q_prev_prev, cq_prev);
+        let backward_euler_ieq = Engine::linear_charge_history_ieq(
+            &backward_euler,
+            dt,
+            BranchChargeHistory {
+                q_prev,
+                q_prev_prev,
+                cq_prev,
+            },
+        );
+        let gear_order_one_ieq = Engine::linear_charge_history_ieq(
+            &gear_order_one,
+            dt,
+            BranchChargeHistory {
+                q_prev,
+                q_prev_prev,
+                cq_prev,
+            },
+        );
+        let gear_order_two_ieq = Engine::linear_charge_history_ieq(
+            &gear_order_two,
+            dt,
+            BranchChargeHistory {
+                q_prev,
+                q_prev_prev,
+                cq_prev,
+            },
+        );
         assert_eq!(gear_order_one_ieq, backward_euler_ieq);
         assert_ne!(gear_order_two_ieq, backward_euler_ieq);
     }
@@ -12797,9 +13239,11 @@ D1 D 0 DMOD
             dq_dv,
             v_curr,
             q_curr,
-            q_prev,
-            q_prev_prev,
-            0.0,
+            BranchChargeHistory {
+                q_prev,
+                q_prev_prev,
+                cq_prev: 0.0,
+            },
         );
         let expected_cq = (5.0 / 3.0 * q_curr - 3.0 * q_prev + 4.0 / 3.0 * q_prev_prev) / dt;
         let expected_geq = 5.0 / 3.0 * dq_dv / dt;
@@ -12898,13 +13342,17 @@ D1 D 0 DMOD
             dt,
             dt,
             false,
-            source_delta,
-            source_delta,
-            crate::constants::DEVICE_ACTIVITY_STEP_BOUND,
-            1.0e-15,
-            1.0e-12,
-            false,
-            true,
+            SourceActivityDeltas {
+                expected_source_delta: source_delta,
+                interior_source_delta: source_delta,
+                source_ramp_tracking_delta: crate::constants::DEVICE_ACTIVITY_STEP_BOUND,
+            },
+            StepBiasFloors {
+                practical_min_dt: 1.0e-15,
+                preferred_min_dt: 1.0e-12,
+                recovery_cap_enabled: false,
+                nonlinear_source_ramp_cap_enabled: true,
+            },
         );
         let expected = dt * crate::constants::DEVICE_ACTIVITY_STEP_BOUND / source_delta;
 
@@ -12914,13 +13362,17 @@ D1 D 0 DMOD
                 dt,
                 dt,
                 false,
-                source_delta,
-                source_delta,
-                crate::constants::DEVICE_ACTIVITY_STEP_BOUND,
-                1.0e-15,
-                1.0e-12,
-                false,
-                false,
+                SourceActivityDeltas {
+                    expected_source_delta: source_delta,
+                    interior_source_delta: source_delta,
+                    source_ramp_tracking_delta: crate::constants::DEVICE_ACTIVITY_STEP_BOUND
+                },
+                StepBiasFloors {
+                    practical_min_dt: 1.0e-15,
+                    preferred_min_dt: 1.0e-12,
+                    recovery_cap_enabled: false,
+                    nonlinear_source_ramp_cap_enabled: false
+                }
             ),
             dt
         );
@@ -12972,7 +13424,13 @@ D1 D 0 DMOD
 
         let mut txl_circuit = crate::circuit::CircuitData::new();
         let mut txl_line = scalar_line("TTXL");
-        assert!(txl_line.enable_txl_runtime(12.45, 8.972e-9, 0.0, 0.468e-12, 16.0));
+        assert!(txl_line.enable_txl_runtime(DistributedRlgc {
+            r: 12.45,
+            l: 8.972e-9,
+            g: 0.0,
+            c: 0.468e-12,
+            len: 16.0
+        }));
         txl_circuit.tlines.push(txl_line);
         assert!(!Engine::should_enable_nonlinear_source_ramp_cap(
             &txl_circuit,
@@ -13860,10 +14318,12 @@ D1 D 0 DMOD
                 &mut matrix,
                 &mut rhs,
                 &rejected,
-                1.0e-9,
-                1.0e-9,
-                &CompanionCoefficients::backward_euler(),
-                num_nodes,
+                SolutionDependentCompanionStep {
+                    time: 1.0e-9,
+                    dt: 1.0e-9,
+                    coeff: &CompanionCoefficients::backward_euler(),
+                    num_nodes,
+                },
             )
             .expect("rejected trial stamps");
         assert_ne!(

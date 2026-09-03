@@ -14,7 +14,6 @@
 //! - Hierarchical node naming for waveform access
 //! - Proper parameter scoping with precedence resolution
 
-#![allow(clippy::too_many_arguments)]
 use super::expr::{
     behavioral_expression_references_runtime_quantity, prepare_behavioral_expression,
     prepare_behavioral_expression_preserving_spelling,
@@ -165,14 +164,17 @@ pub struct XspiceAutoBridgeNodeHint {
 /// retain identical ordering and typed error payloads.
 pub(super) fn validate_subcircuit_port_bindings(
     subcircuit: &SubcircuitDef,
-    invoked_subcircuit_name: &str,
-    instance_name: &str,
-    qualified_instance_name: &str,
+    names: SubcircuitInstanceNames<'_>,
     actual_count: usize,
     mapped_ports: &[(&String, String)],
     global_nodes: &HashSet<String>,
     abort: &dyn AbortSignal,
 ) -> Result<(), ParseWithAbortError> {
+    let SubcircuitInstanceNames {
+        invoked_subcircuit_name,
+        instance_name,
+        qualified_instance_name,
+    } = names;
     let mut first_bindings = HashMap::<String, (usize, &str)>::new();
     for (index, (formal, actual)) in mapped_ports.iter().enumerate() {
         poll_parse_abort(abort, index)?;
@@ -236,6 +238,28 @@ pub(super) fn validate_subcircuit_port_bindings(
         .into());
     }
     Ok(())
+}
+
+/// The three names one subcircuit instantiation carries: the `.SUBCKT` it
+/// invokes, the instance's own name, and the fully qualified name it takes in
+/// the flattened deck. Diagnostics read all three, and passing them as bare
+/// `&str`s made a swapped pair invisible.
+#[derive(Clone, Copy)]
+pub(super) struct SubcircuitInstanceNames<'a> {
+    pub invoked_subcircuit_name: &'a str,
+    pub instance_name: &'a str,
+    pub qualified_instance_name: &'a str,
+}
+
+/// Where the flattener currently is: the name prefix it prepends, the node
+/// renaming in force, the parameter scope, and how deep the instantiation
+/// stack is.
+#[derive(Clone, Copy)]
+struct FlattenScope<'a> {
+    prefix: &'a str,
+    node_map: &'a HashMap<String, String>,
+    scope: &'a ParamContext,
+    depth: usize,
 }
 
 /// Flattens a hierarchical netlist into a flat element list
@@ -475,10 +499,12 @@ impl<'a> Flattener<'a> {
             let stack_len = self.expansion_stack.len();
             if let Err(error) = self.flatten_element(
                 element,
-                "",
-                &HashMap::new(),
-                &global_scope,
-                0,
+                FlattenScope {
+                    prefix: "",
+                    node_map: &HashMap::new(),
+                    scope: &global_scope,
+                    depth: 0,
+                },
                 &mut flat_elements,
                 abort,
             ) {
@@ -508,13 +534,16 @@ impl<'a> Flattener<'a> {
     fn flatten_element(
         &mut self,
         element: &Element,
-        prefix: &str,
-        node_map: &HashMap<String, String>,
-        scope: &ParamContext,
-        depth: usize,
+        scope: FlattenScope<'_>,
         output: &mut Vec<Element>,
         abort: &dyn AbortSignal,
     ) -> Result<(), ParseWithAbortError> {
+        let FlattenScope {
+            prefix,
+            node_map,
+            scope,
+            depth,
+        } = scope;
         ensure_parse_not_aborted(abort)?;
         ResourceLimitError::ensure(ResourceKind::HierarchyDepth, depth, self.config.max_depth)
             .map_err(ParseError::from)?;
@@ -599,10 +628,12 @@ impl<'a> Flattener<'a> {
                         element,
                         subckt_name,
                         params,
-                        prefix,
-                        node_map,
-                        scope,
-                        depth,
+                        FlattenScope {
+                            prefix,
+                            node_map,
+                            scope,
+                            depth,
+                        },
                         output,
                         abort,
                     )?;
@@ -909,13 +940,16 @@ impl<'a> Flattener<'a> {
         instance: &Element,
         subckt_name: &str,
         instance_params: &[(String, ParametricValue)],
-        prefix: &str,
-        parent_node_map: &HashMap<String, String>,
-        caller_scope: &ParamContext,
-        depth: usize,
+        scope: FlattenScope<'_>,
         output: &mut Vec<Element>,
         abort: &dyn AbortSignal,
     ) -> Result<(), ParseWithAbortError> {
+        let FlattenScope {
+            prefix,
+            node_map: parent_node_map,
+            scope: caller_scope,
+            depth,
+        } = scope;
         ensure_parse_not_aborted(abort)?;
         // Look up subcircuit definition
         let subckt = self.find_subcircuit(subckt_name).ok_or_else(|| {
@@ -942,9 +976,11 @@ impl<'a> Flattener<'a> {
             .collect::<Vec<_>>();
         validate_subcircuit_port_bindings(
             subckt,
-            subckt_name,
-            &instance.name,
-            &new_prefix,
+            SubcircuitInstanceNames {
+                invoked_subcircuit_name: subckt_name,
+                instance_name: &instance.name,
+                qualified_instance_name: &new_prefix,
+            },
             instance.nodes.len(),
             &mapped_ports,
             &self.global_nodes,
@@ -1053,10 +1089,12 @@ impl<'a> Flattener<'a> {
                 }
                 self.flatten_element(
                     &substituted,
-                    &new_prefix,
-                    &node_map,
-                    &param_scope,
-                    depth + 1,
+                    FlattenScope {
+                        prefix: &new_prefix,
+                        node_map: &node_map,
+                        scope: &param_scope,
+                        depth: depth + 1,
+                    },
                     output,
                     abort,
                 )
@@ -3309,9 +3347,9 @@ fn resolve_string_parametric_value(
                     expr
                 ))
             }),
-        ParametricValue::Resolved(_) => Err(ParseError::InvalidValue(format!(
-            "numeric parameter value cannot be used as a string value"
-        ))),
+        ParametricValue::Resolved(_) => Err(ParseError::InvalidValue(
+            "numeric parameter value cannot be used as a string value".to_string(),
+        )),
     }
 }
 
@@ -3568,20 +3606,21 @@ fn resolve_deferred_param_expressions(
     Ok(())
 }
 
+/// Parameters after resolution, split by what each one resolved to: numeric
+/// values, string literals, and the assignments that stayed symbolic.
+type ResolvedParams = (
+    Vec<(String, Value)>,
+    Vec<(String, String)>,
+    Vec<(String, String)>,
+);
+
 fn resolve_subcircuit_instance_params(
     subckt: &SubcircuitDef,
     caller_scope: &ParamContext,
     instance_params: &[(String, ParametricValue)],
     random: &RandomState,
     abort: &dyn AbortSignal,
-) -> Result<
-    (
-        Vec<(String, Value)>,
-        Vec<(String, String)>,
-        Vec<(String, String)>,
-    ),
-    ParseWithAbortError,
-> {
+) -> Result<ResolvedParams, ParseWithAbortError> {
     ensure_parse_not_aborted(abort)?;
     let mut instance_scope = caller_scope.clone();
     instance_scope.adopt_random(random);

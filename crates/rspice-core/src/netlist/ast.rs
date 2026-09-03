@@ -669,17 +669,12 @@ pub struct PspiceUTiming {
 }
 
 /// PSpice min/typ/max timing selection carried by MNTYMXDLY.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PspiceUTimingMode {
     Min,
+    #[default]
     Typ,
     Max,
-}
-
-impl Default for PspiceUTimingMode {
-    fn default() -> Self {
-        Self::Typ
-    }
 }
 
 /// Switch initial state

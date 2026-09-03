@@ -5,8 +5,6 @@
 //! prediction built from the accepted history, so it needs the same companion
 //! coefficients the devices stamped with.
 
-#![allow(clippy::type_complexity)]
-
 use crate::Value;
 use crate::numerics::integration::IntegrationMethod;
 
@@ -97,6 +95,16 @@ pub(crate) struct AcceptedBoundaryLteEstimatorCheckpoint {
 /// Supports both standard extrapolation and Richardson extrapolation for
 /// higher accuracy LTE estimates.
 #[derive(Debug)]
+/// The prefix of the solution vector an LTE estimate is taken over: how many
+/// leading unknowns to score, the step size they were solved at, and the
+/// indices excluded from the norm because their rows are not integrated.
+#[derive(Clone, Copy)]
+pub struct LtePrefixWindow<'a> {
+    pub prefix_len: usize,
+    pub dt: Value,
+    pub excluded_indices: &'a [usize],
+}
+
 pub struct LteEstimator {
     /// Previous solution vector (t - dt)
     prev_solution: Vec<Value>,
@@ -1064,7 +1072,14 @@ impl LteEstimator {
         prefix_len: usize,
         dt: Value,
     ) -> (Value, bool) {
-        self.estimate_prefix_excluding(current, prefix_len, dt, &[])
+        self.estimate_prefix_excluding(
+            current,
+            LtePrefixWindow {
+                prefix_len,
+                dt,
+                excluded_indices: &[],
+            },
+        )
     }
 
     /// Estimate LTE for the first `prefix_len` solution entries, skipping
@@ -1072,16 +1087,21 @@ impl LteEstimator {
     pub fn estimate_prefix_excluding(
         &self,
         current: &[Value],
-        prefix_len: usize,
-        dt: Value,
-        excluded_indices: &[usize],
+        window: LtePrefixWindow<'_>,
     ) -> (Value, bool) {
-        self.estimate_prefix_excluding_with_coefficient(
-            current,
-            None,
+        let LtePrefixWindow {
             prefix_len,
             dt,
             excluded_indices,
+        } = window;
+        self.estimate_prefix_excluding_with_coefficient(
+            current,
+            None,
+            LtePrefixWindow {
+                prefix_len,
+                dt,
+                excluded_indices,
+            },
             1.0,
             self.method_order,
         )
@@ -1097,20 +1117,25 @@ impl LteEstimator {
     pub(crate) fn estimate_prefix_excluding_for_integration(
         &self,
         current: &[Value],
-        prefix_len: usize,
-        dt: Value,
-        excluded_indices: &[usize],
+        window: LtePrefixWindow<'_>,
         method: IntegrationMethod,
         trap_order: u8,
     ) -> (Value, bool) {
+        let LtePrefixWindow {
+            prefix_len,
+            dt,
+            excluded_indices,
+        } = window;
         let coefficient = self.integration_error_coefficient(method, trap_order, dt);
         let method_order = Self::integration_method_order(method, trap_order);
         self.estimate_prefix_excluding_with_coefficient(
             current,
             None,
-            prefix_len,
-            dt,
-            excluded_indices,
+            LtePrefixWindow {
+                prefix_len,
+                dt,
+                excluded_indices,
+            },
             coefficient,
             method_order,
         )
@@ -1121,20 +1146,25 @@ impl LteEstimator {
         &self,
         current: &[Value],
         predicted: &[Value],
-        prefix_len: usize,
-        dt: Value,
-        excluded_indices: &[usize],
+        window: LtePrefixWindow<'_>,
         method: IntegrationMethod,
         trap_order: u8,
     ) -> (Value, bool) {
+        let LtePrefixWindow {
+            prefix_len,
+            dt,
+            excluded_indices,
+        } = window;
         let coefficient = self.integration_error_coefficient(method, trap_order, dt);
         let method_order = Self::integration_method_order(method, trap_order);
         self.estimate_prefix_excluding_with_coefficient(
             current,
             Some(predicted),
-            prefix_len,
-            dt,
-            excluded_indices,
+            LtePrefixWindow {
+                prefix_len,
+                dt,
+                excluded_indices,
+            },
             coefficient,
             method_order,
         )
@@ -1183,12 +1213,15 @@ impl LteEstimator {
         &self,
         current: &[Value],
         predicted_solution: Option<&[Value]>,
-        prefix_len: usize,
-        dt: Value,
-        excluded_indices: &[usize],
+        window: LtePrefixWindow<'_>,
         error_coefficient: Value,
         method_order: u32,
     ) -> (Value, bool) {
+        let LtePrefixWindow {
+            prefix_len,
+            dt,
+            excluded_indices,
+        } = window;
         let len = prefix_len.min(current.len());
         if predicted_solution.is_some_and(|predicted| predicted.len() < len) {
             return (Value::INFINITY, false);
@@ -1870,8 +1903,22 @@ mod lte_estimator_tests {
         );
         let candidate = [1.1, 100.1];
 
-        let (first_lte, _) = estimator.estimate_prefix_excluding(&candidate, 2, 1.0, &[1]);
-        let (second_lte, _) = estimator.estimate_prefix_excluding(&candidate, 2, 1.0, &[0]);
+        let (first_lte, _) = estimator.estimate_prefix_excluding(
+            &candidate,
+            LtePrefixWindow {
+                prefix_len: 2,
+                dt: 1.0,
+                excluded_indices: &[1],
+            },
+        );
+        let (second_lte, _) = estimator.estimate_prefix_excluding(
+            &candidate,
+            LtePrefixWindow {
+                prefix_len: 2,
+                dt: 1.0,
+                excluded_indices: &[0],
+            },
+        );
 
         assert!(first_lte > second_lte * 50.0);
     }
@@ -1903,9 +1950,11 @@ mod lte_estimator_tests {
         let (lte, accepts) = estimator.estimate_correction_prefix_excluding_for_integration(
             &[1.0, 200.0],
             &[1.0, 100.0],
-            2,
-            1.0,
-            &[1],
+            LtePrefixWindow {
+                prefix_len: 2,
+                dt: 1.0,
+                excluded_indices: &[1],
+            },
             IntegrationMethod::Trapezoidal,
             2,
         );
@@ -1925,9 +1974,11 @@ mod lte_estimator_tests {
         let (masked_lte, _) = estimator.estimate_correction_prefix_excluding_for_integration(
             &[1.6, 2000.0],
             &[1.0, 1000.0],
-            2,
-            1.0,
-            &[1],
+            LtePrefixWindow {
+                prefix_len: 2,
+                dt: 1.0,
+                excluded_indices: &[1],
+            },
             IntegrationMethod::Trapezoidal,
             2,
         );
@@ -1935,18 +1986,22 @@ mod lte_estimator_tests {
             .estimate_correction_prefix_excluding_for_integration(
                 &[1.6, 1000.0],
                 &[1.0, 1000.0],
-                2,
-                1.0,
-                &[1],
+                LtePrefixWindow {
+                    prefix_len: 2,
+                    dt: 1.0,
+                    excluded_indices: &[1],
+                },
                 IntegrationMethod::Trapezoidal,
                 2,
             );
         let (unmasked_lte, _) = estimator.estimate_correction_prefix_excluding_for_integration(
             &[1.6, 2000.0],
             &[1.0, 1000.0],
-            2,
-            1.0,
-            &[],
+            LtePrefixWindow {
+                prefix_len: 2,
+                dt: 1.0,
+                excluded_indices: &[],
+            },
             IntegrationMethod::Trapezoidal,
             2,
         );
@@ -1960,9 +2015,11 @@ mod lte_estimator_tests {
             .estimate_correction_prefix_excluding_for_integration(
                 &[1.6, 1.0],
                 &[1.0, 1.0],
-                2,
-                1.0,
-                &[1],
+                LtePrefixWindow {
+                    prefix_len: 2,
+                    dt: 1.0,
+                    excluded_indices: &[1],
+                },
                 IntegrationMethod::Trapezoidal,
                 2,
             );
@@ -1982,9 +2039,11 @@ mod lte_estimator_tests {
         let (lte, accepts) = estimator.estimate_correction_prefix_excluding_for_integration(
             &[123.0],
             &[123.0],
-            1,
-            1.0,
-            &[],
+            LtePrefixWindow {
+                prefix_len: 1,
+                dt: 1.0,
+                excluded_indices: &[],
+            },
             IntegrationMethod::Trapezoidal,
             2,
         );
@@ -2027,9 +2086,11 @@ mod lte_estimator_tests {
 
         let (lte, accepts) = estimator.estimate_prefix_excluding_for_integration(
             &[2.0],
-            1,
-            1.0,
-            &[],
+            LtePrefixWindow {
+                prefix_len: 1,
+                dt: 1.0,
+                excluded_indices: &[],
+            },
             IntegrationMethod::BackwardEuler,
             1,
         );
@@ -2186,17 +2247,21 @@ mod lte_estimator_tests {
 
         let (order_one_lte, _) = estimator.estimate_prefix_excluding_for_integration(
             &[9.0],
-            1,
-            1.0,
-            &[],
+            LtePrefixWindow {
+                prefix_len: 1,
+                dt: 1.0,
+                excluded_indices: &[],
+            },
             IntegrationMethod::BackwardEuler,
             1,
         );
         let (order_two_lte, _) = estimator.estimate_prefix_excluding_for_integration(
             &[9.0],
-            1,
-            1.0,
-            &[],
+            LtePrefixWindow {
+                prefix_len: 1,
+                dt: 1.0,
+                excluded_indices: &[],
+            },
             IntegrationMethod::Trapezoidal,
             2,
         );

@@ -178,6 +178,10 @@ impl Engine {
     /// Run Monte Carlo under one exact operating environment. Parameter
     /// perturbation reparses the authored source per trial, so the environment
     /// is deliberately applied after that reparse and before each solve.
+    // The two thinner entry points above delegate here, and both are called
+    // from crates outside this package; bundling the run would change their
+    // public signatures too.
+    #[allow(clippy::too_many_arguments)]
     pub fn run_monte_carlo_with_options_environment_and_abort(
         &self,
         netlist: &Netlist,

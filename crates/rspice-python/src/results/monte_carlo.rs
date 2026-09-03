@@ -99,11 +99,16 @@ impl PyVariableStatistics {
         let rank = (pct / 100.0) * (sorted.len() - 1) as f64;
         let lo = rank.floor() as usize;
         let hi = rank.ceil() as usize;
+        let (Some(&low), Some(&high)) = (sorted.get(lo), sorted.get(hi)) else {
+            return Err(crate::errors::value_error(
+                "percentile rank fell outside the sample",
+            ));
+        };
         if lo == hi {
-            Ok(sorted[lo])
+            Ok(low)
         } else {
             let frac = rank - lo as f64;
-            Ok(sorted[lo] * (1.0 - frac) + sorted[hi] * frac)
+            Ok(low * (1.0 - frac) + high * frac)
         }
     }
 

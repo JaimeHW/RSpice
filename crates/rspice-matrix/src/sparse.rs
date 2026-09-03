@@ -6,7 +6,6 @@
 //! Key optimization: Static structure matrix that caches topology
 //! and allows updates to values only, avoiding O(N log N) rebuild.
 
-#![allow(clippy::needless_range_loop)]
 use crate::{
     CircuitLuOrientation, CircuitLuRobustness, CircuitLuRowScaling, DivisionPolicy,
     FactorizationRequest, NumericFactorizationPolicy, RealSolverBackend, SolverError,
@@ -380,8 +379,8 @@ fn equilibrate_sparse_system(
     let row_idx = csc.row_idx();
     for col in 0..ncols {
         let mut max_abs: Value = 0.0;
-        for idx in col_ptr[col]..col_ptr[col + 1] {
-            let value = values[idx];
+        let span = col_ptr[col]..col_ptr[col + 1];
+        for &value in &values[span.clone()] {
             if !value.is_finite() {
                 return Err(SolverError::Overflow);
             }
@@ -392,23 +391,23 @@ fn equilibrate_sparse_system(
         }
         let scale = finite_reciprocal_scale(max_abs);
         col_scale[col] = scale;
-        for idx in col_ptr[col]..col_ptr[col + 1] {
-            scaled_values[idx] = values[idx] * scale;
+        for (scaled, &value) in scaled_values[span.clone()].iter_mut().zip(&values[span]) {
+            *scaled = value * scale;
         }
     }
 
     row_scale.fill(0.0);
     for col in 0..ncols {
-        for idx in col_ptr[col]..col_ptr[col + 1] {
-            let row = row_idx[idx];
-            row_scale[row] = row_scale[row].max(scaled_values[idx].abs());
+        let span = col_ptr[col]..col_ptr[col + 1];
+        for (&row, &scaled) in row_idx[span.clone()].iter().zip(&scaled_values[span]) {
+            row_scale[row] = row_scale[row].max(scaled.abs());
         }
     }
-    for row in 0..nrows {
-        if row_scale[row] == 0.0 {
+    for scale in row_scale.iter_mut().take(nrows) {
+        if *scale == 0.0 {
             return Err(SolverError::SingularMatrix);
         }
-        row_scale[row] = finite_reciprocal_scale(row_scale[row]);
+        *scale = finite_reciprocal_scale(*scale);
     }
     for col in 0..ncols {
         for idx in col_ptr[col]..col_ptr[col + 1] {
@@ -623,11 +622,11 @@ fn canonicalize_real_homogeneous_singletons(
     let mut unique_unknown = vec![None; nrows];
     let mut multiple = vec![false; nrows];
     for col in 0..ncols {
-        for index in csc.col_ptr()[col]..csc.col_ptr()[col + 1] {
-            if values[index] == 0.0 {
+        let span = csc.col_ptr()[col]..csc.col_ptr()[col + 1];
+        for (&original_row, &value) in csc.row_idx()[span.clone()].iter().zip(&values[span]) {
+            if value == 0.0 {
                 continue;
             }
-            let original_row = csc.row_idx()[index];
             let (equation, unknown) = match operation {
                 RealSolveOp::Normal => (original_row, col),
                 RealSolveOp::Transpose => (col, original_row),
@@ -1236,9 +1235,9 @@ impl StaticMatrix {
         let row_idx = self.csc.row_idx();
         let mut dense = vec![vec![0.0; self.ncols]; self.nrows];
         for col in 0..self.ncols {
-            for idx in col_ptr[col]..col_ptr[col + 1] {
-                let row = row_idx[idx];
-                dense[row][col] = self.values[idx];
+            let span = col_ptr[col]..col_ptr[col + 1];
+            for (&row, &value) in row_idx[span.clone()].iter().zip(&self.values[span]) {
+                dense[row][col] = value;
             }
         }
         dense
@@ -1775,7 +1774,7 @@ impl StaticMatrix {
             return Ok(());
         }
 
-        for row in 0..row_count {
+        for (row, &row_rhs) in rhs.iter().enumerate().take(row_count) {
             let mut row_ax = 0.0;
             let mut row_ax_gross = 0.0;
             for position in self.residual_layout.row_ptr[row]..self.residual_layout.row_ptr[row + 1]
@@ -1785,7 +1784,6 @@ impl StaticMatrix {
                 row_ax += term;
                 row_ax_gross += term.abs();
             }
-            let row_rhs = rhs[row];
             if !row_rhs.is_finite() || !row_ax.is_finite() {
                 for remaining in row..row_count {
                     visit(remaining, Value::INFINITY);
@@ -2512,9 +2510,9 @@ impl StaticMatrix {
                     RealSolveOp::Normal => &ws.col_scale,
                     RealSolveOp::Transpose => &ws.row_scale,
                 };
-                for col in 0..n {
+                for (col, &scale) in solution_scale.iter().enumerate().take(n) {
                     let slot = rhs_index * n + col;
-                    solution[slot] *= solution_scale[col];
+                    solution[slot] *= scale;
                     if !solution[slot].is_finite() {
                         return Err(SolverError::Overflow);
                     }
@@ -3435,8 +3433,8 @@ fn equilibrate_complex_matrix(
     let row_idx = csc.row_idx();
     for col in 0..ncols {
         let mut max_abs: Value = 0.0;
-        for idx in col_ptr[col]..col_ptr[col + 1] {
-            let value = values[idx];
+        let span = col_ptr[col]..col_ptr[col + 1];
+        for &value in &values[span.clone()] {
             if !complex_is_finite(value) {
                 return Err(SolverError::Overflow);
             }
@@ -3447,16 +3445,16 @@ fn equilibrate_complex_matrix(
         }
         let scale = finite_reciprocal_scale(max_abs);
         col_scale[col] = scale;
-        for idx in col_ptr[col]..col_ptr[col + 1] {
-            scaled_values[idx] = values[idx] * scale;
+        for (scaled, &value) in scaled_values[span.clone()].iter_mut().zip(&values[span]) {
+            *scaled = value * scale;
         }
     }
 
     row_scale.fill(0.0);
     for col in 0..ncols {
-        for idx in col_ptr[col]..col_ptr[col + 1] {
-            let row = row_idx[idx];
-            row_scale[row] = row_scale[row].max(complex_abs1(scaled_values[idx]));
+        let span = col_ptr[col]..col_ptr[col + 1];
+        for (&row, &scaled) in row_idx[span.clone()].iter().zip(&scaled_values[span]) {
+            row_scale[row] = row_scale[row].max(complex_abs1(scaled));
         }
     }
     for scale in row_scale.iter_mut() {
@@ -3949,12 +3947,11 @@ fn canonicalize_complex_homogeneous_singletons(
     let mut unique_unknown = vec![None; nrows];
     let mut multiple = vec![false; nrows];
     for col in 0..ncols {
-        for index in csc.col_ptr()[col]..csc.col_ptr()[col + 1] {
-            let value = values[index];
+        let span = csc.col_ptr()[col]..csc.col_ptr()[col + 1];
+        for (&original_row, &value) in csc.row_idx()[span.clone()].iter().zip(&values[span]) {
             if value == Complex64::new(0.0, 0.0) {
                 continue;
             }
-            let original_row = csc.row_idx()[index];
             let (equation, unknown) = match operation {
                 ComplexSolveOp::Normal => (original_row, col),
                 ComplexSolveOp::Transpose | ComplexSolveOp::Adjoint => (col, original_row),
@@ -4012,12 +4009,12 @@ fn fast_complex_componentwise_backward_error(
         denominator[row] = complex_abs1(rhs[row]);
     }
     for col in 0..ncols {
-        for index in csc.col_ptr()[col]..csc.col_ptr()[col + 1] {
-            let original_row = csc.row_idx()[index];
+        let span = csc.col_ptr()[col]..csc.col_ptr()[col + 1];
+        for (&original_row, &entry) in csc.row_idx()[span.clone()].iter().zip(&values[span]) {
             let (equation, x_index, value) = match operation {
-                ComplexSolveOp::Normal => (original_row, col, values[index]),
-                ComplexSolveOp::Transpose => (col, original_row, values[index]),
-                ComplexSolveOp::Adjoint => (col, original_row, values[index].conj()),
+                ComplexSolveOp::Normal => (original_row, col, entry),
+                ComplexSolveOp::Transpose => (col, original_row, entry),
+                ComplexSolveOp::Adjoint => (col, original_row, entry.conj()),
             };
             let x = solution[x_index];
             let product = value * x;
@@ -4405,9 +4402,9 @@ impl ComplexMatrix {
         let row_idx = self.csc.row_idx();
         let mut dense = vec![vec![0.0; self.ncols]; self.nrows];
         for col in 0..self.ncols {
-            for idx in col_ptr[col]..col_ptr[col + 1] {
-                let row = row_idx[idx];
-                dense[row][col] = self.values[idx].re;
+            let span = col_ptr[col]..col_ptr[col + 1];
+            for (&row, value) in row_idx[span.clone()].iter().zip(&self.values[span]) {
+                dense[row][col] = value.re;
             }
         }
         dense
@@ -4419,9 +4416,9 @@ impl ComplexMatrix {
         let row_idx = self.csc.row_idx();
         let mut dense = vec![vec![0.0; self.ncols]; self.nrows];
         for col in 0..self.ncols {
-            for idx in col_ptr[col]..col_ptr[col + 1] {
-                let row = row_idx[idx];
-                dense[row][col] = self.values[idx].im;
+            let span = col_ptr[col]..col_ptr[col + 1];
+            for (&row, value) in row_idx[span.clone()].iter().zip(&self.values[span]) {
+                dense[row][col] = value.im;
             }
         }
         dense
@@ -4436,8 +4433,9 @@ impl ComplexMatrix {
         let col_ptr = self.csc.col_ptr();
         let row_idx = self.csc.row_idx();
         for col in 0..self.ncols {
-            for index in col_ptr[col]..col_ptr[col + 1] {
-                visitor(row_idx[index], col, self.values[index]);
+            let span = col_ptr[col]..col_ptr[col + 1];
+            for (&row, &value) in row_idx[span.clone()].iter().zip(&self.values[span]) {
+                visitor(row, col, value);
             }
         }
     }
@@ -5550,9 +5548,9 @@ pub(crate) fn solve_gauss(
         let mut max_row = k;
         let mut max_val = a[k][k].abs();
 
-        for i in (k + 1)..n {
-            if a[i][k].abs() > max_val {
-                max_val = a[i][k].abs();
+        for (i, row) in a.iter().enumerate().take(n).skip(k + 1) {
+            if row[k].abs() > max_val {
+                max_val = row[k].abs();
                 max_row = i;
             }
         }
@@ -5569,13 +5567,19 @@ pub(crate) fn solve_gauss(
 
         // Eliminate column
         for i in (k + 1)..n {
-            let factor = a[i][k] / a[k][k];
+            // `i > k`, so the split leaves the pivot row in `above` and the row
+            // being eliminated at the head of `below`. Same elements, same
+            // operations, same order as the index form.
+            let (above, below) = a.split_at_mut(i);
+            let pivot_row = &above[k];
+            let target_row = &mut below[0];
+            let factor = target_row[k] / pivot_row[k];
             if !factor.is_finite() {
                 return Err(SolverError::Overflow);
             }
-            for j in k..n {
-                a[i][j] -= factor * a[k][j];
-                if !a[i][j].is_finite() {
+            for (target, &pivot) in target_row[k..n].iter_mut().zip(&pivot_row[k..n]) {
+                *target -= factor * pivot;
+                if !target.is_finite() {
                     return Err(SolverError::Overflow);
                 }
             }
@@ -6205,11 +6209,13 @@ mod tests {
 
         let mut ax = vec![0.0; matrix.nrows];
         let mut gross = vec![0.0; matrix.nrows];
-        for col in 0..matrix.ncols {
-            let x = solution[col];
-            for index in matrix.csc.col_ptr()[col]..matrix.csc.col_ptr()[col + 1] {
-                let row = matrix.csc.row_idx()[index];
-                let term = matrix.values[index] * x;
+        for (col, &x) in solution.iter().enumerate().take(matrix.ncols) {
+            let span = matrix.csc.col_ptr()[col]..matrix.csc.col_ptr()[col + 1];
+            for (&row, &value) in matrix.csc.row_idx()[span.clone()]
+                .iter()
+                .zip(&matrix.values[span])
+            {
+                let term = value * x;
                 ax[row] += term;
                 gross[row] += term.abs();
             }
@@ -7498,10 +7504,10 @@ mod tests {
                 Complex64::new(3.0, 0.5),
             ],
         ];
-        for row in 0..3 {
-            for col in 0..3 {
-                if a[row][col] != Complex64::new(0.0, 0.0) {
-                    matrix.add(row, col, a[row][col]);
+        for (row, entries) in a.iter().enumerate() {
+            for (col, &value) in entries.iter().enumerate() {
+                if value != Complex64::new(0.0, 0.0) {
+                    matrix.add(row, col, value);
                 }
             }
         }

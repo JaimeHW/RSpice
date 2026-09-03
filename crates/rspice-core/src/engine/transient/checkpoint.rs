@@ -241,6 +241,42 @@ impl TransientCheckpointBlockerSource {
     }
 }
 
+/// What a checkpoint says it is a checkpoint *of*: the deck fingerprint, the
+/// optional netlist and restart identities, and the simulation identity. All
+/// four are compared on resume, so a swapped pair would accept a checkpoint
+/// from a different run.
+#[derive(Clone, Debug)]
+pub(super) struct CheckpointIdentity {
+    pub fingerprint: u64,
+    pub netlist_identity: Option<String>,
+    pub restart_identity: Option<String>,
+    pub simulation_identity: String,
+}
+
+/// The accepted point a checkpoint captures.
+#[derive(Clone, Copy)]
+pub(crate) struct CheckpointState<'a> {
+    pub time: Value,
+    pub solution: &'a [Value],
+    pub circuit: &'a CircuitData,
+    pub startup_mode: TransientStartupMode,
+}
+
+/// The integrator state that must come back with it.
+#[derive(Clone)]
+pub(super) struct CheckpointIntegrationState<'a> {
+    pub integration_max_step: Option<Value>,
+    pub integration_continuation: Option<ProposedIntegrationContinuation>,
+    pub pending_tline_arrivals: &'a [Value],
+    pub dynamic_tline_breakpoints_added: usize,
+}
+
+/// The accepted-step runtime a resumed run reseeds from.
+pub(super) struct AcceptedTransientRuntime {
+    pub accepted_junction_history: AcceptedJunctionTransientHistoryCheckpoint,
+    pub accepted_integration_runtime: AcceptedIntegrationRuntime,
+}
+
 /// One deterministic reason a transient checkpoint cannot be resumed.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TransientCheckpointBlocker {
@@ -905,9 +941,14 @@ fn hash_external_dependencies(hasher: &mut blake3::Hasher, netlist: &Netlist) {
     }
 }
 
+/// One device's initial-condition projection: the flattened instance name,
+/// the terminal role the condition applies to, and the bit pattern of each
+/// authored value, or `None` where the deck authored nothing.
+type DeviceInitialConditionColumn = (String, &'static str, Vec<Option<u64>>);
+
 fn effective_device_initial_condition_projection(
     netlist: &Netlist,
-) -> Option<Vec<(String, &'static str, Vec<Option<u64>>)>> {
+) -> Option<Vec<DeviceInitialConditionColumn>> {
     let mut isolated = netlist.clone();
     isolated.params = netlist.params.checkpoint_isolated_clone();
     let flattened = flatten_netlist_with_models(&isolated).ok()?;
@@ -3584,16 +3625,15 @@ fn validate_runtime_policy(
             "accepted integration runtime livelock streak {livelock_streak} reaches restart threshold {LIVELOCK_STREAK_RESTART}"
         ));
     }
-    if let Some(last_restart) = livelock_last_restart_time {
-        if !last_restart.is_finite()
+    if let Some(last_restart) = livelock_last_restart_time
+        && (!last_restart.is_finite()
             || last_restart < 0.0
             || last_restart > checkpoint_time
-            || (last_restart == 0.0 && last_restart.to_bits() != 0.0_f64.to_bits())
-        {
-            return Err(format!(
-                "accepted integration runtime last livelock restart time {last_restart} is outside [0, {checkpoint_time}] or noncanonical"
-            ));
-        }
+            || (last_restart == 0.0 && last_restart.to_bits() != 0.0_f64.to_bits()))
+    {
+        return Err(format!(
+            "accepted integration runtime last livelock restart time {last_restart} is outside [0, {checkpoint_time}] or noncanonical"
+        ));
     }
     if (checkpoint_time == 0.0 && accepted_interval_count != 0)
         || (checkpoint_time > 0.0 && accepted_interval_count == 0)
@@ -4144,20 +4184,18 @@ fn read_runtime_blockers(
     read_canonical_nonempty_line_vector(lines, "accepted_integration_runtime_blockers", budget)
 }
 
-fn parse_runtime_policy(
-    lines: &mut CheckpointLines<'_>,
-) -> Result<
-    (
-        u8,
-        usize,
-        usize,
-        Option<Value>,
-        usize,
-        bool,
-        Option<XyceDampedAcceptedBoundaryCheckpoint>,
-    ),
-    String,
-> {
+/// The accepted-integration policy line of a checkpoint, decoded.
+struct RuntimePolicyRecord {
+    lte_warmup_skips: u8,
+    force_accept_cooldown: usize,
+    livelock_streak: usize,
+    livelock_last_restart_time: Option<Value>,
+    accepted_interval_count: usize,
+    damped_first_solver_call: bool,
+    damped_status: Option<XyceDampedAcceptedBoundaryCheckpoint>,
+}
+
+fn parse_runtime_policy(lines: &mut CheckpointLines<'_>) -> Result<RuntimePolicyRecord, String> {
     let line = lines
         .next()
         .ok_or_else(|| "missing accepted integration policy line".to_string())?;
@@ -4228,7 +4266,7 @@ fn parse_runtime_policy(
             "accepted integration policy line has extra field '{extra}'"
         ));
     }
-    Ok((
+    Ok(RuntimePolicyRecord {
         lte_warmup_skips,
         force_accept_cooldown,
         livelock_streak,
@@ -4236,7 +4274,7 @@ fn parse_runtime_policy(
         accepted_interval_count,
         damped_first_solver_call,
         damped_status,
-    ))
+    })
 }
 
 fn next_runtime_field<'a>(
@@ -4319,7 +4357,7 @@ fn read_accepted_integration_runtime(
         ));
     }
     let resume_blockers = read_runtime_blockers(lines, budget)?;
-    let (
+    let RuntimePolicyRecord {
         lte_warmup_skips,
         force_accept_cooldown,
         livelock_streak,
@@ -4327,7 +4365,7 @@ fn read_accepted_integration_runtime(
         accepted_interval_count,
         damped_first_solver_call,
         damped_status,
-    ) = parse_runtime_policy(lines)?;
+    } = parse_runtime_policy(lines)?;
     if kind == "restart-normalized" {
         let runtime = RestartNormalizedIntegrationRuntimeCheckpoint {
             version,
@@ -5489,12 +5527,15 @@ impl TransientCheckpoint {
         fingerprint: u64,
         netlist_identity: Option<String>,
         simulation_identity: String,
-        time: Value,
-        solution: &[Value],
-        circuit: &CircuitData,
-        startup_mode: TransientStartupMode,
+        state: CheckpointState<'_>,
         lte_estimator: Option<&LteEstimator>,
     ) -> Result<Self, String> {
+        let CheckpointState {
+            time,
+            solution,
+            circuit,
+            startup_mode,
+        } = state;
         let accepted_junction_history = if circuit.bjts.is_empty() && circuit.diodes.is_empty() {
             AcceptedJunctionTransientHistoryCheckpoint {
                 available: true,
@@ -5506,54 +5547,74 @@ impl TransientCheckpoint {
             )
         };
         Self::capture_with_restart_identity(
-            fingerprint,
-            netlist_identity,
-            None,
-            simulation_identity,
-            time,
-            solution,
-            circuit,
-            startup_mode,
-            None,
-            None,
-            &[],
-            0,
-            accepted_junction_history,
-            AcceptedIntegrationRuntime::RestartNormalized(
-                RestartNormalizedIntegrationRuntimeCheckpoint {
-                    version: ACCEPTED_INTEGRATION_RUNTIME_VERSION,
-                    resume_blockers: Vec::new(),
-                    lte_warmup_skips: 0,
-                    force_accept_cooldown: 0,
-                    livelock_streak: 0,
-                    livelock_last_restart_time: None,
-                    accepted_interval_count: usize::from(time > 0.0),
-                    damped_first_solver_call: true,
-                    damped_status: None,
-                },
-            ),
+            CheckpointIdentity {
+                fingerprint,
+                netlist_identity,
+                restart_identity: None,
+                simulation_identity,
+            },
+            CheckpointState {
+                time,
+                solution,
+                circuit,
+                startup_mode,
+            },
+            CheckpointIntegrationState {
+                integration_max_step: None,
+                integration_continuation: None,
+                pending_tline_arrivals: &[],
+                dynamic_tline_breakpoints_added: 0,
+            },
+            AcceptedTransientRuntime {
+                accepted_junction_history,
+                accepted_integration_runtime: AcceptedIntegrationRuntime::RestartNormalized(
+                    RestartNormalizedIntegrationRuntimeCheckpoint {
+                        version: ACCEPTED_INTEGRATION_RUNTIME_VERSION,
+                        resume_blockers: Vec::new(),
+                        lte_warmup_skips: 0,
+                        force_accept_cooldown: 0,
+                        livelock_streak: 0,
+                        livelock_last_restart_time: None,
+                        accepted_interval_count: usize::from(time > 0.0),
+                        damped_first_solver_call: true,
+                        damped_status: None,
+                    },
+                ),
+            },
             lte_estimator,
         )
     }
 
     /// Capture transient state together with the authored-restart identity.
     pub(super) fn capture_with_restart_identity(
-        fingerprint: u64,
-        netlist_identity: Option<String>,
-        restart_identity: Option<String>,
-        simulation_identity: String,
-        time: Value,
-        solution: &[Value],
-        circuit: &CircuitData,
-        startup_mode: TransientStartupMode,
-        integration_max_step: Option<Value>,
-        integration_continuation: Option<ProposedIntegrationContinuation>,
-        pending_tline_arrivals: &[Value],
-        dynamic_tline_breakpoints_added: usize,
-        accepted_junction_history: AcceptedJunctionTransientHistoryCheckpoint,
-        accepted_integration_runtime: AcceptedIntegrationRuntime,
+        identity: CheckpointIdentity,
+        state: CheckpointState<'_>,
+        integration: CheckpointIntegrationState<'_>,
+        runtime: AcceptedTransientRuntime,
         lte_estimator: Option<&LteEstimator>,
     ) -> Result<Self, String> {
+        let AcceptedTransientRuntime {
+            accepted_junction_history,
+            accepted_integration_runtime,
+        } = runtime;
+        let CheckpointIntegrationState {
+            integration_max_step,
+            integration_continuation,
+            pending_tline_arrivals,
+            dynamic_tline_breakpoints_added,
+        } = integration;
+        let CheckpointState {
+            time,
+            solution,
+            circuit,
+            startup_mode,
+        } = state;
+        let CheckpointIdentity {
+            fingerprint,
+            netlist_identity,
+            restart_identity,
+            simulation_identity,
+        } = identity;
         let mut tline_states = Vec::with_capacity(circuit.tlines.len());
         let mut tline_resume_blockers = Vec::new();
         for line in &circuit.tlines {
@@ -5719,37 +5780,57 @@ impl TransientCheckpoint {
     pub(super) fn capture_resumable(
         target_netlist: &Netlist,
         config: &SimulationConfig,
-        fingerprint: u64,
-        netlist_identity: Option<String>,
-        restart_identity: Option<String>,
-        simulation_identity: String,
-        time: Value,
-        solution: &[Value],
-        circuit: &CircuitData,
-        startup_mode: TransientStartupMode,
-        integration_max_step: Option<Value>,
-        integration_continuation: Option<ProposedIntegrationContinuation>,
-        pending_tline_arrivals: &[Value],
-        dynamic_tline_breakpoints_added: usize,
-        accepted_junction_history: AcceptedJunctionTransientHistoryCheckpoint,
-        accepted_integration_runtime: AcceptedIntegrationRuntime,
+        identity: CheckpointIdentity,
+        state: CheckpointState<'_>,
+        integration: CheckpointIntegrationState<'_>,
+        runtime: AcceptedTransientRuntime,
         lte_estimator: Option<&LteEstimator>,
     ) -> Result<Self, String> {
-        let checkpoint = Self::capture_with_restart_identity(
-            fingerprint,
-            netlist_identity,
-            restart_identity,
-            simulation_identity,
-            time,
-            solution,
-            circuit,
-            startup_mode,
+        let AcceptedTransientRuntime {
+            accepted_junction_history,
+            accepted_integration_runtime,
+        } = runtime;
+        let CheckpointIntegrationState {
             integration_max_step,
             integration_continuation,
             pending_tline_arrivals,
             dynamic_tline_breakpoints_added,
-            accepted_junction_history,
-            accepted_integration_runtime,
+        } = integration;
+        let CheckpointState {
+            time,
+            solution,
+            circuit,
+            startup_mode,
+        } = state;
+        let CheckpointIdentity {
+            fingerprint,
+            netlist_identity,
+            restart_identity,
+            simulation_identity,
+        } = identity;
+        let checkpoint = Self::capture_with_restart_identity(
+            CheckpointIdentity {
+                fingerprint,
+                netlist_identity,
+                restart_identity,
+                simulation_identity,
+            },
+            CheckpointState {
+                time,
+                solution,
+                circuit,
+                startup_mode,
+            },
+            CheckpointIntegrationState {
+                integration_max_step,
+                integration_continuation,
+                pending_tline_arrivals,
+                dynamic_tline_breakpoints_added,
+            },
+            AcceptedTransientRuntime {
+                accepted_junction_history,
+                accepted_integration_runtime,
+            },
             lte_estimator,
         )?;
         checkpoint.validate_numeric_state()?;
@@ -7861,13 +7942,14 @@ impl TransientCheckpoint {
             let columns = read_value_section(lines, "generic_switch_stores", 4, budget)?;
             let count = columns.first().map_or(0, Vec::len);
             let mut stores = allocate_checkpoint_capacity(count, "generic_switch_stores", budget)?;
-            for index in 0..count {
-                stores.push([
-                    columns[0][index],
-                    columns[1][index],
-                    columns[2][index],
-                    columns[3][index],
-                ]);
+            for (((&first, &second), &third), &fourth) in columns[0]
+                .iter()
+                .zip(&columns[1])
+                .zip(&columns[2])
+                .zip(&columns[3])
+                .take(count)
+            {
+                stores.push([first, second, third, fourth]);
             }
             stores
         } else {
@@ -10748,10 +10830,12 @@ mod tests {
             netlist_fingerprint(&netlist),
             netlist_checkpoint_identity(&netlist),
             simulation_checkpoint_identity(engine.config()),
-            0.0,
-            &solution,
-            &circuit,
-            TransientStartupMode::OperatingPoint,
+            CheckpointState {
+                time: 0.0,
+                solution: &solution,
+                circuit: &circuit,
+                startup_mode: TransientStartupMode::OperatingPoint,
+            },
             None,
         )
         .expect("native diode/BJT checkpoint captures");
@@ -10921,10 +11005,12 @@ mod tests {
             netlist_fingerprint(&empty_netlist),
             netlist_checkpoint_identity(&empty_netlist),
             simulation_checkpoint_identity(engine.config()),
-            0.0,
-            &[],
-            &empty,
-            TransientStartupMode::OperatingPoint,
+            CheckpointState {
+                time: 0.0,
+                solution: &[],
+                circuit: &empty,
+                startup_mode: TransientStartupMode::OperatingPoint,
+            },
             None,
         )
         .expect("junction-free checkpoint captures");
@@ -10948,10 +11034,12 @@ mod tests {
             netlist_fingerprint(&diode_netlist),
             netlist_checkpoint_identity(&diode_netlist),
             simulation_checkpoint_identity(engine.config()),
-            0.0,
-            &vec![0.0; diode.matrix_size()],
-            &diode,
-            TransientStartupMode::OperatingPoint,
+            CheckpointState {
+                time: 0.0,
+                solution: &vec![0.0; diode.matrix_size()],
+                circuit: &diode,
+                startup_mode: TransientStartupMode::OperatingPoint,
+            },
             None,
         )
         .expect("diode checkpoint captures with an explicit history blocker");
@@ -11609,23 +11697,31 @@ mod tests {
         captured_circuit.xyce_memristors[0].resistance_store = 4321.25;
         let solution = vec![0.0; captured_circuit.num_nodes() + captured_circuit.num_branches()];
         let checkpoint = TransientCheckpoint::capture_with_restart_identity(
-            netlist_fingerprint(&netlist),
-            netlist_checkpoint_identity(&netlist),
-            restart_checkpoint_identity(&netlist),
-            simulation_checkpoint_identity(engine.config()),
-            0.0,
-            &solution,
-            &captured_circuit,
-            TransientStartupMode::OperatingPoint,
-            None,
-            None,
-            &[],
-            0,
-            AcceptedJunctionTransientHistoryCheckpoint {
-                available: true,
-                ..AcceptedJunctionTransientHistoryCheckpoint::default()
+            CheckpointIdentity {
+                fingerprint: netlist_fingerprint(&netlist),
+                netlist_identity: netlist_checkpoint_identity(&netlist),
+                restart_identity: restart_checkpoint_identity(&netlist),
+                simulation_identity: simulation_checkpoint_identity(engine.config()),
             },
-            sample_restart_normalized_runtime(0.0, 0),
+            CheckpointState {
+                time: 0.0,
+                solution: &solution,
+                circuit: &captured_circuit,
+                startup_mode: TransientStartupMode::OperatingPoint,
+            },
+            CheckpointIntegrationState {
+                integration_max_step: None,
+                integration_continuation: None,
+                pending_tline_arrivals: &[],
+                dynamic_tline_breakpoints_added: 0,
+            },
+            AcceptedTransientRuntime {
+                accepted_junction_history: AcceptedJunctionTransientHistoryCheckpoint {
+                    available: true,
+                    ..AcceptedJunctionTransientHistoryCheckpoint::default()
+                },
+                accepted_integration_runtime: sample_restart_normalized_runtime(0.0, 0),
+            },
             None,
         )
         .expect("accepted checkpoint captures");

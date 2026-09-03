@@ -4,7 +4,8 @@
 //! quasi-static terminal charge and junction depletion storage. Noise remains
 //! intentionally fail-closed outside this slice.
 
-use super::mosfet::MosType;
+use super::MosTerminals;
+use super::classic::MosType;
 use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
 use crate::{NodeId, Value};
 use std::collections::HashMap;
@@ -1137,34 +1138,51 @@ pub struct EkvMosfet {
 }
 
 impl EkvMosfet {
-    pub fn new_nmos(
-        name: String,
-        drain: NodeId,
-        gate: NodeId,
-        source: NodeId,
-        bulk: NodeId,
-    ) -> Self {
-        Self::new(name, MosType::Nmos, drain, gate, source, bulk)
+    pub fn new_nmos(name: String, terminals: MosTerminals) -> Self {
+        let MosTerminals {
+            drain,
+            gate,
+            source,
+            bulk,
+        } = terminals;
+        Self::new(
+            name,
+            MosType::Nmos,
+            MosTerminals {
+                drain,
+                gate,
+                source,
+                bulk,
+            },
+        )
     }
 
-    pub fn new_pmos(
-        name: String,
-        drain: NodeId,
-        gate: NodeId,
-        source: NodeId,
-        bulk: NodeId,
-    ) -> Self {
-        Self::new(name, MosType::Pmos, drain, gate, source, bulk)
+    pub fn new_pmos(name: String, terminals: MosTerminals) -> Self {
+        let MosTerminals {
+            drain,
+            gate,
+            source,
+            bulk,
+        } = terminals;
+        Self::new(
+            name,
+            MosType::Pmos,
+            MosTerminals {
+                drain,
+                gate,
+                source,
+                bulk,
+            },
+        )
     }
 
-    fn new(
-        name: String,
-        mos_type: MosType,
-        drain: NodeId,
-        gate: NodeId,
-        source: NodeId,
-        bulk: NodeId,
-    ) -> Self {
+    fn new(name: String, mos_type: MosType, terminals: MosTerminals) -> Self {
+        let MosTerminals {
+            drain,
+            gate,
+            source,
+            bulk,
+        } = terminals;
         let setup = Ekv26Setup {
             type_sign: match mos_type {
                 MosType::Nmos => 1.0,
@@ -1172,27 +1190,42 @@ impl EkvMosfet {
             },
             ..Ekv26Setup::default()
         };
-        Self::with_setup(name, drain, gate, source, bulk, setup, 300.15)
+        Self::with_setup(
+            name,
+            MosTerminals {
+                drain,
+                gate,
+                source,
+                bulk,
+            },
+            setup,
+            300.15,
+        )
     }
 
     pub fn from_params(
         name: String,
-        drain: NodeId,
-        gate: NodeId,
-        source: NodeId,
-        bulk: NodeId,
+        terminals: MosTerminals,
         mos_type: MosType,
         model_params: &HashMap<String, Value>,
         instance_params: &[(String, Value)],
         circuit_temp_k: Value,
     ) -> Result<Self, String> {
-        let setup = Ekv26Setup::from_params(model_params, mos_type, instance_params)?;
-        Ok(Self::with_setup(
-            name,
+        let MosTerminals {
             drain,
             gate,
             source,
             bulk,
+        } = terminals;
+        let setup = Ekv26Setup::from_params(model_params, mos_type, instance_params)?;
+        Ok(Self::with_setup(
+            name,
+            MosTerminals {
+                drain,
+                gate,
+                source,
+                bulk,
+            },
             setup,
             circuit_temp_k,
         ))
@@ -1200,13 +1233,16 @@ impl EkvMosfet {
 
     fn with_setup(
         name: String,
-        drain: NodeId,
-        gate: NodeId,
-        source: NodeId,
-        bulk: NodeId,
+        terminals: MosTerminals,
         setup: Ekv26Setup,
         circuit_temp_k: Value,
     ) -> Self {
+        let MosTerminals {
+            drain,
+            gate,
+            source,
+            bulk,
+        } = terminals;
         let model_xd_gmin = setup.xd_gmin;
         Self {
             name,
@@ -1491,231 +1527,6 @@ impl NonlinearDevice for EkvMosfet {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn assert_abs_close(label: &str, got: Value, expected: Value, abs_tol: Value) {
-        let abs = (got - expected).abs();
-        assert!(
-            abs <= abs_tol,
-            "{label}: got {got:.12e}, expected {expected:.12e}, abs {abs:.3e} > {abs_tol:.3e}"
-        );
-    }
-
-    fn assert_charge_conserved(label: &str, charges: [Value; NODE_COUNT]) {
-        let sum: Value = charges.iter().sum();
-        assert_abs_close(label, sum, 0.0, 1.0e-24);
-    }
-
-    #[test]
-    fn off_instance_holds_its_zero_bias_startup_state_until_newton_moves() {
-        // Every SPICE MOSFET load evaluates an instance the deck marked OFF at
-        // zero junction bias on MODEINITJCT. This device carries absolute
-        // terminal values, so that state is every terminal pinned at the source
-        // potential. The operating-point seed is primed and then re-evaluated at
-        // the same solution before anything is stamped, so the state has to
-        // survive that repeat or the keyword never reaches the matrix.
-        let seed = [1.2, 1.2, 0.0, 0.0];
-        let params = HashMap::from([("VTO".to_string(), 0.5), ("KP".to_string(), 2.0e-4)]);
-
-        let mut off = EkvMosfet::new_nmos("m1".to_string(), 1, 2, 3, 4);
-        off = off.with_params(&params).expect("model params apply");
-        off.set_initially_off(true);
-        assert!(off.is_initially_off());
-
-        for pass in 0..2 {
-            off.update(&seed);
-            assert_eq!(
-                off.last_values, [0.0; NODE_COUNT],
-                "pass {pass} must keep the OFF startup state"
-            );
-            assert!(
-                off.op_values().id.abs() < 1.0e-20,
-                "a zero-bias channel carries no drain current: id={}",
-                off.op_values().id
-            );
-        }
-
-        // A new iterate retires it, and the device tracks the bias again.
-        off.update(&[1.2, 0.9, 0.0, 0.0]);
-        assert_eq!(off.last_values, [1.2, 0.9, 0.0, 0.0]);
-        assert!(off.op_values().id > 0.0);
-
-        // An instance whose terminals ideal sources pin never sees a changed
-        // bias, so the evaluation count has to retire the state instead.
-        let mut pinned = EkvMosfet::new_nmos("m3".to_string(), 1, 2, 3, 4);
-        pinned = pinned.with_params(&params).expect("model params apply");
-        pinned.set_initially_off(true);
-        for _ in 0..8 {
-            pinned.update(&seed);
-        }
-        assert_eq!(pinned.last_values, seed);
-        assert!(
-            pinned.op_values().id > 0.0,
-            "a pinned OFF instance must stop reporting cut off: id={}",
-            pinned.op_values().id
-        );
-
-        // Without the keyword the same seed evaluates at the raw bias.
-        let mut active = EkvMosfet::new_nmos("m2".to_string(), 1, 2, 3, 4);
-        active = active.with_params(&params).expect("model params apply");
-        assert!(!active.is_initially_off());
-        active.update(&seed);
-        assert_eq!(active.last_values, seed);
-    }
-
-    #[test]
-    fn off_instance_keyword_is_a_native_instance_parameter() {
-        let setup =
-            Ekv26Setup::from_params(&HashMap::new(), MosType::Nmos, &[("OFF".to_string(), 1.0)])
-                .expect("OFF is standard SPICE and must not be rejected");
-        assert!(setup.initial_off);
-
-        let plain = Ekv26Setup::from_params(&HashMap::new(), MosType::Nmos, &[])
-            .expect("an unmarked instance builds");
-        assert!(!plain.initial_off);
-    }
-
-    #[test]
-    fn setup_from_params_rejects_unsupported_model_params() {
-        for param in ["FNOIMOD", "NOIA"] {
-            let params = HashMap::from([(param.to_string(), 1.0)]);
-            let message = Ekv26Setup::from_params(&params, MosType::Nmos, &[])
-                .expect_err("unsupported EKV26 model params must fail closed");
-
-            assert!(
-                message.contains(param) && message.contains("unsupported"),
-                "error should identify unsupported {param}: {message}"
-            );
-        }
-    }
-
-    #[test]
-    fn setup_from_params_accepts_native_junction_storage_params() {
-        let params = HashMap::from([
-            ("XD_MJ".to_string(), 0.45),
-            ("XD_MJSW".to_string(), 0.35),
-            ("XD_MJSWG".to_string(), 0.25),
-            ("XD_PB".to_string(), 0.8),
-            ("XD_PBSW".to_string(), 0.6),
-            ("XD_PBSWG".to_string(), 0.55),
-            ("XD_CJ".to_string(), 2.0e-3),
-            ("XD_CJSW".to_string(), 3.0e-10),
-            ("XD_CJSWG".to_string(), 4.0e-10),
-            ("TP_CJ".to_string(), 1.0e-4),
-            ("TP_CJSW".to_string(), 2.0e-4),
-            ("TP_CJSWG".to_string(), 3.0e-4),
-            ("TP_PB".to_string(), 1.0e-4),
-            ("TP_PBSW".to_string(), 2.0e-4),
-            ("TP_PBSWG".to_string(), 3.0e-4),
-        ]);
-        let setup = Ekv26Setup::from_params(&params, MosType::Nmos, &[])
-            .expect("EKV26 junction storage params are native");
-
-        assert_abs_close("XD_MJ parsed", setup.xd_mj, 0.45, 0.0);
-        assert_abs_close("XD_MJSW parsed", setup.xd_mjsw, 0.35, 0.0);
-        assert_abs_close("XD_MJSWG parsed", setup.xd_mjswg, 0.25, 0.0);
-        assert_abs_close("XD_PB parsed", setup.xd_pb, 0.8, 0.0);
-        assert_abs_close("XD_PBSW parsed", setup.xd_pbsw, 0.6, 0.0);
-        assert_abs_close("XD_PBSWG parsed", setup.xd_pbswg, 0.55, 0.0);
-        assert_abs_close("XD_CJ parsed", setup.xd_cj, 2.0e-3, 0.0);
-        assert_abs_close("XD_CJSW parsed", setup.xd_cjsw, 3.0e-10, 0.0);
-        assert_abs_close("XD_CJSWG parsed", setup.xd_cjswg, 4.0e-10, 0.0);
-        assert_abs_close("TP_CJ parsed", setup.tp_cj, 1.0e-4, 0.0);
-        assert_abs_close("TP_CJSW parsed", setup.tp_cjsw, 2.0e-4, 0.0);
-        assert_abs_close("TP_CJSWG parsed", setup.tp_cjswg, 3.0e-4, 0.0);
-        assert_abs_close("TP_PB parsed", setup.tp_pb, 1.0e-4, 0.0);
-        assert_abs_close("TP_PBSW parsed", setup.tp_pbsw, 2.0e-4, 0.0);
-        assert_abs_close("TP_PBSWG parsed", setup.tp_pbswg, 3.0e-4, 0.0);
-    }
-
-    #[test]
-    fn setup_from_params_rejects_unsupported_instance_params() {
-        let params = [("CGSO".to_string(), 1.0e-12)];
-        let message = Ekv26Setup::from_params(&HashMap::new(), MosType::Nmos, &params)
-            .expect_err("unsupported EKV26 instance params must fail closed");
-
-        assert!(
-            message.contains("CGSO") && message.contains("unsupported"),
-            "error should identify unsupported instance parameter: {message}"
-        );
-    }
-
-    #[test]
-    fn with_params_rejects_unsupported_model_params() {
-        let params = HashMap::from([("FNOIMOD".to_string(), 1.0)]);
-        let message = EkvMosfet::new_nmos("m1".to_string(), 1, 2, 3, 4)
-            .with_params(&params)
-            .expect_err("unsupported EKV26 params must fail closed through EkvMosfet");
-
-        assert!(
-            message.contains("FNOIMOD") && message.contains("unsupported"),
-            "error should identify unsupported with_params parameter: {message}"
-        );
-    }
-
-    #[test]
-    fn terminal_charges_conserve_and_swap_drain_source_in_reverse_mode() {
-        let setup = Ekv26Setup::default();
-        let forward = setup.terminal_charges([1.0, 0.8, 0.0, -1.0], 300.15);
-        let reverse = setup.terminal_charges([0.0, 0.8, 1.0, -1.0], 300.15);
-
-        assert!(forward[1].abs() > 1.0e-18, "gate charge should be active");
-        assert_charge_conserved("forward EKV26 terminal charges", forward);
-        assert_charge_conserved("reverse EKV26 terminal charges", reverse);
-        assert_abs_close("reverse D maps forward S", reverse[0], forward[2], 1.0e-24);
-        assert_abs_close("reverse S maps forward D", reverse[2], forward[0], 1.0e-24);
-        assert_abs_close("reverse G stays gate", reverse[1], forward[1], 1.0e-24);
-        assert_abs_close("reverse B stays bulk", reverse[3], forward[3], 1.0e-24);
-    }
-
-    #[test]
-    fn terminal_charges_apply_pmos_type_sign() {
-        let nmos = Ekv26Setup {
-            vto: 0.5706,
-            ..Ekv26Setup::default()
-        };
-        let pmos = Ekv26Setup {
-            type_sign: -1.0,
-            vto: -0.5706,
-            tcv: -nmos.tcv,
-            ..nmos.clone()
-        };
-        let nmos_charges = nmos.terminal_charges([1.0, 0.8, 0.0, -1.0], 300.15);
-        let pmos_charges = pmos.terminal_charges([-1.0, -0.8, 0.0, 1.0], 300.15);
-
-        assert_charge_conserved("NMOS EKV26 terminal charges", nmos_charges);
-        assert_charge_conserved("PMOS EKV26 terminal charges", pmos_charges);
-        for row in 0..NODE_COUNT {
-            assert_abs_close(
-                &format!("PMOS row {row} mirrors NMOS sign"),
-                pmos_charges[row],
-                -nmos_charges[row],
-                1.0e-24,
-            );
-        }
-    }
-
-    #[test]
-    fn set_eval_gmin_uses_larger_of_model_and_circuit_gmin() {
-        let mut params = HashMap::new();
-        params.insert("XD_GMIN".to_string(), 2.0e-9);
-        let mut device = EkvMosfet::new_nmos("m1".to_string(), 1, 2, 0, 0)
-            .with_params(&params)
-            .expect("supported EKV26 params apply");
-
-        device.set_eval_gmin(1.0e-8);
-        assert_eq!(device.setup.xd_gmin, 1.0e-8);
-
-        device.set_eval_gmin(1.0e-12);
-        assert_eq!(device.setup.xd_gmin, 2.0e-9);
-
-        device.set_eval_gmin(-1.0);
-        assert_eq!(device.setup.xd_gmin, 2.0e-9);
-    }
-}
-
 fn known_param(name: &str, supported: &[&str]) -> bool {
     supported
         .iter()
@@ -1821,5 +1632,270 @@ fn ekv_norm(x: Value) -> EkvNorm {
     EkvNorm {
         current,
         sqrt_current: current.sqrt(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_abs_close(label: &str, got: Value, expected: Value, abs_tol: Value) {
+        let abs = (got - expected).abs();
+        assert!(
+            abs <= abs_tol,
+            "{label}: got {got:.12e}, expected {expected:.12e}, abs {abs:.3e} > {abs_tol:.3e}"
+        );
+    }
+
+    fn assert_charge_conserved(label: &str, charges: [Value; NODE_COUNT]) {
+        let sum: Value = charges.iter().sum();
+        assert_abs_close(label, sum, 0.0, 1.0e-24);
+    }
+
+    #[test]
+    fn off_instance_holds_its_zero_bias_startup_state_until_newton_moves() {
+        // Every SPICE MOSFET load evaluates an instance the deck marked OFF at
+        // zero junction bias on MODEINITJCT. This device carries absolute
+        // terminal values, so that state is every terminal pinned at the source
+        // potential. The operating-point seed is primed and then re-evaluated at
+        // the same solution before anything is stamped, so the state has to
+        // survive that repeat or the keyword never reaches the matrix.
+        let seed = [1.2, 1.2, 0.0, 0.0];
+        let params = HashMap::from([("VTO".to_string(), 0.5), ("KP".to_string(), 2.0e-4)]);
+
+        let mut off = EkvMosfet::new_nmos(
+            "m1".to_string(),
+            MosTerminals {
+                drain: 1,
+                gate: 2,
+                source: 3,
+                bulk: 4,
+            },
+        );
+        off = off.with_params(&params).expect("model params apply");
+        off.set_initially_off(true);
+        assert!(off.is_initially_off());
+
+        for pass in 0..2 {
+            off.update(&seed);
+            assert_eq!(
+                off.last_values, [0.0; NODE_COUNT],
+                "pass {pass} must keep the OFF startup state"
+            );
+            assert!(
+                off.op_values().id.abs() < 1.0e-20,
+                "a zero-bias channel carries no drain current: id={}",
+                off.op_values().id
+            );
+        }
+
+        // A new iterate retires it, and the device tracks the bias again.
+        off.update(&[1.2, 0.9, 0.0, 0.0]);
+        assert_eq!(off.last_values, [1.2, 0.9, 0.0, 0.0]);
+        assert!(off.op_values().id > 0.0);
+
+        // An instance whose terminals ideal sources pin never sees a changed
+        // bias, so the evaluation count has to retire the state instead.
+        let mut pinned = EkvMosfet::new_nmos(
+            "m3".to_string(),
+            MosTerminals {
+                drain: 1,
+                gate: 2,
+                source: 3,
+                bulk: 4,
+            },
+        );
+        pinned = pinned.with_params(&params).expect("model params apply");
+        pinned.set_initially_off(true);
+        for _ in 0..8 {
+            pinned.update(&seed);
+        }
+        assert_eq!(pinned.last_values, seed);
+        assert!(
+            pinned.op_values().id > 0.0,
+            "a pinned OFF instance must stop reporting cut off: id={}",
+            pinned.op_values().id
+        );
+
+        // Without the keyword the same seed evaluates at the raw bias.
+        let mut active = EkvMosfet::new_nmos(
+            "m2".to_string(),
+            MosTerminals {
+                drain: 1,
+                gate: 2,
+                source: 3,
+                bulk: 4,
+            },
+        );
+        active = active.with_params(&params).expect("model params apply");
+        assert!(!active.is_initially_off());
+        active.update(&seed);
+        assert_eq!(active.last_values, seed);
+    }
+
+    #[test]
+    fn off_instance_keyword_is_a_native_instance_parameter() {
+        let setup =
+            Ekv26Setup::from_params(&HashMap::new(), MosType::Nmos, &[("OFF".to_string(), 1.0)])
+                .expect("OFF is standard SPICE and must not be rejected");
+        assert!(setup.initial_off);
+
+        let plain = Ekv26Setup::from_params(&HashMap::new(), MosType::Nmos, &[])
+            .expect("an unmarked instance builds");
+        assert!(!plain.initial_off);
+    }
+
+    #[test]
+    fn setup_from_params_rejects_unsupported_model_params() {
+        for param in ["FNOIMOD", "NOIA"] {
+            let params = HashMap::from([(param.to_string(), 1.0)]);
+            let message = Ekv26Setup::from_params(&params, MosType::Nmos, &[])
+                .expect_err("unsupported EKV26 model params must fail closed");
+
+            assert!(
+                message.contains(param) && message.contains("unsupported"),
+                "error should identify unsupported {param}: {message}"
+            );
+        }
+    }
+
+    #[test]
+    fn setup_from_params_accepts_native_junction_storage_params() {
+        let params = HashMap::from([
+            ("XD_MJ".to_string(), 0.45),
+            ("XD_MJSW".to_string(), 0.35),
+            ("XD_MJSWG".to_string(), 0.25),
+            ("XD_PB".to_string(), 0.8),
+            ("XD_PBSW".to_string(), 0.6),
+            ("XD_PBSWG".to_string(), 0.55),
+            ("XD_CJ".to_string(), 2.0e-3),
+            ("XD_CJSW".to_string(), 3.0e-10),
+            ("XD_CJSWG".to_string(), 4.0e-10),
+            ("TP_CJ".to_string(), 1.0e-4),
+            ("TP_CJSW".to_string(), 2.0e-4),
+            ("TP_CJSWG".to_string(), 3.0e-4),
+            ("TP_PB".to_string(), 1.0e-4),
+            ("TP_PBSW".to_string(), 2.0e-4),
+            ("TP_PBSWG".to_string(), 3.0e-4),
+        ]);
+        let setup = Ekv26Setup::from_params(&params, MosType::Nmos, &[])
+            .expect("EKV26 junction storage params are native");
+
+        assert_abs_close("XD_MJ parsed", setup.xd_mj, 0.45, 0.0);
+        assert_abs_close("XD_MJSW parsed", setup.xd_mjsw, 0.35, 0.0);
+        assert_abs_close("XD_MJSWG parsed", setup.xd_mjswg, 0.25, 0.0);
+        assert_abs_close("XD_PB parsed", setup.xd_pb, 0.8, 0.0);
+        assert_abs_close("XD_PBSW parsed", setup.xd_pbsw, 0.6, 0.0);
+        assert_abs_close("XD_PBSWG parsed", setup.xd_pbswg, 0.55, 0.0);
+        assert_abs_close("XD_CJ parsed", setup.xd_cj, 2.0e-3, 0.0);
+        assert_abs_close("XD_CJSW parsed", setup.xd_cjsw, 3.0e-10, 0.0);
+        assert_abs_close("XD_CJSWG parsed", setup.xd_cjswg, 4.0e-10, 0.0);
+        assert_abs_close("TP_CJ parsed", setup.tp_cj, 1.0e-4, 0.0);
+        assert_abs_close("TP_CJSW parsed", setup.tp_cjsw, 2.0e-4, 0.0);
+        assert_abs_close("TP_CJSWG parsed", setup.tp_cjswg, 3.0e-4, 0.0);
+        assert_abs_close("TP_PB parsed", setup.tp_pb, 1.0e-4, 0.0);
+        assert_abs_close("TP_PBSW parsed", setup.tp_pbsw, 2.0e-4, 0.0);
+        assert_abs_close("TP_PBSWG parsed", setup.tp_pbswg, 3.0e-4, 0.0);
+    }
+
+    #[test]
+    fn setup_from_params_rejects_unsupported_instance_params() {
+        let params = [("CGSO".to_string(), 1.0e-12)];
+        let message = Ekv26Setup::from_params(&HashMap::new(), MosType::Nmos, &params)
+            .expect_err("unsupported EKV26 instance params must fail closed");
+
+        assert!(
+            message.contains("CGSO") && message.contains("unsupported"),
+            "error should identify unsupported instance parameter: {message}"
+        );
+    }
+
+    #[test]
+    fn with_params_rejects_unsupported_model_params() {
+        let params = HashMap::from([("FNOIMOD".to_string(), 1.0)]);
+        let message = EkvMosfet::new_nmos(
+            "m1".to_string(),
+            MosTerminals {
+                drain: 1,
+                gate: 2,
+                source: 3,
+                bulk: 4,
+            },
+        )
+        .with_params(&params)
+        .expect_err("unsupported EKV26 params must fail closed through EkvMosfet");
+
+        assert!(
+            message.contains("FNOIMOD") && message.contains("unsupported"),
+            "error should identify unsupported with_params parameter: {message}"
+        );
+    }
+
+    #[test]
+    fn terminal_charges_conserve_and_swap_drain_source_in_reverse_mode() {
+        let setup = Ekv26Setup::default();
+        let forward = setup.terminal_charges([1.0, 0.8, 0.0, -1.0], 300.15);
+        let reverse = setup.terminal_charges([0.0, 0.8, 1.0, -1.0], 300.15);
+
+        assert!(forward[1].abs() > 1.0e-18, "gate charge should be active");
+        assert_charge_conserved("forward EKV26 terminal charges", forward);
+        assert_charge_conserved("reverse EKV26 terminal charges", reverse);
+        assert_abs_close("reverse D maps forward S", reverse[0], forward[2], 1.0e-24);
+        assert_abs_close("reverse S maps forward D", reverse[2], forward[0], 1.0e-24);
+        assert_abs_close("reverse G stays gate", reverse[1], forward[1], 1.0e-24);
+        assert_abs_close("reverse B stays bulk", reverse[3], forward[3], 1.0e-24);
+    }
+
+    #[test]
+    fn terminal_charges_apply_pmos_type_sign() {
+        let nmos = Ekv26Setup {
+            vto: 0.5706,
+            ..Ekv26Setup::default()
+        };
+        let pmos = Ekv26Setup {
+            type_sign: -1.0,
+            vto: -0.5706,
+            tcv: -nmos.tcv,
+            ..nmos.clone()
+        };
+        let nmos_charges = nmos.terminal_charges([1.0, 0.8, 0.0, -1.0], 300.15);
+        let pmos_charges = pmos.terminal_charges([-1.0, -0.8, 0.0, 1.0], 300.15);
+
+        assert_charge_conserved("NMOS EKV26 terminal charges", nmos_charges);
+        assert_charge_conserved("PMOS EKV26 terminal charges", pmos_charges);
+        for row in 0..NODE_COUNT {
+            assert_abs_close(
+                &format!("PMOS row {row} mirrors NMOS sign"),
+                pmos_charges[row],
+                -nmos_charges[row],
+                1.0e-24,
+            );
+        }
+    }
+
+    #[test]
+    fn set_eval_gmin_uses_larger_of_model_and_circuit_gmin() {
+        let mut params = HashMap::new();
+        params.insert("XD_GMIN".to_string(), 2.0e-9);
+        let mut device = EkvMosfet::new_nmos(
+            "m1".to_string(),
+            MosTerminals {
+                drain: 1,
+                gate: 2,
+                source: 0,
+                bulk: 0,
+            },
+        )
+        .with_params(&params)
+        .expect("supported EKV26 params apply");
+
+        device.set_eval_gmin(1.0e-8);
+        assert_eq!(device.setup.xd_gmin, 1.0e-8);
+
+        device.set_eval_gmin(1.0e-12);
+        assert_eq!(device.setup.xd_gmin, 2.0e-9);
+
+        device.set_eval_gmin(-1.0);
+        assert_eq!(device.setup.xd_gmin, 2.0e-9);
     }
 }

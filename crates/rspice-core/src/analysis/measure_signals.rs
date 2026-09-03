@@ -10,14 +10,39 @@
 //! `TIME` (the swept value plays that role for DC sweeps, so
 //! `FIND TIME WHEN V(out)=...` addresses the sweep variable).
 
+// Plan rule 2: no authored-input panic. Every index, name and shape this layer
+// reads comes from a deck, so an unchecked access here is a crash a user can
+// author. A proven invariant keeps its `expect` under a function-scope allow
+// that names the test constructing the boundary case; everything else returns
+// a typed error. Clippy's in-test allowances (crates/rspice-core/clippy.toml)
+// keep the denial off the tests' own preconditions.
+#![deny(
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic,
+    clippy::unreachable,
+    clippy::unwrap_used
+)]
+
 use std::collections::{HashMap, HashSet, VecDeque};
+
+/// Whether the first adjacent pair that differs is ascending.
+///
+/// `slice::windows(2)` yields exactly two samples, and matching on that shape
+/// keeps the pair's arity checked by the compiler.
+fn first_ordered_pair(pair: &[Value]) -> Option<bool> {
+    match pair {
+        [first, second] if first != second => Some(second > first),
+        _ => None,
+    }
+}
 
 use super::measure::{
     AcceptedRowAtMatch, ContinuousMeasureResult, DelayConditionTracker, EdgeType,
     ErrorFunctionNorm, ExtremaOutput, LegacyFracDelayTracker, MeasureConditionDirection,
-    MeasureEngine, MeasureOperand, MeasureResult, MeasureStatement, MeasureType, TrigSpec,
-    TriggerEvent, WhenCondition, accepted_row_at_match, accepted_row_secant_slope,
-    canonical_measure_signal_name,
+    MeasureData, MeasureEngine, MeasureOperand, MeasureResult, MeasureStatement, MeasureType,
+    MeasureWindow, TrigSpec, TriggerEvent, WhenCondition, accepted_row_at_match,
+    accepted_row_secant_slope, canonical_measure_signal_name,
 };
 use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
@@ -130,9 +155,10 @@ impl InterfaceNodeAliasProjection {
         match Self::new_with_abort(netlist, analysis, point_count, &NoAbort) {
             Ok(projection) => Ok(projection),
             Err(InterfaceNodeAliasProjectionError::Detail(detail)) => Err(detail),
-            Err(InterfaceNodeAliasProjectionError::Aborted) => {
-                unreachable!("NoAbort cannot cancel interface-alias projection")
-            }
+            Err(InterfaceNodeAliasProjectionError::Aborted) => Err(
+                "interface-alias projection reported cancellation without an abort source"
+                    .to_string(),
+            ),
         }
     }
 
@@ -256,9 +282,10 @@ impl InterfaceNodeAliasProjection {
         match self.augment_with_abort(signals, &NoAbort) {
             Ok(()) => Ok(()),
             Err(InterfaceNodeAliasProjectionError::Detail(detail)) => Err(detail),
-            Err(InterfaceNodeAliasProjectionError::Aborted) => {
-                unreachable!("NoAbort cannot cancel interface-alias augmentation")
-            }
+            Err(InterfaceNodeAliasProjectionError::Aborted) => Err(
+                "interface-alias augmentation reported cancellation without an abort source"
+                    .to_string(),
+            ),
         }
     }
 
@@ -565,16 +592,44 @@ struct LiveMeasureReadContext<'program, 'netlist> {
     axis: &'program [Value],
 }
 
+/// One row of the series a live measurement is being advanced over.
+#[derive(Clone, Copy)]
+struct LiveMeasureRow {
+    row: usize,
+    axis_value: Value,
+    starts_segment: bool,
+}
+
+/// The window a live condition is only allowed to fire inside.
+#[derive(Clone, Copy)]
+struct LiveConditionWindow {
+    lower: Value,
+    upper: Value,
+    exclusive_lower: Option<Value>,
+}
+
+/// One row of the series a live selection is being advanced over, with the
+/// axis bounds and direction it is judged against.
+#[derive(Clone, Copy)]
+struct LiveSelectionRow {
+    row: usize,
+    axis_value: Value,
+    ascending: bool,
+    axis_minimum: Value,
+    axis_maximum: Value,
+    starts_segment: bool,
+}
+
 impl LiveMeasureReadContext<'_, '_> {
     fn read_measure(&mut self, canonical_name: &str) -> Option<Value> {
         if let Some(&program_index) = self.program_indices.get(canonical_name)
-            && freeze_live_file_error(&mut self.programs[program_index], self.row, self.axis)
+            && let Some(program) = self.programs.get_mut(program_index)
+            && freeze_live_file_error(program, self.row, self.axis)
         {
-            let program = &self.programs[program_index];
-            *self
-                .current_values
-                .get_mut(&program.canonical_name)
-                .expect("compiled measure value slot") = program.current;
+            let (name, current) = (program.canonical_name.clone(), program.current);
+            if let Some(slot) = self.current_values.get_mut(&name) {
+                *slot = current;
+            }
         }
         self.current_values.get(canonical_name).copied()
     }
@@ -618,9 +673,10 @@ impl LivePreparedExpression {
         match Self::compile_with_abort(expression, params, &NoAbort) {
             Ok(expression) => Ok(expression),
             Err(LivePreparedExpressionCompileError::Detail(detail)) => Err(detail),
-            Err(LivePreparedExpressionCompileError::Aborted) => {
-                unreachable!("NoAbort cannot cancel live expression compilation")
-            }
+            Err(LivePreparedExpressionCompileError::Aborted) => Err(
+                "live expression compilation reported cancellation without an abort source"
+                    .to_string(),
+            ),
         }
     }
 
@@ -1021,12 +1077,12 @@ impl LiveRawOutputOperator {
             None
         };
         let current = if is_current_projection_accessor(&prefix) {
-            if arguments.len() != 1 {
+            let [device] = arguments.as_slice() else {
                 return Err(format!(
                     "{prefix}() in continuous measure requires exactly one argument"
                 ));
-            }
-            let authored = format!("I({})", arguments[0]);
+            };
+            let authored = format!("I({device})");
             Some(LiveCurrentOutputOperator {
                 prefix,
                 canonical_signal: canonical_measure_signal_name(&authored),
@@ -1071,7 +1127,11 @@ impl LiveRawOutputOperator {
                 "IM" => magnitude,
                 "IP" => 0.0_f64.atan2(value).to_degrees(),
                 "IDB" => 20.0 * magnitude.log10(),
-                _ => unreachable!(),
+                other => {
+                    return Err(format!(
+                        "continuous measure current accessor '{other}' is not supported"
+                    ));
+                }
             });
         }
         let Some(voltage) = &self.voltage else {
@@ -1088,7 +1148,11 @@ impl LiveRawOutputOperator {
                 "V" => &node.voltage,
                 "VR" => &node.real,
                 "VI" => &node.imaginary,
-                _ => unreachable!(),
+                other => {
+                    return Err(format!(
+                        "continuous measure voltage component '{other}' is not supported"
+                    ));
+                }
             };
             if let Some(value) =
                 lookup_equation_signal_canonical_optional(signals, &node.authored, canonical, row)?
@@ -1110,18 +1174,23 @@ impl LiveRawOutputOperator {
                 node.authored
             ))
         };
-        if voltage.arguments.len() == 1 {
-            return if voltage.prefix == "V" {
-                node_component("V", &voltage.arguments[0])
-            } else {
-                Err(format!(
-                    "continuous measure signal '{}' is unavailable at row {row}",
-                    self.authored
-                ))
-            };
-        }
-        let positive = &voltage.arguments[0];
-        let negative = &voltage.arguments[1];
+        let unavailable = || {
+            format!(
+                "continuous measure signal '{}' is unavailable at row {row}",
+                self.authored
+            )
+        };
+        let (positive, negative) = match voltage.arguments.as_slice() {
+            [only] => {
+                return if voltage.prefix == "V" {
+                    node_component("V", only)
+                } else {
+                    Err(unavailable())
+                };
+            }
+            [positive, negative, ..] => (positive, negative),
+            [] => return Err(unavailable()),
+        };
         match voltage.prefix.as_str() {
             "V" | "VR" => Ok(node_component("VR", positive)? - node_component("VR", negative)?),
             "VI" => Ok(node_component("VI", positive)? - node_component("VI", negative)?),
@@ -1133,10 +1202,16 @@ impl LiveRawOutputOperator {
                     "VM" => magnitude,
                     "VP" => imaginary.atan2(real).to_degrees(),
                     "VDB" => 20.0 * magnitude.log10(),
-                    _ => unreachable!(),
+                    other => {
+                        return Err(format!(
+                            "continuous measure voltage accessor '{other}' is not supported"
+                        ));
+                    }
                 })
             }
-            _ => unreachable!(),
+            other => Err(format!(
+                "continuous measure voltage accessor '{other}' is not supported"
+            )),
         }
     }
 }
@@ -1467,12 +1542,8 @@ fn preflight_real_output_requests(
                         })?,
                     );
                 }
-                column_count = column_count.saturating_add(
-                    wildcard_voltage_nodes
-                        .as_ref()
-                        .expect("initialized above")
-                        .len(),
-                );
+                column_count = column_count
+                    .saturating_add(wildcard_voltage_nodes.as_ref().map_or(0, Vec::len));
             } else {
                 column_count = column_count.saturating_add(1);
             }
@@ -1500,9 +1571,9 @@ fn evaluate_tran_output_columns_with_abort(
     abort: &dyn AbortSignal,
 ) -> Result<Vec<OutputColumn>, OutputProjectionError> {
     let requests = matching_print_requests(netlist, OutputAnalysisKind::Tran);
-    if requests.is_empty() {
+    let Some(&first_request) = requests.first() else {
         return Ok(Vec::new());
-    }
+    };
     let projection = preflight_real_output_requests(
         &requests,
         OutputAnalysisKind::Tran,
@@ -1521,12 +1592,12 @@ fn evaluate_tran_output_columns_with_abort(
     .map_err(|error| match error {
         InterfaceNodeAliasProjectionError::Aborted => OutputProjectionError::Aborted,
         InterfaceNodeAliasProjectionError::Detail(detail) => {
-            output_request_error(requests[0], OutputAnalysisKind::Tran, 0, None, detail)
+            output_request_error(first_request, OutputAnalysisKind::Tran, 0, None, detail)
         }
     })?;
     let mut signals = transient_signal_map(result);
     alias_projection.augment(&mut signals).map_err(|detail| {
-        output_request_error(requests[0], OutputAnalysisKind::Tran, 0, None, detail)
+        output_request_error(first_request, OutputAnalysisKind::Tran, 0, None, detail)
     })?;
     evaluate_real_output_requests(
         &requests,
@@ -1539,6 +1610,11 @@ fn evaluate_tran_output_columns_with_abort(
     )
 }
 
+/// One evaluated output column as a frontend receives it: the request's
+/// authored name, its physical type (`voltage`, `current` or `parameter`), and
+/// the value at each point of the analysis axis.
+pub type FrontendOutputColumn = (String, &'static str, Vec<Value>);
+
 /// Evaluate ordered real `.PRINT TRAN` columns for frontend export.
 ///
 /// Each tuple is `(authored_name, physical_type, values)`, where
@@ -1548,7 +1624,7 @@ pub fn evaluate_tran_output_requests_with_abort(
     result: &TransientResult,
     limits: ResourceLimits,
     abort: &dyn AbortSignal,
-) -> Result<Vec<(String, &'static str, Vec<Value>)>, SimulationError> {
+) -> Result<Vec<FrontendOutputColumn>, SimulationError> {
     evaluate_tran_output_columns_with_abort(netlist, result, limits, abort)
         .map(frontend_output_columns)
         .map_err(frontend_output_error)
@@ -1566,7 +1642,7 @@ pub fn evaluate_tran_four_output_requests_with_abort(
     four_index: usize,
     limits: ResourceLimits,
     abort: &dyn AbortSignal,
-) -> Result<Vec<(String, &'static str, Vec<Value>)>, SimulationError> {
+) -> Result<Vec<FrontendOutputColumn>, SimulationError> {
     let request = netlist
         .output_requests
         .iter()
@@ -1730,9 +1806,9 @@ fn evaluate_dc_output_columns_with_abort(
     abort: &dyn AbortSignal,
 ) -> Result<Vec<OutputColumn>, OutputProjectionError> {
     let requests = matching_print_requests(netlist, OutputAnalysisKind::Dc);
-    if requests.is_empty() {
+    let Some(&first_request) = requests.first() else {
         return Ok(Vec::new());
-    }
+    };
     let node_metadata = sweep
         .first()
         .map(|(_, result)| (result.node_names.as_slice(), result.node_voltages.len()));
@@ -1753,7 +1829,7 @@ fn evaluate_dc_output_columns_with_abort(
                     OutputProjectionError::ResourceLimit(error)
                 }
                 DcOutputSeriesBuildError::Detail(detail) => {
-                    output_request_error(requests[0], OutputAnalysisKind::Dc, 0, None, detail)
+                    output_request_error(first_request, OutputAnalysisKind::Dc, 0, None, detail)
                 }
             },
         )?;
@@ -1766,12 +1842,12 @@ fn evaluate_dc_output_columns_with_abort(
     .map_err(|error| match error {
         InterfaceNodeAliasProjectionError::Aborted => OutputProjectionError::Aborted,
         InterfaceNodeAliasProjectionError::Detail(detail) => {
-            output_request_error(requests[0], OutputAnalysisKind::Dc, 0, None, detail)
+            output_request_error(first_request, OutputAnalysisKind::Dc, 0, None, detail)
         }
     })?;
     let mut signals = series.signal_map();
     alias_projection.augment(&mut signals).map_err(|detail| {
-        output_request_error(requests[0], OutputAnalysisKind::Dc, 0, None, detail)
+        output_request_error(first_request, OutputAnalysisKind::Dc, 0, None, detail)
     })?;
     evaluate_real_output_requests(
         &requests,
@@ -1793,7 +1869,7 @@ pub fn evaluate_dc_output_requests_with_abort(
     sweep: &[(Value, SimulationResult)],
     limits: ResourceLimits,
     abort: &dyn AbortSignal,
-) -> Result<Vec<(String, &'static str, Vec<Value>)>, SimulationError> {
+) -> Result<Vec<FrontendOutputColumn>, SimulationError> {
     evaluate_dc_output_columns_with_abort(netlist, sweep, limits, abort)
         .map(frontend_output_columns)
         .map_err(frontend_output_error)
@@ -1807,7 +1883,7 @@ pub(crate) fn evaluate_dc_output_requests(
     evaluate_dc_output_columns_with_abort(netlist, sweep, ResourceLimits::default(), &NoAbort)
 }
 
-fn frontend_output_columns(columns: Vec<OutputColumn>) -> Vec<(String, &'static str, Vec<Value>)> {
+fn frontend_output_columns(columns: Vec<OutputColumn>) -> Vec<FrontendOutputColumn> {
     columns
         .into_iter()
         .map(|column| {
@@ -2132,18 +2208,15 @@ fn direct_output_values<'a>(
             return Ok(values);
         }
     }
-    if matches!(
-        signal,
-        SaveSignal::Voltage(_) | SaveSignal::VoltageDiff(_, _) | SaveSignal::Current(_)
-    ) {
-        let canonical_probe = match signal {
-            SaveSignal::Voltage(node) => format!("V({node})"),
-            SaveSignal::VoltageDiff(positive, negative) => {
-                format!("V({positive},{negative})")
-            }
-            SaveSignal::Current(device) => format!("I({device})"),
-            _ => unreachable!(),
-        };
+    // The three raw probe forms; anything else falls through to the resolvers
+    // below rather than being asserted away.
+    let raw_probe = match signal {
+        SaveSignal::Voltage(node) => Some(format!("V({node})")),
+        SaveSignal::VoltageDiff(positive, negative) => Some(format!("V({positive},{negative})")),
+        SaveSignal::Current(device) => Some(format!("I({device})")),
+        _ => None,
+    };
+    if let Some(canonical_probe) = raw_probe {
         let operator =
             LiveRawOutputOperator::compile(&canonical_probe).map_err(|detail| (None, detail))?;
         let mut values = Vec::with_capacity(point_count);
@@ -2199,7 +2272,7 @@ impl DcOutputSeries {
         }
         let point_count = sweep.len();
         let mut slots = HashMap::<String, Slot>::new();
-        for (row, (_, result)) in sweep.iter().enumerate() {
+        for (row, (_sweep_value, result)) in sweep.iter().enumerate() {
             if row.is_multiple_of(64) && abort.is_aborted() {
                 return Err(DcOutputSeriesBuildError::Aborted);
             }
@@ -2268,14 +2341,19 @@ impl DcOutputSeries {
                     name: name.clone(),
                     values: vec![None; point_count],
                 });
-                if let Some(existing) = slot.values[row]
+                let Some(cell) = slot.values.get_mut(row) else {
+                    return Err(DcOutputSeriesBuildError::Detail(format!(
+                        "DC row {row} is outside the {point_count}-point sweep"
+                    )));
+                };
+                if let Some(existing) = *cell
                     && existing.to_bits() != value.to_bits()
                 {
                     return Err(DcOutputSeriesBuildError::Detail(format!(
                         "DC row {row} has ambiguous signal '{name}' normalized as '{canonical}'"
                     )));
                 }
-                slot.values[row] = Some(value);
+                *cell = Some(value);
             }
         }
         if abort.is_aborted() {
@@ -2403,17 +2481,14 @@ fn dc_primary_sweep_is_ascending(netlist: &Netlist, axis: &[Value]) -> bool {
                 crate::netlist::DcSweepMode::Linear if *step != 0.0 => *step > 0.0,
                 crate::netlist::DcSweepMode::List(values) => values
                     .windows(2)
-                    .find_map(|pair| (pair[0] != pair[1]).then_some(pair[1] > pair[0]))
+                    .find_map(first_ordered_pair)
                     .unwrap_or(true),
                 crate::netlist::DcSweepMode::Linear
                 | crate::netlist::DcSweepMode::Decade { .. }
                 | crate::netlist::DcSweepMode::Octave { .. } => *stop >= *start,
             })
         })
-        .or_else(|| {
-            axis.windows(2)
-                .find_map(|pair| (pair[0] != pair[1]).then_some(pair[1] > pair[0]))
-        })
+        .or_else(|| axis.windows(2).find_map(first_ordered_pair))
         .unwrap_or(true)
 }
 
@@ -2438,9 +2513,10 @@ fn evaluate_equation_measurements(
     ) {
         Ok(traces) => Ok(traces),
         Err(EquationMeasurementEvaluationError::Detail(detail)) => Err(detail),
-        Err(EquationMeasurementEvaluationError::Aborted) => {
-            unreachable!("NoAbort cannot cancel equation measurement evaluation")
-        }
+        Err(EquationMeasurementEvaluationError::Aborted) => Err(
+            "equation measurement evaluation reported cancellation without an abort source"
+                .to_string(),
+        ),
     }
 }
 
@@ -2503,8 +2579,8 @@ fn evaluate_equation_measurements_with_abort(
             program
                 .state
                 .as_ref()
-                .expect("compiled live measure state")
-                .all_dependencies()
+                .map(LiveMeasureState::all_dependencies)
+                .unwrap_or_default()
         })
         .collect::<Vec<_>>();
     let referenced_measure_names = all_dependencies
@@ -2544,7 +2620,12 @@ fn evaluate_equation_measurements_with_abort(
         program.has_file_error_dependency = dependencies.iter().any(|dependency| {
             program_indices
                 .get(dependency)
-                .is_some_and(|&dependency_index| file_error_programs[dependency_index])
+                .is_some_and(|&dependency_index| {
+                    file_error_programs
+                        .get(dependency_index)
+                        .copied()
+                        .unwrap_or(false)
+                })
         });
     }
     let signal_index = CanonicalMeasureSignalIndex::new(signals);
@@ -2560,20 +2641,18 @@ fn evaluate_equation_measurements_with_abort(
         }
         let starts_segment = segment_starts.binary_search(&row).is_ok();
         for program_index in 0..programs.len() {
-            if !programs[program_index].store_trace
-                && !programs[program_index].has_file_error_dependency
-            {
+            let Some(program) = programs.get_mut(program_index) else {
+                break;
+            };
+            if !program.store_trace && !program.has_file_error_dependency {
                 continue;
             }
-            let has_failed = programs[program_index].failure.is_some();
-            let is_equation = matches!(
-                programs[program_index].statement.measure_type,
-                MeasureType::Equation { .. }
-            );
-            let mut state = programs[program_index]
-                .state
-                .take()
-                .expect("live measure state is present outside evaluation");
+            let has_failed = program.failure.is_some();
+            let is_equation =
+                matches!(program.statement.measure_type, MeasureType::Equation { .. });
+            let Some(mut state) = program.state.take() else {
+                continue;
+            };
             let update = if has_failed {
                 Ok(None)
             } else {
@@ -2595,8 +2674,10 @@ fn evaluate_equation_measurements_with_abort(
                     dc_sweep_ascending,
                 )
             };
-            programs[program_index].state = Some(state);
-            let program = &mut programs[program_index];
+            let Some(program) = programs.get_mut(program_index) else {
+                break;
+            };
+            program.state = Some(state);
             match update {
                 Ok(Some(value)) => {
                     program.current = value;
@@ -2611,9 +2692,9 @@ fn evaluate_equation_measurements_with_abort(
                 }
                 Err(error) => program.failure = Some(error),
             }
-            *current_values
-                .get_mut(&program.canonical_name)
-                .expect("compiled measure value slot") = program.current;
+            if let Some(slot) = current_values.get_mut(&program.canonical_name) {
+                *slot = program.current;
+            }
             if program.store_trace {
                 program.values.push(program.current);
                 program.valid.push(!program.current.is_nan());
@@ -2914,10 +2995,7 @@ fn compile_live_measure_state(
                     statement.name
                 ));
             }
-            let axis_ascending = axis
-                .windows(2)
-                .find_map(|pair| (pair[0] != pair[1]).then_some(pair[1] > pair[0]))
-                .unwrap_or(true);
+            let axis_ascending = axis.windows(2).find_map(first_ordered_pair).unwrap_or(true);
             let axis_minimum = axis.iter().copied().fold(Value::INFINITY, Value::min);
             let axis_maximum = axis.iter().copied().fold(Value::NEG_INFINITY, Value::max);
             if legacy && matches!(&targ.event, TriggerEvent::At(_)) {
@@ -2987,10 +3065,7 @@ fn live_measurement_window_bounds(
     from: Option<Value>,
     to: Option<Value>,
 ) -> (Value, Value) {
-    let ascending = axis
-        .windows(2)
-        .find_map(|pair| (pair[0] != pair[1]).then_some(pair[1] > pair[0]))
-        .unwrap_or(true);
+    let ascending = axis.windows(2).find_map(first_ordered_pair).unwrap_or(true);
     match (from, to) {
         (Some(from), Some(to)) => (from, to),
         (Some(from), None) if ascending => (from, Value::INFINITY),
@@ -3026,21 +3101,31 @@ fn freeze_live_file_error(
         return true;
     }
     let Some(LiveMeasureState::FileError { samples, .. }) = &program.state else {
-        unreachable!("file ERROR state changed while freezing")
+        // The same borrow read `FileError` a moment ago; if it is gone the
+        // getter has nothing to freeze.
+        return true;
     };
     let mut signals = HashMap::new();
     signals.insert(signal_name, samples.as_slice());
     match MeasureEngine::evaluate_file_error_prefix_raw(
         program.statement,
-        &axis[..sample_count],
-        &signals,
+        MeasureData {
+            axis: axis.get(..sample_count).unwrap_or(axis),
+            signals: &signals,
+            segment_starts: &[],
+        },
     ) {
         Ok(value) => {
             program.current = value;
             program.initialized = true;
-            if program.store_trace && program.values.len() == read_row + 1 {
-                program.values[read_row] = value;
-                program.valid[read_row] = !value.is_nan();
+            if program.store_trace
+                && program.values.len() == read_row + 1
+                && let Some(stored) = program.values.get_mut(read_row)
+            {
+                *stored = value;
+                if let Some(valid) = program.valid.get_mut(read_row) {
+                    *valid = !value.is_nan();
+                }
             }
         }
         Err(error) => program.failure = Some(error),
@@ -3073,16 +3158,22 @@ impl LiveCondition {
 
     fn update(
         &mut self,
-        row: usize,
-        axis_value: Value,
-        starts_segment: bool,
+        sample: LiveMeasureRow,
         signals: &CanonicalMeasureSignalIndex<'_>,
         reads: &mut LiveMeasureReadContext<'_, '_>,
         params: &crate::netlist::ParamContext,
-        lower: Value,
-        upper: Value,
-        exclusive_lower: Option<Value>,
+        window: LiveConditionWindow,
     ) -> Result<LiveConditionUpdate, String> {
+        let LiveConditionWindow {
+            lower,
+            upper,
+            exclusive_lower,
+        } = window;
+        let LiveMeasureRow {
+            row,
+            axis_value,
+            starts_segment,
+        } = sample;
         if starts_segment {
             self.previous = None;
         }
@@ -3229,18 +3320,21 @@ impl LiveDelayClause {
 
     fn update(
         &mut self,
-        row: usize,
-        axis_value: Value,
-        ascending: bool,
-        axis_minimum: Value,
-        axis_maximum: Value,
-        starts_segment: bool,
+        sample: LiveSelectionRow,
         signals: &CanonicalMeasureSignalIndex<'_>,
         reads: &mut LiveMeasureReadContext<'_, '_>,
         params: &crate::netlist::ParamContext,
         after: Option<Value>,
         allow_selection: bool,
     ) -> Result<(), String> {
+        let LiveSelectionRow {
+            row,
+            axis_value,
+            ascending,
+            axis_minimum,
+            axis_maximum,
+            starts_segment,
+        } = sample;
         if self.selected.is_some()
             && (self.at.is_some()
                 || self
@@ -3257,9 +3351,12 @@ impl LiveDelayClause {
                     super::measure::legacy_delay_accepts_sample(
                         axis_value,
                         self.td,
-                        self.from,
-                        self.to,
-                        self.minval,
+                        MeasureWindow {
+                            from: self.from,
+                            to: self.to,
+                            td: None,
+                            minval: self.minval,
+                        },
                     ) && axis_value >= target
                 } else {
                     live_delay_at_is_reached(
@@ -3283,9 +3380,12 @@ impl LiveDelayClause {
             && !super::measure::legacy_delay_accepts_sample(
                 axis_value,
                 self.td,
-                self.from,
-                self.to,
-                condition.tracker.minval(),
+                MeasureWindow {
+                    from: self.from,
+                    to: self.to,
+                    td: None,
+                    minval: condition.tracker.minval(),
+                },
             )
         {
             return Ok(());
@@ -3658,9 +3758,9 @@ impl LiveMeasureState {
                                 current_signal,
                             ))
                         }
-                        (LivePointKind::When, _) => {
-                            unreachable!("WHEN point state cannot carry AT")
-                        }
+                        // `LivePointKind::When` never reaches an `AT`
+                        // resolution: the WHEN arm returns above.
+                        (LivePointKind::When, _) => LivePointCandidate::Undefined,
                     };
                     *complete = true;
                     return Ok(Some(candidate.numeric_value()));
@@ -3669,15 +3769,19 @@ impl LiveMeasureState {
                     return Ok(None);
                 };
                 let update = condition.update(
-                    row,
-                    axis_value,
-                    starts_segment,
+                    LiveMeasureRow {
+                        row,
+                        axis_value,
+                        starts_segment,
+                    },
                     signals,
                     reads,
                     params,
-                    *lower,
-                    *upper,
-                    None,
+                    LiveConditionWindow {
+                        lower: *lower,
+                        upper: *upper,
+                        exclusive_lower: None,
+                    },
                 )?;
                 if matches!(kind, LivePointKind::When) {
                     let Some(event) = update.selected else {
@@ -3721,7 +3825,8 @@ impl LiveMeasureState {
                                 current_value,
                             )))
                         }
-                        LivePointKind::When => unreachable!("WHEN was handled above"),
+                        // Handled by the WHEN arm above.
+                        LivePointKind::When => Ok(LivePointCandidate::Undefined),
                     }
                 };
 
@@ -3772,9 +3877,12 @@ impl LiveMeasureState {
                     if !super::measure::legacy_delay_accepts_sample(
                         axis_value,
                         trigger.td,
-                        trigger.from,
-                        trigger.to,
-                        trigger.minval,
+                        MeasureWindow {
+                            from: trigger.from,
+                            to: trigger.to,
+                            td: None,
+                            minval: trigger.minval,
+                        },
                     ) {
                         return Ok(None);
                     }
@@ -3794,12 +3902,14 @@ impl LiveMeasureState {
                     return Ok(pair.map(|(trigger, target)| target - trigger));
                 }
                 trigger.update(
-                    row,
-                    axis_value,
-                    *axis_ascending,
-                    *axis_minimum,
-                    *axis_maximum,
-                    starts_segment,
+                    LiveSelectionRow {
+                        row,
+                        axis_value,
+                        ascending: *axis_ascending,
+                        axis_minimum: *axis_minimum,
+                        axis_maximum: *axis_maximum,
+                        starts_segment,
+                    },
                     signals,
                     reads,
                     params,
@@ -3809,12 +3919,14 @@ impl LiveMeasureState {
                 let trigger_axis = trigger.selected;
                 let target_after = target.legacy.then_some(trigger_axis).flatten();
                 target.update(
-                    row,
-                    axis_value,
-                    *axis_ascending,
-                    *axis_minimum,
-                    *axis_maximum,
-                    starts_segment,
+                    LiveSelectionRow {
+                        row,
+                        axis_value,
+                        ascending: *axis_ascending,
+                        axis_minimum: *axis_minimum,
+                        axis_maximum: *axis_maximum,
+                        starts_segment,
+                    },
                     signals,
                     reads,
                     params,
@@ -4047,16 +4159,17 @@ fn lookup_equation_voltage_operator(
             "continuous measure signal '{component}({node})' is unavailable at row {row}"
         ))
     };
-    if arguments.len() == 1 {
-        return if prefix == "V" {
-            lookup_equation_signal(signals, &format!("V({})", arguments[0]), row)
-        } else {
-            lookup_equation_signal(signals, &authored, row)
-        };
-    }
-
-    let positive = &arguments[0];
-    let negative = &arguments[1];
+    let (positive, negative) = match arguments {
+        [only] => {
+            return if prefix == "V" {
+                lookup_equation_signal(signals, &format!("V({only})"), row)
+            } else {
+                lookup_equation_signal(signals, &authored, row)
+            };
+        }
+        [positive, negative, ..] => (positive, negative),
+        [] => return lookup_equation_signal(signals, &authored, row),
+    };
     match prefix {
         "V" | "VR" => Ok(node_component("VR", positive)? - node_component("VR", negative)?),
         "VI" => Ok(node_component("VI", positive)? - node_component("VI", negative)?),
@@ -4068,10 +4181,12 @@ fn lookup_equation_voltage_operator(
                 "VM" => magnitude,
                 "VP" => imaginary.atan2(real).to_degrees(),
                 "VDB" => 20.0 * magnitude.log10(),
-                _ => unreachable!(),
+                other => {
+                    return Err(format!("voltage accessor '{other}' is not supported"));
+                }
             })
         }
-        _ => unreachable!(),
+        other => Err(format!("voltage accessor '{other}' is not supported")),
     }
 }
 
@@ -4451,14 +4566,14 @@ impl DcSweepSeries {
                 return Err(SimulationError::Aborted);
             }
             let mut series = Vec::with_capacity(sweep.len());
-            for (row, (_, result)) in sweep.iter().enumerate() {
+            for (row, (sweep_value, result)) in sweep.iter().enumerate() {
                 if row.is_multiple_of(64) && abort.is_aborted() {
                     return Err(SimulationError::Aborted);
                 }
                 let value = result.node_voltages.get(node).copied().ok_or_else(|| {
                     result_schema_mismatch(
                         "DC",
-                        dc_sweep_coordinate(row, sweep[row].0),
+                        dc_sweep_coordinate(row, *sweep_value),
                         "node voltages",
                         &first.node_names,
                         &result.node_names,
@@ -4489,14 +4604,14 @@ impl DcSweepSeries {
                 continue;
             }
             let mut series = Vec::with_capacity(sweep.len());
-            for (row, (_, result)) in sweep.iter().enumerate() {
+            for (row, (sweep_value, result)) in sweep.iter().enumerate() {
                 if row.is_multiple_of(64) && abort.is_aborted() {
                     return Err(SimulationError::Aborted);
                 }
                 let value = result.branch_currents.get(branch).copied().ok_or_else(|| {
                     result_schema_mismatch(
                         "DC",
-                        dc_sweep_coordinate(row, sweep[row].0),
+                        dc_sweep_coordinate(row, *sweep_value),
                         "branch currents",
                         &first.branch_names,
                         &result.branch_names,
@@ -4515,7 +4630,7 @@ impl DcSweepSeries {
         // case-insensitive union before requiring a complete waveform so a
         // name first introduced after row zero is not silently omitted.
         let mut observable_names = Vec::<String>::new();
-        for (row, (_, result)) in sweep.iter().enumerate() {
+        for (row, (_sweep_value, result)) in sweep.iter().enumerate() {
             if row.is_multiple_of(64) && abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
@@ -4538,7 +4653,7 @@ impl DcSweepSeries {
             }
             let mut values = Vec::with_capacity(sweep.len());
             let mut complete = true;
-            for (row, (_, result)) in sweep.iter().enumerate() {
+            for (row, (_sweep_value, result)) in sweep.iter().enumerate() {
                 if row.is_multiple_of(64) && abort.is_aborted() {
                     return Err(SimulationError::Aborted);
                 }
@@ -4596,13 +4711,10 @@ struct ComplexProjectionSeries {
 
 impl ComplexProjectionSeries {
     fn push(&mut self, prefix: char, raw: &str, values: Vec<crate::Complex64>) {
-        match self.push_with_abort(prefix, raw, &values, &NoAbort) {
-            Ok(()) => {}
-            Err(SimulationError::Aborted) => {
-                unreachable!("NoAbort cannot cancel complex measurement projection")
-            }
-            Err(error) => unreachable!("complex measurement projection is infallible: {error}"),
-        }
+        // `push_with_abort` only allocates and copies; a failure would mean a
+        // projection column was dropped, which the caller sees as a missing
+        // signal rather than as a crash here.
+        let _ = self.push_with_abort(prefix, raw, &values, &NoAbort);
     }
 
     fn push_with_abort(
@@ -5039,9 +5151,6 @@ pub fn evaluate_noise_measurements(
 ) -> Vec<MeasureResult> {
     match evaluate_noise_measurements_with_abort(netlist, sweep, &NoAbort) {
         Ok(results) => results,
-        Err(SimulationError::Aborted) => {
-            unreachable!("NoAbort cannot cancel noise measurement projection")
-        }
         Err(error) => {
             let statements = measurements_for_analysis(netlist, "NOISE");
             failed_measurements(&statements, &error.to_string())
@@ -5125,9 +5234,11 @@ pub fn evaluate_noise_measurements_with_abort(
             &netlist.params,
             &[],
             traces,
-            netlist.options.measure_default_value,
-            -1.0,
-            false,
+            MeasureEvaluationPolicy {
+                global_default: netlist.options.measure_default_value,
+                equation_default: -1.0,
+                use_legacy_tran_trig_targ: false,
+            },
         ),
         Err(_) => evaluate_statements(&statements, series.axis(), &signals, &netlist.params, false),
     };
@@ -5273,11 +5384,23 @@ fn evaluate_statements_with_segment_starts(
         engine.add((*statement).clone());
     }
     engine.evaluate_with_segment_starts_and_context(
-        axis,
-        &augmented_signals,
-        segment_starts,
+        MeasureData {
+            axis,
+            signals: &augmented_signals,
+            segment_starts,
+        },
         params,
     )
+}
+
+/// How a batch of `.measure` statements is evaluated: the fallback the whole
+/// run supplies, the fallback an equation measurement supplies, and whether
+/// the legacy transient TRIG/TARG reading applies.
+#[derive(Clone, Copy)]
+struct MeasureEvaluationPolicy {
+    global_default: Option<Value>,
+    equation_default: Value,
+    use_legacy_tran_trig_targ: bool,
 }
 
 fn evaluate_statements_with_equation_traces(
@@ -5287,10 +5410,13 @@ fn evaluate_statements_with_equation_traces(
     params: &crate::netlist::ParamContext,
     segment_starts: &[usize],
     traces: &[EquationMeasureTrace],
-    global_default: Option<Value>,
-    equation_default: Value,
-    use_legacy_tran_trig_targ: bool,
+    policy: MeasureEvaluationPolicy,
 ) -> Vec<MeasureResult> {
+    let MeasureEvaluationPolicy {
+        global_default,
+        equation_default,
+        use_legacy_tran_trig_targ,
+    } = policy;
     let statement_dependencies = statements
         .iter()
         .map(|statement| statement_live_dependencies(statement, params))
@@ -5307,7 +5433,7 @@ fn evaluate_statements_with_equation_traces(
         .iter()
         .zip(&equation_positions)
         .map(|(trace, position)| {
-            let statement = position.map(|position| statements[position]);
+            let statement = position.and_then(|position| statements.get(position).copied());
             let local_default = statement.and_then(|statement| statement.default_value);
             let implicit_default = statement.map_or(equation_default, |statement| {
                 if matches!(statement.measure_type, MeasureType::Equation { .. }) {
@@ -5338,17 +5464,23 @@ fn evaluate_statements_with_equation_traces(
         .map(|(statement_index, _)| {
             let mut map = signals.clone();
             for (trace_index, trace) in traces.iter().enumerate() {
-                if !statement_dependencies[statement_index]
-                    .contains(&trace.name.to_ascii_uppercase())
+                if !statement_dependencies
+                    .get(statement_index)
+                    .is_some_and(|names| names.contains(&trace.name.to_ascii_uppercase()))
                 {
                     continue;
                 }
-                let values = if equation_positions[trace_index]
-                    .is_some_and(|equation_index| statement_index > equation_index)
-                {
+                let after_equation = equation_positions
+                    .get(trace_index)
+                    .copied()
+                    .flatten()
+                    .is_some_and(|equation_index| statement_index > equation_index);
+                let values = if after_equation {
                     trace.values.as_slice()
+                } else if let Some(previous) = previous_values.get(trace_index) {
+                    previous.as_slice()
                 } else {
-                    previous_values[trace_index].as_slice()
+                    continue;
                 };
                 insert_case_variants(&mut map, &trace.name, values);
             }
@@ -5808,11 +5940,9 @@ pub fn evaluate_tran_measurements(
 ) -> Vec<MeasureResult> {
     match evaluate_tran_measurements_with_abort(netlist, result, &NoAbort) {
         Ok(results) => results,
-        Err(SimulationError::Aborted) => {
-            unreachable!("NoAbort cannot cancel transient measurement projection")
-        }
         Err(error) => {
-            unreachable!("transient measurement projection failed unexpectedly: {error}")
+            let statements = measurements_for_analysis(netlist, "TRAN");
+            failed_measurements(&statements, &error.to_string())
         }
     }
 }
@@ -5857,8 +5987,8 @@ pub fn evaluate_tran_remeasurements(
 /// producer wrote the wrapped probe or the underlying solution name. Distinct
 /// columns that describe the same voltage fail closed instead of depending on
 /// input-column or hash iteration order.
-fn augment_remeasure_voltage_spellings<'a>(
-    signals: &mut HashMap<String, &'a [Value]>,
+fn augment_remeasure_voltage_spellings(
+    signals: &mut HashMap<String, &[Value]>,
 ) -> Result<(), String> {
     let index = CanonicalMeasureSignalIndex::new(signals);
     let aliases = signals
@@ -5869,14 +5999,13 @@ fn augment_remeasure_voltage_spellings<'a>(
         .collect::<Vec<_>>();
 
     for (alias, waveform) in aliases {
-        if let Some(existing) = index.get(&alias)? {
-            if existing.len() != waveform.len()
-                || !std::ptr::eq(existing.as_ptr(), waveform.as_ptr())
-            {
-                return Err(format!(
-                    "serialized voltage column '{alias}' conflicts with an equivalent column"
-                ));
-            }
+        if let Some(existing) = index.get(&alias)?
+            && (existing.len() != waveform.len()
+                || !std::ptr::eq(existing.as_ptr(), waveform.as_ptr()))
+        {
+            return Err(format!(
+                "serialized voltage column '{alias}' conflicts with an equivalent column"
+            ));
         }
         insert_case_variants(signals, &alias, waveform);
     }
@@ -5890,11 +6019,12 @@ fn remeasure_voltage_alias(name: &str) -> Option<String> {
     }
 
     if name.len() >= 4
-        && name.as_bytes()[0].eq_ignore_ascii_case(&b'v')
-        && name.as_bytes()[1] == b'('
-        && name.ends_with(')')
+        && let Some(inner) = name
+            .strip_prefix(['v', 'V'])
+            .and_then(|rest| rest.strip_prefix('('))
+            .and_then(|rest| rest.strip_suffix(')'))
     {
-        let node = name[2..name.len() - 1].trim();
+        let node = inner.trim();
         if !node.is_empty() && !node.contains(',') {
             return Some(node.to_string());
         }
@@ -5912,11 +6042,9 @@ fn evaluate_tran_measurements_with_signals(
     match evaluate_tran_measurements_with_signals_and_abort(netlist, time, source_signals, &NoAbort)
     {
         Ok(results) => results,
-        Err(SimulationError::Aborted) => {
-            unreachable!("NoAbort cannot cancel transient measurement projection")
-        }
         Err(error) => {
-            unreachable!("transient measurement projection failed unexpectedly: {error}")
+            let statements = measurements_for_analysis(netlist, "TRAN");
+            failed_measurements(&statements, &error.to_string())
         }
     }
 }
@@ -5990,9 +6118,11 @@ fn evaluate_tran_measurements_with_signals_and_abort(
             &netlist.params,
             &[],
             traces,
-            netlist.options.measure_default_value,
-            -1.0,
-            netlist.options.measure_use_lttm(),
+            MeasureEvaluationPolicy {
+                global_default: netlist.options.measure_default_value,
+                equation_default: -1.0,
+                use_legacy_tran_trig_targ: netlist.options.measure_use_lttm(),
+            },
         ),
         Err(_) => evaluate_statements(
             &statements,
@@ -6169,9 +6299,6 @@ pub fn evaluate_dc_measurements(
 ) -> Vec<MeasureResult> {
     match evaluate_dc_measurements_with_abort(netlist, sweep, &NoAbort) {
         Ok(results) => results,
-        Err(SimulationError::Aborted) => {
-            unreachable!("NoAbort cannot cancel DC measurement projection")
-        }
         Err(error) => {
             let statements = measurements_for_analysis(netlist, "DC");
             failed_measurements(&statements, &error.to_string())
@@ -6203,9 +6330,6 @@ pub fn evaluate_dc_measurements_with_parameter_contexts(
         &NoAbort,
     ) {
         Ok(results) => results,
-        Err(SimulationError::Aborted) => {
-            unreachable!("NoAbort cannot cancel DC measurement projection")
-        }
         Err(error) => {
             let statements = measurements_for_analysis(netlist, "DC");
             failed_measurements(&statements, &error.to_string())
@@ -6314,9 +6438,11 @@ pub fn evaluate_dc_measurements_with_parameter_contexts_and_abort(
             &netlist.params,
             &segment_starts,
             traces,
-            netlist.options.measure_default_value,
-            0.0,
-            false,
+            MeasureEvaluationPolicy {
+                global_default: netlist.options.measure_default_value,
+                equation_default: 0.0,
+                use_legacy_tran_trig_targ: false,
+            },
         ),
         Err(_) => evaluate_statements_with_segment_starts(
             &statements,
@@ -6416,10 +6542,10 @@ fn normalize_dc_measurement_window(mut statement: MeasureStatement) -> MeasureSt
         | MeasureType::FallTime { .. }
         | MeasureType::Integ { .. } => None,
     };
-    if let Some((Some(from), Some(to))) = bounds {
-        if *from > *to {
-            std::mem::swap(from, to);
-        }
+    if let Some((Some(from), Some(to))) = bounds
+        && *from > *to
+    {
+        std::mem::swap(from, to);
     }
     statement
 }
@@ -6481,9 +6607,6 @@ pub fn evaluate_ac_continuous_measurements(
 pub fn evaluate_ac_measurements(netlist: &Netlist, sweep: &[AcResult]) -> Vec<MeasureResult> {
     match evaluate_ac_measurements_with_abort(netlist, sweep, &NoAbort) {
         Ok(results) => results,
-        Err(SimulationError::Aborted) => {
-            unreachable!("NoAbort cannot cancel AC measurement projection")
-        }
         Err(error) => {
             let statements = measurements_for_analysis(netlist, "AC");
             failed_measurements(&statements, &error.to_string())
@@ -6560,9 +6683,11 @@ pub fn evaluate_ac_measurements_with_abort(
             &netlist.params,
             &[],
             traces,
-            netlist.options.measure_default_value,
-            -1.0,
-            false,
+            MeasureEvaluationPolicy {
+                global_default: netlist.options.measure_default_value,
+                equation_default: -1.0,
+                use_legacy_tran_trig_targ: false,
+            },
         ),
         Err(_) => evaluate_statements(&statements, series.axis(), &signals, &netlist.params, false),
     };
@@ -6869,8 +6994,10 @@ mod tests {
         result.num_nodes = 2;
         result.node_names = vec!["a".into(), "b".into()];
         result.voltages = vec![vec![0.0; 4], vec![1.0; 4]];
-        let mut limits = ResourceLimits::default();
-        limits.max_result_values = 11;
+        let limits = ResourceLimits {
+            max_result_values: 11,
+            ..Default::default()
+        };
         let error = evaluate_tran_output_requests_with_abort(&netlist, &result, limits, &NoAbort)
             .expect_err("axis plus two expanded columns require twelve values");
         assert!(matches!(
@@ -7006,8 +7133,10 @@ mod tests {
              .END\n",
         )
         .expect("bounded output deck parses");
-        let mut limits = ResourceLimits::default();
-        limits.max_result_values = 11;
+        let limits = ResourceLimits {
+            max_result_values: 11,
+            ..Default::default()
+        };
         let error =
             evaluate_tran_output_requests_with_abort(&netlist, &tran_result(), limits, &NoAbort)
                 .expect_err("axis plus two columns require twelve values");
@@ -7076,8 +7205,10 @@ mod tests {
             .map(|value| (Value::from(value), point(Value::from(value))))
             .collect::<Vec<_>>();
 
-        let mut limits = ResourceLimits::default();
-        limits.max_result_values = 8;
+        let limits = ResourceLimits {
+            max_result_values: 8,
+            ..Default::default()
+        };
         let error = evaluate_dc_output_requests_with_abort(&netlist, &sweep, limits, &NoAbort)
             .expect_err("intermediate DC projection storage must share the result-value budget");
         assert!(matches!(
@@ -8038,15 +8169,19 @@ mod tests {
             };
             if let Some(event) = selector
                 .update(
-                    row,
-                    axis_value,
-                    false,
+                    LiveMeasureRow {
+                        row,
+                        axis_value,
+                        starts_segment: false,
+                    },
                     &signal_index,
                     &mut reads,
                     &params,
-                    Value::NEG_INFINITY,
-                    Value::INFINITY,
-                    None,
+                    LiveConditionWindow {
+                        lower: Value::NEG_INFINITY,
+                        upper: Value::INFINITY,
+                        exclusive_lower: None,
+                    },
                 )
                 .expect("bounded selector updates")
                 .selected

@@ -1122,7 +1122,18 @@ fn parse_pat_spec(
     close_source_args(stream, line_num, "PAT", has_paren)?;
     parse_pat_options(stream, line_num, params, false, &mut repeat_count)?;
 
-    validate_pat_spec(line_num, vhi, vlo, delay, rise, fall, sample, &data)?;
+    validate_pat_spec(
+        line_num,
+        vhi,
+        vlo,
+        PatTiming {
+            delay,
+            rise,
+            fall,
+            sample,
+        },
+        &data,
+    )?;
 
     Ok(SourceSpec::Pat {
         vhi,
@@ -1230,16 +1241,29 @@ fn parse_pat_repeat_count(line_num: usize, value: Value) -> Result<i32, ParseErr
     Ok(if repeat_count < -1 { 0 } else { repeat_count })
 }
 
-fn validate_pat_spec(
-    line_num: usize,
-    vhi: Value,
-    vlo: Value,
+/// The timing of a `PAT` source: when the pattern starts, its edge times, and
+/// the bit interval.
+#[derive(Clone, Copy)]
+struct PatTiming {
     delay: Value,
     rise: Value,
     fall: Value,
     sample: Value,
+}
+
+fn validate_pat_spec(
+    line_num: usize,
+    vhi: Value,
+    vlo: Value,
+    timing: PatTiming,
     data: &str,
 ) -> Result<(), ParseError> {
+    let PatTiming {
+        delay,
+        rise,
+        fall,
+        sample,
+    } = timing;
     for (name, value) in [
         ("VHI", vhi),
         ("VLO", vlo),

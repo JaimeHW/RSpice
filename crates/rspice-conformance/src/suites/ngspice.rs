@@ -16,7 +16,6 @@
 //!     └── run_suite()          - Run all tests in directory
 //! ```
 
-#![allow(clippy::needless_range_loop, clippy::too_many_arguments)]
 use rspice_core::engine::{ConvergenceConfig, SimulationConfig};
 use rspice_core::{Complex64, Engine, Netlist, Value};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -149,6 +148,65 @@ pub struct TestResult {
     pub duration_ms: u128,
     /// Analysis type that was run
     pub analysis_type: Option<String>,
+}
+
+/// The deck an analysis runner is executing, and when its clock started.
+///
+/// Every `run_*_test` needs the same five values to build a [`TestResult`] —
+/// what to call the case, where it was discovered, where its authoritative
+/// source lives, that source's text, and the instant the analysis began — and
+/// none of them varies between the analyses of one deck. Threading them as one
+/// borrowed record keeps each runner's own signature to the parameters of the
+/// analysis it actually implements.
+#[derive(Clone, Copy)]
+pub(in crate::suites::ngspice) struct RegressionCase<'a> {
+    /// Reported test name: the discovered file's stem.
+    pub name: &'a str,
+    /// The discovered deck, which is what validation contracts are keyed on.
+    pub cir_path: &'a Path,
+    /// The authoritative source actually read, which differs from `cir_path`
+    /// when a live-oracle run materializes its own copy.
+    pub source_path: &'a Path,
+    /// The text of `source_path`, before include preprocessing.
+    pub source: &'a str,
+    /// When this analysis started, for the result's duration.
+    pub start: Instant,
+}
+
+/// One axis of a `.dc` sweep: the source to walk and the grid to walk it on.
+///
+/// A two-dimensional sweep is two of these, which is why they travel together
+/// rather than as four loose values repeated twice in a signature.
+#[derive(Clone, Copy)]
+pub(in crate::suites::ngspice) struct DcSweepAxis<'a> {
+    pub source: &'a str,
+    pub start: Value,
+    pub stop: Value,
+    pub step: Value,
+}
+
+/// The frequency grid an `.ac` or `.noise` directive asks for.
+///
+/// ngspice derives the point list from all four values together — the spacing
+/// decides whether `points` counts per decade, per octave, or in total — so no
+/// runner has a use for one of them without the rest.
+#[derive(Clone, Copy)]
+pub(in crate::suites::ngspice) struct FrequencySweep {
+    pub sweep_type: AcSweepType,
+    pub points: usize,
+    pub fstart: Value,
+    pub fstop: Value,
+}
+
+/// The transfer function a `.pz` directive is taken across: its input port,
+/// its output port, and whether the input is a current.
+#[derive(Clone, Copy)]
+pub(in crate::suites::ngspice) struct PoleZeroPorts<'a> {
+    pub input_pos: &'a str,
+    pub input_neg: Option<&'a str>,
+    pub output_pos: &'a str,
+    pub output_neg: Option<&'a str>,
+    pub input_is_current: bool,
 }
 
 const EXPECTED_UNSUPPORTED_MARKER: &str = "EXPECTED_UNSUPPORTED:";

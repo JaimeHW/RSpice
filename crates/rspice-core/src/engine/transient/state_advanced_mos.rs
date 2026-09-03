@@ -1,6 +1,29 @@
 //! Advanced MOS, SOI, and EKV transient charge-history helpers.
 
 use super::*;
+use crate::device::mosfet::b3soi::common::SoiCompanionCurrents;
+
+/// The six BSIM4 terminal charges one companion step differences: gate, the
+/// mid-gate node, bulk, drain and the two junction charges.
+#[derive(Clone, Copy)]
+pub(super) struct Bsim4TerminalCharges {
+    pub qg: Value,
+    pub qgmid: Value,
+    pub qb: Value,
+    pub qd: Value,
+    pub qbs: Value,
+    pub qbd: Value,
+}
+
+/// The integration step a BSIM4 companion stamp is written for: the companion
+/// coefficients for the terminal charges, the separate ones for the
+/// non-quasi-static branch, and the step size.
+#[derive(Clone, Copy)]
+pub(super) struct Bsim4CompanionStep<'a> {
+    pub coeff: &'a CompanionCoefficients,
+    pub trnqs_coeff: &'a CompanionCoefficients,
+    pub dt: Value,
+}
 
 impl Engine {
     #[inline]
@@ -189,7 +212,16 @@ impl Engine {
         qth: Value,
     ) -> (Value, Value, Value, Value, Value) {
         let cq = |q: Value, q_prev: Value, q_prev_prev: Value, cq_prev: Value| {
-            Self::jfet_companion_ccap(coeff, dt, q, q_prev, q_prev_prev, cq_prev)
+            Self::jfet_companion_ccap(
+                coeff,
+                dt,
+                q,
+                BranchChargeHistory {
+                    q_prev,
+                    q_prev_prev,
+                    cq_prev,
+                },
+            )
         };
         (
             cq(
@@ -304,11 +336,13 @@ impl Engine {
             dev.stamp_charge_companion(
                 &charge,
                 ag0,
-                cqg,
-                cqb,
-                cqd,
-                cqe,
-                cqth,
+                SoiCompanionCurrents {
+                    cqg,
+                    cqb,
+                    cqd,
+                    cqe,
+                    cqth,
+                },
                 voltages,
                 &mut stamper,
             );
@@ -326,11 +360,13 @@ impl Engine {
             dev.stamp_charge_companion(
                 &charge,
                 ag0,
-                cqg,
-                cqb,
-                cqd,
-                cqe,
-                cqth,
+                SoiCompanionCurrents {
+                    cqg,
+                    cqb,
+                    cqd,
+                    cqe,
+                    cqth,
+                },
                 voltages,
                 &mut stamper,
             );
@@ -348,11 +384,13 @@ impl Engine {
             dev.stamp_charge_companion(
                 &charge,
                 ag0,
-                cqg,
-                cqb,
-                cqd,
-                cqe,
-                cqth,
+                SoiCompanionCurrents {
+                    cqg,
+                    cqb,
+                    cqd,
+                    cqe,
+                    cqth,
+                },
                 voltages,
                 &mut stamper,
             );
@@ -533,7 +571,16 @@ impl Engine {
         qd: Value,
     ) -> (Value, Value, Value) {
         let cq = |q: Value, q_prev: Value, q_prev_prev: Value, cq_prev: Value| {
-            Self::jfet_companion_ccap(coeff, dt, q, q_prev, q_prev_prev, cq_prev)
+            Self::jfet_companion_ccap(
+                coeff,
+                dt,
+                q,
+                BranchChargeHistory {
+                    q_prev,
+                    q_prev_prev,
+                    cq_prev,
+                },
+            )
         };
         (
             cq(
@@ -567,7 +614,16 @@ impl Engine {
         qcdump: Value,
     ) -> (Value, Value) {
         let cq = |q: Value, q_prev: Value, q_prev_prev: Value, cq_prev: Value| {
-            Self::jfet_companion_ccap(coeff, dt, q, q_prev, q_prev_prev, cq_prev)
+            Self::jfet_companion_ccap(
+                coeff,
+                dt,
+                q,
+                BranchChargeHistory {
+                    q_prev,
+                    q_prev_prev,
+                    cq_prev,
+                },
+            )
         };
         (
             cq(
@@ -871,15 +927,27 @@ impl Engine {
         dt: Value,
         history: &Bsim4TransientHistory,
         idx: usize,
-        qg: Value,
-        qgmid: Value,
-        qb: Value,
-        qd: Value,
-        qbs: Value,
-        qbd: Value,
+        charges: Bsim4TerminalCharges,
     ) -> (Value, Value, Value, Value, Value, Value) {
+        let Bsim4TerminalCharges {
+            qg,
+            qgmid,
+            qb,
+            qd,
+            qbs,
+            qbd,
+        } = charges;
         let cq = |q: Value, q_prev: Value, q_prev_prev: Value, cq_prev: Value| {
-            Self::jfet_companion_ccap(coeff, dt, q, q_prev, q_prev_prev, cq_prev)
+            Self::jfet_companion_ccap(
+                coeff,
+                dt,
+                q,
+                BranchChargeHistory {
+                    q_prev,
+                    q_prev_prev,
+                    cq_prev,
+                },
+            )
         };
         (
             cq(
@@ -931,7 +999,16 @@ impl Engine {
         qcdump: Value,
     ) -> (Value, Value) {
         let cq = |q: Value, q_prev: Value, q_prev_prev: Value, cq_prev: Value| {
-            Self::jfet_companion_ccap(coeff, dt, q, q_prev, q_prev_prev, cq_prev)
+            Self::jfet_companion_ccap(
+                coeff,
+                dt,
+                q,
+                BranchChargeHistory {
+                    q_prev,
+                    q_prev_prev,
+                    cq_prev,
+                },
+            )
         };
         (
             cq(
@@ -958,11 +1035,14 @@ impl Engine {
         matrix: &mut crate::solver::StaticMatrix,
         rhs: &mut [Value],
         voltages: &[Value],
-        coeff: &CompanionCoefficients,
-        trnqs_coeff: &CompanionCoefficients,
-        dt: Value,
+        step: Bsim4CompanionStep<'_>,
         history: &Bsim4TransientHistory,
     ) {
+        let Bsim4CompanionStep {
+            coeff,
+            trnqs_coeff,
+            dt,
+        } = step;
         if !circuit.has_bsim4v8_devices() {
             return;
         }
@@ -989,7 +1069,18 @@ impl Engine {
                 )
             };
             let (cqg, cqgmid, cqb, cqd, cqbs, cqbd) = Self::bsim4_companion_currents(
-                coeff, dt, history, idx, qg, qgmid, qb, qd, qbs, qbd,
+                coeff,
+                dt,
+                history,
+                idx,
+                Bsim4TerminalCharges {
+                    qg,
+                    qgmid,
+                    qb,
+                    qd,
+                    qbs,
+                    qbd,
+                },
             );
             // The history carries per-device charges; the device stamp
             // applies the parallel multiplier itself (b4ld.c: mult_q * ceqq*).
@@ -1040,11 +1131,14 @@ impl Engine {
     pub(super) fn update_bsim4_history(
         circuit: &crate::circuit::CircuitData,
         voltages: &[Value],
-        coeff: &CompanionCoefficients,
-        trnqs_coeff: &CompanionCoefficients,
-        dt: Value,
+        step: Bsim4CompanionStep<'_>,
         history: &mut Bsim4TransientHistory,
     ) {
+        let Bsim4CompanionStep {
+            coeff,
+            trnqs_coeff,
+            dt,
+        } = step;
         if !circuit.has_bsim4v8_devices() {
             return;
         }
@@ -1065,7 +1159,18 @@ impl Engine {
                 )
             };
             let (cqg, cqgmid, cqb, cqd, cqbs, cqbd) = Self::bsim4_companion_currents(
-                coeff, dt, history, idx, qg, qgmid, qb, qd, qbs, qbd,
+                coeff,
+                dt,
+                history,
+                idx,
+                Bsim4TerminalCharges {
+                    qg,
+                    qgmid,
+                    qb,
+                    qd,
+                    qbs,
+                    qbd,
+                },
             );
             history.qg_prev_prev_prev[idx] = history.qg_prev_prev[idx];
             history.qg_prev_prev[idx] = history.qg_prev[idx];
@@ -1150,9 +1255,11 @@ impl Engine {
                 coeff,
                 dt,
                 q_curr[row],
-                history.q_prev[idx][row],
-                history.q_prev_prev[idx][row],
-                history.cq_prev[idx][row],
+                BranchChargeHistory {
+                    q_prev: history.q_prev[idx][row],
+                    q_prev_prev: history.q_prev_prev[idx][row],
+                    cq_prev: history.cq_prev[idx][row],
+                },
             );
         }
         cq

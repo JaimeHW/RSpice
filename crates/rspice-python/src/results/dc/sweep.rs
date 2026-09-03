@@ -292,10 +292,10 @@ impl PyDcSweepResult {
     /// Secondary sweep coordinate for a flattened result index.
     fn secondary_value_at(&self, index: usize) -> PyResult<Option<f64>> {
         self.point(index).map_err(PyErr::from)?;
-        Ok(self.secondary_sweep_values.as_ref().map(|values| {
-            let outer_index = index / self.inner_points;
-            values[outer_index]
-        }))
+        Ok(self
+            .secondary_sweep_values
+            .as_ref()
+            .and_then(|values| values.get(index / self.inner_points).copied()))
     }
 
     /// Get the sweep values array
@@ -368,7 +368,9 @@ impl PyDcSweepResult {
             return Err(invalid_sweep_index_error(index.unsigned_abs(), self.results.len()).into());
         }
         let index = idx as usize;
-        let (value, result) = &self.results[index];
+        let Some((value, result)) = self.results.get(index) else {
+            return Err(invalid_sweep_index_error(index, self.results.len()).into());
+        };
         Ok((
             *value,
             PySimulationResult::new_with_device_operating_points(

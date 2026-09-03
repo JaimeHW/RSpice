@@ -717,7 +717,7 @@ fn nodes_to_typed_ports(
         return Ok(nodes.into_iter().map(XspicePort::VoltageName).collect());
     }
 
-    if nodes.len() % 2 != 0 {
+    if !nodes.len().is_multiple_of(2) {
         return Err(ParseError::Syntax {
             line: line_num,
             message: format!(

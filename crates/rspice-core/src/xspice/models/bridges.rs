@@ -979,16 +979,29 @@ fn bidi_drive_current(
     }
 }
 
+/// The output shape a DAC bridge ramps between: the two rail voltages and the
+/// two edge times.
+#[derive(Clone, Copy)]
+struct DacBridgeRamp {
+    out_low: Value,
+    out_high: Value,
+    t_rise: Value,
+    t_fall: Value,
+}
+
 fn dac_bridge_ramp_value(
     time: Value,
     start_time: Value,
     start_value: Value,
     target: Value,
-    out_low: Value,
-    out_high: Value,
-    t_rise: Value,
-    t_fall: Value,
+    ramp: DacBridgeRamp,
 ) -> Value {
+    let DacBridgeRamp {
+        out_low,
+        out_high,
+        t_rise,
+        t_fall,
+    } = ramp;
     // ngspice's signed-slope branches collapse reversed output ranges to the target.
     if out_low > out_high {
         return target;
@@ -998,8 +1011,16 @@ fn dac_bridge_ramp_value(
     if (target - start_value).abs() < 1e-12 || span <= 1e-12 {
         target
     } else {
-        let duration =
-            dac_bridge_transition_duration(start_value, target, out_low, out_high, t_rise, t_fall);
+        let duration = dac_bridge_transition_duration(
+            start_value,
+            target,
+            DacBridgeRamp {
+                out_low,
+                out_high,
+                t_rise,
+                t_fall,
+            },
+        );
         let slope = span / duration;
         if !slope.is_finite() || slope <= 0.0 {
             return target;
@@ -1013,14 +1034,13 @@ fn dac_bridge_ramp_value(
     }
 }
 
-fn dac_bridge_transition_duration(
-    start_value: Value,
-    target: Value,
-    out_low: Value,
-    out_high: Value,
-    t_rise: Value,
-    t_fall: Value,
-) -> Value {
+fn dac_bridge_transition_duration(start_value: Value, target: Value, ramp: DacBridgeRamp) -> Value {
+    let DacBridgeRamp {
+        out_low,
+        out_high,
+        t_rise,
+        t_fall,
+    } = ramp;
     if (target - out_high).abs() <= 1e-12 {
         t_rise
     } else if (target - out_low).abs() <= 1e-12 {
@@ -1036,18 +1056,29 @@ fn dac_bridge_completion_time(
     start_time: Value,
     start_value: Value,
     target: Value,
-    out_low: Value,
-    out_high: Value,
-    t_rise: Value,
-    t_fall: Value,
+    ramp: DacBridgeRamp,
 ) -> Option<Value> {
+    let DacBridgeRamp {
+        out_low,
+        out_high,
+        t_rise,
+        t_fall,
+    } = ramp;
     let span = (out_high - out_low).abs();
     if (target - start_value).abs() <= 1e-12 || span <= 1e-12 {
         return None;
     }
 
-    let duration =
-        dac_bridge_transition_duration(start_value, target, out_low, out_high, t_rise, t_fall);
+    let duration = dac_bridge_transition_duration(
+        start_value,
+        target,
+        DacBridgeRamp {
+            out_low,
+            out_high,
+            t_rise,
+            t_fall,
+        },
+    );
     let slope = span / duration;
     (slope > 0.0 && slope.is_finite()).then_some(start_time + (target - start_value).abs() / slope)
 }
@@ -1230,10 +1261,12 @@ impl CodeModel for DacBridge {
                             accepted_start_time,
                             accepted_start_value,
                             accepted_target,
-                            out_low,
-                            out_high,
-                            t_rise,
-                            t_fall,
+                            DacBridgeRamp {
+                                out_low,
+                                out_high,
+                                t_rise,
+                                t_fall,
+                            },
                         );
                         (v_target, event_time, start_value)
                     }
@@ -1246,10 +1279,12 @@ impl CodeModel for DacBridge {
                 transition_start_time,
                 transition_start_value,
                 transition_target,
-                out_low,
-                out_high,
-                t_rise,
-                t_fall,
+                DacBridgeRamp {
+                    out_low,
+                    out_high,
+                    t_rise,
+                    t_fall,
+                },
             );
 
             let v_out = if first_transient_point {
@@ -1262,10 +1297,12 @@ impl CodeModel for DacBridge {
                 transition_start_time,
                 transition_start_value,
                 transition_target,
-                out_low,
-                out_high,
-                t_rise,
-                t_fall,
+                DacBridgeRamp {
+                    out_low,
+                    out_high,
+                    t_rise,
+                    t_fall,
+                },
             ) && commit_outputs
                 && completion_time > ctx.time + 1.0e-18
             {

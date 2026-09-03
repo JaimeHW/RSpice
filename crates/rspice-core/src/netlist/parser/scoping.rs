@@ -33,6 +33,14 @@ pub(super) fn qualify_local_model_name(scope: &str, local_name: &str) -> String 
 /// references until the deck ends and typos afterwards, and only end-of-parse
 /// validation can tell which — see
 /// `resolve_static_model_expression_params_with_abort`.
+/// The two deferral sinks a `.MODEL` line writes into: bare identifiers whose
+/// value is not known until the parameter scope closes, and the Xyce diode
+/// warnings that can only be emitted once the card is complete.
+pub(super) struct ModelDefinitionDeferrals<'a> {
+    pub bare_ident_deferrals: &'a mut Vec<(String, String, usize)>,
+    pub pending_xyce_diode_model_warnings: &'a mut Vec<PendingXyceDiodeModelWarning>,
+}
+
 pub(super) fn parse_model_definition(
     stream: &mut TokenStream,
     line_num: usize,
@@ -40,9 +48,12 @@ pub(super) fn parse_model_definition(
     params: &ParamContext,
     known_models: &[ModelDef],
     defer_expression_params: bool,
-    bare_ident_deferrals: &mut Vec<(String, String, usize)>,
-    pending_xyce_diode_model_warnings: &mut Vec<PendingXyceDiodeModelWarning>,
+    deferrals: ModelDefinitionDeferrals<'_>,
 ) -> Result<ModelDef, ParseError> {
+    let ModelDefinitionDeferrals {
+        bare_ident_deferrals,
+        pending_xyce_diode_model_warnings,
+    } = deferrals;
     let model_index = known_models.len();
     let name = expect_model_name(stream, line_num)?;
     let second = expect_ident(stream, line_num)?;

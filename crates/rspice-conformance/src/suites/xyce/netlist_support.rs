@@ -4463,10 +4463,12 @@ impl XyceTestRunner {
         };
         rspice_core::device::EkvMosfet::from_params(
             "__xyce_ekv26_contract__".to_string(),
-            0,
-            0,
-            0,
-            0,
+            rspice_core::device::MosTerminals {
+                drain: 0,
+                gate: 0,
+                source: 0,
+                bulk: 0,
+            },
             mos_type,
             &model_params,
             instance_params,
@@ -4531,10 +4533,12 @@ impl XyceTestRunner {
         };
         rspice_core::device::EkvMosfet::from_params(
             "__xyce_ekv26_contract__".to_string(),
-            0,
-            0,
-            0,
-            0,
+            rspice_core::device::MosTerminals {
+                drain: 0,
+                gate: 0,
+                source: 0,
+                bulk: 0,
+            },
             mos_type,
             &model_params,
             &[],

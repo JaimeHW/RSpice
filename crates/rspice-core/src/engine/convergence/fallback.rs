@@ -146,18 +146,23 @@ impl Engine {
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
         source_scale: Value,
-        initial_solution: &[Value],
-        damping_state: &mut NewtonDampingState,
-        max_iterations: usize,
+        run: CorrectorRun<'_>,
         abort: &dyn AbortSignal,
     ) -> Result<(Vec<Value>, bool, usize), SimulationError> {
+        let CorrectorRun {
+            initial_solution,
+            damping_state,
+            max_iterations,
+        } = run;
         self.solve_scaled_nonlinear_corrector_with_seed_mode(
             circuit,
             matrix,
             source_scale,
-            initial_solution,
-            damping_state,
-            max_iterations,
+            CorrectorRun {
+                initial_solution,
+                damping_state,
+                max_iterations,
+            },
             abort,
             CorrectorSeedMode::Limited,
         )
@@ -168,12 +173,15 @@ impl Engine {
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
         source_scale: Value,
-        initial_solution: &[Value],
-        damping_state: &mut NewtonDampingState,
-        max_iterations: usize,
+        run: CorrectorRun<'_>,
         abort: &dyn AbortSignal,
         seed_mode: CorrectorSeedMode,
     ) -> Result<(Vec<Value>, bool, usize), SimulationError> {
+        let CorrectorRun {
+            initial_solution,
+            damping_state,
+            max_iterations,
+        } = run;
         let mut solution = initial_solution.to_vec();
         self.prime_operating_point_seed(circuit, &solution, 0.0, crate::xspice::AnalysisType::DcOp);
         if matches!(
@@ -231,9 +239,11 @@ impl Engine {
             let mut new_solution = self.apply_damping_strategy_for_circuit(
                 circuit.has_b3soi_devices(),
                 &circuit.non_electrical_state_mask(),
-                &solution,
-                &raw_solution,
-                damping_state,
+                DampingStep {
+                    old: &solution,
+                    proposal: &raw_solution,
+                    damping_state,
+                },
                 junction_owns_steps,
                 |trial| self.nonlinear_merit_scaled(circuit, matrix, trial, source_scale),
             );
@@ -352,9 +362,11 @@ impl Engine {
             circuit,
             matrix,
             1.0,
-            candidate,
-            &mut damping_state,
-            refinement_iterations,
+            CorrectorRun {
+                initial_solution: candidate,
+                damping_state: &mut damping_state,
+                max_iterations: refinement_iterations,
+            },
             abort,
             CorrectorSeedMode::StaticJfetEveryIteration,
         )?;
@@ -378,9 +390,11 @@ impl Engine {
             circuit,
             matrix,
             1.0,
-            restart_seed,
-            &mut damping_state,
-            restart_iterations,
+            CorrectorRun {
+                initial_solution: restart_seed,
+                damping_state: &mut damping_state,
+                max_iterations: restart_iterations,
+            },
             abort,
             CorrectorSeedMode::StaticJfet,
         )?;
@@ -405,9 +419,11 @@ impl Engine {
             circuit,
             matrix,
             1.0,
-            restart_seed,
-            &mut damping_state,
-            restart_iterations,
+            CorrectorRun {
+                initial_solution: restart_seed,
+                damping_state: &mut damping_state,
+                max_iterations: restart_iterations,
+            },
             abort,
             CorrectorSeedMode::StaticProbeEveryIteration,
         )?;

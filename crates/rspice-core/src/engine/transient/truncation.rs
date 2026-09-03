@@ -1,10 +1,58 @@
 //! Charge truncation and transient LTE control helpers.
 
-#![allow(clippy::needless_range_loop)]
-
 #[cfg(test)]
 use super::state::MosfetCompanionBiasSource;
 use super::*;
+use crate::numerics::integration::LtePrefixWindow;
+
+/// The three Meyer capacitances of one MOSFET on a candidate step:
+/// gate-source, gate-drain, gate-bulk.
+type MeyerCapacitanceTriple = (Value, Value, Value);
+
+/// The tolerances ngspice's charge-truncation estimator holds a candidate step
+/// to: the relative tolerance, the current and charge absolute floors, and the
+/// `TRTOL` truncation-error factor. ngspice forms one bound from all four, so a
+/// caller that set three of them would be asking for a bound nobody specified.
+#[derive(Clone, Copy)]
+pub(super) struct NgspiceTruncationTolerances {
+    pub reltol: Value,
+    pub current_abstol: Value,
+    pub charge_abstol: Value,
+    pub trtol: Value,
+}
+
+/// The integration a candidate step is being taken with: the method, the
+/// trapezoidal sub-order ngspice tracks beside it, and the step size.
+#[derive(Clone, Copy)]
+pub(super) struct TruncationStep {
+    pub method: IntegrationMethod,
+    pub trap_order: u8,
+    pub dt: Value,
+}
+
+/// The charge history one branch's truncation bound is formed from: the
+/// candidate and the two accepted charges before it, the third for the
+/// third-order term, and the companion currents at the candidate and the
+/// previous step.
+#[derive(Clone, Copy)]
+pub(super) struct ChargeSamples {
+    pub q_curr: Value,
+    pub q_prev: Value,
+    pub q_prev_prev: Value,
+    pub q_prev_prev_prev: Value,
+    pub cq_curr: Value,
+    pub cq_prev: Value,
+}
+
+/// How the voltage-domain LTE estimator is configured for this circuit: the
+/// estimator itself and the two exclusion sets that keep unbounded nodes out
+/// of the norm.
+#[derive(Clone, Copy)]
+pub(super) struct VoltageLteConfig<'a> {
+    pub estimator: &'a LteEstimator,
+    pub excluded_nodes: &'a [usize],
+    pub xyce_excluded_indices: &'a [usize],
+}
 
 #[cfg(feature = "parallel")]
 const CAPACITOR_TRUNCATION_ITEMS_PER_WORKER: usize = 1_024;
@@ -45,11 +93,14 @@ impl NgspiceChargeTruncationContext {
         prev_prev_dt: Value,
         method: IntegrationMethod,
         trap_order: u8,
-        reltol: Value,
-        current_abstol: Value,
-        charge_abstol: Value,
-        trtol: Value,
+        tolerances: NgspiceTruncationTolerances,
     ) -> Option<Self> {
+        let NgspiceTruncationTolerances {
+            reltol,
+            current_abstol,
+            charge_abstol,
+            trtol,
+        } = tolerances;
         if !dt.is_finite()
             || dt <= 0.0
             || !prev_dt.is_finite()
@@ -100,15 +151,15 @@ impl NgspiceChargeTruncationContext {
     }
 
     #[inline]
-    fn limit(
-        &self,
-        q_curr: Value,
-        q_prev: Value,
-        q_prev_prev: Value,
-        q_prev_prev_prev: Value,
-        cq_curr: Value,
-        cq_prev: Value,
-    ) -> Option<Value> {
+    fn limit(&self, samples: ChargeSamples) -> Option<Value> {
+        let ChargeSamples {
+            q_curr,
+            q_prev,
+            q_prev_prev,
+            q_prev_prev_prev,
+            cq_curr,
+            cq_prev,
+        } = samples;
         let volttol = self.current_abstol + self.reltol * cq_curr.abs().max(cq_prev.abs());
         let chargetol =
             self.reltol * q_curr.abs().max(q_prev.abs()).max(self.charge_abstol) / self.dt;
@@ -213,14 +264,14 @@ impl NgspiceChargeTruncationContext {
             }
             let (q_curr, cq_curr) = charges[branch];
             let (q_prev, q_prev_prev, q_prev_prev_prev, cq_prev) = histories[branch];
-            let Some(branch_limit) = self.limit(
+            let Some(branch_limit) = self.limit(ChargeSamples {
                 q_curr,
                 q_prev,
                 q_prev_prev,
                 q_prev_prev_prev,
                 cq_curr,
                 cq_prev,
-            ) else {
+            }) else {
                 continue;
             };
             found_branch = true;
@@ -262,14 +313,14 @@ impl NgspiceChargeTruncationContext {
                 continue;
             }
             let (q_curr, cq_curr) = charges[idx][0];
-            let Some(branch_limit) = self.limit(
+            let Some(branch_limit) = self.limit(ChargeSamples {
                 q_curr,
-                history.qgs_prev[idx],
-                history.qgs_prev_prev[idx],
-                history.qgs_prev_prev_prev[idx],
+                q_prev: history.qgs_prev[idx],
+                q_prev_prev: history.qgs_prev_prev[idx],
+                q_prev_prev_prev: history.qgs_prev_prev_prev[idx],
                 cq_curr,
-                history.cqgs_prev[idx],
-            ) else {
+                cq_prev: history.cqgs_prev[idx],
+            }) else {
                 continue;
             };
             found_branch = true;
@@ -283,14 +334,14 @@ impl NgspiceChargeTruncationContext {
                 continue;
             }
             let (q_curr, cq_curr) = charges[idx][1];
-            let Some(branch_limit) = self.limit(
+            let Some(branch_limit) = self.limit(ChargeSamples {
                 q_curr,
-                history.qgd_prev[idx],
-                history.qgd_prev_prev[idx],
-                history.qgd_prev_prev_prev[idx],
+                q_prev: history.qgd_prev[idx],
+                q_prev_prev: history.qgd_prev_prev[idx],
+                q_prev_prev_prev: history.qgd_prev_prev_prev[idx],
                 cq_curr,
-                history.cqgd_prev[idx],
-            ) else {
+                cq_prev: history.cqgd_prev[idx],
+            }) else {
                 continue;
             };
             found_branch = true;
@@ -304,14 +355,14 @@ impl NgspiceChargeTruncationContext {
                 continue;
             }
             let (q_curr, cq_curr) = charges[idx][2];
-            let Some(branch_limit) = self.limit(
+            let Some(branch_limit) = self.limit(ChargeSamples {
                 q_curr,
-                history.qgb_prev[idx],
-                history.qgb_prev_prev[idx],
-                history.qgb_prev_prev_prev[idx],
+                q_prev: history.qgb_prev[idx],
+                q_prev_prev: history.qgb_prev_prev[idx],
+                q_prev_prev_prev: history.qgb_prev_prev_prev[idx],
                 cq_curr,
-                history.cqgb_prev[idx],
-            ) else {
+                cq_prev: history.cqgb_prev[idx],
+            }) else {
                 continue;
             };
             found_branch = true;
@@ -349,58 +400,72 @@ impl Engine {
     #[inline]
     #[cfg(test)]
     pub(super) fn ngspice_charge_truncation_limit(
-        q_curr: Value,
-        q_prev: Value,
-        q_prev_prev: Value,
-        q_prev_prev_prev: Value,
-        cq_curr: Value,
-        cq_prev: Value,
+        samples: ChargeSamples,
         dt: Value,
         prev_dt: Value,
         prev_prev_dt: Value,
         method: IntegrationMethod,
         trap_order: u8,
-        reltol: Value,
-        current_abstol: Value,
-        charge_abstol: Value,
-        trtol: Value,
+        tolerances: NgspiceTruncationTolerances,
     ) -> Option<Value> {
-        NgspiceChargeTruncationContext::new(
-            dt,
-            prev_dt,
-            prev_prev_dt,
-            method,
-            trap_order,
-            reltol,
-            current_abstol,
-            charge_abstol,
-            trtol,
-        )?
-        .limit(
+        let ChargeSamples {
             q_curr,
             q_prev,
             q_prev_prev,
             q_prev_prev_prev,
             cq_curr,
             cq_prev,
-        )
+        } = samples;
+        let NgspiceTruncationTolerances {
+            reltol,
+            current_abstol,
+            charge_abstol,
+            trtol,
+        } = tolerances;
+        NgspiceChargeTruncationContext::new(
+            dt,
+            prev_dt,
+            prev_prev_dt,
+            method,
+            trap_order,
+            NgspiceTruncationTolerances {
+                reltol,
+                current_abstol,
+                charge_abstol,
+                trtol,
+            },
+        )?
+        .limit(ChargeSamples {
+            q_curr,
+            q_prev,
+            q_prev_prev,
+            q_prev_prev_prev,
+            cq_curr,
+            cq_prev,
+        })
     }
 
     #[inline]
     pub(super) fn capacitor_ngspice_truncation_limit(
         circuit: &crate::circuit::CircuitData,
         candidate_solution: &[Value],
-        method: IntegrationMethod,
-        trap_order: u8,
-        dt: Value,
+        step: TruncationStep,
         prev_dt: Value,
         prev_prev_dt: Value,
-        reltol: Value,
-        current_abstol: Value,
-        charge_abstol: Value,
-        trtol: Value,
+        tolerances: NgspiceTruncationTolerances,
         mut accepted_states_out: Option<&mut Vec<CapacitorAcceptedState>>,
     ) -> Option<Value> {
+        let TruncationStep {
+            method,
+            trap_order,
+            dt,
+        } = step;
+        let NgspiceTruncationTolerances {
+            reltol,
+            current_abstol,
+            charge_abstol,
+            trtol,
+        } = tolerances;
         if let Some(states) = accepted_states_out.as_deref_mut() {
             states.clear();
             states.reserve(circuit.capacitors.stamps.len());
@@ -418,10 +483,12 @@ impl Engine {
             prev_prev_dt,
             effective_method,
             trap_order,
-            reltol,
-            current_abstol,
-            charge_abstol,
-            trtol,
+            NgspiceTruncationTolerances {
+                reltol,
+                current_abstol,
+                charge_abstol,
+                trtol,
+            },
         )?;
         let mut limit = 2.0 * dt;
         let mut found_branch = false;
@@ -476,14 +543,14 @@ impl Engine {
                 });
             }
 
-            let Some(branch_limit) = truncation.limit(
+            let Some(branch_limit) = truncation.limit(ChargeSamples {
                 q_curr,
                 q_prev,
                 q_prev_prev,
                 q_prev_prev_prev,
                 cq_curr,
                 cq_prev,
-            ) else {
+            }) else {
                 continue;
             };
             found_branch = true;
@@ -522,16 +589,22 @@ impl Engine {
     pub(super) fn inductor_ngspice_truncation_limit(
         circuit: &crate::circuit::CircuitData,
         candidate_solution: &[Value],
-        method: IntegrationMethod,
-        trap_order: u8,
-        dt: Value,
+        step: TruncationStep,
         prev_dt: Value,
         prev_prev_dt: Value,
-        reltol: Value,
-        current_abstol: Value,
-        charge_abstol: Value,
-        trtol: Value,
+        tolerances: NgspiceTruncationTolerances,
     ) -> Option<Value> {
+        let TruncationStep {
+            method,
+            trap_order,
+            dt,
+        } = step;
+        let NgspiceTruncationTolerances {
+            reltol,
+            current_abstol,
+            charge_abstol,
+            trtol,
+        } = tolerances;
         if !prev_dt.is_finite() || prev_dt <= 0.0 {
             return None;
         }
@@ -552,10 +625,12 @@ impl Engine {
             prev_prev_dt,
             effective_method,
             trap_order,
-            reltol,
-            current_abstol,
-            charge_abstol,
-            trtol,
+            NgspiceTruncationTolerances {
+                reltol,
+                current_abstol,
+                charge_abstol,
+                trtol,
+            },
         )?;
         let num_nodes = circuit.num_nodes();
         let inductors = &circuit.inductors;
@@ -590,14 +665,14 @@ impl Engine {
             let cq_curr = req * i_curr - veq;
             let cq_prev = v_prev;
 
-            let Some(branch_limit) = truncation.limit(
+            let Some(branch_limit) = truncation.limit(ChargeSamples {
                 q_curr,
                 q_prev,
                 q_prev_prev,
                 q_prev_prev_prev,
                 cq_curr,
                 cq_prev,
-            ) else {
+            }) else {
                 continue;
             };
             found_branch = true;
@@ -653,18 +728,24 @@ impl Engine {
         &self,
         circuit: &crate::circuit::CircuitData,
         candidate_solution: &[Value],
-        method: IntegrationMethod,
-        trap_order: u8,
-        dt: Value,
+        step: TruncationStep,
         prev_dt: Value,
         prev_prev_dt: Value,
-        reltol: Value,
-        current_abstol: Value,
-        charge_abstol: Value,
-        trtol: Value,
+        tolerances: NgspiceTruncationTolerances,
         worker_count: usize,
         accepted_states_out: &mut Vec<CapacitorAcceptedState>,
     ) -> Option<Value> {
+        let TruncationStep {
+            method,
+            trap_order,
+            dt,
+        } = step;
+        let NgspiceTruncationTolerances {
+            reltol,
+            current_abstol,
+            charge_abstol,
+            trtol,
+        } = tolerances;
         use rayon::prelude::*;
 
         accepted_states_out.clear();
@@ -681,10 +762,12 @@ impl Engine {
             prev_prev_dt,
             effective_method,
             trap_order,
-            reltol,
-            current_abstol,
-            charge_abstol,
-            trtol,
+            NgspiceTruncationTolerances {
+                reltol,
+                current_abstol,
+                charge_abstol,
+                trtol,
+            },
         )?;
         let count = circuit.capacitors.stamps.len();
         debug_assert!(worker_count > 1);
@@ -760,14 +843,14 @@ impl Engine {
                             current: accepted_current,
                         };
 
-                        if let Some(branch_limit) = truncation.limit(
+                        if let Some(branch_limit) = truncation.limit(ChargeSamples {
                             q_curr,
                             q_prev,
                             q_prev_prev,
                             q_prev_prev_prev,
                             cq_curr,
                             cq_prev,
-                        ) {
+                        }) {
                             chunk_limit =
                                 Self::min_truncation_limit(chunk_limit, Some(branch_limit));
                         }
@@ -782,15 +865,19 @@ impl Engine {
             Err(_) => Self::capacitor_ngspice_truncation_limit(
                 circuit,
                 candidate_solution,
-                method,
-                trap_order,
-                dt,
+                TruncationStep {
+                    method,
+                    trap_order,
+                    dt,
+                },
                 prev_dt,
                 prev_prev_dt,
-                reltol,
-                current_abstol,
-                charge_abstol,
-                trtol,
+                NgspiceTruncationTolerances {
+                    reltol,
+                    current_abstol,
+                    charge_abstol,
+                    trtol,
+                },
                 Some(accepted_states_out),
             ),
         }
@@ -800,15 +887,21 @@ impl Engine {
     pub(super) fn vbic_ngspice_truncation_limit(
         circuit: &crate::circuit::CircuitData,
         candidate_solution: &[Value],
-        method: IntegrationMethod,
-        trap_order: u8,
-        dt: Value,
+        step: TruncationStep,
         history: &BjtTransientHistory,
-        reltol: Value,
-        current_abstol: Value,
-        charge_abstol: Value,
-        trtol: Value,
+        tolerances: NgspiceTruncationTolerances,
     ) -> Option<Value> {
+        let TruncationStep {
+            method,
+            trap_order,
+            dt,
+        } = step;
+        let NgspiceTruncationTolerances {
+            reltol,
+            current_abstol,
+            charge_abstol,
+            trtol,
+        } = tolerances;
         let lte_debug = lte_debug_enabled();
         let effective_method = Self::effective_companion_method(method, trap_order);
         let coeff = CompanionCoefficients::for_method_with_previous_step(
@@ -822,10 +915,12 @@ impl Engine {
             history.accepted_dt_prev_prev,
             effective_method,
             trap_order,
-            reltol,
-            current_abstol,
-            charge_abstol,
-            trtol,
+            NgspiceTruncationTolerances {
+                reltol,
+                current_abstol,
+                charge_abstol,
+                trtol,
+            },
         )?;
         let mut limit = 2.0 * dt;
         let mut found_branch = false;
@@ -840,23 +935,35 @@ impl Engine {
             // bias (ngspice VBICtrunc CKTterr over the charge states).
             let (branches, _, _) = bjt.vbic_mna_charge_state_at_solution(candidate_solution);
 
-            for branch_idx in 0..BJT_VBIC_TRUNCATION_BRANCH_COUNT {
-                let q_curr = branches[branch_idx].charge;
+            for (branch_idx, branch) in branches
+                .iter()
+                .enumerate()
+                .take(BJT_VBIC_TRUNCATION_BRANCH_COUNT)
+            {
+                let q_curr = branch.charge;
                 let q_prev = history.charge_q_prev[idx][branch_idx];
                 let q_prev_prev = history.charge_q_prev_prev[idx][branch_idx];
                 let q_prev_prev_prev = history.charge_q_prev_prev_prev[idx][branch_idx];
                 let cq_prev = history.charge_cq_prev[idx][branch_idx];
-                let cq_curr =
-                    Self::jfet_companion_ccap(&coeff, dt, q_curr, q_prev, q_prev_prev, cq_prev);
+                let cq_curr = Self::jfet_companion_ccap(
+                    &coeff,
+                    dt,
+                    q_curr,
+                    BranchChargeHistory {
+                        q_prev,
+                        q_prev_prev,
+                        cq_prev,
+                    },
+                );
 
-                let Some(branch_limit) = truncation.limit(
+                let Some(branch_limit) = truncation.limit(ChargeSamples {
                     q_curr,
                     q_prev,
                     q_prev_prev,
                     q_prev_prev_prev,
                     cq_curr,
                     cq_prev,
-                ) else {
+                }) else {
                     continue;
                 };
                 if branch_limit < dt && lte_debug {
@@ -879,17 +986,23 @@ impl Engine {
     pub(super) fn legacy_bjt_ngspice_truncation_limit(
         circuit: &crate::circuit::CircuitData,
         candidate_solution: &[Value],
-        method: IntegrationMethod,
-        trap_order: u8,
-        dt: Value,
+        step: TruncationStep,
         history: &BjtTransientHistory,
         vbic_snapshot_cache: &[Option<BjtChargeSnapshot>],
         voltage_abstol: Value,
-        reltol: Value,
-        current_abstol: Value,
-        charge_abstol: Value,
-        trtol: Value,
+        tolerances: NgspiceTruncationTolerances,
     ) -> Option<Value> {
+        let TruncationStep {
+            method,
+            trap_order,
+            dt,
+        } = step;
+        let NgspiceTruncationTolerances {
+            reltol,
+            current_abstol,
+            charge_abstol,
+            trtol,
+        } = tolerances;
         let lte_debug = lte_debug_enabled();
         let effective_method = Self::effective_companion_method(method, trap_order);
         let coeff = CompanionCoefficients::for_method_with_previous_step(
@@ -903,10 +1016,12 @@ impl Engine {
             history.accepted_dt_prev_prev,
             effective_method,
             trap_order,
-            reltol,
-            current_abstol,
-            charge_abstol,
-            trtol,
+            NgspiceTruncationTolerances {
+                reltol,
+                current_abstol,
+                charge_abstol,
+                trtol,
+            },
         )?;
         let mut limit = 2.0 * dt;
         let mut found_branch = false;
@@ -929,20 +1044,26 @@ impl Engine {
             let snapshot = Self::resolve_vbic_snapshot_for_external_bias_with_linear_history(
                 bjt,
                 candidate_external,
-                &coeff,
-                dt,
-                &history.charge_q_prev[idx],
-                &history.charge_q_prev_prev[idx],
-                &history.charge_cq_prev[idx],
-                history.dynamic_internal_prev.get(idx),
-                history.dynamic_internal_prev_prev.get(idx),
-                history.dynamic_linear_prev.get(idx),
-                history.dynamic_linear_prev_prev.get(idx),
-                history.accepted_dt_prev,
+                VbicChargeStep {
+                    coeff: &coeff,
+                    dt,
+                    q_prev: &history.charge_q_prev[idx],
+                    q_prev_prev: &history.charge_q_prev_prev[idx],
+                    cq_prev: &history.charge_cq_prev[idx],
+                },
+                VbicPredictorHistory {
+                    internal_prev: history.dynamic_internal_prev.get(idx),
+                    internal_prev_prev: history.dynamic_internal_prev_prev.get(idx),
+                    linear_prev: history.dynamic_linear_prev.get(idx),
+                    linear_prev_prev: history.dynamic_linear_prev_prev.get(idx),
+                    previous_dt: history.accepted_dt_prev,
+                },
                 vbic_snapshot_cache.get(idx).copied().flatten(),
                 VbicCachedSnapshotReuse::SeedOnly,
-                snapshot_reuse_abstol,
-                snapshot_reuse_reltol,
+                VbicSnapshotTolerances {
+                    voltage_abstol: snapshot_reuse_abstol,
+                    reltol: snapshot_reuse_reltol,
+                },
             )?;
 
             // Take the charge from the model, not from the snapshot's branch
@@ -976,17 +1097,25 @@ impl Engine {
                 let q_prev_prev = history.charge_q_prev_prev[idx][branch_idx];
                 let q_prev_prev_prev = history.charge_q_prev_prev_prev[idx][branch_idx];
                 let cq_prev = history.charge_cq_prev[idx][branch_idx];
-                let cq_curr =
-                    Self::jfet_companion_ccap(&coeff, dt, q_curr, q_prev, q_prev_prev, cq_prev);
+                let cq_curr = Self::jfet_companion_ccap(
+                    &coeff,
+                    dt,
+                    q_curr,
+                    BranchChargeHistory {
+                        q_prev,
+                        q_prev_prev,
+                        cq_prev,
+                    },
+                );
 
-                let Some(branch_limit) = truncation.limit(
+                let Some(branch_limit) = truncation.limit(ChargeSamples {
                     q_curr,
                     q_prev,
                     q_prev_prev,
                     q_prev_prev_prev,
                     cq_curr,
                     cq_prev,
-                ) else {
+                }) else {
                     continue;
                 };
                 if branch_limit < dt && lte_debug {
@@ -1009,31 +1138,41 @@ impl Engine {
     pub(super) fn bjt_ngspice_truncation_limit(
         circuit: &crate::circuit::CircuitData,
         candidate_solution: &[Value],
-        method: IntegrationMethod,
-        trap_order: u8,
-        dt: Value,
+        step: TruncationStep,
         history: &BjtTransientHistory,
         vbic_snapshot_cache: &[Option<BjtChargeSnapshot>],
         voltage_abstol: Value,
-        reltol: Value,
-        current_abstol: Value,
-        charge_abstol: Value,
-        trtol: Value,
+        tolerances: NgspiceTruncationTolerances,
     ) -> Option<Value> {
+        let TruncationStep {
+            method,
+            trap_order,
+            dt,
+        } = step;
+        let NgspiceTruncationTolerances {
+            reltol,
+            current_abstol,
+            charge_abstol,
+            trtol,
+        } = tolerances;
         let mut limit = 2.0 * dt;
         let mut found_branch = false;
 
         if let Some(vbic_limit) = Self::vbic_ngspice_truncation_limit(
             circuit,
             candidate_solution,
-            method,
-            trap_order,
-            dt,
+            TruncationStep {
+                method,
+                trap_order,
+                dt,
+            },
             history,
-            reltol,
-            current_abstol,
-            charge_abstol,
-            trtol,
+            NgspiceTruncationTolerances {
+                reltol,
+                current_abstol,
+                charge_abstol,
+                trtol,
+            },
         ) {
             limit = limit.min(vbic_limit);
             found_branch = true;
@@ -1042,16 +1181,20 @@ impl Engine {
         if let Some(legacy_limit) = Self::legacy_bjt_ngspice_truncation_limit(
             circuit,
             candidate_solution,
-            method,
-            trap_order,
-            dt,
+            TruncationStep {
+                method,
+                trap_order,
+                dt,
+            },
             history,
             vbic_snapshot_cache,
             voltage_abstol,
-            reltol,
-            current_abstol,
-            charge_abstol,
-            trtol,
+            NgspiceTruncationTolerances {
+                reltol,
+                current_abstol,
+                charge_abstol,
+                trtol,
+            },
         ) {
             limit = limit.min(legacy_limit);
             found_branch = true;
@@ -1064,16 +1207,22 @@ impl Engine {
     pub(super) fn jfet_ngspice_truncation_limit(
         circuit: &crate::circuit::CircuitData,
         candidate_solution: &[Value],
-        method: IntegrationMethod,
-        trap_order: u8,
-        dt: Value,
+        step: TruncationStep,
         history: &JfetTransientHistory,
         suppress_gate_charge: bool,
-        reltol: Value,
-        current_abstol: Value,
-        charge_abstol: Value,
-        trtol: Value,
+        tolerances: NgspiceTruncationTolerances,
     ) -> Option<Value> {
+        let TruncationStep {
+            method,
+            trap_order,
+            dt,
+        } = step;
+        let NgspiceTruncationTolerances {
+            reltol,
+            current_abstol,
+            charge_abstol,
+            trtol,
+        } = tolerances;
         if history.accepted_dt_prev <= 0.0 || !history.accepted_dt_prev.is_finite() {
             return None;
         }
@@ -1090,10 +1239,12 @@ impl Engine {
             history.accepted_dt_prev_prev,
             effective_method,
             trap_order,
-            reltol,
-            current_abstol,
-            charge_abstol,
-            trtol,
+            NgspiceTruncationTolerances {
+                reltol,
+                current_abstol,
+                charge_abstol,
+                trtol,
+            },
         )?;
         let mut limit = 2.0 * dt;
         let mut found_branch = false;
@@ -1193,9 +1344,11 @@ impl Engine {
                         capacitance,
                         voltage,
                         q_exact,
-                        q_prev,
-                        q_prev_prev,
-                        cq_prev,
+                        BranchChargeHistory {
+                            q_prev,
+                            q_prev_prev,
+                            cq_prev,
+                        },
                     )
                 } else {
                     Self::jfet_companion_terms(
@@ -1204,19 +1357,21 @@ impl Engine {
                         capacitance,
                         voltage,
                         voltage_prev,
-                        q_prev,
-                        q_prev_prev,
-                        cq_prev,
+                        BranchChargeHistory {
+                            q_prev,
+                            q_prev_prev,
+                            cq_prev,
+                        },
                     )
                 };
-                let Some(branch_limit) = truncation.limit(
+                let Some(branch_limit) = truncation.limit(ChargeSamples {
                     q_curr,
                     q_prev,
                     q_prev_prev,
                     q_prev_prev_prev,
                     cq_curr,
                     cq_prev,
-                ) else {
+                }) else {
                     continue;
                 };
                 found_branch = true;
@@ -1234,15 +1389,21 @@ impl Engine {
     pub(super) fn diode_ngspice_truncation_limit(
         circuit: &crate::circuit::CircuitData,
         candidate_solution: &[Value],
-        method: IntegrationMethod,
-        trap_order: u8,
-        dt: Value,
+        step: TruncationStep,
         history: &DiodeTransientHistory,
-        reltol: Value,
-        current_abstol: Value,
-        charge_abstol: Value,
-        trtol: Value,
+        tolerances: NgspiceTruncationTolerances,
     ) -> Option<Value> {
+        let TruncationStep {
+            method,
+            trap_order,
+            dt,
+        } = step;
+        let NgspiceTruncationTolerances {
+            reltol,
+            current_abstol,
+            charge_abstol,
+            trtol,
+        } = tolerances;
         if history.accepted_dt_prev <= 0.0 || !history.accepted_dt_prev.is_finite() {
             return None;
         }
@@ -1259,10 +1420,12 @@ impl Engine {
             history.accepted_dt_prev_prev,
             effective_method,
             trap_order,
-            reltol,
-            current_abstol,
-            charge_abstol,
-            trtol,
+            NgspiceTruncationTolerances {
+                reltol,
+                current_abstol,
+                charge_abstol,
+                trtol,
+            },
         )?;
         let mut limit = 2.0 * dt;
         let mut found_branch = false;
@@ -1290,18 +1453,20 @@ impl Engine {
                 capd,
                 vd,
                 qd,
-                history.qd_prev[idx],
-                history.qd_prev_prev[idx],
-                history.cqd_prev[idx],
+                BranchChargeHistory {
+                    q_prev: history.qd_prev[idx],
+                    q_prev_prev: history.qd_prev_prev[idx],
+                    cq_prev: history.cqd_prev[idx],
+                },
             );
-            let Some(branch_limit) = truncation.limit(
+            let Some(branch_limit) = truncation.limit(ChargeSamples {
                 q_curr,
-                history.qd_prev[idx],
-                history.qd_prev_prev[idx],
-                history.qd_prev_prev_prev[idx],
+                q_prev: history.qd_prev[idx],
+                q_prev_prev: history.qd_prev_prev[idx],
+                q_prev_prev_prev: history.qd_prev_prev_prev[idx],
                 cq_curr,
-                history.cqd_prev[idx],
-            ) else {
+                cq_prev: history.cqd_prev[idx],
+            }) else {
                 continue;
             };
             found_branch = true;
@@ -1315,16 +1480,22 @@ impl Engine {
     pub(super) fn mosfet_ngspice_truncation_limit(
         circuit: &crate::circuit::CircuitData,
         candidate_solution: &[Value],
-        method: IntegrationMethod,
-        trap_order: u8,
-        dt: Value,
+        step: TruncationStep,
         history: &MosfetTransientHistory,
-        reltol: Value,
-        current_abstol: Value,
-        charge_abstol: Value,
-        trtol: Value,
-        caps_cache: Option<(&mut Vec<(Value, Value, Value)>, bool)>,
+        tolerances: NgspiceTruncationTolerances,
+        caps_cache: Option<(&mut Vec<MeyerCapacitanceTriple>, bool)>,
     ) -> Option<Value> {
+        let TruncationStep {
+            method,
+            trap_order,
+            dt,
+        } = step;
+        let NgspiceTruncationTolerances {
+            reltol,
+            current_abstol,
+            charge_abstol,
+            trtol,
+        } = tolerances;
         if history.accepted_dt_prev <= 0.0 || !history.accepted_dt_prev.is_finite() {
             return None;
         }
@@ -1354,10 +1525,12 @@ impl Engine {
             history.accepted_dt_prev_prev,
             effective_method,
             trap_order,
-            reltol,
-            current_abstol,
-            charge_abstol,
-            trtol,
+            NgspiceTruncationTolerances {
+                reltol,
+                current_abstol,
+                charge_abstol,
+                trtol,
+            },
         )?;
         let mut limit = 2.0 * dt;
         let mut found_branch = false;
@@ -1439,18 +1612,20 @@ impl Engine {
                     capacitance,
                     voltage,
                     voltage_prev,
-                    q_prev,
-                    q_prev_prev,
-                    cq_prev,
+                    BranchChargeHistory {
+                        q_prev,
+                        q_prev_prev,
+                        cq_prev,
+                    },
                 );
-                let Some(branch_limit) = truncation.limit(
+                let Some(branch_limit) = truncation.limit(ChargeSamples {
                     q_curr,
                     q_prev,
                     q_prev_prev,
                     q_prev_prev_prev,
                     cq_curr,
                     cq_prev,
-                ) else {
+                }) else {
                     continue;
                 };
                 if branch_limit < dt && lte_debug {
@@ -1473,15 +1648,21 @@ impl Engine {
     pub(super) fn vdmos_ngspice_truncation_limit(
         circuit: &crate::circuit::CircuitData,
         candidate_solution: &[Value],
-        method: IntegrationMethod,
-        trap_order: u8,
-        dt: Value,
+        step: TruncationStep,
         history: &VdmosTransientHistory,
-        reltol: Value,
-        current_abstol: Value,
-        charge_abstol: Value,
-        trtol: Value,
+        tolerances: NgspiceTruncationTolerances,
     ) -> Option<Value> {
+        let TruncationStep {
+            method,
+            trap_order,
+            dt,
+        } = step;
+        let NgspiceTruncationTolerances {
+            reltol,
+            current_abstol,
+            charge_abstol,
+            trtol,
+        } = tolerances;
         if history.accepted_dt_prev <= 0.0 || !history.accepted_dt_prev.is_finite() {
             return None;
         }
@@ -1498,10 +1679,12 @@ impl Engine {
             history.accepted_dt_prev_prev,
             effective_method,
             trap_order,
-            reltol,
-            current_abstol,
-            charge_abstol,
-            trtol,
+            NgspiceTruncationTolerances {
+                reltol,
+                current_abstol,
+                charge_abstol,
+                trtol,
+            },
         )?;
         let mut limit = 2.0 * dt;
         let mut found_branch = false;
@@ -1579,18 +1762,20 @@ impl Engine {
                     capacitance,
                     voltage,
                     voltage_prev,
-                    q_prev,
-                    q_prev_prev,
-                    cq_prev,
+                    BranchChargeHistory {
+                        q_prev,
+                        q_prev_prev,
+                        cq_prev,
+                    },
                 );
-                let Some(branch_limit) = truncation.limit(
+                let Some(branch_limit) = truncation.limit(ChargeSamples {
                     q_curr,
                     q_prev,
                     q_prev_prev,
                     q_prev_prev_prev,
                     cq_curr,
                     cq_prev,
-                ) else {
+                }) else {
                     continue;
                 };
                 found_branch = true;
@@ -1647,18 +1832,20 @@ impl Engine {
                     capacitance,
                     voltage,
                     q_curr_exact,
-                    q_prev,
-                    q_prev_prev,
-                    cq_prev,
+                    BranchChargeHistory {
+                        q_prev,
+                        q_prev_prev,
+                        cq_prev,
+                    },
                 );
-                let Some(branch_limit) = truncation.limit(
+                let Some(branch_limit) = truncation.limit(ChargeSamples {
                     q_curr,
                     q_prev,
                     q_prev_prev,
                     q_prev_prev_prev,
                     cq_curr,
                     cq_prev,
-                ) else {
+                }) else {
                     continue;
                 };
                 found_branch = true;
@@ -1680,15 +1867,21 @@ impl Engine {
     pub(super) fn b3soi_ngspice_truncation_limit(
         circuit: &crate::circuit::CircuitData,
         candidate_solution: &[Value],
-        method: IntegrationMethod,
-        trap_order: u8,
-        dt: Value,
+        step: TruncationStep,
         history: &B3SoiTransientHistory,
-        reltol: Value,
-        current_abstol: Value,
-        charge_abstol: Value,
-        trtol: Value,
+        tolerances: NgspiceTruncationTolerances,
     ) -> Option<Value> {
+        let TruncationStep {
+            method,
+            trap_order,
+            dt,
+        } = step;
+        let NgspiceTruncationTolerances {
+            reltol,
+            current_abstol,
+            charge_abstol,
+            trtol,
+        } = tolerances;
         if history.accepted_dt_prev <= 0.0 || !history.accepted_dt_prev.is_finite() {
             return None;
         }
@@ -1704,10 +1897,12 @@ impl Engine {
             history.accepted_dt_prev_prev,
             effective_method,
             trap_order,
-            reltol,
-            current_abstol,
-            charge_abstol,
-            trtol,
+            NgspiceTruncationTolerances {
+                reltol,
+                current_abstol,
+                charge_abstol,
+                trtol,
+            },
         )?;
         let mut limit = 2.0 * dt;
         let mut found_branch = false;
@@ -1772,16 +1967,24 @@ impl Engine {
                 ),
             ] {
                 // Integrated charge current at the candidate point.
-                let cq_curr =
-                    Self::jfet_companion_ccap(&coeff, dt, q_curr, q_prev, q_prev_prev, cq_prev);
-                let Some(branch_limit) = truncation.limit(
+                let cq_curr = Self::jfet_companion_ccap(
+                    &coeff,
+                    dt,
+                    q_curr,
+                    BranchChargeHistory {
+                        q_prev,
+                        q_prev_prev,
+                        cq_prev,
+                    },
+                );
+                let Some(branch_limit) = truncation.limit(ChargeSamples {
                     q_curr,
                     q_prev,
                     q_prev_prev,
                     q_prev_prev_prev,
                     cq_curr,
                     cq_prev,
-                ) else {
+                }) else {
                     continue;
                 };
                 found_branch = true;
@@ -1803,15 +2006,21 @@ impl Engine {
     pub(super) fn bsim3_ngspice_truncation_limit(
         circuit: &crate::circuit::CircuitData,
         candidate_solution: &[Value],
-        method: IntegrationMethod,
-        trap_order: u8,
-        dt: Value,
+        step: TruncationStep,
         history: &Bsim3TransientHistory,
-        reltol: Value,
-        current_abstol: Value,
-        charge_abstol: Value,
-        trtol: Value,
+        tolerances: NgspiceTruncationTolerances,
     ) -> Option<Value> {
+        let TruncationStep {
+            method,
+            trap_order,
+            dt,
+        } = step;
+        let NgspiceTruncationTolerances {
+            reltol,
+            current_abstol,
+            charge_abstol,
+            trtol,
+        } = tolerances;
         if history.accepted_dt_prev <= 0.0 || !history.accepted_dt_prev.is_finite() {
             return None;
         }
@@ -1827,10 +2036,12 @@ impl Engine {
             history.accepted_dt_prev_prev,
             effective_method,
             trap_order,
-            reltol,
-            current_abstol,
-            charge_abstol,
-            trtol,
+            NgspiceTruncationTolerances {
+                reltol,
+                current_abstol,
+                charge_abstol,
+                trtol,
+            },
         )?;
         let mut limit = 2.0 * dt;
         let mut found_branch = false;
@@ -1861,16 +2072,24 @@ impl Engine {
                 ),
             ] {
                 // Integrated charge current at the candidate point.
-                let cq_curr =
-                    Self::jfet_companion_ccap(&coeff, dt, q_curr, q_prev, q_prev_prev, cq_prev);
-                let Some(branch_limit) = truncation.limit(
+                let cq_curr = Self::jfet_companion_ccap(
+                    &coeff,
+                    dt,
+                    q_curr,
+                    BranchChargeHistory {
+                        q_prev,
+                        q_prev_prev,
+                        cq_prev,
+                    },
+                );
+                let Some(branch_limit) = truncation.limit(ChargeSamples {
                     q_curr,
                     q_prev,
                     q_prev_prev,
                     q_prev_prev_prev,
                     cq_curr,
                     cq_prev,
-                ) else {
+                }) else {
                     continue;
                 };
                 found_branch = true;
@@ -1892,15 +2111,21 @@ impl Engine {
     pub(super) fn bsim4_ngspice_truncation_limit(
         circuit: &crate::circuit::CircuitData,
         candidate_solution: &[Value],
-        method: IntegrationMethod,
-        trap_order: u8,
-        dt: Value,
+        step: TruncationStep,
         history: &Bsim4TransientHistory,
-        reltol: Value,
-        current_abstol: Value,
-        charge_abstol: Value,
-        trtol: Value,
+        tolerances: NgspiceTruncationTolerances,
     ) -> Option<Value> {
+        let TruncationStep {
+            method,
+            trap_order,
+            dt,
+        } = step;
+        let NgspiceTruncationTolerances {
+            reltol,
+            current_abstol,
+            charge_abstol,
+            trtol,
+        } = tolerances;
         if history.accepted_dt_prev <= 0.0 || !history.accepted_dt_prev.is_finite() {
             return None;
         }
@@ -1916,10 +2141,12 @@ impl Engine {
             history.accepted_dt_prev_prev,
             effective_method,
             trap_order,
-            reltol,
-            current_abstol,
-            charge_abstol,
-            trtol,
+            NgspiceTruncationTolerances {
+                reltol,
+                current_abstol,
+                charge_abstol,
+                trtol,
+            },
         )?;
         let mut limit = 2.0 * dt;
         let mut found_branch = false;
@@ -1945,16 +2172,24 @@ impl Engine {
                                        q_prev_prev_prev: Value,
                                        cq_prev: Value| {
                 // Integrated charge current at the candidate point.
-                let cq_curr =
-                    Self::jfet_companion_ccap(&coeff, dt, q_curr, q_prev, q_prev_prev, cq_prev);
-                let Some(branch_limit) = truncation.limit(
+                let cq_curr = Self::jfet_companion_ccap(
+                    &coeff,
+                    dt,
+                    q_curr,
+                    BranchChargeHistory {
+                        q_prev,
+                        q_prev_prev,
+                        cq_prev,
+                    },
+                );
+                let Some(branch_limit) = truncation.limit(ChargeSamples {
                     q_curr,
                     q_prev,
                     q_prev_prev,
                     q_prev_prev_prev,
                     cq_curr,
                     cq_prev,
-                ) else {
+                }) else {
                     return;
                 };
                 found_branch = true;
@@ -2037,15 +2272,21 @@ impl Engine {
     pub(super) fn ekv26_ngspice_truncation_limit(
         circuit: &crate::circuit::CircuitData,
         candidate_solution: &[Value],
-        method: IntegrationMethod,
-        trap_order: u8,
-        dt: Value,
+        step: TruncationStep,
         history: &Ekv26TransientHistory,
-        reltol: Value,
-        current_abstol: Value,
-        charge_abstol: Value,
-        trtol: Value,
+        tolerances: NgspiceTruncationTolerances,
     ) -> Option<Value> {
+        let TruncationStep {
+            method,
+            trap_order,
+            dt,
+        } = step;
+        let NgspiceTruncationTolerances {
+            reltol,
+            current_abstol,
+            charge_abstol,
+            trtol,
+        } = tolerances;
         if history.accepted_dt_prev <= 0.0 || !history.accepted_dt_prev.is_finite() {
             return None;
         }
@@ -2061,17 +2302,19 @@ impl Engine {
             history.accepted_dt_prev_prev,
             effective_method,
             trap_order,
-            reltol,
-            current_abstol,
-            charge_abstol,
-            trtol,
+            NgspiceTruncationTolerances {
+                reltol,
+                current_abstol,
+                charge_abstol,
+                trtol,
+            },
         )?;
         let mut limit = 2.0 * dt;
         let mut found_branch = false;
 
         for (idx, dev) in circuit.ekv26s.devices.iter().enumerate() {
             let q_curr = dev.dynamic_charge_vector_at_solution(candidate_solution);
-            for row in 0..EKV26_DYNAMIC_CHARGE_COUNT {
+            for (row, &charge) in q_curr.iter().enumerate().take(EKV26_DYNAMIC_CHARGE_COUNT) {
                 let q_prev = history.q_prev[idx][row];
                 let q_prev_prev = history.q_prev_prev[idx][row];
                 let q_prev_prev_prev = history.q_prev_prev_prev[idx][row];
@@ -2079,19 +2322,21 @@ impl Engine {
                 let cq_curr = Self::jfet_companion_ccap(
                     &coeff,
                     dt,
-                    q_curr[row],
-                    q_prev,
-                    q_prev_prev,
-                    cq_prev,
+                    charge,
+                    BranchChargeHistory {
+                        q_prev,
+                        q_prev_prev,
+                        cq_prev,
+                    },
                 );
-                let Some(branch_limit) = truncation.limit(
-                    q_curr[row],
+                let Some(branch_limit) = truncation.limit(ChargeSamples {
+                    q_curr: charge,
                     q_prev,
                     q_prev_prev,
                     q_prev_prev_prev,
                     cq_curr,
                     cq_prev,
-                ) else {
+                }) else {
                     continue;
                 };
                 found_branch = true;
@@ -2123,16 +2368,22 @@ impl Engine {
     pub(super) fn generated_veriloga_ngspice_truncation_limit(
         circuit: &crate::circuit::CircuitData,
         candidate_solution: &[Value],
-        method: IntegrationMethod,
-        trap_order: u8,
-        dt: Value,
+        step: TruncationStep,
         accepted_dt_prev: Value,
         accepted_dt_prev_prev: Value,
-        reltol: Value,
-        current_abstol: Value,
-        charge_abstol: Value,
-        trtol: Value,
+        tolerances: NgspiceTruncationTolerances,
     ) -> Option<Value> {
+        let TruncationStep {
+            method,
+            trap_order,
+            dt,
+        } = step;
+        let NgspiceTruncationTolerances {
+            reltol,
+            current_abstol,
+            charge_abstol,
+            trtol,
+        } = tolerances;
         if accepted_dt_prev <= 0.0 || !accepted_dt_prev.is_finite() {
             return None;
         }
@@ -2148,10 +2399,12 @@ impl Engine {
             accepted_dt_prev_prev,
             effective_method,
             trap_order,
-            reltol,
-            current_abstol,
-            charge_abstol,
-            trtol,
+            NgspiceTruncationTolerances {
+                reltol,
+                current_abstol,
+                charge_abstol,
+                trtol,
+            },
         )?;
         let num_nodes = circuit.num_nodes();
         let simparams = circuit.generated_simulation_parameters;
@@ -2174,16 +2427,24 @@ impl Engine {
                 // different length, so its own current is rebuilt from the
                 // candidate's coefficients exactly as the native families do,
                 // rather than read back off the model's staged coefficients.
-                let cq_curr =
-                    Self::jfet_companion_ccap(&coeff, dt, q_curr, q_prev, q_prev_prev, cq_prev);
-                let Some(branch_limit) = truncation.limit(
+                let cq_curr = Self::jfet_companion_ccap(
+                    &coeff,
+                    dt,
+                    q_curr,
+                    BranchChargeHistory {
+                        q_prev,
+                        q_prev_prev,
+                        cq_prev,
+                    },
+                );
+                let Some(branch_limit) = truncation.limit(ChargeSamples {
                     q_curr,
                     q_prev,
                     q_prev_prev,
                     q_prev_prev_prev,
                     cq_curr,
                     cq_prev,
-                ) else {
+                }) else {
                     continue;
                 };
                 found_branch = true;
@@ -2332,9 +2593,7 @@ impl Engine {
     pub(super) fn ngspice_device_truncation_limit(
         circuit: &crate::circuit::CircuitData,
         candidate_solution: &[Value],
-        method: IntegrationMethod,
-        trap_order: u8,
-        dt: Value,
+        step: TruncationStep,
         bjt_history: &BjtTransientHistory,
         vbic_snapshot_cache: &[Option<BjtChargeSnapshot>],
         jfet_history: &JfetTransientHistory,
@@ -2344,24 +2603,36 @@ impl Engine {
         ekv26_history: &Ekv26TransientHistory,
         suppress_gate_charge: bool,
         voltage_abstol: Value,
-        reltol: Value,
-        current_abstol: Value,
-        charge_abstol: Value,
-        trtol: Value,
+        tolerances: NgspiceTruncationTolerances,
     ) -> Option<Value> {
+        let TruncationStep {
+            method,
+            trap_order,
+            dt,
+        } = step;
+        let NgspiceTruncationTolerances {
+            reltol,
+            current_abstol,
+            charge_abstol,
+            trtol,
+        } = tolerances;
         let capacitor_limit = if !circuit.capacitors.is_empty() {
             Self::capacitor_ngspice_truncation_limit(
                 circuit,
                 candidate_solution,
-                method,
-                trap_order,
-                dt,
+                TruncationStep {
+                    method,
+                    trap_order,
+                    dt,
+                },
                 mosfet_history.accepted_dt_prev,
                 mosfet_history.accepted_dt_prev_prev,
-                reltol,
-                current_abstol,
-                charge_abstol,
-                trtol,
+                NgspiceTruncationTolerances {
+                    reltol,
+                    current_abstol,
+                    charge_abstol,
+                    trtol,
+                },
                 None,
             )
             .filter(|limit| limit.is_finite() && *limit > 0.0)
@@ -2372,15 +2643,19 @@ impl Engine {
             Self::inductor_ngspice_truncation_limit(
                 circuit,
                 candidate_solution,
-                method,
-                trap_order,
-                dt,
+                TruncationStep {
+                    method,
+                    trap_order,
+                    dt,
+                },
                 mosfet_history.accepted_dt_prev,
                 mosfet_history.accepted_dt_prev_prev,
-                reltol,
-                current_abstol,
-                charge_abstol,
-                trtol,
+                NgspiceTruncationTolerances {
+                    reltol,
+                    current_abstol,
+                    charge_abstol,
+                    trtol,
+                },
             )
             .filter(|limit| limit.is_finite() && *limit > 0.0)
         } else {
@@ -2390,16 +2665,20 @@ impl Engine {
             Self::bjt_ngspice_truncation_limit(
                 circuit,
                 candidate_solution,
-                method,
-                trap_order,
-                dt,
+                TruncationStep {
+                    method,
+                    trap_order,
+                    dt,
+                },
                 bjt_history,
                 vbic_snapshot_cache,
                 voltage_abstol,
-                reltol,
-                current_abstol,
-                charge_abstol,
-                trtol,
+                NgspiceTruncationTolerances {
+                    reltol,
+                    current_abstol,
+                    charge_abstol,
+                    trtol,
+                },
             )
             .filter(|limit| limit.is_finite() && *limit > 0.0)
         } else {
@@ -2409,15 +2688,19 @@ impl Engine {
             Self::jfet_ngspice_truncation_limit(
                 circuit,
                 candidate_solution,
-                method,
-                trap_order,
-                dt,
+                TruncationStep {
+                    method,
+                    trap_order,
+                    dt,
+                },
                 jfet_history,
                 suppress_gate_charge,
-                reltol,
-                current_abstol,
-                charge_abstol,
-                trtol,
+                NgspiceTruncationTolerances {
+                    reltol,
+                    current_abstol,
+                    charge_abstol,
+                    trtol,
+                },
             )
             .filter(|limit| limit.is_finite() && *limit > 0.0)
         } else {
@@ -2427,14 +2710,18 @@ impl Engine {
             Self::diode_ngspice_truncation_limit(
                 circuit,
                 candidate_solution,
-                method,
-                trap_order,
-                dt,
+                TruncationStep {
+                    method,
+                    trap_order,
+                    dt,
+                },
                 diode_history,
-                reltol,
-                current_abstol,
-                charge_abstol,
-                trtol,
+                NgspiceTruncationTolerances {
+                    reltol,
+                    current_abstol,
+                    charge_abstol,
+                    trtol,
+                },
             )
             .filter(|limit| limit.is_finite() && *limit > 0.0)
         } else {
@@ -2444,14 +2731,18 @@ impl Engine {
             Self::mosfet_ngspice_truncation_limit(
                 circuit,
                 candidate_solution,
-                method,
-                trap_order,
-                dt,
+                TruncationStep {
+                    method,
+                    trap_order,
+                    dt,
+                },
                 mosfet_history,
-                reltol,
-                current_abstol,
-                charge_abstol,
-                trtol,
+                NgspiceTruncationTolerances {
+                    reltol,
+                    current_abstol,
+                    charge_abstol,
+                    trtol,
+                },
                 None,
             )
             .filter(|limit| limit.is_finite() && *limit > 0.0)
@@ -2462,14 +2753,18 @@ impl Engine {
             Self::vdmos_ngspice_truncation_limit(
                 circuit,
                 candidate_solution,
-                method,
-                trap_order,
-                dt,
+                TruncationStep {
+                    method,
+                    trap_order,
+                    dt,
+                },
                 vdmos_history,
-                reltol,
-                current_abstol,
-                charge_abstol,
-                trtol,
+                NgspiceTruncationTolerances {
+                    reltol,
+                    current_abstol,
+                    charge_abstol,
+                    trtol,
+                },
             )
             .filter(|limit| limit.is_finite() && *limit > 0.0)
         } else {
@@ -2479,14 +2774,18 @@ impl Engine {
             Self::ekv26_ngspice_truncation_limit(
                 circuit,
                 candidate_solution,
-                method,
-                trap_order,
-                dt,
+                TruncationStep {
+                    method,
+                    trap_order,
+                    dt,
+                },
                 ekv26_history,
-                reltol,
-                current_abstol,
-                charge_abstol,
-                trtol,
+                NgspiceTruncationTolerances {
+                    reltol,
+                    current_abstol,
+                    charge_abstol,
+                    trtol,
+                },
             )
             .filter(|limit| limit.is_finite() && *limit > 0.0)
         } else {
@@ -2500,15 +2799,19 @@ impl Engine {
             Self::generated_veriloga_ngspice_truncation_limit(
                 circuit,
                 candidate_solution,
-                method,
-                trap_order,
-                dt,
+                TruncationStep {
+                    method,
+                    trap_order,
+                    dt,
+                },
                 mosfet_history.accepted_dt_prev,
                 mosfet_history.accepted_dt_prev_prev,
-                reltol,
-                current_abstol,
-                charge_abstol,
-                trtol,
+                NgspiceTruncationTolerances {
+                    reltol,
+                    current_abstol,
+                    charge_abstol,
+                    trtol,
+                },
             )
             .filter(|limit| limit.is_finite() && *limit > 0.0)
         } else {
@@ -2687,14 +2990,20 @@ impl Engine {
         circuit: &crate::circuit::CircuitData,
         candidate_solution: &[Value],
         predicted_solution: Option<&[Value]>,
-        dt: Value,
-        method: IntegrationMethod,
-        trap_order: u8,
+        step: TruncationStep,
         is_strictly_linear_transient: bool,
-        voltage_lte_estimator: &LteEstimator,
-        voltage_lte_excluded_nodes: &[usize],
-        xyce_lte_excluded_indices: &[usize],
+        voltage_lte: VoltageLteConfig<'_>,
     ) -> (Value, bool) {
+        let VoltageLteConfig {
+            estimator: voltage_lte_estimator,
+            excluded_nodes: voltage_lte_excluded_nodes,
+            xyce_excluded_indices: xyce_lte_excluded_indices,
+        } = voltage_lte;
+        let TruncationStep {
+            method,
+            trap_order,
+            dt,
+        } = step;
         if is_strictly_linear_transient && !voltage_lte_estimator.uses_accepted_solution_reference()
         {
             return (0.0, true);
@@ -2704,9 +3013,11 @@ impl Engine {
         if !uses_xyce_solution_domain {
             return voltage_lte_estimator.estimate_prefix_excluding(
                 candidate_solution,
-                circuit.num_nodes(),
-                dt,
-                voltage_lte_excluded_nodes,
+                LtePrefixWindow {
+                    prefix_len: circuit.num_nodes(),
+                    dt,
+                    excluded_indices: voltage_lte_excluded_nodes,
+                },
             );
         }
         let error_domain_len = candidate_solution.len();
@@ -2716,17 +3027,21 @@ impl Engine {
                 .estimate_correction_prefix_excluding_for_integration(
                     candidate_solution,
                     predicted,
-                    error_domain_len,
-                    dt,
-                    excluded,
+                    LtePrefixWindow {
+                        prefix_len: error_domain_len,
+                        dt,
+                        excluded_indices: excluded,
+                    },
                     method,
                     trap_order,
                 ),
             None => voltage_lte_estimator.estimate_prefix_excluding_for_integration(
                 candidate_solution,
-                error_domain_len,
-                dt,
-                excluded,
+                LtePrefixWindow {
+                    prefix_len: error_domain_len,
+                    dt,
+                    excluded_indices: excluded,
+                },
                 method,
                 trap_order,
             ),
@@ -2762,16 +3077,22 @@ impl Engine {
         b3soi_history: &B3SoiTransientHistory,
         bsim3_history: &Bsim3TransientHistory,
         bsim4_history: &Bsim4TransientHistory,
-        voltage_lte_estimator: &LteEstimator,
-        voltage_lte_excluded_nodes: &[usize],
-        xyce_lte_excluded_indices: &[usize],
+        voltage_lte: VoltageLteConfig<'_>,
         vbic_snapshot_cache: &[Option<BjtChargeSnapshot>],
         voltage_abstol: Value,
-        reltol: Value,
-        current_abstol: Value,
-        charge_abstol: Value,
-        trtol: Value,
+        tolerances: NgspiceTruncationTolerances,
     ) -> Option<TrapezoidalOrderTrial> {
+        let VoltageLteConfig {
+            estimator: voltage_lte_estimator,
+            excluded_nodes: voltage_lte_excluded_nodes,
+            xyce_excluded_indices: xyce_lte_excluded_indices,
+        } = voltage_lte;
+        let NgspiceTruncationTolerances {
+            reltol,
+            current_abstol,
+            charge_abstol,
+            trtol,
+        } = tolerances;
         if !matches!(
             method,
             IntegrationMethod::Trapezoidal | IntegrationMethod::TrapGear
@@ -2792,9 +3113,11 @@ impl Engine {
             let base_limit = Self::ngspice_device_truncation_limit(
                 circuit,
                 accepted_solution,
-                method,
-                2,
-                dt,
+                TruncationStep {
+                    method,
+                    trap_order: 2,
+                    dt,
+                },
                 history,
                 vbic_snapshot_cache,
                 jfet_history,
@@ -2804,10 +3127,12 @@ impl Engine {
                 ekv26_history,
                 false,
                 voltage_abstol,
-                reltol,
-                current_abstol,
-                charge_abstol,
-                trtol,
+                NgspiceTruncationTolerances {
+                    reltol,
+                    current_abstol,
+                    charge_abstol,
+                    trtol,
+                },
             );
             let b3soi_limit = circuit
                 .has_b3soi_devices()
@@ -2815,14 +3140,18 @@ impl Engine {
                     Self::b3soi_ngspice_truncation_limit(
                         circuit,
                         accepted_solution,
-                        method,
-                        2,
-                        dt,
+                        TruncationStep {
+                            method,
+                            trap_order: 2,
+                            dt,
+                        },
                         b3soi_history,
-                        reltol,
-                        current_abstol,
-                        charge_abstol,
-                        trtol,
+                        NgspiceTruncationTolerances {
+                            reltol,
+                            current_abstol,
+                            charge_abstol,
+                            trtol,
+                        },
                     )
                 })
                 .flatten()
@@ -2833,14 +3162,18 @@ impl Engine {
                     Self::bsim3_ngspice_truncation_limit(
                         circuit,
                         accepted_solution,
-                        method,
-                        2,
-                        dt,
+                        TruncationStep {
+                            method,
+                            trap_order: 2,
+                            dt,
+                        },
                         bsim3_history,
-                        reltol,
-                        current_abstol,
-                        charge_abstol,
-                        trtol,
+                        NgspiceTruncationTolerances {
+                            reltol,
+                            current_abstol,
+                            charge_abstol,
+                            trtol,
+                        },
                     )
                 })
                 .flatten()
@@ -2851,14 +3184,18 @@ impl Engine {
                     Self::bsim4_ngspice_truncation_limit(
                         circuit,
                         accepted_solution,
-                        method,
-                        2,
-                        dt,
+                        TruncationStep {
+                            method,
+                            trap_order: 2,
+                            dt,
+                        },
                         bsim4_history,
-                        reltol,
-                        current_abstol,
-                        charge_abstol,
-                        trtol,
+                        NgspiceTruncationTolerances {
+                            reltol,
+                            current_abstol,
+                            charge_abstol,
+                            trtol,
+                        },
                     )
                 })
                 .flatten()
@@ -2878,13 +3215,17 @@ impl Engine {
             circuit,
             accepted_solution,
             None,
-            dt,
-            method,
-            2,
+            TruncationStep {
+                method,
+                trap_order: 2,
+                dt,
+            },
             is_strictly_linear_transient,
-            voltage_lte_estimator,
-            voltage_lte_excluded_nodes,
-            xyce_lte_excluded_indices,
+            VoltageLteConfig {
+                estimator: voltage_lte_estimator,
+                excluded_nodes: voltage_lte_excluded_nodes,
+                xyce_excluded_indices: xyce_lte_excluded_indices,
+            },
         );
         if !accept {
             return None;
@@ -2931,8 +3272,8 @@ impl Engine {
         for pivot in 0..dim {
             let mut best = pivot;
             let mut best_abs = lu[pivot][pivot].abs();
-            for row in (pivot + 1)..dim {
-                let value = lu[row][pivot].abs();
+            for (row, entries) in lu.iter().enumerate().take(dim).skip(pivot + 1) {
+                let value = entries[pivot].abs();
                 if value > best_abs {
                     best = row;
                     best_abs = value;
@@ -2950,8 +3291,15 @@ impl Engine {
             for row in (pivot + 1)..dim {
                 lu[row][pivot] /= pivot_value;
                 let factor = lu[row][pivot];
-                for col in (pivot + 1)..dim {
-                    lu[row][col] -= factor * lu[pivot][col];
+                // `row > pivot`, so the pivot row stays in `above`.
+                let (above, below) = lu.split_at_mut(row);
+                let pivot_row = &above[pivot];
+                let target_row = &mut below[0];
+                for (target, &value) in target_row[(pivot + 1)..dim]
+                    .iter_mut()
+                    .zip(&pivot_row[(pivot + 1)..dim])
+                {
+                    *target -= factor * value;
                 }
             }
         }
@@ -3001,22 +3349,28 @@ mod tests {
 
     #[allow(clippy::too_many_arguments)]
     fn reference_charge_truncation_limit(
-        q_curr: Value,
-        q_prev: Value,
-        q_prev_prev: Value,
-        q_prev_prev_prev: Value,
-        cq_curr: Value,
-        cq_prev: Value,
+        samples: ChargeSamples,
         dt: Value,
         prev_dt: Value,
         prev_prev_dt: Value,
         method: IntegrationMethod,
         trap_order: u8,
-        reltol: Value,
-        current_abstol: Value,
-        charge_abstol: Value,
-        trtol: Value,
+        tolerances: NgspiceTruncationTolerances,
     ) -> Option<Value> {
+        let ChargeSamples {
+            q_curr,
+            q_prev,
+            q_prev_prev,
+            q_prev_prev_prev,
+            cq_curr,
+            cq_prev,
+        } = samples;
+        let NgspiceTruncationTolerances {
+            reltol,
+            current_abstol,
+            charge_abstol,
+            trtol,
+        } = tolerances;
         if !dt.is_finite() || dt <= 0.0 {
             return None;
         }
@@ -3093,38 +3447,46 @@ mod tests {
                 for (dt, prev_dt, prev_prev_dt) in timesteps {
                     for (q0, q1, q2, q3, cq0, cq1) in states {
                         let expected = reference_charge_truncation_limit(
-                            q0,
-                            q1,
-                            q2,
-                            q3,
-                            cq0,
-                            cq1,
+                            ChargeSamples {
+                                q_curr: q0,
+                                q_prev: q1,
+                                q_prev_prev: q2,
+                                q_prev_prev_prev: q3,
+                                cq_curr: cq0,
+                                cq_prev: cq1,
+                            },
                             dt,
                             prev_dt,
                             prev_prev_dt,
                             method,
                             trap_order,
-                            1.0e-3,
-                            1.0e-12,
-                            1.0e-14,
-                            7.0,
+                            NgspiceTruncationTolerances {
+                                reltol: 1.0e-3,
+                                current_abstol: 1.0e-12,
+                                charge_abstol: 1.0e-14,
+                                trtol: 7.0,
+                            },
                         );
                         let actual = Engine::ngspice_charge_truncation_limit(
-                            q0,
-                            q1,
-                            q2,
-                            q3,
-                            cq0,
-                            cq1,
+                            ChargeSamples {
+                                q_curr: q0,
+                                q_prev: q1,
+                                q_prev_prev: q2,
+                                q_prev_prev_prev: q3,
+                                cq_curr: cq0,
+                                cq_prev: cq1,
+                            },
                             dt,
                             prev_dt,
                             prev_prev_dt,
                             method,
                             trap_order,
-                            1.0e-3,
-                            1.0e-12,
-                            1.0e-14,
-                            7.0,
+                            NgspiceTruncationTolerances {
+                                reltol: 1.0e-3,
+                                current_abstol: 1.0e-12,
+                                charge_abstol: 1.0e-14,
+                                trtol: 7.0,
+                            },
                         );
                         assert_eq!(
                             actual.map(Value::to_bits),
@@ -3183,15 +3545,19 @@ C1 n 0 2p\n\
         let _ = Engine::capacitor_ngspice_truncation_limit(
             &circuit,
             &candidate,
-            method,
-            trap_order,
-            dt,
+            TruncationStep {
+                method,
+                trap_order,
+                dt,
+            },
             prev_dt,
             prev_prev_dt,
-            1.0e-3,
-            1.0e-12,
-            1.0e-14,
-            7.0,
+            NgspiceTruncationTolerances {
+                reltol: 1.0e-3,
+                current_abstol: 1.0e-12,
+                charge_abstol: 1.0e-14,
+                trtol: 7.0,
+            },
             Some(&mut states),
         );
 
@@ -3226,15 +3592,19 @@ C1 n 0 2p\n\
         let _ = Engine::capacitor_ngspice_truncation_limit(
             &circuit,
             &candidate,
-            method,
-            trap_order,
-            dt,
+            TruncationStep {
+                method,
+                trap_order,
+                dt,
+            },
             prev_dt,
             prev_prev_dt,
-            1.0e-3,
-            1.0e-12,
-            1.0e-14,
-            7.0,
+            NgspiceTruncationTolerances {
+                reltol: 1.0e-3,
+                current_abstol: 1.0e-12,
+                charge_abstol: 1.0e-14,
+                trtol: 7.0,
+            },
             Some(&mut states),
         );
         assert!(states.is_empty(), "an incomplete handoff must fail closed");
@@ -3271,15 +3641,19 @@ L1 n 0 2.5u\n\
                 let actual = Engine::inductor_ngspice_truncation_limit(
                     &circuit,
                     &candidate,
-                    method,
-                    trap_order,
-                    dt,
+                    TruncationStep {
+                        method,
+                        trap_order,
+                        dt,
+                    },
                     prev_dt,
                     prev_prev_dt,
-                    1.0e-3,
-                    1.0e-12,
-                    1.0e-14,
-                    7.0,
+                    NgspiceTruncationTolerances {
+                        reltol: 1.0e-3,
+                        current_abstol: 1.0e-12,
+                        charge_abstol: 1.0e-14,
+                        trtol: 7.0,
+                    },
                 )
                 .expect("a finite positive inductance yields a flux limit");
 
@@ -3295,21 +3669,25 @@ L1 n 0 2.5u\n\
                     circuit.inductors.v_prev[0],
                 );
                 let expected = Engine::ngspice_charge_truncation_limit(
-                    inductance * candidate[branch],
-                    inductance * circuit.inductors.i_prev[0],
-                    inductance * circuit.inductors.i_prev_prev[0],
-                    inductance * circuit.inductors.i_prev_prev_prev[0],
-                    req * candidate[branch] - veq,
-                    circuit.inductors.v_prev[0],
+                    ChargeSamples {
+                        q_curr: inductance * candidate[branch],
+                        q_prev: inductance * circuit.inductors.i_prev[0],
+                        q_prev_prev: inductance * circuit.inductors.i_prev_prev[0],
+                        q_prev_prev_prev: inductance * circuit.inductors.i_prev_prev_prev[0],
+                        cq_curr: req * candidate[branch] - veq,
+                        cq_prev: circuit.inductors.v_prev[0],
+                    },
                     dt,
                     prev_dt,
                     prev_prev_dt,
                     effective,
                     trap_order,
-                    1.0e-3,
-                    1.0e-12,
-                    1.0e-14,
-                    7.0,
+                    NgspiceTruncationTolerances {
+                        reltol: 1.0e-3,
+                        current_abstol: 1.0e-12,
+                        charge_abstol: 1.0e-14,
+                        trtol: 7.0,
+                    },
                 )
                 .expect("reference flux limit")
                 .min(2.0 * dt);
@@ -3357,15 +3735,19 @@ K12 L1 L2 0.9\n\
             Engine::inductor_ngspice_truncation_limit(
                 &circuit,
                 &candidate,
-                IntegrationMethod::Trapezoidal,
-                1,
+                TruncationStep {
+                    method: IntegrationMethod::Trapezoidal,
+                    trap_order: 1,
+                    dt: 1.0e-9
+                },
                 1.0e-9,
                 1.0e-9,
-                1.0e-9,
-                1.0e-3,
-                1.0e-12,
-                1.0e-14,
-                7.0,
+                NgspiceTruncationTolerances {
+                    reltol: 1.0e-3,
+                    current_abstol: 1.0e-12,
+                    charge_abstol: 1.0e-14,
+                    trtol: 7.0
+                }
             )
             .is_none(),
             "M*i_other is part of the coupled flux; the self-inductance walk must not claim it"
@@ -3414,14 +3796,18 @@ D1 n 0 dmod
         let limit = Engine::diode_ngspice_truncation_limit(
             &circuit,
             &candidate,
-            IntegrationMethod::Trapezoidal,
-            1,
-            dt,
+            TruncationStep {
+                method: IntegrationMethod::Trapezoidal,
+                trap_order: 1,
+                dt,
+            },
             &history,
-            1.0e-3,
-            1.0e-12,
-            1.0e-14,
-            7.0,
+            NgspiceTruncationTolerances {
+                reltol: 1.0e-3,
+                current_abstol: 1.0e-12,
+                charge_abstol: 1.0e-14,
+                trtol: 7.0,
+            },
         )
         .expect("DIOtrunc walks CKTterr on a zero charge state too");
         assert!(
@@ -3475,16 +3861,20 @@ Q1 n n 0 0 qmod
             let limit = Engine::legacy_bjt_ngspice_truncation_limit(
                 &circuit,
                 &candidate,
-                IntegrationMethod::Trapezoidal,
-                1,
-                dt,
+                TruncationStep {
+                    method: IntegrationMethod::Trapezoidal,
+                    trap_order: 1,
+                    dt,
+                },
                 &history,
                 &[],
                 1.0e-9,
-                1.0e-3,
-                1.0e-12,
-                1.0e-14,
-                7.0,
+                NgspiceTruncationTolerances {
+                    reltol: 1.0e-3,
+                    current_abstol: 1.0e-12,
+                    charge_abstol: 1.0e-14,
+                    trtol: 7.0,
+                },
             )
             .expect("charged legacy BJT branches report a limit");
             assert!(
@@ -3527,16 +3917,20 @@ Q1 n n 0 0 qmod
         let limit = Engine::bjt_ngspice_truncation_limit(
             &circuit,
             &candidate,
-            IntegrationMethod::Trapezoidal,
-            1,
-            dt,
+            TruncationStep {
+                method: IntegrationMethod::Trapezoidal,
+                trap_order: 1,
+                dt,
+            },
             &history,
             &[],
             1.0e-9,
-            1.0e-3,
-            1.0e-12,
-            1.0e-14,
-            7.0,
+            NgspiceTruncationTolerances {
+                reltol: 1.0e-3,
+                current_abstol: 1.0e-12,
+                charge_abstol: 1.0e-14,
+                trtol: 7.0,
+            },
         )
         .expect("BJTtrunc walks CKTterr on a zero charge state too");
         assert!(
@@ -3587,15 +3981,19 @@ J1 n n 0 jmod
         let limit = Engine::jfet_ngspice_truncation_limit(
             &circuit,
             &candidate,
-            IntegrationMethod::Trapezoidal,
-            1,
-            dt,
+            TruncationStep {
+                method: IntegrationMethod::Trapezoidal,
+                trap_order: 1,
+                dt,
+            },
             &history,
             false,
-            1.0e-3,
-            1.0e-12,
-            1.0e-14,
-            7.0,
+            NgspiceTruncationTolerances {
+                reltol: 1.0e-3,
+                current_abstol: 1.0e-12,
+                charge_abstol: 1.0e-14,
+                trtol: 7.0,
+            },
         )
         .expect("JFETtrunc walks CKTterr on a zero charge state too");
         assert!(
@@ -3650,14 +4048,18 @@ M1 n n 0 0 mmod W=10u L=1u
         let limit = Engine::mosfet_ngspice_truncation_limit(
             &circuit,
             &candidate,
-            IntegrationMethod::Trapezoidal,
-            1,
-            dt,
+            TruncationStep {
+                method: IntegrationMethod::Trapezoidal,
+                trap_order: 1,
+                dt,
+            },
             &history,
-            1.0e-3,
-            1.0e-12,
-            1.0e-14,
-            7.0,
+            NgspiceTruncationTolerances {
+                reltol: 1.0e-3,
+                current_abstol: 1.0e-12,
+                charge_abstol: 1.0e-14,
+                trtol: 7.0,
+            },
             None,
         )
         .expect("MOS6trunc walks CKTterr on a zero charge state too");
@@ -3714,14 +4116,18 @@ M1 n n 0 0 mmod W=10u L=1u
         let direct = Engine::mosfet_ngspice_truncation_limit(
             &circuit,
             &candidate,
-            IntegrationMethod::Trapezoidal,
-            1,
-            dt,
+            TruncationStep {
+                method: IntegrationMethod::Trapezoidal,
+                trap_order: 1,
+                dt,
+            },
             &history,
-            1.0e-3,
-            1.0e-12,
-            1.0e-14,
-            7.0,
+            NgspiceTruncationTolerances {
+                reltol: 1.0e-3,
+                current_abstol: 1.0e-12,
+                charge_abstol: 1.0e-14,
+                trtol: 7.0,
+            },
             None,
         )
         .expect("the direct MOS6trunc walk reports a limit");
@@ -3772,10 +4178,12 @@ M1 n n 0 0 mmod W=10u L=1u
             history.accepted_dt_prev_prev,
             IntegrationMethod::Trapezoidal,
             1,
-            1.0e-3,
-            1.0e-12,
-            1.0e-14,
-            7.0,
+            NgspiceTruncationTolerances {
+                reltol: 1.0e-3,
+                current_abstol: 1.0e-12,
+                charge_abstol: 1.0e-14,
+                trtol: 7.0,
+            },
         )
         .expect("valid truncation context");
 
@@ -3860,14 +4268,18 @@ M1 n g 0 0 vtrunc W=1 L=1u
         let limit = Engine::vdmos_ngspice_truncation_limit(
             &circuit,
             &candidate,
-            IntegrationMethod::Trapezoidal,
-            1,
-            dt,
+            TruncationStep {
+                method: IntegrationMethod::Trapezoidal,
+                trap_order: 1,
+                dt,
+            },
             &history,
-            1.0e-3,
-            1.0e-12,
-            1.0e-14,
-            7.0,
+            NgspiceTruncationTolerances {
+                reltol: 1.0e-3,
+                current_abstol: 1.0e-12,
+                charge_abstol: 1.0e-14,
+                trtol: 7.0,
+            },
         )
         .expect("VDMOStrunc walks CKTterr on a zero charge state too");
         assert!(
@@ -3918,15 +4330,19 @@ M1 n g 0 0 vtrunc W=1 L=1u
         let serial_limit = Engine::capacitor_ngspice_truncation_limit(
             &circuit,
             &candidate,
-            method,
-            trap_order,
-            dt,
+            TruncationStep {
+                method,
+                trap_order,
+                dt,
+            },
             prev_dt,
             prev_prev_dt,
-            1.0e-3,
-            1.0e-12,
-            1.0e-14,
-            7.0,
+            NgspiceTruncationTolerances {
+                reltol: 1.0e-3,
+                current_abstol: 1.0e-12,
+                charge_abstol: 1.0e-14,
+                trtol: 7.0,
+            },
             Some(&mut serial_states),
         );
         let engine = Engine::default();
@@ -3934,15 +4350,19 @@ M1 n g 0 0 vtrunc W=1 L=1u
         let parallel_limit = engine.capacitor_ngspice_truncation_limit_parallel(
             &circuit,
             &candidate,
-            method,
-            trap_order,
-            dt,
+            TruncationStep {
+                method,
+                trap_order,
+                dt,
+            },
             prev_dt,
             prev_prev_dt,
-            1.0e-3,
-            1.0e-12,
-            1.0e-14,
-            7.0,
+            NgspiceTruncationTolerances {
+                reltol: 1.0e-3,
+                current_abstol: 1.0e-12,
+                charge_abstol: 1.0e-14,
+                trtol: 7.0,
+            },
             4,
             &mut parallel_states,
         );
@@ -4069,14 +4489,18 @@ M2 d g s 0 NM W=17u L=2u
         let direct = Engine::mosfet_ngspice_truncation_limit(
             &circuit,
             &candidate,
-            IntegrationMethod::Trapezoidal,
-            1,
-            dt,
+            TruncationStep {
+                method: IntegrationMethod::Trapezoidal,
+                trap_order: 1,
+                dt,
+            },
             &history,
-            1.0e-3,
-            1.0e-12,
-            1.0e-14,
-            7.0,
+            NgspiceTruncationTolerances {
+                reltol: 1.0e-3,
+                current_abstol: 1.0e-12,
+                charge_abstol: 1.0e-14,
+                trtol: 7.0,
+            },
             Some((&mut cache, false)),
         );
         assert_eq!(cache.len(), circuit.mosfets.devices.len());
@@ -4085,14 +4509,18 @@ M2 d g s 0 NM W=17u L=2u
         let reused = Engine::mosfet_ngspice_truncation_limit(
             &circuit,
             &candidate,
-            IntegrationMethod::Trapezoidal,
-            1,
-            dt,
+            TruncationStep {
+                method: IntegrationMethod::Trapezoidal,
+                trap_order: 1,
+                dt,
+            },
             &history,
-            1.0e-3,
-            1.0e-12,
-            1.0e-14,
-            7.0,
+            NgspiceTruncationTolerances {
+                reltol: 1.0e-3,
+                current_abstol: 1.0e-12,
+                charge_abstol: 1.0e-14,
+                trtol: 7.0,
+            },
             Some((&mut cache, true)),
         );
 
@@ -4127,10 +4555,12 @@ M2 d g s 0 NM W=17u L=2u
             history.accepted_dt_prev_prev,
             IntegrationMethod::Trapezoidal,
             1,
-            1.0e-3,
-            1.0e-12,
-            1.0e-14,
-            7.0,
+            NgspiceTruncationTolerances {
+                reltol: 1.0e-3,
+                current_abstol: 1.0e-12,
+                charge_abstol: 1.0e-14,
+                trtol: 7.0,
+            },
         )
         .expect("valid truncation context");
         let fused =
@@ -4199,14 +4629,18 @@ M1 d g s e n1 w=4u l=1u
         let limit = Engine::b3soi_ngspice_truncation_limit(
             &circuit,
             &candidate,
-            IntegrationMethod::Trapezoidal,
-            1,
-            dt,
+            TruncationStep {
+                method: IntegrationMethod::Trapezoidal,
+                trap_order: 1,
+                dt,
+            },
             &history,
-            1.0e-3,
-            1.0e-12,
-            1.0e-14,
-            7.0,
+            NgspiceTruncationTolerances {
+                reltol: 1.0e-3,
+                current_abstol: 1.0e-12,
+                charge_abstol: 1.0e-14,
+                trtol: 7.0,
+            },
         )
         .expect("unchanged qg/qb/qd still yields the default 2*dt bound");
 
@@ -4289,9 +4723,11 @@ M1 d g s 0 VTRUNC W=1 L=1u
         let limit = Engine::ngspice_device_truncation_limit(
             &circuit,
             &candidate,
-            IntegrationMethod::Trapezoidal,
-            1,
-            dt,
+            TruncationStep {
+                method: IntegrationMethod::Trapezoidal,
+                trap_order: 1,
+                dt,
+            },
             &bjt_history,
             &[],
             &jfet_history,
@@ -4301,10 +4737,12 @@ M1 d g s 0 VTRUNC W=1 L=1u
             &ekv26_history,
             false,
             1.0e-9,
-            1.0e-3,
-            1.0e-12,
-            1.0e-14,
-            7.0,
+            NgspiceTruncationTolerances {
+                reltol: 1.0e-3,
+                current_abstol: 1.0e-12,
+                charge_abstol: 1.0e-14,
+                trtol: 7.0,
+            },
         );
 
         assert!(
@@ -4375,9 +4813,11 @@ VB b 0 -1
         let limit = Engine::ngspice_device_truncation_limit(
             &circuit,
             &candidate,
-            IntegrationMethod::Trapezoidal,
-            1,
-            dt,
+            TruncationStep {
+                method: IntegrationMethod::Trapezoidal,
+                trap_order: 1,
+                dt,
+            },
             &bjt_history,
             &[],
             &jfet_history,
@@ -4387,10 +4827,12 @@ VB b 0 -1
             &ekv26_history,
             false,
             1.0e-9,
-            1.0e-3,
-            1.0e-12,
-            1.0e-14,
-            7.0,
+            NgspiceTruncationTolerances {
+                reltol: 1.0e-3,
+                current_abstol: 1.0e-12,
+                charge_abstol: 1.0e-14,
+                trtol: 7.0,
+            },
         );
 
         assert!(
@@ -4452,9 +4894,11 @@ J1 d g s PS area=1
         let limit = Engine::ngspice_device_truncation_limit(
             &circuit,
             &candidate,
-            IntegrationMethod::Trapezoidal,
-            1,
-            dt,
+            TruncationStep {
+                method: IntegrationMethod::Trapezoidal,
+                trap_order: 1,
+                dt,
+            },
             &bjt_history,
             &[],
             &jfet_history,
@@ -4464,10 +4908,12 @@ J1 d g s PS area=1
             &ekv26_history,
             true,
             1.0e-9,
-            1.0e-3,
-            1.0e-12,
-            1.0e-14,
-            7.0,
+            NgspiceTruncationTolerances {
+                reltol: 1.0e-3,
+                current_abstol: 1.0e-12,
+                charge_abstol: 1.0e-14,
+                trtol: 7.0,
+            },
         );
 
         assert!(

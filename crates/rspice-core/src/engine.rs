@@ -109,7 +109,8 @@ pub use config_resolver::{
 };
 pub use core::Engine;
 pub use dc::{
-    DcSweepPointResult, bounded_dc_sweep_points, canonical_device_parameter_sweep_source,
+    DcSweepPointResult, DcSweepRange, bounded_dc_sweep_points,
+    canonical_device_parameter_sweep_source,
 };
 pub use error::{
     MaterializationMismatchError, OutputCommitError, OutputCommitPhase,

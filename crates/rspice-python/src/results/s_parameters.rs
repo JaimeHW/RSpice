@@ -126,8 +126,11 @@ impl PySParameterResult {
                     let mut matrix = SMatrix::new(*frequency, 2);
                     for row in 0..2 {
                         for column in 0..2 {
-                            let value = self.parameters[row][column]
-                                .get(index)
+                            let value = self
+                                .parameters
+                                .get(row)
+                                .and_then(|entries| entries.get(column))
+                                .and_then(|series| series.get(index))
                                 .copied()
                                 .unwrap_or_else(|| Complex64::new(f64::NAN, f64::NAN));
                             matrix.set(row + 1, column + 1, value);

@@ -324,15 +324,11 @@ pub(in crate::device::transmission_line) fn distributed_rlc_h2(
 
 #[inline]
 pub(in crate::device::transmission_line) fn distributed_rlc_straight_line_check(
-    x1: Value,
-    y1: Value,
-    x2: Value,
-    y2: Value,
-    x3: Value,
-    y3: Value,
+    points: [(Value, Value); 3],
     reltol: Value,
     abstol: Value,
 ) -> bool {
+    let [(x1, y1), (x2, y2), (x3, y3)] = points;
     let quad_area1 = 0.5 * (y2.abs() + y1.abs()) * (x2 - x1).abs();
     let quad_area2 = 0.5 * (y3.abs() + y2.abs()) * (x3 - x2).abs();
     let quad_area3 = 0.5 * (y3.abs() + y1.abs()) * (x3 - x1).abs();
@@ -367,12 +363,7 @@ pub(in crate::device::transmission_line) fn distributed_rlc_max_safe_step(
         // model-level timestep hint; constraining both changes the accepted
         // time grid and produces step-history-dependent waveform drift.
         let done_h2 = distributed_rlc_straight_line_check(
-            x_big,
-            y1_big,
-            x_mid,
-            y1_mid,
-            x_small,
-            y1_small,
+            [(x_big, y1_big), (x_mid, y1_mid), (x_small, y1_small)],
             compact_reltol,
             compact_abstol,
         );

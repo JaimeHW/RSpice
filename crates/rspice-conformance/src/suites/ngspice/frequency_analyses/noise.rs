@@ -3,19 +3,25 @@ use super::*;
 impl TestRunner {
     pub(in crate::suites::ngspice) fn run_noise_test(
         &self,
-        name: &str,
-        cir_path: &Path,
-        source_path: &Path,
-        source: &str,
+        case: &RegressionCase<'_>,
         output_pos: &str,
         output_neg: Option<&str>,
         input_source: &str,
-        sweep_type: AcSweepType,
-        points: usize,
-        fstart: Value,
-        fstop: Value,
-        start: std::time::Instant,
+        sweep: FrequencySweep,
     ) -> TestResult {
+        let RegressionCase {
+            name,
+            cir_path,
+            source_path,
+            source,
+            start,
+        } = *case;
+        let FrequencySweep {
+            sweep_type,
+            points,
+            fstart,
+            fstop,
+        } = sweep;
         let netlist = match Self::parse_regression_source(source, source_path) {
             Ok(n) => n,
             Err(e) => {

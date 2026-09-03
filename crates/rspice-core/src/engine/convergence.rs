@@ -5,17 +5,65 @@
 //! - Source stepping for convergence
 //! - Linear and nonlinear solver interfaces
 
-#![allow(clippy::too_many_arguments)]
 use super::{DampingStrategy, Engine, SimulationError};
 use crate::abort_signal::AbortSignal;
 use crate::device::NonlinearConvergenceCriteria;
 use crate::diagnostics::{
     ConvergenceDiagnostic, ConvergenceFailureClass, ConvergenceSite, ConvergenceSiteKind,
 };
+use crate::engine::core::StartupVoltageConstraint;
 use crate::solver::{
     ArcLengthConfig, ArcLengthContinuation, PseudoTransient, SolverError, StaticMatrix,
 };
 use crate::{CircuitData, Value};
+
+/// The trial point an operating-point probe evaluates at: the candidate
+/// solution, the analysis time it is dated to, the analysis kind whose
+/// evaluation phase applies, and the junction conductance floor added to every
+/// nonlinear branch. A probe given the solution without the floor would be
+/// reading a different circuit than the one being solved.
+#[derive(Clone, Copy)]
+pub(in crate::engine::convergence) struct OperatingPointProbe<'a> {
+    pub solution: &'a [Value],
+    pub time: Value,
+    pub analysis: crate::xspice::AnalysisType,
+    pub junction_gmin: Value,
+}
+
+/// One corrector run: where it starts, the damping state it carries across
+/// its Newton steps, and the iteration ceiling it must finish inside.
+pub(in crate::engine::convergence) struct CorrectorRun<'a> {
+    pub initial_solution: &'a [Value],
+    pub damping_state: &'a mut NewtonDampingState,
+    pub max_iterations: usize,
+}
+
+/// One damping decision: the accepted point, the Newton proposal from it, and
+/// the damping state that remembers what the previous steps did.
+pub(in crate::engine::convergence) struct DampingStep<'a> {
+    pub old: &'a [Value],
+    pub proposal: &'a [Value],
+    pub damping_state: &'a mut NewtonDampingState,
+}
+
+/// The conductance floors and seeding choice one constrained transient
+/// operating-point residual check is evaluated under.
+#[derive(Clone, Copy)]
+pub(crate) struct TransientOpConductances {
+    pub nodal_gmin: Value,
+    pub junction_gmin: Value,
+    pub use_transient_current_seed: bool,
+}
+
+/// The linear system a startup-constraint solve is posed as: the step it is
+/// taken at, the nodal gmin floor, the assembled system, and the node
+/// constraints it must honour.
+pub(crate) struct LinearTransientConstraintSolve<'a> {
+    pub time: Value,
+    pub nodal_gmin: Value,
+    pub linear_system: TransientOperatingPointLinearSystem,
+    pub constraints: &'a [StartupVoltageConstraint],
+}
 
 mod continuation;
 mod damping;

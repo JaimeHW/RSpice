@@ -74,304 +74,6 @@ enum DiodeStampMode {
     LimitedNewton,
     StaticProbe,
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::device::{BehavioralVoltageSource, EkvMosfet};
-
-    #[test]
-    fn ekv26_consumes_circuit_junction_gmin() {
-        let mut circuit = CircuitData::new();
-        circuit
-            .ekv26s
-            .add(EkvMosfet::new_nmos("mekv".to_string(), 1, 2, 0, 0));
-
-        circuit.set_semiconductor_junction_gmin(1.0e-8);
-
-        assert_eq!(circuit.ekv26s.devices[0].eval_gmin(), 1.0e-8);
-
-        circuit.set_semiconductor_junction_gmin(-1.0);
-
-        assert_eq!(circuit.ekv26s.devices[0].eval_gmin(), 0.0);
-    }
-
-    #[test]
-    fn behavioral_gmin_does_not_follow_junction_continuation() {
-        let mut source = BehavioralVoltageSource::new("B1".to_string(), 1, 0, 1, "GMIN")
-            .expect("GMIN behavioral expression parses");
-        source.set_gmin(2.5e-8);
-
-        let mut circuit = CircuitData::new();
-        circuit.behavioral_sources.add_voltage(source);
-        circuit.set_semiconductor_junction_gmin(1.0e-3);
-
-        assert_eq!(
-            circuit.behavioral_sources.voltage_sources[0]
-                .evaluate(&[], 0.0)
-                .expect("finite GMIN source"),
-            2.5e-8,
-            "expression-visible GMIN is the fixed resolved device option, not the active continuation conductance"
-        );
-    }
-
-    /// **D5 clause 1**, the half `tests/sync_contract.rs` cannot reach.
-    ///
-    /// Conservative lockstep says the digital world executes only at analog
-    /// timepoints the integrator accepts. Nothing in the event path enforces
-    /// that directly — the settle loop drains at whatever bound it is handed,
-    /// including a Newton trial's candidate time. What makes the rejected
-    /// trial harmless is that the scheduler rides in this snapshot, so a
-    /// discarded attempt's event execution is undone with the rest of the
-    /// device state.
-    ///
-    /// That is a one-line entry in a struct with forty fields, and a
-    /// refactor that dropped it would leave every existing test passing while
-    /// silently breaking D5: a rejected step's events would stay executed.
-    /// This is the assertion that fails instead.
-    ///
-    /// Both snapshot flavours are checked. `transient_trial_state_snapshot` is
-    /// the one the transient loop actually takes per attempt; it omits the
-    /// fixed reactive stores, and the event queue must *not* be omitted with
-    /// them.
-    #[test]
-    fn xspice_event_queue_survives_the_nonlinear_state_round_trip() {
-        use crate::xspice::DigitalValue;
-
-        fn queue_two_events(circuit: &mut CircuitData) {
-            let queue = circuit.xspice_event_queue.make_mut();
-            queue.schedule(
-                2.0e-9,
-                1,
-                "out",
-                "u1",
-                0,
-                crate::xspice::EventValue::Digital(DigitalValue::one()),
-            );
-            queue.schedule(
-                4.0e-9,
-                2,
-                "out",
-                "u2",
-                0,
-                crate::xspice::EventValue::Digital(DigitalValue::zero()),
-            );
-        }
-
-        for (label, take_snapshot) in [
-            (
-                "nonlinear_state_snapshot",
-                CircuitData::nonlinear_state_snapshot
-                    as fn(&CircuitData) -> NonlinearDeviceStateSnapshot,
-            ),
-            (
-                "transient_trial_state_snapshot",
-                CircuitData::transient_trial_state_snapshot
-                    as fn(&CircuitData) -> NonlinearDeviceStateSnapshot,
-            ),
-        ] {
-            let mut circuit = CircuitData::new();
-            queue_two_events(&mut circuit);
-
-            let accepted = take_snapshot(&circuit);
-
-            // The rejected attempt executes both events.
-            circuit
-                .xspice_event_queue
-                .make_mut()
-                .run_due_events(4.0e-9, |_| {})
-                .expect("a queue nothing feeds back into settles");
-            assert!(
-                circuit.xspice_event_queue.is_empty(),
-                "{label}: the attempt must actually consume the queue, or this proves nothing"
-            );
-
-            circuit.restore_nonlinear_state(accepted);
-
-            assert_eq!(
-                circuit.xspice_event_queue.len(),
-                2,
-                "{label}: a rejected step must leave every event pending again"
-            );
-            assert_eq!(
-                circuit.xspice_event_queue.next_event_time(),
-                Some(2.0e-9),
-                "{label}: the restored queue must present the same next event time, \
-                 which is what the retry's breakpoint is placed from"
-            );
-        }
-    }
-
-    #[cfg(feature = "veriloga-builtins-base")]
-    #[test]
-    fn generated_simparam_gmin_is_solver_controlled_and_not_rolled_back() {
-        let mut circuit = CircuitData::new();
-        circuit.set_semiconductor_junction_gmin(1.0e-6);
-        let snapshot = circuit.nonlinear_state_snapshot();
-
-        circuit.set_semiconductor_junction_gmin(0.0);
-        circuit.restore_nonlinear_state(snapshot);
-
-        assert_eq!(
-            circuit.generated_simulation_parameters.get("gmin"),
-            Some(0.0)
-        );
-    }
-
-    #[test]
-    fn nonlinear_snapshot_restores_dynamic_inductor_coefficients() {
-        let mut circuit = CircuitData::new();
-        circuit.inductors.add("lcore".to_string(), 1, 0, 1, 2.0e-3);
-        let snapshot = circuit.nonlinear_state_snapshot();
-
-        circuit.inductors.inductances[0] = 7.0e-3;
-        circuit.restore_nonlinear_state(snapshot);
-
-        assert_eq!(circuit.inductors.inductances, vec![2.0e-3]);
-    }
-
-    #[test]
-    fn nonlinear_snapshot_restores_xyce_memristor_equation_mode() {
-        let mut circuit = CircuitData::new();
-        circuit.set_xyce_memristor_operating_point_mode(false);
-        let snapshot = circuit.nonlinear_state_snapshot();
-
-        circuit.set_xyce_memristor_operating_point_mode(true);
-        circuit.restore_nonlinear_state(snapshot);
-
-        assert!(!circuit.xyce_memristor_operating_point_mode);
-    }
-
-    #[test]
-    fn nonlinear_snapshot_restores_compact_classic_mos_state() {
-        let mut circuit = CircuitData::new();
-        circuit.mosfets.add(crate::device::Mosfet::new_nmos(
-            "m1".to_string(),
-            1,
-            2,
-            0,
-            0,
-        ));
-        let expected = circuit.mosfets.nonlinear_state_snapshot();
-        let snapshot = circuit.nonlinear_state_snapshot();
-
-        circuit.mosfets.devices[0].set_junction_gmin(3.0e-6);
-        circuit.mosfets.update_all(&[1.0, 2.0]);
-        assert_ne!(circuit.mosfets.nonlinear_state_snapshot(), expected);
-
-        circuit.restore_nonlinear_state(snapshot);
-
-        assert_eq!(circuit.mosfets.nonlinear_state_snapshot(), expected);
-        assert_eq!(circuit.mosfets.devices[0].name, "m1");
-    }
-
-    #[test]
-    fn classic_mos_only_transient_capability_is_fail_closed() {
-        let mut circuit = CircuitData::new();
-        assert!(!circuit.has_classic_mos_only_transient_nonlinearity());
-
-        circuit.mosfets.add(crate::device::Mosfet::new_nmos(
-            "m1".to_string(),
-            1,
-            2,
-            0,
-            0,
-        ));
-        assert!(circuit.has_classic_mos_only_transient_nonlinearity());
-        assert!(circuit.has_cacheable_classic_mos_transient_base());
-
-        circuit
-            .diodes
-            .add(crate::device::Diode::new("d1".to_string(), 1, 0));
-        assert!(!circuit.has_classic_mos_only_transient_nonlinearity());
-        assert!(!circuit.has_cacheable_classic_mos_transient_base());
-
-        let mut with_inductor = CircuitData::new();
-        with_inductor.mosfets.add(crate::device::Mosfet::new_nmos(
-            "m1".to_string(),
-            1,
-            2,
-            0,
-            0,
-        ));
-        with_inductor
-            .inductors
-            .add("l1".to_string(), 1, 0, 1, 1.0e-3);
-        assert!(with_inductor.has_classic_mos_only_transient_nonlinearity());
-        assert!(!with_inductor.has_cacheable_classic_mos_transient_base());
-    }
-
-    #[test]
-    fn diode_only_transient_base_capability_is_fail_closed() {
-        let mut circuit = CircuitData::new();
-        assert!(!circuit.has_cacheable_diode_transient_base());
-
-        circuit
-            .diodes
-            .add(crate::device::Diode::new("d1".to_string(), 1, 0));
-        assert!(circuit.has_cacheable_diode_transient_base());
-
-        circuit.mosfets.add(crate::device::Mosfet::new_nmos(
-            "m1".to_string(),
-            1,
-            2,
-            0,
-            0,
-        ));
-        assert!(!circuit.has_cacheable_diode_transient_base());
-
-        let mut with_inductor = CircuitData::new();
-        with_inductor
-            .diodes
-            .add(crate::device::Diode::new("d1".to_string(), 1, 0));
-        with_inductor
-            .inductors
-            .add("l1".to_string(), 1, 0, 1, 1.0e-3);
-        assert!(!with_inductor.has_cacheable_diode_transient_base());
-    }
-
-    #[test]
-    fn nonlinear_snapshot_restores_compact_diode_state() {
-        let mut circuit = CircuitData::new();
-        circuit
-            .diodes
-            .add(crate::device::Diode::new("d1".to_string(), 1, 0));
-        let expected = circuit.diodes.nonlinear_state_snapshot();
-        let snapshot = circuit.nonlinear_state_snapshot();
-
-        circuit.diodes.devices[0].set_junction_gmin(4.0e-6);
-        circuit.diodes.update_all(&[0.7]);
-        assert_ne!(circuit.diodes.nonlinear_state_snapshot(), expected);
-
-        circuit.restore_nonlinear_state(snapshot);
-
-        assert_eq!(circuit.diodes.nonlinear_state_snapshot(), expected);
-        assert_eq!(circuit.diodes.devices[0].name, "d1");
-    }
-
-    #[test]
-    fn time_only_behavioral_source_does_not_make_circuit_nonlinear() {
-        let mut circuit = CircuitData::new();
-        circuit.behavioral_sources.add_voltage(
-            BehavioralVoltageSource::new("B1".to_string(), 1, 0, 1, "time")
-                .expect("time-only behavioral source parses"),
-        );
-
-        assert!(!circuit.has_nonlinear_devices());
-    }
-
-    #[test]
-    fn solution_dependent_behavioral_source_makes_circuit_nonlinear() {
-        let mut circuit = CircuitData::new();
-        circuit.behavioral_sources.add_voltage(
-            BehavioralVoltageSource::new("B1".to_string(), 1, 0, 1, "V(1)*V(1)")
-                .expect("solution-dependent behavioral source parses"),
-        );
-
-        assert!(circuit.has_nonlinear_devices());
-    }
-}
-
 impl CircuitData {
     pub(crate) fn initialize_xyce_team_resistance_noise(
         &mut self,
@@ -1892,9 +1594,11 @@ impl CircuitData {
                     rhs,
                     solution,
                     num_nodes,
-                    generated_analysis,
-                    simparams,
-                    _evaluation_mode,
+                    crate::device::veriloga_builtins::GeneratedEvaluationRequest {
+                        analysis: generated_analysis,
+                        simparams,
+                        evaluation_mode: _evaluation_mode,
+                    },
                 )
                 .map_err(|error| error.to_string())?;
         }
@@ -1951,5 +1655,308 @@ impl CircuitData {
         self.behavioral_sources
             .linearizations_converged(solution, time, reltol, voltage_abstol, current_abstol)
             .map_err(|error| error.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::device::{BehavioralVoltageSource, EkvMosfet};
+
+    #[test]
+    fn ekv26_consumes_circuit_junction_gmin() {
+        let mut circuit = CircuitData::new();
+        circuit.ekv26s.add(EkvMosfet::new_nmos(
+            "mekv".to_string(),
+            crate::device::MosTerminals {
+                drain: 1,
+                gate: 2,
+                source: 0,
+                bulk: 0,
+            },
+        ));
+
+        circuit.set_semiconductor_junction_gmin(1.0e-8);
+
+        assert_eq!(circuit.ekv26s.devices[0].eval_gmin(), 1.0e-8);
+
+        circuit.set_semiconductor_junction_gmin(-1.0);
+
+        assert_eq!(circuit.ekv26s.devices[0].eval_gmin(), 0.0);
+    }
+
+    #[test]
+    fn behavioral_gmin_does_not_follow_junction_continuation() {
+        let mut source = BehavioralVoltageSource::new("B1".to_string(), 1, 0, 1, "GMIN")
+            .expect("GMIN behavioral expression parses");
+        source.set_gmin(2.5e-8);
+
+        let mut circuit = CircuitData::new();
+        circuit.behavioral_sources.add_voltage(source);
+        circuit.set_semiconductor_junction_gmin(1.0e-3);
+
+        assert_eq!(
+            circuit.behavioral_sources.voltage_sources[0]
+                .evaluate(&[], 0.0)
+                .expect("finite GMIN source"),
+            2.5e-8,
+            "expression-visible GMIN is the fixed resolved device option, not the active continuation conductance"
+        );
+    }
+
+    /// **D5 clause 1**, the half `tests/sync_contract.rs` cannot reach.
+    ///
+    /// Conservative lockstep says the digital world executes only at analog
+    /// timepoints the integrator accepts. Nothing in the event path enforces
+    /// that directly — the settle loop drains at whatever bound it is handed,
+    /// including a Newton trial's candidate time. What makes the rejected
+    /// trial harmless is that the scheduler rides in this snapshot, so a
+    /// discarded attempt's event execution is undone with the rest of the
+    /// device state.
+    ///
+    /// That is a one-line entry in a struct with forty fields, and a
+    /// refactor that dropped it would leave every existing test passing while
+    /// silently breaking D5: a rejected step's events would stay executed.
+    /// This is the assertion that fails instead.
+    ///
+    /// Both snapshot flavours are checked. `transient_trial_state_snapshot` is
+    /// the one the transient loop actually takes per attempt; it omits the
+    /// fixed reactive stores, and the event queue must *not* be omitted with
+    /// them.
+    #[test]
+    fn xspice_event_queue_survives_the_nonlinear_state_round_trip() {
+        use crate::xspice::DigitalValue;
+
+        fn queue_two_events(circuit: &mut CircuitData) {
+            let queue = circuit.xspice_event_queue.make_mut();
+            queue.schedule(
+                2.0e-9,
+                1,
+                "out",
+                "u1",
+                0,
+                crate::xspice::EventValue::Digital(DigitalValue::one()),
+            );
+            queue.schedule(
+                4.0e-9,
+                2,
+                "out",
+                "u2",
+                0,
+                crate::xspice::EventValue::Digital(DigitalValue::zero()),
+            );
+        }
+
+        for (label, take_snapshot) in [
+            (
+                "nonlinear_state_snapshot",
+                CircuitData::nonlinear_state_snapshot
+                    as fn(&CircuitData) -> NonlinearDeviceStateSnapshot,
+            ),
+            (
+                "transient_trial_state_snapshot",
+                CircuitData::transient_trial_state_snapshot
+                    as fn(&CircuitData) -> NonlinearDeviceStateSnapshot,
+            ),
+        ] {
+            let mut circuit = CircuitData::new();
+            queue_two_events(&mut circuit);
+
+            let accepted = take_snapshot(&circuit);
+
+            // The rejected attempt executes both events.
+            circuit
+                .xspice_event_queue
+                .make_mut()
+                .run_due_events(4.0e-9, |_| {})
+                .expect("a queue nothing feeds back into settles");
+            assert!(
+                circuit.xspice_event_queue.is_empty(),
+                "{label}: the attempt must actually consume the queue, or this proves nothing"
+            );
+
+            circuit.restore_nonlinear_state(accepted);
+
+            assert_eq!(
+                circuit.xspice_event_queue.len(),
+                2,
+                "{label}: a rejected step must leave every event pending again"
+            );
+            assert_eq!(
+                circuit.xspice_event_queue.next_event_time(),
+                Some(2.0e-9),
+                "{label}: the restored queue must present the same next event time, \
+                 which is what the retry's breakpoint is placed from"
+            );
+        }
+    }
+
+    #[cfg(feature = "veriloga-builtins-base")]
+    #[test]
+    fn generated_simparam_gmin_is_solver_controlled_and_not_rolled_back() {
+        let mut circuit = CircuitData::new();
+        circuit.set_semiconductor_junction_gmin(1.0e-6);
+        let snapshot = circuit.nonlinear_state_snapshot();
+
+        circuit.set_semiconductor_junction_gmin(0.0);
+        circuit.restore_nonlinear_state(snapshot);
+
+        assert_eq!(
+            circuit.generated_simulation_parameters.get("gmin"),
+            Some(0.0)
+        );
+    }
+
+    #[test]
+    fn nonlinear_snapshot_restores_dynamic_inductor_coefficients() {
+        let mut circuit = CircuitData::new();
+        circuit.inductors.add("lcore".to_string(), 1, 0, 1, 2.0e-3);
+        let snapshot = circuit.nonlinear_state_snapshot();
+
+        circuit.inductors.inductances[0] = 7.0e-3;
+        circuit.restore_nonlinear_state(snapshot);
+
+        assert_eq!(circuit.inductors.inductances, vec![2.0e-3]);
+    }
+
+    #[test]
+    fn nonlinear_snapshot_restores_xyce_memristor_equation_mode() {
+        let mut circuit = CircuitData::new();
+        circuit.set_xyce_memristor_operating_point_mode(false);
+        let snapshot = circuit.nonlinear_state_snapshot();
+
+        circuit.set_xyce_memristor_operating_point_mode(true);
+        circuit.restore_nonlinear_state(snapshot);
+
+        assert!(!circuit.xyce_memristor_operating_point_mode);
+    }
+
+    #[test]
+    fn nonlinear_snapshot_restores_compact_classic_mos_state() {
+        let mut circuit = CircuitData::new();
+        circuit.mosfets.add(crate::device::Mosfet::new_nmos(
+            "m1".to_string(),
+            1,
+            2,
+            0,
+            0,
+        ));
+        let expected = circuit.mosfets.nonlinear_state_snapshot();
+        let snapshot = circuit.nonlinear_state_snapshot();
+
+        circuit.mosfets.devices[0].set_junction_gmin(3.0e-6);
+        circuit.mosfets.update_all(&[1.0, 2.0]);
+        assert_ne!(circuit.mosfets.nonlinear_state_snapshot(), expected);
+
+        circuit.restore_nonlinear_state(snapshot);
+
+        assert_eq!(circuit.mosfets.nonlinear_state_snapshot(), expected);
+        assert_eq!(circuit.mosfets.devices[0].name, "m1");
+    }
+
+    #[test]
+    fn classic_mos_only_transient_capability_is_fail_closed() {
+        let mut circuit = CircuitData::new();
+        assert!(!circuit.has_classic_mos_only_transient_nonlinearity());
+
+        circuit.mosfets.add(crate::device::Mosfet::new_nmos(
+            "m1".to_string(),
+            1,
+            2,
+            0,
+            0,
+        ));
+        assert!(circuit.has_classic_mos_only_transient_nonlinearity());
+        assert!(circuit.has_cacheable_classic_mos_transient_base());
+
+        circuit
+            .diodes
+            .add(crate::device::Diode::new("d1".to_string(), 1, 0));
+        assert!(!circuit.has_classic_mos_only_transient_nonlinearity());
+        assert!(!circuit.has_cacheable_classic_mos_transient_base());
+
+        let mut with_inductor = CircuitData::new();
+        with_inductor.mosfets.add(crate::device::Mosfet::new_nmos(
+            "m1".to_string(),
+            1,
+            2,
+            0,
+            0,
+        ));
+        with_inductor
+            .inductors
+            .add("l1".to_string(), 1, 0, 1, 1.0e-3);
+        assert!(with_inductor.has_classic_mos_only_transient_nonlinearity());
+        assert!(!with_inductor.has_cacheable_classic_mos_transient_base());
+    }
+
+    #[test]
+    fn diode_only_transient_base_capability_is_fail_closed() {
+        let mut circuit = CircuitData::new();
+        assert!(!circuit.has_cacheable_diode_transient_base());
+
+        circuit
+            .diodes
+            .add(crate::device::Diode::new("d1".to_string(), 1, 0));
+        assert!(circuit.has_cacheable_diode_transient_base());
+
+        circuit.mosfets.add(crate::device::Mosfet::new_nmos(
+            "m1".to_string(),
+            1,
+            2,
+            0,
+            0,
+        ));
+        assert!(!circuit.has_cacheable_diode_transient_base());
+
+        let mut with_inductor = CircuitData::new();
+        with_inductor
+            .diodes
+            .add(crate::device::Diode::new("d1".to_string(), 1, 0));
+        with_inductor
+            .inductors
+            .add("l1".to_string(), 1, 0, 1, 1.0e-3);
+        assert!(!with_inductor.has_cacheable_diode_transient_base());
+    }
+
+    #[test]
+    fn nonlinear_snapshot_restores_compact_diode_state() {
+        let mut circuit = CircuitData::new();
+        circuit
+            .diodes
+            .add(crate::device::Diode::new("d1".to_string(), 1, 0));
+        let expected = circuit.diodes.nonlinear_state_snapshot();
+        let snapshot = circuit.nonlinear_state_snapshot();
+
+        circuit.diodes.devices[0].set_junction_gmin(4.0e-6);
+        circuit.diodes.update_all(&[0.7]);
+        assert_ne!(circuit.diodes.nonlinear_state_snapshot(), expected);
+
+        circuit.restore_nonlinear_state(snapshot);
+
+        assert_eq!(circuit.diodes.nonlinear_state_snapshot(), expected);
+        assert_eq!(circuit.diodes.devices[0].name, "d1");
+    }
+
+    #[test]
+    fn time_only_behavioral_source_does_not_make_circuit_nonlinear() {
+        let mut circuit = CircuitData::new();
+        circuit.behavioral_sources.add_voltage(
+            BehavioralVoltageSource::new("B1".to_string(), 1, 0, 1, "time")
+                .expect("time-only behavioral source parses"),
+        );
+
+        assert!(!circuit.has_nonlinear_devices());
+    }
+
+    #[test]
+    fn solution_dependent_behavioral_source_makes_circuit_nonlinear() {
+        let mut circuit = CircuitData::new();
+        circuit.behavioral_sources.add_voltage(
+            BehavioralVoltageSource::new("B1".to_string(), 1, 0, 1, "V(1)*V(1)")
+                .expect("solution-dependent behavioral source parses"),
+        );
+
+        assert!(circuit.has_nonlinear_devices());
     }
 }

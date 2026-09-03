@@ -26,11 +26,12 @@ pub(super) fn resolve_hb_harmonic_orders(
             "{context} harmonic orders must all be at least 1"
         )));
     }
-    match requested.len() {
-        1 => Ok(vec![requested[0]; tone_count]),
-        count if count == tone_count => Ok(requested.to_vec()),
-        count => Err(crate::errors::value_error(format!(
-            "{context} has {tone_count} tones but {count} harmonic orders; provide one order to broadcast or one per tone"
+    match requested {
+        [only] => Ok(vec![*only; tone_count]),
+        _ if requested.len() == tone_count => Ok(requested.to_vec()),
+        orders => Err(crate::errors::value_error(format!(
+            "{context} has {tone_count} tones but {} harmonic orders; provide one order to broadcast or one per tone",
+            orders.len()
         ))),
     }
 }
@@ -90,10 +91,11 @@ pub(super) fn hb_config_from_tones(
         tones.push(tone);
     }
 
-    if tones.len() == 1 && tones[0].source_name.is_none() {
-        Ok(HbConfig::new(tones[0].frequency).with_harmonics(tones[0].num_harmonics))
-    } else {
-        Ok(HbConfig::multi_tone(tones))
+    match tones.as_slice() {
+        [single] if single.source_name.is_none() => {
+            Ok(HbConfig::new(single.frequency).with_harmonics(single.num_harmonics))
+        }
+        _ => Ok(HbConfig::multi_tone(tones)),
     }
 }
 

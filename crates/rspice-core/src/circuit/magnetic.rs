@@ -6,7 +6,7 @@
 //! stamping so hysteresis state reaches the MNA coefficients.
 
 use super::*;
-use crate::device::passive::XyceCoreTrial;
+use crate::device::passive::{XyceCoreStep, XyceCoreTrial};
 
 #[inline]
 fn node_voltage(solution: &[Value], node_pos: NodeId, node_neg: NodeId) -> Value {
@@ -21,6 +21,17 @@ fn node_voltage(solution: &[Value], node_pos: NodeId, node_neg: NodeId) -> Value
         solution.get(node_neg - 1).copied().unwrap_or(0.0)
     };
     pos - neg
+}
+
+/// How the Xyce core companion stamp treats the step it is writing: whether
+/// the integrator is in its one-step mode, whether that step is second order,
+/// and whether the magnetization variable may advance. The three booleans are
+/// read together and are easy to transpose as bare arguments.
+#[derive(Clone, Copy)]
+pub struct XyceCoreCompanionMode {
+    pub one_step: bool,
+    pub one_step_order2: bool,
+    pub advance_magvar_update: bool,
 }
 
 impl CircuitData {
@@ -247,10 +258,13 @@ impl CircuitData {
         solution: &[Value],
         dt: Value,
         coeff: &CompanionCoefficients,
-        one_step: bool,
-        one_step_order2: bool,
-        advance_magvar_update: bool,
+        mode: XyceCoreCompanionMode,
     ) {
+        let XyceCoreCompanionMode {
+            one_step,
+            one_step_order2,
+            advance_magvar_update,
+        } = mode;
         // This status belongs to the current Newton assembly only.  Any
         // constitutive failure below must make the candidate non-converged;
         // do not leave the generic inductor companion as an accidental
@@ -368,11 +382,13 @@ impl CircuitData {
                     binding
                         .device
                         .xyce_core_level1_trial_at_magnetization_and_rate(
-                            trial_happ,
-                            trial_happ - old_happ,
-                            trial_voltage,
-                            dt,
-                            one_step_order2,
+                            XyceCoreStep {
+                                happ: trial_happ,
+                                delta_happ: trial_happ - old_happ,
+                                voltage: trial_voltage,
+                                dt,
+                                one_step_order2,
+                            },
                             hidden_m,
                             hidden_rate,
                         )?
@@ -791,11 +807,13 @@ impl CircuitData {
                 group
                     .device
                     .xyce_core_level1_trial_at_magnetization_and_rate(
-                        happ,
-                        delta_happ,
-                        first_voltage,
-                        dt,
-                        one_step_order2,
+                        XyceCoreStep {
+                            happ,
+                            delta_happ,
+                            voltage: first_voltage,
+                            dt,
+                            one_step_order2,
+                        },
                         hidden_m,
                         hidden_rate,
                     )
@@ -904,7 +922,7 @@ impl CircuitData {
                 .unwrap_or(0.0);
             let hidden_branch = group.hidden_m_slot.map(|slot| hidden_base + slot + 1);
             let hidden_rate_branch = group.hidden_r_slot.map(|slot| hidden_base + slot + 1);
-            for i in 0..group.windings.len() {
+            for (i, &entry) in voltages.iter().enumerate().take(group.windings.len()) {
                 let winding_i = &group.windings[i];
                 let index_i = winding_i.inductor_index;
                 let branch_i = self.num_nodes + self.inductors.branch_indices[index_i];
@@ -953,7 +971,7 @@ impl CircuitData {
                 } else {
                     0.0
                 };
-                let static_branch = static_scale * voltages[i] / trial.mid;
+                let static_branch = static_scale * entry / trial.mid;
                 let f0 = if one_step_order2 {
                     charge_derivative - static_branch + history
                 } else {
@@ -970,12 +988,10 @@ impl CircuitData {
                 let first_voltage_partial = if i == 0 { d_mid_d_first_voltage } else { 0.0 };
                 let d_voltage = if one_step_order2 {
                     -static_scale / trial.mid
-                        + static_scale * voltages[i] * first_voltage_partial
-                            / (trial.mid * trial.mid)
+                        + static_scale * entry * first_voltage_partial / (trial.mid * trial.mid)
                 } else {
                     static_scale / trial.mid
-                        - static_scale * voltages[i] * first_voltage_partial
-                            / (trial.mid * trial.mid)
+                        - static_scale * entry * first_voltage_partial / (trial.mid * trial.mid)
                 };
                 // For rows belonging to a non-first winding, the same
                 // constitutive mid factor still depends on V(first).  This
@@ -984,16 +1000,16 @@ impl CircuitData {
                 let cross_first_voltage = if i == 0 {
                     0.0
                 } else if one_step_order2 {
-                    static_scale * voltages[i] * d_mid_d_first_voltage / (trial.mid * trial.mid)
+                    static_scale * entry * d_mid_d_first_voltage / (trial.mid * trial.mid)
                 } else {
-                    -static_scale * voltages[i] * d_mid_d_first_voltage / (trial.mid * trial.mid)
+                    -static_scale * entry * d_mid_d_first_voltage / (trial.mid * trial.mid)
                 };
                 let mut hidden_linearized = 0.0;
                 if hidden_partials.is_some() {
                     let d_m = if one_step_order2 {
-                        static_scale * voltages[i] * fixed_mid_m / (trial.mid * trial.mid)
+                        static_scale * entry * fixed_mid_m / (trial.mid * trial.mid)
                     } else {
-                        -static_scale * voltages[i] * fixed_mid_m / (trial.mid * trial.mid)
+                        -static_scale * entry * fixed_mid_m / (trial.mid * trial.mid)
                     };
                     if !d_m.is_finite() {
                         self.xyce_core_trial_invalid = true;
@@ -1005,7 +1021,7 @@ impl CircuitData {
                     hidden_linearized = d_m * hidden_m;
                 }
                 let mut linearized = 0.0;
-                for j in 0..group.windings.len() {
+                for (j, &current) in currents.iter().enumerate().take(group.windings.len()) {
                     let winding_j = &group.windings[j];
                     let index_j = winding_j.inductor_index;
                     let l0 = group.device.xyce_core_vacuum_mutual_inductance(
@@ -1027,9 +1043,9 @@ impl CircuitData {
                     // device.
                     let static_derivative = d_mid_d_current.map_or(0.0, |value| {
                         if one_step_order2 {
-                            static_scale * voltages[i] * value / (trial.mid * trial.mid)
+                            static_scale * entry * value / (trial.mid * trial.mid)
                         } else {
-                            -static_scale * voltages[i] * value / (trial.mid * trial.mid)
+                            -static_scale * entry * value / (trial.mid * trial.mid)
                         }
                     });
                     let charge_derivative_j = if one_step_order2 {
@@ -1048,9 +1064,9 @@ impl CircuitData {
                         self.num_nodes + self.inductors.branch_indices[index_j] - 1,
                         derivative,
                     );
-                    linearized += derivative * currents[j];
+                    linearized += derivative * current;
                 }
-                let voltage_linear = d_voltage * voltages[i] + cross_first_voltage * first_voltage;
+                let voltage_linear = d_voltage * entry + cross_first_voltage * first_voltage;
                 let desired_rhs = -reduced_f0 + linearized + hidden_linearized + voltage_linear;
                 if self.inductors.node_pos[index_i] > 0 {
                     matrix.add(
@@ -1577,12 +1593,14 @@ impl CircuitData {
                 None
             };
             group.device.commit_xyce_core_group_solution(
-                happ,
-                happ - previous_happ,
-                first_voltage,
+                XyceCoreStep {
+                    happ,
+                    delta_happ: happ - previous_happ,
+                    voltage: first_voltage,
+                    dt,
+                    one_step_order2,
+                },
                 hidden_state,
-                dt,
-                one_step_order2,
                 raw_ampere_turns,
             );
         }

@@ -1,5 +1,9 @@
 use super::data::{FrequencyDataOverridePlan, materialize_frequency_data_row_with_abort};
 use super::{Engine, SimulationError};
+
+/// A probed noise-source set: one source per contribution, and the absolute
+/// temperature each was evaluated at where the model reports one.
+type ProbedNoiseSources = (Vec<NoiseSource>, Vec<Option<Value>>);
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::noise::{
     Bsim3FlickerNoise, Bsim4FlickerNoise, CorrelatedNoisePair, NoiseContribution, NoisePort,
@@ -2153,7 +2157,7 @@ impl Engine {
         base_sources: &[NoiseSource],
         base_absolute_temperatures: &[Option<Value>],
         dialect: crate::engine::SpiceDialect,
-    ) -> Result<Option<(Vec<NoiseSource>, Vec<Option<Value>>)>, SimulationError> {
+    ) -> Result<Option<ProbedNoiseSources>, SimulationError> {
         if !Self::has_veriloga_noise_devices(circuit) {
             return Ok(None);
         }
@@ -3666,6 +3670,9 @@ impl Engine {
 
             // Make the mathematical Hermitian invariant exact in the public
             // result and remove only impossible signed zero on its diagonal.
+            // Hermitian symmetrization writes `[row][column]` and its
+            // transpose together, which are in different rows.
+            #[allow(clippy::needless_range_loop)]
             for row in 0..num_ports {
                 covariance[row][row] = Complex64::new(covariance[row][row].re.max(0.0), 0.0);
                 for column in (row + 1)..num_ports {
@@ -4065,26 +4072,19 @@ impl Engine {
         let has_input_source = match input_source {
             None => false,
             Some(source_name) => {
-                if circuit
+                let matches_independent_source = circuit
                     .voltage_sources
                     .names
                     .iter()
-                    .any(|name| name.eq_ignore_ascii_case(source_name))
-                {
-                    true
-                } else if circuit
-                    .current_sources
-                    .names
-                    .iter()
-                    .any(|name| name.eq_ignore_ascii_case(source_name))
-                {
-                    true
-                } else {
+                    .chain(circuit.current_sources.names.iter())
+                    .any(|name| name.eq_ignore_ascii_case(source_name));
+                if !matches_independent_source {
                     return Err(SimulationError::Circuit(format!(
                         "Noise input source '{}' not found (expected independent V/I source)",
                         source_name
                     )));
                 }
+                true
             }
         };
 
@@ -4562,6 +4562,7 @@ mod tests {
     use crate::Netlist;
     #[cfg(feature = "veriloga-builtins-base")]
     use crate::analysis::NoiseSourceType;
+    use crate::circuit::ResistorValues;
 
     #[cfg(feature = "veriloga-builtins-base")]
     fn generated_process(gains: &[crate::Complex64]) -> EvaluatedGeneratedNoiseProcess {
@@ -4651,9 +4652,11 @@ mod tests {
             out,
             0,
             branch,
-            0.6,
-            1.2,
-            0.6,
+            ResistorValues {
+                resistance: 0.6,
+                small_signal_resistance: 1.2,
+                reported_resistance: 0.6,
+            },
         );
         for label in [
             "noise-temperature offsets",
@@ -6508,17 +6511,28 @@ Q1 C B 0 QN
     const GP_DTEMP_NOISE_ORACLE: &str =
         include_str!("../../tests/testdata/gp_dtemp_noise_ngspice46.dat");
 
+    /// The frequency grid an output-noise comparison is run over.
+    #[derive(Clone, Copy)]
+    struct NoiseSweepGrid {
+        points_per_decade: usize,
+        fstart: f64,
+        fstop: f64,
+    }
+
     fn assert_onoise_matches(
         deck: &str,
         oracle_table: &str,
         output_node: &str,
         input_source: &str,
-        points_per_decade: usize,
-        fstart: f64,
-        fstop: f64,
+        grid: NoiseSweepGrid,
         gate: f64,
         label: &str,
     ) {
+        let NoiseSweepGrid {
+            points_per_decade,
+            fstart,
+            fstop,
+        } = grid;
         let netlist = Netlist::parse(deck).expect("deck parses");
         let engine = Engine::default().resolved_for_netlist(&netlist);
         let circuit = engine.build_circuit(&netlist).expect("circuit builds");
@@ -6734,9 +6748,11 @@ Q1 C B 0 QN
             BSIM4_FNOI1_TNOI0_ORACLE,
             "out",
             "VIN",
-            5,
-            10.0,
-            1e8,
+            NoiseSweepGrid {
+                points_per_decade: 5,
+                fstart: 10.0,
+                fstop: 1e8,
+            },
             5e-2,
             "bsim4-fnoi1-tnoi0",
         );
@@ -6750,9 +6766,11 @@ Q1 C B 0 QN
             BSIM4_FNOI0_TNOI0_ORACLE,
             "out",
             "VIN",
-            5,
-            10.0,
-            1e8,
+            NoiseSweepGrid {
+                points_per_decade: 5,
+                fstart: 10.0,
+                fstop: 1e8,
+            },
             5e-2,
             "bsim4-fnoi0-tnoi0",
         );
@@ -6766,9 +6784,11 @@ Q1 C B 0 QN
             BSIM4_TNOI2_ORACLE,
             "out",
             "VIN",
-            5,
-            10.0,
-            1e8,
+            NoiseSweepGrid {
+                points_per_decade: 5,
+                fstart: 10.0,
+                fstop: 1e8,
+            },
             5e-2,
             "bsim4-tnoi2",
         );
@@ -6786,9 +6806,11 @@ Q1 C B 0 QN
             BSIM4_TNOI1_SERIES_ORACLE,
             "out",
             "VIN",
-            5,
-            10.0,
-            1e8,
+            NoiseSweepGrid {
+                points_per_decade: 5,
+                fstart: 10.0,
+                fstop: 1e8,
+            },
             5e-4,
             "bsim4-tnoi1-series",
         );
@@ -6806,9 +6828,11 @@ Q1 C B 0 QN
             BSIM4_RDSMOD1_TNOI1_ORACLE,
             "out",
             "VIN",
-            5,
-            10.0,
-            1e8,
+            NoiseSweepGrid {
+                points_per_decade: 5,
+                fstart: 10.0,
+                fstop: 1e8,
+            },
             5e-4,
             "bsim4-rdsmod1-tnoi1",
         );
@@ -6825,9 +6849,11 @@ Q1 C B 0 QN
             BSIM4_RBODYMOD1_ORACLE,
             "out",
             "VIN",
-            5,
-            10.0,
-            1e8,
+            NoiseSweepGrid {
+                points_per_decade: 5,
+                fstart: 10.0,
+                fstop: 1e8,
+            },
             5e-4,
             "bsim4-rbodymod1",
         );
@@ -6987,9 +7013,11 @@ Q1 C B 0 QN
             BSIM3_NOIMOD1_ORACLE,
             "out",
             "VIN",
-            5,
-            10.0,
-            1e8,
+            NoiseSweepGrid {
+                points_per_decade: 5,
+                fstart: 10.0,
+                fstop: 1e8,
+            },
             5e-2,
             "bsim3-noimod1",
         );
@@ -7056,9 +7084,11 @@ Q1 C B 0 QN
             &shifted_oracle,
             "out",
             "VIN",
-            5,
-            10.0,
-            1e8,
+            NoiseSweepGrid {
+                points_per_decade: 5,
+                fstart: 10.0,
+                fstop: 1e8,
+            },
             5e-2,
             "bsim3-shifted-grid",
         );
@@ -7072,9 +7102,11 @@ Q1 C B 0 QN
             BSIM3_NOIMOD2_ORACLE,
             "out",
             "VIN",
-            5,
-            10.0,
-            1e8,
+            NoiseSweepGrid {
+                points_per_decade: 5,
+                fstart: 10.0,
+                fstop: 1e8,
+            },
             5e-2,
             "bsim3-noimod2",
         );
@@ -7092,9 +7124,11 @@ Q1 C B 0 QN
             VBIC_DTEMP_NOISE_ORACLE,
             "c",
             "VIN",
-            5,
-            1e5,
-            1e7,
+            NoiseSweepGrid {
+                points_per_decade: 5,
+                fstart: 1e5,
+                fstop: 1e7,
+            },
             1e-2,
             "vbic-dtemp",
         );
@@ -7120,9 +7154,11 @@ Q1 C B 0 QN
             GP_DTEMP_NOISE_ORACLE,
             "c",
             "VIN",
-            5,
-            1e4,
-            1e7,
+            NoiseSweepGrid {
+                points_per_decade: 5,
+                fstart: 1e4,
+                fstop: 1e7,
+            },
             1e-2,
             "gp-dtemp",
         );
@@ -7232,9 +7268,11 @@ R2 OUT 0 1k
             RES_FLICKER_ORACLE,
             "out",
             "V1",
-            5,
-            10.0,
-            1e5,
+            NoiseSweepGrid {
+                points_per_decade: 5,
+                fstart: 10.0,
+                fstop: 1e5,
+            },
             5e-3,
             "res-flicker",
         );
@@ -7251,9 +7289,11 @@ R2 OUT 0 1k
             RES_QUIET_ORACLE,
             "out",
             "V1",
-            5,
-            10.0,
-            1e5,
+            NoiseSweepGrid {
+                points_per_decade: 5,
+                fstart: 10.0,
+                fstop: 1e5,
+            },
             5e-3,
             "res-quiet",
         );
@@ -7277,9 +7317,11 @@ R2 OUT 0 1k
             JFET_DTEMP_NOISE_ORACLE,
             "d",
             "VIN",
-            5,
-            10.0,
-            1e5,
+            NoiseSweepGrid {
+                points_per_decade: 5,
+                fstart: 10.0,
+                fstop: 1e5,
+            },
             1e-2,
             "jfet-dtemp",
         );

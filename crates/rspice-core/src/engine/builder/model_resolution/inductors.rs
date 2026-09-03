@@ -39,19 +39,19 @@ pub(in crate::engine::builder) fn resolve_inductor_instance_value(
         None
     };
 
-    if spice_dialect == SpiceDialect::Xyce {
-        if let Some((model_def, unsupported)) = model_def.and_then(|model_def| {
+    if spice_dialect == SpiceDialect::Xyce
+        && let Some((model_def, unsupported)) = model_def.and_then(|model_def| {
             first_model_param_name(model_def, &["NT", "LENGTH", "DIA", "CSECT", "MU"])
                 .map(|unsupported| (model_def, unsupported))
-        }) {
-            return Err(SimulationError::unsupported_capability(
-                "device.inductor.geometry_model_parameter",
-                format!(
-                    "Inductor '{}' model '{}' parameter '{}' is not supported by Xyce linear-inductor models; Xyce requires an instance L value and treats model L as a multiplier",
-                    element_name, model_def.name, unsupported
-                ),
-            ));
-        }
+        })
+    {
+        return Err(SimulationError::unsupported_capability(
+            "device.inductor.geometry_model_parameter",
+            format!(
+                "Inductor '{}' model '{}' parameter '{}' is not supported by Xyce linear-inductor models; Xyce requires an instance L value and treats model L as a multiplier",
+                element_name, model_def.name, unsupported
+            ),
+        ));
     }
 
     let (eval_ctx, current_temp_c, tnom_c) =

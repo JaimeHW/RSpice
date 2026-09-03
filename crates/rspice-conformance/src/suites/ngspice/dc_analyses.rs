@@ -3,14 +3,14 @@
 use super::*;
 
 impl TestRunner {
-    pub(super) fn run_dc_op_test(
-        &self,
-        name: &str,
-        cir_path: &Path,
-        source_path: &Path,
-        source: &str,
-        start: std::time::Instant,
-    ) -> TestResult {
+    pub(super) fn run_dc_op_test(&self, case: &RegressionCase<'_>) -> TestResult {
+        let RegressionCase {
+            name,
+            cir_path,
+            source_path,
+            source,
+            start,
+        } = *case;
         let netlist = match Self::parse_regression_source(source, source_path) {
             Ok(n) => n,
             Err(e) => {
@@ -142,16 +142,22 @@ impl TestRunner {
 
     pub(super) fn run_dc_sweep_test(
         &self,
-        name: &str,
-        cir_path: &Path,
-        source_path: &Path,
-        source: &str,
-        sweep_source: &str,
-        start_val: Value,
-        stop_val: Value,
-        step_val: Value,
-        start: std::time::Instant,
+        case: &RegressionCase<'_>,
+        axis: &DcSweepAxis<'_>,
     ) -> TestResult {
+        let RegressionCase {
+            name,
+            cir_path,
+            source_path,
+            source,
+            start,
+        } = *case;
+        let DcSweepAxis {
+            source: sweep_source,
+            start: start_val,
+            stop: stop_val,
+            step: step_val,
+        } = *axis;
         let netlist = match Self::parse_regression_source(source, source_path) {
             Ok(n) => n,
             Err(e) => {
@@ -416,20 +422,29 @@ impl TestRunner {
 
     pub(super) fn run_dc_sweep_2d_test(
         &self,
-        name: &str,
-        cir_path: &Path,
-        source_path: &Path,
-        source: &str,
-        inner_source: &str,
-        inner_start: Value,
-        inner_stop: Value,
-        inner_step: Value,
-        outer_source: &str,
-        outer_start: Value,
-        outer_stop: Value,
-        outer_step: Value,
-        start: std::time::Instant,
+        case: &RegressionCase<'_>,
+        inner: &DcSweepAxis<'_>,
+        outer: &DcSweepAxis<'_>,
     ) -> TestResult {
+        let RegressionCase {
+            name,
+            cir_path,
+            source_path,
+            source,
+            start,
+        } = *case;
+        let DcSweepAxis {
+            source: inner_source,
+            start: inner_start,
+            stop: inner_stop,
+            step: inner_step,
+        } = *inner;
+        let DcSweepAxis {
+            source: outer_source,
+            start: outer_start,
+            stop: outer_stop,
+            step: outer_step,
+        } = *outer;
         let base_netlist = match Self::parse_regression_source(source, source_path) {
             Ok(n) => n,
             Err(e) => {

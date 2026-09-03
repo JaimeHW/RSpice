@@ -1521,10 +1521,12 @@ pub fn verify_model_partials(
                         .copied()
                         .unwrap_or(0.0);
                     push_partial_mismatch_if_needed(
-                        model.name(),
-                        &output.name,
-                        &input.name,
-                        Some(index),
+                        PartialDerivativeSite {
+                            model: model.name(),
+                            output_port: &output.name,
+                            input_port: &input.name,
+                            input_index: Some(index),
+                        },
                         analytic,
                         numeric,
                         options,
@@ -1544,10 +1546,12 @@ pub fn verify_model_partials(
                     .copied()
                     .unwrap_or(0.0);
                 push_partial_mismatch_if_needed(
-                    model.name(),
-                    &output.name,
-                    &input.name,
-                    None,
+                    PartialDerivativeSite {
+                        model: model.name(),
+                        output_port: &output.name,
+                        input_port: &input.name,
+                        input_index: None,
+                    },
                     analytic,
                     numeric,
                     options,
@@ -1563,10 +1567,10 @@ pub fn verify_model_partials(
 pub fn context_with_model_defaults(model: &dyn CodeModel) -> CmContext {
     let mut ctx = CmContext::new();
     for port in model.ports() {
-        if port.is_vector {
-            if let Some(min_len) = port.vector_min_len {
-                ctx.set_port_width(&port.name, min_len.max(1));
-            }
+        if port.is_vector
+            && let Some(min_len) = port.vector_min_len
+        {
+            ctx.set_port_width(&port.name, min_len.max(1));
         }
     }
     for param in model.parameters() {
@@ -1629,16 +1633,30 @@ fn finite_difference_vector_input(
     Ok((plus.output(output) - minus.output(output)) / (2.0 * step))
 }
 
-fn push_partial_mismatch_if_needed(
-    model: &str,
-    output_port: &str,
-    input_port: &str,
+/// Which partial derivative a numeric-versus-analytic check is about: the
+/// model, the output it differentiates, and the input it differentiates with
+/// respect to.
+#[derive(Clone, Copy)]
+struct PartialDerivativeSite<'a> {
+    model: &'a str,
+    output_port: &'a str,
+    input_port: &'a str,
     input_index: Option<usize>,
+}
+
+fn push_partial_mismatch_if_needed(
+    site: PartialDerivativeSite<'_>,
     analytic: Value,
     numeric: Value,
     options: PartialVerificationOptions,
     mismatches: &mut Vec<PartialMismatch>,
 ) {
+    let PartialDerivativeSite {
+        model,
+        output_port,
+        input_port,
+        input_index,
+    } = site;
     let abs_error = (analytic - numeric).abs();
     let scale = analytic.abs().max(numeric.abs()).max(1.0);
     let rel_error = abs_error / scale;

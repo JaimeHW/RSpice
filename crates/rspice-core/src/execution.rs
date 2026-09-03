@@ -4,6 +4,20 @@
 //! analysis identity, Cartesian coordinate order, topology identity, or how a
 //! signal that is absent at one coordinate is represented.
 
+// Plan rule 2: no authored-input panic. Every index, name and shape this layer
+// reads comes from a deck, so an unchecked access here is a crash a user can
+// author. A proven invariant keeps its `expect` under a function-scope allow
+// that names the test constructing the boundary case; everything else returns
+// a typed error. Clippy's in-test allowances (crates/rspice-core/clippy.toml)
+// keep the denial off the tests' own preconditions.
+#![deny(
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic,
+    clippy::unreachable,
+    clippy::unwrap_used
+)]
+
 pub mod bounded_io;
 mod capability;
 mod fingerprint;

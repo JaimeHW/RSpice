@@ -4,12 +4,11 @@
 //! frequency-domain analysis at each specified frequency. Supports
 //! parallel frequency sweeps when the `parallel` feature is enabled.
 
-#![allow(clippy::needless_range_loop)]
-
 use super::data::{FrequencyDataOverridePlan, materialize_frequency_data_row_with_abort};
 use super::{Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::ac::AcResult;
+use crate::device::mosfet::b3soi::common::SoiCompanionCurrents;
 use crate::device::semiconductor::{
     BJT_DYNAMIC_CHARGE_COUNT, BJT_EXTERNAL_STATE_DIM, BJT_INTERNAL_STATE_DIM, BjtChargeSnapshot,
 };
@@ -379,6 +378,28 @@ impl MatrixStamper for AcImagStamper<'_> {
     fn stamp_rhs(&mut self, _index: NodeId, _value: Value) {
         // Small-signal AC uses only dQ/dx matrix terms.
     }
+}
+
+/// One XSPICE output port as the AC vector stamp addresses it: which port,
+/// which output row it writes, and the node pair it spans.
+#[derive(Clone, Copy)]
+struct XspiceAcOutputPort<'a> {
+    output_port: &'a str,
+    output_index: usize,
+    pos: usize,
+    neg: usize,
+}
+
+/// The same, for a port taken from the model's own port list, plus whether the
+/// stamp is forced to the current-output form.
+#[derive(Clone, Copy)]
+struct XspiceAcOutputElement<'a> {
+    port: &'a crate::xspice::PortSpec,
+    port_idx: usize,
+    output_index: usize,
+    pos: usize,
+    neg: usize,
+    force_current_output: bool,
 }
 
 impl Engine {
@@ -921,13 +942,16 @@ impl Engine {
     fn stamp_xspice_ac_vector_current_controls(
         ac_matrix: &mut ComplexMatrix,
         instance: &crate::xspice::XspiceInstance,
-        output_port: &str,
-        output_index: usize,
-        pos: usize,
-        neg: usize,
+        port: XspiceAcOutputPort<'_>,
         frequency_hz: Value,
         num_nodes: usize,
     ) {
+        let XspiceAcOutputPort {
+            output_port,
+            output_index,
+            pos,
+            neg,
+        } = port;
         for (control_port, partial) in
             instance.output_vector_input_ac_partials(output_port, output_index, frequency_hz)
         {
@@ -996,15 +1020,18 @@ impl Engine {
         circuit: &CircuitData,
         ac_matrix: &mut ComplexMatrix,
         instance: &crate::xspice::XspiceInstance,
-        port: &crate::xspice::PortSpec,
-        port_idx: usize,
-        output_index: usize,
-        pos: usize,
-        neg: usize,
-        force_current_output: bool,
+        element: XspiceAcOutputElement<'_>,
         frequency_hz: Value,
         num_nodes: usize,
     ) {
+        let XspiceAcOutputElement {
+            port,
+            port_idx,
+            output_index,
+            pos,
+            neg,
+            force_current_output,
+        } = element;
         let (conductance, _) =
             instance.analog_vector_small_signal_contribution_at(port_idx, output_index);
         let stamp_as_current_output = force_current_output
@@ -1022,10 +1049,12 @@ impl Engine {
             Self::stamp_xspice_ac_vector_current_controls(
                 ac_matrix,
                 instance,
-                &port.name,
-                output_index,
-                pos,
-                neg,
+                XspiceAcOutputPort {
+                    output_port: &port.name,
+                    output_index,
+                    pos,
+                    neg,
+                },
                 frequency_hz,
                 num_nodes,
             );
@@ -1093,12 +1122,14 @@ impl Engine {
                                     circuit,
                                     ac_matrix,
                                     instance,
-                                    port,
-                                    port_idx,
-                                    output_index,
-                                    node,
-                                    0,
-                                    false,
+                                    XspiceAcOutputElement {
+                                        port,
+                                        port_idx,
+                                        output_index,
+                                        pos: node,
+                                        neg: 0,
+                                        force_current_output: false,
+                                    },
                                     frequency_hz,
                                     num_nodes,
                                 );
@@ -1112,12 +1143,14 @@ impl Engine {
                                             circuit,
                                             ac_matrix,
                                             instance,
-                                            port,
-                                            port_idx,
-                                            output_index,
-                                            *node,
-                                            0,
-                                            false,
+                                            XspiceAcOutputElement {
+                                                port,
+                                                port_idx,
+                                                output_index,
+                                                pos: *node,
+                                                neg: 0,
+                                                force_current_output: false,
+                                            },
                                             frequency_hz,
                                             num_nodes,
                                         );
@@ -1135,12 +1168,14 @@ impl Engine {
                                             circuit,
                                             ac_matrix,
                                             instance,
-                                            port,
-                                            port_idx,
-                                            output_index,
-                                            *pos,
-                                            *neg,
-                                            false,
+                                            XspiceAcOutputElement {
+                                                port,
+                                                port_idx,
+                                                output_index,
+                                                pos: *pos,
+                                                neg: *neg,
+                                                force_current_output: false,
+                                            },
                                             frequency_hz,
                                             num_nodes,
                                         );
@@ -1153,12 +1188,14 @@ impl Engine {
                                             circuit,
                                             ac_matrix,
                                             instance,
-                                            port,
-                                            port_idx,
-                                            output_index,
-                                            *pos,
-                                            *neg,
-                                            true,
+                                            XspiceAcOutputElement {
+                                                port,
+                                                port_idx,
+                                                output_index,
+                                                pos: *pos,
+                                                neg: *neg,
+                                                force_current_output: true,
+                                            },
                                             frequency_hz,
                                             num_nodes,
                                         );
@@ -1496,8 +1533,8 @@ impl Engine {
         for pivot in 0..dim {
             let mut best = pivot;
             let mut best_abs = a[pivot][pivot].norm();
-            for row in (pivot + 1)..dim {
-                let value = a[row][pivot].norm();
+            for (row, entries) in a.iter().enumerate().take(dim).skip(pivot + 1) {
+                let value = entries[pivot].norm();
                 if value > best_abs {
                     best = row;
                     best_abs = value;
@@ -1513,10 +1550,17 @@ impl Engine {
 
             let pivot_value = a[pivot][pivot];
             for row in (pivot + 1)..dim {
-                let factor = a[row][pivot] / pivot_value;
-                a[row][pivot] = Complex64::new(0.0, 0.0);
-                for col in (pivot + 1)..dim {
-                    a[row][col] -= factor * a[pivot][col];
+                // `row > pivot`, so the pivot row stays in `above`.
+                let (above, below) = a.split_at_mut(row);
+                let pivot_row = &above[pivot];
+                let target_row = &mut below[0];
+                let factor = target_row[pivot] / pivot_value;
+                target_row[pivot] = Complex64::new(0.0, 0.0);
+                for (target, &value) in target_row[(pivot + 1)..dim]
+                    .iter_mut()
+                    .zip(&pivot_row[(pivot + 1)..dim])
+                {
+                    *target -= factor * value;
                 }
                 b[row] -= factor * b[pivot];
             }
@@ -1585,9 +1629,12 @@ impl Engine {
                             matrix.add_imag(row - 1, col_node - 1, sign * omega * c);
                         }
                     }
-                    for col in 0..BJT_EXTERNAL_STATE_DIM {
-                        let c = branch.d_external[col];
-                        let col_node = external_nodes[col];
+                    for (&c, col_node) in branch
+                        .d_external
+                        .iter()
+                        .zip(external_nodes)
+                        .take(BJT_EXTERNAL_STATE_DIM)
+                    {
                         if c != 0.0 && col_node > 0 {
                             matrix.add_imag(row - 1, col_node - 1, sign * omega * c);
                         }
@@ -2289,11 +2336,13 @@ impl Engine {
                 dev.stamp_charge_companion(
                     &charge,
                     omega,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
+                    SoiCompanionCurrents {
+                        cqg: 0.0,
+                        cqb: 0.0,
+                        cqd: 0.0,
+                        cqe: 0.0,
+                        cqth: 0.0,
+                    },
                     op_voltages,
                     &mut stamper,
                 );
@@ -2306,11 +2355,13 @@ impl Engine {
                 dev.stamp_charge_companion(
                     &charge,
                     omega,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
+                    SoiCompanionCurrents {
+                        cqg: 0.0,
+                        cqb: 0.0,
+                        cqd: 0.0,
+                        cqe: 0.0,
+                        cqth: 0.0,
+                    },
                     op_voltages,
                     &mut stamper,
                 );
@@ -2323,11 +2374,13 @@ impl Engine {
                 dev.stamp_charge_companion(
                     &charge,
                     omega,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
+                    SoiCompanionCurrents {
+                        cqg: 0.0,
+                        cqb: 0.0,
+                        cqd: 0.0,
+                        cqe: 0.0,
+                        cqth: 0.0,
+                    },
                     op_voltages,
                     &mut stamper,
                 );

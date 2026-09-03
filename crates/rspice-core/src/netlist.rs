@@ -752,7 +752,7 @@ pub enum GroundPolicy {
 impl GroundPolicy {
     /// Return the canonical execution node name for this dialect policy.
     /// Non-ground names retain their authored spelling.
-    pub fn canonical_node<'a>(self, node: &'a str) -> &'a str {
+    pub fn canonical_node(self, node: &str) -> &str {
         let canonical = node.trim().to_ascii_uppercase();
         let aliases_ground = match self {
             Self::OnlyZero => false,
@@ -1201,6 +1201,17 @@ pub struct VerilogAInclude {
     pub model_name: Option<String>,
 }
 
+/// Where a root parse resolves its dependencies from: the include processor
+/// for `.INCLUDE`/`.LIB`, the separate processor `.IC` file references use,
+/// whether SPEF may be read from the filesystem, and the replay context that
+/// records what was read.
+struct NetlistSourceResolution {
+    include_processor: IncludeProcessor,
+    initcond_source_provider: IncludeProcessor,
+    allow_filesystem_spef: bool,
+    replay_context: NetlistReplayContext,
+}
+
 impl Netlist {
     /// Parse a netlist from a string.
     ///
@@ -1424,10 +1435,12 @@ impl Netlist {
             file_path,
             options,
             abort,
-            include_processor,
-            initcond_source_provider,
-            false,
-            NetlistReplayContext::Sealed(replay_sources),
+            NetlistSourceResolution {
+                include_processor,
+                initcond_source_provider,
+                allow_filesystem_spef: false,
+                replay_context: NetlistReplayContext::Sealed(replay_sources),
+            },
         )
     }
 
@@ -1501,10 +1514,14 @@ impl Netlist {
             file_path,
             options,
             abort,
-            include_processor,
-            initcond_source_provider,
-            true,
-            NetlistReplayContext::PathWithExecutionDir(execution_dir.to_path_buf()),
+            NetlistSourceResolution {
+                include_processor,
+                initcond_source_provider,
+                allow_filesystem_spef: true,
+                replay_context: NetlistReplayContext::PathWithExecutionDir(
+                    execution_dir.to_path_buf(),
+                ),
+            },
         )
     }
 
@@ -1513,11 +1530,14 @@ impl Netlist {
         file_path: &std::path::Path,
         options: NetlistParseOptions,
         abort: &dyn AbortSignal,
-        mut include_processor: IncludeProcessor,
-        initcond_source_provider: IncludeProcessor,
-        allow_filesystem_spef: bool,
-        replay_context: NetlistReplayContext,
+        sources: NetlistSourceResolution,
     ) -> Result<Self, ParseWithAbortError> {
+        let NetlistSourceResolution {
+            mut include_processor,
+            initcond_source_provider,
+            allow_filesystem_spef,
+            replay_context,
+        } = sources;
         Self::enforce_root_source_limits_with_abort(input, options.resource_limits, abort)?;
         let expanded =
             include_processor.expand_content_mapped_with_abort(input, file_path, abort)?;
@@ -3447,10 +3467,11 @@ mod tests {
         passive_test_state(&netlist.elements, name).0
     }
 
-    fn passive_test_state<'a>(
-        elements: &'a [Element],
-        name: &str,
-    ) -> (Value, &'a [(String, Value)], &'a [(String, String)]) {
+    /// A passive element's authored state: its scalar value, its numeric
+    /// instance parameters, and its string instance parameters.
+    type PassiveState<'a> = (Value, &'a [(String, Value)], &'a [(String, String)]);
+
+    fn passive_test_state<'a>(elements: &'a [Element], name: &str) -> PassiveState<'a> {
         let element = elements
             .iter()
             .find(|element| element.name.eq_ignore_ascii_case(name))
@@ -8326,7 +8347,7 @@ mod tests {
             "path-like simulation should resolve relative to deck dir: {simulations:?}"
         );
         assert!(
-            simulations.iter().any(|value| *value == "ivlng"),
+            simulations.contains(&"ivlng"),
             "provider-style simulation id should remain symbolic: {simulations:?}"
         );
     }
@@ -9184,17 +9205,40 @@ mod tests {
         );
     }
 
+    /// The three spellings of the subcircuit an unterminated `.SUBCKT`
+    /// diagnostic names.
+    struct MissingEndsNames<'a> {
+        authored_name: &'a str,
+        canonical_name: &'a str,
+        qualified_name: &'a str,
+    }
+
+    /// Where the same diagnostic says the block was opened and where the
+    /// parser noticed it was never closed.
+    struct MissingEndsSpans<'a> {
+        opened_path: Option<&'a Path>,
+        opened_line: usize,
+        detected_path: Option<&'a Path>,
+        detected_line: usize,
+    }
+
     fn assert_missing_subcircuit_ends(
         error: ParseError,
-        authored_name: &str,
-        canonical_name: &str,
-        qualified_name: &str,
-        opened_path: Option<&Path>,
-        opened_line: usize,
-        detected_path: Option<&Path>,
-        detected_line: usize,
+        names: MissingEndsNames<'_>,
+        spans: MissingEndsSpans<'_>,
         boundary: MissingSubcircuitEndsBoundary,
     ) {
+        let MissingEndsNames {
+            authored_name,
+            canonical_name,
+            qualified_name,
+        } = names;
+        let MissingEndsSpans {
+            opened_path,
+            opened_line,
+            detected_path,
+            detected_line,
+        } = spans;
         match error {
             ParseError::MissingSubcircuitEnds(error) => {
                 let MissingSubcircuitEndsError {
@@ -9240,13 +9284,17 @@ mod tests {
             let error = Netlist::parse(source).expect_err("missing .ENDS must be rejected");
             assert_missing_subcircuit_ends(
                 error,
-                "Cell",
-                "CELL",
-                "CELL",
-                None,
-                2,
-                None,
-                detected_line,
+                MissingEndsNames {
+                    authored_name: "Cell",
+                    canonical_name: "CELL",
+                    qualified_name: "CELL",
+                },
+                MissingEndsSpans {
+                    opened_path: None,
+                    opened_line: 2,
+                    detected_path: None,
+                    detected_line,
+                },
                 boundary,
             );
         }
@@ -9263,13 +9311,17 @@ mod tests {
         .expect_err("innermost missing .ENDS must be rejected");
         assert_missing_subcircuit_ends(
             error,
-            "Inner",
-            "INNER",
-            "OUTER.INNER",
-            None,
-            3,
-            None,
-            5,
+            MissingEndsNames {
+                authored_name: "Inner",
+                canonical_name: "INNER",
+                qualified_name: "OUTER.INNER",
+            },
+            MissingEndsSpans {
+                opened_path: None,
+                opened_line: 3,
+                detected_path: None,
+                detected_line: 5,
+            },
             MissingSubcircuitEndsBoundary::EndOfSource,
         );
     }
@@ -9289,13 +9341,17 @@ mod tests {
         let child = child.canonicalize().expect("canonical child");
         assert_missing_subcircuit_ends(
             error,
-            "testsub",
-            "TESTSUB",
-            "TESTSUB",
-            Some(&child),
-            1,
-            Some(&child),
-            4,
+            MissingEndsNames {
+                authored_name: "testsub",
+                canonical_name: "TESTSUB",
+                qualified_name: "TESTSUB",
+            },
+            MissingEndsSpans {
+                opened_path: Some(&child),
+                opened_line: 1,
+                detected_path: Some(&child),
+                detected_line: 4,
+            },
             MissingSubcircuitEndsBoundary::EndOfSource,
         );
         let _ = std::fs::remove_dir_all(dir);
@@ -9319,13 +9375,17 @@ mod tests {
         let child = child.canonicalize().expect("canonical child");
         assert_missing_subcircuit_ends(
             error,
-            "child",
-            "CHILD",
-            "CHILD",
-            Some(&child),
-            1,
-            Some(&child),
-            3,
+            MissingEndsNames {
+                authored_name: "child",
+                canonical_name: "CHILD",
+                qualified_name: "CHILD",
+            },
+            MissingEndsSpans {
+                opened_path: Some(&child),
+                opened_line: 1,
+                detected_path: Some(&child),
+                detected_line: 3,
+            },
             MissingSubcircuitEndsBoundary::EndCard,
         );
         let _ = std::fs::remove_dir_all(dir);
@@ -9349,13 +9409,17 @@ mod tests {
         let child = child.canonicalize().expect("canonical child");
         assert_missing_subcircuit_ends(
             error,
-            "shifted",
-            "SHIFTED",
-            "SHIFTED",
-            Some(&child),
-            4,
-            Some(&child),
-            6,
+            MissingEndsNames {
+                authored_name: "shifted",
+                canonical_name: "SHIFTED",
+                qualified_name: "SHIFTED",
+            },
+            MissingEndsSpans {
+                opened_path: Some(&child),
+                opened_line: 4,
+                detected_path: Some(&child),
+                detected_line: 6,
+            },
             MissingSubcircuitEndsBoundary::EndOfSource,
         );
         let _ = std::fs::remove_dir_all(dir);

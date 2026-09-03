@@ -376,23 +376,40 @@ impl AnalysisResultDocument {
             start,
             count,
             point_count: self.point_count,
+            // `validate` proves every axis and series is `point_count` long,
+            // but a document reached through a deserializer has not been
+            // validated yet, so a short column is refused rather than a panic.
             axes: self
                 .axes
                 .iter()
-                .map(|axis| AxisWindow {
-                    name: axis.name.clone(),
-                    values: axis.values.slice(start, end),
+                .map(|axis| {
+                    Some(AxisWindow {
+                        name: axis.name.clone(),
+                        values: axis.values.slice(start, end)?,
+                    })
                 })
-                .collect(),
+                .collect::<Option<Vec<_>>>()
+                .ok_or(ResultDocumentError::WindowOutOfBounds {
+                    start,
+                    count,
+                    point_count: self.point_count,
+                })?,
             signals: self
                 .signals
                 .iter()
-                .map(|signal| SignalWindow {
-                    canonical_name: signal.descriptor.canonical_name().to_owned(),
-                    qualifier: signal.qualifier.clone(),
-                    values: signal.values.window(start, end),
+                .map(|signal| {
+                    Some(SignalWindow {
+                        canonical_name: signal.descriptor.canonical_name().to_owned(),
+                        qualifier: signal.qualifier.clone(),
+                        values: signal.values.window(start, end)?,
+                    })
                 })
-                .collect(),
+                .collect::<Option<Vec<_>>>()
+                .ok_or(ResultDocumentError::WindowOutOfBounds {
+                    start,
+                    count,
+                    point_count: self.point_count,
+                })?,
         })
     }
 
@@ -1023,15 +1040,17 @@ impl AxisValues {
         self.len() == 0
     }
 
-    fn slice(&self, start: usize, end: usize) -> Self {
-        match self {
+    /// The coordinates in `start..end`, or `None` when this axis is shorter
+    /// than the document's declared point count claims.
+    fn slice(&self, start: usize, end: usize) -> Option<Self> {
+        Some(match self {
             Self::Real { values } => Self::Real {
-                values: values[start..end].to_vec(),
+                values: values.get(start..end)?.to_vec(),
             },
             Self::Integer { values } => Self::Integer {
-                values: values[start..end].to_vec(),
+                values: values.get(start..end)?.to_vec(),
             },
-        }
+        })
     }
 }
 
@@ -1241,31 +1260,39 @@ impl SeriesValues {
         Ok(())
     }
 
-    fn window(&self, start: usize, end: usize) -> SeriesWindowValues {
-        match self {
-            Self::Real { samples } => SeriesWindowValues::Real {
-                values: samples[start..end]
-                    .iter()
-                    .map(|sample| sample.unwrap_or(0.0))
-                    .collect(),
-                validity: validity_mask(&samples[start..end]),
-            },
-            Self::Complex { samples } => SeriesWindowValues::Complex {
-                real: samples[start..end]
-                    .iter()
-                    .map(|sample| sample.map_or(0.0, |sample| sample.real))
-                    .collect(),
-                imaginary: samples[start..end]
-                    .iter()
-                    .map(|sample| sample.map_or(0.0, |sample| sample.imaginary))
-                    .collect(),
-                validity: validity_mask(&samples[start..end]),
-            },
-            Self::Logic { samples } => SeriesWindowValues::Logic {
-                samples: samples[start..end].to_vec(),
-                validity: validity_mask(&samples[start..end]),
-            },
-        }
+    /// The samples in `start..end`, or `None` when this series is shorter
+    /// than the document's declared point count claims.
+    fn window(&self, start: usize, end: usize) -> Option<SeriesWindowValues> {
+        Some(match self {
+            Self::Real { samples } => {
+                let samples = samples.get(start..end)?;
+                SeriesWindowValues::Real {
+                    values: samples.iter().map(|sample| sample.unwrap_or(0.0)).collect(),
+                    validity: validity_mask(samples),
+                }
+            }
+            Self::Complex { samples } => {
+                let samples = samples.get(start..end)?;
+                SeriesWindowValues::Complex {
+                    real: samples
+                        .iter()
+                        .map(|sample| sample.map_or(0.0, |sample| sample.real))
+                        .collect(),
+                    imaginary: samples
+                        .iter()
+                        .map(|sample| sample.map_or(0.0, |sample| sample.imaginary))
+                        .collect(),
+                    validity: validity_mask(samples),
+                }
+            }
+            Self::Logic { samples } => {
+                let samples = samples.get(start..end)?;
+                SeriesWindowValues::Logic {
+                    samples: samples.to_vec(),
+                    validity: validity_mask(samples),
+                }
+            }
+        })
     }
 }
 

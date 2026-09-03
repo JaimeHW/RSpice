@@ -1086,8 +1086,10 @@ mod tests {
 
     #[test]
     fn validation_rejects_undefined_parameter_domains() {
-        let mut model = XyceTeamModelParams::default();
-        model.x_scaling = 0.0;
+        let mut model = XyceTeamModelParams {
+            x_scaling: 0.0,
+            ..Default::default()
+        };
         assert!(matches!(
             model.validate(),
             Err(XyceTeamMemristorError::InvalidParameter {
@@ -1193,9 +1195,11 @@ mod tests {
 
     #[test]
     fn dc_gauge_target_tracks_a_nonzero_xon() {
-        let mut model = XyceTeamModelParams::default();
-        model.x_on = 0.5e-9;
-        model.x_scaling = 1.0e9;
+        let model = XyceTeamModelParams {
+            x_on: 0.5e-9,
+            x_scaling: 1.0e9,
+            ..Default::default()
+        };
         let device = XyceTeamMemristor::new(model, XyceTeamInstanceParams::default()).unwrap();
         assert_close(device.dc_state_target(), 0.5, 1e-14, 1e-14);
         let cache = device
@@ -1212,17 +1216,19 @@ mod tests {
     fn unit_exponents_keep_the_physical_dc_state_root() {
         // ALPHA*=1 makes the threshold root simple, so the operating point must
         // solve the physical steady state rather than gauge it away.
-        let mut model = XyceTeamModelParams::default();
-        model.r_on = 50.0;
-        model.r_off = 150.0;
-        model.x_on = 0.0;
-        model.x_off = 1.0;
-        model.i_on = -1.0e-3;
-        model.i_off = 1.0e-3;
-        model.k_on = -1.0;
-        model.k_off = 1.0;
-        model.alpha_on = 1.0;
-        model.alpha_off = 1.0;
+        let model = XyceTeamModelParams {
+            r_on: 50.0,
+            r_off: 150.0,
+            x_on: 0.0,
+            x_off: 1.0,
+            i_on: -1.0e-3,
+            i_off: 1.0e-3,
+            k_on: -1.0,
+            k_off: 1.0,
+            alpha_on: 1.0,
+            alpha_off: 1.0,
+            ..Default::default()
+        };
         let device = XyceTeamMemristor::new(model, XyceTeamInstanceParams::default()).unwrap();
         assert!(device.has_nondegenerate_dc_state_root());
 
@@ -1252,9 +1258,11 @@ mod tests {
     #[test]
     fn dc_state_root_is_degenerate_for_every_exponent_above_one() {
         for alpha in [2.0, 3.0, 4.0, 10.0] {
-            let mut model = XyceTeamModelParams::default();
-            model.alpha_on = alpha;
-            model.alpha_off = alpha;
+            let model = XyceTeamModelParams {
+                alpha_on: alpha,
+                alpha_off: alpha,
+                ..Default::default()
+            };
             let device = XyceTeamMemristor::new(model, XyceTeamInstanceParams::default()).unwrap();
             assert!(
                 !device.has_nondegenerate_dc_state_root(),

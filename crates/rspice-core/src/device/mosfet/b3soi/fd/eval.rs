@@ -34,8 +34,6 @@
 // `abulk0`/`dabulk0_dvb`/`exp_vgst` are computed in the DC path but only read
 // by the CAPMOD=2/3 charge models; ngspice keeps them here, so we retain the
 // assignments for a faithful load-equation port rather than dropping them.
-#![allow(unused_assignments)]
-
 use super::super::common::{
     DELT_VBS0DIO, DELT_VBS0EFF, DELT_VBSDIO, DELT_VBSEFF, DELT_VBSMOS, DELT_XCSAT, OFF_VBSDIO,
 };

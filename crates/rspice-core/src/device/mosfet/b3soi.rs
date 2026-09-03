@@ -67,6 +67,6 @@ pub mod dd;
 pub mod fd;
 pub mod pd;
 
-pub use dd::{B3SoiDd, B3SoiDdModel, BodyMode};
+pub use dd::{B3SoiDd, B3SoiDdModel, B3SoiDdNodes, BodyMode};
 pub use fd::{B3SoiFd, B3SoiFdModel};
-pub use pd::{B3SoiPd, B3SoiPdModel};
+pub use pd::{B3SoiPd, B3SoiPdModel, B3SoiPdNodes};

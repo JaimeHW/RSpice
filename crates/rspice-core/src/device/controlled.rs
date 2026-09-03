@@ -6,7 +6,6 @@
 //! - G: Voltage-Controlled Current Source (VCCS)
 //! - H: Current-Controlled Voltage Source (CCVS)
 
-#![allow(clippy::too_many_arguments)]
 use crate::solver::{StaticMatrix, TripletMatrix};
 use crate::{NodeId, Value};
 
@@ -15,6 +14,17 @@ use crate::{NodeId, Value};
 //=============================================================================
 
 /// Voltage-Controlled Voltage Source storage (SoA)
+/// The four nodes a voltage-controlled source spans: the output branch and the
+/// sensed branch. They are positional in the netlist (`E<name> n+ n- nc+ nc-`),
+/// and swapping an output pair for a control pair silently inverts the source.
+#[derive(Clone, Copy)]
+pub struct VoltageControlledNodes {
+    pub node_pos: NodeId,
+    pub node_neg: NodeId,
+    pub ctrl_pos: NodeId,
+    pub ctrl_neg: NodeId,
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct Vcvs {
     pub names: Vec<String>,
@@ -34,13 +44,16 @@ impl Vcvs {
     pub fn add(
         &mut self,
         name: String,
-        node_pos: NodeId,
-        node_neg: NodeId,
-        ctrl_pos: NodeId,
-        ctrl_neg: NodeId,
+        nodes: VoltageControlledNodes,
         branch_idx: NodeId,
         gain: Value,
     ) {
+        let VoltageControlledNodes {
+            node_pos,
+            node_neg,
+            ctrl_pos,
+            ctrl_neg,
+        } = nodes;
         self.names.push(name);
         self.node_pos.push(node_pos);
         self.node_neg.push(node_neg);
@@ -148,15 +161,13 @@ impl Vccs {
         Self::default()
     }
 
-    pub fn add(
-        &mut self,
-        name: String,
-        node_pos: NodeId,
-        node_neg: NodeId,
-        ctrl_pos: NodeId,
-        ctrl_neg: NodeId,
-        gm: Value,
-    ) {
+    pub fn add(&mut self, name: String, nodes: VoltageControlledNodes, gm: Value) {
+        let VoltageControlledNodes {
+            node_pos,
+            node_neg,
+            ctrl_pos,
+            ctrl_neg,
+        } = nodes;
         self.names.push(name);
         self.node_pos.push(node_pos);
         self.node_neg.push(node_neg);

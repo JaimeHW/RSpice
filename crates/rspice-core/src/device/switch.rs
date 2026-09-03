@@ -34,6 +34,7 @@
 //! ```
 //! where f(x) is a smooth step function.
 
+use super::behavioral::BehavioralEnvironment;
 use super::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
 use crate::expr::{
     BinaryOp, CompiledExpr, Context, Expr, Function, UnaryOp, Vm, compile, parse_expression_strict,
@@ -1542,10 +1543,9 @@ impl GenericSwitch {
                         | Function::Le0
                         | Function::Eq0
                         | Function::Ne0
-                ) {
-                    if let Some(arg) = args.first() {
-                        Self::push_affine_zero_crossing(arg, breakpoints);
-                    }
+                ) && let Some(arg) = args.first()
+                {
+                    Self::push_affine_zero_crossing(arg, breakpoints);
                 }
                 if matches!(func, Function::Table | Function::Pwl) {
                     Self::collect_table_time_breakpoints(args, breakpoints);
@@ -1913,11 +1913,13 @@ impl GenericSwitch {
                 &self.program,
                 &self.node_values,
                 &self.branch_values,
-                time,
-                0.0,
-                self.temperature,
-                self.gmin,
-                self.expression_dialect,
+                BehavioralEnvironment {
+                    time,
+                    frequency: 0.0,
+                    temperature: self.temperature,
+                    gmin: self.gmin,
+                    expression_dialect: self.expression_dialect,
+                },
                 idx,
             );
             self.node_partials[idx] = analytic.unwrap_or_else(|| {
@@ -1951,11 +1953,13 @@ impl GenericSwitch {
                 &self.program,
                 &self.node_values,
                 &self.branch_values,
-                time,
-                0.0,
-                self.temperature,
-                self.gmin,
-                self.expression_dialect,
+                BehavioralEnvironment {
+                    time,
+                    frequency: 0.0,
+                    temperature: self.temperature,
+                    gmin: self.gmin,
+                    expression_dialect: self.expression_dialect,
+                },
                 idx,
             );
             self.branch_partials[idx] = analytic.unwrap_or_else(|| {

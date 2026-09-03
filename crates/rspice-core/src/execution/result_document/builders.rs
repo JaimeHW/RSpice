@@ -77,16 +77,29 @@ fn source_error(location: &'static str, detail: impl Into<String>) -> ResultDocu
     }
 }
 
-fn descriptor(
-    location: &'static str,
-    canonical: String,
-    display: String,
+/// How one result signal is classified: what kind of quantity it is, its
+/// unit, its scalar type, its shape, and which part of the run owns it.
+struct SignalClassification {
     kind: SignalKind,
     unit: SignalUnit,
     value_type: SignalValueType,
     shape: SignalShape,
     owner: SignalOwner,
+}
+
+fn descriptor(
+    location: &'static str,
+    canonical: String,
+    display: String,
+    classification: SignalClassification,
 ) -> Result<SignalDescriptor, ResultDocumentError> {
+    let SignalClassification {
+        kind,
+        unit,
+        value_type,
+        shape,
+        owner,
+    } = classification;
     SignalDescriptor::new(canonical, display, kind, unit, value_type, shape, owner)
         .map_err(|error| source_error(location, error.to_string()))
 }
@@ -109,11 +122,13 @@ fn voltage_descriptor(
         location,
         format!("v({node})"),
         format!("V({node})"),
-        SignalKind::Voltage,
-        SignalUnit::Volt,
-        value_type,
-        series_shape(point_count),
-        SignalOwner::Node(node.to_owned()),
+        SignalClassification {
+            kind: SignalKind::Voltage,
+            unit: SignalUnit::Volt,
+            value_type,
+            shape: series_shape(point_count),
+            owner: SignalOwner::Node(node.to_owned()),
+        },
     )
 }
 
@@ -127,11 +142,13 @@ fn current_descriptor(
         location,
         format!("i({branch})"),
         format!("I({branch})"),
-        SignalKind::Current,
-        SignalUnit::Ampere,
-        value_type,
-        series_shape(point_count),
-        SignalOwner::Branch(branch.to_owned()),
+        SignalClassification {
+            kind: SignalKind::Current,
+            unit: SignalUnit::Ampere,
+            value_type,
+            shape: series_shape(point_count),
+            owner: SignalOwner::Branch(branch.to_owned()),
+        },
     )
 }
 
@@ -147,11 +164,13 @@ fn analysis_descriptor(
         location,
         canonical.to_owned(),
         display.to_owned(),
-        SignalKind::Scalar,
-        unit,
-        value_type,
-        series_shape(point_count),
-        SignalOwner::Analysis,
+        SignalClassification {
+            kind: SignalKind::Scalar,
+            unit,
+            value_type,
+            shape: series_shape(point_count),
+            owner: SignalOwner::Analysis,
+        },
     )
 }
 
@@ -1155,7 +1174,16 @@ impl AnalysisResultDocument {
             None,
         )?;
 
-        let totals: [(&str, &str, SignalUnit, fn(&NoiseResult) -> Value); 3] = [
+        /// A total-noise channel: its signal name, its display label, the
+        /// unit it is reported in, and how to read it off one noise point.
+        type NoiseTotalChannel = (
+            &'static str,
+            &'static str,
+            SignalUnit,
+            fn(&NoiseResult) -> Value,
+        );
+
+        let totals: [NoiseTotalChannel; 3] = [
             (
                 "onoise_spectrum",
                 "ONOISE",
@@ -2971,7 +2999,15 @@ impl AnalysisResultDocument {
             },
         )?];
 
-        let optional: [(&str, &str, fn(&PhaseNoisePoint) -> Option<Value>); 3] = [
+        /// An optional phase-noise channel: its signal name, its display
+        /// label, and how to read it off one point when the run produced it.
+        type OptionalPhaseNoiseChannel = (
+            &'static str,
+            &'static str,
+            fn(&PhaseNoisePoint) -> Option<Value>,
+        );
+
+        let optional: [OptionalPhaseNoiseChannel; 3] = [
             ("am_noise", "AM noise", |point| point.am_noise),
             ("upper_sideband_noise", "Upper sideband", |point| {
                 point.upper_sideband

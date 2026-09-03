@@ -178,6 +178,9 @@ where
     let zero = Complex64::new(0.0, 0.0);
     let mut s = vec![vec![vec![zero; points]; count]; count];
 
+    // `excited` names the driven port, and each iteration writes that column
+    // of every row of `s`, so there is no one row to walk.
+    #[allow(clippy::needless_range_loop)]
     for excited in 0..count {
         check_abort(abort)?;
         let mut driven = base.clone();

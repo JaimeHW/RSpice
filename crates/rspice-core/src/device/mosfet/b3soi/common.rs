@@ -6,6 +6,20 @@
 use crate::{NodeId, Value, device::traits::MatrixStamper};
 use std::collections::HashMap;
 
+/// The companion currents one SOI charge stamp injects at a time step: one per
+/// stored charge (gate, body, drain, back gate and the self-heating thermal
+/// node). The integrator produces them together and the stamp is only correct
+/// if all five come from the same step, so they travel as one record rather
+/// than five interchangeable `Value`s.
+#[derive(Clone, Copy)]
+pub struct SoiCompanionCurrents {
+    pub cqg: Value,
+    pub cqb: Value,
+    pub cqd: Value,
+    pub cqe: Value,
+    pub cqth: Value,
+}
+
 pub(crate) const B3SOI_MOBMOD_VALUES: &[i32] = &[0, 1, 2, 3];
 pub(crate) const B3SOI_CAPMOD_VALUES: &[i32] = &[0, 1, 2, 3];
 pub(crate) const B3SOI_SHMOD_VALUES: &[i32] = &[0, 1];

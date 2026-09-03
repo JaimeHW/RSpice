@@ -486,11 +486,16 @@ fn calculate_metrics(
         minimum_metric_bin
     };
     let mut largest_spur: Option<&TransientFftBin> = None;
-    for bin in sfdr_lower..=maximum_metric_bin {
+    for (bin, candidate) in bins
+        .iter()
+        .enumerate()
+        .take(maximum_metric_bin + 1)
+        .skip(sfdr_lower)
+    {
         if bin != fundamental_bin
-            && bins[bin].magnitude > largest_spur.map_or(0.0, |spur| spur.magnitude)
+            && candidate.magnitude > largest_spur.map_or(0.0, |spur| spur.magnitude)
         {
-            largest_spur = Some(&bins[bin]);
+            largest_spur = Some(candidate);
         }
     }
     let sfdr_spur_magnitude = largest_spur.map_or(0.0, |spur| spur.magnitude);

@@ -662,17 +662,17 @@ pub(super) mod optional_step_axis_target {
 // Hexadecimal digests
 //=============================================================================
 
-const HEX_DIGITS: [char; 16] = [
-    '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f',
-];
-
 fn encode_hex(bytes: &[u8]) -> String {
-    let mut encoded = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        encoded.push(HEX_DIGITS[usize::from(byte >> 4)]);
-        encoded.push(HEX_DIGITS[usize::from(byte & 0x0f)]);
-    }
-    encoded
+    use std::fmt::Write as _;
+
+    bytes.iter().fold(
+        String::with_capacity(bytes.len() * 2),
+        |mut encoded, byte| {
+            // Writing into a `String` is infallible.
+            let _ = write!(encoded, "{byte:02x}");
+            encoded
+        },
+    )
 }
 
 fn decode_hex(text: &str, output: &mut [u8]) -> Result<(), String> {
@@ -683,11 +683,12 @@ fn decode_hex(text: &str, output: &mut [u8]) -> Result<(), String> {
             text.len()
         ));
     }
-    let bytes = text.as_bytes();
-    for (index, slot) in output.iter_mut().enumerate() {
-        let high = decode_nibble(bytes[index * 2])?;
-        let low = decode_nibble(bytes[index * 2 + 1])?;
-        *slot = (high << 4) | low;
+    let mut nibbles = text.bytes();
+    for slot in output.iter_mut() {
+        let (Some(high), Some(low)) = (nibbles.next(), nibbles.next()) else {
+            return Err("hexadecimal payload ended in the middle of a byte".to_string());
+        };
+        *slot = (decode_nibble(high)? << 4) | decode_nibble(low)?;
     }
     Ok(())
 }

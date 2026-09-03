@@ -126,6 +126,19 @@ pub struct JilesAthertonParams {
 /// The transient solver uses this value while assembling a Newton trial. It
 /// deliberately contains no accepted-state mutation; the accepted step calls
 /// `integrate_xyce_core` to commit the same constitutive evaluation.
+/// One integration step of the Xyce magnetic core: the applied field and its
+/// increment over the step, the winding voltage that drove it, the step size
+/// and whether the step is the second-order one-step variant. The five terms
+/// describe a single step and are meaningless apart.
+#[derive(Clone, Copy)]
+pub(crate) struct XyceCoreStep {
+    pub happ: Value,
+    pub delta_happ: Value,
+    pub voltage: Value,
+    pub dt: Value,
+    pub one_step_order2: bool,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct XyceCoreTrial {
     /// Endpoint magnetization in A/m.
@@ -960,12 +973,15 @@ impl JilesAthertonInductor {
     /// the public branch matrix compact.
     pub(crate) fn xyce_core_level1_trial_from_happ(
         &self,
-        happ: Value,
-        delta_happ: Value,
-        voltage: Value,
-        dt: Value,
-        one_step_order2: bool,
+        step: XyceCoreStep,
     ) -> Option<XyceCoreTrial> {
+        let XyceCoreStep {
+            happ,
+            delta_happ,
+            voltage,
+            dt,
+            one_step_order2,
+        } = step;
         if !self.params.xyce_core
             || self.params.xyce_core_level2
             || !dt.is_finite()
@@ -1304,14 +1320,17 @@ impl JilesAthertonInductor {
     /// R equation so the circuit assembler can stamp both coupled rows.
     pub(crate) fn xyce_core_level1_trial_at_magnetization_and_rate(
         &self,
-        happ: Value,
-        delta_happ: Value,
-        voltage: Value,
-        dt: Value,
-        one_step_order2: bool,
+        step: XyceCoreStep,
         magnetization: Value,
         rate: Value,
     ) -> Option<XyceCoreTrial> {
+        let XyceCoreStep {
+            happ,
+            delta_happ,
+            voltage,
+            dt,
+            one_step_order2,
+        } = step;
         if !self.params.xyce_core
             || self.params.xyce_core_level2
             || !dt.is_finite()
@@ -1643,11 +1662,13 @@ impl JilesAthertonInductor {
         let happ = branch_current_sum / self.params.length;
         self.integrate_xyce_core_from_happ(
             current,
-            happ,
-            delta_happ,
-            voltage,
-            dt,
-            one_step_order2,
+            XyceCoreStep {
+                happ,
+                delta_happ,
+                voltage,
+                dt,
+                one_step_order2,
+            },
             raw_ampere_turns,
             None,
         );
@@ -1661,14 +1682,17 @@ impl JilesAthertonInductor {
     fn integrate_xyce_core_from_happ(
         &mut self,
         current: Value,
-        happ: Value,
-        delta_happ: Value,
-        voltage: Value,
-        dt: Value,
-        one_step_order2: bool,
+        step: XyceCoreStep,
         raw_ampere_turns: Option<(Value, Value)>,
         accepted_hidden_state: Option<(Value, Value)>,
     ) {
+        let XyceCoreStep {
+            happ,
+            delta_happ,
+            voltage,
+            dt,
+            one_step_order2,
+        } = step;
         if voltage.abs() > self.state.max_voltage_drop {
             self.state.max_voltage_drop = voltage.abs();
         }
@@ -1693,11 +1717,13 @@ impl JilesAthertonInductor {
                         {
                             let Some(trial) = self
                                 .xyce_core_level1_trial_at_magnetization_and_rate(
-                                    happ,
-                                    delta_happ,
-                                    voltage,
-                                    dt,
-                                    one_step_order2,
+                                    XyceCoreStep {
+                                        happ,
+                                        delta_happ,
+                                        voltage,
+                                        dt,
+                                        one_step_order2,
+                                    },
                                     accepted_m,
                                     accepted_rate,
                                 )
@@ -1719,11 +1745,13 @@ impl JilesAthertonInductor {
                 let trial = if !self.params.xyce_core_level2 {
                     if let Some((accepted_m, accepted_rate)) = accepted_hidden_state {
                         let Some(trial) = self.xyce_core_level1_trial_at_magnetization_and_rate(
-                            happ,
-                            delta_happ,
-                            voltage,
-                            dt,
-                            one_step_order2,
+                            XyceCoreStep {
+                                happ,
+                                delta_happ,
+                                voltage,
+                                dt,
+                                one_step_order2,
+                            },
                             accepted_m,
                             accepted_rate,
                         ) else {
@@ -1731,13 +1759,13 @@ impl JilesAthertonInductor {
                         };
                         trial
                     } else {
-                        let Some(trial) = self.xyce_core_level1_trial_from_happ(
+                        let Some(trial) = self.xyce_core_level1_trial_from_happ(XyceCoreStep {
                             happ,
                             delta_happ,
                             voltage,
                             dt,
                             one_step_order2,
-                        ) else {
+                        }) else {
                             return;
                         };
                         trial
@@ -1771,11 +1799,13 @@ impl JilesAthertonInductor {
                 let trial = if !self.params.xyce_core_level2 {
                     if let Some((accepted_m, accepted_rate)) = accepted_hidden_state {
                         let Some(trial) = self.xyce_core_level1_trial_at_magnetization_and_rate(
-                            happ,
-                            delta_happ,
-                            voltage,
-                            dt,
-                            one_step_order2,
+                            XyceCoreStep {
+                                happ,
+                                delta_happ,
+                                voltage,
+                                dt,
+                                one_step_order2,
+                            },
                             accepted_m,
                             accepted_rate,
                         ) else {
@@ -1783,13 +1813,13 @@ impl JilesAthertonInductor {
                         };
                         trial
                     } else {
-                        let Some(trial) = self.xyce_core_level1_trial_from_happ(
+                        let Some(trial) = self.xyce_core_level1_trial_from_happ(XyceCoreStep {
                             happ,
                             delta_happ,
                             voltage,
                             dt,
                             one_step_order2,
-                        ) else {
+                        }) else {
                             return;
                         };
                         trial
@@ -2405,11 +2435,13 @@ impl JilesAthertonInductor {
         let happ = branch_current_sum / self.params.length;
         self.integrate_xyce_core_from_happ(
             current,
-            happ,
-            delta_happ,
-            v_pos - v_neg,
-            dt,
-            one_step_order2,
+            XyceCoreStep {
+                happ,
+                delta_happ,
+                voltage: v_pos - v_neg,
+                dt,
+                one_step_order2,
+            },
             raw_ampere_turns,
             hidden_state,
         );
@@ -2429,14 +2461,17 @@ impl JilesAthertonInductor {
     /// single-winding device.
     pub(crate) fn commit_xyce_core_group_solution(
         &mut self,
-        happ: Value,
-        delta_happ: Value,
-        voltage: Value,
+        step: XyceCoreStep,
         hidden_state: Option<(Value, Value)>,
-        dt: Value,
-        one_step_order2: bool,
         raw_ampere_turns: Option<(Value, Value)>,
     ) {
+        let XyceCoreStep {
+            happ,
+            delta_happ,
+            voltage,
+            dt,
+            one_step_order2,
+        } = step;
         if !self.params.xyce_core {
             return;
         }
@@ -2450,11 +2485,13 @@ impl JilesAthertonInductor {
         };
         self.integrate_xyce_core_from_happ(
             current,
-            happ,
-            delta_happ,
-            voltage,
-            dt,
-            one_step_order2,
+            XyceCoreStep {
+                happ,
+                delta_happ,
+                voltage,
+                dt,
+                one_step_order2,
+            },
             raw_ampere_turns,
             hidden_state,
         );
@@ -2635,10 +2672,12 @@ mod tests {
 
     #[test]
     fn xyce_level2_trial_honors_orig_flag_magnetization_limiter() {
-        let mut params = JilesAthertonParams::default();
-        params.xyce_core = true;
-        params.xyce_core_level2 = true;
-        params.ms = 100.0;
+        let params = JilesAthertonParams {
+            xyce_core: true,
+            xyce_core_level2: true,
+            ms: 100.0,
+            ..Default::default()
+        };
         let mut device = JilesAthertonInductor::new("Lcore".to_owned(), 0, 0).with_params(params);
 
         let trial = |magnetization_update| XyceCoreTrial {

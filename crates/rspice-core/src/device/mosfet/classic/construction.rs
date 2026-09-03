@@ -26,7 +26,7 @@ impl Mosfet {
         Self::new(name, MosType::Pmos, drain, gate, source, bulk)
     }
 
-    pub(in crate::device::mosfet::mosfet) fn new(
+    pub(in crate::device::mosfet::classic) fn new(
         name: String,
         mos_type: MosType,
         drain: NodeId,
@@ -227,7 +227,7 @@ impl Mosfet {
         };
     }
 
-    pub(in crate::device::mosfet::mosfet) fn refresh_legacy_bsim_size_params(&mut self) {
+    pub(in crate::device::mosfet::classic) fn refresh_legacy_bsim_size_params(&mut self) {
         self.legacy_bsim_sized = self
             .legacy_bsim_model
             .as_ref()
@@ -245,7 +245,7 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn terminal_voltage(
+    pub(in crate::device::mosfet::classic) fn terminal_voltage(
         voltages: &[Value],
         node: NodeId,
     ) -> Value {
@@ -253,7 +253,7 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn branch_voltages(
+    pub(in crate::device::mosfet::classic) fn branch_voltages(
         &self,
         voltages: &[Value],
     ) -> (Value, Value, Value) {
@@ -265,7 +265,7 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn model_space_onset_voltage(
+    pub(in crate::device::mosfet::classic) fn model_space_onset_voltage(
         &self,
         vgs: Value,
         vds: Value,
@@ -298,7 +298,7 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn body_junction_vcrit(&self, isat: Value) -> Value {
+    pub(in crate::device::mosfet::classic) fn body_junction_vcrit(&self, isat: Value) -> Value {
         let vt = self.body_junction_thermal_voltage();
         if !isat.is_finite() || isat <= 0.0 {
             return vt * 40.0;
@@ -348,13 +348,13 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn source_body_vcrit(&self) -> Value {
+    pub(in crate::device::mosfet::classic) fn source_body_vcrit(&self) -> Value {
         let isat = self.effective_body_junction_saturation_current(self.source_area);
         self.body_junction_vcrit(isat)
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn drain_body_vcrit(&self) -> Value {
+    pub(in crate::device::mosfet::classic) fn drain_body_vcrit(&self) -> Value {
         let isat = self.effective_body_junction_saturation_current(self.drain_area);
         self.body_junction_vcrit(isat)
     }
@@ -377,7 +377,7 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn dev_pnjlim(
+    pub(in crate::device::mosfet::classic) fn dev_pnjlim(
         vnew: Value,
         vold: Value,
         vt: Value,
@@ -444,7 +444,7 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn limited_branch_voltages_for_eval(
+    pub(in crate::device::mosfet::classic) fn limited_branch_voltages_for_eval(
         &self,
         vgs: Value,
         vds: Value,
@@ -554,7 +554,7 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn linearized_operating_point(
+    pub(in crate::device::mosfet::classic) fn linearized_operating_point(
         &self,
         vgs: Value,
         vds: Value,
@@ -619,7 +619,7 @@ impl Mosfet {
     /// limiting is deterministic, so comparing limited values is equivalent
     /// to re-deriving them.
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn cached_linearization_matches_eval(
+    pub(in crate::device::mosfet::classic) fn cached_linearization_matches_eval(
         &self,
         eval_vgs: Value,
         eval_vds: Value,

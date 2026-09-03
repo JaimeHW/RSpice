@@ -47,6 +47,37 @@ pub(crate) struct LtraRgTwoPort {
     pub(crate) transfer_admittance: Value,
 }
 
+/// The per-unit-length parameters of a distributed RLGC line plus its length.
+#[derive(Clone, Copy)]
+pub struct DistributedRlgc {
+    pub r: Value,
+    pub l: Value,
+    pub g: Value,
+    pub c: Value,
+    pub len: Value,
+}
+
+/// Three consecutive samples of a port voltage and the times they were taken
+/// at, as the LTRA derivative test reads them.
+#[derive(Clone, Copy)]
+struct LtraDerivativeSamples {
+    v_curr: Value,
+    v_prev: Value,
+    v_prev2: Value,
+    t_curr: Value,
+    t_prev: Value,
+    t_prev2: Value,
+}
+
+/// The tolerances the same test compares against.
+#[derive(Clone, Copy)]
+struct LtraDerivativeTolerances {
+    deriv_reltol: Value,
+    deriv_abstol: Value,
+    voltage_reltol: Value,
+    steady_abstol: Value,
+}
+
 impl LtraRgTwoPort {
     /// Build the coefficients from per-unit-length `R`, `G` and a length.
     ///
@@ -793,14 +824,8 @@ impl TransmissionLine {
     }
 
     /// Configure the ngspice-style TXL runtime for a non-lossless scalar line.
-    pub fn enable_txl_runtime(
-        &mut self,
-        r: Value,
-        l: Value,
-        g: Value,
-        c: Value,
-        len: Value,
-    ) -> bool {
+    pub fn enable_txl_runtime(&mut self, rlgc: DistributedRlgc) -> bool {
+        let DistributedRlgc { r, l, g, c, len } = rlgc;
         if let Some(runtime) = txl::TxlRuntime::setup(r, l, g, c, len) {
             self.txl = Some(runtime);
             self.distributed_rlc = None;
@@ -1034,11 +1059,7 @@ impl TransmissionLine {
     /// physically relevant regime for the copied transmission regression decks.
     pub fn set_distributed_rlgc(&mut self, r: Value, l: Value, g: Value, c: Value, len: Value) {
         self.set_distributed_rlgc_with_compaction(
-            r,
-            l,
-            g,
-            c,
-            len,
+            DistributedRlgc { r, l, g, c, len },
             DISTRIBUTED_RLC_COMPACT_RELTOL_DEFAULT,
             DISTRIBUTED_RLC_COMPACT_ABSTOL_DEFAULT,
         );
@@ -1094,14 +1115,11 @@ impl TransmissionLine {
     /// compaction tolerances for its safe-step estimate.
     pub fn set_distributed_rlgc_with_compaction(
         &mut self,
-        r: Value,
-        l: Value,
-        g: Value,
-        c: Value,
-        len: Value,
+        rlgc: DistributedRlgc,
         compact_reltol: Value,
         compact_abstol: Value,
     ) {
+        let DistributedRlgc { r, l, g, c, len } = rlgc;
         if !r.is_finite()
             || !l.is_finite()
             || !g.is_finite()
@@ -1211,17 +1229,23 @@ impl TransmissionLine {
 
     #[inline]
     fn ltra_derivative_changed(
-        v_curr: Value,
-        v_prev: Value,
-        v_prev2: Value,
-        t_curr: Value,
-        t_prev: Value,
-        t_prev2: Value,
-        deriv_reltol: Value,
-        deriv_abstol: Value,
-        voltage_reltol: Value,
-        steady_abstol: Value,
+        samples: LtraDerivativeSamples,
+        tolerances: LtraDerivativeTolerances,
     ) -> bool {
+        let LtraDerivativeSamples {
+            v_curr,
+            v_prev,
+            v_prev2,
+            t_curr,
+            t_prev,
+            t_prev2,
+        } = samples;
+        let LtraDerivativeTolerances {
+            deriv_reltol,
+            deriv_abstol,
+            voltage_reltol,
+            steady_abstol,
+        } = tolerances;
         let dt_curr = t_curr - t_prev;
         if !(dt_curr.is_finite() && dt_curr > 0.0) {
             return false;
@@ -1321,28 +1345,36 @@ impl TransmissionLine {
         };
 
         let forward_changed = Self::ltra_derivative_changed(
-            Self::ltra_wave(curr, self.z0, kernel.attenuation, true),
-            Self::ltra_wave(prev, self.z0, kernel.attenuation, true),
-            Self::ltra_wave(prev2, self.z0, kernel.attenuation, true),
-            curr.time,
-            prev.time,
-            prev2.time,
-            self.ltra_breakpoint_reltol,
-            self.ltra_breakpoint_abstol,
-            voltage_reltol,
-            steady_abstol,
+            LtraDerivativeSamples {
+                v_curr: Self::ltra_wave(curr, self.z0, kernel.attenuation, true),
+                v_prev: Self::ltra_wave(prev, self.z0, kernel.attenuation, true),
+                v_prev2: Self::ltra_wave(prev2, self.z0, kernel.attenuation, true),
+                t_curr: curr.time,
+                t_prev: prev.time,
+                t_prev2: prev2.time,
+            },
+            LtraDerivativeTolerances {
+                deriv_reltol: self.ltra_breakpoint_reltol,
+                deriv_abstol: self.ltra_breakpoint_abstol,
+                voltage_reltol,
+                steady_abstol,
+            },
         );
         let backward_changed = Self::ltra_derivative_changed(
-            Self::ltra_wave(curr, self.z0, kernel.attenuation, false),
-            Self::ltra_wave(prev, self.z0, kernel.attenuation, false),
-            Self::ltra_wave(prev2, self.z0, kernel.attenuation, false),
-            curr.time,
-            prev.time,
-            prev2.time,
-            self.ltra_breakpoint_reltol,
-            self.ltra_breakpoint_abstol,
-            voltage_reltol,
-            steady_abstol,
+            LtraDerivativeSamples {
+                v_curr: Self::ltra_wave(curr, self.z0, kernel.attenuation, false),
+                v_prev: Self::ltra_wave(prev, self.z0, kernel.attenuation, false),
+                v_prev2: Self::ltra_wave(prev2, self.z0, kernel.attenuation, false),
+                t_curr: curr.time,
+                t_prev: prev.time,
+                t_prev2: prev2.time,
+            },
+            LtraDerivativeTolerances {
+                deriv_reltol: self.ltra_breakpoint_reltol,
+                deriv_abstol: self.ltra_breakpoint_abstol,
+                voltage_reltol,
+                steady_abstol,
+            },
         );
 
         if forward_changed || backward_changed {
@@ -2209,7 +2241,17 @@ mod ltra_oracle_replay {
         let z0 = (l / c).sqrt();
         let td = (l * c).sqrt() * len;
         let mut line = TransmissionLine::new("o1".to_string(), 1, 0, 2, 0, z0, td);
-        line.set_distributed_rlgc_with_compaction(r, l, 0.0, c, len, 1.0e-3, 1.0e-14);
+        line.set_distributed_rlgc_with_compaction(
+            DistributedRlgc {
+                r,
+                l,
+                g: 0.0,
+                c,
+                len,
+            },
+            1.0e-3,
+            1.0e-14,
+        );
 
         let mut compared = 0usize;
         let mut worst: (Value, Value) = (0.0, 0.0);

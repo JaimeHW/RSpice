@@ -3,16 +3,22 @@ use super::*;
 impl TestRunner {
     pub(in crate::suites::ngspice) fn run_ac_test(
         &self,
-        name: &str,
-        cir_path: &Path,
-        source_path: &Path,
-        source: &str,
-        sweep_type: AcSweepType,
-        points: usize,
-        fstart: Value,
-        fstop: Value,
-        start: std::time::Instant,
+        case: &RegressionCase<'_>,
+        sweep: FrequencySweep,
     ) -> TestResult {
+        let RegressionCase {
+            name,
+            cir_path,
+            source_path,
+            source,
+            start,
+        } = *case;
+        let FrequencySweep {
+            sweep_type,
+            points,
+            fstart,
+            fstop,
+        } = sweep;
         let netlist = match Self::parse_regression_source(source, source_path) {
             Ok(n) => n,
             Err(e) => {

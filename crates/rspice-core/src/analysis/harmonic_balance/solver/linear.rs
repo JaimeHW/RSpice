@@ -1604,7 +1604,8 @@ impl HbSolver {
         if exact_mna {
             for (branch_index, branch) in self.periodic_mna_branches.iter().enumerate() {
                 let (_, node_pos, node_neg) = branch.ordinal_and_terminals();
-                for k in 0..h {
+                for (k, &branch_current) in branch_currents[branch_index].iter().enumerate().take(h)
+                {
                     let mut voltage_drop = Complex64::new(0.0, 0.0);
                     let mut voltage_scale = 0.0;
                     if node_pos > 0 {
@@ -1631,15 +1632,14 @@ impl HbSolver {
                         ExactMnaBranch::Inductor { inductance, .. } => {
                             let constitutive_voltage =
                                 Complex64::new(0.0, (k as Value) * omega0 * *inductance)
-                                    * branch_currents[branch_index][k];
+                                    * branch_current;
                             (
                                 constitutive_voltage - voltage_drop,
                                 constitutive_voltage.norm(),
                             )
                         }
                         ExactMnaBranch::Resistor { resistance, .. } => {
-                            let constitutive_voltage =
-                                *resistance * branch_currents[branch_index][k];
+                            let constitutive_voltage = *resistance * branch_current;
                             (
                                 constitutive_voltage - voltage_drop,
                                 constitutive_voltage.norm(),
@@ -1677,6 +1677,9 @@ impl HbSolver {
         }
         if exact_mna {
             for &(row, column, coefficient) in &self.exact_mna_static_entries {
+                // The input column is a node voltage or a branch current
+                // depending on `column`, so there is no one slice to walk.
+                #[allow(clippy::needless_range_loop)]
                 for k in 0..h {
                     let input = if column < self.num_nodes {
                         state.x[column][k]
@@ -1697,14 +1700,19 @@ impl HbSolver {
             for &(row, column, inductance) in &self.exact_mna_inductance_entries {
                 let branch = row - self.num_nodes;
                 let control_branch = column - self.num_nodes;
-                for k in 0..h {
-                    let contribution = Complex64::new(0.0, (k as Value) * omega0 * inductance)
-                        * branch_currents[control_branch][k];
+                for (k, &control_current) in
+                    branch_currents[control_branch].iter().enumerate().take(h)
+                {
+                    let contribution =
+                        Complex64::new(0.0, (k as Value) * omega0 * inductance) * control_current;
                     state.mna_branch_residual[branch][k] += contribution;
                     state.mna_branch_residual_scale[branch][k] += contribution.norm();
                 }
             }
             let unknowns = self.num_nodes + self.periodic_mna_branches.len();
+            // As above: the visitor reads whichever of the two unknown vectors
+            // the entry's column names.
+            #[allow(clippy::needless_range_loop)]
             for k in 0..h {
                 let omega = k as Value * omega0;
                 for network in &self.exact_periodic_networks {
@@ -1798,8 +1806,8 @@ impl HbSolver {
                 }
             }
 
-            for node in 0..n {
-                rhs[node] = self
+            for (node, entry) in rhs.iter_mut().enumerate().take(n) {
+                *entry = self
                     .source_spectra
                     .get(node)
                     .and_then(|s| s.get(k))
@@ -1888,19 +1896,19 @@ impl HbSolver {
                 )));
             }
 
-            for node in 0..n {
-                state.x[node][k] = if k == 0 {
-                    Complex64::new(solution[node].re, 0.0)
+            for (harmonics, &node_value) in state.x.iter_mut().zip(&solution).take(n) {
+                harmonics[k] = if k == 0 {
+                    Complex64::new(node_value.re, 0.0)
                 } else {
-                    solution[node]
+                    node_value
                 };
             }
-            for branch_idx in 0..m {
-                let col = n + branch_idx;
-                branch_currents[branch_idx][k] = if k == 0 {
-                    Complex64::new(solution[col].re, 0.0)
+            for (harmonics, &branch_value) in branch_currents.iter_mut().zip(&solution[n..]).take(m)
+            {
+                harmonics[k] = if k == 0 {
+                    Complex64::new(branch_value.re, 0.0)
                 } else {
-                    solution[col]
+                    branch_value
                 };
             }
         }

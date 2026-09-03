@@ -872,8 +872,10 @@ mod tests {
     #[test]
     fn raw_reader_enforces_byte_limit_before_parsing() {
         let source = b"Title: bounded\n";
-        let mut limits = ResourceLimits::default();
-        limits.max_external_data_bytes = source.len() - 1;
+        let limits = ResourceLimits {
+            max_external_data_bytes: source.len() - 1,
+            ..Default::default()
+        };
         let mut reader = Cursor::new(source);
 
         let error = parse_raw_reader_with_limits(&mut reader, limits)
@@ -892,8 +894,10 @@ mod tests {
     #[test]
     fn declared_raw_dimensions_enforce_retained_result_limit() {
         let source = "Title: limited\nPlotname: Transient Analysis\nFlags: real\nNo. Variables: 2\nNo. Points: 1\nVariables:\n0 time time\n1 V(out) voltage\nValues:\n0 0.0 1.0\n";
-        let mut limits = ResourceLimits::default();
-        limits.max_result_values = 3;
+        let limits = ResourceLimits {
+            max_result_values: 3,
+            ..Default::default()
+        };
         let mut reader = Cursor::new(source.as_bytes());
 
         let error = parse_raw_reader_with_limits(&mut reader, limits)

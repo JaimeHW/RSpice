@@ -330,9 +330,9 @@ mod tests {
         let square = super::super::s_from_y(&admittance, &impedances)
             .expect("a series resistor has a scattering representation");
         let mut matrix = SMatrix::new(1.0e9, 2);
-        for row in 0..2 {
-            for column in 0..2 {
-                matrix.set(row + 1, column + 1, square[row][column]);
+        for (row, entries) in square.iter().enumerate() {
+            for (column, &value) in entries.iter().enumerate() {
+                matrix.set(row + 1, column + 1, value);
             }
         }
         let power = 4.0 * crate::constants::K_BOLTZMANN * temperature * conductance;

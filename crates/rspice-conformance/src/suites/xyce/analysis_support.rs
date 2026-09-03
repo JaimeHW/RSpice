@@ -592,9 +592,11 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         self.static_dc_plan_for_source_with_sources_and_abort(
             deck_path,
             source,
-            expression_dialect,
-            parameter_redefinition_policy,
-            parameter_redefinition_diagnostic_policy,
+            &XyceParsePolicy {
+                expression_dialect,
+                redefinition: parameter_redefinition_policy,
+                redefinition_diagnostic: parameter_redefinition_diagnostic_policy,
+            },
             execution_dir,
             None,
             &rspice_core::abort_signal::NoAbort,
@@ -612,9 +614,12 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         self.static_dc_plan_for_source_with_sources_and_abort(
             deck_path,
             source,
-            expression_dialect,
-            ParameterRedefinitionPolicy::UseLast,
-            rspice_core::netlist::ParameterRedefinitionDiagnosticPolicy::Silent,
+            &XyceParsePolicy {
+                expression_dialect,
+                redefinition: ParameterRedefinitionPolicy::UseLast,
+                redefinition_diagnostic:
+                    rspice_core::netlist::ParameterRedefinitionDiagnosticPolicy::Silent,
+            },
             None,
             Some(sealed_sources),
             abort,
@@ -625,14 +630,16 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         &self,
         deck_path: &Path,
         source: String,
-        expression_dialect: ExpressionDialect,
-        parameter_redefinition_policy: ParameterRedefinitionPolicy,
-        parameter_redefinition_diagnostic_policy:
-            rspice_core::netlist::ParameterRedefinitionDiagnosticPolicy,
+        policy: &XyceParsePolicy,
         execution_dir: Option<&Path>,
         sealed_sources: Option<SealedSourceBundle>,
         abort: &dyn AbortSignal,
     ) -> Result<XyceStaticDcPlan, String> {
+        let XyceParsePolicy {
+            expression_dialect,
+            redefinition: parameter_redefinition_policy,
+            redefinition_diagnostic: parameter_redefinition_diagnostic_policy,
+        } = *policy;
         if abort.is_aborted() {
             return Err("static DC plan preparation aborted".to_string());
         }
@@ -1201,12 +1208,15 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         probe: &str,
         netlist: &Netlist,
         result: &TransientResult,
-        time: Value,
-        expected: Value,
-        actual: Value,
+        sample: XyceProbeSample,
         tolerance: XyceComparisonTolerance,
         time_tolerance: Value,
     ) -> Result<bool, String> {
+        let XyceProbeSample {
+            time,
+            expected,
+            actual,
+        } = sample;
         let Some((&first_time, &last_time)) = result.time.first().zip(result.time.last()) else {
             return Ok(false);
         };
@@ -2917,12 +2927,14 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 netlist,
                 dc,
                 sweep_point,
-                "capacitor",
-                &probe_name,
-                "C",
-                *value,
-                value_expr.as_deref(),
-                instance_params,
+                &XycePassiveParameter {
+                    device_kind: "capacitor",
+                    element_name: &probe_name,
+                    parameter_name: "C",
+                    value: *value,
+                    value_expr: value_expr.as_deref(),
+                    instance_params,
+                },
             ),
             ElementKind::Inductor {
                 value,
@@ -2933,12 +2945,14 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 netlist,
                 dc,
                 sweep_point,
-                "inductor",
-                &probe_name,
-                "L",
-                *value,
-                value_expr.as_deref(),
-                instance_params,
+                &XycePassiveParameter {
+                    device_kind: "inductor",
+                    element_name: &probe_name,
+                    parameter_name: "L",
+                    value: *value,
+                    value_expr: value_expr.as_deref(),
+                    instance_params,
+                },
             ),
             _ => Err(format!(
                 "bare device parameter probe '{}' targets an unsupported element kind",
@@ -2969,13 +2983,16 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         netlist: &Netlist,
         dc: &XyceDcSweep,
         sweep_point: XyceDcSweepPoint,
-        device_kind: &str,
-        element_name: &str,
-        parameter_name: &str,
-        value: Value,
-        value_expr: Option<&str>,
-        instance_params: &[(String, Value)],
+        parameter: &XycePassiveParameter<'_>,
     ) -> Result<Value, String> {
+        let XycePassiveParameter {
+            device_kind,
+            element_name,
+            parameter_name,
+            value,
+            value_expr,
+            instance_params,
+        } = *parameter;
         if let Some(instance_value) =
             Self::instance_param(instance_params, &[parameter_name, "VALUE"])
         {
@@ -3028,12 +3045,14 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             netlist,
             dc,
             sweep_point,
-            "capacitor",
-            name,
-            "C",
-            *value,
-            value_expr.as_deref(),
-            instance_params,
+            &XycePassiveParameter {
+                device_kind: "capacitor",
+                element_name: name,
+                parameter_name: "C",
+                value: *value,
+                value_expr: value_expr.as_deref(),
+                instance_params,
+            },
         )
     }
 
@@ -3068,12 +3087,14 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             netlist,
             dc,
             sweep_point,
-            "inductor",
-            name,
-            "L",
-            *value,
-            value_expr.as_deref(),
-            instance_params,
+            &XycePassiveParameter {
+                device_kind: "inductor",
+                element_name: name,
+                parameter_name: "L",
+                value: *value,
+                value_expr: value_expr.as_deref(),
+                instance_params,
+            },
         )
     }
 
@@ -3147,13 +3168,16 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         netlist: &Netlist,
         result: &TransientResult,
         time: Value,
-        device_kind: &str,
-        element_name: &str,
-        parameter_name: &str,
-        value: Value,
-        value_expr: Option<&str>,
-        instance_params: &[(String, Value)],
+        parameter: &XycePassiveParameter<'_>,
     ) -> Result<Value, String> {
+        let XycePassiveParameter {
+            device_kind,
+            element_name,
+            parameter_name,
+            value,
+            value_expr,
+            instance_params,
+        } = *parameter;
         if let Some(instance_value) =
             Self::instance_param(instance_params, &[parameter_name, "VALUE"])
         {
@@ -3218,12 +3242,14 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             netlist,
             result,
             time,
-            "resistor",
-            name,
-            "R",
-            *value,
-            value_expr.as_deref(),
-            instance_params,
+            &XycePassiveParameter {
+                device_kind: "resistor",
+                element_name: name,
+                parameter_name: "R",
+                value: *value,
+                value_expr: value_expr.as_deref(),
+                instance_params,
+            },
         );
         if value.is_ok() {
             return value;
@@ -3270,12 +3296,14 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             netlist,
             result,
             time,
-            "capacitor",
-            name,
-            "C",
-            *value,
-            value_expr.as_deref(),
-            instance_params,
+            &XycePassiveParameter {
+                device_kind: "capacitor",
+                element_name: name,
+                parameter_name: "C",
+                value: *value,
+                value_expr: value_expr.as_deref(),
+                instance_params,
+            },
         )
     }
 
@@ -3310,12 +3338,14 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             netlist,
             result,
             time,
-            "inductor",
-            name,
-            "L",
-            *value,
-            value_expr.as_deref(),
-            instance_params,
+            &XycePassiveParameter {
+                device_kind: "inductor",
+                element_name: name,
+                parameter_name: "L",
+                value: *value,
+                value_expr: value_expr.as_deref(),
+                instance_params,
+            },
         )
     }
 

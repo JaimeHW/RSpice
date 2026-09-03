@@ -213,7 +213,13 @@ pub(super) fn ac_data_frequencies(
                 table.params.len()
             )));
         }
-        let frequency = row[frequency_column];
+        let Some(&frequency) = row.get(frequency_column) else {
+            return Err(crate::errors::value_error(format!(
+                "AC DATA table '{}' row {} has no frequency column",
+                table.name,
+                row_index + 1
+            )));
+        };
         if !frequency.is_finite() || frequency < 0.0 {
             return Err(crate::errors::value_error(format!(
                 "AC DATA table '{}' row {} has invalid frequency {frequency}",

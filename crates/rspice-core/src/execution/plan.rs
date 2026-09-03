@@ -330,7 +330,10 @@ impl RunAxis {
             }
         }
         if kind == AxisKind::Data {
-            let expected = values[0].data_binding_names().unwrap_or_default();
+            let expected = values
+                .first()
+                .and_then(RunAxisValue::data_binding_names)
+                .unwrap_or_default();
             if values
                 .iter()
                 .skip(1)
@@ -412,7 +415,11 @@ impl RunAxis {
         }
         match self.kind {
             AxisKind::Alter => BTreeSet::new(),
-            AxisKind::Data => self.values[0].data_binding_names().unwrap_or_default(),
+            AxisKind::Data => self
+                .values
+                .first()
+                .and_then(RunAxisValue::data_binding_names)
+                .unwrap_or_default(),
             AxisKind::Step => [self.name.to_ascii_lowercase()].into_iter().collect(),
             AxisKind::Temperature => ["temperature".to_string()].into_iter().collect(),
         }
@@ -590,10 +597,12 @@ impl PlannedPostProcess {
     ///
     /// Planning refuses a post-process with no parent, so this is always
     /// present.
+    // Proven invariant: `plan_post_processes` is the only constructor of a
+    // `PostProcessAnalysis` and binds the upstream transient before building
+    // one, and the field is private. `every_four_operand_gets_a_stable_identity_bound_to_its_transient`
+    // constructs the boundary case and reads this parent back.
+    #[allow(clippy::expect_used)]
     pub fn parent(&self) -> AnalysisInstanceId {
-        // `plan_post_processes` binds every post-process to a transient before
-        // it is constructed, and the field is private, so the parent cannot be
-        // absent here.
         self.analysis
             .request
             .upstream
@@ -1123,12 +1132,12 @@ impl DeckPlan {
                 .checked_add(1)
                 .ok_or(DeckPlanError::CoordinateCountOverflow)?;
 
-            for axis_index in 0..indices.len() {
-                indices[axis_index] += 1;
-                if indices[axis_index] < self.axes[axis_index].values.len() {
+            for (index, axis) in indices.iter_mut().zip(&self.axes) {
+                *index += 1;
+                if *index < axis.values.len() {
                     break;
                 }
-                indices[axis_index] = 0;
+                *index = 0;
             }
         }
         Ok(coordinates)
@@ -1843,10 +1852,11 @@ mod tests {
     use crate::abort_signal::ImmediateAbort;
 
     fn coordinate_limits(maximum_coordinates: usize, maximum_assignments: usize) -> ResourceLimits {
-        let mut limits = ResourceLimits::default();
-        limits.max_batch_runs = maximum_coordinates;
-        limits.max_result_values = maximum_assignments;
-        limits
+        ResourceLimits {
+            max_batch_runs: maximum_coordinates,
+            max_result_values: maximum_assignments,
+            ..Default::default()
+        }
     }
 
     fn numeric_coordinate_ids(
@@ -2408,8 +2418,10 @@ mod tests {
              .end\n",
         )
         .expect("bounded axis deck parses");
-        let mut limits = ResourceLimits::default();
-        limits.max_batch_runs = 5;
+        let mut limits = ResourceLimits {
+            max_batch_runs: 5,
+            ..Default::default()
+        };
         assert!(matches!(
             DeckPlan::from_netlist(&netlist, &limits),
             Err(DeckPlanError::ResourceLimit(ResourceLimitError {
@@ -2774,10 +2786,10 @@ mod tests {
         let plan = DeckPlan::from_netlist(&netlist, &ResourceLimits::default()).expect("plans");
         let named = plan
             .authored_analyses(&netlist)
-            .filter_map(|(command, id)| {
+            .filter(|&(command, _id)| {
                 matches!(command, crate::netlist::AnalysisCommand::Four { .. })
-                    .then(|| id.map(|id| id.tag()))
             })
+            .map(|(_command, id)| id.map(|id| id.tag()))
             .collect::<Vec<_>>();
         assert_eq!(named, [Some("four-001".to_string())]);
     }

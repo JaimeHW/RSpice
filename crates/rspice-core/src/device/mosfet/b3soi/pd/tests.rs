@@ -179,13 +179,15 @@ fn update_applies_body_limit_after_branch_limit() {
     let model = Arc::new(B3SoiPdModel::from_params(&n1_params(), false, 300.15));
     let mut dev = B3SoiPd::new(
         "m1".to_string(),
-        1,
-        2,
-        3,
-        4,
-        5,
-        6,
-        0,
+        B3SoiPdNodes {
+            node_drain: 1,
+            node_gate: 2,
+            node_source: 3,
+            node_e: 4,
+            node_body: 5,
+            node_p: 6,
+            node_temp: 0,
+        },
         BodyMode::TiedIdeal,
         model,
         geom(),

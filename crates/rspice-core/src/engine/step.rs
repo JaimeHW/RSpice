@@ -2235,10 +2235,12 @@ mod tests {
 
     #[test]
     fn general_resource_policy_maps_to_step_planning_limits() {
-        let mut resources = crate::ResourceLimits::default();
-        resources.max_batch_runs = 17;
-        resources.max_netlist_lines = 23;
-        resources.max_result_values = 101;
+        let resources = crate::ResourceLimits {
+            max_batch_runs: 17,
+            max_netlist_lines: 23,
+            max_result_values: 101,
+            ..Default::default()
+        };
         let limits = StepPlanLimits::from_resource_limits(resources);
         assert_eq!(limits.max_runs(), 17);
         assert_eq!(limits.max_dimensions(), 23);

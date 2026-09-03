@@ -261,9 +261,9 @@ fn d_ram_select_code(ctx: &CmContext, shape: DMemoryShape, select_codes: &[i64])
         D_RAM_SELECT_VALUE_MAX,
     )?;
 
-    for bit_idx in 0..shape.select_width {
+    for (bit_idx, &select_code) in select_codes.iter().enumerate().take(shape.select_width) {
         let expected = (select_value >> bit_idx) & 1;
-        if select_codes[bit_idx] != expected {
+        if select_code != expected {
             return Ok(0);
         }
     }
@@ -412,8 +412,8 @@ fn d_ram_write_word(
         return;
     };
 
-    for bit in 0..shape.word_width {
-        let code = data_codes[bit];
+    for (bit, &data_code) in data_codes.iter().enumerate().take(shape.word_width) {
+        let code = data_code;
         d_ram_set_memory_state(ctx, scratch_state, shape, address_index, bit, code);
     }
 }
@@ -510,17 +510,29 @@ fn d_ram_previous_data_changed(
         .any(|idx| d_ram_state(ctx, scratch_state, data_start + idx) != data_codes[idx])
 }
 
-fn d_ram_evaluate_with_state(
-    ctx: &mut CmContext,
-    shape: DMemoryShape,
+/// One RAM access as the model sees it: whether it is a write, whether the
+/// device is selected, and which cell the address decoded to.
+#[derive(Clone, Copy)]
+struct DMemoryAccess {
     write_en: i64,
     select: i64,
     address_index: Option<usize>,
+}
+
+fn d_ram_evaluate_with_state(
+    ctx: &mut CmContext,
+    shape: DMemoryShape,
+    access: DMemoryAccess,
     inputs: &DMemoryInputCodes,
     ic: i64,
     read_delay: Value,
     mut scratch_state: Option<&mut [i64]>,
 ) -> CmResult<()> {
+    let DMemoryAccess {
+        write_en,
+        select,
+        address_index,
+    } = access;
     if ctx.time == 0.0 || d_ram_state(ctx, scratch_state.as_deref(), D_RAM_INITIALIZED) == 0 {
         d_ram_fill_memory_state(ctx, &mut scratch_state, shape, ic);
 
@@ -681,9 +693,11 @@ impl CodeModel for DigitalRam {
                     d_ram_evaluate_with_state(
                         ctx,
                         shape,
-                        write_en,
-                        select,
-                        address_index,
+                        DMemoryAccess {
+                            write_en,
+                            select,
+                            address_index,
+                        },
                         &inputs,
                         ic,
                         read_delay,
@@ -705,9 +719,11 @@ impl CodeModel for DigitalRam {
                 d_ram_evaluate_with_state(
                     ctx,
                     shape,
-                    write_en,
-                    select,
-                    address_index,
+                    DMemoryAccess {
+                        write_en,
+                        select,
+                        address_index,
+                    },
                     &inputs,
                     ic,
                     read_delay,
@@ -734,10 +750,11 @@ mod tests {
             .collect()
     }
 
-    fn assert_digital_ports(
-        model: &dyn CodeModel,
-        expected: &[(&str, PortDirection, bool, Option<usize>, Option<usize>)],
-    ) {
+    /// One expected digital port: name, direction, whether it is a vector,
+    /// and its vector length bounds.
+    type DigitalPortShape<'a> = (&'a str, PortDirection, bool, Option<usize>, Option<usize>);
+
+    fn assert_digital_ports(model: &dyn CodeModel, expected: &[DigitalPortShape<'_>]) {
         let ports = model.ports();
         assert_eq!(
             ports

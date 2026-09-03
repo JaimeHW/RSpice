@@ -384,7 +384,7 @@ impl PyPoleZeroResult {
     /// use an AC sweep to compute their actual bandwidth.
     #[getter]
     fn bandwidth_hz(&self) -> Option<f64> {
-        if self.poles.len() == 1 && self.zeros.is_empty() && self.poles[0].is_real() {
+        if self.zeros.is_empty() && matches!(self.poles.as_slice(), [only] if only.is_real()) {
             self.dominant_pole_decay_hz()
         } else {
             None

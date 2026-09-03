@@ -630,13 +630,17 @@ pub(super) fn execute(
             outputs,
             num_harmonics,
         } => {
-            let context = context.expect(".FOUR directives always receive a stable identity");
+            let Some(analysis_id) = context.and_then(|context| context.analysis_id.clone()) else {
+                return Err(crate::errors::value_error(
+                    ".FOUR directive was planned without a stable analysis identity",
+                ));
+            };
             out.pending_fourier.push(PendingFourier {
                 fundamental: *fundamental,
                 outputs: outputs.clone(),
                 num_harmonics: *num_harmonics,
-                analysis_id: context.analysis_id.clone().expect("checked above"),
-                coordinate: context.coordinate.clone(),
+                analysis_id,
+                coordinate: context.and_then(|context| context.coordinate.clone()),
             });
         }
     }

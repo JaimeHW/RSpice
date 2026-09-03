@@ -351,14 +351,12 @@ impl Engine {
 
         if let Err(error) =
             Self::validate_accepted_junction_transient_history_payload(circuit, &checkpoint)
-        {
-            if !checkpoint
+            && !checkpoint
                 .resume_blockers
                 .iter()
                 .any(|blocker| blocker == &error)
-            {
-                checkpoint.resume_blockers.push(error);
-            }
+        {
+            checkpoint.resume_blockers.push(error);
         }
         checkpoint
     }

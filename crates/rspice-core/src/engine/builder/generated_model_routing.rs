@@ -43,16 +43,31 @@ impl GeneratedTarget {
     }
 }
 
+/// The parameter context a generated-model routing decision is made in: the
+/// instance overrides, the parameters whose expressions are still deferred,
+/// the dialect whose semantics apply, and the temperature the card is
+/// evaluated at.
+#[derive(Clone, Copy)]
+pub(super) struct GeneratedRoutingContext<'a> {
+    pub instance_params: &'a [(String, f64)],
+    pub deferred_params: &'a [(String, String)],
+    pub spice_dialect: crate::config::SpiceDialect,
+    pub temperature: f64,
+}
+
 pub(super) fn try_route_generated_resistor_model(
     circuit: &mut CircuitData,
     netlist: &Netlist,
     element: &Element,
     model_name: &str,
-    instance_params: &[(String, f64)],
-    deferred_params: &[(String, String)],
-    spice_dialect: crate::config::SpiceDialect,
-    temperature: f64,
+    context: GeneratedRoutingContext<'_>,
 ) -> Result<bool, SimulationError> {
+    let GeneratedRoutingContext {
+        instance_params,
+        deferred_params,
+        spice_dialect,
+        temperature,
+    } = context;
     let model_def = find_model_def(netlist, model_name);
     let target = generated_resistor_target(model_name, model_def)?;
     let Some(target) = target.filter(|target| target.is_available()) else {
@@ -86,10 +101,12 @@ pub(super) fn try_route_generated_resistor_model(
         target,
         &nodes,
         model_def,
-        instance_params,
-        deferred_params,
-        spice_dialect,
-        temperature,
+        GeneratedRoutingContext {
+            instance_params,
+            deferred_params,
+            spice_dialect,
+            temperature,
+        },
     )?;
     Ok(true)
 }
@@ -99,11 +116,14 @@ pub(super) fn try_route_generated_diode_model(
     netlist: &Netlist,
     element: &Element,
     model_name: &str,
-    instance_params: &[(String, f64)],
-    deferred_params: &[(String, String)],
-    spice_dialect: crate::config::SpiceDialect,
-    temperature: f64,
+    context: GeneratedRoutingContext<'_>,
 ) -> Result<bool, SimulationError> {
+    let GeneratedRoutingContext {
+        instance_params,
+        deferred_params,
+        spice_dialect,
+        temperature,
+    } = context;
     let model_def = find_model_def(netlist, model_name);
     let target = generated_diode_target(model_name, model_def)?;
     let Some(target) = target.filter(|target| target.is_available()) else {
@@ -118,10 +138,12 @@ pub(super) fn try_route_generated_diode_model(
         target,
         &nodes,
         model_def,
-        instance_params,
-        deferred_params,
-        spice_dialect,
-        temperature,
+        GeneratedRoutingContext {
+            instance_params,
+            deferred_params,
+            spice_dialect,
+            temperature,
+        },
     )?;
     Ok(true)
 }
@@ -132,12 +154,15 @@ pub(super) fn try_route_generated_bjt_model(
     element: &Element,
     model_name: &str,
     model_def: Option<&ModelDef>,
-    instance_params: &[(String, f64)],
-    deferred_params: &[(String, String)],
-    spice_dialect: crate::config::SpiceDialect,
-    temperature: f64,
+    context: GeneratedRoutingContext<'_>,
     voltage_limiting_enabled: bool,
 ) -> Result<bool, SimulationError> {
+    let GeneratedRoutingContext {
+        instance_params,
+        deferred_params,
+        spice_dialect,
+        temperature,
+    } = context;
     let target = generated_bjt_target(model_name, model_def, element.nodes.len(), spice_dialect)?;
     let Some(target) = target else {
         return Ok(false);
@@ -180,10 +205,12 @@ pub(super) fn try_route_generated_bjt_model(
         target,
         &nodes,
         model_def,
-        instance_params,
-        deferred_params,
-        spice_dialect,
-        temperature,
+        GeneratedRoutingContext {
+            instance_params,
+            deferred_params,
+            spice_dialect,
+            temperature,
+        },
     )?;
     Ok(true)
 }
@@ -195,11 +222,14 @@ pub(super) fn try_route_generated_mos_model(
     model_name: &str,
     model_def: Option<&ModelDef>,
     compact_syntax: bool,
-    instance_params: &[(String, f64)],
-    deferred_params: &[(String, String)],
-    spice_dialect: crate::config::SpiceDialect,
-    temperature: f64,
+    context: GeneratedRoutingContext<'_>,
 ) -> Result<bool, SimulationError> {
+    let GeneratedRoutingContext {
+        instance_params,
+        deferred_params,
+        spice_dialect,
+        temperature,
+    } = context;
     let target = generated_mos_target(model_name, model_def)?;
     let Some(target) = target.filter(|target| target.is_available()) else {
         return Ok(false);
@@ -218,10 +248,12 @@ pub(super) fn try_route_generated_mos_model(
         target,
         &nodes,
         model_def,
-        instance_params,
-        deferred_params,
-        spice_dialect,
-        temperature,
+        GeneratedRoutingContext {
+            instance_params,
+            deferred_params,
+            spice_dialect,
+            temperature,
+        },
     )?;
     Ok(true)
 }
@@ -541,11 +573,14 @@ fn add_generated_instance(
     target: GeneratedTarget,
     nodes: &[String],
     model_def: Option<&ModelDef>,
-    instance_params: &[(String, f64)],
-    deferred_params: &[(String, String)],
-    spice_dialect: crate::config::SpiceDialect,
-    temperature: f64,
+    context: GeneratedRoutingContext<'_>,
 ) -> Result<(), SimulationError> {
+    let GeneratedRoutingContext {
+        instance_params,
+        deferred_params,
+        spice_dialect,
+        temperature,
+    } = context;
     let keywords = generated_card_keywords(
         target,
         element,
@@ -775,27 +810,27 @@ fn generated_params(
         Vec::with_capacity(model_count + instance_params.len() + deferred_params.len());
     if let Some(model) = model_def {
         for (name, value) in &model.params {
-            if should_pass_model_param(target, name) {
-                if let Some(assignment) = generated_model_card_assignment(
+            if should_pass_model_param(target, name)
+                && let Some(assignment) = generated_model_card_assignment(
                     target,
                     name,
                     ParametricValue::Resolved(*value),
                     spice_dialect,
-                )? {
-                    params.push(assignment);
-                }
+                )?
+            {
+                params.push(assignment);
             }
         }
         for (name, expr) in &model.expr_params {
-            if should_pass_model_param(target, name) {
-                if let Some(assignment) = generated_model_card_assignment(
+            if should_pass_model_param(target, name)
+                && let Some(assignment) = generated_model_card_assignment(
                     target,
                     name,
                     ParametricValue::Expression(expr.clone()),
                     spice_dialect,
-                )? {
-                    params.push(assignment);
-                }
+                )?
+            {
+                params.push(assignment);
             }
         }
         for (name, value) in &model.string_params {
@@ -1308,7 +1343,11 @@ mod card_keyword_tests {
         (netlist, element)
     }
 
-    fn card_tail(element: &Element) -> (&[(String, f64)], &[(String, String)]) {
+    /// The numeric instance parameters and the deferred `name=expr` pairs an
+    /// authored MOSFET card carries, in authored order.
+    type CardTail<'a> = (&'a [(String, f64)], &'a [(String, String)]);
+
+    fn card_tail(element: &Element) -> CardTail<'_> {
         let ElementKind::Mosfet {
             instance_params,
             deferred_params,
@@ -1433,7 +1472,11 @@ mod card_keyword_tests {
 mod tests {
     use super::*;
 
-    fn vbic_scope_fixture() -> (Netlist, Vec<(String, f64)>, Vec<(String, String)>) {
+    /// A parsed deck with the instance and deferred parameter lists that go
+    /// with it.
+    type VbicScopeFixture = (Netlist, Vec<(String, f64)>, Vec<(String, String)>);
+
+    fn vbic_scope_fixture() -> VbicScopeFixture {
         let netlist = Netlist::parse(
             "generated VBIC parameter-scope lowering\n\
              Q1 c b e model sw_noise=1\n\

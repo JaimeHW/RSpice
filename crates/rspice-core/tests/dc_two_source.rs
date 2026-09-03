@@ -2,7 +2,7 @@
 //! (inner) source fully at every value of the second (outer) source,
 //! ngspice-style, with results concatenated in outer order.
 
-use rspice_core::engine::{Engine, SimulationConfig};
+use rspice_core::engine::{DcSweepRange, Engine, SimulationConfig};
 use rspice_core::netlist::{AnalysisCommand, DcSweepMode, Netlist};
 
 /// Equal 1k resistors from each source into `out`, 1k to ground:
@@ -184,9 +184,11 @@ fn nested_sweep_covers_the_full_grid_in_outer_order() {
         .run_dc_sweep2_with_abort(
             &netlist,
             "v1",
-            0.0,
-            2.0,
-            1.0,
+            DcSweepRange {
+                start: 0.0,
+                stop: 2.0,
+                step: 1.0,
+            },
             Some(&sweep2),
             &rspice_core::abort_signal::NoAbort,
         )
@@ -241,9 +243,11 @@ r1 a 0 1k
         .run_dc_sweep2_with_abort(
             &netlist,
             "v1",
-            0.0,
-            1.0,
-            1.0,
+            DcSweepRange {
+                start: 0.0,
+                stop: 1.0,
+                step: 1.0,
+            },
             Some(&sweep2),
             &rspice_core::abort_signal::NoAbort,
         )
@@ -277,9 +281,11 @@ r2 out 0 1k
         .run_dc_sweep2_with_abort(
             &netlist,
             "v1",
-            0.0,
-            2.0,
-            1.0,
+            DcSweepRange {
+                start: 0.0,
+                stop: 2.0,
+                step: 1.0,
+            },
             Some(&sweep2),
             &rspice_core::abort_signal::NoAbort,
         )

@@ -50,6 +50,64 @@ const Q_LOW: Value = 0.0;
 const Q_HIGH: Value = 1.0;
 const Q_PENDING_NONE: Value = -1.0;
 
+/// The persistent-state slots a digital output stamp reads its previous
+/// voltage and current levels from. They are bare `usize` indices into one
+/// flat state vector, so a transposed pair reads a different port's history.
+#[derive(Clone, Copy)]
+struct DigitalOutputStateSlots {
+    previous_low_voltage_state: usize,
+    previous_high_voltage_state: usize,
+    previous_previous_low_voltage_state: usize,
+    previous_previous_high_voltage_state: usize,
+    previous_low_current_state: usize,
+    previous_high_current_state: usize,
+}
+
+/// Where the output currently is in a transition: when it started and what it
+/// was coming from.
+#[derive(Clone, Copy)]
+struct DigitalOutputTransition {
+    transition_start: Value,
+    transition_from: Option<bool>,
+}
+
+/// The two rail voltages a stamp drives between.
+#[derive(Clone, Copy)]
+struct DigitalOutputLevels {
+    vlo: Value,
+    vhi: Value,
+}
+
+/// The persistent-state slots one digital output's scheduling uses.
+#[derive(Clone, Copy)]
+struct DigitalOutputSlots {
+    q_state_index: usize,
+    transition_start_index: usize,
+    transition_from_index: usize,
+    pending_q_index: usize,
+    pending_time_index: usize,
+}
+
+/// The same, for the variant that also defers a pending transition start.
+#[derive(Clone, Copy)]
+struct DigitalOutputPendingSlots {
+    q_index: usize,
+    transition_start_index: usize,
+    transition_from_index: usize,
+    pending_index: usize,
+    pending_time_index: usize,
+    pending_start_index: usize,
+}
+
+/// When that variant is allowed to act: the earliest time it may fire, the
+/// event delay it applies, and how long the transition takes.
+#[derive(Clone, Copy)]
+struct DigitalOutputTiming {
+    deferred_until: Value,
+    event_delay: Value,
+    transition_duration: Value,
+}
+
 #[derive(Debug, Clone, Copy)]
 struct DigParams {
     clo: Value,
@@ -598,9 +656,12 @@ impl XyceDTff {
         previous_low_voltage_state: usize,
         previous_high_voltage_state: usize,
         params: DigParams,
-        transition_start: Value,
-        transition_from: Option<bool>,
+        transition: DigitalOutputTransition,
     ) {
+        let DigitalOutputTransition {
+            transition_start,
+            transition_from,
+        } = transition;
         let output_pair = ctx.port_node_pair(port_name).unwrap_or((0, 0));
         let dpwr_pair = ctx.port_node_pair("dpwr").unwrap_or((0, 0));
         let dgnd_pair = ctx.port_node_pair("dgnd").unwrap_or((0, 0));
@@ -723,8 +784,10 @@ impl CodeModel for XyceDTff {
             STATE_Q_PREV_LOW_VOLTAGE,
             STATE_Q_PREV_HIGH_VOLTAGE,
             params,
-            transition_start,
-            transition_from,
+            DigitalOutputTransition {
+                transition_start,
+                transition_from,
+            },
         );
         Self::stamp_output(
             ctx,
@@ -733,17 +796,18 @@ impl CodeModel for XyceDTff {
             STATE_QBAR_PREV_LOW_VOLTAGE,
             STATE_QBAR_PREV_HIGH_VOLTAGE,
             params,
-            transition_start,
-            transition_from.map(|value| !value),
+            DigitalOutputTransition {
+                transition_start,
+                transition_from: transition_from.map(|value| !value),
+            },
         );
 
-        if ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe {
-            if let Some(q) = q
-                && let Some(end) = transition_time_for_state(q, transition_start, params)
-                && end > ctx.time + 1.0e-18
-            {
-                ctx.request_breakpoint(end);
-            }
+        if ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe
+            && let Some(q) = q
+            && let Some(end) = transition_time_for_state(q, transition_start, params)
+            && end > ctx.time + 1.0e-18
+        {
+            ctx.request_breakpoint(end);
         }
         Ok(())
     }
@@ -1241,8 +1305,10 @@ impl CodeModel for XyceDGate {
             Self::OUTPUT_PREV_LOW_VOLTAGE,
             Self::OUTPUT_PREV_HIGH_VOLTAGE,
             params,
-            transition_start,
-            transition_from,
+            DigitalOutputTransition {
+                transition_start,
+                transition_from,
+            },
         );
 
         Ok(())
@@ -1398,12 +1464,15 @@ impl XyceDAdd {
         desired: Option<bool>,
         last_input_transition_time: Value,
         params: DigParams,
-        q_state_index: usize,
-        transition_start_index: usize,
-        transition_from_index: usize,
-        pending_q_index: usize,
-        pending_time_index: usize,
+        slots: DigitalOutputSlots,
     ) -> (Option<bool>, Value, Option<bool>) {
+        let DigitalOutputSlots {
+            q_state_index,
+            transition_start_index,
+            transition_from_index,
+            pending_q_index,
+            pending_time_index,
+        } = slots;
         let previous_q = q_state(ctx.state_prev(q_state_index));
         let mut q = previous_q;
         let mut transition_start = ctx.state_prev(transition_start_index);
@@ -1661,22 +1730,26 @@ impl CodeModel for XyceDAdd {
             desired.map(|value| value.0),
             last_input_transition_time,
             params,
-            Self::SUM_Q,
-            Self::SUM_TRANSITION_START,
-            Self::SUM_TRANSITION_FROM,
-            Self::SUM_PENDING_Q,
-            Self::SUM_PENDING_TIME,
+            DigitalOutputSlots {
+                q_state_index: Self::SUM_Q,
+                transition_start_index: Self::SUM_TRANSITION_START,
+                transition_from_index: Self::SUM_TRANSITION_FROM,
+                pending_q_index: Self::SUM_PENDING_Q,
+                pending_time_index: Self::SUM_PENDING_TIME,
+            },
         );
         let (carry, carry_start, carry_from) = Self::update_output(
             ctx,
             desired.map(|value| value.1),
             last_input_transition_time,
             params,
-            Self::CARRY_Q,
-            Self::CARRY_TRANSITION_START,
-            Self::CARRY_TRANSITION_FROM,
-            Self::CARRY_PENDING_Q,
-            Self::CARRY_PENDING_TIME,
+            DigitalOutputSlots {
+                q_state_index: Self::CARRY_Q,
+                transition_start_index: Self::CARRY_TRANSITION_START,
+                transition_from_index: Self::CARRY_TRANSITION_FROM,
+                pending_q_index: Self::CARRY_PENDING_Q,
+                pending_time_index: Self::CARRY_PENDING_TIME,
+            },
         );
 
         for index in 0..3 {
@@ -1694,8 +1767,10 @@ impl CodeModel for XyceDAdd {
             Self::SUM_PREV_LOW_VOLTAGE,
             Self::SUM_PREV_HIGH_VOLTAGE,
             params,
-            sum_start,
-            sum_from,
+            DigitalOutputTransition {
+                transition_start: sum_start,
+                transition_from: sum_from,
+            },
         );
         XyceDTff::stamp_output(
             ctx,
@@ -1704,8 +1779,10 @@ impl CodeModel for XyceDAdd {
             Self::CARRY_PREV_LOW_VOLTAGE,
             Self::CARRY_PREV_HIGH_VOLTAGE,
             params,
-            carry_start,
-            carry_from,
+            DigitalOutputTransition {
+                transition_start: carry_start,
+                transition_from: carry_from,
+            },
         );
 
         if ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe {
@@ -2096,18 +2173,24 @@ impl XyceDLegacyGate {
         ctx: &mut CmContext,
         port_name: &str,
         state: Option<bool>,
-        previous_low_voltage_state: usize,
-        previous_high_voltage_state: usize,
-        previous_previous_low_voltage_state: usize,
-        previous_previous_high_voltage_state: usize,
-        previous_low_current_state: usize,
-        previous_high_current_state: usize,
+        slots: DigitalOutputStateSlots,
         params: DigParams,
-        transition_start: Value,
-        transition_from: Option<bool>,
-        vlo: Value,
-        vhi: Value,
+        transition: DigitalOutputTransition,
+        levels: DigitalOutputLevels,
     ) {
+        let DigitalOutputLevels { vlo, vhi } = levels;
+        let DigitalOutputTransition {
+            transition_start,
+            transition_from,
+        } = transition;
+        let DigitalOutputStateSlots {
+            previous_low_voltage_state,
+            previous_high_voltage_state,
+            previous_previous_low_voltage_state,
+            previous_previous_high_voltage_state,
+            previous_low_current_state,
+            previous_high_current_state,
+        } = slots;
         let output_pair = ctx.port_node_pair(port_name).unwrap_or((0, 0));
         let ground = (0, 0);
         let resistances =
@@ -2340,17 +2423,20 @@ impl CodeModel for XyceDLegacyGate {
             ctx,
             "out",
             output_state,
-            Self::OUTPUT_PREV_LOW_VOLTAGE,
-            Self::OUTPUT_PREV_HIGH_VOLTAGE,
-            Self::OUTPUT_PREV_PREV_LOW_VOLTAGE,
-            Self::OUTPUT_PREV_PREV_HIGH_VOLTAGE,
-            Self::OUTPUT_PREV_LOW_CURRENT,
-            Self::OUTPUT_PREV_HIGH_CURRENT,
+            DigitalOutputStateSlots {
+                previous_low_voltage_state: Self::OUTPUT_PREV_LOW_VOLTAGE,
+                previous_high_voltage_state: Self::OUTPUT_PREV_HIGH_VOLTAGE,
+                previous_previous_low_voltage_state: Self::OUTPUT_PREV_PREV_LOW_VOLTAGE,
+                previous_previous_high_voltage_state: Self::OUTPUT_PREV_PREV_HIGH_VOLTAGE,
+                previous_low_current_state: Self::OUTPUT_PREV_LOW_CURRENT,
+                previous_high_current_state: Self::OUTPUT_PREV_HIGH_CURRENT,
+            },
             params,
-            transition_start,
-            transition_from,
-            vlo,
-            vhi,
+            DigitalOutputTransition {
+                transition_start,
+                transition_from,
+            },
+            DigitalOutputLevels { vlo, vhi },
         );
         if let Some(state) = output_state {
             let event_time = if transition_start.is_finite() && transition_start > 0.0 {
@@ -2695,17 +2781,23 @@ impl XyceDLegacyDff {
         ctx: &mut CmContext,
         desired: Option<bool>,
         last_input_transition_time: Value,
-        deferred_until: Value,
-        event_delay: Value,
-        transition_duration: Value,
-        q_index: usize,
-        transition_start_index: usize,
-        transition_from_index: usize,
-        pending_index: usize,
-        pending_time_index: usize,
-        pending_start_index: usize,
+        timing: DigitalOutputTiming,
+        slots: DigitalOutputPendingSlots,
         reschedule_pending: bool,
     ) -> (Option<bool>, Value, Option<bool>) {
+        let DigitalOutputPendingSlots {
+            q_index,
+            transition_start_index,
+            transition_from_index,
+            pending_index,
+            pending_time_index,
+            pending_start_index,
+        } = slots;
+        let DigitalOutputTiming {
+            deferred_until,
+            event_delay,
+            transition_duration,
+        } = timing;
         let previous_q = q_state(ctx.state_prev(q_index));
         let mut q = previous_q;
         let mut transition_start = ctx.state_prev(transition_start_index);
@@ -3001,30 +3093,38 @@ impl CodeModel for XyceDLegacyDff {
             ctx,
             q_target,
             last_input_transition_time,
-            deferred_until,
-            params.delay,
-            transition_duration(q_target.unwrap_or(false), params),
-            Self::Q_STATE,
-            Self::Q_TRANSITION_START,
-            Self::Q_TRANSITION_FROM,
-            Self::Q_PENDING,
-            Self::Q_PENDING_TIME,
-            Self::Q_PENDING_START,
+            DigitalOutputTiming {
+                deferred_until,
+                event_delay: params.delay,
+                transition_duration: transition_duration(q_target.unwrap_or(false), params),
+            },
+            DigitalOutputPendingSlots {
+                q_index: Self::Q_STATE,
+                transition_start_index: Self::Q_TRANSITION_START,
+                transition_from_index: Self::Q_TRANSITION_FROM,
+                pending_index: Self::Q_PENDING,
+                pending_time_index: Self::Q_PENDING_TIME,
+                pending_start_index: Self::Q_PENDING_START,
+            },
             false,
         );
         let (qbar, qbar_start, qbar_from) = Self::update_output(
             ctx,
             qbar_target,
             last_input_transition_time,
-            deferred_until,
-            params.delay,
-            transition_duration(qbar_target.unwrap_or(false), params),
-            Self::QB_STATE,
-            Self::QB_TRANSITION_START,
-            Self::QB_TRANSITION_FROM,
-            Self::QB_PENDING,
-            Self::QB_PENDING_TIME,
-            Self::QB_PENDING_START,
+            DigitalOutputTiming {
+                deferred_until,
+                event_delay: params.delay,
+                transition_duration: transition_duration(qbar_target.unwrap_or(false), params),
+            },
+            DigitalOutputPendingSlots {
+                q_index: Self::QB_STATE,
+                transition_start_index: Self::QB_TRANSITION_START,
+                transition_from_index: Self::QB_TRANSITION_FROM,
+                pending_index: Self::QB_PENDING,
+                pending_time_index: Self::QB_PENDING_TIME,
+                pending_start_index: Self::QB_PENDING_START,
+            },
             false,
         );
         for index in 0..Self::INPUT_COUNT {
@@ -3040,33 +3140,39 @@ impl CodeModel for XyceDLegacyDff {
             ctx,
             "q",
             q,
-            Self::Q_PREV_LOW_VOLTAGE,
-            Self::Q_PREV_HIGH_VOLTAGE,
-            Self::Q_PREV_PREV_LOW_VOLTAGE,
-            Self::Q_PREV_PREV_HIGH_VOLTAGE,
-            Self::Q_PREV_LOW_CURRENT,
-            Self::Q_PREV_HIGH_CURRENT,
+            DigitalOutputStateSlots {
+                previous_low_voltage_state: Self::Q_PREV_LOW_VOLTAGE,
+                previous_high_voltage_state: Self::Q_PREV_HIGH_VOLTAGE,
+                previous_previous_low_voltage_state: Self::Q_PREV_PREV_LOW_VOLTAGE,
+                previous_previous_high_voltage_state: Self::Q_PREV_PREV_HIGH_VOLTAGE,
+                previous_low_current_state: Self::Q_PREV_LOW_CURRENT,
+                previous_high_current_state: Self::Q_PREV_HIGH_CURRENT,
+            },
             params,
-            q_start,
-            q_from,
-            vlo,
-            vhi,
+            DigitalOutputTransition {
+                transition_start: q_start,
+                transition_from: q_from,
+            },
+            DigitalOutputLevels { vlo, vhi },
         );
         XyceDLegacyGate::stamp_output(
             ctx,
             "qbar",
             qbar,
-            Self::QB_PREV_LOW_VOLTAGE,
-            Self::QB_PREV_HIGH_VOLTAGE,
-            Self::QB_PREV_PREV_LOW_VOLTAGE,
-            Self::QB_PREV_PREV_HIGH_VOLTAGE,
-            Self::QB_PREV_LOW_CURRENT,
-            Self::QB_PREV_HIGH_CURRENT,
+            DigitalOutputStateSlots {
+                previous_low_voltage_state: Self::QB_PREV_LOW_VOLTAGE,
+                previous_high_voltage_state: Self::QB_PREV_HIGH_VOLTAGE,
+                previous_previous_low_voltage_state: Self::QB_PREV_PREV_LOW_VOLTAGE,
+                previous_previous_high_voltage_state: Self::QB_PREV_PREV_HIGH_VOLTAGE,
+                previous_low_current_state: Self::QB_PREV_LOW_CURRENT,
+                previous_high_current_state: Self::QB_PREV_HIGH_CURRENT,
+            },
             params,
-            qbar_start,
-            qbar_from,
-            vlo,
-            vhi,
+            DigitalOutputTransition {
+                transition_start: qbar_start,
+                transition_from: qbar_from,
+            },
+            DigitalOutputLevels { vlo, vhi },
         );
         for (port_name, state, transition_start) in [("q", q, q_start), ("qbar", qbar, qbar_start)]
         {
@@ -3606,16 +3712,22 @@ impl XyceDSequential {
         ctx: &mut CmContext,
         port_name: &str,
         state: Option<bool>,
-        previous_low_voltage_state: usize,
-        previous_high_voltage_state: usize,
-        previous_previous_low_voltage_state: usize,
-        previous_previous_high_voltage_state: usize,
-        previous_low_current_state: usize,
-        previous_high_current_state: usize,
+        slots: DigitalOutputStateSlots,
         params: DigParams,
-        transition_start: Value,
-        transition_from: Option<bool>,
+        transition: DigitalOutputTransition,
     ) {
+        let DigitalOutputTransition {
+            transition_start,
+            transition_from,
+        } = transition;
+        let DigitalOutputStateSlots {
+            previous_low_voltage_state,
+            previous_high_voltage_state,
+            previous_previous_low_voltage_state,
+            previous_previous_high_voltage_state,
+            previous_low_current_state,
+            previous_high_current_state,
+        } = slots;
         let output_pair = ctx.port_node_pair(port_name).unwrap_or((0, 0));
         let low_pair = ctx.port_node_pair("dgnd").unwrap_or((0, 0));
         let high_pair = ctx.port_node_pair("dpwr").unwrap_or((0, 0));
@@ -3644,21 +3756,22 @@ impl XyceDSequential {
         let current_voltage = ctx.input(port_name);
         let low_rail = ctx.input("dgnd");
         let high_rail = ctx.input("dpwr");
-        if ctx.is_transient() && ctx.time == 0.0 {
-            if ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe {
-                ctx.set_initial_state(previous_low_voltage_state, current_voltage - low_rail);
-                ctx.set_initial_state(previous_high_voltage_state, current_voltage - high_rail);
-                ctx.set_initial_state(
-                    previous_previous_low_voltage_state,
-                    current_voltage - low_rail,
-                );
-                ctx.set_initial_state(
-                    previous_previous_high_voltage_state,
-                    current_voltage - high_rail,
-                );
-                ctx.set_initial_state(previous_low_current_state, 0.0);
-                ctx.set_initial_state(previous_high_current_state, 0.0);
-            }
+        if ctx.is_transient()
+            && ctx.time == 0.0
+            && ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe
+        {
+            ctx.set_initial_state(previous_low_voltage_state, current_voltage - low_rail);
+            ctx.set_initial_state(previous_high_voltage_state, current_voltage - high_rail);
+            ctx.set_initial_state(
+                previous_previous_low_voltage_state,
+                current_voltage - low_rail,
+            );
+            ctx.set_initial_state(
+                previous_previous_high_voltage_state,
+                current_voltage - high_rail,
+            );
+            ctx.set_initial_state(previous_low_current_state, 0.0);
+            ctx.set_initial_state(previous_high_current_state, 0.0);
         }
 
         if ctx.is_transient() && ctx.timestep.is_finite() && ctx.timestep > 0.0 {
@@ -3824,30 +3937,38 @@ impl XyceDSequential {
             ctx,
             q_target,
             output_event_time,
-            deferred_until,
-            params.delay,
-            transition_duration(q_target.unwrap_or(false), params),
-            Self::Q_STATE,
-            Self::Q_TRANSITION_START,
-            Self::Q_TRANSITION_FROM,
-            Self::Q_PENDING,
-            Self::Q_PENDING_TIME,
-            Self::Q_PENDING_START,
+            DigitalOutputTiming {
+                deferred_until,
+                event_delay: params.delay,
+                transition_duration: transition_duration(q_target.unwrap_or(false), params),
+            },
+            DigitalOutputPendingSlots {
+                q_index: Self::Q_STATE,
+                transition_start_index: Self::Q_TRANSITION_START,
+                transition_from_index: Self::Q_TRANSITION_FROM,
+                pending_index: Self::Q_PENDING,
+                pending_time_index: Self::Q_PENDING_TIME,
+                pending_start_index: Self::Q_PENDING_START,
+            },
             self.kind == XyceDSequentialKind::Jkff,
         );
         let (qbar, qbar_start, qbar_from) = XyceDLegacyDff::update_output(
             ctx,
             qbar_target,
             output_event_time,
-            deferred_until,
-            params.delay,
-            transition_duration(qbar_target.unwrap_or(false), params),
-            Self::QB_STATE,
-            Self::QB_TRANSITION_START,
-            Self::QB_TRANSITION_FROM,
-            Self::QB_PENDING,
-            Self::QB_PENDING_TIME,
-            Self::QB_PENDING_START,
+            DigitalOutputTiming {
+                deferred_until,
+                event_delay: params.delay,
+                transition_duration: transition_duration(qbar_target.unwrap_or(false), params),
+            },
+            DigitalOutputPendingSlots {
+                q_index: Self::QB_STATE,
+                transition_start_index: Self::QB_TRANSITION_START,
+                transition_from_index: Self::QB_TRANSITION_FROM,
+                pending_index: Self::QB_PENDING,
+                pending_time_index: Self::QB_PENDING_TIME,
+                pending_start_index: Self::QB_PENDING_START,
+            },
             self.kind == XyceDSequentialKind::Jkff,
         );
         for index in 0..self.kind.input_count() {
@@ -3862,29 +3983,37 @@ impl XyceDSequential {
             ctx,
             "q",
             q,
-            Self::Q_PREV_LOW_VOLTAGE,
-            Self::Q_PREV_HIGH_VOLTAGE,
-            Self::Q_PREV_PREV_LOW_VOLTAGE,
-            Self::Q_PREV_PREV_HIGH_VOLTAGE,
-            Self::Q_PREV_LOW_CURRENT,
-            Self::Q_PREV_HIGH_CURRENT,
+            DigitalOutputStateSlots {
+                previous_low_voltage_state: Self::Q_PREV_LOW_VOLTAGE,
+                previous_high_voltage_state: Self::Q_PREV_HIGH_VOLTAGE,
+                previous_previous_low_voltage_state: Self::Q_PREV_PREV_LOW_VOLTAGE,
+                previous_previous_high_voltage_state: Self::Q_PREV_PREV_HIGH_VOLTAGE,
+                previous_low_current_state: Self::Q_PREV_LOW_CURRENT,
+                previous_high_current_state: Self::Q_PREV_HIGH_CURRENT,
+            },
             params,
-            q_start,
-            q_from,
+            DigitalOutputTransition {
+                transition_start: q_start,
+                transition_from: q_from,
+            },
         );
         Self::stamp_output(
             ctx,
             "qbar",
             qbar,
-            Self::QB_PREV_LOW_VOLTAGE,
-            Self::QB_PREV_HIGH_VOLTAGE,
-            Self::QB_PREV_PREV_LOW_VOLTAGE,
-            Self::QB_PREV_PREV_HIGH_VOLTAGE,
-            Self::QB_PREV_LOW_CURRENT,
-            Self::QB_PREV_HIGH_CURRENT,
+            DigitalOutputStateSlots {
+                previous_low_voltage_state: Self::QB_PREV_LOW_VOLTAGE,
+                previous_high_voltage_state: Self::QB_PREV_HIGH_VOLTAGE,
+                previous_previous_low_voltage_state: Self::QB_PREV_PREV_LOW_VOLTAGE,
+                previous_previous_high_voltage_state: Self::QB_PREV_PREV_HIGH_VOLTAGE,
+                previous_low_current_state: Self::QB_PREV_LOW_CURRENT,
+                previous_high_current_state: Self::QB_PREV_HIGH_CURRENT,
+            },
             params,
-            qbar_start,
-            qbar_from,
+            DigitalOutputTransition {
+                transition_start: qbar_start,
+                transition_from: qbar_from,
+            },
         );
         for (port_name, state, transition_start) in [("q", q, q_start), ("qbar", qbar, qbar_start)]
         {

@@ -52,6 +52,31 @@ struct Jfet2RawTerms {
     power: Value,
 }
 
+/// The trap-state history a JFET2 evaluation carries: the two trap-shifted
+/// gate voltages, the trap occupancy and the two power-dissipation samples the
+/// self-heating term differences. They come from one accepted step and are
+/// only consistent together.
+#[derive(Clone, Copy)]
+pub(in crate::device::mosfet::jfet) struct Jfet2TrapState {
+    vgstrap: Value,
+    vgdtrap: Value,
+    trap_h: Value,
+    prev_power: Value,
+    power_h: Value,
+}
+
+/// The JFET2 gate-charge model card terms: the doping profile parameters and
+/// the two saturation limits the depletion charge is clipped to.
+#[derive(Clone, Copy)]
+struct Jfet2ChargeModel {
+    gamma: Value,
+    pb: Value,
+    alpha: Value,
+    vto: Value,
+    vmax: Value,
+    xc: Value,
+}
+
 impl Jfet {
     #[inline]
     fn jfet2_forward_bias_coefficient(&self) -> Value {
@@ -217,12 +242,15 @@ impl Jfet {
         temp_terms: Jfet2TempTerms,
         vgs: Value,
         vgd: Value,
-        vgstrap: Value,
-        vgdtrap: Value,
-        trap_h: Value,
-        prev_power: Value,
-        power_h: Value,
+        traps: Jfet2TrapState,
     ) -> Jfet2RawTerms {
+        let Jfet2TrapState {
+            vgstrap,
+            vgdtrap,
+            trap_h,
+            prev_power,
+            power_h,
+        } = traps;
         let area = self.area.max(0.0);
         let nvt = (temp_terms.temp * NG_K_OVER_Q * self.params.n.max(1.0e-30)).max(1.0e-30);
         let isat = temp_terms.t_sat_cur.max(0.0) * area;
@@ -339,7 +367,18 @@ impl Jfet {
         vgs: Value,
         vgd: Value,
     ) -> Jfet2RawTerms {
-        self.jfet2_ps_ids_raw_with_trap(temp_terms, vgs, vgd, vgs, vgd, 0.0, 0.0, 0.0)
+        self.jfet2_ps_ids_raw_with_trap(
+            temp_terms,
+            vgs,
+            vgd,
+            Jfet2TrapState {
+                vgstrap: vgs,
+                vgdtrap: vgd,
+                trap_h: 0.0,
+                prev_power: 0.0,
+                power_h: 0.0,
+            },
+        )
     }
 
     pub(super) fn jfet2_operating_terms(
@@ -393,12 +432,15 @@ impl Jfet {
         vds: Value,
         vgd: Value,
         temp: Value,
-        vgstrap: Value,
-        vgdtrap: Value,
-        trap_h: Value,
-        prev_power: Value,
-        power_h: Value,
+        traps: Jfet2TrapState,
     ) -> Jfet2OperatingTerms {
+        let Jfet2TrapState {
+            vgstrap,
+            vgdtrap,
+            trap_h,
+            prev_power,
+            power_h,
+        } = traps;
         let pol = self.jfet_type.polarity();
         let temp_terms = self.jfet2_temperature_terms(temp);
         let vgs_int = pol * vgs;
@@ -412,11 +454,13 @@ impl Jfet {
                 temp_terms,
                 vgd_int,
                 vgs_int,
-                vgdtrap_int,
-                vgstrap_int,
-                trap_h,
-                prev_power,
-                power_h,
+                Jfet2TrapState {
+                    vgstrap: vgdtrap_int,
+                    vgdtrap: vgstrap_int,
+                    trap_h,
+                    prev_power,
+                    power_h,
+                },
             );
             (
                 -raw.idrain,
@@ -433,11 +477,13 @@ impl Jfet {
                 temp_terms,
                 vgs_int,
                 vgd_int,
-                vgstrap_int,
-                vgdtrap_int,
-                trap_h,
-                prev_power,
-                power_h,
+                Jfet2TrapState {
+                    vgstrap: vgstrap_int,
+                    vgdtrap: vgdtrap_int,
+                    trap_h,
+                    prev_power,
+                    power_h,
+                },
             );
             (
                 raw.idrain, raw.igs, raw.igd, raw.ggs, raw.ggd, raw.gm, raw.gds, raw.power,
@@ -479,11 +525,13 @@ impl Jfet {
             vgs - vgd,
             vgd,
             self.analysis_temperature(),
-            vgstrap,
-            vgdtrap,
-            trap_h,
-            prev_power,
-            power_h,
+            Jfet2TrapState {
+                vgstrap,
+                vgdtrap,
+                trap_h,
+                prev_power,
+                power_h,
+            },
         );
         (vgstrap, vgdtrap, terms.power)
     }
@@ -510,11 +558,13 @@ impl Jfet {
             vds,
             vgd,
             self.analysis_temperature(),
-            vgstrap,
-            vgdtrap,
-            trap_h,
-            prev_power,
-            power_h,
+            Jfet2TrapState {
+                vgstrap,
+                vgdtrap,
+                trap_h,
+                prev_power,
+                power_h,
+            },
         );
 
         self.eval_ids = terms.ids;
@@ -824,15 +874,18 @@ impl Jfet {
     fn jfet2_qgg(
         vgs: Value,
         vgd: Value,
-        gamma: Value,
-        pb: Value,
-        alpha: Value,
-        vto: Value,
-        vmax: Value,
-        xc: Value,
+        model: Jfet2ChargeModel,
         cgso: Value,
         cgdo: Value,
     ) -> (Value, Value, Value) {
+        let Jfet2ChargeModel {
+            gamma,
+            pb,
+            alpha,
+            vto,
+            vmax,
+            xc,
+        } = model;
         let vds = vgs - vgd;
         let d1_xc = 1.0 - xc;
         let vert = (vds * vds + alpha).sqrt().max(1.0e-30);
@@ -879,12 +932,14 @@ impl Jfet {
         let (_, cgs, cgd) = Self::jfet2_qgg(
             pol * vgs,
             pol * vgd,
-            self.params.jfet2_acgam,
-            temp_terms.t_gate_pot,
-            temp_terms.alpha,
-            self.params.vto,
-            temp_terms.cor_dep_cap,
-            self.params.jfet2_xc,
+            Jfet2ChargeModel {
+                gamma: self.params.jfet2_acgam,
+                pb: temp_terms.t_gate_pot,
+                alpha: temp_terms.alpha,
+                vto: self.params.vto,
+                vmax: temp_terms.cor_dep_cap,
+                xc: self.params.jfet2_xc,
+            },
             temp_terms.t_cgs * scale,
             temp_terms.t_cgd * scale,
         );
@@ -987,12 +1042,14 @@ impl Jfet {
             Self::jfet2_qgg(
                 vgs_int,
                 vgd_int,
-                self.params.jfet2_acgam,
-                temp_terms.t_gate_pot,
-                temp_terms.alpha,
-                self.params.vto,
-                temp_terms.cor_dep_cap,
-                self.params.jfet2_xc,
+                Jfet2ChargeModel {
+                    gamma: self.params.jfet2_acgam,
+                    pb: temp_terms.t_gate_pot,
+                    alpha: temp_terms.alpha,
+                    vto: self.params.vto,
+                    vmax: temp_terms.cor_dep_cap,
+                    xc: self.params.jfet2_xc,
+                },
                 temp_terms.t_cgs * scale,
                 temp_terms.t_cgd * scale,
             )

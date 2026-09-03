@@ -779,7 +779,7 @@ mod tests {
             *state += 1;
             DigitalCosimStep {
                 vtime: time,
-                outputs: vec![if *state % 2 == 0 {
+                outputs: vec![if (*state).is_multiple_of(2) {
                     DigitalValue::zero()
                 } else {
                     DigitalValue::one()

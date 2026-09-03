@@ -17,19 +17,33 @@ pub struct LossyTransmissionLine {
     attenuation: Value,
 }
 
+/// The two ports of a two-port transmission line. Netlist order is
+/// `T<name> n1+ n1- n2+ n2-`; naming the pairs stops one port's nodes being
+/// spliced into the other.
+#[derive(Clone, Copy)]
+pub struct TransmissionLinePorts {
+    pub node1_pos: NodeId,
+    pub node1_neg: NodeId,
+    pub node2_pos: NodeId,
+    pub node2_neg: NodeId,
+}
+
 impl LossyTransmissionLine {
     /// Create a new lossy transmission line
     pub fn new(
         name: String,
-        node1_pos: NodeId,
-        node1_neg: NodeId,
-        node2_pos: NodeId,
-        node2_neg: NodeId,
+        ports: TransmissionLinePorts,
         z0: Value,
         td: Value,
         r: Value,
         g: Value,
     ) -> Self {
+        let TransmissionLinePorts {
+            node1_pos,
+            node1_neg,
+            node2_pos,
+            node2_neg,
+        } = ports;
         let base = TransmissionLine::new(name, node1_pos, node1_neg, node2_pos, node2_neg, z0, td);
 
         // Calculate attenuation: exp(-(R/2Z0 + G*Z0/2) * length)

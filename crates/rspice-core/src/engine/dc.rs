@@ -4,8 +4,6 @@
 //! - Operating point (DC OP) calculation
 //! - DC sweep for I-V curve generation
 
-#![allow(clippy::too_many_arguments)]
-
 use super::core::DcOpStartup;
 use super::{Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};
@@ -328,6 +326,35 @@ impl DcSweepSource {
     }
 }
 
+/// One linear `.dc` sweep axis: where it starts, where it stops, and the
+/// increment between points. Three bare `Value`s in that order are trivially
+/// transposed at a call site.
+#[derive(Clone, Copy)]
+pub struct DcSweepRange {
+    pub start: Value,
+    pub stop: Value,
+    pub step: Value,
+}
+
+/// One segment of a `.dc` sweep the substep solver is asked to cross: which
+/// source moves, from where to where, and the solution it starts from.
+#[derive(Clone, Copy)]
+struct DcSweepSegment<'a> {
+    sweep_source: &'a DcSweepSource,
+    from_value: Value,
+    to_value: Value,
+    seed: &'a [Value],
+}
+
+/// How hard it is allowed to try: the minimum subdivision count, and whether
+/// the first and last substeps must land exactly on the segment endpoints.
+#[derive(Clone, Copy)]
+struct DcSubstepPolicy {
+    min_subdivisions: usize,
+    target_initial_step: bool,
+    target_final_step: bool,
+}
+
 impl Engine {
     /// Resolve a Xyce device-parameter `.DC` source to the canonical AST
     /// override spelling used by the engine and regression wrapper.
@@ -561,15 +588,21 @@ impl Engine {
         &self,
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
-        sweep_source: &DcSweepSource,
-        from_value: Value,
-        to_value: Value,
-        seed: &[Value],
-        min_subdivisions: usize,
-        target_initial_step: bool,
-        target_final_step: bool,
+        segment: DcSweepSegment<'_>,
+        policy: DcSubstepPolicy,
         abort: &dyn AbortSignal,
     ) -> Result<(Vec<Value>, usize), SimulationError> {
+        let DcSubstepPolicy {
+            min_subdivisions,
+            target_initial_step,
+            target_final_step,
+        } = policy;
+        let DcSweepSegment {
+            sweep_source,
+            from_value,
+            to_value,
+            seed,
+        } = segment;
         let span = to_value - from_value;
         if !span.is_finite() || span == 0.0 {
             sweep_source.set_value(circuit, to_value);
@@ -878,27 +911,17 @@ impl Engine {
         &self,
         netlist: &Netlist,
         source_name: &str,
-        start: Value,
-        stop: Value,
-        step: Value,
+        range: DcSweepRange,
         sweep2: Option<&crate::netlist::DcSecondSweep>,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<(Value, SimulationResult)>, SimulationError> {
-        self.run_dc_sweep2_with_report_and_abort(
-            netlist,
-            source_name,
-            start,
-            stop,
-            step,
-            sweep2,
-            abort,
-        )
-        .map(|points| {
-            points
-                .into_iter()
-                .map(|point| (point.sweep_value, point.result))
-                .collect()
-        })
+        self.run_dc_sweep2_with_report_and_abort(netlist, source_name, range, sweep2, abort)
+            .map(|points| {
+                points
+                    .into_iter()
+                    .map(|point| (point.sweep_value, point.result))
+                    .collect()
+            })
     }
 
     /// Two-source DC sweep that preserves per-point device operating reports.
@@ -906,12 +929,11 @@ impl Engine {
         &self,
         netlist: &Netlist,
         source_name: &str,
-        start: Value,
-        stop: Value,
-        step: Value,
+        range: DcSweepRange,
         sweep2: Option<&crate::netlist::DcSecondSweep>,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<DcSweepPointResult>, SimulationError> {
+        let DcSweepRange { start, stop, step } = range;
         let primary = crate::netlist::DcSweepSpec::linear(start, stop, step);
         self.run_dc_sweep2_spec_with_report_and_abort(netlist, source_name, &primary, sweep2, abort)
     }
@@ -1308,13 +1330,17 @@ impl Engine {
                                     match engine.solve_nonlinear_dc_sweep_target_with_substeps(
                                         &mut circuit,
                                         &mut matrix,
-                                        &sweep_source,
-                                        previous_value,
-                                        sweep_value,
-                                        seed,
-                                        dc_sweep_subdivisions,
-                                        analysis_initial_step,
-                                        analysis_final_step,
+                                        DcSweepSegment {
+                                            sweep_source: &sweep_source,
+                                            from_value: previous_value,
+                                            to_value: sweep_value,
+                                            seed,
+                                        },
+                                        DcSubstepPolicy {
+                                            min_subdivisions: dc_sweep_subdivisions,
+                                            target_initial_step: analysis_initial_step,
+                                            target_final_step: analysis_final_step,
+                                        },
                                         abort,
                                     ) {
                                         Ok((solution, subdivisions)) => {
@@ -1919,9 +1945,11 @@ mod tests {
              .end\n",
         )
         .expect("deck parses");
-        let mut config = crate::engine::SimulationConfig::default();
-        config.temperature = 125.0 + 273.15;
-        config.tolerance = 1.0e-7;
+        let config = crate::engine::SimulationConfig {
+            temperature: 125.0 + 273.15,
+            tolerance: 1.0e-7,
+            ..Default::default()
+        };
         let engine = Engine::try_new_with_resolved_config(config).unwrap();
         let (result, _) = engine
             .run_dc_op_with_report_and_abort(&netlist, &NoAbort)
@@ -2623,8 +2651,10 @@ RLOAD out 0 2
 .end
 "#;
         let netlist = Netlist::parse(deck).expect("deck parses");
-        let mut config = crate::engine::SimulationConfig::default();
-        config.temperature = crate::constants::celsius_to_kelvin(37.0);
+        let config = crate::engine::SimulationConfig {
+            temperature: crate::constants::celsius_to_kelvin(37.0),
+            ..Default::default()
+        };
         let result = Engine::new(config)
             .run_dc_op(&netlist)
             .expect("modeled solution-dependent resistor solves");

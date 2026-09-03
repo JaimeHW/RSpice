@@ -897,7 +897,7 @@ fn parse_raw_binary_data(
     let mut cursor = *pos;
     let mut data = vec![Vec::with_capacity(header.no_points); header.variables.len()];
     for _ in 0..header.no_points {
-        for var_idx in 0..header.variables.len() {
+        for (var_idx, entry) in data.iter_mut().enumerate().take(header.variables.len()) {
             let real = match encoding {
                 RawBinaryEncoding::RealAllF64 | RawBinaryEncoding::ComplexAllF64 => {
                     read_raw_f64(content, &mut cursor)?
@@ -922,7 +922,7 @@ fn parse_raw_binary_data(
                 }
                 RawBinaryEncoding::RealAllF64 | RawBinaryEncoding::RealMixedAxisF64RestF32 => 0.0,
             };
-            data[var_idx].push(num_complex::Complex64::new(real, imag));
+            (*entry).push(num_complex::Complex64::new(real, imag));
         }
     }
     *pos += payload_len;

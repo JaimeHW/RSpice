@@ -187,7 +187,7 @@ fn resolve_inline_lookup_function(
     interpolation: InterpolationKind,
     resource_limits: crate::resource::ResourceLimits,
 ) -> Result<Expr, String> {
-    if args.len() < 3 || args.len() % 2 == 0 {
+    if args.len() < 3 || args.len().is_multiple_of(2) {
         return Err(format!(
             "{} inline lookup requires an input followed by one or more x/y pairs; got {} arguments",
             function_name(func),
@@ -775,6 +775,10 @@ mod tests {
     use crate::expr::{Context, Vm, compile, parse_expression_strict};
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    /// The closed form an inline lookup expression must reproduce, evaluated
+    /// at the expression's input.
+    type InlineLookupOracle = fn(Value) -> Value;
+
     #[test]
     fn file_table_resolution_enforces_runtime_data_limits() {
         let dir = unique_temp_dir("file-table-resource-limits");
@@ -785,15 +789,19 @@ mod tests {
         let expression =
             || parse_expression_strict("tablefile(\"wave.dat\")").expect("table expression parses");
 
-        let mut byte_limits = crate::resource::ResourceLimits::default();
-        byte_limits.max_external_data_bytes = contents.len() - 1;
+        let byte_limits = crate::resource::ResourceLimits {
+            max_external_data_bytes: contents.len() - 1,
+            ..Default::default()
+        };
         let byte_error =
             resolve_file_lookup_functions_with_limits(expression(), Some(&deck_path), byte_limits)
                 .expect_err("oversized table file must fail");
         assert!(byte_error.contains("external_data_bytes limit exceeded"));
 
-        let mut value_limits = crate::resource::ResourceLimits::default();
-        value_limits.max_external_data_values = 3;
+        let value_limits = crate::resource::ResourceLimits {
+            max_external_data_values: 3,
+            ..Default::default()
+        };
         let value_error =
             resolve_file_lookup_functions_with_limits(expression(), Some(&deck_path), value_limits)
                 .expect_err("oversized table value set must fail");
@@ -1018,7 +1026,7 @@ mod tests {
 
     #[test]
     fn constant_inline_lookups_sort_xy_pairs_and_use_the_explicit_input() {
-        let cases: [(&str, fn(Value) -> Value); 3] = [
+        let cases: [(&str, InlineLookupOracle); 3] = [
             ("table(v(a),1,3,0.5,2,0,1)", |x: Value| 1.0 + 2.0 * x),
             ("akima(v(a),1,4,0.5,2.25,0,1)", |x: Value| (1.0 + x).powi(2)),
             ("spline(v(a),1,4,0.5,2.25,0,1)", |x: Value| {
@@ -1056,7 +1064,7 @@ mod tests {
 
     #[test]
     fn inline_lookup_points_accept_dialect_invariant_constant_expressions() {
-        let cases: [(&str, fn(Value) -> Value); 2] = [
+        let cases: [(&str, InlineLookupOracle); 2] = [
             ("table(v(a),1,3,-(1),-1,1-1,1)", |x: Value| 1.0 + 2.0 * x),
             ("akima(v(a),1,4,-(1),0,2-2,1)", |x: Value| (1.0 + x).powi(2)),
         ];
@@ -1201,8 +1209,10 @@ mod tests {
 
         let expression = parse_expression_strict("akima(v(a),0,1,0.5,2.25,1,4)")
             .expect("resource-limited expression parses");
-        let mut limits = crate::resource::ResourceLimits::default();
-        limits.max_external_data_values = 11;
+        let limits = crate::resource::ResourceLimits {
+            max_external_data_values: 11,
+            ..Default::default()
+        };
         let error = resolve_file_lookup_functions_with_limits(expression, None, limits)
             .expect_err("precomputed coefficients must honor resource limits")
             .to_string();

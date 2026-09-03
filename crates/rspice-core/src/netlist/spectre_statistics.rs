@@ -125,6 +125,9 @@ impl SpectreCorrelationMatrix {
                 "matrix must be square".to_owned(),
             ));
         }
+        // The symmetry check reads `[column][row]` as well, which is in a
+        // different row of the matrix.
+        #[allow(clippy::needless_range_loop)]
         for row in 0..size {
             for column in 0..size {
                 let value = values[row][column];
@@ -713,8 +716,8 @@ fn latent_correlation_matrix(
 ) -> Result<Vec<Vec<Value>>, SpectreStatisticsError> {
     let size = variations.len();
     let mut latent = vec![vec![0.0; size]; size];
-    for index in 0..size {
-        latent[index][index] = 1.0;
+    for (index, row) in latent.iter_mut().enumerate().take(size) {
+        row[index] = 1.0;
     }
     for left in 0..size {
         for right in left + 1..size {

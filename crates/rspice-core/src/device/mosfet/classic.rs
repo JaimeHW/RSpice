@@ -651,7 +651,7 @@ impl Mosfet {
     }
 
     /// True when this instance uses the Berkeley MOS3 equation core.
-    pub(in crate::device::mosfet::mosfet) fn uses_mos3_core(&self) -> bool {
+    pub(in crate::device::mosfet::classic) fn uses_mos3_core(&self) -> bool {
         matches!(self.level, 3 | 9)
     }
 

@@ -24,7 +24,11 @@ pub(crate) fn validate_transient_state(result: &TransientResult) -> Result<(), S
     if result.time.iter().any(|time| !time.is_finite()) {
         return Err("transient result time points must all be finite".to_string());
     }
-    if result.time.windows(2).any(|window| window[1] <= window[0]) {
+    if result
+        .time
+        .windows(2)
+        .any(|window| matches!(window, [previous, next] if next <= previous))
+    {
         return Err("transient result time points must be strictly increasing".to_string());
     }
     if result.voltages.len() != result.num_nodes || result.node_names.len() != result.num_nodes {

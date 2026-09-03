@@ -16,60 +16,6 @@ pub(crate) struct SourceContinuationPolicy {
     maximum_steps: usize,
     corrector_iterations: usize,
 }
-
-#[cfg(test)]
-mod source_continuation_policy_tests {
-    use super::{SourceContinuationPolicy, explicit_source_continuation_policy};
-    use crate::config::NonlinearContinuationMode;
-
-    #[test]
-    fn xyce_simultaneous_policy_matches_loca_defaults() {
-        let policy = SourceContinuationPolicy::XYCE_SIMULTANEOUS;
-        assert_eq!(policy.initial_step, 0.2);
-        assert_eq!(policy.maximum_step, 0.2);
-        assert_eq!(policy.minimum_step, 1.0e-4);
-        assert_eq!(policy.aggressiveness, 1.0);
-        assert_eq!(policy.maximum_steps, 400);
-        assert_eq!(policy.corrector_iterations, 20);
-    }
-
-    #[test]
-    fn xyce_success_adapts_from_corrector_work_and_clips_to_maximum() {
-        let policy = SourceContinuationPolicy::XYCE_SIMULTANEOUS;
-
-        // 10/20 unused iterations gives a 1 + (1/2)^2 = 1.25 factor.
-        assert!((policy.step_after_success(0.1, 10) - 0.125).abs() < 1.0e-15);
-        // A zero-iteration corrector doubles the step, then the configured
-        // maximum clips it.
-        assert!((policy.step_after_success(0.15, 0) - 0.2).abs() < 1.0e-15);
-        // A fully spent corrector budget neither grows nor shrinks a success.
-        assert!((policy.step_after_success(0.1, 20) - 0.1).abs() < 1.0e-15);
-    }
-
-    #[test]
-    fn xyce_failure_halves_until_the_minimum_step() {
-        let policy = SourceContinuationPolicy::XYCE_SIMULTANEOUS;
-        assert_eq!(policy.step_after_failure(0.2), Some(0.1));
-        assert_eq!(policy.step_after_failure(2.0e-4), Some(1.0e-4));
-        assert_eq!(policy.step_after_failure(1.0e-4), None);
-    }
-
-    #[test]
-    fn only_explicit_simultaneous_source_step_selects_this_policy() {
-        assert_eq!(
-            explicit_source_continuation_policy(Some(
-                NonlinearContinuationMode::SimultaneousSourceStep
-            )),
-            Some(SourceContinuationPolicy::XYCE_SIMULTANEOUS)
-        );
-        assert_eq!(
-            explicit_source_continuation_policy(Some(NonlinearContinuationMode::Natural)),
-            None
-        );
-        assert_eq!(explicit_source_continuation_policy(None), None);
-    }
-}
-
 impl SourceContinuationPolicy {
     /// Xyce/LOCA natural-parameter defaults used by simultaneous source
     /// stepping when the deck explicitly requests continuation.
@@ -350,9 +296,11 @@ impl Engine {
                 circuit,
                 matrix,
                 0.0,
-                &solution,
-                &mut damping_state,
-                source_iterations,
+                CorrectorRun {
+                    initial_solution: &solution,
+                    damping_state: &mut damping_state,
+                    max_iterations: source_iterations,
+                },
                 abort,
             )?;
         total_iterations += bootstrap_iterations;
@@ -394,9 +342,11 @@ impl Engine {
                 circuit,
                 matrix,
                 target_scale,
-                &solution,
-                &mut trial_damping_state,
-                source_iterations,
+                CorrectorRun {
+                    initial_solution: &solution,
+                    damping_state: &mut trial_damping_state,
+                    max_iterations: source_iterations,
+                },
                 abort,
             )?;
             total_iterations = total_iterations.saturating_add(used_iterations);
@@ -428,9 +378,11 @@ impl Engine {
                 circuit,
                 matrix,
                 1.0,
-                &solution,
-                &mut damping_state,
-                source_iterations,
+                CorrectorRun {
+                    initial_solution: &solution,
+                    damping_state: &mut damping_state,
+                    max_iterations: source_iterations,
+                },
                 abort,
             )?;
         total_iterations = total_iterations.saturating_add(polish_iterations);
@@ -506,9 +458,11 @@ impl Engine {
                 let mut new_solution = self.apply_damping_strategy_for_circuit(
                     circuit.has_b3soi_devices(),
                     &circuit.non_electrical_state_mask(),
-                    &solution,
-                    &raw_solution,
-                    &mut damping_state,
+                    DampingStep {
+                        old: &solution,
+                        proposal: &raw_solution,
+                        damping_state: &mut damping_state,
+                    },
                     Self::junction_limiting_owns_newton_steps(circuit)
                         || self.b3soi_limiter_owns_global_damping(circuit),
                     |trial| {
@@ -598,9 +552,11 @@ impl Engine {
             circuit,
             matrix,
             0.0,
-            &current_solution,
-            &mut damping_state,
-            arc_newton_iters,
+            CorrectorRun {
+                initial_solution: &current_solution,
+                damping_state: &mut damping_state,
+                max_iterations: arc_newton_iters,
+            },
             abort,
         )?;
         current_solution = bootstrap_solution;
@@ -617,9 +573,11 @@ impl Engine {
                     circuit,
                     matrix,
                     target_lambda,
-                    &predicted_solution,
-                    &mut damping_state,
-                    arc_cfg.max_newton_iters,
+                    CorrectorRun {
+                        initial_solution: &predicted_solution,
+                        damping_state: &mut damping_state,
+                        max_iterations: arc_cfg.max_newton_iters,
+                    },
                     abort,
                 )?;
 
@@ -684,9 +642,11 @@ impl Engine {
                 circuit,
                 matrix,
                 1.0,
-                &solution,
-                &mut damping_state,
-                corrector_iterations,
+                CorrectorRun {
+                    initial_solution: &solution,
+                    damping_state: &mut damping_state,
+                    max_iterations: corrector_iterations,
+                },
                 abort,
                 super::fallback::CorrectorSeedMode::Limited,
             )?;
@@ -729,9 +689,11 @@ impl Engine {
                     circuit,
                     matrix,
                     1.0,
-                    &solution,
-                    &mut trial_damping_state,
-                    corrector_iterations,
+                    CorrectorRun {
+                        initial_solution: &solution,
+                        damping_state: &mut trial_damping_state,
+                        max_iterations: corrector_iterations,
+                    },
                     abort,
                     super::fallback::CorrectorSeedMode::Limited,
                 )?;
@@ -765,9 +727,11 @@ impl Engine {
                 circuit,
                 matrix,
                 1.0,
-                &solution,
-                &mut damping_state,
-                corrector_iterations,
+                CorrectorRun {
+                    initial_solution: &solution,
+                    damping_state: &mut damping_state,
+                    max_iterations: corrector_iterations,
+                },
                 abort,
                 super::fallback::CorrectorSeedMode::Limited,
             )?;
@@ -856,9 +820,11 @@ impl Engine {
                 circuit,
                 matrix,
                 start_gmin,
-                &solution,
-                &mut damping_state,
-                gmin_iterations,
+                CorrectorRun {
+                    initial_solution: &solution,
+                    damping_state: &mut damping_state,
+                    max_iterations: gmin_iterations,
+                },
                 abort,
             )?;
         total_iterations = total_iterations.saturating_add(initial_iterations);
@@ -901,9 +867,11 @@ impl Engine {
                 circuit,
                 matrix,
                 target_gmin,
-                &solution,
-                &mut trial_damping_state,
-                gmin_iterations,
+                CorrectorRun {
+                    initial_solution: &solution,
+                    damping_state: &mut trial_damping_state,
+                    max_iterations: gmin_iterations,
+                },
                 abort,
             )?;
             total_iterations = total_iterations.saturating_add(used_iterations);
@@ -992,11 +960,14 @@ impl Engine {
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
         gmin: Value,
-        initial_solution: &[Value],
-        damping_state: &mut NewtonDampingState,
-        max_iterations: usize,
+        run: CorrectorRun<'_>,
         abort: &dyn AbortSignal,
     ) -> Result<(Vec<Value>, bool, usize), SimulationError> {
+        let CorrectorRun {
+            initial_solution,
+            damping_state,
+            max_iterations,
+        } = run;
         let mut solution = initial_solution.to_vec();
         let junction_gmin = self.effective_device_junction_gmin(gmin);
         self.update_device_states_for_dc_with_junction_gmin(circuit, &solution, junction_gmin);
@@ -1032,9 +1003,11 @@ impl Engine {
             let mut new_solution = self.apply_damping_strategy_for_circuit(
                 circuit.has_b3soi_devices(),
                 &circuit.non_electrical_state_mask(),
-                &solution,
-                &raw_solution,
-                damping_state,
+                DampingStep {
+                    old: &solution,
+                    proposal: &raw_solution,
+                    damping_state,
+                },
                 Self::junction_limiting_owns_newton_steps(circuit)
                     || self.b3soi_limiter_owns_global_damping(circuit),
                 |trial| self.nonlinear_merit_with_gmin(circuit, matrix, trial, gmin),
@@ -1066,5 +1039,58 @@ impl Engine {
         }
 
         Ok((solution, false, used_iterations))
+    }
+}
+
+#[cfg(test)]
+mod source_continuation_policy_tests {
+    use super::{SourceContinuationPolicy, explicit_source_continuation_policy};
+    use crate::config::NonlinearContinuationMode;
+
+    #[test]
+    fn xyce_simultaneous_policy_matches_loca_defaults() {
+        let policy = SourceContinuationPolicy::XYCE_SIMULTANEOUS;
+        assert_eq!(policy.initial_step, 0.2);
+        assert_eq!(policy.maximum_step, 0.2);
+        assert_eq!(policy.minimum_step, 1.0e-4);
+        assert_eq!(policy.aggressiveness, 1.0);
+        assert_eq!(policy.maximum_steps, 400);
+        assert_eq!(policy.corrector_iterations, 20);
+    }
+
+    #[test]
+    fn xyce_success_adapts_from_corrector_work_and_clips_to_maximum() {
+        let policy = SourceContinuationPolicy::XYCE_SIMULTANEOUS;
+
+        // 10/20 unused iterations gives a 1 + (1/2)^2 = 1.25 factor.
+        assert!((policy.step_after_success(0.1, 10) - 0.125).abs() < 1.0e-15);
+        // A zero-iteration corrector doubles the step, then the configured
+        // maximum clips it.
+        assert!((policy.step_after_success(0.15, 0) - 0.2).abs() < 1.0e-15);
+        // A fully spent corrector budget neither grows nor shrinks a success.
+        assert!((policy.step_after_success(0.1, 20) - 0.1).abs() < 1.0e-15);
+    }
+
+    #[test]
+    fn xyce_failure_halves_until_the_minimum_step() {
+        let policy = SourceContinuationPolicy::XYCE_SIMULTANEOUS;
+        assert_eq!(policy.step_after_failure(0.2), Some(0.1));
+        assert_eq!(policy.step_after_failure(2.0e-4), Some(1.0e-4));
+        assert_eq!(policy.step_after_failure(1.0e-4), None);
+    }
+
+    #[test]
+    fn only_explicit_simultaneous_source_step_selects_this_policy() {
+        assert_eq!(
+            explicit_source_continuation_policy(Some(
+                NonlinearContinuationMode::SimultaneousSourceStep
+            )),
+            Some(SourceContinuationPolicy::XYCE_SIMULTANEOUS)
+        );
+        assert_eq!(
+            explicit_source_continuation_policy(Some(NonlinearContinuationMode::Natural)),
+            None
+        );
+        assert_eq!(explicit_source_continuation_policy(None), None);
     }
 }

@@ -284,7 +284,7 @@ fn xfer_table_from_model(ctx: &CmContext) -> CmResult<Vec<XferPoint>> {
     if offset < 1 || span < offset + 2 {
         return Ok(Vec::new());
     }
-    if table.len() % span != 0 {
+    if !table.len().is_multiple_of(span) {
         return Ok(Vec::new());
     }
 
@@ -615,10 +615,10 @@ fn cache_xfer_table(ctx: &mut CmContext) -> CmResult<Arc<XferTableData>> {
 }
 
 fn xfer_table(ctx: &CmContext) -> CmResult<Arc<XferTableData>> {
-    if let Some(resource) = ctx.resource::<XferTableResource>(XFER_TABLE_RESOURCE) {
-        if xfer_table_signature_matches(ctx, &resource.signature) {
-            return resource.result.clone();
-        }
+    if let Some(resource) = ctx.resource::<XferTableResource>(XFER_TABLE_RESOURCE)
+        && xfer_table_signature_matches(ctx, &resource.signature)
+    {
+        return resource.result.clone();
     }
     let (_, result) = xfer_table_uncached(ctx);
     result.map(xfer_table_data).map(Arc::new)
@@ -914,10 +914,10 @@ fn cache_s_xfer_coefficients(ctx: &mut CmContext) -> CmResult<Option<Arc<SXferCo
 }
 
 fn s_xfer_coefficients_for_context(ctx: &CmContext) -> CmResult<Option<Arc<SXferCoefficients>>> {
-    if let Some(resource) = ctx.resource::<SXferCoefficientResource>(SXFER_COEFFICIENT_RESOURCE) {
-        if s_xfer_coefficient_signature_matches(ctx, &resource.signature) {
-            return Ok(resource.coefficients.clone());
-        }
+    if let Some(resource) = ctx.resource::<SXferCoefficientResource>(SXFER_COEFFICIENT_RESOURCE)
+        && s_xfer_coefficient_signature_matches(ctx, &resource.signature)
+    {
+        return Ok(resource.coefficients.clone());
     }
     if s_xfer_has_improper_order(ctx) {
         Ok(None)
@@ -1049,8 +1049,8 @@ fn s_xfer_ngspice_transient_eval(
             state[index - 1] = ctx.state_prev(index - 1) + dt * state[index];
         }
     } else {
-        for index in 0..order {
-            state[index] = ctx.state_prev(index);
+        for (index, entry) in state.iter_mut().enumerate().take(order) {
+            *entry = ctx.state_prev(index);
         }
     }
 
@@ -1248,10 +1248,11 @@ mod tests {
     use super::*;
     use crate::xspice::ParamType;
 
-    fn port_summary(
-        model: &dyn CodeModel,
-    ) -> Vec<(
-        &str,
+    /// One row of a port declaration as these tests compare it: name,
+    /// direction, default type, the types it accepts, whether it is a vector,
+    /// whether a null connection is allowed, and the vector length bounds.
+    type PortShape<'a> = (
+        &'a str,
         PortDirection,
         PortType,
         Vec<PortType>,
@@ -1259,7 +1260,9 @@ mod tests {
         bool,
         Option<usize>,
         Option<usize>,
-    )> {
+    );
+
+    fn port_summary(model: &dyn CodeModel) -> Vec<PortShape<'_>> {
         model
             .ports()
             .iter()
@@ -1278,20 +1281,23 @@ mod tests {
             .collect()
     }
 
-    fn param_summary(
-        model: &dyn CodeModel,
-    ) -> Vec<(
-        &str,
+    /// One row of a transfer-model parameter declaration: name, type,
+    /// numeric default, string default, whether it is required, its numeric
+    /// bounds, its vector length bounds, and any real-vector default.
+    type ParamShape<'a> = (
+        &'a str,
         ParamType,
         Value,
-        Option<&str>,
+        Option<&'a str>,
         bool,
         Option<Value>,
         Option<Value>,
         Option<usize>,
         Option<usize>,
         Option<Vec<Value>>,
-    )> {
+    );
+
+    fn param_summary(model: &dyn CodeModel) -> Vec<ParamShape<'_>> {
         model
             .parameters()
             .iter()
@@ -1312,16 +1318,7 @@ mod tests {
             .collect()
     }
 
-    fn transfer_port_summary() -> Vec<(
-        &'static str,
-        PortDirection,
-        PortType,
-        Vec<PortType>,
-        bool,
-        bool,
-        Option<usize>,
-        Option<usize>,
-    )> {
+    fn transfer_port_summary() -> Vec<PortShape<'static>> {
         let analog_types = vec![
             PortType::Voltage,
             PortType::DifferentialVoltage,

@@ -823,10 +823,11 @@ mod tests {
             .collect()
     }
 
-    fn assert_digital_ports(
-        model: &dyn CodeModel,
-        expected: &[(&str, PortDirection, bool, Option<usize>, Option<usize>)],
-    ) {
+    /// One expected digital port: name, direction, whether it is a vector,
+    /// and its vector length bounds.
+    type DigitalPortShape<'a> = (&'a str, PortDirection, bool, Option<usize>, Option<usize>);
+
+    fn assert_digital_ports(model: &dyn CodeModel, expected: &[DigitalPortShape<'_>]) {
         let ports = model.ports();
         assert_eq!(
             ports

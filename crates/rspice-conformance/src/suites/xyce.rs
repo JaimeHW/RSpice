@@ -14,8 +14,6 @@
 // comparison mode applies. Bundling them into a struct would hide at the call
 // site which knob a given deck is exercising, which is the one thing these
 // helpers exist to make legible.
-#![allow(clippy::too_many_arguments)]
-
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::analysis::ac::ac_sweep_frequencies;
 use rspice_core::analysis::{AcResult, AcSensitivityOutput};
@@ -12237,6 +12235,113 @@ impl XyceCurrentAccessor {
             Self::Decibels => Some(XyceVoltageAccessor::db(value.norm())),
         }
     }
+}
+
+/// How a deck's text is to be read: which expression dialect governs it and
+/// what a repeated `.PARAM` means. Xyce's answer to all three is one decision
+/// about the deck, and no caller sets one without setting the others.
+#[derive(Clone, Copy)]
+struct XyceParsePolicy {
+    expression_dialect: ExpressionDialect,
+    redefinition: ParameterRedefinitionPolicy,
+    redefinition_diagnostic: rspice_core::netlist::ParameterRedefinitionDiagnosticPolicy,
+}
+
+/// One probe observation on the transient axis: when it was taken, what the
+/// reference says, and what RSpice produced.
+#[derive(Clone, Copy)]
+struct XyceProbeSample {
+    time: Value,
+    expected: Value,
+    actual: Value,
+}
+
+/// A passive device parameter being resolved for a probe: which device and
+/// parameter, the literal or expression the deck gave, and the instance
+/// overrides that may replace it.
+#[derive(Clone, Copy)]
+struct XycePassiveParameter<'a> {
+    device_kind: &'a str,
+    element_name: &'a str,
+    parameter_name: &'a str,
+    value: Value,
+    value_expr: Option<&'a str>,
+    instance_params: &'a [(String, Value)],
+}
+
+/// A stepped-transient comparison: the plan, the runs it produced, the
+/// cancellation source, and whether the reference grid is being replayed.
+struct XyceStepTranComparison<'a> {
+    plan: &'a XyceStaticTranPlan,
+    step_runs: &'a [XyceStepRun],
+    abort: &'a dyn AbortSignal,
+    locked_time_grid: bool,
+}
+
+/// Where a DC sensitivity reference lives and how to decode it.
+#[derive(Clone, Copy)]
+struct XyceSensitivityReference<'a> {
+    path: &'a Path,
+    format: XyceDcSensitivityReferenceFormat,
+    side_file: Option<&'a str>,
+}
+
+/// Which `.STEP` row a comparison is on, when the run was stepped.
+#[derive(Clone, Copy)]
+struct XyceStepContext<'a> {
+    row_netlists: Option<&'a [Netlist]>,
+    expected_step_index: Option<usize>,
+}
+
+/// The measurement artifacts a comparison reads and the terms it holds them to.
+#[derive(Clone, Copy)]
+struct XyceMeasureArtifacts<'a> {
+    paths: &'a [PathBuf],
+    tolerance: XyceFileCompareTolerance,
+    declarations: &'a [rspice_core::analysis::MeasureStatement],
+}
+
+/// Xyce's two knobs for how a failed `.MEASURE` is reported.
+#[derive(Clone, Copy)]
+struct XyceMeasurePolicy {
+    fail_output: Option<bool>,
+    default_value: Option<Value>,
+}
+
+/// A lossless transmission line as a deck can spell it: characteristic
+/// impedance plus exactly one of a delay, or a frequency and its electrical
+/// length.
+#[derive(Clone, Copy)]
+struct LosslessLineSpec<'a> {
+    z0: Option<Value>,
+    td: Option<Value>,
+    freq: Option<Value>,
+    nl: Option<Value>,
+    model: Option<&'a str>,
+}
+
+/// One row of a reference table, addressed by its time column.
+#[derive(Clone, Copy)]
+struct XyceReferenceRow<'a> {
+    table: &'a XycePrnTable,
+    time_column: usize,
+    row_index: usize,
+}
+
+/// A value tolerance plus the output-interval corridor it is applied over.
+#[derive(Clone, Copy)]
+struct XyceCorridorTolerance {
+    value: XyceComparisonTolerance,
+    output_interval: Value,
+    time_scale_factor: Value,
+}
+
+/// A value tolerance plus the time-axis neighborhood it is searched over.
+#[derive(Clone, Copy)]
+struct XyceNeighborhoodTolerance {
+    value: XyceComparisonTolerance,
+    time_tolerance: Value,
+    time_scale_factor: Value,
 }
 
 #[derive(Debug, Clone, Copy)]

@@ -2,6 +2,30 @@ use super::*;
 use std::ops::{Add, Div, Mul, Neg, Sub};
 
 const EPSSIL: Value = 11.7 * 8.854_214_871e-12;
+
+/// The bias-dependent terms the level-2 fast surface-state shift reads: the
+/// body-effect argument, the two branch voltages it is evaluated at, and the
+/// two body-charge derivatives that go with them.
+#[derive(Clone, Copy)]
+struct Level2SurfaceShiftBias {
+    barg: Value,
+    lvbs: Value,
+    lvds: Value,
+    dsrgdb: Value,
+    dbrgdb: Value,
+}
+
+/// The geometry and oxide terms of the same shift: the fast-surface-state
+/// factor, the oxide capacitance, the effective channel length and the
+/// depletion-width coefficient.
+#[derive(Clone, Copy)]
+struct Level2SurfaceShiftGeometry {
+    factor: Value,
+    cox: Value,
+    effective_length: Value,
+    xd: Value,
+}
+
 // MOS2 is a Berkeley/Xyce legacy model.  Xyce 7.10 intentionally retains
 // the historical device constants from N_DEV_Const.h rather than the modern
 // SI values used by the rest of the native device library.  Keep that
@@ -12,11 +36,11 @@ const XYCE_K_OVER_Q: Value = XYCE_BOLTZMANN / XYCE_CHARGE;
 const PHYSICAL_K_OVER_Q: Value = crate::constants::K_BOLTZMANN / crate::constants::Q_ELECTRON;
 
 #[derive(Debug, Clone, Copy)]
-pub(in crate::device::mosfet::mosfet) struct Mos2Evaluation {
-    pub(in crate::device::mosfet::mosfet) id: Value,
-    pub(in crate::device::mosfet::mosfet) region: MosRegion,
-    pub(in crate::device::mosfet::mosfet) von: Value,
-    pub(in crate::device::mosfet::mosfet) vdsat: Value,
+pub(in crate::device::mosfet::classic) struct Mos2Evaluation {
+    pub(in crate::device::mosfet::classic) id: Value,
+    pub(in crate::device::mosfet::classic) region: MosRegion,
+    pub(in crate::device::mosfet::classic) von: Value,
+    pub(in crate::device::mosfet::classic) vdsat: Value,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -298,12 +322,12 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn level2_effective_length(&self) -> Value {
+    pub(in crate::device::mosfet::classic) fn level2_effective_length(&self) -> Value {
         (self.l - 2.0 * self.ld).max(1.0e-12)
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn level2_model_space_onset_voltage(
+    pub(in crate::device::mosfet::classic) fn level2_model_space_onset_voltage(
         &self,
         vgs: Value,
         vds: Value,
@@ -313,7 +337,7 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn level2_operating_point(
+    pub(in crate::device::mosfet::classic) fn level2_operating_point(
         &self,
         vgs: Value,
         vds: Value,
@@ -353,7 +377,7 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn level2_evaluate(
+    pub(in crate::device::mosfet::classic) fn level2_evaluate(
         &self,
         vgs: Value,
         vds: Value,
@@ -805,15 +829,19 @@ impl Mosfet {
             if let Some((delta_von, surface_argg)) = self.level2_fast_surface_state_shift_dual(
                 gamasd,
                 sarg,
-                barg.value,
-                lvbs.value,
-                lvds.value,
-                dsrgdb,
-                dbrgdb,
-                factor,
-                cox,
-                effective_length,
-                xd,
+                Level2SurfaceShiftBias {
+                    barg: barg.value,
+                    lvbs: lvbs.value,
+                    lvds: lvds.value,
+                    dsrgdb,
+                    dbrgdb,
+                },
+                Level2SurfaceShiftGeometry {
+                    factor,
+                    cox,
+                    effective_length,
+                    xd,
+                },
             ) {
                 von = von + delta_von;
                 argg = surface_argg;
@@ -1283,16 +1311,22 @@ impl Mosfet {
         &self,
         gamasd: Dual3,
         sarg: Dual3,
-        barg: Value,
-        lvbs: Value,
-        lvds: Value,
-        dsrgdb: Value,
-        dbrgdb: Value,
-        factor: Value,
-        cox: Value,
-        effective_length: Value,
-        xd: Value,
+        bias: Level2SurfaceShiftBias,
+        geometry: Level2SurfaceShiftGeometry,
     ) -> Option<(Dual3, Dual3)> {
+        let Level2SurfaceShiftBias {
+            barg,
+            lvbs,
+            lvds,
+            dsrgdb,
+            dbrgdb,
+        } = bias;
+        let Level2SurfaceShiftGeometry {
+            factor,
+            cox,
+            effective_length,
+            xd,
+        } = geometry;
         if self.mos2_fast_surface_state_density == 0.0 || cox <= 0.0 {
             return None;
         }

@@ -9,6 +9,18 @@
 
 use super::*;
 
+/// A controlled branch's KVL row: the two node pairs it reads and the
+/// coefficient each pair contributes.
+#[derive(Clone, Copy)]
+struct ControlledBranchRow {
+    p1: NodeId,
+    n1: NodeId,
+    p2: NodeId,
+    n2: NodeId,
+    c1: Value,
+    c2: Value,
+}
+
 impl CircuitData {
     #[inline]
     fn stamp_global_shunt_direct(&self, matrix: &mut StaticMatrix) {
@@ -240,12 +252,14 @@ impl CircuitData {
             Self::stamp_branch_voltage_row_direct(
                 matrix,
                 b2,
-                tline.near_nodes[conductor],
-                0,
-                tline.far_nodes[conductor],
-                0,
-                1.0,
-                -1.0,
+                ControlledBranchRow {
+                    p1: tline.near_nodes[conductor],
+                    n1: 0,
+                    p2: tline.far_nodes[conductor],
+                    n2: 0,
+                    c1: 1.0,
+                    c2: -1.0,
+                },
             );
             matrix.add(b2 - 1, b1 - 1, -r_series);
         }
@@ -292,12 +306,14 @@ impl CircuitData {
         Self::stamp_branch_voltage_row_direct(
             matrix,
             br2,
-            tl.node1_pos,
-            tl.node1_neg,
-            tl.node2_pos,
-            tl.node2_neg,
-            1.0,
-            -1.0,
+            ControlledBranchRow {
+                p1: tl.node1_pos,
+                n1: tl.node1_neg,
+                p2: tl.node2_pos,
+                n2: tl.node2_neg,
+                c1: 1.0,
+                c2: -1.0,
+            },
         );
         matrix.add(br2 - 1, br1 - 1, -r_series);
     }
@@ -322,12 +338,14 @@ impl CircuitData {
         Self::stamp_branch_voltage_row_direct(
             matrix,
             br2,
-            tl.node1_pos,
-            tl.node1_neg,
-            tl.node2_pos,
-            tl.node2_neg,
-            1.0,
-            -1.0,
+            ControlledBranchRow {
+                p1: tl.node1_pos,
+                n1: tl.node1_neg,
+                p2: tl.node2_pos,
+                n2: tl.node2_neg,
+                c1: 1.0,
+                c2: -1.0,
+            },
         );
         matrix.add(br2 - 1, br1 - 1, -r_series);
     }
@@ -369,23 +387,27 @@ impl CircuitData {
         Self::stamp_branch_voltage_row_direct(
             matrix,
             br1,
-            tl.node1_pos,
-            tl.node1_neg,
-            tl.node2_pos,
-            tl.node2_neg,
-            1.0,
-            -two_port.cosh_theta,
+            ControlledBranchRow {
+                p1: tl.node1_pos,
+                n1: tl.node1_neg,
+                p2: tl.node2_pos,
+                n2: tl.node2_neg,
+                c1: 1.0,
+                c2: -two_port.cosh_theta,
+            },
         );
         matrix.add(br1 - 1, br2 - 1, two_port.transfer_impedance);
         Self::stamp_branch_voltage_row_direct(
             matrix,
             br2,
-            tl.node2_pos,
-            tl.node2_neg,
-            0,
-            0,
-            -two_port.transfer_admittance,
-            0.0,
+            ControlledBranchRow {
+                p1: tl.node2_pos,
+                n1: tl.node2_neg,
+                p2: 0,
+                n2: 0,
+                c1: -two_port.transfer_admittance,
+                c2: 0.0,
+            },
         );
         matrix.add(br2 - 1, br1 - 1, 1.0);
         matrix.add(br2 - 1, br2 - 1, two_port.cosh_theta);
@@ -410,23 +432,27 @@ impl CircuitData {
         Self::stamp_branch_voltage_row_triplet(
             matrix,
             br1,
-            tl.node1_pos,
-            tl.node1_neg,
-            tl.node2_pos,
-            tl.node2_neg,
-            1.0,
-            -two_port.cosh_theta,
+            ControlledBranchRow {
+                p1: tl.node1_pos,
+                n1: tl.node1_neg,
+                p2: tl.node2_pos,
+                n2: tl.node2_neg,
+                c1: 1.0,
+                c2: -two_port.cosh_theta,
+            },
         );
         matrix.push(br1 - 1, br2 - 1, two_port.transfer_impedance);
         Self::stamp_branch_voltage_row_triplet(
             matrix,
             br2,
-            tl.node2_pos,
-            tl.node2_neg,
-            0,
-            0,
-            -two_port.transfer_admittance,
-            0.0,
+            ControlledBranchRow {
+                p1: tl.node2_pos,
+                n1: tl.node2_neg,
+                p2: 0,
+                n2: 0,
+                c1: -two_port.transfer_admittance,
+                c2: 0.0,
+            },
         );
         matrix.push(br2 - 1, br1 - 1, 1.0);
         matrix.push(br2 - 1, br2 - 1, two_port.cosh_theta);
@@ -454,12 +480,14 @@ impl CircuitData {
         Self::stamp_branch_voltage_row_direct(
             matrix,
             br2,
-            tl.node1_pos,
-            tl.node1_neg,
-            tl.node2_pos,
-            tl.node2_neg,
-            1.0,
-            -1.0,
+            ControlledBranchRow {
+                p1: tl.node1_pos,
+                n1: tl.node1_neg,
+                p2: tl.node2_pos,
+                n2: tl.node2_neg,
+                c1: 1.0,
+                c2: -1.0,
+            },
         );
     }
 
@@ -479,12 +507,14 @@ impl CircuitData {
         Self::stamp_branch_voltage_row_triplet(
             matrix,
             br2,
-            tl.node1_pos,
-            tl.node1_neg,
-            tl.node2_pos,
-            tl.node2_neg,
-            1.0,
-            -1.0,
+            ControlledBranchRow {
+                p1: tl.node1_pos,
+                n1: tl.node1_neg,
+                p2: tl.node2_pos,
+                n2: tl.node2_neg,
+                c1: 1.0,
+                c2: -1.0,
+            },
         );
         matrix.push(br2 - 1, br1 - 1, -r_series);
     }
@@ -509,12 +539,14 @@ impl CircuitData {
         Self::stamp_branch_voltage_row_triplet(
             matrix,
             br2,
-            tl.node1_pos,
-            tl.node1_neg,
-            tl.node2_pos,
-            tl.node2_neg,
-            1.0,
-            -1.0,
+            ControlledBranchRow {
+                p1: tl.node1_pos,
+                n1: tl.node1_neg,
+                p2: tl.node2_pos,
+                n2: tl.node2_neg,
+                c1: 1.0,
+                c2: -1.0,
+            },
         );
         matrix.push(br2 - 1, br1 - 1, -r_series);
     }
@@ -538,12 +570,14 @@ impl CircuitData {
         Self::stamp_branch_voltage_row_triplet(
             matrix,
             br2,
-            tl.node1_pos,
-            tl.node1_neg,
-            tl.node2_pos,
-            tl.node2_neg,
-            1.0,
-            -1.0,
+            ControlledBranchRow {
+                p1: tl.node1_pos,
+                n1: tl.node1_neg,
+                p2: tl.node2_pos,
+                n2: tl.node2_neg,
+                c1: 1.0,
+                c2: -1.0,
+            },
         );
     }
 
@@ -583,13 +617,16 @@ impl CircuitData {
     fn stamp_branch_voltage_row_direct(
         matrix: &mut StaticMatrix,
         row: usize,
-        p1: NodeId,
-        n1: NodeId,
-        p2: NodeId,
-        n2: NodeId,
-        c1: Value,
-        c2: Value,
+        terms: ControlledBranchRow,
     ) {
+        let ControlledBranchRow {
+            p1,
+            n1,
+            p2,
+            n2,
+            c1,
+            c2,
+        } = terms;
         if p1 > 0 {
             matrix.add(row - 1, p1 - 1, c1);
         }
@@ -608,13 +645,16 @@ impl CircuitData {
     fn stamp_branch_voltage_row_triplet(
         matrix: &mut TripletMatrix,
         row: usize,
-        p1: NodeId,
-        n1: NodeId,
-        p2: NodeId,
-        n2: NodeId,
-        c1: Value,
-        c2: Value,
+        terms: ControlledBranchRow,
     ) {
+        let ControlledBranchRow {
+            p1,
+            n1,
+            p2,
+            n2,
+            c1,
+            c2,
+        } = terms;
         if p1 > 0 {
             matrix.push(row - 1, p1 - 1, c1);
         }
@@ -674,12 +714,14 @@ impl CircuitData {
             Self::stamp_branch_voltage_row_triplet(
                 matrix,
                 b2,
-                tline.near_nodes[conductor],
-                0,
-                tline.far_nodes[conductor],
-                0,
-                1.0,
-                -1.0,
+                ControlledBranchRow {
+                    p1: tline.near_nodes[conductor],
+                    n1: 0,
+                    p2: tline.far_nodes[conductor],
+                    n2: 0,
+                    c1: 1.0,
+                    c2: -1.0,
+                },
             );
             matrix.push(b2 - 1, b1 - 1, -r_series);
         }
@@ -898,8 +940,8 @@ impl CircuitData {
             node
         }
         let mut union = |positive: NodeId, negative: NodeId| {
-            let positive = find(&mut parent, positive as usize);
-            let negative = find(&mut parent, negative as usize);
+            let positive = find(&mut parent, positive);
+            let negative = find(&mut parent, negative);
             if positive != negative {
                 parent[positive] = negative;
             }
@@ -936,8 +978,8 @@ impl CircuitData {
                 seed_current[index] = true;
                 continue;
             }
-            let positive_root = find(&mut parent, positive as usize);
-            let negative_root = find(&mut parent, negative as usize);
+            let positive_root = find(&mut parent, positive);
+            let negative_root = find(&mut parent, negative);
             if positive_root == negative_root {
                 seed_current[index] = true;
                 has_inductor_cycle = true;

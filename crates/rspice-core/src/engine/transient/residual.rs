@@ -7,6 +7,7 @@
 
 use super::state::MosfetCompanionBiasSource;
 use super::*;
+use crate::circuit::XyceCoreCompanionMode;
 
 #[cfg(feature = "parallel")]
 const PARALLEL_CLASSIC_MOS_THRESHOLD: usize = 2_048;
@@ -336,12 +337,14 @@ impl Engine {
     ) {
         debug_assert!(!compact_slots.is_empty());
         if Self::stamp_mosfet_transient_compact_companions_for_pattern(
-            circuit,
-            matrix,
-            rhs,
-            solution,
-            coeff,
-            dt,
+            TransientCompanionStamp {
+                circuit,
+                matrix,
+                rhs,
+                voltages: solution,
+                coeff,
+                dt,
+            },
             ctx.mosfet_history,
             ctx.suppress_gate_charge,
             use_verified_cached_bias,
@@ -354,12 +357,14 @@ impl Engine {
 
         let checked_slots = Self::link_mosfet_companion_slots(circuit, matrix);
         Self::stamp_mosfet_transient_companions(
-            circuit,
-            matrix,
-            rhs,
-            solution,
-            coeff,
-            dt,
+            TransientCompanionStamp {
+                circuit,
+                matrix,
+                rhs,
+                voltages: solution,
+                coeff,
+                dt,
+            },
             ctx.mosfet_history,
             ctx.suppress_gate_charge,
             use_verified_cached_bias,
@@ -427,12 +432,14 @@ impl Engine {
             circuit.diodes.update_all(solution);
         }
         Self::stamp_diode_transient_companions(
-            circuit,
-            matrix,
-            rhs,
-            solution,
-            companion_coeff,
-            dt,
+            TransientCompanionStamp {
+                circuit,
+                matrix,
+                rhs,
+                voltages: solution,
+                coeff: companion_coeff,
+                dt,
+            },
             ctx.diode_history,
             ctx.diode_companion_slots,
         );
@@ -524,13 +531,15 @@ impl Engine {
         Self::stamp_nodal_gmin(circuit, matrix, baseline_diag_gmin.max(0.0));
         circuit.stamp_transient_linear_direct(matrix, rhs);
 
-        let mut cache = ClassicMosTransientStampCache::default();
-        cache.stamp_pattern = Some(matrix.pattern_token());
-        cache.cached_devices_support_direct_values = circuit
-            .mosfets
-            .devices
-            .iter()
-            .all(|mosfet| mosfet.node_bulk == 0);
+        let mut cache = ClassicMosTransientStampCache {
+            stamp_pattern: Some(matrix.pattern_token()),
+            cached_devices_support_direct_values: circuit
+                .mosfets
+                .devices
+                .iter()
+                .all(|mosfet| mosfet.node_bulk == 0),
+            ..Default::default()
+        };
         cache.device_constants.extend(
             circuit
                 .mosfets
@@ -784,12 +793,14 @@ impl Engine {
         } else {
             if cache.compact_companion_slots.is_empty() {
                 Self::stamp_mosfet_transient_companions(
-                    circuit,
-                    matrix,
-                    rhs,
-                    solution,
-                    &companion_coeff,
-                    dt,
+                    TransientCompanionStamp {
+                        circuit,
+                        matrix,
+                        rhs,
+                        voltages: solution,
+                        coeff: &companion_coeff,
+                        dt,
+                    },
                     ctx.mosfet_history,
                     ctx.suppress_gate_charge,
                     !static_probe || physical_cache_matches_probe,
@@ -1477,10 +1488,12 @@ impl Engine {
                 matrix,
                 rhs,
                 solution,
-                time,
-                dt,
-                &companion_coeff,
-                num_nodes,
+                SolutionDependentCompanionStep {
+                    time,
+                    dt,
+                    coeff: &companion_coeff,
+                    num_nodes,
+                },
             )
             .map_err(SimulationError::Circuit)?;
         circuit.stamp_transient_inductor_companions(matrix, rhs, dt, &companion_coeff, num_nodes);
@@ -1495,29 +1508,33 @@ impl Engine {
             solution,
             dt,
             &companion_coeff,
-            ctx.xyce_one_step,
-            ctx.xyce_one_step_order2,
-            // Keep the Core carry advancement coupled to a refreshed
-            // candidate. Static/cached probes must remain pure.  The transient
-            // Newton loop stamps the corrected candidate once as its RHS and
-            // then stamps that same point again to build the next Jacobian;
-            // reusing the cached endpoint for the latter is the equivalent of
-            // Xyce's loadDAEMatrices call, which does not run
-            // MutIndNonLin2::updatePrimaryState a second time.
-            evaluation_mode
-                == crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited
-                && refresh_nonlinear,
+            XyceCoreCompanionMode {
+                one_step: ctx.xyce_one_step,
+                one_step_order2: ctx.xyce_one_step_order2,
+                // Keep the Core carry advancement coupled to a refreshed
+                // candidate. Static/cached probes must remain pure.  The
+                // transient Newton loop stamps the corrected candidate once as
+                // its RHS and then stamps that same point again to build the
+                // next Jacobian; reusing the cached endpoint for the latter is
+                // the equivalent of Xyce's loadDAEMatrices call, which does not
+                // run MutIndNonLin2::updatePrimaryState a second time.
+                advance_magvar_update: evaluation_mode
+                    == crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited
+                    && refresh_nonlinear,
+            },
         );
         circuit.stamp_coupled_inductor_pairs_transient(matrix, rhs, dt, &companion_coeff);
         circuit.stamp_multi_winding_transformers_transient(matrix, rhs, dt, &companion_coeff);
 
         Self::stamp_bjt_transient_companions(
-            circuit,
-            matrix,
-            rhs,
-            solution,
-            &companion_coeff,
-            dt,
+            TransientCompanionStamp {
+                circuit,
+                matrix,
+                rhs,
+                voltages: solution,
+                coeff: &companion_coeff,
+                dt,
+            },
             ctx.bjt_history,
             vbic_snapshot_cache,
             vbic_reuse,
@@ -1525,22 +1542,26 @@ impl Engine {
             self.voltage_reltol(),
         );
         Self::stamp_jfet_transient_companions(
-            circuit,
-            matrix,
-            rhs,
-            solution,
-            &companion_coeff,
-            dt,
+            TransientCompanionStamp {
+                circuit,
+                matrix,
+                rhs,
+                voltages: solution,
+                coeff: &companion_coeff,
+                dt,
+            },
             ctx.jfet_history,
             ctx.suppress_gate_charge,
         );
         Self::stamp_diode_transient_companions(
-            circuit,
-            matrix,
-            rhs,
-            solution,
-            &companion_coeff,
-            dt,
+            TransientCompanionStamp {
+                circuit,
+                matrix,
+                rhs,
+                voltages: solution,
+                coeff: &companion_coeff,
+                dt,
+            },
             ctx.diode_history,
             ctx.diode_companion_slots,
         );
@@ -1554,12 +1575,14 @@ impl Engine {
             &relinked_mosfet_companion_slots
         };
         Self::stamp_mosfet_transient_companions(
-            circuit,
-            matrix,
-            rhs,
-            solution,
-            &companion_coeff,
-            dt,
+            TransientCompanionStamp {
+                circuit,
+                matrix,
+                rhs,
+                voltages: solution,
+                coeff: &companion_coeff,
+                dt,
+            },
             ctx.mosfet_history,
             ctx.suppress_gate_charge,
             false,
@@ -1567,12 +1590,14 @@ impl Engine {
             None,
         );
         Self::stamp_vdmos_transient_companions(
-            circuit,
-            matrix,
-            rhs,
-            solution,
-            &companion_coeff,
-            dt,
+            TransientCompanionStamp {
+                circuit,
+                matrix,
+                rhs,
+                voltages: solution,
+                coeff: &companion_coeff,
+                dt,
+            },
             ctx.vdmos_history,
             ctx.vdmos_companion_slots,
         );
@@ -1601,9 +1626,11 @@ impl Engine {
             matrix,
             rhs,
             solution,
-            &companion_coeff,
-            &bsim4_companion_coeff,
-            dt,
+            Bsim4CompanionStep {
+                coeff: &companion_coeff,
+                trnqs_coeff: &bsim4_companion_coeff,
+                dt,
+            },
             ctx.bsim4_history,
         );
         Self::stamp_ekv26_transient_companions(
@@ -1717,8 +1744,10 @@ impl Engine {
                 time,
                 dt,
                 solution,
-                &companion_coeff,
-                ctx.xyce_one_step_order2,
+                XspiceCompanionPolicy {
+                    coefficients: &companion_coeff,
+                    xyce_one_step_order2: ctx.xyce_one_step_order2,
+                },
             );
         }
         // The mixed Verilog-AMS boundary, on the same terms and in the same
@@ -1738,14 +1767,14 @@ impl Engine {
                 ctx.analysis_final_step,
             )?;
         }
-        if ctx.xyce_one_step_order2 {
-            if let Some(history) = ctx.xyce_static_history {
-                debug_assert_eq!(history.len(), rhs.len());
-                for (rhs_value, previous_residual) in rhs.iter_mut().zip(history) {
-                    // The assembled system is A*x = b, while OneStep adds
-                    // +0.5*(F_prev-B_prev) to its residual A*x-b.
-                    *rhs_value -= 0.5 * previous_residual;
-                }
+        if ctx.xyce_one_step_order2
+            && let Some(history) = ctx.xyce_static_history
+        {
+            debug_assert_eq!(history.len(), rhs.len());
+            for (rhs_value, previous_residual) in rhs.iter_mut().zip(history) {
+                // The assembled system is A*x = b, while OneStep adds
+                // +0.5*(F_prev-B_prev) to its residual A*x-b.
+                *rhs_value -= 0.5 * previous_residual;
             }
         }
         if ctx.baseline_diag_gmin == 0.0 && extra_diag_gmin == 0.0 {
@@ -3064,10 +3093,12 @@ M1 d g 0 0 NM W=10u L=1u
             dt,
             IntegrationMethod::BackwardEuler,
             1,
-            1.0e-3,
-            1.0e-12,
-            1.0e-14,
-            7.0,
+            NgspiceTruncationTolerances {
+                reltol: 1.0e-3,
+                current_abstol: 1.0e-12,
+                charge_abstol: 1.0e-14,
+                trtol: 7.0,
+            },
         )
         .expect("limited-candidate truncation context is valid");
         let limited_evaluation = engine
@@ -3160,14 +3191,18 @@ M1 d g 0 0 NM W=10u L=1u
         let canonical_limit = Engine::mosfet_ngspice_truncation_limit(
             &circuit,
             &limited_solution,
-            IntegrationMethod::BackwardEuler,
-            1,
-            dt,
+            TruncationStep {
+                method: IntegrationMethod::BackwardEuler,
+                trap_order: 1,
+                dt,
+            },
             &limited_history,
-            1.0e-3,
-            1.0e-12,
-            1.0e-14,
-            7.0,
+            NgspiceTruncationTolerances {
+                reltol: 1.0e-3,
+                current_abstol: 1.0e-12,
+                charge_abstol: 1.0e-14,
+                trtol: 7.0,
+            },
             Some((&mut companion_caps, true)),
         );
         assert!(!limited_evaluation.truncation_evaluated);

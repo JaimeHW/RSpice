@@ -156,8 +156,10 @@ impl Netlist {
                 }
             })?;
         check_abort(abort)?;
-        let mut xyce_artifact_config = FlattenerConfig::default();
-        xyce_artifact_config.hierarchy_separator = ':';
+        let xyce_artifact_config = FlattenerConfig {
+            hierarchy_separator: ':',
+            ..Default::default()
+        };
         let xyce_artifact_flattened =
             flatten_netlist_with_models_config_with_abort(self, xyce_artifact_config, abort)
                 .map_err(|error| match error {
@@ -1260,7 +1262,8 @@ mod tests {
                 if name == "RONETERM1"
         ));
 
-        for raw in ["{UNKNOWN+}"] {
+        {
+            let raw = "{UNKNOWN+}";
             let source = format!(
                 "invalid resistance\n.PREPROCESS ADDRESISTORS ONETERMINAL {raw}\nV1 1 0 1\n.END\n"
             );

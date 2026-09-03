@@ -520,10 +520,13 @@ impl Engine {
         solution: &[Value],
         time: Value,
         node_hints: &[StartupVoltageConstraint],
-        nodal_gmin: Value,
-        junction_gmin: Value,
-        use_transient_current_seed: bool,
+        conductances: TransientOpConductances,
     ) -> Result<bool, SimulationError> {
+        let TransientOpConductances {
+            nodal_gmin,
+            junction_gmin,
+            use_transient_current_seed,
+        } = conductances;
         let snapshot = circuit.nonlinear_state_snapshot();
         let result = matrix.with_probe_values(|probe, rhs| -> Result<bool, SimulationError> {
             circuit.refresh_jiles_atherton_inductances(solution);
@@ -540,10 +543,12 @@ impl Engine {
                 circuit,
                 probe,
                 rhs,
-                solution,
-                time,
-                crate::xspice::AnalysisType::Transient,
-                junction_gmin,
+                OperatingPointProbe {
+                    solution,
+                    time,
+                    analysis: crate::xspice::AnalysisType::Transient,
+                    junction_gmin,
+                },
             )?;
             Self::apply_node_voltage_constraints(circuit, probe, rhs, node_hints, solution)?;
             Ok(self.residual_probe_fixed_point_converged(circuit, probe, solution, rhs))
@@ -776,9 +781,11 @@ impl Engine {
                 damped_solution = self.apply_damping_strategy_for_circuit(
                     circuit.has_b3soi_devices(),
                     &circuit.non_electrical_state_mask(),
-                    &solution,
-                    &raw_solution,
-                    &mut damping_state,
+                    DampingStep {
+                        old: &solution,
+                        proposal: &raw_solution,
+                        damping_state: &mut damping_state,
+                    },
                     junction_owns_steps,
                     |trial| self.nonlinear_merit(circuit, matrix, trial),
                 );
@@ -892,12 +899,11 @@ impl Engine {
                         iteration + 1
                     );
                 }
-                if self.config.spice_dialect != crate::engine::SpiceDialect::Xyce {
-                    if let Some(refined) =
+                if self.config.spice_dialect != crate::engine::SpiceDialect::Xyce
+                    && let Some(refined) =
                         self.refine_fallback_candidate(circuit, matrix, &solution, abort)?
-                    {
-                        return Ok(refined);
-                    }
+                {
+                    return Ok(refined);
                 }
                 return Ok(solution);
             }
@@ -1502,10 +1508,12 @@ impl Engine {
                 circuit,
                 matrix,
                 &mut rhs,
-                &solution,
-                time,
-                crate::xspice::AnalysisType::Transient,
-                junction_gmin,
+                OperatingPointProbe {
+                    solution: &solution,
+                    time,
+                    analysis: crate::xspice::AnalysisType::Transient,
+                    junction_gmin,
+                },
             )?;
             Self::apply_node_voltage_constraints(circuit, matrix, &mut rhs, node_hints, &solution)?;
 
@@ -1519,10 +1527,12 @@ impl Engine {
                 self.node_voltage_convergence_met(&solution, &new_solution, node_count);
             self.update_device_states_for_operating_point(
                 circuit,
-                &new_solution,
-                time,
-                crate::xspice::AnalysisType::Transient,
-                junction_gmin,
+                OperatingPointProbe {
+                    solution: &new_solution,
+                    time,
+                    analysis: crate::xspice::AnalysisType::Transient,
+                    junction_gmin,
+                },
             );
             let device_converged = circuit.nonlinear_converged(self.device_convergence_criteria());
             let nonlinear_residual_converged = voltage_converged
@@ -1533,9 +1543,11 @@ impl Engine {
                     &new_solution,
                     time,
                     node_hints,
-                    gmin_floor,
-                    junction_gmin,
-                    false,
+                    TransientOpConductances {
+                        nodal_gmin: gmin_floor,
+                        junction_gmin,
+                        use_transient_current_seed: false,
+                    },
                 )?;
 
             std::mem::swap(&mut solution, &mut new_solution);
@@ -1584,10 +1596,12 @@ impl Engine {
         let primary = self.solve_linear_transient_constraint_system(
             circuit,
             matrix,
-            time,
-            nodal_gmin,
-            TransientOperatingPointLinearSystem::IdealInductorShorts,
-            node_constraints,
+            LinearTransientConstraintSolve {
+                time,
+                nodal_gmin,
+                linear_system: TransientOperatingPointLinearSystem::IdealInductorShorts,
+                constraints: node_constraints,
+            },
             abort,
         );
         match primary {
@@ -1605,10 +1619,12 @@ impl Engine {
                 match self.solve_linear_transient_constraint_system(
                     circuit,
                     matrix,
-                    time,
-                    nodal_gmin,
-                    TransientOperatingPointLinearSystem::CurrentSeededInductors,
-                    node_constraints,
+                    LinearTransientConstraintSolve {
+                        time,
+                        nodal_gmin,
+                        linear_system: TransientOperatingPointLinearSystem::CurrentSeededInductors,
+                        constraints: node_constraints,
+                    },
                     abort,
                 ) {
                     Ok(values) => Ok(TransientOperatingPointSolution {
@@ -1633,12 +1649,15 @@ impl Engine {
         &self,
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
-        time: Value,
-        nodal_gmin: Value,
-        linear_system: TransientOperatingPointLinearSystem,
-        constraints: &[StartupVoltageConstraint],
+        solve: LinearTransientConstraintSolve<'_>,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
+        let LinearTransientConstraintSolve {
+            time,
+            nodal_gmin,
+            linear_system,
+            constraints,
+        } = solve;
         let size = circuit.matrix_size();
         let mut roots = constraints
             .iter()
@@ -1773,8 +1792,15 @@ impl Engine {
             for row in pivot + 1..order {
                 let factor = matrix[row][pivot] / matrix[pivot][pivot];
                 matrix[row][pivot] = 0.0;
-                for column in pivot + 1..order {
-                    matrix[row][column] -= factor * matrix[pivot][column];
+                // `row > pivot` here, so the pivot row stays in `above`.
+                let (above, below) = matrix.split_at_mut(row);
+                let pivot_row = &above[pivot];
+                let target_row = &mut below[0];
+                for (target, &value) in target_row[pivot + 1..order]
+                    .iter_mut()
+                    .zip(&pivot_row[pivot + 1..order])
+                {
+                    *target -= factor * value;
                 }
                 rhs[row] -= factor * rhs[pivot];
             }
@@ -1913,10 +1939,12 @@ impl Engine {
                 circuit,
                 matrix,
                 &mut rhs,
-                &solution,
-                time,
-                crate::xspice::AnalysisType::Transient,
-                junction_gmin,
+                OperatingPointProbe {
+                    solution: &solution,
+                    time,
+                    analysis: crate::xspice::AnalysisType::Transient,
+                    junction_gmin,
+                },
             )?;
             Self::apply_node_voltage_constraints(
                 circuit,
@@ -1963,18 +1991,22 @@ impl Engine {
                 damped_solution = self.apply_damping_strategy_for_circuit(
                     circuit.has_b3soi_devices(),
                     &circuit.non_electrical_state_mask(),
-                    &solution,
-                    &raw_solution,
-                    &mut damping_state,
+                    DampingStep {
+                        old: &solution,
+                        proposal: &raw_solution,
+                        damping_state: &mut damping_state,
+                    },
                     junction_owns_steps,
                     |trial| {
                         self.nonlinear_merit_with_linear_stamp_for_operating_point(
                             circuit,
                             matrix,
-                            trial,
-                            time,
-                            crate::xspice::AnalysisType::Transient,
-                            junction_gmin,
+                            OperatingPointProbe {
+                                solution: trial,
+                                time,
+                                analysis: crate::xspice::AnalysisType::Transient,
+                                junction_gmin,
+                            },
                             |circuit, matrix, rhs| {
                                 circuit.refresh_jiles_atherton_inductances(trial);
                                 if use_transient_current_seed {
@@ -2006,10 +2038,12 @@ impl Engine {
                 self.node_voltage_convergence_met(&solution, new_solution, circuit.num_nodes());
             self.update_device_states_for_operating_point(
                 circuit,
-                new_solution,
-                time,
-                crate::xspice::AnalysisType::Transient,
-                junction_gmin,
+                OperatingPointProbe {
+                    solution: new_solution,
+                    time,
+                    analysis: crate::xspice::AnalysisType::Transient,
+                    junction_gmin,
+                },
             );
             let device_converged = circuit.nonlinear_converged(self.device_convergence_criteria());
             let nonlinear_residual_converged = if !voltage_converged || !device_converged {
@@ -2018,10 +2052,12 @@ impl Engine {
                 self.nonlinear_residual_converged_with_linear_stamp_for_operating_point(
                     circuit,
                     matrix,
-                    new_solution,
-                    time,
-                    crate::xspice::AnalysisType::Transient,
-                    junction_gmin,
+                    OperatingPointProbe {
+                        solution: new_solution,
+                        time,
+                        analysis: crate::xspice::AnalysisType::Transient,
+                        junction_gmin,
+                    },
                     |circuit, matrix, rhs| {
                         circuit.refresh_jiles_atherton_inductances(new_solution);
                         if use_transient_current_seed {
@@ -2042,9 +2078,11 @@ impl Engine {
                     new_solution,
                     time,
                     node_constraints,
-                    gmin_floor,
-                    junction_gmin,
-                    use_transient_current_seed,
+                    TransientOpConductances {
+                        nodal_gmin: gmin_floor,
+                        junction_gmin,
+                        use_transient_current_seed,
+                    },
                 )?
             };
 

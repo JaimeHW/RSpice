@@ -487,7 +487,7 @@ fn execute_directive(
         }
         out.records.push(record);
     } else if let Some(context) = context {
-        for record in &mut out.records[records_before..] {
+        for record in out.records.iter_mut().skip(records_before) {
             record.set_execution_context(context.analysis_id.clone(), context.coordinate.clone());
         }
         if matches!(analysis, AnalysisCommand::Tran { .. }) {

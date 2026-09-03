@@ -45,7 +45,7 @@ impl Mosfet {
         (self.w - 2.0 * self.mos3_width_narrow + self.mos3_width_adjust).max(1.0e-12)
     }
 
-    pub(in crate::device::mosfet::mosfet) fn calculate_id_mos3(
+    pub(in crate::device::mosfet::classic) fn calculate_id_mos3(
         &self,
         vgs: Value,
         vds: Value,
@@ -55,7 +55,7 @@ impl Mosfet {
         (self.polarity() * state.ids, state.region)
     }
 
-    pub(in crate::device::mosfet::mosfet) fn mos3_state(
+    pub(in crate::device::mosfet::classic) fn mos3_state(
         &self,
         vgs: Value,
         vds: Value,
@@ -64,7 +64,7 @@ impl Mosfet {
         self.mos3_bias_scalar(vgs, vds, vbs)
     }
 
-    pub(in crate::device::mosfet::mosfet) fn mos3_terminal_small_signal(
+    pub(in crate::device::mosfet::classic) fn mos3_terminal_small_signal(
         &self,
         vgs: Value,
         vds: Value,

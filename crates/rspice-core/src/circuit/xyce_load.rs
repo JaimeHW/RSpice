@@ -85,15 +85,10 @@ impl XyceTopologyDevice {
 /// starts at the first inserted graph vertex.  Naming that behavior prevents
 /// an accidental claim that one traversal is universal across every Xyce
 /// binary.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum XyceTopologyCompatibility {
+    #[default]
     V7_10MsvcFirstInserted,
-}
-
-impl Default for XyceTopologyCompatibility {
-    fn default() -> Self {
-        Self::V7_10MsvcFirstInserted
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -204,16 +199,16 @@ impl XyceLinearDaeOperator {
                 target.len()
             ));
         }
-        for row in 0..self.dimension {
+        for (row, entry) in target.iter_mut().enumerate().take(self.dimension) {
             let mut sum = 0.0;
             for position in self.row_offsets[row]..self.row_offsets[row + 1] {
                 sum += self.coefficients[position] * solution[self.columns[position]];
             }
-            target[row] += sum;
-            if !target[row].is_finite() {
+            (*entry) += sum;
+            if !(*entry).is_finite() {
                 return Err(format!(
                     "Xyce linear DAE row {row} produced non-finite value {}",
-                    target[row]
+                    (*entry)
                 ));
             }
         }

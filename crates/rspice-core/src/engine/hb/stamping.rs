@@ -1,4 +1,9 @@
 use super::*;
+// Only the unit tests below construct these records directly; the
+// production paths in this module receive them already built.
+use crate::analysis::harmonic_balance::{HbSwitchNodes, HbVoltageSwitchModel};
+#[cfg(test)]
+use crate::device::passive::CoupledWinding;
 
 #[derive(Debug, Clone, Copy)]
 enum PeriodicMnaRegistration {
@@ -175,8 +180,19 @@ impl Engine {
             solver.add_named_nonlinear_device(
                 sw.name.clone(),
                 NonlinearDeviceInstance::voltage_switch(
-                    node_pos, node_neg, ctrl_pos, ctrl_neg, sw.vt, sw.vh, sw.ron, sw.roff,
-                    sw.smooth,
+                    HbSwitchNodes {
+                        node_pos,
+                        node_neg,
+                        ctrl_pos,
+                        ctrl_neg,
+                    },
+                    HbVoltageSwitchModel {
+                        vt: sw.vt,
+                        vh: sw.vh,
+                        ron: sw.ron,
+                        roff: sw.roff,
+                        smooth: sw.smooth,
+                    },
                 ),
             );
         }
@@ -1818,12 +1834,16 @@ mod tests {
             branch2 + 1,
             CoupledInductorPair::new(
                 "Kbad".to_string(),
-                primary,
-                0,
-                100.0e-6,
-                secondary,
-                0,
-                25.0e-6,
+                CoupledWinding {
+                    node_pos: primary,
+                    node_neg: 0,
+                    inductance: 100.0e-6,
+                },
+                CoupledWinding {
+                    node_pos: secondary,
+                    node_neg: 0,
+                    inductance: 25.0e-6,
+                },
                 0.8,
             ),
         );

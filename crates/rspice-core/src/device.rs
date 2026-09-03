@@ -5,8 +5,6 @@
 //! - `semiconductor/` - Diodes, BJTs
 //! - `mosfet/` - MOSFETs, VDMOSFETs, JFETs, BSIM4, EKV
 //! - `veriloga/` - Verilog-A compiled models (optional feature)
-#![allow(clippy::large_enum_variant)]
-
 // Organized device subdirectories
 pub mod mosfet;
 pub mod passive;
@@ -35,11 +33,11 @@ pub mod veriloga_builtins;
 
 // Re-export from subdirectories for backwards compatibility
 pub use mosfet::{
-    B3SoiDd, B3SoiDdModel, B3SoiFd, B3SoiFdModel, B3SoiPd, B3SoiPdModel, BodyMode, Bsim3v3,
-    Bsim3v3Device, Bsim3v3EquationSet, Bsim3v3Model, Bsim4v8, Bsim4v8Device, Bsim4v8Model,
-    Ekv3Device, Ekv3Op, EkvMosfet, Jfet, JfetChannelModel, JfetParams, JfetType,
-    MosBodyJunctionModel, MosParams, MosRegion, MosType, Mosfet, MosfetIndices, Vdmos, VdmosRegion,
-    VdmosType,
+    B3SoiDd, B3SoiDdModel, B3SoiDdNodes, B3SoiFd, B3SoiFdModel, B3SoiPd, B3SoiPdModel,
+    B3SoiPdNodes, BodyMode, Bsim3v3, Bsim3v3Device, Bsim3v3EquationSet, Bsim3v3Model, Bsim4v8,
+    Bsim4v8Device, Bsim4v8Model, Ekv3Device, Ekv3Op, EkvMosfet, Jfet, JfetChannelModel, JfetParams,
+    JfetType, MosBodyJunctionModel, MosParams, MosRegion, MosTerminals, MosType, Mosfet,
+    MosfetIndices, Vdmos, VdmosRegion, VdmosType,
 };
 pub use passive::{
     Capacitor, CoupledInductorPair, Inductor, InductorCoupling, MultiWindingTransformer, Resistor,
@@ -82,7 +80,7 @@ pub(crate) use transmission_line::{
     DISTRIBUTED_RLC_COMPACT_ABSTOL_DEFAULT, DISTRIBUTED_RLC_COMPACT_RELTOL_DEFAULT, LtraRgTwoPort,
     TransmissionLineCheckpoint,
 };
-pub use transmission_line::{LossyTransmissionLine, TransmissionLine};
+pub use transmission_line::{DistributedRlgc, LossyTransmissionLine, TransmissionLine};
 pub(crate) use transmission_line::{TlineTransientResponse, TxlTransientStamp};
 
 use crate::Value;
@@ -237,6 +235,12 @@ impl XyceMemristor {
 }
 
 /// A device instance in the circuit
+// The MOSFET variant dwarfs the passives, but nothing holds a collection of
+// these: the circuit stores devices in typed per-family columns (`Capacitors`,
+// `Bjts`, `Mosfets`, ...) and this enum exists as a public, one-at-a-time
+// description at the API boundary. Boxing the variant would change the shape
+// of a public enum to save padding on a value that is never held in bulk.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum Device {
     Resistor(Resistor),

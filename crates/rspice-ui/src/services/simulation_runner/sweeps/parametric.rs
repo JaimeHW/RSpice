@@ -224,9 +224,11 @@ fn run_base_analysis(
                 .run_dc_sweep2_with_abort(
                     netlist,
                     source_name,
-                    *start,
-                    *stop,
-                    *step,
+                    rspice_core::engine::DcSweepRange {
+                        start: *start,
+                        stop: *stop,
+                        step: *step,
+                    },
                     Some(&second),
                     abort,
                 )?

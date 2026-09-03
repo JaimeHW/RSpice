@@ -3,7 +3,6 @@
 //! Provides efficient FFT operations using rustfft for converting between
 //! time-domain waveforms and frequency-domain spectral coefficients.
 
-#![allow(clippy::needless_range_loop)]
 use num_complex::Complex64;
 use rustfft::{Fft, FftDirection, FftPlanner};
 use std::sync::Arc;
@@ -251,9 +250,9 @@ impl HbFft {
         let norm = 1.0 / n as f64;
         let mut spectrum = Vec::with_capacity(self.num_harmonics + 1);
 
-        for k in 0..=self.num_harmonics {
+        for (k, &entry) in buffer.iter().enumerate().take(self.num_harmonics + 1) {
             if k < n {
-                spectrum.push(buffer[k] * norm);
+                spectrum.push(entry * norm);
             } else {
                 spectrum.push(Complex64::new(0.0, 0.0));
             }

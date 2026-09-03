@@ -5,7 +5,7 @@ impl Mosfet {
     ///
     /// For Level 1 and MOS6: standard body effect formula.
     /// For opt-in simplified fallback levels: approximate short-channel Vth roll-off.
-    pub(in crate::device::mosfet::mosfet) fn vth(&self, vbs: Value) -> Value {
+    pub(in crate::device::mosfet::classic) fn vth(&self, vbs: Value) -> Value {
         if let Some(legacy) = &self.legacy_bsim_sized {
             return legacy.threshold(0.0, self.polarity() * vbs);
         }
@@ -49,13 +49,13 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn level6_effective_length(&self) -> Value {
+    pub(in crate::device::mosfet::classic) fn level6_effective_length(&self) -> Value {
         let leff = self.l - 2.0 * self.ld;
         leff.max(1e-12)
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn classic_meyer_effective_length(&self) -> Value {
+    pub(in crate::device::mosfet::classic) fn classic_meyer_effective_length(&self) -> Value {
         match self.level {
             1 => self.l - 2.0 * self.ld,
             6 => self.level6_effective_length(),
@@ -66,12 +66,12 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn oxide_capacitance_total(&self) -> Value {
+    pub(in crate::device::mosfet::classic) fn oxide_capacitance_total(&self) -> Value {
         self.cox * self.classic_meyer_effective_width() * self.classic_meyer_effective_length()
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn classic_meyer_effective_width(&self) -> Value {
+    pub(in crate::device::mosfet::classic) fn classic_meyer_effective_width(&self) -> Value {
         if self.uses_mos3_core() {
             self.mos3_effective_width()
         } else {
@@ -80,7 +80,7 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn meyer_intrinsic_capacitances(
+    pub(in crate::device::mosfet::classic) fn meyer_intrinsic_capacitances(
         vgs: Value,
         vgd: Value,
         vgb: Value,
@@ -136,7 +136,7 @@ impl Mosfet {
     /// equation.  Keep this separate from the legacy generic Meyer helper so
     /// the established Level-1/2 compatibility path is not changed without
     /// its own oracle qualification.
-    pub(in crate::device::mosfet::mosfet) fn xyce_meyer_intrinsic_capacitances(
+    pub(in crate::device::mosfet::classic) fn xyce_meyer_intrinsic_capacitances(
         vgs: Value,
         vgd: Value,
         _vgb: Value,
@@ -173,7 +173,7 @@ impl Mosfet {
         }
     }
 
-    pub(in crate::device::mosfet::mosfet) fn level6_meyer_state(
+    pub(in crate::device::mosfet::classic) fn level6_meyer_state(
         &self,
         vgs: Value,
         vds: Value,
@@ -438,7 +438,7 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn cached_eval_branch_voltages(
+    pub(in crate::device::mosfet::classic) fn cached_eval_branch_voltages(
         &self,
     ) -> Option<(Value, Value, Value)> {
         if !self.has_branch_history

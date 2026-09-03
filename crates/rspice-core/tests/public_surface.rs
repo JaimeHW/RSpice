@@ -52,7 +52,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use rspice_core::analysis::harmonic_balance::{
-    DepletionCap, HbConfig, HbError, HbSolver, HbSolverState, NonlinearDeviceInstance,
+    DepletionCap, HbConfig, HbError, HbSolver, HbSolverState, HbSwitchNodes, HbVoltageSwitchModel,
+    NonlinearDeviceInstance,
 };
 
 /// Ceiling on public items. Lower it whenever the real count drops. The build
@@ -471,7 +472,21 @@ fn public_hb_solver_rejects_invalid_charge_parameters_before_evaluation() {
     }
 
     let mut switch_solver = HbSolver::new(HbConfig::new(1.0e6).with_harmonics(1), 1);
-    switch_solver.add_voltage_switch(0, 0, 0, 0, 0.0, 0.1, 1.0, 1.0e6, 0.1);
+    switch_solver.add_voltage_switch(
+        HbSwitchNodes {
+            node_pos: 0,
+            node_neg: 0,
+            ctrl_pos: 0,
+            ctrl_neg: 0,
+        },
+        HbVoltageSwitchModel {
+            vt: 0.0,
+            vh: 0.1,
+            ron: 1.0,
+            roff: 1.0e6,
+            smooth: 0.1,
+        },
+    );
     let mut state = HbSolverState::new(1, 1);
     let error = switch_solver
         .solve_dc_operating_point(&mut state)

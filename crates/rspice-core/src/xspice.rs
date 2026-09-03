@@ -110,7 +110,10 @@ pub use external::{
     DigitalCosimStep, DigitalProcessRuntime, DigitalProcessRuntimeFactory, DigitalProcessSpec,
     set_digital_cosim_runtime_factory, set_digital_process_runtime_factory,
 };
-pub use instance::{AnalogInputConnection, DigitalPortConnection, PortConnection, XspiceInstance};
+pub use instance::{
+    AnalogInputConnection, CodeModelVectorParams, DigitalPortConnection, PortConnection,
+    XspiceEventInputs, XspiceInstance,
+};
 pub(crate) use instance::{EventInputKind, SharedXspiceInstance, XspiceInstanceCheckpoint};
 pub use registry::CodeModelRegistry;
 pub use traits::{

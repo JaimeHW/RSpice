@@ -13,7 +13,13 @@
 use super::*;
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::HbSolverState;
-use crate::analysis::harmonic_balance::{HbConfig, PeriodicAcExcitation, PeriodicNoiseSource};
+// Only the unit tests below construct these records directly; the
+// production paths in this module receive them already built.
+use crate::analysis::harmonic_balance::{
+    HbConfig, PeriodicAcExcitation, PeriodicNoiseSource, PeriodicSidebandWindow,
+};
+#[cfg(test)]
+use crate::circuit::ResistorValues;
 
 /// Result of periodic noise analysis.
 #[derive(Debug, Clone)]
@@ -928,9 +934,11 @@ impl Engine {
             let per_source = solver
                 .solve_periodic_noise(
                     &state,
-                    offset,
-                    -max_sideband,
-                    max_sideband,
+                    PeriodicSidebandWindow {
+                        offset_hz: offset,
+                        sideband_min: -max_sideband,
+                        sideband_max: max_sideband,
+                    },
                     out_idx,
                     ref_idx,
                     &sources,
@@ -954,9 +962,11 @@ impl Engine {
                 let response = solver
                     .solve_periodic_ac_with_branch_voltages(
                         &state,
-                        offset,
-                        -max_sideband,
-                        max_sideband,
+                        PeriodicSidebandWindow {
+                            offset_hz: offset,
+                            sideband_min: -max_sideband,
+                            sideband_max: max_sideband,
+                        },
                         std::slice::from_ref(excitation),
                         input_branch_voltages,
                     )
@@ -1034,9 +1044,11 @@ mod publication_tests {
             out,
             0,
             branch,
-            0.6,
-            1.2,
-            0.6,
+            ResistorValues {
+                resistance: 0.6,
+                small_signal_resistance: 1.2,
+                reported_resistance: 0.6,
+            },
         );
         for label in [
             "noise-temperature offsets",

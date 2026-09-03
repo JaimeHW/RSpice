@@ -1,6 +1,7 @@
 //! End-to-end DC lifecycle pins for runtime-compiled Verilog-A devices.
 #![cfg(feature = "veriloga")]
 
+use rspice_core::engine::DcSweepRange;
 use rspice_core::{Engine, Netlist, NoAbort};
 use std::io::Write;
 use std::path::PathBuf;
@@ -298,7 +299,17 @@ fn nested_rebuilt_sweep_uses_flattened_public_point_boundaries() {
     let netlist = Netlist::parse(&deck).expect("parse nested rebuilt lifecycle deck");
     let outer = rspice_core::netlist::DcSecondSweep::linear("TEMP".to_string(), 25.0, 26.0, 1.0);
     let points = Engine::default()
-        .run_dc_sweep2_with_abort(&netlist, "VSW", 0.0, 1.0, 1.0, Some(&outer), &NoAbort)
+        .run_dc_sweep2_with_abort(
+            &netlist,
+            "VSW",
+            DcSweepRange {
+                start: 0.0,
+                stop: 1.0,
+                step: 1.0,
+            },
+            Some(&outer),
+            &NoAbort,
+        )
         .expect("nested rebuilt sweep runs");
     assert_rebuilt_lifecycle_values(&points, &[1.0, 1.0, 1.0, 11.0]);
     let _ = std::fs::remove_file(model);

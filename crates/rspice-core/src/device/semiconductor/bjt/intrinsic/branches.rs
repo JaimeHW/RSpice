@@ -546,9 +546,19 @@ mod tests {
             ("IKF".to_string(), 0.1),
             ("IKR".to_string(), 0.02),
         ]));
-        let legacy_eval = legacy.evaluate_state_fixed_temperature(
-            0.0, 0.7, 0.0, 0.0, 0.0, 0.0, 0.5, 0.4, 0.0, 0.0, 0.0,
-        );
+        let legacy_eval = legacy.evaluate_state_fixed_temperature(BjtNodeVoltages {
+            vc: 0.0,
+            vb: 0.7,
+            ve: 0.0,
+            vs: 0.0,
+            vcx: 0.0,
+            vci: 0.0,
+            vbx: 0.5,
+            vbi: 0.4,
+            vei: 0.0,
+            vbp: 0.0,
+            vsi: 0.0,
+        });
         assert!(legacy_eval.linearized.qb.is_finite());
         assert_eq!(legacy_eval.irbi.d_internal[IDX_VCI], 0.0);
         assert_eq!(legacy_eval.irbi.d_internal[IDX_VEI], 0.0);
@@ -561,9 +571,19 @@ mod tests {
             ("VAR".to_string(), 4.0),
             ("IKF".to_string(), 0.1),
         ]));
-        let vbic_eval = vbic.evaluate_state_fixed_temperature(
-            0.0, 0.8, 0.0, 0.0, 0.0, 0.0, 0.7, 0.6, 0.0, 0.0, 0.0,
-        );
+        let vbic_eval = vbic.evaluate_state_fixed_temperature(BjtNodeVoltages {
+            vc: 0.0,
+            vb: 0.8,
+            ve: 0.0,
+            vs: 0.0,
+            vcx: 0.0,
+            vci: 0.0,
+            vbx: 0.7,
+            vbi: 0.6,
+            vei: 0.0,
+            vbp: 0.0,
+            vsi: 0.0,
+        });
         assert!(vbic_eval.irbi.d_internal[IDX_VCI].abs() > 0.0);
         assert!(vbic_eval.irbi.d_internal[IDX_VEI].abs() > 0.0);
     }

@@ -19,7 +19,6 @@
 //! .TF V(out) Vin
 //! ```
 
-#![allow(clippy::needless_range_loop)]
 use crate::Value;
 
 mod ac;

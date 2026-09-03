@@ -342,19 +342,23 @@ impl Jfet {
                 let (igs_int, ggs) = self.hfet_gate_branch(
                     vgs_int,
                     temp_source,
-                    self.params.hfet_js1s,
-                    self.params.hfet_js2s,
-                    self.params.hfet_m1s,
-                    self.params.hfet_m2s,
+                    HfetGateDiodePair {
+                        is1: self.params.hfet_js1s,
+                        is2: self.params.hfet_js2s,
+                        m1: self.params.hfet_m1s,
+                        m2: self.params.hfet_m2s,
+                    },
                     self.params.hfet_rgs,
                 );
                 let (igd_int, ggd) = self.hfet_gate_branch(
                     vgd_int,
                     temp_drain,
-                    self.params.hfet_js1d,
-                    self.params.hfet_js2d,
-                    self.params.hfet_m1d,
-                    self.params.hfet_m2d,
+                    HfetGateDiodePair {
+                        is1: self.params.hfet_js1d,
+                        is2: self.params.hfet_js2d,
+                        m1: self.params.hfet_m1d,
+                        m2: self.params.hfet_m2d,
+                    },
                     self.params.hfet_rgd,
                 );
                 (igs_int, ggs, igd_int, ggd)

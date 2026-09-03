@@ -521,15 +521,15 @@ pub(crate) fn parse_xyce_7_10_legacy_two_column_table_bounded(
                 XycePemLegacyTableParseErrorKind::NonFiniteSecondValue,
             ));
         }
-        if let Some(previous) = points.last() {
-            if first <= previous.x {
-                return Err(XycePemLegacyTableParseError::at(
-                    source_name,
-                    line_number,
-                    first_column,
-                    XycePemLegacyTableParseErrorKind::NonIncreasingAbscissa,
-                ));
-            }
+        if let Some(previous) = points.last()
+            && first <= previous.x
+        {
+            return Err(XycePemLegacyTableParseError::at(
+                source_name,
+                line_number,
+                first_column,
+                XycePemLegacyTableParseErrorKind::NonIncreasingAbscissa,
+            ));
         }
         if points.len() >= max_points {
             return Err(XycePemLegacyTableParseError::at(
@@ -1057,8 +1057,10 @@ mod tests {
 
     #[test]
     fn validation_rejects_nonfinite_and_zero_voltage_scales() {
-        let mut model = XycePemModelParams::default();
-        model.v1 = 0.0;
+        let mut model = XycePemModelParams {
+            v1: 0.0,
+            ..Default::default()
+        };
         assert!(matches!(
             model.validate(),
             Err(XycePemMemristorError::InvalidParameter { name: "V1", .. })

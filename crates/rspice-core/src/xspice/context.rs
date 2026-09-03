@@ -58,20 +58,15 @@ pub enum CallType {
 /// Most built-in models are pure and do not need this distinction. External
 /// co-simulation models need it to avoid mutating irreversible host state
 /// during Newton trial evaluations that may be rolled back.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum EvaluationPhase {
     /// Ordinary evaluation without transient rollback semantics.
+    #[default]
     DirectEvaluation,
     /// A rollbackable trial evaluation used for residual/Jacobian probing.
     RollbackableProbe,
     /// Evaluation for an accepted transient timepoint.
     AcceptedStep,
-}
-
-impl Default for EvaluationPhase {
-    fn default() -> Self {
-        Self::DirectEvaluation
-    }
 }
 
 //=============================================================================
@@ -1495,14 +1490,14 @@ impl CmContext {
             state.when = self.time + delay;
         } else if value != state.prev {
             reversion = Some((state.prev, (state.when - self.time) / 2.0));
-            if value.state.is_unknown() {
-                if let Some((rise_delay, fall_delay)) = unknown_transition_delays {
-                    effective_delay = if state.prev.state.is_low() {
-                        rise_delay
-                    } else {
-                        fall_delay
-                    };
-                }
+            if value.state.is_unknown()
+                && let Some((rise_delay, fall_delay)) = unknown_transition_delays
+            {
+                effective_delay = if state.prev.state.is_low() {
+                    rise_delay
+                } else {
+                    fall_delay
+                };
             }
             state.when = self.time + effective_delay;
         } else {

@@ -1749,7 +1749,7 @@ fn evaluate_table3d_data_with_scratch(
     })
 }
 
-fn table_file_param<'a>(ctx: &'a CmContext, kind: TableKind) -> &'a str {
+fn table_file_param(ctx: &CmContext, kind: TableKind) -> &str {
     ctx.string_param("file")
         .filter(|path| !path.trim().is_empty())
         .unwrap_or_else(|| kind.default_file())
@@ -1782,10 +1782,9 @@ fn table3d_eval_signature(
     order: usize,
     offset: Value,
     gain: Value,
-    inx: Value,
-    iny: Value,
-    inz: Value,
+    point: Table3DPoint,
 ) -> Table3DEvalSignature {
+    let Table3DPoint { inx, iny, inz } = point;
     Table3DEvalSignature {
         table_id: table_arc_id(table),
         order,
@@ -1888,16 +1887,23 @@ fn scale_table3d_eval(raw: TableEval3D, offset: Value, gain: Value) -> TableEval
     }
 }
 
-fn scaled_table3d_eval_from_parts_with_scratch(
-    table: &Table3DData,
-    order: usize,
+/// The point a 3-D table is sampled at.
+#[derive(Clone, Copy)]
+struct Table3DPoint {
     inx: Value,
     iny: Value,
     inz: Value,
+}
+
+fn scaled_table3d_eval_from_parts_with_scratch(
+    table: &Table3DData,
+    order: usize,
+    point: Table3DPoint,
     offset: Value,
     gain: Value,
     scratch: &mut TableEvalScratch,
 ) -> CmResult<TableEval3D> {
+    let Table3DPoint { inx, iny, inz } = point;
     let raw = evaluate_table3d_data_with_scratch(table, order, inx, iny, inz, scratch)?;
     Ok(scale_table3d_eval(raw, offset, gain))
 }
@@ -1905,12 +1911,11 @@ fn scaled_table3d_eval_from_parts_with_scratch(
 fn scaled_table3d_eval_from_parts(
     table: &Table3DData,
     order: usize,
-    inx: Value,
-    iny: Value,
-    inz: Value,
+    point: Table3DPoint,
     offset: Value,
     gain: Value,
 ) -> CmResult<TableEval3D> {
+    let Table3DPoint { inx, iny, inz } = point;
     let raw = evaluate_table3d_data(table, order, inx, iny, inz)?;
     Ok(scale_table3d_eval(raw, offset, gain))
 }
@@ -1924,13 +1929,20 @@ fn scaled_table3d_eval(ctx: &CmContext) -> CmResult<TableEval3D> {
     let inx = ctx.input("inx");
     let iny = ctx.input("iny");
     let inz = ctx.input("inz");
-    let signature = table3d_eval_signature(&table, order, offset, gain, inx, iny, inz);
+    let signature =
+        table3d_eval_signature(&table, order, offset, gain, Table3DPoint { inx, iny, inz });
     if let Some(resource) = ctx.resource::<Table3DEvalResource>(TABLE3D_EVAL_RESOURCE)
         && resource.signature == signature
     {
         return Ok(resource.result);
     }
-    scaled_table3d_eval_from_parts(table.as_ref(), order, inx, iny, inz, offset, gain)
+    scaled_table3d_eval_from_parts(
+        table.as_ref(),
+        order,
+        Table3DPoint { inx, iny, inz },
+        offset,
+        gain,
+    )
 }
 
 fn scaled_table3d_eval_cached(ctx: &mut CmContext) -> CmResult<TableEval3D> {
@@ -1942,7 +1954,8 @@ fn scaled_table3d_eval_cached(ctx: &mut CmContext) -> CmResult<TableEval3D> {
     let inx = ctx.input("inx");
     let iny = ctx.input("iny");
     let inz = ctx.input("inz");
-    let signature = table3d_eval_signature(&table, order, offset, gain, inx, iny, inz);
+    let signature =
+        table3d_eval_signature(&table, order, offset, gain, Table3DPoint { inx, iny, inz });
     if let Some(resource) = ctx.resource::<Table3DEvalResource>(TABLE3D_EVAL_RESOURCE)
         && resource.signature == signature
     {
@@ -1952,9 +1965,7 @@ fn scaled_table3d_eval_cached(ctx: &mut CmContext) -> CmResult<TableEval3D> {
         scaled_table3d_eval_from_parts_with_scratch(
             table.as_ref(),
             order,
-            inx,
-            iny,
-            inz,
+            Table3DPoint { inx, iny, inz },
             offset,
             gain,
             scratch,
@@ -2723,8 +2734,10 @@ mod tests {
 ",
         )
         .expect("register virtual table2d data");
-        let mut limits = crate::resource::ResourceLimits::default();
-        limits.max_shared_cache_bytes = 0;
+        let limits = crate::resource::ResourceLimits {
+            max_shared_cache_bytes: 0,
+            ..Default::default()
+        };
 
         let (table, _) = load_table2d_limited(file, limits)
             .expect("zero-retention policy still returns parsed table data");

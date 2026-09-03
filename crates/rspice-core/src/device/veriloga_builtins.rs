@@ -57,6 +57,18 @@ pub use rspice_veriloga_runtime::{
 use rspice_veriloga_runtime::{GeneratedParameterAssignment, GeneratedParameterOrigin};
 
 #[cfg(feature = "veriloga-builtins-base")]
+/// What one generated Verilog-A stamp is being evaluated for: the analysis
+/// asking, the simulator parameters it reads, and whether the evaluation is a
+/// limited Newton step. The three travel together through every stamp entry
+/// point.
+#[derive(Clone, Copy)]
+pub(crate) struct GeneratedEvaluationRequest {
+    pub analysis: GeneratedAnalysisKind,
+    pub simparams: GeneratedSimulationParameters,
+    pub evaluation_mode: GeneratedEvaluationMode,
+}
+
+#[cfg(feature = "veriloga-builtins-base")]
 #[derive(Debug, Clone)]
 pub(crate) struct BuiltinParameterAssignment {
     pub(crate) name: String,
@@ -582,10 +594,13 @@ impl BuiltinVerilogADevices {
         rhs: &mut [Value],
         voltages: &[Value],
         num_nodes: usize,
-        analysis: GeneratedAnalysisKind,
-        simparams: GeneratedSimulationParameters,
-        evaluation_mode: GeneratedEvaluationMode,
+        request: GeneratedEvaluationRequest,
     ) -> Result<(), GeneratedVerilogAEvaluationError> {
+        let GeneratedEvaluationRequest {
+            analysis,
+            simparams,
+            evaluation_mode,
+        } = request;
         let analysis = self.operating_point_analysis_override.unwrap_or(analysis);
         for device in &mut self.devices {
             device
@@ -594,9 +609,11 @@ impl BuiltinVerilogADevices {
                     rhs,
                     voltages,
                     num_nodes,
-                    analysis,
-                    simparams,
-                    evaluation_mode,
+                    GeneratedEvaluationRequest {
+                        analysis,
+                        simparams,
+                        evaluation_mode,
+                    },
                 )
                 .map_err(|source| GeneratedVerilogAEvaluationError {
                     instance_name: device.instance_name.clone(),
@@ -1496,9 +1513,11 @@ impl BuiltinVerilogAInstance {
             rhs,
             voltages,
             num_nodes,
-            analysis,
-            simparams,
-            GeneratedEvaluationMode::default_for_analysis(analysis),
+            GeneratedEvaluationRequest {
+                analysis,
+                simparams,
+                evaluation_mode: GeneratedEvaluationMode::default_for_analysis(analysis),
+            },
         )
     }
 
@@ -1525,9 +1544,11 @@ impl BuiltinVerilogAInstance {
             rhs,
             voltages,
             num_nodes,
-            analysis,
-            simparams,
-            GeneratedEvaluationMode::StaticProbe,
+            GeneratedEvaluationRequest {
+                analysis,
+                simparams,
+                evaluation_mode: GeneratedEvaluationMode::StaticProbe,
+            },
         )
     }
 
@@ -1537,10 +1558,13 @@ impl BuiltinVerilogAInstance {
         rhs: &mut [Value],
         voltages: &[Value],
         num_nodes: usize,
-        analysis: GeneratedAnalysisKind,
-        simparams: GeneratedSimulationParameters,
-        evaluation_mode: GeneratedEvaluationMode,
+        request: GeneratedEvaluationRequest,
     ) -> Result<(), GeneratedEvaluationError> {
+        let GeneratedEvaluationRequest {
+            analysis,
+            simparams,
+            evaluation_mode,
+        } = request;
         if !self
             .static_stamp_cache
             .axis_indices_match(&self.nodes, &self.branches, num_nodes)
@@ -2038,6 +2062,8 @@ mod tests {
         GeneratedVerilogAAcceptedStateShapeIdentity,
     };
 
+    #[cfg(feature = "veriloga-builtins-base")]
+    use super::GeneratedEvaluationRequest;
     #[cfg(any(
         feature = "veriloga-model-diode-cmc",
         feature = "veriloga-model-ekv-va",
@@ -2298,6 +2324,10 @@ mod tests {
         assert_eq!(devices.primary_terminal_current(1), Some(0.0));
     }
 
+    /// One stamp's matrix and right-hand-side values.
+    #[cfg(feature = "veriloga-builtins-base")]
+    type StampedSystem = (Vec<crate::Value>, Vec<crate::Value>);
+
     /// Stamp one current both ways and compare what reached the matrix.
     ///
     /// `stamp_current_packed` exists so a backend carrying derivatives as an
@@ -2308,10 +2338,7 @@ mod tests {
         derivative0: crate::Value,
         derivative1: crate::Value,
         voltages: &[crate::Value],
-    ) -> (
-        (Vec<crate::Value>, Vec<crate::Value>),
-        (Vec<crate::Value>, Vec<crate::Value>),
-    ) {
+    ) -> (StampedSystem, StampedSystem) {
         let nodes = vec![1usize, 2usize];
         let branches: Vec<usize> = Vec::new();
         let size = 2usize;
@@ -2595,9 +2622,11 @@ mod tests {
                 &mut rhs,
                 &voltages,
                 num_nodes,
-                GeneratedAnalysisKind::Tran,
-                GeneratedSimulationParameters::default(),
-                GeneratedEvaluationMode::NewtonLimited,
+                GeneratedEvaluationRequest {
+                    analysis: GeneratedAnalysisKind::Tran,
+                    simparams: GeneratedSimulationParameters::default(),
+                    evaluation_mode: GeneratedEvaluationMode::NewtonLimited,
+                },
             )
             .expect("VBIC13 initial-step state evaluates");
         instance
@@ -2639,9 +2668,11 @@ mod tests {
                 &mut rhs,
                 &voltages,
                 num_nodes,
-                GeneratedAnalysisKind::Tran,
-                GeneratedSimulationParameters::default(),
-                GeneratedEvaluationMode::StaticDaeProbe,
+                GeneratedEvaluationRequest {
+                    analysis: GeneratedAnalysisKind::Tran,
+                    simparams: GeneratedSimulationParameters::default(),
+                    evaluation_mode: GeneratedEvaluationMode::StaticDaeProbe,
+                },
             )
             .expect("VBIC13 static-DAE probe evaluates");
 

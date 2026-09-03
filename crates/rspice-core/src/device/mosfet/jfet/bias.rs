@@ -2,6 +2,18 @@
 
 use super::*;
 
+/// The two parallel gate-leakage diodes of an HFET: their saturation currents
+/// and the matching ideality factors. A saturation current paired with the
+/// wrong ideality factor is a different diode, so the four terms travel as one
+/// record.
+#[derive(Clone, Copy)]
+pub(super) struct HfetGateDiodePair {
+    pub is1: Value,
+    pub is2: Value,
+    pub m1: Value,
+    pub m2: Value,
+}
+
 impl Jfet {
     /// Thermal voltage at given temperature
     pub(super) fn thermal_voltage(&self, temp: Value) -> Value {
@@ -329,11 +341,9 @@ impl Jfet {
         vt: Value,
         v: Value,
         rs: Value,
-        is1: Value,
-        is2: Value,
-        m1: Value,
-        m2: Value,
+        diodes: HfetGateDiodePair,
     ) -> (Value, Value) {
+        let HfetGateDiodePair { is1, is2, m1, m2 } = diodes;
         let vt1 = (vt * m1).max(1e-18);
         let vt2 = (vt * m2).max(1e-18);
         let rs = rs.max(0.0);
@@ -392,12 +402,15 @@ impl Jfet {
         &self,
         v_int: Value,
         temp: Value,
-        js1: Value,
-        js2: Value,
-        m1: Value,
-        m2: Value,
+        diodes: HfetGateDiodePair,
         rg: Value,
     ) -> (Value, Value) {
+        let HfetGateDiodePair {
+            is1: js1,
+            is2: js2,
+            m1,
+            m2,
+        } = diodes;
         let temp_k = if temp.is_finite() && temp > 0.0 {
             temp
         } else {
@@ -414,10 +427,12 @@ impl Jfet {
                 vt,
                 v_int,
                 rg.max(0.0),
-                is1,
-                is2,
-                m1.max(1e-12),
-                m2.max(1e-12),
+                HfetGateDiodePair {
+                    is1,
+                    is2,
+                    m1: m1.max(1e-12),
+                    m2: m2.max(1e-12),
+                },
             )
         } else {
             (0.0, 0.0)

@@ -121,7 +121,7 @@ pub(super) fn evaluate_pending_fourier(
                 ));
             }
         }
-        for record in &mut out.records[records_before..] {
+        for record in out.records.iter_mut().skip(records_before) {
             record.set_execution_context(Some(analysis_id.clone()), coordinate.clone());
             record.set_parent_analysis_id(parent_analysis_id.clone());
         }

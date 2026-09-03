@@ -2910,16 +2910,17 @@ impl CodeModel for AnalogOneShot {
                 request_oneshot_breakpoints(ctx, &[time1, time2, time3, time4]);
                 // An armed one-shot also needs the crossing itself, which no
                 // other device in the deck has a reason to schedule.
-                if !set && !locked {
-                    if let Some(crossing) = oneshot_predicted_trigger_time(
+                if !set
+                    && !locked
+                    && let Some(crossing) = oneshot_predicted_trigger_time(
                         ctx,
                         old_clock,
                         clock,
                         trigger,
                         positive_edge,
-                    ) {
-                        request_oneshot_breakpoints(ctx, &[crossing]);
-                    }
+                    )
+                {
+                    request_oneshot_breakpoints(ctx, &[crossing]);
                 }
             }
         }
@@ -2970,10 +2971,11 @@ mod tests {
             .collect()
     }
 
-    fn port_summary(
-        model: &dyn CodeModel,
-    ) -> Vec<(
-        &str,
+    /// One row of a port declaration as these tests compare it: name,
+    /// direction, default type, the types it accepts, whether it is a vector,
+    /// whether a null connection is allowed, and the vector length bounds.
+    type PortShape<'a> = (
+        &'a str,
         PortDirection,
         PortType,
         Vec<PortType>,
@@ -2981,7 +2983,9 @@ mod tests {
         bool,
         Option<usize>,
         Option<usize>,
-    )> {
+    );
+
+    fn port_summary(model: &dyn CodeModel) -> Vec<PortShape<'_>> {
         model
             .ports()
             .iter()

@@ -132,12 +132,6 @@ impl CarriesDocumentEvidence for PyFourierResult {
     }
 }
 
-/// Declared unit of one authored `.FOUR` operand.
-///
-/// `V(...)` and `I(...)` are the parser's own probe grammar. Anything else is
-/// a device observable or a braced parameter expression, whose unit the deck
-/// never declared — which is `Unspecified` and not dimensionless, exactly as
-/// core's own transient-output rule states it.
 /// Zero-based ordinal of a canonical `four-NNN` tag, when it is one.
 ///
 /// The directive runner numbers `.FOUR` operands in authored order and
@@ -149,16 +143,22 @@ fn analysis_ordinal(tag: &str) -> Option<u32> {
         .and_then(|ordinal| ordinal.checked_sub(1))
 }
 
+/// Declared unit of one authored `.FOUR` operand.
+///
+/// `V(...)` and `I(...)` are the parser's own probe grammar. Anything else is
+/// a device observable or a braced parameter expression, whose unit the deck
+/// never declared — which is `Unspecified` and not dimensionless, exactly as
+/// core's own transient-output rule states it.
 fn fourier_output_unit(output: &str) -> rspice_core::execution::SignalUnit {
-    let trimmed = output.trim();
-    if trimmed.len() >= 2 && trimmed[1..].starts_with('(') {
-        match trimmed.as_bytes()[0].to_ascii_uppercase() {
-            b'V' => return rspice_core::execution::SignalUnit::Volt,
-            b'I' => return rspice_core::execution::SignalUnit::Ampere,
-            _ => {}
-        }
+    let mut characters = output.trim().chars();
+    match (characters.next(), characters.next()) {
+        (Some(probe), Some('(')) => match probe.to_ascii_uppercase() {
+            'V' => rspice_core::execution::SignalUnit::Volt,
+            'I' => rspice_core::execution::SignalUnit::Ampere,
+            _ => rspice_core::execution::SignalUnit::Unspecified,
+        },
+        _ => rspice_core::execution::SignalUnit::Unspecified,
     }
-    rspice_core::execution::SignalUnit::Unspecified
 }
 
 impl PyFourierResult {

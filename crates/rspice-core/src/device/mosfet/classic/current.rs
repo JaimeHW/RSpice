@@ -7,7 +7,7 @@ impl Mosfet {
     /// - Vgs' = Vgs - Vds = Vg - Vd
     /// - Vds' = -Vds = Vs - Vd
     /// - Vbs' = Vbs - Vds = Vb - Vd
-    pub(in crate::device::mosfet::mosfet) fn reverse_voltages(
+    pub(in crate::device::mosfet::classic) fn reverse_voltages(
         vgs: Value,
         vds: Value,
         vbs: Value,
@@ -15,7 +15,7 @@ impl Mosfet {
         (vgs - vds, -vds, vbs - vds)
     }
 
-    pub(in crate::device::mosfet::mosfet) fn legacy_bsim_current(
+    pub(in crate::device::mosfet::classic) fn legacy_bsim_current(
         &self,
         vgs: Value,
         vds: Value,
@@ -44,7 +44,7 @@ impl Mosfet {
         (p * mode * current, Self::legacy_region_to_mos(region))
     }
 
-    pub(in crate::device::mosfet::mosfet) fn legacy_bsim_linearized_operating_point(
+    pub(in crate::device::mosfet::classic) fn legacy_bsim_linearized_operating_point(
         &self,
         vgs: Value,
         vds: Value,
@@ -76,7 +76,7 @@ impl Mosfet {
         (id, region, gm, gds, gmb)
     }
 
-    pub(in crate::device::mosfet::mosfet) fn legacy_region_to_mos(
+    pub(in crate::device::mosfet::classic) fn legacy_region_to_mos(
         region: LegacyBsimRegion,
     ) -> MosRegion {
         match region {
@@ -87,7 +87,7 @@ impl Mosfet {
     }
 
     /// Determine operating region and calculate drain current
-    pub(in crate::device::mosfet::mosfet) fn calculate_id(
+    pub(in crate::device::mosfet::classic) fn calculate_id(
         &self,
         vgs: Value,
         vds: Value,
@@ -139,7 +139,7 @@ impl Mosfet {
     /// `mos1load.c`: polarity folding, explicit normal/inverse mode
     /// selection, body-effect onset voltage, and the original analytic
     /// derivatives transformed back to the instance terminal orientation.
-    pub(in crate::device::mosfet::mosfet) fn level1_operating_point(
+    pub(in crate::device::mosfet::classic) fn level1_operating_point(
         &self,
         vgs: Value,
         vds: Value,
@@ -153,7 +153,7 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn level1_operating_point_with_constants(
+    pub(in crate::device::mosfet::classic) fn level1_operating_point_with_constants(
         &self,
         vgs: Value,
         vds: Value,
@@ -231,7 +231,7 @@ impl Mosfet {
         )
     }
 
-    pub(in crate::device::mosfet::mosfet) fn calculate_id_forward(
+    pub(in crate::device::mosfet::classic) fn calculate_id_forward(
         &self,
         vgs: Value,
         vds: Value,
@@ -252,7 +252,7 @@ impl Mosfet {
     ///
     /// Uses smooth blending between regions to ensure continuous first derivatives,
     /// which is critical for Newton-Raphson convergence.
-    pub(in crate::device::mosfet::mosfet) fn calculate_id_level1(
+    pub(in crate::device::mosfet::classic) fn calculate_id_level1(
         &self,
         vgs: Value,
         vds: Value,
@@ -301,7 +301,7 @@ impl Mosfet {
     /// - Channel length modulation
     ///
     /// Simplified short-channel fallback current with C1 continuous transitions.
-    pub(in crate::device::mosfet::mosfet) fn calculate_id_bsim3(
+    pub(in crate::device::mosfet::classic) fn calculate_id_bsim3(
         &self,
         vgs: Value,
         vds: Value,
@@ -372,7 +372,7 @@ impl Mosfet {
     /// - explicit normal/inverse mode selection from `Vds`
     /// - `vgon`, `vdsat`, `idsat`, and linear-region backoff
     /// - direct inverse-mode Jacobian transform back into original variables
-    pub(in crate::device::mosfet::mosfet) fn level6_operating_point(
+    pub(in crate::device::mosfet::classic) fn level6_operating_point(
         &self,
         vgs: Value,
         vds: Value,
@@ -454,7 +454,7 @@ impl Mosfet {
         )
     }
 
-    pub(in crate::device::mosfet::mosfet) fn calculate_id_level6(
+    pub(in crate::device::mosfet::classic) fn calculate_id_level6(
         &self,
         vgs: Value,
         vds: Value,
@@ -471,7 +471,7 @@ impl Mosfet {
     /// linearizations. Unsupported simplified levels such as LEVEL=7
     /// differentiate the exact composed current the residual stamps, so their
     /// Jacobian is consistent with `calculate_id` by construction.
-    pub(in crate::device::mosfet::mosfet) fn small_signal(
+    pub(in crate::device::mosfet::classic) fn small_signal(
         &self,
         vgs: Value,
         vds: Value,

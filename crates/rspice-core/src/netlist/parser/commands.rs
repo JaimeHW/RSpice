@@ -1,5 +1,6 @@
 //! Dot-command parsing for analyses, options, measurements, params, and functions.
 
+use super::scoping::ModelDefinitionDeferrals;
 use crate::config::DampingStrategy;
 use crate::netlist::lexer::Token;
 use crate::netlist::{XspiceAutoBridgeParamName, XspiceAutoBridgeTemplate, XyceHbTimeDomainMode};
@@ -241,8 +242,10 @@ pub(super) fn parse_command(
                 params,
                 models,
                 false,
-                model_bare_ident_deferrals,
-                pending_xyce_diode_model_warnings,
+                ModelDefinitionDeferrals {
+                    bare_ident_deferrals: model_bare_ident_deferrals,
+                    pending_xyce_diode_model_warnings,
+                },
             )?;
             models.push(model);
         }
@@ -496,9 +499,11 @@ pub(super) fn parse_command(
                 logical_line,
                 saves,
                 false,
-                params,
-                None,
-                None,
+                SaveCommandContext {
+                    params,
+                    diagnostics: None,
+                    origin: None,
+                },
             )?;
             output_requests.push(request);
         }
@@ -516,9 +521,11 @@ pub(super) fn parse_command(
                 logical_line,
                 saves,
                 true,
-                params,
-                Some(diagnostics),
-                Some(origin),
+                SaveCommandContext {
+                    params,
+                    diagnostics: Some(diagnostics),
+                    origin: Some(origin),
+                },
             )?;
             output_requests.push(
                 OutputRequest::from_ordered_operands(
@@ -1046,16 +1053,27 @@ pub(super) struct ParsedSaveCommand {
     operands: Vec<OutputOperand>,
 }
 
+/// What a `.SAVE` line is parsed against: the parameter scope in force, the
+/// diagnostic sink, and the source location the line came from.
+pub(super) struct SaveCommandContext<'a, 'b> {
+    pub params: &'a ParamContext,
+    pub diagnostics: Option<&'a mut Vec<ParseDiagnostic>>,
+    pub origin: Option<&'b NetlistSourceLocation>,
+}
+
 pub(super) fn parse_save_command(
     stream: &mut TokenStream,
     line_num: usize,
     logical_line: &str,
     saves: &mut super::SaveSet,
     skip_analysis_type: bool,
-    params: &ParamContext,
-    mut diagnostics: Option<&mut Vec<ParseDiagnostic>>,
-    origin: Option<&NetlistSourceLocation>,
+    context: SaveCommandContext<'_, '_>,
 ) -> Result<ParsedSaveCommand, ParseError> {
+    let SaveCommandContext {
+        params,
+        mut diagnostics,
+        origin,
+    } = context;
     use super::SaveSignal;
 
     let mut first_token = true;
@@ -4898,19 +4916,26 @@ fn measure_file_option_ahead(stream: &TokenStream) -> bool {
     )
 }
 
+/// The `FROM`/`TO`/`TD` window a `.MEASURE` statement may restrict itself to.
+type MeasureWindow = (
+    Option<crate::Value>,
+    Option<crate::Value>,
+    Option<crate::Value>,
+);
+
+/// A measure window plus which occurrence of the event the statement selects.
+type MeasureWindowWithOccurrence = (
+    Option<crate::Value>,
+    Option<crate::Value>,
+    Option<crate::Value>,
+    crate::netlist::measure::EventOccurrence,
+);
+
 fn parse_measure_when_event_options(
     stream: &mut TokenStream,
     line_num: usize,
     params: &ParamContext,
-) -> Result<
-    (
-        Option<crate::Value>,
-        Option<crate::Value>,
-        Option<crate::Value>,
-        crate::netlist::measure::EventOccurrence,
-    ),
-    ParseError,
-> {
+) -> Result<MeasureWindowWithOccurrence, ParseError> {
     let mut from = None;
     let mut to = None;
     let mut td = None;
@@ -5048,23 +5073,22 @@ fn scan_meas_statement_options(
                 }
                 _ => false,
             };
-        if statement_qualifier_ahead {
-            if let Some(qualifier) =
+        if statement_qualifier_ahead
+            && let Some(qualifier) =
                 consume_meas_statement_qualifier(&mut stream, line_num, params, true)?
-            {
-                match qualifier {
-                    ParsedMeasStatementQualifier::Numeric { key, value } => match key.as_str() {
-                        "GOAL" => options.goal = Some(value),
-                        "TOL" => options.tolerance = Some(value),
-                        "DEFAULT_VAL" => options.default_value = Some(value),
-                        "FAILVALUE" => options.fail_value = Some(value),
-                        "MINVAL" => options.minval = value,
-                        _ => unreachable!(),
-                    },
-                    ParsedMeasStatementQualifier::Print(policy) => options.print_policy = policy,
-                }
-                continue;
+        {
+            match qualifier {
+                ParsedMeasStatementQualifier::Numeric { key, value } => match key.as_str() {
+                    "GOAL" => options.goal = Some(value),
+                    "TOL" => options.tolerance = Some(value),
+                    "DEFAULT_VAL" => options.default_value = Some(value),
+                    "FAILVALUE" => options.fail_value = Some(value),
+                    "MINVAL" => options.minval = value,
+                    _ => unreachable!(),
+                },
+                ParsedMeasStatementQualifier::Print(policy) => options.print_policy = policy,
             }
+            continue;
         }
         match stream.peek().kind {
             TokenKind::LParen => parenthesis_depth += 1,
@@ -5493,14 +5517,7 @@ fn parse_measure_equation_options(
     stream: &mut TokenStream,
     line_num: usize,
     params: &ParamContext,
-) -> Result<
-    (
-        Option<crate::Value>,
-        Option<crate::Value>,
-        Option<crate::Value>,
-    ),
-    ParseError,
-> {
+) -> Result<MeasureWindow, ParseError> {
     let mut from = None;
     let mut to = None;
     let mut td = None;

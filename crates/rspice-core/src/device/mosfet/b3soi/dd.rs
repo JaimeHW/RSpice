@@ -47,15 +47,29 @@
 //! anchor (t=0, ~0.0917 V) and tracks the transient (the fast-edge body
 //! amplitude is still being calibrated against ngspice's body LTE).
 
-#![allow(clippy::too_many_arguments)]
-
 pub use super::common;
 pub use params::B3SoiDdModel;
+
+/// The circuit nodes a dynamic-depletion SOI instance attaches to. The eight
+/// terminals are positional in the netlist and easy to transpose; naming them
+/// makes a swapped pair a compile error rather than a wrong answer.
+#[derive(Clone, Copy)]
+pub struct B3SoiDdNodes {
+    pub node_drain: NodeId,
+    pub node_gate_external: NodeId,
+    pub node_gate: NodeId,
+    pub node_source: NodeId,
+    pub node_e: NodeId,
+    pub node_body: NodeId,
+    pub node_p: NodeId,
+    pub node_temp: NodeId,
+}
 
 pub mod eval;
 pub mod params;
 pub mod temp;
 
+use crate::device::mosfet::b3soi::common::SoiCompanionCurrents;
 use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
 use crate::{NodeId, Value};
 use eval::{B3SoiDdBias, B3SoiDdOp, ModelConsts};
@@ -210,19 +224,22 @@ impl B3SoiDd {
     /// Build an instance from a model card and instance geometry.
     pub fn new(
         name: String,
-        node_drain: NodeId,
-        node_gate_external: NodeId,
-        node_gate: NodeId,
-        node_source: NodeId,
-        node_e: NodeId,
-        node_body: NodeId,
-        node_p: NodeId,
-        node_temp: NodeId,
+        nodes: B3SoiDdNodes,
         body_mode: BodyMode,
         model: Arc<B3SoiDdModel>,
         geom: B3SoiDdGeometry,
         temp_k: Value,
     ) -> Result<Self, String> {
+        let B3SoiDdNodes {
+            node_drain,
+            node_gate_external,
+            node_gate,
+            node_source,
+            node_e,
+            node_body,
+            node_p,
+            node_temp,
+        } = nodes;
         if model.sh_mod == 1 && geom.rth0 != 0.0 && node_temp == 0 {
             return Err(format!(
                 "B3SOIDD '{name}': self-heating (SHMOD=1 with RTH0!=0) requires a temperature node"
@@ -473,10 +490,10 @@ impl B3SoiDd {
         let op = eval::eval_dc(&sized, &self.consts, bias, self.mtype);
         let vds = if op.mode >= 0 { bias.vds } else { -bias.vds };
         let delta_temp = (op.ids * vds * self.sized.rth).clamp(0.0, 1.0e3);
-        if delta_temp.is_finite() {
-            if let Some(slot) = solution.get_mut(self.node_temp - 1) {
-                *slot = delta_temp;
-            }
+        if delta_temp.is_finite()
+            && let Some(slot) = solution.get_mut(self.node_temp - 1)
+        {
+            *slot = delta_temp;
         }
     }
 
@@ -749,14 +766,17 @@ impl B3SoiDd {
         &self,
         charge: &eval::B3SoiDdCharge,
         ag0: Value,
-        cqg: Value,
-        cqb: Value,
-        cqd: Value,
-        cqe: Value,
-        cqth: Value,
+        currents: SoiCompanionCurrents,
         voltages: &[Value],
         matrix: &mut impl MatrixStamper,
     ) {
+        let SoiCompanionCurrents {
+            cqg,
+            cqb,
+            cqd,
+            cqe,
+            cqth,
+        } = currents;
         let (dp, g, sp, e, b) = self.charge_nodes();
         // Branch voltages are device-polarity (type-folded) and LIMITED,
         // exactly as ngspice forms them from the folded vgs/vbs/vds/ves state
@@ -1275,9 +1295,7 @@ impl NonlinearDevice for B3SoiDd {
             return;
         }
         let raw_bias = self.branch_voltages(voltages);
-        let (op, bias) = if self.bias_was_limited.get() {
-            (self.op.clone(), self.bias)
-        } else if biases_match(raw_bias, self.bias) {
+        let (op, bias) = if self.bias_was_limited.get() || biases_match(raw_bias, self.bias) {
             (self.op.clone(), self.bias)
         } else {
             (self.eval_op_for_bias(raw_bias), raw_bias)
@@ -1951,14 +1969,16 @@ mod tests {
         let model = Arc::new(B3SoiDdModel::from_params(&params, false, 300.15));
         let mut dev = B3SoiDd::new(
             "m1".to_string(),
-            4,
-            1,
-            2,
-            3,
-            5,
-            6,
-            0,
-            0,
+            B3SoiDdNodes {
+                node_drain: 4,
+                node_gate_external: 1,
+                node_gate: 2,
+                node_source: 3,
+                node_e: 5,
+                node_body: 6,
+                node_p: 0,
+                node_temp: 0,
+            },
             BodyMode::Floating,
             model,
             geom(),
@@ -2009,14 +2029,16 @@ mod tests {
         geometry.body_squares = 4.0;
         let dev = B3SoiDd::new(
             "m1".to_string(),
-            1,
-            2,
-            2,
-            3,
-            4,
-            5,
-            7,
-            0,
+            B3SoiDdNodes {
+                node_drain: 1,
+                node_gate_external: 2,
+                node_gate: 2,
+                node_source: 3,
+                node_e: 4,
+                node_body: 5,
+                node_p: 7,
+                node_temp: 0,
+            },
             BodyMode::TiedResistive,
             model,
             geometry,
@@ -2057,14 +2079,16 @@ mod tests {
         geometry.cth0 = 2.0;
         let dev = B3SoiDd::new(
             "m1".to_string(),
-            1,
-            2,
-            2,
-            3,
-            4,
-            5,
-            0,
-            6,
+            B3SoiDdNodes {
+                node_drain: 1,
+                node_gate_external: 2,
+                node_gate: 2,
+                node_source: 3,
+                node_e: 4,
+                node_body: 5,
+                node_p: 0,
+                node_temp: 6,
+            },
             BodyMode::TiedIdeal,
             model,
             geometry,
@@ -2082,11 +2106,13 @@ mod tests {
         dev.stamp_charge_companion(
             &eval::B3SoiDdCharge::default(),
             ag0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
+            SoiCompanionCurrents {
+                cqg: 0.0,
+                cqb: 0.0,
+                cqd: 0.0,
+                cqe: 0.0,
+                cqth: 0.0,
+            },
             &voltages,
             &mut stamper,
         );
@@ -2112,14 +2138,16 @@ mod tests {
         let model = Arc::new(B3SoiDdModel::from_params(&params, false, 300.15));
         let mut dev = B3SoiDd::new(
             "m1".to_string(),
-            1,
-            2,
-            2,
-            3,
-            4,
-            5,
-            0,
-            6,
+            B3SoiDdNodes {
+                node_drain: 1,
+                node_gate_external: 2,
+                node_gate: 2,
+                node_source: 3,
+                node_e: 4,
+                node_body: 5,
+                node_p: 0,
+                node_temp: 6,
+            },
             BodyMode::TiedIdeal,
             model,
             geom(),
@@ -2149,14 +2177,16 @@ mod tests {
         let model = Arc::new(B3SoiDdModel::from_params(&n1_params(), false, 300.15));
         let mut dev = B3SoiDd::new(
             "m1".to_string(),
-            1,
-            2,
-            2,
-            3,
-            4,
-            5,
-            7,
-            0,
+            B3SoiDdNodes {
+                node_drain: 1,
+                node_gate_external: 2,
+                node_gate: 2,
+                node_source: 3,
+                node_e: 4,
+                node_body: 5,
+                node_p: 7,
+                node_temp: 0,
+            },
             BodyMode::TiedIdeal,
             model,
             geom(),
@@ -2230,14 +2260,16 @@ mod tests {
         let geometry = geom();
         let mut dev = B3SoiDd::new(
             "m1".to_string(),
-            1,
-            2,
-            2,
-            3,
-            4,
-            5,
-            0,
-            6,
+            B3SoiDdNodes {
+                node_drain: 1,
+                node_gate_external: 2,
+                node_gate: 2,
+                node_source: 3,
+                node_e: 4,
+                node_body: 5,
+                node_p: 0,
+                node_temp: 6,
+            },
             BodyMode::TiedIdeal,
             model.clone(),
             geometry,
@@ -2285,14 +2317,16 @@ mod tests {
         let geometry = geom();
         let mut dev = B3SoiDd::new(
             "m1".to_string(),
-            1,
-            2,
-            2,
-            3,
-            4,
-            5,
-            0,
-            6,
+            B3SoiDdNodes {
+                node_drain: 1,
+                node_gate_external: 2,
+                node_gate: 2,
+                node_source: 3,
+                node_e: 4,
+                node_body: 5,
+                node_p: 0,
+                node_temp: 6,
+            },
             BodyMode::TiedIdeal,
             model.clone(),
             geometry,
@@ -2342,14 +2376,16 @@ mod tests {
         let geometry = geom();
         let dev = B3SoiDd::new(
             "m1".to_string(),
-            1,
-            2,
-            2,
-            3,
-            4,
-            5,
-            0,
-            6,
+            B3SoiDdNodes {
+                node_drain: 1,
+                node_gate_external: 2,
+                node_gate: 2,
+                node_source: 3,
+                node_e: 4,
+                node_body: 5,
+                node_p: 0,
+                node_temp: 6,
+            },
             BodyMode::TiedIdeal,
             model.clone(),
             geometry,
@@ -2364,11 +2400,13 @@ mod tests {
         dev.stamp_charge_companion(
             &charge,
             ag0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
+            SoiCompanionCurrents {
+                cqg: 0.0,
+                cqb: 0.0,
+                cqd: 0.0,
+                cqe: 0.0,
+                cqth: 0.0,
+            },
             &hot_voltages,
             &mut stamper,
         );

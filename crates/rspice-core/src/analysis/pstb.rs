@@ -28,7 +28,6 @@
 //! For oscillators, one μ = 0 always (corresponding to phase shifts along orbit).
 //! The other exponents determine amplitude stability.
 
-#![allow(clippy::needless_range_loop)]
 use crate::abort_signal::AbortSignal;
 use crate::analysis::{
     FloquetOrbitKind, FloquetSpectrumEvidence, FloquetStabilityVerdict, classify_floquet_stability,
@@ -669,7 +668,7 @@ fn ensure_not_aborted(abort: &dyn AbortSignal) -> Result<(), SimulationError> {
 #[inline]
 fn poll_periodically(abort: &dyn AbortSignal, index: usize) -> Result<(), SimulationError> {
     const ABORT_POLL_STRIDE: usize = 64;
-    if index % ABORT_POLL_STRIDE == 0 {
+    if index.is_multiple_of(ABORT_POLL_STRIDE) {
         ensure_not_aborted(abort)?;
     }
     Ok(())
@@ -726,8 +725,10 @@ mod tests {
         }
 
         for threshold in [0.999, 0.0, -1.0, Value::NAN, Value::INFINITY] {
-            let mut config = PstbConfig::default();
-            config.stability_threshold = threshold;
+            let config = PstbConfig {
+                stability_threshold: threshold,
+                ..Default::default()
+            };
             let mut analyzer = PstbAnalyzer::new(config);
             assert!(
                 analyzer
@@ -788,8 +789,10 @@ mod tests {
 
     #[test]
     fn wide_outer_threshold_cannot_manufacture_stability() {
-        let mut config = PstbConfig::default();
-        config.stability_threshold = 2.0;
+        let config = PstbConfig {
+            stability_threshold: 2.0,
+            ..Default::default()
+        };
         let mut analyzer = PstbAnalyzer::new(config);
         let result = analyzer
             .analyze_monodromy_with_abort(&[vec![1.5]], 1.0, &NoAbort)
@@ -894,8 +897,10 @@ mod tests {
 
     #[test]
     fn subharmonic_reporting_honors_configuration() {
-        let mut config = PstbConfig::default();
-        config.detect_subharmonics = false;
+        let config = PstbConfig {
+            detect_subharmonics: false,
+            ..Default::default()
+        };
         let mut analyzer = PstbAnalyzer::new(config);
         let result = analyzer
             .analyze_monodromy_with_abort(&[vec![-1.0]], 1.0, &NoAbort)

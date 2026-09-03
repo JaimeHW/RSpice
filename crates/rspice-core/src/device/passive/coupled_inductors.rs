@@ -37,7 +37,6 @@
 //! ```
 //! where `[L]` is the inductance matrix with Lij = k*sqrt(Li*Lj) for i≠j.
 
-#![allow(clippy::needless_range_loop, clippy::too_many_arguments)]
 use crate::device::traits::{DynamicDevice, MatrixStamper};
 use crate::numerics::integration::CompanionCoefficients;
 use crate::{NodeId, Value};
@@ -55,6 +54,17 @@ pub struct InductorCoupling {
     pub inductor_names: Vec<String>,
     /// Coupling coefficient (0 < k ≤ 1)
     pub coefficient: Value,
+}
+
+/// One winding of a coupled-inductor pair: the branch it spans and its
+/// self-inductance. The pair constructor took two of these interleaved as six
+/// positional arguments, where swapping a node between windings changed the
+/// mutual sign without any type error.
+#[derive(Clone, Copy)]
+pub struct CoupledWinding {
+    pub node_pos: NodeId,
+    pub node_neg: NodeId,
+    pub inductance: Value,
 }
 
 impl InductorCoupling {
@@ -117,16 +127,17 @@ pub struct CoupledInductorPair {
 
 impl CoupledInductorPair {
     /// Create a new coupled inductor pair
-    pub fn new(
-        name: String,
-        node1_pos: NodeId,
-        node1_neg: NodeId,
-        l1: Value,
-        node2_pos: NodeId,
-        node2_neg: NodeId,
-        l2: Value,
-        k: Value,
-    ) -> Self {
+    pub fn new(name: String, first: CoupledWinding, second: CoupledWinding, k: Value) -> Self {
+        let CoupledWinding {
+            node_pos: node1_pos,
+            node_neg: node1_neg,
+            inductance: l1,
+        } = first;
+        let CoupledWinding {
+            node_pos: node2_pos,
+            node_neg: node2_neg,
+            inductance: l2,
+        } = second;
         let m = k.abs().min(1.0) * (l1 * l2).sqrt();
 
         Self {
@@ -445,19 +456,25 @@ impl MultiWindingTransformer {
         // coeff_g — they differ for Gear2); the voltage history applies for
         // Trapezoidal only. Dual of CompanionCoefficients::inductor_veq.
         let mut v_eq = vec![0.0; n];
-        for i in 0..n {
-            for j in 0..n {
-                v_eq[i] +=
-                    coeff.coeff_v_n * self.inductance_matrix[i][j] * self.currents_prev[j] / dt;
+        for ((equivalent, inductances), &previous_voltage) in v_eq
+            .iter_mut()
+            .zip(&self.inductance_matrix)
+            .zip(&self.voltages_prev)
+            .take(n)
+        {
+            for ((&inductance, &current), &current_prev_prev) in inductances
+                .iter()
+                .zip(&self.currents_prev)
+                .zip(&self.currents_prev_prev)
+                .take(n)
+            {
+                *equivalent += coeff.coeff_v_n * inductance * current / dt;
                 if coeff.needs_two_history {
-                    v_eq[i] += coeff.coeff_v_n_minus_1
-                        * self.inductance_matrix[i][j]
-                        * self.currents_prev_prev[j]
-                        / dt;
+                    *equivalent += coeff.coeff_v_n_minus_1 * inductance * current_prev_prev / dt;
                 }
             }
             if coeff.coeff_i_n != 0.0 {
-                v_eq[i] += coeff.coeff_i_n * self.voltages_prev[i];
+                *equivalent += coeff.coeff_i_n * previous_voltage;
             }
         }
 
@@ -482,9 +499,9 @@ impl MultiWindingTransformer {
             matrix.stamp(branch_i, pos_i, 1.0);
             matrix.stamp(branch_i, neg_i, -1.0);
 
-            for j in 0..n {
-                let branch_j = self.branches[j].expect("Branch index must be set");
-                matrix.stamp(branch_i, branch_j, -r_matrix[i][j]);
+            for (&resistance, branch) in r_matrix[i].iter().zip(&self.branches).take(n) {
+                let branch_j = branch.expect("Branch index must be set");
+                matrix.stamp(branch_i, branch_j, -resistance);
             }
 
             matrix.stamp(pos_i, branch_i, 1.0);
@@ -592,7 +609,20 @@ mod correction_tests {
 
     #[test]
     fn mutual_correction_matches_absolute_companion_polynomial() {
-        let mut pair = CoupledInductorPair::new("K1".to_string(), 1, 0, 2.0, 2, 0, 8.0, 0.5);
+        let mut pair = CoupledInductorPair::new(
+            "K1".to_string(),
+            CoupledWinding {
+                node_pos: 1,
+                node_neg: 0,
+                inductance: 2.0,
+            },
+            CoupledWinding {
+                node_pos: 2,
+                node_neg: 0,
+                inductance: 8.0,
+            },
+            0.5,
+        );
         pair.current1_prev = 1.25;
         pair.current1_prev_prev = 1.0;
         pair.current2_prev = -0.75;

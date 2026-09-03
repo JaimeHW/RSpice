@@ -244,15 +244,18 @@ impl Engine {
         &self,
         has_b3soi_devices: bool,
         non_electrical_state_mask: &[bool],
-        old: &[Value],
-        proposal: &[Value],
-        damping_state: &mut NewtonDampingState,
+        step: DampingStep<'_>,
         junction_owns_steps: bool,
         mut merit: F,
     ) -> Vec<Value>
     where
         F: FnMut(&[Value]) -> Option<Value>,
     {
+        let DampingStep {
+            old,
+            proposal,
+            damping_state,
+        } = step;
         if junction_owns_steps {
             return proposal.to_vec();
         }

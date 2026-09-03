@@ -5,7 +5,6 @@
 //! - Pre-computed matrix indices for zero-cost stamping in the hot loop
 //! - Separation of topology (static) from values (mutable)
 
-#![allow(clippy::too_many_arguments)]
 use crate::device::behavioral::BehavioralSources;
 use crate::device::{Cccs, Ccvs, MatrixStamper, NonlinearConvergenceCriteria, Vccs, Vcvs};
 use crate::numerics::integration::CompanionCoefficients;
@@ -20,21 +19,22 @@ use std::sync::Arc;
 use thiserror::Error;
 
 mod storage;
+pub use magnetic::XyceCoreCompanionMode;
 pub use storage::{
-    Capacitors, CurrentSources, Diodes, Inductors, ResistorBranches, Resistors,
-    ThermalResistorState, VoltageSources,
+    Capacitors, CurrentSources, Diodes, Inductors, ResistorBranches, ResistorValues, Resistors,
+    SolutionDependentCompanionStep, SourceExcitation, ThermalResistorState, VoltageSources,
 };
 // The nonlinear device arrays are stamping machinery that no frontend names,
 // so they stay reachable inside the crate only. `Diodes` is re-exported above
 // because the public `CircuitData::diode_storage` returns one.
 pub(crate) use storage::{
     B3SoiDds, B3SoiFds, B3SoiPds, Bjts, Bsim3v3s, Bsim4v8s, Ekv3Mosfets, EkvMosfets, Mosfets,
-    SolutionDependentCapacitorState, Vdmoses,
+    SolutionDependentCapacitorSpec, SolutionDependentCapacitorState, Vdmoses,
 };
 mod construction;
 pub(crate) mod dae;
 mod external_models;
-pub(crate) use external_models::VerilogADcAcceptedStateCarrier;
+pub(crate) use external_models::{VerilogADcAcceptedStateCarrier, XspiceCompanionPolicy};
 mod force_accept;
 mod introspection;
 pub use introspection::{DeviceOpEntry, DeviceOpReport};

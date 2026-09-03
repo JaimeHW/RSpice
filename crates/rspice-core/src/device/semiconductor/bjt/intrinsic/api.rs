@@ -1,7 +1,5 @@
 //! Public BJT intrinsic API, operating-point accessors, and matrix stamping.
 
-#![allow(clippy::needless_range_loop)]
-
 use super::*;
 
 impl Bjt {
@@ -217,8 +215,8 @@ impl Bjt {
                 - (0..EXTERNAL_DIM)
                     .map(|col_idx| rows[row_idx][col_idx] * anchor[col_idx])
                     .sum::<Value>();
-            for col_idx in 0..EXTERNAL_DIM {
-                stamp_entry(matrix, row_idx, col_idx, rows[row_idx][col_idx]);
+            for (col_idx, &conductance) in rows[row_idx].iter().enumerate().take(EXTERNAL_DIM) {
+                stamp_entry(matrix, row_idx, col_idx, conductance);
             }
             if nodes[row_idx] > 0 {
                 rhs[nodes[row_idx] - 1] -= ieq;

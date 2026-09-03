@@ -160,6 +160,9 @@ impl CodeModel for MetadataOverlayModel {
     }
 }
 
+// `seegen`'s 1.57079 rad ceiling is XSPICE's own published parameter bound,
+// not an approximation of FRAC_PI_2; widening it would change the clamp.
+#[allow(clippy::approx_constant)]
 fn apply_builtin_metadata(
     model: &str,
     _ports: &mut Vec<PortSpec>,

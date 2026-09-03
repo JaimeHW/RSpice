@@ -18,6 +18,19 @@
 //! - [`runners`]: the authored-deck route and the direct entry points
 //! - [`exports`]: the `#[wasm_bindgen]` shims
 
+// Plan rule 2: no authored-input panic. Everything this surface reads comes
+// from a host-language caller, so an unchecked access is a crash that caller
+// can author. A proven invariant keeps its `expect` under a function-scope
+// allow naming the test that constructs the boundary case; everything else
+// returns a typed error.
+#![deny(
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic,
+    clippy::unreachable,
+    clippy::unwrap_used
+)]
+
 mod abort;
 mod document;
 mod dto;

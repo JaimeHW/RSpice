@@ -609,11 +609,13 @@ mod tests {
             Vec::new(),
             vec![inductor("L1"), coupling("Kbad", "Lmissing")],
         );
-        let mut netlist = Netlist::default();
-        netlist.subcircuits = vec![
-            subcircuit("parent_a", vec![leaf_a], Vec::new()),
-            subcircuit("parent_b", vec![leaf_b], Vec::new()),
-        ];
+        let netlist = Netlist {
+            subcircuits: vec![
+                subcircuit("parent_a", vec![leaf_a], Vec::new()),
+                subcircuit("parent_b", vec![leaf_b], Vec::new()),
+            ],
+            ..Default::default()
+        };
 
         let ParseError::UndefinedMutualInductorReference(error) =
             validate_mutual_inductor_references(&netlist)

@@ -3977,11 +3977,13 @@ impl XyceTestRunner {
                     netlist,
                     &element.name,
                     element.nodes.len(),
-                    *z0,
-                    *td,
-                    *freq,
-                    *nl,
-                    model.as_deref(),
+                    &LosslessLineSpec {
+                        z0: *z0,
+                        td: *td,
+                        freq: *freq,
+                        nl: *nl,
+                        model: model.as_deref(),
+                    },
                 )?,
                 ElementKind::BehavioralVoltage { expression, .. }
                 | ElementKind::BehavioralCurrent { expression, .. } => {
@@ -4299,16 +4301,7 @@ impl XyceTestRunner {
                     freq,
                     nl,
                     model,
-                } => Self::validate_lossless_transmission_line_contract(
-                    netlist,
-                    &element.name,
-                    element.nodes.len(),
-                    *z0,
-                    *td,
-                    *freq,
-                    *nl,
-                    model.as_deref(),
-                )?,
+                } => Self::validate_lossless_transmission_line_contract(netlist, &element.name, element.nodes.len(), &LosslessLineSpec { z0: *z0, td: *td, freq: *freq, nl: *nl, model: model.as_deref() })?,
                 ElementKind::VSwitch { .. } => {}
                 ElementKind::ISwitch {
                     control_element, ..
@@ -4574,12 +4567,15 @@ impl XyceTestRunner {
         netlist: &Netlist,
         element_name: &str,
         node_count: usize,
-        z0: Option<Value>,
-        td: Option<Value>,
-        freq: Option<Value>,
-        nl: Option<Value>,
-        model: Option<&str>,
+        spec: &LosslessLineSpec<'_>,
     ) -> Result<(), String> {
+        let LosslessLineSpec {
+            z0,
+            td,
+            freq,
+            nl,
+            model,
+        } = *spec;
         if node_count != 4 {
             return Err(format!(
                 "lossless transmission line '{element_name}' requires four electrical terminals, found {node_count}"

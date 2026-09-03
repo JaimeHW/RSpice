@@ -190,40 +190,42 @@ impl Engine {
     #[inline]
     pub(in crate::engine::transient) fn evaluate_vbic_dynamic_internal_state(
         bjt: &crate::device::Bjt,
-        vc: Value,
-        vb: Value,
-        ve: Value,
-        vs: Value,
-        coeff: &CompanionCoefficients,
-        dt: Value,
-        q_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
-        q_prev_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
-        cq_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
+        bias: BjtExternalBias,
+        step: VbicChargeStep<'_>,
         internal: [Value; BJT_INTERNAL_STATE_DIM],
     ) -> Option<VbicDynamicStateEvaluation> {
-        let mut snapshot = bjt.charge_snapshot_for_dynamic_state(vc, vb, ve, vs, internal);
-        Self::rebalance_vbic_dynamic_thermal_state(
-            bjt,
-            vc,
-            vb,
-            ve,
-            vs,
+        let BjtExternalBias { vc, vb, ve, vs } = bias;
+        let VbicChargeStep {
             coeff,
             dt,
             q_prev,
             q_prev_prev,
             cq_prev,
+        } = step;
+        let mut snapshot = bjt.charge_snapshot_for_dynamic_state(vc, vb, ve, vs, internal);
+        Self::rebalance_vbic_dynamic_thermal_state(
+            bjt,
+            BjtExternalBias { vc, vb, ve, vs },
+            VbicChargeStep {
+                coeff,
+                dt,
+                q_prev,
+                q_prev_prev,
+                cq_prev,
+            },
             &mut snapshot,
         );
         let base_static_g = snapshot.reduction.g_reduced;
         let linearization = Self::assemble_vbic_transient_linearization(
             bjt,
             &snapshot,
-            coeff,
-            dt,
-            q_prev,
-            q_prev_prev,
-            cq_prev,
+            VbicChargeStep {
+                coeff,
+                dt,
+                q_prev,
+                q_prev_prev,
+                cq_prev,
+            },
         )?;
         let residual = Self::vbic_internal_equation_residual(
             &linearization,
@@ -244,22 +246,26 @@ impl Engine {
 
     pub(in crate::engine::transient) fn improve_vbic_dynamic_internal_state_toward_target(
         bjt: &crate::device::Bjt,
-        vc: Value,
-        vb: Value,
-        ve: Value,
-        vs: Value,
-        coeff: &CompanionCoefficients,
-        dt: Value,
-        q_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
-        q_prev_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
-        cq_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
-        current_internal: [Value; BJT_INTERNAL_STATE_DIM],
-        _current_residual_norm: Value,
-        current_residual_objective: Value,
-        target_internal: [Value; BJT_INTERNAL_STATE_DIM],
-        envelope_reference: [Value; BJT_INTERNAL_STATE_DIM],
+        bias: BjtExternalBias,
+        step: VbicChargeStep<'_>,
+        progress: VbicInternalStateProgress,
         max_backtracks: usize,
     ) -> Option<VbicDynamicStateEvaluation> {
+        let VbicInternalStateProgress {
+            current_internal,
+            current_residual_norm: _current_residual_norm,
+            current_residual_objective,
+            target_internal,
+            envelope_reference,
+        } = progress;
+        let BjtExternalBias { vc, vb, ve, vs } = bias;
+        let VbicChargeStep {
+            coeff,
+            dt,
+            q_prev,
+            q_prev_prev,
+            cq_prev,
+        } = step;
         let mut alpha = 1.0;
         let mut best_state: Option<VbicDynamicStateEvaluation> = None;
 
@@ -287,15 +293,14 @@ impl Engine {
 
             let Some(candidate_state) = Self::evaluate_vbic_dynamic_internal_state(
                 bjt,
-                vc,
-                vb,
-                ve,
-                vs,
-                coeff,
-                dt,
-                q_prev,
-                q_prev_prev,
-                cq_prev,
+                BjtExternalBias { vc, vb, ve, vs },
+                VbicChargeStep {
+                    coeff,
+                    dt,
+                    q_prev,
+                    q_prev_prev,
+                    cq_prev,
+                },
                 candidate_internal,
             ) else {
                 alpha *= 0.5;

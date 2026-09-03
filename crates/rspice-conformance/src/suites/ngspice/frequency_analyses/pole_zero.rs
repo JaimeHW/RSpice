@@ -3,19 +3,25 @@ use super::*;
 impl TestRunner {
     pub(in crate::suites::ngspice) fn run_pz_test(
         &self,
-        name: &str,
-        cir_path: &Path,
-        source_path: &Path,
-        source: &str,
-        input_pos: &str,
-        input_neg: Option<&str>,
-        output_pos: &str,
-        output_neg: Option<&str>,
-        input_is_current: bool,
+        case: &RegressionCase<'_>,
+        ports: &PoleZeroPorts<'_>,
         compute_poles: bool,
         compute_zeros: bool,
-        start: std::time::Instant,
     ) -> TestResult {
+        let RegressionCase {
+            name,
+            cir_path,
+            source_path,
+            source,
+            start,
+        } = *case;
+        let PoleZeroPorts {
+            input_pos,
+            input_neg,
+            output_pos,
+            output_neg,
+            input_is_current,
+        } = *ports;
         let netlist = match Self::parse_regression_source(source, source_path) {
             Ok(n) => n,
             Err(e) => {

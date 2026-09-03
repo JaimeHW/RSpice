@@ -655,7 +655,12 @@ impl SignalProjection {
             let matched = select_inventory(source, signal);
             if !matched.is_empty() {
                 for index in matched {
-                    let candidate = source.signals[index].clone().into_projected();
+                    // `select_inventory` enumerates `source.signals`, so the
+                    // index is one it just produced.
+                    let Some(inventory) = source.signals.get(index) else {
+                        continue;
+                    };
+                    let candidate = inventory.clone().into_projected();
                     if !columns
                         .iter()
                         .any(|column| column.identity() == candidate.identity())
@@ -753,7 +758,7 @@ impl SignalProjection {
 
 /// Convert the core resolver's frontend column tuples into typed columns.
 fn frontend_columns(
-    columns: Vec<(String, &'static str, Vec<Value>)>,
+    columns: Vec<crate::analysis::measure_signals::FrontendOutputColumn>,
 ) -> Result<Vec<ProjectedSignal>, SimulationError> {
     columns
         .into_iter()
@@ -978,7 +983,10 @@ pub fn dc_sweep_observable_series(
                 order.push(name.clone());
                 vec![None; sweep.len()]
             });
-            slot[row] = Some(*value);
+            // The slot was sized from this same sweep on first insertion.
+            if let Some(cell) = slot.get_mut(row) {
+                *cell = Some(*value);
+            }
         }
     }
     order

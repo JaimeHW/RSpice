@@ -286,9 +286,9 @@ impl DeckPlanMaterializer<'_> {
             self.analyses.len(),
             "materialized analysis identities and namespaces",
         )?;
-        if is_implicit_op(&self.analyses) {
+        if let Some(only) = implicit_op_analysis(&self.analyses) {
             ensure_not_aborted(abort)?;
-            let planned = self.analyses[0].clone();
+            let planned = only.clone();
             let namespace = ArtifactNamespace::new(coordinate.stable_id(), planned.id());
             analyses.push(MaterializedAnalysis {
                 planned,
@@ -532,8 +532,14 @@ fn canonical_step_commands(
     Ok(ordered)
 }
 
-fn is_implicit_op(analyses: &[PlannedAnalysis]) -> bool {
-    analyses.len() == 1 && analyses[0].id().kind() == AnalysisKind::ImplicitOp
+/// The single implicit operating point a deck with no analysis card plans,
+/// if that is what this plan is. Returning the analysis rather than a flag
+/// keeps the caller from re-deriving the index the check just proved.
+fn implicit_op_analysis(analyses: &[PlannedAnalysis]) -> Option<&PlannedAnalysis> {
+    match analyses {
+        [only] if only.id().kind() == AnalysisKind::ImplicitOp => Some(only),
+        _ => None,
+    }
 }
 
 fn validate_analysis_identity(
@@ -542,7 +548,7 @@ fn validate_analysis_identity(
     coordinate: RunCoordinateId,
     abort: &dyn AbortSignal,
 ) -> Result<(), MaterializedRunError> {
-    let valid = if is_implicit_op(planned) {
+    let valid = if implicit_op_analysis(planned).is_some() {
         configured.is_empty()
     } else {
         let mut valid = planned.len() == configured.len();

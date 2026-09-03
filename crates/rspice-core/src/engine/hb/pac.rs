@@ -7,11 +7,9 @@
 //! `offset + k*f0`. See `harmonic_balance::solver::periodic_ac` for the
 //! conversion-matrix formulation.
 
-#![allow(clippy::needless_range_loop)]
-
 use super::*;
 use crate::abort_signal::{AbortSignal, NoAbort};
-use crate::analysis::harmonic_balance::PeriodicAcExcitation;
+use crate::analysis::harmonic_balance::{PeriodicAcExcitation, PeriodicSidebandWindow};
 use crate::analysis::pac::{PacConfig, PacResult};
 use crate::analysis::{HbConfig, HbError as AnalysisHbError, HbSolverState};
 
@@ -530,9 +528,11 @@ impl Engine {
             solver
                 .solve_periodic_ac_each_with_branch_voltages(
                     &state,
-                    offset,
-                    config.sideband_min,
-                    config.sideband_max,
+                    PeriodicSidebandWindow {
+                        offset_hz: offset,
+                        sideband_min: config.sideband_min,
+                        sideband_max: config.sideband_max,
+                    },
                     &excitations,
                     &branch_excitations,
                     |col, solution| {
