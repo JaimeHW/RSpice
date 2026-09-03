@@ -32,7 +32,7 @@ use crate::canonical_ir::{
 };
 use crate::codegen::{AssignmentStep, BytecodeProgram, CompiledModel, Instruction};
 use crate::jit::cfg_lanes::{ScalarLanes, scalarize_lanes};
-use crate::jit::cfg_plan_builder::{derivative_seeds, shipped_entry_lane};
+use crate::jit::cfg_plan_builder::{ShippedColumnLanes, derivative_seeds};
 use crate::jit::cfg_program::{CfgRuntimeBindings, lower_cfg_function};
 use crate::jit::expr::BranchUnknownRuntimeMapping;
 use crate::jit::plan_builder::canonical_branch_unknown_runtime_map;
@@ -854,7 +854,8 @@ fn the_cfg_jacobian_route_agrees_with_the_interpreter_and_the_oracles() {
         let variables = vec![0.0_f64; runtime.model.num_variables + 8];
 
         // ---- sparsity ---------------------------------------------------
-        let node_count = artifact.mir.nodes.len();
+        let column_lanes = ShippedColumnLanes::build(&runtime.model, &artifact.mir)
+            .unwrap_or_else(|error| panic!("{module}: shipped column lanes: {error}"));
         let mut cfg_pairs: HashSet<(usize, usize)> = HashSet::new();
         for (equation, row) in rows.iter().enumerate() {
             for (lane, entry) in row.iter().enumerate() {
@@ -866,7 +867,9 @@ fn the_cfg_jacobian_route_agrees_with_the_interpreter_and_the_oracles() {
         let mut shipped_pairs: HashSet<(usize, usize)> = HashSet::new();
         for (equation, program) in runtime.model.stamp_programs.iter().enumerate() {
             for entry in &program.jacobian_programs {
-                shipped_pairs.insert((equation, shipped_entry_lane(&entry.col_axis, node_count)));
+                if let Some(lane) = column_lanes.lane(&entry.col_axis) {
+                    shipped_pairs.insert((equation, lane));
+                }
             }
         }
         let paired = runtime.model.stamp_programs.len() == cfg.residuals.len();
@@ -1773,7 +1776,8 @@ fn the_cfg_reactive_jacobian_route_agrees_with_the_interpreter_and_the_oracles()
         }
 
         // ---- sparsity ---------------------------------------------------
-        let node_count = artifact.mir.nodes.len();
+        let column_lanes = ShippedColumnLanes::build(&runtime.model, &artifact.mir)
+            .unwrap_or_else(|error| panic!("{module}: shipped column lanes: {error}"));
         let mut cfg_pairs: HashSet<(usize, usize)> = HashSet::new();
         for (equation, row) in rows.iter().enumerate() {
             for (lane, entry) in row.iter().enumerate() {
@@ -1785,7 +1789,9 @@ fn the_cfg_reactive_jacobian_route_agrees_with_the_interpreter_and_the_oracles()
         let mut shipped_pairs: HashSet<(usize, usize)> = HashSet::new();
         for (equation, program) in runtime.model.stamp_programs.iter().enumerate() {
             for entry in &program.reactive_jacobians {
-                shipped_pairs.insert((equation, shipped_entry_lane(&entry.col_axis, node_count)));
+                if let Some(lane) = column_lanes.lane(&entry.col_axis) {
+                    shipped_pairs.insert((equation, lane));
+                }
             }
         }
         let paired = runtime.model.stamp_programs.len() == cfg.residuals.len();

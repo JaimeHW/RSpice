@@ -316,15 +316,79 @@ pub(crate) struct CfgModelPlan {
     pub(crate) report: CfgPlanReport,
 }
 
-/// Which lane a shipped Jacobian column stands for.
+/// Which derivative lane a shipped Jacobian column stands for.
 ///
-/// The inverse of the seed-list construction below, and the same arithmetic the
-/// generated backend's `emit_row` performs when it splits a lane index back
-/// into a node column and a branch column.
-pub(crate) fn shipped_entry_lane(axis: &ColumnAxis, node_count: usize) -> usize {
-    match axis {
-        ColumnAxis::Node(node) => *node,
-        ColumnAxis::Branch(branch) => node_count + *branch,
+/// A node column is its own lane, which is the inverse of the seed-list
+/// construction below and the same arithmetic the generated backend's `emit_row`
+/// performs when it splits a lane index back into a node column and a branch
+/// column. A *branch* column is not, and that is what this type exists for.
+///
+/// # Why a branch column is not `node_count + ordinal`
+///
+/// MIR mints one branch-current unknown per potential or indirect **equation**
+/// (`collect_branch_unknowns`), so a branch contributed to more than once
+/// carries more than one. Angelov writes its optional gate resistance as five
+/// contributions to `V(g,gi)` — the resistance, the inductance, the thermal
+/// noise, the inductance again in the `Rg == 0` arm, and the short in the arm
+/// where both are zero — and MIR gives that one branch unknowns 5 through 9.
+///
+/// The solver does not work that way: a branch has one flow, so the shipped
+/// route gives the whole branch a single `branch_sources` entry and
+/// [`ColumnAxis::Branch`] numbers *those*. The CFG route agrees with the solver
+/// — `CfgLowerer::branch_unknown_by_nodes` reads a branch's flow as the first
+/// MIR unknown on it — so the derivative row is populated at that leader's lane
+/// and nowhere else on the branch.
+///
+/// Adding `node_count` to a shipped branch ordinal therefore names the right
+/// lane only while no branch is contributed to twice, and names *a different
+/// branch's* unknown as soon as one is. Angelov measured it: stamp 29 is the
+/// first equation of `V(si,sii)`, whose solver column is 6, and lane
+/// `16 + 6 = 22` is MIR unknown 6 — one of the five on `V(g,gi)`. The residual
+/// has no derivative there, so the entry was taken for a structural zero and
+/// lowered to constant zero while the shipped route stamped `Rs_T` = 0.05 into
+/// the matrix.
+pub(crate) struct ShippedColumnLanes {
+    /// Indexed by the shipped route's branch ordinal: the lane of the MIR
+    /// branch unknown whose flow that solver column is, or `None` for an
+    /// ordinal no MIR unknown claims.
+    branch_lanes: Vec<Option<usize>>,
+}
+
+impl ShippedColumnLanes {
+    /// Built from the same endpoint matching the runtime binding uses, so the
+    /// two agree about which solver branch an unknown belongs to by
+    /// construction rather than by a second rule that could drift.
+    ///
+    /// The leader is the first MIR unknown on the branch, in MIR order, which
+    /// is the one `branch_unknown_by_nodes` picks. An `inverted` leader would
+    /// mean the solver source runs against the equation that minted it; the
+    /// derivative would then need a sign the lane cannot carry, so no lane is
+    /// recorded and the module is refused rather than lowered with a flipped
+    /// column.
+    pub(crate) fn build(model: &CompiledModel, mir: &MirModel) -> JitResult<Self> {
+        let mut branch_lanes = vec![None; model.branch_sources.len()];
+        for (index, mapping) in canonical_branch_unknown_runtime_map(model, mir)?
+            .into_iter()
+            .enumerate()
+        {
+            if mapping.inverted {
+                continue;
+            }
+            if let Some(slot) = branch_lanes.get_mut(mapping.runtime_index) {
+                slot.get_or_insert(mir.nodes.len() + index);
+            }
+        }
+        Ok(Self { branch_lanes })
+    }
+
+    /// `None` for a branch column no MIR unknown leads, which the plan builder
+    /// refuses on and the sparsity censuses drop: a column with no lane is a
+    /// position neither route can hold.
+    pub(crate) fn lane(&self, axis: &ColumnAxis) -> Option<usize> {
+        match axis {
+            ColumnAxis::Node(node) => Some(*node),
+            ColumnAxis::Branch(branch) => self.branch_lanes.get(*branch).copied().flatten(),
+        }
     }
 }
 
@@ -751,7 +815,6 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
     let slots = StateSlotMapping::build(model, &artifact.hir, &artifact.mir);
 
     let mut report = CfgPlanReport::default();
-    let node_count = artifact.mir.nodes.len();
 
     // One lowering closure, so every entry reaches the block model by the same
     // three steps: prune to the output, lower, adopt through the module's slot
@@ -786,11 +849,15 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
     // routes have numbered the unknowns differently. The limiter correction is
     // a displacement rather than a coordinate, so a shipped column landing on
     // it would mean the same thing.
-    let require_lane = |axis: &ColumnAxis,
-                        node_count: usize,
-                        entry: CfgPlanEntry|
-     -> Result<usize, CfgPlanRefused> {
-        let lane = shipped_entry_lane(axis, node_count);
+    let column_lanes = ShippedColumnLanes::build(model, &artifact.mir)
+        .map_err(|error| refuse(CfgPlanRefusal::LaneUnmapped, error.to_string()))?;
+    let require_lane = |axis: &ColumnAxis, entry: CfgPlanEntry| -> Result<usize, CfgPlanRefused> {
+        let Some(lane) = column_lanes.lane(axis) else {
+            return Err(refuse(
+                CfgPlanRefusal::LaneUnmapped,
+                format!("{entry}: {axis:?} leads no branch unknown"),
+            ));
+        };
         if lane >= seeds.len() || Some(lane) == correction_lane {
             return Err(refuse(
                 CfgPlanRefusal::LaneUnmapped,
@@ -826,14 +893,14 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
             vec![(stamp_entry, scalar(residual, stamp_entry)?)];
         for (entry_index, jacobian) in stamp.jacobian_programs.iter().enumerate() {
             let entry = CfgPlanEntry::Jacobian(stamp_index, entry_index);
-            let lane = require_lane(&jacobian.col_axis, node_count, entry)?;
+            let lane = require_lane(&jacobian.col_axis, entry)?;
             if let Some(value) = jacobian_rows[stamp_index].get(lane).copied().flatten() {
                 row_entries.push((entry, scalar(value, entry)?));
             }
         }
         for (entry_index, reactive) in stamp.reactive_jacobians.iter().enumerate() {
             let entry = CfgPlanEntry::ReactiveJacobian(stamp_index, entry_index);
-            let lane = require_lane(&reactive.col_axis, node_count, entry)?;
+            let lane = require_lane(&reactive.col_axis, entry)?;
             if let Some(value) = reactive_rows[stamp_index].get(lane).copied().flatten() {
                 row_entries.push((entry, scalar(value, entry)?));
             }
@@ -1375,12 +1442,37 @@ fn read_set_optional(
 
 #[cfg(all(test, feature = "native"))]
 mod tests {
-    use super::{CfgPlanRefusal, PlanRoute, build_default_model_plan_reported};
+    use super::{
+        CfgNoiseScope, CfgPlanRefusal, PlanRoute, ShippedColumnLanes,
+        build_default_model_plan_reported, build_model_plan_from_canonical_cfg,
+    };
     use crate::canonical_ir::CanonicalIrArtifact;
-    use crate::codegen::CompiledModel;
+    use crate::codegen::{ColumnAxis, CompiledModel};
     use crate::jit::model_plan::NativeModelPlan;
     use crate::jit::plan_builder::build_model_plan_with_canonical_ir;
     use crate::{CompilerOptions, VerilogACompiler};
+
+    /// Angelov's optional series resistance, reduced to the two branches that
+    /// make the numbering diverge.
+    ///
+    /// `V(a, b)` is contributed to twice, so MIR mints two branch-current
+    /// unknowns for one branch while the solver gives it one column. Every
+    /// solver column after it is then a different number from the MIR unknown
+    /// that shares its ordinal.
+    const REPEATED_POTENTIAL_CONTRIBUTION: &str = r#"
+module cfg_repeated_potential_branch(a, b, c);
+  inout a, b, c;
+  electrical a, b, c;
+  parameter real r = 0.05;
+  parameter real l = 1.0e-9;
+  parameter real rs = 0.25;
+  analog begin
+    V(a, b) <+ I(a, b) * r;
+    V(a, b) <+ ddt(l * I(a, b));
+    V(b, c) <+ I(b, c) * rs;
+  end
+endmodule
+"#;
 
     /// A resistor, a capacitor and a thermal noise source: one module carrying
     /// all four kinds of value entry the flip decides between.
@@ -1454,6 +1546,46 @@ endmodule
             forms.push(("static_conditions", entry.borrow().form_name()));
         }
         forms
+    }
+
+    /// A branch written twice must not shift the next branch's column.
+    ///
+    /// The census measured this on Angelov as `jacobians[29][5]`: the shipped
+    /// route stamped `Rs_T` = 0.05 into the matrix and the CFG route held the
+    /// entry structurally absent, because solver column 6 was read as MIR
+    /// unknown 6 — one of the five on `V(g,gi)` — instead of unknown 10, the
+    /// one the equation actually differentiates against.
+    #[test]
+    fn a_branch_contributed_to_twice_does_not_shift_the_next_branchs_column() {
+        let (model, artifact) = compile(REPEATED_POTENTIAL_CONTRIBUTION);
+        // Not vacuous: the two numbering spaces really do differ here.
+        assert_eq!(
+            artifact.mir.branch_unknowns.len(),
+            3,
+            "MIR mints one branch unknown per potential equation"
+        );
+        assert_eq!(
+            model.branch_sources.len(),
+            2,
+            "the solver gives each physical branch one column"
+        );
+
+        let lanes = ShippedColumnLanes::build(&model, &artifact.mir).expect("shipped column lanes");
+        let nodes = artifact.mir.nodes.len();
+        assert_eq!(lanes.lane(&ColumnAxis::Branch(0)), Some(nodes));
+        assert_eq!(
+            lanes.lane(&ColumnAxis::Branch(1)),
+            Some(nodes + 2),
+            "solver column 1 is the third MIR unknown, not the second"
+        );
+
+        let plan = build_model_plan_from_canonical_cfg(&model, &artifact, CfgNoiseScope::Cfg)
+            .expect("the CFG plan builds");
+        assert!(
+            plan.report.structural_zeros.is_empty(),
+            "every column of this module is a derivative the CFG route holds: {:?}",
+            plan.report.structural_zeros
+        );
     }
 
     /// The flip, stated as the shape of one plan built on [`PlanRoute::Cfg`]:
