@@ -39,8 +39,9 @@ use super::cfg::{
     CfgUnaryOp, CfgValueKind, CfgValueType, CfgVariable, CfgZiPolynomial, SsaBuilder,
 };
 use super::hir::{
-    HirAnalogOperator, HirContribution, HirContributionKind, HirCrossDirection, HirExprKind,
-    HirExpression, HirLaplaceKind, HirLimiterArgument, HirModel, HirRegion, HirZiKind,
+    HirAnalogOperator, HirAssignment, HirContribution, HirContributionKind, HirCrossDirection,
+    HirExprKind, HirExpression, HirLaplaceKind, HirLimiterArgument, HirModel, HirRegion,
+    HirStatement, HirZiKind,
 };
 use super::mir::{MirEquationKind, MirModel};
 use super::noise::{contains_noise, is_noise_call, string_literal};
@@ -373,6 +374,11 @@ enum LeafKey {
     NodePotential(NodeId),
     BranchFlow(BranchId),
     BranchUnknownFlow(BranchUnknownId),
+    ContributedCurrent {
+        pos: Option<NodeId>,
+        neg: Option<NodeId>,
+        through: ContributionId,
+    },
     NoiseProcess(u32),
 }
 
@@ -406,6 +412,26 @@ struct CfgLowerer<'a> {
     /// Whether `$port_connected` is a runtime leaf rather than the constant
     /// `1.0`. See [`CfgModel::from_hir_for_executable_backend`].
     per_instance_ports: bool,
+    /// Whether the module prologue is evaluated into the entry block. See
+    /// [`Self::prologue`].
+    lower_prologue: bool,
+    /// See [`CfgLowerMode::frozen_event_state`].
+    frozen_event_state: bool,
+    /// The entry block's `EventState` leaf for each event-controlled variable,
+    /// when that leaf is what a read of the variable means. Empty unless
+    /// [`Self::frozen_event_state`].
+    frozen_event_states: HashMap<VariableId, ValueId>,
+    /// See [`CfgLowerMode::frozen_contribution_current`].
+    frozen_contribution_current: bool,
+    /// The current contributions the walk has already completed, in walk order.
+    ///
+    /// Walk order, not reachability: a contribution under an untaken guard has
+    /// still *happened* as far as a probe below it is concerned, because the
+    /// storage the probe reads holds that contribution's slot either way — zero
+    /// when the guard did not take. That is what the shipped route does, whose
+    /// prior-current probe set grows by equation index and knows nothing about
+    /// guards, and matching it here is the whole point.
+    completed_current_contributions: Vec<ContributionId>,
     metadata_assignment_value: bool,
     /// Whether the expression being lowered is a contribution's right-hand
     /// side. Verilog-AMS 2023 section 4.5.12 requires a strictly positive
@@ -761,21 +787,103 @@ struct CfgLowerMode {
     /// so `$port_connected` is a runtime leaf rather than the constant `1.0`.
     /// See [`CfgModel::from_hir_for_executable_backend`].
     per_instance_ports: bool,
+    /// Evaluate [`HirModel::prologue_statements`] into the entry block before
+    /// the body, so a body read of a localparam or a declaration initializer
+    /// sees what the initializer wrote. See [`CfgLowerer::prologue`].
+    lower_prologue: bool,
+    /// Whether a read of an event-controlled variable is the entry block's
+    /// `EventState` leaf rather than the body's reaching definition.
+    ///
+    /// # Which consumer owns the event body
+    ///
+    /// The consumer decides, because the consumer decides whether the event
+    /// body has already run. A generated device computes everything from this
+    /// CFG: the leaf is the *accepted* value its runtime restored, the body
+    /// applies the event on top of it, and what comes out is the candidate the
+    /// device stores. That is one application of the event body and it is
+    /// correct.
+    ///
+    /// An executable plan does not. It keeps the MIR route's assignment pass —
+    /// see [`crate::jit::cfg_plan_builder`] — and that pass has already run the
+    /// guard-folded event body into the variable's runtime slot before any
+    /// value entry executes. The leaf reads that slot, so by the time the CFG's
+    /// body applies the event again it is applying it a *second* time:
+    /// `checkpoint_before_acceptance_excludes_step_event_variable_candidates`
+    /// counted 2.0 where the shipped route counts 1.0.
+    ///
+    /// So the residual reads the slot, which is exactly the
+    /// `NativeOp::LoadVariable` the postfix route's own read lowers to — the
+    /// two routes agree by identity of leaf and op, the standard
+    /// `$port_connected` set. The body's writes to the variable are then dead
+    /// on this route and the pruner drops them; they are still what
+    /// [`CfgModel::event_state_candidates`] reads, which only the generated
+    /// backend consumes.
+    frozen_event_state: bool,
+    /// Whether a probe of a branch nothing solves for is the frozen
+    /// [`CfgValueKind::ContributedCurrent`] leaf rather than the running sum of
+    /// the contributions themselves.
+    ///
+    /// # Which consumer owns the contributed current
+    ///
+    /// The same question `frozen_event_state` answers, with the same answer: it
+    /// depends on whether the consumer computes the other equation.
+    ///
+    /// A generated device does. Its residual for one branch and its probe of
+    /// another are two expressions in one emitted function, so inlining the
+    /// contribution is not just correct, it is the only thing that *is* — the
+    /// device has no per-contribution current storage to read instead.
+    ///
+    /// An executable plan does not. It keeps the shipped route's equation
+    /// order and its `currents` storage, so by the time a later entry runs, the
+    /// earlier contribution's current is a number the runtime is holding, and
+    /// `crate::native`'s `lower_branch_access` reads it — never recomputes it.
+    /// The difference is a whole matrix and not a rounding: inlining makes the
+    /// probe differentiable, so
+    /// `native_device_stamps_internal_node_current_probe_alias_jacobian_without_fallback`
+    /// counted 4.5 where the shipped route counts 2.5.
+    ///
+    /// So the executable lowering emits the leaf, whose derivative is zero, and
+    /// [`crate::native::cfg_program`] translates it to the same
+    /// `LoadCurrent`/`LoadPriorCurrent` the shipped route chose. The two routes
+    /// then agree by identity of leaf and op, which is the standard the
+    /// `$port_connected` and event-state splits were held to.
+    frozen_contribution_current: bool,
 }
 
 impl CfgLowerMode {
+    /// # Why the generated backend does not lower the prologue *yet*
+    ///
+    /// It has the same hole, and for the same reason — it is built from the
+    /// body too — so this is not a difference the two consumers have earned,
+    /// the way `per_instance_ports` is. It is a frozen artifact: the forty-three
+    /// shipped devices are checked in as generated Rust under a `bundle_digest`,
+    /// and `hisimsotb`'s body reads three localparams (`TN`, `QN`, `QB` —
+    /// `hisimsotb.va:657`), so turning this on here changes that device's
+    /// emitted code. Flipping it is a one-word change plus a regeneration, and
+    /// it is a *fix*: today those reads compile to zero.
     const GENERATED: Self = Self {
         noise_metadata_only: false,
         per_instance_ports: false,
+        lower_prologue: false,
+        frozen_event_state: false,
+        frozen_contribution_current: false,
     };
     #[cfg(any(feature = "native", feature = "wasm-jit"))]
     const EXECUTABLE: Self = Self {
         noise_metadata_only: false,
         per_instance_ports: true,
+        lower_prologue: true,
+        frozen_event_state: true,
+        frozen_contribution_current: true,
     };
+    /// Raw grouped-noise metadata is lowered for the generated backend and is
+    /// part of the same frozen output, so it stays with `GENERATED` here.
     const NOISE_METADATA: Self = Self {
         noise_metadata_only: true,
         per_instance_ports: true,
+        lower_prologue: false,
+        frozen_event_state: false,
+        frozen_contribution_current: false,
     };
 }
 
@@ -814,6 +922,11 @@ impl<'a> CfgLowerer<'a> {
             noise_processes: Vec::new(),
             noise_metadata_only: mode.noise_metadata_only,
             per_instance_ports: mode.per_instance_ports,
+            lower_prologue: mode.lower_prologue,
+            frozen_event_state: mode.frozen_event_state,
+            frozen_event_states: HashMap::new(),
+            frozen_contribution_current: mode.frozen_contribution_current,
+            completed_current_contributions: Vec::new(),
             metadata_assignment_value: false,
             zi_direct_assignment: false,
             diagnostics: Vec::new(),
@@ -857,6 +970,9 @@ impl<'a> CfgLowerer<'a> {
             );
             self.builder
                 .write_variable(CfgVariable::Local(variable), entry, accepted);
+            if self.frozen_event_state {
+                self.frozen_event_states.insert(variable, accepted);
+            }
         }
         for index in 0..self.hir.contributions.len() {
             let contribution = ContributionId::from(index);
@@ -866,6 +982,10 @@ impl<'a> CfgLowerer<'a> {
                 self.builder
                     .write_variable(CfgVariable::Activation(contribution), entry, zero);
             }
+        }
+
+        if self.lower_prologue {
+            self.prologue();
         }
 
         let body = self.hir.body.clone();
@@ -997,27 +1117,7 @@ impl<'a> CfgLowerer<'a> {
 
     fn region(&mut self, region: &HirRegion, dynamic_topology_ancestor: bool) {
         match region {
-            HirRegion::Assignment(assignment) => {
-                if assignment.index.is_some() {
-                    self.unsupported(
-                        assignment.span,
-                        format!(
-                            "assignment to '{}' at a run-time array index",
-                            assignment.target_name
-                        ),
-                    );
-                    return;
-                }
-                let was_assignment = self.metadata_assignment_value;
-                self.metadata_assignment_value = self.noise_metadata_only;
-                let value = self.expr(assignment.expr.id);
-                self.metadata_assignment_value = was_assignment;
-                self.builder.write_variable(
-                    CfgVariable::Local(assignment.target),
-                    self.block,
-                    value,
-                );
-            }
+            HirRegion::Assignment(assignment) => self.assignment(assignment),
             HirRegion::Contribution(contribution) => {
                 if self.noise_metadata_only {
                     self.metadata_noise_expr(contribution.expression.id);
@@ -1059,6 +1159,69 @@ impl<'a> CfgLowerer<'a> {
         }
     }
 
+    /// Evaluate one assignment into its variable's reaching definition.
+    ///
+    /// Shared by the structured body and by the module prologue
+    /// ([`Self::prologue`]), which is the same construct at a different program
+    /// point: `HirStatement::Assignment` and `HirRegion::Assignment` are the
+    /// same [`HirAssignment`], so there is one lowering of it rather than two
+    /// that could drift.
+    fn assignment(&mut self, assignment: &HirAssignment) {
+        if assignment.index.is_some() {
+            self.unsupported(
+                assignment.span,
+                format!(
+                    "assignment to '{}' at a run-time array index",
+                    assignment.target_name
+                ),
+            );
+            return;
+        }
+        let was_assignment = self.metadata_assignment_value;
+        self.metadata_assignment_value = self.noise_metadata_only;
+        let value = self.expr(assignment.expr.id);
+        self.metadata_assignment_value = was_assignment;
+        self.builder
+            .write_variable(CfgVariable::Local(assignment.target), self.block, value);
+    }
+
+    /// Evaluate the module prologue into the entry block.
+    ///
+    /// The localparam and module-scope variable initializers run before the
+    /// `analog` keyword, so [`HirModel::body`] has no position for them and a
+    /// CFG built from the body alone has no definition of what they write. The
+    /// flat route runs them by simply executing its statement list in order;
+    /// this is the same thing at the one program point the body has for
+    /// "before anything else". A body assignment to the same variable then
+    /// overwrites the reaching definition exactly as a later statement
+    /// overwrites the slot, so a conditionally-reassigned initializer keeps its
+    /// declared value on the arm that does not assign it.
+    ///
+    /// Only the initializers themselves are here. A prologue initializer whose
+    /// right-hand side hoists a side effect — an analog function call with an
+    /// output argument — pushes that side effect into the flat list *and*
+    /// records it as a body region, because the analyzer's region stack is
+    /// already open when the prologue runs. Lowering it here as well would
+    /// duplicate every operator in it, and duplicating a `ddt` allocates a
+    /// second state record for one source operator. So the side effect stays
+    /// where the body has it, which leaves the initializer that reads it
+    /// reading a definition that does not reach the entry block:
+    /// [`Self::identifier`] warns and takes the language's zero, which is what
+    /// it did for the whole prologue before this existed.
+    fn prologue(&mut self) {
+        let statements = self.hir.statements.clone();
+        for index in &self.hir.prologue_statements {
+            let Some(HirStatement::Assignment(assignment)) =
+                statements.get(usize::try_from(*index).unwrap_or(usize::MAX))
+            else {
+                // A prologue statement is an initializer, never a loop, and the
+                // index came from the analyzer. Nothing to lower either way.
+                continue;
+            };
+            self.assignment(assignment);
+        }
+    }
+
     fn contribution(&mut self, contribution: &HirContribution, dynamic_topology_ancestor: bool) {
         self.zi_direct_assignment = true;
         let value = self.expr(contribution.expression.id);
@@ -1078,6 +1241,14 @@ impl<'a> CfgLowerer<'a> {
         // in the same block, so which runs first cannot change what either sees,
         // and this order keeps the contribution itself the first thing here.
         self.noise_sources(contribution.id, contribution.expression.id);
+
+        // After the expression, so a flow probe *inside* this contribution
+        // reads what came before it and not itself — which is the read the
+        // shipped route allows and the one every model that senses its own
+        // terminal current writes.
+        if contribution.kind == HirContributionKind::Current {
+            self.completed_current_contributions.push(contribution.id);
+        }
     }
 
     fn activate_contribution(&mut self, contribution: ContributionId) {
@@ -2233,6 +2404,12 @@ impl<'a> CfgLowerer<'a> {
 
     fn identifier(&mut self, name: &SmolStr, span: SourceSpanRef) -> ValueId {
         if let Some(variable) = self.variables_by_name.get(name).copied() {
+            // An event-controlled variable, for a consumer whose assignment
+            // pass has already run the body's event bodies into this
+            // variable's slot. See [`CfgLowerMode::frozen_event_state`].
+            if let Some(frozen) = self.frozen_event_states.get(&variable).copied() {
+                return frozen;
+            }
             // The whole reason this level exists: no history search, no
             // heuristic. The builder either has a reaching definition or the
             // variable is genuinely read before assignment.
@@ -2458,24 +2635,15 @@ impl<'a> CfgLowerer<'a> {
     /// HICUM's and BJT505's operating-point sections. Seven of the nine models
     /// that did not lower were this one construct.
     fn contributed_flow(&mut self, pos: Option<NodeId>, neg: Option<NodeId>) -> Option<ValueId> {
-        let contributions: Vec<(ContributionId, bool)> = self
-            .mir
-            .equations
-            .iter()
-            .filter(|equation| equation.kind == MirEquationKind::Current)
-            .filter_map(|equation| {
-                let branch = &equation.branch;
-                if branch.pos_node == pos && branch.neg_node == neg {
-                    return Some((equation.contribution, false));
-                }
-                if branch.pos_node == neg && branch.neg_node == pos {
-                    return Some((equation.contribution, true));
-                }
-                None
-            })
-            .collect();
+        let contributions = self.branch_current_contributions(pos, neg);
         if contributions.is_empty() {
             return None;
+        }
+
+        if self.frozen_contribution_current
+            && let Some(frozen) = self.frozen_contributed_flow(pos, neg, &contributions)
+        {
+            return Some(frozen);
         }
 
         let mut total: Option<ValueId> = None;
@@ -2493,6 +2661,66 @@ impl<'a> CfgLowerer<'a> {
             });
         }
         total
+    }
+
+    /// Every current contribution to one branch, with whether it drives the
+    /// branch the way the probe reads it.
+    fn branch_current_contributions(
+        &self,
+        pos: Option<NodeId>,
+        neg: Option<NodeId>,
+    ) -> Vec<(ContributionId, bool)> {
+        self.mir
+            .equations
+            .iter()
+            .filter(|equation| equation.kind == MirEquationKind::Current)
+            .filter_map(|equation| {
+                let branch = &equation.branch;
+                if branch.pos_node == pos && branch.neg_node == neg {
+                    return Some((equation.contribution, false));
+                }
+                if branch.pos_node == neg && branch.neg_node == pos {
+                    return Some((equation.contribution, true));
+                }
+                None
+            })
+            .collect()
+    }
+
+    /// The same probe, for a consumer that reads the contribution's current out
+    /// of storage instead of recomputing it.
+    ///
+    /// See [`CfgLowerMode::frozen_contribution_current`] for why the two
+    /// consumers differ.
+    ///
+    /// `None` when the walk has completed no matching contribution yet, and the
+    /// caller then takes the accumulator sum it always did. That is not a
+    /// second answer to the same question: every accumulator in that sum still
+    /// holds the entry block's zero, so the value and its derivative are the
+    /// zero the language gives a forward read, and there is no storage slot to
+    /// freeze it against — the shipped route registers a probe only for a
+    /// contribution it has already lowered. Refusing instead would drop a
+    /// module for an expression that is constant.
+    fn frozen_contributed_flow(
+        &mut self,
+        pos: Option<NodeId>,
+        neg: Option<NodeId>,
+        contributions: &[(ContributionId, bool)],
+    ) -> Option<ValueId> {
+        let through = *self
+            .completed_current_contributions
+            .iter()
+            .rev()
+            .find(|completed| {
+                contributions
+                    .iter()
+                    .any(|(contribution, _)| contribution == *completed)
+            })?;
+        Some(self.leaf(
+            LeafKey::ContributedCurrent { pos, neg, through },
+            CfgValueType::Real,
+            CfgValueKind::ContributedCurrent { pos, neg, through },
+        ))
     }
 
     /// The current entering the module at a terminal — `I(<p>)`.
@@ -2526,6 +2754,11 @@ impl<'a> CfgLowerer<'a> {
         // `self` while the builder is being written.
         let mir = self.mir;
         let mut terms: Vec<(ValueId, bool)> = Vec::new();
+        // Which branches this sum has already taken whole, so a branch carrying
+        // two contributions contributes its total once. Only the frozen route
+        // groups: the accumulator route sums the contributions themselves, and
+        // each of those is one term.
+        let mut frozen_branches: HashSet<(Option<NodeId>, Option<NodeId>)> = HashSet::new();
         for equation in &mir.equations {
             if equation.kind != MirEquationKind::Current {
                 continue;
@@ -2537,6 +2770,26 @@ impl<'a> CfgLowerer<'a> {
             } else {
                 continue;
             };
+            let branch = (equation.branch.pos_node, equation.branch.neg_node);
+            if self.frozen_contribution_current {
+                if frozen_branches.contains(&branch) {
+                    continue;
+                }
+                // The whole branch, through everything contributed to it so
+                // far, is one leaf — the same one a direct probe of that branch
+                // would read. `None` means nothing has been contributed to it
+                // yet, and then the accumulators below are still the entry
+                // block's zero, which is the same number with no storage to
+                // freeze it against.
+                let contributions = self.branch_current_contributions(branch.0, branch.1);
+                if let Some(frozen) =
+                    self.frozen_contributed_flow(branch.0, branch.1, &contributions)
+                {
+                    frozen_branches.insert(branch);
+                    terms.push((frozen, reversed));
+                    continue;
+                }
+            }
             let variable = CfgVariable::Residual(equation.contribution);
             let accumulated = self.builder.read_variable(variable, self.block)?;
             terms.push((accumulated, reversed));

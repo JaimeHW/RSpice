@@ -468,6 +468,7 @@ impl SemanticAnalyzer {
             branches: Vec::new(),
             contributions: Vec::new(),
             statements: Vec::new(),
+            prologue_statements: Vec::new(),
             body: Vec::new(),
             analog_site_count: 0,
             internal_nodes: Vec::new(),
@@ -1117,6 +1118,7 @@ impl SemanticAnalyzer {
             // keyword. They are still stamped, because a site names an
             // executed step whether or not one of the two lowerings elides it.
             let site = self.next_analog_site();
+            analyzed.prologue_statements.push(statements.len());
             statements.push(AnalyzedStatement::Assignment(AnalyzedAssignment {
                 target: localparam.name.clone(),
                 var_index,
@@ -1183,6 +1185,7 @@ impl SemanticAnalyzer {
                         )?;
                         let expr_type = self.infer_type(&expression)?;
                         let site = self.next_analog_site();
+                        analyzed.prologue_statements.push(statements.len());
                         statements.push(AnalyzedStatement::Assignment(AnalyzedAssignment {
                             target: analyzed.variables[var_index].name.clone(),
                             var_index,
@@ -1207,6 +1210,7 @@ impl SemanticAnalyzer {
                     self.lower_expression_with_side_effects(init, &mut analyzed, &mut statements)?;
                 let expr_type = self.infer_type(&expression)?;
                 let site = self.next_analog_site();
+                analyzed.prologue_statements.push(statements.len());
                 statements.push(AnalyzedStatement::Assignment(AnalyzedAssignment {
                     target: item.name.clone(),
                     var_index,

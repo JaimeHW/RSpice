@@ -169,6 +169,17 @@ pub enum EmitError {
     /// into one. Rust's `as` casts do none of those, so an emitted `&` would be
     /// a different function wearing the same spelling.
     UnsupportedIntegerOperator(ValueId),
+    /// A frozen contribution-current probe reached the generated emitter.
+    ///
+    /// [`CfgValueKind::ContributedCurrent`] exists for a consumer that keeps
+    /// the shipped route's per-contribution current storage and reads a
+    /// completed contribution out of it. This backend has no such storage — it
+    /// computes every equation of the module itself — which is why its lowering
+    /// mode inlines the contribution instead and never emits this kind. Meeting
+    /// one here means the CFG was lowered for the wrong consumer, and inventing
+    /// a value for it would silently freeze a quantity this backend is able to,
+    /// and is required to, differentiate through.
+    ContributedCurrentInGeneratedEmitter(ValueId),
 }
 
 impl std::fmt::Display for EmitError {
@@ -194,6 +205,11 @@ impl std::fmt::Display for EmitError {
             Self::UnsupportedIntegerOperator(value) => write!(
                 f,
                 "{value} is an analog integer operator unsupported by the direct generated-Rust runtime"
+            ),
+            Self::ContributedCurrentInGeneratedEmitter(value) => write!(
+                f,
+                "{value} is a frozen contribution-current probe, which belongs to the executable \
+                 lowering and has no storage in the generated-Rust runtime"
             ),
         }
     }
@@ -1747,6 +1763,9 @@ impl Emitter<'_> {
             }
             CfgValueKind::IntegerBitwise { .. } | CfgValueKind::IntegerBitwiseNot { .. } => {
                 return Err(EmitError::UnsupportedIntegerOperator(value));
+            }
+            CfgValueKind::ContributedCurrent { .. } => {
+                return Err(EmitError::ContributedCurrentInGeneratedEmitter(value));
             }
             CfgValueKind::Unary { op, input } => self.unary_expression(*op, *input),
             CfgValueKind::Binary { op, left, right } => self.binary_expression(*op, *left, *right),

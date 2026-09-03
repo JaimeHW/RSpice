@@ -10049,6 +10049,7 @@ mod tests {
             branches: Vec::new(),
             contributions: vec![contribution.clone()],
             statements: Vec::new(),
+            prologue_statements: Vec::new(),
             body: vec![AnalyzedRegion::Contribution(contribution)],
             analog_site_count: 1,
             internal_nodes: Vec::new(),

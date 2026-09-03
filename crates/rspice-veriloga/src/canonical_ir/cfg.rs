@@ -304,6 +304,40 @@ pub enum CfgValueKind {
     NodePotential(NodeId),
     BranchFlow(BranchId),
     BranchUnknownFlow(BranchUnknownId),
+    /// The current a model has already contributed to one branch, read as a
+    /// *frozen* quantity rather than as the expression that produced it.
+    ///
+    /// A branch nothing solves for has no unknown; its current is the running
+    /// sum of the flow contributions made to it, and a probe of that sum is
+    /// how a compact model reads back its own terminal current. The sum is in
+    /// hand at the read point, so a consumer that computes everything from this
+    /// CFG inlines it — see
+    /// [`CfgLowerer::contributed_flow`](super::cfg_lower) — and differentiates
+    /// through it like any other expression.
+    ///
+    /// A consumer that does *not* compute everything from this CFG cannot. An
+    /// executable plan keeps the shipped route's contribution order and its
+    /// per-contribution current storage, and reads a completed contribution out
+    /// of that storage: the value is whatever the runtime holds, so it has no
+    /// derivative, and this leaf is how the CFG says so. Its own derivative is
+    /// zero, which is exactly what "frozen" means, and no derivative rule is
+    /// needed for it — [`super::ad`] seeds only the kinds it lists.
+    ///
+    /// `pos`/`neg` name the probe's endpoints as written, in canonical node
+    /// numbering with `None` for ground, because a reversed probe is the
+    /// negation of the forward one and the reader owns which orientation its
+    /// storage keeps. `through` is the last contribution the walk had completed
+    /// when the probe was taken: it is what makes `I(a, b)` read after the
+    /// contributions see them and the same probe read before them see zero,
+    /// without the leaf having to be pinned to a block.
+    ///
+    /// The translation to storage indices is deliberately *not* here.
+    /// See `CfgRuntimeBindings` in `crate::native::cfg_program`.
+    ContributedCurrent {
+        pos: Option<NodeId>,
+        neg: Option<NodeId>,
+        through: ContributionId,
+    },
     /// Unit-amplitude representative of one semantic noise process.
     /// Its large-signal value is identically zero; AD uses the identity to
     /// recover coherent routing gains without changing DC/transient behavior.
@@ -1054,6 +1088,7 @@ impl CfgValueKind {
             | Self::NodePotential(_)
             | Self::BranchFlow(_)
             | Self::BranchUnknownFlow(_)
+            | Self::ContributedCurrent { .. }
             | Self::NoiseProcess(_)
             | Self::Ddt { .. }
             | Self::DdtScale
@@ -2047,6 +2082,7 @@ fn is_leaf(kind: &CfgValueKind) -> bool {
             | CfgValueKind::NodePotential(_)
             | CfgValueKind::BranchFlow(_)
             | CfgValueKind::BranchUnknownFlow(_)
+            | CfgValueKind::ContributedCurrent { .. }
             | CfgValueKind::NoiseProcess(_)
             | CfgValueKind::LaneSplat(_)
             | CfgValueKind::Staged { .. }

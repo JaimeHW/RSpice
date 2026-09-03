@@ -95,7 +95,8 @@ use smol_str::SmolStr;
 
 use crate::canonical_ir::{
     BlockId as CfgBlockId, CanonicalStateOperator, CfgBinaryOp, CfgFunction, CfgStateAllocation,
-    CfgTerminator, CfgUnaryOp, CfgValueKind, CfgValueType, MirModel, NodeId, ValueId as CfgValueId,
+    CfgTerminator, CfgUnaryOp, CfgValueKind, CfgValueType, ContributionId, MirEquationKind,
+    MirModel, NodeId, ValueId as CfgValueId,
 };
 use crate::jit::expr::{
     BinaryMathOp, BranchUnknownRuntimeMapping, CompareOp, ExtremumOp, LogicalOp, NativeOp,
@@ -105,6 +106,7 @@ use crate::jit::ssa::{
     BlockId, BuilderTerminator, BuilderValue, Program, ProgramBuilder, ValueType,
 };
 use crate::jit::{JitError, JitResult};
+use crate::vm::{CURRENT_PAIR_GROUND, terminal_pair_current_index};
 
 /// The runtime numbering a lowered program addresses.
 ///
@@ -132,6 +134,27 @@ pub(crate) struct CfgRuntimeBindings {
     /// rather than dropped: dropping one would renumber every slot after it,
     /// and a renumbered event state reads another variable's history.
     pub(crate) event_state_variables: Vec<Option<usize>>,
+    /// Every current contribution's branch and storage slot, in the shipped
+    /// route's equation order.
+    ///
+    /// What [`CfgValueKind::ContributedCurrent`] is translated through. The CFG
+    /// names the probe's endpoints canonically and says which contribution the
+    /// probe was taken after; this says where the runtime keeps each of them,
+    /// which is the half the CFG deliberately does not know.
+    pub(crate) contributed_currents: Vec<CfgContributedCurrent>,
+}
+
+/// One current contribution, as the runtime stores it.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CfgContributedCurrent {
+    pub(crate) contribution: ContributionId,
+    pub(crate) pos_node: Option<NodeId>,
+    pub(crate) neg_node: Option<NodeId>,
+    /// The slot `NativeOp::LoadPriorCurrent` reads. It is the equation's own
+    /// index, which is what the shipped planner registers a prior-current probe
+    /// under — see `push_prior_current_probe_aliases` in
+    /// [`crate::jit::plan_builder`].
+    pub(crate) current_index: usize,
 }
 
 impl CfgRuntimeBindings {
@@ -147,6 +170,23 @@ impl CfgRuntimeBindings {
         event_state_variables: Vec<Option<usize>>,
     ) -> Self {
         let terminal_count = mir.nodes.iter().filter(|node| node.is_external).count();
+        // Derived rather than supplied, unlike `branch_unknowns`: the shipped
+        // route's prior-current slot for an equation *is* that equation's index
+        // — `prior_named_branch_current_indices` in [`crate::native`] reads it
+        // straight off `mir.equations` — so there is no correlation with the
+        // compiled model to be had here, only a re-derivation of one.
+        let contributed_currents = mir
+            .equations
+            .iter()
+            .enumerate()
+            .filter(|(_, equation)| equation.kind == MirEquationKind::Current)
+            .map(|(index, equation)| CfgContributedCurrent {
+                contribution: equation.contribution,
+                pos_node: equation.branch.pos_node,
+                neg_node: equation.branch.neg_node,
+                current_index: index,
+            })
+            .collect();
         Self {
             model: model.into(),
             terminal_count,
@@ -154,6 +194,7 @@ impl CfgRuntimeBindings {
             parameter_count: mir.parameters.len(),
             branch_unknowns,
             event_state_variables,
+            contributed_currents,
         }
     }
 }
@@ -675,6 +716,9 @@ impl Lowerer<'_> {
                     Ok(loaded)
                 }
             }
+            CfgValueKind::ContributedCurrent { pos, neg, through } => {
+                self.contributed_current(builder, *pos, *neg, *through, value_type)
+            }
             // Identically zero in the large signal; only the derivative pass
             // gives it an amplitude.
             CfgValueKind::NoiseProcess(_) => push(NativeOp::Const(0.0), &[]),
@@ -757,6 +801,94 @@ impl Lowerer<'_> {
             )));
         }
         Ok(index)
+    }
+
+    /// A probe of a branch's already-contributed current, read from the storage
+    /// the shipped route keeps it in.
+    ///
+    /// The two forms are the shipped route's two forms, chosen by the shipped
+    /// route's own test and in its own order — see `lower_branch_access` in
+    /// [`crate::native::expr`]. A pair of terminals (ground counts as one) has
+    /// a running total of its own, and one load reads it. Anything with an
+    /// internal endpoint does not, so the answer is the sum of the individual
+    /// contributions' slots, in equation order, each negated where the probe
+    /// reads the branch backwards — which is the same expression, term for term
+    /// and association for association, that `lower_prior_current_probe`
+    /// assembles.
+    ///
+    /// `through` bounds the sum to the contributions the probe was taken after.
+    /// The shipped route bounds it the same way and by construction: it
+    /// registers a contribution's probe only once it has lowered that
+    /// contribution, so a later entry sees more slots than an earlier one.
+    fn contributed_current(
+        &self,
+        builder: &mut ProgramBuilder,
+        pos: Option<NodeId>,
+        neg: Option<NodeId>,
+        through: ContributionId,
+        value_type: ValueType,
+    ) -> JitResult<BuilderValue> {
+        let pos_endpoint = self.current_endpoint(pos)?;
+        let neg_endpoint = self.current_endpoint(neg)?;
+        if let Some(pair) =
+            terminal_pair_current_index(pos_endpoint, neg_endpoint, self.bindings.terminal_count)
+        {
+            return builder.push(NativeOp::LoadCurrent(pair), &[], value_type);
+        }
+
+        let bound = self
+            .bindings
+            .contributed_currents
+            .iter()
+            .position(|entry| entry.contribution == through)
+            .ok_or_else(|| {
+                self.refuse(format!(
+                    "CFG contribution {through} has no runtime current slot; the module has {} of them",
+                    self.bindings.contributed_currents.len()
+                ))
+            })?;
+
+        let mut total: Option<BuilderValue> = None;
+        for entry in &self.bindings.contributed_currents[..=bound] {
+            let reversed = if entry.pos_node == pos && entry.neg_node == neg {
+                false
+            } else if entry.pos_node == neg && entry.neg_node == pos {
+                true
+            } else {
+                continue;
+            };
+            let loaded = builder.push(
+                NativeOp::LoadPriorCurrent(entry.current_index),
+                &[],
+                value_type,
+            )?;
+            let term = if reversed {
+                builder.push(NativeOp::Neg, &[loaded], value_type)?
+            } else {
+                loaded
+            };
+            total = Some(match total {
+                Some(total) => builder.push(NativeOp::Add, &[total, term], value_type)?,
+                None => term,
+            });
+        }
+        total.ok_or_else(|| {
+            self.refuse(format!(
+                "CFG contribution-current probe through {through} matches no contribution to its \
+                 own branch"
+            ))
+        })
+    }
+
+    /// The runtime endpoint numbering a current pair is addressed in: terminals
+    /// first, then internal nodes, with ground its own sentinel. The same
+    /// numbering `lower_current_endpoint` produces in [`crate::native::expr`].
+    fn current_endpoint(&self, node: Option<NodeId>) -> JitResult<usize> {
+        match self.voltage_node(node)? {
+            VoltageNode::Ground => Ok(CURRENT_PAIR_GROUND),
+            VoltageNode::Terminal(index) => Ok(index),
+            VoltageNode::Internal(index) => Ok(self.bindings.terminal_count + index),
+        }
     }
 
     fn voltage_node(&self, node: Option<NodeId>) -> JitResult<VoltageNode> {
@@ -1193,6 +1325,10 @@ fn speculation_hazard(kind: &CfgValueKind) -> Option<&'static str> {
         | CfgValueKind::SimParam { .. }
         | CfgValueKind::NodePotential(_)
         | CfgValueKind::BranchUnknownFlow(_)
+        // A read of storage the entry has already filled, exactly like the
+        // branch unknown above it: which path the source took cannot change
+        // what the slot holds, and nothing about reading it advances anything.
+        | CfgValueKind::ContributedCurrent { .. }
         | CfgValueKind::NoiseProcess(_)
         | CfgValueKind::Unary { .. }
         | CfgValueKind::Binary { .. } => None,
@@ -1355,6 +1491,7 @@ mod tests {
             branches: Vec::new(),
             contributions: Vec::new(),
             statements: Vec::new(),
+            prologue_statements: Vec::new(),
             body: Vec::new(),
             executed_correspondence: Default::default(),
             expressions: Vec::new(),
@@ -1381,6 +1518,7 @@ mod tests {
             parameter_count,
             branch_unknowns: Vec::new(),
             event_state_variables: Vec::new(),
+            contributed_currents: Vec::new(),
         }
     }
 

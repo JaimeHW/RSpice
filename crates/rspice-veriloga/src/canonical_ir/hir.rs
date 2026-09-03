@@ -892,6 +892,24 @@ pub struct HirModel {
     pub branches: Vec<HirBranch>,
     pub contributions: Vec<HirContribution>,
     pub statements: Vec<HirStatement>,
+    /// Indices into [`Self::statements`] of the module prologue.
+    ///
+    /// The localparam and module-scope variable initializers that run before
+    /// the `analog` keyword. They are the statements [`Self::body`] has no
+    /// counterpart for — see [`HirExecutedCorrespondence`]'s "what is
+    /// deliberately not covered" — so a consumer built from `body` alone has no
+    /// definition of the variables they write, and a read of one falls through
+    /// to Verilog-AMS zero initialisation. A body-consuming lowering evaluates
+    /// these first, into the same variable slots, which is what the flat route
+    /// has always done by simply running the list in order.
+    ///
+    /// Carried from [`crate::semantic::AnalyzedModule::prologue_statements`]
+    /// rather than recovered here: only the analyzer knows which phase emitted
+    /// a statement, and the side effects a prologue initializer hoists *are*
+    /// recorded in `body`, so "assigns a variable the body never assigns" and
+    /// "has no correspondence span" both name the wrong set.
+    #[serde(default)]
+    pub prologue_statements: Vec<u32>,
     /// The analog block with its control flow intact; see [`HirRegion`].
     pub body: Vec<HirRegion>,
     /// Which executed expression each [`Self::body`] expression is a second
@@ -1106,6 +1124,11 @@ impl HirModel {
                 .collect(),
             contributions,
             statements,
+            prologue_statements: module
+                .prologue_statements
+                .iter()
+                .filter_map(|index| u32::try_from(*index).ok())
+                .collect(),
             body,
             executed_correspondence,
             expressions,
