@@ -295,14 +295,10 @@ pub(crate) enum CapabilitySupport {
 }
 
 impl CapabilitySupport {
-    /// Whether every instance of this family is admitted unconditionally.
+    /// Whether every instance of this family is admitted unconditionally, so
+    /// no per-instance condition needs evaluating.
     pub(crate) const fn admits_every_instance(self) -> bool {
         matches!(self, Self::Inapplicable | Self::Complete)
-    }
-
-    /// Whether an instance can be admitted at all, subject to its condition.
-    pub(crate) const fn admits_some_instance(self) -> bool {
-        !matches!(self, Self::Absent(_))
     }
 }
 
@@ -943,7 +939,7 @@ pub(in crate::engine) fn periodic_residual_gaps(circuit: &CircuitData) -> Vec<Ca
     // Diodes: reduced equations first, then nonrepresentable parameters, so a
     // deck hitting both learns about the model reduction it authored.
     if F::Diode.instance_count(circuit) > 0
-        && capability_support(F::Diode, Cap).admits_some_instance()
+        && matches!(capability_support(F::Diode, Cap), Restricted(_))
     {
         let reduced = circuit
             .diodes
@@ -974,7 +970,7 @@ pub(in crate::engine) fn periodic_residual_gaps(circuit: &CircuitData) -> Vec<Ca
     }
 
     if F::Mosfet.instance_count(circuit) > 0
-        && capability_support(F::Mosfet, Cap).admits_some_instance()
+        && matches!(capability_support(F::Mosfet, Cap), Restricted(_))
     {
         let invalid = circuit
             .mosfets
@@ -1005,7 +1001,7 @@ pub(in crate::engine) fn periodic_residual_gaps(circuit: &CircuitData) -> Vec<Ca
     }
 
     if F::Jfet.instance_count(circuit) > 0
-        && capability_support(F::Jfet, Cap).admits_some_instance()
+        && matches!(capability_support(F::Jfet, Cap), Restricted(_))
     {
         let reduced = circuit
             .jfets
@@ -1034,7 +1030,7 @@ pub(in crate::engine) fn periodic_residual_gaps(circuit: &CircuitData) -> Vec<Ca
     }
 
     if F::VoltageSwitch.instance_count(circuit) > 0
-        && capability_support(F::VoltageSwitch, Cap).admits_some_instance()
+        && matches!(capability_support(F::VoltageSwitch, Cap), Restricted(_))
     {
         let invalid = circuit
             .vswitches
