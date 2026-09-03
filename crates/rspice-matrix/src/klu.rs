@@ -389,9 +389,7 @@ impl KluSolver {
             let original_col = self.col_perm[j] as usize;
             let mut input_max: Value = 0.0;
             let span = self.a_col_ptr[original_col]..self.a_col_ptr[original_col + 1];
-            for (&value, &entry_scale) in values[span.clone()]
-                .iter()
-                .zip(&self.a_entry_scale[span])
+            for (&value, &entry_scale) in values[span.clone()].iter().zip(&self.a_entry_scale[span])
             {
                 let scaled = value * entry_scale;
                 if !scaled.is_finite() {
@@ -1838,9 +1836,7 @@ mod tests {
                 let target_row = &mut below[0];
                 let f = target_row[col] / pivot_row[col];
                 if f != 0.0 {
-                    for (target, &pivot) in
-                        target_row[col..n].iter_mut().zip(&pivot_row[col..n])
-                    {
+                    for (target, &pivot) in target_row[col..n].iter_mut().zip(&pivot_row[col..n]) {
                         *target -= f * pivot;
                     }
                     x[row] -= f * x[col];
