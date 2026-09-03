@@ -1248,6 +1248,8 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
     // the flip's pre-flight wants is *which* entry, not how many.
     let mut noisiest: Vec<Comparison> = Vec::new();
     let mut noisiest_floor = 0.0_f64;
+    let mut f64_worst: Option<Comparison> = None;
+    let mut f64_worst_deviation = 0.0_f64;
     let mut spread = ReferenceSpread::default();
     let mut nonzero_structural: Option<Comparison> = None;
     let mut guarded_noise_worst = 0.0_f64;
@@ -1333,16 +1335,6 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
             if comparison.deviation == 0.0 {
                 exact += 1;
             }
-            if comparison.is_derivative() {
-                if comparison.references().is_some() {
-                    tally.referenced += 1;
-                    referenced_here += 1;
-                    spread.push(&comparison);
-                } else {
-                    tally.reference_missing += 1;
-                    missing_here += 1;
-                }
-            }
             if guarded_noise.contains(&entry) {
                 tally.guarded_noise_entries += 1;
                 guarded_here += 1;
@@ -1384,6 +1376,30 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
                     insignificant_case = Some(comparison);
                 }
                 continue;
+            }
+            // Accounted for here rather than at the top of the loop: an entry
+            // the significance gate, the structural-zero check or the noise
+            // criterion decided is not one this criterion judges, so counting
+            // its reference would make the distribution a reading over entries
+            // nothing was asked of. `l_utsoi`'s twenty-six-orders-down reactive
+            // entries are the case — they carry no correct digit and they are
+            // gated away for exactly that reason.
+            if comparison.is_derivative() {
+                if comparison.references().is_some() {
+                    tally.referenced += 1;
+                    referenced_here += 1;
+                    spread.push(&comparison);
+                } else {
+                    tally.reference_missing += 1;
+                    missing_here += 1;
+                }
+                // The entry where the two routes' *`f64`* readings are furthest
+                // apart is the one the wider precision changed the verdict on,
+                // and naming it is how a reader checks that it did.
+                if comparison.deviation >= f64_worst_deviation {
+                    f64_worst_deviation = comparison.deviation;
+                    f64_worst = Some(comparison);
+                }
             }
             let bound = comparison.bound();
             let judged = comparison.judged_deviation();
@@ -1466,8 +1482,12 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
     );
     println!(
         "cfg-mir model={module} referenced={referenced_here} \
-         reference_missing={missing_here} {}",
+         reference_missing={missing_here} {}{}",
         spread.describe(),
+        f64_worst
+            .as_ref()
+            .map(|case| format!(" f64_worst[{}]", case.describe()))
+            .unwrap_or_default(),
     );
     for case in &noisiest {
         println!("cfg-mir model={module} noisiest[{}]", case.describe());
