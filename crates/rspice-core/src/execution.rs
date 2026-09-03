@@ -51,9 +51,7 @@ pub use plan::{
     PlannedAnalysis, PlannedPostProcess, PostProcessSource, RunAxis, RunAxisValue, RunCoordinate,
     StepAxisTarget, numeric_run_coordinate_id,
 };
-pub use post_process::{
-    PlannedFourierResult, evaluate_planned_fourier_with_abort, transient_output_unit,
-};
+pub use post_process::{PlannedFourierResult, evaluate_planned_fourier_with_abort};
 pub use post_process_fft::{
     PlannedFftSpectrum, planned_transient_fft_spectra, transient_fft_output_unit,
 };
@@ -61,8 +59,8 @@ pub use projection::{
     ProjectedSignal, ProjectedSignals, ProjectionSource, ProjectionSourceSignal, ProjectionValues,
     SignalProjection, dc_sweep_observable_series, observable_lookup,
     operating_point_observable_series, operating_point_projection_signals, probe_names_nothing,
-    probe_registry_name, probe_specification_error, projection_analysis_kind, raw_variable_type,
-    signal_descriptor, transient_projection_signals,
+    probe_registry_name, projection_analysis_kind, raw_variable_type, signal_descriptor,
+    transient_projection_signals,
 };
 pub use result_document::{
     ANALYSIS_RESULT_DOCUMENT_SCHEMA, ANALYSIS_RESULT_DOCUMENT_VERSION, AnalysisResultDocument,

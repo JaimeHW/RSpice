@@ -90,7 +90,7 @@ impl ResultPayload {
     }
 
     /// Numerical values retained by this payload, for resource accounting.
-    pub fn value_count(&self) -> usize {
+    pub(crate) fn value_count(&self) -> usize {
         match self {
             Self::Op(payload) => payload.observables.len(),
             Self::Dc(payload) => payload
