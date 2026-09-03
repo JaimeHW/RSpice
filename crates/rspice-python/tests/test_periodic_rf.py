@@ -416,7 +416,7 @@ def test_a_deck_pnoise_around_an_autonomous_carrier_is_refused_by_family():
 
 def test_a_malformed_periodic_card_is_a_typed_parse_error():
     with pytest.raises(rspice.ParseError) as excinfo:
-        parse("bad pss\nV1 out 0 1\nR1 out 0 1k\n.PSS FUND=1G HARMS=0\n.end\n")
+        parse("* bad pss\nV1 out 0 1\nR1 out 0 1k\n.PSS FUND=1G HARMS=0\n.end\n")
     error = excinfo.value
     assert error.kind == "analysis_card"
     assert error.category == "analysis_card_validation"
