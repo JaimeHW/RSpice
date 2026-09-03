@@ -5,7 +5,7 @@ use rspice_core::engine::{
 use rspice_core::netlist::{FftFormat, FftOutput};
 use rspice_core::{AbortSignal, Engine, Netlist, NoAbort, ResourceLimits, SimulationConfig};
 
-use crate::abort::ConfiguredAbort;
+use crate::abort::{ConfiguredAbort, ExecutionDeadline};
 use crate::deck_result_document::*;
 use crate::dto::*;
 use crate::errors::*;
@@ -1027,11 +1027,12 @@ fn retained_result_handle_enforces_bounded_windows_and_exposes_descriptors_only(
 
 #[test]
 fn zero_timeout_cancels_and_oversized_timeout_fails_before_work() {
-    let abort = ConfiguredAbort::new(Some(0), &NoAbort)
+    let deadline = ExecutionDeadline::new(Some(0))
         .expect("a zero deadline is a valid immediate-cancellation policy");
+    let abort = ConfiguredAbort::with_deadline(deadline, &NoAbort);
     assert!(abort.is_aborted());
 
-    let error = match ConfiguredAbort::new(Some(MAX_TIMEOUT_MILLISECONDS + 1), &NoAbort) {
+    let error = match ExecutionDeadline::new(Some(MAX_TIMEOUT_MILLISECONDS + 1)) {
         Ok(_) => panic!("an implausibly large browser deadline must fail closed"),
         Err(error) => error,
     };

@@ -117,6 +117,16 @@ pub fn run_authored_deck_document_with_options_and_abort_detailed(
             ensure_not_aborted(external_abort)?;
             let analysis_id = analysis.id();
             let ordinal = analysis_id.ordinal() as usize + 1;
+            // A failure inside one coordinate-local analysis is reported with
+            // the identity of the exact card and coordinate that produced it.
+            // Without that, a stepped deck reports "convergence failed" with
+            // no way to tell which of its runs failed.
+            let name_the_failure = |error: Box<WasmError>| {
+                Box::new(error.in_execution_context(
+                    Some(analysis_id.tag()),
+                    Some(coordinate.stable_id().to_string()),
+                ))
+            };
             let (mut analog, fft_results) = match analysis.command() {
                 None if analysis_id.kind() == AnalysisKind::ImplicitOp => {
                     execute_authored_operating_point(
@@ -124,12 +134,13 @@ pub fn run_authored_deck_document_with_options_and_abort_detailed(
                         &coordinate_netlist,
                         ordinal,
                         external_abort,
-                    )?
+                    )
+                    .map_err(name_the_failure)?
                 }
                 None => {
-                    return Err(deck_document_error(format!(
+                    return Err(name_the_failure(deck_document_error(format!(
                         "canonical materializer omitted the authored command for {analysis_id}"
-                    )));
+                    ))));
                 }
                 Some(command) => execute_authored_analysis(
                     &coordinate_engine,
@@ -138,7 +149,8 @@ pub fn run_authored_deck_document_with_options_and_abort_detailed(
                     ordinal,
                     resource_limits,
                     external_abort,
-                )?,
+                )
+                .map_err(name_the_failure)?,
             };
             deck_result_document::set_execution_identity(&mut analog, &coordinate, analysis_id);
             let analog_values = analog.retained_numeric_value_count();

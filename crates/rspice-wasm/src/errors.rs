@@ -25,6 +25,16 @@ pub struct WasmError {
     pub kind: String,
     pub category: String,
     pub retryable: bool,
+    /// Canonical identity of the analysis instance that failed, such as
+    /// `ac-002`, when the failure happened inside one. Attached by the runner
+    /// that owns the execution context; the core error taxonomy does not
+    /// carry it.
+    #[serde(default)]
+    pub analysis_id: Option<String>,
+    /// Canonical identity of the `DeckPlan` run coordinate the failure
+    /// happened at, when the failing work belonged to one.
+    #[serde(default)]
+    pub coordinate_id: Option<String>,
     pub primary_source: Option<String>,
     pub primary_line: Option<usize>,
     #[serde(default)]
@@ -94,6 +104,8 @@ pub(crate) struct JsWasmErrorDetails<'a> {
     kind: &'a str,
     category: &'a str,
     retryable: bool,
+    analysis_id: Option<&'a str>,
+    coordinate_id: Option<&'a str>,
     primary_source: Option<&'a str>,
     primary_line: Option<usize>,
     related_source: Option<&'a str>,
@@ -140,6 +152,8 @@ impl WasmError {
             kind: kind.to_string(),
             category: category.to_string(),
             retryable: false,
+            analysis_id: None,
+            coordinate_id: None,
             primary_source: None,
             primary_line: None,
             related_source: None,
@@ -170,6 +184,22 @@ impl WasmError {
 
     pub(crate) fn invalid_argument(message: String) -> Self {
         Self::new(message, "invalid_argument", "input_validation")
+    }
+
+    /// Name the analysis instance and run coordinate the failure happened at.
+    ///
+    /// The core failure taxonomy is deliberately execution-context free, so
+    /// the runner that owns the context attaches it here rather than each
+    /// error variant carrying its own copy.
+    #[must_use]
+    pub(crate) fn in_execution_context(
+        mut self,
+        analysis_id: Option<String>,
+        coordinate_id: Option<String>,
+    ) -> Self {
+        self.analysis_id = analysis_id;
+        self.coordinate_id = coordinate_id;
+        self
     }
 
     pub(crate) fn unsupported_cancellation(mechanism: String) -> Self {
@@ -243,6 +273,8 @@ impl WasmError {
                     kind: "undefined_output_symbols".to_string(),
                     category: "output_symbol_validation".to_string(),
                     retryable: false,
+                    analysis_id: None,
+                    coordinate_id: None,
                     primary_source: primary.and_then(source_path),
                     primary_line: primary.map(|origin| origin.line),
                     related_source: None,
@@ -322,6 +354,8 @@ impl WasmError {
                 kind: "conflicting_startup_directives".to_string(),
                 category: "startup_directive_validation".to_string(),
                 retryable: false,
+                analysis_id: None,
+                coordinate_id: None,
                 primary_source: source_path(&error.first),
                 primary_line: Some(error.first.line),
                 related_source: source_path(&error.conflicting),
@@ -458,6 +492,8 @@ pub(crate) fn wasm_error_to_js(error: WasmError) -> JsValue {
         kind: &error.kind,
         category: &error.category,
         retryable: error.retryable,
+        analysis_id: error.analysis_id.as_deref(),
+        coordinate_id: error.coordinate_id.as_deref(),
         primary_source: error.primary_source.as_deref(),
         primary_line: error.primary_line,
         related_source: error.related_source.as_deref(),

@@ -12,11 +12,11 @@ use crate::errors::WasmError;
 use crate::options::{MAX_TIMEOUT_MILLISECONDS, WasmExecutionOptions};
 
 #[cfg(not(target_arch = "wasm32"))]
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct ExecutionDeadline(Option<std::time::Instant>);
 
 #[cfg(target_arch = "wasm32")]
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct ExecutionDeadline(Option<f64>);
 
 impl ExecutionDeadline {
@@ -96,14 +96,16 @@ pub(crate) struct ConfiguredAbort<'a> {
 }
 
 impl<'a> ConfiguredAbort<'a> {
-    pub(crate) fn new(
-        timeout_milliseconds: Option<u32>,
+    /// Compose an already-started deadline with a cancellation source.
+    ///
+    /// [`ExecutionScope`] starts the deadline once, when the options object
+    /// has been validated and before any parser work, and then hands the same
+    /// deadline to the abort every runner polls.
+    pub(crate) const fn with_deadline(
+        deadline: ExecutionDeadline,
         external: &'a dyn AbortSignal,
-    ) -> DetailedWasmResult<Self> {
-        Ok(Self {
-            external,
-            deadline: ExecutionDeadline::new(timeout_milliseconds)?,
-        })
+    ) -> Self {
+        Self { external, deadline }
     }
 }
 
@@ -194,5 +196,55 @@ impl Drop for ActiveSharedCancellationGuard {
                 *active.borrow_mut() = None;
             });
         }
+    }
+}
+
+/// One decoded browser call: validated policy, installed cancellation
+/// control, and a started deadline.
+///
+/// Every `#[wasm_bindgen]` export opens exactly one of these and then calls a
+/// Rust entry point with [`Self::options`] and [`Self::abort`]. Keeping the
+/// sequence in one place is what makes "a frontend may not call a non-abort
+/// wrapper" checkable by reading one function instead of every export.
+pub(crate) struct ExecutionScope {
+    options: WasmExecutionOptions,
+    shared: JsSharedAbortSignal,
+    deadline: ExecutionDeadline,
+    /// Uninstalls the shared control word when the call returns, including on
+    /// every error path.
+    _cancellation: ActiveSharedCancellationGuard,
+}
+
+impl ExecutionScope {
+    /// Decode the options object, install its cancellation control, and start
+    /// the deadline, in that order.
+    pub(crate) fn open(options: wasm_bindgen::JsValue) -> DetailedWasmResult<Self> {
+        let request = crate::js_interop::execution_request_from_js(options)?;
+        let shared = JsSharedAbortSignal {
+            enabled: request.cancellation.is_some(),
+        };
+        let cancellation = ActiveSharedCancellationGuard::install(request.cancellation)?;
+        let deadline = ExecutionDeadline::new(request.timeout_milliseconds)?;
+        Ok(Self {
+            options: request.options,
+            shared,
+            deadline,
+            _cancellation: cancellation,
+        })
+    }
+
+    /// The validated browser execution policy for this call.
+    pub(crate) const fn options(&self) -> &WasmExecutionOptions {
+        &self.options
+    }
+
+    /// The core resource policy for this call.
+    pub(crate) fn resource_limits(&self) -> rspice_core::ResourceLimits {
+        self.options.resource_limits.to_core()
+    }
+
+    /// The single abort source every runner in this call polls.
+    pub(crate) fn abort(&self) -> ConfiguredAbort<'_> {
+        ConfiguredAbort::with_deadline(self.deadline, &self.shared)
     }
 }
