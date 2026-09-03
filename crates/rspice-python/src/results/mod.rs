@@ -12,6 +12,7 @@
 //! | [`fourier`]              | `FourierResult`, `Harmonic`                                     |
 //! | [`ac`]                   | `AcResult`, `ComplexValue`                                      |
 //! | [`distortion`]           | `DistortionResult`                                              |
+//! | [`envelope`]             | `EnvelopeResult`                                                |
 //! | [`s_parameters`]         | `SParameterResult`                                              |
 //! | [`stability`]            | `StbResult`, `PoleZeroResult`, `TransferFunctionResult`         |
 //! | [`noise`]                | `NoiseResult`, `NoiseContribution`, `PeriodicNoiseResult`, `PeriodicNoiseContribution`, `OscillatorNoiseResult` |
@@ -51,6 +52,7 @@ mod ac;
 mod access;
 mod dc;
 mod distortion;
+mod envelope;
 mod export_bridge;
 mod fft;
 mod fourier;
@@ -77,6 +79,7 @@ pub(crate) use ac::{PyAcResult, PyComplexValue, validated_ac_schema};
 pub(crate) use access::{NodeIdentifier, is_ground_name};
 pub(crate) use dc::{PyDcSweepResult, PyDeviceOperatingPoint, PySimulationResult};
 pub(crate) use distortion::PyDistortionResult;
+pub(crate) use envelope::PyEnvelopeResult;
 pub(crate) use fft::{
     PyTransientFftBin, PyTransientFftHarmonic, PyTransientFftMetrics, PyTransientFftResult,
 };

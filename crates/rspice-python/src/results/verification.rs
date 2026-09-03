@@ -508,6 +508,18 @@ pub struct PyRunReport {
     /// Harmonic-balance result (last .hb)
     #[pyo3(get)]
     pub hb: Option<PyHbResult>,
+    /// Shooting periodic steady-state result (last .pss)
+    #[pyo3(get)]
+    pub pss: Option<PyPssResult>,
+    /// Periodic small-signal AC result (last .pac)
+    #[pyo3(get)]
+    pub pac: Option<PyPacResult>,
+    /// Driven periodic-noise result (last .pnoise)
+    #[pyo3(get)]
+    pub pnoise: Option<PyPeriodicNoiseResult>,
+    /// Envelope-following result (last .envelope)
+    #[pyo3(get)]
+    pub envelope: Option<Py<PyEnvelopeResult>>,
     /// N-port scattering parameters (last .sp)
     #[pyo3(get)]
     pub s_parameters: Option<PySParameterResult>,
@@ -570,6 +582,19 @@ pub struct PyRunReport {
     /// Every harmonic-balance result, in deck/coordinate order.
     #[pyo3(get)]
     pub all_hb: Vec<PyHbResult>,
+    /// Every `.pss` result, in deck/coordinate order. `pss` is the last.
+    #[pyo3(get)]
+    pub all_pss: Vec<PyPssResult>,
+    /// Every `.pac` result, in deck/coordinate order. `pac` is the last.
+    #[pyo3(get)]
+    pub all_pac: Vec<PyPacResult>,
+    /// Every `.pnoise` result, in deck/coordinate order. `pnoise` is the last.
+    #[pyo3(get)]
+    pub all_pnoise: Vec<PyPeriodicNoiseResult>,
+    /// Every `.envelope` result, in deck/coordinate order. `envelope` is the
+    /// last.
+    #[pyo3(get)]
+    pub all_envelope: Vec<Py<PyEnvelopeResult>>,
     /// Every S-parameter result, including attached port-noise data.
     #[pyo3(get)]
     pub all_s_parameters: Vec<PySParameterResult>,

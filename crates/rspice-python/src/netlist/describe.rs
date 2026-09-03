@@ -168,6 +168,60 @@ pub(crate) fn describe_analysis(analysis: &AnalysisCommand) -> String {
             ".four {fundamental} {} ({num_harmonics} harmonics)",
             outputs.join(" ")
         ),
+        AnalysisCommand::Pss(card) => {
+            if card.is_autonomous() {
+                format!(
+                    ".pss autonomous ({} harmonics, period guess {})",
+                    card.num_harmonics, card.period_guess
+                )
+            } else {
+                format!(
+                    ".pss {} ({} harmonics)",
+                    card.fundamental_freq, card.num_harmonics
+                )
+            }
+        }
+        AnalysisCommand::Pac(card) => {
+            let probe = match &card.output_ref {
+                Some(reference) => format!("v({},{reference})", card.output_node),
+                None => format!("v({})", card.output_node),
+            };
+            format!(
+                ".pac {} {} {} {} {} {probe} (sidebands {}..{})",
+                describe_variation(card.sweep.variation),
+                card.sweep.points,
+                card.sweep.start_freq,
+                card.sweep.stop_freq,
+                card.input_source,
+                card.sideband_min,
+                card.sideband_max
+            )
+        }
+        AnalysisCommand::Pnoise(card) => {
+            let probe = match &card.reference_node {
+                Some(reference) => format!("v({},{reference})", card.output_node),
+                None => format!("v({})", card.output_node),
+            };
+            format!(
+                ".pnoise {} {} {} {} {probe} (max sideband {})",
+                describe_variation(card.sweep.variation),
+                card.sweep.points,
+                card.sweep.start_freq,
+                card.sweep.stop_freq,
+                card.max_sideband
+            )
+        }
+        AnalysisCommand::Envelope(card) => {
+            let mut description = format!(".envelope {} {}", card.duration, card.max_step);
+            if !card.frozen_sources.is_empty() {
+                description.push_str(&format!(" frozen={}", card.frozen_sources.join(",")));
+            }
+            description
+        }
         other => format!("{other:?}"),
     }
+}
+
+fn describe_variation(variation: rspice_core::netlist::FreqVariation) -> String {
+    format!("{variation:?}").to_lowercase()
 }

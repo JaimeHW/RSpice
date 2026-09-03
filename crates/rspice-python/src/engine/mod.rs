@@ -42,11 +42,12 @@ use crate::measure;
 use crate::netlist::{PyNetlist, describe_analysis};
 use crate::results::{
     NodeIdentifier, PyAcResult, PyAcSensitivityResult, PyAnalysisRecord,
-    PyCompressedTransientResult, PyDcSweepResult, PyDistortionResult, PyFourierResult, PyHbResult,
-    PyMeasurement, PyMonteCarloResult, PyNoiseResult, PyOscillatorNoiseResult, PyPacResult,
-    PyPeriodicNoiseResult, PyPoleZeroResult, PyPssResult, PyRunCoordinate, PyRunReport,
-    PySParameterResult, PySensitivityResult, PySimulationResult, PyStbResult,
-    PyTransferFunctionResult, PyTransientCheckpoint, PyTransientResult, is_ground_name,
+    PyCompressedTransientResult, PyDcSweepResult, PyDistortionResult, PyEnvelopeResult,
+    PyFourierResult, PyHbResult, PyMeasurement, PyMonteCarloResult, PyNoiseResult,
+    PyOscillatorNoiseResult, PyPacResult, PyPeriodicNoiseResult, PyPoleZeroResult, PyPssResult,
+    PyRunCoordinate, PyRunReport, PySParameterResult, PySensitivityResult, PySimulationResult,
+    PyStbResult, PyTransferFunctionResult, PyTransientCheckpoint, PyTransientResult,
+    is_ground_name,
 };
 
 mod directives;
@@ -143,10 +144,12 @@ impl PyEngine {
     /// Run every analysis directive in the netlist and evaluate .MEAS
     ///
     /// Executes every directive the netlist carries, in deck order: `.op`,
-    /// `.dc`, `.tran`, `.ac` and `.ac data`, `.disto`, `.hb`, `.sp` (with
-    /// `donoise`), `.noise` and `.noise data`, `.tf`, `.stb`, `.pz`, `.mc`,
-    /// `.step`, `.temp`, DC and AC `.sens`, and `.four`. `.four` is evaluated
-    /// after the loop so it may precede its `.tran` in the deck.
+    /// `.dc`, `.tran`, `.ac` and `.ac data`, `.disto`, `.hb`, `.pss`, `.pac`,
+    /// `.pnoise`, `.envelope`, `.sp` (with `donoise`), `.noise` and
+    /// `.noise data`, `.tf`, `.stb`, `.pz`, `.mc`, `.step`, `.temp`, DC and AC
+    /// `.sens`, and `.four`. `.four` is evaluated after the loop so it may
+    /// precede its `.tran` in the deck. `.pac`, `.pnoise`, and `.envelope`
+    /// linearize around the `.pss`/`.hb` instance the deck plan bound them to.
     ///
     /// `.MEAS` statements are then evaluated against the TRAN, DC, AC, and
     /// NOISE results. Every directive contributes at least one entry to

@@ -2,16 +2,22 @@
 //!
 //! `Engine.run()` is the automated-verification entry point: it runs whatever
 //! `.op`, `.dc`, `.tran`, `.ac`, `.sp`, `.noise`, `.tf`, `.stb`, `.pz`, `.mc`,
-//! `.step`, `.temp`, `.sens`, and `.four` cards the netlist carries, then
-//! evaluates its `.MEAS` statements against the results.
+//! `.hb`, `.pss`, `.pac`, `.pnoise`, `.envelope`, `.step`, `.temp`, `.sens`,
+//! and `.four` cards the netlist carries, then evaluates its `.MEAS`
+//! statements against the results.
 //!
-//! Two ordering rules are load-bearing:
+//! Three ordering rules are load-bearing:
 //!
 //! - `.four` is deferred until after the directive loop, so a `.four` card may
 //!   precede the `.tran` it measures. Decks written by hand routinely do.
 //! - A measurement whose analysis never ran is recorded as *not evaluated*
 //!   rather than omitted, so a CI gate fails loudly instead of quietly
 //!   checking nothing.
+//! - `.pac`, `.pnoise`, and `.envelope` consume the periodic operating point
+//!   of the specific upstream instance `DeckPlan` bound them to, retained here
+//!   under that instance's canonical identity. "Whichever periodic analysis
+//!   ran most recently" is a different, wrong answer in any deck that carries
+//!   more than one.
 //!
 //! Each directive runs inside its own fallible scope. When one fails and
 //! `continue_on_error` is set, the records it had already pushed are rolled
@@ -35,6 +41,20 @@ struct LastAndAll<T> {
 struct ExecutionContext {
     analysis_id: Option<String>,
     coordinate: Option<PyRunCoordinate>,
+    /// Canonical identity of the periodic large-signal analysis this card
+    /// linearizes around, as `DeckPlan` bound it.
+    ///
+    /// `.PAC`, `.PNOISE` and `.ENVELOPE` consume a specific upstream instance,
+    /// not "whichever periodic analysis ran most recently". Carrying the plan's
+    /// binding here is what keeps the executed pairing identical to the planned
+    /// one.
+    upstream_analysis_id: Option<String>,
+}
+
+/// A converged periodic large-signal state retained for its dependents.
+enum PeriodicOperatingPoint {
+    Shooting(Box<rspice_core::engine::PssOperatingPoint>),
+    HarmonicBalance(Box<rspice_core::engine::HbOperatingPoint>),
 }
 
 struct PlannedDirectiveRun<'a> {
@@ -105,6 +125,14 @@ struct DirectiveOutcomes {
     noise: LastAndAll<Vec<PyNoiseResult>>,
     distortion: LastAndAll<Py<PyDistortionResult>>,
     hb: LastAndAll<PyHbResult>,
+    pss: LastAndAll<PyPssResult>,
+    pac: LastAndAll<PyPacResult>,
+    pnoise: LastAndAll<PyPeriodicNoiseResult>,
+    envelope: LastAndAll<Py<PyEnvelopeResult>>,
+    /// Converged periodic operating points, keyed by the canonical identity of
+    /// the analysis that produced them, so a dependent card consumes exactly
+    /// the upstream the plan bound it to.
+    periodic_operating_points: std::collections::BTreeMap<String, PeriodicOperatingPoint>,
     s_parameters: LastAndAll<PySParameterResult>,
     /// Retained separately from `noise` because `.MEAS` evaluates against
     /// core's result type, not the Python projection.
@@ -137,6 +165,13 @@ impl DirectiveOutcomes {
         self.noise.append(other.noise);
         self.distortion.append(other.distortion);
         self.hb.append(other.hb);
+        self.pss.append(other.pss);
+        self.pac.append(other.pac);
+        self.pnoise.append(other.pnoise);
+        self.envelope.append(other.envelope);
+        // Operating points are deliberately not merged across coordinates: a
+        // dependent card must linearize around the carrier solved at its own
+        // coordinate, never one retained from an earlier one.
         self.s_parameters.append(other.s_parameters);
         replace_if_some(&mut self.noise_core, other.noise_core);
         self.tf.append(other.tf);
@@ -176,7 +211,6 @@ pub(super) fn run(
         )
         .map_err(deck_plan_simulation_error)
     })?;
-    refuse_unsupported_deck_analyses(net, &plan)?;
     let mut measurements = if plan.axes().is_empty() {
         run_directives(
             py_engine,
@@ -202,47 +236,6 @@ pub(super) fn run(
     Ok(into_report(out, measurements))
 }
 
-/// Dot-command spelling of a card this surface has no execution route for.
-fn unsupported_deck_analysis_card(analysis: &AnalysisCommand) -> Option<&'static str> {
-    match analysis {
-        AnalysisCommand::Pss(_) => Some(".PSS"),
-        AnalysisCommand::Pac(_) => Some(".PAC"),
-        AnalysisCommand::Pnoise(_) => Some(".PNOISE"),
-        AnalysisCommand::Envelope(_) => Some(".ENVELOPE"),
-        _ => None,
-    }
-}
-
-/// Typed refusal naming the card and its canonical analysis identity.
-fn unsupported_deck_analysis_error(
-    analysis: &AnalysisCommand,
-    analysis_id: Option<String>,
-) -> PyErr {
-    let card = unsupported_deck_analysis_card(analysis).unwrap_or(".<analysis>");
-    let instance = analysis_id.map(|id| format!(" ({id})")).unwrap_or_default();
-    crate::errors::not_implemented_error(format!(
-        "Engine.run has no authored route for the {card} card{instance}; \
-         call the direct periodic analysis methods instead"
-    ))
-}
-
-/// Refuse authored cards this surface cannot execute before any directive
-/// runs, so a refused deck publishes no partial result.
-fn refuse_unsupported_deck_analyses(
-    netlist: &rspice_core::netlist::Netlist,
-    plan: &rspice_core::execution::DeckPlan,
-) -> PyResult<()> {
-    for (analysis, id) in plan.authored_analyses(netlist) {
-        if unsupported_deck_analysis_card(analysis).is_some() {
-            return Err(unsupported_deck_analysis_error(
-                analysis,
-                id.map(|id| id.tag()),
-            ));
-        }
-    }
-    Ok(())
-}
-
 fn run_directives(
     py_engine: &PyEngine,
     py: Python<'_>,
@@ -262,17 +255,25 @@ fn run_directives(
         ) {
             continue;
         }
-        let analysis_id = if matches!(analysis, AnalysisCommand::Four { .. }) {
-            let analysis_id = format!("four-{next_fourier_ordinal:03}");
-            next_fourier_ordinal += 1;
-            Some(analysis_id)
-        } else {
-            planned.next().map(|analysis| analysis.id().tag())
-        };
+        let (analysis_id, upstream_analysis_id) =
+            if matches!(analysis, AnalysisCommand::Four { .. }) {
+                let analysis_id = format!("four-{next_fourier_ordinal:03}");
+                next_fourier_ordinal += 1;
+                (Some(analysis_id), None)
+            } else {
+                match planned.next() {
+                    Some(planned) => (
+                        Some(planned.id().tag()),
+                        planned.request().upstream().map(|id| id.tag()),
+                    ),
+                    None => (None, None),
+                }
+            };
         let context =
             (analysis_id.is_some() || planned_run.coordinate.is_some()).then(|| ExecutionContext {
                 analysis_id,
                 coordinate: planned_run.coordinate.cloned(),
+                upstream_analysis_id,
             });
         execute_directive(
             py_engine,
@@ -306,6 +307,7 @@ fn run_materialized_directives(
         let context = ExecutionContext {
             analysis_id: Some(analysis.output_namespace().analysis_component()),
             coordinate: Some(coordinate.clone()),
+            upstream_analysis_id: analysis.planned().request().upstream().map(|id| id.tag()),
         };
         execute_directive(
             py_engine,
@@ -327,6 +329,7 @@ fn run_materialized_directives(
             let context = ExecutionContext {
                 analysis_id: Some(format!("four-{next_fourier_ordinal:03}")),
                 coordinate: Some(coordinate.clone()),
+                upstream_analysis_id: None,
             };
             next_fourier_ordinal += 1;
             execute_directive(
@@ -439,6 +442,7 @@ fn run_axis_plan(
             let context = ExecutionContext {
                 analysis_id: Some(implicit_analysis.output_namespace().analysis_component()),
                 coordinate: Some(coordinate.clone()),
+                upstream_analysis_id: None,
             };
             match py_engine.run_dc_op(py, &materialized) {
                 Ok(result) => {
@@ -609,6 +613,10 @@ fn into_report(out: DirectiveOutcomes, measurements: Vec<PyMeasurement>) -> PyRu
     let (noise, all_noise) = out.noise.into_parts();
     let (distortion, all_distortion) = out.distortion.into_parts();
     let (hb, all_hb) = out.hb.into_parts();
+    let (pss, all_pss) = out.pss.into_parts();
+    let (pac, all_pac) = out.pac.into_parts();
+    let (pnoise, all_pnoise) = out.pnoise.into_parts();
+    let (envelope, all_envelope) = out.envelope.into_parts();
     let (s_parameters, all_s_parameters) = out.s_parameters.into_parts();
     let (tf, all_tf) = out.tf.into_parts();
     let (stb, all_stb) = out.stb.into_parts();
@@ -624,6 +632,10 @@ fn into_report(out: DirectiveOutcomes, measurements: Vec<PyMeasurement>) -> PyRu
         ac,
         distortion,
         hb,
+        pss,
+        pac,
+        pnoise,
+        envelope,
         s_parameters,
         noise,
         tf,
@@ -644,6 +656,10 @@ fn into_report(out: DirectiveOutcomes, measurements: Vec<PyMeasurement>) -> PyRu
         all_noise,
         all_distortion,
         all_hb,
+        all_pss,
+        all_pac,
+        all_pnoise,
+        all_envelope,
         all_s_parameters,
         all_tf,
         all_stb,
@@ -812,6 +828,14 @@ fn execute(
                 engine.run_hb_with_abort(net, config, abort)
             })?;
             out.hb.push(PyHbResult::from_core(&result));
+            // Retained under this instance's canonical identity so a bound
+            // `.PAC`, `.PNOISE`, or `.ENVELOPE` consumes this exact carrier.
+            if let Some(id) = context.and_then(|context| context.analysis_id.clone()) {
+                out.periodic_operating_points.insert(
+                    id,
+                    PeriodicOperatingPoint::HarmonicBalance(Box::new(result.operating_point)),
+                );
+            }
             out.records.push(PyAnalysisRecord::executed(
                 "hb",
                 describe_analysis(analysis),
@@ -1054,15 +1078,150 @@ fn execute(
                 "run-axis directives must be executed through the canonical deck materializer",
             ));
         }
-        AnalysisCommand::Pss(_)
-        | AnalysisCommand::Pac(_)
-        | AnalysisCommand::Pnoise(_)
-        | AnalysisCommand::Envelope(_) => {
-            // `refuse_unsupported_deck_analyses` rejects these before any
-            // directive runs; reaching here means the preflight was bypassed.
-            return Err(unsupported_deck_analysis_error(
-                analysis,
-                context.and_then(|context| context.analysis_id.clone()),
+        AnalysisCommand::Pss(card) => {
+            let config = rspice_core::analysis::PssConfig::from(card.as_ref());
+            let harmonics = config.num_harmonics;
+            let engine = py_engine.engine_for_netlist(net);
+            // The operating point carries the analysis result, so solving it
+            // once yields both the published result and the exact orbit a
+            // dependent `.PAC`/`.PNOISE` linearizes around.
+            let operating_point = run_interruptible(py, &py_engine.active_runs, |abort| {
+                engine.run_pss_operating_point_with_abort(net, config, abort)
+            })?;
+            out.pss.push(PyPssResult::from_core(
+                operating_point.analysis(),
+                harmonics,
+            ));
+            if let Some(id) = context.and_then(|context| context.analysis_id.clone()) {
+                out.periodic_operating_points.insert(
+                    id,
+                    PeriodicOperatingPoint::Shooting(Box::new(operating_point)),
+                );
+            }
+            out.records.push(PyAnalysisRecord::executed(
+                "pss",
+                describe_analysis(analysis),
+            ));
+        }
+        AnalysisCommand::Pac(card) => {
+            let config = rspice_core::analysis::PacConfig::from(card.as_ref());
+            config.validate().map_err(|message| {
+                crate::errors::value_error(format!("invalid .PAC card: {message}"))
+            })?;
+            let engine = py_engine.engine_for_netlist(net);
+            let result = match upstream_operating_point(out, context, ".PAC")? {
+                PeriodicOperatingPoint::Shooting(point) => {
+                    run_interruptible(py, &py_engine.active_runs, |abort| {
+                        engine.run_pac_from_pss_with_abort(net, config, point, abort)
+                    })?
+                }
+                PeriodicOperatingPoint::HarmonicBalance(point) => {
+                    run_interruptible(py, &py_engine.active_runs, |abort| {
+                        engine.run_pac_from_hb_with_abort(net, config, point, abort)
+                    })?
+                }
+            };
+            out.pac.push(PyPacResult::from_core(&result));
+            out.records.push(PyAnalysisRecord::executed(
+                "pac",
+                describe_analysis(analysis),
+            ));
+        }
+        AnalysisCommand::Pnoise(card) => {
+            let offsets = sweep_frequencies(
+                card.sweep.variation,
+                card.sweep.points,
+                card.sweep.start_freq,
+                card.sweep.stop_freq,
+                max_analysis_points(),
+            )?;
+            if offsets.iter().any(|offset| *offset <= 0.0) {
+                return Err(crate::errors::value_error(
+                    ".PNOISE offset frequencies must be strictly positive",
+                ));
+            }
+            let engine = py_engine.engine_for_netlist(net);
+            let reference = card.reference_node.as_deref();
+            let source = card.input_source.as_deref();
+            let result = match upstream_operating_point(out, context, ".PNOISE")? {
+                PeriodicOperatingPoint::Shooting(point) if point.config().is_autonomous() => {
+                    // An autonomous carrier's noise is oscillator phase noise,
+                    // a different result family with a different unit basis.
+                    // The engine computes it, but this deck route publishes
+                    // only driven periodic noise, so folding it in here would
+                    // mislabel phase noise as sideband noise.
+                    return Err(crate::errors::not_implemented_error(
+                        "Engine.run executes .PNOISE around a driven carrier only; the .PSS it is \
+                         bound to is autonomous, whose noise is oscillator phase noise — call \
+                         run_oscillator_noise for that result family",
+                    ));
+                }
+                PeriodicOperatingPoint::Shooting(point) => {
+                    run_interruptible(py, &py_engine.active_runs, |abort| {
+                        engine.run_pnoise_from_pss_with_abort(
+                            net,
+                            &offsets,
+                            &card.output_node,
+                            reference,
+                            source,
+                            card.max_sideband,
+                            point,
+                            abort,
+                        )
+                    })?
+                }
+                PeriodicOperatingPoint::HarmonicBalance(point) => {
+                    run_interruptible(py, &py_engine.active_runs, |abort| {
+                        engine.run_pnoise_from_hb_with_abort(
+                            net,
+                            &offsets,
+                            &card.output_node,
+                            reference,
+                            source,
+                            card.max_sideband,
+                            point,
+                            abort,
+                        )
+                    })?
+                }
+            };
+            out.pnoise.push(PyPeriodicNoiseResult::from_core(&result));
+            out.records.push(PyAnalysisRecord::executed(
+                "pnoise",
+                describe_analysis(analysis),
+            ));
+        }
+        AnalysisCommand::Envelope(card) => {
+            // The envelope continues the carrier the bound `.HB` defined, so
+            // its spectral configuration comes from that instance rather than
+            // being re-derived from the deck.
+            let config = match upstream_operating_point(out, context, ".ENVELOPE")? {
+                PeriodicOperatingPoint::HarmonicBalance(point) => point.config().clone(),
+                PeriodicOperatingPoint::Shooting(_) => {
+                    return Err(crate::errors::value_error(
+                        ".ENVELOPE continues a harmonic-balance carrier, but the analysis it is \
+                         bound to is a shooting PSS",
+                    ));
+                }
+            };
+            let frozen = card.frozen_sources.clone();
+            let engine = py_engine.engine_for_netlist(net);
+            let result = run_interruptible(py, &py_engine.active_runs, |abort| {
+                engine.run_envelope_with_abort(
+                    net,
+                    config,
+                    &frozen,
+                    card.duration,
+                    card.max_step,
+                    abort,
+                )
+            })?;
+            let handle = Py::new(py, PyEnvelopeResult::from_core(py, &result)?)?;
+            out.envelope
+                .push_with(handle, |handle| handle.clone_ref(py));
+            out.records.push(PyAnalysisRecord::executed(
+                "envelope",
+                describe_analysis(analysis),
             ));
         }
         AnalysisCommand::Sensitivity {
@@ -1133,6 +1292,31 @@ fn execute(
         }
     }
     Ok(())
+}
+
+/// The periodic operating point the deck plan bound this card to.
+///
+/// The binding is the plan's, not "whichever periodic analysis ran last": a
+/// deck with two `.PSS` cards and a `.PAC` between them must linearize around
+/// the one the planner selected, and a `.PAC` whose upstream failed must fail
+/// rather than silently reuse an earlier orbit.
+fn upstream_operating_point<'a>(
+    out: &'a DirectiveOutcomes,
+    context: Option<&ExecutionContext>,
+    card: &'static str,
+) -> PyResult<&'a PeriodicOperatingPoint> {
+    let id = context
+        .and_then(|context| context.upstream_analysis_id.clone())
+        .ok_or_else(|| {
+            crate::errors::SimulationError::new_err(format!(
+                "{card} was executed without the upstream periodic analysis its deck plan bound it to"
+            ))
+        })?;
+    out.periodic_operating_points.get(&id).ok_or_else(|| {
+        crate::errors::SimulationError::new_err(format!(
+            "{card} linearizes around {id}, which produced no periodic operating point in this run"
+        ))
+    })
 }
 
 /// Evaluate deferred `.four` cards against the transient result.

@@ -212,8 +212,8 @@ const CLI_ARTIFACT: &str = "CSV/text artifact exists, but no shared typed result
 const CLI_AXIS: &str =
     "shared deck axes execute, but the CLI artifact does not retain a typed coordinate document";
 const CLI_AXIS_UNAVAILABLE: &str = "CLI has no authored deck-axis route for this analysis family";
-const PY_AXIS_UNAVAILABLE: &str =
-    "typed direct API exists, but Engine.run has no authored axis route";
+const PY_PNOISE_DRIVEN_AXIS_ONLY: &str = "deck-axis .PNOISE executes around a driven carrier only; an autonomous PSS carrier's \
+     oscillator phase noise has no run-report field";
 const WASM_UNAVAILABLE: &str = "browser API has no result adapter for this family";
 const WASM_AXIS_UNAVAILABLE: &str = "browser API does not consume DeckPlan axes";
 const ADAPTER_UNAVAILABLE: &str = "protocol-3 adapter has no result mapping for this family";
@@ -239,14 +239,6 @@ const fn python_mapped_axes() -> SurfaceCapability {
         MappingStatus::Mapped,
         MappingStatus::Mapped,
         MappingStatus::Mapped,
-    )
-}
-
-const fn python_direct_only() -> SurfaceCapability {
-    SurfaceCapability::new(
-        MappingStatus::Mapped,
-        MappingStatus::Unsupported(PY_AXIS_UNAVAILABLE),
-        MappingStatus::Unsupported(PY_AXIS_UNAVAILABLE),
     )
 }
 
@@ -399,21 +391,25 @@ pub const ANALYSIS_CAPABILITY_MATRIX: &[AnalysisResultCapability] = &[
     AnalysisResultCapability {
         result: AnalysisResultKind::Pss,
         cli: cli_artifact_scalar_only(),
-        python: python_direct_only(),
+        python: python_mapped_axes(),
         wasm: SurfaceCapability::unsupported(WASM_UNAVAILABLE),
         engine_adapter: SurfaceCapability::unsupported(ADAPTER_UNAVAILABLE),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Pac,
         cli: SurfaceCapability::unsupported("CLI has no PAC execution or result adapter"),
-        python: python_direct_only(),
+        python: python_mapped_axes(),
         wasm: SurfaceCapability::unsupported(WASM_UNAVAILABLE),
         engine_adapter: SurfaceCapability::unsupported(ADAPTER_UNAVAILABLE),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::PNoise,
         cli: SurfaceCapability::unsupported("CLI has no PNoise execution or result adapter"),
-        python: python_direct_only(),
+        python: SurfaceCapability::new(
+            MappingStatus::Mapped,
+            MappingStatus::Partial(PY_PNOISE_DRIVEN_AXIS_ONLY),
+            MappingStatus::Partial(PY_PNOISE_DRIVEN_AXIS_ONLY),
+        ),
         wasm: SurfaceCapability::unsupported(WASM_UNAVAILABLE),
         engine_adapter: SurfaceCapability::unsupported(ADAPTER_UNAVAILABLE),
     },
@@ -427,13 +423,7 @@ pub const ANALYSIS_CAPABILITY_MATRIX: &[AnalysisResultCapability] = &[
     AnalysisResultCapability {
         result: AnalysisResultKind::Envelope,
         cli: SurfaceCapability::unsupported("CLI has no envelope result adapter"),
-        python: SurfaceCapability::new(
-            MappingStatus::Partial(
-                "HB continuation state and continued transient are exposed, but no envelope result document exists",
-            ),
-            MappingStatus::Unsupported(PY_AXIS_UNAVAILABLE),
-            MappingStatus::Unsupported(PY_AXIS_UNAVAILABLE),
-        ),
+        python: python_mapped_axes(),
         wasm: SurfaceCapability::unsupported(WASM_UNAVAILABLE),
         engine_adapter: SurfaceCapability::unsupported(ADAPTER_UNAVAILABLE),
     },
