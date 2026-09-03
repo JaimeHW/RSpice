@@ -3144,10 +3144,9 @@ impl<'a> CfgLowerer<'a> {
                     },
                 )
             }
-            // Keyed by the *call*, not by its argument. The other `ddt` path —
-            // `HirAnalogOperator::Ddt`, below — always did, and so does the
-            // state-slot allocation every backend reads, so keying this one by
-            // the operand named a slot that does not exist.
+            // Keyed by the *call*, not by its argument. The state-slot
+            // allocation every backend reads keys on the call, so keying this
+            // one by the operand named a slot that does not exist.
             ("ddt", 1) => {
                 let input = self.expr(args[0]);
                 self.builder.push(
