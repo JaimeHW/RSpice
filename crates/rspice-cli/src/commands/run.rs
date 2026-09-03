@@ -2412,6 +2412,13 @@ fn run_deck(
         // Dropping the transaction removes every staged coordinate, so the
         // destination directory keeps exactly the artifacts it had before.
         drop(transaction);
+        if !quiet {
+            println!(
+                "Cancelled after {} of {} coordinates: the incomplete set was discarded and no coordinate artifact was published",
+                reports.len(),
+                materializer.len()
+            );
+        }
         return Ok(DeckOutcome {
             reports,
             outputs: Vec::new(),

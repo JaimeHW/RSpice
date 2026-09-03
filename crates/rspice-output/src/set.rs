@@ -235,18 +235,6 @@ impl AtomicArtifactSet {
         Self::default()
     }
 
-    /// Number of members, including the manifest member when one is staged.
-    #[must_use]
-    pub fn len(&self) -> usize {
-        self.members.len() + usize::from(self.manifest.is_some())
-    }
-
-    /// Whether the transaction would publish nothing.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
     /// Destinations this transaction will replace, in commit order.
     pub fn destinations(&self) -> impl Iterator<Item = &Path> {
         self.members
@@ -267,21 +255,6 @@ impl AtomicArtifactSet {
     {
         let staged = StagedArtifact::stage(destination, write)?;
         self.adopt(staged)?;
-        Ok(())
-    }
-
-    /// Stage the set manifest, which is always committed last.
-    pub fn stage_manifest<E, F>(
-        &mut self,
-        destination: &Path,
-        write: F,
-    ) -> Result<(), AtomicArtifactSetError<E>>
-    where
-        E: std::error::Error + 'static,
-        F: FnOnce(&mut dyn Write) -> Result<(), E>,
-    {
-        let staged = StagedArtifact::stage(destination, write)?;
-        self.adopt_manifest(staged)?;
         Ok(())
     }
 
@@ -311,12 +284,6 @@ impl AtomicArtifactSet {
     /// error reports the failing destination and what the rollback restored.
     pub fn commit(self) -> Result<(), AtomicArtifactSetError<io::Error>> {
         self.commit_impl(&mut NoFaults)
-    }
-
-    /// Discard the transaction: staging files are removed and every
-    /// destination keeps the bytes it already had.
-    pub fn abandon(self) {
-        drop(self);
     }
 
     fn reject_duplicate(&self, destination: &Path) -> Result<(), SetMembershipError> {
@@ -648,6 +615,18 @@ mod tests {
             .collect()
     }
 
+    /// Stage the manifest of a set under test.
+    fn stage_manifest(
+        set: &mut AtomicArtifactSet,
+        destination: &Path,
+    ) -> Result<(), AtomicArtifactSetError<io::Error>> {
+        let staged = StagedArtifact::stage::<io::Error, _>(destination, |writer| {
+            writer.write_all(b"{\"members\":3}")
+        })?;
+        set.adopt_manifest(staged)?;
+        Ok(())
+    }
+
     fn seed_set(paths: &[PathBuf], preexisting: bool) {
         if preexisting {
             for (index, path) in paths.iter().enumerate() {
@@ -718,11 +697,8 @@ mod tests {
             let manifest_path = directory.path().join("set.json");
             let mut set = AtomicArtifactSet::new();
             stage_all(&mut set, &paths, &mut NoFaults).expect("stage members");
-            set.stage_manifest::<io::Error, _>(&manifest_path, |writer| {
-                writer.write_all(b"{\"members\":3}")
-            })
-            .expect("stage manifest");
-            assert_eq!(set.len(), 4);
+            stage_manifest(&mut set, &manifest_path).expect("stage manifest");
+            assert_eq!(set.destinations().count(), 4);
             assert_eq!(
                 set.destinations().last().expect("manifest is last"),
                 manifest_path.as_path()
@@ -755,8 +731,8 @@ mod tests {
             // Cancellation between members: the second coordinate is staged
             // and the third never runs.
             stage_all(&mut set, &paths[..2], &mut NoFaults).expect("stage members");
-            assert_eq!(set.len(), 2);
-            set.abandon();
+            assert_eq!(set.destinations().count(), 2);
+            drop(set);
 
             assert_set_unpublished(&paths, preexisting);
             assert_no_snapshots(&directory);
@@ -878,10 +854,7 @@ mod tests {
             let manifest_path = directory.path().join("set.json");
             let mut set = AtomicArtifactSet::new();
             stage_all(&mut set, &paths, &mut NoFaults).expect("stage members");
-            set.stage_manifest::<io::Error, _>(&manifest_path, |writer| {
-                writer.write_all(b"{\"members\":3}")
-            })
-            .expect("stage manifest");
+            stage_manifest(&mut set, &manifest_path).expect("stage manifest");
 
             let error = set
                 .commit_impl(&mut InjectSetFault::new(
@@ -944,12 +917,8 @@ mod tests {
         );
 
         let manifest = directory.path().join("set.json");
-        set.stage_manifest::<io::Error, _>(&manifest, |writer| writer.write_all(b"{}"))
-            .expect("stage manifest");
-        let error = set
-            .stage_manifest::<io::Error, _>(&directory.path().join("other.json"), |writer| {
-                writer.write_all(b"{}")
-            })
+        stage_manifest(&mut set, &manifest).expect("stage manifest");
+        let error = stage_manifest(&mut set, &directory.path().join("other.json"))
             .expect_err("second manifest must fail closed");
         assert!(
             matches!(

@@ -158,10 +158,11 @@ pub struct AtomicArtifactFile {
 /// A completely written, flushed, and synchronized artifact that has not yet
 /// replaced its destination.
 ///
-/// This split phase is useful when a logical result consists of several
-/// sibling files: callers can prepare every member before publishing the
-/// first one. Dropping a prepared artifact removes only its staging file and
-/// leaves the destination unchanged.
+/// This split phase is what lets [`AtomicArtifactSet`] complete every member
+/// of a result before it touches the first destination, and it lets a single
+/// publisher re-validate its destination after the bytes are durable but
+/// before the namespace changes. Dropping a prepared artifact removes only
+/// its staging file and leaves the destination unchanged.
 #[derive(Debug)]
 pub struct PreparedAtomicArtifact {
     destination: PathBuf,
@@ -310,12 +311,6 @@ impl PreparedAtomicArtifact {
     /// Atomically replace the destination with this fully prepared artifact.
     pub fn commit(self) -> Result<(), AtomicArtifactError<io::Error>> {
         self.commit_impl::<io::Error, _>(&mut NoFaults)
-    }
-
-    /// Destination this prepared artifact will replace.
-    #[must_use]
-    pub fn destination(&self) -> &Path {
-        &self.destination
     }
 
     pub(crate) fn commit_impl<E, H>(mut self, hooks: &mut H) -> Result<(), AtomicArtifactError<E>>
@@ -519,17 +514,10 @@ pub(crate) fn destination_parent(destination: &Path) -> &Path {
     }
 }
 
-/// Synchronize the directory entry containing an artifact where the host
-/// exposes a directory durability primitive. Multi-file publishers use this
-/// after rollback or recovery namespace changes before reporting completion.
-pub fn sync_artifact_parent(destination: &Path) -> io::Result<()> {
-    sync_parent_directory(destination)
-}
-
 /// Replace `destination` with a complete same-filesystem recovery file using
 /// the platform's durable atomic-replace path. On success, `recovery` has
 /// been consumed.
-pub fn restore_artifact_durably(recovery: &Path, destination: &Path) -> io::Result<()> {
+pub(crate) fn restore_artifact_durably(recovery: &Path, destination: &Path) -> io::Result<()> {
     reject_symlink_destination(destination)?;
     commit_staging_file(recovery, destination)?;
     sync_parent_directory(destination)
@@ -541,7 +529,7 @@ pub fn restore_artifact_durably(recovery: &Path, destination: &Path) -> io::Resu
 /// with `MOVEFILE_WRITE_THROUGH`, then deletes that tombstone. If the final
 /// tombstone deletion is interrupted, ordinary stale-artifact recovery can
 /// remove it without resurrecting the public destination.
-pub fn remove_artifact_durably(destination: &Path) -> io::Result<()> {
+pub(crate) fn remove_artifact_durably(destination: &Path) -> io::Result<()> {
     remove_artifact_durably_impl(destination)
 }
 
@@ -756,7 +744,7 @@ mod tests {
         let directory = TestDirectory::new("parent-sync");
         let destination = directory.destination();
         std::fs::write(&destination, b"complete").expect("write synchronized fixture");
-        sync_artifact_parent(&destination).expect("synchronize artifact parent");
+        sync_parent_directory(&destination).expect("synchronize artifact parent");
     }
 
     #[test]
