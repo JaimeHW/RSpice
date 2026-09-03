@@ -252,7 +252,6 @@ impl<'a> RunContext<'a> {
     ///
     /// The corner deck is re-parsed, so it gets its own canonical plan and
     /// therefore names its analyses exactly as the nominal deck does.
-    #[allow(clippy::too_many_arguments)] // One context, one call site per corner executor.
     pub(super) fn for_elaborated_deck(
         engine: &'a Engine,
         netlist: &'a Netlist,

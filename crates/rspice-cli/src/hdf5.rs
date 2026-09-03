@@ -2066,7 +2066,14 @@ mod tests {
             })
             .collect();
         Hdf5FftResult {
-            analysis_id: format!("fft-{ordinal:03}"),
+            analysis_id: crate::analysis_identity::post_process_ids(
+                rspice_core::execution::AnalysisKind::Fft,
+                ordinal,
+            )
+            .expect("canonical FFT identities")
+            .last()
+            .expect("one identity per requested ordinal")
+            .tag(),
             ordinal,
             source_kind: if physical_type == "parameter" {
                 "expression".to_string()
