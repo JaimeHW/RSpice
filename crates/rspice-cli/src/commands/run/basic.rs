@@ -128,7 +128,12 @@ pub(super) fn run_dc_op(ctx: &RunContext<'_>) -> Result<(), CliError> {
                         )
                     },
                     |path, format| {
-                        write_dc_op_output(path, &exported_operating_point_signals, format)
+                        write_dc_op_output(
+                            path,
+                            &exported_operating_point_signals,
+                            format,
+                            Some(&super::document::hdf5_identity(ctx, analysis_id)?),
+                        )
                     },
                 )?;
                 if !ctx.quiet {
@@ -223,10 +228,12 @@ pub(super) fn write_dc_op_output(
     path: &Path,
     signals: &[crate::commands::run_signals::ScalarSignal],
     format: OutputFormat,
+    identity: Option<&crate::hdf5::Hdf5ResultIdentity>,
 ) -> Result<(), CliError> {
     if matches!(format, OutputFormat::Hdf5) {
         let mut data = Hdf5SimulationData::new();
         data.title = "DC Operating Point".to_string();
+        data.identity = identity.cloned();
 
         let mut operating_point = Hdf5WaveformSection::new("point", vec![0.0]);
         for signal in signals {
@@ -464,6 +471,7 @@ pub(super) fn run_dc_sweep(
                         OutputFormat::Hdf5 => {
                             let mut data = Hdf5SimulationData::new();
                             data.title = "DC Sweep".to_string();
+                            data.identity = Some(super::document::hdf5_identity(ctx, analysis_id)?);
 
                             let mut dc_sweep = Hdf5WaveformSection::new(source, sweep_vals.clone());
                             for signal in &signals {
@@ -966,6 +974,7 @@ pub(super) fn run_transient(
                     OutputFormat::Hdf5 => {
                         let mut data = Hdf5SimulationData::new();
                         data.title = "Transient Analysis".to_string();
+                        data.identity = Some(super::document::hdf5_identity(ctx, analysis_id)?);
 
                         let mut transient = Hdf5WaveformSection::new("time", output_time.clone());
                         for signal in &signals {
@@ -3292,6 +3301,16 @@ fn write_fft_to_writer(
         OutputFormat::Hdf5 => {
             let mut data = Hdf5SimulationData::new();
             data.title = format!("Transient FFT ({parent_analysis_id})");
+            // The bundle carries several `.FFT` instances, so the document's
+            // own identity is the parent transient they were derived from;
+            // each spectrum keeps its own `analysis_id` inside the section.
+            data.identity = Some(crate::hdf5::Hdf5ResultIdentity {
+                analysis_id: parent_analysis_id.to_string(),
+                coordinate_id: coordinate.map(|value| value.id.clone()),
+                coordinate_tag: coordinate.map(|value| value.tag.clone()),
+                coordinate_assignment: coordinate.map(|value| value.assignment.clone()),
+                topology_fingerprint: None,
+            });
             data.fft = Some(hdf5_fft_section(
                 parent_analysis_id,
                 analysis_ids,

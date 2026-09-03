@@ -255,6 +255,7 @@ pub(super) fn run_disto(
                 if matches!(format, OutputFormat::Hdf5) {
                     let mut data = Hdf5SimulationData::new();
                     data.title = "Volterra Distortion Analysis".to_string();
+                    data.identity = Some(super::document::hdf5_identity(ctx, analysis_id)?);
                     data.distortion = Some(distortion_hdf5_section(&projection)?);
                     write_hdf5(path, &data).map_err(|error| map_hdf5_output_error(path, error))
                 } else {
@@ -788,6 +789,7 @@ fn finish_ac_results(
                 if matches!(format, OutputFormat::Hdf5) {
                     let mut data = Hdf5SimulationData::new();
                     data.title = "AC Analysis".to_string();
+                    data.identity = Some(super::document::hdf5_identity(ctx, analysis_id)?);
 
                     let mut ac = Hdf5AcSection::new(frequencies.clone());
                     for signal in &signals {
@@ -952,6 +954,7 @@ pub(super) fn run_stb(
                 if matches!(format, OutputFormat::Hdf5) {
                     let mut data = Hdf5SimulationData::new();
                     data.title = "STB Loop Gain".to_string();
+                    data.identity = Some(super::document::hdf5_identity(ctx, analysis_id)?);
 
                     let mut ac = Hdf5AcSection::new(stb.frequencies.clone());
                     ac.add_signal(
@@ -1218,6 +1221,7 @@ fn finish_noise(
                         if matches!(format, OutputFormat::Hdf5) {
                             let mut data = Hdf5SimulationData::new();
                             data.title = "Noise Analysis".to_string();
+                            data.identity = Some(super::document::hdf5_identity(ctx, analysis_id)?);
 
                             let mut noise =
                                 Hdf5WaveformSection::new("frequency", noise_frequencies.clone());

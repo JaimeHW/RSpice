@@ -2555,7 +2555,20 @@ fn run_implicit_step_op_table(
                 )?;
                 document::write_document(&ctx, &path, &built)?;
             } else {
-                basic::write_dc_op_output(&path, &run.signals, ctx.format)?;
+                basic::write_dc_op_output(
+                    &path,
+                    &run.signals,
+                    ctx.format,
+                    Some(&crate::hdf5::Hdf5ResultIdentity {
+                        analysis_id: run.analysis_id.clone(),
+                        coordinate_id: Some(run.coordinate_id.to_string()),
+                        coordinate_tag: Some(run.coordinate_tag.clone()),
+                        coordinate_assignment: Some(canonical_coordinate_description(
+                            &run.canonical,
+                        )),
+                        topology_fingerprint: Some(run.topology.to_string()),
+                    }),
+                )?;
             }
             coordinate_publications.push(CoordinatePublication {
                 coordinate: run.canonical.clone(),

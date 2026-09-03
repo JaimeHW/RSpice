@@ -890,9 +890,29 @@ impl Hdf5Measurement {
     }
 }
 
+/// Identity one HDF5 document publishes under.
+///
+/// A `run` artifact names the canonical analysis instance that produced it,
+/// and, for an axis coordinate, the coordinate and topology it belongs to. A
+/// document `convert` produced from a file that declared none carries none.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Hdf5ResultIdentity {
+    /// Canonical `AnalysisInstanceId::tag()`, which is also the group name.
+    pub analysis_id: String,
+    pub coordinate_id: Option<String>,
+    pub coordinate_tag: Option<String>,
+    pub coordinate_assignment: Option<String>,
+    pub topology_fingerprint: Option<String>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Hdf5SimulationData {
     pub title: String,
+    /// The analysis instance this document publishes. When present, the
+    /// section group is named by it instead of by the result family, so two
+    /// `.AC` cards cannot collide in one file and a reader can tell which card
+    /// a group came from.
+    pub identity: Option<Hdf5ResultIdentity>,
     pub operating_point: Option<Hdf5WaveformSection>,
     pub transient: Option<Hdf5WaveformSection>,
     pub dc_sweep: Option<Hdf5WaveformSection>,
@@ -960,27 +980,76 @@ fn build_hdf5(data: &Hdf5SimulationData) -> Result<FileBuilder> {
     );
     builder.set_attr("simulator", AttrValue::String("RSpice".to_string()));
     builder.set_attr("title", AttrValue::String(data.title.clone()));
+    // The identity travels on the root as well as in the group name, so a
+    // reader that walks groups by their `section_type` still learns which
+    // analysis instance and coordinate produced them.
+    if let Some(identity) = &data.identity {
+        builder.set_attr(
+            "analysis_id",
+            AttrValue::String(identity.analysis_id.clone()),
+        );
+        for (name, value) in [
+            ("coordinate_id", identity.coordinate_id.as_ref()),
+            ("coordinate_tag", identity.coordinate_tag.as_ref()),
+            (
+                "coordinate_assignment",
+                identity.coordinate_assignment.as_ref(),
+            ),
+            (
+                "topology_fingerprint",
+                identity.topology_fingerprint.as_ref(),
+            ),
+        ] {
+            if let Some(value) = value {
+                builder.set_attr(name, AttrValue::String(value.clone()));
+            }
+        }
+    }
+    // One document carries one analysis, so the identity names its single
+    // section group. A converted document with no identity keeps the family
+    // name it was decoded under.
+    let section_name = |family: &'static str| {
+        data.identity.as_ref().map_or_else(
+            || family.to_string(),
+            |identity| identity.analysis_id.clone(),
+        )
+    };
 
     if let Some(operating_point) = &data.operating_point {
-        add_waveform_section(&mut builder, "operating_point", operating_point)?;
+        add_waveform_section(
+            &mut builder,
+            &section_name("operating_point"),
+            "operating_point",
+            operating_point,
+        )?;
     }
     if let Some(transient) = &data.transient {
-        add_waveform_section(&mut builder, "transient", transient)?;
+        add_waveform_section(
+            &mut builder,
+            &section_name("transient"),
+            "transient",
+            transient,
+        )?;
     }
     if let Some(dc_sweep) = &data.dc_sweep {
-        add_waveform_section(&mut builder, "dc_sweep", dc_sweep)?;
+        add_waveform_section(
+            &mut builder,
+            &section_name("dc_sweep"),
+            "dc_sweep",
+            dc_sweep,
+        )?;
     }
     if let Some(noise) = &data.noise {
-        add_waveform_section(&mut builder, "noise", noise)?;
+        add_waveform_section(&mut builder, &section_name("noise"), "noise", noise)?;
     }
     if let Some(ac) = &data.ac {
-        add_ac_section(&mut builder, ac)?;
+        add_ac_section(&mut builder, &section_name("ac"), ac)?;
     }
     if let Some(distortion) = &data.distortion {
-        add_distortion_section(&mut builder, distortion)?;
+        add_distortion_section(&mut builder, &section_name("distortion"), distortion)?;
     }
     if let Some(fft) = &data.fft {
-        add_fft_section(&mut builder, fft)?;
+        add_fft_section(&mut builder, &section_name("fft"), fft)?;
     }
     if !data.measurements.is_empty() {
         add_measurements(&mut builder, &data.measurements)?;
@@ -1016,69 +1085,66 @@ pub fn read_hdf5(path: &Path) -> Result<Hdf5SimulationData> {
     }
 
     let title = read_string_attr(&root_attrs, "title")?.unwrap_or_default();
+    let identity = read_string_attr(&root_attrs, "analysis_id")?.map(|analysis_id| {
+        Ok::<_, Hdf5Error>(Hdf5ResultIdentity {
+            analysis_id,
+            coordinate_id: read_string_attr(&root_attrs, "coordinate_id")?,
+            coordinate_tag: read_string_attr(&root_attrs, "coordinate_tag")?,
+            coordinate_assignment: read_string_attr(&root_attrs, "coordinate_assignment")?,
+            topology_fingerprint: read_string_attr(&root_attrs, "topology_fingerprint")?,
+        })
+    });
+    let identity = identity.transpose()?;
     let root_groups = root.groups()?;
 
-    let operating_point = if root_groups.iter().any(|group| group == "operating_point") {
-        Some(read_waveform_section(&file, "operating_point")?)
-    } else {
-        None
-    };
-    let transient = if root_groups.iter().any(|group| group == "transient") {
-        Some(read_waveform_section(&file, "transient")?)
-    } else {
-        None
-    };
-    let dc_sweep = if root_groups.iter().any(|group| group == "dc_sweep") {
-        Some(read_waveform_section(&file, "dc_sweep")?)
-    } else {
-        None
-    };
-    let noise = if root_groups.iter().any(|group| group == "noise") {
-        Some(read_waveform_section(&file, "noise")?)
-    } else {
-        None
-    };
-    let ac = if root_groups.iter().any(|group| group == "ac") {
-        Some(read_ac_section(&file)?)
-    } else {
-        None
-    };
-    let distortion = if root_groups.iter().any(|group| group == "distortion") {
-        Some(read_distortion_section(&file)?)
-    } else {
-        None
-    };
-    let fft = if root_groups.iter().any(|group| group == "fft") {
-        Some(read_fft_section(&file)?)
-    } else {
-        None
-    };
-    let measurements = if root_groups.iter().any(|group| group == "measurements") {
-        read_measurements(&file)?
-    } else {
-        Vec::new()
-    };
-
-    Ok(Hdf5SimulationData {
+    // A section group is named by the analysis instance that produced it, so
+    // the family it belongs to is read from its own `section_type` attribute
+    // rather than guessed from the group name.
+    let mut data = Hdf5SimulationData {
         title,
-        operating_point,
-        transient,
-        dc_sweep,
-        noise,
-        ac,
-        distortion,
-        fft,
-        measurements,
-    })
+        identity,
+        ..Hdf5SimulationData::default()
+    };
+    for group_name in &root_groups {
+        if group_name == "measurements" {
+            data.measurements = read_measurements(&file)?;
+            continue;
+        }
+        let family = read_required_string_attr(&file.group(group_name)?.attrs()?, "section_type")
+            .map_err(|_| {
+            Hdf5Error::InvalidSchema(format!(
+                "group '{group_name}' declares no section_type, so its result family is unknown"
+            ))
+        })?;
+        match family.as_str() {
+            "operating_point" => {
+                data.operating_point = Some(read_waveform_section(&file, group_name)?);
+            }
+            "transient" => data.transient = Some(read_waveform_section(&file, group_name)?),
+            "dc_sweep" => data.dc_sweep = Some(read_waveform_section(&file, group_name)?),
+            "noise" => data.noise = Some(read_waveform_section(&file, group_name)?),
+            "ac" => data.ac = Some(read_ac_section(&file, group_name)?),
+            "distortion" => data.distortion = Some(read_distortion_section(&file, group_name)?),
+            "fft" => data.fft = Some(read_fft_section(&file, group_name)?),
+            other => {
+                return Err(Hdf5Error::InvalidSchema(format!(
+                    "group '{group_name}' declares unknown section_type '{other}'"
+                )));
+            }
+        }
+    }
+
+    Ok(data)
 }
 
 fn add_waveform_section(
     builder: &mut FileBuilder,
     name: &str,
+    family: &str,
     section: &Hdf5WaveformSection,
 ) -> Result<()> {
     let mut group = builder.create_group(name);
-    group.set_attr("section_type", AttrValue::String(name.to_string()));
+    group.set_attr("section_type", AttrValue::String(family.to_string()));
     group.set_attr(
         "independent_name",
         AttrValue::String(section.independent_name.clone()),
@@ -1134,8 +1200,8 @@ fn read_waveform_section(file: &Hdf5File, group_name: &str) -> Result<Hdf5Wavefo
     Ok(section)
 }
 
-fn add_ac_section(builder: &mut FileBuilder, section: &Hdf5AcSection) -> Result<()> {
-    let mut group = builder.create_group("ac");
+fn add_ac_section(builder: &mut FileBuilder, name: &str, section: &Hdf5AcSection) -> Result<()> {
+    let mut group = builder.create_group(name);
     group.set_attr("section_type", AttrValue::String("ac".to_string()));
     group.set_attr("signal_count", AttrValue::I64(section.signals.len() as i64));
     group
@@ -1160,8 +1226,8 @@ fn add_ac_section(builder: &mut FileBuilder, section: &Hdf5AcSection) -> Result<
     Ok(())
 }
 
-fn read_ac_section(file: &Hdf5File) -> Result<Hdf5AcSection> {
-    let group = file.group("ac")?;
+fn read_ac_section(file: &Hdf5File, group_name: &str) -> Result<Hdf5AcSection> {
+    let group = file.group(group_name)?;
     let attrs = group.attrs()?;
     let signal_count = read_required_i64_attr(&attrs, "signal_count")? as usize;
     let frequency = group.dataset("frequency")?.read_f64()?;
@@ -1182,9 +1248,10 @@ fn read_ac_section(file: &Hdf5File) -> Result<Hdf5AcSection> {
 
 fn add_distortion_section(
     builder: &mut FileBuilder,
+    name: &str,
     section: &Hdf5DistortionSection,
 ) -> Result<()> {
-    let mut group = builder.create_group("distortion");
+    let mut group = builder.create_group(name);
     group.set_attr("section_type", AttrValue::String("distortion".to_string()));
     group.set_attr("mode", AttrValue::String(section.mode.clone()));
     group.set_attr(
@@ -1259,8 +1326,8 @@ fn add_distortion_section(
     Ok(())
 }
 
-fn read_distortion_section(file: &Hdf5File) -> Result<Hdf5DistortionSection> {
-    let group = file.group("distortion")?;
+fn read_distortion_section(file: &Hdf5File, group_name: &str) -> Result<Hdf5DistortionSection> {
+    let group = file.group(group_name)?;
     let attrs = group.attrs()?;
     let mode = read_required_string_attr(&attrs, "mode")?;
     let f2_over_f1 = read_f64_attr(&attrs, "f2_over_f1")?;
@@ -1349,8 +1416,8 @@ fn checked_i64(value: usize, name: &str) -> Result<i64> {
     })
 }
 
-fn add_fft_section(builder: &mut FileBuilder, section: &Hdf5FftSection) -> Result<()> {
-    let mut group = builder.create_group("fft");
+fn add_fft_section(builder: &mut FileBuilder, name: &str, section: &Hdf5FftSection) -> Result<()> {
+    let mut group = builder.create_group(name);
     group.set_attr("section_type", AttrValue::String("fft".to_string()));
     group.set_attr(
         "schema_version",
@@ -1559,8 +1626,8 @@ fn add_fft_section(builder: &mut FileBuilder, section: &Hdf5FftSection) -> Resul
     Ok(())
 }
 
-fn read_fft_section(file: &Hdf5File) -> Result<Hdf5FftSection> {
-    let group = file.group("fft")?;
+fn read_fft_section(file: &Hdf5File, group_name: &str) -> Result<Hdf5FftSection> {
+    let group = file.group(group_name)?;
     let attrs = group.attrs()?;
     let schema_version = read_required_string_attr(&attrs, "schema_version")?;
     if schema_version != FFT_SECTION_SCHEMA_VERSION {

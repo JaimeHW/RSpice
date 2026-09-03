@@ -162,6 +162,30 @@ pub(super) fn write_document(
     .map_err(|error| map_atomic_output_error(path, error))
 }
 
+/// The identity an HDF5 document publishes under: the canonical analysis
+/// instance, the coordinate that produced it, and its topology fingerprint.
+///
+/// HDF5 has one group per analysis, keyed by the instance rather than by the
+/// result family, so two `.AC` cards in one deck cannot collide and a reader
+/// can tell which card a group came from.
+pub(super) fn hdf5_identity(
+    ctx: &RunContext<'_>,
+    analysis_id: AnalysisInstanceId,
+) -> Result<crate::hdf5::Hdf5ResultIdentity, CliError> {
+    Ok(crate::hdf5::Hdf5ResultIdentity {
+        analysis_id: analysis_id.tag(),
+        coordinate_id: ctx.coordinate.as_ref().map(|value| value.id.clone()),
+        coordinate_tag: ctx.coordinate.as_ref().map(|value| value.tag.clone()),
+        coordinate_assignment: ctx
+            .coordinate
+            .as_ref()
+            .map(|value| value.assignment.clone()),
+        topology_fingerprint: ctx
+            .topology_fingerprint()?
+            .map(|fingerprint| fingerprint.to_string()),
+    })
+}
+
 /// The coordinate-local schema of a real-valued flat artifact.
 pub(super) fn scalar_schema(
     signals: &[crate::commands::run_signals::ScalarSignal],

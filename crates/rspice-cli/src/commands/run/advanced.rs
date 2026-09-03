@@ -330,6 +330,7 @@ fn export_monte_carlo(
             crate::cli::OutputFormat::Hdf5 => {
                 let mut data = crate::hdf5::Hdf5SimulationData::new();
                 data.title = "Monte Carlo Samples".to_string();
+                data.identity = Some(super::document::hdf5_identity(ctx, analysis_id)?);
                 let mut sweep = crate::hdf5::Hdf5WaveformSection::new("run", runs.clone());
                 for signal in &signals {
                     sweep.add_typed_signal(
@@ -498,6 +499,7 @@ fn export_pss(
                 crate::cli::OutputFormat::Hdf5 => {
                     let mut data = crate::hdf5::Hdf5SimulationData::new();
                     data.title = "Periodic Steady State".to_string();
+                    data.identity = Some(super::document::hdf5_identity(ctx, analysis_id)?);
                     let mut section =
                         crate::hdf5::Hdf5WaveformSection::new("time", result.time.clone());
                     for signal in &signals {
@@ -718,6 +720,7 @@ fn export_hb(
             if matches!(format, crate::cli::OutputFormat::Hdf5) {
                 let mut data = crate::hdf5::Hdf5SimulationData::new();
                 data.title = "Harmonic Balance Spectrum".to_string();
+                data.identity = Some(super::document::hdf5_identity(ctx, analysis_id)?);
                 let mut section = crate::hdf5::Hdf5AcSection::new(frequencies.clone());
                 for signal in &signals {
                     section.add_signal(
@@ -1408,6 +1411,7 @@ pub(super) fn run_sparam_from_command(
                     if matches!(format, crate::cli::OutputFormat::Hdf5) {
                         let mut hdf5 = crate::hdf5::Hdf5SimulationData::new();
                         hdf5.title = "S-Parameters".to_string();
+                        hdf5.identity = Some(super::document::hdf5_identity(ctx, analysis_id)?);
                         let mut section = crate::hdf5::Hdf5AcSection::new(data.frequencies.clone());
                         for signal in &signals {
                             section.add_signal(
@@ -1969,6 +1973,7 @@ pub(super) fn run_sparam(ctx: &RunContext<'_>, ports_spec: &str, z0: f64) -> Res
                     if matches!(format, crate::cli::OutputFormat::Hdf5) {
                         let mut data = crate::hdf5::Hdf5SimulationData::new();
                         data.title = "S-Parameters".to_string();
+                        data.identity = Some(super::document::hdf5_identity(ctx, analysis_id)?);
                         let mut section = crate::hdf5::Hdf5AcSection::new(frequencies.clone());
                         for s in &signals {
                             section.add_signal(
