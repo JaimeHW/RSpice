@@ -1,6 +1,7 @@
+use rspice_core::NoAbort;
 use rspice_wasm::{
-    WasmExecutionOptions, run_ac_analysis, run_ac_analysis_detailed,
-    run_ac_analysis_with_options_detailed, summarize_netlist, summarize_netlist_detailed,
+    WasmExecutionOptions, run_ac_document_detailed,
+    run_ac_document_with_options_and_abort_detailed, summarize_netlist, summarize_netlist_detailed,
 };
 
 const INVALID_OUTPUT_DECK: &str = "typed browser error\n\
@@ -94,18 +95,18 @@ fn legacy_string_error_api_retains_the_typed_errors_message() {
 
 #[test]
 fn execution_and_argument_boundaries_publish_structured_categories() {
-    let parse_error = run_ac_analysis_detailed(INVALID_OUTPUT_DECK, &[1_000.0])
+    let parse_error = run_ac_document_detailed(INVALID_OUTPUT_DECK, &[1_000.0])
         .expect_err("execution must validate before circuit construction");
     assert_eq!(parse_error.kind, "undefined_output_symbols");
     assert_eq!(parse_error.primary_line, Some(3));
 
-    let argument_error = run_ac_analysis_detailed("valid\nV1 1 0 1\n.END\n", &[])
+    let argument_error = run_ac_document_detailed("valid\nV1 1 0 1\n.END\n", &[])
         .expect_err("empty frequency grids are invalid");
     assert_eq!(argument_error.kind, "invalid_argument");
     assert_eq!(argument_error.category, "input_validation");
-    assert_eq!(
-        run_ac_analysis("valid\nV1 1 0 1\n.END\n", &[])
-            .expect_err("legacy API retains invalid-grid message"),
+    assert!(
+        argument_error.message.contains("at least one frequency"),
+        "the argument failure names the empty grid: {}",
         argument_error.message
     );
 }
@@ -114,10 +115,11 @@ fn execution_and_argument_boundaries_publish_structured_categories() {
 fn resource_failures_serialize_stable_machine_readable_details() {
     let mut options = WasmExecutionOptions::default();
     options.resource_limits.max_analysis_points = 1;
-    let error = run_ac_analysis_with_options_detailed(
+    let error = run_ac_document_with_options_and_abort_detailed(
         "valid\nV1 1 0 1\nR1 1 0 1k\n.END\n",
         &[1_000.0, 2_000.0],
         &options,
+        &NoAbort,
     )
     .expect_err("explicit browser ceiling must reject the frequency grid");
 

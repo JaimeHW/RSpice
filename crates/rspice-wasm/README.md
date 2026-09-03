@@ -1,12 +1,10 @@
 # RSpice WASM
 
 WebAssembly bindings for the RSpice simulation engine. The crate is
-deliberately thin: `src/lib.rs` and focused result-document modules expose serializable snapshots,
-structured errors, and browser-safe execution policies over `rspice-core`, so
-a browser can parse a netlist and run DC operating-point, AC, and transient
-analyses entirely client-side. The versioned result-document API additionally
-maps scalar-deck DC sweeps, input-referred noise, and loop stability. All numerical work happens in `rspice-core`;
-this crate adapts inputs and serializes results across the JS boundary.
+deliberately thin, and it owns **no result schema of its own**: every analysis
+produces the shared `rspice_core::execution::AnalysisResultDocument`, and this
+crate only decides how that document crosses the JavaScript boundary. All
+numerical work happens in `rspice-core`.
 
 This is what powers the "run it in your browser" demo on the project site.
 The client-owned [`web/`](web/) shell is overlaid onto the standalone
@@ -15,112 +13,108 @@ The client-owned [`web/`](web/) shell is overlaid onto the standalone
 
 ## Public API (the contract JavaScript sees)
 
-Analysis exports take the netlist as a string, return a plain JS object
-(serialized with `serde-wasm-bindgen`, not a JSON string), and report errors
-by throwing an `RSpiceError` with stable structured fields.
+Every analysis export returns a `WasmResultHandle`. Errors are thrown as an
+`RSpiceError` with stable structured fields.
 
 | JS function | Arguments | Returns |
 | :--- | :--- | :--- |
 | `defaultResourceLimits()` | none | camelCase browser resource policy object |
 | `healthCheck([options])` | optional execution options | parser-to-solver readiness report with timing and probe counts |
-| `summarizeNetlist(source[, options])` | netlist text and optional execution options | `{title, element_count, analysis_count, model_count, subcircuit_count, parameter_count}` |
-| `runDcOperatingPoint(source[, options])` | netlist text and optional execution options | `{node_names, node_voltages, branch_names, branch_currents}` |
-| `runAcAnalysis(source, frequencies[, options])` | netlist text, `Float64Array`/array of Hz values (non-empty, finite, and non-negative), and optional options | array of `{frequency, node_names, branch_names, voltages: {real, imag}, currents: {real, imag}}`, one entry per frequency |
-| `runTransientAnalysis(source, tstop, max_step[, options])` | netlist text, positive finite stop/max-step values, and optional options | complete analog transient inventory: accepted `time`/`step_sizes`, node and branch identities/waveforms, device operating-point and typed store traces, FFT products, and explicit compression provenance |
-| `runTransientAnalysisCompressed(source, tstop, max_step, compression[, options])` | the transient inputs plus a fail-closed compression object | the same complete transient DTO on a bounded decimated grid, with non-null compression provenance |
-| `runOperatingPointDocument(source, ordinal[, options])` | netlist and one-based analysis ordinal | retained version-1 typed analog result handle |
-| `runDcSweepDocument(source, sourceName, start, stop, step, ordinal[, options])` | scalar-deck linear source sweep | retained version-1 typed analog result handle |
-| `runAcAnalysisDocument(source, frequencies, ordinal[, options])` | explicit frequency grid | retained version-1 typed analog result handle |
-| `runTransientAnalysisDocument(source, tstop, maxStep, ordinal[, options])` | explicit transient interval | retained version-1 typed analog result handle |
-| `runNoiseAnalysisDocument(source, outputNode, referenceNode, inputSource, frequencies, ordinal[, options])` | named output/input and explicit positive frequency grid | retained version-1 typed analog result handle |
-| `runStbAnalysisDocument(source, probe, sweep, points, startFrequency, stopFrequency, computeNyquist, ordinal[, options])` | scalar Tian STB request (`linear`/`decade`/`octave`) | retained version-1 lossless STB result handle |
-| `runAuthoredDeckDocument(source[, options])` | complete authored analog deck containing mapped OP, DC, AC, TRAN, or noise analyses and optional DATA/STEP/TEMP axes | retained version-1 deck result handle with canonical coordinate/analysis namespaces and bounded analog/attached-FFT windows |
+| `summarizeNetlist(source[, options])` | netlist text and optional execution options | `{title, element_count, analysis_count, model_count, subcircuit_count, parameter_count, diagnostics, startup_diagnostics}` |
+| `runOperatingPointDocument(source[, options])` | netlist text | result handle holding one `op` document |
+| `runDcSweepDocument(source, sourceName, start, stop, step[, options])` | scalar linear source sweep | result handle holding one `dc` document |
+| `runAcAnalysisDocument(source, frequencies[, options])` | explicit frequency grid | result handle holding one `ac` document |
+| `runTransientAnalysisDocument(source, tstop, maxStep[, options])` | explicit transient interval | result handle holding one `tran` document |
+| `runNoiseAnalysisDocument(source, outputNode, referenceNode, inputSource, frequencies[, options])` | named output/input and an explicit positive frequency grid | result handle holding one `noise` document |
+| `runAuthoredDeckDocument(source[, options])` | a complete authored deck with optional DATA/STEP/TEMP axes | result handle holding every coordinate-local result the deck produced |
 
-The five `*Document` calls share the schema identity `rspice-analog-result`
-and schema version `1`. Each document retains a stable kind/ordinal ID such as
-`dc-002`, explicit `coordinateId: null` for these scalar-only calls, physical
-units where the engine has sound metadata, node/branch/device/analysis owners,
-real versus complex value types, branch currents, device observables, and
-device operating regions. Unknown device-observable units are `null`; they are
-not guessed from probe spelling.
+### The result handle
 
-Document calls return a `WasmAnalogResultHandle`, not a full JavaScript sample
-tree. `handle.metadata()` copies only descriptors and reports `pointCount` and
-`maximumWindowValues`. `handle.readWindow(start, count)` returns a half-open
-aligned slice. Axis and real/complex sample columns are `Float64Array`; each
-signal carries a `Uint8Array` validity mask. A zero validity entry is an
-explicitly unavailable sample, so the same-position numeric placeholder must
-not be interpreted. Empty, out-of-range, overflowing, and over-budget windows
-fail with `code: "invalid_result_window"`. The default transfer ceiling is
-262,144 numeric/validity values and is further reduced by `maxResultValues`.
-This retained-handle contract avoids constructing a second full ordinary JS
-array copy of a large result.
+`WasmResultHandle` retains its results in WebAssembly memory. Only descriptors
+and caller-bounded numeric windows cross into JavaScript.
 
-Authored-deck execution uses the dedicated `rspice-deck-result` schema,
-version `1`. `WasmDeckResultHandle.metadata()` returns ordered run-axis
-descriptors, canonical `RunCoordinate` IDs and assignments, planned analysis
-instance IDs such as `ac-001`/`ac-002`, collision-free output/checkpoint
-namespaces, and compact result summaries. Each coordinate keeps its exact
-local signal schema; call `resultMetadata(resultIndex)` and
-`readWindow(resultIndex, start, count)` to inspect it without unioning or
-zero-filling conditional topology. Attached transient FFTs use
-`fftMetadata(index)`, `readFftBins(index, start, count)`, and
-`readFftHarmonics(index, start, count)`. All numeric windows use typed arrays
-and share the same transfer ceiling. Global authored FFT requests are attached
-independently to every authored TRAN parent, preserving each `tran-NNN` parent
-identity and its own `fft-NNN` namespace. A deck containing an unmapped
-analysis, nonzero TRAN output start, nested two-source DC sweep, textual ALTER,
-or FOUR fails as a whole; no partial or coerced result is published.
+- `resultCount()` / `coordinateCount()`.
+- `metadata()` — the executed plan: `schema` (`rspice-browser-result`),
+  `schemaVersion`, ordered `axes` run-axis descriptors, `plannedAnalyses`
+  (canonical identities such as `ac-001`/`ac-002`), the canonical
+  `coordinates`, a compact `results` summary array, `maximumWindowValues`, and
+  `maximumResultJsonBytes`.
+- `resultMetadata(resultIndex)` — one result's identity, provenance, and
+  descriptors: `resultKind`, `analysis`, `parentAnalysis`, `coordinateId`, the
+  full `coordinate`, `topologyFingerprint`, `namespaces`, `pointCount`, `axes`,
+  `signals`, `scalars`, `deviceStates`, a `payload` descriptor carrying the
+  family tag plus the compression certificate and the FFT children, and the
+  `valuesPerPoint` / `totalValueCount` / `maximumWindowValues` budget figures.
+- `readWindow(resultIndex, start, count)` — a half-open aligned slice. Axis and
+  real/complex sample columns are `Float64Array`; every signal carries a
+  `Uint8Array` `validity` mask. **A zero validity entry is an explicitly
+  unavailable sample, so the aligned numeric placeholder must not be
+  interpreted.** Empty, out-of-range, and over-budget windows fail with
+  `code: "invalid_result_window"`; an unknown result index fails with
+  `code: "invalid_result_index"`.
+- `resultJson(resultIndex)` — the complete core document as JSON. This is the
+  lossless export path: it is bounded by an explicit byte budget and fails
+  closed rather than truncating.
 
-STB uses the dedicated schema identity `rspice-stb-result`, version `1`,
-because core intentionally retains separate primary, Bode, and optional
-Nyquist records. `WasmStbResultHandle.metadata()` publishes the probe,
-analysis identity, explicit `coordinateId: null`, success/warnings/assessment,
-all six margin values, and hertz/dimensionless/decibel/degree descriptors.
-`readWindow(start, count)` transfers the primary frequency and complex loop
-gain, the complete Bode record, and optional Nyquist real/imaginary/frequency
-columns as `Float64Array` values. The bounded transfer charges exactly 9
-values per point without Nyquist or 12 with it; the six numeric margins are
-also included in result-resource accounting. JSON documents encode non-finite
-STB values as `"NaN"`, `"Infinity"`, or `"-Infinity"` so valid no-crossover
-margin semantics round-trip instead of becoming ambiguous `null` values.
+The default transfer ceiling is 262,144 numeric/validity values and is further
+reduced by `maxResultValues`. A window charges for its numeric columns plus one
+validity byte per signal per point, because a transfer without the mask cannot
+tell a placeholder from a measurement.
 
-Transient numeric columns cross the JavaScript boundary as typed arrays:
-`time`, `step_sizes`, each retained voltage or branch-current waveform, and
-each device operating-point/store `values` column are `Float64Array` values.
-`node_names` and `branch_names` retain core ordering. A known solution channel
-excluded by authored output projection is explicitly `null` at its aligned
-position rather than being confused with a retained empty waveform. Full-grid
-execution returns `compression: null`; Rust callers adapting a validated
-`TransientResultCompressed` receive `{input_points, retained_points,
-compression_ratio}` through the same DTO.
+### Result documents
 
-The compression object accepts `absoluteTolerance`, `relativeTolerance`,
-`maximumInterval`, and `enabled`. Omitted fields use core defaults; tolerance
-and interval values must be finite and non-negative, and unknown fields are
-rejected. `maximumInterval: 0` disables the time-axis gap ceiling.
+Documents are `rspice-analysis-result` version 1, defined and validated by
+`rspice-core`. Their JSON encoding, missingness rules, per-family payloads, and
+identity fields are documented on
+`rspice_core::execution::result_document`; this crate does not restate or
+reinterpret them.
 
-Each transient FFT entry exposes the complete authored and resolved identity
-(`analysis_id`, `parent_analysis_id`, one-based `ordinal`, `source_kind`,
-`source_text`, `authored_output`, `output_name`,
-`physical_type`, `value_unit`), sampling/calibration metadata (`start_time`, `stop_time`,
-`sample_interval`, `point_count`, `accurate_sampling`, `coherent_gain`,
-`frequency_resolution`), mode selection (`format`, `mode`, `window`,
-`window_name`, `alpha`), and metric-bin selection (`fundamental_bin`,
-`minimum_metric_bin`, `maximum_metric_bin`). Its `bins` object contains aligned
-`indices`, `frequencies`, `real`, `imaginary`, `magnitudes`, and
-`phase_degrees` typed arrays. `metrics` is explicitly `null` unless `FFTOUT=1`;
-`value_unit` is `"1"` for normalized spectra, `"V"`/`"A"` for unnormalized
-voltage/current spectra, and `null` for an unnormalized parameter spectrum;
-`physical_type` always retains the source quantity provenance. Unknown physical
-types fail snapshot conversion rather than receiving an invented unit. When
-present, `metrics` contains `fundamental_magnitude`, `thd_ratio`, `thd_db`,
-`sndr_db`, `enob_bits`, `snr_db`, `sfdr_db`, the optional
-`sfdr_spur_bin`/`sfdr_spur_frequency`, and aligned typed arrays under
-`largest_harmonics` for `ranks`, `bins`, `frequencies`, `magnitudes`,
-`magnitudes_db`, and `phase_degrees`.
+A direct request is planned as a one-analysis `DeckPlan`, so its result carries
+the same canonical `AnalysisInstanceId` and the same single run coordinate an
+authored deck would give it. Nothing here mints an identity of its own.
 
-The optional object is additive and existing calls need no changes:
+### Analysis coverage
+
+`runAuthoredDeckDocument` executes every planned analysis in a deck over its
+canonical DATA/`.STEP`/`.TEMP` coordinate product:
+
+| Executed | `.OP`, `.DC` (single source), `.AC` (including `DATA=`), `.TRAN` (including attached `.FFT` spectra and optional compression), `.NOISE` (including `DATA=`), `.STB`, `.TF`, `.DISTO`, `.MC`, `.PSS`, `.PAC`, `.HB`, `.ENVELOPE` |
+| :--- | :--- |
+| Refused by name | `.SP` and its port noise, `.PNOISE`, `.SENS`, `.PZ`, `.FOUR`, and a nested two-source `.DC` |
+
+Every refusal is raised before any solver work, names the authored card and its
+canonical instance identity, and quotes the exact `rspice-core` entry point
+that is missing. The browser API never turns an unsupported family into an
+operating point, an empty table, or a nominal-temperature run. Textual `.ALTER`
+is refused by the core deck materializer, which owns that contract.
+
+The declared coverage of every family on this surface lives in
+`rspice_core::execution::capability`, and the browser test suite uses that
+registry as its input: a cell that says `Mapped` must publish a document of
+that family, and a cell that says `Unsupported` must refuse by name.
+
+### Renames from the previous browser schemas
+
+This build replaces the three browser-owned result schemas
+(`rspice-analog-result`, `rspice-deck-result`, `rspice-stb-result`) with the
+shared core document. Consumers of the old handles should note:
+
+| Was | Now |
+| :--- | :--- |
+| `WasmAnalogResultHandle`, `WasmDeckResultHandle`, `WasmStbResultHandle` | one `WasmResultHandle` |
+| `handle.readWindow(start, count)` | `handle.readWindow(resultIndex, start, count)` |
+| `handle.metadata()` returning one result's descriptors | `handle.resultMetadata(resultIndex)`; `metadata()` now describes the plan |
+| coordinate `index` / `namespace` / assignment `target` | coordinate `ordinal` / `label` / assignment `stepTarget` |
+| coordinate `id` as a string | `coordinate.id` as `{semantic, occurrence}`; the flat string stays available as `coordinateId` |
+| `analysis: {id, kind, request_kind, ordinal}` | `analysis: {id, kind, ordinal}`, with the core's own kind tags |
+| scalar calls taking a one-based `ordinal` argument | removed; a one-analysis request is `kind-001` by construction |
+| `runStbAnalysisDocument(...)` | author `.STB` in the deck and call `runAuthoredDeckDocument` |
+| `runDcOperatingPoint`, `runAcAnalysis`, `runTransientAnalysis`, `runTransientAnalysisCompressed` | removed; they copied whole results into JavaScript arrays. Use the corresponding `*Document` call, and request compression through `options.transientCompression` |
+| the separate `TransientFftSnapshot` DTO family | each `.FFT` spectrum is its own `fft` document naming its parent `tran` analysis |
+
+### Execution options
+
+The optional object is additive; existing calls need no changes:
 
 ```js
 const options = {
@@ -130,23 +124,37 @@ const options = {
     maxAnalysisPoints: 50_000,
     maxResultValues: 1_000_000,
   },
+  transientCompression: {
+    absoluteTolerance: 1e-6,
+    relativeTolerance: 1e-6,
+    maximumInterval: 0,
+    enabled: true,
+  },
 };
-const result = runAcAnalysis(source, frequencies, options);
+const handle = runAcAnalysisDocument(source, frequencies, options);
 ```
 
 Omitted resource fields inherit browser-safe defaults. Unknown option or
-resource fields are rejected, so a misspelled control cannot silently fall
-back to a looser policy. `defaultResourceLimits()` returns all 16 current
-ceilings. The defaults cap netlists at 8 MiB, circuit matrices at 2,000
-unknowns, analysis grids at 200,000 points, retained results at 2,000,000
-scalar values, shared caches at 64 MiB, and parallel workers at one because
-the browser build is single-threaded.
+resource fields are rejected, so a misspelled control cannot silently fall back
+to a looser policy. `defaultResourceLimits()` returns all 16 current ceilings.
+The defaults cap netlists at 8 MiB, circuit matrices at 2,000 unknowns,
+analysis grids at 200,000 points, retained results at 2,000,000 scalar values,
+shared caches at 64 MiB, and parallel workers at one because the browser build
+is single-threaded.
+
+`transientCompression` is a browser transfer policy, not a deck semantic: the
+solver and the authored output projection are identical either way, and the
+published result always carries the compression certificate that says which
+grid it is on. Tolerances must be finite and non-negative;
+`maximumInterval: 0` disables the time-axis gap ceiling.
 
 ### Cancellation and deadlines
 
-Every OP, DC, AC, TRAN, noise, STB, authored-deck, and compressed-TRAN browser export calls the corresponding
-abort-aware `rspice-core` entrypoint. Parsing uses the core abort-aware parser
-as well. There are two supported controls:
+Every export decodes its options, installs its cancellation control, and starts
+its deadline in one place, then hands the composed abort source to an
+abort-aware `rspice-core` entrypoint. There is no non-abort execution path, and
+parsing uses the core abort-aware parser as well. There are two supported
+controls:
 
 - `timeoutMilliseconds` is an integer from 0 through 86,400,000. It starts
   after the options object is validated and before parser work. Zero requests
@@ -184,12 +192,11 @@ the same object without special flags on supported Node releases.
 Cancellation is cooperative, not asynchronous exception injection. The core
 observes it at bounded parser chunks and natural numerical checkpoints (for
 example Newton/continuation, frequency, accepted-step, FFT, and compression
-boundaries). The exact wall-clock latency therefore depends on the cost of one
+boundaries), and result-document validation, encoding, and the JSON export poll
+it too. The exact wall-clock latency therefore depends on the cost of one
 uncancellable numerical kernel. A successful result is never returned after a
 poll observes cancellation; the export throws `RSpiceError` with
 `code: "aborted"`, `category: "cancellation"`, and `retryable: true`.
-Conversion of an already completed bounded result into JavaScript typed arrays
-is synchronous and is not an independently interruptible phase.
 
 A DOM `AbortSignal` cannot interrupt a synchronous WebAssembly call on the
 same worker event loop, so claiming support for it would be misleading. The
@@ -198,39 +205,46 @@ binding rejects `mechanism: "abortSignal"` with
 use `timeoutMilliseconds` for cooperative engine cancellation or terminate a
 dedicated worker for unconditional process-isolation cancellation.
 
-Thrown errors expose the cross-interface `code`, compatibility `kind`,
-`category`, conservative `retryable` policy, and `details`. Resource failures add
-`resource`, `requested`, and `limit`; convergence errors add `iterations`;
-diagnostic errors retain source locations and unresolved output symbols.
+### Errors
 
-The same analysis operations are also exported as plain Rust functions
-(`summarize_netlist`, `run_dc_operating_point`, `run_ac_analysis`,
-`run_transient_analysis`, `run_transient_analysis_compressed`,
-`run_authored_deck_document_detailed`) returning
-`Result<T, String>`, since the crate
-builds as both `cdylib` and `rlib`. Their `*_detailed` variants return
-`WasmError`, and `*_with_options_detailed` variants accept the typed
-`WasmExecutionOptions` policy. Rust embedders can use the additive
-`*_with_options_and_abort_detailed` variants to provide any core
-`AbortSignal`; the existing Rust APIs remain source-compatible and use
-`NoAbort`. The JavaScript shim composes its deadline and shared control into
-that explicit abort-aware path.
+Thrown errors expose the cross-interface `code`, compatibility `kind`,
+`category`, conservative `retryable` policy, and `details`. `code`, `category`,
+and `retryable` are taken from the core error descriptor, so a new core failure
+taxonomy reaches JavaScript without a per-error edit in this crate.
+
+The core failure taxonomy is execution-context free by design, so the deck
+runner attaches `analysisId` and `coordinateId` to any failure raised inside
+one coordinate-local analysis: a stepped deck that fails to converge says which
+run and which card failed. Source locations are reported as `primarySource` /
+`primaryLine` (and `relatedSource` / `relatedLine`). Resource failures add
+`resource`, `requested`, and `limit`; convergence errors add `iterations`;
+diagnostic errors retain unresolved output symbols.
+
+### Rust API
+
+The same operations are exported as plain Rust functions, since the crate
+builds as both `cdylib` and `rlib`. `*_detailed` variants return `WasmError`,
+`*_with_options_detailed` accept the typed `WasmExecutionOptions` policy, and
+`*_with_options_and_abort_detailed` accept any core `AbortSignal`. They return
+a `DeckExecution` holding the plan, the coordinates, and the core documents, so
+a Rust embedder can consume the shared document directly instead of going
+through the JavaScript handle.
 
 ## Module layout
 
-The public bindings live in `src/lib.rs`; result-document adapters are kept in
-small focused submodules:
+- `options`: browser resource policy, execution options, compression policy
+- `abort`: deadlines, the shared-memory cancellation control, and the composed
+  abort source every runner polls
+- `errors`: the structured `WasmError` and its JavaScript projection
+- `dto`: parser-diagnostic and readiness summaries
+- `document`: the descriptor-only projection of one core result document
+- `hb_config`: the authored `.HB` tone list, resolved through the core constructors
+- `handles`: the retained handle that publishes bounded typed-array windows
+- `js_interop`: JavaScript value decoding and typed-array publication
+- `runners::{deck, direct}`: the authored-deck route and the direct entry points
+- `exports`: the `#[wasm_bindgen]` shims
 
-- Snapshot types: `NetlistSummary`, `DcOperatingPoint`, `ComplexSeries`
-  (parallel real/imag vectors), `AcPointSnapshot`, the complete analog
-  `TransientSnapshot`/device-op/store/compression family, and the complete
-  `TransientFftSnapshot`/bins/metrics/harmonics DTO family
-- Versioned typed result documents for scalar OP, DC, AC, TRAN, noise, and
-  STB, plus a canonical authored-deck aggregate and retained handles that
-  publish bounded typed-array windows
-- Browser-safe resource defaults, typed per-call options, and input validation
-- Structured error conversion with stable machine-readable resource details
-- The `#[wasm_bindgen]` export shims
+Tests live beside what they test.
 
 ## Relationship to rspice-core
 
@@ -248,12 +262,7 @@ inside a dedicated module Web Worker so long solves do not block the page's
 UI event loop. Inside that worker the solve is still single-threaded; Verilog-A
 is not enabled here.
 
-Not exposed through these bindings: `.MEAS` evaluation, SP/port-noise,
-distortion, TF, sensitivity,
-pole-zero, Fourier, Monte Carlo, PSS/PAC/PNoise, HB, and envelope. These remain
-explicitly unsupported in the generated non-UI capability matrix rather than
-being coerced into an OP/AC/TRAN shape. The full application surface is the
-[CLI](../rspice-cli/README.md), the
+The full application surface is the [CLI](../rspice-cli/README.md), the
 [Python bindings](../rspice-python/README.md), and the
 [GUI](../rspice-ui/README.md).
 
@@ -279,31 +288,35 @@ wasm threads.
 
 `cargo test -p rspice-wasm` runs native unit and integration tests for browser
 defaults, option decoding, fail-closed field handling, structured error
-contracts, abort propagation across every mapped analysis path, and the analysis
-adapters. Transient tests compare the complete
-full and compressed analog inventories against `rspice-core`, exercise
-authored projection missingness and stable trace ordering, run the real
-compressed solver path under Node. FFT tests compare every DTO field and
-source-order position with `rspice-core`, round-trip the serializable records,
-and ratchet the documented field inventory. Wasm32 tests additionally assert
-that time-domain, bin, and ranked-harmonic columns use JavaScript typed arrays
-and that optional fields are explicit `null`. Typed document tests execute all
-six mapped scalar analysis families, round-trip the versioned Serde documents,
-reject a forward version, preserve complex/current/device data, and enforce
-bounded windows with explicit validity. STB tests additionally ratchet exact
-retained resource counts, optional Nyquist data, non-finite JSON semantics,
-projection cancellation, and typed-array window columns. Node wasm-bindgen tests exercise
-pre-set shared control words, zero deadlines, unsupported mechanisms, and
-ordinary-buffer rejection through the actual JavaScript exports. Authored-deck
-tests cover STEP/TEMP/DATA coordinates, repeated analysis identities,
-conditional coordinate-local schemas, attached FFT parentage, unsupported
-families and ambiguous shapes, cumulative result accounting, cancellation,
-and the public retained-handle typed-array path. CI also builds the real
-`wasm32-unknown-unknown` artifact. The static browser contract is guarded by
-`tools/ci/test_wasm_playground.py`, which verifies that the canonical
-playground routes engine calls through `engine-worker.js`, that AC controls are
-present, and that synchronous solve exports stay off the main page. Numerical
-engine behavior remains covered in `rspice-core`.
+contracts, abort propagation across every entry point, the descriptor
+projection, and bounded window transfer.
+
+The central test drives the shared capability registry: for every core
+`AnalysisResultKind`, an exhaustive match supplies a deck, and the test asserts
+that the family behaves the way `rspice_core::execution::capability` declares —
+executing and round-tripping through the handle unchanged, or refusing by name
+with the missing core API quoted. Further tests cover `.STEP`/`.TEMP`
+coordinate products and collision-free artifact namespaces, `.ALTER` refusal
+through the core materializer, coordinate-local failure attribution,
+compression certificates, direct-entry-point planning and argument validation,
+and the periodic large-signal cards.
+
+A `wasm-bindgen-test` module in `exports` covers what only the real JavaScript
+boundary can show: that window columns arrive as `Float64Array`/`Uint8Array`,
+that absent metadata is explicit `null` rather than an omitted field, that a
+pre-set `sharedInt32` control word cancels an export while a clear one does
+not, that a DOM `AbortSignal` and an ordinary `ArrayBuffer` are rejected before
+any work, and that a refused family throws the typed refusal naming the card
+and the missing core API. It builds for `wasm32-unknown-unknown` in CI and runs
+under Node with `wasm-pack test --node`.
+
+CI also builds the real `wasm32-unknown-unknown` artifact. The static browser
+contract is guarded by `tools/ci/test_wasm_playground.py`, which verifies that
+the canonical playground routes engine calls through `engine-worker.js`, that
+the worker reads bounded windows from the retained handle rather than copying
+whole results, that AC controls are present, and that synchronous solve exports
+stay off the main page. Numerical engine behavior remains covered in
+`rspice-core`.
 
 ## License
 

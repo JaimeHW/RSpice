@@ -29,13 +29,19 @@ after engine changes. The wasm-bindgen CLI version must match the
   the page's UI event loop.
 - Netlist editor prefilled with the series-RLC step deck (ζ = 0.35,
   f₀ = 800 Hz — the same circuit as the marketing site's live demo).
-- **Run .tran** — `runTransientAnalysis(deck, tstop, hmax)` with
+- **Run .tran** — `runTransientAnalysisDocument(deck, tstop, hmax)` with
   engineering-notation fields; plots V(out)/V(in) and reports solve wall time.
-- **Run .ac** — `runAcAnalysis(deck, frequencies)` over non-empty,
+- **Run .ac** — `runAcAnalysisDocument(deck, frequencies)` over non-empty,
   finite, non-negative logarithmic frequency points; plots the selected node
   magnitude in dB.
-- **.op** — `runDcOperatingPoint`, rendered as a node/branch table.
+- **.op** — `runOperatingPointDocument`, rendered as a node/branch table.
 - **Summarize** — `summarizeNetlist` element/analysis counts.
+- Every analysis export returns a retained result handle, not a JavaScript copy
+  of the result. The worker reads descriptor-only metadata once and then
+  transfers at most one budgeted window per result, so a long solve never
+  becomes a second full copy of itself in page memory. A window's validity mask
+  says which numbers are measurements; the page stops a trace at the first
+  unavailable sample instead of drawing the placeholder zero beside it.
 - Every worker call uses browser-safe defaults (8 MiB netlists, 2,000 matrix
   unknowns, 200,000 analysis points, and 2,000,000 retained scalar values).
   Direct API callers and worker requests can pass a final options object with
