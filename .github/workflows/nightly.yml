@@ -41,6 +41,17 @@ jobs:
           --exclude rspice-conformance --release
       - name: Core library unit tests (release)
         run: cargo test --locked -p rspice-core --lib --release
+      - name: Qualification baseline (release)
+        # The workspace run above already executes these targets. Naming them
+        # again buys two things a nightly needs: the counts are printed into
+        # the log rather than captured, and a drift that only appears under
+        # optimization is attributed to this step instead of to a workspace
+        # run with several hundred other tests in it. The baseline gates
+        # counts, never wall-clock, so a release profile must produce the same
+        # numbers the debug CI run does.
+        run: >-
+          cargo test --locked -p rspice-core --release
+          --test qualification_baseline --test no_panic_corpus -- --nocapture
       - name: Xyce conformance suite (release)
         # The workspace run above excludes rspice-conformance wholesale, so
         # the Xyce corpus needs its own step or it would silently vanish from

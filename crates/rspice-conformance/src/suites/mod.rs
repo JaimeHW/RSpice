@@ -43,6 +43,17 @@ pub mod execution;
 pub mod gf180mcu;
 #[cfg(feature = "circuit-suites")]
 pub mod ngspice;
+
+/// The corpus-wide panic gate: no vendored deck may make ingestion, planning,
+/// materialization, or output resolution panic.
+///
+/// A fifth shape again, and the shallowest: it asks nothing about numbers, so
+/// it needs no oracle, no tolerance, and no contract per deck. What it buys is
+/// breadth — every deck in every corpus, not just the ones a reference suite
+/// has data for — at a cost small enough to run per commit.
+#[cfg(feature = "circuit-suites")]
+pub mod panic_gate;
+
 #[cfg(feature = "circuit-suites")]
 pub mod xyce;
 

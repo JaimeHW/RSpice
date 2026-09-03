@@ -153,6 +153,22 @@ jobs:
         run: cargo test --locked -p rspice-core --tests
       - name: Core library unit tests
         run: cargo test --locked -p rspice-core --lib
+      - name: Gate the qualification baseline
+        # The checked-in qualification baseline is a product artifact: what
+        # this build supports, and what it costs *in counts*. Wall-clock and
+        # resident set size are deliberately not gated — a shared hosted
+        # runner measures neither reproducibly, so a time budget here would be
+        # either noise or so loose it catches nothing. Every claim it makes is
+        # an abort-poll count, a retained-point count, a result-value count or
+        # an artifact byte count, each judged against the tolerance the
+        # baseline itself declares.
+        #
+        # The targets also run in the fast tier above; naming them here makes
+        # the gate greppable in a red build and prints the counts, which the
+        # aggregate step captures.
+        run: >-
+          cargo test --locked -p rspice-core
+          --test qualification_baseline --test no_panic_corpus -- --nocapture
       - name: Conformance suite unit tests
         # The ngspice runner's own unit tests — tolerance model, directive
         # classification, reference-table decoding — used to run as part of
@@ -250,6 +266,21 @@ jobs:
         run: >-
           cargo test --locked -p rspice-conformance --release
           --test execution_corpora -- --test-threads 1
+      - name: Corpus panic gate
+        # Rule 2 of the engineering contract — authored input never panics —
+        # over every vendored deck rather than only the ones a reference suite
+        # has data for. It runs ingestion, planning, coordinate
+        # materialization and authored-output resolution in process under
+        # `catch_unwind`; the solve stays with the subprocess-isolated
+        # regression runners, which is where a solver crash is already
+        # attributable.
+        #
+        # `--release` reuses the build the step above just made, and the gate
+        # prints its deck count so the log shows how much corpus was actually
+        # swept rather than a bare "ok".
+        run: >-
+          cargo test --locked -p rspice-conformance --release
+          --test panic_gate -- --nocapture
       - name: Verilog-A suite unit tests
         # The Verilog-A suite sits behind `veriloga-builtins-base`, so the
         # featureless run above compiles the whole module — oracle included —
