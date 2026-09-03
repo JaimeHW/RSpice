@@ -237,9 +237,13 @@ impl<'a> PlanProgramRef<'a> {
         }
     }
 
-    /// The deepest operand stack the entry needs, for the backends that size a
-    /// frame before they emit.
-    #[cfg_attr(not(any(test, feature = "wasm-jit")), allow(dead_code))]
+    /// The deepest operand stack the entry needs, for the wasm plan summary
+    /// that sizes a frame before it emits.
+    ///
+    /// Only that summary asks a whole entry: the native backends take the
+    /// depth off the lowered SSA instead, because they check it against their
+    /// own architectural ceiling after the lift rather than before it.
+    #[cfg(feature = "wasm-jit")]
     pub(crate) fn max_stack_depth(self) -> usize {
         match self {
             Self::Postfix(program) => program.max_stack_depth(),
@@ -247,9 +251,9 @@ impl<'a> PlanProgramRef<'a> {
         }
     }
 
-    /// How many operations the entry carries, for the plan summaries that
-    /// report emitted size.
-    #[cfg_attr(not(any(test, feature = "wasm-jit")), allow(dead_code))]
+    /// How many operations the entry carries, for the wasm plan summary that
+    /// reports emitted size.
+    #[cfg(feature = "wasm-jit")]
     pub(crate) fn operation_count(self) -> usize {
         match self {
             Self::Postfix(program) => program.ops().len(),
