@@ -51,6 +51,6 @@ pub(crate) use solver::DC_SHORT_CONDUCTANCE;
 pub use solver::{
     DepletionCap, HbError, HbSolver, HbSolverState, HbSwitchNodes, HbVoltageSwitchModel,
     NonlinearDeviceInstance, NonlinearDeviceParams, NonlinearDeviceType, PeriodicAcExcitation,
-    PeriodicNoiseSource, PeriodicSidebandWindow,
+    PeriodicNoiseSource,
 };
-pub(crate) use solver::{ExactPeriodicNetwork, HbDcSeedPolicy};
+pub(crate) use solver::{ExactPeriodicNetwork, HbDcSeedPolicy, PeriodicSidebandWindow};

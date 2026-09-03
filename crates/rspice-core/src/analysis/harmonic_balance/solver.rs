@@ -80,7 +80,7 @@ pub struct HbVoltageSwitchModel {
 /// The sideband window a periodic small-signal solve is taken over: the offset
 /// from the carrier and the inclusive sideband index range.
 #[derive(Clone, Copy)]
-pub struct PeriodicSidebandWindow {
+pub(crate) struct PeriodicSidebandWindow {
     pub offset_hz: Value,
     pub sideband_min: i32,
     pub sideband_max: i32,
