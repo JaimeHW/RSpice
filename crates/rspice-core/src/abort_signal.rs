@@ -64,6 +64,42 @@ pub struct TransientSample<'a> {
 }
 
 //=============================================================================
+// AbortReason - why a signal fired
+//=============================================================================
+
+/// Why an [`AbortSignal`] is aborted.
+///
+/// The distinction is not cosmetic: a cancelled run is one an operator stopped
+/// and may simply restart, while an expired budget is a workload that needs a
+/// larger budget or a smaller deck. Frontends map the two to different exit
+/// codes, exception classes, and wire failure codes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[non_exhaustive]
+pub enum AbortReason {
+    /// A caller asked the run to stop.
+    #[default]
+    Cancelled,
+    /// A wall-clock or deadline budget expired.
+    TimeLimit,
+}
+
+impl AbortReason {
+    /// Stable snake-case representation used by API and report payloads.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Cancelled => "cancelled",
+            Self::TimeLimit => "time_limit",
+        }
+    }
+}
+
+impl std::fmt::Display for AbortReason {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+//=============================================================================
 // AbortSignal Trait
 //=============================================================================
 
@@ -85,6 +121,18 @@ pub trait AbortSignal: Send + Sync {
     /// Returns `true` if the simulation should stop immediately.
     /// Implementations must be thread-safe and lock-free for performance.
     fn is_aborted(&self) -> bool;
+
+    /// Why this signal aborts.
+    ///
+    /// The engine's inner loops raise a reason-free stop because they cannot
+    /// know whether the flag was set by an operator or by an expired budget.
+    /// Only the signal's owner knows, so a deadline-backed implementation
+    /// overrides this and the surface that owns the signal re-labels the
+    /// error once at its boundary. The default is caller cancellation, which
+    /// is what an interactive stop flag means.
+    fn abort_reason(&self) -> AbortReason {
+        AbortReason::Cancelled
+    }
 
     /// Observe analysis progress as a completed fraction in `[0, 1]`.
     ///
@@ -225,6 +273,10 @@ impl<T: AbortSignal + ?Sized> AbortSignal for &T {
         (*self).is_aborted()
     }
 
+    fn abort_reason(&self) -> AbortReason {
+        (*self).abort_reason()
+    }
+
     fn observe_progress(&self, fraction: f64) {
         (*self).observe_progress(fraction);
     }
@@ -241,6 +293,10 @@ impl AbortSignal for Box<dyn AbortSignal> {
         self.as_ref().is_aborted()
     }
 
+    fn abort_reason(&self) -> AbortReason {
+        self.as_ref().abort_reason()
+    }
+
     fn observe_progress(&self, fraction: f64) {
         self.as_ref().observe_progress(fraction);
     }
@@ -255,6 +311,10 @@ impl AbortSignal for Arc<dyn AbortSignal> {
     #[inline(always)]
     fn is_aborted(&self) -> bool {
         self.as_ref().is_aborted()
+    }
+
+    fn abort_reason(&self) -> AbortReason {
+        self.as_ref().abort_reason()
     }
 
     fn observe_progress(&self, fraction: f64) {

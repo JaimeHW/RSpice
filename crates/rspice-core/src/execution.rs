@@ -14,6 +14,7 @@ mod schema;
 mod topology;
 mod transient;
 
+pub use crate::identity::{AnalysisInstanceId, AnalysisKind, RunCoordinateId};
 pub use bounded_io::{BoundedAbortWriter, BoundedWriteFailure};
 pub use capability::{
     ANALYSIS_CAPABILITY_MATRIX, AnalysisResultCapability, AnalysisResultKind, MappingStatus,
@@ -27,9 +28,9 @@ pub use materialized::{
     MaterializedRunError,
 };
 pub use plan::{
-    AnalysisInstanceId, AnalysisKind, AnalysisRequest, AxisAssignment, AxisKind, DataBinding,
-    DeckPlan, DeckPlanError, PlannedAnalysis, RunAxis, RunAxisValue, RunCoordinate,
-    RunCoordinateId, StepAxisTarget, numeric_run_coordinate_id,
+    AnalysisRequest, AxisAssignment, AxisKind, DataBinding, DeckPlan, DeckPlanError,
+    PlannedAnalysis, RunAxis, RunAxisValue, RunCoordinate, StepAxisTarget,
+    numeric_run_coordinate_id,
 };
 pub use result_document::{
     ANALYSIS_RESULT_DOCUMENT_SCHEMA, ANALYSIS_RESULT_DOCUMENT_VERSION, AnalysisResultDocument,

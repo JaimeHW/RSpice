@@ -13,7 +13,9 @@ use super::{
 };
 use crate::Netlist;
 use crate::abort_signal::{AbortSignal, NoAbort};
-use crate::engine::{Engine, SimulationError, StepPlan, StepPlanLimits};
+use crate::engine::{
+    Engine, MaterializationMismatchError, SimulationError, StepPlan, StepPlanLimits,
+};
 use crate::netlist::{AnalysisCommand, StepCommand, StepSweep, StepTarget};
 
 /// Stable, path-neutral namespace identity for one coordinate/analysis pair.
@@ -196,12 +198,12 @@ impl DeckPlanMaterializer<'_> {
         if abort.is_aborted() {
             return Err(MaterializedRunError::Aborted);
         }
-        let coordinate = self.coordinates.get(run_index).cloned().ok_or(
-            MaterializedRunError::CoordinateIndex {
+        let coordinate = self.coordinates.get(run_index).cloned().ok_or(mismatch(
+            MaterializationMismatchError::CoordinateIndex {
                 index: run_index,
                 coordinate_count: self.coordinates.len(),
             },
-        )?;
+        ))?;
 
         let mut netlist = match &self.step_plan {
             Some(step_plan) => {
@@ -215,14 +217,16 @@ impl DeckPlanMaterializer<'_> {
                         abort,
                     )
                     .map_err(materialization_simulation_error)?
-                    .ok_or(MaterializedRunError::CoordinateIndex {
-                        index: run_index,
-                        coordinate_count: self.coordinates.len(),
+                    .ok_or_else(|| {
+                        mismatch(MaterializationMismatchError::CoordinateIndex {
+                            index: run_index,
+                            coordinate_count: self.coordinates.len(),
+                        })
                     })?;
                 if !indices_match {
-                    return Err(MaterializedRunError::CoordinateIdentityMismatch {
+                    return Err(mismatch(MaterializationMismatchError::CoordinateIdentity {
                         coordinate: coordinate.stable_id(),
-                    });
+                    }));
                 }
                 self.engine
                     .materialize_step_run_with_abort(step_plan, run_index, abort)
@@ -346,7 +350,7 @@ impl DeckPlanMaterializer<'_> {
                 // Preparation already refuses textual ALTER; a variant axis
                 // has no numeric coordinate to seed a draw from.
                 RunAxisValue::AlterVariant { .. } => {
-                    return Err(MaterializedRunError::AlterUnsupported);
+                    return Err(alter_unsupported());
                 }
             }
         }
@@ -383,12 +387,12 @@ impl Engine {
             return Err(MaterializedRunError::Aborted);
         }
         if contains_textual_alter(netlist, abort)? {
-            return Err(MaterializedRunError::AlterUnsupported);
+            return Err(alter_unsupported());
         }
         for axis in plan.axes() {
             ensure_not_aborted(abort)?;
             if axis.kind() == super::AxisKind::Alter {
-                return Err(MaterializedRunError::AlterUnsupported);
+                return Err(alter_unsupported());
             }
         }
 
@@ -396,7 +400,7 @@ impl Engine {
         let canonical = DeckPlan::from_netlist_with_abort(netlist, &limits, abort)
             .map_err(materialization_plan_error)?;
         if &canonical != plan {
-            return Err(MaterializedRunError::PlanNetlistMismatch);
+            return Err(mismatch(MaterializationMismatchError::PlanNetlist));
         }
         let coordinates = plan
             .coordinates_with_abort(&limits, abort)
@@ -406,10 +410,10 @@ impl Engine {
         } else {
             let steps = canonical_step_commands(netlist, abort)?;
             if steps.len() != plan.axes().len() {
-                return Err(MaterializedRunError::AxisMaterializerMismatch {
+                return Err(mismatch(MaterializationMismatchError::AxisMaterializer {
                     planned: plan.axes().len(),
                     materialized: steps.len(),
-                });
+                }));
             }
             let step_plan = self
                 .plan_step_commands_with_abort(
@@ -420,10 +424,12 @@ impl Engine {
                 )
                 .map_err(materialization_simulation_error)?;
             if step_plan.total_runs() != coordinates.len() {
-                return Err(MaterializedRunError::CoordinateCardinalityMismatch {
-                    planned: coordinates.len(),
-                    materialized: step_plan.total_runs(),
-                });
+                return Err(mismatch(
+                    MaterializationMismatchError::CoordinateCardinality {
+                        planned: coordinates.len(),
+                        materialized: step_plan.total_runs(),
+                    },
+                ));
             }
             Some(step_plan)
         };
@@ -566,11 +572,11 @@ fn validate_analysis_identity(
             ensure_not_aborted(abort)?;
             actual.push(analysis_kind(analysis));
         }
-        Err(MaterializedRunError::AnalysisIdentityMismatch {
+        Err(mismatch(MaterializationMismatchError::AnalysisIdentity {
             coordinate,
             expected,
             actual,
-        })
+        }))
     }
 }
 
@@ -593,6 +599,28 @@ fn ensure_not_aborted(abort: &dyn AbortSignal) -> Result<(), MaterializedRunErro
     }
 }
 
+/// Wrap a materialization mismatch in the engine's typed error.
+///
+/// Mismatches used to be variants of this module's own error enum, which then
+/// wrapped [`SimulationError`] as well — two error types describing the same
+/// failure in opposite directions. They are `SimulationError`s now, so a
+/// frontend that already handles the engine's taxonomy needs no second table.
+fn mismatch(error: MaterializationMismatchError) -> MaterializedRunError {
+    MaterializedRunError::Simulation(SimulationError::from(error))
+}
+
+/// Refuse a textual or explicit `.ALTER` axis as an unimplemented capability.
+///
+/// The deck is well formed; source-variant expansion is simply not part of
+/// DeckPlan materialization yet, which is a capability boundary rather than an
+/// authoring mistake.
+fn alter_unsupported() -> MaterializedRunError {
+    MaterializedRunError::Simulation(SimulationError::unsupported_capability(
+        "deck.alter.materialization",
+        "textual ALTER variants must be expanded before DeckPlan materialization",
+    ))
+}
+
 fn materialization_plan_error(error: DeckPlanError) -> MaterializedRunError {
     match error {
         DeckPlanError::Aborted => MaterializedRunError::Aborted,
@@ -601,12 +629,20 @@ fn materialization_plan_error(error: DeckPlanError) -> MaterializedRunError {
 }
 
 fn materialization_simulation_error(error: SimulationError) -> MaterializedRunError {
-    match error {
-        SimulationError::Aborted => MaterializedRunError::Aborted,
-        other => MaterializedRunError::Simulation(other),
+    if error.is_stopped() {
+        MaterializedRunError::Aborted
+    } else {
+        MaterializedRunError::Simulation(error)
     }
 }
 
+/// Failures raised while turning one planned coordinate into a runnable deck.
+///
+/// Only three things happen here that the engine's taxonomy does not already
+/// name: cooperative cancellation, a bounded allocation that could not be
+/// reserved, and an invalid deck plan. Everything else — capability refusals
+/// and plan/materializer mismatches alike — is a [`SimulationError`], so the
+/// mismatch typing lives in exactly one place.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum MaterializedRunError {
@@ -618,33 +654,6 @@ pub enum MaterializedRunError {
     DeckPlan(DeckPlanError),
     #[error(transparent)]
     Simulation(SimulationError),
-    #[error("textual ALTER variants must be expanded before DeckPlan materialization")]
-    AlterUnsupported,
-    #[error(
-        "DeckPlan axes or ordered analysis identities do not match the supplied netlist's canonical plan"
-    )]
-    PlanNetlistMismatch,
-    #[error(
-        "DeckPlan has {planned} run axes, but its netlist exposes {materialized} materializer dimensions"
-    )]
-    AxisMaterializerMismatch { planned: usize, materialized: usize },
-    #[error("DeckPlan has {planned} coordinates, but its checked materializer has {materialized}")]
-    CoordinateCardinalityMismatch { planned: usize, materialized: usize },
-    #[error("run coordinate index {index} is outside {coordinate_count} planned coordinates")]
-    CoordinateIndex {
-        index: usize,
-        coordinate_count: usize,
-    },
-    #[error("checked materializer selected different values for coordinate {coordinate}")]
-    CoordinateIdentityMismatch { coordinate: RunCoordinateId },
-    #[error(
-        "materialized analysis identity changed at coordinate {coordinate}: expected {expected:?}, got {actual:?}"
-    )]
-    AnalysisIdentityMismatch {
-        coordinate: RunCoordinateId,
-        expected: Vec<AnalysisKind>,
-        actual: Vec<AnalysisKind>,
-    },
 }
 
 impl MaterializedRunError {
@@ -668,6 +677,27 @@ mod tests {
 
     fn plan(netlist: &Netlist) -> DeckPlan {
         DeckPlan::from_netlist(netlist, &ResourceLimits::default()).expect("canonical deck plan")
+    }
+
+    /// The typed mismatch a materialization failure must carry, or a panic
+    /// naming what came back instead.
+    fn expect_mismatch(error: &MaterializedRunError) -> &MaterializationMismatchError {
+        match error {
+            MaterializedRunError::Simulation(SimulationError::MaterializationMismatch(
+                mismatch,
+            )) => mismatch,
+            other => panic!("expected a typed materialization mismatch, got {other}"),
+        }
+    }
+
+    /// The capability token a refusal published, if it is one.
+    fn capability_token(error: &MaterializedRunError) -> Option<&'static str> {
+        match error {
+            MaterializedRunError::Simulation(SimulationError::UnsupportedCapability(refusal)) => {
+                Some(refusal.capability)
+            }
+            _ => None,
+        }
     }
 
     struct AbortOnPoll {
@@ -936,15 +966,18 @@ mod tests {
         materializer
             .materialize_run(0)
             .expect("unchanged first coordinate");
-        assert!(matches!(
-            materializer.materialize_run(1),
-            Err(MaterializedRunError::AnalysisIdentityMismatch {
-                expected,
-                actual,
-                ..
-            }) if expected == vec![AnalysisKind::ImplicitOp]
-                && actual == vec![AnalysisKind::Tran]
-        ));
+        let error = materializer
+            .materialize_run(1)
+            .err()
+            .expect("changed analysis identity is refused");
+        let MaterializationMismatchError::AnalysisIdentity {
+            expected, actual, ..
+        } = expect_mismatch(&error)
+        else {
+            panic!("expected an analysis-identity mismatch, got {error}");
+        };
+        assert_eq!(*expected, vec![AnalysisKind::ImplicitOp]);
+        assert_eq!(*actual, vec![AnalysisKind::Tran]);
     }
 
     #[test]
@@ -962,10 +995,11 @@ mod tests {
         .expect("valid explicit ALTER axis");
         let alter_plan = DeckPlan::new(vec![alter], vec![AnalysisRequest::new(AnalysisKind::Op)])
             .expect("manual ALTER plan");
-        assert!(matches!(
-            Engine::default().prepare_deck_plan_materializer(&netlist, &alter_plan),
-            Err(MaterializedRunError::AlterUnsupported)
-        ));
+        let error = Engine::default()
+            .prepare_deck_plan_materializer(&netlist, &alter_plan)
+            .err()
+            .expect("explicit ALTER axis is refused");
+        assert_eq!(capability_token(&error), Some("deck.alter.materialization"));
 
         let authored = Netlist::parse(
             "authored ALTER boundary\n\
@@ -977,10 +1011,11 @@ mod tests {
         )
         .expect("parser retains the base ALTER variant");
         let authored_plan = plan(&authored);
-        assert!(matches!(
-            Engine::default().prepare_deck_plan_materializer(&authored, &authored_plan),
-            Err(MaterializedRunError::AlterUnsupported)
-        ));
+        let error = Engine::default()
+            .prepare_deck_plan_materializer(&authored, &authored_plan)
+            .err()
+            .expect("authored ALTER text is refused");
+        assert_eq!(capability_token(&error), Some("deck.alter.materialization"));
     }
 
     #[test]
@@ -1021,13 +1056,19 @@ mod tests {
             materializer.materialize_run_with_abort(0, &ImmediateAbort),
             Err(MaterializedRunError::Aborted)
         ));
-        assert!(matches!(
-            materializer.materialize_run(2),
-            Err(MaterializedRunError::CoordinateIndex {
-                index: 2,
-                coordinate_count: 2,
-            })
-        ));
+        let error = materializer
+            .materialize_run(2)
+            .expect_err("out-of-range coordinate index is refused");
+        assert!(
+            matches!(
+                expect_mismatch(&error),
+                MaterializationMismatchError::CoordinateIndex {
+                    index: 2,
+                    coordinate_count: 2,
+                }
+            ),
+            "unexpected materialization error: {error}"
+        );
     }
 
     #[test]
@@ -1090,14 +1131,19 @@ mod tests {
         let first_plan = plan(&first);
         let engine = Engine::default();
 
-        assert!(matches!(
-            engine.prepare_deck_plan_materializer(&different_axis, &first_plan),
-            Err(MaterializedRunError::PlanNetlistMismatch)
-        ));
-        assert!(matches!(
-            engine.prepare_deck_plan_materializer(&different_analysis, &first_plan),
-            Err(MaterializedRunError::PlanNetlistMismatch)
-        ));
+        for netlist in [&different_axis, &different_analysis] {
+            let error = engine
+                .prepare_deck_plan_materializer(netlist, &first_plan)
+                .err()
+                .expect("plan and netlist must agree");
+            assert!(
+                matches!(
+                    expect_mismatch(&error),
+                    MaterializationMismatchError::PlanNetlist
+                ),
+                "unexpected materialization error: {error}"
+            );
+        }
     }
 
     #[test]
