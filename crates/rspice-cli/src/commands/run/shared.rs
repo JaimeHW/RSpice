@@ -15,9 +15,15 @@ pub(super) struct NodeResolver {
 }
 
 impl NodeResolver {
+    /// Build the circuit purely to learn its node map.
+    ///
+    /// Elaboration of a large hierarchical deck is real work, so it runs under
+    /// the process abort source: `--timeout` and Ctrl-C must stop a run that
+    /// is still resolving `--node`-style flags, not only one already inside a
+    /// solver.
     pub(super) fn from_netlist(engine: &Engine, netlist: &Netlist) -> Result<Self, CliError> {
         let circuit = engine
-            .build_circuit(netlist)
+            .build_circuit_with_abort(netlist, &crate::abort::ProcessAbort)
             .map_err(|e| CliError::simulation_error_in(e.to_string(), "Node Resolution"))?;
 
         let node_name_to_index = circuit

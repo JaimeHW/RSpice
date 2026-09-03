@@ -71,7 +71,7 @@ use rspice_core::engine::{ConvergenceConfig, SimulationConfig};
 use rspice_core::{Engine, Netlist};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 mod compare;
 mod discovery;
@@ -80,28 +80,7 @@ mod manifest;
 pub use compare::{DeviceMismatch, compare_series};
 pub use manifest::DeviceContract;
 
-/// Aborts a case once its wall-clock budget is spent.
-#[derive(Debug, Clone, Copy)]
-struct DeadlineAbort {
-    start: Instant,
-    budget: Duration,
-}
-
-impl DeadlineAbort {
-    fn new(start: Instant, budget_ms: u128) -> Self {
-        Self {
-            start,
-            budget: Duration::from_millis(budget_ms.min(u128::from(u64::MAX)) as u64),
-        }
-    }
-}
-
-impl rspice_core::abort_signal::AbortSignal for DeadlineAbort {
-    #[inline]
-    fn is_aborted(&self) -> bool {
-        self.start.elapsed() >= self.budget
-    }
-}
+use super::deadline::DeadlineAbort;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Results

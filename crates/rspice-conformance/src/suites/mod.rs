@@ -33,6 +33,10 @@
 //! [`execution`] as another [`ExecutionCorpus`](execution::ExecutionCorpus)
 //! and needs only a corpus directory and a manifest.
 
+/// The per-case wall-clock budget shared by every circuit suite.
+#[cfg(feature = "circuit-suites")]
+pub mod deadline;
+
 #[cfg(feature = "circuit-suites")]
 pub mod execution;
 #[cfg(feature = "circuit-suites")]

@@ -57,7 +57,10 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
+// The per-contract test modules build deadline fixtures from a fixed offset.
+#[cfg(test)]
+use std::time::Duration;
 
 const EXPECTED_UNSUPPORTED_MARKER: &str = "EXPECTED_UNSUPPORTED:";
 const UPSTREAM_EXCLUDED_MARKER: &str = "UPSTREAM_EXCLUDED:";
@@ -12703,26 +12706,7 @@ enum XycePrnDelimiter {
     Comma,
 }
 
-#[derive(Debug, Clone, Copy)]
-struct DeadlineAbort {
-    start: Instant,
-    deadline: Duration,
-}
-
-impl DeadlineAbort {
-    fn new(start: Instant, timeout_ms: u128) -> Self {
-        Self {
-            start,
-            deadline: Duration::from_millis(timeout_ms.min(u128::from(u64::MAX)) as u64),
-        }
-    }
-}
-
-impl AbortSignal for DeadlineAbort {
-    fn is_aborted(&self) -> bool {
-        self.start.elapsed() >= self.deadline
-    }
-}
+use super::deadline::DeadlineAbort;
 
 mod analysis_support;
 mod comparison;

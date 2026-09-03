@@ -998,59 +998,9 @@ enum VerilogACacheRecordReadError {
     Cancelled,
 }
 
+/// The message an interrupted or oversized cache-record read carries.
 #[cfg(feature = "veriloga")]
-struct LimitedReader<'a, R> {
-    inner: R,
-    bytes_read: usize,
-    limit: usize,
-    exceeded: bool,
-    cancelled: bool,
-    abort: &'a dyn AbortSignal,
-}
-
-#[cfg(feature = "veriloga")]
-impl<'a, R> LimitedReader<'a, R> {
-    fn new(inner: R, limit: usize, abort: &'a dyn AbortSignal) -> Self {
-        Self {
-            inner,
-            bytes_read: 0,
-            limit,
-            exceeded: false,
-            cancelled: false,
-            abort,
-        }
-    }
-}
-
-#[cfg(feature = "veriloga")]
-impl<R: std::io::Read> std::io::Read for LimitedReader<'_, R> {
-    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
-        if self.abort.is_aborted() {
-            self.cancelled = true;
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Interrupted,
-                "Verilog-A cache read cancelled",
-            ));
-        }
-        let remaining = self.limit.saturating_sub(self.bytes_read);
-        if remaining == 0 {
-            let mut probe = [0_u8; 1];
-            if self.inner.read(&mut probe)? == 0 {
-                return Ok(0);
-            }
-            self.exceeded = true;
-            return Err(std::io::Error::other(format!(
-                "Verilog-A cache record exceeds the {} byte read limit",
-                self.limit
-            )));
-        }
-
-        let readable = remaining.min(buffer.len());
-        let read = self.inner.read(&mut buffer[..readable])?;
-        self.bytes_read = self.bytes_read.saturating_add(read);
-        Ok(read)
-    }
-}
+const CACHE_RECORD_READ: &str = "Verilog-A cache record";
 
 #[cfg(feature = "veriloga")]
 fn read_cache_record_with_limits(
@@ -1089,11 +1039,16 @@ fn read_cache_record_with_limits_and_abort(
     .map_err(VerilogACacheRecordReadError::ResourceLimit)?;
 
     let buffered = std::io::BufReader::new(file);
-    let mut reader = LimitedReader::new(buffered, limits.max_shared_cache_bytes, abort);
+    let mut reader = crate::abort_signal::AbortReader::with_byte_cap(
+        buffered,
+        abort,
+        CACHE_RECORD_READ,
+        limits.max_shared_cache_bytes,
+    );
     match serde_json::from_reader::<_, VerilogADiskCacheRecord>(&mut reader) {
         Ok(record) => Ok(record),
-        Err(_) if reader.cancelled => Err(VerilogACacheRecordReadError::Cancelled),
-        Err(_) if reader.exceeded => Err(VerilogACacheRecordReadError::ResourceLimit(
+        Err(_) if reader.was_cancelled() => Err(VerilogACacheRecordReadError::Cancelled),
+        Err(_) if reader.exceeded_cap() => Err(VerilogACacheRecordReadError::ResourceLimit(
             ResourceLimitError {
                 resource: ResourceKind::SharedCacheBytes,
                 requested: limits.max_shared_cache_bytes.saturating_add(1),

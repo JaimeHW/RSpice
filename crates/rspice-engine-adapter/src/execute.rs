@@ -4,6 +4,7 @@
 use std::collections::{BTreeMap, HashSet};
 use std::io::{self, Write};
 use std::path::Path;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::{Duration, Instant};
 
 use rspice_core::abort_signal::AbortSignal;
@@ -47,12 +48,51 @@ use crate::wire::{
 };
 use rspice_core::execution::bounded_io::{BoundedAbortWriter, BoundedWriteFailure};
 
-/// Wall-clock ceiling for all engine work in one request. The worker holds
-/// the authoritative external deadline; this internal one exists so a
+/// Default wall-clock ceiling for all engine work in one request. The worker
+/// holds the authoritative external deadline; this internal one exists so a
 /// pathological deck produces the bounded `engine.time_limit` outcome instead
-/// of an opaque kill. Compile-time by design: the launch contract clears the
-/// environment, so there is no runtime configuration channel to harden.
-const SOLVE_BUDGET: Duration = Duration::from_secs(240);
+/// of an opaque kill.
+pub const DEFAULT_SOLVE_BUDGET: Duration = Duration::from_secs(240);
+
+/// Launch variable that overrides [`DEFAULT_SOLVE_BUDGET`].
+///
+/// The value is a positive number of seconds. The launch contract clears the
+/// environment before starting this executor, so the only way this is set is
+/// the worker deliberately setting it, which is exactly the authority that
+/// owns the external deadline it has to stay under.
+pub const SOLVE_BUDGET_SECONDS_ENV: &str = "RSPICE_ENGINE_SOLVE_BUDGET_SECONDS";
+
+/// Resolve the solve budget from the launch environment.
+///
+/// A malformed or non-positive value is refused rather than rounded into
+/// something plausible: silently substituting the default for a budget the
+/// operator meant to shorten would let a request outlive the deadline the
+/// worker is holding it to.
+pub fn solve_budget_from_env() -> Result<Duration, String> {
+    // Read through `var_os` so a value that is not valid UTF-8 is refused as
+    // a malformed budget rather than mistaken for an unset one.
+    let Some(value) = std::env::var_os(SOLVE_BUDGET_SECONDS_ENV) else {
+        return Ok(DEFAULT_SOLVE_BUDGET);
+    };
+    let value = value.to_str().ok_or_else(|| {
+        format!("{SOLVE_BUDGET_SECONDS_ENV} is not valid UTF-8; expected a number of seconds")
+    })?;
+    parse_solve_budget(value)
+}
+
+fn parse_solve_budget(value: &str) -> Result<Duration, String> {
+    let seconds: f64 = value.trim().parse().map_err(|_| {
+        format!("{SOLVE_BUDGET_SECONDS_ENV} is {value:?}; expected a positive number of seconds")
+    })?;
+    if !seconds.is_finite() || seconds <= 0.0 {
+        return Err(format!(
+            "{SOLVE_BUDGET_SECONDS_ENV} is {value:?}; expected a positive number of seconds"
+        ));
+    }
+    Duration::try_from_secs_f64(seconds).map_err(|_| {
+        format!("{SOLVE_BUDGET_SECONDS_ENV} is {value:?}; the budget does not fit a duration")
+    })
+}
 
 /// Transient runs longer than this many accepted samples stop with the
 /// bounded resource outcome before their waveforms outgrow every downstream
@@ -129,13 +169,72 @@ impl AnalysisKind {
     }
 }
 
-struct SolveDeadline {
-    start: Instant,
+/// Why one request stopped early.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StopCause {
+    /// The caller asked this process to stop.
+    Cancelled,
+    /// The solve budget expired.
+    Deadline,
 }
 
-impl AbortSignal for SolveDeadline {
+const STOP_NONE: u8 = 0;
+const STOP_CANCELLED: u8 = 1;
+const STOP_DEADLINE: u8 = 2;
+
+/// The one abort source every analysis in a request sees: the caller's
+/// cancellation or this executor's own solve budget, whichever fires first.
+///
+/// Which of the two fired is remembered because the two are different
+/// outcomes to the operator — a cancelled job is not a job that ran too long
+/// — and by the time the engine has unwound to the response mapping the
+/// distinction is otherwise gone: `SimulationError::Aborted` says only that
+/// something asked it to stop.
+pub struct RunAbort<'a> {
+    start: Instant,
+    budget: Duration,
+    cancel: &'a dyn AbortSignal,
+    cause: AtomicU8,
+}
+
+impl<'a> RunAbort<'a> {
+    pub fn new(cancel: &'a dyn AbortSignal, budget: Duration) -> Self {
+        Self {
+            start: Instant::now(),
+            budget,
+            cancel,
+            cause: AtomicU8::new(STOP_NONE),
+        }
+    }
+
+    /// The first cause observed, or `None` while the request is still live.
+    pub fn stop_cause(&self) -> Option<StopCause> {
+        match self.cause.load(Ordering::SeqCst) {
+            STOP_CANCELLED => Some(StopCause::Cancelled),
+            STOP_DEADLINE => Some(StopCause::Deadline),
+            _ => None,
+        }
+    }
+
+    fn record(&self, cause: u8) -> bool {
+        let _ = self
+            .cause
+            .compare_exchange(STOP_NONE, cause, Ordering::SeqCst, Ordering::SeqCst);
+        true
+    }
+}
+
+impl AbortSignal for RunAbort<'_> {
     fn is_aborted(&self) -> bool {
-        self.start.elapsed() >= SOLVE_BUDGET
+        // Cancellation is checked first: a caller that asked to stop deserves
+        // that answer even if the budget expired in the same instant.
+        if self.cancel.is_aborted() {
+            return self.record(STOP_CANCELLED);
+        }
+        if self.start.elapsed() >= self.budget {
+            return self.record(STOP_DEADLINE);
+        }
+        false
     }
 }
 
@@ -155,34 +254,47 @@ impl Execution {
     }
 }
 
+/// Executes one validated request with no caller cancellation and the default
+/// solve budget.
+///
+/// Retained for embedding that has no cancellation source of its own; the
+/// executor binary always calls [`execute_with_abort`].
+pub fn execute(analysis: &Value, content: &CircuitContent, engine_build: &str) -> Execution {
+    execute_with_abort(
+        analysis,
+        content,
+        engine_build,
+        &rspice_core::abort_signal::NoAbort,
+        DEFAULT_SOLVE_BUDGET,
+    )
+}
+
 /// Executes one validated request against the interpreted circuit content.
 /// Customer-content problems become canonical failures here; this function
 /// touches no filesystem, so nothing in it can raise a process fault.
-pub fn execute(analysis: &Value, content: &CircuitContent, engine_build: &str) -> Execution {
-    let deadline = SolveDeadline {
-        start: Instant::now(),
-    };
-    execute_with_abort(analysis, content, engine_build, &deadline)
-}
-
-/// Execute with a caller-owned cooperative cancellation source. Every solver,
-/// projection, serialization, and manifest-finalization step observes this
-/// same token. The compatibility [`execute`] wrapper supplies the adapter's
-/// fixed internal deadline.
+///
+/// `cancel` is the caller's stop request — a signal handler, a supervising
+/// thread — and `solve_budget` is this executor's own wall-clock ceiling. The
+/// two combine into one abort source, and the failure the caller sees says
+/// which of them fired.
 pub fn execute_with_abort(
     analysis: &Value,
     content: &CircuitContent,
     engine_build: &str,
-    abort: &dyn AbortSignal,
+    cancel: &dyn AbortSignal,
+    solve_budget: Duration,
 ) -> Execution {
-    finalize_execution(execute_inner(analysis, content, engine_build, abort), abort)
+    let abort = RunAbort::new(cancel, solve_budget);
+    let execution = execute_bounded(analysis, content, engine_build, &abort);
+    let execution = finalize_execution(execution, &abort);
+    label_stop_cause(execution, abort.stop_cause())
 }
 
-fn execute_inner(
+fn execute_bounded(
     analysis: &Value,
     content: &CircuitContent,
     engine_build: &str,
-    abort: &dyn AbortSignal,
+    abort: &RunAbort<'_>,
 ) -> Execution {
     if abort.is_aborted() {
         return failure_execution(&SimulationError::Aborted);
@@ -243,6 +355,7 @@ fn execute_inner(
         spice_dialect: SpiceDialect::Ngspice,
         ..SimulationConfig::default()
     });
+
     execute_planned_netlist(kind, &netlist, engine_build, &engine, abort)
 }
 
@@ -2388,15 +2501,51 @@ fn finalize_execution(execution: Execution, abort: &dyn AbortSignal) -> Executio
     }
 }
 
+/// A request stopped because its caller asked it to.
+pub const CANCELLED_FAILURE_CODE: &str = "engine.cancelled";
+/// A request stopped because it exhausted its solve budget.
+pub const TIME_LIMIT_FAILURE_CODE: &str = "engine.time_limit";
+
 /// Maps every engine error onto the bounded failure vocabulary through the
 /// engine's own stable descriptor, so new engine variants cannot silently
 /// widen the wire surface.
+///
+/// `SimulationError::Aborted` says only that something asked the engine to
+/// stop, so it lands on the cancellation code here; [`label_stop_cause`]
+/// promotes it to the time-limit code when the executor's own deadline is
+/// what fired. Reporting a caller-requested cancellation as a time limit —
+/// which is what this function used to do unconditionally — tells the
+/// operator their deck is too slow when in fact they stopped it.
 fn failure_execution(error: &SimulationError) -> Execution {
     let code = match error.descriptor().code {
-        rspice_core::engine::SimulationErrorCode::Aborted => "engine.time_limit".to_owned(),
+        rspice_core::engine::SimulationErrorCode::Aborted => CANCELLED_FAILURE_CODE.to_owned(),
         stable => format!("engine.{}", stable.as_str()),
     };
     Execution::failed(&code, &error.to_string())
+}
+
+/// Re-label a stop outcome once the whole request has unwound and the cause
+/// that fired first is known.
+fn label_stop_cause(execution: Execution, cause: Option<StopCause>) -> Execution {
+    let EngineResponse::Failed {
+        failure_code,
+        failure_detail,
+    } = &execution.response
+    else {
+        return execution;
+    };
+    if failure_code != CANCELLED_FAILURE_CODE {
+        return execution;
+    }
+    match cause {
+        // Nothing this executor owns fired, so the engine stopped for an
+        // abort source further in. Leave the honest cancellation label.
+        None | Some(StopCause::Cancelled) => execution,
+        Some(StopCause::Deadline) => Execution {
+            response: EngineResponse::failed(TIME_LIMIT_FAILURE_CODE, failure_detail),
+            artifacts: execution.artifacts,
+        },
+    }
 }
 
 /// Stages the complete response-gated artifact set, atomically replaces each
@@ -2449,14 +2598,6 @@ mod artifact_publication_tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static NEXT_TEST_DIRECTORY: AtomicU64 = AtomicU64::new(0);
-
-    struct AlwaysAbort;
-
-    impl AbortSignal for AlwaysAbort {
-        fn is_aborted(&self) -> bool {
-            true
-        }
-    }
 
     struct TestDirectory(PathBuf);
 
@@ -2753,7 +2894,7 @@ mod artifact_publication_tests {
             directive,
             AnalysisKind::Transient,
             0,
-            &AlwaysAbort,
+            &rspice_core::abort_signal::ImmediateAbort,
             MAX_ENGINE_RETAINED_RESULT_BYTES,
         ) {
             Err(DirectiveFailure::Engine(SimulationError::Aborted)) => {}
@@ -2763,7 +2904,7 @@ mod artifact_publication_tests {
     }
 
     #[test]
-    fn cancelled_axis_planning_returns_time_limit_without_artifacts() {
+    fn cancelled_axis_planning_returns_a_cancellation_without_artifacts() {
         let netlist = Netlist::parse_validated(
             "cancelled axis plan\n\
              .param r=1k\n\
@@ -2783,14 +2924,130 @@ mod artifact_publication_tests {
             &netlist,
             "test",
             &engine,
-            &AlwaysAbort,
+            &rspice_core::abort_signal::ImmediateAbort,
         );
         assert!(execution.artifacts.is_empty());
         match execution.response {
             EngineResponse::Failed { failure_code, .. } => {
-                assert_eq!(failure_code, "engine.time_limit")
+                assert_eq!(failure_code, CANCELLED_FAILURE_CODE)
             }
             EngineResponse::Succeeded { .. } => panic!("cancelled planning succeeded"),
+        }
+    }
+}
+
+/// A stop is either the caller's or the clock's, and the wire says which.
+#[cfg(test)]
+mod stop_cause_tests {
+    use super::*;
+    use rspice_core::abort_signal::{ImmediateAbort, NoAbort};
+
+    const STEP_DECK: &str = "stop cause fixture\n\
+         .param r=1k\n\
+         V1 in 0 1\n\
+         R1 in 0 {r}\n\
+         .step param r list 1k 2k\n\
+         .op\n\
+         .end\n";
+
+    fn content() -> CircuitContent {
+        CircuitContent::Deck {
+            expanded_netlist: STEP_DECK.to_owned(),
+        }
+    }
+
+    fn failure_code(execution: &Execution) -> &str {
+        match &execution.response {
+            EngineResponse::Failed { failure_code, .. } => failure_code,
+            EngineResponse::Succeeded { .. } => panic!("a stopped request reported success"),
+        }
+    }
+
+    #[test]
+    fn a_caller_requested_stop_is_reported_as_a_cancellation() {
+        let execution = execute_with_abort(
+            &serde_json::json!({"kind": "operating_point"}),
+            &content(),
+            "test",
+            &ImmediateAbort,
+            DEFAULT_SOLVE_BUDGET,
+        );
+
+        assert_eq!(failure_code(&execution), CANCELLED_FAILURE_CODE);
+        assert!(
+            execution.artifacts.is_empty(),
+            "a cancelled request must declare no artifacts"
+        );
+    }
+
+    #[test]
+    fn an_exhausted_solve_budget_is_reported_as_a_time_limit() {
+        // A zero budget is expired at its first poll, which makes the deadline
+        // branch deterministic instead of a race against a real solve.
+        let execution = execute_with_abort(
+            &serde_json::json!({"kind": "operating_point"}),
+            &content(),
+            "test",
+            &NoAbort,
+            Duration::ZERO,
+        );
+
+        assert_eq!(failure_code(&execution), TIME_LIMIT_FAILURE_CODE);
+        assert!(
+            execution.artifacts.is_empty(),
+            "a request that ran out of time must declare no artifacts"
+        );
+    }
+
+    #[test]
+    fn cancellation_wins_when_both_causes_are_live() {
+        let execution = execute_with_abort(
+            &serde_json::json!({"kind": "operating_point"}),
+            &content(),
+            "test",
+            &ImmediateAbort,
+            Duration::ZERO,
+        );
+
+        assert_eq!(
+            failure_code(&execution),
+            CANCELLED_FAILURE_CODE,
+            "a caller who asked to stop must be told their request was cancelled, \
+             not that it was too slow"
+        );
+    }
+
+    #[test]
+    fn a_completed_request_is_never_relabelled() {
+        let execution = execute_with_abort(
+            &serde_json::json!({"kind": "operating_point"}),
+            &CircuitContent::Deck {
+                expanded_netlist: "trivial\nV1 in 0 1\nR1 in 0 1k\n.op\n.end\n".to_owned(),
+            },
+            "test",
+            &NoAbort,
+            DEFAULT_SOLVE_BUDGET,
+        );
+
+        assert!(matches!(
+            execution.response,
+            EngineResponse::Succeeded { .. }
+        ));
+    }
+
+    #[test]
+    fn the_solve_budget_override_is_parsed_and_bounded() {
+        assert_eq!(
+            parse_solve_budget("30"),
+            Ok(Duration::from_secs(30)),
+            "a plain number of seconds is the documented form"
+        );
+        assert_eq!(parse_solve_budget(" 0.5 "), Ok(Duration::from_millis(500)));
+        for refused in ["0", "-1", "abc", "", "inf", "NaN"] {
+            assert!(
+                parse_solve_budget(refused).is_err(),
+                "{refused:?} must be refused rather than silently defaulted"
+            );
         }
     }
 }

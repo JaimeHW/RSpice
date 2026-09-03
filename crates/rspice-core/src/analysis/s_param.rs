@@ -41,7 +41,7 @@ mod ports;
 mod stability;
 mod touchstone;
 
-pub use extract::{ExtractError, extract_s_matrix};
+pub use extract::{ExtractError, extract_s_matrix, extract_s_matrix_with_abort};
 pub use matrix::{Port, SMatrix, SParameterResult};
 pub use network::{
     NetworkError, invert_complex_matrix, invert_complex_matrix_with_abort,

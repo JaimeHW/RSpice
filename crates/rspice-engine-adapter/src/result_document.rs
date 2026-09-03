@@ -7,20 +7,12 @@
 
 use std::collections::HashSet;
 
-use rspice_core::abort_signal::AbortSignal;
+use rspice_core::abort_signal::{AbortSignal, NoAbort};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::wire::MAX_ENGINE_RETAINED_RESULT_BYTES;
 use rspice_core::execution::bounded_io::{BoundedAbortWriter, BoundedWriteFailure};
-
-struct NeverAbort;
-
-impl AbortSignal for NeverAbort {
-    fn is_aborted(&self) -> bool {
-        false
-    }
-}
 
 /// Stable schema identity, independent of its version.
 pub const RESULT_DOCUMENT_SCHEMA: &str = "rspice-analog-result";
@@ -64,7 +56,7 @@ impl AnalogResultDocument {
 
     /// Validate and serialize a document written by this build.
     pub fn to_json(&self) -> Result<String, ResultDocumentError> {
-        self.to_json_with_abort(&NeverAbort, MAX_ENGINE_RETAINED_RESULT_BYTES)
+        self.to_json_with_abort(&NoAbort, MAX_ENGINE_RETAINED_RESULT_BYTES)
     }
 
     /// Validate and serialize without exceeding `byte_limit` or ignoring an
@@ -90,7 +82,7 @@ impl AnalogResultDocument {
     /// strict decoding. This makes forward incompatibility explicit even if a
     /// future writer also added fields that version 1 does not recognize.
     pub fn from_json(json: &str) -> Result<Self, ResultDocumentError> {
-        Self::from_json_with_abort(json, &NeverAbort, MAX_ENGINE_RETAINED_RESULT_BYTES)
+        Self::from_json_with_abort(json, &NoAbort, MAX_ENGINE_RETAINED_RESULT_BYTES)
     }
 
     /// Decode and validate one bounded current-version document.
@@ -132,7 +124,7 @@ impl AnalogResultDocument {
     /// Enforce shape, identity, finiteness, and the analysis/value-type rules
     /// that readers otherwise have to guess.
     pub fn validate(&self) -> Result<(), ResultDocumentError> {
-        self.validate_with_abort(&NeverAbort)
+        self.validate_with_abort(&NoAbort)
     }
 
     pub fn validate_with_abort(&self, abort: &dyn AbortSignal) -> Result<(), ResultDocumentError> {

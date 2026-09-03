@@ -19,12 +19,12 @@
 //! ```
 
 use std::collections::{HashMap, HashSet};
-use std::io::{self, Read};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::manager::{ModelDefinition, ModelType};
-use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::abort_signal::{AbortReader, AbortSignal, NoAbort};
 use crate::netlist::lexer::parse_spice_value_complete;
 use crate::resource::{
     ResourceKind, ResourceLimitError, ResourceLimits, ResourceReadError, read_bytes_limited,
@@ -37,11 +37,15 @@ use crate::resource::{
 /// is intentionally far above normal foundry PDK closure sizes.
 pub(crate) const DEFAULT_MAX_LIBRARY_SOURCE_FILES: usize = 16_384;
 
+/// The message an interrupted library read carries; the only signal a caller
+/// downstream of `io::Error` has that the failure was a cancellation.
+const LIBRARY_READ_CANCELLED: &str = "library parsing aborted";
+
 fn ensure_library_parse_not_aborted(abort: &dyn AbortSignal) -> io::Result<()> {
     if abort.is_aborted() {
         Err(io::Error::new(
             io::ErrorKind::Interrupted,
-            "library parsing aborted",
+            LIBRARY_READ_CANCELLED,
         ))
     } else {
         Ok(())
@@ -57,18 +61,6 @@ fn resource_read_error_to_io(error: ResourceReadError) -> io::Error {
     }
 }
 
-struct LibraryAbortReader<'a, R> {
-    inner: R,
-    abort: &'a dyn AbortSignal,
-}
-
-impl<R: Read> Read for LibraryAbortReader<'_, R> {
-    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
-        ensure_library_parse_not_aborted(self.abort)?;
-        self.inner.read(buffer)
-    }
-}
-
 fn read_library_file_bytes_limited(
     path: &Path,
     resource: ResourceKind,
@@ -80,8 +72,12 @@ fn read_library_file_bytes_limited(
     let metadata_bytes = usize::try_from(file.metadata()?.len()).unwrap_or(usize::MAX);
     ResourceLimitError::ensure(resource, metadata_bytes, limit)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-    read_bytes_limited(LibraryAbortReader { inner: file, abort }, resource, limit)
-        .map_err(resource_read_error_to_io)
+    read_bytes_limited(
+        AbortReader::new(file, abort, LIBRARY_READ_CANCELLED),
+        resource,
+        limit,
+    )
+    .map_err(resource_read_error_to_io)
 }
 
 //=============================================================================

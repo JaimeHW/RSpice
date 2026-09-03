@@ -691,7 +691,7 @@ impl Engine {
 mod tests {
     use super::*;
     use crate::SimulationConfig;
-    use crate::abort_signal::{AbortSignal, NoAbort};
+    use crate::abort_signal::NoAbort;
 
     fn dc_sources(netlist: &Netlist) -> Vec<Value> {
         netlist
@@ -758,14 +758,6 @@ mod tests {
         assert_eq!(dc_sources(&netlist), original);
     }
 
-    struct Aborted;
-
-    impl AbortSignal for Aborted {
-        fn is_aborted(&self) -> bool {
-            true
-        }
-    }
-
     #[test]
     fn supply_scaling_preserves_typed_abort() {
         let mut netlist =
@@ -777,7 +769,7 @@ mod tests {
                 2.0,
                 1.0,
                 &["VDD".to_owned()],
-                &Aborted,
+                &crate::abort_signal::ImmediateAbort,
             ),
             Err(SimulationError::Aborted)
         ));

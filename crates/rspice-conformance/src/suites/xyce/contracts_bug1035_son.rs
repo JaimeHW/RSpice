@@ -926,12 +926,6 @@ mod tests {
     }
     #[test]
     fn bug1035_data_execution_honors_abort_during_engine_entry() {
-        struct AlwaysAbort;
-        impl AbortSignal for AlwaysAbort {
-            fn is_aborted(&self) -> bool {
-                true
-            }
-        }
         let runner = runner();
         let raw = fs::read(runner.root.join(Bug1035SonRole::DataOwner.path())).unwrap();
         let worker = runner
@@ -945,7 +939,7 @@ mod tests {
             runner.create_xyce_engine().run_ac_data_with_abort(
                 &worker.netlist,
                 "eric",
-                &AlwaysAbort
+                &rspice_core::abort_signal::ImmediateAbort
             ),
             Err(SimulationError::Aborted)
         ));

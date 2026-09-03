@@ -8,18 +8,10 @@
 //! engine behavior: two runs of the same request must serialize identically
 //! byte for byte.
 
-use rspice_core::abort_signal::AbortSignal;
+use rspice_core::abort_signal::{AbortSignal, NoAbort};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
-
-struct NeverAbort;
-
-impl AbortSignal for NeverAbort {
-    fn is_aborted(&self) -> bool {
-        false
-    }
-}
 
 /// One extracted measurement in manifest order.
 pub struct Measurement {
@@ -46,7 +38,7 @@ impl Measurement {
     /// settled value for sweeps and transients, the last frequency point for
     /// spectra — and the hash commits to every sample in order.
     pub fn series(name: String, unit: &'static str, samples: &[f64]) -> Option<Self> {
-        Self::series_with_abort(name, unit, samples, &NeverAbort).ok()?
+        Self::series_with_abort(name, unit, samples, &NoAbort).ok()?
     }
 
     pub fn series_with_abort(
@@ -102,7 +94,7 @@ pub fn canonical_decimal(value: f64) -> Option<String> {
 /// decimal rendering of every sample. Reproducibility conformance compares
 /// exactly this value across repetitions.
 pub fn series_sha256(samples: &[f64]) -> Option<String> {
-    series_sha256_with_abort(samples, &NeverAbort).ok()?
+    series_sha256_with_abort(samples, &NoAbort).ok()?
 }
 
 pub fn series_sha256_with_abort(

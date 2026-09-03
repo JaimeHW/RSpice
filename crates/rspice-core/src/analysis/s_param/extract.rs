@@ -11,12 +11,22 @@
 //! its own engine, its own cancellation, and its own error type, and none of
 //! that belongs in here.
 
+use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::ac::AcResult;
 use crate::netlist::Netlist;
 use crate::{Complex64, Value};
 
 use super::network::{NetworkError, s_column_from_port_voltages};
 use super::ports::{PortError, SParameterPort, normalize_ports, set_excitations};
+
+/// Ports whose per-frequency projection runs between two abort polls.
+///
+/// The per-port AC solve is polled on both sides, but the projection loop
+/// that reads every port voltage at every frequency is `ports × points` work
+/// of this analysis's own and has to be polled too. Sixteen matches the
+/// solver's `ABORT_CHECK_INTERVAL` so cancellation latency is bounded by the
+/// same order of work everywhere.
+const ABORT_CHECK_INTERVAL: usize = 16;
 
 /// Why an S-matrix could not be extracted.
 #[derive(Debug, Clone, PartialEq)]
@@ -27,6 +37,12 @@ pub enum ExtractError {
     Network(NetworkError),
     /// The caller's AC solve failed or was cancelled.
     AcSolve(String),
+    /// Extraction observed a cancellation request of its own.
+    ///
+    /// Distinct from [`Self::AcSolve`]: this is the extraction's own port and
+    /// projection loops stopping, not the caller's solve reporting a failure
+    /// whose text happens to mention cancellation.
+    Aborted,
     /// The AC solve returned a different number of points than were requested.
     ///
     /// Reported rather than truncated: a short sweep means the solve gave up
@@ -48,6 +64,7 @@ impl std::fmt::Display for ExtractError {
             Self::Port(error) => error.fmt(f),
             Self::Network(error) => error.fmt(f),
             Self::AcSolve(message) => write!(f, "S-parameter AC solve failed: {message}"),
+            Self::Aborted => write!(f, "S-parameter extraction was cancelled"),
             Self::PointCount {
                 returned,
                 requested,
@@ -106,23 +123,50 @@ fn node_voltage(point: &AcResult, node: &str) -> Result<Complex64, ExtractError>
     Ok(value)
 }
 
-/// Extract the full scattering matrix, indexed `[row][column][frequency]`.
+/// Extract the full scattering matrix through a non-cancellable
+/// compatibility path.
+///
+/// First-party surfaces call [`extract_s_matrix_with_abort`] instead; this
+/// remains for third-party embedding that has no abort source to offer.
+pub fn extract_s_matrix<F>(
+    netlist: &Netlist,
+    ports: &[SParameterPort],
+    frequencies: &[Value],
+    run_ac: F,
+) -> Result<Vec<Vec<Vec<Complex64>>>, ExtractError>
+where
+    F: FnMut(&Netlist) -> Result<Vec<AcResult>, String>,
+{
+    extract_s_matrix_with_abort(netlist, ports, frequencies, run_ac, &NoAbort)
+}
+
+/// Extract the full scattering matrix, indexed `[row][column][frequency]`,
+/// observing cooperative cancellation throughout.
 ///
 /// `run_ac` receives a netlist with exactly one port driven and every other
 /// source silenced, and must return one [`AcResult`] per requested frequency in
 /// order. Returning an `Err` aborts the extraction, so a cancelled run reports
 /// as a cancelled run rather than as a bad measurement.
-pub fn extract_s_matrix<F>(
+///
+/// `abort` is polled before and after every port's solve and on a fixed stride
+/// through the projection that reads port voltages back, so an N-port sweep
+/// cannot sit uncancellable between two AC solves. It is the extraction's own
+/// bound; the caller's `run_ac` closure remains responsible for cancelling the
+/// solve it runs.
+pub fn extract_s_matrix_with_abort<F>(
     netlist: &Netlist,
     ports: &[SParameterPort],
     frequencies: &[Value],
     mut run_ac: F,
+    abort: &dyn AbortSignal,
 ) -> Result<Vec<Vec<Vec<Complex64>>>, ExtractError>
 where
     F: FnMut(&Netlist) -> Result<Vec<AcResult>, String>,
 {
     let count = ports.len();
     let points = frequencies.len();
+
+    check_abort(abort)?;
 
     // Normalize once, on this analysis's own copy. Every excitation then starts
     // from the same circuit, so a port cannot be given two reference impedances
@@ -135,9 +179,11 @@ where
     let mut s = vec![vec![vec![zero; points]; count]; count];
 
     for excited in 0..count {
+        check_abort(abort)?;
         let mut driven = base.clone();
         set_excitations(&mut driven, &ports, excited)?;
         let solved = run_ac(&driven).map_err(ExtractError::AcSolve)?;
+        check_abort(abort)?;
         if solved.len() != points {
             return Err(ExtractError::PointCount {
                 returned: solved.len(),
@@ -146,6 +192,9 @@ where
         }
 
         for (index, point) in solved.iter().enumerate() {
+            if index.is_multiple_of(ABORT_CHECK_INTERVAL) {
+                check_abort(abort)?;
+            }
             let voltages = ports
                 .iter()
                 .map(|port| {
@@ -160,4 +209,12 @@ where
     }
 
     Ok(s)
+}
+
+fn check_abort(abort: &dyn AbortSignal) -> Result<(), ExtractError> {
+    if abort.is_aborted() {
+        Err(ExtractError::Aborted)
+    } else {
+        Ok(())
+    }
 }

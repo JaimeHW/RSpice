@@ -816,9 +816,10 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
 
     crate::abort::install_interrupt_handler();
     validate_run_numeric_args(&args)?;
-    if let Some(seconds) = args.timeout {
-        crate::abort::arm_timeout(seconds);
-    }
+    // Held for the whole cancellable region. Dropping it on any exit path
+    // closes the completion latch, so a deadline that expires after the run
+    // is already over cannot announce a cancellation that never happened.
+    let _timeout = args.timeout.map(crate::abort::arm_timeout);
 
     // A run that was killed (rather than cancelled) cannot clean up after
     // itself, so its staging files stay in the output directory. Reclaim the

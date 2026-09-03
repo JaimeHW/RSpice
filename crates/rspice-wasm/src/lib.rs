@@ -4926,13 +4926,14 @@ mod tests {
 
         let core_netlist = Netlist::parse(STB_DOCUMENT_DECK).expect("parse core STB deck");
         let core_result = Engine::new(SimulationConfig::default())
-            .run_stb(
+            .run_stb_with_abort(
                 &core_netlist,
                 StbConfig::new()
                     .with_sweep(10.0, 1.0e3, 4)
                     .with_sweep_type(StbSweepType::Linear)
                     .with_probe("VPROBE")
                     .with_nyquist(true),
+                &NoAbort,
             )
             .expect("core STB reference executes");
         assert_eq!(document.primary.frequencies, core_result.frequencies);
@@ -5417,7 +5418,7 @@ mod tests {
     fn fft_parity_fixture() -> (TransientResult, TransientSnapshot) {
         let netlist = Netlist::parse(FFT_PARITY_DECK).expect("FFT parity deck parses in core");
         let core = Engine::new(SimulationConfig::default())
-            .run_tran(&netlist, 1.0e-3, 1.0e-6)
+            .run_tran_with_abort(&netlist, 1.0e-3, 1.0e-6, &NoAbort)
             .expect("FFT parity deck executes in core");
         let wasm = run_transient_analysis_detailed(FFT_PARITY_DECK, 1.0e-3, 1.0e-6)
             .expect("FFT parity deck executes through browser adapter");
@@ -5594,7 +5595,7 @@ mod tests {
     fn transient_fft_snapshot_conversion_rejects_unsupported_physical_type() {
         let netlist = Netlist::parse(FFT_PARITY_DECK).expect("FFT parity deck parses in core");
         let mut core = Engine::new(SimulationConfig::default())
-            .run_tran(&netlist, 1.0e-3, 1.0e-6)
+            .run_tran_with_abort(&netlist, 1.0e-3, 1.0e-6, &NoAbort)
             .expect("FFT parity deck executes in core");
         core.fft_results[0].physical_type = "unsupported";
 
@@ -5678,7 +5679,7 @@ mod tests {
     fn transient_analog_adapter_matches_actual_core_execution_inventory() {
         let netlist = Netlist::parse(ANALOG_PARITY_DECK).expect("analog parity deck parses");
         let core = Engine::new(SimulationConfig::default())
-            .run_tran(&netlist, 2.0e-6, 20.0e-9)
+            .run_tran_with_abort(&netlist, 2.0e-6, 20.0e-9, &NoAbort)
             .expect("analog parity deck executes in core");
         let wasm = run_transient_analysis_detailed(ANALOG_PARITY_DECK, 2.0e-6, 20.0e-9)
             .expect("analog parity deck executes through browser adapter");
@@ -5759,13 +5760,14 @@ mod tests {
             maximum_interval: 100.0e-9,
         };
         let compressed_core = Engine::new(SimulationConfig::default())
-            .run_tran_compressed(
+            .run_tran_compressed_with_abort(
                 &netlist,
                 2.0e-6,
                 20.0e-9,
                 compression_options
                     .to_core()
                     .expect("compression options are valid"),
+                &NoAbort,
             )
             .expect("analog parity deck executes through core compression");
         let compressed = transient_snapshot_from_compressed_result(compressed_core.clone())

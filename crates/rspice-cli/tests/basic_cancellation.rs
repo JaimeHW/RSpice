@@ -1,8 +1,10 @@
 //! Cancellation regressions for basic-analysis dispatch.
 //!
 //! The public CLI normalizes `.TEMP` into the canonical run-axis planner, so
-//! the process tests below cover that reachable surface. The source guard is
-//! what protects the retained legacy `run_temp` adapter until it is removed.
+//! these process tests cover that reachable surface: what a cancelled run
+//! exits with, and that it publishes nothing. Which core entry point the
+//! runner calls is enforced at lint time by this crate's `clippy.toml`
+//! `disallowed-methods` list, not by reading the runner's source here.
 
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -165,4 +167,51 @@ fn reachable_temperature_axis_timeout_is_typed_and_publishes_no_artifact() {
         leaked.is_empty(),
         "a cancelled temperature run published artifacts: {leaked:?}"
     );
+}
+
+#[test]
+fn a_run_that_finishes_under_its_deadline_announces_no_timeout() {
+    let directory = TestDirectory::new("deadline_latch");
+    let deck = directory.path().join("fast.sp");
+    let output = directory.path().join("fast.json");
+    std::fs::write(
+        &deck,
+        "* completes long before its deadline\n\
+         V1 in 0 10\n\
+         R1 in out 1k\n\
+         R2 out 0 1k\n\
+         .op\n\
+         .end\n",
+    )
+    .expect("write fast fixture");
+
+    // The deadline is far longer than the run, so the detached timer can only
+    // ever wake after the completion latch has closed. Its claim on the shared
+    // flag is then refused and it must say nothing.
+    let result = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args([
+            "--quiet",
+            "run",
+            deck.to_str().expect("UTF-8 deck path"),
+            "--timeout",
+            "600",
+            "--output",
+            output.to_str().expect("UTF-8 output path"),
+            "--format",
+            "json",
+        ])
+        .output()
+        .expect("run fast fixture");
+
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(
+        result.status.success(),
+        "an under-deadline run must succeed:\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("Timeout"),
+        "a run that finished on its own must not report a timeout:\n{stderr}"
+    );
+    assert!(output.exists(), "the completed run must publish its result");
 }

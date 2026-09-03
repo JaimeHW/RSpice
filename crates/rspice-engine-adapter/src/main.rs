@@ -8,11 +8,28 @@
 //! solver rejects. A non-zero exit status is reserved for launch-contract and
 //! sandbox-authority violations, which the worker treats as controller
 //! faults rather than customer results.
+//!
+//! # Stopping a request
+//!
+//! Two things can stop engine work, and the response says which:
+//!
+//! - The worker asks the process to terminate (SIGINT/SIGTERM, or a Windows
+//!   console-control event). That is recorded cooperatively, the solver
+//!   unwinds at its next abort poll, and the response is
+//!   `status: failed` with `engine.cancelled`.
+//! - The solve budget expires. The response is `engine.time_limit`. The
+//!   budget defaults to 240 seconds and the worker may shorten or lengthen it
+//!   with `RSPICE_ENGINE_SOLVE_BUDGET_SECONDS`; a malformed or non-positive
+//!   value is a launch-contract violation rather than a silent fallback to
+//!   the default.
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
+use rspice_core::abort_signal::AbortSignal;
 use rspice_engine_adapter::document::{CircuitContent, IncludeSources, interpret_document};
 use rspice_engine_adapter::execute::{self, Execution};
 use rspice_engine_adapter::wire::{
@@ -30,6 +47,76 @@ const EXIT_REQUEST_INVALID: u8 = 12;
 const EXIT_SANDBOX_AUTHORITY: u8 = 13;
 /// The response could not be serialized or written.
 const EXIT_RESPONSE_IO: u8 = 14;
+
+/// Set by the signal handler when the supervisor asks this process to stop.
+///
+/// Cooperative rather than immediate: the worker's terminate request has to
+/// reach the solver so the request unwinds into a canonical `status: failed`
+/// response with a cancellation code, instead of the process dying mid-solve
+/// and the worker having to infer what happened from an exit signal.
+static TERMINATION_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+/// The executor's cancellation source: any received termination request.
+struct ProcessTermination;
+
+impl AbortSignal for ProcessTermination {
+    #[inline]
+    fn is_aborted(&self) -> bool {
+        TERMINATION_REQUESTED.load(Ordering::Relaxed)
+    }
+}
+
+/// Install the termination handler for this process.
+///
+/// Errors are reported and otherwise ignored: without a handler the default
+/// disposition terminates the process, which is the pre-existing behavior and
+/// still a correct — merely less informative — outcome.
+#[cfg(not(windows))]
+fn install_termination_handler() {
+    // `termination` widens this beyond SIGINT to the SIGTERM a supervisor
+    // actually sends, which is the request this executor must honor.
+    if let Err(error) = ctrlc::set_handler(|| {
+        TERMINATION_REQUESTED.store(true, Ordering::SeqCst);
+    }) {
+        eprintln!("failed to install the termination handler: {error}");
+    }
+}
+
+/// Windows dispatches console-control callbacks on a system-managed thread,
+/// so register directly rather than having `ctrlc` spawn a waiter for a
+/// process that serves exactly one request.
+#[cfg(windows)]
+fn install_termination_handler() {
+    use windows_sys::Win32::System::Console::SetConsoleCtrlHandler;
+
+    // SAFETY: `windows_console_control_handler` has the required static
+    // `PHANDLER_ROUTINE` ABI and touches only a process-lifetime atomic.
+    unsafe {
+        if SetConsoleCtrlHandler(Some(windows_console_control_handler), 1) == 0 {
+            eprintln!("failed to install the termination handler");
+        }
+    }
+}
+
+#[cfg(windows)]
+unsafe extern "system" fn windows_console_control_handler(control_type: u32) -> i32 {
+    use windows_sys::Win32::System::Console::{
+        CTRL_BREAK_EVENT, CTRL_C_EVENT, CTRL_CLOSE_EVENT, CTRL_LOGOFF_EVENT, CTRL_SHUTDOWN_EVENT,
+    };
+
+    if !matches!(
+        control_type,
+        CTRL_C_EVENT
+            | CTRL_BREAK_EVENT
+            | CTRL_CLOSE_EVENT
+            | CTRL_LOGOFF_EVENT
+            | CTRL_SHUTDOWN_EVENT
+    ) {
+        return 0;
+    }
+    TERMINATION_REQUESTED.store(true, Ordering::SeqCst);
+    1
+}
 
 /// Engine build identity: the workspace version plus the exact source SHA
 /// stamped by the component release lane. This is the `engine_build` value
@@ -80,6 +167,18 @@ fn serve() -> ExitCode {
             return ExitCode::from(EXIT_LAUNCH_CONTRACT);
         }
     };
+    let solve_budget = match execute::solve_budget_from_env() {
+        Ok(budget) => budget,
+        Err(violation) => {
+            eprintln!("launch contract violation: {violation}");
+            return ExitCode::from(EXIT_LAUNCH_CONTRACT);
+        }
+    };
+
+    // Installed before any work starts so a terminate request that arrives
+    // while the request is still being read is already recorded when the
+    // solver first polls.
+    install_termination_handler();
 
     // The engine parallelizes device evaluation through rayon. Repetition
     // deterministic replay compares series hashes bit for bit, and work-stealing
@@ -126,7 +225,7 @@ fn serve() -> ExitCode {
         };
 
     let execution = match interpret_document(&request.revision.document, &sources) {
-        Ok(content) => run(&request.analysis, &content),
+        Ok(content) => run(&request.analysis, &content, solve_budget),
         Err(rejection) => Execution {
             response: EngineResponse::failed(rejection.failure_code, &rejection.failure_detail),
             artifacts: Vec::new(),
@@ -143,8 +242,18 @@ fn serve() -> ExitCode {
     emit(&execution.response)
 }
 
-fn run(analysis: &serde_json::Value, content: &CircuitContent) -> Execution {
-    let execution = execute::execute(analysis, content, &engine_build());
+fn run(
+    analysis: &serde_json::Value,
+    content: &CircuitContent,
+    solve_budget: Duration,
+) -> Execution {
+    let execution = execute::execute_with_abort(
+        analysis,
+        content,
+        &engine_build(),
+        &ProcessTermination,
+        solve_budget,
+    );
     // The response must fit the wire budget with its manifest and declared
     // artifacts. An oversized manifest is a bounded customer outcome: the
     // waveform data still exists conceptually, but this run cannot represent

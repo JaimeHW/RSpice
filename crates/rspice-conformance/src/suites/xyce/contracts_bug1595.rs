@@ -319,12 +319,7 @@ mod tests {
 
     #[test]
     fn bug1595_typed_observer_rejects_identity_and_origin_mutations() {
-        struct ImmediateAbort;
-        impl AbortSignal for ImmediateAbort {
-            fn is_aborted(&self) -> bool {
-                true
-            }
-        }
+        use rspice_core::abort_signal::ImmediateAbort;
 
         let path = corpus_root().join(XYCE_BUG1595_EXPECTED_FAILURE_PATH);
         let source = fs::read_to_string(&path).expect("read canonical BUG1595 source");

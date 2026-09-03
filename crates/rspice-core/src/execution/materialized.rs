@@ -656,7 +656,6 @@ impl MaterializedRunError {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
-    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
     use crate::abort_signal::ImmediateAbort;
@@ -668,17 +667,6 @@ mod tests {
 
     fn plan(netlist: &Netlist) -> DeckPlan {
         DeckPlan::from_netlist(netlist, &ResourceLimits::default()).expect("canonical deck plan")
-    }
-
-    struct AbortOnPoll {
-        polls: AtomicUsize,
-        abort_on: usize,
-    }
-
-    impl AbortSignal for AbortOnPoll {
-        fn is_aborted(&self) -> bool {
-            self.polls.fetch_add(1, Ordering::Relaxed) + 1 >= self.abort_on
-        }
     }
 
     #[test]
@@ -1046,16 +1034,14 @@ mod tests {
         let materializer = engine
             .prepare_deck_plan_materializer(&netlist, &plan)
             .expect("scalar materializer");
-        let abort = AbortOnPoll {
-            polls: AtomicUsize::new(0),
-            abort_on: 3,
-        };
+        let abort = crate::abort_signal::CountingAbort::new(2);
 
         assert!(matches!(
             materializer.materialize_run_with_abort(0, &abort),
             Err(MaterializedRunError::Aborted)
         ));
-        assert_eq!(abort.polls.load(Ordering::Relaxed), 3);
+        assert_eq!(abort.observed_at(), Some(3));
+        assert_eq!(abort.polls_after_abort(), 0);
     }
 
     #[test]

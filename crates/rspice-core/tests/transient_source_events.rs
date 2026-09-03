@@ -1,14 +1,7 @@
+use rspice_core::ResourceLimits;
+use rspice_core::abort_signal::ImmediateAbort;
 use rspice_core::engine::{Engine, SimulationConfig, SimulationError};
 use rspice_core::netlist::Netlist;
-use rspice_core::{ResourceLimits, abort_signal::AbortSignal};
-
-struct AlwaysAbort;
-
-impl AbortSignal for AlwaysAbort {
-    fn is_aborted(&self) -> bool {
-        true
-    }
-}
 
 fn contains_time(events: &[f64], expected: f64) -> bool {
     let tolerance = 32.0 * f64::EPSILON * expected.abs().max(f64::MIN_POSITIVE);
@@ -125,7 +118,7 @@ fn event_enumeration_is_cancellable_and_resource_bounded() {
             6.0e-6,
             1.0e-7,
             &["Vpulse".to_string()],
-            &AlwaysAbort,
+            &ImmediateAbort,
         )
         .expect_err("pre-aborted enumeration must stop");
     assert!(matches!(aborted, SimulationError::Aborted));

@@ -2,10 +2,10 @@
 
 use std::collections::{BTreeSet, HashSet};
 use std::fs;
-use std::io::{self, Read};
+use std::io;
 use std::path::{Component, Path, PathBuf};
 
-use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::abort_signal::{AbortReader, AbortSignal, NoAbort};
 use crate::resource::{
     ResourceKind, ResourceLimitError, ResourceLimits, ResourceReadError, read_bytes_limited,
 };
@@ -312,25 +312,13 @@ fn include_directories_for_package(package_root: &Path, include_files: &[PathBuf
     directories.into_iter().collect()
 }
 
-struct AbortReader<'a, R> {
-    inner: R,
-    abort: &'a dyn AbortSignal,
-}
-
-impl<R: Read> Read for AbortReader<'_, R> {
-    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
-        ensure_not_aborted(self.abort)?;
-        self.inner.read(buffer)
-    }
-}
-
 fn read_source_limited(path: &Path, limit: usize, abort: &dyn AbortSignal) -> io::Result<Vec<u8>> {
     let file = fs::File::open(path)?;
     let metadata_bytes = usize::try_from(file.metadata()?.len()).unwrap_or(usize::MAX);
     ResourceLimitError::ensure(ResourceKind::DependencySourceBytes, metadata_bytes, limit)
         .map_err(resource_error_to_io)?;
     read_bytes_limited(
-        AbortReader { inner: file, abort },
+        AbortReader::new(file, abort, DISCOVERY_READ_CANCELLED),
         ResourceKind::DependencySourceBytes,
         limit,
     )
@@ -348,11 +336,15 @@ fn resource_read_error_to_io(error: ResourceReadError) -> io::Error {
     }
 }
 
+/// The message an interrupted discovery read carries; the only signal a
+/// caller downstream of `io::Error` has that the failure was a cancellation.
+const DISCOVERY_READ_CANCELLED: &str = "Verilog-A model discovery aborted";
+
 fn ensure_not_aborted(abort: &dyn AbortSignal) -> io::Result<()> {
     if abort.is_aborted() {
         Err(io::Error::new(
             io::ErrorKind::Interrupted,
-            "Verilog-A model discovery aborted",
+            DISCOVERY_READ_CANCELLED,
         ))
     } else {
         Ok(())

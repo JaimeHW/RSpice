@@ -1,0 +1,97 @@
+# Rule 6 of the production-readiness plan: "Abort is an execution dependency.
+# Long-running core entrypoints receive an abort source; a frontend may not
+# call a non-abort wrapper."
+#
+# `rspice-core` keeps a non-abort convenience form of many cancellable entry
+# points for third-party embedding. This crate is a first-party surface, so it
+# must always reach for the `_with_abort` / `_and_abort` form and thread its
+# real cancellation source through it. Listing the convenience forms here
+# turns that from a review convention into a build failure under
+# `cargo clippy -- -D warnings`, which is why this file exists in every
+# first-party surface crate rather than being asserted by a test that reads
+# production source text.
+#
+# A test that genuinely has no cancellation to model still uses the
+# `_with_abort` form and passes `rspice_core::abort_signal::NoAbort`, so that
+# "this call cannot be cancelled" is written down at the call site.
+#
+# Only entry points that still have a non-abort form appear here; clippy warns
+# about a path it cannot resolve, so a wrapper deleted from core must also be
+# deleted from this list.
+
+disallowed-methods = [
+    # Circuit construction and readiness
+    { path = "rspice_core::engine::Engine::build_circuit", reason = "use build_circuit_with_abort (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::health_check", reason = "use health_check_with_abort (plan rule 6)" },
+
+    # DC
+    { path = "rspice_core::engine::Engine::run_dc_op", reason = "use run_dc_op_with_abort (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::run_dc_op_with_report", reason = "use run_dc_op_with_report_and_abort (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::run_dc_sweep", reason = "use run_dc_sweep_with_abort (plan rule 6)" },
+
+    # Transient
+    { path = "rspice_core::engine::Engine::run_tran", reason = "use run_tran_with_abort (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::run_tran_with_startup_mode", reason = "use run_tran_with_startup_mode_and_abort (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::run_tran_compressed", reason = "use run_tran_compressed_with_abort (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::run_tran_checkpointed", reason = "use run_tran_checkpointed_with_abort (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::run_tran_checkpointed_with_startup_mode", reason = "use run_tran_checkpointed_with_startup_mode_and_abort (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::run_tran_checkpoint_schedule_with_startup_mode", reason = "use the _and_abort form (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::run_tran_resume", reason = "use run_tran_resume_with_abort (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::run_tran_restart_resume", reason = "use run_tran_restart_resume_with_abort (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::preflight_transient_checkpoint", reason = "use preflight_transient_checkpoint_with_abort (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::transient_source_event_times", reason = "use transient_source_event_times_with_abort (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::transient_source_names", reason = "use transient_source_names_with_abort (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::validate_transient_source_names", reason = "use validate_transient_source_names_with_abort (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::validate_periodic_source_contract", reason = "use validate_periodic_source_contract_with_abort (plan rule 6)" },
+
+    # Frequency domain
+    { path = "rspice_core::engine::Engine::run_ac", reason = "use run_ac_with_abort (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::run_ac_data", reason = "use run_ac_data_with_abort (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::run_noise", reason = "use run_noise_with_abort (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::run_noise_ports", reason = "use run_noise_ports_with_abort (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::run_noise_with_input_source", reason = "use run_noise_with_input_source_and_abort (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::run_noise_named_with_input_source", reason = "use the _and_abort form (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::run_noise_data_named_with_input_source", reason = "use the _and_abort form (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::run_port_noise_correlation", reason = "use run_port_noise_correlation_with_abort (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::run_distortion", reason = "use run_distortion_with_abort (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::run_transfer_function", reason = "use run_transfer_function_with_abort (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::run_stb", reason = "use run_stb_with_abort (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::run_pz_ports", reason = "use run_pz_ports_with_abort (plan rule 6)" },
+
+    # Periodic / RF
+    { path = "rspice_core::engine::Engine::run_pss", reason = "use run_pss_with_abort (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::run_pss_with_dc_seed", reason = "use run_pss_with_dc_seed_and_abort (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::run_pss_operating_point_with_dc_seed", reason = "use the _and_abort form (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::run_tran_from_pss_state", reason = "use run_tran_from_pss_state_with_abort (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::run_hb", reason = "use run_hb_with_abort (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::run_hb_envelope_continuation_state", reason = "use the _with_abort form (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::run_tran_from_hb_envelope_state", reason = "use the _with_abort form (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::run_pac", reason = "use run_pac_with_abort (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::run_pnoise", reason = "use run_pnoise_with_abort (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::run_pnoise_oscillator", reason = "use run_pnoise_oscillator_with_abort (plan rule 6)" },
+
+    # Statistical and parametric
+    { path = "rspice_core::engine::Engine::run_monte_carlo_with_options", reason = "use run_monte_carlo_with_options_and_abort (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::run_sensitivity", reason = "use run_sensitivity_with_abort (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::run_sensitivity_ac", reason = "use run_sensitivity_ac_with_abort (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::run_sensitivity_ac_complete", reason = "use run_sensitivity_ac_complete_with_abort (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::run_sensitivity_dc_complete", reason = "use run_sensitivity_dc_complete_with_abort (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::run_sensitivity_linearized", reason = "use run_sensitivity_linearized_with_abort (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::run_step", reason = "use run_step_with_abort (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::run_step_command", reason = "use run_step_command_with_abort (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::plan_step_commands", reason = "use plan_step_commands_with_abort (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::step_netlists_for_command", reason = "use step_netlists_for_command_with_abort (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::materialize_step_run", reason = "use materialize_step_run_with_abort (plan rule 6)" },
+    { path = "rspice_core::engine::Engine::prepare_deck_plan_materializer", reason = "use prepare_deck_plan_materializer_with_abort (plan rule 6)" },
+    { path = "rspice_core::execution::topology_fingerprint", reason = "use topology_fingerprint_with_abort (plan rule 6)" },
+
+    # Analysis-level entry points a surface can reach without the engine
+    { path = "rspice_core::analysis::fourier::FourierAnalysis::analyze", reason = "use analyze_with_abort (plan rule 6)" },
+    { path = "rspice_core::analysis::s_param::extract_s_matrix", reason = "use extract_s_matrix_with_abort (plan rule 6)" },
+    { path = "rspice_core::execution::DeckPlan::from_netlist", reason = "use from_netlist_with_abort (plan rule 6)" },
+    { path = "rspice_core::execution::DeckPlan::from_netlist_run_axes", reason = "use from_netlist_run_axes_with_abort (plan rule 6)" },
+    { path = "rspice_core::engine::TransientCheckpoint::load", reason = "use load_with_abort (plan rule 6)" },
+    { path = "rspice_core::engine::TransientCheckpoint::save", reason = "use save_with_abort (plan rule 6)" },
+    { path = "rspice_core::engine::TransientCheckpoint::to_bytes", reason = "use to_bytes_with_abort (plan rule 6)" },
+    { path = "rspice_core::engine::TransientCheckpoint::to_text", reason = "use to_text_with_abort (plan rule 6)" },
+]

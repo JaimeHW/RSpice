@@ -11,6 +11,12 @@ pub fn execute(
     _verbose: bool,
     quiet: bool,
 ) -> Result<(), CliError> {
+    // The readiness probe parses, builds, and solves a deck. That is real
+    // engine work, so Ctrl-C has to reach it the same way it reaches a run:
+    // the probe polls the process abort source and a cancelled probe reports
+    // as an interrupt rather than as a backend that is not ready.
+    crate::abort::install_interrupt_handler();
+
     let started = Instant::now();
     let engine = match Engine::try_new(config.core_simulation_config()) {
         Ok(engine) => engine,
@@ -23,14 +29,21 @@ pub fn execute(
 
     let report = match args.mode {
         HealthMode::Liveness => None,
-        HealthMode::Readiness => match engine.health_check() {
-            Ok(report) => Some(report),
-            Err(error) => {
-                let error = CliError::from(error);
-                emit_failure(&args, started.elapsed().as_secs_f64(), &error);
-                return Err(error);
+        HealthMode::Readiness => {
+            match engine.health_check_with_abort(&crate::abort::ProcessAbort) {
+                Ok(report) => Some(report),
+                Err(rspice_core::SimulationError::Aborted) => {
+                    let error = CliError::Interrupted;
+                    emit_failure(&args, started.elapsed().as_secs_f64(), &error);
+                    return Err(error);
+                }
+                Err(error) => {
+                    let error = CliError::from(error);
+                    emit_failure(&args, started.elapsed().as_secs_f64(), &error);
+                    return Err(error);
+                }
             }
-        },
+        }
     };
 
     let duration_secs = started.elapsed().as_secs_f64();

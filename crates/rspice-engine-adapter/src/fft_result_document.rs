@@ -9,7 +9,7 @@
 
 use std::collections::HashSet;
 
-use rspice_core::abort_signal::AbortSignal;
+use rspice_core::abort_signal::{AbortSignal, NoAbort};
 use rspice_core::engine::{
     TransientFftBin, TransientFftHarmonic, TransientFftMetrics, TransientFftResult,
     transient_fft_window_coherent_gain,
@@ -32,14 +32,6 @@ pub const FFT_RESULT_DOCUMENT_CONTENT_TYPE: &str =
 
 const FFT_DB_REPORTING_FLOOR: f64 = 1.0e-10;
 const MAX_RANKED_HARMONICS: usize = 30;
-
-struct NeverAbort;
-
-impl AbortSignal for NeverAbort {
-    fn is_aborted(&self) -> bool {
-        false
-    }
-}
 
 /// Every `.FFT` result belonging to one executed transient directive.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -67,7 +59,7 @@ impl TransientFftResultDocument {
             results,
             authored,
             authored_mode,
-            &NeverAbort,
+            &NoAbort,
         )
     }
 
@@ -114,7 +106,7 @@ impl TransientFftResultDocument {
 
     /// Validate and serialize a current-version document.
     pub fn to_json(&self) -> Result<String, FftResultDocumentError> {
-        self.to_json_with_abort(&NeverAbort, MAX_ENGINE_RETAINED_RESULT_BYTES)
+        self.to_json_with_abort(&NoAbort, MAX_ENGINE_RETAINED_RESULT_BYTES)
     }
 
     pub fn to_json_with_abort(
@@ -148,7 +140,7 @@ impl TransientFftResultDocument {
     pub fn from_json(json: &str) -> Result<Self, FftResultDocumentError> {
         self::TransientFftResultDocument::from_json_with_abort(
             json,
-            &NeverAbort,
+            &NoAbort,
             MAX_ENGINE_RETAINED_RESULT_BYTES,
         )
     }
@@ -192,7 +184,7 @@ impl TransientFftResultDocument {
     /// Enforce parent/child identity, source order, units, shapes, and all
     /// transform invariants needed for a lossless reader.
     pub fn validate(&self) -> Result<(), FftResultDocumentError> {
-        self.validate_with_abort(&NeverAbort)
+        self.validate_with_abort(&NoAbort)
     }
 
     pub fn validate_with_abort(
@@ -1310,9 +1302,8 @@ pub enum FftResultDocumentError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rspice_core::abort_signal::NoAbort;
+    use rspice_core::abort_signal::{CountingAbort, NoAbort};
     use rspice_core::{Engine, Netlist, SimulationConfig};
-    use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn parent() -> AnalysisIdentity {
         AnalysisIdentity {
@@ -1398,7 +1389,7 @@ mod tests {
         );
         let netlist = Netlist::parse(&deck).expect("metric FFT fixture parses");
         let result = Engine::new(SimulationConfig::default())
-            .run_tran(&netlist, 1.0e-3, 1.0e-6)
+            .run_tran_with_abort(&netlist, 1.0e-3, 1.0e-6, &NoAbort)
             .expect("metric FFT fixture executes");
         TransientFftResultDocument::from_engine_results(
             parent(),
@@ -1407,30 +1398,6 @@ mod tests {
             netlist.options.fft_mode.unwrap_or_default(),
         )
         .expect("metric FFT document maps")
-    }
-
-    struct AbortAfter {
-        calls: AtomicUsize,
-        abort_at: usize,
-    }
-
-    impl AbortAfter {
-        fn new(abort_at: usize) -> Self {
-            Self {
-                calls: AtomicUsize::new(0),
-                abort_at,
-            }
-        }
-
-        fn calls(&self) -> usize {
-            self.calls.load(Ordering::Relaxed)
-        }
-    }
-
-    impl AbortSignal for AbortAfter {
-        fn is_aborted(&self) -> bool {
-            self.calls.fetch_add(1, Ordering::Relaxed) >= self.abort_at
-        }
     }
 
     #[test]
@@ -1712,7 +1679,7 @@ mod tests {
     fn mapping_serialization_cancellation_and_byte_limits_fail_closed() {
         let result = engine_result(FftOutput::Probe("V(out)".to_owned()), 512);
         let authored = authored(&result);
-        let mapping_abort = AbortAfter::new(3);
+        let mapping_abort = CountingAbort::new(3);
         assert!(matches!(
             TransientFftResultDocument::from_engine_results_with_abort(
                 parent(),
@@ -1731,11 +1698,11 @@ mod tests {
             XyceFftMode::HspiceCompatible,
         )
         .unwrap();
-        let validation_counter = AbortAfter::new(usize::MAX);
+        let validation_counter = CountingAbort::new(usize::MAX);
         document
             .validate_with_abort(&validation_counter)
             .expect("count validation abort checks");
-        let serialization_abort = AbortAfter::new(validation_counter.calls() + 2);
+        let serialization_abort = CountingAbort::new(validation_counter.count() + 2);
         assert!(matches!(
             document.to_json_with_abort(&serialization_abort, u64::MAX),
             Err(FftResultDocumentError::Aborted)
@@ -1744,11 +1711,11 @@ mod tests {
         let json = document.to_json().unwrap();
         assert!(
             document
-                .to_json_with_abort(&NeverAbort, json.len() as u64)
+                .to_json_with_abort(&NoAbort, json.len() as u64)
                 .is_ok()
         );
         assert!(matches!(
-            document.to_json_with_abort(&NeverAbort, json.len() as u64 - 1),
+            document.to_json_with_abort(&NoAbort, json.len() as u64 - 1),
             Err(FftResultDocumentError::ArtifactTooLarge { .. })
         ));
     }

@@ -475,6 +475,36 @@ pub(super) fn run_dc_sweep(
     }
 }
 
+/// One line of compression evidence: which signal came closest to leaving its
+/// declared tolerance, when, and by how much.
+///
+/// A compression ratio on its own says only how much data was dropped, never
+/// whether dropping it was allowed, so the ratio is never reported alone. The
+/// certificate the core produces travels with every compressed result and this
+/// is where the CLI shows it.
+fn describe_compression_error(report: &rspice_core::engine::TransientCompressionReport) -> String {
+    let Some(worst) = report.worst_observed.as_ref() else {
+        return format!(
+            "Worst compression error: none — all {} accepted samples were retained exactly",
+            report.input_points
+        );
+    };
+    let relative = worst
+        .relative_error
+        .map_or_else(|| "n/a".to_string(), |relative| format!("{:.3e}", relative));
+    format!(
+        "Worst compression error: {} {} at t={:.6e}s — absolute {:.3e}, relative {}, \
+         tolerance {:.3e} ({:.1}% used)",
+        worst.signal.kind.as_str(),
+        worst.signal.canonical_name,
+        worst.time,
+        worst.absolute_error,
+        relative,
+        worst.allowed_tolerance,
+        worst.tolerance_utilization * 100.0,
+    )
+}
+
 pub(super) fn run_transient(
     ctx: &RunContext<'_>,
     tstop: f64,
@@ -675,6 +705,10 @@ pub(super) fn run_transient(
                                 compressed.input_points,
                                 compressed.compression_ratio
                             );
+                            println!(
+                                "  {}",
+                                describe_compression_error(&compressed.compression_report)
+                            );
                         }
                         compressed.try_into_transient().map_err(|message| {
                             CliError::InternalError {
@@ -724,6 +758,10 @@ pub(super) fn run_transient(
                         "✓ Transient complete (compressed): {} points (compression ratio: {:.1}x)",
                         compressed.time.len(),
                         compressed.compression_ratio
+                    );
+                    println!(
+                        "  {}",
+                        describe_compression_error(&compressed.compression_report)
                     );
                 }
                 let expanded =
@@ -3843,7 +3881,7 @@ mod restart_tests {
         )
         .expect("parse FFT publication fixture");
         let transient = rspice_core::Engine::new(rspice_core::SimulationConfig::default())
-            .run_tran(&netlist, 1.0e-3, 1.0e-6)
+            .run_tran_with_abort(&netlist, 1.0e-3, 1.0e-6, &rspice_core::NoAbort)
             .expect("run FFT publication fixture");
         (netlist, transient.fft_results)
     }
@@ -4019,7 +4057,7 @@ mod restart_tests {
         )
         .expect("parse typed FFT RAW test deck");
         let transient = rspice_core::Engine::new(rspice_core::SimulationConfig::default())
-            .run_tran(&netlist, 1.0e-3, 1.0e-6)
+            .run_tran_with_abort(&netlist, 1.0e-3, 1.0e-6, &rspice_core::NoAbort)
             .expect("run typed FFT RAW test deck");
         assert_eq!(transient.fft_results.len(), 2);
         let directory = FftTestDirectory::new();

@@ -770,15 +770,39 @@ impl PyTransientCheckpoint {
 
 #[pymethods]
 impl PyTransientCheckpoint {
+    /// Read a checkpoint from disk.
+    ///
+    /// Reading and validating a checkpoint is bounded but not fast — a large
+    /// one carries the whole solver state — so it runs on the interruptible
+    /// worker rather than holding the GIL and ignoring `KeyboardInterrupt`.
     #[staticmethod]
-    fn load(path: PathBuf) -> PyResult<Self> {
-        rspice_core::engine::TransientCheckpoint::load(&path)
+    fn load(py: Python<'_>, path: PathBuf) -> PyResult<Self> {
+        let loaded = crate::abort::run_interruptible_unregistered(py, |abort| {
+            // Cancellation belongs to the worker; a rejected or unreadable
+            // checkpoint stays this call's own `ValueError`.
+            match rspice_core::engine::TransientCheckpoint::load_with_abort(&path, abort) {
+                Err(rspice_core::SimulationError::Aborted) => {
+                    Err(rspice_core::SimulationError::Aborted)
+                }
+                outcome => Ok(outcome),
+            }
+        })?;
+        loaded
             .map(Self::new)
-            .map_err(crate::errors::value_error)
+            .map_err(|error| crate::errors::value_error(error.to_string()))
     }
 
-    fn save(&self, path: PathBuf) -> PyResult<()> {
-        self.inner.save(&path).map_err(crate::errors::value_error)
+    /// Write the checkpoint to disk, interruptibly.
+    fn save(&self, py: Python<'_>, path: PathBuf) -> PyResult<()> {
+        let saved = crate::abort::run_interruptible_unregistered(py, |abort| {
+            match self.inner.save_with_abort(&path, abort) {
+                Err(rspice_core::SimulationError::Aborted) => {
+                    Err(rspice_core::SimulationError::Aborted)
+                }
+                outcome => Ok(outcome),
+            }
+        })?;
+        saved.map_err(|error| crate::errors::value_error(error.to_string()))
     }
 
     #[getter]

@@ -284,8 +284,20 @@ impl PyTransientResult {
     }
 
     /// Shared `.FOUR` evaluation for every waveform source.
+    ///
+    /// Qualifying and transforming a long waveform is unbounded work, so it
+    /// runs on the interruptible worker: `KeyboardInterrupt` stops it and the
+    /// GIL is released while it runs. A result object owns no engine, so the
+    /// run is not registered with one — `Engine.cancel_all()` does not reach
+    /// post-processing of an already-returned result.
+    ///
+    /// The sample grid is borrowed rather than copied across that release,
+    /// which is sound because this class exposes no mutating method: there is
+    /// no `&mut self` entry point and no `__setstate__`, so nothing Python
+    /// can call while the worker runs can move the values out from under it.
     fn fourier_of_waveform(
         &self,
+        py: Python<'_>,
         waveform: &[f64],
         fundamental: f64,
         num_harmonics: usize,
@@ -302,13 +314,18 @@ impl PyTransientResult {
         }
         let analysis =
             FourierAnalysis::new(FourierConfig::new(fundamental).with_harmonics(num_harmonics));
-        let result = analysis
-            .analyze(&self.inner.time, waveform)
-            .map_err(|error| {
-                crate::errors::value_error(format!(
-                    "Fourier waveform could not be analyzed: {error}"
-                ))
-            })?;
+        let time = self.inner.time.as_slice();
+        let qualified = crate::abort::run_interruptible_unregistered(py, |abort| {
+            match analysis.analyze_with_abort(time, waveform, abort) {
+                // Cancellation is the worker's business; every other outcome
+                // is this waveform's own and stays a value error below.
+                Err(FourierError::Aborted) => Err(rspice_core::SimulationError::Aborted),
+                outcome => Ok(outcome),
+            }
+        })?;
+        let result = qualified.map_err(|error| {
+            crate::errors::value_error(format!("Fourier waveform could not be analyzed: {error}"))
+        })?;
         Ok(PyFourierResult::from_core(&result))
     }
 }
@@ -474,6 +491,7 @@ impl PyTransientResult {
     #[pyo3(signature = (node, fundamental, num_harmonics=9, *, reference=None))]
     fn fourier(
         &self,
+        py: Python<'_>,
         node: NodeIdentifier,
         fundamental: f64,
         num_harmonics: usize,
@@ -491,7 +509,7 @@ impl PyTransientResult {
                     .collect()
             }
         };
-        self.fourier_of_waveform(&waveform, fundamental, num_harmonics)
+        self.fourier_of_waveform(py, &waveform, fundamental, num_harmonics)
     }
 
     /// Fourier-analyze a branch-current waveform
@@ -513,6 +531,7 @@ impl PyTransientResult {
     #[pyo3(signature = (element, fundamental, num_harmonics=9))]
     fn fourier_current(
         &self,
+        py: Python<'_>,
         element: &str,
         fundamental: f64,
         num_harmonics: usize,
@@ -520,7 +539,7 @@ impl PyTransientResult {
         let waveform = self.signal_waveform(&SignalSpec::Current {
             element: element.to_string(),
         })?;
-        self.fourier_of_waveform(&waveform, fundamental, num_harmonics)
+        self.fourier_of_waveform(py, &waveform, fundamental, num_harmonics)
     }
 
     /// Evaluate any SPICE output specification against this result

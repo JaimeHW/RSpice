@@ -84,24 +84,3 @@ fn noise_timeout_is_typed_prompt_and_does_not_publish_an_artifact() {
         artifact.display()
     );
 }
-
-#[test]
-fn frequency_runner_contains_no_first_party_non_abort_analysis_wrapper() {
-    let source = include_str!("../src/commands/run/frequency.rs");
-    for forbidden in [
-        ".run_transfer_function(",
-        ".run_ac_data(",
-        ".run_stb(",
-        ".run_noise_with_input_source(",
-        ".run_noise_data_named_with_input_source(",
-        ".run_pz_ports(",
-        ".run_sensitivity(",
-        ".run_sensitivity_ac_complete(",
-        ".run_sensitivity_dc_complete(",
-    ] {
-        assert!(
-            !source.contains(forbidden),
-            "frequency runner regressed to non-cancellable core wrapper {forbidden}"
-        );
-    }
-}

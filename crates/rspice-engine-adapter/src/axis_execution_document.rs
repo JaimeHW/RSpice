@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use rspice_core::abort_signal::AbortSignal;
+use rspice_core::abort_signal::{AbortSignal, NoAbort};
 use rspice_core::execution::{AxisKind, numeric_run_coordinate_id};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -13,14 +13,6 @@ use rspice_core::execution::bounded_io::{BoundedAbortWriter, BoundedWriteFailure
 
 pub const AXIS_EXECUTION_SCHEMA: &str = "rspice-axis-execution";
 pub const AXIS_EXECUTION_VERSION: u32 = 1;
-
-struct NeverAbort;
-
-impl AbortSignal for NeverAbort {
-    fn is_aborted(&self) -> bool {
-        false
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -38,7 +30,7 @@ impl AxisExecutionDocument {
         analysis_kind: AxisAnalysisKind,
         runs: Vec<CoordinateExecution>,
     ) -> Result<Self, AxisExecutionDocumentError> {
-        Self::new_with_abort(analysis_kind, runs, &NeverAbort)
+        Self::new_with_abort(analysis_kind, runs, &NoAbort)
     }
 
     pub fn new_with_abort(
@@ -65,7 +57,7 @@ impl AxisExecutionDocument {
     }
 
     pub fn to_value(&self) -> Result<serde_json::Value, AxisExecutionDocumentError> {
-        self.to_value_with_abort(&NeverAbort, MAX_ENGINE_RESULT_MANIFEST_BYTES as u64)
+        self.to_value_with_abort(&NoAbort, MAX_ENGINE_RESULT_MANIFEST_BYTES as u64)
     }
 
     pub fn to_value_with_abort(
@@ -85,7 +77,7 @@ impl AxisExecutionDocument {
     }
 
     pub fn from_value(value: serde_json::Value) -> Result<Self, AxisExecutionDocumentError> {
-        Self::from_value_with_abort(value, &NeverAbort)
+        Self::from_value_with_abort(value, &NoAbort)
     }
 
     pub fn from_value_with_abort(
@@ -134,7 +126,7 @@ impl AxisExecutionDocument {
     }
 
     pub fn validate(&self) -> Result<(), AxisExecutionDocumentError> {
-        self.validate_with_abort(&NeverAbort)
+        self.validate_with_abort(&NoAbort)
     }
 
     pub fn validate_with_abort(
@@ -620,6 +612,7 @@ pub enum AxisExecutionDocumentError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rspice_core::abort_signal::ImmediateAbort;
 
     fn coordinate_id(resistance: f64) -> String {
         numeric_run_coordinate_id(&[(AxisKind::Step, "param:r", resistance)], 0)
@@ -729,14 +722,8 @@ mod tests {
                 if message.contains("dense from zero")
         ));
 
-        struct AlwaysAbort;
-        impl AbortSignal for AlwaysAbort {
-            fn is_aborted(&self) -> bool {
-                true
-            }
-        }
         assert!(matches!(
-            two_coordinate_document().validate_with_abort(&AlwaysAbort),
+            two_coordinate_document().validate_with_abort(&ImmediateAbort),
             Err(AxisExecutionDocumentError::Aborted)
         ));
     }

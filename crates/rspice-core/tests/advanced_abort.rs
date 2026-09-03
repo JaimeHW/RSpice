@@ -1,4 +1,12 @@
 //! Cooperative-cancellation contracts for long periodic/RF analyses.
+//!
+//! This file covers the entry-point half of the contract: an analysis handed
+//! an already-set abort must refuse to start rather than run to completion and
+//! discard the result. The other half — how much work happens between a stop
+//! request and the stop — is measured in `abort_iteration_bounds.rs`, which
+//! cancels inside each solver loop and asserts the exact poll it stopped at.
+//! Passing this file and failing that one is precisely the shape of an
+//! analysis whose cancellation latency is unbounded.
 
 use rspice_core::AtomicAbort;
 use rspice_core::analysis::Distribution;
