@@ -854,8 +854,11 @@ pub(crate) enum PlanRoute {
 /// rejected step (2.0 against 1.0), and `hypot`/`atan2` under a `ddx`, where
 /// the scalar derivative rules fall through to a zero.
 ///
-/// Every one of them has since been *closed* rather than screened, and
-/// [`a_closed_divergence_takes_the_cfg_route`] is where they moved to. The
+/// Every one of them but the last has since been *closed* rather than
+/// screened, and [`a_closed_divergence_takes_the_cfg_route`] is where they
+/// moved to. `hypot`/`atan2` is not on that list because it is not a
+/// divergence: neither route computes a wrong number for it, the CFG route
+/// simply has no rule and refuses, which is [`DERIVATIVE_RULE_HOLES`]. The
 /// pattern each followed is the same one: the divergence was a lowering
 /// decision one route had and the other did not, and the fix was to give the
 /// CFG route the same decision.
@@ -930,10 +933,21 @@ pub(crate) enum PlanRoute {
 /// CFG-versus-MIR census ([`crate::native::cfg_mir_census`]), which has never
 /// run past nine modules.
 ///
-/// So the switch sits here at `Postfix` until that census runs 43/43 and the
-/// contribution-current probe is closed rather than screened. Flipping it is a
-/// one-line change and everything behind [`PlanRoute::Cfg`] is live, tested and
-/// pinned.
+/// That census is now the only thing this constant is waiting on. Every
+/// divergence the estate found is closed, the screen and its refusal class are
+/// gone, and the estate runs green with the constant reading `Cfg` —
+/// `--test-threads=1`, `--features native`, `--no-fail-fast`, fifty-seven test
+/// binaries, one target failing and that one the generated-bundle digest stamp,
+/// which this lane restamped. What is missing is not a construct; it is the
+/// measurement that would bound the constructs no test covers, and W-F5 could
+/// not take it: the box had 19.0 GB free against the 24 GB a release corpus
+/// census needs, with peer builds running.
+///
+/// So the switch sits here at `Postfix` until [`crate::native::cfg_mir_census`]
+/// runs 43/43 within bound, [`crate::native::cfg_census`]'s zero-deviation pin
+/// holds, and [`crate::native::code_identity`]'s digest reproduces. Flipping it
+/// is a one-line change and everything behind [`PlanRoute::Cfg`] is live,
+/// tested and pinned.
 ///
 /// # What `Postfix` reaches, and why the shipped plan is byte-identical
 ///
