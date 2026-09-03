@@ -1,21 +1,40 @@
-//! A postfix-plan walker generic over the scalar, so the shipped route can be
-//! evaluated in a precision the shipped route does not have.
+//! A plan walker generic over the scalar, so either route's *built plan* can be
+//! evaluated in a precision neither route has.
 //!
 //! # Why this exists
 //!
 //! [`super::cfg_mir_census`] measures the two routes' agreement against a
-//! reference computed in [`DoubleDouble`](super::double_double::DoubleDouble).
-//! The CFG route already has a door for that — its plan is a lowering of a
-//! `CfgFunction`, and [`crate::canonical_ir::evaluate_cfg`] walks one with any
-//! [`CfgScalar`]. The shipped route has none: its plan entries are flat
-//! [`NativeProgram`] streams that only a machine-code backend consumes, and
-//! there is no interpreter for them anywhere in the estate.
+//! reference computed in [`DoubleDouble`](super::double_double::DoubleDouble),
+//! and the reference has to be the plan production compiles rather than a
+//! reconstruction of it. Neither plan form had an interpreter: a shipped entry
+//! is a flat [`NativeProgram`] stream and a CFG entry is a
+//! [`ssa::Program`](crate::jit::ssa::Program) of basic blocks, and both exist
+//! only to be handed to a machine-code backend.
 //!
-//! So one is written here, for the census alone. It is generic over the scalar
-//! for the same reason the CFG interpreter is: `f64` reproduces what the
-//! compiled program does — which is how this walker is *checked*, entry by
-//! entry, against the machine code on every module the census runs — and
-//! `DoubleDouble` gives the reference the same walk could not otherwise have.
+//! So one walker is written here, for the census alone, and it takes *both*
+//! forms — [`PlanWalk::run`] for a postfix stream, [`PlanWalk::run_blocks`] for
+//! a block program, [`PlanWalk::run_plan_program`] for whichever a plan entry
+//! holds. It is generic over the scalar for the same reason the CFG interpreter
+//! is: `f64` reproduces what the compiled program does — which is how this
+//! walker is *checked*, entry by entry, against the machine code on every module
+//! the census runs — and `DoubleDouble` gives the reference the same walk could
+//! not otherwise have.
+//!
+//! # One vocabulary, two shapes
+//!
+//! The two forms share every operation and therefore share [`PlanWalk::step`].
+//! An SSA instruction's operands are the values the same operation would have
+//! popped, in the same order — `ssa::Program::lower` builds them by splitting
+//! the operand stack — so a block walk seeds a one-instruction stack with them
+//! and reads the single value the step leaves. That is what makes it impossible
+//! for the two walks to drift apart in a rule.
+//!
+//! What the block form adds is control flow: typed block parameters bound by
+//! edge arguments, a branch that reads Verilog-A truthiness exactly as
+//! [`x64::codegen`](crate::native::x64)'s `emit_terminator` does — the sign bit
+//! cleared and the payload tested, so every NaN is taken — and a `Return`. A
+//! walk that does not reach one inside its block budget is refused by name
+//! rather than spun on.
 //!
 //! # Where the semantics come from
 //!
@@ -58,6 +77,8 @@ use crate::jit::expr::{
     BinaryMathOp, CompareOp, ExtremumOp, LogicalOp, NativeOp, NativeProgram, UnaryMathOp,
     VoltageNode, native_op_name, runtime_integer_operation,
 };
+use crate::jit::plan_program::PlanProgram;
+use crate::jit::ssa::{self, Terminator};
 
 /// The backend's own thermal-voltage coefficient, `k/q`.
 const THERMAL_VOLTAGE_PER_K: f64 = 1.380_649e-23 / 1.602_176_634e-19;
@@ -71,9 +92,11 @@ pub(super) enum PostfixRefusal {
     /// An operation this walker does not implement. Named, and counted per
     /// module by the census.
     Operation(&'static str),
-    /// The stream did not leave exactly one value on the stack, or an operation
-    /// found fewer operands than it needs. A finding about the plan rather than
-    /// about this walker.
+    /// The program is not the shape its form promises: a stream that did not
+    /// leave exactly one value on the stack, an operation that found fewer
+    /// operands than it needs, an edge whose arity is not its target's, a use
+    /// ahead of its definition, or a block walk that never reached a `Return`.
+    /// A finding about the plan rather than about this walker.
     Malformed(&'static str),
     /// A load addressed storage the operating point does not have, or an
     /// integer conversion the runtime refuses. The compiled route reports a
@@ -146,20 +169,21 @@ impl MirPoint<'_> {
     }
 }
 
-/// One walk of a plan's postfix programs in the scalar `S`.
+/// One walk of a plan's programs — postfix or block — in the scalar `S`.
 ///
-/// The variable array is the walk's own: the shipped route reads slots its
-/// assignment pass wrote, so a reference that read the *`f64`* slots would be
-/// measuring the entry program's rounding and calling it the route's. Both
-/// passes are re-walked in `S`, which is the same cone the CFG route inlines.
-pub(super) struct PostfixWalk<'a, S: CfgScalar> {
+/// The variable and prelude arrays are the walk's own: both routes read storage
+/// an earlier pass wrote, so a reference that read the *`f64`* arrays would be
+/// measuring the entry program's rounding and calling it the route's. Every
+/// pass a plan carries — the assignment pass, the CFG prelude, then the entry —
+/// is re-walked in `S` on the same walker, in the order the device runs them.
+pub(super) struct PlanWalk<'a, S: CfgScalar> {
     point: &'a MirPoint<'a>,
     variables: Vec<S>,
     prelude: Vec<S>,
     refused: BTreeSet<&'static str>,
 }
 
-impl<'a, S: CfgScalar> PostfixWalk<'a, S> {
+impl<'a, S: CfgScalar> PlanWalk<'a, S> {
     pub(super) fn new(point: &'a MirPoint<'a>, variables: usize, prelude: usize) -> Self {
         Self {
             point,
@@ -245,6 +269,122 @@ impl<'a, S: CfgScalar> PostfixWalk<'a, S> {
             self.refused.insert(refusal.name());
             Err(refusal)
         }
+    }
+
+    /// Evaluate whichever program form a plan entry holds.
+    pub(super) fn run_plan_program(&mut self, program: &PlanProgram) -> Result<S, PostfixRefusal> {
+        match program {
+            PlanProgram::Postfix(program) => self.run(program),
+            PlanProgram::Blocks(program) => self.run_blocks(program.ssa()),
+        }
+    }
+
+    /// Evaluate one block program to the value its `Return` names.
+    ///
+    /// Blocks are followed rather than laid out: the walk starts at the entry
+    /// and takes whichever edge each terminator selects, binding the target's
+    /// parameters from that edge's arguments. That is what makes a value
+    /// defined in an untaken arm simply never computed, which is what the
+    /// machine code does too — and it is why the arguments are all read before
+    /// any parameter is written, so a back edge that permutes them does not
+    /// read a value it has already overwritten.
+    ///
+    /// The budget is not a timeout dressed up: a value program has one
+    /// `Return`, and a walk that has entered more blocks than the program has
+    /// plus the runtime's own loop bound is not going to reach it. Refusing by
+    /// name leaves the entry without a reference and says so, which is the same
+    /// answer every other refusal here gives.
+    pub(super) fn run_blocks(&mut self, program: &ssa::Program) -> Result<S, PostfixRefusal> {
+        let mut values: Vec<Option<S>> = vec![None; program.value_count()];
+        let mut block = program.entry();
+        let mut arguments: Vec<S> = Vec::new();
+        let budget = program.blocks().len() + MAX_RUNTIME_LOOP_ITERATIONS;
+        for _ in 0..budget {
+            let current = program
+                .block(block)
+                .map_err(|_| self.refuse(PostfixRefusal::Malformed("block-target")))?;
+            let parameters = program.parameters(current);
+            if parameters.len() != arguments.len() {
+                return Err(self.refuse(PostfixRefusal::Malformed("block-arity")));
+            }
+            for (parameter, value) in parameters.iter().zip(arguments.drain(..)) {
+                let slot = values
+                    .get_mut(parameter.value().index())
+                    .ok_or_else(|| self.refuse(PostfixRefusal::Malformed("block-parameter")))?;
+                *slot = Some(value);
+            }
+
+            for index in current.instruction_start()..current.instruction_end() {
+                let instruction = program
+                    .instructions()
+                    .get(index)
+                    .ok_or_else(|| self.refuse(PostfixRefusal::Malformed("block-instruction")))?;
+                let op = instruction.op();
+                let name = native_op_name(&op);
+                let mut stack: Vec<S> = Vec::with_capacity(instruction.operands().len() + 1);
+                for operand in instruction.operands() {
+                    stack.push(
+                        Self::read_value(&values, *operand, name)
+                            .map_err(|refusal| self.refuse(refusal))?,
+                    );
+                }
+                if let Err(refusal) = self.step(&mut stack, op) {
+                    return Err(self.refuse(refusal));
+                }
+                let [result] = stack.as_slice() else {
+                    return Err(self.refuse(PostfixRefusal::Malformed(name)));
+                };
+                let slot = values
+                    .get_mut(instruction.result().index())
+                    .ok_or_else(|| self.refuse(PostfixRefusal::Malformed(name)))?;
+                *slot = Some(*result);
+            }
+
+            let read = |value| Self::read_value(&values, value, "terminator");
+            let edge = match current.terminator() {
+                Terminator::Return(value) => {
+                    return read(*value).map_err(|refusal| self.refuse(refusal));
+                }
+                Terminator::Jump(edge) => edge,
+                Terminator::Branch {
+                    condition,
+                    then_edge,
+                    else_edge,
+                } => {
+                    let condition = read(*condition).map_err(|refusal| self.refuse(refusal))?;
+                    if truthy(condition) {
+                        then_edge
+                    } else {
+                        else_edge
+                    }
+                }
+            };
+            for argument in edge.arguments() {
+                arguments.push(read(*argument).map_err(|refusal| self.refuse(refusal))?);
+            }
+            block = edge.target();
+        }
+        Err(self.refuse(PostfixRefusal::Malformed("block-budget")))
+    }
+
+    /// One SSA value's result, or the refusal a use before its definition is.
+    fn read_value(
+        values: &[Option<S>],
+        value: ssa::ValueId,
+        name: &'static str,
+    ) -> Result<S, PostfixRefusal> {
+        values
+            .get(value.index())
+            .copied()
+            .flatten()
+            .ok_or(PostfixRefusal::Malformed(name))
+    }
+
+    /// Record a refusal by name and hand it back, so every exit from a walk
+    /// reaches [`Self::refusals`].
+    fn refuse(&mut self, refusal: PostfixRefusal) -> PostfixRefusal {
+        self.refused.insert(refusal.name());
+        refusal
     }
 
     #[allow(clippy::too_many_lines)]
@@ -599,7 +739,7 @@ fn binary_math<S: CfgScalar>(op: BinaryMathOp, left: S, right: S) -> S {
 
 #[cfg(test)]
 mod tests {
-    use super::{MirPoint, PostfixRefusal, PostfixWalk};
+    use super::{MirPoint, PlanWalk, PostfixRefusal};
     use crate::jit::expr::{
         CompareOp, ExtremumOp, LogicalOp, NativeOp, NativeProgram, UnaryMathOp, VoltageNode,
     };
@@ -634,7 +774,7 @@ mod tests {
 
     fn run_f64(ops: Vec<NativeOp>, depth: usize) -> Result<f64, PostfixRefusal> {
         let point = point();
-        let mut walk: PostfixWalk<'_, f64> = PostfixWalk::new(&point, 4, 2);
+        let mut walk: PlanWalk<'_, f64> = PlanWalk::new(&point, 4, 2);
         walk.run(&program(ops, depth))
     }
 
@@ -882,7 +1022,7 @@ mod tests {
     #[test]
     fn an_unimplemented_operation_is_refused_by_name() {
         let point = point();
-        let mut walk: PostfixWalk<'_, f64> = PostfixWalk::new(&point, 4, 2);
+        let mut walk: PlanWalk<'_, f64> = PlanWalk::new(&point, 4, 2);
         let refused = walk.run(&program(
             vec![NativeOp::Const(1.0), NativeOp::LaplaceState(0)],
             1,
@@ -896,7 +1036,7 @@ mod tests {
     #[test]
     fn a_prelude_store_publishes_and_yields() {
         let point = point();
-        let mut walk: PostfixWalk<'_, f64> = PostfixWalk::new(&point, 4, 2);
+        let mut walk: PlanWalk<'_, f64> = PlanWalk::new(&point, 4, 2);
         let stored = walk.run(&program(
             vec![NativeOp::Const(6.25), NativeOp::StorePreludeSlot(1)],
             1,
@@ -914,7 +1054,7 @@ mod tests {
     fn the_assignment_pass_fills_what_the_entries_read() {
         use crate::jit::assignment::NativeAssignment;
         let point = point();
-        let mut walk: PostfixWalk<'_, f64> = PostfixWalk::new(&point, 4, 2);
+        let mut walk: PlanWalk<'_, f64> = PlanWalk::new(&point, 4, 2);
         walk.fill_variables(&[
             NativeAssignment::Direct {
                 var_index: 0,
@@ -976,8 +1116,8 @@ mod tests {
             NativeOp::SubConst(1.0),
         ];
         let point = point();
-        let mut narrow: PostfixWalk<'_, f64> = PostfixWalk::new(&point, 0, 0);
-        let mut wide: PostfixWalk<'_, DoubleDouble> = PostfixWalk::new(&point, 0, 0);
+        let mut narrow: PlanWalk<'_, f64> = PlanWalk::new(&point, 0, 0);
+        let mut wide: PlanWalk<'_, DoubleDouble> = PlanWalk::new(&point, 0, 0);
         let narrow = narrow.run(&program(ops.clone(), 2)).expect("f64 result");
         let wide = wide.run(&program(ops, 2)).expect("double-double result");
         // `(1/3)*3 - 1` is exactly zero in `f64` — the two roundings cancel —
@@ -993,8 +1133,8 @@ mod tests {
             NativeOp::Const(1.0e-20),
             NativeOp::Add,
         ];
-        let mut narrow: PostfixWalk<'_, f64> = PostfixWalk::new(&point, 0, 0);
-        let mut wide: PostfixWalk<'_, DoubleDouble> = PostfixWalk::new(&point, 0, 0);
+        let mut narrow: PlanWalk<'_, f64> = PlanWalk::new(&point, 0, 0);
+        let mut wide: PlanWalk<'_, DoubleDouble> = PlanWalk::new(&point, 0, 0);
         let narrow = narrow.run(&program(dropping.clone(), 2)).expect("f64");
         let wide = wide.run(&program(dropping, 2)).expect("double-double");
         assert_eq!(narrow, 1.0);
@@ -1029,8 +1169,8 @@ mod tests {
             (UnaryMathOp::LimitedExp, 0.7),
         ] {
             let ops = vec![NativeOp::Const(argument), NativeOp::UnaryMath(op)];
-            let mut narrow: PostfixWalk<'_, f64> = PostfixWalk::new(&point, 0, 0);
-            let mut wide: PostfixWalk<'_, DoubleDouble> = PostfixWalk::new(&point, 0, 0);
+            let mut narrow: PlanWalk<'_, f64> = PlanWalk::new(&point, 0, 0);
+            let mut wide: PlanWalk<'_, DoubleDouble> = PlanWalk::new(&point, 0, 0);
             let narrow = narrow.run(&program(ops.clone(), 1)).expect("f64");
             let wide = wide.run(&program(ops, 1)).expect("double-double");
             assert!(
@@ -1039,5 +1179,140 @@ mod tests {
                 wide.to_f64()
             );
         }
+    }
+
+    /// The two program shapes are one walk.
+    ///
+    /// A postfix stream, the SSA lift of it, and the *branching* form of that
+    /// lift are three encodings of one expression, and the walker has to return
+    /// the same double for all three — the same bits, not a tolerance, because
+    /// what makes the block walk a reference is that it reproduces the
+    /// operations rather than approximating them.
+    #[test]
+    fn one_expression_walks_the_same_in_both_program_shapes() {
+        use crate::jit::ssa::Program;
+
+        // A conditional, so the branching form actually branches, over a
+        // subexpression the two arms do not share.
+        let ops = vec![
+            NativeOp::LoadParam(0),
+            NativeOp::CompareConst(CompareOp::Gt, 1.0),
+            NativeOp::LoadParam(0),
+            NativeOp::LoadParam(2),
+            NativeOp::Div,
+            NativeOp::LoadParam(1),
+            NativeOp::UnaryMath(UnaryMathOp::Exp),
+            NativeOp::IfElse,
+            NativeOp::LoadVoltage {
+                pos: VoltageNode::Terminal(0),
+                neg: VoltageNode::Terminal(1),
+            },
+            NativeOp::Mul,
+        ];
+        let stream = program(ops, 3);
+        let lifted = Program::lower(&stream).expect("lift the postfix stream");
+        let branching = lifted
+            .with_branching_conditionals()
+            .expect("split the conditional");
+        assert!(
+            !branching.is_single_block(),
+            "the fixture has to actually branch or it proves nothing"
+        );
+
+        let point = point();
+        let mut stack_walk: PlanWalk<'_, f64> = PlanWalk::new(&point, 0, 0);
+        let mut block_walk: PlanWalk<'_, f64> = PlanWalk::new(&point, 0, 0);
+        let mut split_walk: PlanWalk<'_, f64> = PlanWalk::new(&point, 0, 0);
+        let expected = stack_walk.run(&stream).expect("the postfix walk");
+        assert_eq!(
+            expected,
+            PARAMETERS[0] / PARAMETERS[2] * (TERMINALS[0] - TERMINALS[1]),
+            "the fixture has to select the division arm, not the exponential",
+        );
+        assert_eq!(block_walk.run_blocks(&lifted), Ok(expected));
+        assert_eq!(split_walk.run_blocks(&branching), Ok(expected));
+    }
+
+    /// A back edge, its loop-carried parameters, and the permutation on it.
+    ///
+    /// The shared loop fixture every backend is tested against: `a` and `b`
+    /// exchange places across the edge, so a walk that wrote each parameter as
+    /// it read the argument would carry one value into both. Reading every
+    /// argument before binding any parameter is what this pins.
+    #[test]
+    fn the_block_walk_follows_a_back_edge_and_the_permutation_on_it() {
+        use crate::jit::ssa::Program;
+
+        const LIMIT: f64 = 4.0;
+        const SCALE: f64 = 3.0;
+        let loop_program = Program::loop_fixture_for_test(LIMIT, SCALE).expect("the loop fixture");
+        let point = point();
+        let mut walk: PlanWalk<'_, f64> = PlanWalk::new(&point, 0, 0);
+        assert_eq!(
+            walk.run_blocks(&loop_program),
+            Ok(Program::loop_fixture_expectation(
+                LIMIT,
+                SCALE,
+                PARAMETERS[0],
+                PARAMETERS[1]
+            ))
+        );
+    }
+
+    /// A branch reads the truthiness the backend's terminator reads, which is
+    /// "not exactly zero" — so a NaN condition takes the `then` arm.
+    #[test]
+    fn a_nan_branch_condition_takes_the_then_arm() {
+        use crate::jit::ssa::Program;
+
+        let select = |condition: f64| {
+            let stream = program(
+                vec![
+                    NativeOp::Const(condition),
+                    NativeOp::Const(11.0),
+                    NativeOp::Const(22.0),
+                    NativeOp::IfElse,
+                ],
+                3,
+            );
+            let branching = Program::lower(&stream)
+                .expect("lift")
+                .with_branching_conditionals()
+                .expect("split the conditional");
+            let point = point();
+            let mut walk: PlanWalk<'_, f64> = PlanWalk::new(&point, 0, 0);
+            walk.run_blocks(&branching)
+        };
+        assert_eq!(select(1.0), Ok(11.0));
+        assert_eq!(select(0.0), Ok(22.0));
+        assert_eq!(select(-0.0), Ok(22.0));
+        assert_eq!(select(f64::NAN), Ok(11.0));
+    }
+
+    /// A block program that publishes into a prelude slot leaves the slot
+    /// readable by the next program on the same walk.
+    ///
+    /// This is the whole of how a CFG plan is walked: the prelude runs once and
+    /// each entry is a load of what it published, so the two programs have to
+    /// share the walker's slot array.
+    #[test]
+    fn a_block_prelude_publishes_slots_the_next_program_reads() {
+        use crate::jit::ssa::Program;
+
+        let publication = program(
+            vec![
+                NativeOp::LoadParam(0),
+                NativeOp::MulConst(4.0),
+                NativeOp::StorePreludeSlot(1),
+            ],
+            1,
+        );
+        let prelude = Program::lower(&publication).expect("lift the publication");
+        let read = Program::lower(&program(vec![NativeOp::LoadPreludeSlot(1)], 1)).expect("lift");
+
+        let point = point();
+        let mut walk: PlanWalk<'_, f64> = PlanWalk::new(&point, 0, 2);
+        assert_eq!(walk.run_blocks(&prelude), Ok(10.0));
+        assert_eq!(walk.run_blocks(&read), Ok(10.0));
     }
 }
