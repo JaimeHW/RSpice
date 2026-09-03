@@ -691,7 +691,7 @@ impl Engine {
 mod tests {
     use super::*;
     use crate::SimulationConfig;
-    use crate::abort_signal::{AbortSignal, NoAbort};
+    use crate::abort_signal::NoAbort;
 
     fn dc_sources(netlist: &Netlist) -> Vec<Value> {
         netlist
