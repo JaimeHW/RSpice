@@ -4,6 +4,7 @@
 //! quasi-static terminal charge and junction depletion storage. Noise remains
 //! intentionally fail-closed outside this slice.
 
+use super::MosTerminals;
 use super::classic::MosType;
 use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
 use crate::{NodeId, Value};
@@ -1137,34 +1138,51 @@ pub struct EkvMosfet {
 }
 
 impl EkvMosfet {
-    pub fn new_nmos(
-        name: String,
-        drain: NodeId,
-        gate: NodeId,
-        source: NodeId,
-        bulk: NodeId,
-    ) -> Self {
-        Self::new(name, MosType::Nmos, drain, gate, source, bulk)
+    pub fn new_nmos(name: String, terminals: MosTerminals) -> Self {
+        let MosTerminals {
+            drain,
+            gate,
+            source,
+            bulk,
+        } = terminals;
+        Self::new(
+            name,
+            MosType::Nmos,
+            MosTerminals {
+                drain: drain,
+                gate: gate,
+                source: source,
+                bulk: bulk,
+            },
+        )
     }
 
-    pub fn new_pmos(
-        name: String,
-        drain: NodeId,
-        gate: NodeId,
-        source: NodeId,
-        bulk: NodeId,
-    ) -> Self {
-        Self::new(name, MosType::Pmos, drain, gate, source, bulk)
+    pub fn new_pmos(name: String, terminals: MosTerminals) -> Self {
+        let MosTerminals {
+            drain,
+            gate,
+            source,
+            bulk,
+        } = terminals;
+        Self::new(
+            name,
+            MosType::Pmos,
+            MosTerminals {
+                drain: drain,
+                gate: gate,
+                source: source,
+                bulk: bulk,
+            },
+        )
     }
 
-    fn new(
-        name: String,
-        mos_type: MosType,
-        drain: NodeId,
-        gate: NodeId,
-        source: NodeId,
-        bulk: NodeId,
-    ) -> Self {
+    fn new(name: String, mos_type: MosType, terminals: MosTerminals) -> Self {
+        let MosTerminals {
+            drain,
+            gate,
+            source,
+            bulk,
+        } = terminals;
         let setup = Ekv26Setup {
             type_sign: match mos_type {
                 MosType::Nmos => 1.0,
@@ -1172,27 +1190,42 @@ impl EkvMosfet {
             },
             ..Ekv26Setup::default()
         };
-        Self::with_setup(name, drain, gate, source, bulk, setup, 300.15)
+        Self::with_setup(
+            name,
+            MosTerminals {
+                drain: drain,
+                gate: gate,
+                source: source,
+                bulk: bulk,
+            },
+            setup,
+            300.15,
+        )
     }
 
     pub fn from_params(
         name: String,
-        drain: NodeId,
-        gate: NodeId,
-        source: NodeId,
-        bulk: NodeId,
+        terminals: MosTerminals,
         mos_type: MosType,
         model_params: &HashMap<String, Value>,
         instance_params: &[(String, Value)],
         circuit_temp_k: Value,
     ) -> Result<Self, String> {
-        let setup = Ekv26Setup::from_params(model_params, mos_type, instance_params)?;
-        Ok(Self::with_setup(
-            name,
+        let MosTerminals {
             drain,
             gate,
             source,
             bulk,
+        } = terminals;
+        let setup = Ekv26Setup::from_params(model_params, mos_type, instance_params)?;
+        Ok(Self::with_setup(
+            name,
+            MosTerminals {
+                drain: drain,
+                gate: gate,
+                source: source,
+                bulk: bulk,
+            },
             setup,
             circuit_temp_k,
         ))
@@ -1200,13 +1233,16 @@ impl EkvMosfet {
 
     fn with_setup(
         name: String,
-        drain: NodeId,
-        gate: NodeId,
-        source: NodeId,
-        bulk: NodeId,
+        terminals: MosTerminals,
         setup: Ekv26Setup,
         circuit_temp_k: Value,
     ) -> Self {
+        let MosTerminals {
+            drain,
+            gate,
+            source,
+            bulk,
+        } = terminals;
         let model_xd_gmin = setup.xd_gmin;
         Self {
             name,
@@ -1627,7 +1663,15 @@ mod tests {
         let seed = [1.2, 1.2, 0.0, 0.0];
         let params = HashMap::from([("VTO".to_string(), 0.5), ("KP".to_string(), 2.0e-4)]);
 
-        let mut off = EkvMosfet::new_nmos("m1".to_string(), 1, 2, 3, 4);
+        let mut off = EkvMosfet::new_nmos(
+            "m1".to_string(),
+            MosTerminals {
+                drain: 1,
+                gate: 2,
+                source: 3,
+                bulk: 4,
+            },
+        );
         off = off.with_params(&params).expect("model params apply");
         off.set_initially_off(true);
         assert!(off.is_initially_off());
@@ -1652,7 +1696,15 @@ mod tests {
 
         // An instance whose terminals ideal sources pin never sees a changed
         // bias, so the evaluation count has to retire the state instead.
-        let mut pinned = EkvMosfet::new_nmos("m3".to_string(), 1, 2, 3, 4);
+        let mut pinned = EkvMosfet::new_nmos(
+            "m3".to_string(),
+            MosTerminals {
+                drain: 1,
+                gate: 2,
+                source: 3,
+                bulk: 4,
+            },
+        );
         pinned = pinned.with_params(&params).expect("model params apply");
         pinned.set_initially_off(true);
         for _ in 0..8 {
@@ -1666,7 +1718,15 @@ mod tests {
         );
 
         // Without the keyword the same seed evaluates at the raw bias.
-        let mut active = EkvMosfet::new_nmos("m2".to_string(), 1, 2, 3, 4);
+        let mut active = EkvMosfet::new_nmos(
+            "m2".to_string(),
+            MosTerminals {
+                drain: 1,
+                gate: 2,
+                source: 3,
+                bulk: 4,
+            },
+        );
         active = active.with_params(&params).expect("model params apply");
         assert!(!active.is_initially_off());
         active.update(&seed);
@@ -1753,9 +1813,17 @@ mod tests {
     #[test]
     fn with_params_rejects_unsupported_model_params() {
         let params = HashMap::from([("FNOIMOD".to_string(), 1.0)]);
-        let message = EkvMosfet::new_nmos("m1".to_string(), 1, 2, 3, 4)
-            .with_params(&params)
-            .expect_err("unsupported EKV26 params must fail closed through EkvMosfet");
+        let message = EkvMosfet::new_nmos(
+            "m1".to_string(),
+            MosTerminals {
+                drain: 1,
+                gate: 2,
+                source: 3,
+                bulk: 4,
+            },
+        )
+        .with_params(&params)
+        .expect_err("unsupported EKV26 params must fail closed through EkvMosfet");
 
         assert!(
             message.contains("FNOIMOD") && message.contains("unsupported"),
@@ -1809,9 +1877,17 @@ mod tests {
     fn set_eval_gmin_uses_larger_of_model_and_circuit_gmin() {
         let mut params = HashMap::new();
         params.insert("XD_GMIN".to_string(), 2.0e-9);
-        let mut device = EkvMosfet::new_nmos("m1".to_string(), 1, 2, 0, 0)
-            .with_params(&params)
-            .expect("supported EKV26 params apply");
+        let mut device = EkvMosfet::new_nmos(
+            "m1".to_string(),
+            MosTerminals {
+                drain: 1,
+                gate: 2,
+                source: 0,
+                bulk: 0,
+            },
+        )
+        .with_params(&params)
+        .expect("supported EKV26 params apply");
 
         device.set_eval_gmin(1.0e-8);
         assert_eq!(device.setup.xd_gmin, 1.0e-8);

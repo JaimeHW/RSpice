@@ -16,6 +16,7 @@
 //! that says `M1 d g s b NMOS150` with `LEVEL=301` has no route to it. Retiring
 //! this file means giving those decks one, not reimplementing the physics.
 
+use super::MosTerminals;
 use super::classic::MosType;
 use crate::NodeId;
 use crate::Value;
@@ -507,15 +508,18 @@ pub struct Ekv3Device {
 impl Ekv3Device {
     pub fn from_params(
         name: String,
-        drain: NodeId,
-        gate: NodeId,
-        source: NodeId,
-        bulk: NodeId,
+        terminals: MosTerminals,
         mos_type: MosType,
         model_params: &HashMap<String, Value>,
         instance_params: &[(String, Value)],
         temperature_kelvin: Value,
     ) -> Result<Self, String> {
+        let MosTerminals {
+            drain,
+            gate,
+            source,
+            bulk,
+        } = terminals;
         let model_spec = validate_model_params(mos_type, model_params)?;
         validate_instance_params(model_spec, instance_params)?;
         if !temperature_kelvin.is_finite() || temperature_kelvin <= 0.0 {
@@ -1192,7 +1196,18 @@ fn ekv3_intrinsic_currents(
     let powqsqdpp1_2 = 1.0 / (qsqdpp1 * qsqdpp1);
     let i = if_ - irp;
 
-    let nq = nq(psi_p, sqrt_psi_p, qs, qdp, dpd, gamma_b_chsh, gamma_g2, TG);
+    let nq = nq(
+        Ekv3ChargeState {
+            psi_p: psi_p,
+            sqrt_psi_p: sqrt_psi_p,
+            qs: qs,
+            qd: qdp,
+        },
+        dpd,
+        gamma_b_chsh,
+        gamma_g2,
+        TG,
+    );
     let v_o = vg_p_chsh - psi_p0;
     let qr1 = 3.0 * ONESQRT2 * gamma_b_chsh;
     let qbo = if vg_p < 0.0 {
@@ -1220,12 +1235,14 @@ fn ekv3_intrinsic_currents(
     let qs_charge = qx(psi_p, nq, qs, qdp, powqs_qdp2, powqsqdpp1_2, inv_dqmip1);
     let qd_charge = qx(psi_p, nq, qdp, qs, powqs_qdp2, powqsqdpp1_2, inv_dqmip1);
     let qg_charge = qg(
-        psi_p,
-        qs,
-        qdp,
-        powqs_qdp2,
-        powqsqdpp1_2,
-        qsqdpp1,
+        Ekv3GateChargeTerms {
+            psi_p: psi_p,
+            qs: qs,
+            qd: qdp,
+            powqs_qd2: powqs_qdp2,
+            powqsqd1_2: powqsqdpp1_2,
+            qsqd1: qsqdpp1,
+        },
         v_o_qme,
         gamma_g2,
         inv_dqmip1,
@@ -1425,16 +1442,37 @@ fn qv(v: Value, nuv: Value) -> Value {
     }
 }
 
-fn nq(
+/// The normalized charge state the EKV3 charge integrals are evaluated at: the
+/// pinch-off surface potential, its square root, and the normalized inversion
+/// charge densities at the source and drain ends of the channel.
+#[derive(Clone, Copy)]
+struct Ekv3ChargeState {
     psi_p: Value,
     sqrt_psi_p: Value,
     qs: Value,
     qd: Value,
-    dpd: Value,
-    gamma_b: Value,
-    gamma_g2: Value,
-    tg: Value,
-) -> Value {
+}
+
+/// The gate-charge integrand terms: the same charge state plus the three
+/// precomputed powers of the source/drain charge sum that the closed-form
+/// integral reuses.
+#[derive(Clone, Copy)]
+struct Ekv3GateChargeTerms {
+    psi_p: Value,
+    qs: Value,
+    qd: Value,
+    powqs_qd2: Value,
+    powqsqd1_2: Value,
+    qsqd1: Value,
+}
+
+fn nq(state: Ekv3ChargeState, dpd: Value, gamma_b: Value, gamma_g2: Value, tg: Value) -> Value {
+    let Ekv3ChargeState {
+        psi_p,
+        sqrt_psi_p,
+        qs,
+        qd,
+    } = state;
     let tmp_psi_sa = psi_p - qs - qd;
     let sqrt_psi_sa = maxa(tmp_psi_sa, 1.0e-4, 1.0e-2).sqrt();
     if tg < 0.0 {
@@ -1466,17 +1504,20 @@ fn qx(
 }
 
 fn qg(
-    psi_p: Value,
-    qs: Value,
-    qd: Value,
-    powqs_qd2: Value,
-    _powqsqd1_2: Value,
-    qsqd1: Value,
+    terms: Ekv3GateChargeTerms,
     v_o: Value,
     gamma_g2: Value,
     inv_dqmip1: Value,
     tg: Value,
 ) -> Value {
+    let Ekv3GateChargeTerms {
+        psi_p,
+        qs,
+        qd,
+        powqs_qd2,
+        powqsqd1_2: _powqsqd1_2,
+        qsqd1,
+    } = terms;
     if psi_p > 2.0 {
         if tg < 0.0 {
             let v1_qg = v_o + 2.0 * qs * inv_dqmip1;

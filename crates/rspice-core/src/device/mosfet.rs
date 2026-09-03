@@ -3,6 +3,18 @@
 //! Includes various MOSFET models (Level 1-3, BSIM3, BSIM4, EKV, VDMOS) and JFETs.
 //! Also contains shared utilities for smooth region transitions.
 
+/// The four circuit nodes a four-terminal MOSFET attaches to. They are
+/// positional in the netlist (`M<name> nd ng ns nb`) and trivial to transpose;
+/// naming them makes a swapped pair a compile error rather than a device that
+/// silently conducts the wrong way.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MosTerminals {
+    pub drain: crate::NodeId,
+    pub gate: crate::NodeId,
+    pub source: crate::NodeId,
+    pub bulk: crate::NodeId,
+}
+
 pub mod b3soi;
 pub mod bsim3v3;
 pub mod bsim4v8;

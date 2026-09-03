@@ -1,6 +1,7 @@
 //! Advanced native MOS-family builders used by circuit construction.
 
 use super::*;
+use crate::device::MosTerminals;
 
 impl Engine {
     /// Build and register a BSIMSOI dynamic-depletion (level 56) instance.
@@ -1182,10 +1183,12 @@ impl Engine {
         let bulk = circuit.get_or_create_node(&element.nodes[3]);
         let device = crate::device::EkvMosfet::from_params(
             element.name.clone(),
-            drain,
-            gate,
-            source,
-            bulk,
+            MosTerminals {
+                drain: drain,
+                gate: gate,
+                source: source,
+                bulk: bulk,
+            },
             device_mos_type,
             params_map,
             instance_params,
@@ -1227,10 +1230,12 @@ impl Engine {
         let bulk = circuit.get_or_create_node(&element.nodes[3]);
         let device = crate::device::Ekv3Device::from_params(
             element.name.clone(),
-            drain,
-            gate,
-            source,
-            bulk,
+            MosTerminals {
+                drain: drain,
+                gate: gate,
+                source: source,
+                bulk: bulk,
+            },
             device_mos_type,
             params_map,
             instance_params,

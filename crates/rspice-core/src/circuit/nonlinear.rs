@@ -1664,9 +1664,15 @@ mod tests {
     #[test]
     fn ekv26_consumes_circuit_junction_gmin() {
         let mut circuit = CircuitData::new();
-        circuit
-            .ekv26s
-            .add(EkvMosfet::new_nmos("mekv".to_string(), 1, 2, 0, 0));
+        circuit.ekv26s.add(EkvMosfet::new_nmos(
+            "mekv".to_string(),
+            crate::device::MosTerminals {
+                drain: 1,
+                gate: 2,
+                source: 0,
+                bulk: 0,
+            },
+        ));
 
         circuit.set_semiconductor_junction_gmin(1.0e-8);
 
