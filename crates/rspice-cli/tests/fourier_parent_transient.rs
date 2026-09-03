@@ -79,7 +79,7 @@ fn fourier_consumes_the_authored_transient_and_exports_currents_with_parent_iden
     );
 
     let fourier_path = directory.join("results.four-001.json");
-    let transient_path = directory.join("results.tran.json");
+    let transient_path = directory.join("results.tran-001.json");
     assert!(
         transient_path.exists(),
         "authored transient artifact is missing"

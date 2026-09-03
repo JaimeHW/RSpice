@@ -151,7 +151,7 @@ fn a_periodic_card_is_refused_before_a_preceding_transient_publishes() {
         !artifact.exists(),
         "the transient must not publish when a later card is refused"
     );
-    let tagged = dir.join("result.tran.csv");
+    let tagged = dir.join("result.tran-001.csv");
     assert!(!tagged.exists(), "no tagged transient artifact either");
 }
 

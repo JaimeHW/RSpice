@@ -942,6 +942,7 @@ pub(super) fn run_transient(
                         &fft_output_path,
                         ctx.format,
                         &parent_analysis_id,
+                        ctx.fft_analysis_ids(),
                         ctx.coordinate.as_ref(),
                         &result.fft_results,
                         ctx.netlist,
@@ -998,6 +999,7 @@ fn write_transient_fft_output_pair(
     fft_path: &Path,
     format: OutputFormat,
     parent_analysis_id: &str,
+    analysis_ids: &[String],
     coordinate: Option<&super::ArtifactCoordinate>,
     results: &[rspice_core::engine::TransientFftResult],
     netlist: &rspice_core::Netlist,
@@ -1018,6 +1020,7 @@ fn write_transient_fft_output_pair(
                 fft_path,
                 format,
                 parent_analysis_id,
+                analysis_ids,
                 coordinate,
                 results,
                 requests,
@@ -1065,6 +1068,8 @@ struct FftJsonDocument<'a> {
 
 struct FftJsonResults<'a> {
     parent_analysis_id: &'a str,
+    /// Canonical `fft-NNN` identity of each authored request, in source order.
+    analysis_ids: &'a [String],
     results: &'a [rspice_core::engine::TransientFftResult],
     requests: &'a [rspice_core::netlist::FftAnalysis],
 }
@@ -1081,9 +1086,15 @@ impl serde::Serialize for FftJsonResults<'_> {
             if index.is_multiple_of(32) && crate::abort::reason().is_some() {
                 return Err(S::Error::custom("FFT JSON serialization was cancelled"));
             }
+            let analysis_id = self
+                .analysis_ids
+                .get(index)
+                .map(String::as_str)
+                .ok_or_else(|| S::Error::custom(missing_fft_identity(index)))?;
             sequence.serialize_element(&FftJsonResult::new(
                 result,
                 index + 1,
+                analysis_id,
                 self.parent_analysis_id,
                 request,
             ))?;
@@ -1264,13 +1275,14 @@ impl<'a> FftJsonResult<'a> {
     fn new(
         result: &'a rspice_core::engine::TransientFftResult,
         ordinal: usize,
+        analysis_id: &'a str,
         parent_analysis_id: &'a str,
         request: &'a rspice_core::netlist::FftAnalysis,
     ) -> Self {
         let (source_kind, source_text, authored_output) = fft_output_identity(&result.output);
         let unit = fft_value_unit(result.physical_type, result.format).unwrap_or(None);
         Self {
-            analysis_id: format!("fft-{ordinal:03}"),
+            analysis_id: analysis_id.to_string(),
             parent_analysis_id,
             ordinal,
             source: FftJsonSource {
@@ -1809,6 +1821,7 @@ fn validate_fft_publication(
 
 fn fft_json_document<'a>(
     parent_analysis_id: &'a str,
+    analysis_ids: &'a [String],
     coordinate: Option<&'a super::ArtifactCoordinate>,
     results: &'a [rspice_core::engine::TransientFftResult],
     requests: &'a [rspice_core::netlist::FftAnalysis],
@@ -1826,6 +1839,7 @@ fn fft_json_document<'a>(
         result_count: results.len(),
         results: FftJsonResults {
             parent_analysis_id,
+            analysis_ids,
             results,
             requests,
         },
@@ -1909,6 +1923,7 @@ fn delimited_optional_usize(value: Option<usize>) -> String {
 fn fft_delimited_common_fields(
     format: OutputFormat,
     ordinal: usize,
+    analysis_id: &str,
     parent_analysis_id: &str,
     coordinate: Option<&super::ArtifactCoordinate>,
     result: &rspice_core::engine::TransientFftResult,
@@ -1925,7 +1940,7 @@ fn fft_delimited_common_fields(
             _ => unreachable!("validated flattened FFT format"),
         }
         .to_string(),
-        format!("fft-{ordinal:03}"),
+        analysis_id.to_string(),
         parent_analysis_id.to_string(),
         coordinate.map(|value| value.id.clone()).unwrap_or_default(),
         coordinate
@@ -2017,6 +2032,7 @@ fn write_fft_delimited(
     path: &Path,
     format: OutputFormat,
     parent_analysis_id: &str,
+    analysis_ids: &[String],
     coordinate: Option<&super::ArtifactCoordinate>,
     results: &[rspice_core::engine::TransientFftResult],
     requests: &[rspice_core::netlist::FftAnalysis],
@@ -2036,6 +2052,10 @@ fn write_fft_delimited(
         let common = fft_delimited_common_fields(
             format,
             index + 1,
+            analysis_ids
+                .get(index)
+                .map(String::as_str)
+                .ok_or_else(|| missing_fft_identity(index))?,
             parent_analysis_id,
             coordinate,
             result,
@@ -2219,6 +2239,7 @@ impl FftRawMetadataResult {
     fn new(
         result: &rspice_core::engine::TransientFftResult,
         ordinal: usize,
+        analysis_id: &str,
         parent_analysis_id: &str,
         request: &rspice_core::netlist::FftAnalysis,
     ) -> Self {
@@ -2227,7 +2248,7 @@ impl FftRawMetadataResult {
             .unwrap_or(None)
             .map(str::to_string);
         Self {
-            analysis_id: format!("fft-{ordinal:03}"),
+            analysis_id: analysis_id.to_string(),
             parent_analysis_id: parent_analysis_id.to_string(),
             ordinal,
             source: FftRawSource {
@@ -2300,11 +2321,12 @@ impl FftRawMetadataResult {
 fn fft_raw_metadata(
     format: OutputFormat,
     parent_analysis_id: &str,
+    analysis_ids: &[String],
     coordinate: Option<&super::ArtifactCoordinate>,
     results: &[rspice_core::engine::TransientFftResult],
     requests: &[rspice_core::netlist::FftAnalysis],
-) -> FftRawMetadata {
-    FftRawMetadata {
+) -> Result<FftRawMetadata, CliError> {
+    Ok(FftRawMetadata {
         schema_version: FFT_ARTIFACT_SCHEMA_VERSION,
         analysis: "fft".to_string(),
         parent_analysis_id: parent_analysis_id.to_string(),
@@ -2320,9 +2342,18 @@ fn fft_raw_metadata(
             .zip(requests)
             .enumerate()
             .map(|(index, (result, request))| {
-                FftRawMetadataResult::new(result, index + 1, parent_analysis_id, request)
+                Ok(FftRawMetadataResult::new(
+                    result,
+                    index + 1,
+                    analysis_ids
+                        .get(index)
+                        .map(String::as_str)
+                        .ok_or_else(|| missing_fft_identity(index))?,
+                    parent_analysis_id,
+                    request,
+                ))
             })
-            .collect(),
+            .collect::<Result<Vec<_>, CliError>>()?,
         data_columns: [
             "frequency_hz".to_string(),
             "real".to_string(),
@@ -2340,6 +2371,17 @@ fn fft_raw_metadata(
         } else {
             "ascii".to_string()
         },
+    })
+}
+
+/// The publication has fewer canonical identities than authored `.FFT`
+/// requests, so a spectrum would be published anonymously.
+fn missing_fft_identity(index: usize) -> CliError {
+    CliError::InternalError {
+        message: format!(
+            "FFT publication has no canonical analysis identity for authored request {}",
+            index.saturating_add(1)
+        ),
     }
 }
 
@@ -2378,9 +2420,19 @@ fn validate_fft_raw_metadata(metadata: &FftRawMetadata) -> Result<(), String> {
     {
         return Err("incomplete FFT RAW coordinate identity".to_string());
     }
+    // The canonical identity of each authored `.FFT` request comes from the
+    // planner, so a decoded document is checked against the same minting the
+    // writer used rather than a second spelling of it.
+    let canonical_ids = crate::analysis_identity::post_process_ids(
+        rspice_core::execution::AnalysisKind::Fft,
+        metadata.results.len(),
+    )
+    .map_err(|error| format!("cannot mint canonical FFT identities: {error}"))?;
     for (index, result) in metadata.results.iter().enumerate() {
         let ordinal = index + 1;
-        if result.analysis_id != format!("fft-{ordinal:03}")
+        if canonical_ids
+            .get(index)
+            .is_none_or(|id| result.analysis_id != id.tag())
             || result.parent_analysis_id != metadata.parent_analysis_id
             || result.ordinal != ordinal
             || !crate::hdf5::fft_source_identity_is_valid(
@@ -2796,12 +2848,20 @@ fn write_fft_raw(
     path: &Path,
     format: OutputFormat,
     parent_analysis_id: &str,
+    analysis_ids: &[String],
     coordinate: Option<&super::ArtifactCoordinate>,
     results: &[rspice_core::engine::TransientFftResult],
     requests: &[rspice_core::netlist::FftAnalysis],
     timeout_seconds: Option<f64>,
 ) -> Result<(), CliError> {
-    let metadata = fft_raw_metadata(format, parent_analysis_id, coordinate, results, requests);
+    let metadata = fft_raw_metadata(
+        format,
+        parent_analysis_id,
+        analysis_ids,
+        coordinate,
+        results,
+        requests,
+    )?;
     validate_fft_raw_metadata(&metadata).map_err(|message| CliError::InternalError { message })?;
     let command = serde_json::to_string(&metadata).map_err(|error| {
         if crate::abort::reason().is_some() {
@@ -2883,6 +2943,7 @@ fn write_fft_raw(
 
 fn hdf5_fft_section(
     parent_analysis_id: &str,
+    analysis_ids: &[String],
     coordinate: Option<&super::ArtifactCoordinate>,
     results: &[rspice_core::engine::TransientFftResult],
     requests: &[rspice_core::netlist::FftAnalysis],
@@ -2962,7 +3023,10 @@ fn hdf5_fft_section(
                 .collect(),
         });
         hdf5_results.push(Hdf5FftResult {
-            analysis_id: format!("fft-{:03}", index + 1),
+            analysis_id: analysis_ids
+                .get(index)
+                .cloned()
+                .ok_or_else(|| missing_fft_identity(index))?,
             ordinal: index + 1,
             source_kind: source_kind.to_string(),
             source_text: source_text.to_string(),
@@ -3015,6 +3079,7 @@ fn write_fft_output(
     path: &Path,
     format: OutputFormat,
     parent_analysis_id: &str,
+    analysis_ids: &[String],
     coordinate: Option<&super::ArtifactCoordinate>,
     results: &[rspice_core::engine::TransientFftResult],
     netlist: &rspice_core::Netlist,
@@ -3031,6 +3096,7 @@ fn write_fft_output(
             path,
             format,
             parent_analysis_id,
+            analysis_ids,
             coordinate,
             results,
             requests,
@@ -3046,6 +3112,7 @@ fn write_fft_to_writer(
     path: &Path,
     format: OutputFormat,
     parent_analysis_id: &str,
+    analysis_ids: &[String],
     coordinate: Option<&super::ArtifactCoordinate>,
     results: &[rspice_core::engine::TransientFftResult],
     requests: &[rspice_core::netlist::FftAnalysis],
@@ -3056,7 +3123,13 @@ fn write_fft_to_writer(
     }
     match format {
         OutputFormat::Json => {
-            let document = fft_json_document(parent_analysis_id, coordinate, results, requests);
+            let document = fft_json_document(
+                parent_analysis_id,
+                analysis_ids,
+                coordinate,
+                results,
+                requests,
+            );
             serde_json::to_writer_pretty(&mut *writer, &document).map_err(|error| {
                 if crate::abort::reason().is_some() {
                     super::cancellation_cli_error(timeout_seconds)
@@ -3073,6 +3146,7 @@ fn write_fft_to_writer(
             path,
             format,
             parent_analysis_id,
+            analysis_ids,
             coordinate,
             results,
             requests,
@@ -3083,6 +3157,7 @@ fn write_fft_to_writer(
             path,
             format,
             parent_analysis_id,
+            analysis_ids,
             coordinate,
             results,
             requests,
@@ -3093,6 +3168,7 @@ fn write_fft_to_writer(
             data.title = format!("Transient FFT ({parent_analysis_id})");
             data.fft = Some(hdf5_fft_section(
                 parent_analysis_id,
+                analysis_ids,
                 coordinate,
                 results,
                 requests,
@@ -3517,7 +3593,7 @@ pub(super) fn run_fourier(
         }
     }
 
-    let fourier_analysis_id = format!("four-{:03}", four_index + 1);
+    let fourier_analysis_id = ctx.fourier_analysis_id(four_index)?.to_string();
     if let Some(ref output_path) = ctx.output_path_for(&fourier_analysis_id) {
         write_fourier_output(
             output_path,
@@ -3645,6 +3721,16 @@ mod restart_tests {
 
     static NEXT_FFT_TEST: AtomicU64 = AtomicU64::new(0);
 
+    /// The canonical `fft-NNN` identities a deck with `count` authored `.FFT`
+    /// requests publishes under, minted the same way the executor mints them.
+    fn fft_test_identities(count: usize) -> Vec<String> {
+        crate::analysis_identity::post_process_ids(rspice_core::execution::AnalysisKind::Fft, count)
+            .expect("canonical FFT identities")
+            .iter()
+            .map(|id| id.tag())
+            .collect()
+    }
+
     struct FftTestDirectory(PathBuf);
 
     impl FftTestDirectory {
@@ -3728,8 +3814,17 @@ mod restart_tests {
             (OutputFormat::Hdf5, "h5"),
         ] {
             let path = directory.0.join(format!("{label}.{extension}"));
-            write_fft_output(&path, format, "tran-001", None, results, netlist, None)
-                .expect_err("malformed FFT publication must fail closed");
+            write_fft_output(
+                &path,
+                format,
+                "tran-001",
+                &fft_test_identities(netlist.fft_analyses.len()),
+                None,
+                results,
+                netlist,
+                None,
+            )
+            .expect_err("malformed FFT publication must fail closed");
             assert!(!path.exists(), "malformed {format:?} FFT was published");
         }
         let entries = std::fs::read_dir(&directory.0)
@@ -3810,6 +3905,7 @@ mod restart_tests {
             &fft_path,
             OutputFormat::Json,
             "tran-001",
+            &fft_test_identities(netlist.fft_analyses.len()),
             None,
             &reordered,
             &netlist,
@@ -3898,6 +3994,7 @@ mod restart_tests {
                 &path,
                 format,
                 "tran-007",
+                &fft_test_identities(netlist.fft_analyses.len()),
                 None,
                 &transient.fft_results,
                 &netlist,
@@ -4105,6 +4202,7 @@ mod restart_tests {
             &hdf5_path,
             OutputFormat::Hdf5,
             "tran-007",
+            &fft_test_identities(netlist.fft_analyses.len()),
             None,
             &transient.fft_results,
             &netlist,

@@ -972,34 +972,35 @@ fn run_corner_job(
     };
 
     let corner_engine = rspice_core::Engine::new(setup.config.clone());
-    let corner_ctx = RunContext {
-        engine: &corner_engine,
-        netlist: &corner_netlist,
-        args: setup.args,
-        format: setup.format,
-        output: corner_output_path(setup.output.as_deref(), corner),
-        checkpoint: corner_output_path(setup.args.checkpoint.as_deref(), corner),
-        resume: corner_output_path(setup.args.resume.as_deref(), corner),
-        show_progress: false,
-        compress: setup.compress,
-        compress_tol: setup.compress_tol,
-        multi_analysis: corner_netlist.analyses.len() > 1
-            || !corner_netlist.fft_analyses.is_empty(),
-        coordinate: None,
-        output_tag_multiplicities: super::analysis_output_tag_multiplicities(&corner_netlist),
-        next_output_tag_ordinal: std::cell::RefCell::new(std::collections::HashMap::new()),
-        materialized_output_ids: std::cell::RefCell::new(std::collections::HashMap::new()),
-        materialized_transient_ids: Vec::new(),
-        materialized_namespace_required: false,
-        materialized_namespace_error: std::cell::RefCell::new(None),
-        verbose: false,
-        quiet: true,
-        measurements: std::cell::RefCell::new(Vec::new()),
-        evaluated_meas: std::cell::RefCell::new(std::collections::HashSet::new()),
-        outputs: std::cell::RefCell::new(Vec::new()),
-        last_transient: std::cell::RefCell::new(None),
-        next_transient_ordinal: std::cell::Cell::new(0),
-        next_fourier_ordinal: std::cell::Cell::new(0),
+    let corner_ctx = match RunContext::for_elaborated_deck(
+        &corner_engine,
+        &corner_netlist,
+        setup.args,
+        setup.format,
+        super::ElaboratedDeckPaths {
+            output: corner_output_path(setup.output.as_deref(), corner),
+            checkpoint: corner_output_path(setup.args.checkpoint.as_deref(), corner),
+            resume: corner_output_path(setup.args.resume.as_deref(), corner),
+        },
+        &super::RunContextSettings {
+            show_progress: false,
+            compress: setup.compress,
+            compress_tol: setup.compress_tol,
+            coordinate: None,
+            verbose: false,
+            quiet: true,
+        },
+    ) {
+        Ok(context) => context,
+        Err(error) => {
+            return CornerOutcome {
+                simulation_passed: false,
+                measurements_passed: false,
+                error: Some(format!("corner '{}': {}", corner, error)),
+                measurements: Vec::new(),
+                outputs: Vec::new(),
+            };
+        }
     };
 
     let mut passed = true;
@@ -1182,35 +1183,25 @@ fn run_corner_serial_source(
     })?;
 
     let corner_engine = rspice_core::Engine::new(ctx.engine.config().clone());
-    let corner_ctx = RunContext {
-        engine: &corner_engine,
-        netlist: &corner_netlist,
-        args: ctx.args,
-        format: ctx.format,
-        output: corner_output_path(ctx.output.as_deref(), corner),
-        checkpoint: corner_output_path(ctx.checkpoint.as_deref(), corner),
-        resume: corner_output_path(ctx.resume.as_deref(), corner),
-        show_progress: ctx.show_progress,
-        compress: ctx.compress,
-        compress_tol: ctx.compress_tol,
-        multi_analysis: corner_netlist.analyses.len() > 1
-            || !corner_netlist.fft_analyses.is_empty(),
-        coordinate: ctx.coordinate.clone(),
-        output_tag_multiplicities: super::analysis_output_tag_multiplicities(&corner_netlist),
-        next_output_tag_ordinal: std::cell::RefCell::new(std::collections::HashMap::new()),
-        materialized_output_ids: std::cell::RefCell::new(std::collections::HashMap::new()),
-        materialized_transient_ids: Vec::new(),
-        materialized_namespace_required: false,
-        materialized_namespace_error: std::cell::RefCell::new(None),
-        verbose: ctx.verbose,
-        quiet: ctx.quiet,
-        measurements: std::cell::RefCell::new(Vec::new()),
-        evaluated_meas: std::cell::RefCell::new(std::collections::HashSet::new()),
-        outputs: std::cell::RefCell::new(Vec::new()),
-        last_transient: std::cell::RefCell::new(None),
-        next_transient_ordinal: std::cell::Cell::new(0),
-        next_fourier_ordinal: std::cell::Cell::new(0),
-    };
+    let corner_ctx = RunContext::for_elaborated_deck(
+        &corner_engine,
+        &corner_netlist,
+        ctx.args,
+        ctx.format,
+        super::ElaboratedDeckPaths {
+            output: corner_output_path(ctx.output.as_deref(), corner),
+            checkpoint: corner_output_path(ctx.checkpoint.as_deref(), corner),
+            resume: corner_output_path(ctx.resume.as_deref(), corner),
+        },
+        &super::RunContextSettings {
+            show_progress: ctx.show_progress,
+            compress: ctx.compress,
+            compress_tol: ctx.compress_tol,
+            coordinate: ctx.coordinate.clone(),
+            verbose: ctx.verbose,
+            quiet: ctx.quiet,
+        },
+    )?;
 
     let mut passed = true;
     if corner_netlist.analyses.is_empty() {

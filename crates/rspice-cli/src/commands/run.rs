@@ -82,20 +82,21 @@ struct RunContext<'a> {
     /// an axis-expanded run. Scalar runs deliberately retain `None`.
     coordinate: Option<ArtifactCoordinate>,
     /// Number of authored analysis instances that publish under each output
-    /// tag. Repeated kinds receive stable one-based ordinal suffixes.
+    /// tag. A tag registered here must resolve to a planned identity.
     output_tag_multiplicities: std::collections::HashMap<&'static str, usize>,
-    /// Next output ordinal for every repeated analysis tag.
-    next_output_tag_ordinal: std::cell::RefCell<std::collections::HashMap<&'static str, usize>>,
-    /// Stable materializer-owned output identities, consumed in authored
-    /// analysis order by the legacy per-analysis exporters.
-    materialized_output_ids: std::cell::RefCell<
+    /// Canonical plan-owned output identities, consumed in authored analysis
+    /// order by the per-analysis exporters.
+    planned_output_ids: std::cell::RefCell<
         std::collections::HashMap<&'static str, std::collections::VecDeque<String>>,
     >,
-    /// Stable transient identities used by checkpoint and post-processing
-    /// namespaces. Empty for scalar runs outside a materialized deck plan.
-    materialized_transient_ids: Vec<String>,
-    materialized_namespace_required: bool,
-    materialized_namespace_error: std::cell::RefCell<Option<String>>,
+    /// Canonical transient identities used by checkpoint and post-processing
+    /// namespaces, indexed by zero-based authored transient ordinal.
+    planned_transient_ids: Vec<String>,
+    /// Canonical `.FOUR` identities, one per authored Fourier card.
+    planned_fourier_ids: Vec<String>,
+    /// Canonical `.FFT` identities, one per authored transient FFT request.
+    planned_fft_ids: Vec<String>,
+    planned_namespace_error: std::cell::RefCell<Option<String>>,
     verbose: bool,
     quiet: bool,
     /// .MEAS results collected while analyses run, for CI/CD reporting
@@ -123,7 +124,7 @@ struct RetainedTransient {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct ArtifactCoordinate {
+pub(crate) struct ArtifactCoordinate {
     id: String,
     ordinal: usize,
     tag: String,
@@ -150,10 +151,12 @@ impl<'a> RunContext<'a> {
         verbose: bool,
         quiet: bool,
         run_label: Option<&str>,
-        coordinate: Option<&RunCoordinate>,
-        materialized_analyses: Option<&[MaterializedAnalysis]>,
+        identity: RunIdentity<'_>,
     ) -> Result<Self, CliError> {
-        validate_materialized_namespaces(coordinate, materialized_analyses)?;
+        let RunIdentity {
+            coordinate,
+            analyses: planned,
+        } = identity;
         let format = match args.format {
             Some(format) => format,
             None => parse_format_name(&config.output.format)?,
@@ -197,15 +200,89 @@ impl<'a> RunContext<'a> {
                 || !netlist.fft_analyses.is_empty(),
             coordinate: coordinate.map(ArtifactCoordinate::from_run_coordinate),
             output_tag_multiplicities: analysis_output_tag_multiplicities(netlist),
-            next_output_tag_ordinal: std::cell::RefCell::new(std::collections::HashMap::new()),
-            materialized_output_ids: std::cell::RefCell::new(materialized_output_id_queues(
-                materialized_analyses,
-            )),
-            materialized_transient_ids: materialized_analysis_ids(materialized_analyses, "tran"),
-            materialized_namespace_required: materialized_analyses.is_some(),
-            materialized_namespace_error: std::cell::RefCell::new(None),
+            planned_output_ids: std::cell::RefCell::new(planned.output_ids),
+            planned_transient_ids: planned.transient_ids,
+            planned_fourier_ids: post_process_tags(
+                rspice_core::execution::AnalysisKind::Fourier,
+                netlist
+                    .analyses
+                    .iter()
+                    .filter(|analysis| matches!(analysis, AnalysisCommand::Four { .. }))
+                    .count(),
+            )?,
+            planned_fft_ids: post_process_tags(
+                rspice_core::execution::AnalysisKind::Fft,
+                netlist.fft_analyses.len(),
+            )?,
+            planned_namespace_error: std::cell::RefCell::new(None),
             verbose,
             quiet,
+            measurements: std::cell::RefCell::new(Vec::new()),
+            evaluated_meas: std::cell::RefCell::new(std::collections::HashSet::new()),
+            outputs: std::cell::RefCell::new(Vec::new()),
+            last_transient: std::cell::RefCell::new(None),
+            next_transient_ordinal: std::cell::Cell::new(0),
+            next_fourier_ordinal: std::cell::Cell::new(0),
+        })
+    }
+
+    /// Context for a deck this process elaborated itself rather than received
+    /// from the deck planner: one `--corners` variant, whose artifact paths
+    /// the caller has already namespaced by corner.
+    ///
+    /// The corner deck is re-parsed, so it gets its own canonical plan and
+    /// therefore names its analyses exactly as the nominal deck does.
+    #[allow(clippy::too_many_arguments)] // One context, one call site per corner executor.
+    pub(super) fn for_elaborated_deck(
+        engine: &'a Engine,
+        netlist: &'a Netlist,
+        args: &'a RunArgs,
+        format: OutputFormat,
+        paths: ElaboratedDeckPaths,
+        source: &RunContextSettings,
+    ) -> Result<Self, CliError> {
+        let plan = DeckPlan::from_netlist_with_abort(
+            netlist,
+            &engine.config().resource_limits,
+            &crate::abort::ProcessAbort,
+        )
+        .map_err(|error| CliError::InternalError {
+            message: format!("re-elaborated deck cannot be planned: {error}"),
+        })?;
+        let planned = PlannedAnalysisIdentities::from_plan(&plan, netlist);
+        Ok(Self {
+            engine,
+            netlist,
+            args,
+            format,
+            output: paths.output,
+            checkpoint: paths.checkpoint,
+            resume: paths.resume,
+            show_progress: source.show_progress,
+            compress: source.compress,
+            compress_tol: source.compress_tol,
+            multi_analysis: source.coordinate.is_some()
+                || netlist.analyses.len() > 1
+                || !netlist.fft_analyses.is_empty(),
+            coordinate: source.coordinate.clone(),
+            output_tag_multiplicities: analysis_output_tag_multiplicities(netlist),
+            planned_output_ids: std::cell::RefCell::new(planned.output_ids),
+            planned_transient_ids: planned.transient_ids,
+            planned_fourier_ids: post_process_tags(
+                rspice_core::execution::AnalysisKind::Fourier,
+                netlist
+                    .analyses
+                    .iter()
+                    .filter(|analysis| matches!(analysis, AnalysisCommand::Four { .. }))
+                    .count(),
+            )?,
+            planned_fft_ids: post_process_tags(
+                rspice_core::execution::AnalysisKind::Fft,
+                netlist.fft_analyses.len(),
+            )?,
+            planned_namespace_error: std::cell::RefCell::new(None),
+            verbose: source.verbose,
+            quiet: source.quiet,
             measurements: std::cell::RefCell::new(Vec::new()),
             evaluated_meas: std::cell::RefCell::new(std::collections::HashSet::new()),
             outputs: std::cell::RefCell::new(Vec::new()),
@@ -305,40 +382,34 @@ impl<'a> RunContext<'a> {
     ///
     /// When the deck runs several analyses, each gets its own file so later
     /// analyses cannot silently overwrite earlier results:
-    /// `out.csv` becomes `out.op.csv`, `out.tran.csv`, ...
+    /// `out.csv` becomes `out.op-001.csv`, `out.tran-001.csv`, ...
+    ///
+    /// The namespace component is always the canonical
+    /// `AnalysisInstanceId::tag()` the planner minted for the authored card.
+    /// A tag the deck did not author belongs to a command-line analysis mode
+    /// (`--monte-carlo`, `--sparam`, ...), which is single by construction and
+    /// therefore publishes under the bare tag.
     ///
     /// Every resolved path is remembered for the `--summary` manifest.
     fn output_path_for(&self, tag: &str) -> Option<std::path::PathBuf> {
         let path = self.output.clone()?;
-        let materialized_id = self
-            .materialized_output_ids
+        let planned_id = self
+            .planned_output_ids
             .borrow_mut()
             .get_mut(tag)
             .and_then(std::collections::VecDeque::pop_front);
-        if materialized_id.is_none()
-            && self.materialized_namespace_required
-            && is_physical_output_tag(tag)
-        {
-            self.materialized_namespace_error.replace(Some(format!(
-                "materialized analysis namespace queue has no remaining '{tag}' identity"
-            )));
-            return None;
-        }
-        let repeated_tag = self
-            .output_tag_multiplicities
-            .get_key_value(tag)
-            .and_then(|(registered_tag, count)| (*count > 1).then_some(*registered_tag));
-        let qualified_tag = materialized_id.unwrap_or_else(|| {
-            repeated_tag.map_or_else(
-                || tag.to_string(),
-                |registered_tag| {
-                    let mut ordinals = self.next_output_tag_ordinal.borrow_mut();
-                    let ordinal = ordinals.entry(registered_tag).or_default();
-                    *ordinal = ordinal.saturating_add(1);
-                    format!("{tag}-{:03}", *ordinal)
-                },
-            )
-        });
+        let qualified_tag = match planned_id {
+            Some(id) => id,
+            None => {
+                if self.output_tag_multiplicities.contains_key(tag) {
+                    self.planned_namespace_error.replace(Some(format!(
+                        "planned analysis namespace queue has no remaining '{tag}' identity"
+                    )));
+                    return None;
+                }
+                tag.to_string()
+            }
+        };
         let resolved = if !self.multi_analysis {
             path
         } else {
@@ -357,15 +428,15 @@ impl<'a> RunContext<'a> {
         Some(resolved)
     }
 
-    fn ensure_materialized_namespaces_consumed(&self) -> Result<(), CliError> {
-        if let Some(message) = self.materialized_namespace_error.borrow_mut().take() {
+    fn ensure_planned_namespaces_consumed(&self) -> Result<(), CliError> {
+        if let Some(message) = self.planned_namespace_error.borrow_mut().take() {
             return Err(CliError::InternalError { message });
         }
-        if !self.materialized_namespace_required || self.output.is_none() {
+        if self.output.is_none() {
             return Ok(());
         }
         let unconsumed = self
-            .materialized_output_ids
+            .planned_output_ids
             .borrow()
             .iter()
             .filter_map(|(tag, ids)| (!ids.is_empty()).then_some((*tag, ids.len())))
@@ -375,7 +446,7 @@ impl<'a> RunContext<'a> {
         } else {
             Err(CliError::InternalError {
                 message: format!(
-                    "materialized analysis namespace queue retained unconsumed identities: {unconsumed:?}"
+                    "planned analysis namespace queue retained unconsumed identities: {unconsumed:?}"
                 ),
             })
         }
@@ -390,51 +461,43 @@ impl<'a> RunContext<'a> {
         path: Option<&std::path::Path>,
     ) -> Option<std::path::PathBuf> {
         let path = path?.to_path_buf();
-        let ordinal = self.next_transient_ordinal.get();
-        if let Some(analysis_id) = ordinal
-            .checked_sub(1)
-            .and_then(|index| self.materialized_transient_ids.get(index as usize))
-        {
-            return Some(tag_output_path(&path, analysis_id));
-        }
-        if self.materialized_namespace_required {
-            self.materialized_namespace_error.replace(Some(format!(
-                "materialized transient checkpoint namespace has no identity for ordinal {ordinal}"
-            )));
-            return None;
-        }
+        let analysis_id = match self.current_transient_analysis_id() {
+            Ok(analysis_id) => analysis_id,
+            Err(CliError::InternalError { message }) => {
+                self.planned_namespace_error.replace(Some(message));
+                return None;
+            }
+            Err(_) => return None,
+        };
+        // A deck with one authored transient keeps the requested checkpoint
+        // path so `--checkpoint state.chk` round-trips under its own name.
         if self
             .output_tag_multiplicities
             .get("tran")
             .is_none_or(|count| *count <= 1)
+            && self.coordinate.is_none()
         {
             return Some(path);
         }
-        Some(tag_output_path(&path, &format!("tran-{ordinal:03}")))
+        Some(tag_output_path(&path, &analysis_id))
     }
 
     fn current_transient_analysis_id(&self) -> Result<String, CliError> {
         let ordinal = self.next_transient_ordinal.get();
-        if ordinal == 0 {
-            return Err(CliError::InternalError {
+        let index = ordinal
+            .checked_sub(1)
+            .ok_or_else(|| CliError::InternalError {
                 message: "transient execution entered without an assigned analysis ordinal"
                     .to_string(),
-            });
-        }
-        if let Some(analysis_id) = ordinal
-            .checked_sub(1)
-            .and_then(|index| self.materialized_transient_ids.get(index as usize))
-        {
-            Ok(analysis_id.clone())
-        } else if self.materialized_namespace_required {
-            Err(CliError::InternalError {
+            })?;
+        self.planned_transient_ids
+            .get(index as usize)
+            .cloned()
+            .ok_or_else(|| CliError::InternalError {
                 message: format!(
-                    "materialized transient namespace has no identity for ordinal {ordinal}"
+                    "planned transient namespace has no identity for ordinal {ordinal}"
                 ),
             })
-        } else {
-            Ok(format!("tran-{ordinal:03}"))
-        }
     }
 
     /// One FFT artifact contains every source-authored directive for one
@@ -451,6 +514,23 @@ impl<'a> RunContext<'a> {
             "fft".to_string()
         };
         self.output_path_for(&tag)
+    }
+
+    /// Canonical identity of one authored `.FOUR` card, addressed by its
+    /// zero-based source ordinal.
+    fn fourier_analysis_id(&self, index: usize) -> Result<&str, CliError> {
+        self.planned_fourier_ids
+            .get(index)
+            .map(String::as_str)
+            .ok_or_else(|| CliError::InternalError {
+                message: format!("planned Fourier namespace has no identity for index {index}"),
+            })
+    }
+
+    /// Canonical identities of the deck's authored `.FFT` requests, in source
+    /// order. One transient publishes a spectrum for each of them.
+    fn fft_analysis_ids(&self) -> &[String] {
+        &self.planned_fft_ids
     }
 
     fn run_analysis(&self, analysis: &AnalysisCommand) -> Result<(), CliError> {
@@ -771,24 +851,6 @@ fn analysis_output_tag(analysis: &AnalysisCommand) -> Option<&'static str> {
     }
 }
 
-fn is_physical_output_tag(tag: &str) -> bool {
-    matches!(
-        tag,
-        "op" | "dc"
-            | "ac"
-            | "tran"
-            | "noise"
-            | "sp"
-            | "stb"
-            | "disto"
-            | "pz"
-            | "sens"
-            | "tf"
-            | "hb"
-            | "mc"
-    )
-}
-
 fn analysis_output_tag_multiplicities(
     netlist: &Netlist,
 ) -> std::collections::HashMap<&'static str, usize> {
@@ -800,66 +862,136 @@ fn analysis_output_tag_multiplicities(
     counts
 }
 
-fn materialized_output_id_queues(
-    analyses: Option<&[MaterializedAnalysis]>,
-) -> std::collections::HashMap<&'static str, std::collections::VecDeque<String>> {
-    let mut ids = std::collections::HashMap::new();
-    for analysis in analyses.into_iter().flatten() {
-        let Some(tag) = analysis.command().and_then(analysis_output_tag) else {
-            continue;
-        };
-        ids.entry(tag)
-            .or_insert_with(std::collections::VecDeque::new)
-            .push_back(analysis.output_namespace().analysis_component());
-    }
-    ids
+/// The canonical plan identity of every authored analysis one concrete deck
+/// run publishes under.
+///
+/// Both sources resolve to the same thing — the `AnalysisInstanceId` the
+/// canonical planner minted for each authored card, in source order. A scalar
+/// deck reads them straight off its `DeckPlan`; an axis coordinate reads them
+/// off that coordinate's `MaterializedAnalysis` list, which additionally binds
+/// each identity to the coordinate. The CLI never formats an analysis
+/// namespace of its own, so a repeated `.AC` pair is `ac-001`/`ac-002` for
+/// exactly one reason everywhere.
+#[derive(Debug, Default)]
+struct PlannedAnalysisIdentities {
+    /// Output tag to the queue of canonical analysis tags, consumed in
+    /// authored order by the per-analysis exporters.
+    output_ids: std::collections::HashMap<&'static str, std::collections::VecDeque<String>>,
+    /// Transient identities in authored order, indexed by zero-based
+    /// transient ordinal for checkpoint and post-processing namespaces.
+    transient_ids: Vec<String>,
 }
 
-fn validate_materialized_namespaces(
-    coordinate: Option<&RunCoordinate>,
-    analyses: Option<&[MaterializedAnalysis]>,
-) -> Result<(), CliError> {
-    let Some(analyses) = analyses else {
-        return Ok(());
-    };
-    let coordinate = coordinate.ok_or_else(|| CliError::InternalError {
-        message: "materialized analyses were supplied without their run coordinate".to_string(),
-    })?;
-    for analysis in analyses {
-        let output = analysis.output_namespace();
-        let checkpoint = analysis.checkpoint_namespace();
-        if output.coordinate_id() != coordinate.stable_id()
-            || checkpoint.coordinate_id() != coordinate.stable_id()
-            || output.analysis_id() != analysis.id()
-            || checkpoint.analysis_id() != analysis.id()
-        {
-            return Err(CliError::InternalError {
-                message: format!(
-                    "materialized output/checkpoint namespace disagrees with coordinate {} and analysis {}",
-                    coordinate.stable_id(),
-                    analysis.id()
-                ),
-            });
+impl PlannedAnalysisIdentities {
+    fn from_pairs<'a>(
+        pairs: impl IntoIterator<
+            Item = (
+                &'a AnalysisCommand,
+                rspice_core::execution::AnalysisInstanceId,
+            ),
+        >,
+    ) -> Self {
+        let mut identities = Self::default();
+        for (analysis, id) in pairs {
+            let Some(tag) = analysis_output_tag(analysis) else {
+                continue;
+            };
+            let component = id.tag();
+            if tag == "tran" {
+                identities.transient_ids.push(component.clone());
+            }
+            identities
+                .output_ids
+                .entry(tag)
+                .or_default()
+                .push_back(component);
         }
+        identities
     }
-    Ok(())
+
+    /// Identities for a deck with no run axis, read off its canonical plan.
+    ///
+    /// Run axes and `.FOUR` pair with `None` in the plan: an axis owns no
+    /// analysis namespace, and a Fourier card publishes under its own
+    /// post-process identity instead.
+    fn from_plan(plan: &DeckPlan, netlist: &Netlist) -> Self {
+        Self::from_pairs(
+            plan.authored_analyses(netlist)
+                .filter_map(|(analysis, id)| id.map(|id| (analysis, id))),
+        )
+    }
+
+    /// Identities for one materialized axis coordinate.
+    ///
+    /// The coordinate binding is checked here rather than trusted: an output
+    /// or checkpoint namespace that disagrees with the coordinate it claims to
+    /// belong to would let one coordinate overwrite another's artifact.
+    fn from_materialized(
+        coordinate: &RunCoordinate,
+        analyses: &[MaterializedAnalysis],
+    ) -> Result<Self, CliError> {
+        for analysis in analyses {
+            let output = analysis.output_namespace();
+            let checkpoint = analysis.checkpoint_namespace();
+            if output.coordinate_id() != coordinate.stable_id()
+                || checkpoint.coordinate_id() != coordinate.stable_id()
+                || output.analysis_id() != analysis.id()
+                || checkpoint.analysis_id() != analysis.id()
+            {
+                return Err(CliError::InternalError {
+                    message: format!(
+                        "materialized output/checkpoint namespace disagrees with coordinate {} and analysis {}",
+                        coordinate.stable_id(),
+                        analysis.id()
+                    ),
+                });
+            }
+        }
+        Ok(Self::from_pairs(analyses.iter().filter_map(|analysis| {
+            analysis.command().map(|command| (command, analysis.id()))
+        })))
+    }
 }
 
-fn materialized_analysis_ids(
-    analyses: Option<&[MaterializedAnalysis]>,
-    requested_tag: &str,
-) -> Vec<String> {
-    analyses
-        .into_iter()
-        .flatten()
-        .filter(|analysis| {
-            analysis
-                .command()
-                .and_then(analysis_output_tag)
-                .is_some_and(|tag| tag == requested_tag)
+/// Artifact paths one re-elaborated deck publishes under, already namespaced
+/// by the caller.
+pub(crate) struct ElaboratedDeckPaths {
+    pub(crate) output: Option<PathBuf>,
+    pub(crate) checkpoint: Option<PathBuf>,
+    pub(crate) resume: Option<PathBuf>,
+}
+
+/// Reporting and compression settings a re-elaborated deck inherits from the
+/// run that spawned it.
+pub(crate) struct RunContextSettings {
+    pub(crate) show_progress: bool,
+    pub(crate) compress: bool,
+    pub(crate) compress_tol: f64,
+    pub(crate) coordinate: Option<ArtifactCoordinate>,
+    pub(crate) verbose: bool,
+    pub(crate) quiet: bool,
+}
+
+/// Canonical artifact tags of one post-process family, in authored order.
+fn post_process_tags(
+    kind: rspice_core::execution::AnalysisKind,
+    count: usize,
+) -> Result<Vec<String>, CliError> {
+    crate::analysis_identity::post_process_ids(kind, count)
+        .map(|ids| ids.iter().map(|id| id.tag()).collect())
+        .map_err(|error| CliError::InternalError {
+            message: format!("cannot mint {count} canonical {kind:?} identities: {error}"),
         })
-        .map(|analysis| analysis.checkpoint_namespace().analysis_component())
-        .collect()
+}
+
+/// What one concrete deck run publishes under: its canonical analysis
+/// identities and, for an axis-expanded run, its coordinate.
+struct RunIdentity<'a> {
+    /// Coordinate of an axis-expanded run. A scalar deck's single trivial
+    /// coordinate deliberately does not namespace artifact paths, so this
+    /// stays `None` there.
+    coordinate: Option<&'a RunCoordinate>,
+    analyses: PlannedAnalysisIdentities,
 }
 
 fn cancellation_cli_error(timeout_seconds: Option<f64>) -> CliError {
@@ -1983,8 +2115,21 @@ fn run_implicit_step_op_table(
     } else {
         ("Cartesian run axes".to_string(), None)
     };
+    // This path publishes under the implicit-OP identity each coordinate
+    // carries, resolved per coordinate below. The shared context owns no
+    // authored analysis namespace of its own.
     let ctx = RunContext::new(
-        engine, netlist, args, config, verbose, quiet, run_label, None, None,
+        engine,
+        netlist,
+        args,
+        config,
+        verbose,
+        quiet,
+        run_label,
+        RunIdentity {
+            coordinate: None,
+            analyses: PlannedAnalysisIdentities::default(),
+        },
     )?;
     let start_time = Instant::now();
     let mut retained_values = 0usize;
@@ -2412,8 +2557,22 @@ fn run_deck(
         DeckPlan::from_netlist_with_abort(netlist, &resource_limits, &crate::abort::ProcessAbort)
             .map_err(|error| map_deck_plan_error(error, args))?;
     if canonical_plan.axes().is_empty() {
-        let (report, outputs) =
-            run_concrete_deck(netlist, args, config, verbose, quiet, run_label, None, None)?;
+        // An axis-free deck still takes its artifact namespaces from the
+        // canonical plan. Reading the authored identities straight off the
+        // plan costs no materialization, so a scalar run does not pay for a
+        // second elaboration to learn what it already planned.
+        let (report, outputs) = run_concrete_deck(
+            netlist,
+            args,
+            config,
+            verbose,
+            quiet,
+            run_label,
+            RunIdentity {
+                coordinate: None,
+                analyses: PlannedAnalysisIdentities::from_plan(&canonical_plan, netlist),
+            },
+        )?;
         return Ok(DeckOutcome {
             reports: vec![report],
             outputs,
@@ -2519,8 +2678,13 @@ fn run_deck(
             verbose,
             quiet,
             Some(&label),
-            Some(canonical_coordinate),
-            Some(materialized.analyses()),
+            RunIdentity {
+                coordinate: Some(canonical_coordinate),
+                analyses: PlannedAnalysisIdentities::from_materialized(
+                    canonical_coordinate,
+                    materialized.analyses(),
+                )?,
+            },
         ) {
             Ok(outcome) => outcome,
             Err(_) if crate::abort::reason().is_some() => break,
@@ -2674,8 +2838,7 @@ fn run_concrete_deck(
     verbose: bool,
     quiet: bool,
     run_label: Option<&str>,
-    coordinate: Option<&RunCoordinate>,
-    materialized_analyses: Option<&[MaterializedAnalysis]>,
+    identity: RunIdentity<'_>,
 ) -> Result<(SimulationReport, Vec<PathBuf>), CliError> {
     if verbose {
         println!("Title: {}", netlist.title);
@@ -2686,15 +2849,7 @@ fn run_concrete_deck(
     let sim_config = build_sim_config(args, config, netlist);
     let engine = Engine::try_new(sim_config)?;
     let ctx = RunContext::new(
-        &engine,
-        netlist,
-        args,
-        config,
-        verbose,
-        quiet,
-        run_label,
-        coordinate,
-        materialized_analyses,
+        &engine, netlist, args, config, verbose, quiet, run_label, identity,
     )?;
 
     let base_name = args
@@ -2715,7 +2870,12 @@ fn run_concrete_deck(
         if requested_mode.needs_measurement_finalization() {
             ctx.record_unevaluated_measurements();
         }
-        ctx.ensure_materialized_namespaces_consumed()?;
+        // A command-line analysis mode deliberately supersedes the deck's
+        // authored cards, so their planned identities stay unconsumed. Only
+        // the deferred namespace failure is still a defect here.
+        if let Some(message) = ctx.planned_namespace_error.borrow_mut().take() {
+            return Err(CliError::InternalError { message });
+        }
         let measurements = ctx.measurements.borrow().clone();
         let passed = measurements.iter().all(|meas| meas.passed);
         return Ok((
@@ -2775,7 +2935,7 @@ fn run_concrete_deck(
     }
     ctx.record_unevaluated_measurements();
     if simulation_error.is_none() {
-        ctx.ensure_materialized_namespaces_consumed()?;
+        ctx.ensure_planned_namespaces_consumed()?;
     }
 
     let duration = start_time.elapsed().as_secs_f64();

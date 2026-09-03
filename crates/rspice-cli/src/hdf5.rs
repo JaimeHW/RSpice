@@ -454,20 +454,34 @@ impl Hdf5FftSection {
                 "FFT section must contain at least one result".to_string(),
             ));
         }
+        // The identity of each authored `.FFT` request comes from the
+        // canonical planner, so a decoded section is checked against the same
+        // minting the writer used rather than a second spelling of it.
+        let canonical_ids = crate::analysis_identity::post_process_ids(
+            rspice_core::execution::AnalysisKind::Fft,
+            self.results.len(),
+        )
+        .map_err(|error| {
+            Hdf5Error::InvalidSchema(format!("cannot mint canonical FFT identities: {error}"))
+        })?;
         for (index, result) in self.results.iter().enumerate() {
-            result.validate(index + 1)?;
+            let expected = canonical_ids.get(index).ok_or_else(|| {
+                Hdf5Error::InvalidSchema(format!(
+                    "FFT section has no canonical identity for result {}",
+                    index.saturating_add(1)
+                ))
+            })?;
+            result.validate(index + 1, &expected.tag())?;
         }
         Ok(())
     }
 }
 
 impl Hdf5FftResult {
-    fn validate(&self, expected_ordinal: usize) -> Result<()> {
-        if self.ordinal != expected_ordinal
-            || self.analysis_id != format!("fft-{expected_ordinal:03}")
-        {
+    fn validate(&self, expected_ordinal: usize, expected_analysis_id: &str) -> Result<()> {
+        if self.ordinal != expected_ordinal || self.analysis_id != expected_analysis_id {
             return Err(Hdf5Error::InvalidSchema(format!(
-                "FFT result {} does not match source-order identity fft-{expected_ordinal:03}",
+                "FFT result {} does not match source-order identity {expected_analysis_id}",
                 self.analysis_id
             )));
         }
@@ -2113,66 +2127,66 @@ mod tests {
         ));
         assert!(
             fft_result(1, 8, "voltage", Some("1"), true)
-                .validate(1)
+                .validate(1, "fft-001")
                 .is_ok()
         );
         assert!(
             fft_result(1, 8, "current", Some("1"), true)
-                .validate(1)
+                .validate(1, "fft-001")
                 .is_ok()
         );
         assert!(
             fft_result(2, 8, "voltage", Some("V"), false)
-                .validate(2)
+                .validate(2, "fft-002")
                 .is_ok()
         );
         assert!(
             fft_result(2, 8, "current", Some("A"), false)
-                .validate(2)
+                .validate(2, "fft-002")
                 .is_ok()
         );
 
         assert!(
             fft_result(1, 8, "voltage", Some("V"), true)
-                .validate(1)
+                .validate(1, "fft-001")
                 .is_err()
         );
         assert!(
             fft_result(2, 8, "current", Some("1"), false)
-                .validate(2)
+                .validate(2, "fft-002")
                 .is_err()
         );
         assert!(
             fft_result(1, 8, "unsupported", Some("1"), false)
-                .validate(1)
+                .validate(1, "fft-001")
                 .is_err()
         );
 
         let mut inconsistent_expression = fft_result(2, 8, "parameter", None, false);
         inconsistent_expression.authored_output = inconsistent_expression.source_text.clone();
-        assert!(inconsistent_expression.validate(2).is_err());
+        assert!(inconsistent_expression.validate(2, "fft-002").is_err());
 
         let mut impossible_bounds = fft_result(2, 8, "voltage", Some("V"), false);
         impossible_bounds.fundamental_bin = 2;
         impossible_bounds.minimum_metric_bin = 0;
         impossible_bounds.maximum_metric_bin = 0;
         impossible_bounds.sfdr_search_minimum_bin = 0;
-        assert!(impossible_bounds.validate(2).is_err());
+        assert!(impossible_bounds.validate(2, "fft-002").is_err());
 
         let mut not_normalized = fft_result(1, 8, "voltage", Some("1"), false);
         not_normalized.real[1] = 0.5;
         not_normalized.magnitude[1] = 0.5;
-        assert!(not_normalized.validate(1).is_err());
+        assert!(not_normalized.validate(1, "fft-001").is_err());
 
         let mut negative_sub_pico = fft_result(1, 8, "voltage", Some("1"), false);
         negative_sub_pico.magnitude[0] = -1.0e-300;
-        assert!(negative_sub_pico.validate(1).is_err());
+        assert!(negative_sub_pico.validate(1, "fft-001").is_err());
     }
 
     #[test]
     fn fft_metric_mutations_are_rejected_against_the_spectrum() {
         let valid = fft_result(1, 8, "voltage", Some("1"), true);
-        assert!(valid.validate(1).is_ok());
+        assert!(valid.validate(1, "fft-001").is_ok());
 
         let mut wrong_fundamental = valid.clone();
         wrong_fundamental
@@ -2180,7 +2194,7 @@ mod tests {
             .as_mut()
             .expect("metric fixture")
             .fundamental_magnitude += 0.25;
-        assert!(wrong_fundamental.validate(1).is_err());
+        assert!(wrong_fundamental.validate(1, "fft-001").is_err());
 
         for mutate in [
             |metrics: &mut Hdf5FftMetrics| metrics.thd_ratio += 0.25,
@@ -2192,14 +2206,14 @@ mod tests {
         ] {
             let mut malformed = valid.clone();
             mutate(malformed.metrics.as_mut().expect("metric fixture"));
-            assert!(malformed.validate(1).is_err());
+            assert!(malformed.validate(1, "fft-001").is_err());
         }
 
         let mut wrong_spur = valid.clone();
         let metrics = wrong_spur.metrics.as_mut().expect("metric fixture");
         metrics.sfdr_spur_bin = Some(2);
         metrics.sfdr_spur_frequency_hz = Some(2.0);
-        assert!(wrong_spur.validate(1).is_err());
+        assert!(wrong_spur.validate(1, "fft-001").is_err());
 
         let mut wrong_harmonic = valid;
         wrong_harmonic
@@ -2208,7 +2222,7 @@ mod tests {
             .expect("metric fixture")
             .largest_harmonics[0]
             .magnitude += 1.0e-6;
-        assert!(wrong_harmonic.validate(1).is_err());
+        assert!(wrong_harmonic.validate(1, "fft-001").is_err());
     }
 
     #[test]
