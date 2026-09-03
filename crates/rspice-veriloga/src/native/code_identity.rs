@@ -47,15 +47,22 @@ const SHIPPED_CENSUS_MODELS: usize = 43;
 /// because nothing about its plan changed, and every module that does not move
 /// without appearing in that log did not take the CFG route after all.
 ///
-/// The value below was measured by the W-F3b lane and remains valid: production
-/// builds the postfix plan. The previous value, `fe9a2072…`, moved to
-/// `e00c6b88…` at W-F3a (`84ba2c2bb`),
-/// which ruled `limexp`'s threshold once for the whole estate: exactly five
-/// modules changed — `angelov`, `angelov_gan`, `hicumL0va`, `hicumL2va` and
-/// `vbic_4T_et_cf`, the five that call `limexp` — and the other thirty-eight
-/// were digest identical across that change.
+/// The value below remains valid: production builds the postfix plan. History:
+/// `fe9a2072…` moved to `e00c6b88…` at W-F3a (`84ba2c2bb`), which ruled
+/// `limexp`'s threshold once for the whole estate — exactly five modules
+/// changed (`angelov`, `angelov_gan`, `hicumL0va`, `hicumL2va`, `vbic_4T_et_cf`,
+/// the five that call `limexp`) and the other thirty-eight were digest
+/// identical. `e00c6b88…` moved to `79e2c753…` at W-F8/W-F8b (`5a8e55c7b`,
+/// `1ba20f27c`), the reaching-definition snapshot: an equation now reads the
+/// definition that reaches it, not the slot's final value, so exactly eight
+/// modules changed — the five the compile-time survey named (`ekv3_rf` `tmp`;
+/// `asmhemt` `t0`/`t1`; `bsimsoi_va` `qgate`; the two `bsimsoi` variants,
+/// `qgate` and `sqig`/`mig`/`sqid`) plus three whose only capture is an operator
+/// operand the survey's first pass did not walk (`bsimbulk` `FNPowerAt1Hz`,
+/// `hicumL2va` `flicker_Pwr`, `r3_cmc` `gc`) — and the other thirty-five were
+/// digest identical (measured 2026-09-03 on `1ba20f27c`, peers idle, 893 s).
 const SHIPPED_CENSUS_DIGEST: &str =
-    "e00c6b8818e88bba07840df35b68f69687bba439910b56b2b76c9ffe5ae601a3";
+    "79e2c753f224100286136c38cfa1ae10ebf3973f5b64385cff64e7565e1632c8";
 
 /// One shipped module's compiled machine-code digest.
 struct ModelImageDigest {
