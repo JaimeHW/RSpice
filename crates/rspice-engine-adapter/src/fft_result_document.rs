@@ -14,11 +14,11 @@ use rspice_core::engine::{
     TransientFftBin, TransientFftHarmonic, TransientFftMetrics, TransientFftResult,
     transient_fft_window_coherent_gain,
 };
+use rspice_core::execution::bounded_io::{BoundedAbortWriter, BoundedWriteFailure};
 use rspice_core::netlist::{FftAnalysis, FftFormat, FftOutput, FftWindow, XyceFftMode};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::bounded_serialization::{BoundedAbortWriter, BoundedWriteFailure};
 use crate::result_document::{AnalogAnalysisKind, AnalysisIdentity};
 use crate::wire::MAX_ENGINE_RETAINED_RESULT_BYTES;
 
@@ -126,26 +126,16 @@ impl TransientFftResultDocument {
         check_abort(abort)?;
         let mut writer = BoundedAbortWriter::new(abort, byte_limit);
         if let Err(error) = serde_json::to_writer_pretty(&mut writer, self) {
-            match writer.failure() {
-                Some(BoundedWriteFailure::Aborted) => {
-                    return Err(FftResultDocumentError::Aborted);
+            return Err(match writer.failure() {
+                Some(BoundedWriteFailure::Aborted) => FftResultDocumentError::Aborted,
+                Some(BoundedWriteFailure::ByteLimitExceeded { limit_bytes }) => {
+                    FftResultDocumentError::ArtifactTooLarge { limit_bytes }
                 }
-                Some(BoundedWriteFailure::TooLarge { limit_bytes }) => {
-                    return Err(FftResultDocumentError::ArtifactTooLarge {
-                        limit_bytes: *limit_bytes,
-                    });
+                Some(BoundedWriteFailure::AllocationFailed) => {
+                    invalid(&format!("cannot allocate FFT JSON: {error}"))
                 }
-                Some(BoundedWriteFailure::Allocation(detail)) => {
-                    return Err(invalid(&format!(
-                        "unable to allocate bounded FFT JSON: {detail}"
-                    )));
-                }
-                Some(BoundedWriteFailure::LengthOverflow) => {
-                    return Err(invalid("FFT JSON length overflowed"));
-                }
-                None => {}
-            }
-            return Err(FftResultDocumentError::InvalidJson(error));
+                None => FftResultDocumentError::InvalidJson(error),
+            });
         }
         check_abort(abort)?;
         writer

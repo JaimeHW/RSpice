@@ -11,8 +11,8 @@ use rspice_core::abort_signal::AbortSignal;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::bounded_serialization::{BoundedAbortWriter, BoundedWriteFailure};
 use crate::wire::MAX_ENGINE_RETAINED_RESULT_BYTES;
+use rspice_core::execution::bounded_io::{BoundedAbortWriter, BoundedWriteFailure};
 
 struct NeverAbort;
 
@@ -264,15 +264,12 @@ fn map_bounded_json_error(
 ) -> ResultDocumentError {
     match writer.failure() {
         Some(BoundedWriteFailure::Aborted) => ResultDocumentError::Aborted,
-        Some(BoundedWriteFailure::TooLarge { limit_bytes }) => {
-            ResultDocumentError::ArtifactTooLarge {
-                limit_bytes: *limit_bytes,
-            }
+        Some(BoundedWriteFailure::ByteLimitExceeded { limit_bytes }) => {
+            ResultDocumentError::ArtifactTooLarge { limit_bytes }
         }
-        Some(BoundedWriteFailure::Allocation(detail)) => {
-            invalid(&format!("unable to allocate bounded result JSON: {detail}"))
+        Some(BoundedWriteFailure::AllocationFailed) => {
+            invalid("unable to allocate bounded result JSON")
         }
-        Some(BoundedWriteFailure::LengthOverflow) => invalid("result JSON length overflowed"),
         None => ResultDocumentError::InvalidJson(error),
     }
 }

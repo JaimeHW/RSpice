@@ -32,7 +32,6 @@ use crate::axis_execution_document::{
     AxisExecutionDocument, CoordinateExecution, MeasurementDocument, OutputNamespaceDocument,
     StepTargetDocument,
 };
-use crate::bounded_serialization::{BoundedAbortWriter, BoundedWriteFailure};
 use crate::document::CircuitContent;
 use crate::fft_result_document::{
     FFT_RESULT_DOCUMENT_CONTENT_TYPE, FFT_RESULT_DOCUMENT_SCHEMA, FFT_RESULT_DOCUMENT_VERSION,
@@ -51,6 +50,7 @@ use crate::wire::{
     MAX_ENGINE_RESPONSE_BYTES, MAX_ENGINE_RESULT_ARTIFACTS, MAX_ENGINE_RESULT_MANIFEST_BYTES,
     MAX_ENGINE_RETAINED_RESULT_BYTES, valid_result_path,
 };
+use rspice_core::execution::bounded_io::{BoundedAbortWriter, BoundedWriteFailure};
 
 /// Wall-clock ceiling for all engine work in one request. The worker holds
 /// the authoritative external deadline; this internal one exists so a
@@ -860,12 +860,10 @@ fn map_measurement_error(error: MeasurementError) -> DirectiveFailure {
 fn map_bounded_write_failure(writer: &BoundedAbortWriter<'_>) -> DirectiveFailure {
     match writer.failure() {
         Some(BoundedWriteFailure::Aborted) => DirectiveFailure::Engine(SimulationError::Aborted),
-        Some(BoundedWriteFailure::TooLarge { .. }) => DirectiveFailure::ResultSetBytes,
-        Some(BoundedWriteFailure::Allocation(_) | BoundedWriteFailure::LengthOverflow) | None => {
-            DirectiveFailure::ResultDocument(
-                "bounded result serialization could not allocate its output".to_owned(),
-            )
-        }
+        Some(BoundedWriteFailure::ByteLimitExceeded { .. }) => DirectiveFailure::ResultSetBytes,
+        Some(BoundedWriteFailure::AllocationFailed) | None => DirectiveFailure::ResultDocument(
+            "bounded result serialization could not allocate its output".to_owned(),
+        ),
     }
 }
 
@@ -2338,9 +2336,10 @@ fn serialize_wire_bounded<T: Serialize + ?Sized>(
     if serde_json::to_writer(&mut writer, value).is_err() {
         return Err(match writer.failure() {
             Some(BoundedWriteFailure::Aborted) => WireSerializationFailure::Aborted,
-            Some(BoundedWriteFailure::TooLarge { .. }) => WireSerializationFailure::TooLarge,
-            Some(BoundedWriteFailure::Allocation(_) | BoundedWriteFailure::LengthOverflow)
-            | None => WireSerializationFailure::Invalid,
+            Some(BoundedWriteFailure::ByteLimitExceeded { .. }) => {
+                WireSerializationFailure::TooLarge
+            }
+            Some(BoundedWriteFailure::AllocationFailed) | None => WireSerializationFailure::Invalid,
         });
     }
     if abort.is_aborted() {

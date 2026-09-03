@@ -7,9 +7,9 @@ use rspice_core::execution::{AxisKind, numeric_run_coordinate_id};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::bounded_serialization::{BoundedAbortWriter, BoundedWriteFailure};
 use crate::measure::canonical_decimal;
 use crate::wire::{MAX_ENGINE_RESULT_MANIFEST_BYTES, valid_result_path};
+use rspice_core::execution::bounded_io::{BoundedAbortWriter, BoundedWriteFailure};
 
 pub const AXIS_EXECUTION_SCHEMA: &str = "rspice-axis-execution";
 pub const AXIS_EXECUTION_VERSION: u32 = 1;
@@ -541,15 +541,12 @@ fn map_bounded_json_error(
 ) -> AxisExecutionDocumentError {
     match writer.failure() {
         Some(BoundedWriteFailure::Aborted) => AxisExecutionDocumentError::Aborted,
-        Some(BoundedWriteFailure::TooLarge { limit_bytes }) => {
-            AxisExecutionDocumentError::DocumentTooLarge {
-                limit_bytes: *limit_bytes,
-            }
+        Some(BoundedWriteFailure::ByteLimitExceeded { limit_bytes }) => {
+            AxisExecutionDocumentError::DocumentTooLarge { limit_bytes }
         }
-        Some(BoundedWriteFailure::Allocation(detail)) => {
-            invalid(&format!("unable to allocate bounded axis JSON: {detail}"))
+        Some(BoundedWriteFailure::AllocationFailed) => {
+            invalid("unable to allocate bounded axis JSON")
         }
-        Some(BoundedWriteFailure::LengthOverflow) => invalid("axis JSON length overflowed"),
         None => AxisExecutionDocumentError::InvalidJson(error),
     }
 }

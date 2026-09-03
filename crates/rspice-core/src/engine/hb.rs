@@ -30,6 +30,7 @@ use num_complex::Complex64;
 use std::collections::BTreeSet;
 
 mod drive;
+mod envelope_result;
 mod pac;
 mod pnoise;
 #[cfg(test)]
@@ -37,6 +38,7 @@ mod retained_auth_tests;
 mod stamping;
 mod state;
 
+pub use envelope_result::EnvelopeResult;
 pub use pac::PacAnalysisResult;
 pub use pnoise::PnoiseAnalysisResult;
 pub use state::{HbEnvelopeContinuationState, HbEnvelopeStateGuarantee};
