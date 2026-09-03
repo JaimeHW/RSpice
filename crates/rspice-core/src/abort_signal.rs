@@ -73,30 +73,17 @@ pub struct TransientSample<'a> {
 /// and may simply restart, while an expired budget is a workload that needs a
 /// larger budget or a smaller deck. Frontends map the two to different exit
 /// codes, exception classes, and wire failure codes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+///
+/// The reason is not published as its own wire string: it selects which
+/// [`crate::SimulationError`] variant a stop becomes, and that error's code
+/// and category are what every surface reports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum AbortReason {
     /// A caller asked the run to stop.
-    #[default]
     Cancelled,
     /// A wall-clock or deadline budget expired.
     TimeLimit,
-}
-
-impl AbortReason {
-    /// Stable snake-case representation used by API and report payloads.
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Cancelled => "cancelled",
-            Self::TimeLimit => "time_limit",
-        }
-    }
-}
-
-impl std::fmt::Display for AbortReason {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
 }
 
 //=============================================================================

@@ -678,6 +678,11 @@ impl From<rspice_core::error::ParseError> for CliError {
 
 impl From<rspice_core::SimulationError> for CliError {
     fn from(err: rspice_core::SimulationError) -> Self {
+        // The engine cannot know whether its stop flag was set by Ctrl-C or by
+        // `--timeout`; this process does. Re-labelling once here is what makes
+        // an expired budget exit 124 instead of 130 on every path that does
+        // not already classify the stop itself.
+        let err = err.with_abort_reason(&crate::abort::ProcessAbort);
         match err {
             rspice_core::SimulationError::Configuration(error) => error.into(),
             other => CliError::CoreSimulationError {
