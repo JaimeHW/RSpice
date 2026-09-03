@@ -17,11 +17,11 @@ use std::collections::BTreeMap;
 use num_complex::Complex64;
 
 use super::payload::{
-    AcPayload, CompressionReportDocument, DcSweepPayload, DigitalEventPoint, DigitalEventTrace,
-    DistortionPayload, DistortionProductSeries, DistortionProductTag, DistortionTone,
-    EnvelopeCarrierDocument, EnvelopeContinuationDocument, EnvelopeNodeSpectrum, EnvelopePayload,
-    FftMetricsDocument, FftPayload, FftSourceDocument, FloquetEvidenceDocument, FourierPayload,
-    HarmonicBalancePayload, HbReactiveSpectrumDocument, MonteCarloPayload,
+    AcPayload, CompressionReportDocument, DcSweepAxisDocument, DcSweepPayload, DigitalEventPoint,
+    DigitalEventTrace, DistortionPayload, DistortionProductSeries, DistortionProductTag,
+    DistortionTone, EnvelopeCarrierDocument, EnvelopeContinuationDocument, EnvelopeNodeSpectrum,
+    EnvelopePayload, FftMetricsDocument, FftPayload, FftSourceDocument, FloquetEvidenceDocument,
+    FourierPayload, HarmonicBalancePayload, HbReactiveSpectrumDocument, MonteCarloPayload,
     MonteCarloVariableStatistics, NamedObservable, NamedObservableSeries, NoiseContributionSeries,
     NoisePayload, NoiseSourceIdentityDocument, NyquistSample, OperatingPointPayload,
     PNoiseBandwidth, PNoiseContribution, PNoiseContributor, PNoisePayload, PacConversionEntry,
@@ -33,7 +33,8 @@ use super::payload::{
 use super::{
     AnalysisResultDocument, AnalysisResultDocumentBuilder, AxisValues, ComplexSample,
     DeviceParameterSeries, DeviceStateSeries, ResultAxis, ResultAxisKind, ResultDocumentError,
-    ResultScalar, ResultSignal, ScalarValue, SeriesAvailability, SeriesQualifier, SeriesValues,
+    ResultScalar, ResultSignal, ScalarUnavailability, ScalarValue, SeriesAvailability,
+    SeriesQualifier, SeriesValues,
 };
 use crate::Value;
 use crate::analysis::ac::AcResult;
@@ -238,6 +239,56 @@ fn real_scalar(
         Some(unit),
         finite_scalar(location, name, value)?,
     )
+}
+
+/// One real scalar whose analysis may legitimately produce no finite value.
+///
+/// An ideal voltage source really has unbounded input impedance, and a loop
+/// whose phase never reaches -180 degrees really has unbounded gain margin.
+/// Those are determinations, so they are recorded as such. `NaN` stays a hard
+/// projection failure: it is a defect in the producing computation, not a
+/// statement about the circuit.
+fn real_or_unbounded_scalar(
+    location: &'static str,
+    name: &str,
+    display: &str,
+    unit: SignalUnit,
+    value: Value,
+) -> Result<ResultScalar, ResultDocumentError> {
+    match ScalarUnavailability::classify(value) {
+        Some(reason) => ResultScalar::new(
+            name,
+            display,
+            Some(unit),
+            ScalarValue::Unavailable { reason },
+        ),
+        None => real_scalar(location, name, display, unit, value),
+    }
+}
+
+/// One frequency that exists only when the response actually crosses.
+///
+/// With no crossover there is no frequency to report; publishing the margin
+/// struct's default zero would name DC as the crossing point.
+fn crossover_frequency_scalar(
+    location: &'static str,
+    name: &str,
+    display: &str,
+    crossed: bool,
+    value: Value,
+) -> Result<ResultScalar, ResultDocumentError> {
+    if crossed {
+        real_or_unbounded_scalar(location, name, display, SignalUnit::Hertz, value)
+    } else {
+        ResultScalar::new(
+            name,
+            display,
+            Some(SignalUnit::Hertz),
+            ScalarValue::Unavailable {
+                reason: ScalarUnavailability::NoCrossover,
+            },
+        )
+    }
 }
 
 fn count_scalar(
@@ -495,7 +546,54 @@ impl AnalysisResultDocument {
         sweep_unit: SignalUnit,
         points: &[DcSweepPointResult],
     ) -> Result<AnalysisResultDocumentBuilder, ResultDocumentError> {
+        Self::from_nested_dc_sweep(
+            analysis,
+            &[DcSweepAxisDocument {
+                name: sweep_variable.trim().to_ascii_lowercase(),
+                unit: sweep_unit,
+                value_count: points.len(),
+            }],
+            points,
+        )
+    }
+
+    /// Project one `.DC` card with every authored sweep axis it declares.
+    ///
+    /// `axes` runs outermost first. A nested `.DC v1 ... v2 ...` card re-runs
+    /// the inner sweep for every outer value, so the point list is the
+    /// row-major flattening of that grid and every axis is published: dropping
+    /// the outer source would leave a result whose points cannot be told
+    /// apart.
+    pub fn from_nested_dc_sweep(
+        analysis: AnalysisInstanceId,
+        axes: &[DcSweepAxisDocument],
+        points: &[DcSweepPointResult],
+    ) -> Result<AnalysisResultDocumentBuilder, ResultDocumentError> {
         const LOCATION: &str = "DC sweep result";
+        let (sweep_variable, sweep_unit) = match axes.last() {
+            Some(axis) => (axis.name.clone(), axis.unit.clone()),
+            None => {
+                return Err(source_error(
+                    LOCATION,
+                    "a DC sweep must name at least one sweep variable",
+                ));
+            }
+        };
+        let declared = axes
+            .iter()
+            .try_fold(1usize, |product, axis| {
+                product.checked_mul(axis.value_count)
+            })
+            .ok_or_else(|| source_error(LOCATION, "the declared DC sweep grid overflows"))?;
+        if declared != points.len() {
+            return Err(source_error(
+                LOCATION,
+                format!(
+                    "the declared DC sweep grid has {declared} points but the result has {}",
+                    points.len()
+                ),
+            ));
+        }
         let first = points
             .first()
             .ok_or_else(|| source_error(LOCATION, "a DC sweep needs at least one point"))?;
@@ -529,12 +627,12 @@ impl AnalysisResultDocument {
             .map(|point| point.sweep_value)
             .collect::<Vec<_>>();
         let axis = ResultAxis::new(
-            format!("sweep:{}", sweep_variable.trim().to_ascii_lowercase()),
-            sweep_variable.trim(),
+            format!("sweep:{sweep_variable}"),
+            sweep_variable.as_str(),
             ResultAxisKind::SweepValue,
             sweep_unit,
             AxisValues::Real {
-                values: finite_axis(LOCATION, sweep_variable, &sweep_values)?,
+                values: finite_axis(LOCATION, &sweep_variable, &sweep_values)?,
             },
         )?;
 
@@ -631,7 +729,7 @@ impl AnalysisResultDocument {
         Ok(Self::builder(
             analysis,
             ResultPayload::Dc(DcSweepPayload {
-                sweep_variable: sweep_variable.trim().to_ascii_lowercase(),
+                sweep_variables: axes.to_vec(),
                 observables,
             }),
             point_count,
@@ -1455,14 +1553,17 @@ impl AnalysisResultDocument {
                 SignalUnit::Dimensionless,
                 result.gain,
             )?,
-            real_scalar(
+            // An ideal voltage source presents unbounded input impedance and
+            // an ideal current source unbounded output impedance. Both are
+            // exact answers, not overflow.
+            real_or_unbounded_scalar(
                 LOCATION,
                 "input_impedance",
                 "Input impedance",
                 SignalUnit::Ohm,
                 result.input_impedance,
             )?,
-            real_scalar(
+            real_or_unbounded_scalar(
                 LOCATION,
                 "output_impedance",
                 "Output impedance",
@@ -1584,47 +1685,55 @@ impl AnalysisResultDocument {
         ];
 
         let margins = &result.margins;
+        // A margin frequency exists only where the loop actually crosses.
+        // `StabilityMargins` leaves its default zero in place otherwise, and
+        // publishing that would name DC as the crossing point. The unity-gain
+        // crossing is counted directly; the -180 degree crossing is exactly
+        // the case that leaves the gain margin non-finite.
+        let swept = !result.bode_points.is_empty();
+        let unity_gain_crossed = swept && margins.num_crossovers > 0;
+        let phase_crossed = swept && margins.gain_margin_db.is_finite();
         let scalars = vec![
-            real_scalar(
+            real_or_unbounded_scalar(
                 LOCATION,
                 "gain_margin_db",
                 "Gain margin",
                 decibel(),
                 margins.gain_margin_db,
             )?,
-            real_scalar(
+            crossover_frequency_scalar(
                 LOCATION,
                 "gain_margin_frequency",
                 "Gain margin frequency",
-                SignalUnit::Hertz,
+                phase_crossed,
                 margins.gain_margin_freq,
             )?,
-            real_scalar(
+            real_or_unbounded_scalar(
                 LOCATION,
                 "phase_margin_degrees",
                 "Phase margin",
                 SignalUnit::Degree,
                 margins.phase_margin_deg,
             )?,
-            real_scalar(
+            crossover_frequency_scalar(
                 LOCATION,
                 "phase_margin_frequency",
                 "Phase margin frequency",
-                SignalUnit::Hertz,
+                unity_gain_crossed,
                 margins.phase_margin_freq,
             )?,
-            real_scalar(
+            real_or_unbounded_scalar(
                 LOCATION,
                 "dc_loop_gain_db",
                 "DC loop gain",
                 decibel(),
                 margins.dc_gain_db,
             )?,
-            real_scalar(
+            crossover_frequency_scalar(
                 LOCATION,
                 "unity_gain_bandwidth",
                 "Unity gain bandwidth",
-                SignalUnit::Hertz,
+                unity_gain_crossed,
                 margins.unity_gain_bandwidth,
             )?,
             boolean_scalar(

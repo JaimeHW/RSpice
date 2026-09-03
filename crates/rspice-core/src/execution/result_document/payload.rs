@@ -221,18 +221,57 @@ impl OperatingPointPayload {
     }
 }
 
+/// One authored sweep axis of a `.DC` card.
+///
+/// A nested `.DC v1 ... v2 ...` sweep re-runs the inner source for every value
+/// of the outer one. Both variables are authored evidence, so both are named
+/// here; `value_count` is what lets a reader recover the rectangular grid from
+/// the flattened point list without re-deriving the card's arithmetic.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DcSweepAxisDocument {
+    /// Case-normalized authored source, device, or parameter name.
+    pub name: String,
+    /// Unit of the swept quantity.
+    #[serde(with = "super::wire::signal_unit")]
+    pub unit: SignalUnit,
+    /// How many distinct values this axis contributes.
+    pub value_count: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DcSweepPayload {
-    /// Authored sweep source or parameter driving the primary axis.
-    pub sweep_variable: String,
+    /// Every authored sweep axis, outermost first and innermost last. A
+    /// single-source `.DC` card has exactly one entry; a nested two-source
+    /// sweep has two, and the document's `sweep:` axes carry their values.
+    pub sweep_variables: Vec<DcSweepAxisDocument>,
     /// Per-point converged DC observables.
     pub observables: Vec<NamedObservableSeries>,
 }
 
 impl DcSweepPayload {
+    /// The innermost authored sweep variable, which drives the point order.
+    pub fn primary_variable(&self) -> Option<&DcSweepAxisDocument> {
+        self.sweep_variables.last()
+    }
+
     fn validate(&self) -> Result<(), ResultDocumentError> {
-        super::require_name("DC sweep variable", &self.sweep_variable)?;
+        if self.sweep_variables.is_empty() {
+            return Err(ResultDocumentError::Malformed {
+                location: "DC sweep payload",
+                detail: "a DC sweep must name at least one sweep variable".to_owned(),
+            });
+        }
+        for axis in &self.sweep_variables {
+            super::require_name("DC sweep variable", &axis.name)?;
+            if axis.value_count == 0 {
+                return Err(ResultDocumentError::Malformed {
+                    location: "DC sweep payload",
+                    detail: format!("sweep variable '{}' contributes no values", axis.name),
+                });
+            }
+        }
         for observable in &self.observables {
             super::require_name("DC sweep observable", &observable.name)?;
             for value in &observable.values {

@@ -161,6 +161,7 @@ enum SignalUnitWire {
     Radian,
     Dimensionless,
     Logic,
+    Unspecified,
     Custom { symbol: String },
 }
 
@@ -178,6 +179,7 @@ impl From<&SignalUnit> for SignalUnitWire {
             SignalUnit::Radian => Self::Radian,
             SignalUnit::Dimensionless => Self::Dimensionless,
             SignalUnit::Logic => Self::Logic,
+            SignalUnit::Unspecified => Self::Unspecified,
             SignalUnit::Custom(symbol) => Self::Custom {
                 symbol: symbol.clone(),
             },
@@ -199,6 +201,7 @@ impl From<SignalUnitWire> for SignalUnit {
             SignalUnitWire::Radian => Self::Radian,
             SignalUnitWire::Dimensionless => Self::Dimensionless,
             SignalUnitWire::Logic => Self::Logic,
+            SignalUnitWire::Unspecified => Self::Unspecified,
             SignalUnitWire::Custom { symbol } => Self::Custom(symbol),
         }
     }

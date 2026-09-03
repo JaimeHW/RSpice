@@ -43,6 +43,15 @@ pub enum SignalUnit {
     Radian,
     Dimensionless,
     Logic,
+    /// The producing analysis knows of no physical unit for this quantity.
+    ///
+    /// This is not [`Self::Dimensionless`]: a reflection coefficient really is
+    /// a pure ratio, while a `.DC` sweep over a user parameter or a `.FOUR` of
+    /// a braced expression has a unit the deck simply never declared. Folding
+    /// the second case onto the first asserts a physical fact nobody stated,
+    /// and spelling it `Custom("unspecified")` invents a symbol that no
+    /// consumer can distinguish from a real one.
+    Unspecified,
     Custom(String),
 }
 

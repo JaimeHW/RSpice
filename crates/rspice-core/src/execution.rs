@@ -9,6 +9,7 @@ mod capability;
 mod fingerprint;
 mod materialized;
 mod plan;
+mod post_process;
 mod projection;
 pub mod result_document;
 mod schema;
@@ -29,8 +30,12 @@ pub use materialized::{
 };
 pub use plan::{
     AnalysisRequest, AxisAssignment, AxisKind, DataBinding, DeckPlan, DeckPlanError,
-    PlannedAnalysis, RunAxis, RunAxisValue, RunCoordinate, StepAxisTarget,
-    numeric_run_coordinate_id,
+    PlannedAnalysis, PlannedPostProcess, PostProcessSource, RunAxis, RunAxisValue, RunCoordinate,
+    StepAxisTarget, numeric_run_coordinate_id,
+};
+pub use post_process::{
+    PlannedFourierResult, evaluate_planned_fourier, evaluate_planned_fourier_with_abort,
+    post_processes_for, transient_output_unit,
 };
 pub use projection::{
     ProjectedSignal, ProjectedSignals, ProjectionSource, ProjectionSourceSignal, ProjectionValues,

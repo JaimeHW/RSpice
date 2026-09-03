@@ -135,8 +135,8 @@ pub use transient::{
     DEFAULT_MAX_CHECKPOINT_BYTES, TransientCheckpoint, TransientCheckpointBlocker,
     TransientCheckpointBlockerSource, TransientCheckpointCapability, TransientCheckpointEncoding,
     TransientStartupMode, XYCE_RESTART_SCHEDULE_TOLERANCE, XyceRestartJobPlan,
-    XyceRestartPlanError, evaluate_transient_post_results, netlist_fingerprint,
-    transient_fft_window_coherent_gain, xyce_restart_schedule_is_due,
+    XyceRestartPlanError, evaluate_transient_fourier_results, evaluate_transient_post_results,
+    netlist_fingerprint, transient_fft_window_coherent_gain, xyce_restart_schedule_is_due,
 };
 pub use waveform::{
     CompressionConfig, TRANSIENT_COMPRESSION_REPORT_VERSION, TransientAnalysisIdentity,

@@ -168,9 +168,9 @@ use serde::{Deserialize, Serialize};
 pub use payload::{
     AcPayload, CompressionAlgorithmTag, CompressionObservationDocument, CompressionPolicyDocument,
     CompressionReportDocument, CompressionSampleDomainTag, CompressionSignalKindTag,
-    DcSweepPayload, DigitalEventPoint, DigitalEventTrace, DigitalStateTag, DigitalStrengthTag,
-    DistortionPayload, DistortionProductSeries, DistortionProductTag, DistortionTone,
-    EnvelopeCarrierDocument, EnvelopeContinuationDocument, EnvelopeGuaranteeTag,
+    DcSweepAxisDocument, DcSweepPayload, DigitalEventPoint, DigitalEventTrace, DigitalStateTag,
+    DigitalStrengthTag, DistortionPayload, DistortionProductSeries, DistortionProductTag,
+    DistortionTone, EnvelopeCarrierDocument, EnvelopeContinuationDocument, EnvelopeGuaranteeTag,
     EnvelopeNodeSpectrum, EnvelopePayload, FftChildReference, FftCoefficientFormatTag,
     FftCompatibilityModeTag, FftHarmonicDocument, FftMetricsDocument, FftPayload,
     FftSourceDocument, FftWindowTag, FloquetCertificateDocument, FloquetEvidenceDocument,
@@ -447,14 +447,18 @@ impl AnalysisResultDocument {
                 analysis: declared,
             });
         }
-        let required_parent = match self.result_kind {
+        // A periodic small-signal card linearizes around whichever periodic
+        // large-signal analysis preceded it. Shooting `.PSS` and harmonic
+        // balance both produce that operating point, and the engine runs
+        // `.PAC`/`.PNOISE` from either, so both are accepted parents.
+        let required_parent: Option<(bool, &'static [AnalysisKind])> = match self.result_kind {
             AnalysisResultKind::Fft | AnalysisResultKind::Fourier => {
-                Some((true, AnalysisKind::Tran))
+                Some((true, &[AnalysisKind::Tran]))
             }
             AnalysisResultKind::Pac | AnalysisResultKind::PNoise => {
-                Some((false, AnalysisKind::Pss))
+                Some((false, &[AnalysisKind::Pss, AnalysisKind::HarmonicBalance]))
             }
-            AnalysisResultKind::Envelope => Some((false, AnalysisKind::HarmonicBalance)),
+            AnalysisResultKind::Envelope => Some((false, &[AnalysisKind::HarmonicBalance])),
             _ => None,
         };
         match (required_parent, self.parent_analysis) {
@@ -467,7 +471,7 @@ impl AnalysisResultDocument {
             }),
             (Some((false, _)), None) => Ok(()),
             (Some((_, expected)), Some(parent)) => {
-                if parent.kind() == expected {
+                if expected.contains(&parent.kind()) {
                     Ok(())
                 } else {
                     Err(ResultDocumentError::WrongParentAnalysis {
@@ -1380,7 +1384,8 @@ impl ResultScalar {
             }
             ScalarValue::Integer { .. }
             | ScalarValue::Count { .. }
-            | ScalarValue::Boolean { .. } => Ok(()),
+            | ScalarValue::Boolean { .. }
+            | ScalarValue::Unavailable { .. } => Ok(()),
             ScalarValue::Text { value } => require_name("scalar text value", value),
         }
     }
@@ -1390,12 +1395,76 @@ impl ResultScalar {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "representation", rename_all = "snake_case")]
 pub enum ScalarValue {
-    Real { value: Option<f64> },
-    Complex { value: Option<ComplexSample> },
-    Integer { value: i64 },
-    Count { value: u64 },
-    Boolean { value: bool },
-    Text { value: String },
+    Real {
+        value: Option<f64>,
+    },
+    Complex {
+        value: Option<ComplexSample>,
+    },
+    Integer {
+        value: i64,
+    },
+    Count {
+        value: u64,
+    },
+    Boolean {
+        value: bool,
+    },
+    Text {
+        value: String,
+    },
+    /// A real quantity the analysis proved has no finite value, with the
+    /// reason. A finite `ResultScalar` cannot hold `±inf`, and rounding one
+    /// down to a large number would report a margin the loop does not have.
+    Unavailable {
+        reason: ScalarUnavailability,
+    },
+}
+
+/// Why a real scalar has no finite value.
+///
+/// This is stronger than `Real { value: None }`, which says only that the
+/// producing analysis did not compute the quantity. Each variant here is a
+/// determination: the analysis ran, and the answer is not a number.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ScalarUnavailability {
+    /// The quantity diverges upward — the input impedance of an ideal voltage
+    /// source, or the gain margin of a loop whose phase never reaches -180°.
+    PositiveInfinity,
+    /// The quantity diverges downward, such as the phase margin of a loop
+    /// whose magnitude never falls below unity.
+    NegativeInfinity,
+    /// The quantity is only defined at a crossover the response never makes,
+    /// so it has no value at all rather than an infinite one.
+    NoCrossover,
+}
+
+impl ScalarUnavailability {
+    /// Classify one non-finite real value, or `None` when it is finite.
+    ///
+    /// `NaN` is deliberately not classified: it is a defect in the producing
+    /// computation, not a determination about the circuit, and the projection
+    /// must keep rejecting it.
+    pub const fn classify(value: f64) -> Option<Self> {
+        if value == f64::INFINITY {
+            Some(Self::PositiveInfinity)
+        } else if value == f64::NEG_INFINITY {
+            Some(Self::NegativeInfinity)
+        } else {
+            None
+        }
+    }
+
+    /// Stable tag used by diagnostics and frontends.
+    pub const fn tag(self) -> &'static str {
+        match self {
+            Self::PositiveInfinity => "positive_infinity",
+            Self::NegativeInfinity => "negative_infinity",
+            Self::NoCrossover => "no_crossover",
+        }
+    }
 }
 
 //=============================================================================
@@ -1663,7 +1732,8 @@ pub enum ResultDocumentError {
     /// A post-process named a parent of the wrong analysis kind.
     WrongParentAnalysis {
         result_kind: AnalysisResultKind,
-        expected: AnalysisKind,
+        /// Every parent family the result kind derives from.
+        expected: &'static [AnalysisKind],
         found: AnalysisKind,
     },
     /// A window did not fit inside the document.
@@ -1756,7 +1826,11 @@ impl fmt::Display for ResultDocumentError {
                 formatter,
                 "{} results derive from {} analyses, not {}",
                 result_kind.tag(),
-                expected.tag(),
+                expected
+                    .iter()
+                    .map(|kind| kind.tag())
+                    .collect::<Vec<_>>()
+                    .join(" or "),
                 found.tag()
             ),
             Self::WindowOutOfBounds {

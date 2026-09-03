@@ -39,7 +39,7 @@ pub fn evaluate_transient_post_results(
     if abort.is_aborted() {
         return Err(SimulationError::Aborted);
     }
-    let fourier = evaluate_transient_fourier(netlist, result, limits, abort)?;
+    let fourier = evaluate_transient_fourier_results(netlist, result, limits, abort)?;
     let measurements = evaluate_tran_measurements_with_abort(netlist, result, abort)?;
     Ok(TransientPostResults {
         fft: result.fft_results.clone(),
@@ -48,7 +48,21 @@ pub fn evaluate_transient_post_results(
     })
 }
 
-fn evaluate_transient_fourier(
+/// Evaluate every authored `.FOUR` card of a deck against one transient result.
+///
+/// This is the single resolver from a `.FOUR` output specification to a column
+/// of a [`TransientResult`]: operands go through the ordered transient output
+/// resolver, so differential voltages, branch currents, hierarchy aliases and
+/// braced expressions mean exactly what they mean on a `.PRINT TRAN` card. The
+/// results come back in card-then-operand order, which is the order the
+/// canonical plan mints `four-NNN` identities in, and each one carries the
+/// authored spelling and physical quantity class its document needs.
+///
+/// Callers holding a complete transient should prefer
+/// [`evaluate_transient_post_results`], which also evaluates `.MEASURE` and
+/// carries the `.FFT` spectra; this entry point exists for a caller that wants
+/// the Fourier products alone.
+pub fn evaluate_transient_fourier_results(
     netlist: &Netlist,
     result: &TransientResult,
     limits: ResourceLimits,
