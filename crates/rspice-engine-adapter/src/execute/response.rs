@@ -104,14 +104,6 @@ pub(super) fn directive_failure(failure: DirectiveFailure) -> Execution {
     }
 }
 
-pub(super) fn map_fft_document_error(error: FftResultDocumentError) -> DirectiveFailure {
-    match error {
-        FftResultDocumentError::Aborted => DirectiveFailure::Engine(SimulationError::Aborted),
-        FftResultDocumentError::ArtifactTooLarge { .. } => DirectiveFailure::ResultArtifactBytes,
-        other => DirectiveFailure::ResultDocument(other.to_string()),
-    }
-}
-
 fn frequency_grid_failure(error: rspice_core::analysis::FrequencyGridError) -> Execution {
     use rspice_core::analysis::FrequencyGridError;
 
@@ -258,16 +250,6 @@ pub(super) fn succeeded(
             }
         };
         manifest["axis_execution"] = execution_value;
-    }
-    if artifacts
-        .iter()
-        .any(|artifact| artifact.content_type == FFT_RESULT_DOCUMENT_CONTENT_TYPE)
-    {
-        manifest["typed_fft_result_schema"] = serde_json::json!({
-            "name": FFT_RESULT_DOCUMENT_SCHEMA,
-            "version": FFT_RESULT_DOCUMENT_VERSION,
-            "content_type": FFT_RESULT_DOCUMENT_CONTENT_TYPE,
-        });
     }
     let descriptors = artifacts
         .iter()

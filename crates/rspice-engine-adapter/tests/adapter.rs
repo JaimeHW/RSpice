@@ -7,7 +7,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
 use rspice_core::abort_signal::ImmediateAbort;
-use rspice_core::execution::result_document::{ResultPayload, ScalarValue, SeriesValues};
+use rspice_core::execution::result_document::{
+    FftCompatibilityModeTag, ResultPayload, ScalarValue, SeriesValues,
+};
 use rspice_core::execution::{
     ANALYSIS_RESULT_DOCUMENT_SCHEMA, ANALYSIS_RESULT_DOCUMENT_VERSION, AnalysisResultDocument,
     AnalysisResultKind, MappingStatus, ResultSignal, SignalUnit, analysis_result_capability,
@@ -18,10 +20,6 @@ use rspice_engine_adapter::axis_execution_document::{
 use rspice_engine_adapter::document::CircuitContent;
 use rspice_engine_adapter::execute::{
     CANCELLED_FAILURE_CODE, DEFAULT_SOLVE_BUDGET, execute_with_abort,
-};
-use rspice_engine_adapter::fft_result_document::{
-    FFT_RESULT_DOCUMENT_CONTENT_TYPE, FftCompatibilityMode, FftPhysicalType, FftSourceKind,
-    FftUnit, TransientFftResultDocument,
 };
 use rspice_engine_adapter::result_artifact::result_document_content_type;
 use rspice_engine_adapter::wire::{
@@ -218,19 +216,6 @@ fn typed_result_at_path(job: &Job, path: &str) -> AnalysisResultDocument {
     AnalysisResultDocument::from_json(&content).expect("typed result validates")
 }
 
-fn typed_fft_result(job: &Job, response: &Value, file_name: &str) -> TransientFftResultDocument {
-    let path = format!("results/{file_name}");
-    let descriptor = response["result_artifacts"]
-        .as_array()
-        .expect("declared result artifacts")
-        .iter()
-        .find(|artifact| artifact["path"] == path)
-        .unwrap_or_else(|| panic!("typed FFT result descriptor {path} missing"));
-    assert_eq!(descriptor["content_type"], FFT_RESULT_DOCUMENT_CONTENT_TYPE);
-    let content = std::fs::read_to_string(job.root.join(&path)).expect("read typed FFT result");
-    TransientFftResultDocument::from_json(&content).expect("typed FFT result validates")
-}
-
 fn signal<'a>(document: &'a AnalysisResultDocument, canonical_name: &str) -> &'a ResultSignal {
     document
         .signals()
@@ -300,14 +285,6 @@ enum FamilyExpectation {
         /// `Partial` when the family runs but a documented subset of results
         /// cannot be published; the registry note says which.
         declared: DeclaredStatus,
-    },
-    /// The family is published as a typed child of another family's result
-    /// rather than as its own request, so the registry declares it partial.
-    Attached {
-        request_kind: &'static str,
-        parent_request_kind: &'static str,
-        parent_artifact: &'static str,
-        deck: &'static str,
     },
     /// The family's result is a second shared document published beside
     /// another card's, so it is fully mapped -- but its own wire kind is
@@ -485,10 +462,12 @@ fn family_expectation(kind: AnalysisResultKind) -> FamilyExpectation {
             deck: "attached transient Fourier\nV1 out 0 SIN(0 1 1k)\nR1 out 0 1k\n\
                    .tran 1u 4m\n.four 1k v(out)\n.end\n",
         },
-        AnalysisResultKind::Fft => FamilyExpectation::Attached {
+        AnalysisResultKind::Fft => FamilyExpectation::Child {
             request_kind: "fft",
             parent_request_kind: "transient",
-            parent_artifact: "tran-001.fft.result.json",
+            artifact: "tran-001.fft-001.result.json",
+            analysis_tag: "fft-001",
+            parent_analysis_tag: "tran-001",
             deck: "attached transient FFT\nV1 out 0 SIN(0 1 1k)\nR1 out 0 1k\n\
                    .tran 1u 1m\n.fft v(out) np=8 freq=1k\n.end\n",
         },
@@ -562,32 +541,6 @@ fn every_result_family_matches_its_engine_adapter_capability_declaration() {
                     );
                 }
             }
-            FamilyExpectation::Attached {
-                request_kind,
-                parent_request_kind,
-                parent_artifact,
-                deck,
-            } => {
-                assert_eq!(
-                    declared_status(declared.scalar),
-                    DeclaredStatus::Partial,
-                    "{kind:?} is published attached but the registry declares {:?}",
-                    declared.scalar
-                );
-                let refusal_job = Job::new(&format!("attached-refusal-{}", kind.tag()));
-                let refusal = refusal_job.execute(&format!("{DIVIDER}.op\n.end\n"), request_kind);
-                assert_eq!(refusal["status"], "failed", "{kind:?}: {refusal}");
-                assert_eq!(refusal["failure_code"], "analysis.unsupported_kind");
-
-                let job = Job::new(&format!("attached-{}", kind.tag()));
-                let response = job.execute(deck, parent_request_kind);
-                assert_eq!(
-                    response["status"], "succeeded",
-                    "{kind:?} parent deck failed: {response}"
-                );
-                let document = typed_fft_result(&job, &response, parent_artifact);
-                assert!(!document.results.is_empty());
-            }
             FamilyExpectation::Child {
                 request_kind,
                 parent_request_kind,
@@ -657,7 +610,6 @@ fn every_runnable_family_executes_at_every_step_and_temperature_coordinate() {
                 deck,
                 ..
             } => (parent_request_kind, parent_analysis_tag, deck),
-            FamilyExpectation::Attached { .. } => continue,
         };
         for (label, axis_card, axis_kind) in [
             (
@@ -1132,7 +1084,7 @@ fn an_ac_sensitivity_sweep_publishes_the_shared_sensitivity_document() {
 //=============================================================================
 
 #[test]
-fn transient_fft_artifacts_preserve_parent_order_ragged_bins_units_and_metrics() {
+fn transient_fft_children_carry_planned_identities_ragged_bins_units_and_metrics() {
     let job = Job::new("transient-fft");
     let deck = "typed transient FFT results\n\
                 V1 out 0 SIN(0 1 1k)\n\
@@ -1141,63 +1093,137 @@ fn transient_fft_artifacts_preserve_parent_order_ragged_bins_units_and_metrics()
                 .tran 1u 1m\n\
                 .tran 2u 1m\n\
                 .fft v(out) np=8 format=unorm window=rect freq=1k\n\
-                .fft i(V1) np=16 window=hann freq=1k\n\
+                .fft i(V1) np=16 format=unorm window=hann freq=1k\n\
                 .end\n";
     let response = job.execute(deck, "transient");
     assert_eq!(response["status"], "succeeded", "response: {response}");
-    assert_eq!(
-        response["result_manifest"]["typed_fft_result_schema"],
-        json!({
-            "name": "rspice-transient-fft-result",
-            "version": 1,
-            "content_type": FFT_RESULT_DOCUMENT_CONTENT_TYPE,
-        })
+    assert!(
+        response["result_manifest"]["typed_fft_result_schema"].is_null(),
+        "the adapter publishes no FFT schema of its own: {response}"
     );
+    let paths = response["result_artifacts"]
+        .as_array()
+        .expect("result artifacts")
+        .iter()
+        .map(|artifact| artifact["path"].as_str().expect("artifact path").to_owned())
+        .collect::<Vec<_>>();
     assert_eq!(
-        response["result_artifacts"]
-            .as_array()
-            .expect("result artifacts")
-            .len(),
-        4,
-        "two transients each publish one typed result and one FFT bundle"
+        paths,
+        vec![
+            "results/tran-001.result.json".to_owned(),
+            "results/tran-001.fft-001.result.json".to_owned(),
+            "results/tran-001.fft-002.result.json".to_owned(),
+            "results/tran-002.result.json".to_owned(),
+        ],
+        "the plan binds both .FFT cards to the first transient, so only it publishes spectra"
     );
 
-    let first = typed_fft_result(&job, &response, "tran-001.fft.result.json");
-    let second = typed_fft_result(&job, &response, "tran-002.fft.result.json");
-    assert_eq!(first.parent_analysis, "tran-001");
-    assert_eq!(second.parent_analysis, "tran-002");
-    for document in [&first, &second] {
-        assert_eq!(document.result_count, 2);
-        assert_eq!(document.results[0].analysis_id, "fft-001");
-        assert_eq!(document.results[1].analysis_id, "fft-002");
+    // The parent lists its children by identity and probed column, so a reader
+    // pairs the two without opening either spectrum.
+    let parent = typed_result(&job, &response, "tran-001.result.json");
+    let ResultPayload::Tran(transient) = parent.payload() else {
+        panic!("tran-001 published a {:?} payload", parent.result_kind());
+    };
+    assert_eq!(
+        transient
+            .fft_children
+            .iter()
+            .map(|child| (child.analysis.tag(), child.output_name.clone()))
+            .collect::<Vec<_>>(),
+        vec![
+            ("fft-001".to_owned(), "V(OUT)".to_owned()),
+            ("fft-002".to_owned(), "I(V1)".to_owned()),
+        ]
+    );
+    let second_parent = typed_result(&job, &response, "tran-002.result.json");
+    let ResultPayload::Tran(second) = second_parent.payload() else {
+        panic!("tran-002 published a non-transient payload");
+    };
+    assert!(second.fft_children.is_empty());
+
+    let voltage = typed_result(&job, &response, "tran-001.fft-001.result.json");
+    let current = typed_result(&job, &response, "tran-001.fft-002.result.json");
+    for (document, tag, unit, bins) in [
+        (&voltage, "fft-001", SignalUnit::Volt, 5usize),
+        (&current, "fft-002", SignalUnit::Ampere, 9usize),
+    ] {
+        assert_eq!(document.result_kind(), AnalysisResultKind::Fft);
+        assert_eq!(document.analysis().tag(), tag);
         assert_eq!(
-            document.results[0].parent_analysis_id,
-            document.parent_analysis
+            document.parent_analysis().map(|parent| parent.tag()),
+            Some("tran-001".to_owned())
         );
-        assert_eq!(document.results[0].source.kind, FftSourceKind::Probe);
-        assert_eq!(document.results[0].source.authored_output, "V(OUT)");
+        assert_eq!(document.point_count(), bins, "ragged bin counts survive");
         assert_eq!(
-            document.results[0].authored.compatibility_mode,
-            FftCompatibilityMode::HspiceCompatible
+            signal(document, "spectrum").descriptor().unit(),
+            &unit,
+            "an unnormalized spectrum keeps its probed column's unit"
         );
+        let ResultPayload::Fft(payload) = document.payload() else {
+            panic!("{tag} published a {:?} payload", document.result_kind());
+        };
         assert_eq!(
-            document.results[0].signal.physical_type,
-            FftPhysicalType::Voltage
+            payload.compatibility_mode,
+            FftCompatibilityModeTag::HspiceCompatible
         );
-        assert_eq!(document.results[0].signal.unit, Some(FftUnit::Volt));
-        assert_eq!(
-            document.results[1].signal.physical_type,
-            FftPhysicalType::Current
-        );
-        assert_eq!(document.results[0].spectrum.bins.len(), 5);
-        assert_eq!(document.results[1].spectrum.bins.len(), 9);
         assert!(
-            document
-                .results
-                .iter()
-                .all(|result| result.metrics.is_some())
+            payload.metrics.is_some(),
+            "FFTOUT=1 metrics must reach the shared document"
         );
     }
+    assert_eq!(
+        {
+            let ResultPayload::Fft(payload) = voltage.payload() else {
+                unreachable!("checked above")
+            };
+            payload.output_name.clone()
+        },
+        "V(OUT)"
+    );
+}
+
+#[test]
+fn a_published_fft_child_round_trips_and_refuses_a_forward_schema_version() {
+    let job = Job::new("transient-fft-decode");
+    let response = job.execute(
+        "fft child decode contract\n\
+         V1 out 0 SIN(0 1 2k)\n\
+         R1 out 0 1k\n\
+         .options fft fftout=1\n\
+         .tran 1u 1m\n\
+         .fft v(out) np=16 format=unorm window=rect freq=2k\n\
+         .end\n",
+        "transient",
+    );
+    assert_eq!(response["status"], "succeeded", "response: {response}");
+    let path = job.root.join("results/tran-001.fft-001.result.json");
+    let published = std::fs::read_to_string(&path).expect("read the published FFT child");
+
+    // A reader decodes the bytes on disk, and anything it accepted survives
+    // its own re-encoding: a spectrum that changed value on the way through
+    // would be evidence a consumer cannot trust.
+    let decoded = AnalysisResultDocument::from_json(&published).expect("the FFT child validates");
+    let reencoded = decoded.to_json().expect("an accepted child re-encodes");
+    assert_eq!(
+        AnalysisResultDocument::from_json(&reencoded).expect("the re-encoding is accepted"),
+        decoded,
+        "the FFT child did not survive its own encoding"
+    );
+    assert_eq!(decoded.schema(), ANALYSIS_RESULT_DOCUMENT_SCHEMA);
+    assert_eq!(decoded.schema_version(), ANALYSIS_RESULT_DOCUMENT_VERSION);
+
+    // A document from a future build is refused rather than decoded field by
+    // field against this build's meaning of those fields.
+    let mut forward: Value = serde_json::from_str(&published).expect("published child is JSON");
+    forward["schemaVersion"] = json!(ANALYSIS_RESULT_DOCUMENT_VERSION + 1);
+    let error = AnalysisResultDocument::from_json(
+        &serde_json::to_string(&forward).expect("forward document serializes"),
+    )
+    .expect_err("a forward schema version must be refused");
+    assert!(
+        error.to_string().contains("version"),
+        "forward-version refusal must name the version: {error}"
+    );
 }
 
 #[test]
@@ -1815,12 +1841,7 @@ fn every_family_reports_the_same_cancellation_label() {
             FamilyExpectation::Runs {
                 request_kind, deck, ..
             } => (request_kind, deck),
-            FamilyExpectation::Attached {
-                parent_request_kind,
-                deck,
-                ..
-            }
-            | FamilyExpectation::Child {
+            FamilyExpectation::Child {
                 parent_request_kind,
                 deck,
                 ..
@@ -1866,12 +1887,7 @@ fn every_family_reports_a_caller_stop_as_a_cancellation() {
             FamilyExpectation::Runs {
                 request_kind, deck, ..
             } => (request_kind, deck),
-            FamilyExpectation::Attached {
-                parent_request_kind,
-                deck,
-                ..
-            }
-            | FamilyExpectation::Child {
+            FamilyExpectation::Child {
                 parent_request_kind,
                 deck,
                 ..
@@ -1932,7 +1948,6 @@ fn component_info_states_the_reviewed_identity() {
         info["result_schemas"],
         json!([
             format!("{ANALYSIS_RESULT_DOCUMENT_SCHEMA}-v{ANALYSIS_RESULT_DOCUMENT_VERSION}"),
-            "rspice-transient-fft-result-v1",
             "rspice-axis-execution-v1",
         ])
     );

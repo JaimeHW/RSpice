@@ -10,7 +10,8 @@
 //! A card is not always one document: [`DirectiveProjection`] carries the
 //! card's own result plus every document produced beside it, so `.SP DONOISE`
 //! publishes its port-noise sweep and a transient publishes one Fourier
-//! document per authored `.FOUR` operand.
+//! document per authored `.FOUR` operand and one spectrum per authored `.FFT`
+//! card.
 //!
 //! A family the shared result contract cannot express is listed in
 //! [`unmapped_deck_card`] with the exact core API that is missing, and is
@@ -33,7 +34,6 @@ use rspice_core::netlist::{
 use rspice_core::{Engine, Netlist, SimulationError};
 
 use crate::failure::{DirectiveFailure, check_abort, map_result_document_error};
-use crate::fft_result_document::{FftResultDocumentError, TransientFftResultDocument};
 
 /// Accepted samples one analysis may retain before the bounded resource
 /// outcome replaces an unbounded waveform.
@@ -152,18 +152,17 @@ pub fn unmapped_deck_card(_command: &AnalysisCommand) -> Option<(&'static str, &
 ///
 /// A card is not always one document. `.SP DONOISE` produces the scattering
 /// sweep and the port-noise sweep, and a transient produces one Fourier
-/// spectrum per authored `.FOUR` operand. Each of those is a complete shared
-/// result document with its own analysis identity, published beside the parent
-/// rather than folded into it, so the whole set is staged in the one artifact
-/// transaction the parent's own document is staged in.
+/// spectrum per authored `.FOUR` operand and one `.FFT` spectrum per authored
+/// `.FFT` card. Each of those is a complete shared result document with its own
+/// analysis identity, published beside the parent rather than folded into it,
+/// so the whole set is staged in the one artifact transaction the parent's own
+/// document is staged in.
 pub(crate) struct DirectiveProjection {
     /// The card's own shared result document, with its family payload and
     /// series.
     pub(crate) builder: AnalysisResultDocumentBuilder,
     /// Documents this card produced beside its own, in publication order.
     pub(crate) children: Vec<ChildDocument>,
-    /// Transient `.FFT` spectra, when the parent transient authored any.
-    pub(crate) fft: Option<TransientFftResultDocument>,
 }
 
 /// One shared result document published beside its parent card's.
@@ -184,7 +183,6 @@ impl From<AnalysisResultDocumentBuilder> for DirectiveProjection {
         Self {
             builder,
             children: Vec::new(),
-            fft: None,
         }
     }
 }
@@ -329,20 +327,41 @@ pub(crate) fn run_directive(
                 return Err(DirectiveFailure::SeriesBudget);
             }
             validate_fft_result_sequence(netlist, &result.fft_results, *stop, abort)?;
-            let fft = if result.fft_results.is_empty() {
-                None
-            } else {
-                Some(
-                    TransientFftResultDocument::from_engine_results_with_abort(
-                        id.tag(),
-                        &result.fft_results,
-                        &netlist.fft_analyses,
-                        netlist.options.fft_mode.unwrap_or_default(),
-                        abort,
+            // Each authored `.FFT` card is its own analysis instance, bound by
+            // the plan to this transient. Core pairs each spectrum with the
+            // identity the planner minted for it and declares the unit its
+            // coefficients carry, so nothing here counts cards a second time.
+            let spectra = rspice_core::execution::planned_transient_fft_spectra(
+                plan,
+                id,
+                &result.fft_results,
+                abort,
+            )?;
+            let mut fft_children = Vec::new();
+            fft_children
+                .try_reserve_exact(spectra.len())
+                .map_err(|_| DirectiveFailure::SeriesBudget)?;
+            let mut fft_references = Vec::new();
+            fft_references
+                .try_reserve_exact(spectra.len())
+                .map_err(|_| DirectiveFailure::SeriesBudget)?;
+            for spectrum in &spectra {
+                check_abort(abort)?;
+                fft_references.push(rspice_core::execution::result_document::FftChildReference {
+                    analysis: spectrum.analysis,
+                    output_name: spectrum.result.output_name.clone(),
+                });
+                fft_children.push(ChildDocument {
+                    namespace: spectrum.analysis.tag(),
+                    builder: AnalysisResultDocument::from_transient_fft(
+                        spectrum.analysis,
+                        spectrum.parent,
+                        spectrum.output_unit.clone(),
+                        spectrum.result,
                     )
-                    .map_err(map_fft_document_error)?,
-                )
-            };
+                    .map_err(map_result_document_error)?,
+                });
+            }
             // Each authored `.FOUR` operand is its own analysis instance with
             // its own identity, bound by the plan to this transient. The core
             // entry point owns the `.FOUR`-to-transient-column grammar and
@@ -356,7 +375,7 @@ pub(crate) fn run_directive(
                 engine.config().resource_limits,
                 abort,
             )?;
-            let mut children = Vec::new();
+            let mut children = fft_children;
             children
                 .try_reserve_exact(fourier.len())
                 .map_err(|_| DirectiveFailure::SeriesBudget)?;
@@ -374,13 +393,9 @@ pub(crate) fn run_directive(
                     .map_err(map_result_document_error)?,
                 });
             }
-            return AnalysisResultDocument::from_transient(id, &result, None, Vec::new())
+            return AnalysisResultDocument::from_transient(id, &result, None, fft_references)
                 .map_err(map_result_document_error)
-                .map(|builder| DirectiveProjection {
-                    builder,
-                    children,
-                    fft,
-                });
+                .map(|builder| DirectiveProjection { builder, children });
         }
         AnalysisCommand::Noise {
             output_node,
@@ -513,11 +528,7 @@ pub(crate) fn run_directive(
                 }],
                 None => Vec::new(),
             };
-            return Ok(DirectiveProjection {
-                builder,
-                children,
-                fft: None,
-            });
+            return Ok(DirectiveProjection { builder, children });
         }
         AnalysisCommand::MonteCarlo(card) => {
             let distribution = match card.distribution {
@@ -792,14 +803,6 @@ pub(crate) fn validate_fft_result_sequence(
         }
     }
     Ok(())
-}
-
-fn map_fft_document_error(error: FftResultDocumentError) -> DirectiveFailure {
-    match error {
-        FftResultDocumentError::Aborted => DirectiveFailure::Engine(SimulationError::Aborted),
-        FftResultDocumentError::ArtifactTooLarge { .. } => DirectiveFailure::ResultArtifactBytes,
-        other => DirectiveFailure::ResultDocument(other.to_string()),
-    }
 }
 
 fn fft_float_equal(left: f64, right: f64) -> bool {

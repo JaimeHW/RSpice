@@ -256,17 +256,6 @@ const fn adapter_typed_axes() -> SurfaceCapability {
     )
 }
 
-const ADAPTER_FFT_ATTACHED: &str = "a complete typed FFT bundle is published beside its parent transient, but it is the adapter's \
-     own schema rather than the shared fft result document";
-
-const fn adapter_attached_fft() -> SurfaceCapability {
-    SurfaceCapability::new(
-        MappingStatus::Partial(ADAPTER_FFT_ATTACHED),
-        MappingStatus::Partial(ADAPTER_FFT_ATTACHED),
-        MappingStatus::Partial(ADAPTER_FFT_ATTACHED),
-    )
-}
-
 /// One authoritative row per core result family.
 ///
 /// Every constructor is deliberately visible in source: unsupported cells are
@@ -372,7 +361,7 @@ pub const ANALYSIS_CAPABILITY_MATRIX: &[AnalysisResultCapability] = &[
         ),
         python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
-        engine_adapter: adapter_attached_fft(),
+        engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::MonteCarlo,

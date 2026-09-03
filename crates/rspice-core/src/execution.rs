@@ -10,6 +10,7 @@ mod fingerprint;
 mod materialized;
 mod plan;
 mod post_process;
+mod post_process_fft;
 mod projection;
 pub mod result_document;
 mod schema;
@@ -36,6 +37,9 @@ pub use plan::{
 };
 pub use post_process::{
     PlannedFourierResult, evaluate_planned_fourier_with_abort, transient_output_unit,
+};
+pub use post_process_fft::{
+    PlannedFftSpectrum, planned_transient_fft_spectra, transient_fft_output_unit,
 };
 pub use projection::{
     ProjectedSignal, ProjectedSignals, ProjectionSource, ProjectionSourceSignal, ProjectionValues,

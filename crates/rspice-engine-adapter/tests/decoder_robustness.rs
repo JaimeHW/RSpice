@@ -2,10 +2,11 @@
 //!
 //! The executor reads exactly three kinds of machine-written input: the
 //! protocol-4 engine request on standard input, the axis-execution manifest a
-//! controller may hand back, and the typed FFT bundle published beside a
-//! transient. All three are decoded from bytes produced elsewhere, so all
-//! three are damaged here with a seeded xorshift stream and with an exhaustive
-//! truncation sweep.
+//! controller may hand back, and the shared result documents it published —
+//! covered here through the `fft` child a transient publishes, which carries
+//! the widest payload of any of them. All three are decoded from bytes
+//! produced elsewhere, so all three are damaged here with a seeded xorshift
+//! stream and with an exhaustive truncation sweep.
 //!
 //! The invariant is the same as `rspice-core`'s decoder robustness suite:
 //! never a panic, never a success on corrupted input that claims a different
@@ -17,14 +18,17 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use rspice_core::abort_signal::NoAbort;
 use rspice_core::engine::{Engine, SimulationConfig};
-use rspice_core::execution::{AxisKind, numeric_run_coordinate_id};
+use rspice_core::execution::{
+    ANALYSIS_RESULT_DOCUMENT_VERSION, AnalysisKind, AnalysisResultDocument, AxisKind, DeckPlan,
+    numeric_run_coordinate_id, planned_transient_fft_spectra,
+};
 use rspice_core::netlist::Netlist;
+use rspice_core::resource::ResourceLimits;
 use rspice_engine_adapter::axis_execution_document::{
     AnalysisExecution, AxisAnalysisKind, AxisAssignmentDocument, AxisAssignmentKind,
     AxisExecutionDocument, CoordinateExecution, OutputNamespaceDocument, ResultDocumentReference,
     StepTargetDocument,
 };
-use rspice_engine_adapter::fft_result_document::TransientFftResultDocument;
 use rspice_engine_adapter::measure::canonical_decimal;
 use rspice_engine_adapter::wire::{
     EngineArtifact, EngineRequest, EngineRevision, INTEGRITY_ENGINE_PROTOCOL_VERSION,
@@ -337,10 +341,12 @@ fn axis_manifest_decoder_survives_every_truncation() {
 }
 
 //=============================================================================
-// Typed FFT bundle
+// Transient `.FFT` child document
 //=============================================================================
 
-fn fft_bundle_json() -> Vec<u8> {
+/// The exact `fft` child this executor publishes beside a transient, encoded
+/// the way it lands under `results/`.
+fn fft_child_json() -> Vec<u8> {
     let deck = "fft decoder fixture\n\
                 V1 out 0 SIN(0 1 2k)\n\
                 R1 out 0 1k\n\
@@ -348,27 +354,40 @@ fn fft_bundle_json() -> Vec<u8> {
                 .tran 1u 1m\n\
                 .fft v(out) np=16 format=unorm window=rect freq=2k\n\
                 .end\n";
-    let netlist = Netlist::parse(deck).expect("the FFT fixture parses");
+    let netlist = Netlist::parse_validated(deck).expect("the FFT fixture parses");
+    let plan = DeckPlan::from_netlist_with_abort(&netlist, &ResourceLimits::default(), &NoAbort)
+        .expect("the FFT fixture plans");
+    let parent = plan
+        .analyses()
+        .iter()
+        .find(|analysis| analysis.id().kind() == AnalysisKind::Tran)
+        .expect("the FFT fixture plans a transient")
+        .id();
     let result = Engine::new(SimulationConfig::default())
         .run_tran_with_abort(&netlist, 1.0e-3, 1.0e-6, &NoAbort)
         .expect("the FFT fixture executes");
-    TransientFftResultDocument::from_engine_results(
-        "tran-001".to_owned(),
-        &result.fft_results,
-        &netlist.fft_analyses,
-        netlist.options.fft_mode.unwrap_or_default(),
+    let spectra = planned_transient_fft_spectra(&plan, parent, &result.fft_results, &NoAbort)
+        .expect("the FFT fixture pairs its planned spectrum");
+    let spectrum = spectra.first().expect("the fixture authors one .FFT card");
+    AnalysisResultDocument::from_transient_fft(
+        spectrum.analysis,
+        spectrum.parent,
+        spectrum.output_unit.clone(),
+        spectrum.result,
     )
-    .expect("the FFT fixture maps into the adapter schema")
+    .expect("the FFT fixture projects into the shared document")
+    .build()
+    .expect("the FFT fixture document builds")
     .to_json()
     .expect("the FFT fixture encodes")
     .into_bytes()
 }
 
-fn assert_fft_decode_is_faithful(bytes: &[u8]) {
+fn assert_fft_child_decode_is_faithful(bytes: &[u8]) {
     let Ok(text) = std::str::from_utf8(bytes) else {
         return;
     };
-    let Ok(document) = TransientFftResultDocument::from_json_with_abort(
+    let Ok(document) = AnalysisResultDocument::from_json_with_abort(
         text,
         &NoAbort,
         MAX_ENGINE_RETAINED_RESULT_BYTES,
@@ -377,34 +396,54 @@ fn assert_fft_decode_is_faithful(bytes: &[u8]) {
     };
     let reencoded = document
         .to_json()
-        .expect("an accepted bundle must re-encode");
-    let again = TransientFftResultDocument::from_json(&reencoded)
-        .expect("an accepted bundle's own encoding must be accepted");
+        .expect("an accepted child must re-encode");
+    let again = AnalysisResultDocument::from_json(&reencoded)
+        .expect("an accepted child's own encoding must be accepted");
     assert_eq!(
         again, document,
-        "the FFT decoder produced a value that does not survive its own encoding"
+        "the FFT child decoder produced a value that does not survive its own encoding"
     );
 }
 
 #[test]
-fn fft_bundle_decoder_survives_chaos_without_inventing_a_value() {
-    let seed = fft_bundle_json();
+fn fft_child_decoder_survives_chaos_without_inventing_a_value() {
+    let seed = fft_child_json();
     chaos_bytes(
-        "TransientFftResultDocument::from_json_with_abort",
+        "AnalysisResultDocument::from_json_with_abort (fft child)",
         &seed,
         0x0ADA_0003,
         3_000,
-        assert_fft_decode_is_faithful,
+        assert_fft_child_decode_is_faithful,
     );
 }
 
 #[test]
-fn fft_bundle_decoder_survives_every_truncation() {
-    let seed = fft_bundle_json();
+fn fft_child_decoder_survives_every_truncation() {
+    let seed = fft_child_json();
     truncation_sweep(
-        "TransientFftResultDocument::from_json_with_abort",
+        "AnalysisResultDocument::from_json_with_abort (fft child)",
         &seed,
         400,
-        assert_fft_decode_is_faithful,
+        assert_fft_child_decode_is_faithful,
+    );
+}
+
+#[test]
+fn a_forward_schema_version_of_the_fft_child_is_refused_before_any_field() {
+    let seed = fft_child_json();
+    let mut document: serde_json::Value =
+        serde_json::from_slice(&seed).expect("the fixture child is JSON");
+    document["schemaVersion"] = json!(ANALYSIS_RESULT_DOCUMENT_VERSION + 1);
+    // Fields this build has no meaning for are added alongside the bumped
+    // version: a decoder that reported them as unknown fields would be reading
+    // a future document field by field instead of refusing it outright.
+    document["futureField"] = json!({"published": "by a later build"});
+    let error = AnalysisResultDocument::from_json(
+        &serde_json::to_string(&document).expect("the forward child serializes"),
+    )
+    .expect_err("a forward schema version must be refused");
+    assert!(
+        error.to_string().contains("version"),
+        "forward-version refusal must name the version: {error}"
     );
 }
