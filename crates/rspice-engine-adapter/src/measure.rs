@@ -8,8 +8,18 @@
 //! engine behavior: two runs of the same request must serialize identically
 //! byte for byte.
 
+use rspice_core::abort_signal::AbortSignal;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use thiserror::Error;
+
+struct NeverAbort;
+
+impl AbortSignal for NeverAbort {
+    fn is_aborted(&self) -> bool {
+        false
+    }
+}
 
 /// One extracted measurement in manifest order.
 pub struct Measurement {
@@ -36,14 +46,27 @@ impl Measurement {
     /// settled value for sweeps and transients, the last frequency point for
     /// spectra — and the hash commits to every sample in order.
     pub fn series(name: String, unit: &'static str, samples: &[f64]) -> Option<Self> {
-        let last = *samples.last()?;
-        Some(Self {
+        Self::series_with_abort(name, unit, samples, &NeverAbort).ok()?
+    }
+
+    pub fn series_with_abort(
+        name: String,
+        unit: &'static str,
+        samples: &[f64],
+        abort: &dyn AbortSignal,
+    ) -> Result<Option<Self>, MeasurementError> {
+        let Some(&last) = samples.last() else {
+            return Ok(None);
+        };
+        Ok(Some(Self {
             name,
             unit,
-            value_decimal: canonical_decimal(last)?,
+            value_decimal: canonical_decimal(last).ok_or(MeasurementError::NonFinite)?,
             sample_count: samples.len(),
-            series_sha256: Some(series_sha256(samples)?),
-        })
+            series_sha256: Some(
+                series_sha256_with_abort(samples, abort)?.ok_or(MeasurementError::NonFinite)?,
+            ),
+        }))
     }
 
     pub fn to_manifest_value(&self) -> Value {
@@ -79,14 +102,33 @@ pub fn canonical_decimal(value: f64) -> Option<String> {
 /// decimal rendering of every sample. Reproducibility conformance compares
 /// exactly this value across repetitions.
 pub fn series_sha256(samples: &[f64]) -> Option<String> {
+    series_sha256_with_abort(samples, &NeverAbort).ok()?
+}
+
+pub fn series_sha256_with_abort(
+    samples: &[f64],
+    abort: &dyn AbortSignal,
+) -> Result<Option<String>, MeasurementError> {
     let mut hasher = Sha256::new();
     hasher.update(b"rspice-series-v1\n");
     for sample in samples {
-        hasher.update(canonical_decimal(*sample)?.as_bytes());
+        if abort.is_aborted() {
+            return Err(MeasurementError::Aborted);
+        }
+        let decimal = canonical_decimal(*sample).ok_or(MeasurementError::NonFinite)?;
+        hasher.update(decimal.as_bytes());
         hasher.update(b"\n");
     }
     let digest: [u8; 32] = hasher.finalize().into();
-    Some(crate::wire::digest_hex(&digest))
+    Ok(Some(crate::wire::digest_hex(&digest)))
+}
+
+#[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
+pub enum MeasurementError {
+    #[error("measurement construction was cancelled")]
+    Aborted,
+    #[error("measurement contains a non-finite value")]
+    NonFinite,
 }
 
 /// Maps an engine-side signal label into the measurement-name grammar

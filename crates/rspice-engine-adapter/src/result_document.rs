@@ -7,8 +7,20 @@
 
 use std::collections::HashSet;
 
+use rspice_core::abort_signal::AbortSignal;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+use crate::bounded_serialization::{BoundedAbortWriter, BoundedWriteFailure};
+use crate::wire::MAX_ENGINE_RETAINED_RESULT_BYTES;
+
+struct NeverAbort;
+
+impl AbortSignal for NeverAbort {
+    fn is_aborted(&self) -> bool {
+        false
+    }
+}
 
 /// Stable schema identity, independent of its version.
 pub const RESULT_DOCUMENT_SCHEMA: &str = "rspice-analog-result";
@@ -52,14 +64,47 @@ impl AnalogResultDocument {
 
     /// Validate and serialize a document written by this build.
     pub fn to_json(&self) -> Result<String, ResultDocumentError> {
-        self.validate()?;
-        serde_json::to_string_pretty(self).map_err(ResultDocumentError::InvalidJson)
+        self.to_json_with_abort(&NeverAbort, MAX_ENGINE_RETAINED_RESULT_BYTES)
+    }
+
+    /// Validate and serialize without exceeding `byte_limit` or ignoring an
+    /// observed cancellation request.
+    pub fn to_json_with_abort(
+        &self,
+        abort: &dyn AbortSignal,
+        byte_limit: u64,
+    ) -> Result<String, ResultDocumentError> {
+        self.validate_with_abort(abort)?;
+        check_abort(abort)?;
+        let mut writer = BoundedAbortWriter::new(abort, byte_limit);
+        if let Err(error) = serde_json::to_writer_pretty(&mut writer, self) {
+            return Err(map_bounded_json_error(error, &writer));
+        }
+        check_abort(abort)?;
+        writer
+            .into_string()
+            .map_err(|error| invalid(&format!("result JSON serialization was not UTF-8: {error}")))
     }
 
     /// Read the current schema and reject future versions before attempting
     /// strict decoding. This makes forward incompatibility explicit even if a
     /// future writer also added fields that version 1 does not recognize.
     pub fn from_json(json: &str) -> Result<Self, ResultDocumentError> {
+        Self::from_json_with_abort(json, &NeverAbort, MAX_ENGINE_RETAINED_RESULT_BYTES)
+    }
+
+    /// Decode and validate one bounded current-version document.
+    pub fn from_json_with_abort(
+        json: &str,
+        abort: &dyn AbortSignal,
+        byte_limit: u64,
+    ) -> Result<Self, ResultDocumentError> {
+        check_abort(abort)?;
+        if json.len() as u128 > byte_limit as u128 {
+            return Err(ResultDocumentError::ArtifactTooLarge {
+                limit_bytes: byte_limit,
+            });
+        }
         #[derive(Deserialize)]
         struct Header {
             schema: String,
@@ -79,13 +124,19 @@ impl AnalogResultDocument {
         }
         let document: Self =
             serde_json::from_str(json).map_err(ResultDocumentError::InvalidJson)?;
-        document.validate()?;
+        check_abort(abort)?;
+        document.validate_with_abort(abort)?;
         Ok(document)
     }
 
     /// Enforce shape, identity, finiteness, and the analysis/value-type rules
     /// that readers otherwise have to guess.
     pub fn validate(&self) -> Result<(), ResultDocumentError> {
+        self.validate_with_abort(&NeverAbort)
+    }
+
+    pub fn validate_with_abort(&self, abort: &dyn AbortSignal) -> Result<(), ResultDocumentError> {
+        check_abort(abort)?;
         if self.schema != RESULT_DOCUMENT_SCHEMA {
             return Err(ResultDocumentError::WrongSchema(self.schema.clone()));
         }
@@ -123,15 +174,17 @@ impl AnalogResultDocument {
 
         let mut names = HashSet::new();
         for axis in &self.axes {
+            check_abort(abort)?;
             if axis.name.trim().is_empty()
                 || axis.values.len() != self.point_count
-                || !finite_real(&axis.values)
+                || !finite_real_with_abort(&axis.values, abort)?
                 || !names.insert(format!("axis:{}", axis.name.to_ascii_lowercase()))
             {
                 return Err(invalid("axis name, shape, or value is invalid"));
             }
         }
         for signal in &self.signals {
+            check_abort(abort)?;
             if signal.canonical_name.trim().is_empty()
                 || signal.display_name.trim().is_empty()
                 || !names.insert(format!(
@@ -139,7 +192,7 @@ impl AnalogResultDocument {
                     signal.canonical_name.to_ascii_lowercase()
                 ))
                 || signal.values.len() != self.point_count
-                || !signal.values.is_finite()
+                || !signal.values.is_finite_with_abort(abort)?
             {
                 return Err(invalid("signal name, shape, or value is invalid"));
             }
@@ -168,6 +221,7 @@ impl AnalogResultDocument {
             }
         }
         for state in &self.device_states {
+            check_abort(abort)?;
             if state.device_name.trim().is_empty()
                 || state.regions.len() != self.point_count
                 || !names.insert(format!("state:{}", state.device_name.to_ascii_lowercase()))
@@ -183,8 +237,44 @@ fn invalid(message: &str) -> ResultDocumentError {
     ResultDocumentError::InvalidDocument(message.to_owned())
 }
 
-fn finite_real(values: &[Option<f64>]) -> bool {
-    values.iter().flatten().all(|value| value.is_finite())
+fn check_abort(abort: &dyn AbortSignal) -> Result<(), ResultDocumentError> {
+    if abort.is_aborted() {
+        Err(ResultDocumentError::Aborted)
+    } else {
+        Ok(())
+    }
+}
+
+fn finite_real_with_abort(
+    values: &[Option<f64>],
+    abort: &dyn AbortSignal,
+) -> Result<bool, ResultDocumentError> {
+    for value in values.iter().flatten() {
+        check_abort(abort)?;
+        if !value.is_finite() {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+fn map_bounded_json_error(
+    error: serde_json::Error,
+    writer: &BoundedAbortWriter<'_>,
+) -> ResultDocumentError {
+    match writer.failure() {
+        Some(BoundedWriteFailure::Aborted) => ResultDocumentError::Aborted,
+        Some(BoundedWriteFailure::TooLarge { limit_bytes }) => {
+            ResultDocumentError::ArtifactTooLarge {
+                limit_bytes: *limit_bytes,
+            }
+        }
+        Some(BoundedWriteFailure::Allocation(detail)) => {
+            invalid(&format!("unable to allocate bounded result JSON: {detail}"))
+        }
+        Some(BoundedWriteFailure::LengthOverflow) => invalid("result JSON length overflowed"),
+        None => ResultDocumentError::InvalidJson(error),
+    }
 }
 
 /// Stable identity of the executed analysis directive.
@@ -307,13 +397,18 @@ impl SignalValues {
         }
     }
 
-    fn is_finite(&self) -> bool {
+    fn is_finite_with_abort(&self, abort: &dyn AbortSignal) -> Result<bool, ResultDocumentError> {
         match self {
-            Self::Real { samples } => finite_real(samples),
-            Self::Complex { samples } => samples
-                .iter()
-                .flatten()
-                .all(|sample| sample.real.is_finite() && sample.imaginary.is_finite()),
+            Self::Real { samples } => finite_real_with_abort(samples, abort),
+            Self::Complex { samples } => {
+                for sample in samples.iter().flatten() {
+                    check_abort(abort)?;
+                    if !sample.real.is_finite() || !sample.imaginary.is_finite() {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
+            }
         }
     }
 }
@@ -346,6 +441,10 @@ pub enum ResultDocumentError {
     UnsupportedVersion { found: u32, current: u32 },
     #[error("invalid result document: {0}")]
     InvalidDocument(String),
+    #[error("result mapping or serialization was cancelled")]
+    Aborted,
+    #[error("result artifact exceeds the {limit_bytes}-byte limit")]
+    ArtifactTooLarge { limit_bytes: u64 },
 }
 
 #[cfg(test)]

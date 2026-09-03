@@ -24,7 +24,7 @@ use rspice_output::{
     PreparedAtomicArtifact, remove_artifact_durably, restore_artifact_durably,
     sync_artifact_parent,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::axis_execution_document::{
@@ -32,12 +32,15 @@ use crate::axis_execution_document::{
     AxisExecutionDocument, CoordinateExecution, MeasurementDocument, OutputNamespaceDocument,
     StepTargetDocument,
 };
+use crate::bounded_serialization::{BoundedAbortWriter, BoundedWriteFailure};
 use crate::document::CircuitContent;
 use crate::fft_result_document::{
     FFT_RESULT_DOCUMENT_CONTENT_TYPE, FFT_RESULT_DOCUMENT_SCHEMA, FFT_RESULT_DOCUMENT_VERSION,
     FftResultDocumentError, TransientFftResultDocument,
 };
-use crate::measure::{Measurement, canonical_decimal, finalize_measurements, measurement_name};
+use crate::measure::{
+    Measurement, MeasurementError, canonical_decimal, finalize_measurements, measurement_name,
+};
 use crate::result_document::{
     AnalogAnalysisKind, AnalogResultDocument, AnalogSignalKind, AxisDocument, ComplexSample,
     DeviceStateSeries, RESULT_DOCUMENT_CONTENT_TYPE, RESULT_DOCUMENT_SCHEMA,
@@ -45,7 +48,8 @@ use crate::result_document::{
 };
 use crate::wire::{
     EngineResponse, EngineResultArtifactDescriptor, MAX_ENGINE_ARTIFACT_BYTES,
-    MAX_ENGINE_RESULT_ARTIFACTS, valid_result_path,
+    MAX_ENGINE_RESPONSE_BYTES, MAX_ENGINE_RESULT_ARTIFACTS, MAX_ENGINE_RESULT_MANIFEST_BYTES,
+    MAX_ENGINE_RETAINED_RESULT_BYTES, valid_result_path,
 };
 
 /// Wall-clock ceiling for all engine work in one request. The worker holds
@@ -160,6 +164,34 @@ impl Execution {
 /// Customer-content problems become canonical failures here; this function
 /// touches no filesystem, so nothing in it can raise a process fault.
 pub fn execute(analysis: &Value, content: &CircuitContent, engine_build: &str) -> Execution {
+    let deadline = SolveDeadline {
+        start: Instant::now(),
+    };
+    execute_with_abort(analysis, content, engine_build, &deadline)
+}
+
+/// Execute with a caller-owned cooperative cancellation source. Every solver,
+/// projection, serialization, and manifest-finalization step observes this
+/// same token. The compatibility [`execute`] wrapper supplies the adapter's
+/// fixed internal deadline.
+pub fn execute_with_abort(
+    analysis: &Value,
+    content: &CircuitContent,
+    engine_build: &str,
+    abort: &dyn AbortSignal,
+) -> Execution {
+    finalize_execution(execute_inner(analysis, content, engine_build, abort), abort)
+}
+
+fn execute_inner(
+    analysis: &Value,
+    content: &CircuitContent,
+    engine_build: &str,
+    abort: &dyn AbortSignal,
+) -> Execution {
+    if abort.is_aborted() {
+        return failure_execution(&SimulationError::Aborted);
+    }
     let request: AnalysisRequestV1 = match serde_json::from_value(analysis.clone()) {
         Ok(request) => request,
         Err(_) => {
@@ -186,7 +218,7 @@ pub fn execute(analysis: &Value, content: &CircuitContent, engine_build: &str) -
             // an operating point (this is the deterministic release smoke),
             // and an honest refusal for every waveform analysis.
             if kind == AnalysisKind::OperatingPoint {
-                return succeeded(kind, engine_build, Vec::new(), Vec::new(), 0, None);
+                return succeeded(kind, engine_build, Vec::new(), Vec::new(), 0, None, abort);
             }
             return Execution::failed(
                 "analysis.empty_circuit",
@@ -216,11 +248,7 @@ pub fn execute(analysis: &Value, content: &CircuitContent, engine_build: &str) -
         spice_dialect: SpiceDialect::Ngspice,
         ..SimulationConfig::default()
     });
-    let deadline = SolveDeadline {
-        start: Instant::now(),
-    };
-
-    execute_planned_netlist(kind, &netlist, engine_build, &engine, &deadline)
+    execute_planned_netlist(kind, &netlist, engine_build, &engine, abort)
 }
 
 fn execute_planned_netlist(
@@ -279,6 +307,7 @@ fn execute_planned_netlist(
 
     let mut measurements = Vec::new();
     let mut artifacts = Vec::new();
+    let mut retained_artifact_bytes = 0u64;
     let mut runs = Vec::<CoordinateExecution>::new();
     if has_axes && runs.try_reserve_exact(materializer.len()).is_err() {
         return Execution::failed(
@@ -372,6 +401,7 @@ fn execute_planned_netlist(
                 kind,
                 ordinal,
                 deadline,
+                MAX_ENGINE_RETAINED_RESULT_BYTES.saturating_sub(retained_artifact_bytes),
             ) {
                 Ok(outcome) => {
                     let mut outcome = outcome;
@@ -412,6 +442,18 @@ fn execute_planned_netlist(
                     ) {
                         return resource_failure(failure);
                     }
+                    let outcome_bytes =
+                        match outcome.artifacts.iter().try_fold(0u64, |total, artifact| {
+                            total.checked_add(artifact.content.len() as u64)
+                        }) {
+                            Some(bytes) => bytes,
+                            None => return resource_failure(DirectiveFailure::ResultSetBytes),
+                        };
+                    retained_artifact_bytes =
+                        match retained_artifact_bytes.checked_add(outcome_bytes) {
+                            Some(bytes) if bytes <= MAX_ENGINE_RETAINED_RESULT_BYTES => bytes,
+                            _ => return resource_failure(DirectiveFailure::ResultSetBytes),
+                        };
                     let outcome_measurements = if has_axes {
                         finalize_measurements(outcome.measurements)
                     } else {
@@ -481,11 +523,11 @@ fn execute_planned_netlist(
                         "The run produced more result artifacts than the protocol permits.",
                     );
                 }
-                Err(DirectiveFailure::ResultArtifactBytes) => {
-                    return Execution::failed(
-                        "resource.result_artifact_bytes",
-                        "A result artifact exceeds the protocol byte limit.",
-                    );
+                Err(
+                    failure @ (DirectiveFailure::ResultArtifactBytes
+                    | DirectiveFailure::ResultSetBytes),
+                ) => {
+                    return resource_failure(failure);
                 }
                 Err(DirectiveFailure::FrequencyGrid(error)) => {
                     return frequency_grid_failure(error);
@@ -515,7 +557,7 @@ fn execute_planned_netlist(
     }
 
     let axis_execution = if has_axes {
-        match AxisExecutionDocument::new(axis_analysis_kind(kind), runs) {
+        match AxisExecutionDocument::new_with_abort(axis_analysis_kind(kind), runs, deadline) {
             Ok(document) => Some(document),
             Err(error) => {
                 return Execution::failed("results.schema_mismatch", &error.to_string());
@@ -531,6 +573,7 @@ fn execute_planned_netlist(
         artifacts,
         matching_directive_count,
         axis_execution,
+        deadline,
     )
 }
 
@@ -647,6 +690,10 @@ fn resource_failure(failure: DirectiveFailure) -> Execution {
             "resource.result_artifact_bytes",
             "A result artifact exceeds the protocol byte limit.",
         ),
+        DirectiveFailure::ResultSetBytes => Execution::failed(
+            "resource.result_set_bytes",
+            "The aggregate encoded result set exceeds the adapter memory budget.",
+        ),
         _ => Execution::failed(
             "results.resource_accounting",
             "The adapter encountered an inconsistent result-resource accounting outcome.",
@@ -661,11 +708,17 @@ fn validate_artifact_budget(
     if artifact_count > MAX_ENGINE_RESULT_ARTIFACTS {
         return Err(DirectiveFailure::ResultArtifactLimit);
     }
-    if byte_lengths
-        .into_iter()
-        .any(|length| !(1..=MAX_ENGINE_ARTIFACT_BYTES).contains(&length))
-    {
-        return Err(DirectiveFailure::ResultArtifactBytes);
+    let mut total = 0u64;
+    for length in byte_lengths {
+        if !(1..=MAX_ENGINE_ARTIFACT_BYTES).contains(&length) {
+            return Err(DirectiveFailure::ResultArtifactBytes);
+        }
+        total = total
+            .checked_add(length)
+            .ok_or(DirectiveFailure::ResultSetBytes)?;
+        if total > MAX_ENGINE_RETAINED_RESULT_BYTES {
+            return Err(DirectiveFailure::ResultSetBytes);
+        }
     }
     Ok(())
 }
@@ -753,6 +806,7 @@ enum DirectiveFailure {
     ResultDocument(String),
     ResultArtifactLimit,
     ResultArtifactBytes,
+    ResultSetBytes,
     FrequencyGrid(rspice_core::analysis::FrequencyGridError),
     InvalidAnalysis(String),
 }
@@ -768,6 +822,50 @@ fn map_fft_document_error(error: FftResultDocumentError) -> DirectiveFailure {
         FftResultDocumentError::Aborted => DirectiveFailure::Engine(SimulationError::Aborted),
         FftResultDocumentError::ArtifactTooLarge { .. } => DirectiveFailure::ResultArtifactBytes,
         other => DirectiveFailure::ResultDocument(other.to_string()),
+    }
+}
+
+fn map_result_document_error(
+    error: crate::result_document::ResultDocumentError,
+) -> DirectiveFailure {
+    match error {
+        crate::result_document::ResultDocumentError::Aborted => {
+            DirectiveFailure::Engine(SimulationError::Aborted)
+        }
+        crate::result_document::ResultDocumentError::ArtifactTooLarge { .. } => {
+            DirectiveFailure::ResultSetBytes
+        }
+        other => DirectiveFailure::ResultDocument(other.to_string()),
+    }
+}
+
+fn remaining_outcome_bytes(
+    outcome: &DirectiveOutcome,
+    limit: u64,
+) -> Result<u64, DirectiveFailure> {
+    let used = outcome.artifacts.iter().try_fold(0u64, |total, artifact| {
+        total.checked_add(artifact.content.len() as u64)
+    });
+    used.and_then(|used| limit.checked_sub(used))
+        .ok_or(DirectiveFailure::ResultSetBytes)
+}
+
+fn map_measurement_error(error: MeasurementError) -> DirectiveFailure {
+    match error {
+        MeasurementError::Aborted => DirectiveFailure::Engine(SimulationError::Aborted),
+        MeasurementError::NonFinite => DirectiveFailure::NonFinite,
+    }
+}
+
+fn map_bounded_write_failure(writer: &BoundedAbortWriter<'_>) -> DirectiveFailure {
+    match writer.failure() {
+        Some(BoundedWriteFailure::Aborted) => DirectiveFailure::Engine(SimulationError::Aborted),
+        Some(BoundedWriteFailure::TooLarge { .. }) => DirectiveFailure::ResultSetBytes,
+        Some(BoundedWriteFailure::Allocation(_) | BoundedWriteFailure::LengthOverflow) | None => {
+            DirectiveFailure::ResultDocument(
+                "bounded result serialization could not allocate its output".to_owned(),
+            )
+        }
     }
 }
 
@@ -810,11 +908,13 @@ fn add_typed_artifact(
     kind: AnalysisKind,
     ordinal: usize,
     document: AnalogResultDocument,
+    abort: &dyn AbortSignal,
+    byte_limit: u64,
 ) -> Result<(), DirectiveFailure> {
     let signature = ResultSchemaSignature::from_document(&document);
     let content = document
-        .to_json()
-        .map_err(|error| DirectiveFailure::ResultDocument(error.to_string()))?;
+        .to_json_with_abort(abort, byte_limit.min(MAX_ENGINE_ARTIFACT_BYTES))
+        .map_err(map_result_document_error)?;
     outcome.artifacts.push(PendingArtifact {
         file_name: format!("{}-{}.result.json", kind.as_str(), ordinal + 1),
         content_type: RESULT_DOCUMENT_CONTENT_TYPE,
@@ -829,9 +929,10 @@ fn add_fft_typed_artifact(
     ordinal: usize,
     document: TransientFftResultDocument,
     abort: &dyn AbortSignal,
+    byte_limit: u64,
 ) -> Result<(), DirectiveFailure> {
     let content = document
-        .to_json_with_abort(abort, MAX_ENGINE_ARTIFACT_BYTES)
+        .to_json_with_abort(abort, byte_limit.min(MAX_ENGINE_ARTIFACT_BYTES))
         .map_err(map_fft_document_error)?;
     outcome.artifacts.push(PendingArtifact {
         file_name: format!("transient-{}.fft.result.json", ordinal + 1),
@@ -1377,6 +1478,7 @@ fn run_directive(
     kind: AnalysisKind,
     ordinal: usize,
     deadline: &dyn AbortSignal,
+    result_byte_limit: u64,
 ) -> Result<DirectiveOutcome, DirectiveFailure> {
     match directive {
         AnalysisCommand::Op => {
@@ -1409,13 +1511,25 @@ fn run_directive(
             // The operating point publishes its solution as a results table,
             // like every sweep class: downstream evidence contracts require
             // each successful run to retain at least one result artifact.
-            let mut content = String::from("name,unit,value\n");
-            for measurement in &measurements {
-                content.push_str(&format!(
-                    "{},{},{}\n",
-                    measurement.name, measurement.unit, measurement.value_decimal,
-                ));
+            let mut writer =
+                BoundedAbortWriter::new(deadline, result_byte_limit.min(MAX_ENGINE_ARTIFACT_BYTES));
+            if writer.write_all(b"name,unit,value\n").is_err() {
+                return Err(map_bounded_write_failure(&writer));
             }
+            for measurement in &measurements {
+                if writeln!(
+                    &mut writer,
+                    "{},{},{}",
+                    measurement.name, measurement.unit, measurement.value_decimal,
+                )
+                .is_err()
+                {
+                    return Err(map_bounded_write_failure(&writer));
+                }
+            }
+            let content = writer.into_string().map_err(|error| {
+                DirectiveFailure::ResultDocument(format!("OP CSV was not UTF-8: {error}"))
+            })?;
             let artifacts = vec![PendingArtifact {
                 file_name: format!("{}-{}.csv", kind.as_str(), ordinal + 1),
                 content_type: "text/csv",
@@ -1435,7 +1549,8 @@ fn run_directive(
                     report: Some(&report),
                 }],
             )?;
-            add_typed_artifact(&mut outcome, kind, ordinal, document)?;
+            let remaining = remaining_outcome_bytes(&outcome, result_byte_limit)?;
+            add_typed_artifact(&mut outcome, kind, ordinal, document, deadline, remaining)?;
             Ok(outcome)
         }
         AnalysisCommand::Dc {
@@ -1512,7 +1627,7 @@ fn run_directive(
                     columns.push((measurement_name("i", name), "A", series));
                 }
             }
-            let mut outcome = columns_outcome(kind, ordinal, columns)?;
+            let mut outcome = columns_outcome(kind, ordinal, columns, deadline, result_byte_limit)?;
             let mut document = analog_document(kind, ordinal).expect("DC is analog");
             document.point_count = points.len();
             document.axes.push(AxisDocument {
@@ -1546,7 +1661,8 @@ fn run_directive(
                 })
                 .collect();
             append_real_solution(&mut document, &solution_points)?;
-            add_typed_artifact(&mut outcome, kind, ordinal, document)?;
+            let remaining = remaining_outcome_bytes(&outcome, result_byte_limit)?;
+            add_typed_artifact(&mut outcome, kind, ordinal, document, deadline, remaining)?;
             Ok(outcome)
         }
         AnalysisCommand::Tran {
@@ -1556,7 +1672,10 @@ fn run_directive(
             max_step,
             uic,
         } => {
-            let ceiling = transient_max_step(*step, *stop, *start, *max_step)?;
+            let ceiling = rspice_core::execution::resolve_transient_maximum_step(
+                *step, *stop, *start, *max_step,
+            )
+            .map_err(|error| DirectiveFailure::InvalidAnalysis(error.to_string()))?;
             let result = engine.run_tran_with_startup_mode_and_abort(
                 netlist,
                 *stop,
@@ -1605,7 +1724,7 @@ fn run_directive(
                     )));
                 }
             }
-            let mut outcome = columns_outcome(kind, ordinal, columns)?;
+            let mut outcome = columns_outcome(kind, ordinal, columns, deadline, result_byte_limit)?;
             if let Some(mut document) = analog_document(kind, ordinal) {
                 document.point_count = result.time.len();
                 document.axes.push(AxisDocument {
@@ -1692,7 +1811,8 @@ fn run_directive(
                     });
                 }
                 let parent_analysis = document.analysis.clone();
-                add_typed_artifact(&mut outcome, kind, ordinal, document)?;
+                let remaining = remaining_outcome_bytes(&outcome, result_byte_limit)?;
+                add_typed_artifact(&mut outcome, kind, ordinal, document, deadline, remaining)?;
                 if !result.fft_results.is_empty() {
                     let fft_document = TransientFftResultDocument::from_engine_results_with_abort(
                         parent_analysis,
@@ -1702,7 +1822,14 @@ fn run_directive(
                         deadline,
                     )
                     .map_err(map_fft_document_error)?;
-                    add_fft_typed_artifact(&mut outcome, ordinal, fft_document, deadline)?;
+                    let remaining = remaining_outcome_bytes(&outcome, result_byte_limit)?;
+                    add_fft_typed_artifact(
+                        &mut outcome,
+                        ordinal,
+                        fft_document,
+                        deadline,
+                        remaining,
+                    )?;
                 }
             }
             Ok(outcome)
@@ -1794,7 +1921,7 @@ fn run_directive(
                     ));
                 }
             }
-            let mut outcome = columns_outcome(kind, ordinal, columns)?;
+            let mut outcome = columns_outcome(kind, ordinal, columns, deadline, result_byte_limit)?;
             let mut document = analog_document(kind, ordinal).expect("AC is analog");
             document.point_count = results.len();
             document.axes.push(AxisDocument {
@@ -1811,7 +1938,8 @@ fn run_directive(
                     currents: &point.currents,
                 }),
             )?;
-            add_typed_artifact(&mut outcome, kind, ordinal, document)?;
+            let remaining = remaining_outcome_bytes(&outcome, result_byte_limit)?;
+            add_typed_artifact(&mut outcome, kind, ordinal, document, deadline, remaining)?;
             Ok(outcome)
         }
         AnalysisCommand::Noise {
@@ -1878,7 +2006,7 @@ fn run_directive(
                         .collect(),
                 ),
             ];
-            let mut outcome = columns_outcome(kind, ordinal, columns)?;
+            let mut outcome = columns_outcome(kind, ordinal, columns, deadline, result_byte_limit)?;
             let mut document = analog_document(kind, ordinal).expect("noise is analog");
             document.point_count = results.len();
             document.axes.push(AxisDocument {
@@ -1925,7 +2053,8 @@ fn run_directive(
                 ),
             ]);
             append_noise_contributions(&mut document, &results);
-            add_typed_artifact(&mut outcome, kind, ordinal, document)?;
+            let remaining = remaining_outcome_bytes(&outcome, result_byte_limit)?;
+            add_typed_artifact(&mut outcome, kind, ordinal, document, deadline, remaining)?;
             Ok(outcome)
         }
         // Directive classes are filtered before dispatch, so any other
@@ -1936,47 +2065,26 @@ fn run_directive(
     }
 }
 
-fn transient_max_step(
-    step: f64,
-    stop: f64,
-    start: Option<f64>,
-    explicit_max_step: Option<f64>,
-) -> Result<f64, DirectiveFailure> {
-    let start = start.unwrap_or(0.0);
-    if !step.is_finite()
-        || step <= 0.0
-        || !stop.is_finite()
-        || !start.is_finite()
-        || start < 0.0
-        || start >= stop
-    {
-        return Err(DirectiveFailure::InvalidAnalysis(
-            "transient TSTEP/TSTART/TSTOP must define a finite positive analysis window".to_owned(),
-        ));
-    }
-    if let Some(max_step) = explicit_max_step {
-        if !max_step.is_finite() || max_step <= 0.0 {
-            return Err(DirectiveFailure::InvalidAnalysis(
-                "transient TMAX must be finite and positive".to_owned(),
-            ));
-        }
-        return Ok(max_step);
-    }
-    Ok(step.min((stop - start) / 50.0))
-}
-
 /// Converts named series columns into measurements plus one CSV artifact.
 fn columns_outcome(
     kind: AnalysisKind,
     ordinal: usize,
     columns: Vec<(String, &'static str, Vec<f64>)>,
+    abort: &dyn AbortSignal,
+    byte_limit: u64,
 ) -> Result<DirectiveOutcome, DirectiveFailure> {
     let mut measurements = Vec::new();
     for (name, unit, series) in &columns {
+        if abort.is_aborted() {
+            return Err(DirectiveFailure::Engine(SimulationError::Aborted));
+        }
         if series.iter().any(|value| !value.is_finite()) {
             return Err(DirectiveFailure::NonFinite);
         }
-        measurements.extend(Measurement::series(name.clone(), unit, series));
+        measurements.extend(
+            Measurement::series_with_abort(name.clone(), unit, series, abort)
+                .map_err(map_measurement_error)?,
+        );
     }
 
     let rows = columns.first().map_or(0, |(_, _, series)| series.len());
@@ -1985,23 +2093,35 @@ fn columns_outcome(
             "legacy result columns do not share a common point count".to_owned(),
         ));
     }
-    let mut content = String::new();
+    let mut writer = BoundedAbortWriter::new(abort, byte_limit.min(MAX_ENGINE_ARTIFACT_BYTES));
     for (index, (name, _, _)) in columns.iter().enumerate() {
-        if index > 0 {
-            content.push(',');
+        if index > 0 && writer.write_all(b",").is_err() {
+            return Err(map_bounded_write_failure(&writer));
         }
-        content.push_str(name);
+        if writer.write_all(name.as_bytes()).is_err() {
+            return Err(map_bounded_write_failure(&writer));
+        }
     }
-    content.push('\n');
+    if writer.write_all(b"\n").is_err() {
+        return Err(map_bounded_write_failure(&writer));
+    }
     for row in 0..rows {
         for (index, (_, _, series)) in columns.iter().enumerate() {
-            if index > 0 {
-                content.push(',');
+            if index > 0 && writer.write_all(b",").is_err() {
+                return Err(map_bounded_write_failure(&writer));
             }
-            content.push_str(&canonical_decimal(series[row]).ok_or(DirectiveFailure::NonFinite)?);
+            let decimal = canonical_decimal(series[row]).ok_or(DirectiveFailure::NonFinite)?;
+            if writer.write_all(decimal.as_bytes()).is_err() {
+                return Err(map_bounded_write_failure(&writer));
+            }
         }
-        content.push('\n');
+        if writer.write_all(b"\n").is_err() {
+            return Err(map_bounded_write_failure(&writer));
+        }
     }
+    let content = writer.into_string().map_err(|error| {
+        DirectiveFailure::ResultDocument(format!("result CSV was not UTF-8: {error}"))
+    })?;
 
     Ok(DirectiveOutcome {
         measurements,
@@ -2137,6 +2257,7 @@ fn succeeded(
     artifacts: Vec<PendingArtifact>,
     directive_count: usize,
     axis_execution: Option<AxisExecutionDocument>,
+    abort: &dyn AbortSignal,
 ) -> Execution {
     let mut manifest = serde_json::json!({
         "format": if axis_execution.is_some() { "rspice-result-v2" } else { "rspice-result-v1" },
@@ -2153,8 +2274,21 @@ fn succeeded(
             .collect::<Vec<_>>(),
     });
     if let Some(axis_execution) = axis_execution {
-        let execution_value = match axis_execution.to_value() {
+        let execution_value = match axis_execution
+            .to_value_with_abort(abort, MAX_ENGINE_RESULT_MANIFEST_BYTES as u64)
+        {
             Ok(value) => value,
+            Err(crate::axis_execution_document::AxisExecutionDocumentError::Aborted) => {
+                return failure_execution(&SimulationError::Aborted);
+            }
+            Err(crate::axis_execution_document::AxisExecutionDocumentError::DocumentTooLarge {
+                ..
+            }) => {
+                return Execution::failed(
+                    "results.manifest_too_large",
+                    "The axis execution manifest exceeds its protocol byte limit.",
+                );
+            }
             Err(error) => {
                 return Execution::failed("results.schema_mismatch", &error.to_string());
             }
@@ -2183,6 +2317,80 @@ fn succeeded(
             result_artifacts: descriptors,
         },
         artifacts,
+    }
+}
+
+enum WireSerializationFailure {
+    Aborted,
+    TooLarge,
+    Invalid,
+}
+
+fn serialize_wire_bounded<T: Serialize + ?Sized>(
+    value: &T,
+    abort: &dyn AbortSignal,
+    byte_limit: u64,
+) -> Result<Vec<u8>, WireSerializationFailure> {
+    if abort.is_aborted() {
+        return Err(WireSerializationFailure::Aborted);
+    }
+    let mut writer = BoundedAbortWriter::new(abort, byte_limit);
+    if serde_json::to_writer(&mut writer, value).is_err() {
+        return Err(match writer.failure() {
+            Some(BoundedWriteFailure::Aborted) => WireSerializationFailure::Aborted,
+            Some(BoundedWriteFailure::TooLarge { .. }) => WireSerializationFailure::TooLarge,
+            Some(BoundedWriteFailure::Allocation(_) | BoundedWriteFailure::LengthOverflow)
+            | None => WireSerializationFailure::Invalid,
+        });
+    }
+    if abort.is_aborted() {
+        return Err(WireSerializationFailure::Aborted);
+    }
+    Ok(writer.into_bytes())
+}
+
+fn finalize_execution(execution: Execution, abort: &dyn AbortSignal) -> Execution {
+    if abort.is_aborted() {
+        return failure_execution(&SimulationError::Aborted);
+    }
+    if let EngineResponse::Succeeded {
+        result_manifest, ..
+    } = &execution.response
+    {
+        match serialize_wire_bounded(
+            result_manifest,
+            abort,
+            MAX_ENGINE_RESULT_MANIFEST_BYTES as u64,
+        ) {
+            Ok(_) => {}
+            Err(WireSerializationFailure::Aborted) => {
+                return failure_execution(&SimulationError::Aborted);
+            }
+            Err(WireSerializationFailure::TooLarge) => {
+                return Execution::failed(
+                    "results.manifest_too_large",
+                    "The result manifest exceeds its protocol byte limit; reduce the number of saved signals in the deck.",
+                );
+            }
+            Err(WireSerializationFailure::Invalid) => {
+                return Execution::failed(
+                    "results.manifest_invalid",
+                    "The result manifest could not be serialized.",
+                );
+            }
+        }
+    }
+    match serialize_wire_bounded(&execution.response, abort, MAX_ENGINE_RESPONSE_BYTES as u64) {
+        Ok(_) => execution,
+        Err(WireSerializationFailure::Aborted) => failure_execution(&SimulationError::Aborted),
+        Err(WireSerializationFailure::TooLarge) => Execution::failed(
+            "results.manifest_too_large",
+            "The result manifest exceeds the response budget; reduce the number of saved signals in the deck.",
+        ),
+        Err(WireSerializationFailure::Invalid) => Execution::failed(
+            "results.manifest_invalid",
+            "The result manifest could not be serialized.",
+        ),
     }
 }
 
@@ -2568,9 +2776,20 @@ mod artifact_publication_tests {
     #[test]
     fn result_artifact_count_and_byte_budgets_accept_only_the_exact_boundaries() {
         assert!(
-            validate_artifact_budget(MAX_ENGINE_RESULT_ARTIFACTS, [MAX_ENGINE_ARTIFACT_BYTES])
-                .is_ok()
+            validate_artifact_budget(
+                MAX_ENGINE_RESULT_ARTIFACTS,
+                [MAX_ENGINE_RETAINED_RESULT_BYTES]
+            )
+            .is_ok()
         );
+        assert!(matches!(
+            validate_artifact_budget(1, [MAX_ENGINE_RETAINED_RESULT_BYTES + 1]),
+            Err(DirectiveFailure::ResultSetBytes)
+        ));
+        assert!(matches!(
+            validate_artifact_budget(2, [MAX_ENGINE_RETAINED_RESULT_BYTES, 1]),
+            Err(DirectiveFailure::ResultSetBytes)
+        ));
         assert!(matches!(
             validate_artifact_budget(MAX_ENGINE_RESULT_ARTIFACTS + 1, [0]),
             Err(DirectiveFailure::ResultArtifactLimit)
@@ -2586,21 +2805,27 @@ mod artifact_publication_tests {
     }
 
     #[test]
-    fn transient_default_tmax_uses_the_smaller_print_step_or_tstart_window_limit() {
+    fn transient_default_tmax_uses_the_shared_core_contract() {
         assert!(
-            matches!(transient_max_step(1.0e-6, 1.0e-3, None, None), Ok(value) if value == 1.0e-6),
+            matches!(rspice_core::execution::resolve_transient_maximum_step(1.0e-6, 1.0e-3, None, None), Ok(value) if value == 1.0e-6),
             "TSTEP is the default ceiling when it is smaller"
         );
         assert!(
-            matches!(transient_max_step(10.0e-3, 1.0, Some(0.9), None), Ok(value) if (value - 2.0e-3).abs() < 1.0e-15),
+            matches!(rspice_core::execution::resolve_transient_maximum_step(10.0e-3, 1.0, Some(0.9), None), Ok(value) if (value - 2.0e-3).abs() < 1.0e-15),
             "(TSTOP-TSTART)/50 is the default ceiling when it is smaller"
         );
         assert!(
-            matches!(transient_max_step(1.0e-6, 1.0e-3, None, Some(7.0e-6)), Ok(value) if value == 7.0e-6),
+            matches!(rspice_core::execution::resolve_transient_maximum_step(1.0e-6, 1.0e-3, None, Some(7.0e-6)), Ok(value) if value == 7.0e-6),
             "an explicit valid TMAX overrides both defaults"
         );
-        assert!(transient_max_step(1.0e-6, 1.0e-3, None, Some(0.0)).is_err());
-        assert!(transient_max_step(1.0e-6, 1.0, Some(1.0), None).is_err());
+        assert!(
+            rspice_core::execution::resolve_transient_maximum_step(1.0e-6, 1.0e-3, None, Some(0.0))
+                .is_err()
+        );
+        assert!(
+            rspice_core::execution::resolve_transient_maximum_step(1.0e-6, 1.0, Some(1.0), None)
+                .is_err()
+        );
     }
 
     #[test]
@@ -2764,6 +2989,7 @@ mod artifact_publication_tests {
             AnalysisKind::Transient,
             0,
             &AlwaysAbort,
+            MAX_ENGINE_RETAINED_RESULT_BYTES,
         ) {
             Err(DirectiveFailure::Engine(SimulationError::Aborted)) => {}
             Err(_) => panic!("cancellation returned the wrong bounded failure"),

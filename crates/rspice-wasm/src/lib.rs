@@ -3636,7 +3636,7 @@ fn execute_authored_analysis(
             max_step,
             uic,
         } if start.is_none_or(|start| start == 0.0) => {
-            let ceiling = resolved_authored_tran_step(*step, *stop, *max_step)?;
+            let ceiling = resolved_authored_tran_step(*step, *stop, *start, *max_step)?;
             validate_transient_request(*stop, ceiling, resource_limits)?;
             let result = engine
                 .run_tran_with_startup_mode_and_abort(
@@ -3744,25 +3744,11 @@ fn authored_frequency_grid(
 fn resolved_authored_tran_step(
     step: f64,
     stop: f64,
+    start: Option<f64>,
     explicit: Option<f64>,
 ) -> DetailedWasmResult<f64> {
-    if !step.is_finite() || step <= 0.0 {
-        return Err(Box::new(WasmError::invalid_argument(format!(
-            "authored transient print step must be positive and finite, got {step}"
-        ))));
-    }
-    if !stop.is_finite() || stop <= 0.0 {
-        return Err(Box::new(WasmError::invalid_argument(format!(
-            "authored transient stop time must be positive and finite, got {stop}"
-        ))));
-    }
-    match explicit {
-        Some(value) if value.is_finite() && value > 0.0 => Ok(value),
-        Some(value) => Err(Box::new(WasmError::invalid_argument(format!(
-            "authored transient maximum step must be positive and finite, got {value}"
-        )))),
-        None => Ok((stop / 50.0).min(step).max(1.0e-18)),
-    }
+    rspice_core::execution::resolve_transient_maximum_step(step, stop, start, explicit)
+        .map_err(|error| Box::new(WasmError::invalid_argument(error.to_string())))
 }
 
 fn unsupported_deck_analysis(message: String) -> Box<WasmError> {
@@ -4867,14 +4853,31 @@ mod tests {
 
     #[test]
     fn authored_tran_default_and_explicit_max_step_contract_is_exact() {
-        assert_eq!(resolved_authored_tran_step(1.0, 100.0, None).unwrap(), 1.0);
-        assert_eq!(resolved_authored_tran_step(10.0, 100.0, None).unwrap(), 2.0);
         assert_eq!(
-            resolved_authored_tran_step(10.0, 100.0, Some(0.25)).unwrap(),
+            resolved_authored_tran_step(1.0, 100.0, None, None).unwrap(),
+            1.0
+        );
+        assert_eq!(
+            resolved_authored_tran_step(10.0, 100.0, None, None).unwrap(),
+            2.0
+        );
+        assert_eq!(
+            resolved_authored_tran_step(10.0, 100.0, Some(90.0), None).unwrap(),
+            0.2
+        );
+        assert_eq!(
+            resolved_authored_tran_step(10.0, 100.0, Some(90.0), Some(0.25)).unwrap(),
             0.25
         );
-        assert!(resolved_authored_tran_step(1.0, 100.0, Some(0.0)).is_err());
-        assert!(resolved_authored_tran_step(1.0, 100.0, Some(f64::NAN)).is_err());
+        for error in [
+            resolved_authored_tran_step(0.0, 100.0, None, None),
+            resolved_authored_tran_step(1.0, 0.0, None, None),
+            resolved_authored_tran_step(1.0, 100.0, Some(-1.0), None),
+            resolved_authored_tran_step(1.0, 100.0, None, Some(0.0)),
+            resolved_authored_tran_step(1.0, 100.0, None, Some(f64::NAN)),
+        ] {
+            assert_eq!(error.unwrap_err().code, "invalid_argument");
+        }
     }
 
     const TYPED_DOCUMENT_DECK: &str = "browser typed analog document\n\

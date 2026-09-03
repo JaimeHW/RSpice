@@ -67,28 +67,6 @@ pub(super) fn parse_variation(variation: &str) -> PyResult<FreqVariation> {
     }
 }
 
-/// SPICE default transient max step: explicit value, else
-/// min(tstep, window/50), floored at 1e-18 s.
-pub(super) fn resolve_tran_max_step(
-    tstep: f64,
-    tstop: f64,
-    tstart: f64,
-    explicit: Option<f64>,
-) -> f64 {
-    explicit
-        .filter(|step| step.is_finite() && *step > 0.0)
-        .unwrap_or_else(|| {
-            let window = tstop - tstart;
-            let window = if window.is_finite() && window > 0.0 {
-                window
-            } else {
-                tstop.abs().max(tstep.abs())
-            };
-            (window / 50.0).min(if tstep > 0.0 { tstep } else { f64::INFINITY })
-        })
-        .max(1e-18)
-}
-
 /// Generate frequency points for an analysis directive's sweep spec.
 pub(super) fn sweep_frequencies(
     variation: FreqVariation,

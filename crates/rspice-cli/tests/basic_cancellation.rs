@@ -43,7 +43,7 @@ fn legacy_temperature_runner_has_no_non_abort_dc_wrapper() {
         .split_once("pub(super) fn run_temp")
         .expect("legacy temperature runner remains present")
         .1
-        .split_once("fn resolve_transient_max_step")
+        .split_once("#[cfg(test)]\nmod restart_tests")
         .expect("temperature runner has a stable end marker")
         .0;
 

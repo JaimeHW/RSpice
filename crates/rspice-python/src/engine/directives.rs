@@ -685,7 +685,10 @@ fn execute(
             uic,
         } => {
             let tstart = start.unwrap_or(0.0);
-            let resolved = resolve_tran_max_step(*step, *stop, tstart, *max_step);
+            let resolved = rspice_core::execution::resolve_transient_maximum_step(
+                *step, *stop, *start, *max_step,
+            )
+            .map_err(|error| crate::errors::value_error(error.to_string()))?;
             let result = py_engine.tran_impl(
                 py,
                 netlist,

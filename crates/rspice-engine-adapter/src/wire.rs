@@ -31,6 +31,13 @@ pub const MAX_ENGINE_RESULT_MANIFEST_BYTES: usize = 128 * 1024;
 pub const MAX_ENGINE_RESULT_ARTIFACTS: usize = 100;
 pub const MAX_ENGINE_ARTIFACTS: usize = 100;
 pub const MAX_ENGINE_ARTIFACT_BYTES: u64 = 50 * 1024 * 1024 * 1024;
+/// Maximum encoded result bytes retained in adapter memory for one response.
+///
+/// The protocol's 50-GiB per-file ceiling is a storage contract, not a safe
+/// process-memory budget. The adapter currently stages result files in memory,
+/// so it applies this independent aggregate ceiling until result streaming is
+/// introduced.
+pub const MAX_ENGINE_RETAINED_RESULT_BYTES: u64 = 512 * 1024 * 1024;
 pub const MAX_SIMULATION_ATTEMPTS: i32 = 20;
 pub const MAX_FAILURE_CODE_BYTES: usize = 120;
 pub const MAX_FAILURE_DETAIL_CHARS: usize = 1_024;

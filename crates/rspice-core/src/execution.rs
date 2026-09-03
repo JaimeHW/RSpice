@@ -9,6 +9,7 @@ mod materialized;
 mod plan;
 mod schema;
 mod topology;
+mod transient;
 
 pub use capability::{
     ANALYSIS_CAPABILITY_MATRIX, AnalysisResultCapability, AnalysisResultKind, MappingStatus,
@@ -23,10 +24,11 @@ pub use materialized::{
 pub use plan::{
     AnalysisInstanceId, AnalysisKind, AnalysisRequest, AxisAssignment, AxisKind, DataBinding,
     DeckPlan, DeckPlanError, PlannedAnalysis, RunAxis, RunAxisValue, RunCoordinate,
-    RunCoordinateId, StepAxisTarget,
+    RunCoordinateId, StepAxisTarget, numeric_run_coordinate_id,
 };
 pub use schema::{
     CoordinateSchema, SchemaUnion, SignalDescriptor, SignalKind, SignalOwner, SignalSchema,
     SignalSchemaError, SignalShape, SignalUnit, SignalValueType,
 };
 pub use topology::{TopologyComponent, TopologyFingerprint, TopologyFingerprintError};
+pub use transient::{TransientMaximumStepError, resolve_transient_maximum_step};

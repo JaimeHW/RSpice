@@ -495,7 +495,19 @@ pub(super) fn run_transient(
     // --tran-stop overrides the deck's stop time so checkpoint segments can
     // share byte-identical source (the checkpoint fingerprint covers it).
     let tstop = ctx.args.tran_stop.unwrap_or(tstop);
-    let internal_max_step = resolve_transient_max_step(tstep, tstop, tstart, max_step);
+    let internal_max_step = rspice_core::execution::resolve_transient_maximum_step(
+        tstep,
+        tstop,
+        Some(tstart),
+        max_step,
+    )
+    .map_err(|error| CliError::InvalidArgument {
+        message: error.to_string(),
+        suggestion: Some(
+            "use finite TSTEP/TMAX values with 0 <= TSTART < TSTOP in the .TRAN directive"
+                .to_owned(),
+        ),
+    })?;
 
     let pb = if ctx.quiet {
         indicatif::ProgressBar::hidden()
@@ -4036,38 +4048,6 @@ pub(super) fn run_temp(ctx: &RunContext<'_>, temperatures: &[f64]) -> Result<(),
 
     ensure_not_cancelled()?;
     Ok(())
-}
-
-fn resolve_transient_max_step(
-    tstep: f64,
-    tstop: f64,
-    tstart: f64,
-    explicit_max_step: Option<f64>,
-) -> f64 {
-    explicit_max_step
-        .filter(|step| step.is_finite() && *step > 0.0)
-        .unwrap_or_else(|| default_transient_max_step(tstep, tstop, tstart))
-        .max(1e-18)
-}
-
-fn default_transient_max_step(tstep: f64, tstop: f64, tstart: f64) -> f64 {
-    let analysis_window = tstop - tstart;
-    let fallback_window = if analysis_window.is_finite() && analysis_window > 0.0 {
-        analysis_window
-    } else {
-        tstop.abs().max(tstep.abs())
-    };
-    let window_limit = if fallback_window.is_finite() && fallback_window > 0.0 {
-        fallback_window / 50.0
-    } else {
-        1e-18
-    };
-
-    if tstep.is_finite() && tstep > 0.0 && tstep < window_limit {
-        tstep
-    } else {
-        window_limit
-    }
 }
 
 #[cfg(test)]

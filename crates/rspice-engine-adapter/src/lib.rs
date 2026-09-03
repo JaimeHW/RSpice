@@ -4,6 +4,7 @@
 //! byte-exact requests through the same code the executor validates with.
 
 pub mod axis_execution_document;
+mod bounded_serialization;
 pub mod document;
 pub mod execute;
 pub mod fft_result_document;

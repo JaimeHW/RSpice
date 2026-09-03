@@ -1540,6 +1540,43 @@ fn coordinate_semantic_id(assignments: &[AxisAssignment]) -> Result<[u8; 16], De
     Ok(id)
 }
 
+/// Recompute the stable coordinate ID that [`RunCoordinate`] assigns to a
+/// purely numeric STEP/TEMP coordinate from axis assignments carried by an
+/// external typed result contract.
+///
+/// It shares the planner's versioned hash, so a reader that recomputes the ID
+/// can reject coordinate IDs that were detached from or tampered independently
+/// of their assignments without ever drifting from the planner's own identity.
+pub fn numeric_run_coordinate_id(
+    assignments: &[(AxisKind, &str, Value)],
+    occurrence: u32,
+) -> Result<RunCoordinateId, DeckPlanError> {
+    let mut canonical =
+        try_vec_with_capacity(assignments.len(), "canonical numeric coordinate identity")?;
+    for &(kind, name, value) in assignments {
+        if name.is_empty() {
+            return Err(DeckPlanError::EmptyAxisName);
+        }
+        if !value.is_finite() {
+            return Err(DeckPlanError::NonFiniteAxisValue {
+                axis: name.to_owned(),
+                value,
+            });
+        }
+        canonical.push(AxisAssignment {
+            kind,
+            name: name.to_owned(),
+            value: RunAxisValue::Numeric(value),
+            value_index: 0,
+            step_target: None,
+        });
+    }
+    Ok(RunCoordinateId::from_parts(
+        coordinate_semantic_id(&canonical)?,
+        occurrence,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
