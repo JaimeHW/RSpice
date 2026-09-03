@@ -17,14 +17,13 @@
 //! ```
 
 #![allow(clippy::needless_range_loop, clippy::too_many_arguments)]
-use rspice_core::abort_signal::AbortSignal;
 use rspice_core::engine::{ConvergenceConfig, SimulationConfig};
 use rspice_core::{Complex64, Engine, Netlist, Value};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 mod codec;
 mod dc_analyses;
@@ -238,28 +237,7 @@ enum AcProbe {
     },
 }
 
-#[derive(Debug, Clone, Copy)]
-struct DeadlineAbort {
-    start: Instant,
-    deadline: Duration,
-}
-
-impl DeadlineAbort {
-    fn new(start: Instant, timeout_ms: u128) -> Self {
-        let millis = timeout_ms.min(u128::from(u64::MAX)) as u64;
-        Self {
-            start,
-            deadline: Duration::from_millis(millis),
-        }
-    }
-}
-
-impl AbortSignal for DeadlineAbort {
-    #[inline]
-    fn is_aborted(&self) -> bool {
-        self.start.elapsed() >= self.deadline
-    }
-}
+use super::deadline::DeadlineAbort;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ValidationContract {

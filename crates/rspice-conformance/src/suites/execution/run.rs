@@ -331,11 +331,17 @@ impl ExecutionRunner {
                         return (AnalysisOutcome::Refused(error.to_string()), false);
                     }
                 };
-                match s_param::extract_s_matrix(netlist, &ports, &frequencies, |driven| {
-                    engine
-                        .run_ac_with_abort(driven, &frequencies, abort)
-                        .map_err(|error| error.to_string())
-                }) {
+                match s_param::extract_s_matrix_with_abort(
+                    netlist,
+                    &ports,
+                    &frequencies,
+                    |driven| {
+                        engine
+                            .run_ac_with_abort(driven, &frequencies, abort)
+                            .map_err(|error| error.to_string())
+                    },
+                    abort,
+                ) {
                     Ok(parameters)
                         if parameters
                             .iter()
