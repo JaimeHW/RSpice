@@ -7802,6 +7802,23 @@ impl Engine {
                         continue;
                     }
 
+                    // A compact-model type the Verilog-A model program owns is
+                    // refused by name before native resolution can report it
+                    // as an incompatible type. The generated routing above
+                    // consumed it when its module is compiled in, so reaching
+                    // here means this build does not carry it.
+                    if let Some(device_model) = model_def
+                        && let Some(delivered) =
+                            verilog_a_delivered_bjt_model(&device_model.model_type)
+                    {
+                        return Err(verilog_a_delivered_bjt_model_error(
+                            &element.name,
+                            model,
+                            &device_model.model_type,
+                            delivered,
+                        ));
+                    }
+
                     let resolved_bjt_type = if let Some(device_model) = model_def {
                         resolve_bjt_type_from_model(&device_model.model_type).ok_or_else(|| {
                             SimulationError::Circuit(format!(

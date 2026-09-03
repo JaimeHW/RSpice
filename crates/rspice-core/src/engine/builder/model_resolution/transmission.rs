@@ -1010,19 +1010,17 @@ mod tests {
     }
 
     #[test]
-    fn ltra_classifies_but_rejects_finite_rg_until_native_stamps_exist() {
-        let err = resolve_test_tline_err(
+    fn ltra_classifies_finite_rg_as_its_own_memoryless_class() {
+        let params = resolve_test_tline(
             r#"title
 .model y ltra r=3 g=1u len=10
 .end
 "#,
         );
-        assert!(err.to_string().contains("finite-length RG line"), "{err}");
-        assert!(
-            err.to_string()
-                .contains("native execution stamps are not implemented"),
-            "{err}"
-        );
+        assert_eq!(params.ltra_class, Some(LtraModelClass::Rg));
+        assert!(params.is_finite_rg());
+        assert!(!params.is_finite_rc());
+        assert!(!params.is_zero_length_rc_rg());
     }
 
     #[test]

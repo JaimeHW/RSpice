@@ -149,6 +149,21 @@ pub(super) fn try_route_generated_bjt_model(
         )));
     }
     if !target.is_available() {
+        // A model type the Verilog-A program owns gets the routing-boundary
+        // rejection that names its module and feature; a level-selected route
+        // keeps the dialect-compatibility wording, because there the deck
+        // asked for a dialect's device rather than for a named module.
+        let model_type = model_def
+            .map(|model| model.model_type.as_str())
+            .unwrap_or(model_name);
+        if let Some(delivered) = verilog_a_delivered_bjt_model(model_type) {
+            return Err(verilog_a_delivered_bjt_model_error(
+                &element.name,
+                model_name,
+                model_type,
+                delivered,
+            ));
+        }
         return Err(SimulationError::Circuit(format!(
             "BJT '{}': model '{}' selects generated Verilog-A model '{}' under {:?} compatibility, but that exact model is not available in this build",
             element.name, model_name, target.model_name, spice_dialect
