@@ -24,7 +24,7 @@ mod dto;
 mod errors;
 mod exports;
 mod handles;
-mod hb_request;
+mod hb_config;
 mod js_interop;
 mod options;
 mod runners;

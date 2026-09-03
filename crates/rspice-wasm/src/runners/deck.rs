@@ -8,9 +8,21 @@
 //! A family this build cannot execute is refused by name, with the core API
 //! that is missing spelled out, before any solver work starts. It is never
 //! quietly turned into an operating point.
+//!
+//! # Output projection
+//!
+//! This module decides nothing about which signals a result retains. The core
+//! runners apply the deck's own `.SAVE`/`.PRINT` output requests, and the
+//! document reports a channel they excluded as
+//! `SeriesAvailability::NotProjected` with its descriptor and unit intact, so
+//! a projected-out signal stays visible evidence instead of vanishing or
+//! becoming a zero. [`execute_analysis`] is the single seam where an explicit
+//! projection object would be threaded through if a caller-supplied one is
+//! ever accepted here: it is the only place that calls a core runner, so a
+//! projection would be applied once rather than per family.
 
 use rspice_core::analysis::{
-    Distribution, FrequencyGridError, PacConfig, PssConfig, StbConfig, StbSweepType,
+    Distribution, FrequencyGridError, HbConfig, PacConfig, PssConfig, StbConfig, StbSweepType,
 };
 use rspice_core::engine::{
     CompressionConfig, HbOperatingPoint, PssOperatingPoint, TransientStartupMode,
@@ -30,7 +42,7 @@ use rspice_core::{AbortSignal, Engine, Netlist, NoAbort, ResourceKind, ResourceL
 use crate::DetailedWasmResult;
 use crate::abort::{aborted_error, ensure_not_aborted};
 use crate::errors::{WasmError, resource_limit_error};
-use crate::hb_request::{HbRequest, hb_request_for_tones};
+use crate::hb_config::hb_config_for_tones;
 use crate::options::WasmExecutionOptions;
 use crate::support::{engine_with_resource_limits, parse_netlist_detailed};
 
@@ -203,7 +215,7 @@ pub fn run_authored_deck_document_detailed(source: &str) -> DetailedWasmResult<D
 struct PeriodicOperatingPoints {
     pss: Vec<(AnalysisInstanceId, PssOperatingPoint)>,
     hb: Vec<(AnalysisInstanceId, HbOperatingPoint)>,
-    hb_requests: Vec<(AnalysisInstanceId, HbRequest)>,
+    hb_configs: Vec<(AnalysisInstanceId, HbConfig)>,
 }
 
 impl PeriodicOperatingPoints {
@@ -221,11 +233,11 @@ impl PeriodicOperatingPoints {
             .map(|(_, point)| point)
     }
 
-    fn hb_request(&self, id: AnalysisInstanceId) -> Option<&HbRequest> {
-        self.hb_requests
+    fn hb_config(&self, id: AnalysisInstanceId) -> Option<&HbConfig> {
+        self.hb_configs
             .iter()
             .find(|(candidate, _)| *candidate == id)
-            .map(|(_, request)| request)
+            .map(|(_, config)| config)
     }
 }
 
@@ -507,9 +519,9 @@ fn execute_analysis(
         }
 
         AnalysisCommand::Hb { frequencies } => {
-            let request = hb_request_for_tones(netlist, frequencies)?;
+            let config = hb_config_for_tones(netlist, frequencies)?;
             let result = engine
-                .run_hb_with_abort(netlist, request.config.clone(), abort)
+                .run_hb_with_abort(netlist, config.clone(), abort)
                 .map_err(simulation_error)?;
             ensure_not_aborted(abort)?;
             let builder = AnalysisResultDocument::from_harmonic_balance(id, &result.result)
@@ -519,16 +531,16 @@ fn execute_analysis(
                 .try_reserve(1)
                 .map_err(|_| allocation_error("retained HB operating points"))?;
             periodic
-                .hb_requests
+                .hb_configs
                 .try_reserve(1)
                 .map_err(|_| allocation_error("retained HB configurations"))?;
             periodic.hb.push((id, result.operating_point));
-            periodic.hb_requests.push((id, request));
+            periodic.hb_configs.push((id, config));
             Ok(vec![builder])
         }
 
         AnalysisCommand::Pac(card) => {
-            let mut config = PacConfig::from(card.as_ref());
+            let config = PacConfig::from(card.as_ref());
             preflight_periodic_sweep(&card.sweep, resource_limits)?;
             let upstream = upstream_or_refuse(upstream, ".PAC", card.source)?;
             let result = if let Some(operating_point) = periodic.pss(upstream) {
@@ -536,7 +548,6 @@ fn execute_analysis(
                     .run_pac_from_pss_with_abort(netlist, config, operating_point, abort)
                     .map_err(simulation_error)?
             } else if let Some(operating_point) = periodic.hb(upstream) {
-                config.fundamental_freq = 0.0;
                 engine
                     .run_pac_from_hb_with_abort(netlist, config, operating_point, abort)
                     .map_err(simulation_error)?
@@ -555,7 +566,7 @@ fn execute_analysis(
 
         AnalysisCommand::Envelope(card) => {
             let upstream = upstream_or_refuse(upstream, ".ENVELOPE", PeriodicSourceSelector::Hb)?;
-            let Some(request) = periodic.hb_request(upstream) else {
+            let Some(config) = periodic.hb_config(upstream) else {
                 return Err(unsupported_deck_analysis(format!(
                     "authored .ENVELOPE card names upstream {upstream}, which is not a retained harmonic-balance carrier"
                 )));
@@ -563,7 +574,7 @@ fn execute_analysis(
             let result = engine
                 .run_envelope_with_abort(
                     netlist,
-                    request.config.clone(),
+                    config.clone(),
                     &card.frozen_sources,
                     card.duration,
                     card.max_step,

@@ -238,6 +238,7 @@ through the JavaScript handle.
 - `errors`: the structured `WasmError` and its JavaScript projection
 - `dto`: parser-diagnostic and readiness summaries
 - `document`: the descriptor-only projection of one core result document
+- `hb_config`: the authored `.HB` tone list, resolved through the core constructors
 - `handles`: the retained handle that publishes bounded typed-array windows
 - `js_interop`: JavaScript value decoding and typed-array publication
 - `runners::{deck, direct}`: the authored-deck route and the direct entry points
