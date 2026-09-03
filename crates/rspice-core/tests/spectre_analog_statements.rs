@@ -479,4 +479,25 @@ fn lowered_transient_and_ac_analyses_match_their_spice_equivalents() {
         authored.voltage_waveform(authored_index),
         "the lowered vccs must drive the same waveform as the authored G card"
     );
+
+    let ac_point = |netlist: &Netlist| {
+        let point = engine
+            .run_ac(netlist, &[1.0e3])
+            .expect("AC point solves")
+            .pop()
+            .expect("one requested AC point");
+        let index = point
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("out"))
+            .expect("out is an AC node");
+        point.voltages[index]
+    };
+    let lowered_ac = ac_point(&spectre);
+    let authored_ac = ac_point(&spice);
+    assert_eq!(
+        (lowered_ac.re.to_bits(), lowered_ac.im.to_bits()),
+        (authored_ac.re.to_bits(), authored_ac.im.to_bits()),
+        "the lowered AC source magnitude must match the authored AC card"
+    );
 }
