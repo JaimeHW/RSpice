@@ -81,6 +81,16 @@ pub struct PyPacResult {
     inner: rspice_core::analysis::PacResult,
     #[pyo3(get)]
     pub converged: bool,
+    evidence: Option<DocumentEvidence<()>>,
+}
+
+impl CarriesDocumentEvidence for PyPacResult {
+    fn bind_analysis(&mut self, analysis: rspice_core::execution::AnalysisInstanceId) {
+        self.evidence = self
+            .evidence
+            .take()
+            .map(|evidence| evidence.with_analysis(analysis));
+    }
 }
 
 impl PyPacResult {
@@ -88,7 +98,19 @@ impl PyPacResult {
         Self {
             inner: result.result.clone(),
             converged: result.converged,
+            evidence: Some(DocumentEvidence::sole(
+                rspice_core::execution::AnalysisKind::Pac,
+                (),
+            )),
         }
+    }
+
+    /// The shared result document, projected from the retained sidebands.
+    fn shared_document(&self, py: Python<'_>) -> PyResult<AnalysisResultDocument> {
+        let analysis = document::evidence(&self.evidence, "PAC")?.analysis;
+        document::build(py, |abort| {
+            AnalysisResultDocument::from_pac(analysis, &self.inner)?.build_with_abort(abort)
+        })
     }
 
     /// The solved record for one `(frequency, sideband)` coordinate.
@@ -287,6 +309,30 @@ impl PyPacResult {
         )
     }
 
+    /// Typed inventory of every signal in this result's shared document.
+    ///
+    /// The descriptors are the ones the CLI, the WASM build and the engine
+    /// adapter publish, so a canonical name, unit, owner, or availability
+    /// means the same thing on every surface.
+    fn signals(&self, py: Python<'_>) -> PyResult<Vec<PySignalDescriptor>> {
+        Ok(document::signals(&self.shared_document(py)?))
+    }
+
+    /// Every analysis-owned scalar this result publishes, with its unit.
+    fn scalars(&self, py: Python<'_>) -> PyResult<Vec<PyResultScalar>> {
+        Ok(document::scalars(&self.shared_document(py)?))
+    }
+
+    /// Every per-device observable history this result captured.
+    fn device_observables(&self, py: Python<'_>) -> PyResult<Vec<PyDeviceObservable>> {
+        Ok(document::device_observables(&self.shared_document(py)?))
+    }
+
+    /// The whole shared result document as JSON-serializable Python data.
+    fn document<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        document::json_view(py, &self.shared_document(py)?)
+    }
+
     /// Rebuild from pickled state. Not part of the public API.
     ///
     /// Each sideband's absolute frequency is recomputed by `PacResult::new`
@@ -428,7 +474,11 @@ impl PyPacResult {
         inner.residual = residual;
         inner.input_source = input_source;
         inner.output_node = output_node;
-        Ok(Self { inner, converged })
+        Ok(Self {
+            inner,
+            converged,
+            evidence: None,
+        })
     }
 
     #[allow(clippy::type_complexity)]

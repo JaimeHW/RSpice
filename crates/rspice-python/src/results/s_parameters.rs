@@ -20,6 +20,18 @@ pub struct PySParameterResult {
     reference_impedances: Vec<f64>,
     parameters: Vec<Vec<Vec<rspice_core::Complex64>>>,
     noise: Option<SParameterNoiseData>,
+    /// The core scattering sweep, kept because the accessors publish it
+    /// pivoted into port-major cubes the shared projection cannot read back.
+    evidence: Option<DocumentEvidence<rspice_core::analysis::s_param::SParameterResult>>,
+}
+
+impl CarriesDocumentEvidence for PySParameterResult {
+    fn bind_analysis(&mut self, analysis: rspice_core::execution::AnalysisInstanceId) {
+        self.evidence = self
+            .evidence
+            .take()
+            .map(|evidence| evidence.with_analysis(analysis));
+    }
 }
 
 /// Optional `.SP donoise` data attached to an S-parameter sweep.
@@ -171,7 +183,21 @@ impl PySParameterResult {
             reference_impedances: run.ports.iter().map(|port| port.z0).collect(),
             parameters,
             noise: run.port_noise.as_ref().map(SParameterNoiseData::from_core),
+            evidence: Some(DocumentEvidence::sole(
+                rspice_core::execution::AnalysisKind::Sp,
+                run.scattering.clone(),
+            )),
         }
+    }
+
+    /// The shared result document, projected from the retained sweep.
+    fn shared_document(&self, py: Python<'_>) -> PyResult<AnalysisResultDocument> {
+        let evidence = document::evidence(&self.evidence, "S-parameter")?;
+        let analysis = evidence.analysis;
+        let scattering = &evidence.core;
+        document::build(py, |abort| {
+            AnalysisResultDocument::from_s_parameters(analysis, scattering)?.build_with_abort(abort)
+        })
     }
 
     fn parameter(
@@ -247,6 +273,30 @@ impl PySParameterResult {
 
 #[pymethods]
 impl PySParameterResult {
+    /// Typed inventory of every signal in this result's shared document.
+    ///
+    /// The descriptors are the ones the CLI, the WASM build and the engine
+    /// adapter publish, so a canonical name, unit, owner, or availability
+    /// means the same thing on every surface.
+    fn signals(&self, py: Python<'_>) -> PyResult<Vec<PySignalDescriptor>> {
+        Ok(document::signals(&self.shared_document(py)?))
+    }
+
+    /// Every analysis-owned scalar this result publishes, with its unit.
+    fn scalars(&self, py: Python<'_>) -> PyResult<Vec<PyResultScalar>> {
+        Ok(document::scalars(&self.shared_document(py)?))
+    }
+
+    /// Every per-device observable history this result captured.
+    fn device_observables(&self, py: Python<'_>) -> PyResult<Vec<PyDeviceObservable>> {
+        Ok(document::device_observables(&self.shared_document(py)?))
+    }
+
+    /// The whole shared result document as JSON-serializable Python data.
+    fn document<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        document::json_view(py, &self.shared_document(py)?)
+    }
+
     #[getter]
     fn frequencies<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
         self.frequencies.to_pyarray(py)

@@ -200,6 +200,18 @@ pub struct PyMonteCarloResult {
     pub num_failures: usize,
     /// Statistics for all variables (internal storage)
     variables: std::collections::HashMap<String, PyVariableStatistics>,
+    /// The core trial statistics, kept because the Python projection drops
+    /// the histogram-edge/bin pairing the shared document publishes.
+    evidence: Option<DocumentEvidence<rspice_core::analysis::MonteCarloResult>>,
+}
+
+impl CarriesDocumentEvidence for PyMonteCarloResult {
+    fn bind_analysis(&mut self, analysis: rspice_core::execution::AnalysisInstanceId) {
+        self.evidence = self
+            .evidence
+            .take()
+            .map(|evidence| evidence.with_analysis(analysis));
+    }
 }
 
 impl PyMonteCarloResult {
@@ -215,7 +227,21 @@ impl PyMonteCarloResult {
             all_converged: result.all_converged,
             num_failures: result.num_failures,
             variables,
+            evidence: Some(DocumentEvidence::sole(
+                rspice_core::execution::AnalysisKind::MonteCarlo,
+                result.clone(),
+            )),
         }
+    }
+
+    /// The shared result document, projected from the retained trials.
+    fn shared_document(&self, py: Python<'_>) -> PyResult<AnalysisResultDocument> {
+        let evidence = document::evidence(&self.evidence, "Monte Carlo")?;
+        let analysis = evidence.analysis;
+        let result = &evidence.core;
+        document::build(py, |abort| {
+            AnalysisResultDocument::from_monte_carlo(analysis, result)?.build_with_abort(abort)
+        })
     }
 
     /// Exact match first, then a case-insensitive scan.
@@ -231,6 +257,30 @@ impl PyMonteCarloResult {
 
 #[pymethods]
 impl PyMonteCarloResult {
+    /// Typed inventory of every signal in this result's shared document.
+    ///
+    /// The descriptors are the ones the CLI, the WASM build and the engine
+    /// adapter publish, so a canonical name, unit, owner, or availability
+    /// means the same thing on every surface.
+    fn signals(&self, py: Python<'_>) -> PyResult<Vec<PySignalDescriptor>> {
+        Ok(document::signals(&self.shared_document(py)?))
+    }
+
+    /// Every analysis-owned scalar this result publishes, with its unit.
+    fn scalars(&self, py: Python<'_>) -> PyResult<Vec<PyResultScalar>> {
+        Ok(document::scalars(&self.shared_document(py)?))
+    }
+
+    /// Every per-device observable history this result captured.
+    fn device_observables(&self, py: Python<'_>) -> PyResult<Vec<PyDeviceObservable>> {
+        Ok(document::device_observables(&self.shared_document(py)?))
+    }
+
+    /// The whole shared result document as JSON-serializable Python data.
+    fn document<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        document::json_view(py, &self.shared_document(py)?)
+    }
+
     /// Get statistics for a specific variable by name (case-insensitive)
     ///
     /// Raises:
@@ -324,6 +374,7 @@ impl PyMonteCarloResult {
             all_converged,
             num_failures,
             variables: variables.into_iter().collect(),
+            evidence: None,
         }
     }
 

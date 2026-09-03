@@ -7,6 +7,19 @@
 
 use super::*;
 
+/// Bind one produced result to the identity the canonical plan minted for the
+/// card that produced it.
+///
+/// A deck may author several cards of one family, and each result's shared
+/// document has to name its own card. Without this every `.AC` result in a
+/// deck would publish under `ac-001`.
+fn identified<T: crate::results::CarriesDocumentEvidence>(
+    result: T,
+    context: Option<&ExecutionContext>,
+) -> T {
+    crate::results::bind_document_identity(result, context.and_then(|context| context.analysis))
+}
+
 /// Run one directive, recording what it produced.
 pub(super) fn execute(
     py_engine: &PyEngine,
@@ -28,7 +41,7 @@ pub(super) fn execute(
     match analysis {
         AnalysisCommand::Op => {
             let result = py_engine.dc_op_impl(py, netlist)?;
-            let handle = Py::new(py, result)?;
+            let handle = Py::new(py, identified(result, context))?;
             out.op.push_with(handle, |handle| handle.clone_ref(py));
             out.records
                 .push(PyAnalysisRecord::executed("op", ".op".to_string()));
@@ -66,7 +79,7 @@ pub(super) fn execute(
                 )?,
                 None => PyDcSweepResult::new_named_with_reports(results, source),
             };
-            let handle = Py::new(py, result)?;
+            let handle = Py::new(py, identified(result, context))?;
             out.dc.push_with(handle, |handle| handle.clone_ref(py));
             let description = describe_analysis(analysis);
             out.records
@@ -95,7 +108,7 @@ pub(super) fn execute(
                     TransientStartup::DeckInferred => None,
                 };
             let result = py_engine.tran_impl(py, netlist, *stop, resolved, tstart, startup_mode)?;
-            let handle = Py::new(py, result)?;
+            let handle = Py::new(py, identified(result, context))?;
             out.tran.push_with(handle, |handle| handle.clone_ref(py));
             let mut detail = format!(".tran {step} {stop}");
             if tstart > 0.0 {
@@ -117,7 +130,7 @@ pub(super) fn execute(
                 max_analysis_points(),
             )?;
             let result = py_engine.ac_impl(py, netlist, frequencies)?;
-            let handle = Py::new(py, result)?;
+            let handle = Py::new(py, identified(result, context))?;
             out.ac.push_with(handle, |handle| handle.clone_ref(py));
             out.records.push(PyAnalysisRecord::executed(
                 "ac",
@@ -130,7 +143,7 @@ pub(super) fn execute(
         AnalysisCommand::AcData { table_name } => {
             let frequencies = ac_data_frequencies(net, table_name)?;
             let result = py_engine.ac_impl(py, netlist, frequencies)?;
-            let handle = Py::new(py, result)?;
+            let handle = Py::new(py, identified(result, context))?;
             out.ac.push_with(handle, |handle| handle.clone_ref(py));
             out.records.push(PyAnalysisRecord::executed(
                 "ac_data",
@@ -150,7 +163,8 @@ pub(super) fn execute(
             let result = run_interruptible(py, &py_engine.active_runs, |abort| {
                 engine.run_hb_with_abort(net, config, abort)
             })?;
-            out.hb.push(PyHbResult::from_core(&result));
+            out.hb
+                .push(identified(PyHbResult::from_core(&result), context));
             // Retained under this instance's canonical identity so a bound
             // `.PAC`, `.PNOISE`, or `.ENVELOPE` consumes this exact carrier.
             if let Some(id) = context.and_then(|context| context.analysis_id.clone()) {
@@ -179,7 +193,7 @@ pub(super) fn execute(
                 max_analysis_points(),
             )?;
             let result = py_engine.distortion_impl(py, netlist, frequencies, *f2_over_f1)?;
-            let handle = Py::new(py, result)?;
+            let handle = Py::new(py, identified(result, context))?;
             out.distortion
                 .push_with(handle, |handle| handle.clone_ref(py));
             out.records.push(PyAnalysisRecord::executed(
@@ -201,12 +215,10 @@ pub(super) fn execute(
                 *stop_freq,
                 max_analysis_points(),
             )?;
-            out.s_parameters.push(py_engine.sparameter_impl(
-                py,
-                netlist,
-                frequencies,
-                *do_noise,
-            )?);
+            out.s_parameters.push(identified(
+                py_engine.sparameter_impl(py, netlist, frequencies, *do_noise)?,
+                context,
+            ));
             out.records.push(PyAnalysisRecord::executed(
                 "sp",
                 describe_analysis(analysis),
@@ -266,8 +278,10 @@ pub(super) fn execute(
                 &frequencies,
                 None,
             )?;
-            let converted: Vec<PyNoiseResult> =
-                results.iter().map(PyNoiseResult::from_core).collect();
+            let converted: Vec<PyNoiseResult> = PyNoiseResult::sweep_from_core(&results)
+                .into_iter()
+                .map(|point| identified(point, context))
+                .collect();
             out.noise.push(converted);
             out.noise_core = Some(results);
             out.records.push(PyAnalysisRecord::executed(
@@ -293,8 +307,10 @@ pub(super) fn execute(
                     abort,
                 )
             })?;
-            let converted: Vec<PyNoiseResult> =
-                results.iter().map(PyNoiseResult::from_core).collect();
+            let converted: Vec<PyNoiseResult> = PyNoiseResult::sweep_from_core(&results)
+                .into_iter()
+                .map(|point| identified(point, context))
+                .collect();
             out.noise.push(converted);
             out.noise_core = Some(results);
             out.records.push(PyAnalysisRecord::executed(
@@ -316,7 +332,7 @@ pub(super) fn execute(
                 *output_is_current,
                 input_source,
             )?;
-            out.tf.push(result);
+            out.tf.push(identified(result, context));
             out.records.push(PyAnalysisRecord::executed(
                 "tf",
                 format!(".tf {output_node} {input_source}"),
@@ -338,7 +354,7 @@ pub(super) fn execute(
                 *start_freq,
                 *stop_freq,
             )?;
-            out.stb.push(result);
+            out.stb.push(identified(result, context));
             out.records.push(PyAnalysisRecord::executed(
                 "stb",
                 describe_analysis(analysis),
@@ -368,15 +384,20 @@ pub(super) fn execute(
                 compute_poles,
                 compute_zeros,
             )?;
-            out.pz.push(result);
+            out.pz.push(identified(result, context));
             out.records.push(PyAnalysisRecord::executed(
                 "pz",
                 describe_analysis(analysis),
             ));
         }
         AnalysisCommand::MonteCarlo(command) => {
-            let result = py_engine.monte_carlo_impl(py, netlist, command)?;
-            out.monte_carlo.push(result);
+            let result = py_engine.monte_carlo_impl(
+                py,
+                netlist,
+                command,
+                context.and_then(|context| context.coordinate_id),
+            )?;
+            out.monte_carlo.push(identified(result, context));
             out.records.push(PyAnalysisRecord::executed(
                 "mc",
                 describe_analysis(analysis),
@@ -397,9 +418,9 @@ pub(super) fn execute(
             let operating_point = run_interruptible(py, &py_engine.active_runs, |abort| {
                 engine.run_pss_operating_point_with_abort(net, config, abort)
             })?;
-            out.pss.push(PyPssResult::from_core(
-                operating_point.analysis(),
-                harmonics,
+            out.pss.push(identified(
+                PyPssResult::from_core(operating_point.analysis(), harmonics),
+                context,
             ));
             if let Some(id) = context.and_then(|context| context.analysis_id.clone()) {
                 out.periodic_operating_points.insert(
@@ -430,13 +451,18 @@ pub(super) fn execute(
                     })?
                 }
             };
-            out.pac.push(PyPacResult::from_core(&result));
+            out.pac
+                .push(identified(PyPacResult::from_core(&result), context));
             out.records.push(PyAnalysisRecord::executed(
                 "pac",
                 describe_analysis(analysis),
             ));
         }
         AnalysisCommand::Pnoise(card) => {
+            // The offset grid is preflighted against this binding's own
+            // analysis-point limit before the card runs; core reads the same
+            // sweep off the card when it executes it, so the grid is not
+            // decided twice.
             let offsets = sweep_frequencies(
                 card.sweep.variation,
                 card.sweep.points,
@@ -450,53 +476,51 @@ pub(super) fn execute(
                 ));
             }
             let engine = py_engine.engine_for_netlist(net);
-            let reference = card.reference_node.as_deref();
-            let source = card.input_source.as_deref();
+            // Core's card runner decides what an authored `.PNOISE` means
+            // around each carrier: an autonomous `.PSS` selects the
+            // oscillator driver, whose result is a carrier-normalized
+            // phase-noise spectrum plus the Demir diffusion evidence, and a
+            // driven carrier selects the conversion-matrix analysis. Both
+            // come back in the one type the shared document accepts.
             let result = match upstream_operating_point(out, context, ".PNOISE")? {
-                PeriodicOperatingPoint::Shooting(point) if point.config().is_autonomous() => {
-                    // An autonomous carrier's noise is oscillator phase noise,
-                    // a different result family with a different unit basis.
-                    // The engine computes it, but this deck route publishes
-                    // only driven periodic noise, so folding it in here would
-                    // mislabel phase noise as sideband noise.
-                    return Err(crate::errors::not_implemented_error(
-                        "Engine.run executes .PNOISE around a driven carrier only; the .PSS it is \
-                         bound to is autonomous, whose noise is oscillator phase noise — call \
-                         run_oscillator_noise for that result family",
-                    ));
-                }
                 PeriodicOperatingPoint::Shooting(point) => {
                     run_interruptible(py, &py_engine.active_runs, |abort| {
-                        engine.run_pnoise_from_pss_with_abort(
-                            net,
-                            &offsets,
-                            &card.output_node,
-                            reference,
-                            source,
-                            card.max_sideband,
-                            point,
-                            abort,
-                        )
+                        engine.run_pnoise_card_from_pss_with_abort(net, card, point, abort)
                     })?
                 }
                 PeriodicOperatingPoint::HarmonicBalance(point) => {
                     run_interruptible(py, &py_engine.active_runs, |abort| {
-                        engine.run_pnoise_from_hb_with_abort(
-                            net,
-                            &offsets,
-                            &card.output_node,
-                            reference,
-                            source,
-                            card.max_sideband,
-                            point,
-                            abort,
-                        )
+                        engine.run_pnoise_card_from_hb_with_abort(net, card, point, abort)
                     })?
                 }
             };
-            out.pnoise.push(PyPeriodicNoiseResult::from_core(&result));
+            let kind = match result {
+                rspice_core::engine::PeriodicNoiseResult::Driven { output, result } => {
+                    out.pnoise.push(identified(
+                        PyPeriodicNoiseResult::from_run(&output, &result),
+                        context,
+                    ));
+                    "pnoise"
+                }
+                rspice_core::engine::PeriodicNoiseResult::Oscillator { output, result } => {
+                    out.oscillator_noise.push(identified(
+                        PyOscillatorNoiseResult::from_run(&output, &result),
+                        context,
+                    ));
+                    "pnoise_oscillator"
+                }
+                rspice_core::engine::PeriodicNoiseResult::Spectral(_) => {
+                    // The card runners return only the driven and autonomous
+                    // shapes; a spectral assembly reaching here would mean the
+                    // executed card is not the one that was authored.
+                    return Err(crate::errors::SimulationError::new_err(
+                        "the .PNOISE card runner returned a directly assembled spectral result, \
+                         which no authored card produces",
+                    ));
+                }
+            };
             out.records.push(PyAnalysisRecord::executed(
-                "pnoise",
+                kind,
                 describe_analysis(analysis),
             ));
         }
@@ -525,7 +549,10 @@ pub(super) fn execute(
                     abort,
                 )
             })?;
-            let handle = Py::new(py, PyEnvelopeResult::from_core(py, &result)?)?;
+            let handle = Py::new(
+                py,
+                identified(PyEnvelopeResult::from_core(py, &result)?, context),
+            )?;
             out.envelope
                 .push_with(handle, |handle| handle.clone_ref(py));
             out.records.push(PyAnalysisRecord::executed(
@@ -552,8 +579,8 @@ pub(super) fn execute(
                 let reference = reference_node
                     .as_ref()
                     .map(|name| NodeIdentifier::Name(name.clone()));
-                out.sensitivity_ac
-                    .push(py_engine.sensitivity_ac_complete_impl(
+                out.sensitivity_ac.push(identified(
+                    py_engine.sensitivity_ac_complete_impl(
                         py,
                         netlist,
                         &output,
@@ -561,7 +588,9 @@ pub(super) fn execute(
                         *output_is_current,
                         &frequencies,
                         filters,
-                    )?);
+                    )?,
+                    context,
+                ));
                 out.records.push(PyAnalysisRecord::executed(
                     "sens_ac",
                     describe_analysis(analysis),
@@ -571,14 +600,17 @@ pub(super) fn execute(
                 let reference = reference_node
                     .as_ref()
                     .map(|name| NodeIdentifier::Name(name.clone()));
-                out.sensitivity.push(py_engine.sensitivity_dc_complete_impl(
-                    py,
-                    netlist,
-                    &output,
-                    reference.as_ref(),
-                    *output_is_current,
-                    filters,
-                )?);
+                out.sensitivity.push(identified(
+                    py_engine.sensitivity_dc_complete_impl(
+                        py,
+                        netlist,
+                        &output,
+                        reference.as_ref(),
+                        *output_is_current,
+                        filters,
+                    )?,
+                    context,
+                ));
                 out.records.push(PyAnalysisRecord::executed(
                     "sens",
                     describe_analysis(analysis),

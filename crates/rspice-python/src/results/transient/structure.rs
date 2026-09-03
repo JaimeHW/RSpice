@@ -124,6 +124,109 @@ fn validate_event_times(
     Ok(())
 }
 
+/// Discard every sample before a requested SPICE `TSTART` output boundary.
+///
+/// The solver still integrates from zero so dynamic state at `TSTART` is
+/// correct; only the published data is clipped. Every time-aligned vector is
+/// proved to match the time axis before a single one is mutated, so a
+/// malformed core result becomes a typed error rather than a set of Python
+/// arrays that are silently misaligned with each other.
+///
+/// Event traces record changes rather than one value per accepted analog
+/// point, so the state in force at `TSTART` is carried forward to the boundary
+/// instead of being dropped along with the event that established it.
+pub(crate) fn clip_transient_to_start(
+    result: &mut TransientResult,
+    start_time: f64,
+) -> Result<(), String> {
+    if start_time <= 0.0 {
+        return Ok(());
+    }
+
+    let original_len = result.time.len();
+    let start_index = result.time.partition_point(|time| *time < start_time);
+    if start_index >= original_len {
+        return Err(format!(
+            "transient result contains no sample at or after requested start_time {start_time}"
+        ));
+    }
+
+    for (kind, series) in result
+        .voltages
+        .iter()
+        .map(|series| ("voltage", series))
+        .chain(
+            result
+                .branch_currents
+                .iter()
+                .map(|series| ("branch-current", series)),
+        )
+        .chain(
+            result
+                .device_op_traces
+                .iter()
+                .map(|trace| ("device operating-point", &trace.values)),
+        )
+    {
+        if series.len() != original_len {
+            return Err(format!(
+                "malformed transient result: {kind} series has {} samples but time has \
+                 {original_len}",
+                series.len()
+            ));
+        }
+    }
+
+    result.time.drain(..start_index);
+    for series in &mut result.voltages {
+        series.drain(..start_index);
+    }
+    for series in &mut result.branch_currents {
+        series.drain(..start_index);
+    }
+    for trace in &mut result.device_op_traces {
+        trace.values.drain(..start_index);
+    }
+
+    for trace in &mut result.digital_traces {
+        let prior = trace
+            .points
+            .iter()
+            .rev()
+            .find(|point| point.time < start_time)
+            .copied();
+        trace.points.retain(|point| point.time >= start_time);
+        if trace
+            .points
+            .first()
+            .is_none_or(|point| point.time > start_time)
+            && let Some(mut point) = prior
+        {
+            point.time = start_time;
+            trace.points.insert(0, point);
+        }
+    }
+    for trace in &mut result.real_traces {
+        let prior = trace
+            .points
+            .iter()
+            .rev()
+            .find(|point| point.time < start_time)
+            .copied();
+        trace.points.retain(|point| point.time >= start_time);
+        if trace
+            .points
+            .first()
+            .is_none_or(|point| point.time > start_time)
+            && let Some(mut point) = prior
+        {
+            point.time = start_time;
+            trace.points.insert(0, point);
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod structural_tests {
     use super::*;

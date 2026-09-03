@@ -1453,7 +1453,11 @@ impl PyEngine {
                 abort,
             ),
         })?;
-        Ok(PyPeriodicNoiseResult::from_core(&result))
+        let output = match reference_node {
+            Some(reference) => format!("V({output_node},{reference})"),
+            None => format!("V({output_node})"),
+        };
+        Ok(PyPeriodicNoiseResult::from_run(&output, &result))
     }
 
     /// Run autonomous-oscillator phase noise using PSS and PPV projection.

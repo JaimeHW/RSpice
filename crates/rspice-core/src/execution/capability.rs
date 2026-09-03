@@ -209,7 +209,6 @@ impl AnalysisResultCapability {
 }
 
 const CLI_AXIS_UNAVAILABLE: &str = "CLI has no authored deck-axis route for this analysis family";
-const PY_PNOISE_DRIVEN_AXIS_ONLY: &str = "deck-axis .PNOISE executes around a driven carrier only; an autonomous PSS carrier's      oscillator phase noise has no run-report field";
 
 /// The CLI publishes the shared typed result document for this family, under
 /// its canonical analysis identity, for a scalar deck and for every coordinate
@@ -366,15 +365,7 @@ pub const ANALYSIS_CAPABILITY_MATRIX: &[AnalysisResultCapability] = &[
     AnalysisResultCapability {
         result: AnalysisResultKind::MonteCarlo,
         cli: cli_mapped_scalar_only(),
-        python: SurfaceCapability::new(
-            MappingStatus::Mapped,
-            MappingStatus::Partial(
-                "nested STEP executes, but coordinate-derived Monte Carlo seed semantics are undefined",
-            ),
-            MappingStatus::Partial(
-                "nested TEMP executes, but coordinate-derived Monte Carlo seed semantics are undefined",
-            ),
-        ),
+        python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
     },
@@ -395,11 +386,7 @@ pub const ANALYSIS_CAPABILITY_MATRIX: &[AnalysisResultCapability] = &[
     AnalysisResultCapability {
         result: AnalysisResultKind::PNoise,
         cli: SurfaceCapability::unsupported("CLI has no PNoise execution or result adapter"),
-        python: SurfaceCapability::new(
-            MappingStatus::Mapped,
-            MappingStatus::Partial(PY_PNOISE_DRIVEN_AXIS_ONLY),
-            MappingStatus::Partial(PY_PNOISE_DRIVEN_AXIS_ONLY),
-        ),
+        python: python_mapped_axes(),
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
     },
@@ -469,19 +456,6 @@ impl SignalCapability {
 }
 
 const CLI_DEVICE_OBSERVABLE: &str = "the operating point publishes device observables in its typed payload; the sweep families export the ones their authored projection selected, not the complete device inventory";
-/// The Python device-observable and analysis-scalar gaps, stated by family.
-///
-/// These are deliberately specific rather than "a subset of result families":
-/// the missing cells are missing because the engine computes no such signal
-/// for those families, not because the binding declined to expose one, and a
-/// reader deciding whether to wait for the adapter needs to know which it is.
-const PY_DEVICE_OBSERVABLE_SUBSET: &str = "mapped for operating-point, DC-sweep and transient results, which are the families whose \
-     solvers capture per-device observables; the frequency-domain and periodic families compute \
-     none to expose";
-const PY_SCALAR_SUBSET: &str = "mapped as named accessors on the noise, transfer-function, stability, pole-zero, \
-     distortion, S-parameter, harmonic-balance, PSS, Monte Carlo and envelope results, not as a \
-     shared SignalDescriptor lookup; AC and operating-point results publish no analysis-owned \
-     scalar";
 const DIGITAL_OUT_OF_SCOPE: &str =
     "digital/AMS surface work is owned by the separate digital effort";
 const WASM_LOGIC_SAMPLES: &str = "descriptors, state/strength samples and validity masks cross the browser boundary with the shared document, but no digital-specific browser surface exists; that work is owned by the separate digital effort";
@@ -506,14 +480,14 @@ pub const SIGNAL_CAPABILITY_MATRIX: &[SignalCapability] = &[
     SignalCapability {
         signal: SignalKind::DeviceObservable,
         cli: MappingStatus::Partial(CLI_DEVICE_OBSERVABLE),
-        python: MappingStatus::Partial(PY_DEVICE_OBSERVABLE_SUBSET),
+        python: MappingStatus::Mapped,
         wasm: MappingStatus::Mapped,
         engine_adapter: MappingStatus::Mapped,
     },
     SignalCapability {
         signal: SignalKind::Scalar,
         cli: MappingStatus::Mapped,
-        python: MappingStatus::Partial(PY_SCALAR_SUBSET),
+        python: MappingStatus::Mapped,
         wasm: MappingStatus::Mapped,
         engine_adapter: MappingStatus::Mapped,
     },

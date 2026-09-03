@@ -365,12 +365,51 @@ impl PyTransientFftMetrics {
 #[derive(Debug, Clone)]
 pub struct PyTransientFftResult {
     pub(crate) inner: rspice_core::engine::TransientFftResult,
+    /// The transient this spectrum post-processed, which the shared document
+    /// records as the spectrum's parent analysis.
+    evidence: Option<DocumentEvidence<rspice_core::execution::AnalysisInstanceId>>,
+}
+
+impl CarriesDocumentEvidence for PyTransientFftResult {
+    fn bind_analysis(&mut self, analysis: rspice_core::execution::AnalysisInstanceId) {
+        self.evidence = self
+            .evidence
+            .take()
+            .map(|evidence| evidence.with_analysis(analysis));
+    }
+}
+
+impl PyTransientFftResult {
+    /// The shared result document, projected from the retained spectrum.
+    ///
+    /// The coefficient unit is core's own `.FFT` rule, so a normalized
+    /// spectrum is a ratio here exactly as it is on every other surface.
+    fn shared_document(&self, py: Python<'_>) -> PyResult<AnalysisResultDocument> {
+        let evidence = document::evidence(&self.evidence, "FFT")?;
+        let analysis = evidence.analysis;
+        let parent = evidence.core;
+        let unit = rspice_core::execution::transient_fft_output_unit(
+            self.inner.physical_type,
+            self.inner.format,
+        )
+        .map_err(crate::errors::simulation_error_to_pyerr)?;
+        document::build(py, |abort| {
+            AnalysisResultDocument::from_transient_fft(analysis, parent, unit, &self.inner)?
+                .build_with_abort(abort)
+        })
+    }
 }
 
 impl From<&rspice_core::engine::TransientFftResult> for PyTransientFftResult {
     fn from(inner: &rspice_core::engine::TransientFftResult) -> Self {
         Self {
             inner: inner.clone(),
+            evidence: Some(DocumentEvidence::sole(
+                rspice_core::execution::AnalysisKind::Fft,
+                rspice_core::execution::sole_analysis_identity(
+                    rspice_core::execution::AnalysisKind::Tran,
+                ),
+            )),
         }
     }
 }
@@ -587,9 +626,36 @@ impl PyTransientFftResult {
         )
     }
 
+    /// Typed inventory of every signal in this result's shared document.
+    ///
+    /// The descriptors are the ones the CLI, the WASM build and the engine
+    /// adapter publish, so a canonical name, unit, owner, or availability
+    /// means the same thing on every surface.
+    fn signals(&self, py: Python<'_>) -> PyResult<Vec<PySignalDescriptor>> {
+        Ok(document::signals(&self.shared_document(py)?))
+    }
+
+    /// Every analysis-owned scalar this result publishes, with its unit.
+    fn scalars(&self, py: Python<'_>) -> PyResult<Vec<PyResultScalar>> {
+        Ok(document::scalars(&self.shared_document(py)?))
+    }
+
+    /// Every per-device observable history this result captured.
+    fn device_observables(&self, py: Python<'_>) -> PyResult<Vec<PyDeviceObservable>> {
+        Ok(document::device_observables(&self.shared_document(py)?))
+    }
+
+    /// The whole shared result document as JSON-serializable Python data.
+    fn document<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        document::json_view(py, &self.shared_document(py)?)
+    }
+
     #[staticmethod]
     fn _unpickle(state: TransientFftResultState) -> PyResult<Self> {
-        rebuild_transient_fft_result(state).map(|inner| Self { inner })
+        rebuild_transient_fft_result(state).map(|inner| Self {
+            inner,
+            evidence: None,
+        })
     }
 
     #[allow(clippy::type_complexity)]

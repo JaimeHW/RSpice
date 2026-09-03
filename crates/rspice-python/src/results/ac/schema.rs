@@ -110,6 +110,7 @@ mod tests {
             results,
             node_names,
             branch_names,
+            evidence: None,
         }
     }
 

@@ -12,7 +12,7 @@ pub(super) fn run_materialized_directives(
     py: Python<'_>,
     netlist: &PyNetlist,
     analyses: &[rspice_core::execution::MaterializedAnalysis],
-    coordinate: &PyRunCoordinate,
+    coordinate: MaterializedCoordinate<'_>,
     continue_on_error: bool,
     out: &mut DirectiveOutcomes,
 ) -> PyResult<()> {
@@ -25,7 +25,9 @@ pub(super) fn run_materialized_directives(
         })?;
         let context = ExecutionContext {
             analysis_id: Some(analysis.output_namespace().analysis_component()),
-            coordinate: Some(coordinate.clone()),
+            analysis: Some(analysis.id()),
+            coordinate_id: Some(coordinate.id),
+            coordinate: Some(coordinate.python.clone()),
             transient_startup: TransientStartup::Card,
             upstream_analysis_id: analysis.planned().request().upstream().map(|id| id.tag()),
         };
@@ -48,7 +50,12 @@ pub(super) fn run_materialized_directives(
         if matches!(command, AnalysisCommand::Four { .. }) {
             let context = ExecutionContext {
                 analysis_id: Some(format!("four-{next_fourier_ordinal:03}")),
-                coordinate: Some(coordinate.clone()),
+                coordinate_id: Some(coordinate.id),
+                analysis: Some(rspice_core::execution::analysis_instance_identity(
+                    rspice_core::execution::AnalysisKind::Fourier,
+                    u32::try_from(next_fourier_ordinal.saturating_sub(1)).unwrap_or(u32::MAX),
+                )),
+                coordinate: Some(coordinate.python.clone()),
                 transient_startup: TransientStartup::Card,
                 upstream_analysis_id: None,
             };
@@ -124,6 +131,8 @@ pub(super) fn run_axis_plan(
             }
             let context = ExecutionContext {
                 analysis_id: Some(implicit_analysis.output_namespace().analysis_component()),
+                analysis: Some(implicit_analysis.id()),
+                coordinate_id: Some(core_coordinate.stable_id()),
                 coordinate: Some(coordinate.clone()),
                 transient_startup: TransientStartup::Card,
                 upstream_analysis_id: None,
@@ -135,7 +144,10 @@ pub(super) fn run_axis_plan(
                     } else {
                         compatibility_complete = false;
                     }
-                    let handle = Py::new(py, result)?;
+                    let handle = Py::new(
+                        py,
+                        crate::results::bind_document_identity(result, context.analysis),
+                    )?;
                     coordinate_out
                         .op
                         .push_with(handle, |handle| handle.clone_ref(py));
@@ -161,7 +173,10 @@ pub(super) fn run_axis_plan(
                 py,
                 &materialized,
                 &materialized_analyses,
-                &coordinate,
+                MaterializedCoordinate {
+                    python: &coordinate,
+                    id: core_coordinate.stable_id(),
+                },
                 continue_on_error,
                 &mut coordinate_out,
             )?;

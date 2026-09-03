@@ -9,7 +9,18 @@ use super::*;
 /// Structural proof that a transient result is a complete, aligned waveform set.
 mod structure;
 
-pub(crate) use structure::validate_transient_state;
+pub(crate) use structure::{clip_transient_to_start, validate_transient_state};
+
+/// Authored spelling of a node a caller addressed by name or by index.
+///
+/// A `.FOUR` spectrum records the operand it analyzed, and a caller who probed
+/// by index gets that index back rather than a node name the deck never wrote.
+fn node_label(node: &NodeIdentifier) -> String {
+    match node {
+        NodeIdentifier::Index(index) => index.to_string(),
+        NodeIdentifier::Name(name) => name.clone(),
+    }
+}
 
 /// Transient simulation result with time-domain waveforms
 ///
@@ -23,11 +34,49 @@ pub(crate) use structure::validate_transient_state;
 #[pyclass(name = "TransientResult", module = "rspice")]
 pub struct PyTransientResult {
     pub(crate) inner: TransientResult,
+    evidence: Option<DocumentEvidence<()>>,
+}
+
+impl CarriesDocumentEvidence for PyTransientResult {
+    fn bind_analysis(&mut self, analysis: rspice_core::execution::AnalysisInstanceId) {
+        self.evidence = self
+            .evidence
+            .take()
+            .map(|evidence| evidence.with_analysis(analysis));
+    }
 }
 
 impl PyTransientResult {
     pub fn new(inner: TransientResult) -> Self {
-        Self { inner }
+        Self {
+            inner,
+            evidence: Some(DocumentEvidence::sole(
+                rspice_core::execution::AnalysisKind::Tran,
+                (),
+            )),
+        }
+    }
+
+    /// A trajectory rebuilt from pickled state, which carries no identity.
+    fn restored(inner: TransientResult) -> Self {
+        Self {
+            inner,
+            evidence: None,
+        }
+    }
+
+    /// The shared result document, projected from the retained trajectory.
+    ///
+    /// The document's `.FFT` child references are deliberately empty: this
+    /// binding publishes each authored `.FFT` spectrum as its own
+    /// `FftResult`, reachable from `fft_results`, rather than as a separate
+    /// document with an identity of its own.
+    fn shared_document(&self, py: Python<'_>) -> PyResult<AnalysisResultDocument> {
+        let analysis = document::evidence(&self.evidence, "transient")?.analysis;
+        document::build(py, |abort| {
+            AnalysisResultDocument::from_transient(analysis, &self.inner, None, Vec::new())?
+                .build_with_abort(abort)
+        })
     }
 
     fn device_op_values(&self, device: &str, parameter: &str) -> PyResult<&[f64]> {
@@ -53,94 +102,9 @@ impl PyTransientResult {
     /// vectors are validated before mutation so malformed core results cannot
     /// become silently misaligned Python arrays.
     pub(crate) fn new_with_start(mut inner: TransientResult, start_time: f64) -> PyResult<Self> {
-        if start_time <= 0.0 {
-            return Ok(Self { inner });
-        }
-
-        let original_len = inner.time.len();
-        let start_index = inner.time.partition_point(|time| *time < start_time);
-        if start_index >= original_len {
-            return Err(crate::errors::SimulationError::new_err(format!(
-                "transient result contains no sample at or after requested start_time {start_time}"
-            )));
-        }
-
-        for (kind, series) in inner
-            .voltages
-            .iter()
-            .map(|series| ("voltage", series))
-            .chain(
-                inner
-                    .branch_currents
-                    .iter()
-                    .map(|series| ("branch-current", series)),
-            )
-            .chain(
-                inner
-                    .device_op_traces
-                    .iter()
-                    .map(|trace| ("device operating-point", &trace.values)),
-            )
-        {
-            if series.len() != original_len {
-                return Err(crate::errors::SimulationError::new_err(format!(
-                    "malformed transient result: {kind} series has {} samples but time has {original_len}",
-                    series.len()
-                )));
-            }
-        }
-
-        inner.time.drain(..start_index);
-        for series in &mut inner.voltages {
-            series.drain(..start_index);
-        }
-        for series in &mut inner.branch_currents {
-            series.drain(..start_index);
-        }
-        for trace in &mut inner.device_op_traces {
-            trace.values.drain(..start_index);
-        }
-
-        // Event traces store changes rather than one value per accepted analog
-        // point. Preserve the state in force at TSTART, then subsequent events.
-        for trace in &mut inner.digital_traces {
-            let prior = trace
-                .points
-                .iter()
-                .rev()
-                .find(|point| point.time < start_time)
-                .copied();
-            trace.points.retain(|point| point.time >= start_time);
-            if trace
-                .points
-                .first()
-                .is_none_or(|point| point.time > start_time)
-                && let Some(mut point) = prior
-            {
-                point.time = start_time;
-                trace.points.insert(0, point);
-            }
-        }
-        for trace in &mut inner.real_traces {
-            let prior = trace
-                .points
-                .iter()
-                .rev()
-                .find(|point| point.time < start_time)
-                .copied();
-            trace.points.retain(|point| point.time >= start_time);
-            if trace
-                .points
-                .first()
-                .is_none_or(|point| point.time > start_time)
-                && let Some(mut point) = prior
-            {
-                point.time = start_time;
-                trace.points.insert(0, point);
-            }
-        }
-
-        Ok(Self { inner })
+        clip_transient_to_start(&mut inner, start_time)
+            .map_err(crate::errors::SimulationError::new_err)?;
+        Ok(Self::new(inner))
     }
 
     fn checked_time_index(&self, time_index: usize) -> AccessResult<()> {
@@ -271,6 +235,7 @@ impl PyTransientResult {
     fn fourier_of_waveform(
         &self,
         py: Python<'_>,
+        output: &str,
         waveform: &[f64],
         fundamental: f64,
         num_harmonics: usize,
@@ -299,7 +264,7 @@ impl PyTransientResult {
         let result = qualified.map_err(|error| {
             crate::errors::value_error(format!("Fourier waveform could not be analyzed: {error}"))
         })?;
-        Ok(PyFourierResult::from_core(&result))
+        Ok(PyFourierResult::from_core(&result).with_output(output))
     }
 }
 
@@ -363,6 +328,30 @@ impl PyTransientResult {
             .map(|waveform| waveform.to_pyarray(py))
             .ok_or_else(|| unknown_branch_name_error(name))
             .map_err(PyErr::from)
+    }
+
+    /// Typed inventory of every signal in this result's shared document.
+    ///
+    /// The descriptors are the ones the CLI, the WASM build and the engine
+    /// adapter publish, so a canonical name, unit, owner, or availability
+    /// means the same thing on every surface.
+    fn signals(&self, py: Python<'_>) -> PyResult<Vec<PySignalDescriptor>> {
+        Ok(document::signals(&self.shared_document(py)?))
+    }
+
+    /// Every analysis-owned scalar this result publishes, with its unit.
+    fn scalars(&self, py: Python<'_>) -> PyResult<Vec<PyResultScalar>> {
+        Ok(document::scalars(&self.shared_document(py)?))
+    }
+
+    /// Every per-device observable history this result captured.
+    fn device_observables(&self, py: Python<'_>) -> PyResult<Vec<PyDeviceObservable>> {
+        Ok(document::device_observables(&self.shared_document(py)?))
+    }
+
+    /// The whole shared result document as JSON-serializable Python data.
+    fn document<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        document::json_view(py, &self.shared_document(py)?)
     }
 
     /// Device operating-point traces requested with `.SAVE @device[param]`.
@@ -470,6 +459,10 @@ impl PyTransientResult {
         num_harmonics: usize,
         reference: Option<NodeIdentifier>,
     ) -> PyResult<PyFourierResult> {
+        let output = match &reference {
+            None => format!("V({})", node_label(&node)),
+            Some(reference) => format!("V({},{})", node_label(&node), node_label(reference)),
+        };
         let waveform = match reference {
             None => self.waveform_for(&node)?,
             Some(reference) => {
@@ -482,7 +475,7 @@ impl PyTransientResult {
                     .collect()
             }
         };
-        self.fourier_of_waveform(py, &waveform, fundamental, num_harmonics)
+        self.fourier_of_waveform(py, &output, &waveform, fundamental, num_harmonics)
     }
 
     /// Fourier-analyze any SPICE output specification
@@ -511,7 +504,7 @@ impl PyTransientResult {
         num_harmonics: usize,
     ) -> PyResult<PyFourierResult> {
         let waveform = self.probe_waveform(spec)?;
-        self.fourier_of_waveform(py, &waveform, fundamental, num_harmonics)
+        self.fourier_of_waveform(py, spec, &waveform, fundamental, num_harmonics)
     }
 
     /// Fourier-analyze a branch-current waveform
@@ -539,7 +532,13 @@ impl PyTransientResult {
         num_harmonics: usize,
     ) -> PyResult<PyFourierResult> {
         let waveform = self.probe_waveform(&format!("I({element})"))?;
-        self.fourier_of_waveform(py, &waveform, fundamental, num_harmonics)
+        self.fourier_of_waveform(
+            py,
+            &format!("I({element})"),
+            &waveform,
+            fundamental,
+            num_harmonics,
+        )
     }
 
     /// Evaluate any SPICE output specification against this result
@@ -791,7 +790,7 @@ impl PyTransientResult {
             fft_results: rebuild_transient_fft_results(fft_state)?,
         };
         validate_transient_state(&restored).map_err(crate::errors::value_error)?;
-        Ok(Self::new(restored))
+        Ok(Self::restored(restored))
     }
 
     #[allow(clippy::type_complexity)]

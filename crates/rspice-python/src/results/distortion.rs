@@ -44,9 +44,31 @@ pub struct PyDistortionResult {
     products: Vec<(DistortionProduct, Vec<AcResult>)>,
     node_names: Vec<String>,
     branch_names: Vec<String>,
+    /// The core sweep, kept because this projection re-lays every point's
+    /// products into product-major rows the shared projection cannot read back.
+    evidence: Option<DocumentEvidence<DistortionAnalysisResult>>,
+}
+
+impl CarriesDocumentEvidence for PyDistortionResult {
+    fn bind_analysis(&mut self, analysis: rspice_core::execution::AnalysisInstanceId) {
+        self.evidence = self
+            .evidence
+            .take()
+            .map(|evidence| evidence.with_analysis(analysis));
+    }
 }
 
 impl PyDistortionResult {
+    /// The shared result document, projected from the retained sweep.
+    fn shared_document(&self, py: Python<'_>) -> PyResult<AnalysisResultDocument> {
+        let evidence = document::evidence(&self.evidence, "distortion")?;
+        let analysis = evidence.analysis;
+        let result = &evidence.core;
+        document::build(py, |abort| {
+            AnalysisResultDocument::from_distortion(analysis, result)?.build_with_abort(abort)
+        })
+    }
+
     pub fn from_core(result: &DistortionAnalysisResult) -> PyResult<Self> {
         if result.points.is_empty() {
             return Err(crate::errors::value_error(
@@ -152,6 +174,10 @@ impl PyDistortionResult {
             products,
             node_names,
             branch_names,
+            evidence: Some(DocumentEvidence::sole(
+                rspice_core::execution::AnalysisKind::Distortion,
+                result.clone(),
+            )),
         })
     }
 
@@ -317,6 +343,30 @@ fn magnitude_ratio(numerator: f64, denominator: f64) -> f64 {
 
 #[pymethods]
 impl PyDistortionResult {
+    /// Typed inventory of every signal in this result's shared document.
+    ///
+    /// The descriptors are the ones the CLI, the WASM build and the engine
+    /// adapter publish, so a canonical name, unit, owner, or availability
+    /// means the same thing on every surface.
+    fn signals(&self, py: Python<'_>) -> PyResult<Vec<PySignalDescriptor>> {
+        Ok(document::signals(&self.shared_document(py)?))
+    }
+
+    /// Every analysis-owned scalar this result publishes, with its unit.
+    fn scalars(&self, py: Python<'_>) -> PyResult<Vec<PyResultScalar>> {
+        Ok(document::scalars(&self.shared_document(py)?))
+    }
+
+    /// Every per-device observable history this result captured.
+    fn device_observables(&self, py: Python<'_>) -> PyResult<Vec<PyDeviceObservable>> {
+        Ok(document::device_observables(&self.shared_document(py)?))
+    }
+
+    /// The whole shared result document as JSON-serializable Python data.
+    fn document<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        document::json_view(py, &self.shared_document(py)?)
+    }
+
     /// Swept F1 frequencies in Hz.
     #[getter]
     fn f1_frequencies<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
@@ -488,6 +538,7 @@ impl PyDistortionResult {
             products,
             node_names,
             branch_names,
+            evidence: None,
         })
     }
 

@@ -6,6 +6,31 @@
 
 use super::*;
 
+/// Split reported sweep points into the retained solutions and their reports.
+fn split_reported_points(
+    results: Vec<rspice_core::engine::DcSweepPointResult>,
+) -> (
+    Vec<(f64, SimulationResult)>,
+    Vec<rspice_core::circuit::DeviceOpReport>,
+) {
+    results
+        .into_iter()
+        .map(|point| ((point.sweep_value, point.result), point.device_op_report))
+        .unzip()
+}
+
+/// One sweep point's device report in its Python projection.
+fn projected_device_report(
+    report: &rspice_core::circuit::DeviceOpReport,
+) -> Vec<PyDeviceOperatingPoint> {
+    report
+        .entries
+        .iter()
+        .cloned()
+        .map(PyDeviceOperatingPoint::from_core)
+        .collect()
+}
+
 /// DC sweep analysis result
 ///
 /// A sequence of (sweep_value, SimulationResult) pairs. Supports `len()`,
@@ -26,6 +51,19 @@ pub struct PyDcSweepResult {
     secondary_source: Option<String>,
     secondary_sweep_values: Option<Vec<f64>>,
     inner_points: usize,
+    /// Per-point core device reports, kept beside their Python projection
+    /// because the projection owns its parameter names and cannot be turned
+    /// back into a report. `None` when the producing run captured none.
+    evidence: Option<DocumentEvidence<Option<Vec<rspice_core::circuit::DeviceOpReport>>>>,
+}
+
+impl CarriesDocumentEvidence for PyDcSweepResult {
+    fn bind_analysis(&mut self, analysis: rspice_core::execution::AnalysisInstanceId) {
+        self.evidence = self
+            .evidence
+            .take()
+            .map(|evidence| evidence.with_analysis(analysis));
+    }
 }
 
 impl PyDcSweepResult {
@@ -38,13 +76,95 @@ impl PyDcSweepResult {
             secondary_source: None,
             secondary_sweep_values: None,
             inner_points,
+            // A sweep with no named axis cannot be published as a `dc`
+            // document: the shared schema names the swept variable, and this
+            // constructor was told none.
+            evidence: None,
         }
     }
 
     pub fn new_named(results: Vec<(f64, SimulationResult)>, primary_source: &str) -> Self {
         let mut result = Self::new(results);
         result.primary_source = Some(primary_source.to_string());
+        result.evidence = Some(DocumentEvidence::sole(
+            rspice_core::execution::AnalysisKind::Dc,
+            None,
+        ));
         result
+    }
+
+    /// The shared result document, projected from the retained sweep points.
+    ///
+    /// The core projection takes complete sweep points, so the retained
+    /// solutions and their device reports are re-paired here; the pairing is
+    /// a temporary the document build consumes, not a second retained copy.
+    fn shared_document(&self, py: Python<'_>) -> PyResult<AnalysisResultDocument> {
+        use rspice_core::execution::result_document::DcSweepAxisDocument;
+
+        let evidence = document::evidence(&self.evidence, "DC-sweep")?;
+        let analysis = evidence.analysis;
+        let primary = self.primary_source.clone().ok_or_else(|| {
+            crate::errors::SimulationError::new_err(
+                "this DC sweep result names no swept variable, which the shared result document \
+                 requires",
+            )
+        })?;
+        let reports = evidence.core.as_deref();
+        if let Some(reports) = reports
+            && reports.len() != self.results.len()
+        {
+            return Err(crate::errors::SimulationError::new_err(format!(
+                "malformed DC sweep result: device operating-point reports cover {} of {} sweep \
+                 points",
+                reports.len(),
+                self.results.len()
+            )));
+        }
+        let points = self
+            .results
+            .iter()
+            .enumerate()
+            .map(
+                |(index, (sweep_value, result))| rspice_core::engine::DcSweepPointResult {
+                    sweep_value: *sweep_value,
+                    result: result.clone(),
+                    device_op_report: reports
+                        .and_then(|reports| reports.get(index))
+                        .cloned()
+                        .unwrap_or_default(),
+                },
+            )
+            .collect::<Vec<_>>();
+        let secondary = self.secondary_source.clone();
+        let secondary_values = self.secondary_sweep_values.clone();
+        let inner_points = self.inner_points;
+        document::build(py, move |abort| {
+            let builder = match (secondary, secondary_values) {
+                (Some(outer), Some(values)) => AnalysisResultDocument::from_nested_dc_sweep(
+                    analysis,
+                    &[
+                        DcSweepAxisDocument {
+                            name: outer.trim().to_ascii_lowercase(),
+                            unit: rspice_core::execution::sweep_axis_unit(&outer),
+                            value_count: values.len(),
+                        },
+                        DcSweepAxisDocument {
+                            name: primary.trim().to_ascii_lowercase(),
+                            unit: rspice_core::execution::sweep_axis_unit(&primary),
+                            value_count: inner_points,
+                        },
+                    ],
+                    &points,
+                )?,
+                _ => AnalysisResultDocument::from_dc_sweep(
+                    analysis,
+                    &primary,
+                    rspice_core::execution::sweep_axis_unit(&primary),
+                    &points,
+                )?,
+            };
+            builder.build_with_abort(abort)
+        })
     }
 
     pub fn new_named_with_reports(
@@ -52,27 +172,18 @@ impl PyDcSweepResult {
         primary_source: &str,
     ) -> Self {
         let inner_points = results.len();
-        let (points, device_operating_points) = results
-            .into_iter()
-            .map(|point| {
-                (
-                    (point.sweep_value, point.result),
-                    point
-                        .device_op_report
-                        .entries
-                        .into_iter()
-                        .map(PyDeviceOperatingPoint::from_core)
-                        .collect::<Vec<_>>(),
-                )
-            })
-            .unzip();
+        let (points, reports) = split_reported_points(results);
         Self {
             results: points,
-            device_operating_points: Some(device_operating_points),
+            device_operating_points: Some(reports.iter().map(projected_device_report).collect()),
             primary_source: Some(primary_source.to_string()),
             secondary_source: None,
             secondary_sweep_values: None,
             inner_points,
+            evidence: Some(DocumentEvidence::sole(
+                rspice_core::execution::AnalysisKind::Dc,
+                Some(reports),
+            )),
         }
     }
 
@@ -99,6 +210,10 @@ impl PyDcSweepResult {
             secondary_source: Some(secondary_source.to_string()),
             secondary_sweep_values: Some(secondary_sweep_values),
             inner_points,
+            evidence: Some(DocumentEvidence::sole(
+                rspice_core::execution::AnalysisKind::Dc,
+                None,
+            )),
         })
     }
 
@@ -118,27 +233,18 @@ impl PyDcSweepResult {
             )));
         }
         let inner_points = results.len() / secondary_sweep_values.len();
-        let (points, device_operating_points) = results
-            .into_iter()
-            .map(|point| {
-                (
-                    (point.sweep_value, point.result),
-                    point
-                        .device_op_report
-                        .entries
-                        .into_iter()
-                        .map(PyDeviceOperatingPoint::from_core)
-                        .collect::<Vec<_>>(),
-                )
-            })
-            .unzip();
+        let (points, reports) = split_reported_points(results);
         Ok(Self {
             results: points,
-            device_operating_points: Some(device_operating_points),
+            device_operating_points: Some(reports.iter().map(projected_device_report).collect()),
             primary_source: Some(primary_source.to_string()),
             secondary_source: Some(secondary_source.to_string()),
             secondary_sweep_values: Some(secondary_sweep_values),
             inner_points,
+            evidence: Some(DocumentEvidence::sole(
+                rspice_core::execution::AnalysisKind::Dc,
+                Some(reports),
+            )),
         })
     }
 
@@ -446,6 +552,30 @@ impl PyDcSweepResult {
         )
     }
 
+    /// Typed inventory of every signal in this result's shared document.
+    ///
+    /// The descriptors are the ones the CLI, the WASM build and the engine
+    /// adapter publish, so a canonical name, unit, owner, or availability
+    /// means the same thing on every surface.
+    fn signals(&self, py: Python<'_>) -> PyResult<Vec<PySignalDescriptor>> {
+        Ok(document::signals(&self.shared_document(py)?))
+    }
+
+    /// Every analysis-owned scalar this result publishes, with its unit.
+    fn scalars(&self, py: Python<'_>) -> PyResult<Vec<PyResultScalar>> {
+        Ok(document::scalars(&self.shared_document(py)?))
+    }
+
+    /// Every per-device observable history this result captured.
+    fn device_observables(&self, py: Python<'_>) -> PyResult<Vec<PyDeviceObservable>> {
+        Ok(document::device_observables(&self.shared_document(py)?))
+    }
+
+    /// The whole shared result document as JSON-serializable Python data.
+    fn document<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        document::json_view(py, &self.shared_document(py)?)
+    }
+
     /// Rebuild from pickled state. Not part of the public API.
     #[staticmethod]
     #[allow(clippy::too_many_arguments)]
@@ -467,6 +597,7 @@ impl PyDcSweepResult {
             secondary_source,
             secondary_sweep_values,
             inner_points,
+            evidence: None,
         }
     }
 
