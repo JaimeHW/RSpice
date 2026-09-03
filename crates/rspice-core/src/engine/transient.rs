@@ -2711,12 +2711,41 @@ impl Engine {
     /// the exact integration-runtime wire contract. A time-zero checkpoint is
     /// exempt: no accepted interval has advanced these stores, so rebuilding
     /// the authenticated startup phase reconstructs their canonical state.
+    ///
+    /// This flat, sorted list is what a checkpoint stores and what a resume
+    /// compares against, so its exact contents are part of the checkpoint
+    /// format. Callers that need to know *which* owner produced a message —
+    /// the capability layer does, so that each one is reported under one
+    /// source — take the split form below instead.
     fn exact_integration_runtime_resume_blockers(
         circuit: &crate::circuit::CircuitData,
         accepted_interval_count: usize,
     ) -> Vec<String> {
+        let (mut blockers, extension) = Self::exact_integration_runtime_resume_blockers_by_owner(
+            circuit,
+            accepted_interval_count,
+        );
+        blockers.extend(extension);
+        blockers.sort_unstable();
+        blockers.dedup();
+        blockers
+    }
+
+    /// The same inventory as
+    /// [`Self::exact_integration_runtime_resume_blockers`], split into the
+    /// messages the integration runtime owns and the messages an extension
+    /// runtime owns.
+    ///
+    /// The stored list concatenates the two because a resume compares one
+    /// string list; the classification exists only so a capability report can
+    /// name the owner of each message once, rather than listing the extension
+    /// ones twice under two sources.
+    fn exact_integration_runtime_resume_blockers_by_owner(
+        circuit: &crate::circuit::CircuitData,
+        accepted_interval_count: usize,
+    ) -> (Vec<String>, Vec<String>) {
         if accepted_interval_count == 0 {
-            return Vec::new();
+            return (Vec::new(), Vec::new());
         }
 
         fn block_if_present(blockers: &mut Vec<String>, present: bool, description: &'static str) {
@@ -2820,41 +2849,53 @@ impl Engine {
             !circuit.iswitches.is_empty(),
             "current-controlled switch accepted hysteresis state is not checkpointed",
         );
-        // A mixed Verilog-AMS module's accepted state is a running digital
-        // design — the event queue, every process's resumption point, every
-        // `reg`, the resolved drivers and the boundary values — and none of it
-        // reaches the checkpoint file. `MixedSignalHost::checkpoint` produces an
-        // exact restart image of all of it, but that image holds a compiled
-        // analog device and a live scheduler rather than the numbers this
-        // format writes, so it is not the thing a `.cir`-adjacent text or packed
+        // Extension runtimes own the rest of this inventory. A mixed
+        // Verilog-AMS module's accepted state is a running digital design —
+        // the event queue, every process's resumption point, every `reg`, the
+        // resolved drivers and the boundary values — and none of it reaches
+        // the checkpoint file. `MixedSignalHost::checkpoint` produces an exact
+        // restart image of all of it, but that image holds a compiled analog
+        // device and a live scheduler rather than the numbers this format
+        // writes, so it is not the thing a `.cir`-adjacent text or packed
         // encoding can carry.
         //
-        // Without this blocker a resume rebuilds the module from the netlist,
-        // which restarts its `initial` blocks at time zero, and then advances it
-        // from the checkpoint's analog time. That is not a slightly worse
-        // answer: it is the design's state machine started over while the
+        // `Engine::transient_checkpoint_capability_for_circuit` reads this
+        // inventory off the elaborated circuit before any solver work, so a
+        // run that asked for a checkpoint at all — scheduled or retained — is
+        // refused at t=0 naming the owners that block it. Nothing downstream
+        // has to cope with a mixed checkpoint, because none is produced.
+        //
+        // The same message stays in the stored list a resume compares, for the
+        // images that reach resume by another route: files written by an older
+        // build, and the synthetic-origin state HB and PSS hand to a
+        // continuation. Without it such a resume rebuilds the module from the
+        // netlist, which restarts its `initial` blocks at time zero, and then
+        // advances it from the checkpoint's analog time. That is not a slightly
+        // worse answer: it is the design's state machine started over while the
         // circuit around it continues, and the trace it produces is plausible.
-        // Measured on a deck whose module toggles on an external clock, a resume
-        // produced a `q` trace inverted against the baseline's from the
+        // Measured on a deck whose module toggles on an external clock, a
+        // resume produced a `q` trace inverted against the baseline's from the
         // checkpoint onward, with nothing reporting a problem. A module that
         // happens to have a pending self-scheduled activation is caught by
         // `MixedSignalError::MissedDigitalBreakpoint` instead, which is an
         // accident of that guard rather than a contract — it fires only because
         // the restarted wheel still holds an event dated behind the resume time.
+        let mut extension = Vec::new();
         #[cfg(feature = "veriloga")]
         block_if_present(
-            &mut blockers,
+            &mut extension,
             circuit.has_mixed_signal_hosts(),
-            "mixed Verilog-AMS accepted digital state is not checkpointed",
+            checkpoint::MIXED_SIGNAL_ACCEPTED_STATE_BLOCKER,
         );
-        blockers.extend(circuit.xspice_checkpoint_resume_blockers());
-        blockers.sort_unstable();
-        blockers.dedup();
-        blockers
+        extension.extend(circuit.xspice_checkpoint_resume_blockers());
+        (blockers, extension)
     }
 
     /// Inspect one elaborated circuit for every state owner that can prove a
     /// future accepted transient checkpoint unresumable before solver work.
+    ///
+    /// Each message is reported under exactly one source, so a frontend that
+    /// groups a report by owner sees each blocked owner once.
     fn transient_checkpoint_capability_for_circuit(
         circuit: &crate::circuit::CircuitData,
         abort: &dyn AbortSignal,
@@ -2911,9 +2952,6 @@ impl Engine {
             }
         }
 
-        for message in circuit.xspice_checkpoint_resume_blockers() {
-            push(TransientCheckpointBlockerSource::ExtensionState, message);
-        }
         if let Err(message) = circuit.generated_veriloga_checkpoint_states() {
             push(TransientCheckpointBlockerSource::ExtensionState, message);
         }
@@ -2922,7 +2960,17 @@ impl Engine {
             push(TransientCheckpointBlockerSource::ExtensionState, message);
         }
 
-        for message in Self::exact_integration_runtime_resume_blockers(circuit, 1) {
+        // One interval, because this asks what a checkpoint taken after any
+        // accepted step would carry. The split form is what keeps the XSPICE
+        // and mixed-host messages from being reported twice: they are part of
+        // the accepted-runtime inventory the checkpoint stores, and they are
+        // extension state, not integration state.
+        let (integration_blockers, extension_blockers) =
+            Self::exact_integration_runtime_resume_blockers_by_owner(circuit, 1);
+        for message in extension_blockers {
+            push(TransientCheckpointBlockerSource::ExtensionState, message);
+        }
+        for message in integration_blockers {
             push(
                 TransientCheckpointBlockerSource::IntegrationRuntime,
                 message,
