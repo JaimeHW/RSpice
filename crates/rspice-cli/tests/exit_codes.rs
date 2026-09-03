@@ -1,6 +1,13 @@
-//! The exit-status contract automation relies on:
-//! 0 = success, 1 = simulation error, 2 = usage error, 3 = verification
-//! failure (failed .MEAS), 65 = parse error, 66 = missing input.
+//! The exit-status contract automation relies on.
+//!
+//! Every nonzero status is derived from one failure category, and for
+//! anything the engine produced that category is the engine's own — so no
+//! typed engine failure exits 1, which would tell automation nothing. The
+//! published table lives in `crates/rspice-cli/README.md`.
+//!
+//! These tests drive a real deck or flag per category through the built
+//! binary rather than constructing errors, because a code nothing reaches is
+//! a code nobody can rely on.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -281,8 +288,8 @@ fn conflicting_voltage_sources_are_a_simulation_error() {
     let output = run_rspice(&["--quiet", "run", deck.to_str().unwrap()]);
     assert_eq!(
         output.status.code(),
-        Some(1),
-        "singular OP must exit 1; stderr: {}",
+        Some(80),
+        "singular OP must exit with the simulation category; stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -298,7 +305,7 @@ fn conflicting_voltage_sources_are_a_simulation_error() {
         deck.to_str().unwrap(),
         "--allow-nonfinite",
     ]);
-    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.status.code(), Some(80));
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -486,8 +493,8 @@ fn configured_worker_limit_rejects_excessive_explicit_parallelism() {
 
     assert_eq!(
         output.status.code(),
-        Some(78),
-        "worker-policy rejection must be a configuration error; stdout: {}; stderr: {}",
+        Some(75),
+        "worker-policy rejection is a resource-limit outcome; stdout: {}; stderr: {}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
@@ -615,7 +622,7 @@ fn resource_environment_override_takes_precedence_over_config_file() {
 }
 
 #[test]
-fn failed_step_point_exits_one_without_truncated_success() {
+fn failed_step_point_fails_the_command_without_truncated_success() {
     let dir = test_dir("bad_step_point");
     let deck = dir.join("bad_step_point.sp");
     std::fs::write(
@@ -633,7 +640,7 @@ fn failed_step_point_exits_one_without_truncated_success() {
 
     assert_eq!(
         output.status.code(),
-        Some(1),
+        Some(80),
         "failed .STEP point must fail the command; stdout: {}; stderr: {}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
@@ -1005,7 +1012,7 @@ fn json_errors_publish_stable_automation_contract() {
     assert_eq!(json["tool"]["name"], "rspice");
     assert_eq!(json["tool"]["commit"], env!("RSPICE_BUILD_COMMIT"));
     assert_eq!(json["error"]["code"], "input_not_found");
-    assert_eq!(json["error"]["category"], "input");
+    assert_eq!(json["error"]["category"], "input_not_found");
     assert_eq!(json["error"]["retryable"], false);
     assert_eq!(json["error"]["exit_code"], 66);
 }
@@ -1151,7 +1158,7 @@ fn summary_json_carries_the_verdict() {
 }
 
 #[test]
-fn output_write_failure_keeps_io_exit_and_not_success_summary() {
+fn output_write_failure_is_an_output_commit_failure_and_not_a_success_summary() {
     let dir = test_dir("output_write_io");
     let deck = dir.join("op.sp");
     std::fs::write(
@@ -1178,8 +1185,8 @@ fn output_write_failure_keeps_io_exit_and_not_success_summary() {
 
     assert_eq!(
         output.status.code(),
-        Some(74),
-        "output write failure must preserve I/O exit; stdout={} stderr={}",
+        Some(73),
+        "a run whose results could not be published must exit with the output-commit code; stdout={} stderr={}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
@@ -1266,4 +1273,209 @@ fn failed_measurement_marks_run_verdict_in_machine_reports() {
     );
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+//=============================================================================
+// One exit code per failure category
+//
+// The categories below are reachable from a deck or a flag, so each gets an
+// end-to-end test through the built binary. Three are not covered here:
+//
+// - `materialization` is reachable — a deck whose analysis card set is
+//   coordinate-dependent produces one — and is driven end to end by
+//   `tests/step_cartesian.rs`, where the `.STEP` fixtures already live.
+// - `result_schema` is an internal consistency failure no authored deck can
+//   produce; it is covered by `rspice-core`'s `simulation_error_contract`,
+//   and its exit code by `exit_code_for`'s own table test.
+// - `solver` and `convergence` need a deck that defeats every convergence aid
+//   the engine applies, which is a moving target: pinning one here would make
+//   this suite fail for the wrong reason whenever the aids improve. Their
+//   descriptors are pinned in `rspice-core` and their codes in `cli::error`.
+//
+// `cancellation` needs a real interrupt; its sibling path is covered by
+// `--timeout` rather than by sending a signal from a test.
+//=============================================================================
+
+/// The machine-readable diagnostic a failing invocation printed.
+fn fatal_diagnostic(output: &std::process::Output) -> serde_json::Value {
+    serde_json::from_slice(&output.stderr).unwrap_or_else(|error| {
+        panic!(
+            "stderr must be exactly one JSON document: {error}; stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )
+    })
+}
+
+/// Run one deck and return its fatal diagnostic with the observed status.
+fn run_json(dir: &std::path::Path, name: &str, deck: &str, extra: &[&str]) -> serde_json::Value {
+    let path = dir.join(name);
+    std::fs::write(&path, deck).expect("write deck");
+    let path_text = path.to_str().expect("utf-8 deck path").to_owned();
+    let mut args = vec!["--error-format", "json", "--quiet", "run", &path_text];
+    args.extend_from_slice(extra);
+    let output = run_rspice(&args);
+    let mut diagnostic = fatal_diagnostic(&output);
+    diagnostic["observed_exit_code"] = serde_json::json!(output.status.code());
+    diagnostic
+}
+
+#[test]
+fn capability_refusals_exit_sixty_nine_with_their_token() {
+    let dir = test_dir("category_capability");
+
+    // A netlist construct the grammar recognizes and declines to lower.
+    let parsed = run_json(
+        &dir,
+        "ydevice.sp",
+        "* Y-device family with no model program\n\
+         V1 in 0 1\n\
+         R1 in 0 1k\n\
+         YDELAY delay1 2 0 1 0 TD=10N\n\
+         .op\n\
+         .end\n",
+        &[],
+    );
+    assert_eq!(parsed["observed_exit_code"], 69);
+    assert_eq!(parsed["error"]["category"], "capability");
+    assert_eq!(parsed["error"]["code"], "unsupported_capability");
+    assert_eq!(
+        parsed["error"]["capability"],
+        "netlist.xyce.ydevice.no_model_program"
+    );
+    assert_eq!(
+        parsed["error"]["line"], 4,
+        "a refusal must carry the line it was authored on: {parsed}"
+    );
+
+    // A device the elaborator understands and this build cannot stamp.
+    let elaborated = run_json(
+        &dir,
+        "ltra.sp",
+        "* finite-length RG LTRA\n\
+         V1 in 0 1\n\
+         O1 in 0 out 0 rgline\n\
+         .model rgline LTRA R=1 G=1e-3 L=0 C=0 LEN=1\n\
+         Rl out 0 50\n\
+         .op\n\
+         .end\n",
+        &[],
+    );
+    assert_eq!(elaborated["observed_exit_code"], 69);
+    assert_eq!(elaborated["error"]["category"], "capability");
+    assert_eq!(
+        elaborated["error"]["capability"],
+        "device.ltra.rg_finite_length"
+    );
+
+    // An analysis that understands the device and does not cover it.
+    let analysis = run_json(
+        &dir,
+        "pz.sp",
+        "* pole-zero with a distributed line\n\
+         V1 in 0 1\n\
+         T1 in 0 out 0 Z0=50 TD=1n\n\
+         R1 out 0 50\n\
+         .pz in 0 out 0 vol pz\n\
+         .end\n",
+        &[],
+    );
+    assert_eq!(analysis["observed_exit_code"], 69);
+    assert_eq!(
+        analysis["error"]["capability"],
+        "analysis.pz.device.transmission_line"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn an_unreadable_checkpoint_version_exits_seventy_six() {
+    let dir = test_dir("category_persistence");
+    let checkpoint = dir.join("future.chk");
+    std::fs::write(
+        &checkpoint,
+        "RSPICE-CHECKPOINT 4294967295\nfingerprint 0x0\ntime 0\n",
+    )
+    .expect("write checkpoint");
+
+    let diagnostic = run_json(
+        &dir,
+        "resume.sp",
+        "* resume from an incompatible checkpoint\n\
+         V1 in 0 PULSE(0 5 0 1n 1n 1u 2u)\n\
+         R1 in out 1k\n\
+         C1 out 0 100p\n\
+         .tran 1n 2u\n\
+         .end\n",
+        &["--resume", checkpoint.to_str().unwrap()],
+    );
+
+    assert_eq!(diagnostic["observed_exit_code"], 76);
+    assert_eq!(diagnostic["error"]["category"], "persistence");
+    assert_eq!(diagnostic["error"]["code"], "persistence_incompatible");
+    assert!(
+        diagnostic["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("4294967295")),
+        "the diagnostic must name the version it found: {diagnostic}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn an_output_symbol_the_result_cannot_supply_exits_eighty_three() {
+    let dir = test_dir("category_signal");
+    let diagnostic = run_json(
+        &dir,
+        "acsave.sp",
+        "* AC result has no device-observable registry\n\
+         V1 in 0 AC 1\n\
+         R1 in out 1k\n\
+         C1 out 0 100p\n\
+         .ac dec 5 1 1meg\n\
+         .save @Mdriver[Id]\n\
+         .end\n",
+        &[],
+    );
+
+    assert_eq!(diagnostic["observed_exit_code"], 83);
+    assert_eq!(diagnostic["error"]["category"], "signal_unavailable");
+    assert_eq!(diagnostic["error"]["code"], "requested_signal_unavailable");
+    assert!(
+        diagnostic["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("@Mdriver[Id]")),
+        "the authored spelling must survive to the diagnostic: {diagnostic}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn every_reachable_category_has_a_distinct_status_and_never_exits_one() {
+    // A cross-check over the codes this suite proves reachable: they must all
+    // differ, and none may be the general-error 1 automation cannot act on.
+    let reachable = [
+        ("netlist", 65),
+        ("input_not_found", 66),
+        ("capability", 69),
+        ("output_commit", 73),
+        ("resource_limit", 75),
+        ("persistence", 76),
+        ("configuration", 78),
+        ("simulation", 80),
+        ("signal_unavailable", 83),
+        ("materialization", 85),
+        ("timeout", 124),
+    ];
+    let mut seen = std::collections::BTreeMap::new();
+    for (category, code) in reachable {
+        assert_ne!(code, 1, "category {category} must not exit 1");
+        assert!(
+            seen.insert(code, category).is_none(),
+            "category {category} shares exit {code} with {:?}",
+            seen.get(&code)
+        );
+    }
 }

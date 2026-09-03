@@ -315,7 +315,7 @@ pub enum MaterializationMismatchError {
     CoordinateIdentity { coordinate: RunCoordinateId },
 
     #[error(
-        "materialized analysis identity changed at coordinate {coordinate}: expected {expected:?}, got {actual:?}"
+        "materialized analysis identity changed at coordinate {coordinate}: expected {expected:?}, got {actual:?}; the authored physical-analysis and post-processing card set must be unconditional across every coordinate"
     )]
     AnalysisIdentity {
         coordinate: RunCoordinateId,
@@ -669,7 +669,7 @@ pub enum SimulationError {
     Netlist(String),
 
     #[error(transparent)]
-    RequestedSignalUnavailable(#[from] RequestedSignalUnavailableError),
+    RequestedSignalUnavailable(Box<RequestedSignalUnavailableError>),
 
     #[error(transparent)]
     ResultSchemaMismatch(Box<ResultSchemaMismatchError>),
@@ -688,6 +688,12 @@ pub enum SimulationError {
 
     #[error("Simulation stopped: the run's time budget expired")]
     TimeLimitExceeded,
+}
+
+impl From<RequestedSignalUnavailableError> for SimulationError {
+    fn from(error: RequestedSignalUnavailableError) -> Self {
+        Self::RequestedSignalUnavailable(Box::new(error))
+    }
 }
 
 impl From<ResultSchemaMismatchError> for SimulationError {

@@ -968,8 +968,7 @@ mod tests {
             .expect("unchanged first coordinate");
         let error = materializer
             .materialize_run(1)
-            .err()
-            .expect("changed analysis identity is refused");
+            .expect_err("changed analysis identity is refused");
         let MaterializationMismatchError::AnalysisIdentity {
             expected, actual, ..
         } = expect_mismatch(&error)

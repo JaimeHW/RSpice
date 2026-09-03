@@ -42,7 +42,7 @@ fn unusable_explicit_checkpoint_is_refused_before_write_and_preserves_destinatio
         checkpoint.to_str().unwrap(),
     ]);
 
-    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.status.code(), Some(80));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("checkpoint capability preflight failed")
@@ -202,7 +202,7 @@ fn xyce_restart_rejects_namespace_escape_and_cli_checkpoint_conflict() {
     )
     .expect("write unsafe restart deck");
     let output = run_rspice(&["--quiet", "run", escaping.to_str().unwrap()]);
-    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.status.code(), Some(80));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("one portable filename") || stderr.contains("exactly one file"),
@@ -224,7 +224,7 @@ fn xyce_restart_rejects_namespace_escape_and_cli_checkpoint_conflict() {
         "--checkpoint",
         explicit.to_str().unwrap(),
     ]);
-    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.status.code(), Some(80));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("cannot be combined with --checkpoint or --resume"),
@@ -347,7 +347,7 @@ fn xyce_restart_pack_selects_distinct_encodings_and_file_auto_detects_both() {
     corrupt[40] ^= 0x01; // BLAKE3 seal, outside the compressed payload.
     std::fs::write(&packed_path, corrupt).expect("corrupt packed integrity seal");
     let output = run_rspice(&["--quiet", "run", packed_resume.to_str().unwrap()]);
-    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.status.code(), Some(80));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("BLAKE3 integrity check failed"),
@@ -424,7 +424,7 @@ fn checkpoint_resume_matches_uninterrupted_run() {
         ])
         .output()
         .expect("run resource-limited checkpoint resume");
-    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.status.code(), Some(80));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("configured encoded limit")
@@ -523,7 +523,7 @@ fn checkpoint_resume_matches_uninterrupted_run() {
     ]);
     assert_eq!(
         output.status.code(),
-        Some(1),
+        Some(80),
         "mismatched checkpoint must be refused"
     );
     let stderr = String::from_utf8_lossy(&output.stderr);

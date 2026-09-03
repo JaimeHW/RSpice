@@ -581,6 +581,47 @@ pub enum ParseError {
     Io(#[from] std::io::Error),
 }
 
+impl ParseError {
+    /// Where in the source this failure was raised, when one location says it.
+    ///
+    /// Frontends print a file and line beside the message rather than leaving
+    /// the operator to find "line N" inside prose. The match is exhaustive so
+    /// a new variant has to declare whether it has a location; `None` means
+    /// the failure genuinely has no single point in the source — a resolution
+    /// failure discovered after flattening, or a conflict that spans two
+    /// declarations, whose message names both.
+    pub fn source_location(&self) -> Option<NetlistSourceLocation> {
+        match self {
+            Self::Syntax { line, .. } => Some(NetlistSourceLocation::in_memory(*line)),
+            Self::UnsupportedCapability { origin, .. } => Some(origin.clone()),
+            Self::DuplicateName { duplicate_line, .. } => {
+                Some(NetlistSourceLocation::in_memory(*duplicate_line))
+            }
+            Self::ParameterRedefinition(error) => Some(error.duplicate_origin.clone()),
+            Self::DuplicateModelParameter(error) => Some(error.model_origin.clone()),
+            Self::MissingSubcircuitEnds(error) => Some(error.detected_at.clone()),
+            Self::MissingDeviceModel(error) => Some(NetlistSourceLocation::in_memory(error.line)),
+            Self::UndefinedMutualInductorReference(error) => Some(error.origin.clone()),
+            Self::ResourceLimit(_)
+            | Self::UnknownDevice(_)
+            | Self::InvalidNode(_)
+            | Self::DuplicateSubcircuitPortBinding(_)
+            | Self::GlobalSubcircuitPortBinding(_)
+            | Self::UndefinedSubcircuit(_)
+            | Self::UnresolvedSubcircuitParameter(_)
+            | Self::OutputSymbolValidation(_)
+            | Self::OutputExpressionValidation(_)
+            | Self::StartupDirectiveConflict(_)
+            | Self::StartupConstraintConflict(_)
+            | Self::DeviceInitialCondition(_)
+            | Self::MissingParameter(_)
+            | Self::UndefinedParameter(_)
+            | Self::InvalidValue(_)
+            | Self::Io(_) => None,
+        }
+    }
+}
+
 /// Error returned by cooperative, abort-aware netlist parsing APIs.
 ///
 /// Keeping cancellation separate from [`ParseError`] preserves the existing

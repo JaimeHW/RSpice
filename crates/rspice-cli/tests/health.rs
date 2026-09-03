@@ -102,7 +102,9 @@ fn readiness_failure_is_structured_and_nonzero() {
         .expect("write restrictive config");
 
     let output = run_rspice(&["--config", config.to_str().unwrap(), "health", "--json"]);
-    assert_eq!(output.status.code(), Some(1));
+    // A budget the probe deck outgrew is a resource-limit outcome, and the
+    // exit status says so rather than collapsing into a generic failure.
+    assert_eq!(output.status.code(), Some(75));
     let json: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("not-ready JSON response");
     assert_eq!(json["status"], "not_ready");

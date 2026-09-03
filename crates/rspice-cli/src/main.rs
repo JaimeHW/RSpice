@@ -33,16 +33,44 @@ mod report;
 
 use cli::{Cli, Commands, Config};
 
+/// Where the failure was authored, rendered for a human reading a terminal.
+///
+/// A diagnostic that says "line 41" only inside its own prose costs the
+/// operator a search; the location belongs beside the message.
+fn source_context(details: &cli::ErrorDetails) -> Option<String> {
+    let line = details.line?;
+    Some(match &details.path {
+        Some(path) => format!("{path}:{line}"),
+        None => format!("line {line}"),
+    })
+}
+
 fn print_cli_error(error: &cli::CliError, format: cli::ErrorFormat) {
+    let details = error.details();
     match format {
         cli::ErrorFormat::Text => {
-            eprintln!("Error: {error}");
+            match source_context(&details) {
+                Some(location) => eprintln!("Error: {location}: {error}"),
+                None => eprintln!("Error: {error}"),
+            }
+            let mut identity = Vec::new();
+            if let Some(analysis) = &details.analysis_id {
+                identity.push(format!("analysis {analysis}"));
+            }
+            if let Some(coordinate) = &details.coordinate_id {
+                identity.push(format!("run {coordinate}"));
+            }
+            if !identity.is_empty() {
+                eprintln!("  in {}", identity.join(", "));
+            }
+            if let Some(capability) = details.capability {
+                eprintln!("  unsupported capability: {capability}");
+            }
             if let Some(suggestion) = error.suggestion() {
                 eprintln!("Suggestion: {suggestion}");
             }
         }
         cli::ErrorFormat::Json => {
-            let details = error.details();
             let payload = serde_json::json!({
                 "schema_version": 1,
                 "tool": {
@@ -61,6 +89,11 @@ fn print_cli_error(error: &cli::CliError, format: cli::ErrorFormat) {
                     "exit_code": error.exit_code() as u8,
                     "suggestion": error.suggestion(),
                     "analysis": details.analysis,
+                    "analysis_id": details.analysis_id,
+                    "coordinate_id": details.coordinate_id,
+                    "capability": details.capability,
+                    "line": details.line,
+                    "path": details.path,
                     "iterations": details.iterations,
                     "resource": details.resource,
                     "requested": details.requested,

@@ -413,20 +413,26 @@ impl Engine {
         for dev in &circuit.bsim4v8.devices {
             let model = &dev.core.model;
             if !(0..=2).contains(&model.cap_mod) {
-                return Err(SimulationError::Circuit(format!(
-                    "{analysis} analysis requires native BSIM4 charge model equations; BSIM4 '{}' \
-                     selects CAPMOD={} (only CAPMOD=0, 1, or 2 is implemented for charge-based analyses; \
-                     DC operating point is supported)",
-                    dev.name, model.cap_mod
-                )));
+                return Err(SimulationError::unsupported_capability(
+                    "device.bsim4.capmod",
+                    format!(
+                        "{analysis} analysis requires native BSIM4 charge model equations; BSIM4 '{}' \
+                         selects CAPMOD={} (only CAPMOD=0, 1, or 2 is implemented for charge-based analyses; \
+                         DC operating point is supported)",
+                        dev.name, model.cap_mod
+                    ),
+                ));
             }
             if !model.cvcharge_mod_supported_for_charges() {
-                return Err(SimulationError::Circuit(format!(
-                    "{analysis} analysis requires native BSIM4 charge model equations; BSIM4 '{}' \
-                     selects CVCHARGEMOD={} (only integer CVCHARGEMOD=0, 1, 2, or 3 is implemented for \
-                     charge-based analyses; DC operating point is supported)",
-                    dev.name, model.cvcharge_mod_value
-                )));
+                return Err(SimulationError::unsupported_capability(
+                    "device.bsim4.cvchargemod",
+                    format!(
+                        "{analysis} analysis requires native BSIM4 charge model equations; BSIM4 '{}' \
+                         selects CVCHARGEMOD={} (only integer CVCHARGEMOD=0, 1, 2, or 3 is implemented for \
+                         charge-based analyses; DC operating point is supported)",
+                        dev.name, model.cvcharge_mod_value
+                    ),
+                ));
             }
         }
         Ok(())
