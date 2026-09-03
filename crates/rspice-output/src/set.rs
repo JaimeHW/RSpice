@@ -332,6 +332,9 @@ impl AtomicArtifactSet {
             hooks.enter_member(index);
             let prepared = match members[index].prepared.take() {
                 Some(prepared) => prepared,
+                // Commit consumes the set and visits each member once, so
+                // this is unreachable; it fails the transaction closed rather
+                // than panicking if that ever stops being true.
                 None => {
                     let destination = members[index].destination.clone();
                     let outcome = rollback(&mut members);
