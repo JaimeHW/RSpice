@@ -1448,8 +1448,8 @@ R2 out 0 1k\n\
             "browser alter deck\nV1 in 0 1\nR1 in 0 1k\n.OP\n.ALTER\nR1 in 0 2k\n.END\n",
         )
         .expect_err("textual ALTER must be refused");
-        assert_eq!(error.code, "unsupported_deck_axis");
-        assert_eq!(error.category, "unsupported_feature");
+        assert_eq!(error.code, "unsupported_capability");
+        assert_eq!(error.category, "capability");
         assert!(
             error.message.to_ascii_lowercase().contains("alter"),
             "the refusal names ALTER: {}",
