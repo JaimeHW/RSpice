@@ -292,6 +292,113 @@ impl HbConfig {
         basis
     }
 
+    /// Resolve one authored `.HB` card against `.OPTIONS HBINT NUMFREQ`.
+    ///
+    /// `frequencies` is the card's tone list in authored order and
+    /// `harmonic_orders` is the option's list. The Xyce contract is:
+    ///
+    /// - no option: every tone keeps this configuration's own default order,
+    ///   and the collocation grid stays the solver's default;
+    /// - one order: it is broadcast across every tone;
+    /// - one order per tone: they pair positionally;
+    /// - anything else is an authored-input defect.
+    ///
+    /// A single tone whose order the deck stated explicitly also pins the
+    /// minimal bilateral `2N+1` collocation grid, which is what an explicit
+    /// `NUMFREQ` asks for. Every other shape uses the configuration's own
+    /// default grid.
+    ///
+    /// This is the one implementation of that rule. The CLI, the Python
+    /// bindings, the browser API, and the engine adapter all translate the
+    /// same authored card, and four independent translations of a harmonic
+    /// order list are four chances to disagree about how many harmonics a
+    /// deck asked for.
+    pub fn from_hb_card(
+        frequencies: &[Value],
+        harmonic_orders: &[usize],
+    ) -> Result<Self, HbConfigError> {
+        if frequencies.is_empty() {
+            return Err(HbConfigError::new(
+                "tones",
+                ".HB requires at least one positive tone frequency",
+            ));
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        for (index, frequency) in frequencies.iter().enumerate() {
+            if !frequency.is_finite() || *frequency <= 0.0 {
+                return Err(HbConfigError::new(
+                    "tones",
+                    format!(
+                        ".HB tone {} must be a positive finite frequency, not {frequency}",
+                        index + 1
+                    ),
+                ));
+            }
+            if !seen.insert(frequency.to_bits()) {
+                return Err(HbConfigError::new(
+                    "tones",
+                    format!(".HB lists the tone frequency {frequency} more than once"),
+                ));
+            }
+        }
+
+        let default_harmonics = Self::new(frequencies[0]).num_harmonics;
+        let orders: Vec<usize> = if harmonic_orders.is_empty() {
+            vec![default_harmonics; frequencies.len()]
+        } else if harmonic_orders.contains(&0) {
+            return Err(HbConfigError::new(
+                "num_harmonics",
+                ".OPTIONS HBINT NUMFREQ harmonic orders must all be at least 1",
+            ));
+        } else if harmonic_orders.len() == 1 {
+            vec![harmonic_orders[0]; frequencies.len()]
+        } else if harmonic_orders.len() == frequencies.len() {
+            harmonic_orders.to_vec()
+        } else {
+            return Err(HbConfigError::new(
+                "num_harmonics",
+                format!(
+                    ".HB has {} tones but .OPTIONS HBINT NUMFREQ lists {} harmonic orders; \
+                     provide one order to broadcast or one per tone",
+                    frequencies.len(),
+                    harmonic_orders.len()
+                ),
+            ));
+        };
+
+        let mut tones = Vec::new();
+        tones
+            .try_reserve_exact(frequencies.len())
+            .map_err(|_| HbConfigError::new("tones", "could not allocate the .HB tone list"))?;
+        for (index, (frequency, order)) in frequencies.iter().zip(&orders).enumerate() {
+            tones.push(HbTone::new(*frequency, *order).with_name(format!("tone{}", index + 1)));
+        }
+
+        let [tone] = tones.as_slice() else {
+            let config = Self::multi_tone(tones);
+            config.validate()?;
+            return Ok(config);
+        };
+        let config = Self::new(tone.frequency).with_harmonics(tone.num_harmonics);
+        let config = if harmonic_orders.is_empty() {
+            config
+        } else {
+            let points = config.minimum_collocation_points().ok_or_else(|| {
+                HbConfigError::new(
+                    "collocation_points",
+                    format!(
+                        ".OPTIONS HBINT NUMFREQ harmonic count {} exceeds the addressable \
+                         collocation grid",
+                        tone.num_harmonics
+                    ),
+                )
+            })?;
+            config.with_collocation_points(points)
+        };
+        config.validate()?;
+        Ok(config)
+    }
+
     /// Set number of harmonics
     pub fn with_harmonics(mut self, n: usize) -> Self {
         self.num_harmonics = n.max(1);
@@ -659,5 +766,72 @@ mod tests {
             config.fft_size(),
             config.num_harmonics
         );
+    }
+
+    #[test]
+    fn a_card_with_no_numfreq_keeps_the_core_default_order_and_grid() {
+        let config = HbConfig::from_hb_card(&[1.0e9], &[]).expect("a one-tone .HB resolves");
+        assert_eq!(config.fundamental_freq, 1.0e9);
+        assert_eq!(config.num_harmonics, HbConfig::new(1.0e9).num_harmonics);
+        assert_eq!(
+            config.collocation_points, None,
+            "without NUMFREQ the solver's own grid is used"
+        );
+    }
+
+    #[test]
+    fn an_explicit_single_tone_order_pins_the_minimal_bilateral_grid() {
+        let config = HbConfig::from_hb_card(&[1.0e9], &[5]).expect("an explicit order resolves");
+        assert_eq!(config.num_harmonics, 5);
+        assert_eq!(
+            config.collocation_points,
+            Some(11),
+            "an explicit NUMFREQ asks for the minimal 2N+1 grid"
+        );
+    }
+
+    #[test]
+    fn one_order_broadcasts_across_every_tone() {
+        let broadcast =
+            HbConfig::from_hb_card(&[9.0e8, 8.0e8], &[4]).expect("broadcasting resolves");
+        let paired = HbConfig::from_hb_card(&[9.0e8, 8.0e8], &[4, 4]).expect("pairing resolves");
+        assert_eq!(broadcast.fundamental_freq, paired.fundamental_freq);
+        assert_eq!(broadcast.num_harmonics, paired.num_harmonics);
+        assert_eq!(broadcast.tones.len(), 2);
+        assert_eq!(
+            broadcast
+                .tones
+                .iter()
+                .map(|tone| tone.num_harmonics)
+                .collect::<Vec<_>>(),
+            vec![4, 4]
+        );
+    }
+
+    #[test]
+    fn a_multi_tone_card_uses_the_core_common_basis_rule() {
+        let config = HbConfig::from_hb_card(&[9.0e8, 8.0e8], &[]).expect("a two-tone .HB resolves");
+        let default_order = HbConfig::new(9.0e8).num_harmonics;
+        let expected = HbConfig::multi_tone(vec![
+            HbTone::new(9.0e8, default_order).with_name("tone1"),
+            HbTone::new(8.0e8, default_order).with_name("tone2"),
+        ]);
+        assert_eq!(config.fundamental_freq, expected.fundamental_freq);
+        assert_eq!(config.num_harmonics, expected.num_harmonics);
+    }
+
+    #[test]
+    fn an_impossible_card_or_order_list_fails_closed() {
+        for (frequencies, orders) in [
+            (vec![], vec![]),
+            (vec![0.0], vec![]),
+            (vec![f64::NAN], vec![]),
+            (vec![1.0e9, 1.0e9], vec![]),
+            (vec![1.0e9], vec![0]),
+            (vec![1.0e9, 2.0e9], vec![3, 4, 5]),
+        ] {
+            HbConfig::from_hb_card(&frequencies, &orders)
+                .expect_err("an impossible .HB card must fail before any solve");
+        }
     }
 }

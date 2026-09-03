@@ -61,6 +61,8 @@ mod health;
 mod matrix;
 mod monte_carlo;
 pub use monte_carlo::{MonteCarloEnvironment, apply_supply_voltage_scale_with_abort};
+mod node_resolver;
+pub use node_resolver::NodeResolver;
 mod noise;
 /// Declared native periodic-analysis device capabilities, keyed by family.
 /// Every advanced-analysis admission check reads this table instead of a
@@ -71,6 +73,9 @@ mod pss;
 mod pss_noise;
 mod result;
 mod sensitivity;
+pub use sensitivity::SensitivityCardResult;
+mod sp;
+pub use sp::SParameterRun;
 mod source_values;
 mod stamping;
 mod stb;
@@ -121,7 +126,7 @@ pub use pss::{
     PssAnalysisResult, PssContinuationState, PssDcOperatingPointSeed, PssError, PssOperatingPoint,
     PssOperatingPointIdentity,
 };
-pub use pss_noise::OscPnoiseResult;
+pub use pss_noise::{OscPnoiseResult, PeriodicNoiseResult};
 pub use result::{
     DigitalTrace, DigitalTracePoint, RealTrace, RealTracePoint, TransientDeviceOpTrace,
     TransientFftBin, TransientFftHarmonic, TransientFftMetrics, TransientFftResult,
@@ -135,8 +140,8 @@ pub use transient::{
     DEFAULT_MAX_CHECKPOINT_BYTES, TransientCheckpoint, TransientCheckpointBlocker,
     TransientCheckpointBlockerSource, TransientCheckpointCapability, TransientCheckpointEncoding,
     TransientStartupMode, XYCE_RESTART_SCHEDULE_TOLERANCE, XyceRestartJobPlan,
-    XyceRestartPlanError, evaluate_transient_post_results, netlist_fingerprint,
-    transient_fft_window_coherent_gain, xyce_restart_schedule_is_due,
+    XyceRestartPlanError, evaluate_transient_fourier_results, evaluate_transient_post_results,
+    netlist_fingerprint, transient_fft_window_coherent_gain, xyce_restart_schedule_is_due,
 };
 pub use waveform::{
     CompressionConfig, TRANSIENT_COMPRESSION_REPORT_VERSION, TransientAnalysisIdentity,

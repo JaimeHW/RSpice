@@ -50,7 +50,7 @@ pub use network::{
 };
 pub use noise_params::{TwoPortNoise, derive_two_port_noise};
 pub use port_noise::{
-    PortNoiseAssemblyError, PortNoiseSweep, assemble_port_noise, assemble_port_noise_with_abort,
+    PortNoiseAssembly, PortNoiseAssemblyError, assemble_port_noise, assemble_port_noise_with_abort,
 };
 pub use ports::{
     PortError, PortRealization, SParameterPort, collect_ports, normalize_ports, set_excitations,

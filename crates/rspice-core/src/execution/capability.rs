@@ -212,22 +212,12 @@ const CLI_ARTIFACT: &str = "CSV/text artifact exists, but no shared typed result
 const CLI_AXIS: &str =
     "shared deck axes execute, but the CLI artifact does not retain a typed coordinate document";
 const CLI_AXIS_UNAVAILABLE: &str = "CLI has no authored deck-axis route for this analysis family";
-const PY_PNOISE_DRIVEN_AXIS_ONLY: &str = "deck-axis .PNOISE executes around a driven carrier only; an autonomous PSS carrier's \
-     oscillator phase noise has no run-report field";
-const ADAPTER_SP_UNAVAILABLE: &str = "no Engine::run_* entry point produces an SParameterResult, so the protocol-4 adapter cannot \
-     publish the shared sp/port-noise document without deciding the .SP projection itself";
-const ADAPTER_PNOISE_UNAVAILABLE: &str = "the driven .PNOISE runners return PnoiseAnalysisResult and the autonomous one returns \
-     OscPnoiseResult, while from_pnoise accepts only analysis::pnoise::PnoiseResult";
-const ADAPTER_POST_PROCESS_UNAVAILABLE: &str = "DeckPlan mints no AnalysisInstanceId for .FOUR or .FFT, so the shared post-process document \
-     cannot be named";
-const WASM_SP_RUNNER: &str =
-    "no Engine runner returns an SParameterResult, so the browser deck route refuses .SP by name";
-const WASM_NODE_INDEX: &str = "core takes node indices here and exposes no authored-name to node-index resolver, so the browser deck route refuses the card by name";
-const WASM_FOUR_RESOLVER: &str = "core exposes no resolver from a .FOUR output specification to a TransientResult column, so the browser deck route refuses .FOUR by name";
-const WASM_PNOISE_RUNNER: &str = "no Engine runner returns analysis::pnoise::PnoiseResult, so the browser deck route refuses .PNOISE by name";
-const WASM_STB_INFINITE_MARGIN: &str = "the browser deck route executes .STB and publishes the shared stability document, but a loop with no gain or phase crossover has an infinite Tian margin that a finite ResultScalar cannot encode, so such a run fails closed instead of publishing a different margin";
-const WASM_MONTE_CARLO_SEED: &str =
-    "the axis executes, but coordinate-derived Monte Carlo seed semantics are undefined";
+const PY_PNOISE_DRIVEN_AXIS_ONLY: &str = "deck-axis .PNOISE executes around a driven carrier only; an autonomous PSS carrier's      oscillator phase noise has no run-report field";
+/// The adapter stages one shared result document per authored card. Port noise
+/// is the `.SP` card's second result and `.FOUR` is the transient's, so core
+/// naming and projection are no longer what is missing: the executor has no
+/// slot to publish a second document beside its parent.
+const ADAPTER_SECOND_DOCUMENT: &str = "the protocol-4 executor publishes one shared result document per authored card, and this      family is a second result produced beside another card's; core names and projects it, but      the adapter has no slot for it and refuses the deck rather than dropping it";
 
 const fn cli_artifact_axes() -> SurfaceCapability {
     SurfaceCapability::new(
@@ -266,29 +256,6 @@ const fn adapter_typed_axes() -> SurfaceCapability {
         MappingStatus::Mapped,
         MappingStatus::Mapped,
         MappingStatus::Mapped,
-    )
-}
-
-const ADAPTER_MC_AXIS_SEED: &str =
-    "shared deck axes execute, but coordinate-derived Monte Carlo seed semantics are undefined";
-
-const fn adapter_typed_scalar_only(axis_note: &'static str) -> SurfaceCapability {
-    SurfaceCapability::new(
-        MappingStatus::Mapped,
-        MappingStatus::Partial(axis_note),
-        MappingStatus::Partial(axis_note),
-    )
-}
-
-const ADAPTER_STB_MARGIN: &str = "loops with finite margins publish the shared stability document, but an unconditionally \
-     stable loop reports an infinite margin and from_stability refuses a non-finite scalar rather \
-     than recording the absent crossover";
-
-const fn adapter_partial_axes(note: &'static str) -> SurfaceCapability {
-    SurfaceCapability::new(
-        MappingStatus::Partial(note),
-        MappingStatus::Partial(note),
-        MappingStatus::Partial(note),
     )
 }
 
@@ -347,15 +314,15 @@ pub const ANALYSIS_CAPABILITY_MATRIX: &[AnalysisResultCapability] = &[
         result: AnalysisResultKind::SParameters,
         cli: cli_artifact_axes(),
         python: python_mapped_axes(),
-        wasm: SurfaceCapability::unsupported(WASM_SP_RUNNER),
-        engine_adapter: SurfaceCapability::unsupported(ADAPTER_SP_UNAVAILABLE),
+        wasm: wasm_mapped_axes(),
+        engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::PortNoise,
         cli: cli_artifact_axes(),
         python: python_mapped_axes(),
-        wasm: SurfaceCapability::unsupported(WASM_SP_RUNNER),
-        engine_adapter: SurfaceCapability::unsupported(ADAPTER_SP_UNAVAILABLE),
+        wasm: wasm_mapped_axes(),
+        engine_adapter: SurfaceCapability::unsupported(ADAPTER_SECOND_DOCUMENT),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Distortion,
@@ -375,33 +342,29 @@ pub const ANALYSIS_CAPABILITY_MATRIX: &[AnalysisResultCapability] = &[
         result: AnalysisResultKind::Stability,
         cli: cli_artifact_axes(),
         python: python_mapped_axes(),
-        wasm: SurfaceCapability::new(
-            MappingStatus::Partial(WASM_STB_INFINITE_MARGIN),
-            MappingStatus::Partial(WASM_STB_INFINITE_MARGIN),
-            MappingStatus::Partial(WASM_STB_INFINITE_MARGIN),
-        ),
-        engine_adapter: adapter_partial_axes(ADAPTER_STB_MARGIN),
+        wasm: wasm_mapped_axes(),
+        engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Sensitivity,
         cli: cli_artifact_axes(),
         python: python_mapped_axes(),
-        wasm: SurfaceCapability::unsupported(WASM_NODE_INDEX),
+        wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::PoleZero,
         cli: cli_artifact_axes(),
         python: python_mapped_axes(),
-        wasm: SurfaceCapability::unsupported(WASM_NODE_INDEX),
+        wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Fourier,
         cli: cli_artifact_axes(),
         python: python_mapped_axes(),
-        wasm: SurfaceCapability::unsupported(WASM_FOUR_RESOLVER),
-        engine_adapter: SurfaceCapability::unsupported(ADAPTER_POST_PROCESS_UNAVAILABLE),
+        wasm: wasm_mapped_axes(),
+        engine_adapter: SurfaceCapability::unsupported(ADAPTER_SECOND_DOCUMENT),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Fft,
@@ -426,12 +389,8 @@ pub const ANALYSIS_CAPABILITY_MATRIX: &[AnalysisResultCapability] = &[
                 "nested TEMP executes, but coordinate-derived Monte Carlo seed semantics are undefined",
             ),
         ),
-        wasm: SurfaceCapability::new(
-            MappingStatus::Mapped,
-            MappingStatus::Partial(WASM_MONTE_CARLO_SEED),
-            MappingStatus::Partial(WASM_MONTE_CARLO_SEED),
-        ),
-        engine_adapter: adapter_typed_scalar_only(ADAPTER_MC_AXIS_SEED),
+        wasm: wasm_mapped_axes(),
+        engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::Pss,
@@ -455,8 +414,8 @@ pub const ANALYSIS_CAPABILITY_MATRIX: &[AnalysisResultCapability] = &[
             MappingStatus::Partial(PY_PNOISE_DRIVEN_AXIS_ONLY),
             MappingStatus::Partial(PY_PNOISE_DRIVEN_AXIS_ONLY),
         ),
-        wasm: SurfaceCapability::unsupported(WASM_PNOISE_RUNNER),
-        engine_adapter: SurfaceCapability::unsupported(ADAPTER_PNOISE_UNAVAILABLE),
+        wasm: wasm_mapped_axes(),
+        engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
         result: AnalysisResultKind::HarmonicBalance,

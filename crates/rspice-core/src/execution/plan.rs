@@ -538,10 +538,79 @@ impl PlannedAnalysis {
     }
 }
 
+/// Which authored post-processing card one planned post-process came from.
+///
+/// A `.FOUR` card may name several operands and each one produces its own
+/// spectrum, so the identity is per operand: two spectra published under one
+/// name would collide in every artifact namespace derived from it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PostProcessSource {
+    /// Operand `operand` of the `card_index`-th authored `.FOUR` card.
+    FourierOperand {
+        /// Zero-based ordinal of the `.FOUR` card among the deck's `.FOUR`
+        /// cards, which is the index the core `.FOUR` operand resolver takes.
+        card_index: usize,
+        /// Zero-based ordinal of the operand on that card.
+        operand: usize,
+        /// Authored operand spelling, such as `V(out)`.
+        output: String,
+    },
+    /// The `card_index`-th authored `.FFT` card.
+    Fft {
+        /// Zero-based index into `Netlist::fft_analyses`.
+        card_index: usize,
+    },
+}
+
+/// One authored post-processing card, named and bound to its parent analysis.
+///
+/// Post-processes are deliberately not part of [`DeckPlan::analyses`]: `.FOUR`
+/// and `.FFT` are not physical analyses, they suppress no implicit operating
+/// point, and an executor must not try to solve them. They still need stable
+/// identities, because their results are published documents like any other.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlannedPostProcess {
+    analysis: PlannedAnalysis,
+    source: PostProcessSource,
+}
+
+impl PlannedPostProcess {
+    /// Canonical identity of this post-process, such as `four-001`.
+    pub const fn id(&self) -> AnalysisInstanceId {
+        self.analysis.id
+    }
+
+    /// The planned analysis, including the parent it is bound to.
+    pub const fn analysis(&self) -> &PlannedAnalysis {
+        &self.analysis
+    }
+
+    /// The physical analysis whose result this post-process consumes.
+    ///
+    /// Planning refuses a post-process with no parent, so this is always
+    /// present.
+    pub fn parent(&self) -> AnalysisInstanceId {
+        // `plan_post_processes` binds every post-process to a transient before
+        // it is constructed, and the field is private, so the parent cannot be
+        // absent here.
+        self.analysis
+            .request
+            .upstream
+            .expect("a planned post-process is always bound to its parent")
+    }
+
+    /// Which authored card and operand this identity names.
+    pub const fn source(&self) -> &PostProcessSource {
+        &self.source
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeckPlan {
     axes: Vec<RunAxis>,
     analyses: Vec<PlannedAnalysis>,
+    post_processes: Vec<PlannedPostProcess>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -710,7 +779,8 @@ impl DeckPlan {
         axes.extend(data_axes);
         axes.extend(step_axes);
         axes.extend(temperature_axes);
-        let plan = Self::new(axes, analyses)?;
+        let mut plan = Self::new(axes, analyses)?;
+        plan.post_processes = plan_post_processes(netlist, &plan.analyses, abort)?;
         plan.preflight_coordinates(limits)?;
         if abort.is_aborted() {
             return Err(DeckPlanError::Aborted);
@@ -823,7 +893,44 @@ impl DeckPlan {
             analyses.push(PlannedAnalysis { id, request });
         }
 
-        Ok(Self { axes, analyses })
+        Ok(Self {
+            axes,
+            analyses,
+            post_processes: Vec::new(),
+        })
+    }
+
+    /// Plan one analysis family for a direct, non-deck run.
+    ///
+    /// A frontend that runs an analysis outside a deck — a browser API call, a
+    /// Python `Engine.run_ac`, an attached `.FFT` spectrum — still publishes a
+    /// result document, and that document needs the same canonical `ac-001`
+    /// style identity a deck run would give it. This is the sanctioned way to
+    /// get one: [`AnalysisInstanceId`] has no public constructor precisely so
+    /// that no frontend can invent an ordinal scheme of its own.
+    pub fn for_direct_analyses(kind: AnalysisKind, count: usize) -> Result<Self, DeckPlanError> {
+        if kind == AnalysisKind::ImplicitOp {
+            return Err(DeckPlanError::ExplicitImplicitOp);
+        }
+        let mut requests = Vec::new();
+        requests
+            .try_reserve_exact(count)
+            .map_err(|_| DeckPlanError::Allocation {
+                object: "direct analysis requests",
+            })?;
+        for _ in 0..count {
+            requests.push(AnalysisRequest::new(kind));
+        }
+        // An empty request list would become an implicit operating point, so a
+        // zero-count request is answered with an empty plan instead.
+        if requests.is_empty() {
+            return Ok(Self {
+                axes: Vec::new(),
+                analyses: Vec::new(),
+                post_processes: Vec::new(),
+            });
+        }
+        Self::new(Vec::new(), requests)
     }
 
     pub fn axes(&self) -> &[RunAxis] {
@@ -834,13 +941,26 @@ impl DeckPlan {
         &self.analyses
     }
 
+    /// Every authored `.FOUR` operand and `.FFT` card, named and bound to the
+    /// transient it post-processes.
+    ///
+    /// These are not analyses an executor solves; they are identities for the
+    /// documents a transient's post-processing publishes. They are listed
+    /// `.FOUR` operands first in authored card and operand order, then `.FFT`
+    /// cards in authored order, which is the order their ordinals follow.
+    pub fn post_process_analyses(&self) -> &[PlannedPostProcess] {
+        &self.post_processes
+    }
+
     /// Pair every authored analysis command with the planned analysis it
     /// became, in authored order.
     ///
-    /// Run axes (`.STEP`, `.TEMP`) and post-processing cards (`.FOUR`) occupy
-    /// no planned slot and pair with `None`. Frontends that report on an
-    /// authored card need its canonical identity; deriving that pairing
-    /// separately on each surface is how the two drift apart.
+    /// Run axes (`.STEP`, `.TEMP`) occupy no planned slot and pair with
+    /// `None`. A `.FOUR` card pairs with the identity of its first planned
+    /// operand — the whole card's operand set is in
+    /// [`Self::post_process_analyses`]. Frontends that report on an authored
+    /// card need its canonical identity; deriving that pairing separately on
+    /// each surface is how the two drift apart.
     pub fn authored_analyses<'plan>(
         &'plan self,
         netlist: &'plan crate::netlist::Netlist,
@@ -853,11 +973,24 @@ impl DeckPlan {
         use crate::netlist::AnalysisCommand;
 
         let mut planned = self.analyses.iter();
+        let mut four_card = 0usize;
         netlist.analyses.iter().map(move |command| {
             let id = match command {
-                AnalysisCommand::Step(_)
-                | AnalysisCommand::Temp { .. }
-                | AnalysisCommand::Four { .. } => None,
+                AnalysisCommand::Step(_) | AnalysisCommand::Temp { .. } => None,
+                AnalysisCommand::Four { .. } => {
+                    let card_index = four_card;
+                    four_card += 1;
+                    self.post_processes
+                        .iter()
+                        .find(|post| {
+                            matches!(
+                                post.source,
+                                PostProcessSource::FourierOperand { card_index: card, .. }
+                                    if card == card_index
+                            )
+                        })
+                        .map(PlannedPostProcess::id)
+                }
                 _ => planned.next().map(PlannedAnalysis::id),
             };
             (command, id)
@@ -1214,10 +1347,9 @@ impl fmt::Display for DeckPlanError {
             Self::TemperatureAxisWithStep => formatter.write_str(
                 "the legacy temperature-only execution adapter cannot compose .TEMP with .STEP; use the canonical run-axis plan",
             ),
-            Self::MissingUpstreamAnalysis { card, required } => write!(
-                formatter,
-                "{card} requires {required} in the same deck to linearize around"
-            ),
+            Self::MissingUpstreamAnalysis { card, required } => {
+                write!(formatter, "{card} requires {required} in the same deck")
+            }
             Self::AnalysisCountOverflow(kind) => {
                 write!(
                     formatter,
@@ -1268,6 +1400,154 @@ fn resolve_periodic_source(
         PeriodicSourceSelector::Hb => (last_hb, "a preceding .HB"),
     };
     found.ok_or(DeckPlanError::MissingUpstreamAnalysis { card, required })
+}
+
+/// Name every authored `.FOUR` operand and `.FFT` card, bound to the transient
+/// it post-processes.
+///
+/// A post-process is meaningless without a parent trajectory, so a deck that
+/// authors one without a `.TRAN` is refused here rather than having the card
+/// quietly dropped. The parent is the transient the card follows, or — because
+/// both directives are commonly written above the `.TRAN` line — the deck's
+/// first transient when none precedes it.
+fn plan_post_processes(
+    netlist: &crate::netlist::Netlist,
+    analyses: &[PlannedAnalysis],
+    abort: &dyn AbortSignal,
+) -> Result<Vec<PlannedPostProcess>, DeckPlanError> {
+    use crate::netlist::AnalysisCommand;
+
+    let four_operands = netlist
+        .analyses
+        .iter()
+        .filter_map(|command| match command {
+            AnalysisCommand::Four { outputs, .. } => Some(outputs.len()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if four_operands.is_empty() && netlist.fft_analyses.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let transients = analyses
+        .iter()
+        .filter(|planned| planned.id.kind() == AnalysisKind::Tran)
+        .map(PlannedAnalysis::id)
+        .collect::<Vec<_>>();
+    let first_transient = |card: &'static str| -> Result<AnalysisInstanceId, DeckPlanError> {
+        transients
+            .first()
+            .copied()
+            .ok_or(DeckPlanError::MissingUpstreamAnalysis {
+                card,
+                required: "a completed authored .TRAN to post-process",
+            })
+    };
+
+    // The transient a `.FOUR` card follows, by authored position. Cards above
+    // the deck's `.TRAN` line attach to the first transient.
+    let mut preceding_transient: Vec<Option<AnalysisInstanceId>> =
+        Vec::with_capacity(four_operands.len());
+    let mut seen_transients = 0usize;
+    for command in &netlist.analyses {
+        match command {
+            AnalysisCommand::Tran { .. } => seen_transients += 1,
+            AnalysisCommand::Four { .. } => {
+                preceding_transient.push(
+                    seen_transients
+                        .checked_sub(1)
+                        .and_then(|index| transients.get(index).copied()),
+                );
+            }
+            _ => {}
+        }
+    }
+
+    let mut requests = Vec::new();
+    let mut sources = Vec::new();
+    let total = four_operands
+        .iter()
+        .try_fold(netlist.fft_analyses.len(), |sum, count| {
+            sum.checked_add(*count)
+        })
+        .ok_or(DeckPlanError::CoordinateCountOverflow)?;
+    requests
+        .try_reserve_exact(total)
+        .map_err(|_| DeckPlanError::Allocation {
+            object: "planned post-process requests",
+        })?;
+    sources
+        .try_reserve_exact(total)
+        .map_err(|_| DeckPlanError::Allocation {
+            object: "planned post-process sources",
+        })?;
+
+    for (card_index, operand_count) in four_operands.iter().copied().enumerate() {
+        if abort.is_aborted() {
+            return Err(DeckPlanError::Aborted);
+        }
+        if operand_count == 0 {
+            return Err(DeckPlanError::MissingUpstreamAnalysis {
+                card: ".FOUR",
+                required: "at least one output operand",
+            });
+        }
+        let parent = match preceding_transient.get(card_index).copied().flatten() {
+            Some(id) => id,
+            None => first_transient(".FOUR")?,
+        };
+        let outputs = netlist
+            .analyses
+            .iter()
+            .filter_map(|command| match command {
+                AnalysisCommand::Four { outputs, .. } => Some(outputs),
+                _ => None,
+            })
+            .nth(card_index)
+            .ok_or(DeckPlanError::MissingUpstreamAnalysis {
+                card: ".FOUR",
+                required: "an authored output list",
+            })?;
+        for (operand, output) in outputs.iter().enumerate() {
+            requests.push(AnalysisRequest::new(AnalysisKind::Fourier).with_upstream(parent));
+            sources.push(PostProcessSource::FourierOperand {
+                card_index,
+                operand,
+                output: output.clone(),
+            });
+        }
+    }
+
+    if !netlist.fft_analyses.is_empty() {
+        let parent = first_transient(".FFT")?;
+        for card_index in 0..netlist.fft_analyses.len() {
+            if abort.is_aborted() {
+                return Err(DeckPlanError::Aborted);
+            }
+            requests.push(AnalysisRequest::new(AnalysisKind::Fft).with_upstream(parent));
+            sources.push(PostProcessSource::Fft { card_index });
+        }
+    }
+
+    let mut ordinals = std::collections::BTreeMap::<AnalysisKind, u32>::new();
+    let mut planned = Vec::new();
+    planned
+        .try_reserve_exact(requests.len())
+        .map_err(|_| DeckPlanError::Allocation {
+            object: "planned post-processes",
+        })?;
+    for (request, source) in requests.into_iter().zip(sources) {
+        let ordinal = ordinals.entry(request.kind).or_default();
+        let id = AnalysisInstanceId::new(request.kind, *ordinal);
+        *ordinal = ordinal
+            .checked_add(1)
+            .ok_or(DeckPlanError::AnalysisCountOverflow(request.kind))?;
+        planned.push(PlannedPostProcess {
+            analysis: PlannedAnalysis { id, request },
+            source,
+        });
+    }
+    Ok(planned)
 }
 
 pub(super) fn analysis_kind(command: &crate::netlist::AnalysisCommand) -> AnalysisKind {
@@ -2420,6 +2700,171 @@ mod tests {
             .coordinates_with_abort(&ResourceLimits::default(), &crate::NoAbort)
             .expect("periodic run coordinates materialize");
         assert_eq!(coordinates.len(), 4);
+    }
+
+    fn post_process_plan(body: &str) -> DeckPlan {
+        let source = format!(
+            "Post-process deck\n\
+             V1 in 0 SIN(0 1 1k)\n\
+             R1 in out 1k\n\
+             C1 out 0 1u\n\
+             {body}\
+             .end\n"
+        );
+        let netlist = crate::netlist::Netlist::parse(&source).expect("post-process deck parses");
+        DeckPlan::from_netlist(&netlist, &ResourceLimits::default())
+            .expect("post-process deck plans")
+    }
+
+    #[test]
+    fn every_four_operand_gets_a_stable_identity_bound_to_its_transient() {
+        let plan = post_process_plan(
+            ".tran 1u 1m\n\
+             .four 1k v(out) v(in)\n\
+             .four 2k v(out)\n",
+        );
+        assert_eq!(
+            plan.post_process_analyses()
+                .iter()
+                .map(|post| (post.id().tag(), post.parent().tag()))
+                .collect::<Vec<_>>(),
+            [
+                ("four-001".to_string(), "tran-001".to_string()),
+                ("four-002".to_string(), "tran-001".to_string()),
+                ("four-003".to_string(), "tran-001".to_string()),
+            ]
+        );
+        assert_eq!(
+            plan.post_process_analyses()
+                .iter()
+                .map(|post| match post.source() {
+                    PostProcessSource::FourierOperand {
+                        card_index, output, ..
+                    } => (*card_index, output.as_str()),
+                    PostProcessSource::Fft { .. } => panic!("no .FFT card was authored"),
+                })
+                .collect::<Vec<_>>(),
+            [(0, "V(OUT)"), (0, "V(IN)"), (1, "V(OUT)")],
+            "the authored operand spelling is retained exactly as the resolver reports it"
+        );
+    }
+
+    #[test]
+    fn a_four_card_stays_out_of_the_physical_analysis_set() {
+        let plan = post_process_plan(
+            ".tran 1u 1m\n\
+             .four 1k v(out)\n",
+        );
+        assert_eq!(
+            plan.analyses()
+                .iter()
+                .map(|analysis| analysis.id().tag())
+                .collect::<Vec<_>>(),
+            ["tran-001"],
+            "post-processing must not occupy a solvable analysis slot"
+        );
+    }
+
+    #[test]
+    fn an_fft_card_is_named_and_bound_even_though_it_is_not_an_analysis_command() {
+        let plan = post_process_plan(
+            ".tran 1u 1m\n\
+             .fft v(out)\n\
+             .fft v(in)\n",
+        );
+        assert_eq!(
+            plan.post_process_analyses()
+                .iter()
+                .map(|post| (post.id().tag(), post.parent().tag()))
+                .collect::<Vec<_>>(),
+            [
+                ("fft-001".to_string(), "tran-001".to_string()),
+                ("fft-002".to_string(), "tran-001".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_four_card_written_above_the_transient_still_binds_to_it() {
+        let plan = post_process_plan(
+            ".four 1k v(out)\n\
+             .tran 1u 1m\n",
+        );
+        assert_eq!(
+            plan.post_process_analyses()
+                .first()
+                .expect("one planned .FOUR operand")
+                .parent()
+                .tag(),
+            "tran-001"
+        );
+    }
+
+    #[test]
+    fn a_post_process_without_a_transient_is_refused_rather_than_dropped() {
+        let netlist = crate::netlist::Netlist::parse(
+            "No transient\n\
+             V1 in 0 DC 1\n\
+             R1 in 0 1k\n\
+             .op\n\
+             .four 1k v(in)\n\
+             .end\n",
+        )
+        .expect("deck parses");
+        let error = DeckPlan::from_netlist(&netlist, &ResourceLimits::default())
+            .expect_err("a .FOUR with nothing to post-process must be refused");
+        assert!(
+            matches!(
+                error,
+                DeckPlanError::MissingUpstreamAnalysis { card: ".FOUR", .. }
+            ),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn the_authored_card_pairing_names_the_four_card_it_planned() {
+        let source = "Post-process deck\n\
+             V1 in 0 SIN(0 1 1k)\n\
+             R1 in out 1k\n\
+             C1 out 0 1u\n\
+             .tran 1u 1m\n\
+             .four 1k v(out)\n\
+             .end\n";
+        let netlist = crate::netlist::Netlist::parse(source).expect("deck parses");
+        let plan = DeckPlan::from_netlist(&netlist, &ResourceLimits::default()).expect("plans");
+        let named = plan
+            .authored_analyses(&netlist)
+            .filter_map(|(command, id)| {
+                matches!(command, crate::netlist::AnalysisCommand::Four { .. })
+                    .then(|| id.map(|id| id.tag()))
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(named, [Some("four-001".to_string())]);
+    }
+
+    #[test]
+    fn a_direct_run_names_its_instances_without_a_deck() {
+        let plan = DeckPlan::for_direct_analyses(AnalysisKind::Fft, 2)
+            .expect("a direct post-process family plans");
+        assert_eq!(
+            plan.analyses()
+                .iter()
+                .map(|analysis| analysis.id().tag())
+                .collect::<Vec<_>>(),
+            ["fft-001", "fft-002"]
+        );
+        assert!(
+            DeckPlan::for_direct_analyses(AnalysisKind::Ac, 0)
+                .expect("an empty direct plan is legal")
+                .analyses()
+                .is_empty(),
+            "a zero-count direct plan must not invent an implicit operating point"
+        );
+        assert!(
+            DeckPlan::for_direct_analyses(AnalysisKind::ImplicitOp, 1).is_err(),
+            "the implicit operating point is minted by planning, never requested"
+        );
     }
 
     #[test]

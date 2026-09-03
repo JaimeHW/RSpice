@@ -5754,7 +5754,7 @@ pub fn evaluate_transient_probe_with_abort(
         .strip_prefix('{')
         .and_then(|body| body.strip_suffix('}'));
     if braced.is_none()
-        && let Some(detail) = crate::execution::probe_specification_error(trimmed)
+        && let Some(detail) = crate::netlist::probe_specification_error(trimmed)
     {
         return Err(SimulationError::Netlist(detail));
     }

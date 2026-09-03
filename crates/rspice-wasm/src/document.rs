@@ -61,7 +61,13 @@ pub enum SignalUnitView {
     Radian,
     Dimensionless,
     Logic,
-    Custom { symbol: String },
+    /// The producing analysis knows of no physical unit for the quantity —
+    /// a `.DC` sweep over a user parameter, or a `.FOUR` of a braced
+    /// expression. Distinct from `Dimensionless`, which is a real ratio.
+    Unspecified,
+    Custom {
+        symbol: String,
+    },
 }
 
 impl SignalUnitView {
@@ -78,6 +84,7 @@ impl SignalUnitView {
             SignalUnit::Radian => Self::Radian,
             SignalUnit::Dimensionless => Self::Dimensionless,
             SignalUnit::Logic => Self::Logic,
+            SignalUnit::Unspecified => Self::Unspecified,
             SignalUnit::Custom(symbol) => Self::Custom {
                 symbol: symbol.clone(),
             },

@@ -221,18 +221,57 @@ impl OperatingPointPayload {
     }
 }
 
+/// One authored sweep axis of a `.DC` card.
+///
+/// A nested `.DC v1 ... v2 ...` sweep re-runs the inner source for every value
+/// of the outer one. Both variables are authored evidence, so both are named
+/// here; `value_count` is what lets a reader recover the rectangular grid from
+/// the flattened point list without re-deriving the card's arithmetic.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DcSweepAxisDocument {
+    /// Case-normalized authored source, device, or parameter name.
+    pub name: String,
+    /// Unit of the swept quantity.
+    #[serde(with = "super::wire::signal_unit")]
+    pub unit: SignalUnit,
+    /// How many distinct values this axis contributes.
+    pub value_count: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DcSweepPayload {
-    /// Authored sweep source or parameter driving the primary axis.
-    pub sweep_variable: String,
+    /// Every authored sweep axis, outermost first and innermost last. A
+    /// single-source `.DC` card has exactly one entry; a nested two-source
+    /// sweep has two, and the document's `sweep:` axes carry their values.
+    pub sweep_variables: Vec<DcSweepAxisDocument>,
     /// Per-point converged DC observables.
     pub observables: Vec<NamedObservableSeries>,
 }
 
 impl DcSweepPayload {
+    /// The innermost authored sweep variable, which drives the point order.
+    pub fn primary_variable(&self) -> Option<&DcSweepAxisDocument> {
+        self.sweep_variables.last()
+    }
+
     fn validate(&self) -> Result<(), ResultDocumentError> {
-        super::require_name("DC sweep variable", &self.sweep_variable)?;
+        if self.sweep_variables.is_empty() {
+            return Err(ResultDocumentError::Malformed {
+                location: "DC sweep payload",
+                detail: "a DC sweep must name at least one sweep variable".to_owned(),
+            });
+        }
+        for axis in &self.sweep_variables {
+            super::require_name("DC sweep variable", &axis.name)?;
+            if axis.value_count == 0 {
+                return Err(ResultDocumentError::Malformed {
+                    location: "DC sweep payload",
+                    detail: format!("sweep variable '{}' contributes no values", axis.name),
+                });
+            }
+        }
         for observable in &self.observables {
             super::require_name("DC sweep observable", &observable.name)?;
             for value in &observable.values {
@@ -998,12 +1037,28 @@ pub struct NyquistSample {
 pub struct SensitivityPayload {
     /// Authored output variable.
     pub output: String,
+    /// Per-parameter derivatives of a DC `.SENS` card. Empty for an AC card.
     pub entries: Vec<SensitivityEntry>,
+    /// Per-parameter complex derivative traces of a `.SENS ... AC` card, each
+    /// sampled on the document's frequency axis. Empty for a DC card.
+    ///
+    /// A DC derivative is one number per parameter and an AC derivative is a
+    /// complex trace per parameter. Flattening one onto the other would either
+    /// discard the frequency dependence or claim a DC study has a spectrum, so
+    /// the two shapes are carried side by side and exactly one is populated.
+    #[serde(default)]
+    pub ac_entries: Vec<AcSensitivityEntry>,
 }
 
 impl SensitivityPayload {
     fn validate(&self) -> Result<(), ResultDocumentError> {
         super::require_name("sensitivity output", &self.output)?;
+        if !self.entries.is_empty() && !self.ac_entries.is_empty() {
+            return Err(ResultDocumentError::Malformed {
+                location: "sensitivity payload",
+                detail: "a .SENS card is either a DC study or an AC study, never both".to_owned(),
+            });
+        }
         for entry in &self.entries {
             super::require_name("sensitivity vector name", &entry.vector_name)?;
             super::require_name("sensitivity element", &entry.element)?;
@@ -1011,8 +1066,52 @@ impl SensitivityPayload {
             finite("absolute sensitivity", entry.absolute)?;
             finite("normalized sensitivity", entry.normalized)?;
         }
+        for entry in &self.ac_entries {
+            super::require_name("AC sensitivity vector name", &entry.vector_name)?;
+            super::require_name("AC sensitivity element", &entry.element)?;
+            finite("AC sensitivity nominal value", entry.nominal_value)?;
+            if entry.absolute.len() != entry.normalized.len()
+                || entry.absolute.len() != entry.magnitude.len()
+                || entry.absolute.len() != entry.phase.len()
+            {
+                return Err(ResultDocumentError::Malformed {
+                    location: "sensitivity payload",
+                    detail: format!(
+                        "AC sensitivity trace '{}' has traces of unequal length",
+                        entry.vector_name
+                    ),
+                });
+            }
+            for value in entry.magnitude.iter().chain(&entry.phase) {
+                finite("AC sensitivity derivative", *value)?;
+            }
+            for sample in entry.absolute.iter().chain(&entry.normalized) {
+                finite("AC sensitivity derivative", sample.real)?;
+                finite("AC sensitivity derivative", sample.imaginary)?;
+            }
+        }
         Ok(())
     }
+}
+
+/// One parameter's complex derivative trace from a `.SENS ... AC` card.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AcSensitivityEntry {
+    /// Stable SPICE-compatible vector name (`R1`, `M1_W`, `MOD:VTO`).
+    pub vector_name: String,
+    pub element: String,
+    pub element_kind: SensitivityElementTag,
+    pub parameter: String,
+    pub nominal_value: f64,
+    /// `d(output)/d(parameter)` at every frequency of the document's axis.
+    pub absolute: Vec<ComplexSample>,
+    /// `(parameter / output) * d(output)/d(parameter)`.
+    pub normalized: Vec<ComplexSample>,
+    /// Derivative of the output magnitude.
+    pub magnitude: Vec<f64>,
+    /// Derivative of the output phase, in radians.
+    pub phase: Vec<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1853,11 +1952,39 @@ pub struct PNoisePayload {
     /// Integration band used for the jitter figures, in hertz.
     pub jitter_bandwidth: Option<PNoiseBandwidth>,
     pub contributors: Vec<PNoiseContributor>,
+    /// Demir phase-diffusion evidence, present only for an autonomous
+    /// oscillator run. A driven run has no free-running orbit and therefore no
+    /// diffusion constant, which is why this is absent rather than zero.
+    #[serde(default)]
+    pub oscillator: Option<OscillatorPhaseNoiseDocument>,
+}
+
+/// Phase-diffusion evidence of one autonomous oscillator phase-noise run.
+///
+/// Demir's theory reduces the free-running orbit's noise to a single scalar
+/// diffusion constant; the Lorentzian corner and the solved period are the two
+/// figures that make the published spectrum checkable against it. Dropping
+/// them would leave a dBc/Hz curve with no way to verify that it preserves
+/// carrier power.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OscillatorPhaseNoiseDocument {
+    /// Zero-frequency-equivalent phase diffusion constant `c` (Demir Eq. 16).
+    pub diffusion_constant: f64,
+    /// Solved oscillation period, in seconds.
+    pub period: f64,
+    /// Lorentzian corner `pi*f0^2*c`, in hertz.
+    pub corner_frequency: f64,
 }
 
 impl PNoisePayload {
     fn validate(&self) -> Result<(), ResultDocumentError> {
         super::require_name("PNoise output node", &self.output_node)?;
+        if let Some(oscillator) = self.oscillator {
+            finite("PNoise diffusion constant", oscillator.diffusion_constant)?;
+            finite("PNoise oscillation period", oscillator.period)?;
+            finite("PNoise Lorentzian corner", oscillator.corner_frequency)?;
+        }
         if let Some(bandwidth) = self.jitter_bandwidth {
             finite("PNoise jitter bandwidth start", bandwidth.start)?;
             finite("PNoise jitter bandwidth stop", bandwidth.stop)?;

@@ -34,7 +34,7 @@ use crate::numerics::integration::{
 use crate::numerics::integration::{CompanionCoefficients, IntegrationMethod};
 use crate::numerics::xyce_hard_min_timestep;
 use crate::{Netlist, Value};
-pub use post_results::evaluate_transient_post_results;
+pub use post_results::{evaluate_transient_fourier_results, evaluate_transient_post_results};
 use std::collections::{HashMap, HashSet};
 
 use xyce_dae::{XyceOneStepOrder, XyceOneStepWorkspace};

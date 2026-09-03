@@ -55,48 +55,13 @@ pub(super) fn run_hb_from_command(
     ctx: &RunContext<'_>,
     frequencies: &[f64],
 ) -> Result<(), CliError> {
-    use rspice_core::analysis::{HbConfig, HbTone};
-
-    if frequencies.is_empty() {
-        return Err(CliError::simulation_error_in(
-            ".HB requires at least one positive frequency",
-            "HB",
-        ));
-    }
-    let orders = &ctx.netlist.options.hb_num_frequencies;
-    let order_for = |index: usize| {
-        orders
-            .get(index)
-            .copied()
-            .or_else(|| orders.first().copied())
-            .unwrap_or(9)
-    };
-    let config = if frequencies.len() == 1 {
-        let order = order_for(0);
-        let config = HbConfig::new(frequencies[0]).with_harmonics(order);
-        if orders.is_empty() {
-            config
-        } else {
-            let points = config.minimum_collocation_points().ok_or_else(|| {
-                CliError::simulation_error_in(
-                    format!("HB harmonic count {order} exceeds the addressable collocation grid"),
-                    "HB",
-                )
-            })?;
-            config.with_collocation_points(points)
-        }
-    } else {
-        HbConfig::multi_tone(
-            frequencies
-                .iter()
-                .enumerate()
-                .map(|(index, frequency)| {
-                    HbTone::new(*frequency, order_for(index))
-                        .with_name(format!("tone{}", index + 1))
-                })
-                .collect(),
-        )
-    };
+    // The default harmonic order, the multi-tone common basis, and the
+    // `.OPTIONS HBINT NUMFREQ` collocation rule all belong to `rspice-core`.
+    let config = rspice_core::analysis::HbConfig::from_hb_card(
+        frequencies,
+        &ctx.netlist.options.hb_num_frequencies,
+    )
+    .map_err(|error| CliError::simulation_error_in(error.to_string(), "HB"))?;
 
     run_hb_with_config(ctx, config)
 }

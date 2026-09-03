@@ -9,9 +9,11 @@ mod capability;
 mod fingerprint;
 mod materialized;
 mod plan;
+mod post_process;
 mod projection;
 pub mod result_document;
 mod schema;
+mod seed;
 mod topology;
 mod transient;
 
@@ -29,8 +31,11 @@ pub use materialized::{
 };
 pub use plan::{
     AnalysisRequest, AxisAssignment, AxisKind, DataBinding, DeckPlan, DeckPlanError,
-    PlannedAnalysis, RunAxis, RunAxisValue, RunCoordinate, StepAxisTarget,
-    numeric_run_coordinate_id,
+    PlannedAnalysis, PlannedPostProcess, PostProcessSource, RunAxis, RunAxisValue, RunCoordinate,
+    StepAxisTarget, numeric_run_coordinate_id,
+};
+pub use post_process::{
+    PlannedFourierResult, evaluate_planned_fourier_with_abort, transient_output_unit,
 };
 pub use projection::{
     ProjectedSignal, ProjectedSignals, ProjectionSource, ProjectionSourceSignal, ProjectionValues,
@@ -48,5 +53,6 @@ pub use schema::{
     CoordinateSchema, SchemaUnion, SignalDescriptor, SignalKind, SignalOwner, SignalSchema,
     SignalSchemaError, SignalShape, SignalUnit, SignalValueType,
 };
+pub use seed::monte_carlo_seed_at_coordinate;
 pub use topology::{TopologyComponent, TopologyFingerprint, TopologyFingerprintError};
 pub use transient::{TransientMaximumStepError, resolve_transient_maximum_step};

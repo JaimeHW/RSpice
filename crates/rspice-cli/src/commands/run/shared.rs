@@ -5,14 +5,15 @@
 use crate::cli::CliError;
 use crate::report::MeasurementReport;
 use rspice_core::{Engine, Netlist};
-use std::collections::HashMap;
 use std::path::Path;
 
+/// Authored node names of the deck under analysis.
+///
+/// The namespace, the deck's ground policy, and what a bare integer means are
+/// all decided by `rspice_core::engine::NodeResolver`; this is the CLI's error
+/// mapping around it and nothing else.
 #[derive(Debug, Clone)]
-pub(super) struct NodeResolver {
-    pub(super) node_name_to_index: HashMap<String, usize>,
-    ground_policy: rspice_core::netlist::GroundPolicy,
-}
+pub(super) struct NodeResolver(rspice_core::engine::NodeResolver);
 
 impl NodeResolver {
     /// Build the circuit purely to learn its node map.
@@ -22,38 +23,17 @@ impl NodeResolver {
     /// is still resolving `--node`-style flags, not only one already inside a
     /// solver.
     pub(super) fn from_netlist(engine: &Engine, netlist: &Netlist) -> Result<Self, CliError> {
-        let circuit = engine
-            .build_circuit_with_abort(netlist, &crate::abort::ProcessAbort)
-            .map_err(|e| CliError::simulation_error_in(e.to_string(), "Node Resolution"))?;
-
-        let node_name_to_index = circuit
-            .node_names_sorted()
-            .iter()
-            .enumerate()
-            .map(|(idx, name)| (name.to_ascii_uppercase(), idx + 1))
-            .collect();
-
-        Ok(Self {
-            node_name_to_index,
-            ground_policy: netlist.ground_policy(),
-        })
+        rspice_core::engine::NodeResolver::build_with_abort(
+            engine,
+            netlist,
+            &crate::abort::ProcessAbort,
+        )
+        .map(Self)
+        .map_err(|e| CliError::simulation_error_in(e.to_string(), "Node Resolution"))
     }
 
     pub(super) fn resolve_node(&self, node: &str) -> Option<usize> {
-        let node = node.trim();
-        if node.is_empty() {
-            return None;
-        }
-        if self.ground_policy.is_ground(node) {
-            return Some(0);
-        }
-        if let Ok(idx) = node.parse::<usize>() {
-            return Some(idx);
-        }
-
-        self.node_name_to_index
-            .get(&node.to_ascii_uppercase())
-            .copied()
+        self.0.resolve(node, "node").ok()
     }
 }
 
@@ -410,24 +390,27 @@ pub(super) fn record_continuous_measurements(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rspice_core::netlist::{GroundPolicy, StepSweep};
+    use rspice_core::netlist::StepSweep;
 
+    /// The CLI resolves `--node`-style flags through the core resolver, so a
+    /// deck's own ground policy and node namespace reach the flag unchanged.
     #[test]
-    fn node_resolver_uses_the_effective_ground_policy() {
-        let xyce_false = NodeResolver {
-            node_name_to_index: HashMap::new(),
-            ground_policy: GroundPolicy::OnlyZero,
-        };
-        assert_eq!(xyce_false.resolve_node("0"), Some(0));
-        assert_eq!(xyce_false.resolve_node("GND"), None);
-
-        let xyce_replace = NodeResolver {
-            node_name_to_index: HashMap::new(),
-            ground_policy: GroundPolicy::XyceReplace,
-        };
-        assert_eq!(xyce_replace.resolve_node("GND"), Some(0));
-        assert_eq!(xyce_replace.resolve_node("gnd!"), Some(0));
-        assert_eq!(xyce_replace.resolve_node("GROUND"), Some(0));
+    fn node_flags_resolve_through_the_core_resolver() {
+        let netlist = Netlist::parse(
+            "flag node resolution\n\
+             V1 in 0 DC 1\n\
+             R1 in out 1k\n\
+             R2 out 0 1k\n\
+             .op\n\
+             .end\n",
+        )
+        .expect("deck parses");
+        let engine = Engine::new(rspice_core::SimulationConfig::default());
+        let resolver = NodeResolver::from_netlist(&engine, &netlist).expect("resolver builds");
+        assert_eq!(resolver.resolve_node("0"), Some(0));
+        assert_eq!(resolver.resolve_node("out"), resolver.resolve_node("OUT"));
+        assert!(resolver.resolve_node("out").is_some_and(|index| index != 0));
+        assert_eq!(resolver.resolve_node("nowhere"), None);
     }
 
     fn assert_step_error_contains(sweep: StepSweep, expected: &str) {

@@ -3124,6 +3124,62 @@ fn collect_measure_sources<'a>(
     }
 }
 
+/// Why an authored probe spelling is not well formed, if it is not.
+///
+/// This is the arity contract of the probe grammar, kept next to the grammar
+/// it constrains: `V()` takes a node or a node pair, `I()` takes one element,
+/// every other accessor takes one argument, and an accessor's parentheses must
+/// close. A well-formed probe naming something the result does not have is a
+/// different failure — an unavailable signal, not a malformed request.
+///
+/// Both the measurement resolvers in `analysis` and the result projection in
+/// `execution` check a spelling before they try to resolve it, so the contract
+/// lives below both of them; `execution::projection` re-exports it under the
+/// path callers already use.
+pub fn probe_specification_error(spec: &str) -> Option<String> {
+    let trimmed = spec.trim();
+    if trimmed.is_empty() {
+        return Some("output specification must not be empty".to_string());
+    }
+    let open_count = trimmed.matches('(').count();
+    if open_count != trimmed.matches(')').count() {
+        return Some(format!(
+            "output specification '{spec}' has unbalanced parentheses"
+        ));
+    }
+    let open = trimmed.find('(')?;
+    if !trimmed.ends_with(')') {
+        return Some(format!(
+            "output specification '{spec}' does not end with its accessor's closing parenthesis"
+        ));
+    }
+    let operator = trimmed[..open].trim();
+    if operator.is_empty() {
+        return Some(format!("output specification '{spec}' has no accessor"));
+    }
+    let arguments = trimmed[open + 1..trimmed.len() - 1]
+        .split(',')
+        .map(str::trim)
+        .collect::<Vec<_>>();
+    if arguments.iter().any(|argument| argument.is_empty()) {
+        return Some(format!(
+            "output specification '{spec}' has an empty argument"
+        ));
+    }
+    let permitted = if operator.eq_ignore_ascii_case("V") {
+        2
+    } else {
+        1
+    };
+    if arguments.len() > permitted {
+        return Some(format!(
+            "output specification '{spec}': {operator}() takes at most {permitted} argument(s), got {}",
+            arguments.len()
+        ));
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

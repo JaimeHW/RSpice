@@ -274,6 +274,11 @@ pub(crate) fn measurements_from_document(
             }
             // Text carries no numeric evidence; it stays in the document.
             ScalarValue::Text { .. } => continue,
+            // A quantity the analysis proved has no finite value is not a
+            // measurement. Naming it here with any number at all would report
+            // a margin or an impedance the circuit does not have; the typed
+            // determination stays in the document, where it can be read.
+            ScalarValue::Unavailable { .. } => continue,
         };
         if let Some(value) = value {
             push_scalar(&mut measurements, name, unit, value)?;

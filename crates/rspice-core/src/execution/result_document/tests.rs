@@ -26,7 +26,7 @@ use crate::analysis::sensitivity::{ElementType, Sensitivity, SensitivityResult};
 use crate::analysis::stb::{BodePoint, NyquistPoint, StabilityMargins, StbResult};
 use crate::analysis::transfer::TransferFunctionResult;
 use crate::circuit::{DeviceOpEntry, DeviceOpReport, OpLabel};
-use crate::engine::{Engine, SimulationConfig};
+use crate::engine::{Engine, PeriodicNoiseResult, SimulationConfig};
 use crate::engine::{TransientDeviceOpTrace, TransientResult, TransientStoreTrace};
 use crate::execution::plan::AnalysisKind;
 use crate::netlist::Netlist;
@@ -449,9 +449,10 @@ fn document_for(kind: AnalysisResultKind) -> AnalysisResultDocument {
         AnalysisResultKind::Pac => {
             AnalysisResultDocument::from_pac(instance(AnalysisKind::Pac), &pac_result())
         }
-        AnalysisResultKind::PNoise => {
-            AnalysisResultDocument::from_pnoise(instance(AnalysisKind::PNoise), &pnoise_result())
-        }
+        AnalysisResultKind::PNoise => AnalysisResultDocument::from_pnoise(
+            instance(AnalysisKind::PNoise),
+            &PeriodicNoiseResult::Spectral(pnoise_result()),
+        ),
         AnalysisResultKind::HarmonicBalance => AnalysisResultDocument::from_harmonic_balance(
             instance(AnalysisKind::HarmonicBalance),
             &harmonic_balance_result(),
@@ -1399,7 +1400,7 @@ fn a_post_process_family_must_name_a_transient_parent() {
     assert!(matches!(
         wrong,
         ResultDocumentError::WrongParentAnalysis {
-            expected: AnalysisKind::Tran,
+            expected: [AnalysisKind::Tran],
             found: AnalysisKind::Ac,
             ..
         }
@@ -1534,4 +1535,282 @@ fn value_accounting_counts_every_retained_number() {
     // Time, two node voltages, one branch current: four values per point.
     assert_eq!(transient.values_per_point(), 4);
     assert!(transient.total_value_count() >= 4 * transient.point_count());
+}
+
+//=============================================================================
+// Quantities with no finite value
+//=============================================================================
+
+fn scalar_value_of(document: &AnalysisResultDocument, name: &str) -> ScalarValue {
+    scalar_of(document, name).value().clone()
+}
+
+#[test]
+fn an_ideal_source_publishes_unbounded_input_impedance_instead_of_failing() {
+    let document = AnalysisResultDocument::from_transfer_function(
+        instance(AnalysisKind::TransferFunction),
+        &TransferFunctionResult::new("V(out)", "V1", 0.5, f64::INFINITY, 50.0),
+    )
+    .expect("an unbounded input impedance is a determination, not a projection failure")
+    .build()
+    .expect("document builds");
+    assert_eq!(
+        scalar_value_of(&document, "input_impedance"),
+        ScalarValue::Unavailable {
+            reason: ScalarUnavailability::PositiveInfinity
+        }
+    );
+    assert_eq!(
+        scalar_value_of(&document, "output_impedance"),
+        ScalarValue::Real { value: Some(50.0) }
+    );
+}
+
+#[test]
+fn a_transfer_function_nan_is_still_a_projection_failure() {
+    AnalysisResultDocument::from_transfer_function(
+        instance(AnalysisKind::TransferFunction),
+        &TransferFunctionResult::new("V(out)", "V1", f64::NAN, 1.0e3, 50.0),
+    )
+    .expect_err("NaN is a defect in the producing computation, not a determination");
+}
+
+#[test]
+fn a_loop_with_no_crossover_records_the_absence_rather_than_zero_hertz() {
+    let mut result = stability_result();
+    result.margins = StabilityMargins {
+        gain_margin_db: f64::INFINITY,
+        gain_margin_freq: 0.0,
+        phase_margin_deg: f64::INFINITY,
+        phase_margin_freq: 0.0,
+        dc_gain_db: -40.0,
+        unity_gain_bandwidth: 0.0,
+        conditionally_stable: false,
+        num_crossovers: 0,
+    };
+    let document = AnalysisResultDocument::from_stability(instance(AnalysisKind::Stb), &result)
+        .expect("an unconditionally stable loop must publish, not fail closed")
+        .build()
+        .expect("document builds");
+    assert_eq!(
+        scalar_value_of(&document, "gain_margin_db"),
+        ScalarValue::Unavailable {
+            reason: ScalarUnavailability::PositiveInfinity
+        }
+    );
+    for name in [
+        "gain_margin_frequency",
+        "phase_margin_frequency",
+        "unity_gain_bandwidth",
+    ] {
+        assert_eq!(
+            scalar_value_of(&document, name),
+            ScalarValue::Unavailable {
+                reason: ScalarUnavailability::NoCrossover
+            },
+            "{name} must record the missing crossover rather than naming DC"
+        );
+    }
+}
+
+#[test]
+fn a_loop_that_never_leaves_unity_gain_records_a_negative_divergence() {
+    let mut result = stability_result();
+    result.margins = StabilityMargins {
+        gain_margin_db: f64::NEG_INFINITY,
+        gain_margin_freq: 0.0,
+        phase_margin_deg: f64::NEG_INFINITY,
+        phase_margin_freq: 0.0,
+        dc_gain_db: 60.0,
+        unity_gain_bandwidth: 0.0,
+        conditionally_stable: false,
+        num_crossovers: 0,
+    };
+    let document = AnalysisResultDocument::from_stability(instance(AnalysisKind::Stb), &result)
+        .expect("projection succeeds")
+        .build()
+        .expect("document builds");
+    assert_eq!(
+        scalar_value_of(&document, "phase_margin_degrees"),
+        ScalarValue::Unavailable {
+            reason: ScalarUnavailability::NegativeInfinity
+        }
+    );
+}
+
+#[test]
+fn a_crossing_loop_still_publishes_its_finite_margins() {
+    let document =
+        AnalysisResultDocument::from_stability(instance(AnalysisKind::Stb), &stability_result())
+            .expect("projection succeeds")
+            .build()
+            .expect("document builds");
+    assert_eq!(
+        scalar_value_of(&document, "gain_margin_db"),
+        ScalarValue::Real { value: Some(12.0) }
+    );
+    assert_eq!(
+        scalar_value_of(&document, "unity_gain_bandwidth"),
+        ScalarValue::Real { value: Some(1.0e6) }
+    );
+}
+
+//=============================================================================
+// Periodic small-signal parents
+//=============================================================================
+
+#[test]
+fn a_pac_result_accepts_either_periodic_large_signal_parent() {
+    for parent in [AnalysisKind::Pss, AnalysisKind::HarmonicBalance] {
+        AnalysisResultDocument::from_pac(instance(AnalysisKind::Pac), &pac_result())
+            .expect("PAC projection")
+            .parent_analysis(instance(parent))
+            .build()
+            .unwrap_or_else(|error| panic!("a {parent:?} carrier must be accepted: {error}"));
+    }
+}
+
+#[test]
+fn a_pac_result_still_refuses_a_transient_parent() {
+    let error = AnalysisResultDocument::from_pac(instance(AnalysisKind::Pac), &pac_result())
+        .expect("PAC projection")
+        .parent_analysis(instance(AnalysisKind::Tran))
+        .build()
+        .expect_err("a transient is not a periodic carrier");
+    assert!(
+        error.to_string().contains("pss or hb"),
+        "the refusal names both accepted carriers: {error}"
+    );
+}
+
+//=============================================================================
+// Nested DC sweeps
+//=============================================================================
+
+#[test]
+fn a_nested_dc_sweep_publishes_every_authored_sweep_variable() {
+    let engine = Engine::new(SimulationConfig::default());
+    let netlist = Netlist::parse(
+        "Nested DC sweep\n\
+         V1 in 0 DC 0\n\
+         V2 mid 0 DC 0\n\
+         R1 in mid 1k\n\
+         R2 mid 0 1k\n\
+         .dc V1 0 1 0.5 V2 0 1 1\n\
+         .end\n",
+    )
+    .expect("nested DC deck parses");
+    let command = netlist
+        .analyses
+        .iter()
+        .find(|command| matches!(command, crate::netlist::AnalysisCommand::Dc { .. }))
+        .expect("the deck authors a .DC card");
+    let crate::netlist::AnalysisCommand::Dc {
+        source,
+        start,
+        stop,
+        step,
+        mode,
+        sweep2: Some(outer),
+    } = command
+    else {
+        panic!("the .DC card must carry an outer sweep");
+    };
+    let primary = crate::netlist::DcSweepSpec {
+        start: *start,
+        stop: *stop,
+        step: *step,
+        mode: mode.clone(),
+    };
+    let points = engine
+        .run_dc_sweep2_spec_with_report_and_abort(&netlist, source, &primary, Some(outer), &NoAbort)
+        .expect("nested DC sweep runs");
+    let document = AnalysisResultDocument::from_nested_dc_sweep(
+        instance(AnalysisKind::Dc),
+        &[
+            DcSweepAxisDocument {
+                name: outer.source.trim().to_ascii_lowercase(),
+                unit: SignalUnit::Volt,
+                value_count: outer.spec().points().len(),
+            },
+            DcSweepAxisDocument {
+                name: source.trim().to_ascii_lowercase(),
+                unit: SignalUnit::Volt,
+                value_count: primary.points().len(),
+            },
+        ],
+        &points,
+    )
+    .expect("nested projection")
+    .build()
+    .expect("document builds");
+    let ResultPayload::Dc(payload) = document.payload() else {
+        panic!("a .DC card projects a DC payload");
+    };
+    assert_eq!(
+        payload
+            .sweep_variables
+            .iter()
+            .map(|axis| axis.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["v2", "v1"],
+        "the outer source must survive beside the inner one"
+    );
+    assert_eq!(
+        payload.primary_variable().map(|axis| axis.name.as_str()),
+        Some("v1")
+    );
+}
+
+#[test]
+fn a_declared_dc_grid_that_does_not_match_the_result_is_refused() {
+    let engine = Engine::new(SimulationConfig::default());
+    let netlist = Netlist::parse("DC sweep\nV1 in 0 DC 0\nR1 in 0 1k\n.dc V1 0 1 0.5\n.end\n")
+        .expect("DC deck parses");
+    let points = engine
+        .run_dc_sweep_with_report_and_abort(&netlist, "V1", 0.0, 1.0, 0.5, &NoAbort)
+        .expect("DC sweep runs");
+    AnalysisResultDocument::from_nested_dc_sweep(
+        instance(AnalysisKind::Dc),
+        &[DcSweepAxisDocument {
+            name: "v1".to_owned(),
+            unit: SignalUnit::Volt,
+            value_count: points.len() + 1,
+        }],
+        &points,
+    )
+    .expect_err("a declared grid that disagrees with the result must be refused");
+}
+
+//=============================================================================
+// Units
+//=============================================================================
+
+#[test]
+fn an_unspecified_unit_survives_the_wire_round_trip_distinct_from_dimensionless() {
+    use crate::execution::schema::{SignalKind, SignalOwner, SignalShape};
+
+    let descriptor = SignalDescriptor::new(
+        "param:rload",
+        "rload",
+        SignalKind::Scalar,
+        SignalUnit::Unspecified,
+        SignalValueType::Real,
+        SignalShape::Scalar,
+        SignalOwner::Analysis,
+    )
+    .expect("an unspecified unit is a valid scalar descriptor");
+    let signal = ResultSignal::new(
+        descriptor,
+        None,
+        SeriesAvailability::Available,
+        SeriesValues::Real {
+            samples: vec![Some(1.0e3)],
+        },
+    )
+    .expect("signal builds");
+    let encoded = serde_json::to_string(&signal).expect("signal serializes");
+    let decoded: ResultSignal = serde_json::from_str(&encoded).expect("signal decodes");
+    assert_eq!(decoded.descriptor().unit(), &SignalUnit::Unspecified);
+    assert_ne!(decoded.descriptor().unit(), &SignalUnit::Dimensionless);
 }

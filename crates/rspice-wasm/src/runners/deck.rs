@@ -25,13 +25,15 @@ use rspice_core::analysis::{
     Distribution, FrequencyGridError, HbConfig, PacConfig, PssConfig, StbConfig, StbSweepType,
 };
 use rspice_core::engine::{
-    CompressionConfig, HbOperatingPoint, PssOperatingPoint, TransientStartupMode,
+    CompressionConfig, HbOperatingPoint, PssOperatingPoint, SensitivityCardResult,
+    TransientStartupMode,
 };
-use rspice_core::execution::result_document::FftChildReference;
+use rspice_core::execution::result_document::{DcSweepAxisDocument, FftChildReference};
 use rspice_core::execution::{
-    AnalysisInstanceId, AnalysisKind, AnalysisRequest, AnalysisResultDocument,
-    AnalysisResultDocumentBuilder, DeckPlan, DeckPlanError, MaterializedRunError, ResultCoordinate,
-    ResultDocumentError, ResultNamespaces, RunCoordinate, SignalUnit,
+    AnalysisInstanceId, AnalysisKind, AnalysisResultDocument, AnalysisResultDocumentBuilder,
+    DeckPlan, DeckPlanError, MaterializedRunError, PlannedPostProcess, PostProcessSource,
+    ResultCoordinate, ResultDocumentError, ResultNamespaces, RunCoordinate, RunCoordinateId,
+    SignalUnit,
 };
 use rspice_core::netlist::{
     AnalysisCommand, DcSweepSpec, FftFormat, FreqVariation, MonteCarloDistribution,
@@ -128,7 +130,6 @@ pub fn run_authored_deck_document_with_options_and_abort_detailed(
         })?;
         let result_coordinate = ResultCoordinate::from_run_coordinate(&coordinate);
         let mut periodic = PeriodicOperatingPoints::default();
-        let mut post_process_ordinal = 0usize;
 
         for analysis in analyses {
             ensure_not_aborted(external_abort)?;
@@ -147,13 +148,16 @@ pub fn run_authored_deck_document_with_options_and_abort_detailed(
             let produced = execute_analysis(
                 &coordinate_engine,
                 &coordinate_netlist,
-                analysis.command(),
-                analysis_id,
-                upstream,
+                AnalysisContext {
+                    plan: &plan,
+                    command: analysis.command(),
+                    id: analysis_id,
+                    upstream,
+                    coordinate: coordinate.stable_id(),
+                    compression: compression.as_ref(),
+                    resource_limits,
+                },
                 &mut periodic,
-                &mut post_process_ordinal,
-                compression.as_ref(),
-                resource_limits,
                 external_abort,
             )
             .map_err(name_the_failure)?;
@@ -241,23 +245,44 @@ impl PeriodicOperatingPoints {
     }
 }
 
+/// Everything one planned analysis needs from the run around it.
+///
+/// The plan is here because post-processing identities and upstream bindings
+/// belong to it, and the coordinate because a Monte Carlo card inside a
+/// `.STEP` or `.TEMP` sweep draws from a coordinate-derived stream.
+#[derive(Clone, Copy)]
+struct AnalysisContext<'run> {
+    plan: &'run DeckPlan,
+    command: Option<&'run AnalysisCommand>,
+    id: AnalysisInstanceId,
+    upstream: Option<AnalysisInstanceId>,
+    coordinate: RunCoordinateId,
+    compression: Option<&'run CompressionConfig>,
+    resource_limits: ResourceLimits,
+}
+
 /// Run one planned analysis and project everything it produced.
 ///
 /// A transient produces its own document plus one per attached `.FFT`
-/// spectrum, so this returns a list rather than a single builder.
-#[allow(clippy::too_many_arguments)]
+/// spectrum and one per authored `.FOUR` operand, and a `.SP DONOISE` card
+/// produces a scattering document and a port-noise document, so this returns
+/// a list rather than a single builder.
 fn execute_analysis(
     engine: &Engine,
     netlist: &Netlist,
-    command: Option<&AnalysisCommand>,
-    id: AnalysisInstanceId,
-    upstream: Option<AnalysisInstanceId>,
+    context: AnalysisContext<'_>,
     periodic: &mut PeriodicOperatingPoints,
-    post_process_ordinal: &mut usize,
-    compression: Option<&CompressionConfig>,
-    resource_limits: ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> DetailedWasmResult<Vec<AnalysisResultDocumentBuilder>> {
+    let AnalysisContext {
+        plan,
+        command,
+        id,
+        upstream,
+        coordinate,
+        compression,
+        resource_limits,
+    } = context;
     let Some(command) = command else {
         if id.kind() != AnalysisKind::ImplicitOp {
             return Err(document_error(format!(
@@ -276,7 +301,7 @@ fn execute_analysis(
             stop,
             step,
             mode,
-            sweep2: None,
+            sweep2,
         } => {
             let spec = DcSweepSpec {
                 start: *start,
@@ -285,11 +310,33 @@ fn execute_analysis(
                 mode: mode.clone(),
             };
             let points = engine
-                .run_dc_sweep2_spec_with_report_and_abort(netlist, source, &spec, None, abort)
+                .run_dc_sweep2_spec_with_report_and_abort(
+                    netlist,
+                    source,
+                    &spec,
+                    sweep2.as_ref(),
+                    abort,
+                )
                 .map_err(simulation_error)?;
             ensure_not_aborted(abort)?;
+            // The outer source of a nested sweep is authored evidence: without
+            // it the flattened point list cannot be told apart, so both axes
+            // are declared and the core constructor checks the grid shape.
+            let mut axes = Vec::new();
+            if let Some(outer) = sweep2 {
+                axes.push(DcSweepAxisDocument {
+                    name: outer.source.trim().to_ascii_lowercase(),
+                    unit: dc_sweep_unit(&outer.source),
+                    value_count: outer.spec().points().len(),
+                });
+            }
+            axes.push(DcSweepAxisDocument {
+                name: source.trim().to_ascii_lowercase(),
+                unit: dc_sweep_unit(source),
+                value_count: spec.points().len(),
+            });
             Ok(vec![
-                AnalysisResultDocument::from_dc_sweep(id, source, dc_sweep_unit(source), &points)
+                AnalysisResultDocument::from_nested_dc_sweep(id, &axes, &points)
                     .map_err(document_projection_error)?,
             ])
         }
@@ -333,13 +380,15 @@ fn execute_analysis(
         } => transient_builders(
             engine,
             netlist,
+            plan,
             id,
-            *step,
-            *stop,
-            *start,
-            *max_step,
-            *uic,
-            post_process_ordinal,
+            TransientCard {
+                step: *step,
+                stop: *stop,
+                start: *start,
+                max_step: *max_step,
+                uic: *uic,
+            },
             compression.cloned(),
             resource_limits,
             abort,
@@ -485,11 +534,19 @@ fn execute_analysis(
             let distribution =
                 monte_carlo_distribution(request.distribution, request.relative_spread);
             let filter = (!request.params.is_empty()).then_some(request.params.as_slice());
+            // A `.MC` card inside a `.STEP` or `.TEMP` sweep runs once per
+            // coordinate. The core derivation gives each coordinate its own
+            // reproducible stream; reusing the authored seed would make every
+            // coordinate draw the identical sample.
+            let seed = rspice_core::execution::monte_carlo_seed_at_coordinate(
+                request.seed.unwrap_or(0),
+                coordinate,
+            );
             let result = engine
                 .run_monte_carlo_with_options_and_abort(
                     netlist,
                     request.runs,
-                    request.seed.unwrap_or(0),
+                    seed,
                     distribution,
                     filter,
                     abort,
@@ -589,8 +646,78 @@ fn execute_analysis(
             ])
         }
 
-        // Every remaining card is refused before execution starts, so
-        // reaching here means the preflight and this dispatch disagree.
+        AnalysisCommand::Sp { .. } => {
+            let run = engine
+                .run_sp_with_abort(netlist, command, abort)
+                .map_err(simulation_error)?;
+            ensure_not_aborted(abort)?;
+            let mut builders = vec![
+                AnalysisResultDocument::from_s_parameters(id, &run.scattering)
+                    .map_err(document_projection_error)?,
+            ];
+            // Port noise is the `.SP` card's optional second result and shares
+            // its analysis identity, exactly as the shared document declares.
+            if let Some(noise) = &run.port_noise {
+                builders.push(
+                    AnalysisResultDocument::from_port_noise(id, &noise.points)
+                        .map_err(document_projection_error)?,
+                );
+            }
+            Ok(builders)
+        }
+
+        AnalysisCommand::Sensitivity { .. } => {
+            let result = engine
+                .run_sensitivity_from_card_with_abort(netlist, command, abort)
+                .map_err(simulation_error)?;
+            ensure_not_aborted(abort)?;
+            let builder = match &result {
+                SensitivityCardResult::Dc(dc) => AnalysisResultDocument::from_sensitivity(id, dc),
+                SensitivityCardResult::Ac(ac) => {
+                    AnalysisResultDocument::from_ac_sensitivity(id, ac)
+                }
+            }
+            .map_err(document_projection_error)?;
+            Ok(vec![builder])
+        }
+
+        AnalysisCommand::PoleZero { .. } => {
+            let result = engine
+                .run_pz_from_card_with_abort(netlist, command, abort)
+                .map_err(simulation_error)?;
+            ensure_not_aborted(abort)?;
+            Ok(vec![
+                AnalysisResultDocument::from_pole_zero(id, &result)
+                    .map_err(document_projection_error)?,
+            ])
+        }
+
+        AnalysisCommand::Pnoise(card) => {
+            preflight_periodic_sweep(&card.sweep, resource_limits)?;
+            let upstream = upstream_or_refuse(upstream, ".PNOISE", card.source)?;
+            let result = if let Some(operating_point) = periodic.pss(upstream) {
+                engine
+                    .run_pnoise_card_from_pss_with_abort(netlist, card, operating_point, abort)
+                    .map_err(simulation_error)?
+            } else if let Some(operating_point) = periodic.hb(upstream) {
+                engine
+                    .run_pnoise_card_from_hb_with_abort(netlist, card, operating_point, abort)
+                    .map_err(simulation_error)?
+            } else {
+                return Err(unsupported_deck_analysis(format!(
+                    "authored .PNOISE card names upstream {upstream}, which produced no retained periodic operating point"
+                )));
+            };
+            ensure_not_aborted(abort)?;
+            Ok(vec![
+                AnalysisResultDocument::from_pnoise(id, &result)
+                    .map_err(document_projection_error)?
+                    .parent_analysis(upstream),
+            ])
+        }
+
+        // Run axes and post-processing cards occupy no planned analysis slot,
+        // so reaching here means the materializer and this dispatch disagree.
         other => Err(document_error(format!(
             "authored {} card reached execution without a route",
             card_spelling(other)
@@ -628,22 +755,36 @@ fn ac_builder(
     ])
 }
 
-/// Run one authored `.TRAN` and project it with every attached `.FFT`.
-#[allow(clippy::too_many_arguments)]
-fn transient_builders(
-    engine: &Engine,
-    netlist: &Netlist,
-    id: AnalysisInstanceId,
+/// The authored numbers of one `.TRAN` card.
+#[derive(Clone, Copy)]
+struct TransientCard {
     step: Value,
     stop: Value,
     start: Option<Value>,
     max_step: Option<Value>,
     uic: bool,
-    post_process_ordinal: &mut usize,
+}
+
+/// Run one authored `.TRAN` and project it with every attached `.FFT`
+/// spectrum and every authored `.FOUR` operand.
+#[allow(clippy::too_many_arguments)]
+fn transient_builders(
+    engine: &Engine,
+    netlist: &Netlist,
+    plan: &DeckPlan,
+    id: AnalysisInstanceId,
+    card: TransientCard,
     compression: Option<CompressionConfig>,
     resource_limits: ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> DetailedWasmResult<Vec<AnalysisResultDocumentBuilder>> {
+    let TransientCard {
+        step,
+        stop,
+        start,
+        max_step,
+        uic,
+    } = card;
     let ceiling =
         rspice_core::execution::resolve_transient_maximum_step(step, stop, start, max_step)
             .map_err(|error| Box::new(WasmError::invalid_argument(error.to_string())))?;
@@ -681,17 +822,24 @@ fn transient_builders(
     spectra
         .try_reserve_exact(result.fft_results.len())
         .map_err(|_| allocation_error("attached FFT spectra"))?;
-    // `.FFT` spectra are attached to a transient rather than planned, so the
-    // canonical `fft-NNN` identities are minted from a one-family plan instead
-    // of being invented here.
-    let fft_ids = post_process_ids(
-        AnalysisKind::Fft,
-        *post_process_ordinal,
-        result.fft_results.len(),
-    )?;
-    *post_process_ordinal = post_process_ordinal
-        .checked_add(result.fft_results.len())
-        .ok_or_else(|| allocation_error("attached FFT identities"))?;
+    // The canonical plan already named every authored `.FFT` card and bound it
+    // to the transient it post-processes, so the identities are read from it
+    // rather than counted a second time here.
+    let fft_ids = plan
+        .post_process_analyses()
+        .iter()
+        .filter(|post| {
+            post.parent() == id && matches!(post.source(), PostProcessSource::Fft { .. })
+        })
+        .map(PlannedPostProcess::id)
+        .collect::<Vec<_>>();
+    if fft_ids.len() != result.fft_results.len() {
+        return Err(document_error(format!(
+            "the canonical plan names {} .FFT spectra for {id} but the transient produced {}",
+            fft_ids.len(),
+            result.fft_results.len()
+        )));
+    }
     for (fft_id, spectrum) in fft_ids.into_iter().zip(&result.fft_results) {
         ensure_not_aborted(abort)?;
         children.push(FftChildReference {
@@ -709,50 +857,52 @@ fn transient_builders(
         );
     }
 
+    // `.FOUR` operands are resolved by the core entry point that owns the
+    // `.FOUR`-to-transient-column grammar, and each spectrum arrives already
+    // bound to the `four-NNN` identity the canonical plan minted for it.
+    let fourier = rspice_core::execution::evaluate_planned_fourier_with_abort(
+        plan,
+        netlist,
+        id,
+        &result,
+        resource_limits,
+        abort,
+    )
+    .map_err(simulation_error)?;
+    let mut harmonics = Vec::new();
+    harmonics
+        .try_reserve_exact(fourier.len())
+        .map_err(|_| allocation_error("authored .FOUR spectra"))?;
+    for spectrum in &fourier {
+        ensure_not_aborted(abort)?;
+        harmonics.push(
+            AnalysisResultDocument::from_fourier(
+                spectrum.analysis,
+                spectrum.parent,
+                &spectrum.output,
+                spectrum.output_unit.clone(),
+                &spectrum.result,
+            )
+            .map_err(document_projection_error)?,
+        );
+    }
+
     let mut builders = Vec::new();
     builders
-        .try_reserve_exact(spectra.len().saturating_add(1))
+        .try_reserve_exact(
+            spectra
+                .len()
+                .saturating_add(harmonics.len())
+                .saturating_add(1),
+        )
         .map_err(|_| allocation_error("transient result documents"))?;
     builders.push(
         AnalysisResultDocument::from_transient(id, &result, compression_report.as_ref(), children)
             .map_err(document_projection_error)?,
     );
     builders.extend(spectra);
+    builders.extend(harmonics);
     Ok(builders)
-}
-
-/// Mint canonical instance identities for a post-process family the authored
-/// plan does not carry.
-///
-/// `AnalysisInstanceId` is deliberately not constructible outside core, so the
-/// identities come from a one-family `DeckPlan` rather than from a widened
-/// constructor.
-fn post_process_ids(
-    kind: AnalysisKind,
-    already_minted: usize,
-    count: usize,
-) -> DetailedWasmResult<Vec<AnalysisInstanceId>> {
-    if count == 0 {
-        return Ok(Vec::new());
-    }
-    let total = already_minted
-        .checked_add(count)
-        .ok_or_else(|| allocation_error("post-process analysis identities"))?;
-    let mut requests = Vec::new();
-    requests
-        .try_reserve_exact(total)
-        .map_err(|_| allocation_error("post-process analysis identities"))?;
-    for _ in 0..total {
-        requests.push(AnalysisRequest::new(kind));
-    }
-    let plan = DeckPlan::new(Vec::new(), requests).map_err(deck_plan_wasm_error)?;
-    let mut ids = Vec::new();
-    ids.try_reserve_exact(count)
-        .map_err(|_| allocation_error("post-process analysis identities"))?;
-    for planned in plan.analyses().iter().skip(already_minted) {
-        ids.push(planned.id());
-    }
-    Ok(ids)
 }
 
 /// Which authored analyses this build cannot execute, and why.
@@ -762,42 +912,32 @@ fn post_process_ids(
 /// surface would mean deciding its semantics a second time.
 fn unroutable_reason(command: &AnalysisCommand) -> Option<&'static str> {
     match command {
-        AnalysisCommand::Dc {
-            sweep2: Some(_), ..
-        } => Some(
-            "the shared result document declares exactly one sweep variable, so the outer source of a nested .DC sweep would be lost",
-        ),
-        AnalysisCommand::Sp { .. } => Some(
-            "rspice-core exposes S-parameter port collection and matrix extraction but no Engine runner that returns an SParameterResult",
-        ),
-        AnalysisCommand::Pnoise(_) => Some(
-            "rspice-core has no Engine runner that returns the analysis::pnoise::PnoiseResult the shared result document is built from",
-        ),
-        AnalysisCommand::PoleZero { .. } | AnalysisCommand::Sensitivity { .. } => Some(
-            "rspice-core takes node indices here and exposes no authored-name to node-index resolver for an unsolved netlist",
-        ),
-        AnalysisCommand::Four { .. } => Some(
-            "rspice-core exposes no resolver from a .FOUR output specification to a column of a TransientResult",
-        ),
-        // Routed families and the meta-analysis cards the materializer owns.
-        // This match is deliberately exhaustive: a new authored card must be
-        // declared routable or unroutable here before it can compile.
+        // Every authored analog card this build recognizes now has a core
+        // entry point that takes the card and a shared document projection for
+        // what it returns. This match is deliberately exhaustive: a new
+        // authored card must be declared routable or unroutable here before it
+        // can compile.
         AnalysisCommand::Op
-        | AnalysisCommand::Dc { sweep2: None, .. }
+        | AnalysisCommand::Dc { .. }
         | AnalysisCommand::Ac { .. }
         | AnalysisCommand::AcData { .. }
         | AnalysisCommand::Hb { .. }
+        | AnalysisCommand::Sp { .. }
         | AnalysisCommand::Stb { .. }
         | AnalysisCommand::Disto { .. }
         | AnalysisCommand::Tran { .. }
         | AnalysisCommand::Noise { .. }
         | AnalysisCommand::NoiseData { .. }
+        | AnalysisCommand::PoleZero { .. }
+        | AnalysisCommand::Sensitivity { .. }
         | AnalysisCommand::Tf { .. }
+        | AnalysisCommand::Four { .. }
         | AnalysisCommand::MonteCarlo(_)
         | AnalysisCommand::Step(_)
         | AnalysisCommand::Temp { .. }
         | AnalysisCommand::Pss(_)
         | AnalysisCommand::Pac(_)
+        | AnalysisCommand::Pnoise(_)
         | AnalysisCommand::Envelope(_) => None,
     }
 }
@@ -869,7 +1009,8 @@ fn fft_output_unit(physical_type: &str, format: FftFormat) -> DetailedWasmResult
 /// A sweep over an independent source carries that source's unit; `V`-prefixed
 /// instances are voltage sources and `I`-prefixed are current sources, which
 /// is the same first-letter element contract the parser itself uses. Anything
-/// else is a swept parameter with no intrinsic unit.
+/// else is a swept parameter, whose unit the deck never declared — which is
+/// `Unspecified`, not the pure ratio `Dimensionless` asserts.
 fn dc_sweep_unit(source: &str) -> SignalUnit {
     match source
         .trim()
@@ -879,7 +1020,7 @@ fn dc_sweep_unit(source: &str) -> SignalUnit {
     {
         Some('V') => SignalUnit::Volt,
         Some('I') => SignalUnit::Ampere,
-        _ => SignalUnit::Dimensionless,
+        _ => SignalUnit::Unspecified,
     }
 }
 
@@ -1078,10 +1219,19 @@ V1 in 0 SIN(0 0.1 1G) AC 1 DISTOF1 1\n\
 R1 in out 1k\n\
 C1 out 0 1p\n";
 
-    /// The same network with a series source resistance, so the `.TF` input
-    /// impedance is finite. The shared result document refuses a non-finite
-    /// scalar rather than encoding one, which is the correct contract: an
-    /// ideal source has no finite input impedance to report.
+    /// A resistively terminated two-port with `portnum=` annotations, which is
+    /// what a `.SP` card measures.
+    const TWO_PORT: &str = "browser s-parameter deck\n\
+V1 p1 0 AC 1 portnum=1 z0=50\n\
+V2 p2 0 AC 0 portnum=2 z0=50\n\
+RA p1 mid 25\n\
+RB mid 0 50\n\
+RC mid p2 25\n";
+
+    /// The same network with a series source resistance. The input impedance
+    /// is finite here so the deck exercises the ordinary numeric path; an
+    /// ideal source's unbounded impedance is recorded as the typed
+    /// determination it is rather than failing the run.
     const TRANSFER: &str = "browser transfer-function deck\n\
 V1 in 0 1 AC 1\n\
 RS in mid 50\n\
@@ -1090,9 +1240,9 @@ R2 out 0 10k\n";
 
     /// A three-pole feedback loop with a zero-volt Tian probe in series.
     ///
-    /// Three poles are the point: the shared result document refuses a
-    /// non-finite scalar, and a loop that never reaches -180 degrees has no
-    /// finite gain margin to report. The deck therefore has a real crossover.
+    /// Three poles are the point: the deck has a real -180 degree crossover,
+    /// so the published margins are ordinary numbers. A loop with no crossover
+    /// now publishes the typed absence instead of failing.
     const LOOP_DECK: &str = "browser stability deck\n\
 V1 in 0 AC 1\n\
 R1 in a 1k\n\
@@ -1106,11 +1256,14 @@ R4 e a 1k\n\
 C4 a 0 160p\n";
 
     /// How the browser surface is expected to answer for one result family.
+    ///
+    /// Every family this build knows now executes, so `Routed` is the only
+    /// variant. A family that cannot run must get a refusal path back — an
+    /// `Unsupported` registry cell and a named refusal — and the test below
+    /// fails until it does.
     enum Expectation {
         /// The deck executes and publishes a document of this family.
         Routed { deck: String },
-        /// The deck is refused by name, quoting the missing core API.
-        Refused { deck: String, names: &'static str },
     }
 
     fn deck(circuit: &str, cards: &str) -> String {
@@ -1120,8 +1273,8 @@ C4 a 0 160p\n";
     /// The browser surface's declared answer for every core result family.
     ///
     /// This match is exhaustive on purpose: a new `AnalysisResultKind` cannot
-    /// compile until this surface says, in one place, whether it executes the
-    /// family or refuses it and why.
+    /// compile until this surface says, in one place, how it answers for the
+    /// family.
     fn expectation(kind: AnalysisResultKind) -> Expectation {
         match kind {
             AnalysisResultKind::OperatingPoint => Expectation::Routed {
@@ -1140,9 +1293,8 @@ C4 a 0 160p\n";
                 deck: deck(LINEAR, ".NOISE V(out) V1 DEC 3 1k 100k\n"),
             },
             AnalysisResultKind::SParameters | AnalysisResultKind::PortNoise => {
-                Expectation::Refused {
-                    deck: deck(LINEAR, ".SP DEC 3 1k 100k\n"),
-                    names: "SParameterResult",
+                Expectation::Routed {
+                    deck: deck(TWO_PORT, ".SP LIN 3 1meg 3meg 1\n"),
                 }
             }
             AnalysisResultKind::Distortion => Expectation::Routed {
@@ -1154,17 +1306,17 @@ C4 a 0 160p\n";
             AnalysisResultKind::Stability => Expectation::Routed {
                 deck: deck(LOOP_DECK, ".STB DEC 8 1k 100meg PROBE=VP\n"),
             },
-            AnalysisResultKind::Sensitivity => Expectation::Refused {
+            AnalysisResultKind::Sensitivity => Expectation::Routed {
                 deck: deck(LINEAR, ".SENS V(out)\n"),
-                names: "node-index resolver",
             },
-            AnalysisResultKind::PoleZero => Expectation::Refused {
+            AnalysisResultKind::PoleZero => Expectation::Routed {
                 deck: deck(LINEAR, ".PZ in 0 out 0 VOL PZ\n"),
-                names: "node-index resolver",
             },
-            AnalysisResultKind::Fourier => Expectation::Refused {
-                deck: deck(LINEAR, ".TRAN 1n 20n\n.FOUR 1G V(out)\n"),
-                names: ".FOUR output specification",
+            // The step resolves every harmonic of the authored fundamental:
+            // `.FOUR` refuses a trajectory too coarse to represent one rather
+            // than folding it, which is the resolver's own contract.
+            AnalysisResultKind::Fourier => Expectation::Routed {
+                deck: deck(LINEAR, ".TRAN 0.01n 20n\n.FOUR 1G V(out)\n"),
             },
             AnalysisResultKind::Fft => Expectation::Routed {
                 deck: deck(
@@ -1185,13 +1337,12 @@ C4 a 0 160p\n";
 .PAC LIN 2 1meg 10meg INPUT=V1 OUT=V(out)\n",
                 ),
             },
-            AnalysisResultKind::PNoise => Expectation::Refused {
+            AnalysisResultKind::PNoise => Expectation::Routed {
                 deck: deck(
                     LINEAR,
                     ".PSS FUND=1G HARMS=3 POINTS=32 TSTABPERIODS=2\n\
 .PNOISE DEC 3 1k 100k OUT=V(out)\n",
                 ),
-                names: "PnoiseResult",
             },
             AnalysisResultKind::HarmonicBalance => Expectation::Routed {
                 deck: deck(LINEAR, ".HB 1G\n"),
@@ -1213,34 +1364,14 @@ C4 a 0 160p\n";
     fn every_result_family_matches_its_wasm_capability_declaration() {
         for kind in AnalysisResultKind::ALL {
             let declared = analysis_result_capability(kind).surface(NonUiSurface::Wasm);
-            match expectation(kind) {
-                Expectation::Refused { deck, names } => {
-                    assert!(
-                        matches!(declared.scalar, MappingStatus::Unsupported(_)),
-                        "{kind:?} is refused by the browser API but the registry does not say so"
-                    );
-                    let error = *run_authored_deck_document_detailed(&deck)
-                        .expect_err("an unroutable family must be refused");
-                    assert_eq!(error.code, "unsupported_deck_analysis", "{kind:?}");
-                    assert_eq!(error.category, "unsupported_feature", "{kind:?}");
-                    assert!(
-                        error.message.contains(names),
-                        "{kind:?} refusal must name the missing core API: {}",
-                        error.message
-                    );
-                }
-                Expectation::Routed { deck } => {
-                    assert!(
-                        !matches!(declared.scalar, MappingStatus::Unsupported(_)),
-                        "{kind:?} executes on the browser API but the registry calls it unsupported"
-                    );
-                    let execution =
-                        run_authored_deck_document_detailed(&deck).unwrap_or_else(|error| {
-                            panic!("{kind:?} deck must run: {}", error.message)
-                        });
-                    assert_document_round_trips(kind, execution);
-                }
-            }
+            let Expectation::Routed { deck } = expectation(kind);
+            assert!(
+                !matches!(declared.scalar, MappingStatus::Unsupported(_)),
+                "{kind:?} executes on the browser API but the registry calls it unsupported"
+            );
+            let execution = run_authored_deck_document_detailed(&deck)
+                .unwrap_or_else(|error| panic!("{kind:?} deck must run: {}", error.message));
+            assert_document_round_trips(kind, execution);
         }
     }
 

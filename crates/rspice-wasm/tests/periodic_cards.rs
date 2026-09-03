@@ -1,9 +1,9 @@
 //! Authored periodic large-signal cards on the browser deck route.
 //!
-//! `.PSS`, `.PAC`, `.HB` and `.ENVELOPE` execute and publish shared result
-//! documents. `.PNOISE` is refused by name because `rspice-core` exposes no
-//! runner that returns the `PnoiseResult` the shared document is built from,
-//! and a refusal must never be softened into a different family's result.
+//! `.PSS`, `.PAC`, `.HB`, `.ENVELOPE` and `.PNOISE` all execute and publish
+//! shared result documents, each named by the identity the canonical plan
+//! assigned it and — for the small-signal cards — bound to the carrier they
+//! linearized around.
 
 use rspice_wasm::run_authored_deck_document_detailed;
 
@@ -16,37 +16,46 @@ fn deck(cards: &str) -> String {
     format!("{CIRCUIT}{cards}.END\n")
 }
 
-fn refusal(cards: &str) -> rspice_wasm::WasmError {
-    *run_authored_deck_document_detailed(&deck(cards))
-        .expect_err("an unroutable authored card must be refused")
+#[test]
+fn an_authored_pnoise_card_publishes_a_document_bound_to_its_carrier() {
+    let execution = run_authored_deck_document_detailed(&deck(
+        ".PSS FUND=1G HARMS=3 POINTS=32 TSTABPERIODS=2\n\
+         .PNOISE DEC 3 1k 100k OUT=V(out)\n",
+    ))
+    .expect("an authored .PNOISE executes on the browser deck route");
+    let document = execution
+        .results
+        .iter()
+        .find(|document| document.analysis().tag() == "pnoise-001")
+        .expect("the PNoise result keeps its canonical identity");
+    assert_eq!(
+        document.result_kind(),
+        rspice_core::execution::AnalysisResultKind::PNoise
+    );
+    assert_eq!(
+        document.parent_analysis().map(|parent| parent.tag()),
+        Some("pss-001".to_owned()),
+        "a periodic-noise result must name the carrier it folded noise around"
+    );
+    assert!(
+        document.point_count() > 0,
+        "a periodic-noise sweep retains its offset grid"
+    );
 }
 
 #[test]
-fn an_authored_pnoise_card_is_refused_with_its_analysis_identity() {
-    let error = refusal(".PSS FUND=1G\n.PNOISE DEC 3 1k 100k OUT=V(out)\n");
-    assert_eq!(error.kind, "unsupported_deck_analysis");
-    assert_eq!(error.category, "unsupported_feature");
+fn a_preceding_analysis_does_not_change_the_pnoise_ordinal() {
+    let execution = run_authored_deck_document_detailed(&deck(
+        ".OP\n.PSS FUND=1G HARMS=3 POINTS=32 TSTABPERIODS=2\n\
+         .PNOISE DEC 3 1k 100k OUT=V(out)\n",
+    ))
+    .expect("the deck executes");
     assert!(
-        error.message.contains(".PNOISE") && error.message.contains("pnoise-001"),
-        "the refusal names the card and its canonical instance: {}",
-        error.message
-    );
-    assert!(
-        error.message.contains("PnoiseResult"),
-        "the refusal names the missing core API: {}",
-        error.message
-    );
-}
-
-#[test]
-fn an_unroutable_card_is_refused_before_a_supported_analysis_publishes() {
-    // The `.OP` alone would produce a document; the deck must publish none.
-    let error = refusal(".OP\n.PSS FUND=1G\n.PNOISE DEC 3 1k 100k OUT=V(out)\n");
-    assert_eq!(error.kind, "unsupported_deck_analysis");
-    assert!(
-        error.message.contains("pnoise-001"),
-        "the ordinal survives preceding supported analyses: {}",
-        error.message
+        execution
+            .results
+            .iter()
+            .any(|document| document.analysis().tag() == "pnoise-001"),
+        "the ordinal is per family, so a preceding .OP does not shift it"
     );
 }
 

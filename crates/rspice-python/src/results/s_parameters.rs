@@ -24,10 +24,52 @@ pub struct PySParameterResult {
 
 /// Optional `.SP donoise` data attached to an S-parameter sweep.
 ///
-/// This is the core assembly verbatim. The derived two-port parameters are
-/// therefore either present and physical for every frequency or the sweep
-/// failed: there is no per-point validity mask for a caller to overlook.
-pub(crate) type SParameterNoiseData = rspice_core::analysis::s_param::PortNoiseSweep;
+/// The core assembly returns one covariance matrix per frequency; this is that
+/// evidence pivoted into the port-major cube the accessors publish, which is
+/// the only difference between the two. The derived two-port parameters are
+/// either present and physical for every frequency or the sweep failed: there
+/// is no per-point validity mask for a caller to overlook.
+#[derive(Debug, Clone)]
+pub(crate) struct SParameterNoiseData {
+    reference_temperature_kelvin: f64,
+    /// Norton port-current covariance in A²/Hz, indexed
+    /// `[output_port][input_port][frequency_point]`.
+    current_correlation: Vec<Vec<Vec<rspice_core::Complex64>>>,
+    two_port_parameters: Option<Vec<rspice_core::analysis::s_param::TwoPortNoise>>,
+}
+
+impl SParameterNoiseData {
+    fn from_core(assembly: &rspice_core::analysis::s_param::PortNoiseAssembly) -> Self {
+        let ports = assembly
+            .points
+            .first()
+            .map_or(0, |point| point.current_correlation.len());
+        let mut current_correlation =
+            vec![vec![Vec::with_capacity(assembly.points.len()); ports]; ports];
+        for point in &assembly.points {
+            for (row, correlations) in current_correlation.iter_mut().enumerate() {
+                for (column, series) in correlations.iter_mut().enumerate() {
+                    // Core validated every matrix as square and `ports x ports`
+                    // before publishing the assembly, so a missing entry would
+                    // be a core defect rather than caller input; it stays a
+                    // typed absence here instead of a fabricated zero.
+                    series.extend(
+                        point
+                            .current_correlation
+                            .get(row)
+                            .and_then(|values| values.get(column))
+                            .copied(),
+                    );
+                }
+            }
+        }
+        Self {
+            reference_temperature_kelvin: assembly.reference_temperature_kelvin,
+            current_correlation,
+            two_port_parameters: assembly.two_port.clone(),
+        }
+    }
+}
 
 impl PySParameterResult {
     /// Per-frequency stability analysis, for two-port results only.
@@ -103,19 +145,32 @@ impl PySParameterResult {
         Some(values.to_pyarray(py))
     }
 
-    pub(crate) fn new(
-        frequencies: Vec<f64>,
-        port_names: Vec<String>,
-        reference_impedances: Vec<f64>,
-        parameters: Vec<Vec<Vec<rspice_core::Complex64>>>,
-        noise: Option<SParameterNoiseData>,
-    ) -> Self {
+    /// Project one core `.SP` run onto the Python result surface.
+    ///
+    /// Core owns the sweep, the port-noise assembly and the two-port
+    /// derivation; this only re-lays the per-frequency matrices as the
+    /// port-major cubes the accessors index.
+    pub(crate) fn from_run(run: &rspice_core::engine::SParameterRun) -> Self {
+        let ports = run.ports.len();
+        let mut parameters =
+            vec![vec![Vec::with_capacity(run.scattering.data.len()); ports]; ports];
+        for matrix in &run.scattering.data {
+            for (row, columns) in parameters.iter_mut().enumerate() {
+                for (column, series) in columns.iter_mut().enumerate() {
+                    series.push(matrix.get(row + 1, column + 1));
+                }
+            }
+        }
         Self {
-            frequencies,
-            port_names,
-            reference_impedances,
+            frequencies: run.scattering.frequencies(),
+            port_names: run
+                .ports
+                .iter()
+                .map(|port| port.source_name.clone())
+                .collect(),
+            reference_impedances: run.ports.iter().map(|port| port.z0).collect(),
             parameters,
-            noise,
+            noise: run.port_noise.as_ref().map(SParameterNoiseData::from_core),
         }
     }
 

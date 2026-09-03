@@ -1009,55 +1009,10 @@ pub fn probe_registry_name(display_name: &str) -> &str {
 
 /// Why an authored probe spelling is not well formed, if it is not.
 ///
-/// This is the arity contract of the probe grammar, kept next to the
-/// projection that owns probe meaning: `V()` takes a node or a node pair,
-/// `I()` takes one element, every other accessor takes one argument, and an
-/// accessor's parentheses must close. A well-formed probe naming something
-/// the result does not have is a different failure — an unavailable signal,
-/// not a malformed request.
-pub fn probe_specification_error(spec: &str) -> Option<String> {
-    let trimmed = spec.trim();
-    if trimmed.is_empty() {
-        return Some("output specification must not be empty".to_string());
-    }
-    let open_count = trimmed.matches('(').count();
-    if open_count != trimmed.matches(')').count() {
-        return Some(format!(
-            "output specification '{spec}' has unbalanced parentheses"
-        ));
-    }
-    let open = trimmed.find('(')?;
-    if !trimmed.ends_with(')') {
-        return Some(format!(
-            "output specification '{spec}' does not end with its accessor's closing parenthesis"
-        ));
-    }
-    let operator = trimmed[..open].trim();
-    if operator.is_empty() {
-        return Some(format!("output specification '{spec}' has no accessor"));
-    }
-    let arguments = trimmed[open + 1..trimmed.len() - 1]
-        .split(',')
-        .map(str::trim)
-        .collect::<Vec<_>>();
-    if arguments.iter().any(|argument| argument.is_empty()) {
-        return Some(format!(
-            "output specification '{spec}' has an empty argument"
-        ));
-    }
-    let permitted = if operator.eq_ignore_ascii_case("V") {
-        2
-    } else {
-        1
-    };
-    if arguments.len() > permitted {
-        return Some(format!(
-            "output specification '{spec}': {operator}() takes at most {permitted} argument(s), got {}",
-            arguments.len()
-        ));
-    }
-    None
-}
+/// Re-exported from `netlist`, where the probe grammar itself is parsed: the
+/// arity contract belongs beside the grammar rather than beside the projection
+/// that consumes it, and `analysis` needs it too without reaching up here.
+pub use crate::netlist::probe_specification_error;
 
 /// Whether a probe spelling names no circuit symbol at all.
 ///

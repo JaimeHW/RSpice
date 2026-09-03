@@ -476,90 +476,17 @@ impl PyEngine {
                 "S-parameter frequencies must be strictly positive",
             ));
         }
-        let ports = s_param::collect_ports(&netlist.inner)
-            .map_err(|error| crate::errors::value_error(error.to_string()))?;
-        let port_names = ports
-            .iter()
-            .map(|port| port.source_name.clone())
-            .collect::<Vec<_>>();
-        let impedances = ports.iter().map(|port| port.z0).collect::<Vec<_>>();
         let engine = self.engine_for_netlist(&netlist.inner);
-        let temperature = engine.config().temperature;
-        let (parameters, noise) = run_interruptible(py, &self.active_runs, |abort| {
-            let scattering = s_param::extract_s_matrix_with_abort(
-                &netlist.inner,
-                &ports,
-                &frequencies,
-                |driven| {
-                    engine
-                        .run_ac_with_abort(driven, &frequencies, abort)
-                        .map_err(|error| error.to_string())
-                },
-                abort,
-            )
-            // The extraction reports its own cancellation, but an interrupt
-            // caught inside the caller's AC solve still surfaces as a failed
-            // solve, so the abort signal — not the error text — decides which
-            // it was. A cancelled run must never reach the caller dressed up
-            // as a defect in their circuit.
-            .map_err(|error| {
-                if matches!(error, s_param::ExtractError::Aborted) || abort.is_aborted() {
-                    rspice_core::engine::SimulationError::Aborted
-                } else {
-                    rspice_core::engine::SimulationError::Circuit(error.to_string())
-                }
-            })?;
-
-            let noise = if do_noise {
-                let points = engine.run_port_noise_correlation_with_abort(
-                    &netlist.inner,
-                    &port_names,
-                    &frequencies,
-                    temperature,
-                    abort,
-                )?;
-                // Folding the sweep, checking its alignment, and deriving the
-                // two-port parameters is one core operation with one validity
-                // policy: an undefined parameter set fails the analysis rather
-                // than being published behind a mask.
-                Some(
-                    s_param::assemble_port_noise_with_abort(
-                        &points,
-                        &frequencies,
-                        &scattering,
-                        &impedances,
-                        temperature,
-                        abort,
-                    )
-                    .map_err(port_noise_simulation_error)?,
-                )
-            } else {
-                None
-            };
-            Ok((scattering, noise))
+        // Unusable `portnum=` annotations are a mistake in the caller's deck,
+        // and this API has always reported them as ValueError. Collecting the
+        // ports here reports them that way before the runner restates the same
+        // typed failure as a SimulationError; the sweep itself — extraction,
+        // port noise, and the two-port derivation — belongs to the runner.
+        s_param::collect_ports(&netlist.inner)
+            .map_err(|error| crate::errors::value_error(error.to_string()))?;
+        let run = run_interruptible(py, &self.active_runs, |abort| {
+            engine.run_sp_over_grid_with_abort(&netlist.inner, &frequencies, do_noise, abort)
         })?;
-        Ok(PySParameterResult::new(
-            frequencies,
-            port_names,
-            impedances,
-            parameters,
-            noise,
-        ))
-    }
-}
-
-/// Map a core port-noise assembly failure onto the engine's error type.
-///
-/// Cancellation stays cancellation: a `KeyboardInterrupt` that lands inside
-/// the assembly must not reach the caller dressed up as a defect in their
-/// circuit.
-fn port_noise_simulation_error(
-    error: rspice_core::analysis::s_param::PortNoiseAssemblyError,
-) -> rspice_core::engine::SimulationError {
-    match error {
-        rspice_core::analysis::s_param::PortNoiseAssemblyError::Aborted => {
-            rspice_core::engine::SimulationError::Aborted
-        }
-        other => rspice_core::engine::SimulationError::Circuit(other.to_string()),
+        Ok(PySParameterResult::from_run(&run))
     }
 }

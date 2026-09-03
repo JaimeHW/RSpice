@@ -646,7 +646,14 @@ fn execute_analysis(
     abort: &dyn AbortSignal,
     byte_limit: u64,
 ) -> Result<AnalysisOutcome, DirectiveFailure> {
-    let projection = run_directive(engine, netlist, analysis, peers, abort)?;
+    let projection = run_directive(
+        engine,
+        netlist,
+        analysis,
+        peers,
+        coordinate.stable_id(),
+        abort,
+    )?;
     let mut builder = projection
         .builder
         .topology_fingerprint(topology)
@@ -767,6 +774,8 @@ fn axis_analysis_kind(kind: PlannedAnalysisKind) -> Option<AxisAnalysisKind> {
         PlannedAnalysisKind::HarmonicBalance => AxisAnalysisKind::HarmonicBalance,
         PlannedAnalysisKind::Pss => AxisAnalysisKind::Pss,
         PlannedAnalysisKind::Pac => AxisAnalysisKind::Pac,
+        PlannedAnalysisKind::PNoise => AxisAnalysisKind::PNoise,
+        PlannedAnalysisKind::Sp => AxisAnalysisKind::SParameters,
         PlannedAnalysisKind::Envelope => AxisAnalysisKind::Envelope,
         _ => return None,
     })

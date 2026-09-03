@@ -1,208 +1,192 @@
-//! Assembly of a `.SP donoise` port-noise sweep from the per-frequency
-//! correlation solve.
+//! Assembly of one `.SP DONOISE` run's port-noise evidence.
 //!
-//! Folding the per-frequency covariance points into a `[port][port][point]`
-//! cube, checking that the returned sweep is the sweep that was requested, and
-//! deriving the standard two-port noise parameters from the measured S-matrix
-//! is one semantic operation. It used to be written twice — once in the CLI
-//! and once in the Python bindings — and the two copies disagreed about the
-//! one thing that matters: what to do when the two-port derivation has no
-//! physical solution. One surface refused the sweep, the other published NaNs
-//! next to a validity flag a caller could ignore.
+//! The port-noise solver returns a per-frequency current-noise covariance
+//! matrix. Turning that into publishable evidence means proving it lines up
+//! with the scattering sweep it belongs to, and — for a two-port network —
+//! converting scattering to admittance and deriving the standard noise
+//! parameters at every frequency.
 //!
-//! This module is that operation, with one validity policy: an undefined
-//! two-port parameter set is a typed failure naming the frequency it occurred
-//! at. A noise figure that is quietly wrong is worse than one that is visibly
-//! absent, because it will be believed.
+//! That assembly used to live in the CLI and the Python bindings, in two
+//! copies that agreed by inspection but disagreed about the one thing that
+//! matters: what to do when the two-port derivation has no physical solution.
+//! One surface refused the sweep, the other published NaNs next to a validity
+//! flag a caller could ignore. This module is that operation, with one
+//! validity policy: an undefined two-port parameter set is a typed failure
+//! naming the frequency it occurred at. A noise figure that is quietly wrong
+//! is worse than one that is visibly absent, because it will be believed.
 
 use thiserror::Error;
 
-use super::{TwoPortNoise, derive_two_port_noise, y_from_s};
 use crate::abort_signal::AbortSignal;
 use crate::analysis::noise::PortNoiseCorrelationResult;
 use crate::{Complex64, NoAbort, Value};
 
+use super::matrix::SParameterResult;
+use super::network::y_from_s;
+use super::noise_params::{TwoPortNoise, derive_two_port_noise};
+use super::ports::SParameterPort;
+
 /// Number of ports for which the standard noise parameters are defined.
 const TWO_PORT: usize = 2;
 
-/// A fully assembled `.SP donoise` result for one frequency sweep.
-#[derive(Debug, Clone, PartialEq)]
-pub struct PortNoiseSweep {
-    /// Circuit temperature the device noise was evaluated at, in kelvin.
-    pub reference_temperature_kelvin: Value,
-    /// Complex Norton port-current covariance in A²/Hz, indexed
-    /// `[output_port][input_port][frequency_point]`.
-    pub current_correlation: Vec<Vec<Vec<Complex64>>>,
-    /// Standard two-port noise parameters, one entry per frequency point.
-    ///
-    /// `None` for any port count other than two: `Rn`, `F`, `Fmin` and `Sopt`
-    /// are two-port quantities, and deriving them from a sub-matrix of a
-    /// larger network would describe a different device.
-    pub two_port_parameters: Option<Vec<TwoPortNoise>>,
-}
-
-/// Why a port-noise sweep could not be assembled.
+/// Why a port-noise sweep could not be assembled into publishable evidence.
 ///
-/// Every variant identifies the offending point or port count, so a frontend
-/// can translate it into its native diagnostic without parsing a message.
+/// Every variant identifies the offending point, port count, or frequency, so
+/// a frontend can translate it into its native diagnostic without parsing a
+/// message.
 #[derive(Debug, Clone, PartialEq, Error)]
 pub enum PortNoiseAssemblyError {
+    /// The assembly was cancelled by its abort source.
     #[error("port-noise assembly was cancelled")]
     Aborted,
+    /// The sweep declared no ports, so there is nothing to correlate.
     #[error("port-noise sweep requires at least one port")]
     NoPorts,
+    /// The sweep covered no frequencies, so there is nothing to publish.
     #[error("port-noise sweep requires at least one frequency")]
     NoFrequencies,
-    #[error("port-noise solve returned {returned} points for {requested} requested frequencies")]
-    PointCount { returned: usize, requested: usize },
-    #[error("port-noise point {point} is at {actual:.16e} Hz, expected {expected:.16e} Hz")]
+    /// The scattering sweep and the noise sweep describe different grids.
+    #[error("the scattering sweep has {scattering} frequencies and the noise sweep {noise}")]
+    ScatteringMismatch { scattering: usize, noise: usize },
+    /// The scattering sweep was measured for a different number of ports than
+    /// the noise sweep declares.
+    #[error("port-noise sweep has {ports} ports but the scattering sweep has {scattering_ports}")]
+    PortCountMismatch {
+        ports: usize,
+        scattering_ports: usize,
+    },
+    /// A covariance point is not at the frequency it was requested for.
+    #[error("port-noise point {} is at {actual:.16e} Hz, expected {expected:.16e} Hz", index + 1)]
     FrequencyMismatch {
-        point: usize,
-        actual: Value,
+        index: usize,
         expected: Value,
+        actual: Value,
     },
-    #[error("port-noise point {point} returned a malformed covariance matrix for {ports} ports")]
-    MalformedCovariance { point: usize, ports: usize },
-    #[error("port-noise sweep has {ports} ports but {impedances} reference impedances")]
-    ImpedanceCount { ports: usize, impedances: usize },
+    /// A covariance matrix is not square and `N x N` for the declared ports.
     #[error(
-        "port-noise sweep needs a {ports}x{ports} S-matrix over {points} points, got {rows} rows"
+        "port-noise point {} returned a malformed covariance matrix for {ports} ports",
+        index + 1
     )]
-    ScatteringRows {
-        ports: usize,
-        points: usize,
-        rows: usize,
-    },
-    #[error(
-        "port-noise S-matrix row {row} has {columns} columns over {points} points; expected {ports} columns of {points} values"
-    )]
-    ScatteringRow {
-        row: usize,
-        columns: usize,
-        ports: usize,
-        points: usize,
-    },
+    MalformedCovariance { index: usize, ports: usize },
+    /// The noise was evaluated at a temperature no physical derivation accepts.
     #[error("port-noise sweep needs a positive finite temperature, got {temperature}")]
     Temperature { temperature: Value },
-    #[error("port-noise admittance conversion failed at {frequency:.16e} Hz: {reason}")]
-    Admittance { frequency: Value, reason: String },
+    /// Scattering could not be converted to admittance at one frequency.
+    #[error("scattering could not be converted to admittance at {frequency:.16e} Hz: {detail}")]
+    Admittance { frequency: Value, detail: String },
+    /// The admittance and covariance at one frequency do not support a
+    /// physical two-port noise solution.
+    ///
+    /// Reported rather than published with `valid = false`: a noise figure
+    /// that is present but meaningless will be believed.
     #[error(
         "two-port noise parameters are undefined at {frequency:.16e} Hz; the admittance/noise data do not support a physical finite solution"
     )]
-    UndefinedTwoPort { frequency: Value },
+    UndefinedTwoPortParameters { frequency: Value },
 }
 
-/// Assemble a port-noise sweep, without cancellation.
+/// One `.SP DONOISE` run's assembled port-noise evidence.
+#[derive(Debug, Clone)]
+pub struct PortNoiseAssembly {
+    /// Circuit temperature the noise parameters were derived at, in kelvin.
+    pub reference_temperature_kelvin: Value,
+    /// Validated correlation sweep, one point per swept frequency, in the
+    /// exact shape the shared port-noise result document accepts.
+    pub points: Vec<PortNoiseCorrelationResult>,
+    /// Standard two-port noise parameters, present only for a two-port
+    /// network. Every entry is a physical solution: an unphysical one is a
+    /// typed error rather than a `valid = false` placeholder.
+    ///
+    /// `None` for any other port count: `Rn`, `F`, `Fmin` and `Sopt` are
+    /// two-port quantities, and deriving them from a sub-matrix of a larger
+    /// network would describe a different device.
+    pub two_port: Option<Vec<TwoPortNoise>>,
+}
+
+/// Validate one port-noise sweep against its scattering sweep and derive the
+/// two-port noise parameters when the network has exactly two ports, without
+/// cancellation.
 pub fn assemble_port_noise(
-    points: &[PortNoiseCorrelationResult],
-    frequencies: &[Value],
-    scattering: &[Vec<Vec<Complex64>>],
-    reference_impedances: &[Value],
+    ports: &[SParameterPort],
+    scattering: &SParameterResult,
+    points: Vec<PortNoiseCorrelationResult>,
     temperature: Value,
-) -> Result<PortNoiseSweep, PortNoiseAssemblyError> {
-    assemble_port_noise_with_abort(
-        points,
-        frequencies,
-        scattering,
-        reference_impedances,
-        temperature,
-        &NoAbort,
-    )
+) -> Result<PortNoiseAssembly, PortNoiseAssemblyError> {
+    assemble_port_noise_with_abort(ports, scattering, points, temperature, &NoAbort)
 }
 
-/// Assemble a port-noise sweep with cooperative cancellation.
+/// Validate one port-noise sweep against its scattering sweep and derive the
+/// two-port noise parameters when the network has exactly two ports.
 ///
-/// `scattering` is the measured S-matrix indexed `[row][column][point]`, the
-/// shape [`super::extract_s_matrix`] produces. `reference_impedances` is one
-/// impedance per port. The returned cube is indexed
-/// `[output_port][input_port][point]`.
+/// `points` must already be in swept-frequency order, which is the order the
+/// port-noise solver returns them in. The abort source is polled per frequency
+/// so a cancelled run stops inside the derivation rather than only between
+/// solver calls.
 pub fn assemble_port_noise_with_abort(
-    points: &[PortNoiseCorrelationResult],
-    frequencies: &[Value],
-    scattering: &[Vec<Vec<Complex64>>],
-    reference_impedances: &[Value],
+    ports: &[SParameterPort],
+    scattering: &SParameterResult,
+    points: Vec<PortNoiseCorrelationResult>,
     temperature: Value,
     abort: &dyn AbortSignal,
-) -> Result<PortNoiseSweep, PortNoiseAssemblyError> {
+) -> Result<PortNoiseAssembly, PortNoiseAssemblyError> {
     if abort.is_aborted() {
         return Err(PortNoiseAssemblyError::Aborted);
     }
-    let port_count = reference_impedances.len();
-    if port_count == 0 {
+    let count = ports.len();
+    if count == 0 {
         return Err(PortNoiseAssemblyError::NoPorts);
     }
-    if frequencies.is_empty() {
+    if scattering.data.is_empty() || points.is_empty() {
         return Err(PortNoiseAssemblyError::NoFrequencies);
     }
     if !temperature.is_finite() || temperature <= 0.0 {
         return Err(PortNoiseAssemblyError::Temperature { temperature });
     }
-    let point_count = frequencies.len();
-    if points.len() != point_count {
-        return Err(PortNoiseAssemblyError::PointCount {
-            returned: points.len(),
-            requested: point_count,
+    if scattering.data.len() != points.len() {
+        return Err(PortNoiseAssemblyError::ScatteringMismatch {
+            scattering: scattering.data.len(),
+            noise: points.len(),
         });
     }
-    if scattering.len() != port_count {
-        return Err(PortNoiseAssemblyError::ScatteringRows {
-            ports: port_count,
-            points: point_count,
-            rows: scattering.len(),
+    if scattering.num_ports != count {
+        return Err(PortNoiseAssemblyError::PortCountMismatch {
+            ports: count,
+            scattering_ports: scattering.num_ports,
         });
     }
-    for (row_index, row) in scattering.iter().enumerate() {
-        if row.len() != port_count || row.iter().any(|column| column.len() != point_count) {
-            return Err(PortNoiseAssemblyError::ScatteringRow {
-                row: row_index,
-                columns: row.len(),
-                ports: port_count,
-                points: point_count,
-            });
-        }
-    }
-
-    let mut current_correlation =
-        vec![vec![vec![Complex64::ZERO; point_count]; port_count]; port_count];
-    for (point_index, (expected_frequency, point)) in frequencies.iter().zip(points).enumerate() {
-        if point_index.is_multiple_of(64) && abort.is_aborted() {
+    for (index, (matrix, point)) in scattering.data.iter().zip(&points).enumerate() {
+        if index.is_multiple_of(64) && abort.is_aborted() {
             return Err(PortNoiseAssemblyError::Aborted);
         }
-        // The solve is asked for exactly the requested grid; the tolerance
-        // only absorbs a round trip through the solver's own bookkeeping, not
-        // a genuinely different frequency.
-        let tolerance = expected_frequency.abs().max(1.0) * Value::EPSILON * 64.0;
-        if (point.frequency - expected_frequency).abs() > tolerance {
+        // The solve is asked for exactly the swept grid; the tolerance only
+        // absorbs a round trip through the solver's own bookkeeping, not a
+        // genuinely different frequency.
+        let tolerance = matrix.frequency.abs().max(1.0) * Value::EPSILON * 64.0;
+        if (point.frequency - matrix.frequency).abs() > tolerance {
             return Err(PortNoiseAssemblyError::FrequencyMismatch {
-                point: point_index + 1,
+                index,
+                expected: matrix.frequency,
                 actual: point.frequency,
-                expected: *expected_frequency,
             });
         }
-        if point.current_correlation.len() != port_count
+        if point.current_correlation.len() != count
             || point
                 .current_correlation
                 .iter()
-                .any(|row| row.len() != port_count)
+                .any(|row| row.len() != count)
         {
             return Err(PortNoiseAssemblyError::MalformedCovariance {
-                point: point_index + 1,
-                ports: port_count,
+                index,
+                ports: count,
             });
-        }
-        for (row, correlations) in current_correlation.iter_mut().enumerate() {
-            for (column, values) in correlations.iter_mut().enumerate() {
-                values[point_index] = point.current_correlation[row][column];
-            }
         }
     }
 
-    let two_port_parameters = if port_count == TWO_PORT {
+    let two_port = if count == TWO_PORT {
         Some(derive_two_port_sweep(
-            frequencies,
+            ports,
             scattering,
-            &current_correlation,
-            reference_impedances,
+            &points,
             temperature,
             abort,
         )?)
@@ -210,52 +194,61 @@ pub fn assemble_port_noise_with_abort(
         None
     };
 
-    Ok(PortNoiseSweep {
+    Ok(PortNoiseAssembly {
         reference_temperature_kelvin: temperature,
-        current_correlation,
-        two_port_parameters,
+        points,
+        two_port,
     })
 }
 
+/// Derive the standard two-port noise parameters at every swept frequency.
+///
+/// Shapes were validated by the caller, so the only failures here are physical
+/// ones: an admittance conversion that has no solution, and a parameter set
+/// that is not finite and physical.
 fn derive_two_port_sweep(
-    frequencies: &[Value],
-    scattering: &[Vec<Vec<Complex64>>],
-    current_correlation: &[Vec<Vec<Complex64>>],
-    reference_impedances: &[Value],
+    ports: &[SParameterPort],
+    scattering: &SParameterResult,
+    points: &[PortNoiseCorrelationResult],
     temperature: Value,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<TwoPortNoise>, PortNoiseAssemblyError> {
-    if reference_impedances.len() != TWO_PORT {
-        return Err(PortNoiseAssemblyError::ImpedanceCount {
-            ports: TWO_PORT,
-            impedances: reference_impedances.len(),
-        });
-    }
-    let mut derived = Vec::with_capacity(frequencies.len());
-    for (point_index, frequency) in frequencies.iter().enumerate() {
-        if point_index.is_multiple_of(16) && abort.is_aborted() {
+    let reference_impedances = ports.iter().map(|port| port.z0).collect::<Vec<_>>();
+    // Two ports were counted by the caller, so port 1 is present; its
+    // reference impedance is the one the noise figure is defined against.
+    let Some(input_reference) = ports.first().map(|port| port.z0) else {
+        return Err(PortNoiseAssemblyError::NoPorts);
+    };
+    let mut derived = Vec::with_capacity(points.len());
+    for (index, (matrix, point)) in scattering.data.iter().zip(points).enumerate() {
+        if index.is_multiple_of(16) && abort.is_aborted() {
             return Err(PortNoiseAssemblyError::Aborted);
         }
         // Derived from the S-matrix just measured rather than read off the
         // port branch currents: behind a Thevenin port that current flows
         // through the reference resistor and is not the admittance term.
-        let s = point_matrix(scattering, point_index);
-        let admittance = y_from_s(&s, reference_impedances).map_err(|error| {
+        let square = (1..=TWO_PORT)
+            .map(|row| {
+                (1..=TWO_PORT)
+                    .map(|column| matrix.get(row, column))
+                    .collect()
+            })
+            .collect::<Vec<Vec<Complex64>>>();
+        let admittance = y_from_s(&square, &reference_impedances).map_err(|error| {
             PortNoiseAssemblyError::Admittance {
-                frequency: *frequency,
-                reason: error.to_string(),
+                frequency: matrix.frequency,
+                detail: error.to_string(),
             }
         })?;
-        let covariance = point_matrix(current_correlation, point_index);
         let parameters = derive_two_port_noise(
             &admittance,
-            &covariance,
-            reference_impedances[0],
+            &point.current_correlation,
+            input_reference,
             temperature,
         );
         if !parameters.valid {
-            return Err(PortNoiseAssemblyError::UndefinedTwoPort {
-                frequency: *frequency,
+            return Err(PortNoiseAssemblyError::UndefinedTwoPortParameters {
+                frequency: matrix.frequency,
             });
         }
         derived.push(parameters);
@@ -263,26 +256,47 @@ fn derive_two_port_sweep(
     Ok(derived)
 }
 
-/// Slice one frequency point out of a `[row][column][point]` cube.
-///
-/// Shapes are validated by the caller before this runs, so the indexing is a
-/// proven invariant rather than an assumption about solver output.
-fn point_matrix(cube: &[Vec<Vec<Complex64>>], point_index: usize) -> Vec<Vec<Complex64>> {
-    cube.iter()
-        .map(|row| {
-            row.iter()
-                .map(|values| values[point_index])
-                .collect::<Vec<_>>()
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::abort_signal::ImmediateAbort;
+    use crate::analysis::s_param::{Port, PortRealization, SMatrix};
 
-    fn point(frequency: Value, values: [[Complex64; 2]; 2]) -> PortNoiseCorrelationResult {
+    /// The typed refusal an assembly that must not succeed produced.
+    fn refused(
+        outcome: Result<PortNoiseAssembly, PortNoiseAssemblyError>,
+    ) -> PortNoiseAssemblyError {
+        outcome.expect_err("this input has no publishable port-noise evidence")
+    }
+
+    fn port(number: usize, z0: Value) -> SParameterPort {
+        SParameterPort {
+            number,
+            source_name: format!("V{number}"),
+            node_pos: format!("p{number}"),
+            node_neg: "0".to_owned(),
+            z0,
+            realization: PortRealization::Ideal,
+        }
+    }
+
+    fn sweep(impedances: &[Value], matrices: Vec<SMatrix>) -> SParameterResult {
+        let reference = impedances.first().copied().unwrap_or(50.0);
+        let mut result = SParameterResult::new(
+            reference,
+            impedances
+                .iter()
+                .enumerate()
+                .map(|(index, z0)| Port::single_ended(index + 1, &format!("p{}", index + 1), *z0))
+                .collect(),
+        );
+        for matrix in matrices {
+            result.add(matrix);
+        }
+        result
+    }
+
+    fn correlation(frequency: Value, values: [[Complex64; 2]; 2]) -> PortNoiseCorrelationResult {
         PortNoiseCorrelationResult {
             frequency,
             current_correlation: values.map(|row| row.to_vec()).to_vec(),
@@ -294,14 +308,13 @@ mod tests {
     /// scattering data therefore round-trips back to the admittance the noise
     /// data belongs to, which is exactly what the assembly relies on.
     fn resistive_two_port() -> (
-        Vec<Value>,
-        Vec<Vec<Vec<Complex64>>>,
+        Vec<SParameterPort>,
+        SParameterResult,
         Vec<PortNoiseCorrelationResult>,
-        Vec<Value>,
         Value,
     ) {
-        let frequencies = vec![1.0e9];
-        let impedances = vec![50.0, 50.0];
+        let impedances = [50.0, 50.0];
+        let ports = vec![port(1, 50.0), port(2, 50.0)];
         let temperature = 300.15;
         let conductance = 1.0 / 50.0;
         let admittance = vec![
@@ -314,37 +327,36 @@ mod tests {
                 Complex64::new(conductance, 0.0),
             ],
         ];
-        let matrix = super::super::s_from_y(&admittance, &impedances)
+        let square = super::super::s_from_y(&admittance, &impedances)
             .expect("a series resistor has a scattering representation");
-        let scattering = (0..2)
-            .map(|row| (0..2).map(|column| vec![matrix[row][column]]).collect())
-            .collect::<Vec<Vec<Vec<Complex64>>>>();
+        let mut matrix = SMatrix::new(1.0e9, 2);
+        for row in 0..2 {
+            for column in 0..2 {
+                matrix.set(row + 1, column + 1, square[row][column]);
+            }
+        }
         let power = 4.0 * crate::constants::K_BOLTZMANN * temperature * conductance;
-        let points = vec![point(
+        let points = vec![correlation(
             1.0e9,
             [
                 [Complex64::new(power, 0.0), Complex64::new(-power, 0.0)],
                 [Complex64::new(-power, 0.0), Complex64::new(power, 0.0)],
             ],
         )];
-        (frequencies, scattering, points, impedances, temperature)
+        (ports, sweep(&impedances, vec![matrix]), points, temperature)
     }
 
     #[test]
-    fn a_two_port_sweep_folds_into_a_port_major_cube() {
-        let (frequencies, scattering, points, impedances, temperature) = resistive_two_port();
-        let sweep =
-            assemble_port_noise(&points, &frequencies, &scattering, &impedances, temperature)
-                .expect("physical two-port noise data assembles");
-        assert_eq!(sweep.reference_temperature_kelvin, temperature);
-        assert_eq!(sweep.current_correlation.len(), 2);
-        assert_eq!(sweep.current_correlation[0][0].len(), 1);
-        assert_eq!(
-            sweep.current_correlation[0][0][0],
-            points[0].current_correlation[0][0]
-        );
-        let derived = sweep
-            .two_port_parameters
+    fn a_two_port_sweep_keeps_its_points_and_derives_noise_parameters() {
+        let (ports, scattering, points, temperature) = resistive_two_port();
+        let expected = points[0].current_correlation[0][0];
+        let assembly = assemble_port_noise(&ports, &scattering, points, temperature)
+            .expect("physical two-port noise data assembles");
+        assert_eq!(assembly.reference_temperature_kelvin, temperature);
+        assert_eq!(assembly.points.len(), 1);
+        assert_eq!(assembly.points[0].current_correlation[0][0], expected);
+        let derived = assembly
+            .two_port
             .expect("a two-port sweep derives standard noise parameters");
         assert_eq!(derived.len(), 1);
         assert!(derived[0].valid);
@@ -355,89 +367,135 @@ mod tests {
 
     #[test]
     fn a_three_port_sweep_reports_no_two_port_parameters() {
-        let frequencies = vec![1.0e9];
-        let impedances = vec![50.0, 50.0, 50.0];
-        let scattering = vec![vec![vec![Complex64::ZERO]; 3]; 3];
+        let impedances = [50.0, 50.0, 50.0];
+        let ports = vec![port(1, 50.0), port(2, 50.0), port(3, 50.0)];
+        let scattering = sweep(&impedances, vec![SMatrix::new(1.0e9, 3)]);
         let points = vec![PortNoiseCorrelationResult {
             frequency: 1.0e9,
             current_correlation: vec![vec![Complex64::ZERO; 3]; 3],
         }];
-        let sweep =
-            assemble_port_noise(&points, &frequencies, &scattering, &impedances, 300.15).unwrap();
-        assert!(sweep.two_port_parameters.is_none());
+        let assembly = assemble_port_noise(&ports, &scattering, points, 300.15)
+            .expect("a three-port correlation sweep is still evidence");
+        assert!(assembly.two_port.is_none());
+        assert_eq!(assembly.points.len(), 1);
     }
 
     #[test]
     fn undefined_two_port_parameters_fail_the_sweep_instead_of_publishing_nan() {
-        let (frequencies, scattering, mut points, impedances, temperature) = resistive_two_port();
+        let (ports, scattering, mut points, temperature) = resistive_two_port();
         // A covariance matrix that is not positive semidefinite has no
         // physical noise-parameter solution.
         points[0].current_correlation[1][1] = Complex64::new(-1.0, 0.0);
-        let error =
-            assemble_port_noise(&points, &frequencies, &scattering, &impedances, temperature)
-                .expect_err("an unphysical covariance must not publish a noise figure");
+        let error = assemble_port_noise(&ports, &scattering, points, temperature)
+            .expect_err("an unphysical covariance must not publish a noise figure");
         assert!(matches!(
             error,
-            PortNoiseAssemblyError::UndefinedTwoPort { .. }
+            PortNoiseAssemblyError::UndefinedTwoPortParameters { .. }
         ));
     }
 
     #[test]
     fn a_short_or_misaligned_solve_is_refused() {
-        let (frequencies, scattering, points, impedances, temperature) = resistive_two_port();
+        let (ports, scattering, points, temperature) = resistive_two_port();
+
         assert_eq!(
-            assemble_port_noise(&[], &frequencies, &scattering, &impedances, temperature),
-            Err(PortNoiseAssemblyError::PointCount {
-                returned: 0,
-                requested: 1
-            })
+            refused(assemble_port_noise(
+                &[],
+                &scattering,
+                points.clone(),
+                temperature
+            )),
+            PortNoiseAssemblyError::NoPorts
+        );
+        assert_eq!(
+            refused(assemble_port_noise(
+                &ports,
+                &scattering,
+                Vec::new(),
+                temperature
+            )),
+            PortNoiseAssemblyError::NoFrequencies
+        );
+        assert_eq!(
+            refused(assemble_port_noise(
+                &ports,
+                &sweep(&[50.0, 50.0], Vec::new()),
+                points.clone(),
+                temperature
+            )),
+            PortNoiseAssemblyError::NoFrequencies
+        );
+        assert!(matches!(
+            refused(assemble_port_noise(
+                &ports,
+                &scattering,
+                points.clone(),
+                0.0
+            )),
+            PortNoiseAssemblyError::Temperature { .. }
+        ));
+
+        let mut doubled = points.clone();
+        doubled.push(points[0].clone());
+        assert_eq!(
+            refused(assemble_port_noise(
+                &ports,
+                &scattering,
+                doubled,
+                temperature
+            )),
+            PortNoiseAssemblyError::ScatteringMismatch {
+                scattering: 1,
+                noise: 2
+            }
+        );
+
+        let three_ports = vec![port(1, 50.0), port(2, 50.0), port(3, 50.0)];
+        assert_eq!(
+            refused(assemble_port_noise(
+                &three_ports,
+                &scattering,
+                points.clone(),
+                temperature
+            )),
+            PortNoiseAssemblyError::PortCountMismatch {
+                ports: 3,
+                scattering_ports: 2
+            }
         );
 
         let mut moved = points.clone();
         moved[0].frequency = 2.0e9;
         assert!(matches!(
-            assemble_port_noise(&moved, &frequencies, &scattering, &impedances, temperature),
-            Err(PortNoiseAssemblyError::FrequencyMismatch { point: 1, .. })
+            refused(assemble_port_noise(&ports, &scattering, moved, temperature)),
+            PortNoiseAssemblyError::FrequencyMismatch { index: 0, .. }
         ));
 
-        let mut malformed = points.clone();
+        let mut malformed = points;
         malformed[0].current_correlation[1].pop();
         assert!(matches!(
-            assemble_port_noise(
-                &malformed,
-                &frequencies,
+            refused(assemble_port_noise(
+                &ports,
                 &scattering,
-                &impedances,
+                malformed,
                 temperature
-            ),
-            Err(PortNoiseAssemblyError::MalformedCovariance { point: 1, ports: 2 })
-        ));
-
-        let truncated = vec![scattering[0].clone()];
-        assert!(matches!(
-            assemble_port_noise(&points, &frequencies, &truncated, &impedances, temperature),
-            Err(PortNoiseAssemblyError::ScatteringRows { rows: 1, .. })
-        ));
-
-        assert!(matches!(
-            assemble_port_noise(&points, &frequencies, &scattering, &impedances, 0.0),
-            Err(PortNoiseAssemblyError::Temperature { .. })
+            )),
+            PortNoiseAssemblyError::MalformedCovariance { index: 0, ports: 2 }
         ));
     }
 
     #[test]
     fn assembly_observes_the_abort_signal() {
-        let (frequencies, scattering, points, impedances, temperature) = resistive_two_port();
+        let (ports, scattering, points, temperature) = resistive_two_port();
         assert_eq!(
-            assemble_port_noise_with_abort(
-                &points,
-                &frequencies,
+            refused(assemble_port_noise_with_abort(
+                &ports,
                 &scattering,
-                &impedances,
+                points,
                 temperature,
                 &ImmediateAbort,
-            ),
-            Err(PortNoiseAssemblyError::Aborted)
+            )),
+            PortNoiseAssemblyError::Aborted
         );
     }
 }

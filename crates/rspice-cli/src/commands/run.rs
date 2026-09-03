@@ -1541,7 +1541,11 @@ fn physical_step_analysis_kind(
     analysis: &AnalysisCommand,
 ) -> Result<Option<&'static str>, CliError> {
     match analysis {
-        AnalysisCommand::Step(_) | AnalysisCommand::Temp { .. } => Ok(None),
+        // `.FOUR` post-processes a transient; it is not itself a physical
+        // analysis a `.STEP` coordinate re-solves.
+        AnalysisCommand::Step(_) | AnalysisCommand::Temp { .. } | AnalysisCommand::Four { .. } => {
+            Ok(None)
+        }
         AnalysisCommand::Op => Ok(Some("op")),
         AnalysisCommand::Dc { .. } => Ok(Some("dc")),
         AnalysisCommand::Ac { .. } | AnalysisCommand::AcData { .. } => Ok(Some("ac")),
@@ -1554,7 +1558,6 @@ fn physical_step_analysis_kind(
         AnalysisCommand::Sensitivity { .. } => Ok(Some("sens")),
         AnalysisCommand::Tf { .. } => Ok(Some("tf")),
         AnalysisCommand::PoleZero { .. } => Ok(Some("pz")),
-        AnalysisCommand::Four { .. } => Ok(Some("four")),
         AnalysisCommand::Pss(_)
         | AnalysisCommand::Pac(_)
         | AnalysisCommand::Pnoise(_)

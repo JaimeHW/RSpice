@@ -286,14 +286,17 @@ R1 in 0 1k
             ("four", "nosuch", "node")
         ]
 
-    def test_four_without_a_transient_is_recorded_as_skipped(self, engine):
+    def test_four_without_a_transient_is_refused_by_the_deck_plan(self, engine):
+        # A `.FOUR` names a transient to post-process. With no `.TRAN` in the
+        # deck there is nothing it could ever describe, so the plan refuses the
+        # deck instead of running it and reporting an empty post-process. The
+        # CLI refuses the same deck with the same diagnostic; which analyses a
+        # deck can execute is one decision, not one per surface.
         deck = SINE.replace(".end", ".four 1k V(in)\n.end")
-        report = engine.run(rspice.Netlist.parse(deck))
+        with pytest.raises(rspice.SimulationError) as failure:
+            engine.run(rspice.Netlist.parse(deck))
 
-        four = [record for record in report.records if record.kind == "four"]
-        assert len(four) == 1
-        assert four[0].skipped
-        assert "tran" in four[0].reason
+        assert "requires a completed authored .TRAN" in str(failure.value)
 
     def test_four_with_too_short_a_transient_is_recorded_as_skipped(self, engine):
         deck = SINE.replace(".end", ".tran 2u 100u\n.four 1k V(in)\n.end")

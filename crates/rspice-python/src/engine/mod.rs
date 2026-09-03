@@ -28,9 +28,7 @@ use rspice_core::netlist::{
     AnalysisCommand, DcSecondSweep, DcSweepMode, DcSweepSpec, FreqVariation,
     MonteCarloDistribution, PoleZeroAnalysisType, PoleZeroTransferType,
 };
-use rspice_core::{
-    AbortSignal, Engine, SimulationConfig, SimulationConfigOverrides, resolve_simulation_config,
-};
+use rspice_core::{Engine, SimulationConfig, SimulationConfigOverrides, resolve_simulation_config};
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
 
