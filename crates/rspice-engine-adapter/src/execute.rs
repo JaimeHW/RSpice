@@ -3,8 +3,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 use std::io::{self, Write};
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use rspice_core::abort_signal::AbortSignal;
@@ -17,13 +16,9 @@ use rspice_core::execution::{
 use rspice_core::netlist::{AnalysisCommand, DcSweepSpec, ElementKind, FftFormat};
 use rspice_core::solver::SimulationResult;
 use rspice_core::{Engine, Netlist, SimulationError};
+use rspice_output::AtomicArtifactSet;
 #[cfg(test)]
 use rspice_output::write_atomic;
-use rspice_output::{
-    AtomicArtifactError, AtomicArtifactFile, AtomicArtifactOptions, DestinationState, Durability,
-    PreparedAtomicArtifact, remove_artifact_durably, restore_artifact_durably,
-    sync_artifact_parent,
-};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -2422,246 +2417,33 @@ pub fn write_artifacts(results_dir: &Path, artifacts: &[PendingArtifact]) -> Res
         }
     }
 
-    let options = AtomicArtifactOptions::new(Durability::SyncFileAndParent);
-    let mut prepared = Vec::new();
-    prepared
-        .try_reserve_exact(artifacts.len())
-        .map_err(|error| format!("cannot allocate result transaction: {error}"))?;
+    let mut transaction = AtomicArtifactSet::new();
     for artifact in artifacts {
         let destination = results_dir.join(&artifact.file_name);
-        let mut staged = AtomicArtifactFile::prepare(&destination, options)
-            .map_err(|error| format!("failed to stage {}: {error}", destination.display()))?;
-        staged
-            .write_all(artifact.content.as_bytes())
-            .map_err(|error| format!("failed to write {}: {error}", destination.display()))?;
-        let staged = staged.prepare_for_commit().map_err(|error| {
-            format!(
-                "failed to synchronize staged artifact {}: {error}",
-                destination.display()
-            )
-        })?;
-        prepared.push(PreparedResultArtifact {
-            destination,
-            staged: Some(staged),
-            predecessor: Predecessor::Absent,
-            committed: false,
-        });
+        transaction
+            .stage::<io::Error, _>(&destination, |writer| {
+                writer.write_all(artifact.content.as_bytes())
+            })
+            .map_err(|error| error.to_string())?;
     }
-
-    for index in 0..prepared.len() {
-        match capture_predecessor(&prepared[index].destination) {
-            Ok(predecessor) => prepared[index].predecessor = predecessor,
-            Err(error) => {
-                return match cleanup_result_backups(&mut prepared) {
-                    Ok(()) => Err(error),
-                    Err(cleanup_error) => Err(format!(
-                        "{error}; rollback snapshot cleanup also failed: {cleanup_error}"
-                    )),
-                };
-            }
-        }
-    }
-
-    for index in 0..prepared.len() {
-        let staged = prepared[index]
-            .staged
-            .take()
-            .expect("prepared result artifact is consumed once");
-        if let Err(error) = staged.commit() {
-            if commit_error_published(&error) {
-                prepared[index].committed = true;
-            }
-            let rollback = rollback_result_transaction(&mut prepared);
-            return Err(match rollback {
-                Ok(()) => format!(
-                    "failed to commit result artifact {}: {error}; the predecessor set was restored",
-                    prepared[index].destination.display()
-                ),
-                Err(rollback_error) => format!(
-                    "failed to commit result artifact {}: {error}; rollback also failed: {rollback_error}",
-                    prepared[index].destination.display()
-                ),
-            });
-        }
-        prepared[index].committed = true;
-    }
-
-    cleanup_result_backups(&mut prepared)?;
-    Ok(())
-}
-
-fn commit_error_published(error: &AtomicArtifactError<io::Error>) -> bool {
-    matches!(
-        error,
-        AtomicArtifactError::Commit {
-            destination_state: DestinationState::PublishedDurabilityUncertain,
-            ..
-        }
-    )
-}
-
-struct PreparedResultArtifact {
-    destination: PathBuf,
-    staged: Option<PreparedAtomicArtifact>,
-    predecessor: Predecessor,
-    committed: bool,
-}
-
-enum Predecessor {
-    Absent,
-    File { backup: PathBuf },
-    Directory,
-}
-
-impl Predecessor {
-    fn remove_backup(&mut self) -> Result<(), String> {
-        if let Self::File { backup } = self {
-            remove_artifact_durably(&*backup)
-                .map_err(|error| format!("failed to remove rollback backup: {error}"))?;
-            *self = Self::Absent;
-        }
-        Ok(())
-    }
-}
-
-fn cleanup_result_backups(members: &mut [PreparedResultArtifact]) -> Result<(), String> {
-    let mut failures = Vec::new();
-    for member in members.iter_mut() {
-        if let Err(error) = member.predecessor.remove_backup() {
-            failures.push(format!("{}: {error}", member.destination.display()));
-        }
-    }
-    if let Err(error) = sync_result_parents(members) {
-        failures.push(error);
-    }
-    if failures.is_empty() {
-        Ok(())
-    } else {
-        Err(failures.join("; "))
-    }
-}
-
-static NEXT_ROLLBACK_BACKUP: AtomicU64 = AtomicU64::new(0);
-
-fn capture_predecessor(destination: &Path) -> Result<Predecessor, String> {
-    let metadata = match std::fs::symlink_metadata(destination) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Predecessor::Absent),
-        Err(error) => {
-            return Err(format!(
-                "cannot inspect predecessor {}: {error}",
-                destination.display()
-            ));
-        }
-    };
-    if metadata.file_type().is_dir() {
-        // A regular file cannot atomically replace a directory, so retaining
-        // the directory is a safe way for commit to report an unchanged
-        // destination. Other non-regular objects (devices, FIFOs, sockets)
-        // can be replaced by rename on Unix and therefore must fail closed.
-        return Ok(Predecessor::Directory);
-    }
-    if !metadata.file_type().is_file() {
-        return Err(format!(
-            "result predecessor {} is not a regular file or directory",
-            destination.display()
-        ));
-    }
-    let parent = destination
-        .parent()
-        .ok_or_else(|| "result destination has no parent".to_owned())?;
-    let name = destination
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| "result destination name is not UTF-8".to_owned())?;
-    for _ in 0..1_024 {
-        let serial = NEXT_ROLLBACK_BACKUP.fetch_add(1, Ordering::Relaxed);
-        let backup = parent.join(format!(
-            ".{name}.rspice-adapter-rollback-{}-{serial}",
-            std::process::id()
-        ));
-        match std::fs::hard_link(destination, &backup) {
-            Ok(()) => return Ok(Predecessor::File { backup }),
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
-            Err(error) => {
-                return Err(format!(
-                    "cannot create exact rollback snapshot for {}: {error}",
-                    destination.display()
-                ));
-            }
-        }
-    }
-    Err("cannot allocate a unique result rollback backup".to_owned())
-}
-
-fn rollback_result_transaction(members: &mut [PreparedResultArtifact]) -> Result<(), String> {
-    let mut failures = Vec::new();
-    for member in members.iter_mut().rev() {
-        let result = match &member.predecessor {
-            Predecessor::Absent if member.committed => remove_artifact_durably(&member.destination),
-            Predecessor::Absent | Predecessor::Directory => Ok(()),
-            Predecessor::File { backup } => {
-                if member.committed {
-                    restore_artifact_durably(backup, &member.destination)
-                } else {
-                    remove_artifact_durably(backup)
-                }
-            }
-        };
-        if let Err(error) = result {
-            failures.push(format!("{}: {error}", member.destination.display()));
-        }
-        member.staged.take();
-    }
-    if let Err(error) = sync_result_parents(members) {
-        failures.push(error);
-    }
-    if failures.is_empty() {
-        Ok(())
-    } else {
-        Err(failures.join("; "))
-    }
-}
-
-fn sync_result_parents(members: &[PreparedResultArtifact]) -> Result<(), String> {
-    let mut synchronized = HashSet::new();
-    for member in members {
-        let parent = member
-            .destination
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
-            .to_path_buf();
-        if synchronized.insert(parent) {
-            sync_artifact_parent(&member.destination).map_err(|error| {
-                format!(
-                    "failed to synchronize result transaction directory for {}: {error}",
-                    member.destination.display()
-                )
-            })?;
-        }
-    }
-    Ok(())
+    transaction.commit().map_err(|error| error.to_string())
 }
 
 #[cfg(test)]
 fn publish_artifact<E>(
     destination: &Path,
-    write: impl FnOnce(&mut dyn Write) -> Result<(), E>,
-) -> Result<(), AtomicArtifactError<E>>
+    write: impl FnOnce(&mut dyn std::io::Write) -> Result<(), E>,
+) -> Result<(), rspice_output::AtomicArtifactError<E>>
 where
     E: std::error::Error + 'static,
 {
-    write_atomic(
-        destination,
-        AtomicArtifactOptions::new(Durability::SyncFileAndParent),
-        write,
-    )
+    write_atomic(destination, write)
 }
 
 #[cfg(test)]
 mod artifact_publication_tests {
     use super::*;
-    use rspice_output::stale_artifacts;
+    use rspice_output::{AtomicArtifactError, stale_artifacts};
     use std::io;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -2900,9 +2682,9 @@ mod artifact_publication_tests {
                 .map(|entry| entry.expect("read transaction entry").file_name())
                 .collect::<Vec<_>>();
             assert!(
-                names
-                    .iter()
-                    .all(|name| !name.to_string_lossy().contains("rspice-adapter-rollback")),
+                names.iter().all(|name| !name
+                    .to_string_lossy()
+                    .contains(rspice_output::PREDECESSOR_MARKER)),
                 "rollback backup remained: {names:?}"
             );
         }
@@ -2933,31 +2715,15 @@ mod artifact_publication_tests {
 
         let error = write_artifacts(&directory.0, &artifacts)
             .expect_err("a socket predecessor must fail closed");
-        assert!(error.contains("not a regular file or directory"), "{error}");
+        assert!(
+            error.contains("neither a regular file nor a directory"),
+            "{error}"
+        );
         assert_eq!(
             std::fs::read(&first).expect("read untouched first predecessor"),
             b"old first"
         );
         assert!(socket.exists());
-    }
-
-    #[test]
-    fn durability_uncertain_commit_errors_are_treated_as_published_for_rollback() {
-        let error = AtomicArtifactError::Commit {
-            operation: rspice_output::CommitOperation::SyncParent,
-            destination_state: DestinationState::PublishedDurabilityUncertain,
-            recovery_path: None,
-            source: io::Error::other("injected parent sync failure"),
-        };
-        assert!(commit_error_published(&error));
-
-        let unchanged = AtomicArtifactError::Commit {
-            operation: rspice_output::CommitOperation::Replace,
-            destination_state: DestinationState::Unchanged,
-            recovery_path: None,
-            source: io::Error::other("injected replace failure"),
-        };
-        assert!(!commit_error_published(&unchanged));
     }
 
     #[test]

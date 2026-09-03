@@ -8,6 +8,7 @@
 use super::RunContext;
 use super::shared::map_hdf5_output_error;
 use crate::cli::{CliError, OutputFormat, map_atomic_output_error};
+use crate::commands::publish;
 use crate::commands::run_signals::{
     SignalKind, checked_dc_operating_point_signals, dc_export_signals,
     dc_operating_point_export_signals, transient_export_signals,
@@ -16,11 +17,6 @@ use crate::hdf5::{
     Hdf5FftCoordinate, Hdf5FftHarmonic, Hdf5FftMetrics, Hdf5FftResult, Hdf5FftSection,
     Hdf5SimulationData, Hdf5WaveformSection, write_hdf5, write_hdf5_to_writer,
 };
-use rspice_output::{
-    AtomicArtifactError, AtomicArtifactFile, AtomicArtifactOptions, DestinationState, Durability,
-    PreparedAtomicArtifact, write_atomic,
-};
-use std::io::BufWriter;
 use std::path::{Component, Path, PathBuf};
 
 fn map_output_projection_error(
@@ -227,130 +223,125 @@ pub(super) fn write_dc_op_output(
         return Ok(());
     }
 
-    write_atomic(
-        path,
-        AtomicArtifactOptions::new(Durability::SyncFileAndParent),
-        |file| {
-            match format {
-                OutputFormat::Json => {
-                    let mut vars = serde_json::Map::new();
-                    for signal in signals {
-                        vars.insert(
-                            signal.display_name.clone(),
-                            serde_json::json!(signal.values[0]),
-                        );
-                    }
-                    let json = serde_json::json!({
-                        "analysis": "dc_op",
-                        "variables": vars,
-                    });
-                    let text = serde_json::to_string_pretty(&json)
-                        .map_err(|e| CliError::output_json_error(path, e))?;
-                    writeln!(file, "{}", text).map_err(|e| CliError::OutputError {
-                        path: path.to_path_buf(),
-                        source: e,
-                    })?;
+    publish::artifact(path, |file| {
+        match format {
+            OutputFormat::Json => {
+                let mut vars = serde_json::Map::new();
+                for signal in signals {
+                    vars.insert(
+                        signal.display_name.clone(),
+                        serde_json::json!(signal.values[0]),
+                    );
                 }
-                OutputFormat::Csv => {
-                    writeln!(file, "signal,value").map_err(|e| CliError::OutputError {
+                let json = serde_json::json!({
+                    "analysis": "dc_op",
+                    "variables": vars,
+                });
+                let text = serde_json::to_string_pretty(&json)
+                    .map_err(|e| CliError::output_json_error(path, e))?;
+                writeln!(file, "{}", text).map_err(|e| CliError::OutputError {
+                    path: path.to_path_buf(),
+                    source: e,
+                })?;
+            }
+            OutputFormat::Csv => {
+                writeln!(file, "signal,value").map_err(|e| CliError::OutputError {
+                    path: path.to_path_buf(),
+                    source: e,
+                })?;
+                for signal in signals {
+                    writeln!(
+                        file,
+                        "{},{:.17e}",
+                        super::export::delimited_cell(&signal.display_name, ','),
+                        signal.values[0]
+                    )
+                    .map_err(|e| CliError::OutputError {
                         path: path.to_path_buf(),
                         source: e,
                     })?;
-                    for signal in signals {
-                        writeln!(
-                            file,
-                            "{},{:.17e}",
-                            super::export::delimited_cell(&signal.display_name, ','),
-                            signal.values[0]
-                        )
-                        .map_err(|e| CliError::OutputError {
-                            path: path.to_path_buf(),
-                            source: e,
-                        })?;
-                    }
-                }
-                OutputFormat::Tsv => {
-                    writeln!(file, "signal\tvalue").map_err(|e| CliError::OutputError {
-                        path: path.to_path_buf(),
-                        source: e,
-                    })?;
-                    for signal in signals {
-                        writeln!(file, "{}\t{:.17e}", signal.display_name, signal.values[0])
-                            .map_err(|e| CliError::OutputError {
-                                path: path.to_path_buf(),
-                                source: e,
-                            })?;
-                    }
-                }
-                OutputFormat::Raw | OutputFormat::RawAscii => {
-                    writeln!(file, "Title: DC Operating Point").map_err(|e| {
-                        CliError::OutputError {
-                            path: path.to_path_buf(),
-                            source: e,
-                        }
-                    })?;
-                    writeln!(file, "Plotname: DC OP").map_err(|e| CliError::OutputError {
-                        path: path.to_path_buf(),
-                        source: e,
-                    })?;
-                    writeln!(file, "Flags: real").map_err(|e| CliError::OutputError {
-                        path: path.to_path_buf(),
-                        source: e,
-                    })?;
-                    writeln!(file, "No. Variables: {}", signals.len()).map_err(|e| {
-                        CliError::OutputError {
-                            path: path.to_path_buf(),
-                            source: e,
-                        }
-                    })?;
-                    writeln!(file, "No. Points: 1").map_err(|e| CliError::OutputError {
-                        path: path.to_path_buf(),
-                        source: e,
-                    })?;
-                    writeln!(file, "Variables:").map_err(|e| CliError::OutputError {
-                        path: path.to_path_buf(),
-                        source: e,
-                    })?;
-                    for (index, signal) in signals.iter().enumerate() {
-                        writeln!(
-                            file,
-                            "\t{}\t{}\t{}",
-                            index,
-                            signal.display_name,
-                            signal.kind.raw_variable_type()
-                        )
-                        .map_err(|e| CliError::OutputError {
-                            path: path.to_path_buf(),
-                            source: e,
-                        })?;
-                    }
-                    writeln!(file, "Values:").map_err(|e| CliError::OutputError {
-                        path: path.to_path_buf(),
-                        source: e,
-                    })?;
-                    writeln!(file, "0").map_err(|e| CliError::OutputError {
-                        path: path.to_path_buf(),
-                        source: e,
-                    })?;
-                    for signal in signals {
-                        writeln!(file, "\t{:.17e}", signal.values[0]).map_err(|e| {
-                            CliError::OutputError {
-                                path: path.to_path_buf(),
-                                source: e,
-                            }
-                        })?;
-                    }
-                }
-                OutputFormat::Hdf5 => {
-                    return Err(CliError::InternalError {
-                        message: "HDF5 handled before text writers".to_string(),
-                    });
                 }
             }
+            OutputFormat::Tsv => {
+                writeln!(file, "signal\tvalue").map_err(|e| CliError::OutputError {
+                    path: path.to_path_buf(),
+                    source: e,
+                })?;
+                for signal in signals {
+                    writeln!(file, "{}\t{:.17e}", signal.display_name, signal.values[0]).map_err(
+                        |e| CliError::OutputError {
+                            path: path.to_path_buf(),
+                            source: e,
+                        },
+                    )?;
+                }
+            }
+            OutputFormat::Raw | OutputFormat::RawAscii => {
+                writeln!(file, "Title: DC Operating Point").map_err(|e| CliError::OutputError {
+                    path: path.to_path_buf(),
+                    source: e,
+                })?;
+                writeln!(file, "Plotname: DC OP").map_err(|e| CliError::OutputError {
+                    path: path.to_path_buf(),
+                    source: e,
+                })?;
+                writeln!(file, "Flags: real").map_err(|e| CliError::OutputError {
+                    path: path.to_path_buf(),
+                    source: e,
+                })?;
+                writeln!(file, "No. Variables: {}", signals.len()).map_err(|e| {
+                    CliError::OutputError {
+                        path: path.to_path_buf(),
+                        source: e,
+                    }
+                })?;
+                writeln!(file, "No. Points: 1").map_err(|e| CliError::OutputError {
+                    path: path.to_path_buf(),
+                    source: e,
+                })?;
+                writeln!(file, "Variables:").map_err(|e| CliError::OutputError {
+                    path: path.to_path_buf(),
+                    source: e,
+                })?;
+                for (index, signal) in signals.iter().enumerate() {
+                    writeln!(
+                        file,
+                        "\t{}\t{}\t{}",
+                        index,
+                        signal.display_name,
+                        signal.kind.raw_variable_type()
+                    )
+                    .map_err(|e| CliError::OutputError {
+                        path: path.to_path_buf(),
+                        source: e,
+                    })?;
+                }
+                writeln!(file, "Values:").map_err(|e| CliError::OutputError {
+                    path: path.to_path_buf(),
+                    source: e,
+                })?;
+                writeln!(file, "0").map_err(|e| CliError::OutputError {
+                    path: path.to_path_buf(),
+                    source: e,
+                })?;
+                for signal in signals {
+                    writeln!(file, "\t{:.17e}", signal.values[0]).map_err(|e| {
+                        CliError::OutputError {
+                            path: path.to_path_buf(),
+                            source: e,
+                        }
+                    })?;
+                }
+            }
+            OutputFormat::Hdf5 => {
+                return Err(CliError::InternalError {
+                    message: "HDF5 handled before text writers".to_string(),
+                });
+            }
+        }
 
-            Ok(())
-        },
-    )
+        Ok(())
+    })
     .map_err(|error| map_atomic_output_error(path, error))
 }
 
@@ -955,264 +946,6 @@ impl TransientOutputDocument {
     }
 }
 
-const FFT_PAIR_BACKUP_MARKER: &str = ".rspice-pair-backup-v1-";
-static NEXT_FFT_PAIR_BACKUP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
-enum ArtifactPredecessorKind {
-    Missing,
-    File,
-    Other,
-}
-
-struct ArtifactPredecessor {
-    kind: ArtifactPredecessorKind,
-    backup: Option<PathBuf>,
-    retain_for_recovery: bool,
-}
-
-impl ArtifactPredecessor {
-    fn capture(path: &Path) -> Result<Self, CliError> {
-        let metadata = match std::fs::symlink_metadata(path) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(Self {
-                    kind: ArtifactPredecessorKind::Missing,
-                    backup: None,
-                    retain_for_recovery: false,
-                });
-            }
-            Err(error) => return Err(CliError::output_error(path, error)),
-        };
-        if metadata.file_type().is_symlink() {
-            return Err(CliError::output_error(
-                path,
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    "refusing to snapshot a symlink artifact destination",
-                ),
-            ));
-        }
-        if !metadata.is_file() {
-            return Ok(Self {
-                kind: ArtifactPredecessorKind::Other,
-                backup: None,
-                retain_for_recovery: false,
-            });
-        }
-
-        let backup = unique_fft_pair_sidecar(path, FFT_PAIR_BACKUP_MARKER)?;
-        let mut source =
-            std::fs::File::open(path).map_err(|error| CliError::output_error(path, error))?;
-        let mut destination = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&backup)
-            .map_err(|error| CliError::output_error(path, error))?;
-        if let Err(error) =
-            std::io::copy(&mut source, &mut destination).and_then(|_| destination.sync_all())
-        {
-            let _ = std::fs::remove_file(&backup);
-            return Err(CliError::output_error(path, error));
-        }
-        Ok(Self {
-            kind: ArtifactPredecessorKind::File,
-            backup: Some(backup),
-            retain_for_recovery: false,
-        })
-    }
-
-    fn preserve(&mut self) {
-        self.retain_for_recovery = true;
-    }
-
-    fn recovery_path(&self) -> Option<&Path> {
-        self.backup.as_deref()
-    }
-}
-
-impl Drop for ArtifactPredecessor {
-    fn drop(&mut self) {
-        if !self.retain_for_recovery
-            && let Some(path) = self.backup.take()
-        {
-            let _ = std::fs::remove_file(path);
-        }
-    }
-}
-
-fn unique_fft_pair_sidecar(path: &Path, marker: &str) -> Result<PathBuf, CliError> {
-    let name = path.file_name().ok_or_else(|| CliError::InternalError {
-        message: format!("artifact path '{}' does not name a file", path.display()),
-    })?;
-    let parent = path.parent().filter(|value| !value.as_os_str().is_empty());
-    for _ in 0..1_024 {
-        let id = NEXT_FFT_PAIR_BACKUP.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let mut sidecar_name = std::ffi::OsString::from(".");
-        sidecar_name.push(name);
-        sidecar_name.push(format!("{marker}{}-{id}", std::process::id()));
-        let candidate =
-            parent.map_or_else(|| PathBuf::from(&sidecar_name), |p| p.join(&sidecar_name));
-        if !candidate.exists() {
-            return Ok(candidate);
-        }
-    }
-    Err(CliError::output_error(
-        path,
-        std::io::Error::new(
-            std::io::ErrorKind::AlreadyExists,
-            "could not allocate a unique grouped-artifact recovery sidecar",
-        ),
-    ))
-}
-
-fn map_prepared_atomic_error(
-    path: &Path,
-    phase: &str,
-    error: AtomicArtifactError<std::io::Error>,
-) -> CliError {
-    CliError::output_error(
-        path,
-        std::io::Error::other(format!("atomic {phase} failed: {error}")),
-    )
-}
-
-fn stage_artifact(
-    path: &Path,
-    write: impl FnOnce(&mut dyn std::io::Write) -> Result<(), CliError>,
-) -> Result<PreparedAtomicArtifact, CliError> {
-    let artifact = AtomicArtifactFile::prepare(
-        path,
-        AtomicArtifactOptions::new(Durability::SyncFileAndParent),
-    )
-    .map_err(|error| map_prepared_atomic_error(path, "preparation", error))?;
-    let mut writer = BufWriter::new(artifact);
-    if let Err(error) = write(&mut writer) {
-        drop(writer);
-        return Err(error);
-    }
-    let artifact = writer.into_inner().map_err(|error| {
-        CliError::output_error(
-            path,
-            std::io::Error::new(error.error().kind(), error.error().to_string()),
-        )
-    })?;
-    artifact
-        .prepare_for_commit()
-        .map_err(|error| map_prepared_atomic_error(path, "staging", error))
-}
-
-fn rollback_published_destination(
-    path: &Path,
-    predecessor: &ArtifactPredecessor,
-) -> std::io::Result<()> {
-    match predecessor.kind {
-        ArtifactPredecessorKind::Missing => match std::fs::symlink_metadata(path) {
-            Ok(metadata) if metadata.is_file() => {
-                let rollback = unique_fft_pair_sidecar(path, ".rspice-pair-rollback-v1-")
-                    .map_err(|error| std::io::Error::other(error.to_string()))?;
-                std::fs::rename(path, &rollback)?;
-                std::fs::remove_file(rollback)
-            }
-            Ok(_) => Err(std::io::Error::other(format!(
-                "cannot roll back non-file destination {}",
-                path.display()
-            ))),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(error),
-        },
-        ArtifactPredecessorKind::File => {
-            let backup = predecessor.backup.as_deref().ok_or_else(|| {
-                std::io::Error::other("predecessor backup is unavailable for rollback")
-            })?;
-            let mut source = std::fs::File::open(backup)?;
-            let mut restoration = AtomicArtifactFile::prepare(
-                path,
-                AtomicArtifactOptions::new(Durability::SyncFileAndParent),
-            )
-            .map_err(|error| std::io::Error::other(error.to_string()))?;
-            std::io::copy(&mut source, &mut restoration)?;
-            restoration
-                .prepare_for_commit()
-                .map_err(|error| std::io::Error::other(error.to_string()))?
-                .commit()
-                .map_err(|error| std::io::Error::other(error.to_string()))
-        }
-        ArtifactPredecessorKind::Other => Ok(()),
-    }
-}
-
-fn commit_artifact_pair(
-    first_path: &Path,
-    first: PreparedAtomicArtifact,
-    second_path: &Path,
-    second: PreparedAtomicArtifact,
-    timeout_seconds: Option<f64>,
-) -> Result<(), CliError> {
-    let mut first_predecessor = ArtifactPredecessor::capture(first_path)?;
-    let mut second_predecessor = ArtifactPredecessor::capture(second_path)?;
-    if crate::abort::reason().is_some() {
-        return Err(super::cancellation_cli_error(timeout_seconds));
-    }
-
-    if let Err(error) = first.commit() {
-        if matches!(
-            &error,
-            AtomicArtifactError::Commit {
-                destination_state: DestinationState::PublishedDurabilityUncertain,
-                ..
-            }
-        ) && let Err(rollback) = rollback_published_destination(first_path, &first_predecessor)
-        {
-            first_predecessor.preserve();
-            return Err(CliError::output_error(
-                first_path,
-                std::io::Error::other(format!(
-                    "grouped artifact first commit failed ({error}); rollback failed ({rollback}); predecessor retained at {}",
-                    first_predecessor.recovery_path().map_or_else(
-                        || "<missing>".to_string(),
-                        |path| path.display().to_string()
-                    )
-                )),
-            ));
-        }
-        return Err(map_prepared_atomic_error(first_path, "group commit", error));
-    }
-
-    if let Err(error) = second.commit() {
-        let mut rollback_errors = Vec::new();
-        if matches!(
-            &error,
-            AtomicArtifactError::Commit {
-                destination_state: DestinationState::PublishedDurabilityUncertain,
-                ..
-            }
-        ) && let Err(rollback) = rollback_published_destination(second_path, &second_predecessor)
-        {
-            rollback_errors.push(format!("{}: {rollback}", second_path.display()));
-            second_predecessor.preserve();
-        }
-        if let Err(rollback) = rollback_published_destination(first_path, &first_predecessor) {
-            rollback_errors.push(format!("{}: {rollback}", first_path.display()));
-            first_predecessor.preserve();
-        }
-        if rollback_errors.is_empty() {
-            return Err(map_prepared_atomic_error(
-                second_path,
-                "group commit",
-                error,
-            ));
-        }
-        return Err(CliError::output_error(
-            second_path,
-            std::io::Error::other(format!(
-                "grouped artifact second commit failed ({error}); rollback incomplete: {}",
-                rollback_errors.join("; ")
-            )),
-        ));
-    }
-    Ok(())
-}
-
 #[allow(clippy::too_many_arguments)]
 fn write_transient_fft_output_pair(
     transient_path: &Path,
@@ -1227,31 +960,34 @@ fn write_transient_fft_output_pair(
 ) -> Result<(), CliError> {
     validate_fft_publication(results, netlist)?;
     let requests = &netlist.fft_analyses;
-    let transient_stage = stage_artifact(transient_path, |writer| {
-        transient.write_to(writer, transient_path, format)
-    })?;
-    let fft_stage = stage_artifact(fft_path, |writer| {
-        write_fft_to_writer(
-            writer,
-            fft_path,
-            format,
-            parent_analysis_id,
-            coordinate,
-            results,
-            requests,
-            timeout_seconds,
-        )
-    })?;
-    if crate::abort::reason().is_some() {
-        return Err(super::cancellation_cli_error(timeout_seconds));
-    }
-    commit_artifact_pair(
+    // A transient result and the FFT derived from it are one logical result:
+    // publishing the transient alone would advertise a run whose declared
+    // spectrum is missing. They are staged together and published together.
+    publish::artifact_pair(
         transient_path,
-        transient_stage,
+        |writer| transient.write_to(writer, transient_path, format),
         fft_path,
-        fft_stage,
-        timeout_seconds,
+        |writer| {
+            write_fft_to_writer(
+                writer,
+                fft_path,
+                format,
+                parent_analysis_id,
+                coordinate,
+                results,
+                requests,
+                timeout_seconds,
+            )?;
+            // Both members are complete here and nothing has been published
+            // yet, so a cancellation that arrived during serialization still
+            // leaves both destinations untouched.
+            if crate::abort::reason().is_some() {
+                return Err(super::cancellation_cli_error(timeout_seconds));
+            }
+            Ok(())
+        },
     )
+    .map_err(|error| map_atomic_output_error(fft_path, error))
 }
 
 const FFT_ARTIFACT_SCHEMA_VERSION: u32 = 2;
@@ -3244,22 +2980,18 @@ fn write_fft_output(
     }
     validate_fft_publication(results, netlist)?;
     let requests = &netlist.fft_analyses;
-    write_atomic(
-        path,
-        AtomicArtifactOptions::new(Durability::SyncFileAndParent),
-        |writer| {
-            write_fft_to_writer(
-                writer,
-                path,
-                format,
-                parent_analysis_id,
-                coordinate,
-                results,
-                requests,
-                timeout_seconds,
-            )
-        },
-    )
+    publish::artifact(path, |writer| {
+        write_fft_to_writer(
+            writer,
+            path,
+            format,
+            parent_analysis_id,
+            coordinate,
+            results,
+            requests,
+            timeout_seconds,
+        )
+    })
     .map_err(|error| map_atomic_output_error(path, error))
 }
 
@@ -3758,9 +3490,8 @@ fn write_fourier_output(
     analyzed: &[(String, &'static str, rspice_core::analysis::FourierResult)],
 ) -> Result<(), CliError> {
     let io_err = |e: std::io::Error| CliError::output_error(path, e);
-    write_atomic(
+    publish::artifact(
         path,
-        AtomicArtifactOptions::new(Durability::SyncFileAndParent),
         |file| {
         match format {
             OutputFormat::Csv | OutputFormat::Tsv => {
@@ -3939,106 +3670,98 @@ pub(super) fn run_temp(ctx: &RunContext<'_>, temperatures: &[f64]) -> Result<(),
 
     if let Some(ref output_path) = ctx.output_path_for("temp") {
         ensure_not_cancelled()?;
-        write_atomic(
-            output_path,
-            AtomicArtifactOptions::new(Durability::SyncFileAndParent),
-            |file| {
-                ensure_not_cancelled()?;
-                match ctx.format {
-                    OutputFormat::Csv => {
-                        let num_nodes = results.first().map(|(_, v)| v.len()).unwrap_or(0);
-                        let mut header = String::new();
-                        for i in 1..num_nodes {
-                            ensure_not_cancelled()?;
-                            let name = node_names.get(i).cloned().unwrap_or_else(|| i.to_string());
-                            header.push_str(&format!(",V({name})"));
-                        }
-                        writeln!(file, "Temperature_C{}", header).map_err(|e| {
-                            CliError::OutputError {
-                                path: output_path.clone(),
-                                source: e,
-                            }
-                        })?;
-
-                        for (temp, voltages) in &results {
-                            ensure_not_cancelled()?;
-                            // Skip index 0: ground is not a column
-                            write!(file, "{temp:.2}").map_err(|e| CliError::OutputError {
-                                path: output_path.clone(),
-                                source: e,
-                            })?;
-                            for voltage in voltages.iter().skip(1) {
-                                ensure_not_cancelled()?;
-                                write!(file, ",{voltage:.17e}").map_err(|e| {
-                                    CliError::OutputError {
-                                        path: output_path.clone(),
-                                        source: e,
-                                    }
-                                })?;
-                            }
-                            writeln!(file).map_err(|e| CliError::OutputError {
-                                path: output_path.clone(),
-                                source: e,
-                            })?;
-                        }
-                    }
-                    OutputFormat::Json => {
-                        let mut json_results = Vec::new();
-                        json_results
-                            .try_reserve_exact(results.len())
-                            .map_err(|error| {
-                                CliError::simulation_error_in(
-                                    format!("cannot allocate temperature output rows: {error}"),
-                                    "Temperature Sweep",
-                                )
-                            })?;
-                        for (temperature, voltages) in &results {
-                            ensure_not_cancelled()?;
-                            json_results.push(serde_json::json!({
-                                "temperature_c": temperature,
-                                "voltages": voltages,
-                            }));
-                        }
-                        let json = serde_json::json!({
-                            "analysis": "temperature_sweep",
-                            "temperatures_c": temperatures,
-                            "results": json_results,
-                        });
-                        let text = serde_json::to_string_pretty(&json)
-                            .map_err(|e| CliError::output_json_error(output_path, e))?;
+        publish::artifact(output_path, |file| {
+            ensure_not_cancelled()?;
+            match ctx.format {
+                OutputFormat::Csv => {
+                    let num_nodes = results.first().map(|(_, v)| v.len()).unwrap_or(0);
+                    let mut header = String::new();
+                    for i in 1..num_nodes {
                         ensure_not_cancelled()?;
-                        for chunk in text.as_bytes().chunks(64 * 1024) {
-                            ensure_not_cancelled()?;
-                            std::io::Write::write_all(file, chunk).map_err(|e| {
-                                CliError::OutputError {
-                                    path: output_path.clone(),
-                                    source: e,
-                                }
-                            })?;
+                        let name = node_names.get(i).cloned().unwrap_or_else(|| i.to_string());
+                        header.push_str(&format!(",V({name})"));
+                    }
+                    writeln!(file, "Temperature_C{}", header).map_err(|e| {
+                        CliError::OutputError {
+                            path: output_path.clone(),
+                            source: e,
                         }
-                        std::io::Write::write_all(file, b"\n").map_err(|e| {
-                            CliError::OutputError {
+                    })?;
+
+                    for (temp, voltages) in &results {
+                        ensure_not_cancelled()?;
+                        // Skip index 0: ground is not a column
+                        write!(file, "{temp:.2}").map_err(|e| CliError::OutputError {
+                            path: output_path.clone(),
+                            source: e,
+                        })?;
+                        for voltage in voltages.iter().skip(1) {
+                            ensure_not_cancelled()?;
+                            write!(file, ",{voltage:.17e}").map_err(|e| CliError::OutputError {
                                 path: output_path.clone(),
                                 source: e,
-                            }
-                        })?;
-                    }
-                    _ => {
-                        for (temp, voltages) in &results {
-                            ensure_not_cancelled()?;
-                            writeln!(file, "T={:.2}C: {:?}", temp, voltages).map_err(|e| {
-                                CliError::OutputError {
-                                    path: output_path.clone(),
-                                    source: e,
-                                }
                             })?;
                         }
+                        writeln!(file).map_err(|e| CliError::OutputError {
+                            path: output_path.clone(),
+                            source: e,
+                        })?;
                     }
                 }
-                ensure_not_cancelled()?;
-                Ok(())
-            },
-        )
+                OutputFormat::Json => {
+                    let mut json_results = Vec::new();
+                    json_results
+                        .try_reserve_exact(results.len())
+                        .map_err(|error| {
+                            CliError::simulation_error_in(
+                                format!("cannot allocate temperature output rows: {error}"),
+                                "Temperature Sweep",
+                            )
+                        })?;
+                    for (temperature, voltages) in &results {
+                        ensure_not_cancelled()?;
+                        json_results.push(serde_json::json!({
+                            "temperature_c": temperature,
+                            "voltages": voltages,
+                        }));
+                    }
+                    let json = serde_json::json!({
+                        "analysis": "temperature_sweep",
+                        "temperatures_c": temperatures,
+                        "results": json_results,
+                    });
+                    let text = serde_json::to_string_pretty(&json)
+                        .map_err(|e| CliError::output_json_error(output_path, e))?;
+                    ensure_not_cancelled()?;
+                    for chunk in text.as_bytes().chunks(64 * 1024) {
+                        ensure_not_cancelled()?;
+                        std::io::Write::write_all(file, chunk).map_err(|e| {
+                            CliError::OutputError {
+                                path: output_path.clone(),
+                                source: e,
+                            }
+                        })?;
+                    }
+                    std::io::Write::write_all(file, b"\n").map_err(|e| CliError::OutputError {
+                        path: output_path.clone(),
+                        source: e,
+                    })?;
+                }
+                _ => {
+                    for (temp, voltages) in &results {
+                        ensure_not_cancelled()?;
+                        writeln!(file, "T={:.2}C: {:?}", temp, voltages).map_err(|e| {
+                            CliError::OutputError {
+                                path: output_path.clone(),
+                                source: e,
+                            }
+                        })?;
+                    }
+                }
+            }
+            ensure_not_cancelled()?;
+            Ok(())
+        })
         .map_err(|error| map_atomic_output_error(output_path, error))?;
 
         if !ctx.quiet {

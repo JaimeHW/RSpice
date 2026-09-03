@@ -17,7 +17,7 @@ use super::RunContext;
 use super::basic::run_dc_op;
 use super::shared::generate_frequency_sweep;
 use crate::cli::{CliError, map_atomic_output_error};
-use rspice_output::{AtomicArtifactOptions, Durability, write_atomic};
+use crate::commands::publish;
 
 fn ensure_not_cancelled(ctx: &RunContext<'_>) -> Result<(), CliError> {
     if crate::abort::reason().is_some() {
@@ -316,16 +316,12 @@ fn export_monte_carlo(
                 })
             }).collect::<Vec<_>>(),
         });
-        write_atomic(
-            output_path,
-            AtomicArtifactOptions::new(Durability::SyncFileAndParent),
-            |file| {
-                serde_json::to_writer_pretty(&mut *file, &json)
-                    .map_err(|e| CliError::output_json_error(output_path, e))?;
-                file.write_all(b"\n")
-                    .map_err(|e| CliError::output_error(output_path, e))
-            },
-        )
+        publish::artifact(output_path, |file| {
+            serde_json::to_writer_pretty(&mut *file, &json)
+                .map_err(|e| CliError::output_json_error(output_path, e))?;
+            file.write_all(b"\n")
+                .map_err(|e| CliError::output_error(output_path, e))
+        })
         .map_err(|error| map_atomic_output_error(output_path, error))?;
     } else {
         let signals: Vec<crate::commands::run_signals::ScalarSignal> = variables
@@ -1061,10 +1057,17 @@ fn run_corners_parallel(
         .map_err(|error| CliError::InternalError {
             message: format!("failed to create bounded corner worker pool: {error}"),
         })?;
+    // Corner artifacts belong to the run that fanned them out, so a worker
+    // publishes into the transaction this thread opened rather than
+    // replacing its destination on its own.
+    let transaction = publish::current();
     let outcomes: Vec<CornerOutcome> = pool.install(|| {
         corners
             .par_iter()
-            .map(|corner| run_corner_job(&setup, lib, corner))
+            .map(|corner| {
+                let _joined = transaction.clone().map(publish::enter);
+                run_corner_job(&setup, lib, corner)
+            })
             .collect()
     });
     ensure_not_cancelled(ctx)?;
@@ -1645,15 +1648,11 @@ fn write_touchstone_nport(
         message,
         suggestion: Some("use CSV, JSON, or HDF5 output for per-port z0 values".to_string()),
     })?;
-    write_atomic(
-        path,
-        AtomicArtifactOptions::new(Durability::SyncFileAndParent),
-        |writer| {
-            writer
-                .write_all(document.as_bytes())
-                .map_err(|error| CliError::output_error(path, error))
-        },
-    )
+    publish::artifact(path, |writer| {
+        writer
+            .write_all(document.as_bytes())
+            .map_err(|error| CliError::output_error(path, error))
+    })
     .map_err(|error| map_atomic_output_error(path, error))
 }
 
@@ -1881,30 +1880,26 @@ fn write_touchstone_2port(
     frequencies: &[f64],
     s: [&[rspice_core::Complex64]; 4],
 ) -> Result<(), CliError> {
-    write_atomic(
-        path,
-        AtomicArtifactOptions::new(Durability::SyncFileAndParent),
-        |file| {
-            writeln!(file, "! 2-port S-parameters").map_err(|e| CliError::output_error(path, e))?;
-            writeln!(file, "# HZ S RI R {z0}").map_err(|e| CliError::output_error(path, e))?;
-            let [s11, s21, s12, s22] = s;
-            for (index, freq) in frequencies.iter().enumerate() {
-                let entry = |values: &[rspice_core::Complex64]| {
-                    values
-                        .get(index)
-                        .copied()
-                        .unwrap_or_else(|| rspice_core::Complex64::new(0.0, 0.0))
-                };
-                let (a, b, c, d) = (entry(s11), entry(s21), entry(s12), entry(s22));
-                writeln!(
-                    file,
-                    "{freq:.9e} {:.9e} {:.9e} {:.9e} {:.9e} {:.9e} {:.9e} {:.9e} {:.9e}",
-                    a.re, a.im, b.re, b.im, c.re, c.im, d.re, d.im
-                )
-                .map_err(|e| CliError::output_error(path, e))?;
-            }
-            Ok(())
-        },
-    )
+    publish::artifact(path, |file| {
+        writeln!(file, "! 2-port S-parameters").map_err(|e| CliError::output_error(path, e))?;
+        writeln!(file, "# HZ S RI R {z0}").map_err(|e| CliError::output_error(path, e))?;
+        let [s11, s21, s12, s22] = s;
+        for (index, freq) in frequencies.iter().enumerate() {
+            let entry = |values: &[rspice_core::Complex64]| {
+                values
+                    .get(index)
+                    .copied()
+                    .unwrap_or_else(|| rspice_core::Complex64::new(0.0, 0.0))
+            };
+            let (a, b, c, d) = (entry(s11), entry(s21), entry(s12), entry(s22));
+            writeln!(
+                file,
+                "{freq:.9e} {:.9e} {:.9e} {:.9e} {:.9e} {:.9e} {:.9e} {:.9e} {:.9e}",
+                a.re, a.im, b.re, b.im, c.re, c.im, d.re, d.im
+            )
+            .map_err(|e| CliError::output_error(path, e))?;
+        }
+        Ok(())
+    })
     .map_err(|error| map_atomic_output_error(path, error))
 }

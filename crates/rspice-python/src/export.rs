@@ -28,7 +28,7 @@ use std::io;
 use std::path::Path;
 
 use rspice_core::Complex64;
-use rspice_output::{AtomicArtifactError, AtomicArtifactOptions, Durability, write_atomic};
+use rspice_output::{AtomicArtifactError, write_atomic};
 
 // The Touchstone writer lives in core so the CLI and the desktop runner emit
 // byte-identical files; the result types keep reaching it through this module.
@@ -325,45 +325,14 @@ pub(crate) fn csv(headers: &[String], rows: &[Vec<f64>]) -> Result<String, Strin
 /// failure therefore leaves an existing complete artifact unchanged or an
 /// absent destination absent; callers never observe a truncated result file.
 pub(crate) fn write_bytes(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    write_atomic(
-        path,
-        AtomicArtifactOptions::new(Durability::SyncFileAndParent),
-        |writer| writer.write_all(bytes),
-    )
-    .map_err(map_atomic_error)
-}
-
-fn map_atomic_error(error: AtomicArtifactError<io::Error>) -> io::Error {
-    match error {
-        AtomicArtifactError::Prepare(source) => atomic_phase_error("preparation", source),
-        AtomicArtifactError::Write(source) => atomic_phase_error("write", source),
-        AtomicArtifactError::Flush { source, .. } => atomic_phase_error("flush", source),
-        AtomicArtifactError::Commit {
-            source,
-            recovery_path,
-            ..
-        } => {
-            let source = if let Some(recovery_path) = recovery_path {
-                io::Error::new(
-                    source.kind(),
-                    format!(
-                        "{source}; complete staging result retained at {}",
-                        recovery_path.display()
-                    ),
-                )
-            } else {
-                source
-            };
-            atomic_phase_error("commit", source)
-        }
-    }
-}
-
-fn atomic_phase_error(phase: &str, error: io::Error) -> io::Error {
-    io::Error::new(
-        error.kind(),
-        format!("atomic result output {phase} failed: {error}"),
-    )
+    write_atomic(path, |writer| writer.write_all(bytes))
+        .map_err(AtomicArtifactError::into_io_error)
+        .map_err(|error| {
+            io::Error::new(
+                error.kind(),
+                format!("atomic result output failed: {error}"),
+            )
+        })
 }
 
 #[cfg(test)]

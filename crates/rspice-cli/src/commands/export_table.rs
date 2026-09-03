@@ -15,8 +15,8 @@
 //! see [`crate::commands::waveform_io`].
 
 use crate::cli::{CliError, OutputFormat};
+use crate::commands::publish;
 use crate::commands::run_signals::{ComplexSignal, ScalarSignal};
-use rspice_output::{AtomicArtifactError, AtomicArtifactOptions, Durability, write_atomic};
 use std::io::Write;
 use std::path::Path;
 
@@ -207,12 +207,8 @@ impl ExportTable {
             });
         }
 
-        write_atomic(
-            path,
-            AtomicArtifactOptions::new(Durability::SyncFileAndParent),
-            |writer| self.write_to(writer, path, format),
-        )
-        .map_err(|error| map_atomic_error(path, error))
+        publish::artifact(path, |writer| self.write_to(writer, path, format))
+            .map_err(|error| crate::cli::map_atomic_output_error(path, error))
     }
 
     /// Serialize this table into an already staged artifact.
@@ -400,42 +396,6 @@ impl ExportTable {
             .map_err(|e| CliError::output_error(path, e))?;
         Ok(())
     }
-}
-
-fn map_atomic_error(path: &Path, error: AtomicArtifactError<CliError>) -> CliError {
-    match error {
-        AtomicArtifactError::Write(error) => error,
-        AtomicArtifactError::Prepare(error) => atomic_io_error(path, "preparation", error),
-        AtomicArtifactError::Flush { source, .. } => atomic_io_error(path, "flush", source),
-        AtomicArtifactError::Commit {
-            source,
-            recovery_path,
-            ..
-        } => {
-            let error = if let Some(recovery_path) = recovery_path {
-                std::io::Error::new(
-                    source.kind(),
-                    format!(
-                        "{source}; complete staging artifact retained at {}",
-                        recovery_path.display()
-                    ),
-                )
-            } else {
-                source
-            };
-            atomic_io_error(path, "commit", error)
-        }
-    }
-}
-
-fn atomic_io_error(path: &Path, phase: &str, error: std::io::Error) -> CliError {
-    CliError::output_error(
-        path,
-        std::io::Error::new(
-            error.kind(),
-            format!("atomic output {phase} failed: {error}"),
-        ),
-    )
 }
 
 /// SPICE rawfile variable declarations are whitespace-delimited and have no

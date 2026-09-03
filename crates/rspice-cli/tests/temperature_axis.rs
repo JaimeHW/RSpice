@@ -84,6 +84,12 @@ fn sanitize_coordinate_tag(tag: &str) -> String {
         .collect()
 }
 
+/// Manifest that names the complete coordinate set, published as the last
+/// member of the set's own transaction.
+fn planned_set_manifest(requested: &Path) -> PathBuf {
+    tag_output_path(requested, "run_set").with_extension("json")
+}
+
 fn planned_artifacts(deck: &Path, requested: &Path) -> Vec<PathBuf> {
     let source = std::fs::read_to_string(deck).expect("read planned deck");
     let netlist = rspice_core::Netlist::parse(&source).expect("parse planned deck");
@@ -103,6 +109,15 @@ fn planned_artifacts(deck: &Path, requested: &Path) -> Vec<PathBuf> {
                 .map(move |analysis| tag_output_path(&coordinate_path, &analysis.id().tag()))
         })
         .collect()
+}
+
+/// Everything a completed axis deck publishes: one artifact per coordinate
+/// and analysis, plus the manifest that says the set is complete.
+fn planned_directory_contents(deck: &Path, requested: &Path) -> Vec<PathBuf> {
+    let mut contents = planned_artifacts(deck, requested);
+    contents.push(planned_set_manifest(requested));
+    contents.sort();
+    contents
 }
 
 fn signal_real_values(document: &Value, name: &str) -> Vec<f64> {
@@ -144,9 +159,11 @@ fn multi_temperature_wraps_every_authored_analysis_without_extra_runs() {
         .map(|entry| entry.expect("directory entry").path())
         .collect::<Vec<_>>();
     actual.sort();
-    let mut expected_sorted = expected.clone();
-    expected_sorted.sort();
-    assert_eq!(actual, expected_sorted, "unexpected nominal or OP artifact");
+    assert_eq!(
+        actual,
+        planned_directory_contents(&fixture("temp_wraps_tran_ac.cir"), &requested),
+        "unexpected nominal or OP artifact"
+    );
 
     for path in &expected {
         let document = read_json(path);
@@ -183,12 +200,17 @@ fn single_temperature_configures_transient_without_running_a_temp_op() {
         "single-temperature transient failed:\n{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let files = std::fs::read_dir(&*dir)
+    let mut files = std::fs::read_dir(&*dir)
         .expect("list outputs")
         .map(|entry| entry.expect("directory entry").path())
         .collect::<Vec<_>>();
-    let expected = planned_artifacts(&fixture("temp_single_tran.cir"), &requested);
-    assert_eq!(files.as_slice(), expected.as_slice());
+    files.sort();
+    let deck = fixture("temp_single_tran.cir");
+    assert_eq!(
+        files.as_slice(),
+        planned_directory_contents(&deck, &requested).as_slice()
+    );
+    let expected = planned_artifacts(&deck, &requested);
     assert_eq!(read_json(&expected[0])["analysis"], "transient");
 }
 
@@ -279,6 +301,7 @@ fn repeated_ac_cards_keep_stable_analysis_namespaces_at_each_temperature() {
         })
         .collect::<Vec<_>>();
     actual.sort();
+    expected.push(planned_set_manifest(&requested));
     expected.sort();
     assert_eq!(actual, expected, "unexpected OP or colliding AC artifact");
 }

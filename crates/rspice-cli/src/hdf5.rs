@@ -3,7 +3,8 @@
 //! The CLI uses a stable, self-describing layout with path-safe dataset names
 //! so exported files remain robust even when signal names contain SPICE syntax.
 
-use rspice_output::{AtomicArtifactError, AtomicArtifactOptions, Durability, write_atomic};
+use crate::commands::publish;
+use rspice_output::AtomicArtifactError;
 use rustyhdf5::{AttrValue, File as Hdf5File, FileBuilder};
 use thiserror::Error;
 
@@ -975,15 +976,11 @@ fn build_hdf5(data: &Hdf5SimulationData) -> Result<FileBuilder> {
 }
 
 fn write_hdf5_builder(path: &Path, builder: FileBuilder) -> Result<()> {
-    write_atomic(
-        path,
-        AtomicArtifactOptions::new(Durability::SyncFileAndParent),
-        |file| {
-            let bytes = builder.finish()?;
-            file.write_all(&bytes)?;
-            Ok(())
-        },
-    )
+    publish::artifact(path, |file| {
+        let bytes = builder.finish()?;
+        file.write_all(&bytes)?;
+        Ok(())
+    })
     .map_err(|error| match error {
         AtomicArtifactError::Prepare(error) => Hdf5Error::ArtifactPreparation(error),
         AtomicArtifactError::Write(Hdf5StagingError::Backend(error)) => Hdf5Error::Backend(error),

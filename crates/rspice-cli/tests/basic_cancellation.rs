@@ -37,35 +37,6 @@ impl Drop for TestDirectory {
 }
 
 #[test]
-fn legacy_temperature_runner_has_no_non_abort_dc_wrapper() {
-    let source = include_str!("../src/commands/run/basic.rs");
-    let run_temp = source
-        .split_once("pub(super) fn run_temp")
-        .expect("legacy temperature runner remains present")
-        .1
-        .split_once("#[cfg(test)]\nmod restart_tests")
-        .expect("temperature runner has a stable end marker")
-        .0;
-
-    assert!(
-        run_temp.contains(".run_dc_op_with_abort("),
-        "legacy temperature execution must pass ProcessAbort into the DC solve"
-    );
-    assert!(
-        run_temp.contains("&crate::abort::ProcessAbort"),
-        "legacy temperature execution must use the process-wide abort source"
-    );
-    assert!(
-        run_temp.contains("Err(rspice_core::SimulationError::Aborted)"),
-        "legacy temperature execution must distinguish cancellation from non-convergence"
-    );
-    assert!(
-        !run_temp.contains(".run_dc_op("),
-        "legacy temperature execution regressed to the non-cancellable DC wrapper"
-    );
-}
-
-#[test]
 fn canonical_temperature_axis_still_completes_and_publishes_each_coordinate() {
     let directory = TestDirectory::new("success");
     let deck = directory.path().join("temperature_success.sp");
