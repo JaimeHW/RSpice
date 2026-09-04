@@ -837,9 +837,18 @@ impl DigitalHost {
     }
 
     /// Remove a process from every net it waits on.
+    ///
+    /// The terms are moved out of the slot rather than copied from it. The
+    /// only caller wakes the process immediately after, which overwrites the
+    /// status anyway, so the list a wake cloned and dropped was pure cost.
     fn unsubscribe(&mut self, index: usize) {
-        let ProcessStatus::AwaitingEvent(terms) = self.slots[index].status.clone() else {
+        if !matches!(self.slots[index].status, ProcessStatus::AwaitingEvent(_)) {
             return;
+        }
+        let ProcessStatus::AwaitingEvent(terms) =
+            std::mem::replace(&mut self.slots[index].status, ProcessStatus::Queued)
+        else {
+            unreachable!("the status was just matched as awaiting an event");
         };
         for term in &terms {
             let net = usize::from(term.signal);
