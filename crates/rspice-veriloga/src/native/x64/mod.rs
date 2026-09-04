@@ -37,7 +37,7 @@ use crate::codegen::CompiledModel;
 
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 use crate::jit::plan_builder::{
-    canonical_branch_unknown_runtime_map, checked_logical_index,
+    AssignmentRootPolicy, canonical_branch_unknown_runtime_map, checked_logical_index,
     derivative_shadow_axes_from_suffix, infer_current_terminal_pair, infer_current_unified_pair,
     live_canonical_assignment_slots, lower_assignment_step, lower_static_condition_program,
     native_assignment_roots, push_prior_current_probe_aliases, ranges_overlap,
@@ -1189,7 +1189,7 @@ fn align_image_for_entry(image: &mut Vec<u8>, entry_starts: &mut Vec<CodeOffset>
 mod tests {
     use super::PlanProgramRef;
     use super::{
-        MAX_ASSIGNMENT_CHUNK_OPERATIONS, NativeModel, append_assignment_pass,
+        AssignmentRootPolicy, MAX_ASSIGNMENT_CHUNK_OPERATIONS, NativeModel, append_assignment_pass,
         assignment_chunk_ranges, canonical_branch_unknown_runtime_map,
         compile_model_with_canonical_ir, derivative_shadow_axes_from_suffix,
         live_canonical_assignment_slots, lower_assignment_step, lower_static_condition_program,
@@ -4700,8 +4700,17 @@ endmodule
                 .map_err(|error| error.to_string())?;
         let limits = NativeLoweringLimits::for_model(model)
             .with_canonical_branch_unknown_map(&canonical_branch_unknown_map);
-        let live_variables = live_canonical_assignment_slots(model, &artifact.mir, limits)
-            .map_err(|error| error.to_string())?;
+        // `native` came out of the production route, whose plan is the CFG
+        // one wherever it builds, so the variables its image publishes are the
+        // ones that plan roots on. Reading the postfix set here would compare
+        // the interpreter against slots the image no longer writes.
+        let live_variables = live_canonical_assignment_slots(
+            model,
+            &artifact.mir,
+            limits,
+            AssignmentRootPolicy::CfgPreludeSlots,
+        )
+        .map_err(|error| error.to_string())?;
         let mut bytecode_context = base_context.clone();
         bytecode_context.clear_currents();
         bytecode_context

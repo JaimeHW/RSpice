@@ -28,6 +28,27 @@ use crate::vm::{CURRENT_PAIR_GROUND, terminal_pair_current_index};
 use smol_str::SmolStr;
 use std::collections::HashMap;
 
+/// What keeps a lowered assignment alive in the plan a model will execute.
+///
+/// The assignment pass exists to publish variable slots that something later in
+/// the same evaluation reads. Which "something" that is depends on the plan
+/// being built, and until W-F14 only one answer was ever asked for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AssignmentRootPolicy {
+    /// Every value entry of the plan is a postfix program that reads the
+    /// variable array directly, so what those entries read is a root.
+    PostfixEntries,
+    /// The plan's residual, Jacobian, reactive-Jacobian and noise entries are
+    /// prelude-slot loads. A slot load reads the prelude's slot array and never
+    /// a variable, so the postfix entries' reads are not roots of *this* plan;
+    /// keeping them was keeping a pass alive for programs the image no longer
+    /// holds.
+    ///
+    /// What still reads a variable under this plan is named by
+    /// [`mark_cfg_plan_variable_roots`].
+    CfgPreludeSlots,
+}
+
 /// Build the architecture-neutral native plan consumed by every machine
 /// backend. The lowering implementation is still colocated here while the
 /// original x64 model compiler is split into planning and image-emission
@@ -37,17 +58,36 @@ pub(crate) fn build_model_plan_with_canonical_ir(
     artifact: &CanonicalIrArtifact,
 ) -> JitResult<NativeModelPlan> {
     validate_canonical_artifact_for_model(model, artifact)?;
-    build_model_plan_inner(model, Some(artifact))
+    build_model_plan_inner(model, Some(artifact), AssignmentRootPolicy::PostfixEntries)
+}
+
+/// [`build_model_plan_with_canonical_ir`], with the assignment pass rooted on
+/// what a CFG plan reads rather than on what a postfix plan reads.
+///
+/// This is the plan
+/// [`build_model_plan_from_canonical_cfg`](crate::jit::cfg_plan_builder::build_model_plan_from_canonical_cfg)
+/// starts from and then replaces the value entries of. It is not a second
+/// route: the entries, dependencies and shape validation are the same lowering,
+/// and the only difference is that the assignments the CFG plan's entries will
+/// never read are not lowered. A module the CFG route then refuses does not
+/// keep this plan — the fallback rebuilds the postfix one.
+pub(crate) fn build_model_plan_with_canonical_ir_for_cfg(
+    model: &CompiledModel,
+    artifact: &CanonicalIrArtifact,
+) -> JitResult<NativeModelPlan> {
+    validate_canonical_artifact_for_model(model, artifact)?;
+    build_model_plan_inner(model, Some(artifact), AssignmentRootPolicy::CfgPreludeSlots)
 }
 
 #[cfg(feature = "native-bytecode-contract-tests")]
 pub(crate) fn build_model_plan_from_bytecode(model: &CompiledModel) -> JitResult<NativeModelPlan> {
-    build_model_plan_inner(model, None)
+    build_model_plan_inner(model, None, AssignmentRootPolicy::PostfixEntries)
 }
 
 fn build_model_plan_inner(
     model: &CompiledModel,
     canonical_artifact: Option<&CanonicalIrArtifact>,
+    policy: AssignmentRootPolicy,
 ) -> JitResult<NativeModelPlan> {
     super::coverage::validate_jit_coverage(model)?;
     let canonical_mir = canonical_artifact.map(|artifact| &artifact.mir);
@@ -101,6 +141,7 @@ fn build_model_plan_inner(
             model,
             canonical_artifact,
             base_limits.with_prior_current_probes(&assignment_prior_current_probes),
+            policy,
         )?;
 
     let parameter_defaults = model
@@ -2503,6 +2544,7 @@ fn lower_assignment_phases(
     model: &CompiledModel,
     canonical_artifact: Option<&CanonicalIrArtifact>,
     limits: NativeLoweringLimits<'_>,
+    policy: AssignmentRootPolicy,
 ) -> JitResult<(
     Vec<NativeAssignment>,
     Vec<NativeAssignment>,
@@ -2516,6 +2558,7 @@ fn lower_assignment_phases(
                 &artifact.hir,
                 &artifact.mir,
                 limits,
+                policy,
             )?;
             split_canonical_assignment_phases(model, &artifact.mir, assignments, limits)?
         }
@@ -2558,6 +2601,12 @@ fn split_canonical_assignment_phases(
     mark_native_assignment_targets(&post_assignments, &mut post_targets);
 
     let mut pre_current_roots = vec![false; model.num_variables];
+    // Deliberately the postfix entries' reads, under either policy. This is a
+    // statement about the *module* — a variable the equations need before the
+    // currents exist may not be one the currents produce — and a plan route is
+    // not allowed to decide whether the module is well formed. Reading the CFG
+    // plan's roots here would make the same source compile or not depending on
+    // which plan was asked for.
     mark_canonical_entry_variable_roots(model, mir, limits, false, &mut pre_current_roots)?;
     propagate_live_assignment_slots(model, &mut pre_current_roots);
 
@@ -2689,9 +2738,17 @@ pub(crate) fn live_canonical_assignment_slots(
     model: &CompiledModel,
     mir: &MirModel,
     limits: NativeLoweringLimits<'_>,
+    policy: AssignmentRootPolicy,
 ) -> JitResult<Vec<bool>> {
     let mut live = native_observable_assignment_roots(model);
-    mark_canonical_entry_variable_roots(model, mir, limits, true, &mut live)?;
+    match policy {
+        AssignmentRootPolicy::PostfixEntries => {
+            mark_canonical_entry_variable_roots(model, mir, limits, true, &mut live)?;
+        }
+        AssignmentRootPolicy::CfgPreludeSlots => {
+            mark_cfg_plan_variable_roots(model, mir, limits, &mut live)?;
+        }
+    }
     propagate_live_assignment_slots(model, &mut live);
     Ok(live)
 }
@@ -2987,8 +3044,9 @@ fn lower_live_canonical_assignment_statements(
     hir: &HirModel,
     mir: &MirModel,
     limits: NativeLoweringLimits<'_>,
+    policy: AssignmentRootPolicy,
 ) -> JitResult<Vec<NativeAssignment>> {
-    let live = live_canonical_assignment_slots(model, mir, limits)?;
+    let live = live_canonical_assignment_slots(model, mir, limits, policy)?;
     let shadow_index = AssignmentShadowIndex::for_model(model)?;
     let mut program_cursor = AssignmentProgramCursor::for_steps(&model.assignment_steps);
     let snapshots = ReachingSnapshotCopies::for_model(model)?;
@@ -3829,6 +3887,54 @@ fn mark_bytecode_entry_variable_roots(model: &CompiledModel, live: &mut [bool]) 
             mark_program_variable_reads(program, live);
         }
     }
+}
+
+/// The variable slots a CFG plan's own programs read.
+///
+/// Under [`AssignmentRootPolicy::CfgPreludeSlots`] the residual, Jacobian,
+/// reactive-Jacobian and noise entries are `LoadPreludeSlot` reads, and the
+/// prelude that publishes those slots is lowered from the canonical body rather
+/// than from the variable array. Two things still read a variable:
+///
+/// * **The static conditions**, which the CFG route does not replace: they stay
+///   the shipped plan's postfix programs (`cfg_plan_builder` assigns `prelude`,
+///   `stamp_values`, `jacobians`, `reactive_jacobians` and the two noise
+///   fields, and nothing else), so what a condition reads is a root exactly as
+///   before. The parameter defaults are also kept, and cannot read a procedural
+///   variable at all — a default is a function of parameters.
+/// * **The event-state variables.** A `CfgValueKind::EventState` leaf lowers to
+///   `LoadVariable` on that variable's slot
+///   ([`crate::native::cfg_program`]), because the runtime commits and restores
+///   the accepted value through the variable array; the assignment that writes
+///   it is the one the prelude is reading back.
+fn mark_cfg_plan_variable_roots(
+    model: &CompiledModel,
+    mir: &MirModel,
+    limits: NativeLoweringLimits<'_>,
+    live: &mut [bool],
+) -> JitResult<()> {
+    for (stamp_index, stamp) in model.stamp_programs.iter().enumerate() {
+        let Some(condition) = &stamp.static_condition else {
+            continue;
+        };
+        // The same snapshot-aware limits the entry lowering uses, for the same
+        // reason: a condition redirected to a snapshot keeps that snapshot's
+        // slot alive.
+        let snapshot_identifiers = equation_snapshot_identifiers(model, limits, stamp_index);
+        let limits = match &snapshot_identifiers {
+            Some(identifiers) => limits.with_identifier_index(identifiers),
+            None => limits,
+        };
+        let program =
+            lower_static_condition_program(model, Some(mir), stamp_index, condition, limits)?;
+        mark_native_program_variable_reads(&program, live);
+    }
+    for &slot in &model.event_state_variables {
+        if let Some(root) = live.get_mut(slot) {
+            *root = true;
+        }
+    }
+    Ok(())
 }
 
 fn mark_canonical_entry_variable_roots(

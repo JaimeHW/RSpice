@@ -207,7 +207,8 @@ use super::cfg_program::{CfgRuntimeBindings, lower_cfg_function};
 use super::expr::NativeOp;
 use super::model_plan::{NativeModelPlan, NativePrelude};
 use super::plan_builder::{
-    build_model_plan_with_canonical_ir, canonical_branch_unknown_runtime_map,
+    build_model_plan_with_canonical_ir, build_model_plan_with_canonical_ir_for_cfg,
+    canonical_branch_unknown_runtime_map,
 };
 use super::plan_program::{BlockProgram, PlanProgram, PlanProgramRef};
 use super::ssa::{BlockId, BuilderTerminator, Program, ProgramBuilder, ValueType};
@@ -1018,7 +1019,11 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
         detail,
     };
 
-    let mut plan = build_model_plan_with_canonical_ir(model, artifact)
+    // Rooted on what *this* plan reads. The value entries below become
+    // prelude-slot loads, so the assignments the shipped entries used to keep
+    // alive are never lowered; a refusal further down does not keep this plan,
+    // because the fallback rebuilds the postfix one from scratch.
+    let mut plan = build_model_plan_with_canonical_ir_for_cfg(model, artifact)
         .map_err(|error| refuse(CfgPlanRefusal::ShippedPlan, error.to_string()))?;
 
     // The executable lowering, not the generated one: this plan is executed by
