@@ -38,7 +38,7 @@
 //!   hoist has to leave a real branch behind.
 
 use super::cfg_census::OperatingPoint;
-use crate::jit::cfg_plan_builder::{CfgNoiseScope, build_model_plan_from_canonical_cfg};
+use crate::jit::cfg_plan_builder::build_model_plan_from_canonical_cfg;
 use crate::jit::plan_builder::build_model_plan_with_canonical_ir;
 use crate::{CompilerOptions, VerilogACompiler};
 
@@ -97,7 +97,7 @@ fn readings(source: &str) -> Vec<Reading> {
         .compile_canonical_ir(source)
         .expect("compile canonical IR");
 
-    let cfg_plan = build_model_plan_from_canonical_cfg(&model, &artifact, CfgNoiseScope::Cfg)
+    let cfg_plan = build_model_plan_from_canonical_cfg(&model, &artifact)
         .unwrap_or_else(|refused| panic!("CFG plan: {refused}"));
     let mir_plan = build_model_plan_with_canonical_ir(&model, &artifact)
         .unwrap_or_else(|error| panic!("shipped plan: {error}"));
@@ -255,7 +255,7 @@ fn the_builder_says_which_magnitudes_it_hoisted() {
     let artifact = compiler
         .compile_canonical_ir(SHAPES)
         .expect("compile canonical IR");
-    let built = build_model_plan_from_canonical_cfg(&model, &artifact, CfgNoiseScope::Cfg)
+    let built = build_model_plan_from_canonical_cfg(&model, &artifact)
         .unwrap_or_else(|refused| panic!("CFG plan: {refused}"));
 
     assert_eq!(built.report.noise_values, 10);
@@ -272,33 +272,4 @@ fn the_builder_says_which_magnitudes_it_hoisted() {
         "only the guarded source whose shipped magnitude is a variable read \
          keeps the exit value"
     );
-}
-
-/// Production takes no noise from the CFG, so asking for the postfix scope must
-/// leave the plan's noise entries exactly as the shipped builder produced them
-/// — not "equivalent to", the same programs.
-#[test]
-fn the_postfix_scope_takes_no_noise_from_the_cfg() {
-    let compiler = VerilogACompiler::new(CompilerOptions::default());
-    let model = compiler.compile(SHAPES).expect("compile bytecode model");
-    let artifact = compiler
-        .compile_canonical_ir(SHAPES)
-        .expect("compile canonical IR");
-    let built = build_model_plan_from_canonical_cfg(&model, &artifact, CfgNoiseScope::Postfix)
-        .unwrap_or_else(|refused| panic!("CFG plan: {refused}"));
-    let shipped = build_model_plan_with_canonical_ir(&model, &artifact).expect("shipped plan");
-
-    assert!(!built.plan.noise_psd.is_empty());
-    for (index, entry) in built.plan.noise_psd.iter().enumerate() {
-        assert_eq!(
-            entry.borrow().form_name(),
-            "postfix",
-            "noise_psd[{index}] must stay the shipped program"
-        );
-    }
-    assert_eq!(built.plan.noise_psd.len(), shipped.noise_psd.len());
-    assert_eq!(built.report.noise_values, 0);
-    assert!(built.report.noise_guarded_reads.is_empty());
-    assert_eq!(built.report.noise_hoisted, 0);
-    assert_eq!(built.report.noise_prelude_slots, 0);
 }

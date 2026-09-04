@@ -1862,6 +1862,11 @@ endmodule
         let params = [2.0_f64];
         let voltages = [0.5_f64, 0.0_f64, 0.25_f64];
         let ctx = eval_context(&params, &voltages);
+        // A schema-0 model is `CfgPlanRefusal::NoiseUngrouped`, so this is the
+        // postfix plan whole — which is the plan this test was written for and
+        // which publishes no prelude. The call is what `crate::device` does
+        // before it reads any entry, and it returns at once here.
+        native.run_prelude(&ctx, std::ptr::null());
 
         let white_psd = native
             .run_noise_psd(0, &ctx, std::ptr::null())

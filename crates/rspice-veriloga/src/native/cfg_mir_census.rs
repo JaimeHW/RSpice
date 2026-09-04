@@ -107,8 +107,7 @@ use crate::canonical_ir::cfg_lower::CfgModel;
 use crate::canonical_ir::{CfgScalar, differentiate, evaluate_cfg, prune_cfg_to_outputs};
 use crate::jit::cfg_lanes::scalarize_lanes;
 use crate::jit::cfg_plan_builder::{
-    CfgNoiseScope, CfgPlanEntry, CfgPlanRefusal, build_model_plan_from_canonical_cfg,
-    derivative_seeds,
+    CfgPlanEntry, CfgPlanRefusal, build_model_plan_from_canonical_cfg, derivative_seeds,
 };
 use crate::jit::plan_builder::build_model_plan_with_canonical_ir;
 use crate::jit::plan_program::PlanProgram;
@@ -1035,7 +1034,7 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
     // `Cfg`, not the `Postfix` scope production takes: the whole point of this
     // census is to measure the noise slice the default plan declines to use, so
     // narrowing it here would make the gap invisible on the day it closes.
-    let cfg_plan = match build_model_plan_from_canonical_cfg(model, artifact, CfgNoiseScope::Cfg) {
+    let cfg_plan = match build_model_plan_from_canonical_cfg(model, artifact) {
         Ok(plan) => plan,
         Err(refused) => {
             tally.refused += 1;

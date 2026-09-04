@@ -9,22 +9,33 @@
 //! value once should cost less than a few thousand overlapping cones, but
 //! "should" is not a measurement.
 //!
-//! # Three plans, one process, interleaved samples
+//! # Two plans, one process, interleaved samples
 //!
-//! `postfix` is the shipped plan. `cfg` is the plan production builds after the
-//! flip — the CFG route with [`CfgNoiseScope::Cfg`]. `cfg-mir-noise` is the CFG
-//! route with the noise magnitudes left postfix, which is the plan
-//! [`super::cfg_size_census`] measures. The third exists because the two
-//! switches are separable in principle even though the flip moves them
-//! together: with all three timed, a regression can be attributed to the route
-//! or to the noise scope instead of only observed.
+//! `postfix` is the shipped plan and `cfg` is the plan production builds. Both
+//! are built from the same front-end artifact, compiled by the same x64
+//! backend, and run against the same operating point, the same variable array
+//! and the same storage, with each timed sample taken from one plan and then
+//! the other. A before-and-after pair of runs across a code change would have
+//! measured the box's thermal state and its peer builds as much as the plans;
+//! this measures one difference.
 //!
-//! All three are built from the same front-end artifact, compiled by the same
-//! x64 backend, and run against the same operating point, the same variable
-//! array and the same storage, with each timed sample taken from one plan and
-//! then the next. A before-and-after pair of runs across a code change would
-//! have measured the box's thermal state and its peer builds as much as the
-//! plans; this measures one difference.
+//! # There used to be a third
+//!
+//! `cfg-mir-noise` was the CFG route with the noise magnitudes left postfix,
+//! and it existed to attribute a cost to the route or to the noise scope
+//! separately. It measured what it was built for. With the magnitudes each
+//! their own dependence cone the noise scope was the whole regression —
+//! `asmesd` 1.14 against the route's 1.00, `vbic13_4t` 1.65 against 1.05,
+//! `hicumL2va` 1.67 against 0.95, `bsimcmg_va` 1.30 against 0.97 — and it took
+//! `hicumL2va`'s image from 1.27 MB to 3.08 and `bsimcmg_va`'s from 5.62 to
+//! 9.81. W-F13a published the magnitudes through the prelude instead, and the
+//! same reading became 1.075, 1.022, 0.946, 0.973 and 0.978 times the route
+//! alone, with every image within 0.8 per cent of it.
+//!
+//! There is no noise scope to attribute to now: a magnitude is a prelude slot
+//! like every other entry, so the third plan would be one nothing constructs
+//! but this census, which is what [`build_model_plan_from_canonical_cfg`]
+//! deleted the scope for.
 //!
 //! # What an evaluation is here
 //!
@@ -50,7 +61,7 @@ use std::time::Instant;
 use super::census_models::shipped_census_models_matching;
 use super::cfg_census::OperatingPoint;
 use super::cfg_mir_census::{Storage, entry_positions, run_entry};
-use crate::jit::cfg_plan_builder::{CfgNoiseScope, build_model_plan_from_canonical_cfg};
+use crate::jit::cfg_plan_builder::build_model_plan_from_canonical_cfg;
 use crate::jit::model_plan::NativeModelPlan;
 use crate::jit::plan_builder::{
     build_model_plan_with_canonical_ir, canonical_branch_unknown_runtime_map,
@@ -121,21 +132,15 @@ fn the_plan_routes_cost_the_same_per_evaluation() {
         let model = &shipped.model;
         let artifact = &shipped.canonical_ir;
 
-        let plans: [(&'static str, NativeModelPlan); 3] = [
+        let plans: [(&'static str, NativeModelPlan); 2] = [
             (
                 "postfix",
                 build_model_plan_with_canonical_ir(model, artifact)
                     .unwrap_or_else(|error| panic!("{module}: shipped plan: {error}")),
             ),
             (
-                "cfg-mir-noise",
-                build_model_plan_from_canonical_cfg(model, artifact, CfgNoiseScope::Postfix)
-                    .unwrap_or_else(|refused| panic!("{module}: CFG plan, MIR noise: {refused}"))
-                    .plan,
-            ),
-            (
                 "cfg",
-                build_model_plan_from_canonical_cfg(model, artifact, CfgNoiseScope::Cfg)
+                build_model_plan_from_canonical_cfg(model, artifact)
                     .unwrap_or_else(|refused| panic!("{module}: CFG plan: {refused}"))
                     .plan,
             ),

@@ -2,10 +2,9 @@
 //!
 //! [`build_model_plan_with_canonical_ir`] lowers every value entry from MIR's
 //! flat postfix stream. This is the second constructor: the same
-//! [`NativeModelPlan`], with `stamp_values`, `jacobians`, `reactive_jacobians`
-//! and — when [`CfgNoiseScope::Cfg`] is asked for — `noise_psd` and
-//! `noise_exponents` lowered instead from the canonical CFG through
-//! [`lower_cfg_function`] and [`scalarize_lanes`], adopted as
+//! [`NativeModelPlan`], with `stamp_values`, `jacobians`, `reactive_jacobians`,
+//! `noise_psd` and `noise_exponents` lowered instead from the canonical CFG
+//! through [`lower_cfg_function`] and [`scalarize_lanes`], adopted as
 //! [`PlanProgram::Blocks`].
 //!
 //! # The plan has an assignment pass of its own
@@ -18,20 +17,20 @@
 //! image limit, which is raised *after* the whole-module fallback point, so it
 //! was a model production could not construct.
 //!
-//! So the builder gathers every entry of every stamp first, builds one
-//! [`CfgPrelude`] over them — one prune, one lowering, one slot per distinct
-//! output value — and each entry becomes the single `LoadPreludeSlot` that
-//! reads what the prelude published. The plan carries it as
-//! [`NativeModelPlan::prelude`] and every backend runs it once per evaluation,
-//! after the assignment pass whose variables it reads and before the first
-//! entry that reads one of its slots.
+//! So the builder gathers every entry of every stamp first — and, since
+//! W-F13a, every noise magnitude with them — builds one [`CfgPrelude`] over
+//! them, one prune, one lowering, one slot per distinct output value, and each
+//! entry becomes the single `LoadPreludeSlot` that reads what the prelude
+//! published. The plan carries it as [`NativeModelPlan::prelude`] and every
+//! backend runs it once per evaluation, after the assignment pass whose
+//! variables it reads and before the first entry that reads one of its slots.
 //!
 //! Two classes keep their own cone. A value that reads a contribution current
 //! is ordered against the residuals before it and the prelude runs before all
-//! of them ([`LiveCurrentTaint`]); and the noise magnitudes below lower from
-//! the *primal* body and from hoisted copies of it, which are not the function
-//! the prelude is built over. Noise is tens of entries, not thousands, so it
-//! was never part of the explosion.
+//! of them ([`LiveCurrentTaint`]); and a noise magnitude the shipped route
+//! evaluates unconditionally *under a guard* is a number the evaluation may not
+//! compute at all, so no slot can hold it ([`NoiseMagnitudePlan`]). Those lower
+//! from the primal body and from one hoisted straight-line copy of it.
 //!
 //! [`build_default_model_plan`] is what x64, AArch64 and the WASM JIT all call,
 //! and it builds **this** plan: the CFG form of a module's residual, Jacobian,
@@ -41,10 +40,10 @@
 //! selects; it is that fallback, and the reference side of
 //! [`crate::native::cfg_mir_census`].
 //!
-//! There is no route switch. It was a constant read at one call site while the
-//! evidence was being taken, and once production takes the CFG plan a two-armed
-//! selector has one arm nothing constructs. See [`build_default_model_plan`]
-//! for the evidence the flip stands on.
+//! There is no route switch and no noise scope. Each was a constant read at one
+//! call site while the evidence was being taken, and once production takes the
+//! CFG plan entire a two-armed selector has one arm nothing constructs. See
+//! [`build_default_model_plan`] for the evidence the flip stands on.
 //!
 //! # What stays postfix, and why that is not a half measure
 //!
@@ -57,11 +56,10 @@
 //! by the same code, and the value entries then have to agree about what that
 //! operating point evaluates to.
 //!
-//! # Noise stays postfix, and now there is a reason rather than a queue
+//! # Noise takes the CFG route too, and here is what it took
 //!
-//! Production asks for [`CfgNoiseScope::Postfix`]. It used to say the flip
-//! taking the other scope had not run its censuses yet and no more than that.
-//! The censuses have now run and named two counts. One of them is closed.
+//! Production used to ask for the postfix magnitudes. The censuses named two
+//! counts against taking the CFG's; both are closed, which is W-F13a.
 //!
 //! **It computed a wrong number for one class, and no longer does.** A noise
 //! magnitude that reads a *contribution current* —
@@ -85,27 +83,21 @@
 //! is the pin, and `try_noise_sources_evaluates_current_probe_psd` in
 //! `tests/device_eval.rs` is the same claim end to end.
 //!
-//! **It costs, and it is now the whole cost of the flip.**
-//! [`crate::native::cfg_cost_census`] times the shipped plan, the CFG route with
-//! noise left postfix, and the CFG route entire, at one bias in one process.
-//! The route alone is free — 1.00, 1.05, 0.95, 0.97 and 0.89 times the shipped
-//! plan's evaluation on `asmesd`, `vbic13_4t`, `hicumL2va`, `bsimcmg_va` and
-//! `asmhemt`, with images within a few per cent of
-//! [`crate::native::cfg_size_census`]'s. Taking noise from the CFG as well costs
-//! 1.14, 1.65, 1.67, 1.30 and 0.95, and takes `hicumL2va`'s image from 1.27 MB
-//! to 3.08 and `bsimcmg_va`'s from 5.62 to 9.81.
+//! **It cost, and the cost was the per-magnitude cone.** "Noise is tens of
+//! entries, not thousands, so it was never part of the explosion" was a count
+//! of entries; those tens were cones over the deepest part of a compact
+//! model's body, and on `hicumL2va` and `bsimcmg_va` they were most of the
+//! image. [`crate::native::cfg_cost_census`] measured them at 1.14, 1.65, 1.67
+//! and 1.30 times the shipped plan's evaluation on `asmesd`, `vbic13_4t`,
+//! `hicumL2va` and `bsimcmg_va` where the route alone cost 1.00, 1.05, 0.95 and
+//! 0.97, and they took `hicumL2va`'s image from 1.27 MB to 3.08 and
+//! `bsimcmg_va`'s from 5.62 to 9.81.
 //!
-//! Where the cost comes from is the paragraph above about the prelude: the noise
-//! magnitudes lower from the primal body and from hoisted copies of it, which
-//! are not the function the prelude is built over, so every one of them keeps
-//! its own cone. "Noise is tens of entries, not thousands, so it was never part
-//! of the explosion" was a count of entries; those tens are cones over the
-//! deepest part of a compact model's body, and on `hicumL2va` and `bsimcmg_va`
-//! they are most of the image.
-//!
-//! Both are the same piece of work — give the magnitudes the prelude's
-//! function, which shares their cones and carries the contributed-current
-//! binding — and [`NoiseMagnitude`] names the analysis it needs.
+//! The magnitudes are prelude slots now, on the rule [`NoiseMagnitudePlan`]
+//! states, and the same census reads 1.117, 1.089, 0.972, 0.887 and 0.876
+//! against the shipped plan on the five — every one of them at or below what
+//! the route alone cost, with `hicumL2va` at 1.2679 MB and `bsimcmg_va` at
+//! 5.666. There is nothing left for a noise scope to select between.
 //!
 //! ## What the gap was, and what it actually is
 //!
@@ -264,6 +256,22 @@ pub(crate) enum CfgPlanRefusal {
     ChargeMissing,
     /// A shipped noise source has no CFG process with its id.
     NoiseUnpaired,
+    /// The module's noise sources are the ungrouped schema, whose shipped
+    /// magnitude is a different quantity from the CFG's.
+    ///
+    /// A `CfgNoiseProcess` publishes the *raw* magnitude — the routing
+    /// amplitude a source was scaled by belongs to the grouped complex
+    /// injection and is not folded into the power. That is what a
+    /// `noise_process_schema >= 1` model's shipped `psd_program` holds too, and
+    /// `crate::native::cfg_noise_pins` reads the two bit for bit on a scaled
+    /// source. A schema-0 model is the deserialized pre-grouped artifact
+    /// [`crate::device`] still serves, and there the shipped program folds the
+    /// amplitude *squared* into the power, so the two are not the same number.
+    ///
+    /// Every compiler this crate has writes schema 1, so nothing the estate
+    /// compiles reaches this; a legacy artifact takes the postfix plan whole
+    /// rather than a plan whose noise means something else.
+    NoiseUngrouped,
     /// A block program addresses a state slot the module's
     /// [`StateSlotMapping`] never allocated.
     SlotUnclaimed,
@@ -298,6 +306,7 @@ impl CfgPlanRefusal {
             Self::LaneUnmapped => "lane-unmapped",
             Self::ChargeMissing => "charge-missing",
             Self::NoiseUnpaired => "noise-unpaired",
+            Self::NoiseUngrouped => "noise-ungrouped",
             Self::SlotUnclaimed => "slot-unclaimed",
             Self::PreludeLiveCurrent => "prelude-live-current",
         }
@@ -857,42 +866,27 @@ fn constant_zero_program() -> JitResult<Program> {
     builder.finish(entry, entry)
 }
 
-/// Where a CFG-built plan's `noise_psd` and `noise_exponents` come from.
-///
-/// The one field of the plan the two routes are known to disagree about, so it
-/// is the one the caller chooses rather than the builder. See the module
-/// documentation for the measurement.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CfgNoiseScope {
-    /// Lower them from the CFG with everything else. What the CFG-versus-MIR
-    /// census asks for, because measuring the gap is how it closes, and what
-    /// the size and cost censuses build to hold the shipped plan against.
-    ///
-    /// Not what production asks for, and the module documentation says why in
-    /// numbers: a magnitude over a contribution current reads zero here, and
-    /// the scope costs up to 1.67 times the evaluation and 2.4 times the image.
-    /// Constructed only by those censuses until that is closed; the attribute is
-    /// the honest statement of it rather than a silenced warning.
-    #[cfg_attr(not(test), allow(dead_code))]
-    Cfg,
-    /// Keep the postfix plan's. What production asks for.
-    ///
-    /// [`CfgPlanRefusal::NoiseUnpaired`] cannot fire under this scope: a
-    /// shipped source with no CFG process is not a disagreement about a value
-    /// nobody is taking from the CFG.
-    Postfix,
-}
-
 /// Build the CFG route's plan for `model`, or say why it cannot be built.
 ///
 /// The postfix plan is built first and kept: it validates the canonical
 /// artifact against the compiled model, and its assignment passes, parameter
 /// defaults, static conditions and published current pairs are the CFG plan's
-/// too. Only the program-bearing value fields `noise` names are replaced.
+/// too. Only the program-bearing value fields are replaced — `stamp_values`,
+/// `jacobians`, `reactive_jacobians`, `noise_psd` and `noise_exponents`.
+///
+/// # There is no noise scope
+///
+/// This constructor used to take one, because the noise magnitudes were the one
+/// field of the plan the two routes were known to disagree about and W-F12
+/// shipped with production asking for the postfix ones. Both reasons are gone —
+/// the disagreement was
+/// [`a_noise_magnitude_over_a_contribution_current_reads_the_shipped_routes_storage`]
+/// and the cost was the per-magnitude cone — so a two-armed selector would have
+/// one arm nothing but a census constructs, which is what
+/// [`build_default_model_plan`] deleted `PlanRoute` for.
 pub(crate) fn build_model_plan_from_canonical_cfg(
     model: &CompiledModel,
     artifact: &CanonicalIrArtifact,
-    noise: CfgNoiseScope,
 ) -> Result<CfgModelPlan, CfgPlanRefused> {
     let module = model.name.to_string();
     let refuse = |class: CfgPlanRefusal, detail: String| CfgPlanRefused {
@@ -1103,49 +1097,57 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
                 .map(|id| (id, process))
         })
         .collect();
+    if !model.noise_sources.is_empty() && model.noise_process_schema < 1 {
+        return Err(refuse(
+            CfgPlanRefusal::NoiseUngrouped,
+            format!(
+                "{} sources at noise_process_schema={}",
+                model.noise_sources.len(),
+                model.noise_process_schema
+            ),
+        ));
+    }
     let mut noise_magnitudes: Vec<NoiseMagnitudePlan> = Vec::new();
-    if noise == CfgNoiseScope::Cfg {
-        for (source_index, source) in model.noise_sources.iter().enumerate() {
-            let process = processes.get(&source.process_id).ok_or_else(|| {
-                refuse(
+    for (source_index, source) in model.noise_sources.iter().enumerate() {
+        let process = processes.get(&source.process_id).ok_or_else(|| {
+            refuse(
+                CfgPlanRefusal::NoiseUnpaired,
+                format!(
+                    "shipped source {source_index} names process {}",
+                    source.process_id
+                ),
+            )
+        })?;
+        let guarded = !process_is_unconditional(&cfg.function, process.active);
+        let psd = CfgPlanEntry::NoisePsd(source_index);
+        noise_magnitudes.push(NoiseMagnitudePlan {
+            entry: psd,
+            source: noise_magnitude_source(&plan, psd),
+            site: process.site.map(|site| site.psd),
+            exit: process.psd,
+            guarded,
+        });
+        match (process.exponent, source.exponent_program.as_ref()) {
+            (Some(exit), Some(_)) => {
+                let entry = CfgPlanEntry::NoiseExponent(source_index);
+                noise_magnitudes.push(NoiseMagnitudePlan {
+                    entry,
+                    source: noise_magnitude_source(&plan, entry),
+                    site: process.site.and_then(|site| site.exponent),
+                    exit,
+                    guarded,
+                });
+            }
+            (None, None) => {}
+            (canonical, shipped) => {
+                return Err(refuse(
                     CfgPlanRefusal::NoiseUnpaired,
                     format!(
-                        "shipped source {source_index} names process {}",
-                        source.process_id
+                        "source {source_index} exponent: canonical={} shipped={}",
+                        canonical.is_some(),
+                        shipped.is_some()
                     ),
-                )
-            })?;
-            let guarded = !process_is_unconditional(&cfg.function, process.active);
-            let psd = CfgPlanEntry::NoisePsd(source_index);
-            noise_magnitudes.push(NoiseMagnitudePlan {
-                entry: psd,
-                source: noise_magnitude_source(&plan, psd),
-                site: process.site.map(|site| site.psd),
-                exit: process.psd,
-                guarded,
-            });
-            match (process.exponent, source.exponent_program.as_ref()) {
-                (Some(exit), Some(_)) => {
-                    let entry = CfgPlanEntry::NoiseExponent(source_index);
-                    noise_magnitudes.push(NoiseMagnitudePlan {
-                        entry,
-                        source: noise_magnitude_source(&plan, entry),
-                        site: process.site.and_then(|site| site.exponent),
-                        exit,
-                        guarded,
-                    });
-                }
-                (None, None) => {}
-                (canonical, shipped) => {
-                    return Err(refuse(
-                        CfgPlanRefusal::NoiseUnpaired,
-                        format!(
-                            "source {source_index} exponent: canonical={} shipped={}",
-                            canonical.is_some(),
-                            shipped.is_some()
-                        ),
-                    ));
-                }
+                ));
             }
         }
     }
@@ -1341,13 +1343,8 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
     // shared by all of them, and the shipped emitter's two-pass rule is kept
     // because six shipped models read a `ddx` inside a noise power and only the
     // AD pass resolves one.
-    //
-    // Skipped entirely under `CfgNoiseScope::Postfix`: nothing here would be
-    // kept, and running it would only let a noise-only refusal take a module's
-    // residual and Jacobian entries down with it.
-    let cfg_noise = match noise {
-        CfgNoiseScope::Postfix => None,
-        CfgNoiseScope::Cfg => {
+    let (noise_psd, noise_exponents) = {
+        {
             let slot_of = |entry: CfgPlanEntry| prelude.as_ref().and_then(|p| p.slot(entry));
 
             // The magnitudes the prelude did not take, gathered before anything
@@ -1464,7 +1461,7 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
                     }
                 }
             }
-            Some((noise_psd, noise_exponents))
+            (noise_psd, noise_exponents)
         }
     };
 
@@ -1503,22 +1500,17 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
         &reactive_jacobians,
         PlanProgram::branch_unknown_dependencies,
     );
-    // The noise read-sets stay the postfix plan's whenever its noise programs
-    // do: a recomputed set would then describe programs this plan does not
-    // carry, which is the same defect in the other direction.
-    if let Some((noise_psd, noise_exponents)) = &cfg_noise {
-        dependencies.noise_psd = read_set(noise_psd, PlanProgram::current_pair_dependencies);
-        dependencies.noise_psd_prior_currents =
-            read_set(noise_psd, PlanProgram::prior_current_dependencies);
-        dependencies.noise_psd_branch_unknowns =
-            read_set(noise_psd, PlanProgram::branch_unknown_dependencies);
-        dependencies.noise_exponents =
-            read_set_optional(noise_exponents, PlanProgram::current_pair_dependencies);
-        dependencies.noise_exponent_prior_currents =
-            read_set_optional(noise_exponents, PlanProgram::prior_current_dependencies);
-        dependencies.noise_exponent_branch_unknowns =
-            read_set_optional(noise_exponents, PlanProgram::branch_unknown_dependencies);
-    }
+    dependencies.noise_psd = read_set(&noise_psd, PlanProgram::current_pair_dependencies);
+    dependencies.noise_psd_prior_currents =
+        read_set(&noise_psd, PlanProgram::prior_current_dependencies);
+    dependencies.noise_psd_branch_unknowns =
+        read_set(&noise_psd, PlanProgram::branch_unknown_dependencies);
+    dependencies.noise_exponents =
+        read_set_optional(&noise_exponents, PlanProgram::current_pair_dependencies);
+    dependencies.noise_exponent_prior_currents =
+        read_set_optional(&noise_exponents, PlanProgram::prior_current_dependencies);
+    dependencies.noise_exponent_branch_unknowns =
+        read_set_optional(&noise_exponents, PlanProgram::branch_unknown_dependencies);
 
     plan.prelude = prelude.map(|prelude| NativePrelude {
         slot_count: prelude.slot_count(),
@@ -1527,10 +1519,8 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
     plan.stamp_values = stamp_values;
     plan.jacobians = jacobians;
     plan.reactive_jacobians = reactive_jacobians;
-    if let Some((noise_psd, noise_exponents)) = cfg_noise {
-        plan.noise_psd = noise_psd;
-        plan.noise_exponents = noise_exponents;
-    }
+    plan.noise_psd = noise_psd;
+    plan.noise_exponents = noise_exponents;
     plan.validate_shape(model)
         .map_err(|error| refuse(CfgPlanRefusal::EquationsUnpaired, error.to_string()))?;
     Ok(CfgModelPlan { plan, report })
@@ -1620,16 +1610,18 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
 ///   to do, and its documentation carries the per-module reading that
 ///   re-baselined it — every module moved except the two the fallback names.
 /// * [`crate::native::cfg_cost_census`] measures what it costs, which is the one
-///   thing the other three cannot say: 1.00, 1.05, 0.95, 0.97 and 0.89 times the
-///   shipped plan's evaluation on the five modules it times. The route is free.
-///   [`CfgNoiseScope::Cfg`] is not, and is not what this builds.
+///   thing the other three cannot say: 1.117, 1.089, 0.972, 0.887 and 0.876
+///   times the shipped plan's evaluation on the five modules it times, noise
+///   included. It is free where it matters — the two largest models are the two
+///   it is fastest on — and `asmesd`, the smallest, is the only one over unity.
 ///
 /// # The postfix plan did not change, and that is checkable
 ///
 /// [`build_model_plan_with_canonical_ir`], and every function it reaches, is
-/// untouched by this lane — it is the fallback above and the reference side of
-/// the CFG-versus-MIR census, so a module that refuses compiles to exactly the
-/// machine code it compiled to before. `jit::plan_builder` is not in the diff.
+/// untouched by this lane and by W-F13a — it is the fallback above and the
+/// reference side of the CFG-versus-MIR census, so a module that refuses
+/// compiles to exactly the machine code it compiled to before.
+/// `jit::plan_builder` is not in either diff.
 pub(crate) fn build_default_model_plan(
     model: &CompiledModel,
     artifact: &CanonicalIrArtifact,
@@ -1665,7 +1657,7 @@ pub(crate) fn build_default_model_plan_reported(
     model: &CompiledModel,
     artifact: &CanonicalIrArtifact,
 ) -> JitResult<(NativeModelPlan, Option<CfgPlanRefused>)> {
-    match build_model_plan_from_canonical_cfg(model, artifact, CfgNoiseScope::Postfix) {
+    match build_model_plan_from_canonical_cfg(model, artifact) {
         Ok(built) => Ok((built.plan, None)),
         Err(refused) => {
             let plan = build_model_plan_with_canonical_ir(model, artifact)?;
@@ -1702,7 +1694,7 @@ fn read_set_optional(
 #[cfg(all(test, feature = "native"))]
 mod tests {
     use super::{
-        CfgNoiseScope, CfgPlanRefusal, ShippedColumnLanes, build_default_model_plan_reported,
+        CfgPlanRefusal, ShippedColumnLanes, build_default_model_plan_reported,
         build_model_plan_from_canonical_cfg,
     };
     use crate::canonical_ir::CanonicalIrArtifact;
@@ -1838,8 +1830,8 @@ endmodule
             "solver column 1 is the third MIR unknown, not the second"
         );
 
-        let plan = build_model_plan_from_canonical_cfg(&model, &artifact, CfgNoiseScope::Cfg)
-            .expect("the CFG plan builds");
+        let plan =
+            build_model_plan_from_canonical_cfg(&model, &artifact).expect("the CFG plan builds");
         assert!(
             plan.report.structural_zeros.is_empty(),
             "every column of this module is a derivative the CFG route holds: {:?}",
@@ -1848,10 +1840,11 @@ endmodule
     }
 
     /// The flip, stated as the shape of the plan production builds: the CFG
-    /// route owns the residual and both Jacobians, the MIR route owns
-    /// everything else, noise included.
+    /// route owns the residual, both Jacobians and the noise magnitudes; the
+    /// MIR route owns the parameter defaults and the static conditions, which
+    /// the CFG does not carry at all.
     #[test]
-    fn the_cfg_route_takes_its_values_from_the_cfg_and_its_noise_from_mir() {
+    fn the_cfg_route_takes_every_value_entry_it_carries() {
         let (model, artifact) = compile(RESISTOR_WITH_CHARGE_AND_NOISE);
         let (plan, refused) =
             build_default_model_plan_reported(&model, &artifact).expect("the default plan builds");
@@ -1870,11 +1863,11 @@ endmodule
 
         for (field, form) in forms(&plan) {
             let expected = match field {
-                "stamp_values" | "jacobians" | "reactive_jacobians" => "block",
-                // Noise, parameter defaults and static conditions. The last two
-                // the CFG does not carry; noise it does, and the module
-                // documentation's cost paragraph is why this route does not
-                // take it.
+                "stamp_values" | "jacobians" | "reactive_jacobians" | "noise_psd"
+                | "noise_exponents" => "block",
+                // Parameter defaults and static conditions, which the CFG does
+                // not carry: a default is evaluated once before any body runs,
+                // from a MIR expression with no CFG counterpart.
                 _ => "postfix",
             };
             assert_eq!(
@@ -1924,16 +1917,14 @@ module cfg_noise_current_probe(p, n);
 endmodule
 "#;
         let (model, artifact) = compile(source);
-        let postfix =
-            build_model_plan_from_canonical_cfg(&model, &artifact, CfgNoiseScope::Postfix)
-                .expect("the CFG plan builds with MIR noise")
-                .plan;
-        let cfg = build_model_plan_from_canonical_cfg(&model, &artifact, CfgNoiseScope::Cfg)
-            .expect("the CFG plan builds with CFG noise")
+        let shipped =
+            build_model_plan_with_canonical_ir(&model, &artifact).expect("the shipped plan builds");
+        let cfg = build_model_plan_from_canonical_cfg(&model, &artifact)
+            .expect("the CFG plan builds")
             .plan;
 
         assert_eq!(
-            postfix.noise_psd.len(),
+            shipped.noise_psd.len(),
             1,
             "the module has one noise source"
         );
@@ -1949,8 +1940,8 @@ endmodule
             )
         };
         // Not vacuous: the shipped magnitude really is a read of the published
-        // current, which is the quantity the CFG copy has to reproduce.
-        let shipped_reads = reads(&postfix);
+        // current, which is the quantity the CFG entry has to reproduce.
+        let shipped_reads = reads(&shipped);
         assert!(
             !shipped_reads.0.is_empty() || !shipped_reads.1.is_empty(),
             "the shipped noise magnitude reads the contribution current it probes"

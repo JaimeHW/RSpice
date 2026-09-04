@@ -91,8 +91,8 @@ use crate::canonical_ir::{
 use crate::jit::assignment::operation_count;
 use crate::jit::cfg_lanes::scalarize_lanes;
 use crate::jit::cfg_plan_builder::{
-    CfgNoiseScope, CfgPlanEntry, CfgPlanRefusal, ShippedColumnLanes,
-    build_model_plan_from_canonical_cfg, derivative_seeds,
+    CfgPlanEntry, CfgPlanRefusal, ShippedColumnLanes, build_model_plan_from_canonical_cfg,
+    derivative_seeds,
 };
 use crate::jit::cfg_program::{CfgRuntimeBindings, lower_cfg_function};
 use crate::jit::plan_builder::{
@@ -563,7 +563,7 @@ fn census_images(module: &str, shipped: &super::census_models::CensusModel) {
         Err(error) => println!("cfg-size model={module} image route=postfix refused={error}"),
     }
     let started = Instant::now();
-    match build_model_plan_from_canonical_cfg(model, artifact, CfgNoiseScope::Postfix)
+    match build_model_plan_from_canonical_cfg(model, artifact)
         .map_err(|refused| refused.to_string())
         .and_then(|built| {
             // The prelude's figures are the ones that replaced Σ cone: every
