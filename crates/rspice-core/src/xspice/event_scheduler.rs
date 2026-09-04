@@ -61,7 +61,8 @@
 //! event first. That is not reproducible, and this kernel does not inherit it.
 
 use super::EventValue;
-use std::collections::{BTreeMap, HashMap};
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::mem;
 
@@ -519,13 +520,87 @@ struct PendingEvent {
     value: EventValue,
 }
 
+/// One event in the future tier, ordered by the total order and by nothing
+/// else.
+///
+/// The comparison *is* the ordering specification: `(tick, region, sequence)`,
+/// with the sequence unique across the scheduler, so no two entries compare
+/// equal and the heap's shape can never decide which of two events runs first.
+/// Deliberately not derived — a derived `Ord` would order by whatever fields
+/// [`PendingEvent`] happens to declare, and adding a field to that struct
+/// would silently change the order of a run.
+#[derive(Debug, Clone)]
+struct Queued(PendingEvent);
+
+impl Queued {
+    fn key(&self) -> (u64, SchedulerRegion, u64) {
+        (self.0.tick, self.0.region, self.0.sequence)
+    }
+}
+
+impl Ord for Queued {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.key().cmp(&other.key())
+    }
+}
+
+impl PartialOrd for Queued {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for Queued {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.sequence == other.0.sequence
+    }
+}
+
+impl Eq for Queued {}
+
 #[derive(Debug, Clone, Default)]
 struct EventQueues {
-    /// Events at ticks after the current one, keyed by the full total order so
-    /// the key type *is* the ordering specification.
-    future: BTreeMap<(u64, SchedulerRegion, u64), PendingEvent>,
-    /// The current tick's slot, one queue per region, each ordered by sequence.
-    slot: [BTreeMap<u64, PendingEvent>; REGION_COUNT],
+    /// Events at ticks after the current one, as a min-heap on the total
+    /// order.
+    ///
+    /// A heap rather than an ordered map because nothing reads this tier in
+    /// order except one event at a time from its front: the drain wants the
+    /// earliest tick and then every event at that tick, which is a run of
+    /// pops. A map paid a node allocation per event to keep an ordering
+    /// nothing else consults — W5.2a measured it at a third of an allocation
+    /// per event across both tiers — and the heap pays none, because its
+    /// backing vector keeps the capacity a tick's traffic gave it.
+    ///
+    /// Its top is always live: a cancellation that lands on the top prunes it
+    /// (see [`Self::cancelled`]), so [`Self::future_min_tick`] and
+    /// [`Self::open_next_due_tick`] can read it without a scan.
+    future: BinaryHeap<Reverse<Queued>>,
+    /// The current tick's slot, one FIFO per region.
+    ///
+    /// In sequence order by construction rather than by comparison: an event
+    /// filed into the open slot carries a sequence higher than everything
+    /// already in it — it was drawn later — and the events a tick opens with
+    /// arrive from `future` already ascending. [`Self::push_slot`] states that
+    /// as a check rather than assuming it, so the one path that can break it
+    /// (a slot left part-settled by an oscillation, then refilled from an
+    /// earlier tick) still files in order.
+    slot: [VecDeque<PendingEvent>; REGION_COUNT],
+    /// Sequences cancelled out of `future` and not yet skipped.
+    ///
+    /// Supersession cannot reach into a heap, so a cancelled future event is
+    /// tombstoned here and dropped when it surfaces. A set of sequences rather
+    /// than a flag in the event or a bitmap over a moving base, because the
+    /// set is *empty* in the steady state — a driver supersedes an output it
+    /// has already delivered, which cancels nothing — so every reader can skip
+    /// the lookup behind one `is_empty` test, and nothing is paid per event
+    /// for a case that is not happening. It is exact, so [`Self::pending`]
+    /// subtracts it rather than estimating.
+    ///
+    /// The slot is never tombstoned: [`Self::remove_scheduled`] takes an event
+    /// out of a region queue directly. It can afford to, because supersession
+    /// is only reachable from outside a running slot, so a non-empty slot to
+    /// scan means a previous drain stopped on an oscillation ceiling.
+    cancelled: HashSet<u64>,
     /// Next sequence number. Per-scheduler, never reused.
     next_sequence: u64,
     /// Every driver ever scheduled, indexed by its [`TargetId`]. This is what
@@ -555,9 +630,13 @@ struct EventQueues {
     driver_events: Vec<Vec<PendingRef>>,
 }
 
-/// Where one of a driver's unexecuted events is: its tick, and the key the
-/// tiers hold it under.
-type PendingRef = (u64, SchedulerRegion, u64);
+/// One of a driver's unexecuted events: the tick that decides whether a
+/// supersession reaches it, and the sequence that identifies it.
+///
+/// The region is not carried. Cancellation names an event by its sequence,
+/// which is unique across the scheduler, and the region a promoted event was
+/// scheduled into no longer says which queue it is sitting in.
+type PendingRef = (u64, u64);
 
 impl EventQueues {
     /// Place an event, routing it to the current slot or the future tier.
@@ -576,7 +655,7 @@ impl EventQueues {
     ) -> u64 {
         let sequence = self.next_sequence;
         self.next_sequence += 1;
-        self.driver_events[target.index()].push((tick, region, sequence));
+        self.driver_events[target.index()].push((tick, sequence));
         let event = PendingEvent {
             tick,
             region,
@@ -585,11 +664,49 @@ impl EventQueues {
             value,
         };
         if open_slot == Some(tick) {
-            self.slot[region.index()].insert(sequence, event);
+            self.push_slot(event);
         } else {
-            self.future.insert((tick, region, sequence), event);
+            self.future.push(Reverse(Queued(event)));
         }
         sequence
+    }
+
+    /// File an event into its region's queue, in sequence order.
+    ///
+    /// The append is the whole operation in every reachable case: both callers
+    /// hand over events whose sequences ascend, so the queue's last entry is
+    /// already lower. The ordered branch exists for the one state that breaks
+    /// that — a region still holding events from a slot a ceiling stopped
+    /// mid-settle, refilled when a later call opens an earlier tick — where an
+    /// append would run a lower sequence after a higher one.
+    fn push_slot(&mut self, event: PendingEvent) {
+        let queue = &mut self.slot[event.region.index()];
+        match queue.back() {
+            Some(last) if last.sequence > event.sequence => {
+                let at = queue.partition_point(|held| held.sequence < event.sequence);
+                queue.insert(at, event);
+            }
+            _ => queue.push_back(event),
+        }
+    }
+
+    /// Drop cancelled entries from the top of the future tier, so that the top
+    /// is a live event or the tier is empty.
+    ///
+    /// Every reader of the tier's earliest event depends on this, and only a
+    /// cancellation can break it: nothing else puts a dead entry where a live
+    /// one was.
+    fn prune_future(&mut self) {
+        while !self.cancelled.is_empty() {
+            let Some(Reverse(top)) = self.future.peek() else {
+                return;
+            };
+            let sequence = top.0.sequence;
+            if !self.cancelled.remove(&sequence) {
+                return;
+            }
+            self.future.pop();
+        }
     }
 
     /// The id of a driver, interning it if this is the first time it is named.
@@ -647,12 +764,12 @@ impl EventQueues {
     }
 
     fn slot_is_empty(&self) -> bool {
-        self.slot.iter().all(BTreeMap::is_empty)
+        self.slot.iter().all(VecDeque::is_empty)
     }
 
     /// Earliest tick any event still sitting in the slot is dated at.
     ///
-    /// The slot is keyed by sequence, not by tick, because within one tick
+    /// The slot is ordered by sequence, not by tick, because within one tick
     /// sequence is the whole tie-break after the region — so the tick has to
     /// be read off the events themselves. That scan is why the empty case
     /// returns first: an empty slot is the steady state between
@@ -666,18 +783,32 @@ impl EventQueues {
         if self.slot_is_empty() {
             return None;
         }
-        self.slot
-            .iter()
-            .flat_map(BTreeMap::values)
-            .map(|event| event.tick)
-            .min()
+        self.slot.iter().flatten().map(|event| event.tick).min()
+    }
+
+    /// Earliest tick the future tier holds, which is the tick of its top: the
+    /// top is the least entry by `(tick, region, sequence)` and is live.
+    fn future_min_tick(&self) -> Option<u64> {
+        self.future.peek().map(|Reverse(top)| top.0.tick)
+    }
+
+    /// Number of events not yet executed.
+    ///
+    /// Exact, not an estimate: `cancelled` holds one sequence per tombstoned
+    /// entry still sitting in `future`, and the slot holds no tombstones at
+    /// all.
+    fn pending(&self) -> usize {
+        self.future.len() - self.cancelled.len()
+            + self.slot.iter().map(VecDeque::len).sum::<usize>()
     }
 
     /// Take the lowest-sequence active event.
+    ///
+    /// The queue is in sequence order by construction, so this is its front.
+    /// Returning `None` leaves the active queue *empty* rather than merely
+    /// exhausted, which is what lets [`Self::promote`] be a swap.
     fn pop_active(&mut self) -> Option<PendingEvent> {
-        let event = self.slot[SchedulerRegion::Active.index()]
-            .pop_first()
-            .map(|(_, event)| event)?;
+        let event = self.slot[SchedulerRegion::Active.index()].pop_front()?;
         self.forget_driver_event(event.target, event.sequence);
         Some(event)
     }
@@ -689,26 +820,35 @@ impl EventQueues {
     /// construction.
     fn forget_driver_event(&mut self, target: TargetId, sequence: u64) {
         let pending = &mut self.driver_events[target.index()];
-        if let Some(position) = pending.iter().position(|(_, _, filed)| *filed == sequence) {
+        if let Some(position) = pending.iter().position(|(_, filed)| *filed == sequence) {
             pending.swap_remove(position);
         }
     }
 
     /// Remove one unexecuted event wherever it is held.
     ///
-    /// A promoted event sits in the active queue while its `region` field
-    /// still names the region it was scheduled into, so the slot cannot be
-    /// indexed by that field; all four queues are checked instead. There are
-    /// four of them, so this stays a constant number of lookups.
-    fn remove_scheduled(&mut self, tick: u64, region: SchedulerRegion, sequence: u64) {
-        if self.future.remove(&(tick, region, sequence)).is_some() {
-            return;
-        }
-        for queue in self.slot.iter_mut() {
-            if queue.remove(&sequence).is_some() {
-                return;
+    /// Two different removals, because the two tiers answer differently. A
+    /// region queue is a sequence of events and can give one up directly. A
+    /// heap cannot, so a future event is tombstoned instead and dropped when
+    /// it surfaces — and the top is pruned afterwards, because every reader of
+    /// the tier's earliest event reads the top and expects it to be live.
+    ///
+    /// The slot is checked first only when it is not empty, and it is empty
+    /// except after a ceiling stopped a drain mid-settle: this is reached from
+    /// [`Self::supersede_driver`] alone, which is reached from outside a
+    /// running slot alone. So the common case is one `is_empty` test and an
+    /// insertion into a set that is about to be emptied again.
+    fn remove_scheduled(&mut self, sequence: u64) {
+        if !self.slot_is_empty() {
+            for queue in self.slot.iter_mut() {
+                if let Some(at) = queue.iter().position(|held| held.sequence == sequence) {
+                    queue.remove(at);
+                    return;
+                }
             }
         }
+        self.cancelled.insert(sequence);
+        self.prune_future();
     }
 
     /// Cancel every unexecuted event of `target` at or after `tick`, and
@@ -729,8 +869,8 @@ impl EventQueues {
                 position += 1;
                 continue;
             }
-            let (superseded_tick, region, sequence) = pending.swap_remove(position);
-            self.remove_scheduled(superseded_tick, region, sequence);
+            let (_, sequence) = pending.swap_remove(position);
+            self.remove_scheduled(sequence);
             cancelled += 1;
         }
         self.driver_events[target.index()] = pending;
@@ -743,14 +883,20 @@ impl EventQueues {
     /// the next delta: the whole region moves at once, and anything it
     /// schedules back into the active region carries a higher sequence and so
     /// runs after every event promoted with it.
+    ///
+    /// A swap of two queues, not a re-insertion of every event. It is allowed
+    /// to be, because this runs only when [`Self::pop_active`] has emptied the
+    /// active queue, so the promoted region arrives in front of nothing and
+    /// keeps the order it already had; and the active queue's buffer goes back
+    /// to the region it came from rather than being dropped, so a region that
+    /// fills every delta cycle allocates once for the whole run.
     fn promote(&mut self) -> bool {
         for region in &SchedulerRegion::ORDERED[1..] {
             let index = region.index();
             if self.slot[index].is_empty() {
                 continue;
             }
-            let promoted = mem::take(&mut self.slot[index]);
-            self.slot[SchedulerRegion::Active.index()].extend(promoted);
+            self.slot.swap(SchedulerRegion::Active.index(), index);
             return true;
         }
         false
@@ -759,27 +905,33 @@ impl EventQueues {
     /// Move the earliest pending tick at or before `bound` into the slot
     /// queues, reporting whether anything moved.
     ///
-    /// One tick at a time, never a range: a slot queue is keyed by sequence
+    /// One tick at a time, never a range: a slot queue is ordered by sequence
     /// alone, because within one tick sequence is the whole tie-break after
     /// the region. Emptying a span of ticks into it at once would order them
     /// by creation instead of by time, so the due-slot mode opens the next
     /// tick only once the current one has gone quiet.
+    ///
+    /// The tier's top is live and least, so it names the due tick; the events
+    /// at that tick are exactly the run of pops that follows, and they arrive
+    /// ascending in `(region, sequence)`, which is the order the region queues
+    /// want them in.
     fn open_next_due_tick(&mut self, bound: u64) -> bool {
-        let Some(((tick, _, _), _)) = self.future.first_key_value() else {
+        let Some(due) = self.future_min_tick() else {
             return false;
         };
-        let tick = *tick;
-        if tick > bound {
+        if due > bound {
             return false;
         }
-        let upper = match tick.checked_add(1) {
-            Some(next) => self.future.split_off(&(next, SchedulerRegion::Active, 0)),
-            None => BTreeMap::new(),
-        };
-        let due = mem::replace(&mut self.future, upper);
-        for (_, event) in due {
-            self.slot[event.region.index()].insert(event.sequence, event);
+        while self.future_min_tick() == Some(due) {
+            let Some(Reverse(entry)) = self.future.pop() else {
+                break;
+            };
+            if !self.cancelled.is_empty() && self.cancelled.remove(&entry.0.sequence) {
+                continue;
+            }
+            self.push_slot(entry.0);
         }
+        self.prune_future();
         true
     }
 }
@@ -787,7 +939,7 @@ impl EventQueues {
 /// Two-tier discrete-event scheduler over integer ticks.
 ///
 /// One tier is the current tick's stratified slot, iterated until quiescent;
-/// the other is every later tick, keyed by the total order. Advancing is
+/// the other is every later tick, ordered by the total order. Advancing is
 /// [`Self::run_time_slot`], which jumps straight to the next tick that has an
 /// event rather than stepping through empty ones.
 #[derive(Debug, Clone)]
@@ -848,7 +1000,7 @@ impl EventScheduler {
     /// future tier for them exactly as it always did.
     pub fn next_tick(&self) -> Option<u64> {
         let slot = self.queues.slot_min_tick();
-        let future = self.queues.future.keys().next().map(|(tick, _, _)| *tick);
+        let future = self.queues.future_min_tick();
         match (slot, future) {
             (Some(slot), Some(future)) => Some(slot.min(future)),
             (slot, future) => slot.or(future),
@@ -857,7 +1009,7 @@ impl EventScheduler {
 
     /// Number of events not yet executed.
     pub fn pending(&self) -> usize {
-        self.queues.future.len() + self.queues.slot.iter().map(BTreeMap::len).sum::<usize>()
+        self.queues.pending()
     }
 
     /// Schedule an event from outside a running slot.
