@@ -61,7 +61,14 @@ pub const WASM_JIT_ABI_VERSION: u32 = 8;
 /// nothing a browser had cached was stale. A CFG plan does not: the same module
 /// now emits from block programs and one assignment prelude, so a worker
 /// holding a 7 would answer with code this crate no longer produces.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 8;
+///
+/// 8 to 9 when the noise magnitudes joined that prelude. An 8 emitted every
+/// `noise_psd` and `noise_exponents` entry as the shipped postfix program; a 9
+/// emits each as a block program, and for all but a guarded site value that
+/// block program is one load of a prelude slot an 8's module never published.
+/// The functions have the same names and signatures, so nothing but the version
+/// tells the two apart.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 9;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
