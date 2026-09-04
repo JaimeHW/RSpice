@@ -11,6 +11,7 @@ use super::encoder::{
 };
 use super::verifier::{verify_exact_function, verify_exact_function_at};
 use crate::jit::plan_program::PlanProgram;
+use crate::native::FUSED_KERNEL_INLINE_LIMIT;
 use crate::native::abi::NativeRuntimeStatus;
 use crate::native::abi::{
     INTEGER_CAST_DESCRIPTOR, integer_binary_const_descriptor, integer_binary_descriptor,
@@ -401,11 +402,23 @@ pub(crate) fn compile_loop_dispatch_function(
     Ok(bytes)
 }
 
+/// Where in the image each entry a fused kernel emits already lives.
+///
+/// The kernel is assembled after the entries, so every program it is about to
+/// inline is also a function it could call instead. Which of the two it does is
+/// [`FUSED_KERNEL_INLINE_LIMIT`].
+#[derive(Clone, Copy)]
+pub(crate) struct A64FusedKernelEntries<'a> {
+    pub(crate) stamp_values: &'a [CodeOffset],
+    pub(crate) jacobians: &'a [Vec<CodeOffset>],
+}
+
 pub(crate) fn compile_fused_evaluation_kernel(
     kernel_image_offset: usize,
     assignment: CodeOffset,
     prelude: Option<CodeOffset>,
     stamp_values: &[PlanProgram],
+    entries: A64FusedKernelEntries<'_>,
     published_current_pairs: &[Option<(usize, usize)>],
 ) -> JitResult<Vec<u8>> {
     compile_fused_kernel(
@@ -414,6 +427,7 @@ pub(crate) fn compile_fused_evaluation_kernel(
         prelude,
         stamp_values,
         None,
+        entries,
         published_current_pairs,
         "fused evaluation kernel",
     )
@@ -425,6 +439,7 @@ pub(crate) fn compile_fused_stamp_kernel(
     prelude: Option<CodeOffset>,
     stamp_values: &[PlanProgram],
     jacobians: &[Vec<PlanProgram>],
+    entries: A64FusedKernelEntries<'_>,
     published_current_pairs: &[Option<(usize, usize)>],
 ) -> JitResult<Vec<u8>> {
     compile_fused_kernel(
@@ -433,6 +448,7 @@ pub(crate) fn compile_fused_stamp_kernel(
         prelude,
         stamp_values,
         Some(jacobians),
+        entries,
         published_current_pairs,
         "fused stamp kernel",
     )
@@ -539,11 +555,20 @@ fn compile_fused_kernel(
     prelude: Option<CodeOffset>,
     stamp_values: &[PlanProgram],
     jacobians: Option<&[Vec<PlanProgram>]>,
+    entries: A64FusedKernelEntries<'_>,
     published_current_pairs: &[Option<(usize, usize)>],
     kernel_name: &str,
 ) -> JitResult<Vec<u8>> {
     if stamp_values.len() != published_current_pairs.len()
-        || jacobians.is_some_and(|entries| entries.len() != stamp_values.len())
+        || jacobians.is_some_and(|rows| rows.len() != stamp_values.len())
+        || entries.stamp_values.len() != stamp_values.len()
+        || jacobians.is_some_and(|rows| {
+            entries.jacobians.len() != rows.len()
+                || rows
+                    .iter()
+                    .zip(entries.jacobians)
+                    .any(|(row, offsets)| row.len() != offsets.len())
+        })
     {
         return Err(JitError::InternalCompilerError {
             model: MODEL.into(),
@@ -591,25 +616,50 @@ fn compile_fused_kernel(
         })
         .transpose()?;
 
-    let maximum_stack_depth = value_ssa
-        .iter()
-        .chain(
-            jacobian_ssa
-                .iter()
-                .flat_map(|entries| entries.iter().flatten()),
-        )
-        .map(Program::maximum_stack_depth)
+    // Whether the kernel emits a program's body or a branch to the copy the
+    // image already holds. Only a plan with a prelude is eligible, so a postfix
+    // kernel — the modules the CFG route refuses — emits the instructions it
+    // emitted before this rule existed.
+    let inlines = |program: &Program| {
+        prelude.is_none() || program.instructions().len() <= FUSED_KERNEL_INLINE_LIMIT
+    };
+    // The frame is sized by the programs the kernel actually emits. A called
+    // entry brings its own frame and its own spill slots, so it contributes
+    // nothing here.
+    let inlined_ssa = || {
+        value_ssa
+            .iter()
+            .chain(
+                jacobian_ssa
+                    .iter()
+                    .flat_map(|rows| rows.iter().flatten()),
+            )
+            .filter(|program| inlines(program))
+    };
+    let inlined_allocations = || {
+        value_ssa
+            .iter()
+            .zip(&value_allocations)
+            .chain(
+                jacobian_ssa
+                    .iter()
+                    .flat_map(|rows| rows.iter().flatten())
+                    .zip(
+                        jacobian_allocations
+                            .iter()
+                            .flat_map(|rows| rows.iter().flatten()),
+                    ),
+            )
+            .filter(|(program, _)| inlines(program))
+            .map(|(_, allocation)| allocation)
+    };
+    let maximum_stack_depth = inlined_ssa()
+        .map(|program| program.maximum_stack_depth())
         .max()
         .unwrap_or(0);
     validate_expression_stack_depth(maximum_stack_depth)?;
-    let maximum_spill_slots = value_allocations
-        .iter()
-        .chain(
-            jacobian_allocations
-                .iter()
-                .flat_map(|entries| entries.iter().flatten()),
-        )
-        .map(RegisterAllocation::spill_slot_count)
+    let maximum_spill_slots = inlined_allocations()
+        .map(|allocation| allocation.spill_slot_count())
         .max()
         .unwrap_or(0);
     let frame_bytes = aligned_frame_bytes(maximum_spill_slots)?;
@@ -632,23 +682,41 @@ fn compile_fused_kernel(
         .enumerate()
     {
         let skip_stamp = compiler.emit_kernel_skip_if_inactive(stamp_index)?;
-        compiler.emit_program(program, allocation)?;
-        compiler.materialize_location(allocation.result(), DReg::D0)?;
+        if inlines(program) {
+            compiler.emit_program(program, allocation)?;
+            compiler.materialize_location(allocation.result(), DReg::D0)?;
+        } else {
+            compiler.emit_image_entry_call(kernel_image_offset, entries.stamp_values[stamp_index])?;
+            compiler.emit_kernel_abort_if_failed()?;
+        }
         compiler.emit_kernel_non_finite_guard(stamp_index)?;
         compiler.emit_kernel_stamp_value_store(stamp_index, *current_pair)?;
 
-        if let Some(stamp_jacobians) = jacobian_ssa.as_ref().map(|entries| &entries[stamp_index]) {
+        if let Some(stamp_jacobians) = jacobian_ssa.as_ref().map(|rows| &rows[stamp_index]) {
             let stamp_allocations = &jacobian_allocations
                 .as_ref()
                 .expect("Jacobian SSA and allocations are built together")[stamp_index];
             for group in plan_shared_outputs(stamp_jacobians) {
                 let representative = group.representative();
-                compiler.emit_program(
-                    &stamp_jacobians[representative],
-                    &stamp_allocations[representative],
-                )?;
-                compiler
-                    .materialize_location(stamp_allocations[representative].result(), DReg::D0)?;
+                if inlines(&stamp_jacobians[representative]) {
+                    compiler.emit_program(
+                        &stamp_jacobians[representative],
+                        &stamp_allocations[representative],
+                    )?;
+                    compiler.materialize_location(
+                        stamp_allocations[representative].result(),
+                        DReg::D0,
+                    )?;
+                } else {
+                    // One call for the whole group, exactly as one inlined body
+                    // served it: the outputs share a program, so they share the
+                    // image function the value-entry cache published for it.
+                    compiler.emit_image_entry_call(
+                        kernel_image_offset,
+                        entries.jacobians[stamp_index][representative],
+                    )?;
+                    compiler.emit_kernel_abort_if_failed()?;
+                }
                 for output in group.outputs() {
                     let output_index = jacobian_index.checked_add(*output).ok_or_else(|| {
                         encoding_error("AArch64 fused-kernel Jacobian output index overflow")
@@ -3636,19 +3704,38 @@ mod tests {
             .expect("compile AArch64 fused-kernel assignment");
         let mut image = assignment;
         let kernel_offset = align_test_image(&mut image).as_usize();
+        // No prelude and no separately published entries: every program here is
+        // a handful of instructions, so the kernel inlines all of them and the
+        // offsets are only shape.
+        let stamp_value_entries = vec![CodeOffset::new(0); stamp_values.len()];
+        let jacobian_entries: Vec<Vec<CodeOffset>> = jacobians
+            .map(|rows| {
+                rows.iter()
+                    .map(|row| vec![CodeOffset::new(0); row.len()])
+                    .collect()
+            })
+            .unwrap_or_default();
+        let entries = A64FusedKernelEntries {
+            stamp_values: &stamp_value_entries,
+            jacobians: &jacobian_entries,
+        };
         let kernel = match jacobians {
             Some(jacobians) => compile_fused_stamp_kernel(
                 kernel_offset,
                 CodeOffset::new(0),
+                None,
                 stamp_values,
                 jacobians,
+                entries,
                 published_current_pairs,
             )
             .expect("compile AArch64 fused stamp kernel"),
             None => compile_fused_evaluation_kernel(
                 kernel_offset,
                 CodeOffset::new(0),
+                None,
                 stamp_values,
+                entries,
                 published_current_pairs,
             )
             .expect("compile AArch64 fused evaluation kernel"),

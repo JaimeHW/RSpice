@@ -781,6 +781,12 @@ const KERNEL_I32_LOCAL_COUNT: u32 = 1;
 /// evaluate its value, reject a non-finite result, publish the value into the
 /// sequential contribution array and the terminal-pair matrix, and -- when the
 /// driver carries Jacobians -- evaluate and publish each Jacobian entry.
+///
+/// Every entry here is a `call` to the scalar function the module already
+/// exports, never a copy of its body, so the native backends'
+/// [`FUSED_KERNEL_INLINE_LIMIT`](crate::native::FUSED_KERNEL_INLINE_LIMIT) has
+/// no analogue on this one: a deferred contribution-current cone cannot be
+/// duplicated into a WASM kernel because nothing is ever inlined into it.
 fn encode_fused_kernel(
     kernel: &WasmFusedKernel,
     scalar_count: u32,

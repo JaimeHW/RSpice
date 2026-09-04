@@ -26,6 +26,7 @@ use super::{
     X64DataRange, X64FunctionBody, X64RipRelativeRelocation,
 };
 use crate::jit::plan_program::PlanProgram;
+use crate::native::FUSED_KERNEL_INLINE_LIMIT;
 use crate::native::abi::NativeRuntimeStatus;
 use crate::native::abi::{
     INTEGER_CAST_DESCRIPTOR, integer_binary_const_descriptor, integer_binary_descriptor,
@@ -233,20 +234,6 @@ fn compile_assignment_function_artifact(
     super::verify_x64_function_artifact(&artifact, "generated assignment function")?;
     Ok(artifact)
 }
-
-/// How large an entry may be and still be worth inlining into a fused kernel.
-///
-/// An inlined entry costs its own bytes; a called one costs the call sequence —
-/// the argument moves, the `call`, the stack adjustment and the runtime-status
-/// test, about fifty bytes — and one indirect call at run time. Below this an
-/// inline is smaller as well as faster, and every entry a CFG plan does not
-/// defer is a two-instruction slot read that lands far below it.
-///
-/// Above it the arithmetic inverts hard. `l_utsoi`'s eleven deferred cones are
-/// twelve to nineteen thousand instructions each and the kernel held a second
-/// copy of every one, 4.46 MB of a 12.36 MB image, for an entry the image
-/// already carries once.
-const FUSED_KERNEL_INLINE_LIMIT: usize = 32;
 
 pub(super) fn compile_fused_stamp_kernel_artifact(
     kernel_image_offset: usize,

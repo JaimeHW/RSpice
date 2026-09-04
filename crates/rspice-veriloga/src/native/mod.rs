@@ -58,6 +58,31 @@ pub use target::{Architecture, TargetSpec};
 /// when the backend could technically publish the image.
 pub const SHIPPED_MODEL_NATIVE_CODE_SIZE_BUDGET_BYTES: usize = 60 * 1024 * 1024;
 
+/// How many instructions an entry may hold and still be inlined into a fused
+/// kernel rather than called there.
+///
+/// **This is a time guard, not a size break-even.** On bytes a call wins almost
+/// immediately: the call sequence — the argument moves, the `call`/`bl`, the
+/// stack adjustment and the runtime-status test — is about fifty bytes, against
+/// twenty to thirty-four bytes for every inlined instruction, so an entry of
+/// three instructions is already cheaper to call. What the limit buys is the
+/// other axis. A call costs a fixed handful of nanoseconds that an entry doing
+/// almost no arithmetic cannot amortize, and under a CFG plan almost every
+/// entry is exactly that: a two-instruction read of a prelude slot, in a kernel
+/// that runs on every Newton iteration.
+///
+/// The value sits in a gap three orders of magnitude wide, which is why its
+/// exact number does not matter. A CFG plan's entry is either a prelude-slot
+/// load — one or two instructions — or a cone the `LiveCurrentTaint` partition
+/// deferred; `l_utsoi`, the only shipped module that has any, defers eleven of
+/// eleven thousand eight hundred to eighteen thousand eight hundred
+/// instructions. Nothing in the corpus lands between two and eleven thousand.
+///
+/// Above the limit the arithmetic inverts hard: before this rule the x64 fused
+/// stamp kernel held a second full copy of every one of those eleven cones,
+/// 4.46 MB of a 11.87 MB image, for entries the image already carries once.
+pub(crate) const FUSED_KERNEL_INLINE_LIMIT: usize = 32;
+
 use crate::canonical_ir::CanonicalIrArtifact;
 use crate::codegen::CompiledModel;
 

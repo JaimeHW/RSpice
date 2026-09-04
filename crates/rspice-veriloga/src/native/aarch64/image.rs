@@ -5,7 +5,7 @@
 //! direct calls can be authenticated against the complete entry-point set.
 
 use super::codegen::{
-    compile_assignment_dispatch_function, compile_assignment_pass_function,
+    A64FusedKernelEntries, compile_assignment_dispatch_function, compile_assignment_pass_function,
     compile_fused_evaluation_driver, compile_fused_evaluation_kernel, compile_fused_stamp_driver,
     compile_fused_stamp_kernel, compile_loop_dispatch_function,
     compile_segmented_assignment_driver, compile_segmented_indexed_assignment_driver,
@@ -405,6 +405,10 @@ impl A64ImageBuilder {
             assignment,
             prelude,
             stamp_values,
+            A64FusedKernelEntries {
+                stamp_values: stamp_value_entries,
+                jacobians: &[],
+            },
             published_current_pairs,
         )?;
         let bytes = if inline.len() <= A64_SEGMENT_THRESHOLD_BYTES {
@@ -439,6 +443,10 @@ impl A64ImageBuilder {
             prelude,
             stamp_values,
             jacobians,
+            A64FusedKernelEntries {
+                stamp_values: stamp_value_entries,
+                jacobians: jacobian_entries,
+            },
             published_current_pairs,
         )?;
         let bytes = if inline.len() <= A64_SEGMENT_THRESHOLD_BYTES {
