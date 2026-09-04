@@ -180,17 +180,138 @@ pub const fn apply_unary(table: &[FourStateBit; 4], input: FourStateBit) -> Four
 // The two-plane value
 // ============================================================================
 
+/// Number of plane words a value carries without touching the allocator.
+const INLINE_WORDS: usize = 2;
+
+/// The widest value whose planes live inside the value itself.
+///
+/// Two [`PLANE_WORD_BITS`]-bit words per plane, so sixty-four bits. The cut is
+/// not arbitrary: it covers every `reg`, `integer` and bus width a process
+/// declares in practice, and it is exactly the width `$realtobits` produces, so
+/// the one node that manufactures a value from a machine word manufactures one
+/// that still fits. A wider value is legal and falls back to the heap.
+pub const INLINE_VALUE_BITS: u32 = PLANE_WORD_BITS * INLINE_WORDS as u32;
+
+/// Where one value's two bit planes live.
+///
+/// **The invariant**, established by [`FourStateValue::zero`] — the only
+/// constructor of a representation — and depended on by every comparison: a
+/// value of at most [`INLINE_VALUE_BITS`] bits is always [`Planes::Inline`],
+/// and a wider one is always [`Planes::Heap`]. Two values of equal width
+/// therefore always have the same variant, which is what lets equality and
+/// hashing read the planes as slices without a representation ever standing in
+/// for a value.
+#[derive(Debug, Clone)]
+enum Planes {
+    Inline {
+        aval: [u32; INLINE_WORDS],
+        bval: [u32; INLINE_WORDS],
+    },
+    Heap {
+        aval: Vec<u32>,
+        bval: Vec<u32>,
+    },
+}
+
 /// A four-state value of a fixed width, stored as two bit planes.
 ///
 /// Bit `i` of the value is `aval` bit `i` and `bval` bit `i`, LSB first, both
 /// packed into [`PLANE_WORD_BITS`]-bit words. Bits above `width` within the
 /// final word are always zero in both planes, which is what makes
 /// [`PartialEq`] a value comparison rather than a representation comparison.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+///
+/// # Why the planes are inline up to 64 bits
+///
+/// A one-bit signal read is the most frequent operation in a digital run, and
+/// it produces a value. Two heap planes made that read two allocations and a
+/// clone of it two more; a process activation of five instructions was paying
+/// the allocator roughly thirty times. Every width the language actually uses
+/// fits in two words per plane, so the planes are carried by value and the
+/// heap is kept for the widths that do not — the same value, the same bits, the
+/// same answers, with the allocator out of the loop.
+#[derive(Clone)]
 pub struct FourStateValue {
+    width: u32,
+    planes: Planes,
+}
+
+/// The serialized shape of a value, which is the shape it had when both planes
+/// were `Vec`s.
+///
+/// Written out rather than derived so that the representation split above is
+/// invisible on the wire: an artifact written by an earlier build reads back
+/// here, and one written here reads back there.
+#[derive(Serialize, Deserialize)]
+#[serde(rename = "FourStateValue")]
+struct FourStateValueRepr {
     width: u32,
     aval: Vec<u32>,
     bval: Vec<u32>,
+}
+
+impl Serialize for FourStateValue {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        FourStateValueRepr {
+            width: self.width,
+            aval: self.aval().to_vec(),
+            bval: self.bval().to_vec(),
+        }
+        .serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for FourStateValue {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let repr = FourStateValueRepr::deserialize(deserializer)?;
+        Ok(Self::from_planes(repr.width, &repr.aval, &repr.bval))
+    }
+}
+
+impl std::fmt::Debug for FourStateValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FourStateValue")
+            .field("width", &self.width)
+            .field("aval", &self.aval())
+            .field("bval", &self.bval())
+            .finish()
+    }
+}
+
+impl PartialEq for FourStateValue {
+    fn eq(&self, other: &Self) -> bool {
+        if self.width != other.width {
+            return false;
+        }
+        // The invariant above makes equal widths mean equal variants, so the
+        // inline pair is the whole of the hot path and the slice comparison is
+        // the wide one. Comparing all `INLINE_WORDS` rather than the occupied
+        // prefix is exact because the bits above `width` are always zero.
+        match (&self.planes, &other.planes) {
+            (
+                Planes::Inline {
+                    aval: left_a,
+                    bval: left_b,
+                },
+                Planes::Inline {
+                    aval: right_a,
+                    bval: right_b,
+                },
+            ) => left_a == right_a && left_b == right_b,
+            _ => self.aval() == other.aval() && self.bval() == other.bval(),
+        }
+    }
+}
+
+impl Eq for FourStateValue {}
+
+impl std::hash::Hash for FourStateValue {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        // Over the occupied words in both cases, so a value hashes the same
+        // whichever plane representation carries it.
+        self.width.hash(state);
+        self.aval().hash(state);
+        self.bval().hash(state);
+    }
 }
 
 impl FourStateValue {
@@ -200,21 +321,101 @@ impl FourStateValue {
     }
 
     /// A value of `width` bits, every bit `0`.
+    ///
+    /// The one place the representation is chosen, which is what makes the
+    /// [`Planes`] invariant a property of the type rather than a convention.
     pub fn zero(width: u32) -> Self {
+        let planes = if width <= INLINE_VALUE_BITS {
+            Planes::Inline {
+                aval: [0; INLINE_WORDS],
+                bval: [0; INLINE_WORDS],
+            }
+        } else {
+            let words = Self::words_for(width);
+            Planes::Heap {
+                aval: vec![0; words],
+                bval: vec![0; words],
+            }
+        };
+        Self { width, planes }
+    }
+
+    /// Rebuild a value from raw plane words, masking anything above `width`.
+    ///
+    /// Only [`Deserialize`] needs this: the planes it is handed came from some
+    /// other build's representation, and the masking is what stops a
+    /// hand-edited or truncated artifact from producing a value whose spare
+    /// bits make it compare unequal to itself.
+    fn from_planes(width: u32, aval: &[u32], bval: &[u32]) -> Self {
+        let mut value = Self::zero(width);
         let words = Self::words_for(width);
-        Self {
-            width,
-            aval: vec![0; words],
-            bval: vec![0; words],
+        {
+            let (out_a, out_b) = value.plane_words_mut();
+            for index in 0..words {
+                out_a[index] = aval.get(index).copied().unwrap_or(0);
+                out_b[index] = bval.get(index).copied().unwrap_or(0);
+            }
+        }
+        value.mask_top_word();
+        value
+    }
+
+    /// The plane words this value occupies, LSB word first.
+    fn plane_words(&self) -> (&[u32], &[u32]) {
+        match &self.planes {
+            Planes::Inline { aval, bval } => (aval.as_slice(), bval.as_slice()),
+            Planes::Heap { aval, bval } => (aval.as_slice(), bval.as_slice()),
+        }
+    }
+
+    fn plane_words_mut(&mut self) -> (&mut [u32], &mut [u32]) {
+        match &mut self.planes {
+            Planes::Inline { aval, bval } => (aval.as_mut_slice(), bval.as_mut_slice()),
+            Planes::Heap { aval, bval } => (aval.as_mut_slice(), bval.as_mut_slice()),
+        }
+    }
+
+    /// Clear both planes above the last value bit.
+    ///
+    /// The representation invariant every comparison rests on. A word-level
+    /// write covers the whole word, and a value whose spare bits were set would
+    /// compare unequal to the same value built one bit at a time.
+    fn mask_top_word(&mut self) {
+        let width = self.width;
+        let remainder = width % PLANE_WORD_BITS;
+        let words = Self::words_for(width);
+        let (aval, bval) = self.plane_words_mut();
+        if remainder != 0 {
+            let mask = (1u32 << remainder) - 1;
+            aval[words - 1] &= mask;
+            bval[words - 1] &= mask;
+        }
+        // The inline representation carries words a narrow value does not
+        // occupy at all; they are zero on construction and are kept so here.
+        for index in words..aval.len() {
+            aval[index] = 0;
+            bval[index] = 0;
         }
     }
 
     /// A value of `width` bits, every bit set to `bit`.
     pub fn splat(width: u32, bit: FourStateBit) -> Self {
         let mut value = Self::zero(width);
-        for index in 0..width {
-            value.set_bit(index, bit);
+        let (a, b) = match bit {
+            FourStateBit::Zero => return value,
+            FourStateBit::One => (u32::MAX, 0),
+            FourStateBit::HighImpedance => (0, u32::MAX),
+            FourStateBit::Unknown => (u32::MAX, u32::MAX),
+        };
+        let words = Self::words_for(width);
+        {
+            let (aval, bval) = value.plane_words_mut();
+            for index in 0..words {
+                aval[index] = a;
+                bval[index] = b;
+            }
         }
+        value.mask_top_word();
         value
     }
 
@@ -262,19 +463,24 @@ impl FourStateValue {
 
     /// The `aval` plane words, LSB word first.
     pub fn aval(&self) -> &[u32] {
-        &self.aval
+        let words = Self::words_for(self.width);
+        &self.plane_words().0[..words]
     }
 
     /// The `bval` plane words, LSB word first.
     pub fn bval(&self) -> &[u32] {
-        &self.bval
+        let words = Self::words_for(self.width);
+        &self.plane_words().1[..words]
     }
 
     /// Whether any bit is `x` or `z`.
     ///
     /// One word scan, because `bval` is set for exactly those two states.
     pub fn has_unknown(&self) -> bool {
-        self.bval.iter().any(|word| *word != 0)
+        // Over the whole `bval` plane rather than the occupied prefix: the
+        // spare words of an inline value are zero by the masking invariant, so
+        // the answer is the same and the bound is a constant.
+        self.plane_words().1.iter().any(|word| *word != 0)
     }
 
     /// Bit `index`, counting from the least significant.
@@ -283,8 +489,9 @@ impl FourStateValue {
             return FourStateBit::Unknown;
         }
         let (word, offset) = Self::position(index);
-        let a = self.aval[word] >> offset & 1;
-        let b = self.bval[word] >> offset & 1;
+        let (aval, bval) = self.plane_words();
+        let a = aval[word] >> offset & 1;
+        let b = bval[word] >> offset & 1;
         match (a, b) {
             (0, 0) => FourStateBit::Zero,
             (1, 0) => FourStateBit::One,
@@ -307,8 +514,9 @@ impl FourStateValue {
             FourStateBit::Unknown => (1, 1),
         };
         let mask = 1u32 << offset;
-        self.aval[word] = self.aval[word] & !mask | a << offset;
-        self.bval[word] = self.bval[word] & !mask | b << offset;
+        let (aval, bval) = self.plane_words_mut();
+        aval[word] = aval[word] & !mask | a << offset;
+        bval[word] = bval[word] & !mask | b << offset;
     }
 
     const fn position(index: u32) -> (usize, u32) {
@@ -337,11 +545,13 @@ impl FourStateValue {
         if self.has_unknown() || self.width > 64 {
             return None;
         }
+        // Read by word rather than by bit. With no unknown bit the `bval`
+        // plane is empty, so every set `aval` bit is a `1` and the two planes'
+        // encoding collapses to the plain integer the words already hold; bits
+        // above `width` are zero by the masking invariant.
         let mut bits = 0u64;
-        for index in 0..self.width {
-            if self.bit(index) == FourStateBit::One {
-                bits |= 1u64 << index;
-            }
+        for (index, word) in self.aval().iter().enumerate() {
+            bits |= u64::from(*word) << (index as u32 * PLANE_WORD_BITS);
         }
         Some(bits)
     }
@@ -394,6 +604,14 @@ impl FourStateValue {
     /// extends with itself whatever the signedness. That rule belongs to
     /// decoding source text and lives in [`crate::four_state`].
     pub fn extended(&self, width: u32, signed: bool) -> Self {
+        // Extending to the width a value already has copies every bit and
+        // fills nothing, whatever the fill would have been, so it is the value
+        // itself. Named here because it is the common case on the hot path —
+        // a right-hand side usually arrives at its target's declared width —
+        // and because a copy of an inline value is a register move.
+        if width == self.width {
+            return self.clone();
+        }
         let fill = if signed {
             self.sign_bit()
         } else {
@@ -1515,4 +1733,138 @@ mod tests {
         assert_eq!(FourStateValue::from_u64(4, 0b1010), parse("1010"));
         assert_eq!(FourStateValue::zero(4), parse("0000"));
     }
+
+    // ========================================================================
+    // The inline / heap representation boundary
+    // ========================================================================
+    //
+    // A value of at most `INLINE_VALUE_BITS` carries its planes by value and a
+    // wider one carries them on the heap. Nothing above this line knows that,
+    // and these tests are what keeps it that way: every width either side of
+    // the cut has to answer exactly what the bit-at-a-time construction does.
+
+    /// Build a value one bit at a time, which is the representation-agnostic
+    /// reference the word-level constructors have to agree with.
+    fn by_bit(width: u32, mut bit_at: impl FnMut(u32) -> FourStateBit) -> FourStateValue {
+        let mut value = FourStateValue::zero(width);
+        for index in 0..width {
+            value.set_bit(index, bit_at(index));
+        }
+        value
+    }
+
+    /// Every state, at every width around the boundary, read back exactly.
+    #[test]
+    fn every_width_across_the_inline_boundary_round_trips_every_bit() {
+        for width in [0, 1, 31, 32, 33, 63, 64, 65, 96, 128, 129] {
+            for bit in TABLE_ORDER {
+                let splatted = FourStateValue::splat(width, bit);
+                assert_eq!(splatted.width(), width);
+                assert_eq!(splatted, by_bit(width, |_| bit), "splat {width} {bit:?}");
+                for index in 0..width {
+                    assert_eq!(splatted.bit(index), bit, "{width} bit {index} of {bit:?}");
+                }
+                // The plane words a caller sees are exactly the occupied ones,
+                // whichever representation carries them.
+                let words = FourStateValue::words_for(width);
+                assert_eq!(splatted.aval().len(), words);
+                assert_eq!(splatted.bval().len(), words);
+            }
+
+            // A pattern that touches every word and every state.
+            let mixed = by_bit(width, |index| TABLE_ORDER[(index % 4) as usize]);
+            assert_eq!(mixed.width(), width);
+            for index in 0..width {
+                assert_eq!(mixed.bit(index), TABLE_ORDER[(index % 4) as usize]);
+            }
+            assert_eq!(mixed.spelling().len(), width as usize);
+            assert_eq!(
+                FourStateValue::from_bits_msb_first(&mixed.bits_msb_first()),
+                mixed
+            );
+        }
+    }
+
+    /// The masking invariant: no bit above `width` is ever set, so a value
+    /// built by a word-level constructor equals one built bit by bit, and
+    /// `has_unknown` cannot be tripped by a spare bit of an inline plane.
+    #[test]
+    fn no_representation_carries_a_bit_above_its_width() {
+        for width in [0, 1, 7, 31, 32, 33, 63, 64, 65, 100] {
+            for bit in TABLE_ORDER {
+                let value = FourStateValue::splat(width, bit);
+                let words = FourStateValue::words_for(width);
+                let remainder = width % PLANE_WORD_BITS;
+                if remainder != 0 {
+                    let spare = !((1u32 << remainder) - 1);
+                    assert_eq!(value.aval()[words - 1] & spare, 0, "{width} {bit:?}");
+                    assert_eq!(value.bval()[words - 1] & spare, 0, "{width} {bit:?}");
+                }
+                let unknown =
+                    matches!(bit, FourStateBit::Unknown | FourStateBit::HighImpedance) && width > 0;
+                assert_eq!(value.has_unknown(), unknown, "{width} {bit:?}");
+            }
+        }
+    }
+
+    /// `to_u64` refuses above 64 bits and above an unknown bit, and otherwise
+    /// reads the same number the bit loop would.
+    #[test]
+    fn integer_conversion_holds_across_the_inline_boundary() {
+        assert_eq!(
+            FourStateValue::from_u64(64, u64::MAX).to_u64(),
+            Some(u64::MAX)
+        );
+        assert_eq!(
+            FourStateValue::from_u64(63, u64::MAX).to_u64(),
+            Some(u64::MAX >> 1)
+        );
+        assert_eq!(FourStateValue::zero(65).to_u64(), None);
+        assert_eq!(FourStateValue::zero(0).to_u64(), Some(0));
+        assert_eq!(FourStateValue::from_u64(64, 1 << 63).sign_bit(), ONE_BIT);
+        assert_eq!(
+            FourStateValue::from_u64(64, 1 << 63).to_integer(true),
+            Some(-(1i128 << 63))
+        );
+        let mut unknown = FourStateValue::from_u64(64, 0);
+        unknown.set_bit(63, FourStateBit::Unknown);
+        assert_eq!(unknown.to_u64(), None);
+    }
+
+    /// Resizing over the boundary in both directions, which is the one
+    /// operation that changes a value's representation.
+    #[test]
+    fn resizing_crosses_the_boundary_in_both_directions() {
+        let narrow = parse("1x0z");
+        let widened = narrow.resized(96);
+        assert_eq!(widened.width(), 96);
+        assert_eq!(widened.spelling(), format!("{}1x0z", "0".repeat(92)));
+        assert_eq!(widened.resized(4), narrow);
+
+        let wide = FourStateValue::splat(96, FourStateBit::One);
+        assert_eq!(wide.resized(4).spelling(), "1111");
+        assert_eq!(wide.resized(64).to_u64(), Some(u64::MAX));
+        assert_eq!(wide.extended(128, true).spelling(), "1".repeat(128));
+        assert_eq!(wide.resized(96), wide);
+    }
+
+    /// The serialized shape does not know about the representation split, so a
+    /// value written on one side of the boundary reads back on either.
+    #[test]
+    fn serialization_round_trips_on_both_sides_of_the_boundary() {
+        for width in [0u32, 1, 32, 63, 64, 65, 129] {
+            let value = by_bit(width, |index| TABLE_ORDER[(index % 4) as usize]);
+            let text = serde_json::to_string(&value).expect("serialize");
+            assert!(
+                text.contains("\"width\"")
+                    && text.contains("\"aval\"")
+                    && text.contains("\"bval\""),
+                "{text}"
+            );
+            let back: FourStateValue = serde_json::from_str(&text).expect("deserialize");
+            assert_eq!(back, value, "width {width}");
+        }
+    }
+
+    const ONE_BIT: FourStateBit = FourStateBit::One;
 }
