@@ -681,13 +681,21 @@ impl DigitalHost {
     /// Run one process from wherever it stopped, and record where it stops
     /// next.
     fn run_process(&mut self, index: usize, tick: u64) -> Result<(), DigitalRunError> {
-        let Some(process) = self.plan.processes.get(index).cloned() else {
+        // The plan is immutable for the whole of a host's life and already
+        // shared, so an activation borrows its process through a refcount bump
+        // on the handle. Reading it through `self.plan` instead would put that
+        // borrow and `&mut self.store` on the same `self`, which is the borrow
+        // the deep copy this replaces was paying to avoid: a whole
+        // `CfgFunction` — blocks, instructions, values, params — plus the
+        // static sensitivity list, copied and dropped per activation.
+        let plan = Arc::clone(&self.plan);
+        let Some(process) = plan.processes.get(index) else {
             return Ok(());
         };
         let resume = self.slots[index].resume.take();
         let outcome = match &resume {
-            Some(state) => resume_process(&self.plan, &process, state, &mut self.store),
-            None => start_process(&self.plan, &process, &mut self.store),
+            Some(state) => resume_process(&plan, process, state, &mut self.store),
+            None => start_process(&plan, process, &mut self.store),
         }
         .map_err(|error| DigitalRunError::Evaluation {
             process: self.describe(index),
