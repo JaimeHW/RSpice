@@ -1360,12 +1360,22 @@ endmodule
         const SEQUENTIAL_CURRENTS: u32 = 1152;
         const PAIR_CURRENTS: u32 = 1280;
         const JACOBIANS: u32 = 1536;
+        /// Where the assignment prelude publishes.
+        ///
+        /// Past every other region, because it is the only one whose length is
+        /// a property of the *plan* rather than of the model: a browser worker
+        /// reads `WasmJitModelArtifact::prelude_slots` and allocates from it,
+        /// and this harness has to do the same or the module stores through the
+        /// frame at offset zero.
+        const PRELUDE_SLOTS: u32 = 4096;
 
         fn new() -> Self {
             Self::for_source(FUSED_KERNEL_SOURCE, "wasm_kernel_pair")
         }
 
         fn for_source(source: &str, module_name: &str) -> Self {
+            use std::mem::size_of;
+
             use wasmi::{Engine, Linker, Memory, MemoryType, Module, Store};
 
             use super::abi::{
@@ -1373,6 +1383,7 @@ endmodule
                 FRAME_CURRENTS_PTR_OFFSET, FRAME_JACOBIANS_LEN_OFFSET, FRAME_JACOBIANS_PTR_OFFSET,
                 FRAME_MAGIC_OFFSET, FRAME_PARAMETERS_LEN_OFFSET, FRAME_PARAMETERS_PTR_OFFSET,
                 FRAME_PRIOR_CURRENTS_LEN_OFFSET, FRAME_PRIOR_CURRENTS_PTR_OFFSET,
+                FRAME_PRELUDE_SLOTS_LEN_OFFSET, FRAME_PRELUDE_SLOTS_PTR_OFFSET,
                 FRAME_PROGRAM_ACTIVE_LEN_OFFSET, FRAME_PROGRAM_ACTIVE_PTR_OFFSET,
                 FRAME_TERMINAL_VOLTAGES_LEN_OFFSET, FRAME_TERMINAL_VOLTAGES_PTR_OFFSET,
                 FRAME_VARIABLES_LEN_OFFSET, FRAME_VARIABLES_PTR_OFFSET,
@@ -1472,6 +1483,15 @@ endmodule
                 write(FRAME_CURRENTS_LEN_OFFSET, pair_len as u32);
                 write(FRAME_JACOBIANS_PTR_OFFSET, Self::JACOBIANS);
                 write(FRAME_JACOBIANS_LEN_OFFSET, jacobian_count as u32);
+                let prelude_slots = artifact.prelude_slots();
+                assert!(
+                    Self::PRELUDE_SLOTS as usize + prelude_slots * size_of::<f64>()
+                        <= 64 * 1024,
+                    "this model publishes {prelude_slots} prelude slots, past the harness's \
+                     one page of linear memory"
+                );
+                write(FRAME_PRELUDE_SLOTS_PTR_OFFSET, Self::PRELUDE_SLOTS);
+                write(FRAME_PRELUDE_SLOTS_LEN_OFFSET, prelude_slots as u32);
             }
 
             Self {
@@ -1485,6 +1505,24 @@ endmodule
                 parameters,
                 variable_names,
             }
+        }
+
+        /// Publish the prelude.
+        ///
+        /// The browser worker runs this once between the assignment pass and
+        /// the first value export, and a fused kernel runs it for itself — so a
+        /// test that calls a value export directly has to, or the export reads
+        /// the zero its slot was seeded with. A plan without a prelude exports
+        /// none and this does nothing.
+        fn call_prelude(&mut self) {
+            let Some(export) = self.artifact.prelude_export().map(str::to_owned) else {
+                return;
+            };
+            assert_eq!(
+                self.call(&export),
+                0,
+                "the prelude publishes without trapping"
+            );
         }
 
         fn stamp_count(&self) -> usize {
@@ -1659,6 +1697,7 @@ endmodule
             0.0,
         );
         assert_eq!(harness.call(&assignment_export), 0);
+        harness.call_prelude();
         assert_eq!(harness.call(&value_export), 0);
 
         assert_eq!(
@@ -1699,6 +1738,7 @@ endmodule
         // Per-entry path: assignment kernel, then each stamp value export.
         harness.reset();
         assert_eq!(harness.call(&assignment_export), 0);
+        harness.call_prelude();
         let mut per_entry = Vec::with_capacity(stamp_count);
         for stamp in 0..stamp_count {
             let export = harness.stamp_value_export(stamp);
@@ -1772,6 +1812,7 @@ endmodule
         // value publishes before its own derivatives are evaluated.
         harness.reset();
         assert_eq!(harness.call(&assignment_export), 0);
+        harness.call_prelude();
         let mut per_entry = Vec::with_capacity(harness.jacobian_count());
         for stamp in 0..stamp_count {
             let export = harness.stamp_value_export(stamp);
@@ -1903,7 +1944,8 @@ endmodule
         use crate::native::{EvalContext, compile_native_with_canonical_ir};
         use crate::wasm_jit::abi::{
             FRAME_ABI_VERSION_OFFSET, FRAME_BYTE_LEN_OFFSET, FRAME_MAGIC_OFFSET,
-            FRAME_PARAMETERS_LEN_OFFSET, FRAME_PARAMETERS_PTR_OFFSET, FRAME_RESULT_OFFSET,
+            FRAME_PARAMETERS_LEN_OFFSET, FRAME_PARAMETERS_PTR_OFFSET,
+            FRAME_PRELUDE_SLOTS_LEN_OFFSET, FRAME_PRELUDE_SLOTS_PTR_OFFSET, FRAME_RESULT_OFFSET,
             FRAME_TERMINAL_VOLTAGES_LEN_OFFSET, FRAME_TERMINAL_VOLTAGES_PTR_OFFSET,
             FRAME_VARIABLES_LEN_OFFSET, FRAME_VARIABLES_PTR_OFFSET,
         };
@@ -1932,11 +1974,20 @@ endmodule
         let params = [2.0_f64];
         let voltages = [4.0_f64.ln(), 0.0];
         let mut native_variables = vec![0.0_f64; report.model.num_variables];
+        let mut native_prelude_slots =
+            vec![0.0_f64; native.required_storage().prelude_slots.max(1)];
         let mut native_context = EvalContext::empty_for_test();
         native_context.params = params.as_ptr();
         native_context.voltages = voltages.as_ptr();
         native_context.num_terminals = report.model.num_terminals;
+        native_context.prelude_slots = native_prelude_slots.as_mut_ptr();
+        native_context.prelude_slots_len = native_prelude_slots.len();
         native.run_assignments(&native_context, native_variables.as_mut_ptr());
+        // Both backends publish their prelude between the assignment pass and
+        // the first entry, and this test's whole claim is that the two agree
+        // entry by entry — so both have to have run it, or it compares one
+        // route's values against the other route's seeded zeros.
+        native.run_prelude(&native_context, native_variables.as_ptr());
         assert!(native_context.take_runtime_error().is_none());
 
         let engine = Engine::default();
@@ -1985,6 +2036,7 @@ endmodule
         const PARAMS_OFFSET: usize = 256;
         const VOLTAGES_OFFSET: usize = 512;
         const VARIABLES_OFFSET: usize = 768;
+        const PRELUDE_SLOTS_OFFSET: usize = 4096;
         let mut frame = vec![0_u8; super::WASM_JIT_EVAL_FRAME_BYTES as usize];
         let mut write_frame_u32 = |offset: u64, value: u32| {
             frame[offset as usize..offset as usize + size_of::<u32>()]
@@ -1999,6 +2051,8 @@ endmodule
         write_frame_u32(FRAME_TERMINAL_VOLTAGES_LEN_OFFSET, voltages.len() as u32);
         write_frame_u32(FRAME_VARIABLES_PTR_OFFSET, VARIABLES_OFFSET as u32);
         write_frame_u32(FRAME_VARIABLES_LEN_OFFSET, native_variables.len() as u32);
+        write_frame_u32(FRAME_PRELUDE_SLOTS_PTR_OFFSET, PRELUDE_SLOTS_OFFSET as u32);
+        write_frame_u32(FRAME_PRELUDE_SLOTS_LEN_OFFSET, artifact.prelude_slots() as u32);
         memory
             .write(&mut store, FRAME_OFFSET, &frame)
             .expect("write WASM evaluation frame");
@@ -2037,6 +2091,17 @@ endmodule
                 .expect("run WASM assignment kernel"),
             super::WASM_JIT_STATUS_OK
         );
+        if let Some(export) = artifact.prelude_export() {
+            let prelude = instance
+                .get_typed_func::<i32, i32>(&store, export)
+                .expect("resolve WASM prelude");
+            assert_eq!(
+                prelude
+                    .call(&mut store, FRAME_OFFSET as i32)
+                    .expect("run WASM prelude"),
+                super::WASM_JIT_STATUS_OK
+            );
+        }
         let wasm_variables = (0..native_variables.len())
             .map(|index| {
                 let offset = VARIABLES_OFFSET + index * size_of::<f64>();
