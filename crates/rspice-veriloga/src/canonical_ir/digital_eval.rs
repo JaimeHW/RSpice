@@ -792,6 +792,69 @@ fn read_signal<E: DigitalEnvironment + ?Sized>(
 // Running a process
 // ============================================================================
 
+/// The working set one activation needs, kept across activations.
+///
+/// Everything here is *storage*, never state. The execution contract is
+/// unchanged: a `Wait` resumes as a `Jump` into an empty value table, and
+/// [`Interpreter::enter`] clears the table at every entry so that a resumed
+/// block still reads nothing but its own parameters. What the contract does
+/// not require is that the storage be *re-obtained* from the allocator each
+/// time, and a kernel running a million activations of a five-instruction
+/// process should pay for it once.
+///
+/// A caller with no scratch of its own can keep using [`start`] and [`resume`],
+/// which make a temporary one; a kernel should own one per host and hand it to
+/// [`start_in`] and [`resume_in`].
+#[derive(Debug, Default, Clone)]
+pub struct DigitalEvalScratch {
+    /// One slot per SSA value, cleared at every entry into a function.
+    values: Vec<Option<DigitalScalar>>,
+    /// One control-flow edge's arguments, refilled per edge.
+    arguments: Vec<DigitalScalar>,
+    /// One concatenation's operands, refilled per node.
+    operands: Vec<FourStateValue>,
+    /// A spare sensitivity list for the next suspension to fill.
+    terms: Vec<DigitalSensitivityTerm>,
+    /// A spare argument list for the next suspension's resume state.
+    resume: Vec<DigitalScalar>,
+}
+
+impl DigitalEvalScratch {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Take back a sensitivity list a kernel has finished with.
+    ///
+    /// The list a suspension produced is the list the kernel subscribes with
+    /// and then drops when the process wakes. Handed back here it becomes the
+    /// buffer the *next* suspension fills, so a process that waits a million
+    /// times allocates one list rather than a million.
+    ///
+    /// Keeps whichever buffer is larger, so the capacity settles at the
+    /// widest sensitivity list the host has seen rather than oscillating.
+    pub fn recycle_terms(&mut self, mut terms: Vec<DigitalSensitivityTerm>) {
+        terms.clear();
+        if terms.capacity() > self.terms.capacity() {
+            self.terms = terms;
+        }
+    }
+
+    /// Take back a resume state a kernel has finished with.
+    ///
+    /// The counterpart of [`Self::recycle_terms`] for the arguments a
+    /// suspension carries. [`resume_in`] does this itself for the state it is
+    /// resuming; this is for a kernel that discards one — a process that
+    /// finishes, or a host that is being torn down.
+    pub fn recycle_resume(&mut self, state: DigitalResumeState) {
+        let mut arguments = state.arguments;
+        arguments.clear();
+        if arguments.capacity() > self.resume.capacity() {
+            self.resume = arguments;
+        }
+    }
+}
+
 /// Run a process from its entry block.
 pub fn start<E: DigitalEnvironment + ?Sized>(
     plan: &CanonicalDigitalPlan,
@@ -808,11 +871,31 @@ pub fn start_with_limit<E: DigitalEnvironment + ?Sized>(
     environment: &mut E,
     step_limit: usize,
 ) -> Result<DigitalProcessOutcome, DigitalEvalError> {
+    start_in(
+        plan,
+        process,
+        environment,
+        &mut DigitalEvalScratch::new(),
+        step_limit,
+    )
+}
+
+/// Run a process from its entry block against a caller-owned working set.
+pub fn start_in<E: DigitalEnvironment + ?Sized>(
+    plan: &CanonicalDigitalPlan,
+    process: &CfgDigitalProcess,
+    environment: &mut E,
+    scratch: &mut DigitalEvalScratch,
+    step_limit: usize,
+) -> Result<DigitalProcessOutcome, DigitalEvalError> {
     let entry = process.function.entry;
     if !process.function.block(entry).params.is_empty() {
         return Err(DigitalEvalError::EntryBlockHasParameters(entry));
     }
-    Interpreter::new(plan, process, environment).run(entry, Vec::new(), step_limit)
+    // An entry block takes no parameters, so there is nothing to bind and the
+    // edge buffer starts empty.
+    scratch.arguments.clear();
+    Interpreter::new(plan, process, environment, scratch).run(entry, step_limit)
 }
 
 /// Resume a suspended process from a state a previous run produced.
@@ -843,6 +926,31 @@ pub fn resume_with_limit<E: DigitalEnvironment + ?Sized>(
     environment: &mut E,
     step_limit: usize,
 ) -> Result<DigitalProcessOutcome, DigitalEvalError> {
+    resume_in(
+        plan,
+        process,
+        state.clone(),
+        environment,
+        &mut DigitalEvalScratch::new(),
+        step_limit,
+    )
+}
+
+/// Resume a suspended process against a caller-owned working set.
+///
+/// The state arrives **by value**, which is the whole point: its argument list
+/// is the one the previous suspension built, and taking ownership lets the same
+/// allocation carry the next suspension's arguments back out. A kernel that
+/// holds the state in a slot already has it by value — it takes it out of the
+/// slot to run the process and puts a new one back.
+pub fn resume_in<E: DigitalEnvironment + ?Sized>(
+    plan: &CanonicalDigitalPlan,
+    process: &CfgDigitalProcess,
+    state: DigitalResumeState,
+    environment: &mut E,
+    scratch: &mut DigitalEvalScratch,
+    step_limit: usize,
+) -> Result<DigitalProcessOutcome, DigitalEvalError> {
     if state.process != process.id {
         return Err(DigitalEvalError::ResumeProcessMismatch {
             expected: process.id,
@@ -856,38 +964,45 @@ pub fn resume_with_limit<E: DigitalEnvironment + ?Sized>(
             blocks,
         });
     }
-    Interpreter::new(plan, process, environment).run(
-        state.block,
-        state.arguments.clone(),
-        step_limit,
-    )
+    let block = state.block;
+    scratch.arguments.clear();
+    scratch.arguments = state.arguments;
+    Interpreter::new(plan, process, environment, scratch).run(block, step_limit)
 }
 
-struct Interpreter<'a, E: ?Sized> {
+struct Interpreter<'a, 's, E: ?Sized> {
     plan: &'a CanonicalDigitalPlan,
     process: &'a CfgDigitalProcess,
     environment: &'a mut E,
-    /// One slot per SSA value, empty at every entry into the function.
+    /// The reused working set. Its `values` table is one slot per SSA value and
+    /// is empty at every entry into the function.
     ///
     /// Emptied rather than carried across a suspension because a `Wait` resumes
     /// as a `Jump`: the only values a resumed block may read are its own
     /// parameters and whatever it computes. A table that survived would let a
     /// process read a value the lowering never routed through a parameter, and
     /// the bug would surface as a backend that disagreed.
-    values: Vec<Option<DigitalScalar>>,
+    scratch: &'s mut DigitalEvalScratch,
 }
 
-impl<'a, E: DigitalEnvironment + ?Sized> Interpreter<'a, E> {
+impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
     fn new(
         plan: &'a CanonicalDigitalPlan,
         process: &'a CfgDigitalProcess,
         environment: &'a mut E,
+        scratch: &'s mut DigitalEvalScratch,
     ) -> Self {
+        // Cleared and refilled with `None` rather than reallocated. The
+        // observable state is the same table an allocation would have produced
+        // — every slot empty — and dropping the old contents here is what
+        // releases the previous activation's values.
+        scratch.values.clear();
+        scratch.values.resize(process.function.values.len(), None);
         Self {
             plan,
             process,
             environment,
-            values: vec![None; process.function.values.len()],
+            scratch,
         }
     }
 
@@ -898,25 +1013,25 @@ impl<'a, E: DigitalEnvironment + ?Sized> Interpreter<'a, E> {
     fn run(
         mut self,
         entry: BlockId,
-        arguments: Vec<DigitalScalar>,
         step_limit: usize,
     ) -> Result<DigitalProcessOutcome, DigitalEvalError> {
         let function = self.function();
-        self.bind(entry, arguments)?;
+        // The entry arguments are already in the edge buffer: empty for a
+        // start, and the resumed state's own list for a resumption.
+        self.bind(entry)?;
 
         let mut block = entry;
         for _ in 0..step_limit {
             for instruction in &function.block(block).instructions {
                 let value = self.compute(instruction.result)?;
-                self.values[usize::from(instruction.result)] = Some(value);
+                self.scratch.values[usize::from(instruction.result)] = Some(value);
             }
 
             match &function.block(block).terminator {
                 CfgTerminator::Return => return Ok(DigitalProcessOutcome::Finished),
                 CfgTerminator::Unset => return Err(DigitalEvalError::UnterminatedBlock(block)),
                 CfgTerminator::Jump { target, args } => {
-                    let arguments = self.evaluate_arguments(args)?;
-                    self.bind(*target, arguments)?;
+                    self.cross(*target, args)?;
                     block = *target;
                 }
                 CfgTerminator::Branch {
@@ -935,8 +1050,7 @@ impl<'a, E: DigitalEnvironment + ?Sized> Interpreter<'a, E> {
                     } else {
                         (*else_target, else_args)
                     };
-                    let arguments = self.evaluate_arguments(args)?;
-                    self.bind(target, arguments)?;
+                    self.cross(target, args)?;
                     block = target;
                 }
                 CfgTerminator::Wait {
@@ -945,7 +1059,14 @@ impl<'a, E: DigitalEnvironment + ?Sized> Interpreter<'a, E> {
                     resume_args,
                 } => {
                     let wait = match wait {
-                        DigitalWait::Event(terms) => DigitalWaitRequest::Event(terms.clone()),
+                        // Copied into the buffer a previous suspension's list
+                        // was handed back as, rather than into a fresh one.
+                        // `clone_from` reuses that capacity.
+                        DigitalWait::Event(terms) => {
+                            let mut spare = std::mem::take(&mut self.scratch.terms);
+                            spare.clone_from(terms);
+                            DigitalWaitRequest::Event(spare)
+                        }
                         DigitalWait::Delay(delay) => {
                             DigitalWaitRequest::Delay(self.integer(*delay)?)
                         }
@@ -953,7 +1074,12 @@ impl<'a, E: DigitalEnvironment + ?Sized> Interpreter<'a, E> {
                     // Evaluated here, not at resumption: these are the values
                     // the process had when it suspended, and the signals they
                     // came from may have moved by the time it wakes.
-                    let arguments = self.evaluate_arguments(resume_args)?;
+                    let mut arguments = std::mem::take(&mut self.scratch.resume);
+                    arguments.clear();
+                    for arg in resume_args {
+                        let value = self.read(*arg)?;
+                        arguments.push(value);
+                    }
                     let params = function.block(*resume).params.len();
                     if arguments.len() != params {
                         return Err(DigitalEvalError::ArgumentArityMismatch {
@@ -976,39 +1102,61 @@ impl<'a, E: DigitalEnvironment + ?Sized> Interpreter<'a, E> {
         Err(DigitalEvalError::StepLimitExceeded(step_limit))
     }
 
-    /// Read every argument before writing any parameter.
+    /// Evaluate one edge's arguments into the reused buffer and bind them.
     ///
-    /// A back edge that carries two variables past each other passes each one's
-    /// value from before the edge, and binding in place would feed the first
-    /// write into the second read.
-    fn evaluate_arguments(
-        &mut self,
-        args: &[ValueId],
-    ) -> Result<Vec<DigitalScalar>, DigitalEvalError> {
-        args.iter().map(|arg| self.read(*arg)).collect()
+    /// Read every argument before writing any parameter: a back edge that
+    /// carries two variables past each other passes each one's value from
+    /// before the edge, and binding in place would feed the first write into
+    /// the second read.
+    fn cross(&mut self, target: BlockId, args: &[ValueId]) -> Result<(), DigitalEvalError> {
+        // Taken out of the scratch for the duration, so that reading an
+        // argument — which needs the whole interpreter — cannot hold a borrow
+        // of the buffer it is filling. Put back with its capacity on the way
+        // out; an error path drops it, which costs one allocation on a run
+        // that is about to be refused anyway.
+        let mut buffer = std::mem::take(&mut self.scratch.arguments);
+        buffer.clear();
+        let mut outcome = Ok(());
+        for arg in args {
+            match self.read(*arg) {
+                Ok(value) => buffer.push(value),
+                Err(error) => {
+                    outcome = Err(error);
+                    break;
+                }
+            }
+        }
+        buffer.truncate(if outcome.is_ok() { buffer.len() } else { 0 });
+        self.scratch.arguments = buffer;
+        outcome?;
+        self.bind(target)
     }
 
-    fn bind(
-        &mut self,
-        target: BlockId,
-        arguments: Vec<DigitalScalar>,
-    ) -> Result<(), DigitalEvalError> {
+    /// Bind the edge buffer to a block's parameters.
+    fn bind(&mut self, target: BlockId) -> Result<(), DigitalEvalError> {
         let params = &self.function().block(target).params;
-        if params.len() != arguments.len() {
-            return Err(DigitalEvalError::ArgumentArityMismatch {
+        // Taken out for the duration so that writing a parameter slot — which
+        // is the same scratch — does not overlap the read of the buffer.
+        let mut arguments = std::mem::take(&mut self.scratch.arguments);
+        let outcome = if params.len() == arguments.len() {
+            for (param, value) in params.iter().zip(arguments.drain(..)) {
+                self.scratch.values[usize::from(*param)] = Some(value);
+            }
+            Ok(())
+        } else {
+            Err(DigitalEvalError::ArgumentArityMismatch {
                 target,
                 expected: params.len(),
                 found: arguments.len(),
-            });
-        }
-        for (param, value) in params.iter().zip(arguments) {
-            self.values[usize::from(*param)] = Some(value);
-        }
-        Ok(())
+            })
+        };
+        arguments.clear();
+        self.scratch.arguments = arguments;
+        outcome
     }
 
     fn read(&mut self, id: ValueId) -> Result<DigitalScalar, DigitalEvalError> {
-        if let Some(value) = &self.values[usize::from(id)] {
+        if let Some(value) = &self.scratch.values[usize::from(id)] {
             return Ok(value.clone());
         }
         // Constants belong to no block — a `#delay` operand is pushed as a leaf
@@ -1018,7 +1166,7 @@ impl<'a, E: DigitalEnvironment + ?Sized> Interpreter<'a, E> {
             return Err(DigitalEvalError::UndefinedValue(id));
         }
         let value = self.compute(id)?;
-        self.values[usize::from(id)] = Some(value.clone());
+        self.scratch.values[usize::from(id)] = Some(value.clone());
         Ok(value)
     }
 
@@ -1276,12 +1424,30 @@ impl<'a, E: DigitalEnvironment + ?Sized> Interpreter<'a, E> {
                 )))
             }
             CfgValueKind::DigitalConcat { parts } => {
-                let parts = parts.clone();
-                let mut values = Vec::with_capacity(parts.len());
+                // The operand list is read straight out of the function, which
+                // outlives this call, and gathered into the reused buffer
+                // rather than a fresh one. Taken out of the scratch for the
+                // duration so that evaluating an operand cannot hold a borrow
+                // of the buffer being filled.
+                let mut values = std::mem::take(&mut self.scratch.operands);
+                values.clear();
+                let mut failure = None;
                 for part in parts {
-                    values.push(self.four_state(part)?);
+                    match self.four_state(*part) {
+                        Ok(value) => values.push(value),
+                        Err(error) => {
+                            failure = Some(error);
+                            break;
+                        }
+                    }
                 }
-                Ok(DigitalScalar::FourState(digital_value::concat(&values)))
+                let outcome = match failure {
+                    Some(error) => Err(error),
+                    None => Ok(DigitalScalar::FourState(digital_value::concat(&values))),
+                };
+                values.clear();
+                self.scratch.operands = values;
+                outcome
             }
             CfgValueKind::DigitalSelect {
                 condition,

@@ -62,9 +62,10 @@ use rspice_veriloga::canonical_ir::digital::{
     CanonicalDigitalPlan, DigitalProcessKind, DigitalSchedulingRegion, DigitalSensitivityTerm,
 };
 use rspice_veriloga::canonical_ir::digital_eval::{
-    DigitalEvalError, DigitalProcessOutcome, DigitalResumeState, DigitalWaitRequest,
-    any_real_term_is_satisfied, any_term_is_satisfied, apply_deferred as apply_deferred_update,
-    resume as resume_process, start as start_process,
+    DEFAULT_PROCESS_STEP_LIMIT, DigitalEvalError, DigitalEvalScratch, DigitalProcessOutcome,
+    DigitalResumeState, DigitalWaitRequest, any_real_term_is_satisfied, any_term_is_satisfied,
+    apply_deferred as apply_deferred_update, resume_in as resume_process,
+    start_in as start_process,
 };
 use rspice_veriloga::canonical_ir::digital_value::FourStateValue;
 use rspice_veriloga::canonical_ir::ids::DigitalSignalId;
@@ -408,6 +409,16 @@ pub(crate) struct DigitalHost {
     /// `fired` is: a drain that handed back a fresh `Vec` allocated one per
     /// round, and a round happens whenever anything moves.
     drained: Vec<SignalTransition>,
+    /// The interpreter's working set — its value table, its edge arguments,
+    /// its concatenation operands, and the two lists a suspension hands out.
+    ///
+    /// Owned by the host rather than by an activation, because an activation
+    /// is where the cost was: a five-instruction process that runs a million
+    /// times asked the allocator for the same five buffers a million times.
+    /// Nothing of one activation reaches the next through it — the interpreter
+    /// clears the value table at every entry, which is the execution
+    /// contract's "a `Wait` resumes as a `Jump`".
+    scratch: DigitalEvalScratch,
 }
 
 impl DigitalHost {
@@ -473,6 +484,7 @@ impl DigitalHost {
             process_of_target,
             fired: Vec::new(),
             drained: Vec::new(),
+            scratch: DigitalEvalScratch::new(),
             plan,
         }
     }
@@ -701,12 +713,33 @@ impl DigitalHost {
         let Some(process) = plan.processes.get(index) else {
             return Ok(());
         };
+        // Taken out of `self` for the duration so that the interpreter can
+        // hold `&mut store` and `&mut scratch` at once, and put back with
+        // whatever capacity the activation grew it to.
+        let mut scratch = std::mem::take(&mut self.scratch);
+        // The resume state goes in **by value**: its argument list is the one
+        // the previous suspension built, and handing it over is what lets the
+        // same allocation carry the next suspension's arguments back out.
         let resume = self.slots[index].resume.take();
-        let outcome = match &resume {
-            Some(state) => resume_process(&plan, process, state, &mut self.store),
-            None => start_process(&plan, process, &mut self.store),
-        }
-        .map_err(|error| DigitalRunError::Evaluation {
+        let outcome = match resume {
+            Some(state) => resume_process(
+                &plan,
+                process,
+                state,
+                &mut self.store,
+                &mut scratch,
+                DEFAULT_PROCESS_STEP_LIMIT,
+            ),
+            None => start_process(
+                &plan,
+                process,
+                &mut self.store,
+                &mut scratch,
+                DEFAULT_PROCESS_STEP_LIMIT,
+            ),
+        };
+        self.scratch = scratch;
+        let outcome = outcome.map_err(|error| DigitalRunError::Evaluation {
             process: self.describe(index),
             error,
         })?;
@@ -865,6 +898,10 @@ impl DigitalHost {
     /// The terms are moved out of the slot rather than copied from it. The
     /// only caller wakes the process immediately after, which overwrites the
     /// status anyway, so the list a wake cloned and dropped was pure cost.
+    ///
+    /// And the list is not dropped either: it goes back to the interpreter's
+    /// scratch, which is where the *next* suspension's list comes from. A
+    /// process that waits a million times allocates one list.
     fn unsubscribe(&mut self, index: usize) {
         if !matches!(self.slots[index].status, ProcessStatus::AwaitingEvent(_)) {
             return;
@@ -883,6 +920,7 @@ impl DigitalHost {
                 list.remove(position);
             }
         }
+        self.scratch.recycle_terms(terms);
     }
 
     /// A process, as a diagnostic names it.
