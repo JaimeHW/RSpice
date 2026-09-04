@@ -295,24 +295,31 @@ impl From<DigitalRunError> for MixedSignalError {
     }
 }
 
-/// One payload of a mixed module's running state, shared with the trial
-/// rollback image until something writes through it.
+/// One payload of a mixed module's running state, shared with a capture of it
+/// until something writes through the live handle.
 ///
 /// This is `SharedXspiceInstance`'s idiom, generic because the mixed host has
-/// three payloads with the same shape rather than one. A trial used to capture
-/// its rollback by deep-copying the whole module — the compiled analog device
-/// with its context and history, the digital host with its store, scheduler,
-/// process slots and sensitivity index, and both bridge tables — at every
-/// attempted timepoint, whether or not the trial went on to touch any of it.
-/// Behind an [`Arc`] that capture is a reference-count bump, and the copy is
-/// deferred to the first write through a handle the image still shares.
+/// several payloads with the same shape rather than one. A trial used to
+/// capture its rollback by deep-copying the whole module — the digital host
+/// with its store, scheduler, process slots and sensitivity index, and both
+/// bridge tables — at every attempted timepoint, whether or not the trial went
+/// on to touch any of it. Behind an [`Arc`] that capture is a reference-count
+/// bump, and the copy is deferred to the first write through a handle the
+/// capture still shares.
 ///
-/// The rollback image this produces is the image the deep copy produced.
+/// The image this produces is the image the deep copy produced.
 /// [`Arc::make_mut`] copies whenever the pointer is shared, so an image that
 /// aliases a payload observes every subsequent write on a fresh allocation and
 /// never on its own; and writing is the only way to reach that path, because
 /// [`Self::make_mut`] is the only mutable view. `DerefMut` is deliberately not
 /// implemented, so every mutation site is spelled out.
+///
+/// Deferral is only worth having where the write is *conditional*. The analog
+/// device is written by every trial without exception, so wrapping it in a
+/// capture the trial immediately unshared bought nothing and cost a deep copy
+/// per trial; it is captured by nothing on the trial path now — see
+/// [`MixedSignalHost::analog`] — and stays in a cell only for the captures
+/// that are genuinely rare, a host clone and a checkpoint.
 #[derive(Clone)]
 struct MixedCell<T>(Arc<T>);
 
@@ -421,9 +428,47 @@ struct Bridges {
     dac: Vec<DacBridge>,
 }
 
+/// The solver inputs the host pushes into the analog device before it is
+/// evaluated.
+///
+/// Mirrored here rather than read back off the device, because the host is
+/// their only writer and the device publishes no getter for them. Small enough
+/// to be `Copy`, which is what makes a trial able to carry the previous set
+/// without allocating: putting these five back is the whole of what a rejected
+/// trial owes the analog device — see [`MixedSignalHost::analog`].
+#[derive(Clone, Copy)]
+struct AnalogSolverInputs {
+    analysis: u8,
+    initial_step: bool,
+    final_step: bool,
+    time_seconds: f64,
+    timestep_seconds: f64,
+    integration: IntegrationCoefficients,
+}
+
+impl AnalogSolverInputs {
+    /// What [`VerilogADevice::try_begin_analysis`] leaves a transient device
+    /// holding: `VmContext::reset_analysis_state` zeroes the time and the
+    /// timestep and deactivates the integration coefficients, and neither
+    /// analysis-step flag is set until a trial sets one.
+    const fn transient_start() -> Self {
+        Self {
+            analysis: 2,
+            initial_step: false,
+            final_step: false,
+            time_seconds: 0.0,
+            timestep_seconds: 0.0,
+            integration: IntegrationCoefficients::inactive(),
+        }
+    }
+}
+
+/// Everything a rejected trial has to put back.
+///
+/// The analog device is deliberately not in here; [`MixedSignalHost::analog`]
+/// says why.
 #[derive(Clone)]
 struct MixedState {
-    analog: MixedCell<VerilogADevice>,
     digital: MixedCell<DigitalHost>,
     bridges: MixedCell<Bridges>,
     /// Differential voltage each A/D bridge saw at the last accepted timepoint,
@@ -458,7 +503,27 @@ struct MixedState {
 
 #[derive(Clone)]
 struct ActiveTrial {
-    rollback: MixedState,
+    /// The digital host as it stood when the trial opened — the whole of what
+    /// a rejected trial has to put back.
+    ///
+    /// The rest of [`MixedState`] is not here because a trial cannot move it.
+    /// The bridge tables are declarations, and `add_adc_bridge` and
+    /// `add_dac_bridge` both `require_idle`, so no trial is open when one is
+    /// added. The accepted bank — voltages, transition times, probe values,
+    /// boundary histories, tick, time, `started` — is written at exactly one
+    /// place, [`MixedSignalHost::accept_trial`], and every refusal that
+    /// unwinds a trial there happens strictly before the first of those
+    /// writes. Copying them into an image per trial was copying values no
+    /// trial could have changed.
+    rollback: MixedCell<DigitalHost>,
+    /// The analog device's solver inputs as they stood when the trial opened.
+    ///
+    /// The device's *accepted* record needs no image, but these five inputs do:
+    /// they are what a device carries between evaluations, and one of them —
+    /// the timepoint — is encoded into a checkpoint. A rejected trial that left
+    /// its own timepoint standing would make a restart image taken afterwards
+    /// name a time the run never accepted.
+    analog_inputs: AnalogSolverInputs,
     tick: u64,
     time_seconds: f64,
     timestep_seconds: f64,
@@ -507,6 +572,20 @@ struct ActiveTrial {
 pub struct MixedSignalCheckpoint {
     source_digest: String,
     analog_checkpoint: VerilogADeviceCheckpoint,
+    /// The analog device itself, carried beside its accepted-state checkpoint
+    /// because it is no longer inside `state`.
+    ///
+    /// `analog_checkpoint` is what a restore *validates* against — device
+    /// identity, resolved shape, and every accepted value — and this is what a
+    /// restore installs. Both are needed and neither substitutes for the
+    /// other: the checkpoint carries no compiled program, no topology and no
+    /// solver caches by design, so it cannot reconstruct a device; and the
+    /// device alone would let a restore install state into a host the payload
+    /// does not belong to.
+    analog: MixedCell<VerilogADevice>,
+    /// The solver inputs that device is holding, so a resumed host and the host
+    /// it resumed from agree about the timepoint the analog half last saw.
+    analog_inputs: AnalogSolverInputs,
     state: MixedState,
 }
 
@@ -514,9 +593,9 @@ pub struct MixedSignalCheckpoint {
 ///
 /// `Clone` exists because [`CircuitData`](crate::CircuitData) is cloneable and
 /// this now lives in it: an AC sweep hands each worker thread an independent
-/// copy of the whole circuit. Cloning is cheap for the same reason a trial's
-/// rollback capture is — every payload is behind a [`MixedCell`], so a clone is
-/// three reference-count bumps and the copy is deferred to the first write.
+/// copy of the whole circuit. Cloning is cheap because every payload is behind
+/// a [`MixedCell`], so a clone is three reference-count bumps and the copy is
+/// deferred to the first write.
 #[derive(Clone)]
 pub struct MixedSignalHost {
     /// The deck's own name for this instance, carried so a refusal can say
@@ -524,6 +603,43 @@ pub struct MixedSignalHost {
     instance: String,
     source_digest: String,
     resolution: TimeResolution,
+    /// The module's continuous half, outside the trial's rollback image.
+    ///
+    /// A trial writes this device on every single attempt — the analysis type,
+    /// the timepoint, the timestep, the companion coefficients, and then a
+    /// Newton evaluation — so a capture taken beside it was unshared by the
+    /// very next statement and the deferral bought nothing. It bought a deep
+    /// copy per trial instead: 47,836 copies over the 43,017 trials of the
+    /// sigma-delta benchmark, 29,701 of them for probe trials rolled back
+    /// unconditionally, which was 14.5 % of that run spent copying a device to
+    /// throw the copy away.
+    ///
+    /// It is out here because **a rejected trial has nothing in the device to
+    /// restore**, and that is a property of the runtime rather than a hope
+    /// about one. Every stateful analog operator evaluates its candidate from
+    /// its own *committed* record — `filters::…::candidate_evaluation` opens
+    /// with a clone of `self.committed`, the integration slots read
+    /// `state_values_prev`, and `VmContext::apply_validated_advance_state` is
+    /// the only writer that promotes a candidate into the accepted record. A
+    /// trial reaches that promotion only through
+    /// [`Self::accept_trial`], so a trial that is rejected leaves the accepted
+    /// state bit-identical and leaves behind only candidate state that the
+    /// next evaluation recomputes from the same accepted record.
+    ///
+    /// The plain analog route has always relied on exactly this: a rejected
+    /// transient timestep re-runs `prepare_veriloga_timepoint` and re-stamps
+    /// every `VerilogADevice` in the circuit without restoring one, and every
+    /// Newton iteration of an accepted step re-evaluates them in place. The
+    /// mixed host was the outlier, paying for a stronger guarantee than the
+    /// device's own contract needs. `a_rejected_trial_leaves_the_analog_device_
+    /// accepted_state_untouched` pins the property this depends on.
+    ///
+    /// It keeps a [`MixedCell`] all the same, because the two captures that
+    /// *are* rare still want the deferral: a host clone (a `CircuitData` copy)
+    /// and a [checkpoint](Self::checkpoint).
+    analog: MixedCell<VerilogADevice>,
+    /// The solver inputs [`Self::analog`] is currently holding.
+    analog_inputs: AnalogSolverInputs,
     state: MixedState,
     trial: Option<ActiveTrial>,
     /// Every continuous-net probe the discrete half declares, resolved to
@@ -653,8 +769,9 @@ impl MixedSignalHost {
             instance: instance.to_string(),
             source_digest,
             resolution,
+            analog: MixedCell::new(analog),
+            analog_inputs: AnalogSolverInputs::transient_start(),
             state: MixedState {
-                analog: MixedCell::new(analog),
                 digital: MixedCell::new(digital),
                 bridges: MixedCell::new(Bridges::default()),
                 accepted_adc_voltages: Vec::new(),
@@ -705,8 +822,8 @@ impl MixedSignalHost {
     /// what a conservative dense block must span — the same answer, and for the
     /// same reason, that `engine::matrix` computes for a `VerilogADevice`.
     pub(crate) fn coupled_nodes(&self) -> Vec<usize> {
-        let mut nodes: Vec<usize> = (0..self.state.analog.num_terminals())
-            .map(|terminal| self.state.analog.node_for_terminal(terminal))
+        let mut nodes: Vec<usize> = (0..self.analog.num_terminals())
+            .map(|terminal| self.analog.node_for_terminal(terminal))
             .chain(
                 self.state
                     .bridges
@@ -943,7 +1060,16 @@ impl MixedSignalHost {
             });
         }
 
-        let rollback = self.state.clone();
+        let rollback = self.state.digital.clone();
+        let previous_inputs = self.analog_inputs;
+        let inputs = AnalogSolverInputs {
+            analysis: 2,
+            initial_step,
+            final_step,
+            time_seconds,
+            timestep_seconds,
+            integration,
+        };
         let prepare = (|| {
             // Ask before taking the mutable view. `advance_to` on a tick with
             // nothing due is a no-op, but taking the view is not: it copies the
@@ -971,24 +1097,18 @@ impl MixedSignalHost {
                 digital.sample_analog_potentials(&probes);
                 digital.advance_to(tick)?;
             }
-            let analog = self.state.analog.make_mut();
-            analog.try_set_analysis_type(2).map_err(analog_error)?;
-            analog
-                .try_set_analysis_step(initial_step, final_step)
-                .map_err(analog_error)?;
-            analog.try_set_time(time_seconds).map_err(analog_error)?;
-            analog
-                .try_set_timestep(timestep_seconds)
-                .map_err(analog_error)?;
-            analog
-                .try_set_integration_coefficients(integration)
-                .map_err(analog_error)?;
-            Ok::<(), MixedSignalError>(())
+            self.apply_analog_inputs(inputs)
         })();
         if let Err(error) = prepare {
-            self.state = rollback;
+            self.state.digital = rollback;
+            // These are inputs this device was holding a moment ago, so
+            // putting them back cannot be refused for being invalid; and if
+            // the device has become unusable, the refusal worth reporting is
+            // the one that made it so rather than a consequence of it.
+            let _ = self.apply_analog_inputs(previous_inputs);
             return Err(error);
         }
+        self.analog_inputs = inputs;
         let transition_times = self.state.accepted_adc_transition_times.clone();
         let sampled_adc_voltages = self.state.accepted_adc_voltages.clone();
         let probe_values = self.state.accepted_probe_values.clone();
@@ -996,6 +1116,7 @@ impl MixedSignalHost {
         let dac_moved = vec![false; self.state.bridges.dac.len()];
         self.trial = Some(ActiveTrial {
             rollback,
+            analog_inputs: previous_inputs,
             tick,
             time_seconds,
             timestep_seconds,
@@ -1014,6 +1135,40 @@ impl MixedSignalHost {
     /// Whether a trial is open.
     pub(crate) fn trial_active(&self) -> bool {
         self.trial.is_some()
+    }
+
+    /// Push one set of solver inputs into the analog device.
+    ///
+    /// The one writer of those five, so a trial and a trial's undo cannot
+    /// drift apart in what they consider the device's inputs to be. The two
+    /// analysis setters return without touching anything when the value they
+    /// are handed is the value the device already holds, which is what makes
+    /// the undo path cost a handful of comparisons.
+    fn apply_analog_inputs(&mut self, inputs: AnalogSolverInputs) -> Result<(), MixedSignalError> {
+        let analog = self.analog.make_mut();
+        analog
+            .try_set_analysis_type(inputs.analysis)
+            .map_err(analog_error)?;
+        analog
+            .try_set_analysis_step(inputs.initial_step, inputs.final_step)
+            .map_err(analog_error)?;
+        analog
+            .try_set_time(inputs.time_seconds)
+            .map_err(analog_error)?;
+        analog
+            .try_set_timestep(inputs.timestep_seconds)
+            .map_err(analog_error)?;
+        analog
+            .try_set_integration_coefficients(inputs.integration)
+            .map_err(analog_error)?;
+        Ok(())
+    }
+
+    /// Put the analog device's solver inputs back to where a trial found them.
+    fn undo_analog_inputs(&mut self, inputs: AnalogSolverInputs) -> Result<(), MixedSignalError> {
+        self.apply_analog_inputs(inputs)?;
+        self.analog_inputs = inputs;
+        Ok(())
     }
 
     /// Apply co-timed external digital input drives during the active trial.
@@ -1058,8 +1213,7 @@ impl MixedSignalHost {
     {
         self.active_tick()?;
         self.validate_solution(circuit_voltages)?;
-        self.state
-            .analog
+        self.analog
             .make_mut()
             .try_stamp(circuit_voltages, &mut matrix_add, &mut rhs_add)
             .map_err(analog_error)?;
@@ -1269,9 +1423,10 @@ impl MixedSignalHost {
                     .into(),
             });
         }
-        if let Err(error) = self.state.analog.validate_advance_state() {
-            let rollback = self.trial.take().expect("checked above").rollback;
-            self.state = rollback;
+        if let Err(error) = self.analog.validate_advance_state() {
+            let trial = self.trial.take().expect("checked above");
+            self.state.digital = trial.rollback;
+            let _ = self.undo_analog_inputs(trial.analog_inputs);
             return Err(analog_error(error));
         }
         let trial = self.trial.take().expect("checked above");
@@ -1281,12 +1436,13 @@ impl MixedSignalHost {
         // the trial found it.
         let (adc_history, dac_history) = self.folded_boundary_histories(&trial);
         if let Some(oscillation) = self.boundary_flip_run(&adc_history, &dac_history, trial.tick) {
-            self.state = trial.rollback;
+            self.state.digital = trial.rollback;
+            let _ = self.undo_analog_inputs(trial.analog_inputs);
             return Err(oscillation);
         }
         self.state.adc_history = adc_history;
         self.state.dac_history = dac_history;
-        self.state.analog.make_mut().apply_validated_advance_state();
+        self.analog.make_mut().apply_validated_advance_state();
         self.state.accepted_tick = trial.tick;
         self.state.accepted_time = trial.time_seconds;
         self.state.started = true;
@@ -1306,8 +1462,20 @@ impl MixedSignalHost {
         Ok(())
     }
 
-    /// Restore every analog, digital, event, driver, and bridge bit to the
-    /// state at [`begin_trial`](Self::begin_trial).
+    /// Restore every digital, event and driver bit to the state at
+    /// [`begin_trial`](Self::begin_trial).
+    ///
+    /// Plus the analog device's five solver inputs, which are scalars. That is
+    /// the whole restore, and the three things it does not name are not
+    /// omissions. The bridge tables cannot have moved, because adding one
+    /// requires an idle host. The accepted bank cannot have moved, because
+    /// [`Self::accept_trial`] is its only writer. And the analog device's
+    /// *state* has nothing to put back: a trial that does not reach
+    /// `accept_trial` never reaches `apply_validated_advance_state`, which is
+    /// the only promotion of a candidate into the device's accepted record, so
+    /// what a rejected trial leaves behind is candidate state the next
+    /// evaluation recomputes from the same accepted record. [`Self::analog`]
+    /// carries the argument in full.
     pub fn reject_trial(&mut self) -> Result<(), MixedSignalError> {
         let trial = self
             .trial
@@ -1315,7 +1483,8 @@ impl MixedSignalHost {
             .ok_or_else(|| MixedSignalError::TrialProtocol {
                 detail: "there is no active trial to reject".into(),
             })?;
-        self.state = trial.rollback;
+        self.state.digital = trial.rollback;
+        self.undo_analog_inputs(trial.analog_inputs)?;
         Ok(())
     }
 
@@ -1351,10 +1520,12 @@ impl MixedSignalHost {
                 detail: "cannot checkpoint an unaccepted mixed trial".into(),
             });
         }
-        let analog_checkpoint = self.state.analog.checkpoint_state().map_err(analog_error)?;
+        let analog_checkpoint = self.analog.checkpoint_state().map_err(analog_error)?;
         Ok(MixedSignalCheckpoint {
             source_digest: self.source_digest.clone(),
             analog_checkpoint,
+            analog: self.analog.clone(),
+            analog_inputs: self.analog_inputs,
             state: self.state.clone(),
         })
     }
@@ -1368,13 +1539,14 @@ impl MixedSignalHost {
                 detail: "checkpoint source identity does not match this mixed module".into(),
             });
         }
-        self.state
-            .analog
+        self.analog
             .validate_checkpoint_state(&checkpoint.analog_checkpoint)
             .map_err(analog_error)?;
+        self.analog = checkpoint.analog.clone();
+        self.analog_inputs = checkpoint.analog_inputs;
         self.state = checkpoint.state.clone();
-        self.max_circuit_node = (0..self.state.analog.num_terminals())
-            .map(|terminal| self.state.analog.node_for_terminal(terminal))
+        self.max_circuit_node = (0..self.analog.num_terminals())
+            .map(|terminal| self.analog.node_for_terminal(terminal))
             .chain(
                 self.state
                     .bridges
@@ -2331,27 +2503,30 @@ endmodule
     /// run off a deck, because the mixed host has no deck route yet. The
     /// structure it protects is the same one `SharedXspiceInstance` protects:
     /// a rollback capture is a reference-count bump, and the deep copy of the
-    /// compiled analog device or of the digital host is deferred to the first
-    /// write through a handle the image still shares.
+    /// digital host is deferred to the first write through a handle the image
+    /// still shares.
     #[test]
     fn mixed_trial_copy_ratchet() {
-        // A ceiling, not a target. Measured at 41 over these 40 timepoints:
+        // A ceiling, not a target. It used to be 41 over these 40 timepoints —
         // one copy of the analog cell per trial, because `begin_trial` always
-        // writes the device's time and that write is the first after the
-        // capture, plus exactly one copy of the digital host — for the single
-        // trial that had an event due. Everything after the first write in a
-        // trial (the advance applied on acceptance, every A/D publication,
-        // every Newton stamp) goes through a cell the image no longer shares
-        // and costs nothing, and the bridge tables are never written during a
-        // trial at all.
+        // writes the device's time and that write was the first after a
+        // capture that shared it, plus one copy of the digital host for the
+        // single trial that had an event due. The analog device is no longer
+        // captured by a trial at all, so only the digital copies remain and
+        // the whole run costs one.
+        //
+        // Everything after the first write in a trial (every A/D publication,
+        // every Newton stamp) goes through a cell no image shares and costs
+        // nothing, and the bridge tables are never written during a trial at
+        // all.
         //
         // The digital figure is the one to watch: it is small because
         // `begin_trial` asks whether anything is due before taking the
         // mutable view. Drop that predicate and it becomes one per timepoint;
-        // revert the cells to a whole-state deep copy and the count moves by a
-        // multiple rather than by a margin.
+        // put the analog device back in the image and it becomes one more per
+        // timepoint on top.
         const TIMEPOINTS: u64 = 40;
-        const MAX_COPIES: u64 = TIMEPOINTS + 8;
+        const MAX_COPIES: u64 = 8;
 
         let mut host = host();
         settle_cost::reset();
@@ -2386,5 +2561,70 @@ endmodule
             "a run that copies nothing at all means the counter and the work are no longer in \
              the same place, not that the work became free"
         );
+    }
+
+    /// A rejected trial leaves the analog device's accepted record untouched.
+    ///
+    /// This is the property that lets the device sit outside the rollback
+    /// image, so it is pinned rather than argued. The trial is driven the whole
+    /// way — the timepoint, the timestep, the companion coefficients, a Newton
+    /// stamp against a solution that is not the accepted one, and a boundary
+    /// settle that publishes an A/D transition — and then rejected. Nothing in
+    /// `VerilogADeviceCheckpoint` may move: it carries every accepted variable,
+    /// every integration slot, every filter and detector record, and the
+    /// `$discontinuity` edge.
+    ///
+    /// It also pins the digital half, which *is* in the image, so a change that
+    /// took the analog device out of the image by taking the digital host out
+    /// with it fails here rather than in a benchmark's waveform.
+    #[test]
+    fn a_rejected_trial_leaves_the_analog_device_accepted_state_untouched() {
+        let mut host = host();
+        // One accepted timepoint first, so the accepted record under test is a
+        // record the device actually wrote rather than its construction state.
+        begin(&mut host, 0);
+        settle_and_accept(&mut host, &[0.0; 4]);
+
+        let before_analog = host.analog.checkpoint_state().expect("accepted state");
+        let before_digital = host.read_digital("q").expect("q reads");
+        let before_time = host.state.accepted_time;
+        let before_tick = host.state.accepted_tick;
+        let before_voltages = host.state.accepted_adc_voltages.clone();
+        let before_probes = host.state.accepted_probe_values.clone();
+        let before_transitions = host.state.accepted_adc_transition_times.clone();
+        let before_adc_history = host.state.adc_history.clone();
+        let before_dac_history = host.state.dac_history.clone();
+
+        // A trial that moves as much as a trial can. Node 3 — the third matrix
+        // row, so the third entry — is over the A/D bridge's high threshold,
+        // so the settle publishes a transition and runs the digital slot the
+        // rising edge wakes.
+        const DURING: [f64; 4] = [0.5, 0.0, 1.0, 0.0];
+        begin(&mut host, 4);
+        assert!(host.settle_analog_bridges(&DURING).is_ok());
+        host.stamp(&DURING, |_, _, _| {}, |_, _| {})
+            .expect("stamp during the trial");
+        assert_ne!(
+            host.read_digital("q").expect("q reads"),
+            before_digital,
+            "the trial has to move the digital half, or this pins nothing"
+        );
+        host.reject_trial().expect("reject");
+
+        assert_eq!(
+            host.analog.checkpoint_state().expect("accepted state"),
+            before_analog,
+            "a rejected trial moved the analog device's accepted record. That record is what \
+             `MixedSignalHost::analog` promises a trial cannot reach without `accept_trial`, and \
+             the device sits outside the rollback image on the strength of it"
+        );
+        assert_eq!(host.read_digital("q").expect("q reads"), before_digital);
+        assert_eq!(host.state.accepted_time, before_time);
+        assert_eq!(host.state.accepted_tick, before_tick);
+        assert_eq!(host.state.accepted_adc_voltages, before_voltages);
+        assert_eq!(host.state.accepted_probe_values, before_probes);
+        assert_eq!(host.state.accepted_adc_transition_times, before_transitions);
+        assert_eq!(host.state.adc_history, before_adc_history);
+        assert_eq!(host.state.dac_history, before_dac_history);
     }
 }
