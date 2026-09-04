@@ -1382,8 +1382,8 @@ endmodule
                 FRAME_ABI_VERSION_OFFSET, FRAME_BYTE_LEN_OFFSET, FRAME_CURRENTS_LEN_OFFSET,
                 FRAME_CURRENTS_PTR_OFFSET, FRAME_JACOBIANS_LEN_OFFSET, FRAME_JACOBIANS_PTR_OFFSET,
                 FRAME_MAGIC_OFFSET, FRAME_PARAMETERS_LEN_OFFSET, FRAME_PARAMETERS_PTR_OFFSET,
-                FRAME_PRIOR_CURRENTS_LEN_OFFSET, FRAME_PRIOR_CURRENTS_PTR_OFFSET,
                 FRAME_PRELUDE_SLOTS_LEN_OFFSET, FRAME_PRELUDE_SLOTS_PTR_OFFSET,
+                FRAME_PRIOR_CURRENTS_LEN_OFFSET, FRAME_PRIOR_CURRENTS_PTR_OFFSET,
                 FRAME_PROGRAM_ACTIVE_LEN_OFFSET, FRAME_PROGRAM_ACTIVE_PTR_OFFSET,
                 FRAME_TERMINAL_VOLTAGES_LEN_OFFSET, FRAME_TERMINAL_VOLTAGES_PTR_OFFSET,
                 FRAME_VARIABLES_LEN_OFFSET, FRAME_VARIABLES_PTR_OFFSET,
@@ -1485,8 +1485,7 @@ endmodule
                 write(FRAME_JACOBIANS_LEN_OFFSET, jacobian_count as u32);
                 let prelude_slots = artifact.prelude_slots();
                 assert!(
-                    Self::PRELUDE_SLOTS as usize + prelude_slots * size_of::<f64>()
-                        <= 64 * 1024,
+                    Self::PRELUDE_SLOTS as usize + prelude_slots * size_of::<f64>() <= 64 * 1024,
                     "this model publishes {prelude_slots} prelude slots, past the harness's \
                      one page of linear memory"
                 );
@@ -2052,7 +2051,10 @@ endmodule
         write_frame_u32(FRAME_VARIABLES_PTR_OFFSET, VARIABLES_OFFSET as u32);
         write_frame_u32(FRAME_VARIABLES_LEN_OFFSET, native_variables.len() as u32);
         write_frame_u32(FRAME_PRELUDE_SLOTS_PTR_OFFSET, PRELUDE_SLOTS_OFFSET as u32);
-        write_frame_u32(FRAME_PRELUDE_SLOTS_LEN_OFFSET, artifact.prelude_slots() as u32);
+        write_frame_u32(
+            FRAME_PRELUDE_SLOTS_LEN_OFFSET,
+            artifact.prelude_slots() as u32,
+        );
         memory
             .write(&mut store, FRAME_OFFSET, &frame)
             .expect("write WASM evaluation frame");

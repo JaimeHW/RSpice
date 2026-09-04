@@ -1569,8 +1569,8 @@ fn read_set_optional(
 #[cfg(all(test, feature = "native"))]
 mod tests {
     use super::{
-        CfgNoiseScope, CfgPlanRefusal, ShippedColumnLanes,
-        build_default_model_plan_reported, build_model_plan_from_canonical_cfg,
+        CfgNoiseScope, CfgPlanRefusal, ShippedColumnLanes, build_default_model_plan_reported,
+        build_model_plan_from_canonical_cfg,
     };
     use crate::canonical_ir::CanonicalIrArtifact;
     use crate::codegen::{ColumnAxis, CompiledModel};
@@ -1720,8 +1720,8 @@ endmodule
     #[test]
     fn the_cfg_route_takes_its_values_from_the_cfg_and_its_noise_from_mir() {
         let (model, artifact) = compile(RESISTOR_WITH_CHARGE_AND_NOISE);
-        let (plan, refused) = build_default_model_plan_reported(&model, &artifact)
-            .expect("the default plan builds");
+        let (plan, refused) =
+            build_default_model_plan_reported(&model, &artifact).expect("the default plan builds");
         assert!(
             refused.is_none(),
             "a resistor with a charge and a noise source is not a module the CFG route refuses: \
@@ -1782,14 +1782,19 @@ module cfg_noise_current_probe(p, n);
 endmodule
 "#;
         let (model, artifact) = compile(source);
-        let postfix = build_model_plan_from_canonical_cfg(&model, &artifact, CfgNoiseScope::Postfix)
-            .expect("the CFG plan builds with MIR noise")
-            .plan;
+        let postfix =
+            build_model_plan_from_canonical_cfg(&model, &artifact, CfgNoiseScope::Postfix)
+                .expect("the CFG plan builds with MIR noise")
+                .plan;
         let cfg = build_model_plan_from_canonical_cfg(&model, &artifact, CfgNoiseScope::Cfg)
             .expect("the CFG plan builds with CFG noise")
             .plan;
 
-        assert_eq!(postfix.noise_psd.len(), 1, "the module has one noise source");
+        assert_eq!(
+            postfix.noise_psd.len(),
+            1,
+            "the module has one noise source"
+        );
         assert_eq!(cfg.noise_psd.len(), 1);
 
         // Both storages, because which one a probe reads depends on whether its
@@ -1824,8 +1829,8 @@ endmodule
     #[test]
     fn a_module_the_cfg_route_refuses_takes_the_postfix_plan_whole() {
         let (model, artifact) = compile(OPERATOR_IN_A_CASE_SELECTOR);
-        let (plan, refused) = build_default_model_plan_reported(&model, &artifact)
-            .expect("the default plan builds");
+        let (plan, refused) =
+            build_default_model_plan_reported(&model, &artifact).expect("the default plan builds");
         let refused = refused.expect(
             "a canonical operator in a case selector has no executed counterpart, so the CFG \
              route cannot name its state record",
@@ -1871,8 +1876,8 @@ module cfg_plan_no_rule(p, n);
 endmodule
 "#;
         let (model, artifact) = compile(source);
-        let (plan, refused) = build_default_model_plan_reported(&model, &artifact)
-            .expect("the default plan builds");
+        let (plan, refused) =
+            build_default_model_plan_reported(&model, &artifact).expect("the default plan builds");
         let refused = refused.expect(
             "the CFG derivative pass has no rule for hypot, so a module differentiating one \
              cannot take the CFG route",
@@ -2104,9 +2109,8 @@ endmodule
         ];
         for (case, source) in cases {
             let (model, artifact) = compile(source);
-            let (plan, refused) =
-                build_default_model_plan_reported(&model, &artifact)
-                    .unwrap_or_else(|error| panic!("{case}: the default plan builds: {error}"));
+            let (plan, refused) = build_default_model_plan_reported(&model, &artifact)
+                .unwrap_or_else(|error| panic!("{case}: the default plan builds: {error}"));
             assert!(
                 refused.is_none(),
                 "{case}: this construct is no longer a known divergence, so the CFG route must \
@@ -2198,9 +2202,8 @@ endmodule
             ),
         ] {
             let (model, artifact) = compile(source);
-            let (cfg, refused) =
-                build_default_model_plan_reported(&model, &artifact)
-                    .unwrap_or_else(|error| panic!("{case}: the CFG plan builds: {error}"));
+            let (cfg, refused) = build_default_model_plan_reported(&model, &artifact)
+                .unwrap_or_else(|error| panic!("{case}: the CFG plan builds: {error}"));
             assert!(
                 refused.is_none(),
                 "{case}: a contribution-current probe is no longer a divergence: {refused:?}"

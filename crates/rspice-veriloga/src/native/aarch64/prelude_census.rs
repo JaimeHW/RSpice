@@ -45,7 +45,7 @@
 use std::time::Instant;
 
 use super::codegen::{compile_value_function, compile_value_function_from_ssa};
-use super::image::{A64ImageBuilder, A64_SEGMENT_THRESHOLD_BYTES};
+use super::image::{A64_SEGMENT_THRESHOLD_BYTES, A64ImageBuilder};
 use super::unwind::{analyze_function, append_windows_unwind_data};
 use super::verifier::verify_exact_function;
 use crate::jit::cfg_prelude::CfgPrelude;

@@ -223,8 +223,7 @@ fn the_plan_routes_cost_the_same_per_evaluation() {
                 for _ in 0..EVALUATIONS_PER_SAMPLE {
                     evaluate(plan, &context, &mut variables, &positions);
                 }
-                let sample =
-                    started.elapsed().as_nanos() as f64 / EVALUATIONS_PER_SAMPLE as f64;
+                let sample = started.elapsed().as_nanos() as f64 / EVALUATIONS_PER_SAMPLE as f64;
                 plan.samples.push(sample);
             }
         }
@@ -265,8 +264,7 @@ fn evaluate(
     positions: &[crate::jit::cfg_plan_builder::CfgPlanEntry],
 ) {
     context.clear_runtime_error();
-    plan.native
-        .run_assignments(context, variables.as_mut_ptr());
+    plan.native.run_assignments(context, variables.as_mut_ptr());
     plan.native.run_prelude(context, variables.as_ptr());
     let _ = context.take_runtime_error();
     for entry in positions {

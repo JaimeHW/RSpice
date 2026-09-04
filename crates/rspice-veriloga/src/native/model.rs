@@ -1054,6 +1054,7 @@ impl NativeModel {
         self.entry_ptr(self.entries.stamp_values[index])
     }
 
+    #[cfg(all(test, windows, target_arch = "x86_64"))]
     pub(crate) fn prelude_address_for_test(&self) -> *const u8 {
         self.entry_ptr(
             self.entries
