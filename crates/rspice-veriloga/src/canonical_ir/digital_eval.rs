@@ -814,14 +814,26 @@ fn read_signal<E: DigitalEnvironment + ?Sized>(
 /// computes.
 #[derive(Debug, Default, Clone)]
 struct ValueTable {
-    /// One slot per SSA value. Meaningful only where the stamp matches; the
-    /// rest is whatever some earlier activation left there.
-    values: Vec<DigitalScalar>,
-    /// The generation each slot was last written in.
-    stamps: Vec<u32>,
+    /// One slot per SSA value.
+    slots: Vec<ValueSlot>,
     /// The generation being written now. Never zero once a run has started,
     /// which is what makes a never-written slot's zero stamp mean "undefined".
     current: u32,
+}
+
+/// One slot of a [`ValueTable`]: what was written, and when.
+///
+/// The stamp sits beside the value rather than in a table of its own, because
+/// every read wants both — a separate stamp array would make each operand read
+/// touch two cache lines instead of one, and would make the table two
+/// allocations where a mixed-signal trial copies the whole scratch per trial.
+#[derive(Debug, Clone)]
+struct ValueSlot {
+    /// The generation this slot was last written in.
+    stamp: u32,
+    /// Meaningful only when the stamp is the current generation; otherwise it
+    /// is whatever some earlier activation left there.
+    value: DigitalScalar,
 }
 
 impl ValueTable {
@@ -834,9 +846,14 @@ impl ValueTable {
     /// from that function's own value list — and a slot within it carries an
     /// older generation's stamp, which is exactly "undefined".
     fn enter(&mut self, len: usize) {
-        if self.values.len() < len {
-            self.values.resize(len, DigitalScalar::Effect);
-            self.stamps.resize(len, 0);
+        if self.slots.len() < len {
+            self.slots.resize(
+                len,
+                ValueSlot {
+                    stamp: 0,
+                    value: DigitalScalar::Effect,
+                },
+            );
         }
         self.current = match self.current.checked_add(1) {
             Some(next) => next,
@@ -845,7 +862,9 @@ impl ValueTable {
             // slot written before the wrap can be mistaken for one written
             // after it. The reset is O(|values|), once per 2^32 entries.
             None => {
-                self.stamps.fill(0);
+                for slot in &mut self.slots {
+                    slot.stamp = 0;
+                }
                 1
             }
         };
@@ -857,15 +876,16 @@ impl ValueTable {
     /// value from an earlier activation lives until the slot is used again
     /// rather than until the next entry.
     fn define(&mut self, id: ValueId, value: DigitalScalar) {
-        let index = usize::from(id);
-        self.values[index] = value;
-        self.stamps[index] = self.current;
+        let current = self.current;
+        let slot = &mut self.slots[usize::from(id)];
+        slot.value = value;
+        slot.stamp = current;
     }
 
     /// This activation's value for `id`, if this activation gave it one.
     fn defined(&self, id: ValueId) -> Option<&DigitalScalar> {
-        let index = usize::from(id);
-        (self.stamps[index] == self.current).then(|| &self.values[index])
+        let slot = &self.slots[usize::from(id)];
+        (slot.stamp == self.current).then_some(&slot.value)
     }
 
     /// The operand `id` names, borrowed.
