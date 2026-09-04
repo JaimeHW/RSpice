@@ -40,16 +40,44 @@ const SHIPPED_CENSUS_MODELS: usize = 43;
 /// move this pin exists to prevent — it converts a detector into a rubber
 /// stamp.
 ///
-/// The day [`crate::jit::cfg_plan_builder::DEFAULT_PLAN_ROUTE`] becomes
-/// `PlanRoute::Cfg`, this value moves — the census compiles through
-/// [`crate::native::x64::compile_model_with_canonical_ir`], which is the path
-/// that switch decides — and the evidence that re-baselines it is the same
-/// per-module list, read a particular way: every module the fallback logs by
-/// name (`[JIT] Model '…' takes the postfix plan`) must be digest *identical*,
-/// because nothing about its plan changed, and every module that does not move
-/// without appearing in that log did not take the CFG route after all.
+/// # The CFG plan flip, and how this value was re-baselined for it
 ///
-/// The value below remains valid: production builds the postfix plan. History:
+/// `79e2c753…` moved to `0899a73a…` when production stopped compiling the
+/// postfix plan. The census compiles through
+/// [`crate::native::x64::compile_model_with_canonical_ir`], which is exactly the
+/// path that changed, so the digest moving is the expected result and the
+/// evidence is the per-module list read a particular way: **every** module the
+/// fallback names must be digest identical, because nothing about its plan
+/// changed, and **every other** module must move, because one that did not would
+/// be one that never took the CFG route.
+///
+/// Both halves hold, and there is no third case. Two modules are identical —
+/// `mvsg_cmc` (`cmc/mvsg_cmc_v4.0.0_official/vacode/mvsg_cmc_4.0.0.va`) at
+/// 2,861,548 bytes and `bsimsoi`
+/// (`cmc/BSIM_SOI_100.1.1_09152025/code/bsimsoi.va`) at 9,498,652 — and those
+/// are precisely the two the CFG route refuses, both on the W-D
+/// `Ddt`-under-condition class that [`crate::native::cfg_size_census`] reports as
+/// `lowering=refused … canonical analog operator Ddt runs under a condition and
+/// its operand cone contains BlockParameter`. The other forty-one all moved.
+///
+/// The images grew, which is the CFG route's known cost and not news:
+/// `bsimcmg_va` 4,798,396 to 5,623,596, `asmhemt` 16,661,736 to 17,287,712 and
+/// `hicumL2va` 939,040 to 1,266,812 reproduce
+/// [`crate::native::cfg_size_census`]'s `image route=cfg` figures exactly, which
+/// is the cross-check that these are the images that census measures. Two
+/// readings are worth naming beyond it: `l_utsoi` grew 4.2x (2,926,408 to
+/// 12,356,892, and its `_nqs` sibling likewise), the largest factor in the
+/// corpus; and the three `hisimhv` variants — 65,119,620, 71,142,388 and
+/// 71,138,396 bytes — are now **past**
+/// [`crate::native::SHIPPED_MODEL_NATIVE_CODE_SIZE_BUDGET_BYTES`], which is 60
+/// MiB. `native_shipped_models` asserts that budget and cannot see it, because
+/// it fails earlier on `vbic13_4t` for an unrelated reason that reproduces on
+/// the pre-flip revision.
+///
+/// Measured 2026-09-03 on the flip, peers idle, 744 s.
+///
+/// # Earlier history
+///
 /// `fe9a2072…` moved to `e00c6b88…` at W-F3a (`84ba2c2bb`), which ruled
 /// `limexp`'s threshold once for the whole estate — exactly five modules
 /// changed (`angelov`, `angelov_gan`, `hicumL0va`, `hicumL2va`, `vbic_4T_et_cf`,
@@ -64,7 +92,7 @@ const SHIPPED_CENSUS_MODELS: usize = 43;
 /// `hicumL2va` `flicker_Pwr`, `r3_cmc` `gc`) — and the other thirty-five were
 /// digest identical (measured 2026-09-03 on `1ba20f27c`, peers idle, 893 s).
 const SHIPPED_CENSUS_DIGEST: &str =
-    "79e2c753f224100286136c38cfa1ae10ebf3973f5b64385cff64e7565e1632c8";
+    "0899a73acb445016131b610b012ed3c3f88d67d2aef136569724f0d4877e5f09";
 
 /// One shipped module's compiled machine-code digest.
 struct ModelImageDigest {
