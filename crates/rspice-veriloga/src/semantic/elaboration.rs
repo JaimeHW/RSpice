@@ -478,7 +478,13 @@ impl<'a> HierarchyElaborator<'a> {
         }
         self.flattened.event_state_variables.sort_unstable();
         self.flattened.event_state_variables.dedup();
-        for (name, array) in &child.arrays {
+        // By name, because `fresh_name` draws from one counter shared by every
+        // renamed item: walking the child's array map would hand a different
+        // hoisted name to each array — and to everything renamed after it —
+        // on every process that flattens this hierarchy.
+        let mut child_arrays: Vec<_> = child.arrays.iter().collect();
+        child_arrays.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+        for (name, array) in child_arrays {
             let mapped_name = self.fresh_name(name);
             scope.arrays.insert(name.clone(), mapped_name.clone());
             self.flattened.arrays.insert(
