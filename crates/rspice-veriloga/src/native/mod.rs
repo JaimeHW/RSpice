@@ -13,6 +13,8 @@ pub(crate) mod census_models;
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod cfg_census;
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
+mod cfg_cost_census;
+#[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod cfg_mir_census;
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod cfg_noise_pins;

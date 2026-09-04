@@ -555,7 +555,7 @@ enum GuardedNoise {
 }
 
 /// Every entry position the two plans both carry, in plan order.
-fn entry_positions(model: &crate::codegen::CompiledModel) -> Vec<CfgPlanEntry> {
+pub(super) fn entry_positions(model: &crate::codegen::CompiledModel) -> Vec<CfgPlanEntry> {
     let mut positions = Vec::new();
     for (stamp_index, stamp) in model.stamp_programs.iter().enumerate() {
         positions.push(CfgPlanEntry::StampValue(stamp_index));
@@ -614,7 +614,7 @@ fn entry_operations(
 
 /// Run one entry on one compiled plan, or `None` if it reported a runtime
 /// error at this bias.
-fn run_entry(
+pub(super) fn run_entry(
     native: &NativeModel,
     entry: CfgPlanEntry,
     context: &EvalContext,
@@ -792,13 +792,13 @@ fn check_structural_zero(comparison: &Comparison) -> StructuralZero {
 }
 
 /// Storage both routes read, sized once per model.
-struct Storage {
-    currents: Vec<f64>,
-    branch_currents: Vec<f64>,
+pub(super) struct Storage {
+    pub(super) currents: Vec<f64>,
+    pub(super) branch_currents: Vec<f64>,
 }
 
 impl Storage {
-    fn for_model(model: &crate::codegen::CompiledModel) -> Self {
+    pub(super) fn for_model(model: &crate::codegen::CompiledModel) -> Self {
         // Slack past every declared count keeps a stray index inside the
         // allocation: an unchecked indexed load must not decide whether this
         // census process survives.
