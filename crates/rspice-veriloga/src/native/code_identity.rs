@@ -40,7 +40,37 @@ const SHIPPED_CENSUS_MODELS: usize = 43;
 /// move this pin exists to prevent — it converts a detector into a rubber
 /// stamp.
 ///
-/// # The CFG plan flip, and how this value was re-baselined for it
+/// # The noise magnitudes joining the prelude
+///
+/// `0899a73a…` moved to `8c19a2f5…` at W-F13a, when the noise magnitudes
+/// stopped being per-entry cones and became prelude slots like every other
+/// value entry. The reading is the same shape as the flip's below, with one
+/// more case in it: a module's image moves **exactly when it has a noise
+/// source the CFG route lowers**, so the modules that stay identical are the
+/// two the route refuses plus the two that carry no noise at all.
+///
+/// Four are identical and thirty-nine moved. `mvsg_cmc` (2,861,548 bytes) and
+/// the `BSIM_SOI_100.1.1` `bsimsoi` (9,498,652) are the W-D refusals named
+/// below — byte for byte what they were before this change, which is what says
+/// a refused module's plan is untouched by it. `EPFL_HEMT_10a` (241,272) and
+/// `vbic_4T_et_cf` (344,160) are the other case: they are the only two shipped
+/// modules with no noise source, so there was no magnitude of theirs to move.
+/// Every one of the thirty-nine that moved has at least one.
+///
+/// The images grew by 442,240 bytes over the whole corpus — 486,705,936 to
+/// 487,148,176, 0.09 per cent — and not one shrank. The largest factor is
+/// `angelov` at 4.77 per cent (193,556 to 202,788); it and `angelov_gan` are
+/// the two modules the frame census reads as publishing sixteen of twenty-two
+/// magnitudes, the largest hoisted remainder in the corpus. The five the cost
+/// census reads are `asmesd` 0.74, `vbic13_4t` 0.42, `hicumL2va` 0.09,
+/// `bsimcmg_va` 0.76 and `asmhemt` 0.02 per cent. The two readings the flip
+/// singled out barely move: `l_utsoi` 0.042 per cent and the three `hisimhv`
+/// variants 0.005 — they are past the 60 MiB budget for the flip's reasons and
+/// not for this change's.
+///
+/// Measured 2026-09-04, peers idle, 558 s, and reproduced per module at 178 s.
+///
+/// # The CFG plan flip, and how the previous value was re-baselined for it
 ///
 /// `79e2c753…` moved to `0899a73a…` when production stopped compiling the
 /// postfix plan. The census compiles through
@@ -92,7 +122,7 @@ const SHIPPED_CENSUS_MODELS: usize = 43;
 /// `hicumL2va` `flicker_Pwr`, `r3_cmc` `gc`) — and the other thirty-five were
 /// digest identical (measured 2026-09-03 on `1ba20f27c`, peers idle, 893 s).
 const SHIPPED_CENSUS_DIGEST: &str =
-    "0899a73acb445016131b610b012ed3c3f88d67d2aef136569724f0d4877e5f09";
+    "8c19a2f5c9d55b4ab125ff355a2029f4ab010e6963b1fbf5c8e853b7f6feab6b";
 
 /// One shipped module's compiled machine-code digest.
 struct ModelImageDigest {
