@@ -273,3 +273,46 @@ fn the_builder_says_which_magnitudes_it_hoisted() {
          keeps the exit value"
     );
 }
+
+/// Production takes its noise from the CFG, so every magnitude must be a
+/// program this route built — not "equivalent to" the shipped one.
+///
+/// The scope that used to select between the two is gone, so this is where the
+/// claim it made lives: `the_postfix_scope_takes_no_noise_from_the_cfg` said
+/// the entries stayed the shipped programs, and its replacement says the
+/// opposite, on the same module and by the same reading — the form of every
+/// entry the plan carries.
+#[test]
+fn the_plan_takes_every_noise_magnitude_from_the_cfg() {
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    let model = compiler.compile(SHAPES).expect("compile bytecode model");
+    let artifact = compiler
+        .compile_canonical_ir(SHAPES)
+        .expect("compile canonical IR");
+    let built = build_model_plan_from_canonical_cfg(&model, &artifact)
+        .unwrap_or_else(|refused| panic!("CFG plan: {refused}"));
+    let shipped = build_model_plan_with_canonical_ir(&model, &artifact).expect("shipped plan");
+
+    assert_eq!(built.plan.noise_psd.len(), shipped.noise_psd.len());
+    assert!(!built.plan.noise_psd.is_empty());
+    for (index, entry) in built.plan.noise_psd.iter().enumerate() {
+        assert_eq!(
+            entry.borrow().form_name(),
+            "block",
+            "noise_psd[{index}] must be the CFG route's own program"
+        );
+    }
+    let exponents = built
+        .plan
+        .noise_exponents
+        .iter()
+        .flatten()
+        .map(|entry| entry.borrow().form_name())
+        .collect::<Vec<_>>();
+    assert!(!exponents.is_empty(), "the fixture carries flicker sources");
+    assert_eq!(
+        exponents,
+        vec!["block"; exponents.len()],
+        "every flicker exponent must be the CFG route's own program"
+    );
+}
