@@ -69,7 +69,9 @@ use rspice_veriloga::canonical_ir::digital_eval::{
 use rspice_veriloga::canonical_ir::digital_value::FourStateValue;
 use rspice_veriloga::canonical_ir::ids::DigitalSignalId;
 
-use super::store::{DigitalSignalStore, StoreError, TransitionValues, signal_name};
+use super::store::{
+    DigitalSignalStore, SignalTransition, StoreError, TransitionValues, signal_name,
+};
 use crate::xspice::EventValue;
 use crate::xspice::digital::DigitalValue;
 use crate::xspice::event_scheduler::{
@@ -402,6 +404,10 @@ pub(crate) struct DigitalHost {
     /// The drivers one drain of the kernel reported, reused across delta
     /// cycles so that settling a tick does not allocate per pass.
     fired: Vec<TargetId>,
+    /// The transitions one dispatch round consumed, reused for the reason
+    /// `fired` is: a drain that handed back a fresh `Vec` allocated one per
+    /// round, and a round happens whenever anything moves.
+    drained: Vec<SignalTransition>,
 }
 
 impl DigitalHost {
@@ -466,6 +472,7 @@ impl DigitalHost {
             targets,
             process_of_target,
             fired: Vec::new(),
+            drained: Vec::new(),
             plan,
         }
     }
@@ -765,12 +772,27 @@ impl DigitalHost {
     /// twice inside one process is two events, and a process watching for an
     /// edge sees both.
     fn dispatch(&mut self, tick: u64) -> Result<(), DigitalRunError> {
+        // Taken out of `self` for the duration of the round, so that waking a
+        // process — which needs the whole host — cannot hold a borrow of the
+        // buffer, and put back with its capacity for the next round.
+        let mut drained = std::mem::take(&mut self.drained);
+        let outcome = self.dispatch_into(tick, &mut drained);
+        drained.clear();
+        self.drained = drained;
+        outcome
+    }
+
+    fn dispatch_into(
+        &mut self,
+        tick: u64,
+        drained: &mut Vec<SignalTransition>,
+    ) -> Result<(), DigitalRunError> {
         loop {
-            let transitions = self.store.take_transitions();
-            if transitions.is_empty() {
+            self.store.drain_transitions_into(drained);
+            if drained.is_empty() {
                 return Ok(());
             }
-            for transition in transitions {
+            for transition in drained.iter() {
                 let net = usize::from(transition.signal);
                 let mut position = 0usize;
                 while position < self.waiters[net].len() {

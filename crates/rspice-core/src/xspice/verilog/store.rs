@@ -540,8 +540,26 @@ impl DigitalSignalStore {
     }
 
     /// Value changes since the last drain, oldest first.
+    ///
+    /// The tests' reader. The host drains through
+    /// [`Self::drain_transitions_into`], which is the same operation without
+    /// the allocation; this one hands back an owned queue, which is what an
+    /// assertion about one wants and what no hot path should ask for.
+    #[cfg(test)]
     pub(crate) fn take_transitions(&mut self) -> Vec<SignalTransition> {
         std::mem::take(&mut self.transitions)
+    }
+
+    /// Drain the value changes into a buffer the caller owns.
+    ///
+    /// The same drain as [`Self::take_transitions`] with the allocation taken
+    /// out of it: the caller's cleared buffer becomes the queue and the queue
+    /// becomes the caller's, so the two capacities swap rather than one being
+    /// obtained and the other dropped. A dispatch round happens whenever
+    /// anything moves, which on a gate-level design is most activations.
+    pub(crate) fn drain_transitions_into(&mut self, out: &mut Vec<SignalTransition>) {
+        out.clear();
+        std::mem::swap(&mut self.transitions, out);
     }
 
     /// The value a real net holds right now.
