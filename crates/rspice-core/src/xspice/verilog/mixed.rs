@@ -463,6 +463,56 @@ impl AnalogSolverInputs {
     }
 }
 
+/// The working vectors the trial machinery fills and empties.
+///
+/// One per host, kept across trials, because every one of these is written from
+/// scratch by the pass that reads it and none of them outlives the call that
+/// fills it. Allocating them per call made a settle cost a dozen `malloc`s to
+/// answer a question about two bridges — the boundary tables are a handful of
+/// entries wide, so the allocation dominated the arithmetic.
+///
+/// Held by value rather than behind a [`MixedCell`]: a capture must never see
+/// one, and a host clone is welcome to start with empty ones.
+#[derive(Clone, Default)]
+struct TrialScratch {
+    /// Each D/A bridge's driven bit before and after one boundary settle.
+    ///
+    /// Bits rather than [`FourStateValue`]s, which are two heap planes each.
+    /// `scalar_signal` refuses a bridge on anything but a one-bit signal, so
+    /// bit zero *is* the value and comparing bits is comparing values.
+    dac_before: Vec<FourStateBit>,
+    dac_after: Vec<FourStateBit>,
+    /// Differential voltage each A/D bridge was sampled at.
+    sampled: Vec<f64>,
+    /// The continuous-net probe bank one settle sampled.
+    probes: Vec<f64>,
+    /// The A/D transitions one settle publishes, and their interpolated
+    /// crossing times paired with the bridge index.
+    drives: Vec<(DigitalSignalId, FourStateValue)>,
+    crossings: Vec<(usize, f64)>,
+    /// The boundary histories an acceptance would produce, computed before
+    /// anything is committed so a chattering boundary can still be refused.
+    adc_history: Vec<BoundaryNetHistory>,
+    dac_history: Vec<BoundaryNetHistory>,
+    /// The five vectors of the last finished trial, ready to be refilled.
+    trial: TrialVectors,
+}
+
+/// The per-trial vectors, moved between [`TrialScratch`] and [`ActiveTrial`].
+///
+/// A trial's own bookkeeping is parallel to the bridge tables and to the probe
+/// list, so every vector here is the same length on every trial of a run.
+/// Passing them back and forth rather than allocating a set per trial is what
+/// makes an opened trial cost no allocation at all.
+#[derive(Clone, Default)]
+struct TrialVectors {
+    transition_times: Vec<Option<f64>>,
+    sampled_adc_voltages: Vec<f64>,
+    probe_values: Vec<f64>,
+    adc_moved: Vec<bool>,
+    dac_moved: Vec<bool>,
+}
+
 /// Everything a rejected trial has to put back.
 ///
 /// The analog device is deliberately not in here; [`MixedSignalHost::analog`]
@@ -543,25 +593,24 @@ struct ActiveTrial {
     /// trial accepted without sampling its bridges is refused rather than
     /// committed on an unexamined boundary.
     bridges_quiet: bool,
-    /// Interpolated crossing times published during this trial, parallel to
-    /// `bridges.adc`, folded into the accepted state on acceptance.
-    transition_times: Vec<Option<f64>>,
-    /// Differential voltage each A/D bridge was last sampled at, parallel to
-    /// `bridges.adc`. The last settle of the trial that is accepted saw the
-    /// accepted solution, so this becomes the far end of the interval the next
-    /// timepoint's crossings are interpolated in — without the caller having
-    /// to hand the accepted solution back a second time.
-    sampled_adc_voltages: Vec<f64>,
-    /// Continuous-net probe values sampled during this trial, parallel to
-    /// `MixedSignalHost::analog_probes`, folded into the accepted state on
-    /// acceptance for the reason `sampled_adc_voltages` is.
-    probe_values: Vec<f64>,
-    /// Whether any settle of this trial moved each A/D boundary net, parallel
-    /// to `bridges.adc`.
-    adc_moved: Vec<bool>,
-    /// Whether any settle of this trial moved each D/A boundary net, parallel
-    /// to `bridges.dac`.
-    dac_moved: Vec<bool>,
+    /// This trial's own bookkeeping, borrowed from the host's scratch and
+    /// handed back when the trial finishes.
+    ///
+    /// * `transition_times` — interpolated crossing times published during this
+    ///   trial, parallel to `bridges.adc`, folded into the accepted state on
+    ///   acceptance.
+    /// * `sampled_adc_voltages` — differential voltage each A/D bridge was last
+    ///   sampled at, parallel to `bridges.adc`. The last settle of the trial
+    ///   that is accepted saw the accepted solution, so this becomes the far
+    ///   end of the interval the next timepoint's crossings are interpolated
+    ///   in — without the caller having to hand the accepted solution back a
+    ///   second time.
+    /// * `probe_values` — continuous-net probe values sampled during this
+    ///   trial, parallel to `MixedSignalHost::analog_probes`, folded into the
+    ///   accepted state on acceptance for the reason `sampled_adc_voltages` is.
+    /// * `adc_moved` / `dac_moved` — whether any settle of this trial moved
+    ///   each boundary net, parallel to `bridges.adc` and `bridges.dac`.
+    vectors: TrialVectors,
 }
 
 /// Opaque, exact restart image for a settled mixed module.
@@ -641,6 +690,8 @@ pub struct MixedSignalHost {
     /// The solver inputs [`Self::analog`] is currently holding.
     analog_inputs: AnalogSolverInputs,
     state: MixedState,
+    /// The working vectors of the trial machinery, kept across trials.
+    scratch: TrialScratch,
     trial: Option<ActiveTrial>,
     /// Every continuous-net probe the discrete half declares, resolved to
     /// circuit nodes. Empty for a module whose processes read no analog value,
@@ -783,28 +834,12 @@ impl MixedSignalHost {
                 accepted_time: 0.0,
                 started: false,
             },
+            scratch: TrialScratch::default(),
             trial: None,
             analog_probes,
             max_circuit_node: terminal_nodes.iter().copied().max().unwrap_or(0),
             max_bridge_iterations,
         })
-    }
-
-    /// Every continuous-net probe's differential potential, out of one circuit
-    /// solution.
-    ///
-    /// The same arithmetic an A/D bridge samples with, through the same
-    /// `node_voltage` — a probe and a bridge that name one node must agree
-    /// about its voltage, and the way to guarantee that is for there to be one
-    /// function that answers.
-    fn sample_analog_probes(&self, circuit_voltages: &[f64]) -> Vec<f64> {
-        self.analog_probes
-            .iter()
-            .map(|probe| {
-                node_voltage(circuit_voltages, probe.positive)
-                    - node_voltage(circuit_voltages, probe.negative)
-            })
-            .collect()
     }
 
     /// The deck's name for this instance.
@@ -1109,11 +1144,28 @@ impl MixedSignalHost {
             return Err(error);
         }
         self.analog_inputs = inputs;
-        let transition_times = self.state.accepted_adc_transition_times.clone();
-        let sampled_adc_voltages = self.state.accepted_adc_voltages.clone();
-        let probe_values = self.state.accepted_probe_values.clone();
-        let adc_moved = vec![false; self.state.bridges.adc.len()];
-        let dac_moved = vec![false; self.state.bridges.dac.len()];
+        // Refilled rather than allocated. `clone_from` and `resize` keep the
+        // allocation the last trial handed back, and every one of these is the
+        // same length on every trial of a run, so an opened trial allocates
+        // nothing.
+        let mut vectors = std::mem::take(&mut self.scratch.trial);
+        vectors
+            .transition_times
+            .clone_from(&self.state.accepted_adc_transition_times);
+        vectors
+            .sampled_adc_voltages
+            .clone_from(&self.state.accepted_adc_voltages);
+        vectors
+            .probe_values
+            .clone_from(&self.state.accepted_probe_values);
+        vectors.adc_moved.clear();
+        vectors
+            .adc_moved
+            .resize(self.state.bridges.adc.len(), false);
+        vectors.dac_moved.clear();
+        vectors
+            .dac_moved
+            .resize(self.state.bridges.dac.len(), false);
         self.trial = Some(ActiveTrial {
             rollback,
             analog_inputs: previous_inputs,
@@ -1123,11 +1175,7 @@ impl MixedSignalHost {
             probe,
             bridge_iterations: 0,
             bridges_quiet: false,
-            transition_times,
-            sampled_adc_voltages,
-            probe_values,
-            adc_moved,
-            dac_moved,
+            vectors,
         });
         Ok(())
     }
@@ -1186,7 +1234,7 @@ impl MixedSignalHost {
         let probes = self
             .trial
             .as_ref()
-            .map(|trial| trial.probe_values.clone())
+            .map(|trial| trial.vectors.probe_values.clone())
             .unwrap_or_default();
         let digital = self.state.digital.make_mut();
         digital.sample_analog_potentials(&probes);
@@ -1313,15 +1361,41 @@ impl MixedSignalHost {
             });
         }
         self.validate_solution(circuit_voltages)?;
-        let before = self.dac_values()?;
-        let mut drives = Vec::new();
-        let mut crossings = Vec::new();
-        let mut sampled = Vec::with_capacity(self.state.bridges.adc.len());
+        // Borrowed for the whole pass, so the bridge tables and the store can
+        // be read while the working vectors are written. Handed back at every
+        // exit — the `?`s below give up their allocations rather than their
+        // correctness, and each of those refusals ends the run.
+        let mut scratch = std::mem::take(&mut self.scratch);
+        let settled = self.settle_into(
+            &mut scratch,
+            tick,
+            time_seconds,
+            timestep_seconds,
+            circuit_voltages,
+        );
+        self.scratch = scratch;
+        settled
+    }
+
+    /// [`Self::settle_analog_bridges`]'s body, with the scratch vectors held
+    /// apart from the host so both can be borrowed at once.
+    fn settle_into(
+        &mut self,
+        scratch: &mut TrialScratch,
+        tick: u64,
+        time_seconds: f64,
+        timestep_seconds: f64,
+        circuit_voltages: &[f64],
+    ) -> Result<bool, MixedSignalError> {
+        read_dac_bits(&self.state, &mut scratch.dac_before)?;
+        scratch.drives.clear();
+        scratch.crossings.clear();
+        scratch.sampled.clear();
         let mut publish_tick = tick;
         for (index, bridge) in self.state.bridges.adc.iter().enumerate() {
             let voltage = node_voltage(circuit_voltages, bridge.positive)
                 - node_voltage(circuit_voltages, bridge.negative);
-            sampled.push(voltage);
+            scratch.sampled.push(voltage);
             let (bit, threshold) = if voltage <= bridge.low {
                 (Some(FourStateBit::Zero), bridge.low)
             } else if voltage >= bridge.high {
@@ -1330,8 +1404,18 @@ impl MixedSignalHost {
                 (None, 0.0)
             };
             let Some(bit) = bit else { continue };
-            let next = FourStateValue::splat(1, bit);
-            if self.state.digital.read(bridge.signal) == Some(&next) {
+            // Compared as a bit rather than by building the value the bridge
+            // would publish: `scalar_signal` makes every bridge signal one bit
+            // wide, and a `FourStateValue` is two heap planes, so building one
+            // to discover the boundary has not moved was an allocation for the
+            // common answer.
+            if self
+                .state
+                .digital
+                .read(bridge.signal)
+                .map(|value| value.bit(0))
+                == Some(bit)
+            {
                 continue;
             }
             let crossing = threshold_crossing_time(
@@ -1352,8 +1436,10 @@ impl MixedSignalHost {
                 .seconds_to_ticks(crossing)
                 .map_err(DigitalRunError::from)?;
             publish_tick = publish_tick.max(crossing_tick);
-            drives.push((bridge.signal, next));
-            crossings.push((index, crossing));
+            scratch
+                .drives
+                .push((bridge.signal, FourStateValue::splat(1, bit)));
+            scratch.crossings.push((index, crossing));
         }
         // Sampled from the same converged candidate the bridges were, and
         // published into the store *before* the transitions that wake the
@@ -1364,32 +1450,40 @@ impl MixedSignalHost {
         // 7.3.6.3's "analog value calculated for the time corresponding to a
         // real promotion of the digital time", with the two domains at one
         // timepoint and nothing to interpolate between.
-        let probe_values = self.sample_analog_probes(circuit_voltages);
-        if !drives.is_empty() {
+        fill_analog_probes(&self.analog_probes, circuit_voltages, &mut scratch.probes);
+        if !scratch.drives.is_empty() {
             let digital = self.state.digital.make_mut();
-            digital.sample_analog_potentials(&probe_values);
-            digital.force_many(&drives, publish_tick)?;
+            digital.sample_analog_potentials(&scratch.probes);
+            digital.force_many(&scratch.drives, publish_tick)?;
             if let Some(trial) = self.trial.as_mut() {
-                for (index, crossing) in crossings {
-                    trial.transition_times[index] = Some(crossing);
-                    trial.adc_moved[index] = true;
+                for &(index, crossing) in &scratch.crossings {
+                    trial.vectors.transition_times[index] = Some(crossing);
+                    trial.vectors.adc_moved[index] = true;
                 }
             }
         }
-        let after = self.dac_values()?;
-        let changed = before != after;
+        read_dac_bits(&self.state, &mut scratch.dac_after)?;
+        let changed = scratch.dac_before != scratch.dac_after;
         if let Some(trial) = self.trial.as_mut() {
             // Which D/A nets moved, not merely that one did. The boundary
             // diagnostic names participants, and a `!=` on the whole vector
             // knows only that the set moved.
-            for (index, (was, now)) in before.iter().zip(&after).enumerate() {
+            for (index, (was, now)) in scratch
+                .dac_before
+                .iter()
+                .zip(&scratch.dac_after)
+                .enumerate()
+            {
                 if was != now {
-                    trial.dac_moved[index] = true;
+                    trial.vectors.dac_moved[index] = true;
                 }
             }
             trial.bridges_quiet = !changed;
-            trial.sampled_adc_voltages = sampled;
-            trial.probe_values = probe_values;
+            std::mem::swap(
+                &mut trial.vectors.sampled_adc_voltages,
+                &mut scratch.sampled,
+            );
+            std::mem::swap(&mut trial.vectors.probe_values, &mut scratch.probes);
         }
         Ok(changed)
     }
@@ -1425,28 +1519,40 @@ impl MixedSignalHost {
         }
         if let Err(error) = self.analog.validate_advance_state() {
             let trial = self.trial.take().expect("checked above");
-            self.state.digital = trial.rollback;
-            let _ = self.undo_analog_inputs(trial.analog_inputs);
+            self.unwind(trial);
             return Err(analog_error(error));
         }
-        let trial = self.trial.take().expect("checked above");
+        let mut trial = self.trial.take().expect("checked above");
         // Fold this timepoint into each boundary net's accepted history before
         // anything is committed, so a boundary that has been moving at every
         // accepted timepoint is refused with the analog integrator still where
-        // the trial found it.
-        let (adc_history, dac_history) = self.folded_boundary_histories(&trial);
-        if let Some(oscillation) = self.boundary_flip_run(&adc_history, &dac_history, trial.tick) {
-            self.state.digital = trial.rollback;
-            let _ = self.undo_analog_inputs(trial.analog_inputs);
+        // the trial found it. Folded into the scratch pair rather than a fresh
+        // one, so the refusal that never fires costs no allocation.
+        let mut histories = (
+            std::mem::take(&mut self.scratch.adc_history),
+            std::mem::take(&mut self.scratch.dac_history),
+        );
+        self.fold_boundary_histories(&trial, &mut histories.0, &mut histories.1);
+        if let Some(oscillation) = self.boundary_flip_run(&histories.0, &histories.1, trial.tick) {
+            self.scratch.adc_history = histories.0;
+            self.scratch.dac_history = histories.1;
+            self.unwind(trial);
             return Err(oscillation);
         }
-        self.state.adc_history = adc_history;
-        self.state.dac_history = dac_history;
+        // Swapped rather than assigned, so the bank the accepted state is
+        // giving up becomes next acceptance's scratch instead of a free.
+        std::mem::swap(&mut self.state.adc_history, &mut histories.0);
+        std::mem::swap(&mut self.state.dac_history, &mut histories.1);
+        self.scratch.adc_history = histories.0;
+        self.scratch.dac_history = histories.1;
         self.analog.make_mut().apply_validated_advance_state();
         self.state.accepted_tick = trial.tick;
         self.state.accepted_time = trial.time_seconds;
         self.state.started = true;
-        self.state.accepted_adc_transition_times = trial.transition_times;
+        std::mem::swap(
+            &mut self.state.accepted_adc_transition_times,
+            &mut trial.vectors.transition_times,
+        );
         // The settle that reported the boundary quiet is the one that saw the
         // solution this acceptance keeps, so its samples are the accepted
         // voltages, and they become the far end of the interval the next
@@ -1454,12 +1560,33 @@ impl MixedSignalHost {
         // rather than asking the caller to hand the accepted solution back is
         // what keeps the two from ever disagreeing about which solution was
         // kept.
-        self.state.accepted_adc_voltages = trial.sampled_adc_voltages;
+        std::mem::swap(
+            &mut self.state.accepted_adc_voltages,
+            &mut trial.vectors.sampled_adc_voltages,
+        );
         // And the probe bank the same settle sampled becomes what a process
         // waking on its own schedule at a later tick reads, for the same
         // reason: it is the analog solution this acceptance kept.
-        self.state.accepted_probe_values = trial.probe_values;
+        std::mem::swap(
+            &mut self.state.accepted_probe_values,
+            &mut trial.vectors.probe_values,
+        );
+        self.scratch.trial = trial.vectors;
         Ok(())
+    }
+
+    /// Put a trial back the way it found things, and take its vectors back.
+    ///
+    /// The three refusals that unwind a trial — a failed advance validation, a
+    /// chattering boundary, and [`Self::reject_trial`] — differ only in what
+    /// they report, so they say what they undo in one place. The two analysis
+    /// setters put the device's own inputs back and cannot be refused for
+    /// values the device was holding a moment ago; if one is, the refusal worth
+    /// reporting is the caller's rather than a consequence of it.
+    fn unwind(&mut self, trial: ActiveTrial) {
+        self.state.digital = trial.rollback;
+        let _ = self.undo_analog_inputs(trial.analog_inputs);
+        self.scratch.trial = trial.vectors;
     }
 
     /// Restore every digital, event and driver bit to the state at
@@ -1483,9 +1610,11 @@ impl MixedSignalHost {
             .ok_or_else(|| MixedSignalError::TrialProtocol {
                 detail: "there is no active trial to reject".into(),
             })?;
-        self.state.digital = trial.rollback;
-        self.undo_analog_inputs(trial.analog_inputs)?;
-        Ok(())
+        let inputs = trial.analog_inputs;
+        self.unwind(trial);
+        // Reported here and swallowed in the other two unwinds, because this
+        // is the one that has no refusal of its own to report.
+        self.undo_analog_inputs(inputs)
     }
 
     /// Interpolated analog time of the most recent accepted transition on an
@@ -1583,17 +1712,19 @@ impl MixedSignalHost {
     /// is committed. A net whose signal has disappeared from the store — which
     /// `stamp` and `dac_values` both refuse on — is recorded as high impedance
     /// rather than skipped, so the parallel indexing holds.
-    fn folded_boundary_histories(
+    fn fold_boundary_histories(
         &self,
         trial: &ActiveTrial,
-    ) -> (Vec<BoundaryNetHistory>, Vec<BoundaryNetHistory>) {
+        adc: &mut Vec<BoundaryNetHistory>,
+        dac: &mut Vec<BoundaryNetHistory>,
+    ) {
         let read_bit = |signal| {
             self.state
                 .digital
                 .read(signal)
                 .map_or(FourStateBit::HighImpedance, |value| value.bit(0))
         };
-        let mut adc = Vec::with_capacity(self.state.bridges.adc.len());
+        adc.clear();
         for (index, bridge) in self.state.bridges.adc.iter().enumerate() {
             let mut entry = self
                 .state
@@ -1603,11 +1734,11 @@ impl MixedSignalHost {
                 .unwrap_or_default();
             entry.push(
                 read_bit(bridge.signal),
-                trial.adc_moved.get(index).copied().unwrap_or(false),
+                trial.vectors.adc_moved.get(index).copied().unwrap_or(false),
             );
             adc.push(entry);
         }
-        let mut dac = Vec::with_capacity(self.state.bridges.dac.len());
+        dac.clear();
         for (index, bridge) in self.state.bridges.dac.iter().enumerate() {
             let mut entry = self
                 .state
@@ -1617,11 +1748,10 @@ impl MixedSignalHost {
                 .unwrap_or_default();
             entry.push(
                 read_bit(bridge.signal),
-                trial.dac_moved.get(index).copied().unwrap_or(false),
+                trial.vectors.dac_moved.get(index).copied().unwrap_or(false),
             );
             dac.push(entry);
         }
-        (adc, dac)
     }
 
     /// The diagnostic for a boundary that has moved at every accepted timepoint
@@ -1701,30 +1831,35 @@ impl MixedSignalHost {
         };
         let spelling =
             |bit| BoundaryNetHistory::spelling(BoundaryNetHistory::code(bit)).to_string();
-        let mut nets: Vec<BoundaryNetActivity> =
-            self.state
-                .bridges
-                .adc
-                .iter()
-                .zip(&trial.adc_moved)
-                .map(|(bridge, moved)| BoundaryNetActivity {
-                    signal: bridge.signal_name.clone(),
-                    node: bridge.positive,
-                    read_by_module: true,
-                    moves: u32::from(*moved),
-                    recent: vec![spelling(read(bridge.signal))],
-                })
-                .chain(self.state.bridges.dac.iter().zip(&trial.dac_moved).map(
-                    |(bridge, moved)| BoundaryNetActivity {
+        let mut nets: Vec<BoundaryNetActivity> = self
+            .state
+            .bridges
+            .adc
+            .iter()
+            .zip(&trial.vectors.adc_moved)
+            .map(|(bridge, moved)| BoundaryNetActivity {
+                signal: bridge.signal_name.clone(),
+                node: bridge.positive,
+                read_by_module: true,
+                moves: u32::from(*moved),
+                recent: vec![spelling(read(bridge.signal))],
+            })
+            .chain(
+                self.state
+                    .bridges
+                    .dac
+                    .iter()
+                    .zip(&trial.vectors.dac_moved)
+                    .map(|(bridge, moved)| BoundaryNetActivity {
                         signal: bridge.signal_name.clone(),
                         node: bridge.positive,
                         read_by_module: false,
                         moves: u32::from(*moved),
                         recent: vec![spelling(read(bridge.signal))],
-                    },
-                ))
-                .filter(|net| net.moves > 0)
-                .collect();
+                    }),
+            )
+            .filter(|net| net.moves > 0)
+            .collect();
         nets.sort_by(|left, right| right.moves.cmp(&left.moves));
         MixedSignalError::BoundaryOscillation {
             tick: trial.tick,
@@ -1791,23 +1926,41 @@ impl MixedSignalHost {
         }
         Ok(())
     }
+}
 
-    fn dac_values(&self) -> Result<Vec<FourStateValue>, MixedSignalError> {
-        self.state
-            .bridges
-            .dac
-            .iter()
-            .map(|bridge| {
-                self.state
-                    .digital
-                    .read(bridge.signal)
-                    .cloned()
-                    .ok_or_else(|| MixedSignalError::InvalidBridge {
-                        detail: format!("D/A signal `{}` disappeared", bridge.signal_name),
-                    })
-            })
-            .collect()
+/// Read every D/A bridge's driven bit into `out`.
+///
+/// A free function, and taking the state rather than the host, so a caller can
+/// hold the scratch vectors apart from the host while it fills one of them.
+/// `out` is cleared first, so its allocation survives from call to call.
+fn read_dac_bits(state: &MixedState, out: &mut Vec<FourStateBit>) -> Result<(), MixedSignalError> {
+    out.clear();
+    for bridge in &state.bridges.dac {
+        let bit = state
+            .digital
+            .read(bridge.signal)
+            .map(|value| value.bit(0))
+            .ok_or_else(|| MixedSignalError::InvalidBridge {
+                detail: format!("D/A signal `{}` disappeared", bridge.signal_name),
+            })?;
+        out.push(bit);
     }
+    Ok(())
+}
+
+/// Every continuous-net probe's differential potential, out of one circuit
+/// solution.
+///
+/// The same arithmetic an A/D bridge samples with, through the same
+/// `node_voltage` — a probe and a bridge that name one node must agree about
+/// its voltage, and the way to guarantee that is for there to be one function
+/// that answers.
+fn fill_analog_probes(probes: &[AnalogProbeWiring], circuit_voltages: &[f64], out: &mut Vec<f64>) {
+    out.clear();
+    out.extend(probes.iter().map(|probe| {
+        node_voltage(circuit_voltages, probe.positive)
+            - node_voltage(circuit_voltages, probe.negative)
+    }));
 }
 
 /// Resolve every continuous-net probe the discrete half declares to a pair of
