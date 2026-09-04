@@ -685,14 +685,15 @@ enum NoiseMagnitude {
 /// copy [`hoisted_site_function`] builds, and [`CfgPlanReport::noise_hoisted`]
 /// counts them.
 #[derive(Debug, Clone, Copy)]
-struct NoiseMagnitudePlan {
-    entry: CfgPlanEntry,
+pub(crate) struct NoiseMagnitudePlan {
+    pub(crate) entry: CfgPlanEntry,
     /// Which quantity the shipped plan holds for this entry.
     source: NoiseMagnitude,
     /// The value the site computed, when the lowering published one.
     site: Option<ValueId>,
-    /// The value read at the exit block.
-    exit: ValueId,
+    /// The value read at the exit block, and what a prelude publishes when
+    /// [`Self::publishable`].
+    pub(crate) exit: ValueId,
     /// Whether control flow guards the process this magnitude belongs to.
     guarded: bool,
 }
@@ -700,9 +701,101 @@ struct NoiseMagnitudePlan {
 impl NoiseMagnitudePlan {
     /// Whether the exit read is the quantity this entry holds, so the prelude
     /// can publish it. See the type documentation.
-    fn publishable(&self) -> bool {
+    pub(crate) fn publishable(&self) -> bool {
         self.source == NoiseMagnitude::Exit || !self.guarded
     }
+}
+
+/// Resolve every noise entry of `model` against `cfg`, or say why it cannot be.
+///
+/// One decision procedure rather than a step of the builder, because
+/// [`crate::native::cfg_prelude_census`] has to reach the same answer: it
+/// measures whether the production prelude fits an AArch64 stack frame, and a
+/// prelude measured without the magnitudes is not the one production builds.
+/// Its traversal of the *value* entries is still its own — see
+/// `prelude_inputs` for why the builder must stay a builder — and this is a
+/// shared component like [`LiveCurrentTaint`] and [`ShippedColumnLanes`].
+///
+/// `shipped` is the postfix plan, which is where the quantity each entry holds
+/// is recorded; see [`noise_magnitude_source`].
+pub(crate) fn noise_magnitude_plans(
+    module: &str,
+    model: &CompiledModel,
+    shipped: &NativeModelPlan,
+    cfg: &CfgModel,
+) -> Result<Vec<NoiseMagnitudePlan>, CfgPlanRefused> {
+    let refuse = |class: CfgPlanRefusal, detail: String| CfgPlanRefused {
+        module: module.to_owned(),
+        class,
+        detail,
+    };
+    if model.noise_sources.is_empty() {
+        return Ok(Vec::new());
+    }
+    if model.noise_process_schema < 1 {
+        return Err(refuse(
+            CfgPlanRefusal::NoiseUngrouped,
+            format!(
+                "{} sources at noise_process_schema={}",
+                model.noise_sources.len(),
+                model.noise_process_schema
+            ),
+        ));
+    }
+    let processes: HashMap<usize, &CfgNoiseProcess> = cfg
+        .noise_processes
+        .iter()
+        .filter_map(|process| {
+            usize::try_from(process.process_id)
+                .ok()
+                .map(|id| (id, process))
+        })
+        .collect();
+    let mut plans: Vec<NoiseMagnitudePlan> = Vec::with_capacity(model.noise_sources.len());
+    for (source_index, source) in model.noise_sources.iter().enumerate() {
+        let process = processes.get(&source.process_id).ok_or_else(|| {
+            refuse(
+                CfgPlanRefusal::NoiseUnpaired,
+                format!(
+                    "shipped source {source_index} names process {}",
+                    source.process_id
+                ),
+            )
+        })?;
+        let guarded = !process_is_unconditional(&cfg.function, process.active);
+        let psd = CfgPlanEntry::NoisePsd(source_index);
+        plans.push(NoiseMagnitudePlan {
+            entry: psd,
+            source: noise_magnitude_source(shipped, psd),
+            site: process.site.map(|site| site.psd),
+            exit: process.psd,
+            guarded,
+        });
+        match (process.exponent, source.exponent_program.as_ref()) {
+            (Some(exit), Some(_)) => {
+                let entry = CfgPlanEntry::NoiseExponent(source_index);
+                plans.push(NoiseMagnitudePlan {
+                    entry,
+                    source: noise_magnitude_source(shipped, entry),
+                    site: process.site.and_then(|site| site.exponent),
+                    exit,
+                    guarded,
+                });
+            }
+            (None, None) => {}
+            (canonical, shipped) => {
+                return Err(refuse(
+                    CfgPlanRefusal::NoiseUnpaired,
+                    format!(
+                        "source {source_index} exponent: canonical={} shipped={}",
+                        canonical.is_some(),
+                        shipped.is_some()
+                    ),
+                ));
+            }
+        }
+    }
+    Ok(plans)
 }
 
 fn noise_magnitude_source(plan: &NativeModelPlan, entry: CfgPlanEntry) -> NoiseMagnitude {
@@ -1088,69 +1181,7 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
     // Which quantity each entry holds is [`noise_magnitude_source`]'s decision
     // and is unchanged; what is decided here is where the entry gets it. See
     // [`NoiseMagnitudePlan`].
-    let processes: HashMap<usize, &CfgNoiseProcess> = cfg
-        .noise_processes
-        .iter()
-        .filter_map(|process| {
-            usize::try_from(process.process_id)
-                .ok()
-                .map(|id| (id, process))
-        })
-        .collect();
-    if !model.noise_sources.is_empty() && model.noise_process_schema < 1 {
-        return Err(refuse(
-            CfgPlanRefusal::NoiseUngrouped,
-            format!(
-                "{} sources at noise_process_schema={}",
-                model.noise_sources.len(),
-                model.noise_process_schema
-            ),
-        ));
-    }
-    let mut noise_magnitudes: Vec<NoiseMagnitudePlan> = Vec::new();
-    for (source_index, source) in model.noise_sources.iter().enumerate() {
-        let process = processes.get(&source.process_id).ok_or_else(|| {
-            refuse(
-                CfgPlanRefusal::NoiseUnpaired,
-                format!(
-                    "shipped source {source_index} names process {}",
-                    source.process_id
-                ),
-            )
-        })?;
-        let guarded = !process_is_unconditional(&cfg.function, process.active);
-        let psd = CfgPlanEntry::NoisePsd(source_index);
-        noise_magnitudes.push(NoiseMagnitudePlan {
-            entry: psd,
-            source: noise_magnitude_source(&plan, psd),
-            site: process.site.map(|site| site.psd),
-            exit: process.psd,
-            guarded,
-        });
-        match (process.exponent, source.exponent_program.as_ref()) {
-            (Some(exit), Some(_)) => {
-                let entry = CfgPlanEntry::NoiseExponent(source_index);
-                noise_magnitudes.push(NoiseMagnitudePlan {
-                    entry,
-                    source: noise_magnitude_source(&plan, entry),
-                    site: process.site.and_then(|site| site.exponent),
-                    exit,
-                    guarded,
-                });
-            }
-            (None, None) => {}
-            (canonical, shipped) => {
-                return Err(refuse(
-                    CfgPlanRefusal::NoiseUnpaired,
-                    format!(
-                        "source {source_index} exponent: canonical={} shipped={}",
-                        canonical.is_some(),
-                        shipped.is_some()
-                    ),
-                ));
-            }
-        }
-    }
+    let noise_magnitudes = noise_magnitude_plans(module.as_str(), model, &plan, &cfg)?;
 
     // A value that reads a contribution current is ordered against the
     // residuals before it, and the prelude runs before all of them. Those

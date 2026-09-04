@@ -30,7 +30,14 @@
 //! once), the prelude's block instruction count and their ratio, the two
 //! backends' spill-slot counts and the AArch64 frame in bytes against its
 //! ceiling, the slot count (one per distinct entry output), and — under
-//! `RSPICE_PRELUDE_CENSUS_IMAGE=1` — the x64 image of the prelude alone.
+//! `RSPICE_PRELUDE_CENSUS_IMAGE=1` — the x64 image of the prelude alone. A
+//! model with noise sources gets a line before it saying how many magnitudes
+//! the plan builder resolved and how many of them the prelude publishes.
+//!
+//! The magnitudes are in the entry set because since W-F13a the prelude
+//! publishes them, and a prelude measured without them is not the one
+//! production builds — which would make this census answer the frame question
+//! about a program nothing compiles.
 //!
 //! `#[ignore]`d: this is measurement work. Run it with
 //! `--release --features native -- --ignored --nocapture`, narrowed with
@@ -45,10 +52,14 @@ use crate::canonical_ir::{
 };
 use crate::codegen::state_renumbering::StateSlotMapping;
 use crate::jit::cfg_lanes::scalarize_lanes;
-use crate::jit::cfg_plan_builder::{CfgPlanEntry, ShippedColumnLanes, derivative_seeds};
+use crate::jit::cfg_plan_builder::{
+    CfgPlanEntry, ShippedColumnLanes, derivative_seeds, noise_magnitude_plans,
+};
 use crate::jit::cfg_prelude::{CfgPrelude, LiveCurrentTaint};
 use crate::jit::cfg_program::CfgRuntimeBindings;
-use crate::jit::plan_builder::canonical_branch_unknown_runtime_map;
+use crate::jit::plan_builder::{
+    build_model_plan_with_canonical_ir, canonical_branch_unknown_runtime_map,
+};
 use crate::jit::ssa::RegisterAllocation;
 use crate::rust_backend::canonical::stored_charges;
 
@@ -191,6 +202,34 @@ pub(super) fn prelude_inputs(
                 entries.push((entry, scalar));
             }
         }
+    }
+
+    // The noise magnitudes, through the plan builder's own decision procedure.
+    // A prelude measured without them is not the one production builds, and
+    // this census is the only thing that says whether the production prelude
+    // fits an AArch64 frame.
+    match build_model_plan_with_canonical_ir(model, artifact)
+        .map_err(|error| error.to_string())
+        .and_then(|shipped| {
+            noise_magnitude_plans(module, model, &shipped, &cfg)
+                .map_err(|refused| refused.to_string())
+        }) {
+        Ok(magnitudes) => {
+            let mut published = 0_usize;
+            for magnitude in magnitudes.iter().filter(|plan| plan.publishable()) {
+                if let Some(scalar) = scalarized.scalar(magnitude.exit) {
+                    entries.push((magnitude.entry, scalar));
+                    published += 1;
+                }
+            }
+            if !magnitudes.is_empty() {
+                println!(
+                    "prelude model={module} noise_magnitudes={} noise_published={published}",
+                    magnitudes.len()
+                );
+            }
+        }
+        Err(error) => println!("prelude model={module} noise_refused={error}"),
     }
 
     // The same partition the plan builder makes: an entry whose value reads a
