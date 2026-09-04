@@ -69,13 +69,27 @@ use crate::jit::plan_builder::{
 use crate::native::NativeModel;
 use crate::native::abi::EvalContext;
 
-/// The five modules the cost of the flip is reported on.
+/// The six modules the cost of the flip is reported on.
 ///
 /// One of each shape the estate has: a small ESD clamp, a bipolar model, a
 /// HICUM with deep charge storage, and the two whose images the size census
 /// measured growing the most (`bsimcmg_va` 4.80 MB to 5.62, `asmhemt` 16.66 to
 /// 17.29). If the prelude costs time anywhere it is on the last two.
-const COST_MODELS: [&str; 5] = ["asmesd", "vbic13_4t", "hicumL2va", "bsimcmg_va", "asmhemt"];
+///
+/// `hisimhv_n5_va` is the sixth and it is here for a different reason: it is
+/// the largest image in the estate and, until W-F14, 82 per cent of it was a
+/// postfix assignment pass both plans ran before their first entry. A census
+/// that omits it reads the two routes as costing the same because both were
+/// paying the same dominant term; including it is what makes retiring that
+/// term visible as time rather than only as bytes.
+const COST_MODELS: [&str; 6] = [
+    "asmesd",
+    "vbic13_4t",
+    "hicumL2va",
+    "bsimcmg_va",
+    "asmhemt",
+    "hisimhv_n5_va",
+];
 
 /// Timed samples per plan. The reported figure is the median of these.
 const SAMPLES: usize = 7;
