@@ -56,10 +56,30 @@ use super::census_models::shipped_census_models;
 /// block-entry refusal says.
 ///
 /// So the flip to the CFG plan does not enter into these two numbers, and did
-/// not move them. What would move them is a change to the postfix lowering
-/// itself, or to which plan fields this census
-/// enumerates. The CFG route's own entries are measured against MIR's by
-/// [`super::cfg_mir_census`], which is the census that answers for them.
+/// not move them. What moves them is a change to the postfix lowering itself,
+/// or to which plan fields this census enumerates. The CFG route's own entries
+/// are measured against MIR's by [`super::cfg_mir_census`], which is the census
+/// that answers for them.
+///
+/// # `CENSUS_PROGRAMS` is stale, and this is what is known about it
+///
+/// Measured 1,972,515 on 2026-09-03 against the 1,972,391 pinned here, with
+/// `CENSUS_EXECUTIONS` reproducing exactly and `select_only_failures=0` — so the
+/// agreement this census exists to assert holds, and what has drifted is the
+/// corpus-size guard beside it.
+///
+/// It is not the CFG plan flip: that lane changed no file
+/// `build_model_plan_with_canonical_ir` reaches, and
+/// [`super::code_identity`] measured the two modules that still take the
+/// postfix plan compiling to byte-identical images across it. The 124 programs
+/// arrived between `c2ae3da5f`, which set this number, and the flip; the
+/// reaching-definition snapshot (`98da47cea`) is the candidate, because it adds
+/// postfix programs and is the change the identity digest also moved for. That
+/// lane re-baselined the digest and not this.
+///
+/// Re-stamping it without running that down is the one move a drift detector
+/// must not make, so it stays at the measured-and-explained value until someone
+/// does.
 const CENSUS_PROGRAMS: usize = 1_972_391;
 const CENSUS_EXECUTIONS: usize = 5_072_907;
 use crate::jit::expr::{NativeOp, NativeProgram};
