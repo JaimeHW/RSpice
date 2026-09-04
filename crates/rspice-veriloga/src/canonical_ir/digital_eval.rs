@@ -61,6 +61,8 @@
 //! than a scheduling policy — the kernel decides *which* signals changed, and
 //! these decide whether such a change means anything to a given process.
 
+use std::borrow::Cow;
+
 use super::cfg::{CfgFunction, CfgTerminator, CfgValueKind, DigitalWait, is_leaf_kind};
 use super::digital::{
     CanonicalDigitalPlan, CfgDigitalProcess, DigitalDriverId, DigitalEdge, DigitalSchedulingRegion,
@@ -865,6 +867,103 @@ impl ValueTable {
         let index = usize::from(id);
         (self.stamps[index] == self.current).then(|| &self.values[index])
     }
+
+    /// The operand `id` names, borrowed.
+    ///
+    /// A miss is not by itself an error. Constants belong to no block — a
+    /// `#delay` operand is pushed as a leaf because the `Wait` that consumes it
+    /// is a terminator — so a value the table does not hold is read straight
+    /// out of the function, which outlives the activation. Nothing is written
+    /// back: a constant reference costs one match to rebuild, and caching one
+    /// would cost a clone and a stamp write per entry to save that.
+    fn get<'v>(
+        &'v self,
+        function: &'v CfgFunction,
+        id: ValueId,
+    ) -> Result<ScalarRef<'v>, DigitalEvalError> {
+        if let Some(value) = self.defined(id) {
+            return Ok(ScalarRef::of(value));
+        }
+        match &function.value(id).kind {
+            CfgValueKind::FourStateConstant(value) => Ok(ScalarRef::FourState(value)),
+            CfgValueKind::IntegerConstant(value) => Ok(ScalarRef::Integer(*value)),
+            CfgValueKind::RealConstant(value) => Ok(ScalarRef::Real(*value)),
+            // Every other leaf is an analog-domain one, and reporting it as
+            // undefined would hide what it actually is.
+            kind if is_leaf_kind(kind) => Err(DigitalEvalError::AnalogValueInProcess(id)),
+            _ => Err(DigitalEvalError::UndefinedValue(id)),
+        }
+    }
+}
+
+/// One operand, borrowed out of wherever it lives.
+///
+/// The four-state case is a reference because it is the one with a payload
+/// worth not copying — sixty-four bits inline, and a pair of heap planes above
+/// that. The other three are one word each and are copied, which is why this is
+/// not simply a `&DigitalScalar`: a constant read straight out of the function
+/// has a `FourStateValue` to borrow but no `DigitalScalar` around it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ScalarRef<'v> {
+    FourState(&'v FourStateValue),
+    Integer(i32),
+    Real(f64),
+    Effect,
+}
+
+impl<'v> ScalarRef<'v> {
+    fn of(scalar: &'v DigitalScalar) -> Self {
+        match scalar {
+            DigitalScalar::FourState(value) => Self::FourState(value),
+            DigitalScalar::Integer(value) => Self::Integer(*value),
+            DigitalScalar::Real(value) => Self::Real(*value),
+            DigitalScalar::Effect => Self::Effect,
+        }
+    }
+
+    /// The value, owned.
+    ///
+    /// Called only where a value has to outlive the borrow it came from: an
+    /// edge argument, which is read before the binding that overwrites its
+    /// slot, and a resume state's, which outlives the whole activation.
+    fn into_owned(self) -> DigitalScalar {
+        match self {
+            Self::FourState(value) => DigitalScalar::FourState(value.clone()),
+            Self::Integer(value) => DigitalScalar::Integer(value),
+            Self::Real(value) => DigitalScalar::Real(value),
+            Self::Effect => DigitalScalar::Effect,
+        }
+    }
+}
+
+/// Read an operand as four-state, borrowing it where there is one to borrow.
+///
+/// An integer widens to its 32 bits, which is the width IEEE 1364-2005 section
+/// 3.2.1 gives one; that is the only case with no value to borrow, and the only
+/// reason this answers a [`Cow`]. The lowering produces integers only as
+/// `#delay` operands, so it is a defensive conversion rather than a path the
+/// current front end takes.
+///
+/// A free function rather than a method so that a caller which has already
+/// borrowed the interpreter's fields apart — a write, which needs the
+/// environment at the same time — can still read its operand.
+fn four_state_in<'v>(
+    function: &'v CfgFunction,
+    table: &'v ValueTable,
+    id: ValueId,
+) -> Result<Cow<'v, FourStateValue>, DigitalEvalError> {
+    match table.get(function, id)? {
+        ScalarRef::FourState(value) => Ok(Cow::Borrowed(value)),
+        ScalarRef::Integer(value) => Ok(Cow::Owned(FourStateValue::from_u64(
+            32,
+            u64::from(value as u32),
+        ))),
+        // Not converted. Section 3.7's conversion is an explicit system task,
+        // and the lowering refuses every mix it can see, so a real arriving
+        // here is a disagreement rather than a program.
+        ScalarRef::Real(_) => Err(DigitalEvalError::MixedValueDomains(id)),
+        ScalarRef::Effect => Err(DigitalEvalError::EffectValueRead(id)),
+    }
 }
 
 /// The working set one activation needs, kept across activations.
@@ -1105,7 +1204,7 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                     // IEEE 1364-2005 section 9.4: only a known-true condition
                     // takes the first branch. `x` and `z` take the else, the
                     // same as a plain zero.
-                    let taken = truth(&self.four_state(*condition)?) == FourStateBit::One;
+                    let taken = truth(&*self.four_state(*condition)?) == FourStateBit::One;
                     let (target, args) = if taken {
                         (*then_target, then_args)
                     } else {
@@ -1138,8 +1237,9 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                     let mut arguments = std::mem::take(&mut self.scratch.resume);
                     arguments.clear();
                     for arg in resume_args {
-                        let value = self.read(*arg)?;
-                        arguments.push(value);
+                        // Cloned rather than borrowed: these outlive the
+                        // activation that computed them.
+                        arguments.push(self.scalar(*arg)?.into_owned());
                     }
                     let params = function.block(*resume).params.len();
                     if arguments.len() != params {
@@ -1179,8 +1279,10 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
         buffer.clear();
         let mut outcome = Ok(());
         for arg in args {
-            match self.read(*arg) {
-                Ok(value) => buffer.push(value),
+            match self.scalar(*arg) {
+                // Cloned because the buffer has to hold the value across the
+                // binding that is about to overwrite the slot it came from.
+                Ok(value) => buffer.push(value.into_owned()),
                 Err(error) => {
                     outcome = Err(error);
                     break;
@@ -1216,66 +1318,44 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
         outcome
     }
 
-    fn read(&mut self, id: ValueId) -> Result<DigitalScalar, DigitalEvalError> {
-        if let Some(value) = self.scratch.table.defined(id) {
-            return Ok(value.clone());
-        }
-        // Constants belong to no block — a `#delay` operand is pushed as a leaf
-        // because the `Wait` that consumes it is a terminator — so a miss asks
-        // whether the value is one before reporting it undefined.
-        if !is_leaf_kind(&self.function().value(id).kind) {
-            return Err(DigitalEvalError::UndefinedValue(id));
-        }
-        let value = self.compute(id)?;
-        self.scratch.table.define(id, value.clone());
-        Ok(value)
+    /// Read a value, borrowed.
+    ///
+    /// Shared rather than exclusive access, which is what lets an operator read
+    /// both its operands at once without copying either.
+    fn scalar(&self, id: ValueId) -> Result<ScalarRef<'_>, DigitalEvalError> {
+        self.scratch.table.get(self.function(), id)
     }
 
     /// Read a value as four-state.
-    ///
-    /// An integer widens to its 32 bits, which is the width IEEE 1364-2005
-    /// section 3.2.1 gives one. The lowering produces integers only as `#delay`
-    /// operands, so this is a defensive conversion rather than a path the
-    /// current front end takes.
-    fn four_state(&mut self, id: ValueId) -> Result<FourStateValue, DigitalEvalError> {
-        match self.read(id)? {
-            DigitalScalar::FourState(value) => Ok(value),
-            DigitalScalar::Integer(value) => {
-                Ok(FourStateValue::from_u64(32, u64::from(value as u32)))
-            }
-            // Not converted. Section 3.7's conversion is an explicit system
-            // task, and the lowering refuses every mix it can see, so a real
-            // arriving here is a disagreement rather than a program.
-            DigitalScalar::Real(_) => Err(DigitalEvalError::MixedValueDomains(id)),
-            DigitalScalar::Effect => Err(DigitalEvalError::EffectValueRead(id)),
-        }
+    fn four_state(&self, id: ValueId) -> Result<Cow<'_, FourStateValue>, DigitalEvalError> {
+        four_state_in(self.function(), &self.scratch.table, id)
     }
 
     /// Read a value as a real, and only as one.
-    fn real(&mut self, id: ValueId) -> Result<f64, DigitalEvalError> {
-        match self.read(id)? {
-            DigitalScalar::Real(value) => Ok(value),
-            DigitalScalar::FourState(_) | DigitalScalar::Integer(_) => {
+    fn real(&self, id: ValueId) -> Result<f64, DigitalEvalError> {
+        match self.scalar(id)? {
+            ScalarRef::Real(value) => Ok(value),
+            ScalarRef::FourState(_) | ScalarRef::Integer(_) => {
                 Err(DigitalEvalError::MixedValueDomains(id))
             }
-            DigitalScalar::Effect => Err(DigitalEvalError::EffectValueRead(id)),
+            ScalarRef::Effect => Err(DigitalEvalError::EffectValueRead(id)),
         }
     }
 
-    fn integer(&mut self, id: ValueId) -> Result<i64, DigitalEvalError> {
-        match self.read(id)? {
-            DigitalScalar::Integer(value) => Ok(i64::from(value)),
+    fn integer(&self, id: ValueId) -> Result<i64, DigitalEvalError> {
+        match self.scalar(id)? {
+            ScalarRef::Integer(value) => Ok(i64::from(value)),
             // A four-state delay operand with an unknown bit has no number to
             // wait for, and picking one would be inventing a schedule.
-            DigitalScalar::FourState(value) => value
+            ScalarRef::FourState(value) => value
                 .to_u64()
                 .and_then(|bits| i64::try_from(bits).ok())
                 .ok_or(DigitalEvalError::NonIntegerDelay(id)),
             // A `#r` with a real operand would need section 3.9.2's rounding
             // and a ruling on what a fractional time unit is; neither is this
             // wave's, and a rounded delay is a schedule nobody wrote.
-            DigitalScalar::Real(_) => Err(DigitalEvalError::NonIntegerDelay(id)),
-            DigitalScalar::Effect => Err(DigitalEvalError::EffectValueRead(id)),
+            ScalarRef::Real(_) => Err(DigitalEvalError::NonIntegerDelay(id)),
+            ScalarRef::Effect => Err(DigitalEvalError::EffectValueRead(id)),
         }
     }
 
@@ -1382,7 +1462,7 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                 // the rule this interpreter already applies at a `Branch`,
                 // which is what keeps `c ? a : b` and the `if` it stands for
                 // from disagreeing.
-                let taken = truth(&self.four_state(condition)?) == FourStateBit::One;
+                let taken = truth(&*self.four_state(condition)?) == FourStateBit::One;
                 // Both arms are still evaluated, so a refusal inside the arm
                 // not taken is reported rather than hidden by the condition.
                 let then_value = self.real(then_value)?;
@@ -1487,15 +1567,18 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
             CfgValueKind::DigitalConcat { parts } => {
                 // The operand list is read straight out of the function, which
                 // outlives this call, and gathered into the reused buffer
-                // rather than a fresh one. Taken out of the scratch for the
-                // duration so that evaluating an operand cannot hold a borrow
-                // of the buffer being filled.
-                let mut values = std::mem::take(&mut self.scratch.operands);
-                values.clear();
+                // rather than a fresh one. The buffer and the value table are
+                // different fields of the scratch, so borrowing them apart is
+                // what lets the gather read operands while it fills.
+                let function = self.function();
+                let DigitalEvalScratch {
+                    table, operands, ..
+                } = &mut *self.scratch;
+                operands.clear();
                 let mut failure = None;
                 for part in parts {
-                    match self.four_state(*part) {
-                        Ok(value) => values.push(value),
+                    match four_state_in(function, table, *part) {
+                        Ok(value) => operands.push(value.into_owned()),
                         Err(error) => {
                             failure = Some(error);
                             break;
@@ -1504,10 +1587,11 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                 }
                 let outcome = match failure {
                     Some(error) => Err(error),
-                    None => Ok(DigitalScalar::FourState(digital_value::concat(&values))),
+                    None => Ok(DigitalScalar::FourState(digital_value::concat(
+                        operands.as_slice(),
+                    ))),
                 };
-                values.clear();
-                self.scratch.operands = values;
+                operands.clear();
                 outcome
             }
             CfgValueKind::DigitalSelect {
@@ -1526,7 +1610,7 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                 )))
             }
             CfgValueKind::DigitalBlockingWrite { target, value } => {
-                let (target, value) = (target.clone(), *value);
+                let value = *value;
                 // One write node for both domains, the way
                 // [`CfgValueKind::DigitalDriverWrite`] is: what the written
                 // name carries is a property of the declaration, and the plan
@@ -1536,8 +1620,17 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                     self.environment.write_real_signal(target.signal, value);
                     return Ok(DigitalScalar::Effect);
                 }
-                let value = self.four_state(value)?;
-                apply_write(self.plan, self.environment, &target, &value)?;
+                // The plan, the environment and the value table are three
+                // fields, so the write borrows them apart rather than taking a
+                // copy of the value to hand the store.
+                let Interpreter {
+                    plan,
+                    process,
+                    environment,
+                    scratch,
+                } = self;
+                let value = four_state_in(&process.function, &scratch.table, value)?;
+                apply_write(plan, &mut **environment, target, &value)?;
                 Ok(DigitalScalar::Effect)
             }
             CfgValueKind::DigitalDriverWrite {
@@ -1545,27 +1638,33 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                 target,
                 value,
             } => {
-                let (driver, target, value) = (*driver, target.clone(), *value);
+                let (driver, value) = (*driver, *value);
                 // One write node for both domains. What the driven net carries
                 // is a property of the net, and the plan already recorded it —
                 // reading it here is what keeps `assign` one construct rather
                 // than two that could drift apart.
-                if self.signal(target.signal)?.kind.is_real() {
+                let signal = self.signal(target.signal)?;
+                if signal.kind.is_real() {
                     let value = self.real(value)?;
                     self.environment
                         .drive_real_signal(DigitalRealDrive { driver, value });
                     return Ok(DigitalScalar::Effect);
                 }
-                let value = self.four_state(value)?;
                 // Resized here for the same reason a nonblocking update is:
                 // section 5.2.1's width belongs to the assignment, and the
                 // assignment is here. What the kernel later does with the
                 // contribution cannot recover a width it was not given.
-                let signal = self.signal(target.signal)?;
                 let width = target_width(signal, &target.select);
-                self.environment.drive_signal(DigitalDrive {
+                let Interpreter {
+                    process,
+                    environment,
+                    scratch,
+                    ..
+                } = self;
+                let value = four_state_in(&process.function, &scratch.table, value)?;
+                environment.drive_signal(DigitalDrive {
                     driver,
-                    target,
+                    target: target.clone(),
                     value: value.resized(width),
                 });
                 Ok(DigitalScalar::Effect)
@@ -1575,24 +1674,30 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                 value,
                 region,
             } => {
-                let (target, value, region) = (target.clone(), *value, *region);
-                if self.signal(target.signal)?.kind.is_real() {
+                let (value, region) = (*value, *region);
+                let signal = self.signal(target.signal)?;
+                if signal.kind.is_real() {
                     let value = self.real(value)?;
                     self.environment.defer_update(DigitalDeferredUpdate {
-                        target,
+                        target: target.clone(),
                         value: DigitalUpdate::Real(value),
                         region,
                     });
                     return Ok(DigitalScalar::Effect);
                 }
-                let value = self.four_state(value)?;
                 // Resized here, where the assignment is, rather than at the
                 // flush: section 5.2.1's width is the target's, and the target
                 // is known now.
-                let signal = self.signal(target.signal)?;
                 let width = target_width(signal, &target.select);
-                self.environment.defer_update(DigitalDeferredUpdate {
-                    target,
+                let Interpreter {
+                    process,
+                    environment,
+                    scratch,
+                    ..
+                } = self;
+                let value = four_state_in(&process.function, &scratch.table, value)?;
+                environment.defer_update(DigitalDeferredUpdate {
+                    target: target.clone(),
                     value: DigitalUpdate::FourState(value.resized(width)),
                     region,
                 });
