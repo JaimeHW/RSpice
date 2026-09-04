@@ -357,6 +357,10 @@ pub(crate) fn compile_model_plan(
         prelude,
         &plan.stamp_values,
         &plan.jacobians,
+        codegen::FusedKernelEntries {
+            stamp_values: &stamp_values,
+            jacobians: &jacobians,
+        },
         &plan.published_current_pairs,
     )?;
     append_compiled_function_at_offset(
