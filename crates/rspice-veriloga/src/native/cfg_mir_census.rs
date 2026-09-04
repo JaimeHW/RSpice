@@ -1430,9 +1430,11 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
     }
     if !model.noise_sources.is_empty() {
         println!(
-            "cfg-mir model={module} noise_sources={} noise_hoisted={} guarded_reads={} \
-             guarded_compared={guarded_here} guarded_max_deviation={guarded_noise_worst:.3e}{}",
+            "cfg-mir model={module} noise_sources={} noise_prelude_slots={} noise_hoisted={} \
+             guarded_reads={} guarded_compared={guarded_here} \
+             guarded_max_deviation={guarded_noise_worst:.3e}{}",
             model.noise_sources.len(),
+            cfg_plan.report.noise_prelude_slots,
             cfg_plan.report.noise_hoisted,
             cfg_plan.report.noise_guarded_reads.len(),
             guarded_noise_case

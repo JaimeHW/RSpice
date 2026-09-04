@@ -237,11 +237,17 @@ fn every_noise_shape_reads_the_same_double_on_both_routes() {
 /// The plan builder's own account of what it did, so the counts the census
 /// prints are pinned against a module whose shapes are known.
 ///
-/// Four magnitudes are taken at their site — the two guarded-inline ones, the
-/// guarded-variable source's literal exponent, and the bias-guarded one — and
-/// one is left at the exit read, the guarded-variable source's `LoadVariable`
-/// power. Every unguarded magnitude reads the same value either way, so the
-/// builder takes those at their site too and the hoisted count covers them.
+/// Six magnitudes are prelude slots: the five unguarded ones, where the exit
+/// read *is* the site value and so publishing it costs the module nothing, and
+/// the guarded-variable source's power, whose shipped magnitude is a variable
+/// read and whose quantity is therefore the exit read anyway. It is the one
+/// entry the guarded-read count names.
+///
+/// Four are hoisted site values, which is the class no slot can hold: the two
+/// guarded-inline magnitudes, the guarded-variable source's literal exponent
+/// and the bias-guarded power. The shipped route evaluates each of those
+/// unconditionally on a path the body may not take, so a slot written where the
+/// value is computed would not be written at all.
 #[test]
 fn the_builder_says_which_magnitudes_it_hoisted() {
     let compiler = VerilogACompiler::new(CompilerOptions::default());
@@ -253,7 +259,8 @@ fn the_builder_says_which_magnitudes_it_hoisted() {
         .unwrap_or_else(|refused| panic!("CFG plan: {refused}"));
 
     assert_eq!(built.report.noise_values, 10);
-    assert_eq!(built.report.noise_hoisted, 9);
+    assert_eq!(built.report.noise_prelude_slots, 6);
+    assert_eq!(built.report.noise_hoisted, 4);
     assert_eq!(
         built
             .report
@@ -293,4 +300,5 @@ fn the_postfix_scope_takes_no_noise_from_the_cfg() {
     assert_eq!(built.report.noise_values, 0);
     assert!(built.report.noise_guarded_reads.is_empty());
     assert_eq!(built.report.noise_hoisted, 0);
+    assert_eq!(built.report.noise_prelude_slots, 0);
 }

@@ -194,7 +194,7 @@
 use std::collections::{HashMap, HashSet};
 
 use super::cfg_lanes::scalarize_lanes;
-use super::cfg_prelude::{CfgPrelude, LiveCurrentTaint};
+use super::cfg_prelude::{CfgPrelude, LiveCurrentTaint, slot_read_program};
 use super::cfg_program::{CfgRuntimeBindings, lower_cfg_function};
 use super::expr::NativeOp;
 use super::model_plan::{NativeModelPlan, NativePrelude};
@@ -345,9 +345,15 @@ pub(crate) struct CfgPlanReport {
     pub(crate) jacobians: usize,
     pub(crate) reactive_jacobians: usize,
     pub(crate) noise_values: usize,
+    /// Noise magnitudes the prelude publishes, which are one `LoadPreludeSlot`
+    /// each. See [`NoiseMagnitudePlan`] for what admits one.
+    pub(crate) noise_prelude_slots: usize,
     /// Noise magnitudes taken at their own site rather than at the exit block,
     /// so that they hold the unconditional quantity the shipped route holds.
-    /// See [`NoiseMagnitude`].
+    ///
+    /// Since the prelude, this counts only the magnitudes it could not take:
+    /// a site value under a guard, where the two quantities genuinely differ.
+    /// See [`NoiseMagnitude`] and [`NoiseMagnitudePlan`].
     pub(crate) noise_hoisted: usize,
     /// Noise magnitudes lowered from the exit read while the source is under a
     /// guard — the class where the two routes can still hold different numbers.
@@ -632,6 +638,62 @@ enum NoiseMagnitude {
     Site,
     /// The value read at the exit block, with the activation guard folded in.
     Exit,
+}
+
+/// One noise entry, resolved far enough to decide whether the prelude can
+/// publish it.
+///
+/// # Why a magnitude takes a slot at all
+///
+/// Before W-F13a every magnitude was its own dependence cone, and the cost
+/// census said that was the whole cost of taking noise from the CFG:
+/// `hicumL2va` at 1.67 times the shipped plan's evaluation and 2.4 times its
+/// image, because a magnitude's cone is the deepest part of a compact model's
+/// body and the prelude had already computed all of it. A magnitude is an
+/// ordinary value of that body, so the fix is the one W-F11 applied to the
+/// value entries: publish it once into a slot and let the entry read it.
+///
+/// # What decides whether it can
+///
+/// The same thing that decides it for a residual: whether the body computes
+/// the value on *every* path. A prelude slot is written where the value is
+/// computed, so a slot on a path the evaluation did not take holds the previous
+/// evaluation's number rather than the zero an exit read would give.
+///
+/// An exit read always qualifies — SSA answers `read_variable(psd, exit)` with
+/// a value that dominates the exit — so [`NoiseMagnitude::Exit`] entries are
+/// published unconditionally. A [`NoiseMagnitude::Site`] entry qualifies
+/// exactly when its process is *unguarded*: the lowering writes a process's
+/// activation as the constant one at its site and seeds it with zero in the
+/// entry block, so [`process_is_unconditional`] reading back that constant is
+/// the statement that the site's block dominates the exit — and then the exit
+/// read *is* the site value, with nothing merged into it.
+///
+/// What is left is the guarded site value, which is the one case where the two
+/// quantities genuinely differ: the shipped route evaluates the magnitude
+/// unconditionally where the body may not reach it, and no slot can hold a
+/// number the evaluation did not compute. Those keep the straight-line hoisted
+/// copy [`hoisted_site_function`] builds, and [`CfgPlanReport::noise_hoisted`]
+/// counts them.
+#[derive(Debug, Clone, Copy)]
+struct NoiseMagnitudePlan {
+    entry: CfgPlanEntry,
+    /// Which quantity the shipped plan holds for this entry.
+    source: NoiseMagnitude,
+    /// The value the site computed, when the lowering published one.
+    site: Option<ValueId>,
+    /// The value read at the exit block.
+    exit: ValueId,
+    /// Whether control flow guards the process this magnitude belongs to.
+    guarded: bool,
+}
+
+impl NoiseMagnitudePlan {
+    /// Whether the exit read is the quantity this entry holds, so the prelude
+    /// can publish it. See the type documentation.
+    fn publishable(&self) -> bool {
+        self.source == NoiseMagnitude::Exit || !self.guarded
+    }
 }
 
 fn noise_magnitude_source(plan: &NativeModelPlan, entry: CfgPlanEntry) -> NoiseMagnitude {
@@ -1023,6 +1085,71 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
     }
     let entry_values: HashMap<CfgPlanEntry, ValueId> = entries.iter().copied().collect();
 
+    // ---- the noise magnitudes, resolved before the prelude --------------
+    //
+    // A magnitude is an ordinary value of the body, so it belongs in the same
+    // prelude every other entry reads from, and this is resolved here because
+    // the prelude is built below and its outputs have to be known first.
+    //
+    // Which quantity each entry holds is [`noise_magnitude_source`]'s decision
+    // and is unchanged; what is decided here is where the entry gets it. See
+    // [`NoiseMagnitudePlan`].
+    let processes: HashMap<usize, &CfgNoiseProcess> = cfg
+        .noise_processes
+        .iter()
+        .filter_map(|process| {
+            usize::try_from(process.process_id)
+                .ok()
+                .map(|id| (id, process))
+        })
+        .collect();
+    let mut noise_magnitudes: Vec<NoiseMagnitudePlan> = Vec::new();
+    if noise == CfgNoiseScope::Cfg {
+        for (source_index, source) in model.noise_sources.iter().enumerate() {
+            let process = processes.get(&source.process_id).ok_or_else(|| {
+                refuse(
+                    CfgPlanRefusal::NoiseUnpaired,
+                    format!(
+                        "shipped source {source_index} names process {}",
+                        source.process_id
+                    ),
+                )
+            })?;
+            let guarded = !process_is_unconditional(&cfg.function, process.active);
+            let psd = CfgPlanEntry::NoisePsd(source_index);
+            noise_magnitudes.push(NoiseMagnitudePlan {
+                entry: psd,
+                source: noise_magnitude_source(&plan, psd),
+                site: process.site.map(|site| site.psd),
+                exit: process.psd,
+                guarded,
+            });
+            match (process.exponent, source.exponent_program.as_ref()) {
+                (Some(exit), Some(_)) => {
+                    let entry = CfgPlanEntry::NoiseExponent(source_index);
+                    noise_magnitudes.push(NoiseMagnitudePlan {
+                        entry,
+                        source: noise_magnitude_source(&plan, entry),
+                        site: process.site.and_then(|site| site.exponent),
+                        exit,
+                        guarded,
+                    });
+                }
+                (None, None) => {}
+                (canonical, shipped) => {
+                    return Err(refuse(
+                        CfgPlanRefusal::NoiseUnpaired,
+                        format!(
+                            "source {source_index} exponent: canonical={} shipped={}",
+                            canonical.is_some(),
+                            shipped.is_some()
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+
     // A value that reads a contribution current is ordered against the
     // residuals before it, and the prelude runs before all of them. Those
     // entries keep the cone they have always had; see [`LiveCurrentTaint`].
@@ -1034,13 +1161,33 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
     report.live_current_entries = deferred.len();
     report.live_current_control_flow = taint.taints_control_flow();
 
-    let prelude = if published.is_empty() {
+    // The magnitudes that join them, on the same two conditions every other
+    // entry meets: the scalarizer has a scalar for the value, and the value
+    // does not read a contribution current the evaluation publishes after the
+    // prelude runs.
+    let noise_published: Vec<(CfgPlanEntry, ValueId)> = noise_magnitudes
+        .iter()
+        .filter(|magnitude| magnitude.publishable())
+        .filter_map(|magnitude| {
+            scalarized
+                .scalar(magnitude.exit)
+                .filter(|value| taint.publishable(*value))
+                .map(|value| (magnitude.entry, value))
+        })
+        .collect();
+    let prelude_entries: Vec<(CfgPlanEntry, ValueId)> = published
+        .iter()
+        .copied()
+        .chain(noise_published.iter().copied())
+        .collect();
+
+    let prelude = if prelude_entries.is_empty() {
         None
     } else {
         match CfgPrelude::build(
             module.as_str(),
             &scalarized.function,
-            &published,
+            &prelude_entries,
             &state,
             &bindings,
             &slots,
@@ -1180,14 +1327,20 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
 
     // ---- noise ---------------------------------------------------------
     //
-    // A noise magnitude is an ordinary value of the body, so it lowers from the
-    // primal; the shipped emitter's two-pass rule is kept because six shipped
-    // models read a `ddx` inside a noise power and only the AD pass resolves
-    // one.
+    // A noise magnitude is an ordinary value of the body, so the prelude
+    // publishes it like any other: every entry
+    // [`NoiseMagnitudePlan::publishable`] admits is one `LoadPreludeSlot`
+    // reading what the prelude has already computed. That is the whole of the
+    // cost fix — before it each magnitude was a fresh cone over the deepest
+    // part of a compact model, which is why taking noise from the CFG cost 1.67
+    // times the evaluation and 2.4 times the image on `hicumL2va`.
     //
-    // Which *value* is lowered is the whole of the noise slice, and
-    // [`noise_magnitude_source`] is where that is decided. See it for the
-    // measurement.
+    // What is left is the guarded site value, which no slot can hold: the
+    // shipped route evaluates it unconditionally where the body may not reach
+    // it. Those lower from the primal, through one straight-line hoisted copy
+    // shared by all of them, and the shipped emitter's two-pass rule is kept
+    // because six shipped models read a `ddx` inside a noise power and only the
+    // AD pass resolves one.
     //
     // Skipped entirely under `CfgNoiseScope::Postfix`: nothing here would be
     // kept, and running it would only let a noise-only refusal take a module's
@@ -1195,38 +1348,19 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
     let cfg_noise = match noise {
         CfgNoiseScope::Postfix => None,
         CfgNoiseScope::Cfg => {
-            let processes: HashMap<usize, &CfgNoiseProcess> = cfg
-                .noise_processes
-                .iter()
-                .filter_map(|process| {
-                    usize::try_from(process.process_id)
-                        .ok()
-                        .map(|id| (id, process))
-                })
-                .collect();
+            let slot_of = |entry: CfgPlanEntry| prelude.as_ref().and_then(|p| p.slot(entry));
 
-            // The magnitudes taken at their own site, gathered before anything
+            // The magnitudes the prelude did not take, gathered before anything
             // is lowered: they are hoisted together, into one straight-line
-            // copy of the body per function, so a module with eighteen sources
+            // copy of the body per function, so a module with eighteen of them
             // pays for one walk rather than eighteen.
-            let mut site_roots = Vec::new();
-            for (source_index, source) in model.noise_sources.iter().enumerate() {
-                let Some(process) = processes.get(&source.process_id) else {
-                    continue;
-                };
-                let Some(site) = process.site else { continue };
-                if noise_magnitude_source(&plan, CfgPlanEntry::NoisePsd(source_index))
-                    == NoiseMagnitude::Site
-                {
-                    site_roots.push(site.psd);
-                }
-                if let Some(exponent) = site.exponent
-                    && noise_magnitude_source(&plan, CfgPlanEntry::NoiseExponent(source_index))
-                        == NoiseMagnitude::Site
-                {
-                    site_roots.push(exponent);
-                }
-            }
+            let site_roots: Vec<ValueId> = noise_magnitudes
+                .iter()
+                .filter(|magnitude| {
+                    magnitude.source == NoiseMagnitude::Site && slot_of(magnitude.entry).is_none()
+                })
+                .filter_map(|magnitude| magnitude.site)
+                .collect();
             let primal_sites = hoisted_site_function(&cfg.function, &site_roots);
             let scalarized_sites = hoisted_site_function(
                 &scalarized.function,
@@ -1236,107 +1370,99 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
                     .collect::<Vec<_>>(),
             );
 
-            let mut noise_psd = Vec::with_capacity(model.noise_sources.len());
-            let mut noise_exponents = Vec::with_capacity(model.noise_sources.len());
-            for (source_index, source) in model.noise_sources.iter().enumerate() {
-                let process = processes.get(&source.process_id).ok_or_else(|| {
-                    refuse(
-                        CfgPlanRefusal::NoiseUnpaired,
-                        format!(
-                            "shipped source {source_index} names process {}",
-                            source.process_id
-                        ),
-                    )
-                })?;
-                // Site value where the shipped route computes the magnitude
-                // unconditionally, exit read where it reads a slot the guarded
-                // noise assignment pass wrote. A site value the hoist could not
-                // take falls back to the exit read, which is what this route
-                // has always lowered.
-                let magnitude = |site: Option<ValueId>,
-                                 exit: ValueId,
-                                 entry: CfgPlanEntry,
-                                 report: &mut CfgPlanReport|
-                 -> Result<PlanProgram, CfgPlanRefused> {
-                    let hoisted = match (site, noise_magnitude_source(&plan, entry)) {
-                        (Some(site), NoiseMagnitude::Site) => primal_sites
-                            .as_ref()
-                            .filter(|function| function.pins(site))
-                            .map(|function| (&function.function, site)),
-                        _ => None,
-                    };
-                    if let Some((function, value)) = hoisted {
-                        report.noise_hoisted += 1;
-                        match lower(function, value, entry, report) {
-                            Ok(program) => return Ok(program),
-                            Err(primal) if primal.class != CfgPlanRefusal::Lowering => {
-                                return Err(primal);
-                            }
-                            // A `ddx` inside the magnitude, resolved only by the
-                            // derivative pass: the same two-pass rule the exit
-                            // read follows, over the hoisted copy.
-                            Err(primal) => {
-                                let resolved = site.and_then(|site| scalarized.scalar(site));
-                                if let Some(resolved) = resolved
-                                    && let Some(function) = scalarized_sites
-                                        .as_ref()
-                                        .filter(|function| function.pins(resolved))
-                                {
-                                    let program =
-                                        lower(&function.function, resolved, entry, report)?;
-                                    report.noise_from_differentiated += 1;
-                                    return Ok(program);
-                                }
-                                return Err(primal);
-                            }
-                        }
-                    }
-                    if !process_is_unconditional(&cfg.function, process.active) {
+            // A prelude slot where the prelude published one, the site value
+            // where the shipped route computes the magnitude unconditionally
+            // under a guard, and the exit read where neither applies — which is
+            // what this route lowered before either existed.
+            let magnitude = |magnitude: &NoiseMagnitudePlan,
+                             report: &mut CfgPlanReport|
+             -> Result<PlanProgram, CfgPlanRefused> {
+                let entry = magnitude.entry;
+                if let Some(slot) = slot_of(entry) {
+                    let program = slot_read_program(slot).map_err(|error| {
+                        refuse(CfgPlanRefusal::Lowering, format!("{entry}: {error}"))
+                    })?;
+                    let adopted =
+                        BlockProgram::adopt(module.as_str(), program, &slots).map_err(|error| {
+                            refuse(CfgPlanRefusal::SlotUnclaimed, format!("{entry}: {error}"))
+                        })?;
+                    report.noise_prelude_slots += 1;
+                    if magnitude.guarded {
                         report.noise_guarded_reads.push(entry);
                     }
-                    match lower(&cfg.function, exit, entry, report) {
-                        Ok(program) => Ok(program),
-                        Err(primal) if primal.class == CfgPlanRefusal::Lowering => {
-                            let Some(resolved) = scalarized.scalar(exit) else {
-                                return Err(primal);
-                            };
-                            let program = lower(&scalarized.function, resolved, entry, report)?;
-                            report.noise_from_differentiated += 1;
-                            Ok(program)
-                        }
-                        Err(other) => Err(other),
-                    }
+                    return Ok(PlanProgram::Blocks(adopted));
+                }
+                let hoisted = match (magnitude.site, magnitude.source) {
+                    (Some(site), NoiseMagnitude::Site) => primal_sites
+                        .as_ref()
+                        .filter(|function| function.pins(site))
+                        .map(|function| (&function.function, site)),
+                    _ => None,
                 };
-                noise_psd.push(magnitude(
-                    process.site.map(|site| site.psd),
-                    process.psd,
-                    CfgPlanEntry::NoisePsd(source_index),
-                    &mut report,
-                )?);
-                report.noise_values += 1;
-                let exponent = match (process.exponent, source.exponent_program.as_ref()) {
-                    (Some(exponent), Some(_)) => {
-                        report.noise_values += 1;
-                        Some(magnitude(
-                            process.site.and_then(|site| site.exponent),
-                            exponent,
-                            CfgPlanEntry::NoiseExponent(source_index),
-                            &mut report,
-                        )?)
+                if let Some((function, value)) = hoisted {
+                    report.noise_hoisted += 1;
+                    match lower(function, value, entry, report) {
+                        Ok(program) => return Ok(program),
+                        Err(primal) if primal.class != CfgPlanRefusal::Lowering => {
+                            return Err(primal);
+                        }
+                        // A `ddx` inside the magnitude, resolved only by the
+                        // derivative pass: the same two-pass rule the exit
+                        // read follows, over the hoisted copy.
+                        Err(primal) => {
+                            let resolved = magnitude.site.and_then(|site| scalarized.scalar(site));
+                            if let Some(resolved) = resolved
+                                && let Some(function) = scalarized_sites
+                                    .as_ref()
+                                    .filter(|function| function.pins(resolved))
+                            {
+                                let program = lower(&function.function, resolved, entry, report)?;
+                                report.noise_from_differentiated += 1;
+                                return Ok(program);
+                            }
+                            return Err(primal);
+                        }
                     }
-                    (None, None) => None,
-                    (canonical, shipped) => {
+                }
+                if magnitude.guarded {
+                    report.noise_guarded_reads.push(entry);
+                }
+                match lower(&cfg.function, magnitude.exit, entry, report) {
+                    Ok(program) => Ok(program),
+                    Err(primal) if primal.class == CfgPlanRefusal::Lowering => {
+                        let Some(resolved) = scalarized.scalar(magnitude.exit) else {
+                            return Err(primal);
+                        };
+                        let program = lower(&scalarized.function, resolved, entry, report)?;
+                        report.noise_from_differentiated += 1;
+                        Ok(program)
+                    }
+                    Err(other) => Err(other),
+                }
+            };
+
+            let mut noise_psd = Vec::with_capacity(model.noise_sources.len());
+            let mut noise_exponents: Vec<Option<PlanProgram>> = std::iter::repeat_with(|| None)
+                .take(model.noise_sources.len())
+                .collect();
+            for entry in &noise_magnitudes {
+                let program = magnitude(entry, &mut report)?;
+                report.noise_values += 1;
+                match entry.entry {
+                    // One per source, in source order, which is the order
+                    // `noise_magnitudes` was gathered in.
+                    CfgPlanEntry::NoisePsd(source) => {
+                        debug_assert_eq!(noise_psd.len(), source);
+                        noise_psd.push(program);
+                    }
+                    CfgPlanEntry::NoiseExponent(source) => noise_exponents[source] = Some(program),
+                    other => {
                         return Err(refuse(
                             CfgPlanRefusal::NoiseUnpaired,
-                            format!(
-                                "source {source_index} exponent: canonical={} shipped={}",
-                                canonical.is_some(),
-                                shipped.is_some()
-                            ),
+                            format!("{other} is not a noise magnitude"),
                         ));
                     }
-                };
-                noise_exponents.push(exponent);
+                }
             }
             Some((noise_psd, noise_exponents))
         }
