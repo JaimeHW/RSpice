@@ -18,10 +18,14 @@
 //!
 //! * [`CircuitData::stamp_mixed_transient_trial`] opens a *probe* trial,
 //!   settles the boundary, stamps, and rolls the whole trial back. Nothing a
-//!   Newton iteration or a rejected step did survives it, which is D5 clause 1
-//!   at the level the engine can check: a rejected timepoint never touched the
-//!   module at all, so a run that rejects and a run that does not produce the
-//!   same accepted trajectory bit for bit.
+//!   Newton iteration or a rejected step *committed* survives it, which is D5
+//!   clause 1 at the level the engine can check: a rejected timepoint moved no
+//!   accepted state in either domain, so a run that rejects and a run that does
+//!   not produce the same accepted trajectory bit for bit. What it leaves
+//!   behind in the analog device is candidate state — the same candidate state
+//!   an ordinary `VerilogADevice` carries between the Newton iterations of one
+//!   timepoint, recomputed from the accepted record by the next evaluation. See
+//!   `MixedSignalHost::analog`.
 //! * [`CircuitData::accept_mixed_transient_timestep`] opens the one trial that
 //!   *is* committable, evaluates the module against the solution the engine
 //!   kept, settles the boundary to quiet, and commits both domains atomically.
@@ -89,29 +93,42 @@ fn mixed_error(instance: &str, error: MixedSignalError) -> SimulationError {
     SimulationError::Circuit(format!("mixed Verilog-AMS instance '{instance}': {error}"))
 }
 
+/// Name the host a refusal came from, after the borrow that produced it ended.
+///
+/// The obvious spelling — `map_err(|error| mixed_error(host.instance_name(),
+/// error))` on a call that already holds `host` mutably — does not borrow-check,
+/// and the obvious repair was to copy the name into a `String` first. That copy
+/// was taken *per Newton evaluation* on all three of the driver's paths, for a
+/// diagnostic that almost never gets built. Passing the finished `Result` in
+/// instead spends nothing on the path that succeeds: the mutable borrow ends
+/// with the call, so the name can simply be read.
+#[inline]
+fn named<T>(
+    host: &MixedSignalHost,
+    result: Result<T, MixedSignalError>,
+) -> Result<T, SimulationError> {
+    result.map_err(|error| mixed_error(host.instance_name(), error))
+}
+
 /// Repeat the boundary settle until it reports itself quiet.
 ///
 /// A settle that moved a D/A input owes the analog solver another Newton pass
 /// at this timestamp, and the host will refuse to commit until one reports the
 /// boundary quiet. Inside one trial the loop is the driver's job, which is what
 /// `MixedSignalHost::settle_analog_bridges`'s own documentation says.
-fn settle_to_quiet(host: &mut MixedSignalHost, voltages: &[Value]) -> Result<(), SimulationError> {
-    let instance = host.instance_name().to_string();
+///
+/// The refusal is left unnamed for the caller to name, so that a settle inside
+/// a longer chain does not have to know how the chain reports its instance.
+fn settle_to_quiet(host: &mut MixedSignalHost, voltages: &[Value]) -> Result<(), MixedSignalError> {
     for _ in 0..MAX_BOUNDARY_SETTLE_PASSES {
-        if !host
-            .settle_analog_bridges(voltages)
-            .map_err(|error| mixed_error(&instance, error))?
-        {
+        if !host.settle_analog_bridges(voltages)? {
             return Ok(());
         }
     }
     // Named participants rather than a sentence about bridges in general. The
     // host builds the diagnostic because the host is what knows which nets
     // moved; this loop knows only that they kept moving.
-    Err(mixed_error(
-        &instance,
-        host.boundary_settle_oscillation(MAX_BOUNDARY_SETTLE_PASSES),
-    ))
+    Err(host.boundary_settle_oscillation(MAX_BOUNDARY_SETTLE_PASSES))
 }
 
 impl CircuitData {
@@ -159,9 +176,9 @@ impl CircuitData {
     /// Stamp every mixed module for one Newton evaluation, committing nothing.
     ///
     /// The trial is a probe from end to end: it is opened, settled, stamped and
-    /// rolled back inside this call, so the module's state on return is exactly
-    /// its state on entry. See this module's documentation for why that is the
-    /// whole of the rollback contract at deck level.
+    /// rolled back inside this call, so the module's accepted state on return
+    /// is exactly its accepted state on entry. See this module's documentation
+    /// for why that is the whole of the rollback contract at deck level.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn stamp_mixed_transient_trial(
         &mut self,
@@ -176,9 +193,8 @@ impl CircuitData {
     ) -> Result<(), SimulationError> {
         let integration = mixed_integration_coefficients(dt, coefficients);
         for host in &mut self.mixed_signal_hosts {
-            let instance = host.instance_name().to_string();
-            host.begin_probe_trial(time, dt, integration, initial_step, final_step)
-                .map_err(|error| mixed_error(&instance, error))?;
+            let started = host.begin_probe_trial(time, dt, integration, initial_step, final_step);
+            named(host, started)?;
             let stamped = settle_to_quiet(host, voltages).and_then(|()| {
                 host.stamp(
                     voltages,
@@ -197,16 +213,13 @@ impl CircuitData {
                         }
                     },
                 )
-                .map_err(|error| mixed_error(&instance, error))
             });
             // The rollback runs whether or not the stamp succeeded, so a
             // refused evaluation leaves no half-advanced module behind for the
             // next call to inherit.
-            let rolled_back = host
-                .reject_trial()
-                .map_err(|error| mixed_error(&instance, error));
-            stamped?;
-            rolled_back?;
+            let rolled_back = host.reject_trial();
+            named(host, stamped)?;
+            named(host, rolled_back)?;
         }
         Ok(())
     }
@@ -258,22 +271,17 @@ impl CircuitData {
     ) -> Result<(), SimulationError> {
         let integration = mixed_integration_coefficients(dt, coefficients);
         for host in &mut self.mixed_signal_hosts {
-            let instance = host.instance_name().to_string();
-            host.begin_trial(time, dt, integration, initial_step, final_step)
-                .map_err(|error| mixed_error(&instance, error))?;
+            let started = host.begin_trial(time, dt, integration, initial_step, final_step);
+            named(host, started)?;
             let committed = host
                 .stamp(voltages, |_, _, _| {}, |_, _| {})
-                .map_err(|error| mixed_error(&instance, error))
                 .and_then(|()| settle_to_quiet(host, voltages))
-                .and_then(|()| {
-                    host.accept_trial()
-                        .map_err(|error| mixed_error(&instance, error))
-                });
+                .and_then(|()| host.accept_trial());
             if committed.is_err() && host.trial_active() {
-                host.reject_trial()
-                    .map_err(|error| mixed_error(&instance, error))?;
+                let rolled_back = host.reject_trial();
+                named(host, rolled_back)?;
             }
-            committed?;
+            named(host, committed)?;
         }
         Ok(())
     }
