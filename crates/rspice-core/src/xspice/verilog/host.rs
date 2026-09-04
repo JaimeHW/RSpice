@@ -702,43 +702,39 @@ impl DigitalHost {
     /// Run one process from wherever it stopped, and record where it stops
     /// next.
     fn run_process(&mut self, index: usize, tick: u64) -> Result<(), DigitalRunError> {
-        // The plan is immutable for the whole of a host's life and already
-        // shared, so an activation borrows its process through a refcount bump
-        // on the handle. Reading it through `self.plan` instead would put that
-        // borrow and `&mut self.store` on the same `self`, which is the borrow
-        // the deep copy this replaces was paying to avoid: a whole
+        // The plan, the store and the scratch are three different fields, so
+        // an activation borrows all three at once and pays for none of them:
+        // the process is read straight out of `self.plan` rather than through
+        // a refcount bump on a cloned handle, and the scratch is lent rather
+        // than moved out of `self` and back. Both detours existed to keep the
+        // three borrows apart on one `self`, which a field-wise borrow does
+        // for free. What they replaced is still the point: a whole
         // `CfgFunction` — blocks, instructions, values, params — plus the
         // static sensitivity list, copied and dropped per activation.
-        let plan = Arc::clone(&self.plan);
-        let Some(process) = plan.processes.get(index) else {
+        let Some(process) = self.plan.processes.get(index) else {
             return Ok(());
         };
-        // Taken out of `self` for the duration so that the interpreter can
-        // hold `&mut store` and `&mut scratch` at once, and put back with
-        // whatever capacity the activation grew it to.
-        let mut scratch = std::mem::take(&mut self.scratch);
         // The resume state goes in **by value**: its argument list is the one
         // the previous suspension built, and handing it over is what lets the
         // same allocation carry the next suspension's arguments back out.
         let resume = self.slots[index].resume.take();
         let outcome = match resume {
             Some(state) => resume_process(
-                &plan,
+                &self.plan,
                 process,
                 state,
                 &mut self.store,
-                &mut scratch,
+                &mut self.scratch,
                 DEFAULT_PROCESS_STEP_LIMIT,
             ),
             None => start_process(
-                &plan,
+                &self.plan,
                 process,
                 &mut self.store,
-                &mut scratch,
+                &mut self.scratch,
                 DEFAULT_PROCESS_STEP_LIMIT,
             ),
         };
-        self.scratch = scratch;
         let outcome = outcome.map_err(|error| DigitalRunError::Evaluation {
             process: self.describe(index),
             error,
