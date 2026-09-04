@@ -459,6 +459,34 @@ struct CfgLowerer<'a> {
     /// prior-current probe set grows by equation index and knows nothing about
     /// guards, and matching it here is the whole point.
     completed_current_contributions: Vec<ContributionId>,
+    /// Whether the walk is inside a noise process's magnitude operands, where a
+    /// flow probe reads the *settled* branch current rather than the running
+    /// sum at this point in the body.
+    ///
+    /// A noise magnitude is not evaluated where it is written. The consumer
+    /// this matters to runs the whole large-signal body first, caches each
+    /// contribution's current — `populate_noise_current_probe_cache` in
+    /// [`crate::device`] — and only then evaluates the magnitudes, so `I(br)`
+    /// inside one means the operating point's branch current and nothing else.
+    /// Lowering it as the running sum reads the *entry block's seeded zero*
+    /// whenever the source sits in the contribution to its own branch, which is
+    /// the `white_noise(2 * `q` * abs(I(p, n)))` shot-noise idiom every compact
+    /// model writes: the magnitude then evaluates to zero and the analysis
+    /// drops the source before it is seen.
+    ///
+    /// So a probe here names the branch's *last* current contribution rather
+    /// than the last one the walk has completed. Both are
+    /// [`CfgValueKind::ContributedCurrent`] and both translate through
+    /// [`CfgRuntimeBindings`](crate::native::cfg_program::CfgRuntimeBindings) to
+    /// the same `LoadCurrent`/`LoadPriorCurrent` the shipped route chose; what
+    /// changes is only how much of the branch the sum covers, and after the
+    /// body has run the answer is all of it.
+    ///
+    /// Only [`Self::frozen_contribution_current`] consumers see this, because
+    /// only they have per-contribution storage to read. A generated device
+    /// inlines the contribution instead, and inlining a contribution that has
+    /// not happened yet is exactly the forward read the running sum gives.
+    noise_magnitude: bool,
     metadata_assignment_value: bool,
     /// Whether the expression being lowered is a contribution's right-hand
     /// side. Verilog-AMS 2023 section 4.5.12 requires a strictly positive
@@ -982,6 +1010,7 @@ impl<'a> CfgLowerer<'a> {
             frozen_event_states: HashMap::new(),
             frozen_contribution_current: mode.frozen_contribution_current,
             completed_current_contributions: Vec::new(),
+            noise_magnitude: false,
             metadata_assignment_value: false,
             zi_direct_assignment: false,
             diagnostics: Vec::new(),
@@ -2295,6 +2324,12 @@ impl<'a> CfgLowerer<'a> {
 
         // Operand lowering occurs only after control reaches this expression;
         // untaken branches therefore cannot evaluate an invalid PSD/exponent.
+        //
+        // A flow probe inside these operands is the one place in the body that
+        // reads the *settled* branch current rather than the running sum — see
+        // [`Self::noise_magnitude`] — so the flag is raised around the operand
+        // walk and nothing else.
+        let outer_noise_magnitude = std::mem::replace(&mut self.noise_magnitude, true);
         let (psd, exponent, table) = match kind {
             CanonicalNoiseSourceKind::White => (self.expr(operands[0]), None, Vec::new()),
             CanonicalNoiseSourceKind::Flicker => (
@@ -2308,6 +2343,7 @@ impl<'a> CfgLowerer<'a> {
                 operands.iter().map(|operand| self.expr(*operand)).collect(),
             ),
         };
+        self.noise_magnitude = outer_noise_magnitude;
         let pending = PendingNoiseProcess {
             process_id,
             kind,
@@ -2641,21 +2677,32 @@ impl<'a> CfgLowerer<'a> {
     /// freeze it against — the shipped route registers a probe only for a
     /// contribution it has already lowered. Refusing instead would drop a
     /// module for an expression that is constant.
+    ///
+    /// Inside a noise magnitude there is no "yet". The magnitudes are evaluated
+    /// after the whole body, against storage the consumer has already filled
+    /// for every contribution, so the probe names the branch's last current
+    /// contribution whether or not the walk has reached it. See
+    /// [`Self::noise_magnitude`], which is the only thing that answers "would
+    /// this read be the seeded zero?" with "and that is wrong".
     fn frozen_contributed_flow(
         &mut self,
         pos: Option<NodeId>,
         neg: Option<NodeId>,
         contributions: &[(ContributionId, bool)],
     ) -> Option<ValueId> {
-        let through = *self
-            .completed_current_contributions
-            .iter()
-            .rev()
-            .find(|completed| {
-                contributions
-                    .iter()
-                    .any(|(contribution, _)| contribution == *completed)
-            })?;
+        let through = if self.noise_magnitude {
+            contributions.last()?.0
+        } else {
+            *self
+                .completed_current_contributions
+                .iter()
+                .rev()
+                .find(|completed| {
+                    contributions
+                        .iter()
+                        .any(|(contribution, _)| contribution == *completed)
+                })?
+        };
         Some(self.leaf(
             LeafKey::ContributedCurrent { pos, neg, through },
             CfgValueType::Real,

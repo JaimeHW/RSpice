@@ -61,24 +61,31 @@
 //!
 //! Production asks for [`CfgNoiseScope::Postfix`]. It used to say the flip
 //! taking the other scope had not run its censuses yet and no more than that.
-//! The censuses have now run and the answer is that the scope is not ready, on
-//! two counts measured rather than argued.
+//! The censuses have now run and named two counts. One of them is closed.
 //!
-//! **It computes a wrong number for one class.** A noise magnitude that reads a
-//! *contribution current* — `white_noise(abs(I(p, n)) * 4.0, "shot")` — reads
-//! zero through the CFG, so the source is dropped before it reaches the
-//! analysis and the small-signal result is silently missing a term.
-//! `try_noise_sources_evaluates_current_probe_psd` in `tests/device_eval.rs` is
-//! the estate's witness and
-//! [`a_noise_magnitude_over_a_contribution_current_is_why_noise_stays_postfix`]
-//! is the pin here. This is the class W-F5 closed for residuals and Jacobians —
+//! **It computed a wrong number for one class, and no longer does.** A noise
+//! magnitude that reads a *contribution current* —
+//! `white_noise(abs(I(p, n)) * 4.0, "shot")` — read zero through the CFG, so
+//! the source was dropped before it reached the analysis and the small-signal
+//! result was silently missing a term. This is the class W-F5 closed for
+//! residuals and Jacobians —
 //! [`CfgValueKind::ContributedCurrent`](crate::canonical_ir::CfgValueKind)
 //! naming the probe canonically and [`CfgRuntimeBindings`] translating it back
-//! to the shipped route's storage — reaching an entry that class never covered.
-//! The hoisted site copy a magnitude is published as is a second lowering, and
-//! the binding does not survive it.
+//! to the shipped route's storage — reaching an entry that class never covered,
+//! and the reason it did not cover it was not the hoist. The leaf was never
+//! built: `frozen_contributed_flow` names a probe against a contribution the
+//! walk has *completed*, and a magnitude written inside the contribution to its
+//! own branch is lowered before that happens, so the probe fell back to the
+//! running sum, which is the entry block's seeded zero. A noise magnitude has
+//! no "yet" — the consumer runs the whole body and caches every contribution's
+//! current before evaluating one — so inside a magnitude the probe now names
+//! the branch's last contribution whatever the walk has reached.
+//! `CfgLowerer::noise_magnitude` is that rule,
+//! [`a_noise_magnitude_over_a_contribution_current_reads_the_shipped_routes_storage`]
+//! is the pin, and `try_noise_sources_evaluates_current_probe_psd` in
+//! `tests/device_eval.rs` is the same claim end to end.
 //!
-//! **It costs, and it is the whole cost of the flip.**
+//! **It costs, and it is now the whole cost of the flip.**
 //! [`crate::native::cfg_cost_census`] times the shipped plan, the CFG route with
 //! noise left postfix, and the CFG route entire, at one bias in one process.
 //! The route alone is free — 1.00, 1.05, 0.95, 0.97 and 0.89 times the shipped
@@ -1739,9 +1746,9 @@ endmodule
             let expected = match field {
                 "stamp_values" | "jacobians" | "reactive_jacobians" => "block",
                 // Noise, parameter defaults and static conditions. The last two
-                // the CFG does not carry; noise it does, and
-                // `a_noise_magnitude_over_a_contribution_current_is_why_noise_stays_postfix`
-                // is why this route does not take it.
+                // the CFG does not carry; noise it does, and the module
+                // documentation's cost paragraph is why this route does not
+                // take it.
                 _ => "postfix",
             };
             assert_eq!(
@@ -1751,27 +1758,36 @@ endmodule
         }
     }
 
-    /// Why [`CfgNoiseScope::Cfg`] is not what production builds, as the shape
-    /// of the entry rather than as a paragraph.
+    /// A noise magnitude over a contribution current reads the *same storage*
+    /// on both routes, which is what let noise take the CFG route.
     ///
     /// The shipped route freezes a contribution-current probe and reads it back
     /// out of the storage the evaluation published — `LoadCurrent(pair)` here,
     /// which is what `populate_noise_current_probe_cache` in `crate::device`
-    /// fills before a noise sweep reads a magnitude. The CFG route's noise
-    /// magnitude is a hoisted copy of the site's own computation, and the
-    /// binding that translates a canonical `ContributedCurrent` back to that
-    /// storage does not survive the hoist: the entry holds no current load at
-    /// all, so the magnitude evaluates to zero and `try_noise_sources` drops the
-    /// source before the analysis sees it.
+    /// fills before a noise sweep reads a magnitude. The CFG route read the
+    /// *running sum* instead, and a magnitude written inside the contribution to
+    /// its own branch — `white_noise(abs(I(p, n)) * 4.0, "shot")`, the shot
+    /// noise idiom — is lowered before that contribution completes, so the sum
+    /// was the entry block's seeded zero. The magnitude evaluated to zero and
+    /// `try_noise_sources` dropped the source before the analysis saw it.
+    ///
+    /// What was missing was not the translation but the *leaf*: nothing built a
+    /// [`CfgValueKind::ContributedCurrent`](crate::canonical_ir::CfgValueKind)
+    /// at all, because `frozen_contributed_flow` names a probe only against a
+    /// contribution the walk has completed. A noise magnitude has no "yet" —
+    /// the consumer runs the whole body and caches every contribution's current
+    /// before evaluating one — so inside a magnitude the probe names the
+    /// branch's last contribution whatever the walk has reached, and the leaf
+    /// translates to the `LoadCurrent(pair)` the shipped route chose.
+    /// `CfgLowerer::noise_magnitude` in `crate::canonical_ir`'s `cfg_lower` is
+    /// that rule.
     ///
     /// `try_noise_sources_evaluates_current_probe_psd` in `tests/device_eval.rs`
-    /// is the same defect measured end to end, on the same module. It fails the
-    /// moment production asks for [`CfgNoiseScope::Cfg`], which is how this was
-    /// found; this pin says *why* without compiling and running a device, and
-    /// fails by agreeing — the day the hoist carries the binding, the two
-    /// read-sets match and this test says so instead of quietly passing.
+    /// is the same claim measured end to end, on the same module. This pin says
+    /// it without compiling and running a device: the two read-sets are equal,
+    /// and neither is empty.
     #[test]
-    fn a_noise_magnitude_over_a_contribution_current_is_why_noise_stays_postfix() {
+    fn a_noise_magnitude_over_a_contribution_current_reads_the_shipped_routes_storage() {
         let source = r#"
 module cfg_noise_current_probe(p, n);
   inout p, n;
@@ -1815,11 +1831,10 @@ endmodule
         );
 
         let cfg_reads = reads(&cfg);
-        assert!(
-            cfg_reads.0.is_empty() && cfg_reads.1.is_empty(),
-            "the CFG noise magnitude has stopped losing the contributed-current binding \
-             ({cfg_reads:?} against the shipped {shipped_reads:?}); noise can take the CFG route \
-             once cfg_cost_census also says it is affordable"
+        assert_eq!(
+            cfg_reads, shipped_reads,
+            "the CFG noise magnitude reads the same contribution-current storage the shipped \
+             one does"
         );
     }
 
