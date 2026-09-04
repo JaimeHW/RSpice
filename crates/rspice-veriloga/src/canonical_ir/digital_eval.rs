@@ -792,11 +792,86 @@ fn read_signal<E: DigitalEnvironment + ?Sized>(
 // Running a process
 // ============================================================================
 
+/// One activation's SSA value table.
+///
+/// A slot holds whatever was last written to it, and a *generation stamp* says
+/// which activation wrote it: the slot is defined now exactly when its stamp
+/// equals [`current`](Self::current). Entering a function bumps the generation,
+/// which empties the whole table in constant time.
+///
+/// That is the whole reason the table is not a `Vec<Option<DigitalScalar>>`
+/// cleared at every entry. Clearing is O(|values|) per activation and drops
+/// every value the previous activation left, one at a time; a gate-level
+/// process runs about five instructions per activation over a table sized for
+/// the *whole* function, so the emptying cost has no relation to the work done.
+///
+/// The execution contract is unchanged, and the generation is how it is
+/// implemented rather than something it is traded against: every slot is
+/// undefined at every entry, so a `Wait` still resumes as a `Jump` into an
+/// empty table and a resumed block may read only its own parameters and what it
+/// computes.
+#[derive(Debug, Default, Clone)]
+struct ValueTable {
+    /// One slot per SSA value. Meaningful only where the stamp matches; the
+    /// rest is whatever some earlier activation left there.
+    values: Vec<DigitalScalar>,
+    /// The generation each slot was last written in.
+    stamps: Vec<u32>,
+    /// The generation being written now. Never zero once a run has started,
+    /// which is what makes a never-written slot's zero stamp mean "undefined".
+    current: u32,
+}
+
+impl ValueTable {
+    /// Empty the table for a function with `len` values.
+    ///
+    /// Grows to the longest function it has been asked for and never shrinks:
+    /// one scratch is shared by every process a host runs, so the table settles
+    /// at the widest of them instead of being resized per activation. A slot
+    /// beyond the current function's length is unreachable — every id comes
+    /// from that function's own value list — and a slot within it carries an
+    /// older generation's stamp, which is exactly "undefined".
+    fn enter(&mut self, len: usize) {
+        if self.values.len() < len {
+            self.values.resize(len, DigitalScalar::Effect);
+            self.stamps.resize(len, 0);
+        }
+        self.current = match self.current.checked_add(1) {
+            Some(next) => next,
+            // Four billion activations later. Every stamp goes back to the
+            // never-written value and the generation restarts from one, so no
+            // slot written before the wrap can be mistaken for one written
+            // after it. The reset is O(|values|), once per 2^32 entries.
+            None => {
+                self.stamps.fill(0);
+                1
+            }
+        };
+    }
+
+    /// Record `value` as this activation's value for `id`.
+    ///
+    /// Overwriting is what releases whatever the slot held before, so a wide
+    /// value from an earlier activation lives until the slot is used again
+    /// rather than until the next entry.
+    fn define(&mut self, id: ValueId, value: DigitalScalar) {
+        let index = usize::from(id);
+        self.values[index] = value;
+        self.stamps[index] = self.current;
+    }
+
+    /// This activation's value for `id`, if this activation gave it one.
+    fn defined(&self, id: ValueId) -> Option<&DigitalScalar> {
+        let index = usize::from(id);
+        (self.stamps[index] == self.current).then(|| &self.values[index])
+    }
+}
+
 /// The working set one activation needs, kept across activations.
 ///
 /// Everything here is *storage*, never state. The execution contract is
 /// unchanged: a `Wait` resumes as a `Jump` into an empty value table, and
-/// [`Interpreter::enter`] clears the table at every entry so that a resumed
+/// [`ValueTable::enter`] empties the table at every entry so that a resumed
 /// block still reads nothing but its own parameters. What the contract does
 /// not require is that the storage be *re-obtained* from the allocator each
 /// time, and a kernel running a million activations of a five-instruction
@@ -807,8 +882,8 @@ fn read_signal<E: DigitalEnvironment + ?Sized>(
 /// [`start_in`] and [`resume_in`].
 #[derive(Debug, Default, Clone)]
 pub struct DigitalEvalScratch {
-    /// One slot per SSA value, cleared at every entry into a function.
-    values: Vec<Option<DigitalScalar>>,
+    /// One slot per SSA value, emptied at every entry into a function.
+    table: ValueTable,
     /// One control-flow edge's arguments, refilled per edge.
     arguments: Vec<DigitalScalar>,
     /// One concatenation's operands, refilled per node.
@@ -960,8 +1035,9 @@ struct Interpreter<'a, 's, E: ?Sized> {
     plan: &'a CanonicalDigitalPlan,
     process: &'a CfgDigitalProcess,
     environment: &'a mut E,
-    /// The reused working set. Its `values` table is one slot per SSA value and
-    /// is empty at every entry into the function.
+    /// The reused working set. Its value table is one slot per SSA value and is
+    /// empty at every entry into the function — the generation bump in
+    /// [`ValueTable::enter`] is what empties it.
     ///
     /// Emptied rather than carried across a suspension because a `Wait` resumes
     /// as a `Jump`: the only values a resumed block may read are its own
@@ -978,12 +1054,11 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
         environment: &'a mut E,
         scratch: &'s mut DigitalEvalScratch,
     ) -> Self {
-        // Cleared and refilled with `None` rather than reallocated. The
-        // observable state is the same table an allocation would have produced
-        // — every slot empty — and dropping the old contents here is what
-        // releases the previous activation's values.
-        scratch.values.clear();
-        scratch.values.resize(process.function.values.len(), None);
+        // A generation bump rather than a clear: the observable state is the
+        // same table an allocation would have produced — every slot empty —
+        // and it costs one increment instead of one pass over the function's
+        // whole value list.
+        scratch.table.enter(process.function.values.len());
         Self {
             plan,
             process,
@@ -1010,7 +1085,7 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
         for _ in 0..step_limit {
             for instruction in &function.block(block).instructions {
                 let value = self.compute(instruction.result)?;
-                self.scratch.values[usize::from(instruction.result)] = Some(value);
+                self.scratch.table.define(instruction.result, value);
             }
 
             match &function.block(block).terminator {
@@ -1126,7 +1201,7 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
         let mut arguments = std::mem::take(&mut self.scratch.arguments);
         let outcome = if params.len() == arguments.len() {
             for (param, value) in params.iter().zip(arguments.drain(..)) {
-                self.scratch.values[usize::from(*param)] = Some(value);
+                self.scratch.table.define(*param, value);
             }
             Ok(())
         } else {
@@ -1142,7 +1217,7 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
     }
 
     fn read(&mut self, id: ValueId) -> Result<DigitalScalar, DigitalEvalError> {
-        if let Some(value) = &self.scratch.values[usize::from(id)] {
+        if let Some(value) = self.scratch.table.defined(id) {
             return Ok(value.clone());
         }
         // Constants belong to no block — a `#delay` operand is pushed as a leaf
@@ -1152,7 +1227,7 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
             return Err(DigitalEvalError::UndefinedValue(id));
         }
         let value = self.compute(id)?;
-        self.scratch.values[usize::from(id)] = Some(value.clone());
+        self.scratch.table.define(id, value.clone());
         Ok(value)
     }
 
@@ -1533,10 +1608,180 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::cfg::{CfgBlock, CfgInstruction, CfgValue, CfgValueType};
+    use super::super::diagnostic::SourceSpanRef;
+    use super::super::digital::DigitalProcessKind;
     use super::*;
     use crate::four_state::FourStateBit::{
         HighImpedance as Z, One as ONE, Unknown as X, Zero as ZERO,
     };
+
+    /// A store with nothing in it, for the process tests that read no signal.
+    struct NoEnvironment;
+
+    impl DigitalEnvironment for NoEnvironment {
+        fn read_signal(&self, _signal: DigitalSignalId) -> Option<FourStateValue> {
+            None
+        }
+
+        fn write_signal(&mut self, _signal: DigitalSignalId, _value: FourStateValue) {}
+
+        fn defer_update(&mut self, _update: DigitalDeferredUpdate) {}
+
+        fn write_real_signal(&mut self, _signal: DigitalSignalId, _value: f64) {}
+
+        fn read_real_signal(&self, _signal: DigitalSignalId) -> Option<f64> {
+            None
+        }
+
+        fn read_analog_potential(&self, _probe: DigitalAnalogProbeId) -> Option<f64> {
+            None
+        }
+
+        fn drive_real_signal(&mut self, _drive: DigitalRealDrive) {}
+
+        fn drive_signal(&mut self, _drive: DigitalDrive) {}
+    }
+
+    /// A process that computes a value, suspends, and then reads that value in
+    /// the block it resumes into.
+    ///
+    /// The lowering never emits this — a value that has to survive a suspension
+    /// travels as a resume argument, bound to a block parameter — which is the
+    /// point: it is the shape the execution contract forbids, built by hand so
+    /// the interpreter can be asked what it does with one.
+    fn process_reading_across_a_suspension() -> CfgDigitalProcess {
+        let bit = CfgValueType::FourState { width: 1 };
+        let scalar = |index: usize, kind| CfgValue {
+            id: ValueId::from(index),
+            value_type: bit,
+            kind,
+        };
+        let values = vec![
+            scalar(0, CfgValueKind::FourStateConstant(value("0"))),
+            scalar(
+                1,
+                CfgValueKind::DigitalBitwiseNot {
+                    input: ValueId::from(0usize),
+                },
+            ),
+            scalar(
+                2,
+                CfgValueKind::DigitalBitwiseNot {
+                    input: ValueId::from(1usize),
+                },
+            ),
+        ];
+        let blocks = vec![
+            CfgBlock {
+                id: BlockId::from(0usize),
+                params: Vec::new(),
+                instructions: vec![CfgInstruction {
+                    result: ValueId::from(1usize),
+                }],
+                terminator: CfgTerminator::Wait {
+                    wait: DigitalWait::Event(vec![DigitalSensitivityTerm {
+                        signal: DigitalSignalId::from(0usize),
+                        edge: None,
+                    }]),
+                    resume: BlockId::from(1usize),
+                    resume_args: Vec::new(),
+                },
+            },
+            CfgBlock {
+                id: BlockId::from(1usize),
+                params: Vec::new(),
+                // Reads the value the block before the suspension computed,
+                // and nothing bound it as a parameter.
+                instructions: vec![CfgInstruction {
+                    result: ValueId::from(2usize),
+                }],
+                terminator: CfgTerminator::Return,
+            },
+        ];
+        CfgDigitalProcess {
+            id: DigitalProcessId::from(0usize),
+            kind: DigitalProcessKind::Always,
+            function: CfgFunction {
+                entry: BlockId::from(0usize),
+                blocks,
+                values,
+                shapes: Vec::new(),
+            },
+            static_sensitivity: None,
+            span: SourceSpanRef {
+                source_file_id: 0,
+                start: 0,
+                end: 0,
+            },
+        }
+    }
+
+    /// The execution contract, pinned: a `Wait` resumes as a `Jump` into an
+    /// *empty* value table, so a value computed before the suspension is
+    /// undefined after it.
+    ///
+    /// It is pinned because the table no longer empties itself by dropping what
+    /// it holds — a generation stamp decides what is readable, and the previous
+    /// activation's values stay in their slots. A stamp that survived the entry
+    /// would let this process run to completion, and a lowering that lost a
+    /// block argument would pass here and disagree with every other backend.
+    #[test]
+    fn a_value_computed_before_a_suspension_is_undefined_after_it() {
+        let plan = CanonicalDigitalPlan::default();
+        let process = process_reading_across_a_suspension();
+        let mut environment = NoEnvironment;
+        let mut scratch = DigitalEvalScratch::new();
+
+        let outcome = start_in(
+            &plan,
+            &process,
+            &mut environment,
+            &mut scratch,
+            DEFAULT_PROCESS_STEP_LIMIT,
+        )
+        .expect("the process suspends at its first wait");
+        let DigitalProcessOutcome::Suspended(suspension) = outcome else {
+            panic!("an event wait suspends");
+        };
+
+        let (_, state) = suspension.into_parts();
+        let error = resume_in(
+            &plan,
+            &process,
+            state,
+            &mut environment,
+            &mut scratch,
+            DEFAULT_PROCESS_STEP_LIMIT,
+        )
+        .expect_err("the resumed block may not read what the suspended one computed");
+        assert_eq!(error, DigitalEvalError::UndefinedValue(ValueId::from(1usize)));
+    }
+
+    /// The generation is a `u32`, so an interpreter that only ever bumped it
+    /// would, after four billion entries, hand a fresh activation a number some
+    /// slot already carries and revive that slot. It wraps by clearing every
+    /// stamp and restarting at one instead.
+    #[test]
+    fn a_wrapped_generation_revives_no_slot() {
+        let process = process_reading_across_a_suspension();
+        let slot = ValueId::from(1usize);
+        let mut table = ValueTable::default();
+
+        table.enter(process.function.values.len());
+        assert_eq!(table.current, 1);
+        table.define(slot, DigitalScalar::Integer(7));
+        assert_eq!(table.defined(slot), Some(&DigitalScalar::Integer(7)));
+
+        // Four billion entries later, on the last generation a `u32` counts.
+        table.current = u32::MAX;
+        table.enter(process.function.values.len());
+
+        // Back to one — and the slot stamped with the *first* generation one is
+        // not readable in the second, which is what the reset buys.
+        assert_eq!(table.current, 1);
+        assert_eq!(table.defined(slot), None);
+    }
 
     fn value(spelling: &str) -> FourStateValue {
         let bits: Vec<FourStateBit> = spelling
