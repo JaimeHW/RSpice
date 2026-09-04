@@ -55,9 +55,9 @@ use super::census_models::shipped_census_models;
 /// it does not belong here at all — which is exactly what `value_programs`'s
 /// block-entry refusal says.
 ///
-/// So [`crate::jit::cfg_plan_builder::DEFAULT_PLAN_ROUTE`] does not enter into
-/// these two numbers, whichever way it points. What would move them is a change
-/// to the postfix lowering itself, or to which plan fields this census
+/// So the flip to the CFG plan does not enter into these two numbers, and did
+/// not move them. What would move them is a change to the postfix lowering
+/// itself, or to which plan fields this census
 /// enumerates. The CFG route's own entries are measured against MIR's by
 /// [`super::cfg_mir_census`], which is the census that answers for them.
 const CENSUS_PROGRAMS: usize = 1_972_391;

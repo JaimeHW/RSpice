@@ -176,12 +176,13 @@ fn state_slot(op: NativeOp) -> Option<(CanonicalStateFamily, usize)> {
 /// which composes the two.
 #[derive(Debug, Clone)]
 pub(crate) enum PlanProgram {
-    /// The MIR route's flat operation stream. Parameter defaults, static
-    /// conditions and noise on every module; every field of a module the CFG
-    /// route refuses.
+    /// The MIR route's flat operation stream. Parameter defaults and static
+    /// conditions on every module; every field of a module the CFG route
+    /// refuses.
     Postfix(NativeProgram),
-    /// The CFG route's blocks and terminators. Residual, Jacobian and
-    /// reactive-Jacobian entries, on every module the CFG route builds.
+    /// The CFG route's blocks and terminators. Residual, Jacobian,
+    /// reactive-Jacobian and noise entries, on every module the CFG route
+    /// builds.
     Blocks(BlockProgram),
 }
 

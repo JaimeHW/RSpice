@@ -112,7 +112,7 @@ use crate::jit::cfg_plan_builder::{
 };
 use crate::jit::plan_builder::build_model_plan_with_canonical_ir;
 use crate::jit::plan_program::PlanProgram;
-use crate::native::aarch64::image::MAX_A64_FUNCTION_BYTES;
+use crate::native::aarch64::image::A64_SEGMENT_THRESHOLD_BYTES;
 use crate::native::abi::EvalContext;
 use crate::native::model::NativeModel;
 use crate::rust_backend::canonical::stored_charges;
@@ -1390,7 +1390,7 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
         largest
             .map(|(entry, instructions, bytes)| format!(
                 " largest_entry[{entry} instructions={instructions} a64_bytes={bytes} \
-                  a64_ceiling={MAX_A64_FUNCTION_BYTES}]"
+                  a64_segment_threshold={A64_SEGMENT_THRESHOLD_BYTES}]"
             ))
             .unwrap_or_default(),
         worst

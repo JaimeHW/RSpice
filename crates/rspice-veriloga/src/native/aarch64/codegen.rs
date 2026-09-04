@@ -3168,7 +3168,7 @@ mod cross_target_contract_tests {
     use crate::native::aarch64::encoder::{
         A64Encoder, DReg, MAX_FORWARD_LITERAL_REACH_BYTES, XReg,
     };
-    use crate::native::aarch64::image::MAX_A64_FUNCTION_BYTES;
+    use crate::native::aarch64::image::A64_SEGMENT_THRESHOLD_BYTES;
     use crate::native::aarch64::verifier::verify_exact_function;
     use crate::native::expr::{BinaryMathOp, NativeOp, NativeProgram};
 
@@ -3215,8 +3215,8 @@ mod cross_target_contract_tests {
     /// constant more than [`MAX_FORWARD_LITERAL_REACH_BYTES`] past the load
     /// that names it cannot be encoded at all. Before inline islands this was
     /// the reason an A64 function could not grow past a megabyte; the
-    /// megabyte-sized `MAX_A64_FUNCTION_BYTES` refusal in the image builder hid
-    /// it by never letting the encoder get there.
+    /// megabyte-sized refusal `A64_SEGMENT_THRESHOLD_BYTES` then named in the
+    /// image builder hid it by never letting the encoder get there.
     #[test]
     #[ignore = "emits two megabytes of real code; run with --release --features native -- --ignored"]
     fn a_function_past_the_literal_reach_places_its_constants_inline() {
@@ -3238,7 +3238,7 @@ mod cross_target_contract_tests {
             .expect("inline constant islands must verify");
 
         assert!(
-            bytes.len() > MAX_A64_FUNCTION_BYTES,
+            bytes.len() > A64_SEGMENT_THRESHOLD_BYTES,
             "the case is only interesting past the old ceiling, got {} bytes",
             bytes.len()
         );

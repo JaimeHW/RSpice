@@ -55,7 +55,13 @@ pub const WASM_JIT_ABI_VERSION: u32 = 8;
 /// Version of the deterministic encoder. It participates in cache identity
 /// independently of the ABI because code layout may change without changing
 /// runtime frames.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 7;
+///
+/// 7 to 8 at the CFG plan flip. It had held at 7 through the whole block-model
+/// lane because a postfix plan emitted a byte-identical module either way, so
+/// nothing a browser had cached was stale. A CFG plan does not: the same module
+/// now emits from block programs and one assignment prelude, so a worker
+/// holding a 7 would answer with code this crate no longer produces.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 8;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;

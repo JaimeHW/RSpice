@@ -48,9 +48,10 @@
 //!
 //! [`build_model_plan_from_canonical_cfg`](crate::jit::cfg_plan_builder::build_model_plan_from_canonical_cfg)
 //! builds one per module and turns every publishable entry into
-//! [`CfgPrelude::entry_program`]. `DEFAULT_PLAN_ROUTE` still selects the
-//! postfix route, so nothing production compiles carries one yet; the fixture
-//! and the frame census beside this module are what qualified the design.
+//! [`CfgPrelude::entry_program`], and since the flip that is the plan every
+//! backend compiles: every shipped module but the two the CFG route refuses
+//! carries one. The fixture and the frame census beside this module are what
+//! qualified the design before it did.
 
 use std::collections::HashMap;
 

@@ -18,7 +18,7 @@
 //!    pool after the function's `RET`; and
 //! 2. the Windows ARM64 `.xdata` Function Length field, 18 bits of instruction
 //!    words, which is exactly 1,048,572 bytes and is what
-//!    `MAX_A64_FUNCTION_BYTES` was named for.
+//!    `A64_SEGMENT_THRESHOLD_BYTES` takes its value from.
 //!
 //! Constants now go into inline islands as the function grows, which removes
 //! the first. The second was never a limit on the code, only on how much of it
@@ -45,7 +45,7 @@
 use std::time::Instant;
 
 use super::codegen::{compile_value_function, compile_value_function_from_ssa};
-use super::image::{A64ImageBuilder, MAX_A64_FUNCTION_BYTES};
+use super::image::{A64ImageBuilder, A64_SEGMENT_THRESHOLD_BYTES};
 use super::unwind::{analyze_function, append_windows_unwind_data};
 use super::verifier::verify_exact_function;
 use crate::jit::cfg_prelude::CfgPrelude;
@@ -222,7 +222,7 @@ fn the_aarch64_prelude_encoding_census() {
             prelude.slot_count(),
             prelude.program().ssa().instructions().len(),
             bytes.len(),
-            bytes.len() > MAX_A64_FUNCTION_BYTES,
+            bytes.len() > A64_SEGMENT_THRESHOLD_BYTES,
             constant_islands(&bytes),
         );
     }

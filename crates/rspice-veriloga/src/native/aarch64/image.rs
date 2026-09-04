@@ -24,22 +24,25 @@ use crate::native::{JitError, JitResult};
 
 const MODEL: &str = "native-aarch64-image";
 const ENTRY_ALIGNMENT: usize = 16;
-// The largest function one Windows ARM64 `.xdata` record can describe: its
-// Function Length field is an 18-bit instruction count.
+// The size past which an entry is cut into separately published pieces where
+// its form allows it, rather than emitted as one function.
 //
-// Nothing in the instruction stream stops here: `B`/`BL` carry an imm26 word
-// displacement and reach 128 MiB, `B.cond`/`CBZ`/`CBNZ` are always emitted in
-// the long form (the inverse condition over an unconditional `B`, see
-// `A64Encoder`), and `LDR` (literal) reaches its constants through inline
-// islands. Nor does the metadata stop here any more: a function past this size
-// is described by several `.pdata`/`.xdata` fragments, which
-// `append_windows_unwind_data` emits.
+// The number is the largest function one Windows ARM64 `.xdata` record can
+// describe — its Function Length field is an 18-bit instruction count — and it
+// was a ceiling when that was the only shape the metadata had. It is not one
+// any more, which is why the name says threshold. Nothing in the instruction
+// stream stops here: `B`/`BL` carry an imm26 word displacement and reach 128
+// MiB, `B.cond`/`CBZ`/`CBNZ` are always emitted in the long form (the inverse
+// condition over an unconditional `B`, see `A64Encoder`), and `LDR` (literal)
+// reaches its constants through inline islands. Nor does the metadata: a
+// function past this size is described by several `.pdata`/`.xdata` fragments,
+// which `append_windows_unwind_data` emits.
 //
-// What is left is a preference. An entry over this size is *segmented where
-// its form allows it* — a postfix program can be cut into separately published
-// pieces, a block program cannot — so that the common shape stays one function
-// with one unwind record, and only what cannot be cut is emitted whole.
-pub(crate) const MAX_A64_FUNCTION_BYTES: usize = 0x3ffff * 4;
+// So what is left is a preference. A postfix program over this size is cut into
+// numbered pieces behind a driver; a block program cannot be cut at an
+// arbitrary operation and is emitted whole. The common shape stays one function
+// with one unwind record, and only what cannot be cut pays for several.
+pub(crate) const A64_SEGMENT_THRESHOLD_BYTES: usize = 0x3ffff * 4;
 const A64_NOP: [u8; 4] = 0xD503_201F_u32.to_le_bytes();
 const A64_BTI_C: [u8; 4] = 0xD503_245F_u32.to_le_bytes();
 
@@ -122,7 +125,7 @@ impl A64ImageBuilder {
     /// there.
     ///
     /// The one thing only a postfix entry can do is *segment*. A postfix entry
-    /// over [`MAX_A64_FUNCTION_BYTES`] is split into numbered pieces behind a
+    /// over [`A64_SEGMENT_THRESHOLD_BYTES`] is split into numbered pieces behind a
     /// driver — a rewrite of the operand stream that has no block-form
     /// counterpart, because a block program's control flow does not survive
     /// being cut at an arbitrary operation. A block entry over that size is
@@ -142,7 +145,7 @@ impl A64ImageBuilder {
             PlanProgramRef::Blocks(program) => compile_value_function_from_ssa(program.ssa())?,
         };
         let offset = match program {
-            PlanProgramRef::Postfix(postfix) if bytes.len() > MAX_A64_FUNCTION_BYTES => {
+            PlanProgramRef::Postfix(postfix) if bytes.len() > A64_SEGMENT_THRESHOLD_BYTES => {
                 self.append_segmented_value(postfix, entry_kind)
             }
             PlanProgramRef::Postfix(_) | PlanProgramRef::Blocks(_) => {
@@ -239,7 +242,7 @@ impl A64ImageBuilder {
         chunks: &mut Vec<CodeOffset>,
     ) -> JitResult<()> {
         let bytes = compile_assignment_pass_function(assignments)?;
-        if bytes.len() <= MAX_A64_FUNCTION_BYTES {
+        if bytes.len() <= A64_SEGMENT_THRESHOLD_BYTES {
             chunks.push(self.append_function(bytes, entry_kind)?);
             return Ok(());
         }
@@ -404,7 +407,7 @@ impl A64ImageBuilder {
             stamp_values,
             published_current_pairs,
         )?;
-        let bytes = if inline.len() <= MAX_A64_FUNCTION_BYTES {
+        let bytes = if inline.len() <= A64_SEGMENT_THRESHOLD_BYTES {
             inline
         } else {
             compile_fused_evaluation_driver(
@@ -438,7 +441,7 @@ impl A64ImageBuilder {
             jacobians,
             published_current_pairs,
         )?;
-        let bytes = if inline.len() <= MAX_A64_FUNCTION_BYTES {
+        let bytes = if inline.len() <= A64_SEGMENT_THRESHOLD_BYTES {
             inline
         } else {
             compile_fused_stamp_driver(

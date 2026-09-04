@@ -33,17 +33,18 @@
 //! the prelude is built over. Noise is tens of entries, not thousands, so it
 //! was never part of the explosion.
 //!
-//! [`build_default_model_plan`] is what x64, AArch64 and the WASM JIT now all
-//! call, and [`DEFAULT_PLAN_ROUTE`] is the one thing that decides what it
-//! builds. On [`PlanRoute::Cfg`] it takes the CFG form of a module's residual,
-//! Jacobian and reactive-Jacobian entries, keeps every other field postfix, and
-//! falls the whole module back to the postfix plan when the CFG route refuses
-//! it. On [`PlanRoute::Postfix`] it calls [`build_model_plan_with_canonical_ir`]
-//! and nothing else.
+//! [`build_default_model_plan`] is what x64, AArch64 and the WASM JIT all call,
+//! and it builds **this** plan: the CFG form of a module's residual, Jacobian,
+//! reactive-Jacobian and noise entries, every other field postfix, and the
+//! shipped postfix plan entire for a module the CFG route refuses.
+//! [`build_model_plan_with_canonical_ir`] is no longer a route production
+//! selects; it is that fallback, and the reference side of
+//! [`crate::native::cfg_mir_census`].
 //!
-//! **The constant reads `Postfix`.** Everything below is built, tested and
-//! pinned; what it is waiting on is the evidence, and [`DEFAULT_PLAN_ROUTE`]
-//! carries that argument in full.
+//! There is no route switch. It was a constant read at one call site while the
+//! evidence was being taken, and once production takes the CFG plan a two-armed
+//! selector has one arm nothing constructs. See [`build_default_model_plan`]
+//! for the evidence the flip stands on.
 //!
 //! # What stays postfix, and why that is not a half measure
 //!
@@ -56,12 +57,33 @@
 //! by the same code, and the value entries then have to agree about what that
 //! operating point evaluates to.
 //!
-//! # Why noise stays postfix in the default plan
+//! # Noise comes from the CFG too, and what that costs
 //!
-//! Because the flip that takes it has not run its censuses yet, and for no
-//! other reason. Production asks for [`CfgNoiseScope::Postfix`] and the
-//! CFG-versus-MIR census asks for [`CfgNoiseScope::Cfg`]; the two switches move
-//! together or not at all.
+//! Production asks for [`CfgNoiseScope::Cfg`], which is the scope the
+//! CFG-versus-MIR census measures: a plan production built under
+//! [`CfgNoiseScope::Postfix`] would be a third plan neither census walked.
+//!
+//! It is the expensive half of the flip and the numbers say so.
+//! [`crate::native::cfg_cost_census`] times the shipped plan, the CFG route
+//! with the noise magnitudes left postfix, and the CFG route entire, at one
+//! bias in one process. The route alone is free — 1.00, 1.05, 0.95, 0.97 and
+//! 0.89 times the shipped plan's evaluation on `asmesd`, `vbic13_4t`,
+//! `hicumL2va`, `bsimcmg_va` and `asmhemt`, and images within a few per cent of
+//! [`crate::native::cfg_size_census`]'s. Taking noise from the CFG as well
+//! costs 1.14, 1.65, 1.67, 1.30 and 0.95, and takes `hicumL2va`'s image from
+//! 1.27 MB to 3.08 and `bsimcmg_va`'s from 5.62 to 9.81.
+//!
+//! Where it comes from is the paragraph above about the prelude: the noise
+//! magnitudes lower from the primal body and from hoisted copies of it, which
+//! are not the function the prelude is built over, so every one of them keeps
+//! its own cone. "Noise is tens of entries, not thousands, so it was never part
+//! of the explosion" was a count of entries; what the cost census measures is
+//! that those tens are cones over the deepest part of a compact model's body,
+//! and on `hicumL2va` and `bsimcmg_va` they are most of the image.
+//!
+//! Sharing them with the prelude is the work that would close it, and
+//! [`NoiseMagnitude`] names the analysis it needs. Whether the flip should have
+//! waited for that is a ruling about noise, not about this route.
 //!
 //! ## What the gap was, and what it actually is
 //!
@@ -119,16 +141,19 @@
 //!
 //! # The fallback is loud
 //!
-//! On [`PlanRoute::Cfg`], a refused module still compiles:
-//! [`build_default_model_plan`] returns the postfix plan for it, which is the
-//! plan every backend ships today, so a refusal costs accuracy nowhere and
-//! coverage nothing. What it must not do is happen quietly — a module that
-//! stops taking the CFG route because a pass regressed would otherwise look
-//! exactly like one that never took it. So the refusal goes to the same `[JIT]`
-//! seam a failed native compile uses, naming the module and the refusal class,
-//! and [`build_default_model_plan_reported`] hands it back so a test can pin
-//! it. Running the estate with the constant set to `Cfg` therefore censuses the
-//! fallback by class, which is how the counts in that lane's report were taken.
+//! A refused module still compiles: [`build_default_model_plan`] returns the
+//! postfix plan for it, which is the plan every backend shipped before the flip,
+//! so a refusal costs accuracy nowhere and coverage nothing. What it must not do
+//! is happen quietly — a module that stops taking the CFG route because a pass
+//! regressed would otherwise look exactly like one that never took it. So the
+//! refusal goes to the same `[JIT]` seam a failed native compile uses, naming
+//! the module and the refusal class, and [`build_default_model_plan_reported`]
+//! hands it back so a test can pin it. Running the estate therefore censuses the
+//! fallback by class, and across the shipped forty-three it names two modules:
+//! `mvsg_cmc` and the `BSIM_SOI_100.1.1` `bsimsoi`, the W-D
+//! `Ddt`-under-condition class. They are also the only two whose machine code
+//! [`crate::native::code_identity`] measures unmoved across the flip, which is
+//! the same fact read from the other end.
 //!
 //! # The one place a program is built rather than lowered
 //!
@@ -755,18 +780,24 @@ fn constant_zero_program() -> JitResult<Program> {
 /// documentation for the measurement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CfgNoiseScope {
-    /// Lower them from the CFG with everything else. What the CFG-versus-MIR
-    /// census asks for, because measuring the gap is how it closes.
-    ///
-    /// Constructed only there until that lane lands; the attribute is the
-    /// honest statement of it rather than a silenced warning.
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// Lower them from the CFG with everything else. What production asks for,
+    /// and what the CFG-versus-MIR census measures.
     Cfg,
-    /// Keep the postfix plan's. What production asks for.
+    /// Keep the postfix plan's.
     ///
     /// [`CfgPlanRefusal::NoiseUnpaired`] cannot fire under this scope: a
     /// shipped source with no CFG process is not a disagreement about a value
     /// nobody is taking from the CFG.
+    ///
+    /// Production stopped asking for this at the flip, so outside `cfg(test)`
+    /// nothing constructs it and the attribute is the honest statement of that
+    /// rather than a silenced warning. What still does construct it is the
+    /// measurement that separates the route's cost from the noise scope's —
+    /// [`crate::native::cfg_size_census`] and
+    /// [`crate::native::cfg_cost_census`] both build this plan to hold the
+    /// other one against — and [`crate::native::cfg_noise_pins`], which reads
+    /// both scopes at one bias.
+    #[cfg_attr(not(test), allow(dead_code))]
     Postfix,
 }
 
@@ -1359,48 +1390,33 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
     Ok(CfgModelPlan { plan, report })
 }
 
-/// Which route builds a plan's `stamp_values`, `jacobians` and
-/// `reactive_jacobians`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PlanRoute {
-    /// MIR's flat postfix stream, for every field.
-    Postfix,
-    /// The canonical CFG for those three fields, the postfix stream for the
-    /// rest, and the postfix plan entire for a module the CFG route refuses.
-    ///
-    /// Constructed by the pins below and by anyone who sets
-    /// [`DEFAULT_PLAN_ROUTE`] to it — which nothing does yet, so outside
-    /// `cfg(test)` this variant has no constructor and the attribute is the
-    /// honest statement of that rather than a silenced warning. It comes off
-    /// with the commit that flips the constant. Note that only the *variant* is
-    /// unconstructed: everything the `Cfg` arm reaches is compiled, warned
-    /// about normally, and exercised by the pins.
-    #[cfg_attr(not(test), allow(dead_code))]
-    Cfg,
-}
-
-/// The route production compiles, and the one thing that decides it.
+/// The plan every backend compiles.
 ///
-/// # It is `Postfix`, and this is the evidence
+/// x64, AArch64 and the WASM JIT all enter here, and what they get is the CFG
+/// route's plan, with the postfix plan as the fallback for a module the CFG
+/// route refuses. A refusal reaches the `[JIT]` log seam a failed native compile
+/// already uses, so a module that quietly stopped taking the CFG route is
+/// visible in the same place a module that quietly stopped compiling is.
 ///
-/// W-F3c built the `Cfg` route into the default constructor and then measured
-/// it against the estate. Six tests turned red, and not one was rounding: each
-/// was a construct the CFG lowering treats differently from MIR, where the CFG
-/// plan *builds* and computes another number. `$port_connected` (6.0 against
-/// 0.0 on an omitted terminal), `$simparam` (0.0 against a gmin of 1e-12), a
+/// # Why this is the CFG route, and this is the evidence
+///
+/// W-F3c built the CFG route into this constructor and measured it against the
+/// estate. Six tests turned red, and not one was rounding: each was a construct
+/// the CFG lowering treated differently from MIR, where the CFG plan *builds*
+/// and computes another number. `$port_connected` (6.0 against 0.0 on an
+/// omitted terminal), `$simparam` (0.0 against a gmin of 1e-12), a
 /// contribution-current probe (a Jacobian entry of 4.5 against 2.5), an array
 /// variable's declaration initializer, an event-controlled variable across a
-/// rejected step (2.0 against 1.0), and `hypot`/`atan2` under a `ddx`, where
-/// the scalar derivative rules fall through to a zero.
+/// rejected step (2.0 against 1.0), and `hypot`/`atan2` under a `ddx`, where the
+/// scalar derivative rules fall through to a zero.
 ///
-/// Every one of them but the last has since been *closed* rather than
-/// screened, and [`a_closed_divergence_takes_the_cfg_route`] is where they
-/// moved to. `hypot`/`atan2` is not on that list because it is not a
-/// divergence: neither route computes a wrong number for it, the CFG route
-/// simply has no rule and refuses, which is [`DERIVATIVE_RULE_HOLES`]. The
-/// pattern each followed is the same one: the divergence was a lowering
-/// decision one route had and the other did not, and the fix was to give the
-/// CFG route the same decision.
+/// Every one of them but the last was *closed* rather than screened, and
+/// [`a_closed_divergence_takes_the_cfg_route`] is where they moved to.
+/// `hypot`/`atan2` is not on that list because it is not a divergence: neither
+/// route computes a wrong number for it, the CFG route simply has no rule and
+/// refuses, which is [`DERIVATIVE_RULE_HOLES`]. The pattern each followed is the
+/// same one: the divergence was a lowering decision one route had and the other
+/// did not, and the fix was to give the CFG route the same decision.
 ///
 /// * `$port_connected` folded to `1.0` because the generated backend builds
 ///   every instance it evaluates. It is a runtime leaf for a backend that
@@ -1408,17 +1424,17 @@ pub(crate) enum PlanRoute {
 ///   [`CfgModel::from_hir_for_executable_backend`](crate::canonical_ir::CfgModel::from_hir_for_executable_backend)
 ///   is where the two consumers part company — and `$simparam` with no source
 ///   now reads the same `simparam_source_default` table on both routes. (W-F4)
-/// * A **prologue-only definition** — a localparam or a declaration
-///   initializer the body reads — took Verilog-AMS zero because the CFG had no
-///   definition of it at all. The executable lowering now evaluates
+/// * A **prologue-only definition** — a localparam or a declaration initializer
+///   the body reads — took Verilog-AMS zero because the CFG had no definition of
+///   it at all. The executable lowering now evaluates
 ///   [`HirModel::prologue_statements`](crate::canonical_ir::HirModel) into the
 ///   entry block. (W-F4b)
 /// * An **event-controlled variable** was applied twice: the assignment pass
 ///   this plan keeps had already run the guard-folded event body into the
-///   variable's slot, and the CFG applied it again on top of the leaf that
-///   reads that slot, counting 2.0 where the shipped route counts 1.0. A read
-///   of one is now the leaf itself, which is the `LoadVariable` the postfix
-///   route's own read lowers to. (W-F4b)
+///   variable's slot, and the CFG applied it again on top of the leaf that reads
+///   that slot, counting 2.0 where the shipped route counts 1.0. A read of one
+///   is now the leaf itself, which is the `LoadVariable` the postfix route's own
+///   read lowers to. (W-F4b)
 /// * A **contribution-current probe** — `I(p, mid)` read inside another
 ///   contribution — was frozen by the MIR route and inlined and differentiated
 ///   through by the CFG route, so the two Jacobians were different matrices:
@@ -1434,91 +1450,44 @@ pub(crate) enum PlanRoute {
 ///   what frozen means. Pinned by
 ///   [`a_contribution_current_probe_reads_the_shipped_routes_storage`]. (W-F5)
 ///
-/// So there is no divergence screen any more, and no refusal class for one.
-/// [`DERIVATIVE_RULE_HOLES`] screens what is left, which is a construct one
-/// route cannot lower rather than one they lower differently.
+/// # Why six red tests were not enough, and what was
 ///
-/// The fallback census, W-F3c through W-F5:
+/// That screen was empirical, and W-F4 showed the bound on what it was worth by
+/// going looking for what the estate did not cover: a module-scope `real g =
+/// 4.5;` and a `localparam` read from the body both computed a residual of 0.0
+/// on this route, against 9.0 and 6.0 through MIR, and about twelve hundred
+/// tests ran green with both silently wrong. Two more, found by asking, on top
+/// of the six found by failing.
 ///
-/// ```text
-///                          W-F3c   W-F4  W-F4b   W-F5
-/// lowering                    63     63     63     63
-/// cfg-lowering                24     24     24     24
-/// known-divergence            28     15     11      0
-/// derivative-rule-missing      7      7      7      7
-///                            ---    ---    ---    ---
-///                            122    109    105     94
-/// ```
+/// So the instrument that bounds the rest is a census, not a test suite, and
+/// four of them stand behind this call:
 ///
-/// W-F4's thirteen were its two closed constructs and the array screen's
-/// over-refusal: the prologue screen named a variable rather than counting a
-/// module's arrays, so `polysum`, `gsel`, `desc` and `lpsize` — which declare
-/// arrays and fill every element inside the analog block — took the CFG route
-/// from W-F4 on. W-F4b's four are `cinit`, whose array really is filled by a
-/// declaration initializer, and the three event-controlled variables. W-F5's
-/// eleven were the whole contribution-current class.
+/// * [`crate::native::cfg_mir_census`] walks both *built plans* through x64 over
+///   the shipped forty-three at three biases, judging each entry against a
+///   double-double reference: 43/43 within bound, `over_bound=0`,
+///   `walker_disagreements=0`, `lost_entries=0`, and the only two modules it
+///   cannot build are this route's two refusals.
+/// * [`crate::native::cfg_census`] compares the CFG interpreter against x64 on
+///   the CFG plan: 43/43 at `max_relative_deviation=0`.
+/// * [`crate::native::code_identity`] measures the shipped corpus's emitted
+///   machine code. The flip moved it, which is what a route change is *supposed*
+///   to do, and its documentation carries the per-module reading that
+///   re-baselined it — every module moved except the two the fallback names.
+/// * [`crate::native::cfg_cost_census`] measures what it costs, which is the one
+///   thing the other three cannot say. See the module documentation: the route
+///   is free and [`CfgNoiseScope::Cfg`] is not.
 ///
-/// # The screen was empirical, and that is a bound on what it is worth
+/// # The postfix plan did not change, and that is checkable
 ///
-/// It names what about twelve hundred tests happened to expose, not what a
-/// proof would name. W-F4 went looking for what they did not: a module-scope
-/// `real g = 4.5;` and a `localparam` read from the body both computed a
-/// residual of 0.0 on this route, against 9.0 and 6.0 on `Postfix`, and the
-/// whole estate ran green with both silently wrong. Two more, found by asking,
-/// on top of the six the flip found by failing. That is the argument for the
-/// constant, not the six.
-///
-/// The instrument that would bound the rest is the forty-three-module
-/// CFG-versus-MIR census ([`crate::native::cfg_mir_census`]), which has never
-/// run past nine modules.
-///
-/// That census is now the only thing this constant is waiting on. Every
-/// divergence the estate found is closed, the screen and its refusal class are
-/// gone, and the estate runs green with the constant reading `Cfg` —
-/// `--test-threads=1`, `--features native`, `--no-fail-fast`, fifty-seven test
-/// binaries, one target failing and that one the generated-bundle digest stamp,
-/// which this lane restamped. What is missing is not a construct; it is the
-/// measurement that would bound the constructs no test covers, and W-F5 could
-/// not take it: the box had 19.0 GB free against the 24 GB a release corpus
-/// census needs, with peer builds running.
-///
-/// So the switch sits here at `Postfix` until [`crate::native::cfg_mir_census`]
-/// runs 43/43 within bound, [`crate::native::cfg_census`]'s zero-deviation pin
-/// holds, and [`crate::native::code_identity`]'s digest reproduces. Flipping it
-/// is a one-line change and everything behind [`PlanRoute::Cfg`] is live,
-/// tested and pinned.
-///
-/// # What `Postfix` reaches, and why the shipped plan is byte-identical
-///
-/// The `Postfix` arm of [`build_default_model_plan_reported`] calls
-/// [`build_model_plan_with_canonical_ir`] and nothing else — no wrapper, no
-/// post-pass, no field replaced afterwards. That constructor, and every
-/// function it reaches, is unchanged: the diff touches
-/// [`build_model_plan_from_canonical_cfg`] and the items below it in this
-/// module, [`crate::jit::plan_program`]'s documentation and one attribute,
-/// [`crate::native::ssa`]'s attributes, and the four call sites' choice of
-/// entry point. `jit::plan_builder` is untouched. A model therefore compiles to
-/// the same plan, and so to the same machine code, as it did before the lane —
-/// which is what keeps [`crate::native::code_identity`]'s digest valid.
-///
-/// W-F4 kept that true through a refactor that could have broken it: the
-/// `$simparam` table `crate::native`'s `lower_simparam_intrinsic` folds is now
-/// read from `canonical_ir`'s `simparam_source_default` rather than written out
-/// twice. The postfix route emits the same `NativeOp::Const` it always did,
-/// which is why the digest still reads what it read.
-pub(crate) const DEFAULT_PLAN_ROUTE: PlanRoute = PlanRoute::Postfix;
-
-/// The plan every backend compiles: [`DEFAULT_PLAN_ROUTE`]'s.
-///
-/// A refusal on the [`PlanRoute::Cfg`] route reaches the `[JIT]` log seam a
-/// failed native compile already uses, so a module that quietly stopped taking
-/// the CFG route would be visible in the same place a module that quietly
-/// stopped compiling is.
+/// [`build_model_plan_with_canonical_ir`], and every function it reaches, is
+/// untouched by this lane — it is the fallback above and the reference side of
+/// the CFG-versus-MIR census, so a module that refuses compiles to exactly the
+/// machine code it compiled to before. `jit::plan_builder` is not in the diff.
 pub(crate) fn build_default_model_plan(
     model: &CompiledModel,
     artifact: &CanonicalIrArtifact,
 ) -> JitResult<NativeModelPlan> {
-    let (plan, refused) = build_default_model_plan_reported(model, artifact, DEFAULT_PLAN_ROUTE)?;
+    let (plan, refused) = build_default_model_plan_reported(model, artifact)?;
     if let Some(refused) = refused {
         log::warn!(
             "[JIT] Model '{}' takes the postfix plan: {} ({})",
@@ -1537,37 +1506,23 @@ pub(crate) fn build_default_model_plan(
     Ok(plan)
 }
 
-/// [`build_default_model_plan`] for a named route, handing the refusal back
-/// instead of logging it.
+/// [`build_default_model_plan`], handing the refusal back instead of logging
+/// it, so a test can pin which module fell back and on what class.
 ///
-/// The `route` is a parameter rather than a read of [`DEFAULT_PLAN_ROUTE`] for
-/// one reason: the tests below pin [`PlanRoute::Cfg`]'s behaviour, and a pin
-/// that only exercised whatever the constant happens to say would go vacuously
-/// green the moment the constant said `Postfix`. Production passes the
-/// constant; the pins pass `Cfg`.
-///
-/// On the `Cfg` route the fallback rebuilds the postfix plan rather than
-/// recovering the one the CFG builder started from and threw away. That is one
-/// extra plan build, on the refusal path only, once per module per process —
-/// the native cache in [`crate::device`] keys on the module, so no model pays
-/// it twice — against a constructor whose refusals stay a single `?` each.
+/// The fallback rebuilds the postfix plan rather than recovering the one the CFG
+/// builder started from and threw away. That is one extra plan build, on the
+/// refusal path only, once per module per process — the native cache in
+/// [`crate::device`] keys on the module, so no model pays it twice — against a
+/// constructor whose refusals stay a single `?` each.
 pub(crate) fn build_default_model_plan_reported(
     model: &CompiledModel,
     artifact: &CanonicalIrArtifact,
-    route: PlanRoute,
 ) -> JitResult<(NativeModelPlan, Option<CfgPlanRefused>)> {
-    match route {
-        // Nothing wraps this call. See [`DEFAULT_PLAN_ROUTE`] on why that is
-        // load-bearing rather than incidental.
-        PlanRoute::Postfix => Ok((build_model_plan_with_canonical_ir(model, artifact)?, None)),
-        PlanRoute::Cfg => {
-            match build_model_plan_from_canonical_cfg(model, artifact, CfgNoiseScope::Postfix) {
-                Ok(built) => Ok((built.plan, None)),
-                Err(refused) => {
-                    let plan = build_model_plan_with_canonical_ir(model, artifact)?;
-                    Ok((plan, Some(refused)))
-                }
-            }
+    match build_model_plan_from_canonical_cfg(model, artifact, CfgNoiseScope::Cfg) {
+        Ok(built) => Ok((built.plan, None)),
+        Err(refused) => {
+            let plan = build_model_plan_with_canonical_ir(model, artifact)?;
+            Ok((plan, Some(refused)))
         }
     }
 }
@@ -1600,7 +1555,7 @@ fn read_set_optional(
 #[cfg(all(test, feature = "native"))]
 mod tests {
     use super::{
-        CfgNoiseScope, CfgPlanRefusal, PlanRoute, ShippedColumnLanes,
+        CfgNoiseScope, CfgPlanRefusal, ShippedColumnLanes,
         build_default_model_plan_reported, build_model_plan_from_canonical_cfg,
     };
     use crate::canonical_ir::CanonicalIrArtifact;
@@ -1745,13 +1700,13 @@ endmodule
         );
     }
 
-    /// The flip, stated as the shape of one plan built on [`PlanRoute::Cfg`]:
-    /// that route owns the residual and both Jacobians, the MIR route owns
-    /// everything else.
+    /// The flip, stated as the shape of the plan production builds: the CFG
+    /// route owns the residual, both Jacobians and the noise magnitudes, and
+    /// the MIR route owns everything else.
     #[test]
-    fn the_cfg_route_takes_its_values_from_the_cfg_and_its_noise_from_mir() {
+    fn the_cfg_route_takes_its_values_and_its_noise_from_the_cfg() {
         let (model, artifact) = compile(RESISTOR_WITH_CHARGE_AND_NOISE);
-        let (plan, refused) = build_default_model_plan_reported(&model, &artifact, PlanRoute::Cfg)
+        let (plan, refused) = build_default_model_plan_reported(&model, &artifact)
             .expect("the default plan builds");
         assert!(
             refused.is_none(),
@@ -1768,7 +1723,10 @@ endmodule
 
         for (field, form) in forms(&plan) {
             let expected = match field {
-                "stamp_values" | "jacobians" | "reactive_jacobians" => "block",
+                "stamp_values" | "jacobians" | "reactive_jacobians" | "noise_psd"
+                | "noise_exponents" => "block",
+                // `parameter_defaults` and `static_conditions`, which the CFG
+                // does not carry and this route deliberately leaves alone.
                 _ => "postfix",
             };
             assert_eq!(
@@ -1784,7 +1742,7 @@ endmodule
     #[test]
     fn a_module_the_cfg_route_refuses_takes_the_postfix_plan_whole() {
         let (model, artifact) = compile(OPERATOR_IN_A_CASE_SELECTOR);
-        let (plan, refused) = build_default_model_plan_reported(&model, &artifact, PlanRoute::Cfg)
+        let (plan, refused) = build_default_model_plan_reported(&model, &artifact)
             .expect("the default plan builds");
         let refused = refused.expect(
             "a canonical operator in a case selector has no executed counterpart, so the CFG \
@@ -1831,7 +1789,7 @@ module cfg_plan_no_rule(p, n);
 endmodule
 "#;
         let (model, artifact) = compile(source);
-        let (plan, refused) = build_default_model_plan_reported(&model, &artifact, PlanRoute::Cfg)
+        let (plan, refused) = build_default_model_plan_reported(&model, &artifact)
             .expect("the default plan builds");
         let refused = refused.expect(
             "the CFG derivative pass has no rule for hypot, so a module differentiating one \
@@ -1977,7 +1935,7 @@ endmodule
             // estate had of it. Their storage is pinned by
             // [`a_contribution_current_probe_reads_the_shipped_route_s_storage`]
             // and their numbers by the `native_contract` device tests, which
-            // run whatever [`DEFAULT_PLAN_ROUTE`] says.
+            // run the plan production builds.
             (
                 "current-probe-terminal-pair",
                 r#"
@@ -2065,7 +2023,7 @@ endmodule
         for (case, source) in cases {
             let (model, artifact) = compile(source);
             let (plan, refused) =
-                build_default_model_plan_reported(&model, &artifact, PlanRoute::Cfg)
+                build_default_model_plan_reported(&model, &artifact)
                     .unwrap_or_else(|error| panic!("{case}: the default plan builds: {error}"));
             assert!(
                 refused.is_none(),
@@ -2102,8 +2060,8 @@ endmodule
     /// load and holds nothing the inlined equation would have brought with it.
     /// That is the assertion the 4.5-against-2.5 Jacobian was a symptom of —
     /// `native_device_stamps_internal_node_current_probe_alias_jacobian_without_fallback`
-    /// in `native_contract` measures the matrix itself, on whichever route
-    /// [`DEFAULT_PLAN_ROUTE`] names.
+    /// in `native_contract` measures the matrix itself, on the plan production
+    /// builds.
     #[test]
     fn a_contribution_current_probe_reads_the_shipped_routes_storage() {
         use crate::jit::expr::{NativeOp, VoltageNode};
@@ -2159,7 +2117,7 @@ endmodule
         ] {
             let (model, artifact) = compile(source);
             let (cfg, refused) =
-                build_default_model_plan_reported(&model, &artifact, PlanRoute::Cfg)
+                build_default_model_plan_reported(&model, &artifact)
                     .unwrap_or_else(|error| panic!("{case}: the CFG plan builds: {error}"));
             assert!(
                 refused.is_none(),
@@ -2448,7 +2406,7 @@ module cfg_div_branch_flow(p, n);
 endmodule
 "#;
         let (model, artifact) = compile(source);
-        let error = build_default_model_plan_reported(&model, &artifact, PlanRoute::Cfg)
+        let error = build_default_model_plan_reported(&model, &artifact)
             .expect_err("the shipped route cannot lower a probe of a branch with no current");
         let message = error.to_string();
         assert!(
