@@ -1013,6 +1013,20 @@ impl DigitalEvalScratch {
             self.terms = terms;
         }
     }
+
+    /// Take back the argument list a resumption displaced.
+    ///
+    /// A resumption's own list arrives from the state and becomes the edge
+    /// buffer; the buffer it displaces becomes the spare the *next* suspension
+    /// fills, so the two lists trade places every activation and an `always`
+    /// process allocates neither after its first pass. Keeps whichever is
+    /// larger, for the reason [`recycle_terms`](Self::recycle_terms) does.
+    fn recycle_resume(&mut self, mut arguments: Vec<DigitalScalar>) {
+        arguments.clear();
+        if arguments.capacity() > self.resume.capacity() {
+            self.resume = arguments;
+        }
+    }
 }
 
 /// Run a process from its entry block.
@@ -1125,8 +1139,10 @@ pub fn resume_in<E: DigitalEnvironment + ?Sized>(
         });
     }
     let block = state.block;
-    scratch.arguments.clear();
-    scratch.arguments = state.arguments;
+    // The state's list becomes this entry's edge buffer, and the buffer it
+    // displaces becomes the spare the next suspension fills.
+    let displaced = std::mem::replace(&mut scratch.arguments, state.arguments);
+    scratch.recycle_resume(displaced);
     Interpreter::new(plan, process, environment, scratch).run(block, step_limit)
 }
 
@@ -1234,6 +1250,10 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                     // Evaluated here, not at resumption: these are the values
                     // the process had when it suspended, and the signals they
                     // came from may have moved by the time it wakes.
+                    //
+                    // Filled into the spare list the last resumption put back,
+                    // which leaves with the suspension and returns as the edge
+                    // buffer when the process wakes.
                     let mut arguments = std::mem::take(&mut self.scratch.resume);
                     arguments.clear();
                     for arg in resume_args {
@@ -1243,10 +1263,14 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                     }
                     let params = function.block(*resume).params.len();
                     if arguments.len() != params {
+                        let found = arguments.len();
+                        // Handed back rather than dropped, so a refusal does
+                        // not also cost the spare its capacity.
+                        self.scratch.recycle_resume(arguments);
                         return Err(DigitalEvalError::ArgumentArityMismatch {
                             target: *resume,
                             expected: params,
-                            found: arguments.len(),
+                            found,
                         });
                     }
                     return Ok(DigitalProcessOutcome::Suspended(DigitalSuspension {
@@ -1269,53 +1293,55 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
     /// carries two variables past each other passes each one's value from
     /// before the edge, and binding in place would feed the first write into
     /// the second read.
+    ///
+    /// One pass, and the buffer never leaves the scratch: the value table and
+    /// the edge buffer are different fields, so destructuring the scratch once
+    /// borrows them apart and the fill reads the table it is not writing.
     fn cross(&mut self, target: BlockId, args: &[ValueId]) -> Result<(), DigitalEvalError> {
-        // Taken out of the scratch for the duration, so that reading an
-        // argument — which needs the whole interpreter — cannot hold a borrow
-        // of the buffer it is filling. Put back with its capacity on the way
-        // out; an error path drops it, which costs one allocation on a run
-        // that is about to be refused anyway.
-        let mut buffer = std::mem::take(&mut self.scratch.arguments);
-        buffer.clear();
-        let mut outcome = Ok(());
+        let function = self.function();
+        let DigitalEvalScratch {
+            table, arguments, ..
+        } = &mut *self.scratch;
+        arguments.clear();
         for arg in args {
-            match self.scalar(*arg) {
+            match table.get(function, *arg) {
                 // Cloned because the buffer has to hold the value across the
                 // binding that is about to overwrite the slot it came from.
-                Ok(value) => buffer.push(value.into_owned()),
+                Ok(value) => arguments.push(value.into_owned()),
                 Err(error) => {
-                    outcome = Err(error);
-                    break;
+                    // Nothing has been bound, so the refusal leaves the table
+                    // exactly as it found it; the buffer is emptied so no
+                    // argument outlives the edge that read it.
+                    arguments.clear();
+                    return Err(error);
                 }
             }
         }
-        buffer.truncate(if outcome.is_ok() { buffer.len() } else { 0 });
-        self.scratch.arguments = buffer;
-        outcome?;
         self.bind(target)
     }
 
     /// Bind the edge buffer to a block's parameters.
+    ///
+    /// The arity is checked before any parameter is written, so a mismatch is
+    /// refused with the table untouched.
     fn bind(&mut self, target: BlockId) -> Result<(), DigitalEvalError> {
         let params = &self.function().block(target).params;
-        // Taken out for the duration so that writing a parameter slot — which
-        // is the same scratch — does not overlap the read of the buffer.
-        let mut arguments = std::mem::take(&mut self.scratch.arguments);
-        let outcome = if params.len() == arguments.len() {
-            for (param, value) in params.iter().zip(arguments.drain(..)) {
-                self.scratch.table.define(*param, value);
-            }
-            Ok(())
-        } else {
-            Err(DigitalEvalError::ArgumentArityMismatch {
+        let DigitalEvalScratch {
+            table, arguments, ..
+        } = &mut *self.scratch;
+        if params.len() != arguments.len() {
+            let found = arguments.len();
+            arguments.clear();
+            return Err(DigitalEvalError::ArgumentArityMismatch {
                 target,
                 expected: params.len(),
-                found: arguments.len(),
-            })
-        };
-        arguments.clear();
-        self.scratch.arguments = arguments;
-        outcome
+                found,
+            });
+        }
+        for (param, value) in params.iter().zip(arguments.drain(..)) {
+            table.define(*param, value);
+        }
+        Ok(())
     }
 
     /// Read a value, borrowed.
@@ -1860,7 +1886,10 @@ mod tests {
             DEFAULT_PROCESS_STEP_LIMIT,
         )
         .expect_err("the resumed block may not read what the suspended one computed");
-        assert_eq!(error, DigitalEvalError::UndefinedValue(ValueId::from(1usize)));
+        assert_eq!(
+            error,
+            DigitalEvalError::UndefinedValue(ValueId::from(1usize))
+        );
     }
 
     /// The generation is a `u32`, so an interpreter that only ever bumped it
