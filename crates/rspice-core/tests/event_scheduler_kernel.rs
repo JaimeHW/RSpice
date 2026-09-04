@@ -745,6 +745,68 @@ fn a_later_output_supersedes_this_driver_but_not_a_co_driver() {
 }
 
 #[test]
+fn superseding_cancels_every_pending_event_at_or_after_the_tick_and_no_other() {
+    // The two-event case above fixes the boundary; this one fixes the *set*.
+    // A driver may hold several unexecuted outputs at once — a code model that
+    // queues a waveform does — and deciding again at one of their ticks must
+    // cancel that one and everything after it, deliver everything before it,
+    // and report the count exactly. The driver index is what answers this, so
+    // this is the test that holds its shape.
+    let mut scheduler = scheduler();
+    let driver = target("a_driver", "out", 1, 0);
+    let bystander = target("a_driver", "other", 1, 0);
+
+    for (tick, value) in [(5u64, 0u8), (12, 1), (18, 2), (25, 1), (31, 0)] {
+        scheduler
+            .schedule_at(
+                tick,
+                SchedulerRegion::Active,
+                driver.clone(),
+                digital(value),
+            )
+            .expect("nothing has run");
+    }
+    for tick in [12u64, 25] {
+        scheduler
+            .schedule_at(tick, SchedulerRegion::Active, bystander.clone(), digital(2))
+            .expect("nothing has run");
+    }
+    assert_eq!(scheduler.pending(), 7);
+
+    let cancelled =
+        scheduler.schedule_superseding_at(12, SchedulerRegion::Active, driver.clone(), digital(2));
+    assert_eq!(
+        cancelled, 4,
+        "the events at 12, 18, 25 and 31 are cancelled"
+    );
+    assert_eq!(
+        scheduler.pending(),
+        4,
+        "the driver's event at 5, its replacement at 12, and both of the \
+         co-driver's events are left"
+    );
+
+    let drained = drain_due(&mut scheduler, 40);
+    assert_eq!(
+        drained,
+        vec![
+            (5, "out".to_string(), digital(0)),
+            (12, "other".to_string(), digital(2)),
+            (12, "out".to_string(), digital(2)),
+            (25, "other".to_string(), digital(2)),
+        ],
+        "only the surviving events run, in total order"
+    );
+
+    // And the driver's index is left consistent by the cancellation: deciding
+    // again after everything has run cancels nothing.
+    assert_eq!(
+        scheduler.schedule_superseding_at(41, SchedulerRegion::Active, driver, digital(1)),
+        0
+    );
+}
+
+#[test]
 fn superseding_at_the_same_tick_replaces_the_pending_value() {
     let mut scheduler = scheduler();
     let driver = target("a_driver", "out", 1, 0);
