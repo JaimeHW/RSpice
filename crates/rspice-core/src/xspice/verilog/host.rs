@@ -73,7 +73,8 @@ use super::store::{DigitalSignalStore, StoreError, TransitionValues, signal_name
 use crate::xspice::EventValue;
 use crate::xspice::digital::DigitalValue;
 use crate::xspice::event_scheduler::{
-    EventScheduler, EventTarget, SchedulerError, SchedulerLimits, SchedulerRegion, TimeResolution,
+    EventScheduler, EventTarget, SchedulerError, SchedulerLimits, SchedulerRegion, TargetId,
+    TimeResolution,
 };
 
 /// Why a digital run stopped.
@@ -390,10 +391,17 @@ pub(crate) struct DigitalHost {
     waiters: Vec<Vec<usize>>,
     /// Processes deferred to the inactive region, in the order they deferred.
     inactive: Vec<usize>,
-    /// The kernel target naming each process, precomputed because it is used
-    /// on every activation and its strings are what an oscillation diagnostic
-    /// prints.
-    targets: Vec<EventTarget>,
+    /// The kernel's id for each process's driver, interned once at
+    /// construction. The [`EventTarget`] behind it — the strings an
+    /// oscillation diagnostic prints — stays in the kernel, and an activation
+    /// never touches it.
+    targets: Vec<TargetId>,
+    /// The process each interned driver belongs to, which is what a drained
+    /// activation names.
+    process_of_target: Vec<usize>,
+    /// The drivers one drain of the kernel reported, reused across delta
+    /// cycles so that settling a tick does not allocate per pass.
+    fired: Vec<TargetId>,
 }
 
 impl DigitalHost {
@@ -425,20 +433,27 @@ impl DigitalHost {
         resolution: TimeResolution,
         limits: SchedulerLimits,
     ) -> Self {
-        let targets = plan
-            .processes
-            .iter()
-            .enumerate()
-            .map(|(index, process)| EventTarget {
+        let mut scheduler = EventScheduler::new(resolution, limits);
+        // Interned in process order, once, so that queueing an activation is
+        // an index rather than two `String` allocations and a string-keyed map
+        // probe. The reverse map is what a drained driver is turned back into
+        // a process by; it is built rather than assumed so that the identity
+        // survives a kernel that interns anything else first.
+        let mut targets = Vec::with_capacity(plan.processes.len());
+        let mut process_of_target = vec![0usize; plan.processes.len()];
+        for (index, process) in plan.processes.iter().enumerate() {
+            let id = scheduler.intern_target(EventTarget {
                 node_id: index,
                 port_name: driven_signal_name(&plan, index),
                 driver_index: 0,
                 instance: format!("{}#{}", process.kind.keyword(), usize::from(process.id)),
-            })
-            .collect();
+            });
+            process_of_target[usize::from(id)] = index;
+            targets.push(id);
+        }
         Self {
             store: DigitalSignalStore::new(&plan),
-            scheduler: EventScheduler::new(resolution, limits),
+            scheduler,
             slots: vec![
                 ProcessSlot {
                     status: ProcessStatus::Queued,
@@ -449,6 +464,8 @@ impl DigitalHost {
             waiters: vec![Vec::new(); plan.signals.len()],
             inactive: Vec::new(),
             targets,
+            process_of_target,
+            fired: Vec::new(),
             plan,
         }
     }
@@ -583,18 +600,31 @@ impl DigitalHost {
 
     /// Iterate one tick's slot until it is quiet.
     fn settle(&mut self, tick: u64) -> Result<(), DigitalRunError> {
+        // Taken out of `self` so that running a process — which needs the
+        // whole host — cannot hold a borrow of the drain buffer, and put back
+        // on the way out so the next tick reuses its capacity.
+        let mut fired = std::mem::take(&mut self.fired);
+        let outcome = self.settle_into(tick, &mut fired);
+        fired.clear();
+        self.fired = fired;
+        outcome
+    }
+
+    fn settle_into(&mut self, tick: u64, fired: &mut Vec<TargetId>) -> Result<(), DigitalRunError> {
         loop {
-            let mut fired = Vec::new();
-            self.scheduler
-                .run_due_events(tick, |event, _| fired.push(event))?;
+            fired.clear();
+            self.scheduler.run_due_event_targets(tick, fired)?;
 
             if fired.is_empty() {
                 if !self.promote_region(tick)? {
                     return Ok(());
                 }
             } else {
-                for event in fired {
-                    self.run_process(event.target.node_id, tick)?;
+                // Indexed rather than drained: `run_process` needs `&mut
+                // self`, and the buffer is the caller's.
+                for position in 0..fired.len() {
+                    let index = self.process_of_target[usize::from(fired[position])];
+                    self.run_process(index, tick)?;
                     self.dispatch(tick)?;
                 }
             }
@@ -776,10 +806,10 @@ impl DigitalHost {
             return Ok(());
         }
         self.slots[index].status = ProcessStatus::Queued;
-        self.scheduler.schedule_superseding_at(
+        self.scheduler.schedule_id_superseding_at(
             tick,
             SchedulerRegion::Active,
-            self.targets[index].clone(),
+            self.targets[index],
             EventValue::Digital(DigitalValue::default()),
         );
         Ok(())

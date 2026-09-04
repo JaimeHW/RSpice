@@ -61,7 +61,7 @@
 //! event first. That is not reproducible, and this kernel does not inherit it.
 
 use super::EventValue;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::mem;
 
@@ -306,6 +306,36 @@ pub struct EventTarget {
     pub instance: String,
 }
 
+/// A driver's identity, interned to a dense index.
+///
+/// [`EventTarget`] is the identity a caller names a driver by and the one a
+/// diagnostic prints, and it carries two `String`s. Nothing on the per-event
+/// path may compare or clone those: an event is queued, superseded, popped and
+/// counted against its driver, and each of those was a `String`-keyed
+/// `BTreeMap` probe. Interning happens once per distinct driver — at host
+/// construction for a digital plan, at the first schedule for an XSPICE code
+/// model — and every hot structure is keyed by the resulting index instead.
+///
+/// Ids are handed out in interning order, so which id a driver gets is a
+/// function of the order the design schedules in and never of a hash seed. The
+/// interning table is a lookup only: it is never iterated, and nothing
+/// observable is ordered by it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) struct TargetId(u32);
+
+impl TargetId {
+    /// The dense index this id is.
+    fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
+impl From<TargetId> for usize {
+    fn from(id: TargetId) -> Self {
+        id.index()
+    }
+}
+
 /// One scheduled event, carrying its position in the total order.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ScheduledEvent {
@@ -473,22 +503,50 @@ pub struct TimeSlotReport {
 
 /// Scheduling state, split out so an executing event can schedule through
 /// [`SchedulerContext`] while the driver loop owns the event it popped.
+/// A queued event, as the queues hold it.
+///
+/// The same thing a [`ScheduledEvent`] is, with the driver as its interned id
+/// rather than its two-`String` identity. This is what moves between the
+/// tiers, so queueing, superseding and popping cost no string traffic at all;
+/// the public `ScheduledEvent` is materialized from the interning table only
+/// where a caller's closure is about to see one.
+#[derive(Debug, Clone, PartialEq)]
+struct PendingEvent {
+    tick: u64,
+    region: SchedulerRegion,
+    sequence: u64,
+    target: TargetId,
+    value: EventValue,
+}
+
 #[derive(Debug, Clone, Default)]
 struct EventQueues {
     /// Events at ticks after the current one, keyed by the full total order so
     /// the key type *is* the ordering specification.
-    future: BTreeMap<(u64, SchedulerRegion, u64), ScheduledEvent>,
+    future: BTreeMap<(u64, SchedulerRegion, u64), PendingEvent>,
     /// The current tick's slot, one queue per region, each ordered by sequence.
-    slot: [BTreeMap<u64, ScheduledEvent>; REGION_COUNT],
+    slot: [BTreeMap<u64, PendingEvent>; REGION_COUNT],
     /// Next sequence number. Per-scheduler, never reused.
     next_sequence: u64,
-    /// Activation counts at the current tick, for the oscillation report.
-    activations: BTreeMap<EventTarget, u64>,
+    /// Every driver ever scheduled, indexed by its [`TargetId`]. This is what
+    /// a `ScheduledEvent` and an oscillation report are rendered from.
+    targets: Vec<EventTarget>,
+    /// Interning index. A lookup only: never iterated, so no observable order
+    /// depends on it.
+    target_ids: HashMap<EventTarget, TargetId>,
+    /// Activation counts at the current tick, for the oscillation report,
+    /// indexed by [`TargetId`].
+    activations: Vec<u64>,
+    /// Which ids `activations` holds a non-zero count for at this tick, so
+    /// opening a slot clears what fired rather than every driver in the
+    /// design.
+    activated: Vec<TargetId>,
     /// Where each driver's unexecuted events sit, by tick and then in schedule
-    /// order. This is the index [`EventScheduler::schedule_superseding_at`]
-    /// consults; without it, superseding a driver's own pending output would
-    /// mean scanning the whole queue.
-    driver_events: BTreeMap<EventTarget, BTreeMap<u64, Vec<(SchedulerRegion, u64)>>>,
+    /// order, indexed by [`TargetId`]. This is the index
+    /// [`EventScheduler::schedule_superseding_at`] consults; without it,
+    /// superseding a driver's own pending output would mean scanning the whole
+    /// queue.
+    driver_events: Vec<BTreeMap<u64, Vec<(SchedulerRegion, u64)>>>,
 }
 
 impl EventQueues {
@@ -503,18 +561,16 @@ impl EventQueues {
         open_slot: Option<u64>,
         tick: u64,
         region: SchedulerRegion,
-        target: EventTarget,
+        target: TargetId,
         value: EventValue,
     ) -> u64 {
         let sequence = self.next_sequence;
         self.next_sequence += 1;
-        self.driver_events
-            .entry(target.clone())
-            .or_default()
+        self.driver_events[target.index()]
             .entry(tick)
             .or_default()
             .push((region, sequence));
-        let event = ScheduledEvent {
+        let event = PendingEvent {
             tick,
             region,
             sequence,
@@ -527,6 +583,60 @@ impl EventQueues {
             self.future.insert((tick, region, sequence), event);
         }
         sequence
+    }
+
+    /// The id of a driver, interning it if this is the first time it is named.
+    ///
+    /// Off the per-event path by construction: a caller that schedules for the
+    /// same driver repeatedly — every digital process does — interns once and
+    /// then schedules by id.
+    fn intern(&mut self, target: EventTarget) -> TargetId {
+        if let Some(id) = self.target_ids.get(&target) {
+            return *id;
+        }
+        let id = TargetId(
+            u32::try_from(self.targets.len())
+                .expect("an event kernel does not host 2^32 distinct drivers"),
+        );
+        self.targets.push(target.clone());
+        self.driver_events.push(BTreeMap::new());
+        self.activations.push(0);
+        self.target_ids.insert(target, id);
+        id
+    }
+
+    /// The identity behind an id.
+    fn target(&self, id: TargetId) -> &EventTarget {
+        &self.targets[id.index()]
+    }
+
+    /// Render one queued event as the public [`ScheduledEvent`] a caller's
+    /// closure sees. The two `String`s are cloned exactly here and nowhere
+    /// else on the event path.
+    fn render(&self, event: PendingEvent) -> ScheduledEvent {
+        ScheduledEvent {
+            tick: event.tick,
+            region: event.region,
+            sequence: event.sequence,
+            target: self.target(event.target).clone(),
+            value: event.value,
+        }
+    }
+
+    /// Count one activation of `target` against the open slot.
+    fn note_activation(&mut self, target: TargetId) {
+        let count = &mut self.activations[target.index()];
+        if *count == 0 {
+            self.activated.push(target);
+        }
+        *count += 1;
+    }
+
+    /// Forget the open slot's activation counts.
+    fn clear_activations(&mut self) {
+        for id in self.activated.drain(..) {
+            self.activations[id.index()] = 0;
+        }
     }
 
     fn slot_is_empty(&self) -> bool {
@@ -557,27 +667,22 @@ impl EventQueues {
     }
 
     /// Take the lowest-sequence active event.
-    fn pop_active(&mut self) -> Option<ScheduledEvent> {
+    fn pop_active(&mut self) -> Option<PendingEvent> {
         let event = self.slot[SchedulerRegion::Active.index()]
             .pop_first()
             .map(|(_, event)| event)?;
-        self.forget_driver_event(&event.target, event.tick, event.sequence);
+        self.forget_driver_event(event.target, event.tick, event.sequence);
         Some(event)
     }
 
-    /// Drop one event from the driver index, pruning the empty levels above it.
-    fn forget_driver_event(&mut self, target: &EventTarget, tick: u64, sequence: u64) {
-        let Some(ticks) = self.driver_events.get_mut(target) else {
-            return;
-        };
+    /// Drop one event from the driver index, pruning the empty tick above it.
+    fn forget_driver_event(&mut self, target: TargetId, tick: u64, sequence: u64) {
+        let ticks = &mut self.driver_events[target.index()];
         if let Some(entries) = ticks.get_mut(&tick) {
             entries.retain(|(_, pending)| *pending != sequence);
             if entries.is_empty() {
                 ticks.remove(&tick);
             }
-        }
-        if ticks.is_empty() {
-            self.driver_events.remove(target);
         }
     }
 
@@ -600,14 +705,12 @@ impl EventQueues {
 
     /// Cancel every unexecuted event of `target` at or after `tick`, and
     /// report how many were cancelled.
-    fn supersede_driver(&mut self, target: &EventTarget, tick: u64) -> usize {
-        let Some(ticks) = self.driver_events.get_mut(target) else {
-            return 0;
-        };
-        let superseded = ticks.split_off(&tick);
+    fn supersede_driver(&mut self, target: TargetId, tick: u64) -> usize {
+        let ticks = &mut self.driver_events[target.index()];
         if ticks.is_empty() {
-            self.driver_events.remove(target);
+            return 0;
         }
+        let superseded = ticks.split_off(&tick);
         let mut cancelled = 0;
         for (superseded_tick, entries) in superseded {
             for (region, sequence) in entries {
@@ -754,6 +857,34 @@ impl EventScheduler {
         target: EventTarget,
         value: EventValue,
     ) -> Result<u64, SchedulerError> {
+        let target = self.queues.intern(target);
+        self.schedule_id_at(tick, region, target, value)
+    }
+
+    /// The identity of a driver, interned once so that everything after can
+    /// name it by index.
+    ///
+    /// A caller that schedules for the same driver over and over — every
+    /// digital process, every code-model output — takes its id here at
+    /// construction and then never touches a `String` again.
+    ///
+    /// Gated with its caller, the same way [`TimeResolution::
+    /// seconds_to_floor_ticks`] is: `xspice::verilog` is a `veriloga` module,
+    /// so a build without the feature has no caller and `-D warnings` would
+    /// say so.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn intern_target(&mut self, target: EventTarget) -> TargetId {
+        self.queues.intern(target)
+    }
+
+    /// [`Self::schedule_at`] for a driver already interned.
+    pub(crate) fn schedule_id_at(
+        &mut self,
+        tick: u64,
+        region: SchedulerRegion,
+        target: TargetId,
+        value: EventValue,
+    ) -> Result<u64, SchedulerError> {
         let horizon = if self.started {
             self.current_tick.saturating_add(1)
         } else {
@@ -806,7 +937,19 @@ impl EventScheduler {
         target: EventTarget,
         value: EventValue,
     ) -> usize {
-        let cancelled = self.queues.supersede_driver(&target, tick);
+        let target = self.queues.intern(target);
+        self.schedule_id_superseding_at(tick, region, target, value)
+    }
+
+    /// [`Self::schedule_superseding_at`] for a driver already interned.
+    pub(crate) fn schedule_id_superseding_at(
+        &mut self,
+        tick: u64,
+        region: SchedulerRegion,
+        target: TargetId,
+        value: EventValue,
+    ) -> usize {
+        let cancelled = self.queues.supersede_driver(target, tick);
         self.queues.insert(None, tick, region, target, value);
         cancelled
     }
@@ -834,6 +977,50 @@ impl EventScheduler {
     ) -> Result<TimeSlotReport, SchedulerError>
     where
         F: FnMut(ScheduledEvent, &mut SchedulerContext<'_>),
+    {
+        self.drain_due(bound_tick, |queues, event, tick| {
+            // Rendered before the context takes the queues, which is what
+            // keeps the two `String` clones off every other event path.
+            let event = queues.render(event);
+            let mut context = SchedulerContext {
+                queues,
+                current_tick: tick,
+            };
+            execute(event, &mut context);
+        })
+    }
+
+    /// [`Self::run_due_events`] for a caller that only needs to know *which
+    /// drivers* fired, in order.
+    ///
+    /// The digital host is that caller: it collects the slot's activations and
+    /// then runs each one's process, and the identity it acts on is the id.
+    /// Draining this way materializes no [`ScheduledEvent`] and so allocates
+    /// nothing per event. `fired` is appended to, not cleared, so the caller
+    /// owns the buffer and can reuse it across delta cycles.
+    ///
+    /// Nothing may be scheduled while this drains, which is exactly the
+    /// difference from [`Self::run_due_events`]: this caller schedules from
+    /// *outside*, after the slot has gone quiet.
+    ///
+    /// Gated with its caller; see [`Self::intern_target`].
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn run_due_event_targets(
+        &mut self,
+        bound_tick: u64,
+        fired: &mut Vec<TargetId>,
+    ) -> Result<TimeSlotReport, SchedulerError> {
+        self.drain_due(bound_tick, |_, event, _| fired.push(event.target))
+    }
+
+    /// The one drain loop both due-slot modes run.
+    fn drain_due<F>(
+        &mut self,
+        bound_tick: u64,
+        mut execute: F,
+    ) -> Result<TimeSlotReport, SchedulerError>
+    where
+        F: FnMut(&mut EventQueues, PendingEvent, u64),
     {
         self.open_due_slot(bound_tick);
 
@@ -870,17 +1057,8 @@ impl EventScheduler {
                     self.slot_events_executed,
                 ));
             }
-            *self
-                .queues
-                .activations
-                .entry(event.target.clone())
-                .or_insert(0) += 1;
-
-            let mut context = SchedulerContext {
-                queues: &mut self.queues,
-                current_tick: bound_tick,
-            };
-            execute(event, &mut context);
+            self.queues.note_activation(event.target);
+            execute(&mut self.queues, event, bound_tick);
         }
 
         Ok(TimeSlotReport {
@@ -926,7 +1104,7 @@ impl EventScheduler {
         self.started = true;
         self.slot_delta_cycles = 0;
         self.slot_events_executed = 0;
-        self.queues.activations.clear();
+        self.queues.clear_activations();
     }
 
     /// Run the next tick that has events, to quiescence.
@@ -950,7 +1128,7 @@ impl EventScheduler {
         self.current_tick = tick;
         self.started = true;
         self.queues.open_next_due_tick(tick);
-        self.queues.activations.clear();
+        self.queues.clear_activations();
 
         // A tick settles inside this call, so the counters are local. The
         // per-slot fields are cleared so that a scheduler driven both ways
@@ -986,12 +1164,8 @@ impl EventScheduler {
                     events_executed,
                 ));
             }
-            *self
-                .queues
-                .activations
-                .entry(event.target.clone())
-                .or_insert(0) += 1;
-
+            self.queues.note_activation(event.target);
+            let event = self.queues.render(event);
             let mut context = SchedulerContext {
                 queues: &mut self.queues,
                 current_tick: tick,
@@ -1017,9 +1191,14 @@ impl EventScheduler {
         // runs of the same oscillation report the same list.
         let mut entities: Vec<(EventTarget, u64)> = self
             .queues
-            .activations
+            .activated
             .iter()
-            .map(|(target, count)| (target.clone(), *count))
+            .map(|id| {
+                (
+                    self.queues.target(*id).clone(),
+                    self.queues.activations[id.index()],
+                )
+            })
             .collect();
         entities.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
         entities.truncate(self.limits.max_reported_oscillating_entities);
@@ -1068,6 +1247,7 @@ impl SchedulerContext<'_> {
                 requested_tick: tick,
             });
         }
+        let target = self.queues.intern(target);
         Ok(self
             .queues
             .insert(Some(self.current_tick), tick, region, target, value))
