@@ -10,6 +10,8 @@
 //! release-qualification work, not a per-commit gate. Run it with
 //! `--release --features native -- --ignored --nocapture`.
 
+use std::path::PathBuf;
+
 use super::census_models::shipped_census_models;
 
 /// How many modules the shipped model tree declares.
@@ -67,6 +69,12 @@ const SHIPPED_CENSUS_DIGEST: &str =
 /// One shipped module's compiled machine-code digest.
 struct ModelImageDigest {
     name: String,
+    /// The source the module was declared in.
+    ///
+    /// Three shipped modules are named `hisimsoi_va`, two `l_utsoi` and two
+    /// `bsimsoi`, each from a different source, so a re-baseline that reads the
+    /// per-module lines below cannot key a module on its name alone.
+    path: PathBuf,
     digest: String,
     bytes: usize,
     helper_calls: usize,
@@ -143,6 +151,7 @@ fn census() -> Vec<ModelImageDigest> {
         total_census_seconds += census_seconds;
         digests.push(ModelImageDigest {
             name: module.to_string(),
+            path: shipped.path.clone(),
             digest: blake3::hash(&normalized).to_hex().to_string(),
             bytes: image.len(),
             helper_calls,
@@ -152,7 +161,11 @@ fn census() -> Vec<ModelImageDigest> {
     eprintln!(
         "code-identity total_compile_seconds={total_compile_seconds:.1} total_census_seconds={total_census_seconds:.1}"
     );
-    digests.sort_by(|left, right| left.name.cmp(&right.name));
+    digests.sort_by(|left, right| {
+        left.name
+            .cmp(&right.name)
+            .then_with(|| left.path.cmp(&right.path))
+    });
     digests
 }
 
@@ -167,8 +180,13 @@ fn shipped_model_machine_code_census_digest() {
     let mut combined = blake3::Hasher::new();
     for entry in &census {
         eprintln!(
-            "code-identity model={} bytes={} helper_calls={} seconds={:.1} digest={}",
-            entry.name, entry.bytes, entry.helper_calls, entry.seconds, entry.digest
+            "code-identity model={} path={} bytes={} helper_calls={} seconds={:.1} digest={}",
+            entry.name,
+            entry.path.display(),
+            entry.bytes,
+            entry.helper_calls,
+            entry.seconds,
+            entry.digest
         );
         combined.update(entry.name.as_bytes());
         combined.update(entry.digest.as_bytes());
