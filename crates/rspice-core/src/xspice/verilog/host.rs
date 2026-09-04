@@ -620,10 +620,12 @@ impl DigitalHost {
                     return Ok(());
                 }
             } else {
-                // Indexed rather than drained: `run_process` needs `&mut
-                // self`, and the buffer is the caller's.
-                for position in 0..fired.len() {
-                    let index = self.process_of_target[usize::from(fired[position])];
+                // Read rather than drained: the buffer belongs to the caller,
+                // which is what lets it be reused across delta cycles, and it
+                // is reachable from neither `self` nor the kernel while a
+                // process runs.
+                for target in fired.iter() {
+                    let index = self.process_of_target[usize::from(*target)];
                     self.run_process(index, tick)?;
                     self.dispatch(tick)?;
                 }
