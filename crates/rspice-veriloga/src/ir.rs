@@ -930,8 +930,17 @@ impl DeviceIR {
             });
         }
 
-        // Array layouts (element slots are already in `variables`)
-        for (name, layout) in &module.arrays {
+        // Array layouts (element slots are already in `variables`).
+        //
+        // Ordered by name, exactly as `HirModule::from_analyzed` orders its
+        // own array list. The analyzed module holds these in a `HashMap`, and
+        // this list is not a lookup table: derivative shadow runs are handed
+        // contiguous variable slots one array at a time in this order, so a
+        // walk of the map would number the slots of one module differently on
+        // every process — and hand the bytecode a different program each time.
+        let mut layouts: Vec<_> = module.arrays.iter().collect();
+        layouts.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+        for (name, layout) in layouts {
             ir.arrays.push(ArrayDef {
                 name: name.clone(),
                 base: layout.base,
