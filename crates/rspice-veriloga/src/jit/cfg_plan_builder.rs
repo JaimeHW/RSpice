@@ -57,33 +57,48 @@
 //! by the same code, and the value entries then have to agree about what that
 //! operating point evaluates to.
 //!
-//! # Noise comes from the CFG too, and what that costs
+//! # Noise stays postfix, and now there is a reason rather than a queue
 //!
-//! Production asks for [`CfgNoiseScope::Cfg`], which is the scope the
-//! CFG-versus-MIR census measures: a plan production built under
-//! [`CfgNoiseScope::Postfix`] would be a third plan neither census walked.
+//! Production asks for [`CfgNoiseScope::Postfix`]. It used to say the flip
+//! taking the other scope had not run its censuses yet and no more than that.
+//! The censuses have now run and the answer is that the scope is not ready, on
+//! two counts measured rather than argued.
 //!
-//! It is the expensive half of the flip and the numbers say so.
-//! [`crate::native::cfg_cost_census`] times the shipped plan, the CFG route
-//! with the noise magnitudes left postfix, and the CFG route entire, at one
-//! bias in one process. The route alone is free — 1.00, 1.05, 0.95, 0.97 and
-//! 0.89 times the shipped plan's evaluation on `asmesd`, `vbic13_4t`,
-//! `hicumL2va`, `bsimcmg_va` and `asmhemt`, and images within a few per cent of
-//! [`crate::native::cfg_size_census`]'s. Taking noise from the CFG as well
-//! costs 1.14, 1.65, 1.67, 1.30 and 0.95, and takes `hicumL2va`'s image from
-//! 1.27 MB to 3.08 and `bsimcmg_va`'s from 5.62 to 9.81.
+//! **It computes a wrong number for one class.** A noise magnitude that reads a
+//! *contribution current* — `white_noise(abs(I(p, n)) * 4.0, "shot")` — reads
+//! zero through the CFG, so the source is dropped before it reaches the
+//! analysis and the small-signal result is silently missing a term.
+//! `try_noise_sources_evaluates_current_probe_psd` in `tests/device_eval.rs` is
+//! the estate's witness and
+//! [`a_noise_magnitude_over_a_contribution_current_is_why_noise_stays_postfix`]
+//! is the pin here. This is the class W-F5 closed for residuals and Jacobians —
+//! [`CfgValueKind::ContributedCurrent`](crate::canonical_ir::CfgValueKind)
+//! naming the probe canonically and [`CfgRuntimeBindings`] translating it back
+//! to the shipped route's storage — reaching an entry that class never covered.
+//! The hoisted site copy a magnitude is published as is a second lowering, and
+//! the binding does not survive it.
 //!
-//! Where it comes from is the paragraph above about the prelude: the noise
+//! **It costs, and it is the whole cost of the flip.**
+//! [`crate::native::cfg_cost_census`] times the shipped plan, the CFG route with
+//! noise left postfix, and the CFG route entire, at one bias in one process.
+//! The route alone is free — 1.00, 1.05, 0.95, 0.97 and 0.89 times the shipped
+//! plan's evaluation on `asmesd`, `vbic13_4t`, `hicumL2va`, `bsimcmg_va` and
+//! `asmhemt`, with images within a few per cent of
+//! [`crate::native::cfg_size_census`]'s. Taking noise from the CFG as well costs
+//! 1.14, 1.65, 1.67, 1.30 and 0.95, and takes `hicumL2va`'s image from 1.27 MB
+//! to 3.08 and `bsimcmg_va`'s from 5.62 to 9.81.
+//!
+//! Where the cost comes from is the paragraph above about the prelude: the noise
 //! magnitudes lower from the primal body and from hoisted copies of it, which
 //! are not the function the prelude is built over, so every one of them keeps
 //! its own cone. "Noise is tens of entries, not thousands, so it was never part
-//! of the explosion" was a count of entries; what the cost census measures is
-//! that those tens are cones over the deepest part of a compact model's body,
-//! and on `hicumL2va` and `bsimcmg_va` they are most of the image.
+//! of the explosion" was a count of entries; those tens are cones over the
+//! deepest part of a compact model's body, and on `hicumL2va` and `bsimcmg_va`
+//! they are most of the image.
 //!
-//! Sharing them with the prelude is the work that would close it, and
-//! [`NoiseMagnitude`] names the analysis it needs. Whether the flip should have
-//! waited for that is a ruling about noise, not about this route.
+//! Both are the same piece of work — give the magnitudes the prelude's
+//! function, which shares their cones and carries the contributed-current
+//! binding — and [`NoiseMagnitude`] names the analysis it needs.
 //!
 //! ## What the gap was, and what it actually is
 //!
@@ -780,24 +795,22 @@ fn constant_zero_program() -> JitResult<Program> {
 /// documentation for the measurement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CfgNoiseScope {
-    /// Lower them from the CFG with everything else. What production asks for,
-    /// and what the CFG-versus-MIR census measures.
+    /// Lower them from the CFG with everything else. What the CFG-versus-MIR
+    /// census asks for, because measuring the gap is how it closes, and what
+    /// the size and cost censuses build to hold the shipped plan against.
+    ///
+    /// Not what production asks for, and the module documentation says why in
+    /// numbers: a magnitude over a contribution current reads zero here, and
+    /// the scope costs up to 1.67 times the evaluation and 2.4 times the image.
+    /// Constructed only by those censuses until that is closed; the attribute is
+    /// the honest statement of it rather than a silenced warning.
+    #[cfg_attr(not(test), allow(dead_code))]
     Cfg,
-    /// Keep the postfix plan's.
+    /// Keep the postfix plan's. What production asks for.
     ///
     /// [`CfgPlanRefusal::NoiseUnpaired`] cannot fire under this scope: a
     /// shipped source with no CFG process is not a disagreement about a value
     /// nobody is taking from the CFG.
-    ///
-    /// Production stopped asking for this at the flip, so outside `cfg(test)`
-    /// nothing constructs it and the attribute is the honest statement of that
-    /// rather than a silenced warning. What still does construct it is the
-    /// measurement that separates the route's cost from the noise scope's —
-    /// [`crate::native::cfg_size_census`] and
-    /// [`crate::native::cfg_cost_census`] both build this plan to hold the
-    /// other one against — and [`crate::native::cfg_noise_pins`], which reads
-    /// both scopes at one bias.
-    #[cfg_attr(not(test), allow(dead_code))]
     Postfix,
 }
 
@@ -1474,8 +1487,9 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
 ///   to do, and its documentation carries the per-module reading that
 ///   re-baselined it — every module moved except the two the fallback names.
 /// * [`crate::native::cfg_cost_census`] measures what it costs, which is the one
-///   thing the other three cannot say. See the module documentation: the route
-///   is free and [`CfgNoiseScope::Cfg`] is not.
+///   thing the other three cannot say: 1.00, 1.05, 0.95, 0.97 and 0.89 times the
+///   shipped plan's evaluation on the five modules it times. The route is free.
+///   [`CfgNoiseScope::Cfg`] is not, and is not what this builds.
 ///
 /// # The postfix plan did not change, and that is checkable
 ///
@@ -1518,7 +1532,7 @@ pub(crate) fn build_default_model_plan_reported(
     model: &CompiledModel,
     artifact: &CanonicalIrArtifact,
 ) -> JitResult<(NativeModelPlan, Option<CfgPlanRefused>)> {
-    match build_model_plan_from_canonical_cfg(model, artifact, CfgNoiseScope::Cfg) {
+    match build_model_plan_from_canonical_cfg(model, artifact, CfgNoiseScope::Postfix) {
         Ok(built) => Ok((built.plan, None)),
         Err(refused) => {
             let plan = build_model_plan_with_canonical_ir(model, artifact)?;
@@ -1701,10 +1715,10 @@ endmodule
     }
 
     /// The flip, stated as the shape of the plan production builds: the CFG
-    /// route owns the residual, both Jacobians and the noise magnitudes, and
-    /// the MIR route owns everything else.
+    /// route owns the residual and both Jacobians, the MIR route owns
+    /// everything else, noise included.
     #[test]
-    fn the_cfg_route_takes_its_values_and_its_noise_from_the_cfg() {
+    fn the_cfg_route_takes_its_values_from_the_cfg_and_its_noise_from_mir() {
         let (model, artifact) = compile(RESISTOR_WITH_CHARGE_AND_NOISE);
         let (plan, refused) = build_default_model_plan_reported(&model, &artifact)
             .expect("the default plan builds");
@@ -1723,10 +1737,11 @@ endmodule
 
         for (field, form) in forms(&plan) {
             let expected = match field {
-                "stamp_values" | "jacobians" | "reactive_jacobians" | "noise_psd"
-                | "noise_exponents" => "block",
-                // `parameter_defaults` and `static_conditions`, which the CFG
-                // does not carry and this route deliberately leaves alone.
+                "stamp_values" | "jacobians" | "reactive_jacobians" => "block",
+                // Noise, parameter defaults and static conditions. The last two
+                // the CFG does not carry; noise it does, and
+                // `a_noise_magnitude_over_a_contribution_current_is_why_noise_stays_postfix`
+                // is why this route does not take it.
                 _ => "postfix",
             };
             assert_eq!(
@@ -1734,6 +1749,73 @@ endmodule
                 "the default plan's {field} entries are {expected} programs"
             );
         }
+    }
+
+    /// Why [`CfgNoiseScope::Cfg`] is not what production builds, as the shape
+    /// of the entry rather than as a paragraph.
+    ///
+    /// The shipped route freezes a contribution-current probe and reads it back
+    /// out of the storage the evaluation published — `LoadCurrent(pair)` here,
+    /// which is what `populate_noise_current_probe_cache` in `crate::device`
+    /// fills before a noise sweep reads a magnitude. The CFG route's noise
+    /// magnitude is a hoisted copy of the site's own computation, and the
+    /// binding that translates a canonical `ContributedCurrent` back to that
+    /// storage does not survive the hoist: the entry holds no current load at
+    /// all, so the magnitude evaluates to zero and `try_noise_sources` drops the
+    /// source before the analysis sees it.
+    ///
+    /// `try_noise_sources_evaluates_current_probe_psd` in `tests/device_eval.rs`
+    /// is the same defect measured end to end, on the same module. It fails the
+    /// moment production asks for [`CfgNoiseScope::Cfg`], which is how this was
+    /// found; this pin says *why* without compiling and running a device, and
+    /// fails by agreeing — the day the hoist carries the binding, the two
+    /// read-sets match and this test says so instead of quietly passing.
+    #[test]
+    fn a_noise_magnitude_over_a_contribution_current_is_why_noise_stays_postfix() {
+        let source = r#"
+module cfg_noise_current_probe(p, n);
+  inout p, n;
+  electrical p, n;
+  analog begin
+    I(p, n) <+ V(p, n) * 2.0e-3 + white_noise(abs(I(p, n)) * 4.0, "shot");
+  end
+endmodule
+"#;
+        let (model, artifact) = compile(source);
+        let postfix = build_model_plan_from_canonical_cfg(&model, &artifact, CfgNoiseScope::Postfix)
+            .expect("the CFG plan builds with MIR noise")
+            .plan;
+        let cfg = build_model_plan_from_canonical_cfg(&model, &artifact, CfgNoiseScope::Cfg)
+            .expect("the CFG plan builds with CFG noise")
+            .plan;
+
+        assert_eq!(postfix.noise_psd.len(), 1, "the module has one noise source");
+        assert_eq!(cfg.noise_psd.len(), 1);
+
+        // Both storages, because which one a probe reads depends on whether its
+        // endpoints are a terminal pair or an equation's own slot, and the
+        // claim is about neither being read.
+        let reads = |plan: &NativeModelPlan| {
+            (
+                plan.current_dependencies.noise_psd[0].clone(),
+                plan.current_dependencies.noise_psd_prior_currents[0].clone(),
+            )
+        };
+        // Not vacuous: the shipped magnitude really is a read of the published
+        // current, which is the quantity the CFG copy has to reproduce.
+        let shipped_reads = reads(&postfix);
+        assert!(
+            !shipped_reads.0.is_empty() || !shipped_reads.1.is_empty(),
+            "the shipped noise magnitude reads the contribution current it probes"
+        );
+
+        let cfg_reads = reads(&cfg);
+        assert!(
+            cfg_reads.0.is_empty() && cfg_reads.1.is_empty(),
+            "the CFG noise magnitude has stopped losing the contributed-current binding \
+             ({cfg_reads:?} against the shipped {shipped_reads:?}); noise can take the CFG route \
+             once cfg_cost_census also says it is affordable"
+        );
     }
 
     /// A module the CFG route refuses takes the postfix plan whole — every
