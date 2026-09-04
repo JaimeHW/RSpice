@@ -95,9 +95,25 @@
 //!
 //! The magnitudes are prelude slots now, on the rule [`NoiseMagnitudePlan`]
 //! states, and the same census reads 1.117, 1.089, 0.972, 0.887 and 0.876
-//! against the shipped plan on the five — every one of them at or below what
-//! the route alone cost, with `hicumL2va` at 1.2679 MB and `bsimcmg_va` at
-//! 5.666. There is nothing left for a noise scope to select between.
+//! against the shipped plan on the five, with `hicumL2va` at 1.2679 MB and
+//! `bsimcmg_va` at 5.666. Read against the route alone rather than against the
+//! shipped plan — which the census could still do while it built all three —
+//! that is 1.075, 1.022, 0.946, 0.973 and 0.978: the cone cost is gone on the
+//! four large models and `asmesd`, the smallest, keeps 7.5 per cent of it.
+//!
+//! What that 7.5 per cent is *not* is the cone: `asmesd` publishes all seven of
+//! its magnitudes, and doing so grows its prelude from 2517 union instructions
+//! to 2548 and its slots from 181 to 188 — 1.2 per cent, the same order as
+//! `vbic13_4t` (1.2), `hicumL2va` (0.3), `bsimcmg_va` (2.9) and `asmhemt` (0.1),
+//! which is the whole of what an evaluation reading no noise now pays. What is
+//! left is a residual on a six-microsecond evaluation, and the plan that could
+//! attribute it — the route with postfix noise — is the one this flip deleted.
+//! So the number above is a reading and not a bound, which is why it is written
+//! out per model rather than summarized.
+//!
+//! What is *not* left is a choice: both counts that stood against the CFG
+//! magnitudes are answered, and a scope selecting between them would have one
+//! arm nothing but a census constructs.
 //!
 //! ## What the gap was, and what it actually is
 //!
@@ -360,8 +376,19 @@ pub(crate) struct CfgPlanReport {
     /// Noise magnitudes taken at their own site rather than at the exit block,
     /// so that they hold the unconditional quantity the shipped route holds.
     ///
-    /// Since the prelude, this counts only the magnitudes it could not take:
-    /// a site value under a guard, where the two quantities genuinely differ.
+    /// Since the prelude, this counts the site values it could not take, for
+    /// either of the two reasons a slot cannot hold one. The first is the class
+    /// [`NoiseMagnitudePlan`] names: a site value under a guard, where the two
+    /// quantities genuinely differ. The second is the one every entry of every
+    /// kind is subject to — the value reads a contribution current the
+    /// evaluation publishes after the prelude runs ([`LiveCurrentTaint`]) — and
+    /// it is reachable here rather than theoretical, because
+    /// `white_noise(abs(I(p, n)) * 4.0, "shot")` is the shot-noise idiom and its
+    /// magnitude is exactly such a value. An entry in that class is unguarded,
+    /// so it is *publishable* and still not published;
+    /// [`a_noise_magnitude_over_a_contribution_current_reads_the_shipped_routes_storage`]
+    /// is the module it is pinned on.
+    ///
     /// See [`NoiseMagnitude`] and [`NoiseMagnitudePlan`].
     pub(crate) noise_hoisted: usize,
     /// Noise magnitudes lowered from the exit read while the source is under a
@@ -385,9 +412,12 @@ pub(crate) struct CfgPlanReport {
     /// with its identity.
     ///
     /// Since the prelude, that is a small population: every entry the prelude
-    /// publishes is one instruction, so what this measures is the noise
-    /// magnitudes and the entries [`Self::live_current_entries`] counts. `None`
-    /// on a module where the prelude covers everything and noise stays postfix.
+    /// publishes is one instruction, so what this measures is the entries
+    /// [`Self::live_current_entries`] counts and the magnitudes
+    /// [`Self::noise_hoisted`] does. `None` on a module where the prelude covers
+    /// every one of them, which since W-F13a includes the noise entries — a
+    /// module with noise sources no longer reaches this by declining to lower
+    /// them.
     pub(crate) largest_entry: Option<(CfgPlanEntry, usize)>,
     /// `f64` slots the plan's prelude publishes, one per distinct entry output.
     pub(crate) prelude_slots: usize,

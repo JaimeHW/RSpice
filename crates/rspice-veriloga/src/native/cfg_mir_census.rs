@@ -1031,9 +1031,11 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
     let model = &shipped.model;
     let artifact = &shipped.canonical_ir;
 
-    // `Cfg`, not the `Postfix` scope production takes: the whole point of this
-    // census is to measure the noise slice the default plan declines to use, so
-    // narrowing it here would make the gap invisible on the day it closes.
+    // The production plan, and there is no longer a scope that could make it
+    // anything else: this census used to ask for the noise slice the default
+    // plan declined to use, so that the gap would be visible on the day it
+    // closed. W-F13a closed it, so what the columns below compare against the
+    // shipped plan is what every backend builds.
     let cfg_plan = match build_model_plan_from_canonical_cfg(model, artifact) {
         Ok(plan) => plan,
         Err(refused) => {
