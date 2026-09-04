@@ -1054,6 +1054,14 @@ impl NativeModel {
         self.entry_ptr(self.entries.stamp_values[index])
     }
 
+    pub(crate) fn prelude_address_for_test(&self) -> *const u8 {
+        self.entry_ptr(
+            self.entries
+                .prelude
+                .expect("compiled native model has a prelude"),
+        )
+    }
+
     pub(crate) fn run_assignments(&self, ctx: &EvalContext, vars: *mut f64) {
         // Safety: from_executable_image validated this offset is inside the
         // executable image owned by self, and the backend records it with the
@@ -1074,6 +1082,7 @@ impl NativeModel {
         let Some(offset) = self.entries.prelude else {
             return false;
         };
+        self.debug_assert_prelude_storage(ctx);
         // The value ABI: the prelude publishes through the context's slot array
         // and returns a constant nothing reads.
         self.run_value_entry(offset, ctx, vars);
@@ -1100,6 +1109,31 @@ impl NativeModel {
         true
     }
 
+    /// Refuse, in the build where refusing is possible, a context too small for
+    /// the prelude this plan publishes into.
+    ///
+    /// Generated code addresses a prelude slot by a compile-time index and
+    /// cannot check it, so a context sized for a plan without a prelude is a
+    /// store through a null pointer — a segmentation fault with no name on it.
+    /// `crate::device` catches that before the first evaluation through
+    /// [`NativeRequiredStorage::validate_prelude_slot_storage`]; this catches a
+    /// caller that never went through the device, which since the flip means any
+    /// test that hands a production-compiled plan a hand-built [`EvalContext`].
+    ///
+    /// A `debug_assert` rather than a check: the release path is the device's,
+    /// which already validated, and this must not put a branch on the entry to
+    /// every evaluation.
+    #[track_caller]
+    fn debug_assert_prelude_storage(&self, ctx: &EvalContext) {
+        debug_assert!(
+            self.required_storage.prelude_slots == 0
+                || ctx.prelude_slots_len >= self.required_storage.prelude_slots,
+            "the context provides {} prelude slots and this plan publishes {}",
+            ctx.prelude_slots_len,
+            self.required_storage.prelude_slots
+        );
+    }
+
     /// Runs the fused assignment/value/Jacobian driver when this image has one.
     pub(crate) fn run_stamp_kernel(
         &self,
@@ -1110,6 +1144,7 @@ impl NativeModel {
         let Some(offset) = self.entries.stamp_kernel else {
             return false;
         };
+        self.debug_assert_prelude_storage(ctx);
         // Safety: construction validated that `offset` is a recorded function
         // start in the executable image, emitted with StampKernelEntry's ABI.
         let entry: StampKernelEntry = unsafe { std::mem::transmute(self.entry_ptr(offset)) };
@@ -1128,6 +1163,7 @@ impl NativeModel {
         let Some(offset) = self.entries.evaluation_kernel else {
             return false;
         };
+        self.debug_assert_prelude_storage(ctx);
         // Safety: construction validated that `offset` is a recorded function
         // start emitted with StampKernelEntry's ABI. The evaluation driver does
         // not dereference the Jacobian pointer in `io`.

@@ -1459,8 +1459,6 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn windows_registers_unwind_metadata_for_driver_and_helper_entries() {
-        use windows_sys::Win32::System::Diagnostics::Debug::RtlLookupFunctionEntry;
-
         let source = r#"
 module native_windows_unwind(p, n);
   inout p, n;
@@ -1478,29 +1476,57 @@ endmodule
         let native = compile_model_with_canonical_ir(&model, &artifact)
             .expect("compile Windows-unwind native model");
 
-        let assert_registered = |address: *const u8, expected_frame_register: u8| {
+        /// The unwind record for one entry, or `None` if the loader has none.
+        ///
+        /// `None` is a claim, not an absence: the Windows x64 ABI says a leaf
+        /// function — one that pushes nothing, allocates nothing and calls
+        /// nothing — needs no record, and the unwinder reads its return address
+        /// straight off `RSP`. So the assertion below is that an entry with a
+        /// frame is described and an entry without one is a leaf, which is what
+        /// `X64Compiler::windows_unwind_info` decides by whether the prologue
+        /// recorded an operation.
+        fn unwind_frame_register(address: *const u8) -> Option<u8> {
+            use windows_sys::Win32::System::Diagnostics::Debug::RtlLookupFunctionEntry;
+
             let control_pc = address as usize as u64 + 1;
             let mut image_base = 0_u64;
             let function = unsafe {
                 RtlLookupFunctionEntry(control_pc, &mut image_base, std::ptr::null_mut())
             };
-            assert!(
-                !function.is_null(),
-                "RtlLookupFunctionEntry must find generated entry {address:p}"
-            );
+            if function.is_null() {
+                return None;
+            }
             let unwind_info_address = unsafe { (*function).Anonymous.UnwindInfoAddress };
             let unwind_info = (image_base as usize + unwind_info_address as usize) as *const u8;
             let header = unsafe { std::slice::from_raw_parts(unwind_info, 4) };
             assert_eq!(header[0] & 0x07, 1, "Windows unwind version must be 1");
-            assert_eq!(
-                header[3] & 0x0f,
-                expected_frame_register,
-                "unexpected Windows unwind frame register"
-            );
-        };
+            Some(header[3] & 0x0f)
+        }
 
-        assert_registered(native.stamp_kernel_address_for_test(), 5);
-        assert_registered(native.stamp_value_address_for_test(0), 5);
+        // The two entries that establish a frame and call: the fused driver and
+        // the prelude every value entry of this plan reads from. A stack walk
+        // out of a runtime helper passes through both, so both must be
+        // described.
+        assert_eq!(
+            unwind_frame_register(native.stamp_kernel_address_for_test()),
+            Some(5),
+            "the fused stamp kernel must be registered against RBP"
+        );
+        assert_eq!(
+            unwind_frame_register(native.prelude_address_for_test()),
+            Some(5),
+            "the prelude must be registered against RBP"
+        );
+        // The stamp value entry is a load of the slot the prelude published:
+        // frameless, callless, and a leaf the ABI asks for no record for. It is
+        // allowed to be described and must not be described wrongly.
+        assert!(
+            matches!(
+                unwind_frame_register(native.stamp_value_address_for_test(0)),
+                None | Some(5)
+            ),
+            "a stamp value entry is either a described frame or an unwindable leaf"
+        );
     }
 
     #[test]
@@ -1528,9 +1554,11 @@ endmodule
         let params = [2.0_f64];
         let voltages = [5.0_f64, 1.0_f64];
         let ctx = eval_context(&params, &voltages);
+        let mut entry_variables = vec![0.0_f64; model.num_variables + 1];
+        run_assignment_and_prelude(&native, &ctx, entry_variables.as_mut_ptr());
         assert_eq!(
             native
-                .run_stamp_value(0, &ctx, std::ptr::null())
+                .run_stamp_value(0, &ctx, entry_variables.as_ptr())
                 .expect("stamp value entry"),
             (voltages[0] - voltages[1]) / params[0]
         );
@@ -1969,6 +1997,9 @@ endmodule
         let branch_unknowns = [3.0_f64];
         let mut ctx = eval_context(&[], &[0.0, 0.0]);
         ctx.branch_unknowns = branch_unknowns.as_ptr();
+        // The device publishes the prelude before any entry is read, and since
+        // the flip a covered entry loads what it published.
+        native.run_prelude(&ctx, std::ptr::null());
         assert_eq!(
             native
                 .run_stamp_value(0, &ctx, std::ptr::null())
@@ -1981,10 +2012,7 @@ endmodule
                 .expect("second stamp value entry"),
             6.0
         );
-        assert_eq!(
-            native.stamp_value_branch_unknowns(1),
-            Some([0_usize].as_slice())
-        );
+        assert_eq!(stamp_value_branch_unknowns(&native, 1), vec![0_usize]);
     }
 
     #[test]
@@ -2191,7 +2219,7 @@ endmodule
         let mut ctx = eval_context(&[2.0_f64], &[0.0, 0.0]);
         ctx.branch_unknowns = branch_unknowns.as_ptr();
         let mut variables = vec![0.0_f64; native.num_variables.max(1)];
-        native.run_assignments(&ctx, variables.as_mut_ptr());
+        run_assignment_and_prelude(&native, &ctx, variables.as_mut_ptr());
 
         assert_jacobian_axis_value(
             &model,
@@ -2251,7 +2279,7 @@ endmodule
         let voltages = [5.0_f64, 1.0_f64];
         let ctx = eval_context(&[], &voltages);
         let mut vars = vec![0.0_f64; native.num_variables.max(1)];
-        native.run_assignments(&ctx, vars.as_mut_ptr());
+        run_assignment_and_prelude(&native, &ctx, vars.as_mut_ptr());
         if let Some(error) = ctx.take_runtime_error() {
             panic!("native canonical assignment failed: {error}");
         }
@@ -2468,7 +2496,7 @@ endmodule
         ctx.currents_len = currents.len();
         let mut variables = vec![0.0_f64; native.num_variables.max(1)];
 
-        native.run_assignments(&ctx, variables.as_mut_ptr());
+        run_assignment_and_prelude(&native, &ctx, variables.as_mut_ptr());
         assert_eq!(variables[before].to_bits(), 1.0_f64.to_bits());
         assert_eq!(variables[sensed].to_bits(), 0.0_f64.to_bits());
 
@@ -2676,7 +2704,7 @@ endmodule
         resolve_native_parameter_defaults(&model, &native, &mut context);
         let ctx = eval_context_from_vm_context(&mut context);
         ctx.clear_runtime_error();
-        native.run_assignments(&ctx, context.variables.as_mut_ptr());
+        run_assignment_and_prelude(&native, &ctx, context.variables.as_mut_ptr());
         if let Some(error) = ctx.take_runtime_error() {
             panic!("native assignment failed before assignment-fed ddx Jacobian: {error}");
         }
@@ -2750,7 +2778,7 @@ endmodule
         resolve_native_parameter_defaults(&model, &native, &mut context);
         let ctx = eval_context_from_vm_context(&mut context);
         ctx.clear_runtime_error();
-        native.run_assignments(&ctx, context.variables.as_mut_ptr());
+        run_assignment_and_prelude(&native, &ctx, context.variables.as_mut_ptr());
         if let Some(error) = ctx.take_runtime_error() {
             panic!("native assignment failed before array-fed ddx Jacobian: {error}");
         }
@@ -2967,16 +2995,16 @@ endmodule
         let branch_unknowns = [3.0_f64];
         let mut ctx = eval_context(&[], &[0.0, 0.0]);
         ctx.branch_unknowns = branch_unknowns.as_ptr();
+        // The device publishes the prelude before any entry is read, and since
+        // the flip a covered entry loads what it published.
+        native.run_prelude(&ctx, std::ptr::null());
         assert_eq!(
             native
                 .run_stamp_value(1, &ctx, std::ptr::null())
                 .expect("second stamp value entry"),
             -6.0
         );
-        assert_eq!(
-            native.stamp_value_branch_unknowns(1),
-            Some([0_usize].as_slice())
-        );
+        assert_eq!(stamp_value_branch_unknowns(&native, 1), vec![0_usize]);
     }
 
     #[test]
@@ -3006,16 +3034,16 @@ endmodule
         let branch_unknowns = [3.0_f64];
         let mut ctx = eval_context(&[], &[0.0, 0.0]);
         ctx.branch_unknowns = branch_unknowns.as_ptr();
+        // The device publishes the prelude before any entry is read, and since
+        // the flip a covered entry loads what it published.
+        native.run_prelude(&ctx, std::ptr::null());
         assert_eq!(
             native
                 .run_stamp_value(1, &ctx, std::ptr::null())
                 .expect("named branch stamp value entry"),
             -6.0
         );
-        assert_eq!(
-            native.stamp_value_branch_unknowns(1),
-            Some([0_usize].as_slice())
-        );
+        assert_eq!(stamp_value_branch_unknowns(&native, 1), vec![0_usize]);
     }
 
     #[test]
@@ -3193,7 +3221,7 @@ endmodule
         let params: Vec<f64> = model.parameters.iter().map(|param| param.default).collect();
         let ctx = eval_context(&params, &[2.0, 0.0]);
         let mut vars = vec![0.0_f64; native.num_variables.max(1)];
-        native.run_assignments(&ctx, vars.as_mut_ptr());
+        run_assignment_and_prelude(&native, &ctx, vars.as_mut_ptr());
         let active = native
             .run_static_condition(stamp_index, &ctx, vars.as_ptr())
             .expect("static condition has native entry");
@@ -3318,7 +3346,7 @@ endmodule
         let voltages = [8.0_f64, 3.0];
         let ctx = eval_context(&params, &voltages);
         let mut vars = vec![0.0_f64; native.num_variables.max(1)];
-        native.run_assignments(&ctx, vars.as_mut_ptr());
+        run_assignment_and_prelude(&native, &ctx, vars.as_mut_ptr());
         assert_near(vars[0], 0.25, "assignment output");
         assert_near(
             native
@@ -4690,7 +4718,7 @@ endmodule
             .resize(model.stamp_programs.len(), 0.0);
         let mut ctx = eval_context_from_vm_context(&mut native_context);
         ctx.clear_runtime_error();
-        native.run_assignments(&ctx, native_context.variables.as_mut_ptr());
+        run_assignment_and_prelude(&native, &ctx, native_context.variables.as_mut_ptr());
         require_clean_native_context(&ctx, "assignments")?;
 
         let mut stats = FiniteOracleStats::default();
@@ -5097,7 +5125,7 @@ endmodule
 
         let mut ctx = eval_context_from_vm_context(context);
         ctx.clear_runtime_error();
-        native.run_assignments(&ctx, context.variables.as_mut_ptr());
+        run_assignment_and_prelude(&native, &ctx, context.variables.as_mut_ptr());
         require_clean_native_context(&ctx, format!("{name} assignments"))
             .unwrap_or_else(|error| panic!("{error}"));
 
@@ -5562,6 +5590,7 @@ endmodule
 
     fn eval_context_from_vm_context(context: &mut VmContext) -> EvalContext {
         let integration = context.integration_coefficients();
+        let (prelude_slots, prelude_slots_len) = test_prelude_slots();
         EvalContext {
             voltages: context.voltages.as_ptr(),
             internal_voltages: context.internal_voltages.as_ptr(),
@@ -5674,8 +5703,8 @@ endmodule
                 context.state_older_candidate.as_mut_ptr()
             },
             state_older_candidate_len: context.state_older_candidate.len(),
-            prelude_slots: std::ptr::null_mut(),
-            prelude_slots_len: 0,
+            prelude_slots,
+            prelude_slots_len,
         }
     }
 
@@ -5833,6 +5862,12 @@ endmodule
             .iter()
             .position(|jacobian| matches_axis(&jacobian.col_axis))
             .unwrap_or_else(|| panic!("{label}: missing matching Jacobian axis"));
+        // The device publishes the prelude before it reads any entry, and since
+        // the flip a covered entry is a load of what it published. Here rather
+        // than at each caller because reading an entry is what this helper is
+        // for, and a caller that forgot would read a zero and blame the
+        // derivative.
+        native.run_prelude(ctx, variables);
         let actual = native
             .run_jacobian(stamp_index, entry_index, ctx, variables)
             .expect("Jacobian entry");
@@ -5856,6 +5891,7 @@ endmodule
             .iter()
             .position(|jacobian| matches_axis(&jacobian.col_axis))
             .unwrap_or_else(|| panic!("{label}: missing matching Jacobian axis"));
+        native.run_prelude(ctx, variables);
         let actual = native
             .run_jacobian(stamp_index, entry_index, ctx, variables)
             .expect("Jacobian entry");
@@ -5892,6 +5928,7 @@ endmodule
             .iter()
             .position(|jacobian| matches_axis(&jacobian.col_axis))
             .unwrap_or_else(|| panic!("{label}: missing matching reactive Jacobian axis"));
+        native.run_prelude(ctx, variables);
         let actual = native
             .run_reactive_jacobian(stamp_index, entry_index, ctx, variables)
             .expect("reactive Jacobian entry");
@@ -5951,7 +5988,81 @@ endmodule
         );
     }
 
+    /// Per-thread storage for the prelude a production-compiled plan publishes
+    /// into.
+    ///
+    /// `crate::device` sizes this per model from
+    /// [`NativeModel::required_storage`] and refuses a short array through
+    /// `validate_prelude_slot_storage`. A unit test that hands a plan its own
+    /// [`EvalContext`] has no such allocator, and since the flip every plan
+    /// these tests compile through [`compile_model_with_canonical_ir`] carries a
+    /// prelude — so an array borrowed from the caller would have to be threaded
+    /// through every one of them, and a null pointer is a segmentation fault
+    /// rather than a failed assertion.
+    ///
+    /// Per thread rather than per call because the context borrows it and the
+    /// helper returns by value; the harness runs one test at a time on a thread,
+    /// and a prelude writes every slot it reads before reading it, so no test
+    /// can observe another's leftovers. The size is a ceiling over the modules
+    /// declared in this file, which are hand-written and small;
+    /// `NativeModel::debug_assert_prelude_storage` fires rather than corrupting
+    /// memory if one grows past it.
+    const TEST_PRELUDE_SLOTS: usize = 4096;
+
+    thread_local! {
+        static TEST_PRELUDE_STORAGE: std::cell::RefCell<Vec<f64>> =
+            const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    /// Every branch unknown one stamp value's evaluation reads, wherever the
+    /// plan declares it.
+    ///
+    /// Since the flip an entry the prelude covers declares none of its own: the
+    /// reads moved to the prelude, which runs once before any entry and is
+    /// where the runtime validates them —
+    /// `NativeModelPlan::current_dependencies::prelude_branch_unknowns` is the
+    /// field that carries them. What these tests claim is about the evaluation,
+    /// which reads them wherever they are declared, so the claim is made over
+    /// both.
+    fn stamp_value_branch_unknowns(native: &NativeModel, index: usize) -> Vec<usize> {
+        let mut unknowns = native.prelude_branch_unknowns().to_vec();
+        unknowns.extend(
+            native
+                .stamp_value_branch_unknowns(index)
+                .unwrap_or_default()
+                .iter()
+                .copied(),
+        );
+        unknowns.sort_unstable();
+        unknowns.dedup();
+        unknowns
+    }
+
+    /// Fill the variable array and publish the prelude.
+    ///
+    /// What `crate::device` does before it reads any value entry, and what a
+    /// plan with a prelude requires: since the flip a value entry the prelude
+    /// covers *is* a load of the slot the prelude published, so an entry read
+    /// without it returns the zero the slot was seeded with rather than the
+    /// module's value. A plan without a prelude is unaffected — `run_prelude`
+    /// finds no entry point and returns.
+    fn run_assignment_and_prelude(native: &NativeModel, ctx: &EvalContext, variables: *mut f64) {
+        native.run_assignments(ctx, variables);
+        native.run_prelude(ctx, variables.cast_const());
+    }
+
+    fn test_prelude_slots() -> (*mut f64, usize) {
+        TEST_PRELUDE_STORAGE.with(|storage| {
+            let mut storage = storage.borrow_mut();
+            if storage.is_empty() {
+                storage.resize(TEST_PRELUDE_SLOTS, 0.0);
+            }
+            (storage.as_mut_ptr(), storage.len())
+        })
+    }
+
     fn eval_context(params: &[f64], voltages: &[f64]) -> EvalContext {
+        let (prelude_slots, prelude_slots_len) = test_prelude_slots();
         EvalContext {
             voltages: voltages.as_ptr(),
             internal_voltages: std::ptr::null(),
@@ -6012,8 +6123,8 @@ endmodule
             state_candidate_valid_len: 0,
             state_older_candidate: std::ptr::null_mut(),
             state_older_candidate_len: 0,
-            prelude_slots: std::ptr::null_mut(),
-            prelude_slots_len: 0,
+            prelude_slots,
+            prelude_slots_len,
         }
     }
 }
