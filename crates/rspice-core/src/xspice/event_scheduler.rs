@@ -541,13 +541,23 @@ struct EventQueues {
     /// opening a slot clears what fired rather than every driver in the
     /// design.
     activated: Vec<TargetId>,
-    /// Where each driver's unexecuted events sit, by tick and then in schedule
-    /// order, indexed by [`TargetId`]. This is the index
-    /// [`EventScheduler::schedule_superseding_at`] consults; without it,
-    /// superseding a driver's own pending output would mean scanning the whole
-    /// queue.
-    driver_events: Vec<BTreeMap<u64, Vec<(SchedulerRegion, u64)>>>,
+    /// Where each driver's unexecuted events sit, indexed by [`TargetId`].
+    /// This is the index [`EventScheduler::schedule_superseding_at`] consults;
+    /// without it, superseding a driver's own pending output would mean
+    /// scanning the whole queue.
+    ///
+    /// A flat list per driver, not a map by tick: a driver has one pending
+    /// event almost always — that is what supersession *means* — so the map
+    /// bought an ordering nothing reads and charged a node and a `Vec` per
+    /// activation for it. Nothing here is ordered, because both readers cancel
+    /// by unique sequence and neither outcome depends on the order the
+    /// cancellations happen in.
+    driver_events: Vec<Vec<PendingRef>>,
 }
+
+/// Where one of a driver's unexecuted events is: its tick, and the key the
+/// tiers hold it under.
+type PendingRef = (u64, SchedulerRegion, u64);
 
 impl EventQueues {
     /// Place an event, routing it to the current slot or the future tier.
@@ -566,10 +576,7 @@ impl EventQueues {
     ) -> u64 {
         let sequence = self.next_sequence;
         self.next_sequence += 1;
-        self.driver_events[target.index()]
-            .entry(tick)
-            .or_default()
-            .push((region, sequence));
+        self.driver_events[target.index()].push((tick, region, sequence));
         let event = PendingEvent {
             tick,
             region,
@@ -599,7 +606,7 @@ impl EventQueues {
                 .expect("an event kernel does not host 2^32 distinct drivers"),
         );
         self.targets.push(target.clone());
-        self.driver_events.push(BTreeMap::new());
+        self.driver_events.push(Vec::new());
         self.activations.push(0);
         self.target_ids.insert(target, id);
         id
@@ -671,18 +678,19 @@ impl EventQueues {
         let event = self.slot[SchedulerRegion::Active.index()]
             .pop_first()
             .map(|(_, event)| event)?;
-        self.forget_driver_event(event.target, event.tick, event.sequence);
+        self.forget_driver_event(event.target, event.sequence);
         Some(event)
     }
 
-    /// Drop one event from the driver index, pruning the empty tick above it.
-    fn forget_driver_event(&mut self, target: TargetId, tick: u64, sequence: u64) {
-        let ticks = &mut self.driver_events[target.index()];
-        if let Some(entries) = ticks.get_mut(&tick) {
-            entries.retain(|(_, pending)| *pending != sequence);
-            if entries.is_empty() {
-                ticks.remove(&tick);
-            }
+    /// Drop one event from the driver index.
+    ///
+    /// Matched on the sequence alone, which is unique across the scheduler,
+    /// and removed by swapping the last entry down: the list is unordered by
+    /// construction.
+    fn forget_driver_event(&mut self, target: TargetId, sequence: u64) {
+        let pending = &mut self.driver_events[target.index()];
+        if let Some(position) = pending.iter().position(|(_, _, filed)| *filed == sequence) {
+            pending.swap_remove(position);
         }
     }
 
@@ -706,18 +714,26 @@ impl EventQueues {
     /// Cancel every unexecuted event of `target` at or after `tick`, and
     /// report how many were cancelled.
     fn supersede_driver(&mut self, target: TargetId, tick: u64) -> usize {
-        let ticks = &mut self.driver_events[target.index()];
-        if ticks.is_empty() {
+        if self.driver_events[target.index()].is_empty() {
             return 0;
         }
-        let superseded = ticks.split_off(&tick);
+        // Lifted out so that cancelling an entry can reach the queues, and put
+        // back afterwards so the driver keeps the capacity it has already paid
+        // for. Nothing cancelled here can re-file against this driver:
+        // `remove_scheduled` only takes events out of the tiers.
+        let mut pending = mem::take(&mut self.driver_events[target.index()]);
         let mut cancelled = 0;
-        for (superseded_tick, entries) in superseded {
-            for (region, sequence) in entries {
-                self.remove_scheduled(superseded_tick, region, sequence);
-                cancelled += 1;
+        let mut position = 0;
+        while position < pending.len() {
+            if pending[position].0 < tick {
+                position += 1;
+                continue;
             }
+            let (superseded_tick, region, sequence) = pending.swap_remove(position);
+            self.remove_scheduled(superseded_tick, region, sequence);
+            cancelled += 1;
         }
+        self.driver_events[target.index()] = pending;
         cancelled
     }
 
