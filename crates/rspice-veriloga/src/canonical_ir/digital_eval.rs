@@ -839,20 +839,6 @@ impl DigitalEvalScratch {
             self.terms = terms;
         }
     }
-
-    /// Take back a resume state a kernel has finished with.
-    ///
-    /// The counterpart of [`Self::recycle_terms`] for the arguments a
-    /// suspension carries. [`resume_in`] does this itself for the state it is
-    /// resuming; this is for a kernel that discards one — a process that
-    /// finishes, or a host that is being torn down.
-    pub fn recycle_resume(&mut self, state: DigitalResumeState) {
-        let mut arguments = state.arguments;
-        arguments.clear();
-        if arguments.capacity() > self.resume.capacity() {
-            self.resume = arguments;
-        }
-    }
 }
 
 /// Run a process from its entry block.
