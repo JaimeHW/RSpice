@@ -90,6 +90,7 @@ pub mod expr_converter;
 pub mod four_state;
 mod integer_runtime;
 pub mod ir;
+pub mod json_float;
 pub mod lexer;
 pub mod metrics;
 mod numeric_literal;
