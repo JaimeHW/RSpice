@@ -66,35 +66,23 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, page: SimulationPage) {
 /// circuit" because a binding elsewhere is unresolved, which is the wrong
 /// answer to a different question; the rows say which reading they came from
 /// by carrying no occurrence.
+///
+/// The reading itself is
+/// [`whole_design_excitations`](crate::simulation::placed_sources::whole_design_excitations),
+/// beside the count the navigator rail states for this page, so the number on
+/// the way in and the rows on the way out cannot come from different designs.
 fn design_excitations(
     app: &RSpiceApp,
 ) -> (
     Vec<crate::simulation::placed_sources::PlacedSource>,
     Vec<crate::simulation::placed_sources::PlacedRfPort>,
 ) {
-    let plan = app.state.sim_setup.analysis_plan.as_ref();
-    match app.state.workspace.design_projection(
+    crate::simulation::placed_sources::whole_design_excitations(
         &app.state.library_manager,
-        &app.state.workspace.active_view,
+        &app.state.workspace,
         &app.state.schematic,
-    ) {
-        Ok(projection) => (
-            crate::simulation::placed_sources::design_sources(
-                &app.state.library_manager,
-                &projection,
-                plan,
-            ),
-            crate::simulation::placed_sources::design_rf_ports(
-                &app.state.library_manager,
-                &projection,
-                plan,
-            ),
-        ),
-        Err(_) => (
-            crate::simulation::placed_sources::placed_sources(&app.state.schematic, plan),
-            crate::simulation::placed_sources::placed_rf_ports(&app.state.schematic, plan),
-        ),
-    }
+        app.state.sim_setup.analysis_plan.as_ref(),
+    )
 }
 
 /// The plan's own configuration receipts, as the registry pages show them.

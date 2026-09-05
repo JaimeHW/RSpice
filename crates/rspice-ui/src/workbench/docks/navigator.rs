@@ -904,6 +904,15 @@ fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
         .errors
         .is_empty()
         .then_some(run_set_validation.forecast.point_count);
+    // One reading of the design for the whole rail, for the same reason. The
+    // Excitations row states what the whole design places, and resolving that
+    // digests every cell view and walks the configured hierarchy; nine rows
+    // each asking would pay for it nine times to print one number once.
+    let placed_sources = crate::simulation::placed_sources::whole_design_source_count(
+        &app.state.library_manager,
+        &app.state.workspace,
+        &app.state.schematic,
+    );
     // The nine routes are resolved before the head is drawn, because the head
     // is that section's own and a header over nothing is a claim the rail
     // cannot support.
@@ -925,7 +934,8 @@ fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
             let mut requested = None;
             for page in routes {
                 let label = page.label();
-                let meta = simulate_nav_meta(app, page, &analyses_meta, declared_points);
+                let meta =
+                    simulate_nav_meta(app, page, &analyses_meta, declared_points, placed_sources);
                 if nav_row(
                     ui,
                     simulate_nav_icon(page),
@@ -1073,6 +1083,7 @@ fn simulate_nav_meta(
     page: SimulationPage,
     analyses: &str,
     points: Option<usize>,
+    placed_sources: usize,
 ) -> Option<String> {
     let payload = app
         .state
@@ -1085,10 +1096,13 @@ fn simulate_nav_meta(
     match page {
         SimulationPage::Analyses => Some(analyses.to_owned()),
         // Counted from the drawing rather than from the plan payload: a source
-        // is a placed instance, and the plan holds no list of them.
-        SimulationPage::Excitations => count(
-            crate::simulation::placed_sources::placed_source_count(&app.state.schematic),
-        ),
+        // is a placed instance, and the plan holds no list of them. The whole
+        // design rather than the open sheet, and the same number the page this
+        // row opens states in its heading — a rail promising one on the way
+        // into a page headed `DESIGN · 3 sources` was counting a different
+        // design from the one the run drives. Read once for the whole rail by
+        // the caller, like the analysis and run-set numbers beside it.
+        SimulationPage::Excitations => count(placed_sources),
         SimulationPage::Variables => count(payload.map_or(0, |data| data.design_variables.len())),
         SimulationPage::Outputs | SimulationPage::Save => {
             count(payload.map_or(0, |data| data.saved_outputs.len()))

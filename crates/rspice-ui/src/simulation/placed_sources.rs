@@ -286,11 +286,14 @@ fn occurrence_label(occurrence: Option<&InstancePath>) -> String {
 /// How many independent sources this sheet places.
 ///
 /// The same predicate [`placed_sources`] admits a component under, asked
-/// without resolving anything: the navigator's rail states this number and
-/// nothing else, and resolving the list to read its length walked the design's
-/// nets, parsed every source's parameters and sorted the result — on every
-/// frame the rail was drawn, for a count that only the set of placed
-/// components can change.
+/// without resolving anything: resolving the list to read its length walks the
+/// design's nets, parses every source's parameters and sorts the result, for a
+/// count that only the set of placed components can change.
+///
+/// This is one sheet, so it is what [`whole_design_source_count`] falls back
+/// to when the configured hierarchy does not resolve — never what a surface
+/// states about the design, which is a different and larger number wherever a
+/// source is drawn below the open sheet.
 #[must_use]
 pub fn placed_source_count(schematic: &SchematicState) -> usize {
     schematic
@@ -385,6 +388,65 @@ pub fn design_rf_ports(
             ..port.clone()
         })
         .collect()
+}
+
+/// The whole design's excitations, with the reading a surface falls back to
+/// when the configured hierarchy does not resolve.
+///
+/// [`design_sources`] and [`design_rf_ports`] need a projection, and a project
+/// can be in a state that has none — an unresolved binding, a missing root.
+/// Answering "nothing drives this circuit" because a binding elsewhere is
+/// unresolved is the wrong answer to a different question, so the editor's own
+/// buffer is read instead and the rows say so by carrying no occurrence.
+///
+/// One function rather than that choice spelled out per surface: the Studio's
+/// Excitations page lists what this returns and the navigator rail that opens
+/// it counts what [`whole_design_source_count`] returns, and a rail that
+/// resolved the design differently from the page behind it is a number the
+/// reader cannot act on.
+pub fn whole_design_excitations(
+    libraries: &LibraryManager,
+    workspace: &crate::state::ProjectWorkspace,
+    active_schematic: &SchematicState,
+    plan: Option<&SimulationPlan>,
+) -> (Vec<PlacedSource>, Vec<PlacedRfPort>) {
+    match workspace.design_projection(libraries, &workspace.active_view, active_schematic) {
+        Ok(projection) => (
+            design_sources(libraries, &projection, plan),
+            design_rf_ports(libraries, &projection, plan),
+        ),
+        Err(_) => (
+            placed_sources(active_schematic, plan),
+            placed_rf_ports(active_schematic, plan),
+        ),
+    }
+}
+
+/// How many independent sources the whole design places.
+///
+/// The rail counted the open sheet while the page it opens counted the design,
+/// so a root drawing one supply over two instances that each place a source
+/// was offered "1" on the way into a heading reading `DESIGN · 3 sources`.
+/// Both now state this number, and it is the length of exactly the list
+/// [`whole_design_excitations`] hands the page.
+///
+/// Affordable on every frame because nothing here is recomputed while the
+/// design stands still: the projection is memoized on its own key — a digest
+/// over every cell view, the live editor buffer included — and the walk over
+/// the projection is memoized on the projection, so a frame that asks for both
+/// the count and the rows walks the design once and a frame that changes
+/// nothing walks it not at all. The plan is deliberately not consulted: a plan
+/// decides what *reads* a source, never whether one is placed.
+#[must_use]
+pub fn whole_design_source_count(
+    libraries: &LibraryManager,
+    workspace: &crate::state::ProjectWorkspace,
+    active_schematic: &SchematicState,
+) -> usize {
+    match workspace.design_projection(libraries, &workspace.active_view, active_schematic) {
+        Ok(projection) => design_excitations(libraries, &projection).sources.len(),
+        Err(_) => placed_source_count(active_schematic),
+    }
 }
 
 /// Every excitation the whole design places, before any plan is read against

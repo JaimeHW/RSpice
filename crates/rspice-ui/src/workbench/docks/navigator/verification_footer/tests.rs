@@ -193,7 +193,7 @@ fn simulation_models_meta_counts_only_active_plan_bindings() {
     let mut app = RSpiceApp::test_instance();
 
     assert_eq!(
-        simulate_nav_meta(&app, SimulationPage::Models, "unused", None),
+        simulate_nav_meta(&app, SimulationPage::Models, "unused", None, 0),
         None,
         "globally available libraries are not owned by the active simulation plan",
     );
@@ -207,8 +207,118 @@ fn simulation_models_meta_counts_only_active_plan_bindings() {
     );
 
     assert_eq!(
-        simulate_nav_meta(&app, SimulationPage::Models, "unused", None),
+        simulate_nav_meta(&app, SimulationPage::Models, "unused", None, 0),
         Some("1".to_owned()),
+    );
+}
+
+/// A design the run reaches below the sheet in front of the reader: a root
+/// placing one supply, and two instances of a master placing a sine source.
+/// The open sheet places one source; the design the run drives places three.
+///
+/// Built and returned rather than seeded into an app handed in, so the fixture
+/// costs the whole-application-access ratchet nothing.
+fn hierarchical_design() -> RSpiceApp {
+    use crate::state::{
+        CellViewRef, Component, ComponentType, Library, LibraryCellInstance, Point, SchematicState,
+        View, ViewType,
+    };
+
+    fn named(id: u64, kind: ComponentType, name: &str, params: &str) -> Component {
+        let mut component = Component::new(id, kind, Point::new(60, 60));
+        component.name = name.to_owned();
+        component.params = params.to_owned();
+        component
+    }
+
+    let mut app = RSpiceApp::test_instance();
+    app.state
+        .schematic
+        .components
+        .push(named(801, ComponentType::VoltageSource, "VDD", "dc=5"));
+    for (id, name) in [(802, "XA"), (803, "XB")] {
+        let mut instance = Component::new(id, ComponentType::CellInstance, Point::new(80, 80))
+            .with_library_cell(LibraryCellInstance::new("work", "afe", "schematic"));
+        instance.name = name.to_owned();
+        app.state.schematic.components.push(instance);
+    }
+    app.state.sync_active_schematic_to_workspace();
+
+    let mut child = SchematicState::default();
+    child
+        .components
+        .push(named(811, ComponentType::VoltageSourceSin, "V1", "freq=1k"));
+
+    if app.state.library_manager.get_library("work").is_none() {
+        app.state.library_manager.add_library(Library::new("work"));
+    }
+    let owner = app
+        .state
+        .library_manager
+        .get_library_mut("work")
+        .expect("the fixture library exists");
+    let target = owner.get_or_create_cell("afe");
+    if target.get_view("schematic").is_none() {
+        target.add_view(View::new("schematic", ViewType::Schematic));
+    }
+    app.state
+        .workspace
+        .schematic_buffers
+        .insert(CellViewRef::new("work", "afe", "schematic").key(), child);
+    app
+}
+
+/// The Excitations row counts the design the run drives, and it is the number
+/// the page that row opens states above its rows.
+///
+/// The rail counted the editor's own buffer, so the root of a hierarchical
+/// design was offered `1` on the way into a heading reading `DESIGN · 3
+/// sources` — two answers to one question, a click apart, with nothing to tell
+/// a reader which one the run has. Both are now
+/// [`whole_design_source_count`](crate::simulation::placed_sources::whole_design_source_count),
+/// and the page lists exactly what that count is the length of
+/// (`workbench/surfaces/simulate/pages.rs`, whose own pin asserts the heading
+/// text against this design shape).
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_excitations_rail_counts_the_design_that_the_page_it_opens_lists() {
+    let mut app = hierarchical_design();
+    app.state.workbench.activate(Workspace::Simulate);
+
+    assert_eq!(
+        crate::simulation::placed_sources::placed_source_count(&app.state.schematic),
+        1,
+        "the sheet in front of the reader places one supply and two instances"
+    );
+    let listed = crate::simulation::placed_sources::whole_design_excitations(
+        &app.state.library_manager,
+        &app.state.workspace,
+        &app.state.schematic,
+        app.state.sim_setup.analysis_plan.as_ref(),
+    )
+    .0
+    .len();
+    assert_eq!(
+        listed, 3,
+        "the run drives the root's supply and one sine source at each occurrence"
+    );
+
+    let painted = navigator_painted_lines(228.0, app);
+    let row = painted
+        .iter()
+        .find(|(text, _)| text == "Excitations")
+        .map(|(_, rect)| rect.center().y)
+        .expect("the rail draws the Excitations route");
+    let meta = painted
+        .iter()
+        .filter(|(text, rect)| text != "Excitations" && (rect.center().y - row).abs() < 4.0)
+        .map(|(text, _)| text.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        meta,
+        [listed.to_string()],
+        "the row states the design's count, which is the page's own"
     );
 }
 
@@ -1148,9 +1258,9 @@ fn a_producer_tagged_entry_matches_without_naming_its_quantity() {
 /// The Run set row states the resolved point count and the Run set card below
 /// states it again, and each asked the run set for it — two validations of one
 /// declaration to print one number twice. The Excitations row states how many
-/// sources the sheet places and resolved the whole placed-source list to read
-/// its length, which walks the design's nets, parses every source's parameters
-/// and sorts the result.
+/// sources the whole design places, and resolving that walks the configured
+/// hierarchy, resolves each master's nets, parses every source's parameters and
+/// sorts the result — nine rows each asking would pay for it nine times.
 ///
 /// Neither is visible in anything the dock paints, which is why it is counted.
 #[cfg(not(target_arch = "wasm32"))]
@@ -1177,8 +1287,8 @@ fn the_simulation_rail_derives_what_it_states_once_a_frame() {
     );
     assert_eq!(
         count(Derivation::PlacedSources),
-        0,
-        "the rail counts placed sources without resolving them"
+        1,
+        "and resolves the design's excitations once for all nine rows"
     );
 }
 
