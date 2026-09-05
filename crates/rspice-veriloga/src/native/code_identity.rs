@@ -40,6 +40,45 @@ const SHIPPED_CENSUS_MODELS: usize = 43;
 /// move this pin exists to prevent — it converts a detector into a rubber
 /// stamp.
 ///
+/// # The assignment pass leaving the CFG plan
+///
+/// `8c19a2f5…` moved to `001961cf…` at W-F14, when the CFG plan's assignment
+/// liveness stopped rooting on what the *postfix* plan's entries read. Under a
+/// CFG plan those entries are prelude-slot loads that read no variable, so the
+/// assignments they used to keep alive were a pass held open for programs the
+/// image no longer holds. The roots are now what this plan reads — the static
+/// conditions the route does not replace, the event-state leaves the prelude
+/// lowers to a `LoadVariable`, and the externally observable set, which stays
+/// until operating-point readback has somewhere else to come from.
+///
+/// The reading is the same shape as the two below and it comes out cleaner than
+/// either: **forty-one modules moved, two are byte-identical, and not one image
+/// grew**. The two identical ones are exactly the W-D refusals — `mvsg_cmc`
+/// (2,861,548) and the `BSIM_SOI_100.1.1` `bsimsoi` (9,498,652) — which keep the
+/// postfix plan and are therefore untouched by a change to the CFG plan's
+/// liveness. There is no third case, and no module can be in the wrong one: a
+/// module that took the CFG route and did *not* move would be one whose
+/// assignment pass had nothing in it that only a postfix entry read.
+///
+/// The corpus went from 487,148,176 bytes to **354,110,368, −27.31 per cent**.
+/// The largest factors are `asmhemt` −67.64 (17,290,656 to 5,595,628) and the
+/// three `hisimsoi_va` variants −60.3 each; the smallest are `r2_cmc` −2.71 and
+/// `r2_et_cmc` −3.14, two resistor models with almost no procedural body to
+/// re-root. The three `hisimhv` variants are back **under**
+/// [`crate::native::SHIPPED_MODEL_NATIVE_CODE_SIZE_BUDGET_BYTES`] on this change
+/// alone — 59,834,636 / 59,830,484 / 59,329,776 against 62,914,560 — and
+/// `hisimhv_n5_va` at 57.06 MiB is what now sets that budget. `l_utsoi` carries
+/// a second change on top: its eleven deferred contribution-current cones are
+/// called from the fused stamp kernel instead of inlined into it, which is 4.46
+/// MB of its 40 per cent (12,362,140 to 7,412,336).
+///
+/// Both halves were measured on this box rather than carried over. The census
+/// run on the pre-change sources reproduces `8c19a2f5…` exactly (634 s), which
+/// is also what says the per-module before column below is this box's and not a
+/// previous lane's.
+///
+/// Measured 2026-09-04, peers idle, 634 s.
+///
 /// # The noise magnitudes joining the prelude
 ///
 /// `0899a73a…` moved to `8c19a2f5…` at W-F13a, when the noise magnitudes
@@ -90,7 +129,18 @@ const SHIPPED_CENSUS_MODELS: usize = 43;
 /// `lowering=refused … canonical analog operator Ddt runs under a condition and
 /// its operand cone contains BlockParameter`. The other forty-one all moved.
 ///
-/// The images grew, which is the CFG route's known cost and not news:
+/// The images grew, and this file used to call that "the CFG route's known cost
+/// and not news". W-F13b attributed it and it was neither. On `hisimhv_n5_va`
+/// 81.9 per cent of the flipped image was the *postfix* assignment pass, which
+/// the CFG plan kept verbatim and ran before its own prelude on every
+/// evaluation, because the assignment liveness still rooted on what the postfix
+/// entries read — entries that, under a CFG plan, are prelude-slot loads that
+/// read no variable at all. W-F14 re-rooted it, and eleven megabytes of that
+/// module went with the roots. `l_utsoi`'s 4.2x was the other half and also not
+/// intrinsic: eleven deferred contribution-current cones, held once as value
+/// entries and a second time inlined into the fused stamp kernel, which now
+/// calls them. The growth figures below are the flip's, kept because they are
+/// what the digest before this one measured:
 /// `bsimcmg_va` 4,798,396 to 5,623,596, `asmhemt` 16,661,736 to 17,287,712 and
 /// `hicumL2va` 939,040 to 1,266,812 reproduce
 /// [`crate::native::cfg_size_census`]'s `image route=cfg` figures exactly, which
@@ -122,7 +172,7 @@ const SHIPPED_CENSUS_MODELS: usize = 43;
 /// `hicumL2va` `flicker_Pwr`, `r3_cmc` `gc`) — and the other thirty-five were
 /// digest identical (measured 2026-09-03 on `1ba20f27c`, peers idle, 893 s).
 const SHIPPED_CENSUS_DIGEST: &str =
-    "8c19a2f5c9d55b4ab125ff355a2029f4ab010e6963b1fbf5c8e853b7f6feab6b";
+    "001961cfe6e3cbf7c6292a756ae9c0324e225f4d3028bffd31fcbbd93c622040";
 
 /// One shipped module's compiled machine-code digest.
 struct ModelImageDigest {

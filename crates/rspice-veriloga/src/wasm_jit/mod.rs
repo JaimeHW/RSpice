@@ -68,7 +68,16 @@ pub const WASM_JIT_ABI_VERSION: u32 = 8;
 /// block program is one load of a prelude slot an 8's module never published.
 /// The functions have the same names and signatures, so nothing but the version
 /// tells the two apart.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 9;
+///
+/// 9 to 10 when the CFG plan's assignment pass stopped being rooted on what the
+/// *postfix* plan's entries read. A 9 emitted an assignment kernel keeping every
+/// slot those entries used to load; a 10 emits one keeping what this plan reads
+/// — the static conditions, the event-state leaves and the observable set — and
+/// on `hisimhv_n5_va` that is eleven megabytes of machine code fewer on the
+/// native side. Same exports, same frame, fewer assignments inside the kernel,
+/// so again nothing but the version tells a stale worker's module from a
+/// current one.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 10;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
