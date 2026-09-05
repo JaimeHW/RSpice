@@ -383,19 +383,20 @@ pub struct TransientResult {
 impl TransientResult {
     /// Borrow the columns an abort signal's sample hook is allowed to see.
     ///
-    /// The hook sits at the bottom of the crate and must not name a driver
-    /// result type, so the driver narrows itself on the way out: waveform
-    /// columns, their names, the accepted times, and the committed event state
-    /// of the point being reported, and nothing else.
+    /// The hook sits at the bottom of the crate and may name neither a driver
+    /// result type nor an XSPICE one, so the driver narrows itself on the way
+    /// out: waveform columns, their names, the accepted times, and the
+    /// committed event state of the point being reported, and nothing else.
+    /// The digital half of that state crosses as its event code, which is a
+    /// `u8` the abort layer can own.
     ///
     /// The committed event state of the same accepted point is not stored
     /// column-major and so cannot be read back off the result — the traces
-    /// keep only the changes. The caller therefore hands over the snapshot
-    /// buffers it just recorded from, which is also what keeps the hook
-    /// allocation-free.
+    /// keep only the changes. The caller therefore hands over the buffers it
+    /// just recorded from, which is also what keeps the hook allocation-free.
     pub(crate) fn observable_sample<'a>(
         &'a self,
-        digital_values: &'a [(NodeId, DigitalValue)],
+        digital_values: &'a [(NodeId, crate::abort_signal::DigitalEventCode)],
         real_values: &'a [(NodeId, Value)],
     ) -> crate::abort_signal::TransientSample<'a> {
         crate::abort_signal::TransientSample {

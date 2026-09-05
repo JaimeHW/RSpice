@@ -38,9 +38,8 @@
 //!   statement of D5 lockstep for anything reading the run as it goes.
 #![cfg(feature = "veriloga")]
 
-use rspice_core::abort_signal::{AbortSignal, TransientSample};
+use rspice_core::abort_signal::{AbortSignal, DigitalEventCode, TransientSample};
 use rspice_core::engine::TransientResult;
-use rspice_core::xspice::DigitalValue;
 use rspice_core::{Engine, Netlist, SimulationConfig};
 use std::io::Write;
 use std::path::PathBuf;
@@ -675,7 +674,7 @@ fn a_mixed_module_is_refused_by_the_analyses_that_cannot_represent_it() {
 /// point, with node ids resolved through the sample's own node table.
 #[derive(Default)]
 struct BoundaryRecorder {
-    samples: Mutex<Vec<(f64, Vec<(String, DigitalValue)>)>>,
+    samples: Mutex<Vec<(f64, Vec<(String, DigitalEventCode)>)>>,
 }
 
 impl AbortSignal for BoundaryRecorder {
@@ -738,18 +737,20 @@ fn the_live_hook_publishes_the_boundary_value_the_trace_keeps() {
         );
     }
 
-    let recorded: Vec<(f64, DigitalValue)> = result
+    // The hook carries the committed value as its event code, so the trace is
+    // encoded the same way before the two histories are compared.
+    let recorded: Vec<(f64, DigitalEventCode)> = result
         .digital_trace_named("qdiv")
         .expect("the divided output has a digital trace")
         .iter()
-        .map(|point| (point.time, point.value))
+        .map(|point| (point.time, DigitalEventCode(point.value.event_code())))
         .collect();
     assert!(
         recorded.len() > 10,
         "the divider must toggle for this to test anything, its trace is {recorded:?}"
     );
 
-    let mut observed: Vec<(f64, DigitalValue)> = Vec::new();
+    let mut observed: Vec<(f64, DigitalEventCode)> = Vec::new();
     for (time, digital) in &samples {
         for (name, value) in digital {
             if !name.eq_ignore_ascii_case("qdiv") {

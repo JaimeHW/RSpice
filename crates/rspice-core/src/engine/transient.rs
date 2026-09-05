@@ -9,7 +9,7 @@
 mod fft;
 mod post_results;
 use super::{Engine, SimulationError, SpiceDialect, TransientPostResults, TransientResult};
-use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::abort_signal::{AbortSignal, DigitalEventCode, NoAbort};
 // Only the unit tests below construct these records directly; the
 // production paths in this module receive them already built.
 use crate::circuit::SolutionDependentCompanionStep;
@@ -530,6 +530,9 @@ struct TransientEventCapture<'a> {
     record_traces: bool,
     /// Committed digital values of the accepted point, refilled per point.
     digital_snapshot: &'a mut Vec<(crate::NodeId, crate::xspice::DigitalValue)>,
+    /// The same digital state as the event codes the sample hook publishes,
+    /// refilled per point from `digital_snapshot`.
+    digital_event_codes: &'a mut Vec<(crate::NodeId, DigitalEventCode)>,
     /// Committed real event values of the accepted point, refilled per point.
     real_snapshot: &'a mut Vec<(crate::NodeId, Value)>,
     /// Node id to index in `TransientResult::digital_traces`.
@@ -538,6 +541,30 @@ struct TransientEventCapture<'a> {
     real_trace_indices: &'a mut HashMap<crate::NodeId, usize>,
     /// Which nodes output projection retains an event trace for.
     retained_event_nodes: &'a [bool],
+}
+
+/// Project a committed digital snapshot onto the codes the sample hook carries.
+///
+/// The abort layer is a leaf and cannot name `DigitalValue`, so the hook takes
+/// the event code instead — the encoding the result document, the GUI worker
+/// contract and the evidence type downstream already agree on. The projection
+/// is a second run-lifetime buffer rather than a temporary because the hook's
+/// contract is that reporting a point costs no allocation: `clear` keeps the
+/// capacity the run has already grown, so only the first accepted point
+/// allocates.
+///
+/// It is derived from the snapshot rather than filled from the circuit a second
+/// time so that the two views cannot disagree about which point they describe.
+fn fill_digital_event_codes(
+    snapshot: &[(crate::NodeId, crate::xspice::DigitalValue)],
+    codes: &mut Vec<(crate::NodeId, DigitalEventCode)>,
+) {
+    codes.clear();
+    codes.extend(
+        snapshot
+            .iter()
+            .map(|&(node_id, value)| (node_id, DigitalEventCode(value.event_code()))),
+    );
 }
 
 /// Where the scheduled-checkpoint cursor currently stands.
@@ -1668,6 +1695,7 @@ impl Engine {
         let TransientEventCapture {
             record_traces,
             digital_snapshot,
+            digital_event_codes,
             real_snapshot,
             digital_trace_indices,
             real_trace_indices,
@@ -1675,6 +1703,7 @@ impl Engine {
         } = events;
         if record_traces {
             circuit.fill_xspice_digital_snapshot(digital_snapshot);
+            fill_digital_event_codes(digital_snapshot, digital_event_codes);
             retained_result_values =
                 retained_result_values.saturating_add(result.record_digital_snapshot(
                     time,
@@ -1692,7 +1721,8 @@ impl Engine {
                 ));
         }
         self.ensure_transient_result_limits(result, retained_result_values)?;
-        abort.observe_transient_sample(result.observable_sample(digital_snapshot, real_snapshot));
+        abort
+            .observe_transient_sample(result.observable_sample(digital_event_codes, real_snapshot));
         Ok(retained_result_values)
     }
 
@@ -4233,11 +4263,13 @@ impl Engine {
             );
         }
         let mut digital_snapshot = Vec::new();
+        let mut digital_event_codes = Vec::new();
         let mut real_snapshot = Vec::new();
         let mut digital_trace_indices = HashMap::new();
         let mut real_trace_indices = HashMap::new();
         if record_xspice_event_traces {
             circuit.fill_xspice_digital_snapshot(&mut digital_snapshot);
+            fill_digital_event_codes(&digital_snapshot, &mut digital_event_codes);
             result.record_digital_snapshot(
                 resume_time,
                 &digital_snapshot,
@@ -4254,7 +4286,9 @@ impl Engine {
         }
         let mut retained_result_values = Self::transient_result_value_count(&result);
         self.ensure_transient_result_limits(&result, retained_result_values)?;
-        abort.observe_transient_sample(result.observable_sample(&digital_snapshot, &real_snapshot));
+        abort.observe_transient_sample(
+            result.observable_sample(&digital_event_codes, &real_snapshot),
+        );
         let mut t = resume_time;
         let force_accept_protected_nodes = circuit.force_accept_protected_nodes();
         let mut voltage_lte_excluded_nodes = circuit.xspice_transient_voltage_lte_excluded_nodes();
@@ -8472,6 +8506,7 @@ impl Engine {
                         TransientEventCapture {
                             record_traces: record_xspice_event_traces,
                             digital_snapshot: &mut digital_snapshot,
+                            digital_event_codes: &mut digital_event_codes,
                             real_snapshot: &mut real_snapshot,
                             digital_trace_indices: &mut digital_trace_indices,
                             real_trace_indices: &mut real_trace_indices,
@@ -8995,6 +9030,7 @@ impl Engine {
                 TransientEventCapture {
                     record_traces: record_xspice_event_traces,
                     digital_snapshot: &mut digital_snapshot,
+                    digital_event_codes: &mut digital_event_codes,
                     real_snapshot: &mut real_snapshot,
                     digital_trace_indices: &mut digital_trace_indices,
                     real_trace_indices: &mut real_trace_indices,

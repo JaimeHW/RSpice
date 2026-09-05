@@ -56,6 +56,25 @@ use std::sync::atomic::{AtomicBool, Ordering};
 // TransientSample - the observation payload
 //=============================================================================
 
+/// One digital net's committed value, as the XSPICE event code that encodes it.
+///
+/// The code is what `xspice::digital::DigitalValue::event_code` produces:
+/// 0..=11 are the level (0, 1, X) within a strength band, in the order strong,
+/// resistive, high-Z, undetermined; 12 is the disconnected state. It is the
+/// encoding every consumer downstream of this hook already speaks — the result
+/// document tags event points with it, the GUI's worker contract carries it,
+/// and the evidence type it lands in bounds itself by the same 12.
+///
+/// The hook publishes the code rather than the four-state value because this
+/// module is a layer-0 leaf: the abort layer sits below the analyses, so it may
+/// not name a type owned by the XSPICE subsystem nine layers above it. A `u8`
+/// with a documented encoding is the part of that type this boundary needs, and
+/// the newtype is what keeps it from being read as a level, an index, or a
+/// count at the call site.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(transparent)]
+pub struct DigitalEventCode(pub u8);
+
 /// One accepted transient sample, borrowed from the analysis result.
 ///
 /// A transient result is stored column-major: `time` gains one entry per
@@ -87,7 +106,8 @@ pub struct TransientSample<'a> {
     pub branch_names: &'a [String],
     /// Retained branch-current columns, indexed `[branch][sample]`.
     pub branch_currents: &'a [Vec<crate::Value>],
-    /// Committed digital event values at this accepted time, sorted by node id.
+    /// Committed digital event state at this accepted time, as
+    /// [`DigitalEventCode`]s sorted by node id.
     ///
     /// This is the whole committed event state, not a delta: every digital
     /// node the deck has carries its current value at every accepted point.
@@ -101,7 +121,7 @@ pub struct TransientSample<'a> {
     /// Unlike the waveform columns above, this is not filtered by output
     /// retention: a node that `.SAVE` excluded from `digital_traces` is still
     /// reported here. A consumer that wants trace parity filters by name.
-    pub digital_values: &'a [(crate::NodeId, crate::xspice::DigitalValue)],
+    pub digital_values: &'a [(crate::NodeId, DigitalEventCode)],
     /// Committed real-valued event values at this accepted time, sorted by
     /// node id.
     ///

@@ -1,11 +1,11 @@
 //! Native XSPICE digital code models pinned against ngspice code-model semantics.
 
-use rspice_core::abort_signal::{AbortSignal, TransientSample};
+use rspice_core::abort_signal::{AbortSignal, DigitalEventCode, TransientSample};
 use rspice_core::engine::{Engine, TransientResult};
 use rspice_core::netlist::Netlist;
 use rspice_core::xspice::{
-    CodeModelRegistry, DigitalValue, ParamType, PortConnection, XspiceInstance,
-    clear_registered_data_files, register_data_file,
+    CodeModelRegistry, ParamType, PortConnection, XspiceInstance, clear_registered_data_files,
+    register_data_file,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -3848,8 +3848,8 @@ struct LiveSample {
     /// The last entry of every node-voltage column, `None` for a column output
     /// projection did not retain.
     voltages: Vec<Option<f64>>,
-    /// Committed digital event values, node ids resolved through `node_names`.
-    digital: Vec<(String, DigitalValue)>,
+    /// Committed digital event codes, node ids resolved through `node_names`.
+    digital: Vec<(String, DigitalEventCode)>,
     /// Committed real event values, node ids resolved through `node_names`.
     real: Vec<(String, f64)>,
 }
@@ -3968,8 +3968,8 @@ fn assert_one_hook_call_per_accepted_point(result: &TransientResult, samples: &[
 /// same way makes the two directly comparable. Any disagreement is the hook
 /// publishing a different value, or the same value at a different accepted
 /// time, from the one the result kept.
-fn hook_digital_history(samples: &[LiveSample], node: &str) -> Vec<(f64, DigitalValue)> {
-    let mut history: Vec<(f64, DigitalValue)> = Vec::new();
+fn hook_digital_history(samples: &[LiveSample], node: &str) -> Vec<(f64, DigitalEventCode)> {
+    let mut history: Vec<(f64, DigitalEventCode)> = Vec::new();
     for sample in samples {
         for (name, value) in &sample.digital {
             if !name.eq_ignore_ascii_case(node) {
@@ -4005,12 +4005,16 @@ fn hook_real_history(samples: &[LiveSample], node: &str) -> Vec<(f64, f64)> {
 /// value that never moves reads the same whichever step the hook took it from.
 const LEAST_INTERESTING_TRACE_POINTS: usize = 5;
 
+/// The hook carries the committed value as its event code, so the trace's
+/// four-state value is encoded the same way before the two are compared. That
+/// is the encoding the result document, the GUI worker contract and the UI
+/// evidence type already agree on, so it is what a live consumer would decode.
 fn assert_hook_matches_digital_trace(result: &TransientResult, samples: &[LiveSample], node: &str) {
-    let recorded: Vec<(f64, DigitalValue)> = result
+    let recorded: Vec<(f64, DigitalEventCode)> = result
         .digital_trace_named(node)
         .unwrap_or_else(|| panic!("digital trace {node} missing from {:?}", result.node_names))
         .iter()
-        .map(|point| (point.time, point.value))
+        .map(|point| (point.time, DigitalEventCode(point.value.event_code())))
         .collect();
     assert!(
         recorded.len() >= LEAST_INTERESTING_TRACE_POINTS,

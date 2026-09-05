@@ -440,7 +440,18 @@ use rspice_core::analysis::harmonic_balance::{
 // so each is a `pub(crate)` candidate — recorded here so the next narrowing
 // pass finds them, and so this raise is not mistaken for nine items a frontend
 // was found to need.
-const MAX_PUBLIC_ITEMS: usize = 4965;
+//
+// 2026-09-05, +1 deliberate (4,965 -> 4,966): `abort_signal::DigitalEventCode`,
+// the one statement that lets the accepted-sample hook publish a point's
+// committed digital state. `abort_signal` is a layer-0 leaf, so it may not name
+// `xspice::DigitalValue` nine layers above it; the code that type's
+// `event_code` produces is a `u8` the leaf can own, and it is the encoding the
+// result document, the GUI worker contract and the UI evidence type already
+// agree on — the same encoding the rawfile event plots above read and write.
+// It is public because `TransientSample` is — the GUI's runner both constructs
+// and reads that struct — so the field's type cannot be narrower than the
+// struct carrying it.
+const MAX_PUBLIC_ITEMS: usize = 4966;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
