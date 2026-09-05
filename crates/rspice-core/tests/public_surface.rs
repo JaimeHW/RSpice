@@ -396,7 +396,51 @@ use rspice_core::analysis::harmonic_balance::{
 //   `DigitalValue` <-> `VcdBit` mapping functions, and
 //   `EventProjectionError`.
 // - 2 grouped re-export statements, in `io.rs` and `execution.rs`.
-const MAX_PUBLIC_ITEMS: usize = 4945;
+//
+// 2026-09-05, +20 deliberate (4,945 -> 4,965): the rawfile's second half — a
+// reader that returns every plot a file declares, and a writer that appends an
+// XSPICE event timeline as a plot of its own. Case 2 again: `rspice-cli`'s
+// transient publish calls the writer on every `--format raw`/`--format ascii`
+// run, and reading a multi-plot file back is what `convert`, `compare` and the
+// GUI's RAW importer need in order to see anything past plot 1.
+//
+// - 3 in `io/ltspice_raw.rs`: `RawFile`, the parsed file with its plots in
+//   file order, and `parse_raw_plots_file_with_limits` /
+//   `parse_raw_plots_reader_with_limits`, the file/reader pair that produces
+//   it. The pair mirrors the single-plot `parse_raw_*_with_limits` entry
+//   points beside it, which the CLI and the GUI already consume; no
+//   limits-free wrapper was added, because every caller passes its own
+//   `ResourceLimits`.
+// - 11 in `io/raw_export.rs`. `write_event_plots` is the call —
+//   `rspice-cli`'s `commands/run/basic.rs` appends the plots inside the same
+//   staging closure that publishes the table — and `RawEventTimeline` is its
+//   input, which the same file names as a field of its transient output
+//   document. `RawEventKind` is a public field of that input, so
+//   `private_interfaces` makes it public by construction, and its five
+//   accessors (`plot_name`, `from_plot_name`, `variable_type`,
+//   `variable_name`, `node_name`) are the one place the plot-name and
+//   `D(...)`/`E(...)` spellings are defined, so the decoder reads them rather
+//   than restating the format. `RawVariable::event`,
+//   `RawExporter::new_event_plot` and `VariableType::as_str` are the writer's
+//   own half.
+// - 4 in `execution/event_export.rs`: `transient_event_plots`, which the CLI
+//   calls to project a transient's event histories onto those timelines;
+//   `decode_event_plots`, the inverse a reader calls; and the two types that
+//   inverse names, `RawEventTraces` and `EventPlotError`.
+// - 1 in `xspice/digital.rs`: `DigitalValue::from_event_code`, the inverse of
+//   the `event_code` beside it, which is how a code read back out of a plot
+//   becomes a value again.
+// - 1 grouped re-export statement, in `execution.rs`. The two in `io.rs` were
+//   widened in place, so they cost nothing.
+//
+// Nine of the twenty have no caller outside `rspice-core` today: the five
+// `RawEventKind` accessors, `VariableType::as_str`, `RawVariable::event`,
+// `RawExporter::new_event_plot` and `DigitalValue::from_event_code`. Each is
+// reached from `execution/event_export.rs` or from `raw_export`'s own writer,
+// so each is a `pub(crate)` candidate — recorded here so the next narrowing
+// pass finds them, and so this raise is not mistaken for nine items a frontend
+// was found to need.
+const MAX_PUBLIC_ITEMS: usize = 4965;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
