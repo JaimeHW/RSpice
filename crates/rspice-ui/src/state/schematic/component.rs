@@ -561,6 +561,16 @@ pub struct Component {
     /// and quietly stop multiplying anything.
     #[serde(default)]
     pub multiplicity: Option<InstanceMultiplicity>,
+
+    /// The stimulus definition this source's card was copied from, if any.
+    ///
+    /// A receipt, never an authority: `value` and `params` above remain the
+    /// only description of the waveform, and the netlist generator does not
+    /// read this field at all. What it buys is the ability to say that an
+    /// instance has drifted from the definition it adopted, or that the
+    /// definition has moved on — both by comparison, so neither can go stale.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stimulus_provenance: Option<crate::state::StimulusProvenance>,
 }
 
 /// Component fields exactly as a project file on disk spells them.
@@ -594,6 +604,8 @@ struct PersistedComponent {
     library_cell: Option<LibraryCellInstance>,
     #[serde(default)]
     multiplicity: Option<InstanceMultiplicity>,
+    #[serde(default)]
+    stimulus_provenance: Option<crate::state::StimulusProvenance>,
 }
 
 impl From<PersistedComponent> for Component {
@@ -614,8 +626,10 @@ impl From<PersistedComponent> for Component {
             mirror_v: persisted.mirror_v,
             library_cell: persisted.library_cell,
             multiplicity: persisted.multiplicity,
+            stimulus_provenance: persisted.stimulus_provenance,
         };
         component.adopt_params_multiplicity();
+        component.adopt_engine_source_parameter_spellings();
         component
     }
 }
@@ -644,6 +658,7 @@ impl Component {
             mirror_v: false,
             library_cell: None,
             multiplicity: None,
+            stimulus_provenance: None,
         }
     }
 
@@ -668,6 +683,35 @@ impl Component {
         };
         self.multiplicity = Some(multiplicity);
         params.remove(InstanceMultiplicity::PARAMETER_NAME);
+        self.params = crate::state::format_params_string(&params);
+    }
+
+    /// Rename a source parameter this app once spelled differently from the
+    /// engine, so that every reader downstream sees one spelling.
+    ///
+    /// There is exactly one such field. `SFFM`'s fifth positional argument is
+    /// the modulating frequency, which `SourceSpec::Sffm` and ngspice both call
+    /// `FM` and which the property sheet used to call `FS` — the same
+    /// disagreement `AM` never had, because its sheet was written against the
+    /// engine's names. Reading the old spelling here rather than at each of the
+    /// five places that consume source parameters is what makes the rename
+    /// total: after this point `fs` does not exist, so no consumer can be the
+    /// one that forgot to accept it. A card authored either way emits the same
+    /// bytes, because the positional list is positional.
+    fn adopt_engine_source_parameter_spellings(&mut self) {
+        if !matches!(
+            self.kind,
+            ComponentType::VoltageSourceSffm | ComponentType::CurrentSourceSffm
+        ) {
+            return;
+        }
+        let mut params = crate::state::parse_params_string(&self.params);
+        let Some(modulating) = params.remove("fs") else {
+            return;
+        };
+        // An explicit `fm=` wins: it is the current spelling, and a document
+        // carrying both was written by something that already knew the new one.
+        params.entry("fm".to_owned()).or_insert(modulating);
         self.params = crate::state::format_params_string(&params);
     }
 
@@ -1419,5 +1463,82 @@ mod tests {
         instance.adopt_params_multiplicity();
         assert_eq!(instance.params, "m={copies}");
         assert!(instance.multiplicity.is_none());
+    }
+
+    #[test]
+    fn a_component_written_before_provenance_existed_loads_without_it() {
+        let source = Component::new(3, ComponentType::VoltageSourceSin, Point::origin())
+            .with_name_value("V3", "0");
+        let encoded = ron::ser::to_string(&source).expect("serialize");
+        assert!(
+            !encoded.contains("stimulus_provenance"),
+            "an unadopted source must not write the field: {encoded}"
+        );
+
+        let decoded: Component = ron::from_str(&encoded).expect("deserialize");
+        assert!(decoded.stimulus_provenance.is_none());
+        assert_eq!(decoded, source);
+    }
+
+    #[test]
+    fn an_adopted_source_round_trips_its_provenance() {
+        let mut source = Component::new(3, ComponentType::VoltageSourceSin, Point::origin())
+            .with_name_value("V3", "0");
+        source.params = "va=3m freq=1k".to_owned();
+        let definition = crate::state::stimulus_library::definition::StimulusDefinition::new(
+            "sensor_diff_1k",
+            ComponentType::VoltageSourceSin,
+        )
+        .expect("definition");
+        definition.adopt_onto(&mut source).expect("adopt");
+
+        let encoded = ron::ser::to_string(&source).expect("serialize");
+        let decoded: Component = ron::from_str(&encoded).expect("deserialize");
+        assert_eq!(decoded, source);
+        assert_eq!(
+            decoded
+                .stimulus_provenance
+                .as_ref()
+                .map(|provenance| provenance.definition.as_str()),
+            Some("sensor_diff_1k")
+        );
+    }
+
+    #[test]
+    fn an_sffm_card_authored_with_fs_loads_spelling_the_engine_name() {
+        let mut authored = Component::new(1, ComponentType::VoltageSourceSffm, Point::origin())
+            .with_name_value("V1", "0");
+        authored.params = "fc=1Meg fs=1k mdi=2".to_owned();
+        let legacy: Component =
+            ron::from_str(&ron::ser::to_string(&authored).expect("serialize")).expect("decode");
+
+        let mut current = Component::new(1, ComponentType::VoltageSourceSffm, Point::origin())
+            .with_name_value("V1", "0");
+        current.params = "fc=1Meg fm=1k mdi=2".to_owned();
+
+        assert_eq!(legacy.params, "fc=1Meg fm=1k mdi=2");
+        assert_eq!(legacy, current);
+    }
+
+    #[test]
+    fn an_explicit_fm_wins_over_a_legacy_fs_beside_it() {
+        let mut authored = Component::new(1, ComponentType::CurrentSourceSffm, Point::origin())
+            .with_name_value("I1", "0");
+        authored.params = "fm=2k fs=1k".to_owned();
+        let decoded: Component =
+            ron::from_str(&ron::ser::to_string(&authored).expect("serialize")).expect("decode");
+
+        assert_eq!(decoded.params, "fm=2k");
+    }
+
+    #[test]
+    fn the_fs_alias_is_read_only_on_the_family_that_had_the_disagreement() {
+        let mut sample = Component::new(1, ComponentType::VoltageSourcePwlFile, Point::origin())
+            .with_name_value("V1", "rate.csv");
+        sample.params = "fs=48k".to_owned();
+        let decoded: Component =
+            ron::from_str(&ron::ser::to_string(&sample).expect("serialize")).expect("decode");
+
+        assert_eq!(decoded.params, "fs=48k");
     }
 }
