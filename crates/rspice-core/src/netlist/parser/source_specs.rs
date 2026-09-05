@@ -283,7 +283,42 @@ pub(super) fn parse_source_spec(
     })
 }
 
-pub(crate) fn parse_source_spec_text(
+/// Read a `V`/`I` card's waveform specification into a [`SourceSpec`].
+///
+/// This is the only supported route from source text to a `SourceSpec`, and it
+/// is the parser the engine itself uses: a frontend that wants to show what a
+/// card will do — a waveform preview, a source inspector, a stimulus library —
+/// gets the engine's own reading of the text rather than a second
+/// interpretation of it that can disagree.
+///
+/// # What `raw` is
+///
+/// The specification alone: everything on the card *after* the instance name
+/// and its two node names, and nothing before them. `V1 in 0 PULSE(0 5 0 1n
+/// 1n)` is passed here as `PULSE(0 5 0 1n 1n)`. That is exactly what the two
+/// element parsers hand it — `collect_deferred_source_spec` takes the tail of
+/// the line once the nodes have been consumed — so a caller that strips the
+/// same three leading tokens sees the same result the deck does. Trailing
+/// annotations belong to the specification and stay: `DC 0 AC 1 90`,
+/// `SIN(0 1 1k) AC 1` and `PULSE(0 5) DISTOF1 1` all parse here whole.
+///
+/// # What `params` is
+///
+/// The scope any braced expression in `raw` is resolved against. Design
+/// variables are the netlister's business, not a preview's: a caller that is
+/// only interpreting one card's own text passes `ParamContext::new()`, and any
+/// `{name}` in the text then fails to resolve and is reported as a parse error
+/// rather than silently taking some other scope's value.
+///
+/// `line_num` appears in the returned [`ParseError`] and is otherwise unused;
+/// a caller with no deck to point at passes `0`, as the flattener does.
+///
+/// # Errors
+///
+/// Returns the parser's own diagnostic when the text is not a specification the
+/// engine accepts — an unknown waveform keyword, a missing required argument, a
+/// value outside the range the family validates.
+pub fn parse_source_spec_text(
     raw: &str,
     line_num: usize,
     params: &ParamContext,

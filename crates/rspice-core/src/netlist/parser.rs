@@ -72,7 +72,7 @@ use line::*;
 use pspice_stim::*;
 use scoping::*;
 use source_specs::parse_source_spec;
-pub(crate) use source_specs::parse_source_spec_text;
+pub use source_specs::parse_source_spec_text;
 use state::*;
 use tlines::*;
 use values::*;

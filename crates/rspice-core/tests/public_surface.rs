@@ -470,7 +470,21 @@ use rspice_core::analysis::harmonic_balance::{
 // already calls — a browser has no path, so the reader half is the only form
 // the GUI and `rspice-wasm` can use — and `VCD_WRITER_VERSION` is the string a
 // consumer compares `$version` against to learn who wrote a dump.
-const MAX_PUBLIC_ITEMS: usize = 4957;
+//
+// 2026-09-05, +2 deliberate (4,957 -> 4,959): `parse_source_spec_text`, which
+// the GUI now calls to read a placed source's card the way the deck reads it.
+// It is two lines rather than one because this ratchet counts a `pub use` as an
+// item: the function in `netlist/parser/source_specs.rs` and its re-export
+// through `netlist/parser.rs`, which is the crate's established idiom for
+// putting a parser helper on the public surface.
+//
+// The GUI previously interpreted `PULSE`/`SIN`/`SFFM` and the rest itself in
+// its preview card, which is how it came to disagree with the engine about an
+// omitted pulse width. There is no smaller way to hand a frontend the engine's
+// own reading: `SourceSpec` is already public and `VoltageSources::
+// evaluate_source_spec_at_time_with_dialect` already takes one, but nothing
+// public could produce one from the text a card carries.
+const MAX_PUBLIC_ITEMS: usize = 4959;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
