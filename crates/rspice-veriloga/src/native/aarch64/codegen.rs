@@ -3890,12 +3890,13 @@ mod cross_target_contract_tests {
 
 #[cfg(all(test, target_arch = "aarch64"))]
 mod tests {
-    use super::{FunctionCompiler, PreparedInstruction};
+    use super::{A64FusedKernelEntries, FunctionCompiler, PreparedInstruction};
     use super::{
         compile_assignment_dispatch_function, compile_assignment_function,
         compile_assignment_pass_function, compile_fused_evaluation_kernel,
         compile_fused_stamp_kernel, compile_value_function,
     };
+    use crate::jit::plan_program::PlanProgram;
     use crate::native::EvalContext;
     use crate::native::aarch64::encoder::DReg;
     use crate::native::aarch64::verifier::verify_exact_function;
@@ -4000,12 +4001,25 @@ mod tests {
             stamp_values: &stamp_value_entries,
             jacobians: &jacobian_entries,
         };
-        let kernel = match jacobians {
+        // The kernel takes plan entries, and every program these tests build is
+        // a postfix one; the assignment pass is what the image opens with, so
+        // its entry is offset zero.
+        let stamp_plans = stamp_values
+            .iter()
+            .cloned()
+            .map(PlanProgram::Postfix)
+            .collect::<Vec<_>>();
+        let jacobian_plans = jacobians.map(|rows| {
+            rows.iter()
+                .map(|row| row.iter().cloned().map(PlanProgram::Postfix).collect())
+                .collect::<Vec<Vec<_>>>()
+        });
+        let kernel = match jacobian_plans.as_deref() {
             Some(jacobians) => compile_fused_stamp_kernel(
                 kernel_offset,
-                CodeOffset::new(0),
+                Some(CodeOffset::new(0)),
                 None,
-                stamp_values,
+                &stamp_plans,
                 jacobians,
                 entries,
                 published_current_pairs,
@@ -4013,9 +4027,9 @@ mod tests {
             .expect("compile AArch64 fused stamp kernel"),
             None => compile_fused_evaluation_kernel(
                 kernel_offset,
-                CodeOffset::new(0),
+                Some(CodeOffset::new(0)),
                 None,
-                stamp_values,
+                &stamp_plans,
                 entries,
                 published_current_pairs,
             )
