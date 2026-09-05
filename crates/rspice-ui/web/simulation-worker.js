@@ -232,7 +232,12 @@ async function installWasmJitArtifact(module, artifact) {
   ) {
     throw new Error("WASM JIT model artifact has an invalid value manifest.");
   }
-  if (artifact.assignmentExport !== "rspice_wasm_jit_assign") {
+  // A module whose assignment pass has no steps exports no kernel for it, so
+  // the name is validated when present and simply absent otherwise.
+  if (
+    artifact.assignmentExport != null &&
+    artifact.assignmentExport !== "rspice_wasm_jit_assign"
+  ) {
     throw new Error("WASM JIT model artifact has an invalid assignment export.");
   }
   if (
@@ -267,7 +272,10 @@ async function installWasmJitArtifact(module, artifact) {
       throw new Error(`WASM JIT model is missing verified value export ${name}.`);
     }
   }
-  if (typeof instance.exports[artifact.assignmentExport] !== "function") {
+  if (
+    artifact.assignmentExport &&
+    typeof instance.exports[artifact.assignmentExport] !== "function"
+  ) {
     throw new Error("WASM JIT model is missing its assignment kernel.");
   }
   if (

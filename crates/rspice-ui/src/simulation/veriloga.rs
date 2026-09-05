@@ -27,7 +27,11 @@ pub(crate) struct WasmJitWorkerArtifact {
     pub(crate) digest: String,
     pub(crate) module_bytes: Vec<u8>,
     pub(crate) value_exports: Vec<String>,
-    pub(crate) assignment_export: String,
+    /// The module assignment pass, when it has steps to run. A module whose
+    /// pass is empty exports no kernel for it, so the absence has to survive
+    /// the wire: the worker then runs no assignment step, which is exactly
+    /// what the native executable does.
+    pub(crate) assignment_export: Option<String>,
     pub(crate) post_assignment_export: Option<String>,
     /// Whole-model drivers. Present only when the model is eligible to fuse;
     /// the worker keeps the per-entry table either way.
@@ -37,7 +41,9 @@ pub(crate) struct WasmJitWorkerArtifact {
     pub(crate) stamp_kernel_export: Option<String>,
 }
 
-#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+/// Available to a host test as well as to the worker build, so the wire shape
+/// of an artifact can be pinned without a browser.
+#[cfg(all(feature = "browser-worker", any(target_arch = "wasm32", test)))]
 impl WasmJitWorkerArtifact {
     pub(crate) fn from_compiled(
         artifact: &rspice_veriloga::wasm_jit::WasmJitModelArtifact,
@@ -53,7 +59,7 @@ impl WasmJitWorkerArtifact {
                 .iter()
                 .map(|entry| entry.export_name().to_owned())
                 .collect(),
-            assignment_export: artifact.assignment_export().to_owned(),
+            assignment_export: artifact.assignment_export().map(str::to_owned),
             post_assignment_export: artifact.post_assignment_export().map(str::to_owned),
             evaluation_kernel_export: artifact.evaluation_kernel_export().map(str::to_owned),
             stamp_kernel_export: artifact.stamp_kernel_export().map(str::to_owned),
@@ -94,7 +100,7 @@ pub struct PreparedVerilogARuntime {
 }
 
 impl PreparedVerilogARuntime {
-    #[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+    #[cfg(all(feature = "browser-worker", any(target_arch = "wasm32", test)))]
     pub(crate) fn compile_wasm_jit_artifact(&self) -> Result<WasmJitWorkerArtifact, String> {
         self.validate()?;
         let model: rspice_veriloga::CompiledModel = serde_json::from_str(&self.model_json)
@@ -876,5 +882,101 @@ endmodule
                 "IR parameter '{name}' came back as {default:e} instead of {expected:e}"
             );
         }
+    }
+
+    #[cfg(feature = "browser-worker")]
+    fn seal_wasm_jit_runtime(file: &str, module: &str, source: &str) -> PreparedVerilogARuntime {
+        let bundle = rspice_veriloga::VirtualSourceBundle::new(
+            file,
+            [rspice_veriloga::VirtualSourceFile::new(file, source)],
+        )
+        .expect("fixture bundle is well formed");
+        let compilation = rspice_veriloga::VerilogACompiler::default()
+            .compile_virtual_runtime(&bundle, module, project_virtual_compile_limits())
+            .expect("fixture module compiles");
+        PreparedVerilogARuntime::try_from_virtual_compilation(
+            format!("__rspice_project__/wasm-jit/{file}"),
+            crate::product::ContentDigest::from_bytes([0x5a; 32]),
+            module.to_owned(),
+            &compilation,
+        )
+        .expect("fixture compilation seals into a prepared runtime")
+    }
+
+    /// A module whose assignment pass has no steps exports no kernel for it,
+    /// so `WasmJitModelArtifact::assignment_export` is `None` and the shared
+    /// `WasmJitExecutable::run_assignments` — the same driver the browser
+    /// device runs — returns `Ok` without dispatching anything. That artifact
+    /// is whole and shippable, so the wire has to carry the absence: a
+    /// defaulted name would announce an export the module does not have, and
+    /// the worker would refuse to install a model that is perfectly valid.
+    #[cfg(feature = "browser-worker")]
+    #[test]
+    fn an_assignment_free_module_crosses_the_worker_wire_without_an_export() {
+        // Both fixtures stay on the shape `EXACT_CONSTANT_SOURCE` above already
+        // proves seals: a plain conductance product. A division or a `from
+        // (0:inf)` range puts a non-finite constant in the model, and
+        // `serde_json` writes that as `null`, which the sealed payload cannot
+        // read back.
+        const NO_ASSIGNMENTS: &str = r#"
+`include "disciplines.vams"
+module rspice_no_assignment_probe(p, n);
+  inout p, n;
+  electrical p, n;
+  parameter real conductance = 0.5;
+  analog I(p, n) <+ conductance * V(p, n);
+endmodule
+"#;
+        // The control. `$discontinuity` is one of the two simulator-control
+        // task variables a plan roots its assignment pass on, so this module
+        // does export the kernel; without it the test would pass just as well
+        // on a conversion that threw every assignment export away. The other
+        // root, `$bound_step`, cannot be used here: its variable default is
+        // the `+inf` sentinel, and a sealed runtime cannot carry that through
+        // JSON.
+        const ONE_ASSIGNMENT: &str = r#"
+`include "disciplines.vams"
+module rspice_one_assignment_probe(p, n);
+  inout p, n;
+  electrical p, n;
+  parameter real conductance = 0.5;
+  analog begin
+    $discontinuity(0);
+    I(p, n) <+ conductance * V(p, n);
+  end
+endmodule
+"#;
+
+        let empty = seal_wasm_jit_runtime(
+            "no-assignment.va",
+            "rspice_no_assignment_probe",
+            NO_ASSIGNMENTS,
+        )
+        .compile_wasm_jit_artifact()
+        .expect("assignment-free module qualifies for the browser JIT");
+        assert_eq!(
+            empty.assignment_export, None,
+            "a pass with no steps must cross the wire as an absence"
+        );
+
+        let control = seal_wasm_jit_runtime(
+            "one-assignment.va",
+            "rspice_one_assignment_probe",
+            ONE_ASSIGNMENT,
+        )
+        .compile_wasm_jit_artifact()
+        .expect("single-assignment module qualifies for the browser JIT");
+        assert_eq!(
+            control.assignment_export.as_deref(),
+            Some("rspice_wasm_jit_assign"),
+            "a pass with steps still names its kernel on the wire"
+        );
+
+        // The absence has to survive the transport encoding as well, because
+        // the worker protocol decodes this struct under `deny_unknown_fields`.
+        let encoded = serde_json::to_string(&empty).expect("worker artifact encodes");
+        let decoded: super::WasmJitWorkerArtifact =
+            serde_json::from_str(&encoded).expect("worker artifact decodes");
+        assert_eq!(decoded.assignment_export, None);
     }
 }
