@@ -325,13 +325,13 @@ fn format_sffm_label(params: &HashMap<String, String>, primary: &str, is_voltage
     let amp = get_param_with_aliases(params, &["va"], "", "1");
     let fc = get_param_with_aliases(params, &["fc"], "", "1k");
     let mdi = get_param_with_aliases(params, &["mdi"], "", "1");
-    let fs = get_param_with_aliases(params, &["fs"], "", "10");
+    let fm = get_param_with_aliases(params, &["fm"], "", "10");
 
     let mut lines = vec![
         "SFFM".to_string(),
         format!("Amp: {} {}", amp, unit),
         format!("Fc: {}", fc),
-        format!("Fs: {}", fs),
+        format!("Fm: {}", fm),
         format!("Mdi: {}", mdi),
     ];
 

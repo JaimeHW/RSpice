@@ -1332,7 +1332,7 @@ fn common_source_parameter_names(is_voltage: bool) -> &'static [&'static str] {
 /// ngspice's `V`-prefixed spellings on current sources too, so one list serves
 /// both quantities.
 fn independent_source_parameter_names(kind: ComponentType) -> (&'static [&'static str], bool) {
-    const SFFM: &[&str] = &["vo", "va", "fc", "mdi", "fs", "td", "phasem", "phasec"];
+    const SFFM: &[&str] = &["vo", "va", "fc", "mdi", "fm", "td", "phasem", "phasec"];
     const AM: &[&str] = &["vo", "vmo", "vma", "fm", "fc", "td", "phasem", "phasec"];
     const PAT: &[&str] = &[
         "vhi",

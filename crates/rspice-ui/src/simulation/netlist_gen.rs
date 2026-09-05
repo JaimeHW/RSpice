@@ -1131,17 +1131,46 @@ mod tests {
 
         let mut sffm = Component::new(2, ComponentType::CurrentSourceSffm, Point::origin())
             .with_name_value("ISFFM", "0");
-        sffm.params = "va=1m fc=1Meg mdi=3 fs=1k".to_owned();
+        sffm.params = "va=1m fc=1Meg mdi=3 fm=2k".to_owned();
         assert_eq!(
             generator.format_source_value(&sffm),
-            "SFFM(0 1m 1Meg 3 1k)",
+            "SFFM(0 1m 1Meg 3 2k)",
             "an unset delay and phases leave the classic five-argument form"
         );
-        sffm.params = "va=1m fc=1Meg mdi=3 fs=1k phasec=45".to_owned();
+        sffm.params = "va=1m fc=1Meg mdi=3 fm=2k phasec=45".to_owned();
         assert_eq!(
             generator.format_source_value(&sffm),
-            "SFFM(0 1m 1Meg 3 1k 0 0 45)",
+            "SFFM(0 1m 1Meg 3 2k 0 0 45)",
             "a set carrier phase drags its positional predecessors along"
+        );
+    }
+
+    /// The app spelled `SFFM`'s modulating frequency `fs` and the engine spells
+    /// it `fm`. The rename is a load-time migration, so a project authored
+    /// under either spelling emits the same bytes and neither is a second
+    /// parameter the emitter has to know about.
+    #[test]
+    fn an_sffm_source_authored_under_either_spelling_emits_the_same_card() {
+        let schematic = SchematicState::default();
+        let generator = NetlistGenerator::new(&schematic);
+
+        let mut authored = Component::new(2, ComponentType::VoltageSourceSffm, Point::origin())
+            .with_name_value("V2", "0");
+        authored.params = "va=1m fc=1Meg mdi=3 fs=2k".to_owned();
+        let legacy: Component =
+            ron::from_str(&ron::ser::to_string(&authored).expect("serialize")).expect("decode");
+
+        let mut current = Component::new(2, ComponentType::VoltageSourceSffm, Point::origin())
+            .with_name_value("V2", "0");
+        current.params = "va=1m fc=1Meg mdi=3 fm=2k".to_owned();
+
+        assert_eq!(
+            generator.format_source_value(&legacy),
+            generator.format_source_value(&current)
+        );
+        assert_eq!(
+            generator.format_source_value(&legacy),
+            "SFFM(0 1m 1Meg 3 2k)"
         );
     }
 

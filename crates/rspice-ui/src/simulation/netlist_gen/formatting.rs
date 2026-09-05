@@ -382,11 +382,11 @@ impl<'a> NetlistGenerator<'a> {
                 }
             }
             ComponentType::VoltageSourceSffm | ComponentType::CurrentSourceSffm => {
-                // SFFM(VO VA FC MDI FS TD PHASEM PHASEC)
+                // SFFM(VO VA FC MDI FM TD PHASEM PHASEC)
                 let params = crate::state::parse_params_string(&component.params);
                 if !Self::has_any_source_parameter(
                     &params,
-                    &["vo", "va", "fc", "mdi", "fs", "td", "phasem", "phasec"],
+                    &["vo", "va", "fc", "mdi", "fm", "td", "phasem", "phasec"],
                 ) && let Some(literal) = Self::legacy_waveform_literal(value, "SFFM")
                 {
                     return literal;
@@ -395,14 +395,14 @@ impl<'a> NetlistGenerator<'a> {
                 let va = Self::get_param_owned(&params, "va", "", "1");
                 let fc = Self::get_param_owned(&params, "fc", "", "1Meg");
                 let mdi = Self::get_param_owned(&params, "mdi", "", "1");
-                let fs = Self::get_param_owned(&params, "fs", "", "1k");
+                let fm = Self::get_param_owned(&params, "fm", "", "1k");
                 let td = Self::get_param_owned(&params, "td", "", "0");
                 let phasem = Self::get_param_owned(&params, "phasem", "", "0");
                 let phasec = Self::get_param_owned(&params, "phasec", "", "0");
                 format!(
                     "SFFM({})",
                     Self::waveform_arguments(
-                        &[vo, va, fc, mdi, fs],
+                        &[vo, va, fc, mdi, fm],
                         &[(td, "0"), (phasem, "0"), (phasec, "0")]
                     )
                 )

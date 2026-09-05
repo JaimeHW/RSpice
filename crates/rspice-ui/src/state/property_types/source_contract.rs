@@ -31,6 +31,18 @@
 //! read by several analyses with different stop times. The messages name the
 //! substitution instead of predicting its value, so this module needs no plan
 //! state and cannot disagree with the plan.
+//!
+//! A refusal here mirrors something the deck would refuse, and nothing else. Two
+//! rule sets have to be read with the netlist generator open beside them,
+//! because the generator normalizes fields before the parser ever sees them: an
+//! omitted `PAT` edge time takes the sheet's default rather than reaching the
+//! parser as a zero, and a bit pattern typed without its leading `B` is given
+//! one. A rule for either would refuse a card the generator was about to fix.
+//!
+//! These rules audit a stimulus *definition* as well as a placed instance. A
+//! definition is the same `(component type, value, params)` triple, so it is
+//! audited through the transient component it realizes to and there is only one
+//! rule set for both.
 
 use crate::state::ComponentType;
 use crate::state::property_types::{PropertySheet, PropertyValue};
@@ -129,6 +141,26 @@ impl<'a> SourceFields<'a> {
             })
     }
 
+    /// The field as text, for the two waveform fields that are not numbers:
+    /// a bit pattern and a file reference.
+    ///
+    /// Resolved in the same order as [`Self::number`], so a rule and the editor
+    /// beside it cannot read a different string for the same field.
+    pub fn text(&self, name: &str) -> Option<String> {
+        self.values
+            .get(name)
+            .or_else(|| self.sheet.get(name).map(|def| &def.default_value))
+            .map(PropertyValue::display_string)
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| self.params.get(name).cloned())
+            .or_else(|| {
+                self.primary
+                    .filter(|(field, _)| *field == name)
+                    .map(|(_, value)| value.to_owned())
+            })
+            .filter(|value| !value.trim().is_empty())
+    }
+
     /// The field as a boolean, for the switch-shaped properties.
     fn boolean(&self, name: &str) -> Option<bool> {
         match self
@@ -183,6 +215,12 @@ pub fn source_contract_findings(
         }
         ComponentType::VoltageSourcePwl | ComponentType::CurrentSourcePwl => {
             pwl_findings(fields, &mut findings);
+        }
+        ComponentType::VoltageSourcePwlFile | ComponentType::CurrentSourcePwlFile => {
+            pwl_file_findings(fields, &mut findings);
+        }
+        ComponentType::VoltageSourcePat | ComponentType::CurrentSourcePat => {
+            pat_findings(fields, &mut findings);
         }
         ComponentType::VoltageSourceSffm | ComponentType::CurrentSourceSffm => {
             sffm_findings(fields, &mut findings);
@@ -394,16 +432,137 @@ fn pwl_findings(fields: &SourceFields<'_>, findings: &mut Vec<SourceContractFind
     }
 }
 
-/// `SFFM(VO VA FC MDI FS TD PHASEM PHASEC)`.
+/// `PWL FILE="path" [TD=] [R=] [TSCALE=] [VSCALE=] [TOFFSET=] [VOFFSET=]`.
+///
+/// The table itself is the file's business and cannot be judged from a property
+/// sheet — whether it parses, whether its times increase — so the refusals here
+/// are only the ones a card can carry on its own face. Two of them are the
+/// parser's (`validate_pwl_file_scaling`, `validate_pwl_delay` and
+/// `validate_pwl_repeat_from` in `netlist/parser/source_specs.rs`) and one is
+/// the netlist generator's own, which refuses a file-backed source with nothing
+/// selected rather than dispatching a run that fails inside the engine.
+fn pwl_file_findings(fields: &SourceFields<'_>, findings: &mut Vec<SourceContractFinding>) {
+    if fields.text("file").is_none() {
+        findings.push(SourceContractFinding::refusal(
+            "file",
+            "A file-backed PWL source has no waveform until a data file is selected",
+        ));
+    }
+    match fields.number("tscale") {
+        Some(scale) if scale <= 0.0 => findings.push(SourceContractFinding::refusal(
+            "tscale",
+            "PWL FILE TSCALE must be finite and positive — the netlist parser refuses zero or a negative time scale",
+        )),
+        Some(scale) if scale != 1.0 => findings.push(SourceContractFinding::advisory(
+            "tscale",
+            "Times in the file are divided by TSCALE, so a scale above 1 stretches the waveform and one below it compresses",
+        )),
+        _ => {}
+    }
+    match fields.number("td") {
+        Some(delay) if delay < 0.0 => findings.push(SourceContractFinding::refusal(
+            "td",
+            "PWL FILE TD must be finite and non-negative — the netlist parser refuses a negative delay",
+        )),
+        Some(delay) if delay > 0.0 => findings.push(SourceContractFinding::advisory(
+            "td",
+            "Output is exactly 0 before TD, then holds the file's first value until its time",
+        )),
+        _ => {}
+    }
+    if let Some(repeat) = fields
+        .text("r")
+        .and_then(|value| crate::quantity::parse_engineering_value(&value).ok())
+    {
+        if repeat < 0.0 {
+            findings.push(SourceContractFinding::refusal(
+                "r",
+                "PWL FILE R must be finite and non-negative — the netlist parser refuses a negative repeat time",
+            ));
+        } else {
+            findings.push(SourceContractFinding::advisory(
+                "r",
+                "Past the file's last point the waveform folds back to R and repeats from there, indefinitely",
+            ));
+        }
+    }
+    if fields
+        .number("vscale")
+        .is_some_and(|scale| scale != 1.0 && scale.is_finite())
+        || fields
+            .number("voffset")
+            .is_some_and(|offset| offset != 0.0 && offset.is_finite())
+    {
+        findings.push(SourceContractFinding::advisory(
+            "vscale",
+            "Each value in the file is read as VALUE * VSCALE + VOFFSET — the scale is applied first, and the offset is not a DC level added to a scaled waveform",
+        ));
+    }
+}
+
+/// `PAT(VHI VLO TD TR TF TSAMPLE DATA [R=n])`.
+///
+/// The netlist generator normalizes two things before emission, so the rules
+/// here deliberately do not repeat them: an omitted TR/TF/TSAMPLE takes the
+/// sheet's default rather than reaching the parser as a zero, and a bit string
+/// typed without its leading `B` is given one. What is left is what the parser
+/// really refuses (`validate_pat_spec`, `parse_pat_repeat_count`).
+fn pat_findings(fields: &SourceFields<'_>, findings: &mut Vec<SourceContractFinding>) {
+    for (field, label) in [("tr", "TR"), ("tf", "TF"), ("tsample", "TSAMPLE")] {
+        if fields.number(field).is_some_and(|value| value <= 0.0) {
+            findings.push(SourceContractFinding::refusal(
+                field,
+                format!(
+                    "PAT {label} must be positive — the netlist parser refuses a zero or negative \
+                     edge or bit interval"
+                ),
+            ));
+        }
+    }
+    // A blank pattern is not a refusal: the generator emits the sheet's own
+    // default for it, exactly as it does for an omitted TR. Only a pattern
+    // someone actually wrote, and wrote something other than bits into, reaches
+    // the parser as an error.
+    if let Some(data) = fields.text("data") {
+        let bits = data.trim();
+        let bits = bits.strip_prefix(['b', 'B']).unwrap_or(bits);
+        if bits.is_empty() || !bits.chars().all(|bit| matches!(bit, '0' | '1')) {
+            findings.push(SourceContractFinding::refusal(
+                "data",
+                "PAT DATA must be a bit string of 0s and 1s — the netlist parser refuses any \
+                 other character",
+            ));
+        }
+    }
+    match fields.number("repeat_count") {
+        Some(repeat) if repeat.fract() != 0.0 => findings.push(SourceContractFinding::refusal(
+            "repeat_count",
+            "PAT R must be a whole repeat count — the netlist parser refuses a fractional one",
+        )),
+        Some(repeat) if repeat < -1.0 => findings.push(SourceContractFinding::advisory(
+            "repeat_count",
+            "A repeat count below -1 is read as 0: the pattern plays once and then holds its last bit",
+        )),
+        _ => {}
+    }
+    if fields.number("td").is_some_and(|delay| delay > 0.0) {
+        findings.push(SourceContractFinding::advisory(
+            "td",
+            "Output holds VLO before TD, then the first bit's level",
+        ));
+    }
+}
+
+/// `SFFM(VO VA FC MDI FM TD PHASEM PHASEC)`.
 ///
 /// No refusals: the evaluator limits MDI with ngspice's if/else-if chain, so a
-/// negative FS turns `FC/FS` negative and MDI lands on that ratio (or on 0 when
+/// negative FM turns `FC/FM` negative and MDI lands on that ratio (or on 0 when
 /// below it) — the card runs, it just never uses the authored index.
 fn sffm_findings(fields: &SourceFields<'_>, findings: &mut Vec<SourceContractFinding>) {
-    if fields.number("fs").is_some_and(|signal| signal < 0.0) {
+    if fields.number("fm").is_some_and(|signal| signal < 0.0) {
         findings.push(SourceContractFinding::advisory(
-            "fs",
-            "A negative FS inverts the MDI limiter: MDI lands on FC/FS (negative, mirroring the modulation) or on 0, never on the authored value",
+            "fm",
+            "A negative FM inverts the MDI limiter: MDI lands on FC/FM (negative, mirroring the modulation) or on 0, never on the authored value",
         ));
     }
     if fields.number("fc").is_some_and(|carrier| carrier <= 0.0) {
@@ -412,23 +571,23 @@ fn sffm_findings(fields: &SourceFields<'_>, findings: &mut Vec<SourceContractFin
             "An FC of 0 is read as omitted: the engine substitutes 5 / TSTOP",
         ));
     }
-    if fields.number("fs").is_some_and(|signal| signal == 0.0) {
+    if fields.number("fm").is_some_and(|signal| signal == 0.0) {
         findings.push(SourceContractFinding::advisory(
-            "fs",
-            "An FS of 0 is read as omitted: the engine substitutes 500 / TSTOP",
+            "fm",
+            "An FM of 0 is read as omitted: the engine substitutes 500 / TSTOP",
         ));
     }
     if let (Some(index), Some(carrier), Some(signal)) = (
         fields.number("mdi"),
         fields.number("fc"),
-        fields.number("fs"),
+        fields.number("fm"),
     ) && carrier > 0.0
         && signal > 0.0
         && (index < 0.0 || index > carrier / signal)
     {
         findings.push(SourceContractFinding::advisory(
             "mdi",
-            "MDI is clamped to 0 … FC/FS at evaluation — the authored index is outside that range",
+            "MDI is clamped to 0 … FC/FM at evaluation — the authored index is outside that range",
         ));
     }
     if fields.number("td").is_some_and(|delay| delay > 0.0) {
@@ -701,19 +860,19 @@ mod tests {
     }
 
     /// Verified against the evaluator: the MDI limiter is ngspice's if/else-if
-    /// chain, so a negative FS lands MDI on the negative `FC/FS` ratio (or on
+    /// chain, so a negative FM lands MDI on the negative `FC/FM` ratio (or on
     /// 0 when below it) and the run keeps going — advise, never refuse.
     #[test]
     fn a_negative_sffm_signal_frequency_is_advised_not_refused() {
         let findings = findings_for(
             ComponentType::VoltageSourceSffm,
-            &[("fc", "1Meg"), ("fs", "-1k"), ("mdi", "1")],
+            &[("fc", "1Meg"), ("fm", "-1k"), ("mdi", "1")],
         );
         assert!(refusals(&findings).is_empty(), "{findings:?}");
         assert!(
             advisories(&findings)
                 .iter()
-                .any(|finding| finding.field == "fs" && finding.message.contains("FC/FS")),
+                .any(|finding| finding.field == "fm" && finding.message.contains("FC/FM")),
             "{findings:?}"
         );
     }
@@ -722,7 +881,7 @@ mod tests {
     fn an_out_of_range_sffm_index_is_advised_as_clamped() {
         let findings = findings_for(
             ComponentType::VoltageSourceSffm,
-            &[("fc", "1k"), ("fs", "1k"), ("mdi", "50")],
+            &[("fc", "1k"), ("fm", "1k"), ("mdi", "50")],
         );
         assert!(refusals(&findings).is_empty(), "{findings:?}");
         assert!(
@@ -930,6 +1089,140 @@ mod tests {
     }
 
     #[test]
+    fn a_pat_edge_or_bit_interval_of_zero_is_refused_as_the_parser_refuses_it() {
+        for field in ["tr", "tf", "tsample"] {
+            let findings = findings_for(ComponentType::VoltageSourcePat, &[(field, "0")]);
+            assert!(
+                refusals(&findings)
+                    .iter()
+                    .any(|finding| finding.field == field),
+                "{field}: {findings:?}"
+            );
+        }
+    }
+
+    /// The generator supplies its own default for an omitted edge time and
+    /// prefixes a bare bit string, so neither may be refused here.
+    #[test]
+    fn an_omitted_pat_field_and_an_unprefixed_pattern_are_left_alone() {
+        assert!(findings_for(ComponentType::CurrentSourcePat, &[]).is_empty());
+        assert!(
+            findings_for(ComponentType::VoltageSourcePat, &[("data", "0101")])
+                .iter()
+                .all(|finding| finding.field != "data")
+        );
+    }
+
+    #[test]
+    fn a_pat_pattern_that_is_not_bits_is_refused() {
+        let findings = findings_for(ComponentType::VoltageSourcePat, &[("data", "b01x1")]);
+        assert!(
+            refusals(&findings)
+                .iter()
+                .any(|finding| finding.field == "data"),
+            "{findings:?}"
+        );
+    }
+
+    #[test]
+    fn a_fractional_pat_repeat_count_is_refused_and_a_deep_negative_one_is_advised() {
+        assert!(
+            refusals(&findings_for(
+                ComponentType::VoltageSourcePat,
+                &[("repeat_count", "2.5")]
+            ))
+            .iter()
+            .any(|finding| finding.field == "repeat_count")
+        );
+        let findings = findings_for(ComponentType::VoltageSourcePat, &[("repeat_count", "-4")]);
+        assert!(refusals(&findings).is_empty(), "{findings:?}");
+        assert!(
+            advisories(&findings)
+                .iter()
+                .any(|finding| finding.field == "repeat_count"),
+            "{findings:?}"
+        );
+    }
+
+    #[test]
+    fn a_file_backed_pwl_source_with_no_file_is_refused() {
+        let findings = findings_for(ComponentType::VoltageSourcePwlFile, &[]);
+        assert!(
+            refusals(&findings)
+                .iter()
+                .any(|finding| finding.field == "file"),
+            "{findings:?}"
+        );
+        assert!(
+            findings_for(
+                ComponentType::CurrentSourcePwlFile,
+                &[("file", "bridge_step.csv")]
+            )
+            .iter()
+            .all(|finding| finding.field != "file")
+        );
+    }
+
+    #[test]
+    fn a_non_positive_pwl_file_time_scale_is_refused_and_any_other_scale_is_advised() {
+        for scale in ["0", "-1"] {
+            let findings = findings_for(
+                ComponentType::VoltageSourcePwlFile,
+                &[("file", "step.csv"), ("tscale", scale)],
+            );
+            assert!(
+                refusals(&findings)
+                    .iter()
+                    .any(|finding| finding.field == "tscale"),
+                "{scale}: {findings:?}"
+            );
+        }
+        let findings = findings_for(
+            ComponentType::VoltageSourcePwlFile,
+            &[("file", "step.csv"), ("tscale", "1m")],
+        );
+        assert!(refusals(&findings).is_empty(), "{findings:?}");
+        assert!(
+            advisories(&findings)
+                .iter()
+                .any(|finding| finding.field == "tscale"),
+            "{findings:?}"
+        );
+    }
+
+    #[test]
+    fn a_negative_pwl_file_delay_or_repeat_time_is_refused() {
+        for (field, value) in [("td", "-1n"), ("r", "-1")] {
+            let findings = findings_for(
+                ComponentType::VoltageSourcePwlFile,
+                &[("file", "step.csv"), (field, value)],
+            );
+            assert!(
+                refusals(&findings)
+                    .iter()
+                    .any(|finding| finding.field == field),
+                "{field}: {findings:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn pwl_file_value_scaling_states_the_order_the_engine_applies_it_in() {
+        let findings = findings_for(
+            ComponentType::VoltageSourcePwlFile,
+            &[("file", "step.csv"), ("vscale", "2"), ("voffset", "1")],
+        );
+        assert!(refusals(&findings).is_empty(), "{findings:?}");
+        assert!(
+            advisories(&findings)
+                .iter()
+                .any(|finding| finding.field == "vscale"
+                    && finding.message.contains("VALUE * VSCALE + VOFFSET")),
+            "{findings:?}"
+        );
+    }
+
+    #[test]
     fn a_component_that_is_not_an_independent_source_has_no_contract() {
         let findings = findings_for(ComponentType::Resistor, &[("tr", "0")]);
         assert!(findings.is_empty(), "{findings:?}");
@@ -939,7 +1232,7 @@ mod tests {
     /// reduces to nothing here and the rules stay silent rather than guessing.
     #[test]
     fn a_deferred_expression_produces_no_finding() {
-        let findings = findings_for(ComponentType::VoltageSourceSffm, &[("fs", "{fsig}")]);
+        let findings = findings_for(ComponentType::VoltageSourceSffm, &[("fm", "{fsig}")]);
         assert!(findings.is_empty(), "{findings:?}");
     }
 }

@@ -55,9 +55,15 @@ fn instance_name(driven: Driven) -> PropertyDefinition {
 }
 
 impl PropertyRegistry {
-    /// SFFM(VO VA FC MDI FS TD PHASEM PHASEC).
+    /// SFFM(VO VA FC MDI FM TD PHASEM PHASEC).
     ///
-    /// FC and FS carry explicit defaults rather than ngspice's tstop-derived
+    /// The fifth field is `fm`, which is what `SourceSpec::Sffm` and ngspice
+    /// both call the modulating frequency. This sheet called it `FS` until the
+    /// app was reconciled with the engine; a card authored under the old
+    /// spelling is renamed as its component loads, so nothing downstream has
+    /// two names to accept.
+    ///
+    /// FC and FM carry explicit defaults rather than ngspice's tstop-derived
     /// ones: a source placed on a schematic has to mean the same thing under
     /// every `.tran` stop time it is ever swept with.
     pub(super) fn create_sffm_sheet(driven: Driven) -> PropertySheet {
@@ -101,15 +107,15 @@ impl PropertyRegistry {
         sheet.add(
             PropertyDefinition::new("mdi")
                 .with_display_name("Mod Index (MDI)")
-                .with_description("Modulation index; limited to FC/FS during simulation")
+                .with_description("Modulation index; limited to FC/FM during simulation")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(1.0))
                 .with_order(13)
                 .with_category("SFFM"),
         );
         sheet.add(
-            PropertyDefinition::new("fs")
-                .with_display_name("Signal Freq (FS)")
+            PropertyDefinition::new("fm")
+                .with_display_name("Modulating Freq (FM)")
                 .with_description("Signal (modulating) frequency")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(1e3))
