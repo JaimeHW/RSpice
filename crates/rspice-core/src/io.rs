@@ -26,8 +26,9 @@ pub mod waveform_stream;
 pub mod xyce_prn;
 
 pub use ltspice_raw::{
-    RawFileHeader, RawParseError, RawWaveform, RawWaveformData, parse_raw_file,
-    parse_raw_file_with_limits, parse_raw_reader, parse_raw_reader_with_limits,
+    RawFile, RawFileHeader, RawParseError, RawWaveform, RawWaveformData, parse_raw_file,
+    parse_raw_file_with_limits, parse_raw_plots_file_with_limits,
+    parse_raw_plots_reader_with_limits, parse_raw_reader, parse_raw_reader_with_limits,
 };
 pub use raw_export::{
     RawExporter, RawFormat, RawVariable, VariableType, export_dc_sweep, export_transient,
