@@ -913,7 +913,7 @@ fn render_pane_viewer(
         return;
     };
     if definition.release != ViewerReleaseClass::ReleaseTarget {
-        unavailable_surface(ui, &pane.title, definition.release.unavailable_reason());
+        unavailable_surface(ui, &pane.title, &definition.unavailable_reason());
         return;
     }
     let viewer = bound_viewer_projection(&app.state, viewer);

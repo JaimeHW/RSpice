@@ -6,6 +6,8 @@
 //! project-owned collection. Solver samples and retained run history are
 //! never mutated.
 
+use std::borrow::Cow;
+
 use egui::{Color32, RichText, Sense, Ui, UiBuilder, vec2};
 
 use crate::diagnostics::ConsoleMessage;
@@ -470,7 +472,7 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
                                         "Choose a document family that includes this viewer."
                                             .to_owned()
                                     } else if viewer.release != ViewerReleaseClass::ReleaseTarget {
-                                        viewer.release.unavailable_reason().to_owned()
+                                        viewer.unavailable_reason().into_owned()
                                     } else if !compatibility.is_compatible() {
                                         viewer_requirement(viewer)
                                     } else {
@@ -487,7 +489,7 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
                                 let (status, color) = if belongs_to_family {
                                     viewer_status(viewer, compatibility, renderer_available, &t)
                                 } else {
-                                    ("other document family", t.color.text_dim)
+                                    (Cow::Borrowed("other document family"), t.color.text_dim)
                                 };
                                 ui.label(RichText::new(status).color(color));
                                 ui.end_row();
@@ -633,20 +635,26 @@ fn viewer_status(
     compatibility: ViewerCompatibility,
     renderer_available: bool,
     tokens: &Tokens,
-) -> (&'static str, Color32) {
+) -> (Cow<'static, str>, Color32) {
     if viewer.release != ViewerReleaseClass::ReleaseTarget {
-        return (viewer.release.unavailable_reason(), tokens.color.warn);
+        return (viewer.unavailable_reason(), tokens.color.warn);
     }
     if compatibility.is_compatible() && !renderer_available {
-        return ("viewer integration required", tokens.color.warn);
+        return (
+            Cow::Borrowed("viewer integration required"),
+            tokens.color.warn,
+        );
     }
     match compatibility {
-        ViewerCompatibility::Compatible => ("available", tokens.color.ok),
-        ViewerCompatibility::MissingAnalysis { .. } => ("analysis required", tokens.color.warn),
-        ViewerCompatibility::MissingExternalCapability { .. } => {
-            ("specialist dataset required", tokens.color.warn)
+        ViewerCompatibility::Compatible => (Cow::Borrowed("available"), tokens.color.ok),
+        ViewerCompatibility::MissingAnalysis { .. } => {
+            (Cow::Borrowed("analysis required"), tokens.color.warn)
         }
-        ViewerCompatibility::UnknownDocument => ("unregistered", tokens.color.err),
+        ViewerCompatibility::MissingExternalCapability { .. } => (
+            Cow::Borrowed("specialist dataset required"),
+            tokens.color.warn,
+        ),
+        ViewerCompatibility::UnknownDocument => (Cow::Borrowed("unregistered"), tokens.color.err),
     }
 }
 

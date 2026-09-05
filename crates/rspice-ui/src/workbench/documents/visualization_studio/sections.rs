@@ -1110,10 +1110,10 @@ pub(super) fn resolved_viewer_availability(
     // not help. The manifest's own release scope says which it is — planned,
     // preview, deferred, or owned by an external producer.
     let Some(viewer) = ResultViewer::from_viewer_document_id(definition.id) else {
-        return Err(definition.release.unavailable_reason().to_owned());
+        return Err(definition.unavailable_reason().into_owned());
     };
     if definition.release != crate::results::viewer_catalog::ViewerReleaseClass::ReleaseTarget {
-        return Err(definition.release.unavailable_reason().to_owned());
+        return Err(definition.unavailable_reason().into_owned());
     }
     match viewer_compatibility(definition.id, capabilities) {
         ViewerCompatibility::Compatible => {}

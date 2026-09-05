@@ -1041,7 +1041,7 @@ fn a_view_no_sheet_draws_reports_its_release_scope_not_a_data_requirement() {
         match availability {
             Ok(_) => assert!(ships_a_renderer, "{} drew without a sheet", definition.id),
             Err(reason) => assert_eq!(
-                reason == definition.release.unavailable_reason(),
+                reason == definition.unavailable_reason(),
                 !ships_a_renderer,
                 "{} reports the wrong kind of unavailable: {reason}",
                 definition.id

@@ -4476,7 +4476,8 @@
       },
       "capability": {
         "viewerId": "viewer-spectrogram",
-        "classification": "release-planned",
+        "classification": "deferred",
+        "deferralTrigger": "a time-frequency analysis exists",
         "creationFamilyIds": [
           "frequency-stability"
         ],
@@ -4942,7 +4943,8 @@
       },
       "capability": {
         "viewerId": "viewer-wireless",
-        "classification": "preview",
+        "classification": "deferred",
+        "deferralTrigger": "a modulated-signal or envelope analysis exists",
         "creationFamilyIds": [
           "rf-network"
         ],
@@ -5147,7 +5149,8 @@
       },
       "capability": {
         "viewerId": "viewer-constellation",
-        "classification": "preview",
+        "classification": "deferred",
+        "deferralTrigger": "a modulated-signal or envelope analysis exists",
         "creationFamilyIds": [
           "rf-network"
         ],
@@ -5213,7 +5216,8 @@
       },
       "capability": {
         "viewerId": "viewer-ccdf",
-        "classification": "release-planned",
+        "classification": "deferred",
+        "deferralTrigger": "a modulated-signal or envelope analysis exists",
         "creationFamilyIds": [
           "rf-network"
         ],
@@ -5684,7 +5688,8 @@
       },
       "capability": {
         "viewerId": "viewer-contour",
-        "classification": "release-planned",
+        "classification": "deferred",
+        "deferralTrigger": "a sweep or Monte Carlo result carries the two-parameter surface it draws",
         "creationFamilyIds": [
           "statistics-yield"
         ],
@@ -5818,7 +5823,8 @@
       },
       "capability": {
         "viewerId": "viewer-parallel-coordinates",
-        "classification": "release-planned",
+        "classification": "deferred",
+        "deferralTrigger": "a Monte Carlo result carries the multivariate sample shape it draws",
         "creationFamilyIds": [
           "statistics-yield"
         ],
@@ -5883,7 +5889,8 @@
       },
       "capability": {
         "viewerId": "viewer-scatter-matrix",
-        "classification": "release-planned",
+        "classification": "deferred",
+        "deferralTrigger": "a Monte Carlo result carries the paired-variable shape it draws",
         "creationFamilyIds": [
           "statistics-yield"
         ],
@@ -6092,7 +6099,8 @@
       },
       "capability": {
         "viewerId": "bathtub-viewer",
-        "classification": "release-planned",
+        "classification": "deferred",
+        "deferralTrigger": "an eye or jitter flow produces bit-error-rate statistics",
         "creationFamilyIds": [
           "waveform-worksheet"
         ],
@@ -6158,7 +6166,8 @@
       },
       "capability": {
         "viewerId": "margin-viewer",
-        "classification": "release-planned",
+        "classification": "deferred",
+        "deferralTrigger": "an eye or jitter flow produces timing and voltage margins",
         "creationFamilyIds": [
           "waveform-worksheet"
         ],
@@ -6224,7 +6233,8 @@
       },
       "capability": {
         "viewerId": "dynamic-droop-viewer",
-        "classification": "release-planned",
+        "classification": "deferred",
+        "deferralTrigger": "a power-delivery flow produces supply-droop data",
         "creationFamilyIds": [
           "waveform-worksheet"
         ],

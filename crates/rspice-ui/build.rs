@@ -164,6 +164,15 @@ fn generate_results_contract(manifest_dir: &std::path::Path, out_dir: &std::path
                 .and_then(serde_json::Value::as_str)
                 .expect("Results document art must be a string"),
         );
+        // A deferred view says what would bring it back where the reader
+        // meets it, rather than in a roadmap they will never open.
+        let deferral_trigger = capability
+            .get("deferralTrigger")
+            .and_then(serde_json::Value::as_str)
+            .map_or_else(
+                || "None".to_owned(),
+                |value| format!("Some({})", rust_string(value)),
+            );
         let release = viewer_release_variant(
             capability
                 .get("classification")
@@ -182,6 +191,7 @@ fn generate_results_contract(manifest_dir: &std::path::Path, out_dir: &std::path
              \x20       analysis_ids: {},\n\
              \x20       external_capability: {external_capability},\n\
              \x20       release: ViewerReleaseClass::{release},\n\
+             \x20       deferral_trigger: {deferral_trigger},\n\
              \x20   }},\n",
             rust_string(&id),
             rust_string(

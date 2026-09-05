@@ -5,6 +5,8 @@
 //! discovery cannot silently assume that a result kind or external producer is
 //! available.
 
+use std::borrow::Cow;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ViewerGroup {
     TimeAndFrequency,
@@ -160,6 +162,24 @@ pub struct ViewerDocumentDefinition {
     pub external_capability: Option<&'static str>,
     /// Release scope from the product manifest's capability record.
     pub release: ViewerReleaseClass,
+    /// What has to exist before a deferred view is worth building. A
+    /// deferral without one is an indefinite one; carrying the trigger
+    /// on the row is what stops "deferred" from meaning "abandoned".
+    pub deferral_trigger: Option<&'static str>,
+}
+
+impl ViewerDocumentDefinition {
+    /// Why this view cannot be opened, said in the row the reader is
+    /// looking at. A deferred view that names its trigger says what would
+    /// bring it back; every other row falls through to the sentence its
+    /// release class owns.
+    #[must_use]
+    pub fn unavailable_reason(&self) -> Cow<'static, str> {
+        match self.deferral_trigger {
+            Some(trigger) => Cow::Owned(format!("Deferred until {trigger}")),
+            None => Cow::Borrowed(self.release.unavailable_reason()),
+        }
+    }
 }
 
 /// Canonical result-document creation family generated with the viewer
