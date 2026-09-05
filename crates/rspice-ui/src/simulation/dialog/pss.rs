@@ -19,15 +19,6 @@ pub enum PssSolverMethod {
     HarmonicBalance,
 }
 
-impl PssSolverMethod {
-    pub fn spice_keyword(&self) -> &'static str {
-        match self {
-            Self::Shooting => "shooting",
-            Self::HarmonicBalance => "hb",
-        }
-    }
-}
-
 /// Fully parsed nine-field PSS contract.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PssConfig {
@@ -130,43 +121,62 @@ impl PssConfig {
         if !self.tolerance.is_finite() || self.tolerance <= 0.0 {
             return Err("Period tolerance must be finite and positive".to_owned());
         }
+        // The engine's own bound, taken here so the form refuses what the card
+        // cannot spell rather than letting preparation refuse the deck:
+        // `.PSS TSTABPERIODS=` is a whole number of at least one
+        // (`rspice-core/src/netlist/parser/periodic_cards.rs`, the
+        // `TSTABPERIODS` arm), and `TSTAB=0` does not mean "no stabilization"
+        // — it means "take the window from the period count" instead.
+        if self.tstab_periods == 0 {
+            return Err("Stabilization cycles must be at least 1".to_owned());
+        }
         if self.osc_mode && self.osc_node.trim().is_empty() {
             return Err("Oscillator node is required for an autonomous oscillator".to_owned());
         }
         Ok(())
     }
 
+    /// The `.PSS` card the engine reads, in the engine's own grammar.
+    ///
+    /// `rspice-core/src/netlist/parser/periodic_cards.rs::parse_pss_command`
+    /// accepts two disjoint forms: ngspice's positional oscillator card
+    /// `.PSS gfreq tstab oscnode psspoints harms sciter`, and a pure keyword
+    /// card. The studio writes the keyword form, for two reasons the engine
+    /// states itself: the positional form is autonomous by construction — it
+    /// names the node the period is detected on, so a driven solve cannot be
+    /// written in it at all — and two of its six fields, a stabilization time
+    /// in seconds and a Newton-iteration limit, are quantities this form does
+    /// not hold.
+    ///
+    /// No `tones=` key: the engine's `.PSS` has no tone field, and it needs
+    /// none. `Engine::validate_periodic_source_contract` accepts exactly the
+    /// complete elaborated source set of the deck and refuses any proper
+    /// subset, so the sources in the deck *are* the tone list, and a second
+    /// spelling of the same fact on the card would only be a key the engine
+    /// refuses.
     pub fn to_spice(&self) -> String {
-        // An autonomous run has no driven tone, and an empty `tones=` is not
-        // the same card as no `tones` key at all. The deck reader accepts a
-        // keyword argument written with spaces around the sign, so a `tones=`
-        // followed by a space takes the *next* key as its value: an autonomous
-        // card written that way read back carrying one tone source literally
-        // named `tstab_periods=20`, and a periodic spec that names a tone is a
-        // driven solve rather than an oscillator. So the key is omitted, which
-        // is how "no tones" is spelled — the same job `oscnode=-` does for the
-        // node, which the reader knows to discard.
-        let tones = if self.tone_sources.is_empty() {
-            String::new()
-        } else {
-            format!(" tones={}", self.tone_sources.join(","))
-        };
-        format!(
-            ".pss {} mode={}{} tstab_periods={} points_per_period={} tolerance={:.17e} autonomous={} oscnode={} save_harmonics={}",
+        let mut card = format!(
+            ".pss fund={} autonomous={}",
             format_freq(self.fund_freq),
-            self.method.spice_keyword(),
-            tones,
-            self.tstab_periods,
-            self.points_per_period,
-            self.tolerance,
             if self.osc_mode { "yes" } else { "no" },
-            if self.osc_node.is_empty() {
-                "-"
-            } else {
-                self.osc_node.as_str()
-            },
-            self.num_harmonics,
-        )
+        );
+        // `OSCNODE` on a card that also says `AUTONOMOUS=NO` is a conflict the
+        // engine refuses by name, so the node is written only where it means
+        // something.
+        if self.osc_mode && !self.osc_node.trim().is_empty() {
+            card.push_str(&format!(" oscnode={}", self.osc_node.trim()));
+        }
+        card.push_str(&format!(" tstabperiods={}", self.tstab_periods));
+        card.push_str(&format!(" points={}", self.points_per_period));
+        // `HARMS` is a whole number of at least one; the card has no spelling
+        // for retaining none. Nothing is lost by clamping: the shooting solve
+        // is handed `num_harmonics.max(1)` whatever the form says
+        // (`services::simulation_runner::pss::core_pss_config`), and a
+        // retention count of zero is the studio's own choice not to queue a
+        // spectrum, which is a result decision rather than an engine input.
+        card.push_str(&format!(" harms={}", self.num_harmonics.max(1)));
+        card.push_str(&format!(" tol={:.17e}", self.tolerance));
+        card
     }
 }
 
@@ -390,6 +400,55 @@ fn format_freq(frequency: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The exact card, both modes.
+    ///
+    /// `directive_parse_ratchet` proves the engine reads whatever this writes,
+    /// which is the property that matters and the one a string comparison
+    /// cannot give. This pins the other half: *which* card was written. A
+    /// driven card that quietly acquired an `oscnode=` would still parse, and
+    /// would still be a different analysis than the one the form states.
+    #[test]
+    fn the_card_states_the_solve_the_form_was_set_to() {
+        assert_eq!(
+            PssConfig {
+                tone_sources: vec!["VIN".to_owned()],
+                ..PssConfig::default()
+            }
+            .to_spice(),
+            ".pss fund=1k autonomous=no tstabperiods=20 points=512 harms=20 \
+             tol=9.99999999999999955e-8"
+        );
+        assert_eq!(
+            PssConfig {
+                osc_mode: true,
+                osc_node: "osc_out".to_owned(),
+                ..PssConfig::default()
+            }
+            .to_spice(),
+            ".pss fund=1k autonomous=yes oscnode=osc_out tstabperiods=20 points=512 harms=20 \
+             tol=9.99999999999999955e-8"
+        );
+    }
+
+    /// Retaining no spectrum still writes a card the engine can read.
+    ///
+    /// `HARMS` has no zero on the engine's card, and a project saved before
+    /// the retained count was a number carries exactly that zero — the
+    /// `save_harmonics: false` migration above produces it. The card states
+    /// the one harmonic the shooting solve is given either way.
+    #[test]
+    fn a_card_retaining_no_spectrum_still_states_a_harmonic_the_card_can_hold() {
+        assert!(
+            PssConfig {
+                tone_sources: vec!["VIN".to_owned()],
+                num_harmonics: 0,
+                ..PssConfig::default()
+            }
+            .to_spice()
+            .contains(" harms=1 "),
+        );
+    }
 
     /// A draft written before the tone list existed restores as naming none.
     ///
