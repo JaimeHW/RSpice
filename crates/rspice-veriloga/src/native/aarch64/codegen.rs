@@ -44,7 +44,7 @@ use crate::native::expr::{
 use crate::native::model::{CodeOffset, NativeStampKernelIo};
 use crate::native::ssa::{
     AllocatedInstruction, AssignmentProgram, BasicBlock, BlockId, Instruction,
-    LOGICAL_VALUE_REGISTER_COUNT, Program, RegisterAllocation, RegisterBank, Terminator,
+    LOGICAL_VALUE_REGISTER_COUNT, LoopRange, Program, RegisterAllocation, RegisterBank, Terminator,
     ValueLocation, ValueType, dynamic_variable_inline_supported, plan_shared_outputs,
 };
 use crate::native::{EvalContext, JitError, JitResult};
@@ -115,9 +115,16 @@ pub(crate) fn compile_value_function(program: &NativeProgram) -> JitResult<Vec<u
 pub(crate) fn compile_value_function_from_ssa(ssa: &Program) -> JitResult<Vec<u8>> {
     validate_expression_stack_depth(ssa.maximum_stack_depth())?;
     let allocation = RegisterAllocation::build(ssa, A64_VALUE_BANK)?;
-    let frame_bytes = spill_frame_bytes(&allocation)?;
-    let mut compiler = FunctionCompiler::new(frame_bytes, ssa.requires_call_frame())?;
-    compiler.emit_program(&ssa, &allocation)?;
+    let loops = ssa.loop_ranges()?;
+    let counters = BlockLoopCounters::new(allocation.spill_slot_count(), loops.len())?;
+    let frame_bytes = aligned_frame_bytes(counters.frame_slots())?;
+    // A back edge branches to the loop-limit helper, so a loop-carrying
+    // program is never a leaf even when its arithmetic needs no helper at all,
+    // and the link register has to be saved before it can. A loop-free program
+    // asks for exactly the frame it asked for before.
+    let calls_out = ssa.requires_call_frame() || !loops.is_empty();
+    let mut compiler = FunctionCompiler::new(frame_bytes, calls_out)?;
+    compiler.emit_program(&ssa, &allocation, &loops, counters)?;
     let bytes = compiler.finish(allocation.result())?;
     verify_exact_function(&bytes, "scalar value function")?;
     Ok(bytes)
@@ -296,9 +303,10 @@ pub(crate) fn compile_assignment_function(
     let ssa = Program::lower(program)?;
     validate_expression_stack_depth(ssa.maximum_stack_depth())?;
     let allocation = RegisterAllocation::build(&ssa, A64_VALUE_BANK)?;
-    let frame_bytes = spill_frame_bytes(&allocation)?;
+    let frame_bytes = aligned_frame_bytes(allocation.spill_slot_count())?;
     let mut compiler = FunctionCompiler::new(frame_bytes, ssa.requires_call_frame())?;
-    compiler.emit_program(&ssa, &allocation)?;
+    // The postfix lift publishes one block, so this program has no back edge.
+    compiler.emit_program(&ssa, &allocation, &[], BlockLoopCounters::NONE)?;
     let bytes = compiler.finish_assignment(allocation.result(), variable_index)?;
     verify_exact_function(&bytes, "assignment function")?;
     Ok(bytes)
@@ -662,7 +670,17 @@ fn compile_fused_kernel(
         .map(|allocation| allocation.spill_slot_count())
         .max()
         .unwrap_or(0);
-    let frame_bytes = aligned_frame_bytes(maximum_spill_slots)?;
+    // One counter band, shared by every program the kernel inlines: each of
+    // them zeroes the counters it uses on entry to its own loops, so a band
+    // wide enough for the widest program serves all of them.
+    let inlined_loop_counts = inlined_ssa()
+        .map(|program| program.loop_ranges().map(|loops| loops.len()))
+        .collect::<JitResult<Vec<_>>>()?;
+    let counters = BlockLoopCounters::new(
+        maximum_spill_slots,
+        inlined_loop_counts.into_iter().max().unwrap_or(0),
+    )?;
+    let frame_bytes = aligned_frame_bytes(counters.frame_slots())?;
     let mut compiler = FunctionCompiler::new_with_kernel_io(frame_bytes, true, true)?;
     // A module whose assignment pass has no steps emits none, and there is
     // nothing here to call - the rule the prelude below already follows.
@@ -687,7 +705,7 @@ fn compile_fused_kernel(
     {
         let skip_stamp = compiler.emit_kernel_skip_if_inactive(stamp_index)?;
         if inlines(program) {
-            compiler.emit_program(program, allocation)?;
+            compiler.emit_program(program, allocation, &program.loop_ranges()?, counters)?;
             compiler.materialize_location(allocation.result(), DReg::D0)?;
         } else {
             compiler
@@ -707,6 +725,8 @@ fn compile_fused_kernel(
                     compiler.emit_program(
                         &stamp_jacobians[representative],
                         &stamp_allocations[representative],
+                        &stamp_jacobians[representative].loop_ranges()?,
+                        counters,
                     )?;
                     compiler.materialize_location(
                         stamp_allocations[representative].result(),
@@ -845,13 +865,25 @@ impl FunctionCompiler {
         Ok(compiler)
     }
 
-    fn emit_program(&mut self, ssa: &Program, allocation: &RegisterAllocation) -> JitResult<()> {
+    fn emit_program(
+        &mut self,
+        ssa: &Program,
+        allocation: &RegisterAllocation,
+        loops: &[LoopRange],
+        counters: BlockLoopCounters,
+    ) -> JitResult<()> {
         if ssa.instructions().len() != allocation.instructions().len() {
             return Err(verifier_error(
                 "AArch64 SSA and register-allocation instruction counts differ",
             ));
         }
 
+        // Every other loop is entered through a forward edge, which zeroes its
+        // counter as it takes it. A loop headed by the entry block has no such
+        // edge, so its counter is zeroed here, once, before the body runs.
+        if let Some(index) = block_loop_counter_index(loops, ssa.entry()) {
+            self.emit_block_loop_counter_reset(counters, index)?;
+        }
         let mut block_offsets: Vec<Option<usize>> = vec![None; ssa.blocks().len()];
         let mut pending_branches: Vec<(usize, BranchPatch)> = Vec::new();
         for block in ssa.blocks() {
@@ -865,7 +897,7 @@ impl FunctionCompiler {
                 self.flush_literal_island_if_needed()?;
                 self.emit_allocated_instruction(instruction, allocated)?;
             }
-            self.emit_terminator(allocation, block, &mut pending_branches)?;
+            self.emit_terminator(allocation, block, loops, counters, &mut pending_branches)?;
         }
         for (target, patch) in pending_branches {
             let offset = block_offsets[target].ok_or_else(|| {
@@ -883,16 +915,29 @@ impl FunctionCompiler {
     /// `Return` emits nothing: the caller decides what to do with the
     /// allocation's result location, and the exit block is always last in
     /// layout order.
+    ///
+    /// Each outgoing edge is one of three things, and `loops` is what tells
+    /// them apart. A **back edge** — one whose target does not follow it in
+    /// layout — is a loop's latch, and it carries the runtime iteration guard:
+    /// [`Self::emit_block_loop_back_edge_guard`] counts the traversal and
+    /// refuses the [`MAX_RUNTIME_LOOP_ITERATIONS`]th. A forward edge whose
+    /// target is a loop *header* is an entry into that loop from outside its
+    /// range, and it zeroes the loop's counter, so the limit is per entry and
+    /// an inner loop is not charged for the trips of its outer one. Every other
+    /// edge is a plain branch.
     fn emit_terminator(
         &mut self,
         allocation: &RegisterAllocation,
         block: &BasicBlock,
+        loops: &[LoopRange],
+        counters: BlockLoopCounters,
         pending_branches: &mut Vec<(usize, BranchPatch)>,
     ) -> JitResult<()> {
         let fallthrough = block.id().index() + 1;
         match block.terminator() {
             Terminator::Return(_) => Ok(()),
             Terminator::Jump(edge) => {
+                self.emit_block_loop_edge_guard(loops, counters, block.id(), edge.target())?;
                 self.emit_edge_moves(allocation, block.id(), 0)?;
                 if edge.target().index() != fallthrough {
                     pending_branches.push((edge.target().index(), self.encoder.b_placeholder()));
@@ -924,6 +969,7 @@ impl FunctionCompiler {
                 self.encoder.fcmp_d_zero(condition);
                 let taken = self.encoder.b_cond_placeholder(Condition::NotEqual);
 
+                self.emit_block_loop_edge_guard(loops, counters, block.id(), else_edge.target())?;
                 self.emit_edge_moves(allocation, block.id(), 1)?;
                 // The taken arm's moves are laid out next, so the untaken edge
                 // always needs its own branch even when its target follows.
@@ -931,6 +977,7 @@ impl FunctionCompiler {
 
                 let taken_offset = self.encoder.position();
                 self.encoder.patch_branch(taken, taken_offset)?;
+                self.emit_block_loop_edge_guard(loops, counters, block.id(), then_edge.target())?;
                 self.emit_edge_moves(allocation, block.id(), 0)?;
                 if then_edge.target().index() != fallthrough {
                     pending_branches
@@ -939,6 +986,66 @@ impl FunctionCompiler {
                 Ok(())
             }
         }
+    }
+
+    /// Whatever the edge `source -> target` owes the runtime loop guard.
+    ///
+    /// Emitted before the edge's parallel moves, at a block boundary where X9
+    /// and X10 are dead.
+    fn emit_block_loop_edge_guard(
+        &mut self,
+        loops: &[LoopRange],
+        counters: BlockLoopCounters,
+        source: BlockId,
+        target: BlockId,
+    ) -> JitResult<()> {
+        let Some(index) = block_loop_counter_index(loops, target) else {
+            return Ok(());
+        };
+        if target > source {
+            // A forward edge into a header enters the loop from outside its
+            // range: every trip counted from here belongs to this entry.
+            self.emit_block_loop_counter_reset(counters, index)
+        } else {
+            self.emit_block_loop_back_edge_guard(counters, index)
+        }
+    }
+
+    fn emit_block_loop_counter_reset(
+        &mut self,
+        counters: BlockLoopCounters,
+        index: usize,
+    ) -> JitResult<()> {
+        let counter_offset = counters.offset(index)?;
+        self.encoder.mov_u64(XReg::X9, 0)?;
+        self.stack_store_x(XReg::X9, counter_offset)
+    }
+
+    /// Count one back-edge traversal and refuse the limit-th.
+    ///
+    /// The same sequence, the same limit and the same failure as
+    /// [`Self::emit_loop_assignment`]: increment, compare against
+    /// [`MAX_RUNTIME_LOOP_ITERATIONS`], and on reaching it call
+    /// `rspice_native_loop_limit_error` and return early, so the device sees
+    /// the recorded diagnostic instead of a hang.
+    fn emit_block_loop_back_edge_guard(
+        &mut self,
+        counters: BlockLoopCounters,
+        index: usize,
+    ) -> JitResult<()> {
+        let counter_offset = counters.offset(index)?;
+        self.stack_load_x(XReg::X9, counter_offset)?;
+        self.encoder.add_x_imm(XReg::X9, XReg::X9, 1)?;
+        self.stack_store_x(XReg::X9, counter_offset)?;
+        self.encoder
+            .mov_u64(XReg::X10, MAX_RUNTIME_LOOP_ITERATIONS)?;
+        self.encoder.cmp_x(XReg::X9, XReg::X10)?;
+        // CarryClear is the unsigned "lower than", the inverse of the
+        // CarrySet the assignment guard branches on when the limit is reached.
+        let under_limit = self.encoder.b_cond_placeholder(Condition::CarryClear);
+        self.emit_void_error_early_return(rspice_native_loop_limit_error as *const () as usize)?;
+        let under_limit_target = self.encoder.position();
+        self.encoder.patch_branch(under_limit, under_limit_target)
     }
 
     fn emit_edge_moves(
@@ -1016,7 +1123,8 @@ impl FunctionCompiler {
         validate_expression_stack_depth(program.max_stack_depth())?;
         let ssa = Program::lower(program)?;
         let allocation = RegisterAllocation::build(&ssa, A64_VALUE_BANK)?;
-        self.emit_program(&ssa, &allocation)?;
+        // One block off the postfix lift: no back edge, no counter band.
+        self.emit_program(&ssa, &allocation, &[], BlockLoopCounters::NONE)?;
         Ok(allocation.result())
     }
 
@@ -2974,6 +3082,76 @@ fn record_assignment_allocation_trace(
     }
 }
 
+/// The frame band holding a block program's runtime loop-iteration counters,
+/// one 8-byte slot per natural loop, laid out immediately above the expression
+/// spill slots.
+///
+/// Separate from [`AssignmentFrameLayout`]'s band because the two are indexed
+/// by different numbers — an assignment loop by its nesting depth, a block
+/// program's by its index in
+/// [`loop_ranges`](crate::native::ssa::Program::loop_ranges) — and no compiled
+/// function holds both: every program an assignment pass emits comes off the
+/// postfix lift, which publishes a single block and so carries no back edge.
+///
+/// A loop-free program is [`Self::NONE`], reserves nothing, and emits exactly
+/// the bytes it emitted before this band existed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct BlockLoopCounters {
+    spill_slots: usize,
+    slots: usize,
+}
+
+impl BlockLoopCounters {
+    const NONE: Self = Self {
+        spill_slots: 0,
+        slots: 0,
+    };
+
+    fn new(spill_slots: usize, slots: usize) -> JitResult<Self> {
+        spill_slots.checked_add(slots).ok_or_else(|| {
+            register_allocation_error("AArch64 loop-counter frame slot count overflow")
+        })?;
+        Ok(Self { spill_slots, slots })
+    }
+
+    /// Spill slots and counter slots together: what the frame has to hold.
+    fn frame_slots(self) -> usize {
+        self.spill_slots + self.slots
+    }
+
+    fn offset(self, index: usize) -> JitResult<usize> {
+        if index >= self.slots {
+            return Err(JitError::InternalCompilerError {
+                model: MODEL.into(),
+                detail: format!(
+                    "AArch64 block-program loop index {index} exceeds {} reserved counter slots",
+                    self.slots
+                )
+                .into(),
+            });
+        }
+        self.spill_slots
+            .checked_add(index)
+            .and_then(|slot| slot.checked_mul(WORD_BYTES))
+            .ok_or_else(|| JitError::InternalCompilerError {
+                model: MODEL.into(),
+                detail: "AArch64 loop-counter offset overflow".into(),
+            })
+    }
+}
+
+/// Which counter slot guards the loop headed by `header`, if any.
+///
+/// One slot per loop *header*.
+/// [`loop_ranges`](crate::native::ssa::Program::loop_ranges) discovers one
+/// range per back edge, so two edges closing on the same header are two ranges
+/// and one loop; they share the count, which can only make the guard fire
+/// sooner and never later. Every distinct header — every nested loop — gets its
+/// own slot, which is what makes the limit per loop rather than per program.
+fn block_loop_counter_index(loops: &[LoopRange], header: BlockId) -> Option<usize> {
+    loops.iter().position(|range| range.header() == header)
+}
+
 #[derive(Debug, Clone, Copy)]
 struct AssignmentFrameLayout {
     frame_bytes: usize,
@@ -3170,10 +3348,6 @@ fn take_temporary(used_mask: &mut u32) -> JitResult<DReg> {
     logical_register(index)
 }
 
-fn spill_frame_bytes(allocation: &RegisterAllocation) -> JitResult<usize> {
-    aligned_frame_bytes(allocation.spill_slot_count())
-}
-
 fn aligned_frame_bytes(spill_slot_count: usize) -> JitResult<usize> {
     let bytes = spill_slot_count
         .checked_mul(WORD_BYTES)
@@ -3244,6 +3418,7 @@ mod cross_target_contract_tests {
     use crate::native::aarch64::image::A64_SEGMENT_THRESHOLD_BYTES;
     use crate::native::aarch64::verifier::verify_exact_function;
     use crate::native::expr::{BinaryMathOp, NativeOp, NativeProgram};
+    use crate::native::ssa::Program;
 
     fn instruction_occurrences(bytes: &[u8], instruction: &[u8]) -> usize {
         bytes
@@ -3609,6 +3784,107 @@ mod cross_target_contract_tests {
         assert_eq!(backwards, 1, "the latch branches back to the loop header");
         verify_exact_function(&bytes, "loop-form scalar value function")
             .expect("the independent A64 decoder accepts the loop form");
+    }
+
+    /// The runtime iteration guard, encoded.
+    ///
+    /// The host running this is x86-64, so the guard is read off the image
+    /// rather than executed: the counter's increment and the call to
+    /// `rspice_native_loop_limit_error` both have to precede the backward
+    /// branch, because a guard emitted after it would never run. What the
+    /// guard *computes* — 99,999 admitted, 100,000 refused, an inner loop
+    /// counted from zero on each entry — is pinned where it can be run, in
+    /// the x64 and WebAssembly backends' own tests, over the same fixtures.
+    /// Nothing here has been executed on an AArch64 host.
+    #[test]
+    fn a_block_loop_counts_its_back_edge_before_taking_it() {
+        let ssa = Program::empty_block_loop_fixture_for_test(4.0).expect("build the loop program");
+        let bytes = super::compile_value_function_from_ssa(&ssa).expect("encode the loop");
+
+        let mut encoder = A64Encoder::new();
+        encoder
+            .add_x_imm(XReg::X9, XReg::X9, 1)
+            .expect("encode the counter increment");
+        encoder.blr(HOST_ABI.indirect_call_scratch);
+        let guard = encoder.into_bytes();
+        let (increment, call) = guard.split_at(4);
+
+        let word_index = |needle: &[u8]| {
+            bytes
+                .chunks_exact(4)
+                .position(|candidate| candidate == needle)
+                .unwrap_or_else(|| panic!("the guard's {needle:02x?} is missing from the image"))
+        };
+        let backward_index = bytes
+            .chunks_exact(4)
+            .enumerate()
+            .position(|(index, word)| {
+                let word = u32::from_le_bytes(word.try_into().expect("aligned word"));
+                let offset = ((word & 0x03FF_FFFF) << 6) as i32 >> 6;
+                word & 0xFC00_0000 == 0x1400_0000
+                    && offset < 0
+                    && (index as i64 + i64::from(offset)) >= 0
+            })
+            .expect("the latch branches back to the loop header");
+
+        assert!(
+            word_index(increment) < backward_index,
+            "the counter is incremented before the back edge is taken"
+        );
+        assert!(
+            word_index(call) < backward_index,
+            "the limit helper is reached before the back edge is taken"
+        );
+        verify_exact_function(&bytes, "guarded loop-form scalar value function")
+            .expect("the independent A64 decoder accepts the guarded loop form");
+    }
+
+    /// A program with no back edge reserves nothing and pays nothing.
+    ///
+    /// The corpus-scale form of this claim is the machine-code identity
+    /// census; here it is the local form, on the one shape that has blocks
+    /// without having a loop.
+    #[test]
+    fn a_loop_free_block_program_encodes_no_iteration_counter() {
+        let source = NativeProgram::from_ops_for_test(
+            vec![
+                NativeOp::LoadParam(0),
+                NativeOp::LoadParam(1),
+                NativeOp::LoadParam(2),
+                NativeOp::Sqrt,
+                NativeOp::IfElse,
+            ],
+            3,
+            Vec::new(),
+            Vec::new(),
+        );
+        let ssa = Program::lower(&source)
+            .expect("lower the postfix program")
+            .with_branching_conditionals()
+            .expect("re-express the conditional as a branch");
+        assert!(
+            !ssa.is_single_block() && ssa.loop_ranges().expect("loop ranges").is_empty(),
+            "the fixture must have blocks and no back edge"
+        );
+        let bytes = super::compile_value_function_from_ssa(&ssa).expect("encode the branch form");
+
+        let mut encoder = A64Encoder::new();
+        encoder
+            .add_x_imm(XReg::X9, XReg::X9, 1)
+            .expect("encode the counter increment");
+        let increment = encoder.into_bytes();
+        assert_eq!(
+            instruction_occurrences(&bytes, &increment),
+            0,
+            "a loop-free program must not carry the iteration guard"
+        );
+        assert_eq!(
+            super::BlockLoopCounters::new(3, 0)
+                .expect("empty band")
+                .frame_slots(),
+            3,
+            "no loop reserves no slot beyond the spill frame"
+        );
     }
 }
 
