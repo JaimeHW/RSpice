@@ -335,11 +335,10 @@ pub enum PortPlacementError {
     EmptyName,
     NameTooLong,
     InvalidName(&'static str),
-    /// A declared range wider than the member space a deck can name.
-    VectorTooWide {
-        declared: usize,
-        limit: usize,
-    },
+    /// The bus authority's own refusal of a range this name declares, carried
+    /// verbatim. A pin and a bus share one member space, so they share the
+    /// sentence that says a member is outside it.
+    DeclaredRange(super::BusParseError),
     /// A name the engine reads as node `0`, or a global net. Neither can be a
     /// pin of one cell.
     ReservedGroundName {
@@ -359,10 +358,7 @@ impl std::fmt::Display for PortPlacementError {
             Self::EmptyName => formatter.write_str("enter a port name"),
             Self::NameTooLong => formatter.write_str("port names are limited to 128 characters"),
             Self::InvalidName(reason) => write!(formatter, "port name: {reason}"),
-            Self::VectorTooWide { declared, limit } => write!(
-                formatter,
-                "a pin may declare at most {limit} conductors; this range declares {declared}"
-            ),
+            Self::DeclaredRange(error) => write!(formatter, "{error}"),
             Self::ReservedGroundName { name, reason } => {
                 write!(formatter, "port name `{name}` is {reason}")
             }
@@ -666,8 +662,7 @@ impl SchematicState {
     }
 }
 
-/// The one syntax rule for an interface pin's name, and the one bound on how
-/// wide that name may declare.
+/// The one syntax rule for an interface pin's name.
 ///
 /// A pin carries either one conductor or a declared vector, and the name says
 /// which: `DATA[7:0]` parses as a declaration through
@@ -677,12 +672,14 @@ impl SchematicState {
 /// rather than the bit; the deck does not carry that spelling either — a
 /// projected bit travels under its deck spelling, `DATA#3`.
 ///
-/// Width is bounded here because this is where the width is decided. Every
-/// conductor a pin declares becomes one formal of the `.SUBCKT` header and one
-/// node of every instance, so an unbounded range is an unbounded deck; the
-/// bound is [`super::MAX_BUS_MEMBER_INDEX`], the same member space the indices
-/// themselves are held to, and it is stated in conductors rather than indices
-/// so the refusal reads in the units the author typed.
+/// Width is not bounded a second time here. Every conductor a pin declares
+/// becomes one formal of the `.SUBCKT` header and one node of every instance,
+/// so an unbounded range would be an unbounded deck — but the range is already
+/// held to [`super::MAX_BUS_MEMBER_INDEX`] by the declaration parser, and a pin
+/// declares the same member space a bus does: `DATA[4095:0]` is a legal bus and
+/// a legal pin, and `D[4096:0]` is neither. A range the parser refuses is
+/// reported in the parser's own words, so the author reads one sentence about
+/// the member space wherever the range was written.
 fn validate_port_name_syntax(
     name: &str,
     policy: super::NetNamingPolicy,
@@ -694,17 +691,16 @@ fn validate_port_name_syntax(
         return Err(PortPlacementError::NameTooLong);
     }
     super::NetLabel::validate_name(name, policy).map_err(PortPlacementError::InvalidName)?;
-    if let Some(declaration) = super::declared_vector(name) {
-        let declared = declaration.width();
-        let limit = super::MAX_BUS_MEMBER_INDEX as usize;
-        if declared > limit {
-            return Err(PortPlacementError::VectorTooWide { declared, limit });
-        }
-    } else if name.contains(['[', ']', '<', '>']) {
-        return Err(PortPlacementError::InvalidName(
-            "a pin carries one conductor or a declared range such as DATA[7:0]; \
-             a single member such as DATA[3] is a bit of a bus, not a pin",
-        ));
+    if name.contains(['[', ']', '<', '>'])
+        && let Err(error) = super::BusDeclaration::parse(name)
+    {
+        return Err(match error {
+            super::BusParseError::IndexOutOfRange(_) => PortPlacementError::DeclaredRange(error),
+            _ => PortPlacementError::InvalidName(
+                "a pin carries one conductor or a declared range such as DATA[7:0]; \
+                 a single member such as DATA[3] is a bit of a bus, not a pin",
+            ),
+        });
     }
     Ok(())
 }
@@ -926,48 +922,54 @@ mod tests {
         );
     }
 
-    /// A pin's declared width is bounded by the same member space its indices
-    /// are, because every conductor it declares becomes a formal of the header
-    /// and a node of every instance. The boundary is exact, and the refusal
-    /// states both numbers so nobody has to count the bits to read it.
+    /// A pin declares the member space a bus declares — no more and no less —
+    /// and one sentence says so wherever the range was written. The whole space
+    /// is a legal pin; a member past it is refused in the bus parser's own
+    /// words rather than in a second sentence of this module's invention.
     #[test]
-    fn a_declared_range_may_not_be_wider_than_the_member_space() {
+    fn a_pin_declares_the_same_member_space_a_bus_does() {
         let mut state = SchematicState::default();
-        let limit = crate::state::MAX_BUS_MEMBER_INDEX as usize;
+        let highest = crate::state::MAX_BUS_MEMBER_INDEX as usize;
 
-        let widest = format!("D[{}:0]", limit - 1);
+        let widest = format!("D[{highest}:0]");
+        assert!(
+            crate::state::BusDeclaration::parse(&widest).is_ok(),
+            "the whole member space is a legal bus"
+        );
         assert_eq!(
             crate::state::declared_width(&widest),
-            limit,
+            highest + 1,
             "the widest accepted range spans the whole member space"
         );
         assert_eq!(state.validate_new_port_name(&widest), Ok(()));
 
-        let too_wide = format!("D[{limit}:0]");
-        assert_eq!(crate::state::declared_width(&too_wide), limit + 1);
+        let too_wide = format!("D[{}:0]", highest + 1);
+        let bus_refusal = crate::state::BusDeclaration::parse(&too_wide)
+            .expect_err("a member past the space is not a bus");
         assert_eq!(
             state.validate_new_port_name(&too_wide),
-            Err(PortPlacementError::VectorTooWide {
-                declared: limit + 1,
-                limit,
-            })
+            Err(PortPlacementError::DeclaredRange(bus_refusal.clone()))
         );
-        let message = PortPlacementError::VectorTooWide {
-            declared: limit + 1,
-            limit,
-        }
-        .to_string();
-        assert!(
-            message.contains(&limit.to_string()) && message.contains(&(limit + 1).to_string()),
-            "the refusal names the limit and the offending width: {message}"
+        assert_eq!(
+            PortPlacementError::DeclaredRange(bus_refusal.clone()).to_string(),
+            bus_refusal.to_string(),
+            "the pin reports the bus refusal verbatim"
+        );
+        assert_eq!(
+            bus_refusal.to_string(),
+            format!(
+                "bus member index {} is out of range: the highest member a bus declares is \
+                 {highest}",
+                highest + 1
+            )
         );
 
-        // The bound guards the rename and the armed placement too, so no path
-        // can arrive at a header the deck cannot carry.
+        // The member space guards the rename and the armed placement too, so no
+        // path can arrive at a header the deck cannot carry.
         let placed = port(&mut state, "EN", "dir=in");
         assert!(matches!(
             state.validate_edited_port_name(placed, &too_wide),
-            Err(PortPlacementError::VectorTooWide { .. })
+            Err(PortPlacementError::DeclaredRange(_))
         ));
         let baseline = state.components.clone();
         let pending = PendingPortPlacement::new(
@@ -979,9 +981,16 @@ mod tests {
         );
         assert!(matches!(
             state.place_pending_port(Point::origin(), pending),
-            Err(PortPlacementError::VectorTooWide { .. })
+            Err(PortPlacementError::DeclaredRange(_))
         ));
         assert_eq!(state.components, baseline);
+
+        // A bracketed name that is not a range at all still reads as the pin
+        // rule it broke, not as a member-space sentence.
+        assert!(matches!(
+            state.validate_new_port_name("D[3]"),
+            Err(PortPlacementError::InvalidName(_))
+        ));
     }
 
     #[test]
