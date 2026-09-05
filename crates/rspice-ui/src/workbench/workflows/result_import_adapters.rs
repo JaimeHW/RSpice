@@ -185,6 +185,7 @@ fn finish_dataset(
         waveforms,
         family_metadata: None,
         delimiter: 0,
+        notes: Vec::new(),
     })
 }
 

@@ -341,16 +341,89 @@ fn spice_raw_and_psf_ascii_import_real_waveforms() {
 }
 
 #[test]
-fn vcd_imports_initialized_digital_events_and_rejects_unknowns() {
+fn vcd_imports_initialized_digital_events() {
     let vcd = b"$timescale 1 ns $end\n$scope module top $end\n$var wire 1 ! clk $end\n$var wire 2 \" bus $end\n$upscope $end\n$enddefinitions $end\n#0\n0!\nb00 \"\n#5\n1!\nb01 \"\n#10\n0!\nb10 \"\n";
     let parsed = parse_vcd(vcd, ResultImportFormat::Vcd).expect("VCD");
-    assert_basic(parsed, ResultImportFormat::Vcd);
-    let unknown = b"$timescale 1 ns $end\n$scope module top $end\n$var wire 1 ! a $end\n$upscope $end\n$enddefinitions $end\n#0\nx!\n#1\n1!\n";
-    assert!(
-        parse_vcd(unknown, ResultImportFormat::Vcd)
-            .expect_err("X must reject")
-            .contains("X/Z")
+    assert!(parsed.notes.is_empty(), "a two-state file decides nothing");
+    assert_eq!(
+        parsed
+            .waveforms
+            .iter()
+            .map(|waveform| waveform.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["top.clk", "top.bus"]
     );
+    assert_eq!(parsed.waveforms[1].y.as_slice(), &[0.0, 1.0, 2.0]);
+    assert_basic(parsed, ResultImportFormat::Vcd);
+}
+
+#[test]
+fn vcd_imports_unknown_and_high_impedance_at_the_projection_level() {
+    let vcd = b"$timescale 1 ns $end\n$scope module top $end\n$var wire 1 ! a $end\n$var wire 2 \" bus $end\n$upscope $end\n$enddefinitions $end\n#0\nx!\nb0x \"\n#1\n1!\nb01 \"\n#2\nz!\nb11 \"\n";
+    let parsed = parse_vcd(vcd, ResultImportFormat::Vcd).expect("four-state VCD imports");
+    assert_eq!(parsed.waveforms[0].y.as_slice(), &[0.5, 1.0, 0.5]);
+    assert_eq!(
+        parsed.waveforms[1].y.as_slice(),
+        &[0.5, 1.0, 3.0],
+        "a vector with any unknown bit denotes no integer"
+    );
+    assert_eq!(parsed.notes.len(), 1, "the decision is stated once");
+    let note = &parsed.notes[0];
+    assert!(
+        note.starts_with("3 value changes were unknown (x) or high impedance (z)"),
+        "unexpected note: {note}"
+    );
+    assert!(note.contains("0.5"), "unexpected note: {note}");
+}
+
+#[test]
+fn vcd_refuses_only_the_signal_no_f64_sample_can_hold() {
+    let mut vcd = String::from(
+        "$timescale 1 ns $end\n$scope module top $end\n$var wire 96 ! wide $end\n$upscope $end\n$enddefinitions $end\n#0\nb",
+    );
+    vcd.push_str(&"0".repeat(96));
+    vcd.push_str(" !\n#1\nb1");
+    vcd.push_str(&"0".repeat(95));
+    vcd.push_str(" !\n");
+    let error = parse_vcd(vcd.as_bytes(), ResultImportFormat::Vcd)
+        .expect_err("a 96-bit vector has no exact f64 integer");
+    assert!(error.contains("top.wide"), "unexpected message: {error}");
+    assert!(
+        error.contains("96 bits wide"),
+        "unexpected message: {error}"
+    );
+    assert!(
+        error.contains("f64 sample"),
+        "the limit is the dataset's, not the format's: {error}"
+    );
+}
+
+#[test]
+fn vcd_aliases_share_one_timeline_under_their_own_names() {
+    let vcd = b"$timescale 1 ns $end\n$scope module top $end\n$var wire 1 ! clk $end\n$var wire 1 ! clock $end\n$upscope $end\n$enddefinitions $end\n#0\n0!\n#5\n1!\n";
+    let parsed = parse_vcd(vcd, ResultImportFormat::Vcd).expect("aliased VCD");
+    assert_eq!(
+        parsed
+            .waveforms
+            .iter()
+            .map(|waveform| waveform.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["top.clk", "top.clock"]
+    );
+    assert_eq!(parsed.waveforms[0].y, parsed.waveforms[1].y);
+    assert!(Arc::ptr_eq(&parsed.waveforms[0].y, &parsed.waveforms[1].y));
+}
+
+#[test]
+fn vcd_keeps_the_changes_a_dumpoff_block_records() {
+    let vcd = b"$timescale 1 ns $end\n$scope module top $end\n$var wire 1 ! a $end\n$upscope $end\n$enddefinitions $end\n#0\n$dumpvars\n0!\n$end\n#5\n1!\n#10\n$dumpoff\nx!\n$end\n";
+    let parsed = parse_vcd(vcd, ResultImportFormat::Vcd).expect("VCD with a dump block");
+    assert_eq!(
+        parsed.waveforms[0].y.as_slice(),
+        &[0.0, 1.0, 0.5],
+        "a $dumpoff block records that the signals stopped being dumped"
+    );
+    assert_eq!(parsed.sample_count, 3);
 }
 
 fn generated_fst() -> Vec<u8> {

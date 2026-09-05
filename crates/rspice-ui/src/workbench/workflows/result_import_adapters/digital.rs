@@ -5,7 +5,10 @@ use super::*;
 #[derive(Debug)]
 struct DigitalSignal {
     name: String,
-    width: usize,
+    /// Bits this signal's values are mapped from onto one exact `f64` sample,
+    /// or `None` when the source already carries the sample as a real number
+    /// and no integer mapping is involved.
+    width: Option<usize>,
 }
 
 #[derive(Debug)]
@@ -15,273 +18,125 @@ struct DigitalEvent {
     value: f64,
 }
 
+/// The sample an unknown or high-impedance logic value imports as.
+///
+/// The same level a native run's own tabular projection gives a digital value
+/// that is neither 0 nor 1, so an imported waveform and a solved one draw an
+/// unresolved net the same way.
+const UNKNOWN_LOGIC_LEVEL: f64 = 0.5;
+
+/// The widest vector whose unsigned integer value an `f64` sample holds
+/// exactly.
+const MAX_EXACT_VECTOR_BITS: u32 = 53;
+
+/// Import a VCD file through the core codec.
+///
+/// The codec owns the grammar — four-state values, aliases, dump blocks,
+/// timescales and every refusal — and this adapter owns only the mapping onto
+/// the analog-shaped dataset the result surfaces consume: one union grid of
+/// event times, one `f64` per signal per row.
+///
+/// Two limits belong to that mapping rather than to the format, and are stated
+/// here as such. A vector wider than [`MAX_EXACT_VECTOR_BITS`] has no exact
+/// `f64` integer, so it is refused by name — the rest of the file still
+/// imports. A value carrying `x` or `z` has no integer at all, so it imports
+/// at [`UNKNOWN_LOGIC_LEVEL`] and the dataset records how many did.
 pub(in crate::workbench::workflows) fn parse_vcd(
     bytes: &[u8],
     format: ResultImportFormat,
 ) -> Result<ParsedResultDataset, String> {
-    let text = std::str::from_utf8(bytes)
-        .map_err(|error| adapter_error(format, format_args!("source is not UTF-8: {error}")))?;
-    let mut timescale = None;
-    let mut scopes = Vec::new();
+    let mut limits = rspice_core::ResourceLimits::default();
+    limits.max_external_data_bytes = MAX_RESULT_DATASET_BYTES as usize;
+    limits.max_external_data_values = MAX_RESULT_VALUES;
+    limits.max_result_values = MAX_RESULT_VALUES;
+    let document = rspice_core::io::parse_vcd_reader_with_limits(Cursor::new(bytes), limits)
+        .map_err(|error| adapter_error(format, error))?;
+
     let mut signals: Vec<DigitalSignal> = Vec::new();
-    let mut identifiers: HashMap<String, usize> = HashMap::new();
     let mut aliases = Vec::new();
     let mut events = Vec::new();
-    let mut current_tick = 0_u64;
-    let mut in_definitions = true;
-    let mut in_dumpvars = false;
-    let mut directive = String::new();
-
-    for (line_index, raw_line) in text.lines().enumerate() {
-        let line_number = line_index + 1;
-        let line = raw_line.trim();
-        if line.is_empty() {
+    let mut unknown_changes = 0_usize;
+    for signal in document.signals {
+        let mut names = signal
+            .variables
+            .iter()
+            .map(rspice_core::io::VcdVariable::scoped_name);
+        let Some(name) = names.next() else {
             continue;
-        }
-        if line == "$dumpvars" || line == "$dumpon" {
-            in_dumpvars = true;
-            continue;
-        }
-        if in_dumpvars && line == "$end" {
-            in_dumpvars = false;
-            continue;
-        }
-        if line.starts_with('$') && !line.contains("$end") {
-            directive.clear();
-            directive.push_str(line);
-            continue;
-        }
-        let owned;
-        let line = if !directive.is_empty() {
-            directive.push(' ');
-            directive.push_str(line);
-            owned = std::mem::take(&mut directive);
-            owned.as_str()
-        } else {
-            line
         };
-        if line.starts_with("$timescale") {
-            let body = line
-                .trim_start_matches("$timescale")
-                .trim_end_matches("$end")
-                .trim();
-            if timescale
-                .replace(parse_vcd_timescale(body, format)?)
-                .is_some()
-            {
-                return Err(adapter_error(
-                    format,
-                    "VCD declares timescale more than once",
-                ));
-            }
-        } else if line.starts_with("$scope") {
-            let fields = line.split_whitespace().collect::<Vec<_>>();
-            if fields.len() < 4 || fields.last() != Some(&"$end") {
-                return Err(adapter_error(
-                    format,
-                    format_args!("malformed $scope at line {line_number}"),
-                ));
-            }
-            validate_name(format, "scope", fields[2])?;
-            scopes.push(fields[2].to_owned());
-        } else if line.starts_with("$upscope") {
-            if scopes.pop().is_none() {
-                return Err(adapter_error(
-                    format,
-                    format_args!("unbalanced $upscope at line {line_number}"),
-                ));
-            }
-        } else if line.starts_with("$var") {
-            let fields = line.split_whitespace().collect::<Vec<_>>();
-            if fields.len() < 6 || fields.last() != Some(&"$end") {
-                return Err(adapter_error(
-                    format,
-                    format_args!("malformed $var at line {line_number}"),
-                ));
-            }
-            let width = fields[2].parse::<usize>().map_err(|_| {
-                adapter_error(
-                    format,
-                    format_args!("invalid $var width at line {line_number}"),
-                )
-            })?;
-            if width == 0 || width > 53 {
-                return Err(adapter_error(
-                    format,
-                    format_args!(
-                        "VCD variable '{}' width {width} cannot be represented exactly as f64",
-                        fields[4]
-                    ),
-                ));
-            }
-            let mut name = scopes.join(".");
-            if !name.is_empty() {
-                name.push('.');
-            }
-            name.push_str(fields[4]);
-            validate_name(format, "signal", &name)?;
-            let identifier = fields[3].to_owned();
-            let signal_index = if let Some(existing) = identifiers.get(&identifier).copied() {
-                if signals[existing].width != width {
-                    return Err(adapter_error(format, "VCD alias changes declared width"));
+        let width = match signal.kind {
+            rspice_core::io::VcdSignalKind::Real => None,
+            rspice_core::io::VcdSignalKind::Logic => {
+                if signal.width > MAX_EXACT_VECTOR_BITS {
+                    return Err(adapter_error(
+                        format,
+                        format_args!(
+                            "VCD signal '{name}' is {} bits wide; an imported dataset holds one \
+                             f64 sample per signal, which represents at most \
+                             {MAX_EXACT_VECTOR_BITS} bits exactly",
+                            signal.width
+                        ),
+                    ));
                 }
-                aliases.push((existing, name));
-                existing
-            } else {
-                if signals.len() >= MAX_RESULT_COLUMNS - 1 {
-                    return Err(adapter_error(format, "VCD signal-count limit exceeded"));
-                }
-                let index = signals.len();
-                signals.push(DigitalSignal { name, width });
-                identifiers.insert(identifier, index);
-                index
-            };
-            let _ = signal_index;
-        } else if line.starts_with("$enddefinitions") {
-            in_definitions = false;
-        } else if line.starts_with('$') {
-            continue;
-        } else if in_definitions {
-            return Err(adapter_error(
-                format,
-                format_args!("unexpected VCD definition text at line {line_number}"),
-            ));
-        } else if let Some(tick) = line.strip_prefix('#') {
-            current_tick = tick.parse::<u64>().map_err(|_| {
-                adapter_error(
-                    format,
-                    format_args!("invalid timestamp at line {line_number}"),
-                )
-            })?;
-        } else {
-            let (identifier, value) = parse_vcd_change(line, format, line_number)?;
-            let signal = identifiers.get(identifier).copied().ok_or_else(|| {
-                adapter_error(
-                    format,
-                    format_args!("line {line_number} changes unknown identifier '{identifier}'"),
-                )
-            })?;
+                Some(signal.width as usize)
+            }
+        };
+        if signals.len() >= MAX_RESULT_COLUMNS - 1 {
+            return Err(adapter_error(format, "VCD signal-count limit exceeded"));
+        }
+        let index = signals.len();
+        signals.push(DigitalSignal { name, width });
+        aliases.extend(names.map(|alias| (index, alias)));
+        for change in signal.changes {
             if events.len() >= MAX_RESULT_VALUES {
                 return Err(adapter_error(format, "VCD event-count limit exceeded"));
             }
-            if value > (2_f64.powi(signals[signal].width as i32) - 1.0) {
-                return Err(adapter_error(
-                    format,
-                    format_args!("line {line_number} value exceeds declared width"),
-                ));
-            }
+            let value = match change.value {
+                rspice_core::io::VcdValue::Real(value) => value,
+                rspice_core::io::VcdValue::Logic(bits) => match vcd_bits_to_f64(&bits) {
+                    Some(value) => value,
+                    None => {
+                        unknown_changes += 1;
+                        UNKNOWN_LOGIC_LEVEL
+                    }
+                },
+            };
             events.push(DigitalEvent {
-                tick: current_tick,
-                signal,
+                tick: change.tick,
+                signal: index,
                 value,
             });
         }
     }
-    if !directive.is_empty() {
-        return Err(adapter_error(
-            format,
-            "truncated VCD directive at end of file",
+
+    let mut parsed =
+        digital_events_to_dataset(format, document.timescale.seconds(), signals, events)?;
+    append_digital_aliases(format, &mut parsed, aliases)?;
+    if unknown_changes > 0 {
+        parsed.notes.push(format!(
+            "{unknown_changes} value changes were unknown (x) or high impedance (z); each imports \
+             at the {UNKNOWN_LOGIC_LEVEL} level a solved run's digital projection uses, not as a \
+             logic 0 or 1"
         ));
     }
-    if in_definitions {
-        return Err(adapter_error(format, "VCD is missing $enddefinitions"));
-    }
-    let mut parsed = digital_events_to_dataset(
-        format,
-        timescale.ok_or_else(|| adapter_error(format, "VCD is missing $timescale"))?,
-        signals,
-        events,
-    )?;
-    append_digital_aliases(format, &mut parsed, aliases)?;
     Ok(parsed)
 }
 
-fn parse_vcd_timescale(raw: &str, format: ResultImportFormat) -> Result<f64, String> {
-    let compact = raw.split_whitespace().collect::<String>();
-    let split = compact
-        .find(|character: char| !character.is_ascii_digit())
-        .ok_or_else(|| adapter_error(format, format_args!("invalid VCD timescale '{raw}'")))?;
-    let magnitude = compact[..split]
-        .parse::<u32>()
-        .map_err(|_| adapter_error(format, format_args!("invalid VCD timescale '{raw}'")))?;
-    if !matches!(magnitude, 1 | 10 | 100) {
-        return Err(adapter_error(
-            format,
-            "VCD timescale magnitude must be 1, 10, or 100",
-        ));
-    }
-    let scale = match compact[split..].to_ascii_lowercase().as_str() {
-        "s" => 1.0,
-        "ms" => 1e-3,
-        "us" => 1e-6,
-        "ns" => 1e-9,
-        "ps" => 1e-12,
-        "fs" => 1e-15,
-        unit => {
-            return Err(adapter_error(
-                format,
-                format_args!("unsupported VCD timescale unit '{unit}'"),
-            ));
+/// The unsigned integer a four-state vector denotes, or `None` when any bit is
+/// unknown or high impedance and the vector therefore denotes no integer.
+fn vcd_bits_to_f64(bits: &[rspice_core::io::VcdBit]) -> Option<f64> {
+    let mut value = 0_u64;
+    for bit in bits {
+        value = value.checked_mul(2)?;
+        match bit {
+            rspice_core::io::VcdBit::Zero => {}
+            rspice_core::io::VcdBit::One => value += 1,
+            rspice_core::io::VcdBit::Unknown | rspice_core::io::VcdBit::HighImpedance => {
+                return None;
+            }
         }
-    };
-    Ok(f64::from(magnitude) * scale)
-}
-
-fn parse_vcd_change(
-    line: &str,
-    format: ResultImportFormat,
-    line_number: usize,
-) -> Result<(&str, f64), String> {
-    let first = line.as_bytes()[0] as char;
-    if matches!(first, '0' | '1' | 'x' | 'X' | 'z' | 'Z') {
-        if matches!(first, 'x' | 'X' | 'z' | 'Z') {
-            return Err(adapter_error(
-                format,
-                format_args!(
-                    "line {line_number} contains X/Z state that cannot be losslessly mapped to an analog trace"
-                ),
-            ));
-        }
-        let identifier = line.get(1..).unwrap_or("").trim();
-        if identifier.is_empty() {
-            return Err(adapter_error(
-                format,
-                format_args!("missing identifier at line {line_number}"),
-            ));
-        }
-        return Ok((identifier, if first == '1' { 1.0 } else { 0.0 }));
     }
-    let mut fields = line.split_whitespace();
-    let value = fields.next().unwrap_or("");
-    let identifier = fields.next().unwrap_or("");
-    if identifier.is_empty() || fields.next().is_some() {
-        return Err(adapter_error(
-            format,
-            format_args!("malformed value change at line {line_number}"),
-        ));
-    }
-    if let Some(bits) = value.strip_prefix(['b', 'B']) {
-        return Ok((identifier, logic_bits_to_f64(bits.as_bytes(), format)?));
-    }
-    if let Some(real) = value.strip_prefix(['r', 'R']) {
-        let real = real.parse::<f64>().map_err(|_| {
-            adapter_error(
-                format,
-                format_args!("invalid real change at line {line_number}"),
-            )
-        })?;
-        if !real.is_finite() {
-            return Err(adapter_error(
-                format,
-                format_args!("non-finite real change at line {line_number}"),
-            ));
-        }
-        return Ok((identifier, real));
-    }
-    Err(adapter_error(
-        format,
-        format_args!("unsupported value change at line {line_number}"),
-    ))
+    Some(value as f64)
 }
 
 fn logic_bits_to_f64(bits: &[u8], format: ResultImportFormat) -> Result<f64, String> {
@@ -1537,7 +1392,7 @@ pub(in crate::workbench::workflows) fn parse_fst(
                     }
                     by_handle.entry(handle).or_default().push(DigitalSignal {
                         name: full_name,
-                        width: length as usize,
+                        width: Some(length as usize),
                     });
                 }
                 _ => {}
@@ -1651,12 +1506,14 @@ fn digital_events_to_dataset(
     }
     for signal in &signals {
         validate_name(format, "signal", &signal.name)?;
-        if signal.width == 0 || signal.width > 53 {
+        if let Some(width) = signal.width
+            && (width == 0 || width > MAX_EXACT_VECTOR_BITS as usize)
+        {
             return Err(adapter_error(
                 format,
                 format_args!(
-                    "signal '{}' width {} cannot be represented exactly",
-                    signal.name, signal.width
+                    "signal '{}' width {width} cannot be represented exactly",
+                    signal.name
                 ),
             ));
         }

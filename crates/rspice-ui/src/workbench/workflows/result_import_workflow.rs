@@ -97,6 +97,11 @@ pub(crate) struct ParsedResultDataset {
     pub(crate) waveforms: Vec<WaveformData>,
     pub(crate) family_metadata: Option<AnalysisResultFamilyMetadata>,
     pub(crate) delimiter: u8,
+    /// What the adapter had to decide that the source did not state, in the
+    /// author's terms. An import that is complete but not literal — a
+    /// four-state VCD landing on an analog grid, say — says so here rather
+    /// than silently, and the review stage and the console both repeat it.
+    pub(crate) notes: Vec<String>,
 }
 
 /// Every import identifier declared by the neutral result-data contract.
@@ -300,6 +305,7 @@ pub(crate) fn stage_imported_result_dataset(
         sample_count: parsed.sample_count,
         waveforms: Arc::new(parsed.waveforms),
         family_metadata: parsed.family_metadata,
+        notes: parsed.notes,
         selected_signals: vec![true; signal_count],
         validation_error: None,
     };
@@ -391,6 +397,7 @@ fn parsed_result_from_draft(
         waveforms,
         family_metadata: draft.family_metadata.clone(),
         delimiter: draft.delimiter,
+        notes: draft.notes.clone(),
     })
 }
 
@@ -420,6 +427,7 @@ fn commit_parsed_result_dataset(
     let coordinate_name = parsed.coordinate_name.clone();
     let sample_count = parsed.sample_count;
     let signal_count = parsed.waveforms.len();
+    let notes = parsed.notes.clone();
     let analysis_label = match parsed.analysis_type {
         AnalysisType::Transient => format!("Imported transient · {coordinate_name}"),
         AnalysisType::Ac => format!("Imported AC · {coordinate_name}"),
@@ -484,6 +492,11 @@ fn commit_parsed_result_dataset(
     state.push_user_message(ConsoleMessage::warning(format!(
         "Dataset {dataset_id} / run {run_id} (Run {run_sequence}) is external legacy-unattributed evidence, not native RSpice solver output"
     )));
+    for note in notes {
+        state.push_user_message(ConsoleMessage::warning(format!(
+            "Dataset {dataset_id}: {note}"
+        )));
+    }
     Ok(())
 }
 
@@ -780,6 +793,12 @@ fn result_import_validate_page(ui: &mut egui::Ui, draft: &ResultImportDialogStat
             );
         });
     ui.add_space(12.0);
+    for note in &draft.notes {
+        ui.colored_label(Tokens::get(ui.ctx()).color.warn, note);
+    }
+    if !draft.notes.is_empty() {
+        ui.add_space(8.0);
+    }
     match parsed_result_from_draft(draft) {
         Ok(_) => {
             ui.colored_label(
@@ -1150,6 +1169,7 @@ fn parse_touchstone_result_dataset(
         waveforms,
         family_metadata: Some(family_metadata),
         delimiter: 0,
+        notes: Vec::new(),
     })
 }
 
@@ -1322,6 +1342,7 @@ fn parse_delimited_result_dataset(
         waveforms,
         family_metadata: None,
         delimiter,
+        notes: Vec::new(),
     })
 }
 

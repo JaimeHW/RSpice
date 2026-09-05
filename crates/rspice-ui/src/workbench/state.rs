@@ -268,6 +268,11 @@ pub struct ResultImportDialogState {
     /// Touchstone per-port reference impedances). It is committed atomically
     /// with the selected waveforms or discarded with the draft.
     pub family_metadata: Option<crate::state::AnalysisResultFamilyMetadata>,
+    /// What the adapter had to decide that the source did not state. These are
+    /// not errors — the draft is committable with them — so they are shown
+    /// beside the review summary and repeated in the console at commit,
+    /// rather than filling `validation_error`.
+    pub notes: Vec<String>,
     pub selected_signals: Vec<bool>,
     pub validation_error: Option<String>,
 }
@@ -285,6 +290,7 @@ impl Default for ResultImportDialogState {
             sample_count: 0,
             waveforms: std::sync::Arc::new(Vec::new()),
             family_metadata: None,
+            notes: Vec::new(),
             selected_signals: Vec::new(),
             validation_error: None,
         }
