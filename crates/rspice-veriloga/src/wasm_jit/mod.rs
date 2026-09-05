@@ -1290,18 +1290,20 @@ endmodule
             "no assignment entry can exist for a pass with no steps"
         );
 
-        // The control: one procedural variable and the kernel is back, so this
-        // is a statement about the pass and not about the emitter giving up.
+        // The control: one thing to assign and the kernel is back, so this is a
+        // statement about the pass and not about the emitter giving up. It has
+        // to be `$bound_step` rather than a procedural variable, because an
+        // entry that read a procedural variable would read a prelude slot and
+        // leave the pass empty here too.
         let with_assignment = r#"
 `include "disciplines.vams"
 module wasm_one_assignment(p, n);
   inout p, n;
   electrical p, n;
   parameter real resistance = 2.0 from (0:inf);
-  real voltage;
   analog begin
-    voltage = V(p, n);
-    I(p, n) <+ voltage / resistance;
+    $bound_step(1.0e-6);
+    I(p, n) <+ V(p, n) / resistance;
   end
 endmodule
 "#;
@@ -1315,16 +1317,20 @@ endmodule
 
     #[test]
     fn complete_resistor_model_uses_shared_canonical_plan() {
+        // `$bound_step` is what gives this module an assignment pass to check.
+        // The stepper reads it back out of the variable array and no entry ever
+        // reads it, so it is one of the two names a plan roots its pass on; a
+        // procedural variable would be published through a prelude slot instead
+        // and leave the pass with nothing in it.
         let source = r#"
 `include "disciplines.vams"
 module wasm_resistor(p, n);
   inout p, n;
   electrical p, n;
   parameter real resistance = 2.0 from (0:inf);
-  real voltage;
   analog begin
-    voltage = V(p, n);
-    I(p, n) <+ voltage / resistance;
+    $bound_step(1.0e-6);
+    I(p, n) <+ V(p, n) / resistance;
   end
 endmodule
 "#;
@@ -1629,6 +1635,21 @@ endmodule
             );
         }
 
+        /// The assignment pass if the module has one, exactly as the driver
+        /// calls it. A CFG plan roots the pass on what its entries read, and
+        /// entries that read prelude slots root nothing, so a module can have
+        /// no pass at all and still be whole.
+        fn call_assignments(&mut self) {
+            let Some(export) = self.artifact.assignment_export().map(str::to_owned) else {
+                return;
+            };
+            assert_eq!(
+                self.call(&export),
+                0,
+                "the assignment pass publishes without trapping"
+            );
+        }
+
         fn stamp_count(&self) -> usize {
             self.stamp_jacobians.len()
         }
@@ -1754,7 +1775,7 @@ endmodule
 `include "disciplines.vams"
 module wasm_reuse(p, n);
   inout p, n;
-  electrical p, n;
+  electrical p, n, m;
   real tmp;
   real reported;
   analog begin
@@ -1762,6 +1783,7 @@ module wasm_reuse(p, n);
     I(p, n) <+ V(p, n) * tmp;
     tmp = 1.25;
     reported = tmp;
+    I(m, n) <+ reported;
   end
 endmodule
 "#;
@@ -1773,8 +1795,14 @@ endmodule
     /// the module is compiled from the same plan and nothing else pins that the
     /// spliced copy survives into the emitted module. The expected value is the
     /// LRM's — `V * 2.5e-3` at the reading contribution's own program point —
-    /// so it cannot agree with a defect two routes share, and the later write is
-    /// read back to prove it happened.
+    /// so it cannot agree with a defect two routes share.
+    ///
+    /// The second contribution is the guard: it reads `tmp` through `reported`
+    /// after the overwrite, so a module that had simply dropped the later write
+    /// would fail it, and the first assertion would otherwise be satisfied by a
+    /// module that never wrote `tmp` twice at all. Both readings come out of
+    /// emitted code rather than out of the variable array, which is what lets
+    /// the pin stand on a plan that publishes no variable.
     #[test]
     fn a_wasm_contribution_reads_the_definition_reaching_it() {
         use std::mem::size_of;
@@ -1786,17 +1814,8 @@ endmodule
         const OVERWRITTEN: f64 = 1.25;
 
         let mut harness = FusedKernelHarness::for_source(REUSED_AFTER_READ, "wasm_reuse");
-        let reported = harness
-            .variable_names
-            .iter()
-            .position(|name| name == "reported")
-            .expect("the module declares the reporting variable");
-        let assignment_export = harness
-            .artifact
-            .assignment_export()
-            .expect("a non-empty pass exports a kernel")
-            .to_owned();
-        let value_export = harness.stamp_value_export(0);
+        let reaching_export = harness.stamp_value_export(0);
+        let overwritten_export = harness.stamp_value_export(1);
 
         harness.reset();
         harness.write_f64(FusedKernelHarness::VOLTAGES as usize, BIAS);
@@ -1804,17 +1823,19 @@ endmodule
             FusedKernelHarness::VOLTAGES as usize + size_of::<f64>(),
             0.0,
         );
-        assert_eq!(harness.call(&assignment_export), 0);
+        harness.call_assignments();
         harness.call_prelude();
-        assert_eq!(harness.call(&value_export), 0);
+        assert_eq!(harness.call(&reaching_export), 0);
 
         assert_eq!(
             harness.read_f64(FRAME_RESULT_OFFSET as usize),
             BIAS * REACHING,
             "the contribution reads tmp at its reaching definition"
         );
+
+        assert_eq!(harness.call(&overwritten_export), 0);
         assert_eq!(
-            harness.read_f64(FusedKernelHarness::VARIABLES as usize + reported * size_of::<f64>()),
+            harness.read_f64(FRAME_RESULT_OFFSET as usize),
             OVERWRITTEN,
             "the later write has to have happened, or this pin proves nothing"
         );
@@ -1839,17 +1860,12 @@ endmodule
             .evaluation_kernel_export()
             .expect("a model with no prior-current reads must fuse")
             .to_owned();
-        let assignment_export = harness
-            .artifact
-            .assignment_export()
-            .expect("a non-empty pass exports a kernel")
-            .to_owned();
         let stamp_count = harness.stamp_count();
         assert!(stamp_count >= 3, "the model must exercise several stamps");
 
         // Per-entry path: assignment kernel, then each stamp value export.
         harness.reset();
-        assert_eq!(harness.call(&assignment_export), 0);
+        harness.call_assignments();
         harness.call_prelude();
         let mut per_entry = Vec::with_capacity(stamp_count);
         for stamp in 0..stamp_count {
@@ -1912,11 +1928,6 @@ endmodule
             .stamp_kernel_export()
             .expect("a model whose Jacobians read no later contribution must fuse")
             .to_owned();
-        let assignment_export = harness
-            .artifact
-            .assignment_export()
-            .expect("a non-empty pass exports a kernel")
-            .to_owned();
         let stamp_count = harness.stamp_count();
         assert!(
             harness.stamp_jacobians.iter().any(|entries| *entries >= 2),
@@ -1927,7 +1938,7 @@ endmodule
         // Per-entry path, interleaved exactly as the driver runs it: a stamp's
         // value publishes before its own derivatives are evaluated.
         harness.reset();
-        assert_eq!(harness.call(&assignment_export), 0);
+        harness.call_assignments();
         harness.call_prelude();
         let mut per_entry = Vec::with_capacity(harness.jacobian_count());
         for stamp in 0..stamp_count {
@@ -2201,20 +2212,17 @@ endmodule
             )
             .expect("clear WASM variables");
 
-        let assignment = instance
-            .get_typed_func::<i32, i32>(
-                &store,
-                artifact
-                    .assignment_export()
-                    .expect("a non-empty pass exports a kernel"),
-            )
-            .expect("resolve WASM assignment kernel");
-        assert_eq!(
-            assignment
-                .call(&mut store, FRAME_OFFSET as i32)
-                .expect("run WASM assignment kernel"),
-            super::WASM_JIT_STATUS_OK
-        );
+        if let Some(export) = artifact.assignment_export() {
+            let assignment = instance
+                .get_typed_func::<i32, i32>(&store, export)
+                .expect("resolve WASM assignment kernel");
+            assert_eq!(
+                assignment
+                    .call(&mut store, FRAME_OFFSET as i32)
+                    .expect("run WASM assignment kernel"),
+                super::WASM_JIT_STATUS_OK
+            );
+        }
         if let Some(export) = artifact.prelude_export() {
             let prelude = instance
                 .get_typed_func::<i32, i32>(&store, export)
