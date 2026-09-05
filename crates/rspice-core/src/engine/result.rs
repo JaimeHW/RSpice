@@ -892,9 +892,9 @@ impl TransientResultCompressed {
     /// a number; read those samples from
     /// [`TransientResultCompressed::channels`], which keeps them as typed
     /// absences. A device operating-point parameter that a device did not
-    /// report is expanded back to the `NaN` padding that
-    /// `TransientResult::record_device_op_sample` writes, which is the exact
-    /// representation it was compressed from.
+    /// report is expanded back to the `NaN` a transient run writes into that
+    /// trace to keep it aligned with `time`, which is the exact representation
+    /// it was compressed from.
     pub fn try_into_transient(self) -> Result<TransientResult, String> {
         self.validate()?;
         let point_count = self.time.len();

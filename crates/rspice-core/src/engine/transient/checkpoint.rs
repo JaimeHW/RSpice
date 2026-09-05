@@ -4823,9 +4823,10 @@ impl TransientCheckpoint {
     ///
     /// Every message arrives under exactly one source. The stored accepted
     /// integration runtime carries one flat inventory that already includes
-    /// the extension-owned messages, so those are recognized on the way back
-    /// out by `TransientCheckpoint::accepted_runtime_blocker_source` rather
-    /// than reported a second time as an integration-runtime blocker.
+    /// the extension-owned messages, so those are picked back out of it by
+    /// identity — the mixed Verilog-AMS message, and whatever the image
+    /// recorded as its own XSPICE inventory, report as extension state —
+    /// rather than a second time as an integration-runtime blocker.
     pub fn capability(&self) -> TransientCheckpointCapability {
         let mut blockers = Vec::new();
         let mut push = |source, message: String| {
