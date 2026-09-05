@@ -542,8 +542,6 @@ fn hex(bytes: &[u8], count: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     // The scan itself, and the two shapes JSON loses, are pinned where they
     // live now: `crate::json_float`.
 
