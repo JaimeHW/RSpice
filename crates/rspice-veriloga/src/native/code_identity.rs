@@ -40,6 +40,49 @@ const SHIPPED_CENSUS_MODELS: usize = 43;
 /// move this pin exists to prevent — it converts a detector into a rubber
 /// stamp.
 ///
+/// # The observable set leaving the CFG plan's roots
+///
+/// `86d6920e…` moved to `556e82e4…` at W-F14c, when the CFG plan's assignment
+/// pass stopped being rooted on every externally observable variable. W-F14
+/// had already taken the postfix entries' reads off those roots; the observable
+/// set stayed because operating-point readback had nowhere else to come from,
+/// and it kept almost the whole pass alive on almost every module. A readback
+/// now compiles a pass of its own on demand
+/// ([`crate::device::VerilogADevice::observe_variables`]), so what an evaluation
+/// publishes is what the plan reads: the static conditions, the event-state
+/// leaves, and `$bound_step`/`$discontinuity`, which the stepper reads back
+/// between evaluations and no entry ever reads.
+///
+/// **Forty-one modules moved, two are byte identical, and not one image grew.**
+/// The two are exactly the W-D refusals — `mvsg_cmc` (2,861,548) and the
+/// `BSIM_SOI_100.1.1` `bsimsoi` (9,498,652) — which keep the postfix plan,
+/// whose entries do read the variable array and whose roots therefore did not
+/// change. There is no third case, and no module can be in the wrong one: a
+/// module on the CFG route that did not move would be one whose whole pass was
+/// already reachable from what its plan reads.
+///
+/// The corpus went from 354,171,040 bytes to **105,811,376, −70.13 per cent**.
+/// The largest factors are the two large `bsimsoi` variants the route accepts —
+/// the 4.6.1 `bsimsoi_va` −94.20 (14,476,364 to 839,964) and the
+/// `BSIM-SOI_4.7.0` `bsimsoi` −92.44 (14,987,868 to 1,133,260) — and
+/// `PSPNQS104VA` −80.98 (30,795,492 to 5,858,268). The smallest are `ekv_va`
+/// −16.71 and `EPFL_HEMT_10a` −16.96, two small modules with little procedural
+/// body to drop. The three `hisimhv` variants fall from 57 MiB to 12.3
+/// (`hisimhv_n5_va` 59,846,716 to 12,888,476, −78.46 per cent), which is what
+/// takes [`crate::native::SHIPPED_MODEL_NATIVE_CODE_SIZE_BUDGET_BYTES`] from 60
+/// MiB to 16, and `l_utsoi` −32.22 (7,414,136 to 5,025,336) — the module whose
+/// CFG plan was the estate's one size *and* time regression, and is now neither:
+/// [`crate::native::cfg_cost_census`] reads it at 0.644 of its postfix plan
+/// where it read 1.734 with the pass in place.
+///
+/// The time reading is the sharper half of this change and belongs here beside
+/// the bytes, because the pass the images no longer hold is a pass the CFG
+/// route was still *running* on every evaluation. On `hisimhv_n5_va` that is
+/// 4,880,238 ns per evaluation before and 41,212 after.
+///
+/// Measured 2026-09-05, peers idle, 300 s; the before column is `86d6920e…`'s
+/// own, from the run recorded in the section below.
+///
 /// # The block programs' back edges getting a counter
 ///
 /// `001961cf…` moved to `86d6920e…` at W-F14b, when every back edge of every
@@ -54,8 +97,8 @@ const SHIPPED_CENSUS_MODELS: usize = 43;
 /// module without a loop moved a byte, and not one with a loop stayed put.
 /// The corpus went from 354,110,368 bytes to **354,171,040, plus 0.017 per
 /// cent**, and the three `hisimhv` variants stay under
-/// [`crate::native::SHIPPED_MODEL_NATIVE_CODE_SIZE_BUDGET_BYTES`] with
-/// `hisimhv_n5_va` at 57.07 MiB.
+/// [`crate::native::SHIPPED_MODEL_NATIVE_CODE_SIZE_BUDGET_BYTES`], which was
+/// then 60 MiB, with `hisimhv_n5_va` at 57.07 MiB.
 ///
 /// The per-module growth divides into two rates, and both are accounted for.
 /// Fourteen modules pay only the guard, at **74 to 80 bytes per back edge**:
@@ -191,9 +234,9 @@ const SHIPPED_CENSUS_MODELS: usize = 43;
 /// readings are worth naming beyond it: `l_utsoi` grew 4.2x (2,926,408 to
 /// 12,356,892, and its `_nqs` sibling likewise), the largest factor in the
 /// corpus; and the three `hisimhv` variants — 65,119,620, 71,142,388 and
-/// 71,138,396 bytes — are now **past**
-/// [`crate::native::SHIPPED_MODEL_NATIVE_CODE_SIZE_BUDGET_BYTES`], which is 60
-/// MiB. `native_shipped_models` asserts that budget and cannot see it, because
+/// 71,138,396 bytes — were then **past**
+/// [`crate::native::SHIPPED_MODEL_NATIVE_CODE_SIZE_BUDGET_BYTES`], which stood
+/// at 60 MiB. `native_shipped_models` asserts that budget and cannot see it, because
 /// it fails earlier on `vbic13_4t` for an unrelated reason that reproduces on
 /// the pre-flip revision.
 ///
@@ -215,7 +258,7 @@ const SHIPPED_CENSUS_MODELS: usize = 43;
 /// `hicumL2va` `flicker_Pwr`, `r3_cmc` `gc`) — and the other thirty-five were
 /// digest identical (measured 2026-09-03 on `1ba20f27c`, peers idle, 893 s).
 const SHIPPED_CENSUS_DIGEST: &str =
-    "86d6920e3a7a8eec7af9879e687055dd1ffee892132c92716f01e0ac52886f8c";
+    "556e82e45b434464a31de8abf01cd71f295d800684e3364228458a5cee6dee65";
 
 /// One shipped module's compiled machine-code digest.
 struct ModelImageDigest {

@@ -83,7 +83,16 @@ pub const WASM_JIT_ABI_VERSION: u32 = 8;
 /// hundred-thousandth trip rather than hanging the worker. Same exports, same
 /// frame, one more local per loop, so again nothing but the version tells a
 /// stale worker's module from a current one.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 11;
+///
+/// 11 to 12 when the assignment kernel stopped publishing the externally
+/// observable set. An 11 emits a kernel that computes every declared variable
+/// as well as what the plan reads; a 12 emits one holding what the plan reads
+/// and the two simulator-control tasks, which for most modules is nothing at
+/// all. An 11 already knew how to omit `rspice_wasm_jit_assign` — the mechanism
+/// landed there and no module reached it — so this is the version where the
+/// export actually starts going missing, and a worker holding an 11 would both
+/// compute variables a 12 does not and call an export a 12 no longer emits.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 12;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;

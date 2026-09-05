@@ -56,7 +56,23 @@ pub use target::{Architecture, TargetSpec};
 /// complete native executable image. This is intentionally much lower than
 /// the architectural image limit: exceeding it is a code-size regression even
 /// when the backend could technically publish the image.
-pub const SHIPPED_MODEL_NATIVE_CODE_SIZE_BUDGET_BYTES: usize = 60 * 1024 * 1024;
+///
+/// # Where 16 MiB comes from
+///
+/// The largest image in the shipped estate is `hisimhv_n5_va` at 12,888,476
+/// bytes — 12.29 MiB — with `hisimhv_va` and `hisimhv_n4_va` a few thousand
+/// bytes behind it and nothing else above 5.6 MB
+/// ([`crate::native::code_identity`] prints all forty-three). 16 MiB is the
+/// smallest power-of-two number of mebibytes that clears it: it leaves 23.2 per
+/// cent of the ceiling unused, and the next size down is below the image
+/// outright.
+///
+/// It was 60 MiB, set when a CFG plan still ran the whole postfix assignment
+/// pass before its own prelude and those three images were 57 MiB each. Nothing
+/// about the ceiling made them that size and nothing about lowering it makes
+/// them smaller; it is a tripwire, and one set four and a half times above the
+/// estate would not trip on anything short of a catastrophe.
+pub const SHIPPED_MODEL_NATIVE_CODE_SIZE_BUDGET_BYTES: usize = 16 * 1024 * 1024;
 
 /// How many instructions an entry may hold and still be inlined into a fused
 /// kernel rather than called there.
