@@ -967,6 +967,25 @@ impl Program {
             .any(|instruction| instruction.effects.may_call() || instruction.effects.may_fail())
     }
 
+    /// Whether a backend must copy the entry arguments into nonvolatile
+    /// registers before running this program.
+    ///
+    /// The entry context and variable pointers arrive in volatile registers, so
+    /// a program that reads one of them *after* calling a helper has to hold
+    /// them somewhere the helper cannot reach.
+    ///
+    /// # This scan reads layout order, and only layout order
+    ///
+    /// Which is execution order for a straight-line program and for a
+    /// reconverging diamond, and is **not** execution order around a back
+    /// edge: an instruction earlier in layout runs after one later in layout on
+    /// every trip of a loop but the first. So on a program with a loop this
+    /// answers a narrower question than its name — "does a read follow a call
+    /// *in the listing*" — and a caller compiling one has to widen it itself.
+    /// Both machine backends do: a loop-carrying program keeps its entry
+    /// arguments whenever it calls a helper at all, which is also what the
+    /// runtime loop guard's own failure path needs, since that path reads the
+    /// context at the latch.
     pub(crate) fn needs_saved_entry_args(&self) -> bool {
         let mut helper_seen = false;
         for instruction in &self.instructions {
