@@ -422,24 +422,16 @@ use rspice_core::analysis::harmonic_balance::{
 //   `D(...)`/`E(...)` spellings are defined, so the decoder reads them rather
 //   than restating the format. `RawVariable::event`,
 //   `RawExporter::new_event_plot` and `VariableType::as_str` are the writer's
-//   own half.
+//   own half. Nine of the eleven were narrowed the same day; see below.
 // - 4 in `execution/event_export.rs`: `transient_event_plots`, which the CLI
 //   calls to project a transient's event histories onto those timelines;
 //   `decode_event_plots`, the inverse a reader calls; and the two types that
 //   inverse names, `RawEventTraces` and `EventPlotError`.
 // - 1 in `xspice/digital.rs`: `DigitalValue::from_event_code`, the inverse of
 //   the `event_code` beside it, which is how a code read back out of a plot
-//   becomes a value again.
+//   becomes a value again. Narrowed the same day; see below.
 // - 1 grouped re-export statement, in `execution.rs`. The two in `io.rs` were
 //   widened in place, so they cost nothing.
-//
-// Nine of the twenty have no caller outside `rspice-core` today: the five
-// `RawEventKind` accessors, `VariableType::as_str`, `RawVariable::event`,
-// `RawExporter::new_event_plot` and `DigitalValue::from_event_code`. Each is
-// reached from `execution/event_export.rs` or from `raw_export`'s own writer,
-// so each is a `pub(crate)` candidate — recorded here so the next narrowing
-// pass finds them, and so this raise is not mistaken for nine items a frontend
-// was found to need.
 //
 // 2026-09-05, +1 deliberate (4,965 -> 4,966): `abort_signal::DigitalEventCode`,
 // the one statement that lets the accepted-sample hook publish a point's
@@ -451,7 +443,34 @@ use rspice_core::analysis::harmonic_balance::{
 // It is public because `TransientSample` is — the GUI's runner both constructs
 // and reads that struct — so the field's type cannot be narrower than the
 // struct carrying it.
-const MAX_PUBLIC_ITEMS: usize = 4966;
+//
+// 2026-09-05, -9 narrowed (4,966 -> 4,957): the nine event-plot helpers the
+// raise above recorded as arrears. Re-measured across `rspice-cli`,
+// `rspice-ui`, `rspice-python`, `rspice-wasm`, `rspice-engine-adapter`,
+// `rspice-conformance` and every integration test — the CLI's VCD work has
+// landed since, so the measurement was worth redoing — and none of the nine
+// has a caller outside this crate. Each is now `pub(crate)`:
+//
+// - The five `RawEventKind` accessors, `plot_name`, `from_plot_name`,
+//   `variable_type`, `variable_name` and `node_name`. `RawEventKind` itself
+//   stays public: it is a field of `RawEventTimeline`, which the CLI builds.
+// - `VariableType::as_str`, read only by `raw_export`'s own writer.
+//   `VariableType` stays public as a field of `RawVariable`.
+// - `RawVariable::event` and `RawExporter::new_event_plot`, both reached only
+//   from `write_event_plots` two functions below them.
+// - `DigitalValue::from_event_code`, reached only from
+//   `execution/event_export.rs`, which is the decoder a frontend actually
+//   calls. `event_code`, the forward direction, stays public: the GUI, the
+//   worker contract and the sample hook all speak it.
+//
+// Left public although nothing outside the crate calls them either, because
+// narrowing would make the contract worse rather than smaller:
+// `parse_vcd_reader_with_limits` and `parse_raw_plots_reader_with_limits` are
+// the byte-slice halves of two file/reader pairs whose file halves the CLI
+// already calls — a browser has no path, so the reader half is the only form
+// the GUI and `rspice-wasm` can use — and `VCD_WRITER_VERSION` is the string a
+// consumer compares `$version` against to learn who wrote a dump.
+const MAX_PUBLIC_ITEMS: usize = 4957;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

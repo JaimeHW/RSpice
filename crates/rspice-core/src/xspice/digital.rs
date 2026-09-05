@@ -343,7 +343,7 @@ impl DigitalValue {
     /// says which of the twelve resolved states a node holds, so a value that
     /// qualified its band twice (`ZeroR` carried at `Strong`) comes back with
     /// the band its state names. Any other code is not an event code.
-    pub const fn from_event_code(code: u8) -> Option<Self> {
+    pub(crate) const fn from_event_code(code: u8) -> Option<Self> {
         let (state, strength) = match code {
             0 => (DigitalState::Zero, DigitalStrength::Strong),
             1 => (DigitalState::One, DigitalStrength::Strong),

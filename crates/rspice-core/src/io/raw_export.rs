@@ -34,7 +34,10 @@
 //! event histories.
 //!
 //! Those plots declare their version in their *name* rather than in a header
-//! key or a `Command:` line, for the reason [`RawEventKind::plot_name`] gives.
+//! key or a `Command:` line, for the reason `RawEventKind::plot_name` gives:
+//! ngspice executes any `Command:` line it does not recognise as its own and
+//! aborts the load on a header key it cannot resolve, while a plot name is
+//! free text to every reader of the format.
 
 use crate::Value;
 use rspice_output::{AtomicArtifactError, write_atomic};
@@ -65,7 +68,7 @@ pub enum VariableType {
 
 impl VariableType {
     /// The rawfile spelling of this type, as it appears in a variable line.
-    pub fn as_str(&self) -> &'static str {
+    pub(crate) fn as_str(&self) -> &'static str {
         match self {
             VariableType::Time => "time",
             VariableType::Frequency => "frequency",
@@ -101,7 +104,7 @@ impl RawEventKind {
     /// a private extension: ngspice executes any `Command:` line it does not
     /// recognise as its own and aborts the load on any header line it cannot
     /// key, while a plot name is free text to every reader of the format.
-    pub const fn plot_name(self) -> &'static str {
+    pub(crate) const fn plot_name(self) -> &'static str {
         match self {
             Self::Digital => "Digital Events (rspice-digital-events/1)",
             Self::Real => "Real Events (rspice-real-events/1)",
@@ -109,7 +112,7 @@ impl RawEventKind {
     }
 
     /// The family a plot name declares, or `None` for an ordinary plot.
-    pub fn from_plot_name(plot_name: &str) -> Option<Self> {
+    pub(crate) fn from_plot_name(plot_name: &str) -> Option<Self> {
         let plot_name = plot_name.trim();
         [Self::Digital, Self::Real]
             .into_iter()
@@ -117,7 +120,7 @@ impl RawEventKind {
     }
 
     /// The rawfile variable type of this family's value column.
-    pub const fn variable_type(self) -> VariableType {
+    pub(crate) const fn variable_type(self) -> VariableType {
         match self {
             Self::Digital => VariableType::Digital,
             Self::Real => VariableType::Real,
@@ -129,7 +132,7 @@ impl RawEventKind {
     /// `D(..)` for digital and `E(..)` for real is the spelling the workbench
     /// event sheet already reads, so a rawfile written here is one an existing
     /// reader recognises rather than a second convention.
-    pub fn variable_name(self, node_name: &str) -> String {
+    pub(crate) fn variable_name(self, node_name: &str) -> String {
         match self {
             Self::Digital => format!("D({node_name})"),
             Self::Real => format!("E({node_name})"),
@@ -137,7 +140,7 @@ impl RawEventKind {
     }
 
     /// The node one variable name spells, when it is spelled for this family.
-    pub fn node_name(self, variable_name: &str) -> Option<&str> {
+    pub(crate) fn node_name(self, variable_name: &str) -> Option<&str> {
         let prefix = match self {
             Self::Digital => "D(",
             Self::Real => "E(",
@@ -208,7 +211,7 @@ impl RawVariable {
     }
 
     /// Create the value variable of one node's event plot.
-    pub fn event(kind: RawEventKind, node_name: &str) -> Self {
+    pub(crate) fn event(kind: RawEventKind, node_name: &str) -> Self {
         Self {
             name: kind.variable_name(node_name),
             var_type: kind.variable_type(),
@@ -244,7 +247,7 @@ impl RawExporter {
     /// The plot carries exactly two variables — the node's own event times and
     /// its values — so an event plot is a complete, self-describing plot and
     /// not a private layout appended to somebody else's.
-    pub fn new_event_plot(kind: RawEventKind, node_name: &str) -> Self {
+    pub(crate) fn new_event_plot(kind: RawEventKind, node_name: &str) -> Self {
         Self {
             title: kind.plot_name().to_string(),
             plot_name: kind.plot_name().to_string(),
