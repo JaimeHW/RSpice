@@ -37,16 +37,20 @@ use crate::simulation::output_contract::{
 };
 use crate::simulation::plan::AnalysisNumericOverride;
 use crate::simulation::runner::SpecExecutionOptions;
-use crate::simulation::runner::{SimulationError, TransientSampleDelta};
+use crate::simulation::runner::{
+    SimulationError, TransientDigitalEventSample, TransientRealEventSample, TransientSampleDelta,
+};
 use crate::simulation::{AnalysisConfig, SimulationRunner, SimulationStatus};
 use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,
     AnalysisResultSourceDomain, AnalysisType, ComplexResultValue, DcOpResult,
-    MonteCarloVariableMetadata, OperatingPointValue, PeriodicNoiseOutputQuantity,
-    ReliabilityCheckpointEvidence, ReliabilityDeviceEvidence, ReliabilityShiftEvidence,
-    ReliabilityStressEvidence, SensitivityResultMode, SensitivityResultRow, SimulationRunIntent,
-    SimulationRunLifecycle, SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence,
-    SoaViolationEvidence, SoaViolationSeverityEvidence, WaveformData,
+    DigitalEventPointEvidence, DigitalEventTraceEvidence, MonteCarloVariableMetadata,
+    OperatingPointValue, PeriodicNoiseOutputQuantity, RealEventPointEvidence,
+    RealEventTraceEvidence, ReliabilityCheckpointEvidence, ReliabilityDeviceEvidence,
+    ReliabilityShiftEvidence, ReliabilityStressEvidence, SensitivityResultMode,
+    SensitivityResultRow, SimulationRunIntent, SimulationRunLifecycle, SoaEvaluationEvidence,
+    SoaParameterEvidence, SoaRuleVerdictEvidence, SoaViolationEvidence,
+    SoaViolationSeverityEvidence, WaveformData,
 };
 use crate::workbench::app_state::{ActiveViewer, AppState, SpecializedViewerCacheProvenance};
 use crate::workbench::workflows::export_workflow::ExportWorkflowIo;
@@ -115,6 +119,9 @@ pub(crate) struct SimulationCampaignDispatchReceipt {
 #[derive(Debug, Default)]
 struct LiveTransientAccumulator {
     waveforms: Vec<LiveTransientWaveform>,
+    digital_events: Vec<DigitalEventTraceEvidence>,
+    real_events: Vec<RealEventTraceEvidence>,
+    retained_event_points: usize,
 }
 
 #[derive(Debug)]
@@ -127,13 +134,28 @@ struct LiveTransientWaveform {
 impl LiveTransientAccumulator {
     const MAX_SOURCE_SAMPLES: usize = 8_192;
     const COMPACTED_SOURCE_SAMPLES: usize = crate::state::DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES;
+    /// Live event points retained across all nodes while a run is in flight.
+    ///
+    /// An event history is exact — every point is a committed transition, so
+    /// there is nothing in it a decimation could drop without lying about
+    /// when a net changed. The provisional history therefore stops growing at
+    /// this ceiling rather than being thinned, and the terminal result, which
+    /// carries the whole schedule, replaces it at completion.
+    const MAX_LIVE_EVENT_POINTS: usize = 8_192;
 
     fn clear(&mut self) {
         self.waveforms.clear();
+        self.digital_events.clear();
+        self.real_events.clear();
+        self.retained_event_points = 0;
     }
 
     fn is_empty(&self) -> bool {
-        self.waveforms.is_empty()
+        self.waveforms.is_empty() && !self.has_events()
+    }
+
+    fn has_events(&self) -> bool {
+        !self.digital_events.is_empty() || !self.real_events.is_empty()
     }
 
     fn ingest(&mut self, deltas: Vec<TransientSampleDelta>) {
@@ -153,7 +175,14 @@ impl LiveTransientAccumulator {
                     break;
                 }
             }
-            if malformed || samples.is_empty() {
+            if malformed {
+                continue;
+            }
+            // Events are per-node timelines, not columns of the shared analog
+            // grid, so they are kept whenever the message itself is sound.
+            // The alignment rule below governs only the grid.
+            self.ingest_events(delta.time, delta.events, delta.real_events);
+            if samples.is_empty() {
                 continue;
             }
 
@@ -191,6 +220,115 @@ impl LiveTransientAccumulator {
             }
         }
         self.compact_if_needed();
+    }
+
+    /// Fold one accepted point's changed event values into the provisional
+    /// per-node histories.
+    ///
+    /// The history is change-compressed and strictly increasing in time, the
+    /// same shape the engine records into a terminal result: a repeated value
+    /// or a time that does not advance is dropped for that node alone, so one
+    /// stale message cannot corrupt the nodes beside it.
+    fn ingest_events(
+        &mut self,
+        time: f64,
+        digital: Vec<TransientDigitalEventSample>,
+        real: Vec<TransientRealEventSample>,
+    ) {
+        for event in digital {
+            if self.retained_event_points >= Self::MAX_LIVE_EVENT_POINTS {
+                return;
+            }
+            if event.name.trim().is_empty()
+                || event.value_code > crate::state::MAX_DIGITAL_EVENT_CODE
+            {
+                continue;
+            }
+            let index = match self
+                .digital_events
+                .iter()
+                .position(|trace| trace.node_name == event.name)
+            {
+                Some(index) => index,
+                None => {
+                    self.digital_events.push(DigitalEventTraceEvidence {
+                        node_name: event.name,
+                        points: Vec::new(),
+                    });
+                    self.digital_events.len() - 1
+                }
+            };
+            let points = &mut self.digital_events[index].points;
+            if points
+                .last()
+                .is_some_and(|last| last.time_s >= time || last.value_code == event.value_code)
+            {
+                continue;
+            }
+            points.push(DigitalEventPointEvidence {
+                time_s: time,
+                value_code: event.value_code,
+            });
+            self.retained_event_points += 1;
+        }
+        for event in real {
+            if self.retained_event_points >= Self::MAX_LIVE_EVENT_POINTS {
+                return;
+            }
+            if event.name.trim().is_empty() || !event.value.is_finite() {
+                continue;
+            }
+            let index = match self
+                .real_events
+                .iter()
+                .position(|trace| trace.node_name == event.name)
+            {
+                Some(index) => index,
+                None => {
+                    self.real_events.push(RealEventTraceEvidence {
+                        node_name: event.name,
+                        points: Vec::new(),
+                    });
+                    self.real_events.len() - 1
+                }
+            };
+            let points = &mut self.real_events[index].points;
+            if points
+                .last()
+                .is_some_and(|last| last.time_s >= time || last.value == event.value)
+            {
+                continue;
+            }
+            points.push(RealEventPointEvidence {
+                time_s: time,
+                value: event.value,
+            });
+            self.retained_event_points += 1;
+        }
+    }
+
+    /// The provisional event schedule as retained evidence, ordered by node
+    /// name so the result digest is a function of the history alone.
+    ///
+    /// A history the validator would reject is offered as nothing at all,
+    /// exactly as the terminal conversion does: the Events sheet must never
+    /// have to decide whether its own evidence is usable.
+    fn event_payload(&self, analysis_type: AnalysisType) -> Option<AnalysisResultPayload> {
+        if !self.has_events() {
+            return None;
+        }
+        let mut digital_traces = self.digital_events.clone();
+        digital_traces.sort_by(|left, right| left.node_name.cmp(&right.node_name));
+        let mut real_traces = self.real_events.clone();
+        real_traces.sort_by(|left, right| left.node_name.cmp(&right.node_name));
+        let payload = AnalysisResultPayload::TransientEvents {
+            digital_traces,
+            real_traces,
+        };
+        payload
+            .validate_for(analysis_type)
+            .is_ok()
+            .then_some(payload)
     }
 
     /// Bound the source arrays used to build the provisional live document.
@@ -265,7 +403,12 @@ impl LiveTransientAccumulator {
                 )
             })
             .collect();
-        AnalysisResult::live_transient_partial(1, analysis_type, label).with_waveforms(waveforms)
+        let analysis = AnalysisResult::live_transient_partial(1, analysis_type, label)
+            .with_waveforms(waveforms);
+        match self.event_payload(analysis_type) {
+            Some(payload) => analysis.with_result_payload(payload),
+            None => analysis,
+        }
     }
 }
 
@@ -1327,12 +1470,17 @@ impl SimulationController {
         let source = self.live_transient.source_analysis(analysis_type, label);
         let waveforms =
             materialize_live_saved_outputs(&source, &self.current_saved_output_contracts);
-        if waveforms.is_empty() {
+        let events = self.live_transient.event_payload(analysis_type);
+        if waveforms.is_empty() && events.is_none() {
             return;
         }
         let partial = AnalysisResult::live_transient_partial(1, analysis_type, label)
             .with_waveforms(waveforms)
             .with_provenance(provenance);
+        let partial = match events {
+            Some(payload) => partial.with_result_payload(payload),
+            None => partial,
+        };
         let Some(run_id) = self.target_run_id(state) else {
             log::error!("Accepted transient samples have no target simulation run");
             return;

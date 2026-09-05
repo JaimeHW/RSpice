@@ -2095,12 +2095,16 @@ pub(crate) struct EventOrderEntry {
 
 /// The merged event order for one analysis.
 ///
-/// Built once per analysis rather than per frame: merging every node's
-/// schedule is O(events log events), and the answer only changes when the
-/// analysis does.
+/// Built once per generation of one analysis rather than per frame: merging
+/// every node's schedule is O(events log events), and the answer only changes
+/// when the evidence does. The data version is part of the key for the same
+/// reason it is part of the evidence-validity memo's — a run still accepting
+/// points republishes one analysis identity with a longer history, so identity
+/// alone would freeze the sheet at whatever it held on the frame it opened.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct EventOrderCache {
     pub analysis: AnalysisPresentationKey,
+    pub data_version: u64,
     /// Whether the rows are the committed schedule rather than a projection.
     pub exact: bool,
     pub rows: Vec<EventOrderEntry>,

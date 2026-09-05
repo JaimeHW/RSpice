@@ -962,6 +962,142 @@ fn live_transient_accumulator_rejects_partial_or_schema_changing_points() {
 }
 
 #[test]
+fn live_transient_accumulator_keeps_a_change_compressed_event_history() {
+    use crate::simulation::runner::{TransientDigitalEventSample, TransientRealEventSample};
+
+    let delta =
+        |time: f64, events: &[(&str, u8)], real_events: &[(&str, f64)]| TransientSampleDelta {
+            time,
+            waveforms: vec![crate::simulation::runner::TransientWaveformSample {
+                name: "out".to_owned(),
+                value: time,
+                y_unit: "V".to_owned(),
+            }],
+            events: events
+                .iter()
+                .map(|(name, value_code)| TransientDigitalEventSample {
+                    name: (*name).to_owned(),
+                    value_code: *value_code,
+                })
+                .collect(),
+            real_events: real_events
+                .iter()
+                .map(|(name, value)| TransientRealEventSample {
+                    name: (*name).to_owned(),
+                    value: *value,
+                })
+                .collect(),
+        };
+
+    let mut accumulator = LiveTransientAccumulator::default();
+    accumulator.ingest(vec![
+        delta(0.0, &[("clk", 0), ("d", 12)], &[("vsense", 1.5)]),
+        // A repeated value, a time that does not advance, a code outside the
+        // 12-state encoding, and a non-finite real are each dropped for their
+        // own node without disturbing the nodes beside them.
+        delta(1.0e-9, &[("clk", 0), ("bad", 13)], &[("vsense", f64::NAN)]),
+        delta(0.0, &[("d", 0)], &[]),
+        delta(2.0e-9, &[("clk", 1)], &[("vsense", 2.5)]),
+    ]);
+
+    let payload = accumulator
+        .event_payload(AnalysisType::Transient)
+        .expect("a live event history is retained");
+    let AnalysisResultPayload::TransientEvents {
+        digital_traces,
+        real_traces,
+    } = payload
+    else {
+        panic!("live events are retained as a transient event payload");
+    };
+
+    assert_eq!(
+        digital_traces
+            .iter()
+            .map(|trace| trace.node_name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["clk", "d"],
+        "an unnamed code outside the encoding must not open a trace"
+    );
+    assert_eq!(
+        digital_traces[0]
+            .points
+            .iter()
+            .map(|point| (point.time_s, point.value_code))
+            .collect::<Vec<_>>(),
+        vec![(0.0, 0), (2.0e-9, 1)]
+    );
+    assert_eq!(
+        digital_traces[1]
+            .points
+            .iter()
+            .map(|point| (point.time_s, point.value_code))
+            .collect::<Vec<_>>(),
+        vec![(0.0, 12)],
+        "a stale message replaying a time this node already has is rejected"
+    );
+    assert_eq!(
+        real_traces
+            .iter()
+            .map(|trace| trace.node_name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["vsense"]
+    );
+    assert_eq!(
+        real_traces[0]
+            .points
+            .iter()
+            .map(|point| (point.time_s, point.value))
+            .collect::<Vec<_>>(),
+        vec![(0.0, 1.5), (2.0e-9, 2.5)]
+    );
+
+    accumulator.clear();
+    assert!(accumulator.is_empty());
+    assert!(accumulator.event_payload(AnalysisType::Transient).is_none());
+}
+
+#[test]
+fn live_transient_accumulator_bounds_the_provisional_event_history() {
+    use crate::simulation::runner::TransientDigitalEventSample;
+
+    let deltas = (0..LiveTransientAccumulator::MAX_LIVE_EVENT_POINTS + 64)
+        .map(|index| TransientSampleDelta {
+            time: index as f64,
+            waveforms: Vec::new(),
+            events: vec![TransientDigitalEventSample {
+                name: "clk".to_owned(),
+                value_code: (index % 2) as u8,
+            }],
+            real_events: Vec::new(),
+        })
+        .collect();
+
+    let mut accumulator = LiveTransientAccumulator::default();
+    accumulator.ingest(deltas);
+
+    let AnalysisResultPayload::TransientEvents { digital_traces, .. } = accumulator
+        .event_payload(AnalysisType::Transient)
+        .expect("a live event history is retained")
+    else {
+        panic!("live events are retained as a transient event payload");
+    };
+    assert_eq!(
+        digital_traces[0].points.len(),
+        LiveTransientAccumulator::MAX_LIVE_EVENT_POINTS
+    );
+    assert_eq!(
+        digital_traces[0]
+            .points
+            .last()
+            .expect("the ceiling retains points")
+            .time_s,
+        (LiveTransientAccumulator::MAX_LIVE_EVENT_POINTS - 1) as f64,
+        "the provisional history stops at the ceiling rather than dropping its start"
+    );
+}
+
+#[test]
 fn live_transient_accumulator_compacts_aligned_source_traces() {
     let mut accumulator = LiveTransientAccumulator::default();
     let deltas = (0..LiveTransientAccumulator::MAX_SOURCE_SAMPLES + 1)

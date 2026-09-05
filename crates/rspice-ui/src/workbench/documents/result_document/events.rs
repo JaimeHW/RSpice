@@ -202,8 +202,16 @@ fn waveform_is_event(waveform: &WaveformData) -> bool {
     }
 }
 
+/// Whether this analysis has an event schedule worth a sheet.
+///
+/// A live partial qualifies alongside a completed run: the events it carries
+/// are the ones the engine has already committed, arriving as the run accepts
+/// them, and the manifest states the run is still going. Withholding the sheet
+/// until the run ends would hide evidence the result model already holds,
+/// which is exactly what the waveform sheets stopped doing when live partial
+/// analog landed.
 fn analysis_is_renderable(analysis: &AnalysisResult) -> bool {
-    analysis.success
+    (analysis.success || analysis.is_live_partial())
         && analysis.analysis_type == AnalysisType::Transient
         && (matches!(
             analysis.result_payload.as_ref(),
@@ -237,6 +245,7 @@ pub(super) fn active_analysis_is_renderable(state: &AppState) -> bool {
 fn build_event_order(
     analysis: &AnalysisResult,
     analysis_key: AnalysisPresentationKey,
+    data_version: u64,
 ) -> EventOrderCache {
     if let Some(AnalysisResultPayload::TransientEvents {
         digital_traces,
@@ -269,6 +278,7 @@ fn build_event_order(
         sort_event_order(analysis, &mut rows);
         return EventOrderCache {
             analysis: analysis_key,
+            data_version,
             exact: true,
             rows,
         };
@@ -315,6 +325,7 @@ fn build_event_order(
     sort_event_order(analysis, &mut rows);
     EventOrderCache {
         analysis: analysis_key,
+        data_version,
         exact: false,
         rows,
     }
@@ -435,6 +446,7 @@ fn event_rows(analysis: &AnalysisResult) -> Vec<EventRow<'_>> {
     build_event_order(
         analysis,
         AnalysisPresentationKey::new(crate::product::DatasetId::new(), analysis),
+        0,
     )
     .rows
     .iter()
@@ -559,14 +571,16 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         .active_analysis()
         .expect("active analysis was resolved above");
 
+    let data_version = state.simulation.data_version;
     if state
         .ui
         .results
         .event_order_cache
         .as_ref()
-        .is_none_or(|cache| cache.analysis != analysis_key)
+        .is_none_or(|cache| cache.analysis != analysis_key || cache.data_version != data_version)
     {
-        state.ui.results.event_order_cache = Some(build_event_order(analysis, analysis_key));
+        state.ui.results.event_order_cache =
+            Some(build_event_order(analysis, analysis_key, data_version));
     }
     let cache = state
         .ui
@@ -813,6 +827,66 @@ fn mono(ui: &mut Ui, text: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn committed_events(digital: &[(f64, u8)]) -> AnalysisResultPayload {
+        AnalysisResultPayload::TransientEvents {
+            digital_traces: vec![crate::state::DigitalEventTraceEvidence {
+                node_name: "clk".to_owned(),
+                points: digital
+                    .iter()
+                    .map(
+                        |(time_s, value_code)| crate::state::DigitalEventPointEvidence {
+                            time_s: *time_s,
+                            value_code: *value_code,
+                        },
+                    )
+                    .collect(),
+            }],
+            real_traces: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_running_analysis_offers_the_events_it_has_already_committed() {
+        let running = AnalysisResult::live_transient_partial(1, AnalysisType::Transient, "TRAN")
+            .with_result_payload(committed_events(&[(0.0, 0), (1.0e-9, 1)]));
+        assert!(
+            running.is_live_partial(),
+            "the fixture must be the provisional result the controller publishes"
+        );
+        assert!(
+            analysis_is_renderable(&running),
+            "a run still accepting points has committed events worth showing"
+        );
+
+        let failed = AnalysisResult::failed(1, AnalysisType::Transient, "TRAN", "converge")
+            .with_result_payload(committed_events(&[(0.0, 0), (1.0e-9, 1)]));
+        assert!(
+            !analysis_is_renderable(&failed),
+            "only a live partial joins successful results; a failure stays out"
+        );
+    }
+
+    #[test]
+    fn the_event_order_remembers_which_generation_of_the_evidence_it_merged() {
+        let analysis = AnalysisResult::live_transient_partial(1, AnalysisType::Transient, "TRAN")
+            .with_result_payload(committed_events(&[(0.0, 0), (1.0e-9, 1)]));
+        let key = AnalysisPresentationKey::new(crate::product::DatasetId::new(), &analysis);
+        let first = build_event_order(&analysis, key, 7);
+
+        let longer = AnalysisResult::live_transient_partial(1, AnalysisType::Transient, "TRAN")
+            .with_result_payload(committed_events(&[(0.0, 0), (1.0e-9, 1), (2.0e-9, 0)]));
+        let second = build_event_order(&longer, key, 8);
+
+        assert_eq!(first.data_version, 7);
+        assert_eq!(second.data_version, 8);
+        assert_eq!(first.rows.len(), 2);
+        assert_eq!(
+            second.rows.len(),
+            3,
+            "the same analysis identity carries a longer history one generation later"
+        );
+    }
 
     #[test]
     fn event_rows_keep_initial_value_and_only_projected_changes() {
