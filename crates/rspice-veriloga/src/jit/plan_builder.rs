@@ -46,6 +46,11 @@ pub(crate) enum AssignmentRootPolicy {
     /// keeping them was keeping a pass alive for programs the image no longer
     /// holds.
     ///
+    /// Neither is the externally observable set. An evaluation exists to
+    /// produce residuals, Jacobians and noise, and a name no part of it reads
+    /// is published only for a caller that may never ask; the one that does ask
+    /// gets it from the observation pass, compiled when it asks and not before.
+    ///
     /// What still reads a variable under this plan is named by
     /// [`mark_cfg_plan_variable_roots`].
     CfgPreludeSlots,
@@ -2894,9 +2899,10 @@ pub(crate) fn live_canonical_assignment_slots(
     limits: NativeLoweringLimits<'_>,
     policy: AssignmentRootPolicy,
 ) -> JitResult<Vec<bool>> {
-    let mut live = native_observable_assignment_roots(model);
+    let mut live = vec![false; model.num_variables];
     match policy {
         AssignmentRootPolicy::PostfixEntries => {
+            mark_observable_variable_roots(model, &mut live);
             mark_canonical_entry_variable_roots(model, mir, limits, true, &mut live)?;
         }
         AssignmentRootPolicy::CfgPreludeSlots => {
@@ -2905,7 +2911,7 @@ pub(crate) fn live_canonical_assignment_slots(
         // The observable set, and nothing beyond it: this pass exists to
         // publish those names and runs no entry that could read anything else.
         #[cfg(feature = "native")]
-        AssignmentRootPolicy::ObservationPass => {}
+        AssignmentRootPolicy::ObservationPass => mark_observable_variable_roots(model, &mut live),
     }
     propagate_live_assignment_slots(model, &mut live);
     Ok(live)
@@ -4011,19 +4017,28 @@ fn canonical_assignment_array_range(
 }
 
 pub(crate) fn native_assignment_roots(model: &CompiledModel) -> Vec<bool> {
-    let mut live = native_observable_assignment_roots(model);
+    let mut live = vec![false; model.num_variables];
+    mark_observable_variable_roots(model, &mut live);
     mark_bytecode_entry_variable_roots(model, &mut live);
     live
 }
 
-fn native_observable_assignment_roots(model: &CompiledModel) -> Vec<bool> {
-    let mut live = vec![false; model.num_variables];
+/// Every variable a caller can name through
+/// [`VerilogADevice::variable`](crate::device::VerilogADevice::variable).
+///
+/// A root of the postfix plan, whose entries read the variable array directly
+/// and whose evaluation therefore publishes the whole set anyway, and of the
+/// observation pass, which exists to publish exactly this. Not a root of the
+/// CFG plan: its entries read prelude slots, so publishing a name nothing in
+/// the plan reads is a pass held open for a reader that arrives, if at all,
+/// through
+/// [`observe_variables`](crate::device::VerilogADevice::observe_variables).
+fn mark_observable_variable_roots(model: &CompiledModel, live: &mut [bool]) {
     for (index, name) in model.variable_names.iter().enumerate().take(live.len()) {
         if native_assignment_root_is_externally_observable(name.as_str()) {
             live[index] = true;
         }
     }
-    live
 }
 
 fn mark_bytecode_entry_variable_roots(model: &CompiledModel, live: &mut [bool]) {
@@ -4065,6 +4080,17 @@ fn mark_bytecode_entry_variable_roots(model: &CompiledModel, live: &mut [bool]) 
 ///   ([`crate::native::cfg_program`]), because the runtime commits and restores
 ///   the accepted value through the variable array; the assignment that writes
 ///   it is the one the prelude is reading back.
+/// * **The simulator-control task variables.** `$bound_step` and
+///   `$discontinuity` are read back out of the array by
+///   [`VerilogADevice::try_transient_bound_step`](crate::device::VerilogADevice::try_transient_bound_step)
+///   and
+///   [`VerilogADevice::discontinuity_pending`](crate::device::VerilogADevice::discontinuity_pending),
+///   on `&self`, between evaluations, to steer the transient stepper. No entry
+///   of either plan reads them, and the structured body the CFG is built from
+///   does not carry the writes at all — the front end puts them only in the
+///   flat statement stream — so this pass is the one thing that computes them.
+///   A stepper reading the `+inf` sentinel a dropped assignment leaves behind
+///   is a model that compiles, runs, and steps wrongly.
 fn mark_cfg_plan_variable_roots(
     model: &CompiledModel,
     mir: &MirModel,
@@ -4092,8 +4118,26 @@ fn mark_cfg_plan_variable_roots(
             *root = true;
         }
     }
+    for (slot, name) in model.variable_names.iter().enumerate().take(live.len()) {
+        if SIMULATOR_CONTROL_TASK_VARIABLES.contains(&name.as_str()) {
+            live[slot] = true;
+        }
+    }
     Ok(())
 }
+
+/// The hidden variables a simulator-control task writes, named exactly as
+/// [`VerilogADevice`](crate::device::VerilogADevice) reads them back.
+///
+/// The source of truth is `SIMULATOR_CONTROL_TASK_VARIABLES` at
+/// `rust_backend/canonical.rs:4891`, where the same two names are what the
+/// generated-Rust backend refuses a model for. That constant is private, in a
+/// module of `GENERATOR_SOURCE_DIGEST_INPUTS`, and re-exporting it would move
+/// `source_tree_digest` and force a built-ins restamp for a rename this file
+/// could do without. So the two names are spelled again here, and the two
+/// spellings are held together by
+/// [`the_two_root_lists_of_simulator_control_variables_agree`](self::tests::the_two_root_lists_of_simulator_control_variables_agree).
+const SIMULATOR_CONTROL_TASK_VARIABLES: [&str; 2] = ["$bound_step", "$discontinuity"];
 
 fn mark_canonical_entry_variable_roots(
     model: &CompiledModel,
@@ -4881,6 +4925,45 @@ endmodule
         assert!(
             targets[copy + 1..].contains(&tmp),
             "and before the statement that overwrites it: {targets:?}"
+        );
+    }
+
+    /// The copy of [`SIMULATOR_CONTROL_TASK_VARIABLES`] and the original say
+    /// the same two names.
+    ///
+    /// Read out of the source because that is the only way to reach the
+    /// original: it is private to `rust_backend::canonical`, and giving it a
+    /// visibility this module could use would edit a generator digest input and
+    /// force a built-ins restamp. A rename there that this file did not follow
+    /// would otherwise silently stop rooting the task the device reads back.
+    #[test]
+    fn the_two_root_lists_of_simulator_control_variables_agree() {
+        let source = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("src")
+                .join("rust_backend")
+                .join("canonical.rs"),
+        )
+        .expect("the generator's canonical module is readable");
+        let declaration = source
+            .lines()
+            .find_map(|line| {
+                line.trim()
+                    .strip_prefix("const SIMULATOR_CONTROL_TASK_VARIABLES: [&str; 2] = [")
+            })
+            .and_then(|rest| rest.strip_suffix("];"))
+            .expect(
+                "rust_backend::canonical declares SIMULATOR_CONTROL_TASK_VARIABLES as a \
+                 two-element array on one line",
+            );
+        let original: Vec<&str> = declaration
+            .split(',')
+            .map(|name| name.trim().trim_matches('"'))
+            .collect();
+        assert_eq!(
+            original, SIMULATOR_CONTROL_TASK_VARIABLES,
+            "the CFG plan roots a different set of simulator-control tasks than the generator \
+             refuses"
         );
     }
 

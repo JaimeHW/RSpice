@@ -3623,7 +3623,11 @@ fn native_device_executes_scalar_assignments_in_source_order() {
     let mut device = native_contract_try_new("ACHAIN1", model, &[1, 0])
         .expect("assignment-chain model uses native JIT");
     assert!(device.is_using_native());
-    assert_eq!(device.native_plan_stats().assignment_entry_points, 1);
+    // No entry of a CFG plan reads either link of the chain, so the pass that
+    // used to carry it is not emitted at all and the order under test is the
+    // prelude's. The stamp below is what pins that order: a chain evaluated
+    // out of order gives a different conductance.
+    assert_eq!(device.native_plan_stats().assignment_entry_points, 0);
 
     let (matrix, rhs) = stamp_device(&mut device, &[8.0]);
 
@@ -3770,6 +3774,12 @@ endmodule
     assert!((currents[0] - 0.02).abs() < 1e-18, "currents: {currents:?}");
     assert!(device.fused_stamp_driver_is_active());
 
+    // The control. `$bound_step` is one of the two names a CFG plan roots its
+    // pass on — the stepper reads it back between evaluations and no entry ever
+    // reads it — so this module's pass has exactly one thing in it and is
+    // emitted. A procedural variable would not do: an entry that read one would
+    // read a prelude slot instead, and the pass would be empty here too, which
+    // would make the pin above a statement about nothing.
     let model = compile(
         r#"
 `include "disciplines.vams"
@@ -3777,10 +3787,9 @@ module native_one_assignment(p, n);
     inout p, n;
     electrical p, n;
     parameter real resistance = 500.0;
-    real conductance;
     analog begin
-        conductance = 1.0 / resistance;
-        I(p, n) <+ V(p, n) * conductance;
+        $bound_step(1.0e-6);
+        I(p, n) <+ V(p, n) / resistance;
     end
 endmodule
 "#,
@@ -4817,6 +4826,21 @@ fn native_device_executes_runtime_loop_assignments_without_fallback() {
     );
 }
 
+/// The device-level pin of the block program's back-edge iteration guard.
+///
+/// The `while` here used to be caught twice over. It is an
+/// `AssignmentStep::Loop` in the flat statement stream, which the assignment
+/// pass has always counted against `MAX_RUNTIME_LOOP_ITERATIONS`, and it is a
+/// back edge in the block program the CFG prelude lowers, which counted
+/// nothing. The assignment pass ran first, so its refusal is what this test
+/// saw, and the prelude's unbounded loop was never reached.
+///
+/// It is not caught twice now. `i` is read by no entry of a CFG plan — the
+/// residual reads a prelude slot — so the assignment pass no longer computes
+/// it, and the only loop left in this module's image is the block program's.
+/// The guard under test is therefore the one W-F14b gave `emit_terminator`,
+/// and this is the only place it is exercised through a device rather than
+/// through a hand-built program.
 #[cfg(target_arch = "x86_64")]
 #[test]
 fn native_runtime_loop_iteration_limit_hard_fails_without_fallback() {
@@ -4831,6 +4855,12 @@ fn native_runtime_loop_iteration_limit_hard_fails_without_fallback() {
 
     let mut device =
         native_contract_try_new("LOOPLIMIT1", model, &[1, 0]).expect("loop model uses native JIT");
+    assert_eq!(
+        device.native_plan_stats().assignment_entry_points,
+        0,
+        "the assignment-step loop is not emitted, so the only loop in this image is the block \
+         program's and the guard under test is the block program's"
+    );
     device.update_voltages(&[1.0]);
     let err = device
         .try_evaluate()
@@ -4844,6 +4874,14 @@ fn native_runtime_loop_iteration_limit_hard_fails_without_fallback() {
     );
 }
 
+/// The other half of that pin: the guarded loop must still *exit* on its own.
+///
+/// A counter that refused a loop it should have admitted would pass the limit
+/// test above and break every module that iterates. These conditions are the
+/// exact-zero cases — `-0.0`, `+0.0` and `NaN` — and like the limit test they
+/// now run in the block program the CFG prelude lowers rather than in an
+/// assignment-step loop, because nothing an entry reads keeps the assignment
+/// pass's copy alive.
 #[cfg(target_arch = "x86_64")]
 #[test]
 fn native_runtime_loop_condition_uses_exact_zero_truthiness() {
@@ -4859,6 +4897,11 @@ fn native_runtime_loop_condition_uses_exact_zero_truthiness() {
     let mut negative_zero = native_contract_try_new("LOOPTRUTH1", model.clone(), &[1, 0])
         .expect("loop truthiness model uses native JIT");
     assert!(negative_zero.is_using_native());
+    assert_eq!(
+        negative_zero.native_plan_stats().assignment_entry_points,
+        0,
+        "the condition under test is the block program's, not an assignment-step loop's"
+    );
     negative_zero.update_voltages(&[1.0]);
     let currents = negative_zero
         .try_evaluate()

@@ -1303,6 +1303,34 @@ mod tests {
     use smol_str::SmolStr;
     use std::path::{Path, PathBuf};
 
+    /// The image a readback runs: the assignment pass, rooted on the observable
+    /// set and on nothing else.
+    ///
+    /// A CFG-planned module's evaluation publishes only what its own entries
+    /// read, so a test that wants a named variable's value asks for it the way
+    /// [`VerilogADevice::observe_variables`] does — compile this, run it after
+    /// the evaluation, read the array.
+    fn observation_image(model: &CompiledModel, artifact: &CanonicalIrArtifact) -> NativeModel {
+        let plan = crate::jit::plan_builder::build_observation_plan(model, artifact)
+            .expect("observation plan builds");
+        super::compile_observation_image(model, &plan).expect("observation image compiles")
+    }
+
+    /// [`observation_image`], run in the order the device runs it.
+    fn run_observation(
+        model: &CompiledModel,
+        artifact: &CanonicalIrArtifact,
+        ctx: &EvalContext,
+        variables: *mut f64,
+    ) -> NativeModel {
+        let observation = observation_image(model, artifact);
+        observation.run_assignments(ctx, variables);
+        if observation.has_post_assignment_pass() {
+            observation.run_post_assignments(ctx, variables);
+        }
+        observation
+    }
+
     fn canonical_artifact_with_unsupported_root(
         compiler: &VerilogACompiler,
         source: &str,
@@ -2370,6 +2398,14 @@ endmodule
             panic!("native canonical assignment failed: {error}");
         }
 
+        // The evaluation publishes what its own entries read, and this plan's
+        // entry reads a prelude slot, so `x` comes back through the readback's
+        // image. That image is lowered from the same HIR, so it is the same
+        // claim: a plan built from the poisoned bytecode would say 99.
+        run_observation(&model, &artifact, &ctx, vars.as_mut_ptr());
+        if let Some(error) = ctx.take_runtime_error() {
+            panic!("native canonical observation failed: {error}");
+        }
         assert_eq!(vars[x_index].to_bits(), 6.0_f64.to_bits());
         assert_eq!(
             native
@@ -2528,16 +2564,22 @@ endmodule
         let artifact = compiler
             .compile_canonical_ir(source)
             .expect("compile canonical IR");
-        let native = compile_model_with_canonical_ir(&model, &artifact)
+        compile_model_with_canonical_ir(&model, &artifact)
             .expect("canonical guarded assignment current compiles");
+
+        // The phase split is a property of the pass that publishes
+        // `operating_current`, and under a CFG plan no entry reads it, so the
+        // pass that has it is the observation image's. Every claim below is the
+        // one the evaluation image used to carry, unchanged.
+        let observation = observation_image(&model, &artifact);
         assert_eq!(
-            native.assignment_current_pairs().len(),
+            observation.assignment_current_pairs().len(),
             0,
             "pre-current assignments must not read the terminal-current cache"
         );
-        assert_eq!(native.plan_stats().assignment_entry_points, 2);
+        assert_eq!(observation.plan_stats().assignment_entry_points, 2);
         assert_eq!(
-            native.post_assignment_prior_currents(),
+            observation.post_assignment_prior_currents(),
             &[0],
             "the post-current assignment reads the exact contribution slot"
         );
@@ -2564,8 +2606,12 @@ endmodule
         let artifact = compiler
             .compile_canonical_ir(source)
             .expect("compile canonical IR");
-        let native = compile_model_with_canonical_ir(&model, &artifact)
+        compile_model_with_canonical_ir(&model, &artifact)
             .expect("post-current assignment phases compile");
+        // Source order across the two phases is what this pins, and the pass
+        // that carries `before`, `sensed` and `after` is now the readback's:
+        // a CFG plan's entries read prelude slots and root none of the three.
+        let native = observation_image(&model, &artifact);
         let variable = |name: &str| {
             model
                 .variable_names
@@ -4787,13 +4833,30 @@ endmodule
         // one wherever it builds, so the variables its image publishes are the
         // ones that plan roots on. Reading the postfix set here would compare
         // the interpreter against slots the image no longer writes.
-        let live_variables = live_canonical_assignment_slots(
+        //
+        // A named variable outside that set is not out of scope, though — it is
+        // what the observation image publishes, and it is compared here too,
+        // after that image has run. Comparing only the evaluation's own set
+        // would let this oracle's coverage fall to whatever the CFG plan
+        // happened to keep alive, which on a dense fixture is a handful of
+        // slots out of dozens.
+        let mut live_variables = live_canonical_assignment_slots(
             model,
             &artifact.mir,
             limits,
             AssignmentRootPolicy::CfgPreludeSlots,
         )
         .map_err(|error| error.to_string())?;
+        let observable_variables = live_canonical_assignment_slots(
+            model,
+            &artifact.mir,
+            limits,
+            AssignmentRootPolicy::ObservationPass,
+        )
+        .map_err(|error| error.to_string())?;
+        for (live, observable) in live_variables.iter_mut().zip(&observable_variables) {
+            *live |= *observable;
+        }
         let mut bytecode_context = base_context.clone();
         bytecode_context.clear_currents();
         bytecode_context
@@ -4817,6 +4880,13 @@ endmodule
         ctx.clear_runtime_error();
         run_assignment_and_prelude(&native, &ctx, native_context.variables.as_mut_ptr());
         require_clean_native_context(&ctx, "assignments")?;
+        // Only the first phase, because the bytecode side ran only its
+        // pre-current steps and the loop below skips every post-current target.
+        if !native.publishes_observable_variables() {
+            let observation = observation_image(model, artifact);
+            observation.run_assignments(&ctx, native_context.variables.as_mut_ptr());
+            require_clean_native_context(&ctx, "observation")?;
+        }
 
         let mut stats = FiniteOracleStats::default();
         for (index, is_live) in live_variables.iter().copied().enumerate() {
