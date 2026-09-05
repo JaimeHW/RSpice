@@ -10,6 +10,28 @@ pub enum SignalKind {
     Current,
     DeviceObservable,
     Scalar,
+    /// A digital event node, projected onto the analysis time grid as a
+    /// `D(node)` column.
+    ///
+    /// This kind describes the *flattened* signal, not the event history it
+    /// came from. `transient_projection_signals` holds each committed value
+    /// until the next recorded event and writes one `f64` per analysis time
+    /// point: `0.0`, `1.0`, or `0.5` for anything the value does not resolve
+    /// to a level. So the twelve `state × strength` combinations the engine
+    /// resolves reach a table as three numbers, the drive strength is gone,
+    /// and `x` and `z` are indistinguishable once written.
+    ///
+    /// Real-valued event nets have no counterpart here at all: the projection
+    /// walks the digital histories only, so nothing carrying
+    /// `SignalKind::Digital` ever stands for one.
+    ///
+    /// The lossless routes past this flattening are the typed result document
+    /// (`payload.digitalTraces` / `payload.realTraces`, which keep state,
+    /// strength and the event's own time), the rawfile event plots
+    /// [`crate::io::write_event_plots`] appends, and a VCD dump
+    /// [`crate::execution::event_vcd_document`] projects — of which VCD keeps
+    /// the level and the timeline but not the strength, because the format
+    /// has four bit states and no strength to put one in.
     Digital,
 }
 
@@ -18,6 +40,13 @@ pub enum SignalKind {
 pub enum SignalValueType {
     Real,
     Complex,
+    /// A logic level carried in the same `f64` column an analog signal uses.
+    ///
+    /// It marks the column as digital for a consumer that renders or exports
+    /// it — a rawfile writes it under variable type `digital` — but it does
+    /// not widen the column: the values are the three levels
+    /// [`SignalKind::Digital`] describes, not a four-state or twelve-state
+    /// encoding.
     Logic,
 }
 
