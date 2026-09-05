@@ -16,7 +16,7 @@ use super::calling_convention::HOST_ABI;
 use super::encoder::{ConditionCode, Gpr, Rel32Patch, X64Encoder, Xmm};
 use super::ir::{
     ALLOCATABLE_VALUE_REGISTERS, AllocatedInstruction, AssignmentProgram,
-    BasicBlock as X64BasicBlock, BlockId as X64BlockId, Effects as X64Effects,
+    BasicBlock as X64BasicBlock, BlockId as X64BlockId, Effects as X64Effects, LoopRange,
     Program as X64SsaProgram, RegisterAllocation, RegisterBank, Terminator as X64Terminator,
     ValueLocation as X64ValueLocation, ValueType as X64ValueType,
     dynamic_variable_inline_supported, plan_shared_outputs,
@@ -173,22 +173,44 @@ pub(crate) fn compile_value_function_artifact_from_ssa(
 ) -> JitResult<CompiledX64Function> {
     validate_expression_stack_depth(ssa.maximum_stack_depth())?;
     let allocation = RegisterAllocation::build(&ssa, X64_VALUE_BANK)?;
+    let loops = ssa.loop_ranges()?;
     let callee_saved_xmm_count = callee_saved_xmm_count_for_allocation(&allocation);
     let expression_spill_bytes = allocation_spill_frame_bytes(&allocation)?;
+    // Above the spill slots, not below them. The encoder picks the shortest
+    // displacement form, so a band that pushed the spill slots up would add a
+    // byte to every access of the first slot and three to the sixteenth — a
+    // charge on the whole program for one loop's counter. Above them, the
+    // counters take the long displacement and nothing else moves.
+    let counters = LoopCounterBand::for_block_loops(expression_spill_bytes, loops.len())?;
     let local_frame_bytes = checked_local_frame_bytes(&[
         expression_spill_bytes,
+        counters.byte_len(),
         callee_saved_xmm_frame_bytes(callee_saved_xmm_count),
     ])?;
+    // A back edge calls the loop-limit helper, so a loop-carrying program is
+    // never a leaf even when its arithmetic needs no helper at all. Asking for
+    // the frame that pays for a call is what gives the call its Windows unwind
+    // record; a loop-free program keeps exactly the frame it asked for before.
+    let calls_out = ssa.uses_helper_calls() || !loops.is_empty();
+    // That helper is handed the evaluation context, which arrives in a
+    // volatile register. `needs_saved_entry_args` reads the instruction list
+    // in layout order, and around a back edge layout order is not execution
+    // order: a helper called in the loop body has already clobbered that
+    // register by the time the *next* trip reaches the guard. So a program
+    // that has both a loop and a helper call keeps the context in a
+    // nonvolatile one, whatever the layout scan concluded.
+    let saves_entry_args =
+        ssa.needs_saved_entry_args() || (!loops.is_empty() && ssa.uses_helper_calls());
     let mut compiler = FunctionCompiler::new(
-        ssa.uses_helper_calls(),
-        ssa.needs_saved_entry_args(),
-        ssa.uses_helper_calls() || expression_spill_bytes > 0,
+        calls_out,
+        saves_entry_args,
+        calls_out || expression_spill_bytes > 0,
         local_frame_bytes,
-        None,
+        counters,
         (expression_spill_bytes > 0).then_some(0),
         callee_saved_xmm_count,
     )?;
-    compiler.emit_allocated_program(&ssa, &allocation)?;
+    compiler.emit_allocated_program(&ssa, &allocation, &loops)?;
     let windows_unwind = compiler.windows_unwind_info();
     let body = compiler.finish_value_function()?;
     let artifact = CompiledX64Function::new(body, windows_unwind);
@@ -223,11 +245,13 @@ fn compile_assignment_function_artifact(
         ssa.uses_helper_calls(),
         ssa.uses_helper_calls() || expression_spill_bytes > 0,
         local_frame_bytes,
-        None,
+        LoopCounterBand::NONE,
         (expression_spill_bytes > 0).then_some(0),
         callee_saved_xmm_count,
     )?;
-    compiler.emit_allocated_program(&ssa, &allocation)?;
+    // The postfix lift publishes one block, so this program has no back edge
+    // and needs no counter band.
+    compiler.emit_allocated_program(&ssa, &allocation, &[])?;
     let windows_unwind = compiler.windows_unwind_info();
     let body = compiler.finish_assignment_function(var_index)?;
     let artifact = CompiledX64Function::new(body, windows_unwind);
@@ -375,6 +399,15 @@ fn compile_fused_kernel_artifact(
         .max()
         .unwrap_or(0);
     validate_expression_stack_depth(maximum_stack_depth)?;
+    // One counter band, shared by every program the kernel inlines: each of
+    // them zeroes the counters it uses on entry to its own loops, so a band
+    // wide enough for the widest program serves all of them. It sits above the
+    // spill slots for the same reason it does in a value entry — moving them
+    // would lengthen a displacement the whole kernel pays for.
+    let inlined_loop_counts = inlined_ssa()
+        .map(|program| program.loop_ranges().map(|loops| loops.len()))
+        .collect::<JitResult<Vec<_>>>()?;
+    let maximum_loop_count = inlined_loop_counts.into_iter().max().unwrap_or(0);
     let maximum_spill_slots = inlined_allocations()
         .map(|allocation| allocation.spill_slot_count())
         .max()
@@ -391,15 +424,18 @@ fn compile_fused_kernel_artifact(
                 "fused-kernel liveness spill frame exceeds the x64 displacement range".into(),
             )
         })?;
+    let counters = LoopCounterBand::for_block_loops(expression_spill_bytes, maximum_loop_count)?;
     let callee_saved_xmm_count = maximum_required_registers
         .min(XMM_STACK.len())
         .saturating_sub(CALLER_SAVED_XMM_COUNT);
     let local_frame_bytes = checked_local_frame_bytes(&[
         expression_spill_bytes,
+        counters.byte_len(),
         callee_saved_xmm_frame_bytes(callee_saved_xmm_count),
     ])?;
     let mut compiler = FunctionCompiler::new_kernel(
         local_frame_bytes,
+        counters,
         (expression_spill_bytes > 0).then_some(0),
         callee_saved_xmm_count,
     )?;
@@ -431,7 +467,7 @@ fn compile_fused_kernel_artifact(
     {
         let skip_stamp = compiler.emit_kernel_skip_if_inactive(stamp_index)?;
         if inlines(program) {
-            compiler.emit_allocated_program(program, allocation)?;
+            compiler.emit_allocated_program(program, allocation, &program.loop_ranges()?)?;
         } else {
             compiler
                 .emit_image_entry_call(kernel_image_offset, entries.stamp_values[stamp_index])?;
@@ -451,6 +487,7 @@ fn compile_fused_kernel_artifact(
                     compiler.emit_allocated_program(
                         &stamp_jacobians[representative],
                         &stamp_allocations[representative],
+                        &stamp_jacobians[representative].loop_ranges()?,
                     )?;
                 } else {
                     // One call for the whole group, exactly as one inlined body
@@ -516,18 +553,17 @@ pub(super) fn compile_assignment_pass_function_artifact(
     } else {
         0
     };
-    let loop_counter_base_disp = (loop_depth > 0).then_some(indexed_slot_bytes);
-    let loop_slot_bytes = loop_depth.checked_mul(LOCAL_SLOT_BYTES).ok_or_else(|| {
-        register_allocation_error("assignment-loop frame exceeds the x64 displacement range".into())
-    })?;
-    let expression_spill_base_disp =
-        indexed_slot_bytes
-            .checked_add(loop_slot_bytes)
-            .ok_or_else(|| {
-                register_allocation_error(
-                    "indexed-assignment frame exceeds the x64 displacement range".into(),
-                )
-            })?;
+    // Every program an assignment pass emits comes off the postfix lift, which
+    // publishes one block, so this band carries assignment nesting depths and
+    // no block-program loops at all.
+    let counters = LoopCounterBand::for_assignment_loops(indexed_slot_bytes, loop_depth)?;
+    let expression_spill_base_disp = indexed_slot_bytes
+        .checked_add(counters.byte_len())
+        .ok_or_else(|| {
+            register_allocation_error(
+                "indexed-assignment frame exceeds the x64 displacement range".into(),
+            )
+        })?;
     let expression_spill_bytes = maximum_spill_slots
         .checked_mul(WORD_BYTES)
         .and_then(|bytes| i32::try_from(bytes).ok())
@@ -547,7 +583,7 @@ pub(super) fn compile_assignment_pass_function_artifact(
         uses_helper_calls,
         uses_helper_calls || expression_spill_bytes > 0,
         local_frame_bytes,
-        loop_counter_base_disp,
+        counters,
         (expression_spill_bytes > 0).then_some(expression_spill_base_disp),
         callee_saved_xmm_count,
     )?;
@@ -573,7 +609,7 @@ pub(super) fn compile_assignment_dispatch_function_artifact(
     // The dispatcher is itself an assignment entry: it preserves the context
     // and variable pointers, calls chunks in source order, and stops at the
     // first helper-reported runtime error.
-    let mut compiler = FunctionCompiler::new(true, true, true, 0, None, None, 0)?;
+    let mut compiler = FunctionCompiler::new(true, true, true, 0, LoopCounterBand::NONE, None, 0)?;
     for chunk in chunks {
         compiler.emit_image_entry_call(function_image_offset, *chunk)?;
         compiler.emit_kernel_abort_if_failed()?;
@@ -603,13 +639,122 @@ struct FunctionCompiler {
     uses_frame_pointer: bool,
     saves_kernel_io: bool,
     local_frame_bytes: i32,
-    loop_counter_base_disp: Option<i32>,
+    loop_counters: LoopCounterBand,
     expression_spill_base_disp: Option<i32>,
     callee_saved_xmm_count: usize,
     early_return_jumps: Vec<Rel32Patch>,
     #[cfg_attr(not(windows), allow(dead_code))]
     windows_unwind_operations: Vec<WindowsX64UnwindOperation>,
     windows_unwind_prologue_size: u8,
+}
+
+/// The frame band holding runtime loop-iteration counters, one 8-byte slot
+/// each.
+///
+/// Two kinds of loop are guarded by [`MAX_RUNTIME_LOOP_ITERATIONS`] and both
+/// count in a frame slot: an [`NativeAssignment::Loop`] step, whose slot is
+/// picked by its *nesting depth* inside the assignment pass, and a block
+/// program's natural loop, whose slot is picked by its *index* in
+/// [`X64SsaProgram::loop_ranges`]. Nothing compiled here emits both — the
+/// postfix lift every assignment program comes off publishes a single block,
+/// which can carry no back edge — but the two numbering schemes are not the
+/// same number, so the band keeps them in separate halves rather than trusting
+/// that they never meet.
+///
+/// A function with neither is [`Self::NONE`], reserves nothing, and emits
+/// exactly the bytes it emitted before this band existed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct LoopCounterBand {
+    base_disp: i32,
+    assignment_slots: i32,
+    block_slots: i32,
+}
+
+impl LoopCounterBand {
+    const NONE: Self = Self {
+        base_disp: 0,
+        assignment_slots: 0,
+        block_slots: 0,
+    };
+
+    fn for_assignment_loops(base_disp: i32, depth: i32) -> JitResult<Self> {
+        Self::checked(base_disp, depth, 0)
+    }
+
+    fn for_block_loops(base_disp: i32, count: usize) -> JitResult<Self> {
+        let count = i32::try_from(count).map_err(|_| {
+            register_allocation_error(
+                "block-program loop count exceeds the x64 displacement range".into(),
+            )
+        })?;
+        Self::checked(base_disp, 0, count)
+    }
+
+    fn checked(base_disp: i32, assignment_slots: i32, block_slots: i32) -> JitResult<Self> {
+        let band = Self {
+            base_disp,
+            assignment_slots,
+            block_slots,
+        };
+        if base_disp < 0 || assignment_slots < 0 || block_slots < 0 {
+            return Err(register_allocation_error(
+                "loop-counter band has a negative extent".into(),
+            ));
+        }
+        assignment_slots
+            .checked_add(block_slots)
+            .and_then(|slots| slots.checked_mul(LOCAL_SLOT_BYTES))
+            .and_then(|bytes| base_disp.checked_add(bytes))
+            .ok_or_else(|| {
+                register_allocation_error(
+                    "loop-counter frame exceeds the x64 displacement range".into(),
+                )
+            })?;
+        Ok(band)
+    }
+
+    fn slots(self) -> i32 {
+        self.assignment_slots + self.block_slots
+    }
+
+    fn byte_len(self) -> i32 {
+        self.slots() * LOCAL_SLOT_BYTES
+    }
+
+    fn is_empty(self) -> bool {
+        self.slots() == 0
+    }
+
+    fn assignment_disp(self, depth: i32) -> JitResult<i32> {
+        if depth < 0 || depth >= self.assignment_slots {
+            return Err(JitError::InternalCompilerError {
+                model: MODEL.into(),
+                detail: format!(
+                    "assignment loop depth {depth} exceeds the {} reserved counter slots",
+                    self.assignment_slots
+                )
+                .into(),
+            });
+        }
+        Ok(self.base_disp + depth * LOCAL_SLOT_BYTES)
+    }
+
+    fn block_disp(self, index: usize) -> JitResult<i32> {
+        let index = i32::try_from(index)
+            .ok()
+            .filter(|index| *index >= 0 && *index < self.block_slots);
+        let Some(index) = index else {
+            return Err(JitError::InternalCompilerError {
+                model: MODEL.into(),
+                detail: format!(
+                    "block-program loop index exceeds the {} reserved counter slots",
+                    self.block_slots
+                )
+                .into(),
+            });
+        };
+        Ok(self.base_disp + (self.assignment_slots + index) * LOCAL_SLOT_BYTES)
+    }
 }
 
 #[derive(Debug)]
@@ -726,7 +871,7 @@ impl FunctionCompiler {
         saves_entry_args: bool,
         uses_frame_pointer: bool,
         local_frame_bytes: i32,
-        loop_counter_base_disp: Option<i32>,
+        loop_counters: LoopCounterBand,
         expression_spill_base_disp: Option<i32>,
         callee_saved_xmm_count: usize,
     ) -> JitResult<Self> {
@@ -736,7 +881,7 @@ impl FunctionCompiler {
             uses_frame_pointer,
             false,
             local_frame_bytes,
-            loop_counter_base_disp,
+            loop_counters,
             expression_spill_base_disp,
             callee_saved_xmm_count,
         )
@@ -744,6 +889,7 @@ impl FunctionCompiler {
 
     fn new_kernel(
         local_frame_bytes: i32,
+        loop_counters: LoopCounterBand,
         expression_spill_base_disp: Option<i32>,
         callee_saved_xmm_count: usize,
     ) -> JitResult<Self> {
@@ -753,7 +899,7 @@ impl FunctionCompiler {
             true,
             true,
             local_frame_bytes,
-            None,
+            loop_counters,
             expression_spill_base_disp,
             callee_saved_xmm_count,
         )
@@ -766,7 +912,7 @@ impl FunctionCompiler {
         uses_frame_pointer: bool,
         saves_kernel_io: bool,
         local_frame_bytes: i32,
-        loop_counter_base_disp: Option<i32>,
+        loop_counters: LoopCounterBand,
         expression_spill_base_disp: Option<i32>,
         callee_saved_xmm_count: usize,
     ) -> JitResult<Self> {
@@ -805,14 +951,22 @@ impl FunctionCompiler {
                 .into(),
             });
         }
-        for (name, displacement) in [
-            ("loop counter", loop_counter_base_disp),
-            ("expression spill", expression_spill_base_disp),
+        for (name, displacement, extent) in [
+            (
+                "loop counter",
+                (!loop_counters.is_empty()).then_some(loop_counters.base_disp),
+                loop_counters.byte_len(),
+            ),
+            (
+                "expression spill",
+                expression_spill_base_disp,
+                LOCAL_SLOT_BYTES,
+            ),
         ] {
             let Some(displacement) = displacement else {
                 continue;
             };
-            let slot_end = displacement.checked_add(LOCAL_SLOT_BYTES);
+            let slot_end = displacement.checked_add(extent);
             if displacement < 0 || slot_end.is_none_or(|end| end > local_frame_bytes) {
                 return Err(JitError::RegisterAllocation {
                     model: MODEL.into(),
@@ -835,7 +989,7 @@ impl FunctionCompiler {
             uses_frame_pointer,
             saves_kernel_io,
             local_frame_bytes,
-            loop_counter_base_disp,
+            loop_counters,
             expression_spill_base_disp,
             callee_saved_xmm_count,
             early_return_jumps: Vec::new(),
@@ -861,18 +1015,21 @@ impl FunctionCompiler {
         self.emit_program(&ssa)
     }
 
+    /// Emit a program the postfix lift produced, which publishes one block and
+    /// so has no back edge to guard.
     fn emit_program(&mut self, ssa: &X64SsaProgram) -> JitResult<()> {
         validate_expression_stack_depth(ssa.maximum_stack_depth())?;
         let allocation = RegisterAllocation::build(ssa, X64_VALUE_BANK)?;
-        self.emit_allocated_program(ssa, &allocation)
+        self.emit_allocated_program(ssa, &allocation, &[])
     }
 
     fn emit_allocated_program(
         &mut self,
         ssa: &X64SsaProgram,
         allocation: &RegisterAllocation,
+        loops: &[LoopRange],
     ) -> JitResult<()> {
-        self.emit_allocated_program_body(ssa, allocation, None)?;
+        self.emit_allocated_program_body(ssa, allocation, None, loops)?;
         self.materialize_allocated_result(allocation.result())
     }
 
@@ -881,6 +1038,7 @@ impl FunctionCompiler {
         ssa: &X64SsaProgram,
         allocation: &RegisterAllocation,
         assignment: Option<&AssignmentProgram>,
+        loops: &[LoopRange],
     ) -> JitResult<()> {
         if ssa.instructions().len() != allocation.instructions().len() {
             return Err(JitError::Verifier {
@@ -897,6 +1055,12 @@ impl FunctionCompiler {
 
         self.depth = 0;
         self.spilled_depth = 0;
+        // Every other loop is entered through a forward edge, which zeroes its
+        // counter as it takes it. A loop headed by the entry block has no such
+        // edge, so its counter is zeroed here, once, before the body runs.
+        if let Some(index) = block_loop_counter_index(loops, ssa.entry()) {
+            self.emit_block_loop_counter_reset(index)?;
+        }
         let mut output_index = 0_usize;
         let mut block_offsets: Vec<Option<usize>> = vec![None; ssa.blocks().len()];
         let mut pending_jumps: Vec<(usize, Rel32Patch)> = Vec::new();
@@ -1156,7 +1320,7 @@ impl FunctionCompiler {
                     }
                 }
             }
-            self.emit_terminator(allocation, block, &mut pending_jumps)?;
+            self.emit_terminator(allocation, block, loops, &mut pending_jumps)?;
         }
         if let Some(assignment) = assignment
             && output_index != assignment.outputs().len()
@@ -1186,16 +1350,28 @@ impl FunctionCompiler {
     /// `Return` emits nothing: the caller either materializes the result into
     /// XMM0 or publishes assignment outputs. The exit block is always the last
     /// block in layout order, so nothing follows it here.
+    ///
+    /// Each outgoing edge is one of three things, and `loops` is what tells
+    /// them apart. A **back edge** — one whose target does not follow it in
+    /// layout — is a loop's latch, and it carries the runtime iteration guard:
+    /// [`Self::emit_block_loop_back_edge_guard`] counts the traversal and
+    /// refuses the [`MAX_RUNTIME_LOOP_ITERATIONS`]th. A forward edge whose
+    /// target is a loop *header* is an entry into that loop from outside its
+    /// range, and it zeroes the loop's counter, so the limit is per entry and
+    /// an inner loop is not charged for the trips of its outer one. Every other
+    /// edge is a plain jump.
     fn emit_terminator(
         &mut self,
         allocation: &RegisterAllocation,
         block: &X64BasicBlock,
+        loops: &[LoopRange],
         pending_jumps: &mut Vec<(usize, Rel32Patch)>,
     ) -> JitResult<()> {
         let fallthrough = block.id().index() + 1;
         match block.terminator() {
             X64Terminator::Return(_) => Ok(()),
             X64Terminator::Jump(edge) => {
+                self.emit_block_loop_edge_guard(loops, block.id(), edge.target())?;
                 self.emit_edge_moves(allocation, block.id(), 0)?;
                 if edge.target().index() != fallthrough {
                     pending_jumps
@@ -1231,6 +1407,7 @@ impl FunctionCompiler {
                 self.encoder.test_r64_r64(Gpr::Rax, Gpr::Rax);
                 let taken = self.encoder.jcc_rel32_placeholder(ConditionCode::NotEqual);
 
+                self.emit_block_loop_edge_guard(loops, block.id(), else_edge.target())?;
                 self.emit_edge_moves(allocation, block.id(), 1)?;
                 // The taken arm's moves are laid out next, so the untaken edge
                 // always needs its own jump even when its target follows.
@@ -1240,6 +1417,7 @@ impl FunctionCompiler {
                 ));
 
                 self.patch_rel32_to_current(taken)?;
+                self.emit_block_loop_edge_guard(loops, block.id(), then_edge.target())?;
                 self.emit_edge_moves(allocation, block.id(), 0)?;
                 if then_edge.target().index() != fallthrough {
                     pending_jumps.push((
@@ -1250,6 +1428,61 @@ impl FunctionCompiler {
                 Ok(())
             }
         }
+    }
+
+    /// Whatever the edge `source -> target` owes the runtime loop guard.
+    ///
+    /// Emitted before the edge's parallel moves, at a block boundary where R10
+    /// is dead under both supported ABIs and the moves have not started using
+    /// RAX yet.
+    fn emit_block_loop_edge_guard(
+        &mut self,
+        loops: &[LoopRange],
+        source: X64BlockId,
+        target: X64BlockId,
+    ) -> JitResult<()> {
+        let Some(index) = block_loop_counter_index(loops, target) else {
+            return Ok(());
+        };
+        if target > source {
+            // A forward edge into a header enters the loop from outside its
+            // range: every trip counted from here belongs to this entry.
+            self.emit_block_loop_counter_reset(index)
+        } else {
+            self.emit_block_loop_back_edge_guard(index)
+        }
+    }
+
+    fn emit_block_loop_counter_reset(&mut self, index: usize) -> JitResult<()> {
+        let counter_disp = self.loop_counters.block_disp(index)?;
+        self.encoder.xor_r64_r64(Gpr::R10, Gpr::R10);
+        self.encoder
+            .mov_m64_base_disp32_r64(Gpr::Rsp, counter_disp, Gpr::R10);
+        Ok(())
+    }
+
+    /// Count one back-edge traversal and refuse the limit-th.
+    ///
+    /// The same counter arithmetic, the same limit and the same diagnostic as
+    /// [`Self::emit_loop_assignment`]: increment, compare against
+    /// [`MAX_RUNTIME_LOOP_ITERATIONS`], and on reaching it record
+    /// `rspice_native_loop_limit_error` and return early, so the device sees
+    /// the recorded failure instead of a hang. The return itself is
+    /// [`Self::emit_void_error_return`], the path every other void failure in
+    /// a value entry takes, which also defines XMM0 rather than returning
+    /// whatever the helper left in it.
+    fn emit_block_loop_back_edge_guard(&mut self, index: usize) -> JitResult<()> {
+        let counter_disp = self.loop_counters.block_disp(index)?;
+        self.encoder
+            .mov_r64_m64_base_disp32(Gpr::R10, Gpr::Rsp, counter_disp);
+        self.encoder.add_r64_imm32(Gpr::R10, 1);
+        self.encoder
+            .mov_m64_base_disp32_r64(Gpr::Rsp, counter_disp, Gpr::R10);
+        self.encoder
+            .cmp_r64_imm32(Gpr::R10, MAX_RUNTIME_LOOP_ITERATIONS);
+        let under_limit = self.encoder.jcc_rel32_placeholder(ConditionCode::Below);
+        self.emit_void_error_return(rspice_native_loop_limit_error);
+        self.patch_rel32_to_current(under_limit)
     }
 
     fn emit_edge_moves(
@@ -1864,7 +2097,7 @@ impl FunctionCompiler {
             .collect::<JitResult<Vec<_>>>()?;
         let assignment = AssignmentProgram::lower(&direct)?;
         let allocation = RegisterAllocation::build_for_assignments(&assignment, X64_VALUE_BANK)?;
-        self.emit_allocated_program_body(assignment.program(), &allocation, Some(&assignment))
+        self.emit_allocated_program_body(assignment.program(), &allocation, Some(&assignment), &[])
     }
 
     fn emit_loop_assignment(
@@ -1873,7 +2106,7 @@ impl FunctionCompiler {
         body: &[NativeAssignment],
         loop_depth: i32,
     ) -> JitResult<()> {
-        let counter_disp = self.loop_counter_disp(loop_depth)?;
+        let counter_disp = self.loop_counters.assignment_disp(loop_depth)?;
         self.encoder.xor_r64_r64(Gpr::R10, Gpr::R10);
         self.encoder
             .mov_m64_base_disp32_r64(Gpr::Rsp, counter_disp, Gpr::R10);
@@ -1901,16 +2134,6 @@ impl FunctionCompiler {
         self.early_return_jumps.push(return_after_error);
         self.patch_rel32_to_current(loop_exit)?;
         Ok(())
-    }
-
-    fn loop_counter_disp(&self, loop_depth: i32) -> JitResult<i32> {
-        let Some(base_disp) = self.loop_counter_base_disp else {
-            return Err(JitError::InternalCompilerError {
-                model: MODEL.into(),
-                detail: "loop assignment emitted without loop-counter frame slot".into(),
-            });
-        };
-        Ok(base_disp + loop_depth * LOCAL_SLOT_BYTES)
     }
 
     fn emit_loop_exit_if_zero(&mut self) -> JitResult<Rel32Patch> {
@@ -4608,6 +4831,18 @@ fn assignment_loop_depth(assignments: &[NativeAssignment]) -> JitResult<i32> {
     Ok(maximum_depth)
 }
 
+/// Which counter slot guards the loop headed by `header`, if any.
+///
+/// One slot per loop *header*.
+/// [`natural_loops`](crate::native::ssa::Program::loop_ranges) discovers one
+/// range per back edge, so two edges closing on the same header are two ranges
+/// and one loop; they share the count, which can only make the guard fire
+/// sooner and never later. Every distinct header — every nested loop — gets its
+/// own slot, which is what makes the limit per loop rather than per program.
+fn block_loop_counter_index(loops: &[LoopRange], header: X64BlockId) -> Option<usize> {
+    loops.iter().position(|range| range.header() == header)
+}
+
 fn checked_local_frame_bytes(components: &[i32]) -> JitResult<i32> {
     let unaligned_bytes = components.iter().try_fold(0_i32, |total, component| {
         if *component < 0 {
@@ -4906,10 +5141,10 @@ mod tests {
         ABS_VALUE_MASK_HIGH, ABS_VALUE_MASK_LOW, BRANCH_CURRENTS_OFFSET, ConditionCode,
         ContextFilterHelper, DYNAMIC_READ_FRAME_BYTES, FunctionCompiler, Gpr,
         I64_MAX_EXCLUSIVE_AS_F64, I64_MIN_AS_F64, INTERNAL_VOLTAGES_OFFSET, K_BOLTZMANN,
-        LITERAL_POOL_ALIGNMENT, NativeAssignment, OperandContextFilterHelper, PARAMS_OFFSET,
-        Q_ELECTRON, ROUND_TEMP_FRAME_BYTES, STACK_PROBE_INTERVAL_BYTES, THERMAL_VOLTAGE_PER_K,
-        TableHelper, VECTOR_LITERAL_ALIGNMENT, VOLTAGES_OFFSET, X64Encoder, X64SsaProgram,
-        XMM_STACK, Xmm, assignment_uses_helper_calls, call_result_disp,
+        LITERAL_POOL_ALIGNMENT, LoopCounterBand, NativeAssignment, OperandContextFilterHelper,
+        PARAMS_OFFSET, Q_ELECTRON, ROUND_TEMP_FRAME_BYTES, STACK_PROBE_INTERVAL_BYTES,
+        THERMAL_VOLTAGE_PER_K, TableHelper, VECTOR_LITERAL_ALIGNMENT, VOLTAGES_OFFSET, X64Encoder,
+        X64SsaProgram, XMM_STACK, Xmm, assignment_uses_helper_calls, call_result_disp,
         compile_assignment_function, compile_assignment_pass_function, compile_value_function,
         compile_value_function_artifact_from_ssa, entry_ctx_arg_reg, entry_vars_arg_reg,
         native_op_reads_entry_args, native_op_uses_helper_call, program_uses_helper_calls,
@@ -4959,7 +5194,8 @@ mod tests {
     #[test]
     fn literal_pool_reuses_identical_bit_patterns() {
         let mut compiler =
-            FunctionCompiler::new(false, false, false, 0, None, None, 0).expect("test frame");
+            FunctionCompiler::new(false, false, false, 0, LoopCounterBand::NONE, None, 0)
+                .expect("test frame");
         compiler.emit_literal_load(Xmm::Xmm0, 2.0);
         compiler.emit_literal_load(Xmm::Xmm1, 2.0);
         compiler.emit_literal_load(Xmm::Xmm2, 3.0);
@@ -4999,7 +5235,8 @@ mod tests {
     #[test]
     fn vector_literal_pool_reuses_abs_masks_and_aligns_to_16_bytes() {
         let mut compiler =
-            FunctionCompiler::new(false, false, false, 0, None, None, 0).expect("test frame");
+            FunctionCompiler::new(false, false, false, 0, LoopCounterBand::NONE, None, 0)
+                .expect("test frame");
         compiler.emit_abs_register(Xmm::Xmm0);
         compiler.emit_abs_register(Xmm::Xmm1);
         compiler.encoder.ret();
@@ -5027,12 +5264,30 @@ mod tests {
     fn generated_frame_rejects_negative_or_misaligned_sizes() {
         for frame_bytes in [-16, 1, STACK_PROBE_INTERVAL_BYTES - 1] {
             assert!(
-                FunctionCompiler::new(false, false, false, frame_bytes, None, None, 0).is_err(),
+                FunctionCompiler::new(
+                    false,
+                    false,
+                    false,
+                    frame_bytes,
+                    LoopCounterBand::NONE,
+                    None,
+                    0
+                )
+                .is_err(),
                 "invalid generated frame size {frame_bytes} must be rejected"
             );
         }
         assert!(
-            FunctionCompiler::new(false, false, false, 16, Some(16), None, 0).is_err(),
+            FunctionCompiler::new(
+                false,
+                false,
+                false,
+                16,
+                LoopCounterBand::for_assignment_loops(16, 1).expect("band"),
+                None,
+                0
+            )
+            .is_err(),
             "local slots must fit completely inside the generated frame"
         );
         assert!(
@@ -5041,7 +5296,20 @@ mod tests {
                 false,
                 false,
                 16,
+                LoopCounterBand::for_block_loops(0, 3).expect("band"),
                 None,
+                0
+            )
+            .is_err(),
+            "a counter band must fit completely, not only its first slot"
+        );
+        assert!(
+            FunctionCompiler::new(
+                false,
+                false,
+                false,
+                16,
+                LoopCounterBand::NONE,
                 None,
                 XMM_STACK.len() - super::CALLER_SAVED_XMM_COUNT + 1,
             )
@@ -5053,12 +5321,19 @@ mod tests {
     #[test]
     fn generated_frame_probes_each_crossed_stack_page_with_a_compact_loop() {
         let small_frame_bytes = STACK_PROBE_INTERVAL_BYTES - 16;
-        let small_bytes =
-            FunctionCompiler::new(false, false, false, small_frame_bytes, None, None, 0)
-                .expect("small aligned frame")
-                .finish_assignment_pass_function()
-                .expect("finish small-frame function")
-                .bytes;
+        let small_bytes = FunctionCompiler::new(
+            false,
+            false,
+            false,
+            small_frame_bytes,
+            LoopCounterBand::NONE,
+            None,
+            0,
+        )
+        .expect("small aligned frame")
+        .finish_assignment_pass_function()
+        .expect("finish small-frame function")
+        .bytes;
         assert!(contains_bytes(
             &small_bytes,
             &sub_rsp_bytes(small_frame_bytes)
@@ -5072,12 +5347,19 @@ mod tests {
         );
 
         let large_frame_bytes = STACK_PROBE_INTERVAL_BYTES * 3;
-        let large_bytes =
-            FunctionCompiler::new(false, false, false, large_frame_bytes, None, None, 0)
-                .expect("large aligned frame")
-                .finish_assignment_pass_function()
-                .expect("finish large-frame function")
-                .bytes;
+        let large_bytes = FunctionCompiler::new(
+            false,
+            false,
+            false,
+            large_frame_bytes,
+            LoopCounterBand::NONE,
+            None,
+            0,
+        )
+        .expect("large aligned frame")
+        .finish_assignment_pass_function()
+        .expect("finish large-frame function")
+        .bytes;
 
         assert!(contains_bytes(
             &large_bytes,
@@ -5178,13 +5460,13 @@ mod tests {
             false,
             spill_bytes > 0,
             frame_bytes,
-            None,
+            LoopCounterBand::NONE,
             (spill_bytes > 0).then_some(0),
             callee_saved,
         )
         .expect("shared SSA compiler");
         compiler
-            .emit_allocated_program(&ssa, &allocation)
+            .emit_allocated_program(&ssa, &allocation, &[])
             .expect("emit shared SSA");
         let bytes = compiler
             .finish_value_function()
@@ -5277,6 +5559,207 @@ mod tests {
                 "loop with limit={limit} scale={scale} first={first} second={second}"
             );
         }
+    }
+
+    /// A block program's back edge is counted, and the hundred-thousandth
+    /// trip is refused.
+    ///
+    /// The fixture terminates on its own after `trips` iterations, so a build
+    /// without the guard answers rather than hanging and this reads as a wrong
+    /// answer instead of a timeout. 99,999 trips is the last one that passes
+    /// and 100,000 is the first that fails, which is
+    /// [`MAX_RUNTIME_LOOP_ITERATIONS`] read exactly as
+    /// [`FunctionCompiler::emit_loop_assignment`] reads it for an assignment
+    /// loop, and 150,000 is a runaway a customer's Verilog-A would produce.
+    #[test]
+    fn a_block_program_back_edge_hard_fails_the_runtime_iteration_limit() {
+        for trips in [100_000.0_f64, 150_000.0] {
+            let ssa = X64SsaProgram::empty_block_loop_fixture_for_test(trips)
+                .expect("build the runaway loop");
+            let artifact =
+                compile_value_function_artifact_from_ssa(&ssa).expect("compile the runaway loop");
+            let memory = ExecutableMemory::allocate(artifact.bytes()).expect("publish the loop");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let function: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+            let params = [1.0_f64];
+            let context = eval_context(&params, &[], &[], &[]);
+            context.clear_runtime_error();
+
+            let returned = function(&context, std::ptr::null());
+
+            let error = context
+                .take_runtime_error()
+                .unwrap_or_else(|| panic!("{trips} trips must hard-fail the iteration limit"));
+            assert!(
+                error.contains("native runtime loop iteration limit exceeded"),
+                "error must carry the loop-limit diagnostic, got: {error}"
+            );
+            assert!(
+                error.contains("no interpreter fallback"),
+                "error must carry the native hard-fail contract, got: {error}"
+            );
+            assert_eq!(
+                returned.to_bits(),
+                0.0_f64.to_bits(),
+                "a refused evaluation returns a defined zero, not whatever the helper left"
+            );
+        }
+    }
+
+    /// The last trip count the guard admits, and the value it still computes.
+    #[test]
+    fn a_block_program_back_edge_admits_the_trip_below_the_limit() {
+        let trips = 99_999.0_f64;
+        let value = 0.5_f64;
+        let ssa = X64SsaProgram::empty_block_loop_fixture_for_test(trips)
+            .expect("build the long-running loop");
+        let artifact =
+            compile_value_function_artifact_from_ssa(&ssa).expect("compile the long-running loop");
+        let memory = ExecutableMemory::allocate(artifact.bytes()).expect("publish the loop");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let function: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let params = [value];
+        let context = eval_context(&params, &[], &[], &[]);
+        context.clear_runtime_error();
+
+        let returned = function(&context, std::ptr::null());
+
+        assert!(
+            context.take_runtime_error().is_none(),
+            "99,999 trips is one below the limit and must not fail"
+        );
+        assert_eq!(
+            returned.to_bits(),
+            X64SsaProgram::empty_block_loop_fixture_expectation(trips, value).to_bits(),
+        );
+    }
+
+    /// Nested loops are counted per entry, not cumulatively.
+    ///
+    /// Ten entries into an inner loop of twenty thousand trips is two hundred
+    /// thousand back-edge traversals in one evaluation, twice the limit; a
+    /// counter that was not zeroed on each entry to the inner loop would
+    /// refuse this program, and one shared between the two loops would refuse
+    /// it sooner still.
+    #[test]
+    fn nested_block_loops_count_each_entry_from_zero() {
+        let (outer, inner) = (10.0_f64, 20_000.0_f64);
+        let ssa =
+            X64SsaProgram::nested_loop_fixture_for_test(outer, inner).expect("build nested loops");
+        let artifact =
+            compile_value_function_artifact_from_ssa(&ssa).expect("compile the nested loops");
+        let memory = ExecutableMemory::allocate(artifact.bytes()).expect("publish the loops");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let function: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let context = eval_context(&[], &[], &[], &[]);
+        context.clear_runtime_error();
+
+        let returned = function(&context, std::ptr::null());
+
+        assert!(
+            context.take_runtime_error().is_none(),
+            "no single loop reaches the limit, so the evaluation must succeed"
+        );
+        assert_eq!(
+            returned.to_bits(),
+            X64SsaProgram::nested_loop_fixture_expectation(outer, inner).to_bits(),
+        );
+    }
+
+    /// The guard's failure path reaches the evaluation context even after the
+    /// loop body has called a helper.
+    ///
+    /// The context arrives in a volatile register, and the diagnostic is
+    /// recorded by handing that pointer to `rspice_native_loop_limit_error`.
+    /// A helper called in the body is free to clobber the register, and the
+    /// scan that decides whether to keep the context in a nonvolatile one
+    /// reads the instruction list in layout order, where the body's call comes
+    /// *after* everything the next trip re-executes. Both halves are asserted:
+    /// the prologue keeps the context, and the recorded message is the real
+    /// one rather than whatever a stale pointer addressed.
+    #[test]
+    fn a_loop_calling_a_helper_keeps_the_context_for_its_own_failure_path() {
+        let ssa = X64SsaProgram::helper_calling_loop_fixture_for_test(150_000.0)
+            .expect("build the helper-calling loop");
+        assert!(
+            ssa.uses_helper_calls() && !ssa.needs_saved_entry_args(),
+            "the fixture must be one the layout-order scan reads as needing nothing"
+        );
+        let artifact = compile_value_function_artifact_from_ssa(&ssa)
+            .expect("compile the helper-calling loop");
+        assert!(
+            contains_bytes(artifact.bytes(), &[0x41, 0x54, 0x41, 0x55]),
+            "a loop that calls a helper must keep the context in R12/R13"
+        );
+
+        let memory = ExecutableMemory::allocate(artifact.bytes()).expect("publish the loop");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let function: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let context = eval_context(&[], &[], &[], &[]);
+        context.clear_runtime_error();
+
+        function(&context, std::ptr::null());
+
+        let error = context
+            .take_runtime_error()
+            .expect("the runaway loop must hard-fail");
+        assert!(
+            error.contains("native runtime loop iteration limit exceeded"),
+            "the diagnostic must reach the context the entry was called with, got: {error}"
+        );
+    }
+
+    /// A program with no back edge reserves nothing and pays nothing.
+    ///
+    /// The corpus-scale form of this claim is the machine-code identity
+    /// census, which moves exactly the modules that carry a loop. Here it is
+    /// the local form: a multi-block program without one asks for the frame
+    /// its allocation asks for and not a byte more, and none of the guard's
+    /// idioms appear in it.
+    #[test]
+    fn a_loop_free_block_program_reserves_no_iteration_counter() {
+        let ssa = branching_ssa(&nested_conditional_program());
+        assert!(
+            !ssa.is_single_block() && ssa.loop_ranges().expect("loop ranges").is_empty(),
+            "the fixture must have blocks and no back edge"
+        );
+
+        let allocation =
+            crate::native::x64::ir::RegisterAllocation::build(&ssa, super::X64_VALUE_BANK)
+                .expect("allocate the branch-form program");
+        let expected_frame = super::checked_local_frame_bytes(&[
+            super::allocation_spill_frame_bytes(&allocation).expect("spill frame"),
+            super::callee_saved_xmm_frame_bytes(super::callee_saved_xmm_count_for_allocation(
+                &allocation,
+            )),
+        ])
+        .expect("branch-form frame");
+        let bytes = compile_value_function_artifact_from_ssa(&ssa)
+            .expect("compile the branch-form program")
+            .bytes;
+
+        if expected_frame > 0 {
+            assert!(
+                contains_bytes(&bytes, &sub_rsp_bytes(expected_frame)),
+                "a loop-free program reserves the frame its allocation asks for"
+            );
+        }
+        assert!(
+            !contains_bytes(
+                &bytes,
+                &cmp_r64_imm32_bytes(Gpr::R10, super::MAX_RUNTIME_LOOP_ITERATIONS)
+            ),
+            "a loop-free program must not carry the iteration guard's compare"
+        );
+        assert_eq!(
+            super::LoopCounterBand::for_block_loops(0, 0).expect("empty band"),
+            super::LoopCounterBand::NONE,
+            "no loop reserves no band"
+        );
     }
 
     /// A loop whose carried value is bound in an empty block, executed.
@@ -13187,7 +13670,8 @@ mod tests {
     }
 
     fn abi_sentinel_compiler() -> FunctionCompiler {
-        FunctionCompiler::new(true, false, true, 0, None, None, 0).expect("ABI sentinel frame")
+        FunctionCompiler::new(true, false, true, 0, LoopCounterBand::NONE, None, 0)
+            .expect("ABI sentinel frame")
     }
 
     fn push_abi_sentinel_const(compiler: &mut FunctionCompiler, value: f64) -> Xmm {

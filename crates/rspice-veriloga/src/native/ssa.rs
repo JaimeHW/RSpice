@@ -564,6 +564,195 @@ impl Program {
         builder.finish(entry, exit)
     }
 
+    /// A loop whose body calls a runtime helper.
+    ///
+    /// ```text
+    /// s = 0;
+    /// while (k > 0) { s = s + exp(0.5); k = k - 1 }
+    /// return s;
+    /// ```
+    ///
+    /// The shape the back edge's own failure path has to survive. The guard
+    /// hands the evaluation context to `rspice_native_loop_limit_error`, and
+    /// the context arrives in a volatile register that the body's helper has
+    /// already been free to clobber by the time the next trip reaches the
+    /// guard — which a scan of the instruction list in *layout* order cannot
+    /// see, because around a back edge layout order is not execution order.
+    #[cfg(test)]
+    pub(crate) fn helper_calling_loop_fixture_for_test(trips: f64) -> JitResult<Self> {
+        let mut builder = ProgramBuilder::new(&[
+            Vec::new(),
+            vec![ValueType::F64; 2],
+            Vec::new(),
+            vec![ValueType::F64; 1],
+        ])?;
+        let entry = BlockId::new(0)?;
+        let header = BlockId::new(1)?;
+        let body = BlockId::new(2)?;
+        let exit = BlockId::new(3)?;
+
+        builder.begin_block(entry)?;
+        let count = builder.push(NativeOp::Const(trips), &[], ValueType::F64)?;
+        let zero = builder.push(NativeOp::Const(0.0), &[], ValueType::F64)?;
+        let argument = builder.push(NativeOp::Const(0.5), &[], ValueType::F64)?;
+        builder.end_block(BuilderTerminator::Jump {
+            target: header,
+            arguments: vec![count, zero],
+        })?;
+
+        let remaining = builder.parameter(header, 0)?;
+        let total = builder.parameter(header, 1)?;
+        builder.begin_block(header)?;
+        let test = builder.push(
+            NativeOp::CompareConst(CompareOp::Gt, 0.0),
+            &[remaining],
+            ValueType::F64,
+        )?;
+        builder.end_block(BuilderTerminator::Branch {
+            condition: test,
+            then_target: body,
+            then_arguments: Vec::new(),
+            else_target: exit,
+            else_arguments: vec![total],
+        })?;
+
+        builder.begin_block(body)?;
+        let called = builder.push(
+            NativeOp::UnaryMath(UnaryMathOp::Exp),
+            &[argument],
+            ValueType::F64,
+        )?;
+        let advanced = builder.push(NativeOp::Add, &[total, called], ValueType::F64)?;
+        let stepped = builder.push(NativeOp::SubConst(1.0), &[remaining], ValueType::F64)?;
+        builder.end_block(BuilderTerminator::Jump {
+            target: header,
+            arguments: vec![stepped, advanced],
+        })?;
+
+        let result = builder.parameter(exit, 0)?;
+        builder.begin_block(exit)?;
+        let returned = builder.push(NativeOp::MulConst(1.0), &[result], ValueType::F64)?;
+        builder.end_block(BuilderTerminator::Return(returned))?;
+        builder.finish(entry, exit)
+    }
+
+    /// One loop nested inside another, each with its own trip count.
+    ///
+    /// ```text
+    /// total = 0;
+    /// for (o = outer; o > 0; o = o - 1)
+    ///     for (i = inner; i > 0; i = i - 1)
+    ///         total = total + 1;
+    /// return total;
+    /// ```
+    ///
+    /// The fixture for the runtime iteration guard's per-entry reset: the
+    /// inner loop is entered `outer` times and takes `inner` trips each time,
+    /// so a guard that counted back-edge traversals cumulatively rather than
+    /// per entry would refuse a program that never runs one loop more than
+    /// `inner` times. Layout puts the inner range strictly inside the outer
+    /// one — blocks 2..=3 inside 1..=4 — which is the nesting the counters
+    /// have to keep apart.
+    #[cfg(test)]
+    pub(crate) fn nested_loop_fixture_for_test(outer: f64, inner: f64) -> JitResult<Self> {
+        let mut builder = ProgramBuilder::new(&[
+            Vec::new(),
+            vec![ValueType::F64; 2],
+            vec![ValueType::F64; 2],
+            Vec::new(),
+            vec![ValueType::F64; 1],
+            vec![ValueType::F64; 1],
+        ])?;
+        let entry = BlockId::new(0)?;
+        let outer_header = BlockId::new(1)?;
+        let inner_header = BlockId::new(2)?;
+        let inner_body = BlockId::new(3)?;
+        let outer_latch = BlockId::new(4)?;
+        let exit = BlockId::new(5)?;
+
+        builder.begin_block(entry)?;
+        let outer_trips = builder.push(NativeOp::Const(outer), &[], ValueType::F64)?;
+        let inner_trips = builder.push(NativeOp::Const(inner), &[], ValueType::F64)?;
+        let zero = builder.push(NativeOp::Const(0.0), &[], ValueType::F64)?;
+        builder.end_block(BuilderTerminator::Jump {
+            target: outer_header,
+            arguments: vec![outer_trips, zero],
+        })?;
+
+        let remaining_outer = builder.parameter(outer_header, 0)?;
+        let total = builder.parameter(outer_header, 1)?;
+        builder.begin_block(outer_header)?;
+        let outer_test = builder.push(
+            NativeOp::CompareConst(CompareOp::Gt, 0.0),
+            &[remaining_outer],
+            ValueType::F64,
+        )?;
+        builder.end_block(BuilderTerminator::Branch {
+            condition: outer_test,
+            then_target: inner_header,
+            then_arguments: vec![inner_trips, total],
+            else_target: exit,
+            else_arguments: vec![total],
+        })?;
+
+        let remaining_inner = builder.parameter(inner_header, 0)?;
+        let accumulated = builder.parameter(inner_header, 1)?;
+        builder.begin_block(inner_header)?;
+        let inner_test = builder.push(
+            NativeOp::CompareConst(CompareOp::Gt, 0.0),
+            &[remaining_inner],
+            ValueType::F64,
+        )?;
+        builder.end_block(BuilderTerminator::Branch {
+            condition: inner_test,
+            then_target: inner_body,
+            then_arguments: Vec::new(),
+            else_target: outer_latch,
+            else_arguments: vec![accumulated],
+        })?;
+
+        builder.begin_block(inner_body)?;
+        let advanced = builder.push(NativeOp::AddConst(1.0), &[accumulated], ValueType::F64)?;
+        let stepped = builder.push(NativeOp::SubConst(1.0), &[remaining_inner], ValueType::F64)?;
+        builder.end_block(BuilderTerminator::Jump {
+            target: inner_header,
+            arguments: vec![stepped, advanced],
+        })?;
+
+        let carried = builder.parameter(outer_latch, 0)?;
+        builder.begin_block(outer_latch)?;
+        let outer_stepped =
+            builder.push(NativeOp::SubConst(1.0), &[remaining_outer], ValueType::F64)?;
+        builder.end_block(BuilderTerminator::Jump {
+            target: outer_header,
+            arguments: vec![outer_stepped, carried],
+        })?;
+
+        let result = builder.parameter(exit, 0)?;
+        builder.begin_block(exit)?;
+        let returned = builder.push(NativeOp::MulConst(1.0), &[result], ValueType::F64)?;
+        builder.end_block(BuilderTerminator::Return(returned))?;
+        builder.finish(entry, exit)
+    }
+
+    /// What [`Self::nested_loop_fixture_for_test`] must compute.
+    #[cfg(test)]
+    pub(crate) fn nested_loop_fixture_expectation(outer: f64, inner: f64) -> f64 {
+        let mut remaining_outer = outer;
+        let mut total = 0.0_f64;
+        while remaining_outer > 0.0 {
+            let mut remaining_inner = inner;
+            let mut accumulated = total;
+            while remaining_inner > 0.0 {
+                accumulated += 1.0;
+                remaining_inner -= 1.0;
+            }
+            total = accumulated;
+            remaining_outer -= 1.0;
+        }
+        total * 1.0
+    }
+
     /// What [`Self::empty_block_loop_fixture_for_test`] must compute.
     #[cfg(test)]
     pub(crate) fn empty_block_loop_fixture_expectation(trips: f64, value: f64) -> f64 {
