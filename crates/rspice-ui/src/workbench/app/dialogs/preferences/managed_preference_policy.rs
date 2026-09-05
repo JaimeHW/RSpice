@@ -703,6 +703,8 @@ fn resolved_policy_rows(category: PreferenceCategory, state: &AppState) -> Vec<R
                         "RSpice Result Bundle",
                         "RSpice Dataset Bundle",
                         "VCD · event timelines",
+                        "NumPy .npy · one array, column order stated",
+                        "NumPy .npz · one named array per signal",
                     ][..],
                 ),
             ] {

@@ -346,6 +346,11 @@ pub enum EngineeringExportFormat {
     /// Value Change Dump: the event timelines of a transient, not its
     /// waveform table.
     ValueChangeDump,
+    /// One NumPy array. It cannot carry signal names, so the column order is
+    /// stated to the reader rather than implied.
+    NumpyArray,
+    /// A NumPy archive: one named array per signal, plus the coordinate.
+    NumpyArchive,
     /// Reserved by the approved mockup. The UI must not offer this until the
     /// UI crate has a verified cross-platform HDF5 publication backend. It is
     /// last so that every offered format keeps a contiguous picker index.
@@ -361,7 +366,9 @@ impl EngineeringExportFormat {
             Self::RSpiceResultBundle => 3,
             Self::RSpiceDatasetBundle => 4,
             Self::ValueChangeDump => 5,
-            Self::Hdf5EngineeringDataset => 6,
+            Self::NumpyArray => 6,
+            Self::NumpyArchive => 7,
+            Self::Hdf5EngineeringDataset => 8,
         }
     }
 
@@ -373,7 +380,9 @@ impl EngineeringExportFormat {
             3 => Ok(Self::RSpiceResultBundle),
             4 => Ok(Self::RSpiceDatasetBundle),
             5 => Ok(Self::ValueChangeDump),
-            6 => Err("HDF5 engineering export is not available in this build"),
+            6 => Ok(Self::NumpyArray),
+            7 => Ok(Self::NumpyArchive),
+            8 => Err("HDF5 engineering export is not available in this build"),
             _ => Err("engineering export index is outside its domain"),
         }
     }

@@ -139,6 +139,8 @@ fn export_registry_matches_the_ten_contract_ids_and_governs_availability() {
                 | ResultExportFormat::CsvRfc4180
                 | ResultExportFormat::Tsv
                 | ResultExportFormat::TouchstoneV2
+                | ResultExportFormat::NumpyNpy
+                | ResultExportFormat::NumpyNpz
                 | ResultExportFormat::Vcd
         ) {
             assert!(availability.is_ok(), "{}", format.canonical_id());

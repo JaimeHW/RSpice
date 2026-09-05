@@ -798,6 +798,8 @@ fn results(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageAction
             "RSpice Result Bundle",
             "RSpice Dataset Bundle",
             "VCD · event timelines",
+            "NumPy .npy · one array, column order stated",
+            "NumPy .npz · one named array per signal",
         ],
     );
 }

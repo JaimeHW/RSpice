@@ -1,5 +1,6 @@
 //! Waveform export actions.
 
+mod numpy;
 mod vcd;
 
 use crate::analysis::eye_diagram::EyeTimebaseProvenance;
@@ -87,6 +88,8 @@ impl ResultExportFormat {
                 | Self::CsvRfc4180
                 | Self::Tsv
                 | Self::TouchstoneV2
+                | Self::NumpyNpy
+                | Self::NumpyNpz
                 | Self::Vcd
         )
     }
@@ -227,6 +230,8 @@ pub(crate) fn action_export_csv_with_io(
         EngineeringExportFormat::RSpiceResultBundle => ResultExportFormat::RSpiceResultBundle,
         EngineeringExportFormat::RSpiceDatasetBundle => ResultExportFormat::RSpiceDatasetBundle,
         EngineeringExportFormat::ValueChangeDump => ResultExportFormat::Vcd,
+        EngineeringExportFormat::NumpyArray => ResultExportFormat::NumpyNpy,
+        EngineeringExportFormat::NumpyArchive => ResultExportFormat::NumpyNpz,
         EngineeringExportFormat::Hdf5EngineeringDataset => ResultExportFormat::Hdf5,
     };
     if let Err(error) = result_export_format_availability_by_id(contract_format.canonical_id()) {
@@ -269,6 +274,17 @@ pub(crate) fn action_export_csv_with_io(
         vcd::export_vcd(state, io, &displayed);
         return;
     }
+    // A NumPy export publishes the retained waveform analysis with its complex
+    // signals still complex, which the flat dataset below has already split
+    // into magnitude and re/im columns.
+    if let Some(kind) = match export_format {
+        EngineeringExportFormat::NumpyArray => Some(numpy::NumpyKind::Array),
+        EngineeringExportFormat::NumpyArchive => Some(numpy::NumpyKind::Archive),
+        _ => None,
+    } {
+        numpy::export_numpy(state, io, &displayed, kind);
+        return;
+    }
     // What the reader is looking at comes first. Three sheets derive their
     // curve in the viewer rather than reading a retained vector, so routing
     // on the payload alone handed back the transient samples the spectrum was
@@ -295,8 +311,12 @@ pub(crate) fn action_export_csv_with_io(
             }
             EngineeringExportFormat::RSpiceResultBundle
             | EngineeringExportFormat::RSpiceDatasetBundle
-            | EngineeringExportFormat::ValueChangeDump => {
-                unreachable!("native bundle and dump formats dispatch before derived exports")
+            | EngineeringExportFormat::ValueChangeDump
+            | EngineeringExportFormat::NumpyArray
+            | EngineeringExportFormat::NumpyArchive => {
+                unreachable!(
+                    "native bundle, dump and NumPy formats dispatch before derived exports"
+                )
             }
         }
         return;
@@ -328,8 +348,10 @@ pub(crate) fn action_export_csv_with_io(
             }
             EngineeringExportFormat::RSpiceResultBundle
             | EngineeringExportFormat::RSpiceDatasetBundle
-            | EngineeringExportFormat::ValueChangeDump => {
-                unreachable!("native bundle and dump formats dispatch before sheet exports")
+            | EngineeringExportFormat::ValueChangeDump
+            | EngineeringExportFormat::NumpyArray
+            | EngineeringExportFormat::NumpyArchive => {
+                unreachable!("native bundle, dump and NumPy formats dispatch before sheet exports")
             }
         }
         return;
@@ -353,8 +375,10 @@ pub(crate) fn action_export_csv_with_io(
             }
             EngineeringExportFormat::RSpiceResultBundle
             | EngineeringExportFormat::RSpiceDatasetBundle
-            | EngineeringExportFormat::ValueChangeDump => {
-                unreachable!("native bundle and dump formats dispatch before typed exports")
+            | EngineeringExportFormat::ValueChangeDump
+                | EngineeringExportFormat::NumpyArray
+                | EngineeringExportFormat::NumpyArchive => {
+                    unreachable!("native bundle, dump and NumPy formats dispatch before typed exports")
             }
         }
         return;
@@ -382,8 +406,10 @@ pub(crate) fn action_export_csv_with_io(
             }
             EngineeringExportFormat::RSpiceResultBundle
             | EngineeringExportFormat::RSpiceDatasetBundle
-            | EngineeringExportFormat::ValueChangeDump => {
-                unreachable!("native bundle and dump formats dispatch before stacked exports")
+            | EngineeringExportFormat::ValueChangeDump
+                | EngineeringExportFormat::NumpyArray
+                | EngineeringExportFormat::NumpyArchive => {
+                    unreachable!("native bundle, dump and NumPy formats dispatch before stacked exports")
             }
         }
         return;
@@ -412,8 +438,12 @@ pub(crate) fn action_export_csv_with_io(
         }
         EngineeringExportFormat::RSpiceResultBundle
         | EngineeringExportFormat::RSpiceDatasetBundle
-        | EngineeringExportFormat::ValueChangeDump => {
-            unreachable!("native bundle and dump formats dispatch before flat waveform exports")
+        | EngineeringExportFormat::ValueChangeDump
+        | EngineeringExportFormat::NumpyArray
+        | EngineeringExportFormat::NumpyArchive => {
+            unreachable!(
+                "native bundle, dump and NumPy formats dispatch before flat waveform exports"
+            )
         }
     }
 }
