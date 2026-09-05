@@ -231,7 +231,15 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
 /// [`ALLOWED_WORKBENCH_VIOLATIONS`]. Take those edges as the work list: the
 /// concentration is in `documents/result_document` (34 `-> app_state`),
 /// `documents/code_workspace`, and the `lifecycle` modules.
-const MAX_WHOLE_APP_MUTABLE_PARAMS: usize = 873;
+///
+/// 873 -> 871 on 2026-09-05, the Component shelf's two frame helpers having
+/// become methods on a harness that owns the application instead of taking it.
+/// The ceiling follows the measurement down rather than keeping the two slots:
+/// a ceiling above its measurement is slack nobody voted for, and this file
+/// says so where it re-tightened the others. So the two signatures are gone,
+/// not banked — the next whole-app parameter is still the one that turns this
+/// red, and the room for it comes from the same place these two did.
+const MAX_WHOLE_APP_MUTABLE_PARAMS: usize = 871;
 
 fn src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
