@@ -2636,14 +2636,16 @@ fn lower_assignment_phases(
 )> {
     let (assignments, post_assignments) = match canonical_artifact {
         Some(artifact) => {
-            let assignments = lower_live_canonical_assignment_statements(
+            refuse_pre_current_variable_produced_after_a_current(model, &artifact.mir, limits)?;
+            let mut assignments = lower_live_canonical_assignment_statements(
                 model,
                 &artifact.hir,
                 &artifact.mir,
                 limits,
                 policy,
             )?;
-            split_canonical_assignment_phases(model, &artifact.mir, assignments, limits)?
+            let post_assignments = split_canonical_assignment_phases(&mut assignments);
+            (assignments, post_assignments)
         }
         None => {
             let live_assignment_steps = live_native_assignment_steps(model);
@@ -2667,29 +2669,55 @@ fn lower_assignment_phases(
 }
 
 fn split_canonical_assignment_phases(
-    model: &CompiledModel,
-    mir: &MirModel,
-    mut assignments: Vec<NativeAssignment>,
-    limits: NativeLoweringLimits<'_>,
-) -> JitResult<(Vec<NativeAssignment>, Vec<NativeAssignment>)> {
+    assignments: &mut Vec<NativeAssignment>,
+) -> Vec<NativeAssignment> {
     let Some(split_index) = assignments
         .iter()
         .position(native_assignment_reads_contribution_current)
     else {
-        return Ok((assignments, Vec::new()));
+        return Vec::new();
     };
+    assignments.split_off(split_index)
+}
 
-    let post_assignments = assignments.split_off(split_index);
+/// Refuse a module that needs a variable before the currents that produce it.
+///
+/// A variable the equations read before the contribution currents exist may not
+/// be one the currents produce. The refusal is a statement about the *module*,
+/// and it is read off the module's own statements for that reason: a plan route
+/// is not allowed to decide whether the module is well formed, and the pass a
+/// plan emits is the one thing here that varies.
+///
+/// It has to stay a refusal, on every route, because the routes do not agree on
+/// what such a module means. A CFG plan reads the contribution accumulated so
+/// far, which before the first write of a branch is zero; the postfix plan's
+/// pass, the bytecode interpreter and the small-signal replay all read the
+/// current cache, which holds the previous evaluation's total. One source, two
+/// numbers, and a deck that ran a DC sweep and an AC sweep would get one of
+/// each.
+///
+/// `emitted` is the set of slots a pass would publish, so a dead statement
+/// cannot make a well-formed module fail: an assignment nothing reads is not
+/// emitted, and the current it reads is never fetched.
+fn refuse_pre_current_variable_produced_after_a_current(
+    model: &CompiledModel,
+    mir: &MirModel,
+    limits: NativeLoweringLimits<'_>,
+) -> JitResult<()> {
+    let emitted = live_assignment_slots(model);
     let mut post_targets = vec![false; model.num_variables];
-    mark_native_assignment_targets(&post_assignments, &mut post_targets);
+    let mut after_current = false;
+    mark_assignment_targets_after_a_current_read(
+        &model.assignment_steps,
+        &emitted,
+        &mut after_current,
+        &mut post_targets,
+    );
+    if !after_current {
+        return Ok(());
+    }
 
     let mut pre_current_roots = vec![false; model.num_variables];
-    // Deliberately the postfix entries' reads, under either policy. This is a
-    // statement about the *module* — a variable the equations need before the
-    // currents exist may not be one the currents produce — and a plan route is
-    // not allowed to decide whether the module is well formed. Reading the CFG
-    // plan's roots here would make the same source compile or not depending on
-    // which plan was asked for.
     mark_canonical_entry_variable_roots(model, mir, limits, false, &mut pre_current_roots)?;
     propagate_live_assignment_slots(model, &mut pre_current_roots);
 
@@ -2712,7 +2740,71 @@ fn split_canonical_assignment_phases(
         });
     }
 
-    Ok((assignments, post_assignments))
+    Ok(())
+}
+
+/// Mark every slot an emitted assignment writes at or after the module's first
+/// emitted read of a contribution current, and say whether there was one.
+///
+/// A loop counts as one statement, exactly as it does when the lowered pass is
+/// partitioned: a loop whose body reads a current puts its whole body after the
+/// boundary, because the trips run in an order the split cannot cut through.
+fn mark_assignment_targets_after_a_current_read(
+    steps: &[AssignmentStep],
+    emitted: &[bool],
+    after_current: &mut bool,
+    targets: &mut [bool],
+) {
+    for step in steps {
+        if !assignment_steps_write_live(std::slice::from_ref(step), emitted) {
+            continue;
+        }
+        if !*after_current && bytecode_assignment_step_reads_current(step) {
+            *after_current = true;
+        }
+        if *after_current {
+            mark_bytecode_assignment_targets(std::slice::from_ref(step), targets);
+        }
+    }
+}
+
+fn bytecode_assignment_step_reads_current(step: &AssignmentStep) -> bool {
+    match step {
+        AssignmentStep::Assign(assignment) => bytecode_program_reads_current(&assignment.program),
+        AssignmentStep::AssignIndexed { index, value, .. } => {
+            bytecode_program_reads_current(index) || bytecode_program_reads_current(value)
+        }
+        AssignmentStep::Loop { condition, body } => {
+            bytecode_program_reads_current(condition)
+                || body.iter().any(bytecode_assignment_step_reads_current)
+        }
+    }
+}
+
+fn bytecode_program_reads_current(program: &BytecodeProgram) -> bool {
+    program
+        .instructions
+        .iter()
+        .any(|instruction| matches!(instruction, Instruction::PushCurrent(_, _)))
+}
+
+fn mark_bytecode_assignment_targets(steps: &[AssignmentStep], targets: &mut [bool]) {
+    for step in steps {
+        match step {
+            AssignmentStep::Assign(assignment) => {
+                if let Some(target) = targets.get_mut(assignment.var_index) {
+                    *target = true;
+                }
+            }
+            AssignmentStep::AssignIndexed { base, len, .. } => {
+                let end = base.saturating_add(*len).min(targets.len());
+                for target in targets.iter_mut().take(end).skip(*base) {
+                    *target = true;
+                }
+            }
+            AssignmentStep::Loop { body, .. } => mark_bytecode_assignment_targets(body, targets),
+        }
+    }
 }
 
 fn native_assignment_reads_contribution_current(assignment: &NativeAssignment) -> bool {
@@ -2736,27 +2828,6 @@ fn native_assignment_reads_contribution_current(assignment: &NativeAssignment) -
 fn native_program_reads_contribution_current(program: &NativeProgram) -> bool {
     !program.current_pair_dependencies().is_empty()
         || !program.prior_current_dependencies().is_empty()
-}
-
-fn mark_native_assignment_targets(assignments: &[NativeAssignment], targets: &mut [bool]) {
-    for assignment in assignments {
-        match assignment {
-            NativeAssignment::Direct { var_index, .. } => {
-                if let Some(target) = targets.get_mut(*var_index) {
-                    *target = true;
-                }
-            }
-            NativeAssignment::Indexed { base, len, .. } => {
-                let end = base.saturating_add(*len).min(targets.len());
-                for target in targets.iter_mut().take(end).skip(*base) {
-                    *target = true;
-                }
-            }
-            NativeAssignment::Loop { body, .. } => {
-                mark_native_assignment_targets(body, targets);
-            }
-        }
-    }
 }
 
 fn collect_assignment_dependencies(
