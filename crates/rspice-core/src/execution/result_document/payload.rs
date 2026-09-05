@@ -303,8 +303,18 @@ pub struct TransientPayload {
     pub store_traces: Vec<NamedObservableSeries>,
     /// XSPICE digital event histories. These have their own event times and
     /// are deliberately not resampled onto the transient axis.
+    ///
+    /// This is the lossless route: the twelve-state value survives here, and
+    /// the `D(node)` column the tabular projection builds does not carry it.
+    /// [`DigitalEventTrace`] states what a consumer may rely on.
     pub digital_traces: Vec<DigitalEventTrace>,
-    /// XSPICE real-valued event histories.
+    /// XSPICE real-valued event histories, under the same rules as
+    /// `digital_traces`.
+    ///
+    /// These have no tabular counterpart at all: the projection that builds
+    /// `D(node)` columns walks the digital histories only, so a real event net
+    /// reaches a consumer through this document, through the rawfile event
+    /// plots, or through a VCD dump, and through nothing else.
     pub real_traces: Vec<RealEventTrace>,
     /// Identity of each `.FFT` post-process this transient produced. The
     /// spectra themselves are separate documents that name this analysis as
@@ -393,36 +403,132 @@ pub struct FftChildReference {
     pub output_name: String,
 }
 
+/// One digital event node's whole history, in the order it was recorded.
+///
+/// # What a consumer may rely on
+///
+/// - **The times are the run's own, not a grid.** Each point's `time` is the
+///   accepted analog time at which the committed value was first observed.
+///   The digital kernel runs in conservative lockstep at accepted analog
+///   instants, and a pending event becomes a breakpoint, so when the stepper
+///   honours that breakpoint the recorded time *is* the event time; otherwise
+///   it is the first accepted time at or after it. Times are non-decreasing.
+/// - **Only changes are recorded.** A value equal to the one already at the
+///   end of the history is not appended. A glitch that returns to its previous
+///   value inside one accepted step therefore leaves no trace here at all —
+///   the history says what the run committed, not what a driver attempted.
+/// - **The value is exact.** `state` and `strength` carry all twelve
+///   `state × strength` combinations the engine resolves, and
+///   [`DigitalStateTag`] and [`DigitalStrengthTag`] convert to and from the
+///   engine's own types without loss in either direction.
+/// - **Points may be empty.** A node the run captured but that never changed
+///   after its initial value still appears, with the single point that value
+///   was first observed at.
+///
+/// # Which nodes reach it
+///
+/// XSPICE digital event nodes, and the scalar A/D and D/A bridge nets of a
+/// mixed Verilog-AMS module. Nothing else: a Verilog-AMS module's internal
+/// four-state registers, its `wreal` nets, and every vector-valued signal stop
+/// at the module boundary and are not published in any result. A vector port
+/// on an XSPICE model is a set of per-element nodes, so each element arrives
+/// as its own trace under its own node name — no width, bus, or element-index
+/// metadata exists anywhere in this document to reassemble them.
+///
+/// Capture is also two gates wide, and a consumer that finds a node missing
+/// should look at both before concluding the node has no events: event tracing
+/// is switched off by `.OPTIONS XSPICE ESAVE` (on by default), and a deck that
+/// names its outputs selects event nodes by bare or raw name only — a typed
+/// `V(node)` save does not select one.
+///
+/// # What is not carried
+///
+/// No unit, no width, no driver identity, and no record of the analog node the
+/// value was bridged from. The strength band is carried here but is dropped by
+/// two of the four export routes; see [`crate::execution::SignalKind::Digital`]
+/// for which.
+///
+/// # Versioning
+///
+/// This type is part of the `rspice-analysis-result` document and carries no
+/// version of its own. Every struct in that document is
+/// `deny_unknown_fields`, so a field cannot be added to it compatibly: a
+/// reader of an older build refuses the document outright rather than
+/// silently ignoring what it does not understand. The version that governs it
+/// is [`crate::execution::ANALYSIS_RESULT_DOCUMENT_VERSION`], and a document
+/// declaring any other value is refused on load.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DigitalEventTrace {
+    /// Netlist node name, as the run resolved it.
     pub node_name: String,
+    /// Committed values in recording order, one per change.
     pub points: Vec<DigitalEventPoint>,
 }
 
+/// One committed digital value and the accepted time it was first observed at.
+///
+/// `state` and `strength` are independent axes, and the pair is exactly what
+/// [`crate::xspice::DigitalValue::event_code`] encodes as a single integer in
+/// `0..=12`. That integer is the spelling the other event surfaces use — the
+/// accepted-sample hook publishes it as
+/// [`crate::abort_signal::DigitalEventCode`], a rawfile event plot stores it
+/// as its value column, and the GUI's browser worker contract carries it
+/// across the message boundary — so a consumer moving between them is moving
+/// between two encodings of the same twelve values, not between two
+/// resolutions.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DigitalEventPoint {
+    /// Accepted analog time, in seconds, at which this value was first seen.
     pub time: f64,
+    /// Resolved logic level and its high-impedance qualifier.
     pub state: DigitalStateTag,
+    /// Drive strength band the level resolved at.
     pub strength: DigitalStrengthTag,
 }
 
+/// One real-valued event node's whole history, in the order it was recorded.
+///
+/// The time, change-only and capture rules are [`DigitalEventTrace`]'s; only
+/// the value differs, and it is the event value itself rather than a coded
+/// state. Real event nets come from XSPICE real-valued nodes; the mixed
+/// Verilog-AMS boundary contributes digital nets only, so a `wreal` signal
+/// does not arrive here.
+///
+/// This is the one event family with no table representation: the projection
+/// that builds `D(node)` columns has no real-valued counterpart, so a
+/// consumer reading CSV, TSV, HDF5 or the grid part of a rawfile will not
+/// find these nodes at all.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RealEventTrace {
+    /// Netlist node name, as the run resolved it.
     pub node_name: String,
+    /// Committed values in recording order, one per change.
     pub points: Vec<RealEventPoint>,
 }
 
+/// One committed real event value and the accepted time it was first observed
+/// at.
+///
+/// `value` is finite: the document refuses to validate otherwise.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RealEventPoint {
+    /// Accepted analog time, in seconds, at which this value was first seen.
     pub time: f64,
+    /// The event value itself, in the net's own units.
     pub value: f64,
 }
 
 /// Wire spelling of one XSPICE digital logic state.
+///
+/// Ten variants, one per [`DigitalState`], and the `From` impls below are a
+/// bijection: a state that goes onto the wire comes back off it as itself.
+/// The three `*Resistive` and three `*HighZ` spellings are levels resolved
+/// through a qualifier, not strengths — the strength band is the separate
+/// [`DigitalStrengthTag`] beside them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DigitalStateTag {
@@ -473,6 +579,11 @@ impl From<DigitalStateTag> for DigitalState {
 }
 
 /// Wire spelling of one XSPICE digital drive strength.
+///
+/// Four variants, one per [`DigitalStrength`], and the `From` impls below are
+/// a bijection in the same way [`DigitalStateTag`]'s are. This is the half of
+/// the value a VCD dump and a flattened `D(node)` column both drop; the typed
+/// document and the rawfile event plots keep it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DigitalStrengthTag {
