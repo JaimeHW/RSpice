@@ -1057,19 +1057,19 @@
           "signal": "Digital",
           "surfaces": {
             "CLI": {
-              "reason": "digital/AMS surface work is owned by the separate digital effort",
-              "status": "unsupported"
+              "reason": "every table format writes the flattened D(node) column (0, 1 or 0.5 per analysis time point, drive strength dropped); the exact twelve-state histories ride beside it only in the rawfile event plots --format raw/ascii append and in the typed document --format json publishes, and --format vcd keeps the timeline and four bit states but not the strength",
+              "status": "partial"
             },
             "Engine adapter": {
-              "reason": "digital/AMS surface work is owned by the separate digital effort",
-              "status": "unsupported"
+              "reason": "the typed document the adapter publishes carries the event histories verbatim, state and strength included, but the adapter adds no digital-specific handling of its own: the descriptor columns beside them are the flattened projection, and the whole result travels as one size-bounded JSON artifact",
+              "status": "partial"
             },
             "Python": {
-              "reason": "digital/AMS surface work is owned by the separate digital effort",
-              "status": "unsupported"
+              "reason": "the shared document's JSON view and the pickled result both carry the event histories with their state and strength labels, but no typed accessor exposes them: saved_signals, to_csv and the raw exporters all read the flattened D(node) projection",
+              "status": "partial"
             },
             "WASM": {
-              "reason": "descriptors, state/strength samples and validity masks cross the browser boundary with the shared document, but no digital-specific browser surface exists; that work is owned by the separate digital effort",
+              "reason": "the event histories cross the browser boundary with the shared document and are reachable losslessly through the handle's bounded JSON export, but the payload descriptor deliberately omits them and no typed digital accessor exists on the browser side",
               "status": "partial"
             }
           }

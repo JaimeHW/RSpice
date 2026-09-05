@@ -439,9 +439,16 @@ impl SignalCapability {
     }
 }
 
-const DIGITAL_OUT_OF_SCOPE: &str =
-    "digital/AMS surface work is owned by the separate digital effort";
-const WASM_LOGIC_SAMPLES: &str = "descriptors, state/strength samples and validity masks cross the browser boundary with the shared document, but no digital-specific browser surface exists; that work is owned by the separate digital effort";
+// The digital row is `Partial` on every surface, and for one shared reason:
+// `SignalKind::Digital` names the *flattened* column — one `f64` per analysis
+// time point, holding 0, 1 or 0.5, with the drive strength gone — so no
+// surface's descriptor inventory carries a digital signal in full. What
+// separates the four notes below is which lossless carrier each surface also
+// offers beside that column, and what that carrier costs.
+const CLI_DIGITAL_FLATTENED_PLUS_EVENTS: &str = "every table format writes the flattened D(node) column (0, 1 or 0.5 per analysis time point, drive strength dropped); the exact twelve-state histories ride beside it only in the rawfile event plots --format raw/ascii append and in the typed document --format json publishes, and --format vcd keeps the timeline and four bit states but not the strength";
+const PYTHON_DIGITAL_NO_TYPED_ACCESSOR: &str = "the shared document's JSON view and the pickled result both carry the event histories with their state and strength labels, but no typed accessor exposes them: saved_signals, to_csv and the raw exporters all read the flattened D(node) projection";
+const WASM_LOGIC_SAMPLES: &str = "the event histories cross the browser boundary with the shared document and are reachable losslessly through the handle's bounded JSON export, but the payload descriptor deliberately omits them and no typed digital accessor exists on the browser side";
+const ADAPTER_DIGITAL_DOCUMENT_ONLY: &str = "the typed document the adapter publishes carries the event histories verbatim, state and strength included, but the adapter adds no digital-specific handling of its own: the descriptor columns beside them are the flattened projection, and the whole result travels as one size-bounded JSON artifact";
 
 /// Signal-descriptor adapter coverage, kept beside result coverage so adding a
 /// `SignalKind` cannot silently inherit a frontend default.
@@ -476,10 +483,10 @@ pub const SIGNAL_CAPABILITY_MATRIX: [SignalCapability; 5] = [
     },
     SignalCapability {
         signal: SignalKind::Digital,
-        cli: MappingStatus::Unsupported(DIGITAL_OUT_OF_SCOPE),
-        python: MappingStatus::Unsupported(DIGITAL_OUT_OF_SCOPE),
+        cli: MappingStatus::Partial(CLI_DIGITAL_FLATTENED_PLUS_EVENTS),
+        python: MappingStatus::Partial(PYTHON_DIGITAL_NO_TYPED_ACCESSOR),
         wasm: MappingStatus::Partial(WASM_LOGIC_SAMPLES),
-        engine_adapter: MappingStatus::Unsupported(DIGITAL_OUT_OF_SCOPE),
+        engine_adapter: MappingStatus::Partial(ADAPTER_DIGITAL_DOCUMENT_ONLY),
     },
 ];
 
@@ -608,9 +615,12 @@ mod tests {
         }
     }
 
-    /// The digital signal row is the one declared boundary: the separate
-    /// digital effort owns its surfaces, and each of its cells says so.
-    /// Every analog signal kind is mapped everywhere.
+    /// The digital signal row is the one declared boundary, and it is a
+    /// boundary of the descriptor rather than of any one surface: a
+    /// `SignalKind::Digital` column is the flattened projection everywhere, so
+    /// no cell can honestly say `Mapped`. Each cell instead states which
+    /// lossless carrier that surface offers beside the column. Every analog
+    /// signal kind is mapped everywhere.
     #[test]
     fn the_digital_signal_row_is_the_only_declared_boundary() {
         for row in SIGNAL_CAPABILITY_MATRIX {
