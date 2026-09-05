@@ -218,7 +218,17 @@ use super::*;
 // the slot the assignment pass finishes with. The plan is not recoverable from
 // the record — it names the statement each definition was written at, and the
 // record keeps no statement sequence. Rebuilding is the only reading.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 42;
+//
+// Version 43 changes how a non-finite float is written. This record is JSON,
+// and JSON has no spelling for an infinity: through version 42 `serde_json`
+// wrote one as `null`, so a `from (0:inf)` parameter — which the compact models
+// are full of — was cached with `CompiledParameter.max` as `null` and read back
+// as `None`, the declared bound simply gone. The compiler now encodes a
+// non-finite float as a string (`rspice_veriloga::json_float`), but a
+// version-42 record's `null` is indistinguishable from a parameter that never
+// declared a bound, so the loss is not recoverable from the record. Rebuilding
+// is the only reading.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 43;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
