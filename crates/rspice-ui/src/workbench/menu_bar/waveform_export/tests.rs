@@ -1553,3 +1553,139 @@ fn an_operating_point_export_that_cannot_be_produced_states_why() {
         "{message}"
     );
 }
+
+/// The picker index is the durable contract between the preference and the
+/// encoder. These are the three added with the new encoders, and each asserts
+/// the bytes that actually reached the IO backend rather than only that a
+/// dispatch arm was taken.
+#[test]
+fn engineering_export_preference_dispatches_the_three_new_encoders() {
+    let events = AnalysisResult::new(1, AnalysisType::Transient, "Transient")
+        .with_waveforms(vec![waveform(
+            "V(out)",
+            vec![0.0, 1.0e-8, 2.0e-8],
+            vec![0.0, 1.0, 0.0],
+        )])
+        .with_result_payload(AnalysisResultPayload::TransientEvents {
+            digital_traces: vec![crate::state::DigitalEventTraceEvidence {
+                node_name: "d".to_owned(),
+                points: vec![
+                    crate::state::DigitalEventPointEvidence {
+                        time_s: 0.0,
+                        value_code: 0,
+                    },
+                    crate::state::DigitalEventPointEvidence {
+                        time_s: 1.0e-8,
+                        value_code: 1,
+                    },
+                ],
+            }],
+            real_traces: Vec::new(),
+        });
+    let mut vcd_state = state_with_typed_result(events);
+    vcd_state
+        .ui
+        .preferences
+        .set_choice(crate::workbench::ChoicePreference::EngineeringExport, 5)
+        .expect("VCD preference");
+    let vcd_io = MockExportWorkflowIo::default();
+    action_export_csv_with_io(&mut vcd_state, &vcd_io);
+    assert_eq!(
+        vcd_io.dialog_titles.borrow().as_slice(),
+        &["Export Value Change Dump"]
+    );
+    let vcd_files = vcd_io.byte_files.borrow();
+    assert_eq!(vcd_files.len(), 1);
+    assert_eq!(vcd_files[0].0, PathBuf::from("events.vcd"));
+    assert_eq!(vcd_files[0].2, "text/plain;charset=utf-8");
+    let dump = String::from_utf8(vcd_files[0].1.clone()).expect("a dump is ASCII text");
+    assert!(dump.contains("$scope module events $end"), "{dump}");
+    assert!(dump.contains("$var wire 1 ! d $end"), "{dump}");
+    drop(vcd_files);
+
+    let transient =
+        AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(vec![
+            waveform("V(out)", vec![0.0, 1.0e-6, 2.0e-6], vec![0.0, 1.25, -0.5]),
+        ]);
+    let mut npy_state = state_with_typed_result(transient.clone());
+    npy_state
+        .ui
+        .preferences
+        .set_choice(crate::workbench::ChoicePreference::EngineeringExport, 6)
+        .expect("NumPy array preference");
+    let npy_io = MockExportWorkflowIo::default();
+    action_export_csv_with_io(&mut npy_state, &npy_io);
+    assert_eq!(
+        npy_io.dialog_titles.borrow().as_slice(),
+        &["Export NumPy Array"]
+    );
+    let npy_files = npy_io.byte_files.borrow();
+    assert_eq!(npy_files[0].0, PathBuf::from("waveforms.npy"));
+    assert_eq!(npy_files[0].2, "application/octet-stream");
+    let npy_reopened = crate::workbench::workflows::result_import_workflow::parse_result_dataset(
+        "waveforms.npy",
+        &npy_files[0].1,
+    )
+    .expect("reopen the array");
+    assert_eq!(npy_reopened.waveforms[0].y.as_ref(), &[0.0, 1.25, -0.5]);
+    drop(npy_files);
+
+    let mut npz_state = state_with_typed_result(transient);
+    npz_state
+        .ui
+        .preferences
+        .set_choice(crate::workbench::ChoicePreference::EngineeringExport, 7)
+        .expect("NumPy archive preference");
+    let npz_io = MockExportWorkflowIo::default();
+    action_export_csv_with_io(&mut npz_state, &npz_io);
+    assert_eq!(
+        npz_io.dialog_titles.borrow().as_slice(),
+        &["Export NumPy Archive"]
+    );
+    let npz_files = npz_io.byte_files.borrow();
+    assert_eq!(npz_files[0].0, PathBuf::from("waveforms.npz"));
+    assert_eq!(npz_files[0].2, "application/zip");
+    let npz_reopened = crate::workbench::workflows::result_import_workflow::parse_result_dataset(
+        "waveforms.npz",
+        &npz_files[0].1,
+    )
+    .expect("reopen the archive");
+    assert_eq!(npz_reopened.coordinate_name, "time");
+    // An archive keeps the names an array cannot.
+    assert_eq!(npz_reopened.waveforms[0].name, "V(out)");
+    assert_eq!(npz_reopened.waveforms[0].y.as_ref(), &[0.0, 1.25, -0.5]);
+}
+
+#[test]
+fn a_transient_without_event_evidence_refuses_the_dump_and_writes_nothing() {
+    let transient =
+        AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(vec![
+            waveform("V(out)", vec![0.0, 1.0e-6, 2.0e-6], vec![0.0, 1.25, -0.5]),
+        ]);
+    let mut state = state_with_typed_result(transient);
+    state
+        .ui
+        .preferences
+        .set_choice(crate::workbench::ChoicePreference::EngineeringExport, 5)
+        .expect("VCD preference");
+    let io = MockExportWorkflowIo::default();
+    action_export_csv_with_io(&mut state, &io);
+
+    assert!(io.dialog_titles.borrow().is_empty());
+    assert!(io.byte_files.borrow().is_empty());
+    assert!(io.text_files.borrow().is_empty());
+    // The refusal names what a dump carries, not the registry's generic
+    // "no verified lossless encoder" sentence.
+    assert!(
+        state.log_buffer.entries().any(|entry| {
+            entry.message.contains("event timelines")
+                && !entry.message.contains("verified lossless encoder")
+        }),
+        "{:?}",
+        state
+            .log_buffer
+            .entries()
+            .map(|entry| entry.message.clone())
+            .collect::<Vec<_>>()
+    );
+}
