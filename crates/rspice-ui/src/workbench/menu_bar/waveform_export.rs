@@ -114,6 +114,20 @@ fn result_export_format_availability_by_id(canonical_id: &str) -> Result<(), Str
     result_export_format_availability(format)
 }
 
+/// The formats a table of the displayed view can answer.
+///
+/// Every other offered format publishes something a table is not — a native
+/// bundle, a transient's event schedule, a NumPy array — and is routed to its
+/// own module before any table is prepared. Narrowing to those three once, at
+/// the point the routing is decided, is what keeps the five payload routers
+/// below from each restating which formats never reach them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TabularExportFormat {
+    Csv,
+    Tsv,
+    TouchstoneWhereCompatible,
+}
+
 /// Export the exact dataset-bound Data Browser selection, never whatever
 /// payload the currently visible sheet happens to choose as its default.
 pub(crate) fn action_export_result_selection_with_io(
@@ -285,6 +299,25 @@ pub(crate) fn action_export_csv_with_io(
         numpy::export_numpy(state, io, &displayed, kind);
         return;
     }
+    // Everything past this point publishes a table of the displayed view, so
+    // the format is narrowed once here rather than re-examined by each router.
+    let export_format = match export_format {
+        EngineeringExportFormat::Csv => TabularExportFormat::Csv,
+        EngineeringExportFormat::Tsv => TabularExportFormat::Tsv,
+        EngineeringExportFormat::TouchstoneWhereCompatible => {
+            TabularExportFormat::TouchstoneWhereCompatible
+        }
+        EngineeringExportFormat::RSpiceResultBundle
+        | EngineeringExportFormat::RSpiceDatasetBundle
+        | EngineeringExportFormat::ValueChangeDump
+        | EngineeringExportFormat::NumpyArray
+        | EngineeringExportFormat::NumpyArchive => {
+            unreachable!("native bundle, dump and NumPy formats dispatch above")
+        }
+        EngineeringExportFormat::Hdf5EngineeringDataset => {
+            unreachable!("an offered format without an encoder is refused above")
+        }
+    };
     // What the reader is looking at comes first. Three sheets derive their
     // curve in the viewer rather than reading a retained vector, so routing
     // on the payload alone handed back the transient samples the spectrum was
@@ -298,25 +331,13 @@ pub(crate) fn action_export_csv_with_io(
             }
         };
         match export_format {
-            EngineeringExportFormat::Csv => export_typed_result_csv(state, io, &derived),
-            EngineeringExportFormat::Tsv => export_typed_result_tsv(state, io, &derived),
-            EngineeringExportFormat::TouchstoneWhereCompatible => {
+            TabularExportFormat::Csv => export_typed_result_csv(state, io, &derived),
+            TabularExportFormat::Tsv => export_typed_result_tsv(state, io, &derived),
+            TabularExportFormat::TouchstoneWhereCompatible => {
                 state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
                     "Touchstone export is not compatible with a derived viewer; select CSV export."
                         .to_owned(),
                 ))
-            }
-            EngineeringExportFormat::Hdf5EngineeringDataset => {
-                unreachable!("unsupported export preferences resolve to CSV")
-            }
-            EngineeringExportFormat::RSpiceResultBundle
-            | EngineeringExportFormat::RSpiceDatasetBundle
-            | EngineeringExportFormat::ValueChangeDump
-            | EngineeringExportFormat::NumpyArray
-            | EngineeringExportFormat::NumpyArchive => {
-                unreachable!(
-                    "native bundle, dump and NumPy formats dispatch before derived exports"
-                )
             }
         }
         return;
@@ -335,23 +356,13 @@ pub(crate) fn action_export_csv_with_io(
     };
     if let Some(sheet) = sheet {
         match export_format {
-            EngineeringExportFormat::Csv => export_typed_result_csv(state, io, &sheet),
-            EngineeringExportFormat::Tsv => export_typed_result_tsv(state, io, &sheet),
-            EngineeringExportFormat::TouchstoneWhereCompatible => {
+            TabularExportFormat::Csv => export_typed_result_csv(state, io, &sheet),
+            TabularExportFormat::Tsv => export_typed_result_tsv(state, io, &sheet),
+            TabularExportFormat::TouchstoneWhereCompatible => {
                 state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
                     "Touchstone export is not compatible with this Results sheet; select CSV export."
                         .to_owned(),
                 ));
-            }
-            EngineeringExportFormat::Hdf5EngineeringDataset => {
-                unreachable!("unsupported export preferences resolve to CSV")
-            }
-            EngineeringExportFormat::RSpiceResultBundle
-            | EngineeringExportFormat::RSpiceDatasetBundle
-            | EngineeringExportFormat::ValueChangeDump
-            | EngineeringExportFormat::NumpyArray
-            | EngineeringExportFormat::NumpyArchive => {
-                unreachable!("native bundle, dump and NumPy formats dispatch before sheet exports")
             }
         }
         return;
@@ -362,24 +373,14 @@ pub(crate) fn action_export_csv_with_io(
         .and_then(prepare_typed_result_csv)
     {
         match export_format {
-            EngineeringExportFormat::Csv => export_typed_result_csv(state, io, &typed),
-            EngineeringExportFormat::Tsv => export_typed_result_tsv(state, io, &typed),
-            EngineeringExportFormat::TouchstoneWhereCompatible => state.push_user_message(
+            TabularExportFormat::Csv => export_typed_result_csv(state, io, &typed),
+            TabularExportFormat::Tsv => export_typed_result_tsv(state, io, &typed),
+            TabularExportFormat::TouchstoneWhereCompatible => state.push_user_message(
                 crate::diagnostics::ConsoleMessage::warning(
                     "Touchstone export is not compatible with the active typed result; select CSV export."
                         .to_owned(),
                 ),
             ),
-            EngineeringExportFormat::Hdf5EngineeringDataset => {
-                unreachable!("unsupported export preferences resolve to CSV")
-            }
-            EngineeringExportFormat::RSpiceResultBundle
-            | EngineeringExportFormat::RSpiceDatasetBundle
-            | EngineeringExportFormat::ValueChangeDump
-                | EngineeringExportFormat::NumpyArray
-                | EngineeringExportFormat::NumpyArchive => {
-                    unreachable!("native bundle, dump and NumPy formats dispatch before typed exports")
-            }
         }
         return;
     }
@@ -393,24 +394,14 @@ pub(crate) fn action_export_csv_with_io(
             }
         };
         match export_format {
-            EngineeringExportFormat::Csv => export_typed_result_csv(state, io, &prepared),
-            EngineeringExportFormat::Tsv => export_typed_result_tsv(state, io, &prepared),
-            EngineeringExportFormat::TouchstoneWhereCompatible => state.push_user_message(
+            TabularExportFormat::Csv => export_typed_result_csv(state, io, &prepared),
+            TabularExportFormat::Tsv => export_typed_result_tsv(state, io, &prepared),
+            TabularExportFormat::TouchstoneWhereCompatible => state.push_user_message(
                 crate::diagnostics::ConsoleMessage::warning(
                     "Touchstone export requires one selected analysis; maximize one displayed strip or select CSV export."
                         .to_owned(),
                 ),
             ),
-            EngineeringExportFormat::Hdf5EngineeringDataset => {
-                unreachable!("unsupported export preferences resolve to CSV")
-            }
-            EngineeringExportFormat::RSpiceResultBundle
-            | EngineeringExportFormat::RSpiceDatasetBundle
-            | EngineeringExportFormat::ValueChangeDump
-                | EngineeringExportFormat::NumpyArray
-                | EngineeringExportFormat::NumpyArchive => {
-                    unreachable!("native bundle, dump and NumPy formats dispatch before stacked exports")
-            }
         }
         return;
     }
@@ -428,22 +419,10 @@ pub(crate) fn action_export_csv_with_io(
     }
 
     match export_format {
-        EngineeringExportFormat::Csv => export_csv(state, io, &prepared.dataset),
-        EngineeringExportFormat::Tsv => export_tsv(state, io, &prepared.dataset),
-        EngineeringExportFormat::TouchstoneWhereCompatible => {
+        TabularExportFormat::Csv => export_csv(state, io, &prepared.dataset),
+        TabularExportFormat::Tsv => export_tsv(state, io, &prepared.dataset),
+        TabularExportFormat::TouchstoneWhereCompatible => {
             export_touchstone(state, io, &prepared.dataset)
-        }
-        EngineeringExportFormat::Hdf5EngineeringDataset => {
-            unreachable!("unsupported export preferences resolve to CSV")
-        }
-        EngineeringExportFormat::RSpiceResultBundle
-        | EngineeringExportFormat::RSpiceDatasetBundle
-        | EngineeringExportFormat::ValueChangeDump
-        | EngineeringExportFormat::NumpyArray
-        | EngineeringExportFormat::NumpyArchive => {
-            unreachable!(
-                "native bundle, dump and NumPy formats dispatch before flat waveform exports"
-            )
         }
     }
 }
