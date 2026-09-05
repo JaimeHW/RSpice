@@ -61,13 +61,13 @@ const SHIPPED_CENSUS_MODELS: usize = 43;
 /// module on the CFG route that did not move would be one whose whole pass was
 /// already reachable from what its plan reads.
 ///
-/// The corpus went from 354,171,040 bytes to **105,811,376, −70.13 per cent**.
+/// The corpus went from 354,171,040 bytes to **105,811,376, −70.12 per cent**.
 /// The largest factors are the two large `bsimsoi` variants the route accepts —
 /// the 4.6.1 `bsimsoi_va` −94.20 (14,476,364 to 839,964) and the
 /// `BSIM-SOI_4.7.0` `bsimsoi` −92.44 (14,987,868 to 1,133,260) — and
 /// `PSPNQS104VA` −80.98 (30,795,492 to 5,858,268). The smallest are `ekv_va`
-/// −16.71 and `EPFL_HEMT_10a` −16.96, two small modules with little procedural
-/// body to drop. The three `hisimhv` variants fall from 57 MiB to 12.3
+/// −16.71, `asmesd_dio` −16.92 and `EPFL_HEMT_10a` −16.96, three small modules
+/// with little procedural body to drop. The three `hisimhv` variants fall from 57 MiB to 12.3
 /// (`hisimhv_n5_va` 59,846,716 to 12,888,476, −78.46 per cent), which is what
 /// takes [`crate::native::SHIPPED_MODEL_NATIVE_CODE_SIZE_BUDGET_BYTES`] from 60
 /// MiB to 16, and `l_utsoi` −32.22 (7,414,136 to 5,025,336) — the module whose
