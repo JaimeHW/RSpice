@@ -640,47 +640,84 @@ fn a_code_model_with_open_port_widths_asks_before_it_arms() {
 
 // -------------------------------------------------- shelf pinning and recents
 
-/// One frame of the whole Component shelf, through the same entry point the
-/// dock calls — so the placement watch, the bands, and the catalog all see one
-/// frame, as they do in the product.
+/// The Component shelf under test: the application it paints from and the
+/// context it paints into, held together so that one frame is one call.
+///
+/// The pair is owned rather than passed because a helper taking `&mut
+/// RSpiceApp` hands a test the whole application, and `tests/module_layering`
+/// counts every signature that does.
 #[cfg(not(target_arch = "wasm32"))]
-fn component_shelf_output(
-    ctx: &egui::Context,
-    app: &mut RSpiceApp,
-    events: Vec<egui::Event>,
-) -> egui::FullOutput {
-    ctx.run_ui(
-        egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(260.0, 2400.0),
-            )),
-            events,
-            ..egui::RawInput::default()
-        },
-        |ctx| {
-            egui::CentralPanel::default()
-                .frame(egui::Frame::NONE)
-                .show(ctx, |ui| {
-                    ui.set_width(260.0);
-                    component_shelf(ui, app);
-                });
-        },
-    )
+struct ShelfHarness {
+    ctx: egui::Context,
+    app: RSpiceApp,
 }
 
-/// What one such frame painted: the joined text and the runs it came from.
-///
-/// Both, because a gesture has to land on a row, and only the runs carry where
-/// the rows are.
 #[cfg(not(target_arch = "wasm32"))]
-fn component_shelf_frame(
-    ctx: &egui::Context,
-    app: &mut RSpiceApp,
-    events: Vec<egui::Event>,
-) -> (String, Vec<(String, egui::Rect, egui::Color32)>) {
-    let output = component_shelf_output(ctx, app, events);
-    (painted_text(&output), painted_runs(&output))
+impl ShelfHarness {
+    /// A themed shelf that has painted nothing yet.
+    fn opened() -> Self {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        Self {
+            ctx,
+            app: RSpiceApp::test_instance(),
+        }
+    }
+
+    /// The shelf held open across frames, driven to a settled layout.
+    ///
+    /// Two frames: the first builds the font set, the second lays out against
+    /// it, and only then are the painted rects worth clicking.
+    fn settled(mut self) -> Self {
+        let _ = self.output(Vec::new());
+        let _ = self.output(Vec::new());
+        self
+    }
+
+    /// Publishing an accessibility tree, so a frame reports what the keyboard
+    /// is on. Switched on before the shelf settles, because a context starts
+    /// reporting from the frame after it is told to.
+    fn reporting_accessibility(self) -> Self {
+        self.ctx.enable_accesskit();
+        self
+    }
+
+    /// One frame of the whole Component shelf, through the same entry point
+    /// the dock calls — so the placement watch, the bands, and the catalog all
+    /// see one frame, as they do in the product.
+    fn output(&mut self, events: Vec<egui::Event>) -> egui::FullOutput {
+        let Self { ctx, app } = self;
+        ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(260.0, 2400.0),
+                )),
+                events,
+                ..egui::RawInput::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ctx, |ui| {
+                        ui.set_width(260.0);
+                        component_shelf(ui, app);
+                    });
+            },
+        )
+    }
+
+    /// What one such frame painted: the joined text and the runs it came from.
+    ///
+    /// Both, because a gesture has to land on a row, and only the runs carry
+    /// where the rows are.
+    fn frame(
+        &mut self,
+        events: Vec<egui::Event>,
+    ) -> (String, Vec<(String, egui::Rect, egui::Color32)>) {
+        let output = self.output(events);
+        (painted_text(&output), painted_runs(&output))
+    }
 }
 
 /// A press and a release of the secondary button, which is what egui reads as
@@ -710,20 +747,6 @@ fn secondary_click_events(at: egui::Pos2) -> Vec<egui::Event> {
 #[cfg(not(target_arch = "wasm32"))]
 fn paints_line(text: &str, line: &str) -> bool {
     text.lines().any(|painted| painted == line)
-}
-
-/// The shelf held open across frames, driven to a settled layout.
-///
-/// Two frames: the first builds the font set, the second lays out against it,
-/// and only then are the painted rects worth clicking.
-#[cfg(not(target_arch = "wasm32"))]
-fn settled_shelf() -> (egui::Context, RSpiceApp) {
-    let mut app = RSpiceApp::test_instance();
-    let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
-    let _ = component_shelf_frame(&ctx, &mut app, Vec::new());
-    let _ = component_shelf_frame(&ctx, &mut app, Vec::new());
-    (ctx, app)
 }
 
 /// The stored history, as the durable domain holds it.
@@ -855,9 +878,9 @@ fn a_fresh_profile_takes_the_shipped_pins_until_the_reader_moves_one() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn the_pinned_band_paints_the_set_and_is_absent_once_it_empties() {
-    let (ctx, mut app) = settled_shelf();
+    let mut shelf = ShelfHarness::opened().settled();
 
-    let (text, _) = component_shelf_frame(&ctx, &mut app, Vec::new());
+    let (text, _) = shelf.frame(Vec::new());
     assert!(paints_line(&text, "PINNED"), "the fresh band is painted");
     for shipped in ["Resistor", "Capacitor", "Ground"] {
         assert!(
@@ -870,8 +893,11 @@ fn the_pinned_band_paints_the_set_and_is_absent_once_it_empties() {
         !paints_line(&text, "NMOS"),
         "NMOS belongs to a band a fresh install folds: {text}"
     );
-    toggle_pin(&mut app.state, &ShelfEntry::Primitive(ComponentType::Nmos));
-    let (text, _) = component_shelf_frame(&ctx, &mut app, Vec::new());
+    toggle_pin(
+        &mut shelf.app.state,
+        &ShelfEntry::Primitive(ComponentType::Nmos),
+    );
+    let (text, _) = shelf.frame(Vec::new());
     assert!(
         paints_line(&text, "NMOS"),
         "a pinned row is painted even while its catalog band is folded: {text}"
@@ -883,9 +909,9 @@ fn the_pinned_band_paints_the_set_and_is_absent_once_it_empties() {
         ComponentType::Ground,
         ComponentType::Nmos,
     ] {
-        toggle_pin(&mut app.state, &ShelfEntry::Primitive(kind));
+        toggle_pin(&mut shelf.app.state, &ShelfEntry::Primitive(kind));
     }
-    let (text, _) = component_shelf_frame(&ctx, &mut app, Vec::new());
+    let (text, _) = shelf.frame(Vec::new());
     assert!(
         !paints_line(&text, "PINNED"),
         "an emptied set leaves no band at all: {text}"
@@ -902,43 +928,46 @@ fn the_pinned_band_paints_the_set_and_is_absent_once_it_empties() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_row_is_pinned_and_unpinned_from_its_context_menu() {
-    let (ctx, mut app) = settled_shelf();
-    let (_, runs) = component_shelf_frame(&ctx, &mut app, Vec::new());
+    let mut shelf = ShelfHarness::opened().settled();
+    let (_, runs) = shelf.frame(Vec::new());
     let row = run_rect(&runs, "Transmission Line")
         .expect("the Passives band paints a Transmission Line row");
     let entry = ShelfEntry::Primitive(ComponentType::TransmissionLine);
-    assert!(!is_pinned(&app.state, &entry), "the row starts unpinned");
+    assert!(
+        !is_pinned(&shelf.app.state, &entry),
+        "the row starts unpinned"
+    );
 
-    let _ = component_shelf_frame(&ctx, &mut app, secondary_click_events(row.center()));
-    let (text, runs) = component_shelf_frame(&ctx, &mut app, Vec::new());
+    let _ = shelf.frame(secondary_click_events(row.center()));
+    let (text, runs) = shelf.frame(Vec::new());
     assert!(
         paints_line(&text, "Pin to shelf"),
         "the menu offers the position the row is not in: {text}"
     );
 
     let pin = run_rect(&runs, "Pin to shelf").expect("the open menu paints its one command");
-    let _ = component_shelf_frame(&ctx, &mut app, click_events(pin.center()));
+    let _ = shelf.frame(click_events(pin.center()));
     assert!(
-        is_pinned(&app.state, &entry),
+        is_pinned(&shelf.app.state, &entry),
         "the command pinned the row it was opened on"
     );
 
     // The pinned row now leads the shelf, and its menu offers the other
     // position — the same control, stating where the row stands.
-    let (_, runs) = component_shelf_frame(&ctx, &mut app, Vec::new());
+    let (_, runs) = shelf.frame(Vec::new());
     let pinned_row =
         run_rect(&runs, "Transmission Line").expect("the pinned row is painted at the top");
-    let _ = component_shelf_frame(&ctx, &mut app, secondary_click_events(pinned_row.center()));
-    let (text, runs) = component_shelf_frame(&ctx, &mut app, Vec::new());
+    let _ = shelf.frame(secondary_click_events(pinned_row.center()));
+    let (text, runs) = shelf.frame(Vec::new());
     assert!(
         paints_line(&text, "Unpin") && !paints_line(&text, "Pin to shelf"),
         "a pinned row's menu offers only the way back out: {text}"
     );
 
     let unpin = run_rect(&runs, "Unpin").expect("the open menu paints its one command");
-    let _ = component_shelf_frame(&ctx, &mut app, click_events(unpin.center()));
+    let _ = shelf.frame(click_events(unpin.center()));
     assert!(
-        !is_pinned(&app.state, &entry),
+        !is_pinned(&shelf.app.state, &entry),
         "and the command takes the row back off the rail"
     );
 }
@@ -948,31 +977,34 @@ fn a_row_is_pinned_and_unpinned_from_its_context_menu() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn placement_feeds_recent_front_ordered_and_deduplicated() {
-    let (ctx, mut app) = settled_shelf();
+    let mut shelf = ShelfHarness::opened().settled();
     let key = |kind| ShelfEntry::Primitive(kind).storage_key();
 
     assert!(
-        stored_recent(&app.state).is_empty(),
+        stored_recent(&shelf.app.state).is_empty(),
         "a profile that has placed nothing has no history"
     );
 
-    place(&mut app.state, ComponentType::Diode);
-    let (text, _) = component_shelf_frame(&ctx, &mut app, Vec::new());
-    assert_eq!(stored_recent(&app.state), vec![key(ComponentType::Diode)]);
+    place(&mut shelf.app.state, ComponentType::Diode);
+    let (text, _) = shelf.frame(Vec::new());
+    assert_eq!(
+        stored_recent(&shelf.app.state),
+        vec![key(ComponentType::Diode)]
+    );
     assert!(paints_line(&text, "RECENT"), "the band appears: {text}");
 
-    place(&mut app.state, ComponentType::Nmos);
-    let _ = component_shelf_frame(&ctx, &mut app, Vec::new());
+    place(&mut shelf.app.state, ComponentType::Nmos);
+    let _ = shelf.frame(Vec::new());
     assert_eq!(
-        stored_recent(&app.state),
+        stored_recent(&shelf.app.state),
         vec![key(ComponentType::Nmos), key(ComponentType::Diode)],
         "the newest placement leads"
     );
 
-    place(&mut app.state, ComponentType::Diode);
-    let _ = component_shelf_frame(&ctx, &mut app, Vec::new());
+    place(&mut shelf.app.state, ComponentType::Diode);
+    let _ = shelf.frame(Vec::new());
     assert_eq!(
-        stored_recent(&app.state),
+        stored_recent(&shelf.app.state),
         vec![key(ComponentType::Diode), key(ComponentType::Nmos)],
         "a re-place moves the part to the front rather than listing it twice"
     );
@@ -983,7 +1015,7 @@ fn placement_feeds_recent_front_ordered_and_deduplicated() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn the_recent_band_shows_only_its_newest_entries() {
-    let (ctx, mut app) = settled_shelf();
+    let mut shelf = ShelfHarness::opened().settled();
 
     // Eight parts, all from bands a fresh install folds, so each label can
     // only reach the paint list through the Recent band.
@@ -998,12 +1030,12 @@ fn the_recent_band_shows_only_its_newest_entries() {
         ComponentType::OpAmp,
     ];
     for kind in placed {
-        place(&mut app.state, kind);
-        let _ = component_shelf_frame(&ctx, &mut app, Vec::new());
+        place(&mut shelf.app.state, kind);
+        let _ = shelf.frame(Vec::new());
     }
-    assert_eq!(stored_recent(&app.state).len(), placed.len());
+    assert_eq!(stored_recent(&shelf.app.state).len(), placed.len());
 
-    let (text, _) = component_shelf_frame(&ctx, &mut app, Vec::new());
+    let (text, _) = shelf.frame(Vec::new());
     let painted = placed
         .iter()
         .filter(|kind| paints_line(&text, kind.display_name()))
@@ -1026,18 +1058,18 @@ fn the_recent_band_shows_only_its_newest_entries() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_pinned_part_is_filtered_out_of_recent_but_kept_in_the_history() {
-    let (ctx, mut app) = settled_shelf();
+    let mut shelf = ShelfHarness::opened().settled();
     let entry = ShelfEntry::Primitive(ComponentType::Diode);
 
-    place(&mut app.state, ComponentType::Diode);
-    let (text, _) = component_shelf_frame(&ctx, &mut app, Vec::new());
+    place(&mut shelf.app.state, ComponentType::Diode);
+    let (text, _) = shelf.frame(Vec::new());
     assert!(
         paints_line(&text, "Diode"),
         "the placement is listed: {text}"
     );
 
-    toggle_pin(&mut app.state, &entry);
-    let (text, _) = component_shelf_frame(&ctx, &mut app, Vec::new());
+    toggle_pin(&mut shelf.app.state, &entry);
+    let (text, _) = shelf.frame(Vec::new());
     assert!(
         !paints_line(&text, "RECENT"),
         "the only recent part is pinned, so the band has nothing left: {text}"
@@ -1047,13 +1079,13 @@ fn a_pinned_part_is_filtered_out_of_recent_but_kept_in_the_history() {
         "and it is painted once, in the Pinned band: {text}"
     );
     assert_eq!(
-        stored_recent(&app.state),
+        stored_recent(&shelf.app.state),
         vec![entry.storage_key()],
         "the history keeps it, so unpinning restores its position"
     );
 
-    toggle_pin(&mut app.state, &entry);
-    let (text, _) = component_shelf_frame(&ctx, &mut app, Vec::new());
+    toggle_pin(&mut shelf.app.state, &entry);
+    let (text, _) = shelf.frame(Vec::new());
     assert!(
         paints_line(&text, "RECENT") && paints_line(&text, "Diode"),
         "unpinning returns it to the band: {text}"
@@ -1066,15 +1098,20 @@ fn a_pinned_part_is_filtered_out_of_recent_but_kept_in_the_history() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_design_that_grows_without_the_shelf_writes_no_history() {
-    let (ctx, mut app) = settled_shelf();
+    let mut shelf = ShelfHarness::opened().settled();
 
-    app.state.schematic.cancel_tool();
-    app.state
+    shelf.app.state.schematic.cancel_tool();
+    shelf
+        .app
+        .state
         .schematic
         .add_component(ComponentType::Diode, crate::state::Point::new(40, 40));
-    let (text, _) = component_shelf_frame(&ctx, &mut app, Vec::new());
+    let (text, _) = shelf.frame(Vec::new());
 
-    assert!(stored_recent(&app.state).is_empty(), "nothing was offered");
+    assert!(
+        stored_recent(&shelf.app.state).is_empty(),
+        "nothing was offered"
+    );
     assert!(
         !paints_line(&text, "RECENT"),
         "so there is no band to paint: {text}"
@@ -1086,32 +1123,34 @@ fn a_design_that_grows_without_the_shelf_writes_no_history() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn switching_designs_credits_nothing_to_the_reader() {
-    let (ctx, mut app) = settled_shelf();
+    let mut shelf = ShelfHarness::opened().settled();
 
-    app.state
+    shelf
+        .app
+        .state
         .schematic
         .arm_tool(Tool::Place(ComponentType::Diode));
-    let _ = component_shelf_frame(&ctx, &mut app, Vec::new());
+    let _ = shelf.frame(Vec::new());
 
     // A design the reader opened, already holding objects someone else placed.
-    app.state.active_schematic_epoch += 1;
+    shelf.app.state.active_schematic_epoch += 1;
     for offset in 0..4 {
-        app.state.schematic.add_component(
+        shelf.app.state.schematic.add_component(
             ComponentType::Nmos,
             crate::state::Point::new(40 + offset, 40),
         );
     }
-    let _ = component_shelf_frame(&ctx, &mut app, Vec::new());
+    let _ = shelf.frame(Vec::new());
     assert!(
-        stored_recent(&app.state).is_empty(),
+        stored_recent(&shelf.app.state).is_empty(),
         "the objects already on an opened design were not placed by this reader"
     );
 
     // From there the watch tracks the new design normally.
-    place(&mut app.state, ComponentType::Diode);
-    let _ = component_shelf_frame(&ctx, &mut app, Vec::new());
+    place(&mut shelf.app.state, ComponentType::Diode);
+    let _ = shelf.frame(Vec::new());
     assert_eq!(
-        stored_recent(&app.state),
+        stored_recent(&shelf.app.state),
         vec![ShelfEntry::Primitive(ComponentType::Diode).storage_key()]
     );
 }
@@ -1227,28 +1266,31 @@ fn a_band_row_arms_the_part_it_names_and_says_so() {
             .map(|(_, _, colour)| *colour)
     }
 
-    let (ctx, mut app) = settled_shelf();
+    let mut shelf = ShelfHarness::opened().settled();
     // NMOS belongs to a band a fresh install folds, so the only NMOS row on
     // screen is the pinned one — the click cannot land on a catalog row by
     // accident.
-    toggle_pin(&mut app.state, &ShelfEntry::Primitive(ComponentType::Nmos));
-    let (_, runs) = component_shelf_frame(&ctx, &mut app, Vec::new());
+    toggle_pin(
+        &mut shelf.app.state,
+        &ShelfEntry::Primitive(ComponentType::Nmos),
+    );
+    let (_, runs) = shelf.frame(Vec::new());
     let row = run_rect(&runs, "NMOS").expect("the pinned NMOS row is painted");
     let resting = tone(&runs, "NMOS");
     assert_ne!(
-        app.state.schematic.tool,
+        shelf.app.state.schematic.tool,
         Tool::Place(ComponentType::Nmos),
         "nothing is armed before the click"
     );
 
-    let _ = component_shelf_frame(&ctx, &mut app, click_events(row.center()));
+    let _ = shelf.frame(click_events(row.center()));
     assert_eq!(
-        app.state.schematic.tool,
+        shelf.app.state.schematic.tool,
         Tool::Place(ComponentType::Nmos),
         "the click armed the part the row names"
     );
 
-    let (_, runs) = component_shelf_frame(&ctx, &mut app, Vec::new());
+    let (_, runs) = shelf.frame(Vec::new());
     assert_ne!(
         tone(&runs, "NMOS"),
         resting,
@@ -1267,27 +1309,29 @@ fn a_band_row_arms_the_part_it_names_and_says_so() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_drag_onto_the_sheet_credits_the_part_the_drop_consumed() {
-    let (ctx, mut app) = settled_shelf();
+    let mut shelf = ShelfHarness::opened().settled();
     let payload = SchematicShelfDragPayload::primitive(ComponentType::Nmos)
         .expect("a primitive travels to the canvas as a drag payload");
 
     // The drag in flight: an identity is on offer and nothing has landed.
-    egui::DragAndDrop::set_payload(&ctx, payload);
-    let _ = component_shelf_frame(&ctx, &mut app, Vec::new());
+    egui::DragAndDrop::set_payload(&shelf.ctx, payload);
+    let _ = shelf.frame(Vec::new());
     assert!(
-        stored_recent(&app.state).is_empty(),
+        stored_recent(&shelf.app.state).is_empty(),
         "a drag still in flight has placed nothing"
     );
 
     // The drop: the canvas takes the payload and commits the object.
-    egui::DragAndDrop::clear_payload(&ctx);
-    app.state
+    egui::DragAndDrop::clear_payload(&shelf.ctx);
+    shelf
+        .app
+        .state
         .schematic
         .add_component(ComponentType::Nmos, crate::state::Point::new(40, 40));
-    let (text, _) = component_shelf_frame(&ctx, &mut app, Vec::new());
+    let (text, _) = shelf.frame(Vec::new());
 
     assert_eq!(
-        stored_recent(&app.state),
+        stored_recent(&shelf.app.state),
         vec![ShelfEntry::Primitive(ComponentType::Nmos).storage_key()],
         "the dropped part is what this reader most recently placed"
     );
@@ -1301,30 +1345,34 @@ fn a_drag_onto_the_sheet_credits_the_part_the_drop_consumed() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_tool_the_reader_put_away_credits_no_later_growth() {
-    let (ctx, mut app) = settled_shelf();
+    let mut shelf = ShelfHarness::opened().settled();
 
-    app.state
+    shelf
+        .app
+        .state
         .schematic
         .arm_tool(Tool::Place(ComponentType::Diode));
-    let _ = component_shelf_frame(&ctx, &mut app, Vec::new());
-    app.state.schematic.cancel_tool();
-    let _ = component_shelf_frame(&ctx, &mut app, Vec::new());
-    let _ = component_shelf_frame(&ctx, &mut app, Vec::new());
+    let _ = shelf.frame(Vec::new());
+    shelf.app.state.schematic.cancel_tool();
+    let _ = shelf.frame(Vec::new());
+    let _ = shelf.frame(Vec::new());
     assert!(
-        stored_recent(&app.state).is_empty(),
+        stored_recent(&shelf.app.state).is_empty(),
         "arming a tool and putting it away places nothing"
     );
 
     // The design grows on its own, well after the offer was withdrawn.
-    app.state
+    shelf
+        .app
+        .state
         .schematic
         .add_component(ComponentType::Diode, crate::state::Point::new(40, 40));
-    let (text, _) = component_shelf_frame(&ctx, &mut app, Vec::new());
+    let (text, _) = shelf.frame(Vec::new());
 
     assert!(
-        stored_recent(&app.state).is_empty(),
+        stored_recent(&shelf.app.state).is_empty(),
         "the shelf had nothing on offer when the design grew: {:?}",
-        stored_recent(&app.state)
+        stored_recent(&shelf.app.state)
     );
     assert!(
         !paints_line(&text, "RECENT"),
@@ -1392,15 +1440,10 @@ fn the_shelf_rail_walks_and_folds_from_the_keyboard() {
             .and_then(|(_, node)| node.is_expanded())
     }
 
-    let mut app = RSpiceApp::test_instance();
-    let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
-    ctx.enable_accesskit();
-    let _ = component_shelf_output(&ctx, &mut app, Vec::new());
-    let _ = component_shelf_output(&ctx, &mut app, Vec::new());
+    let mut shelf = ShelfHarness::opened().reporting_accessibility().settled();
 
-    app.state.workbench.focus_placement_search = true;
-    let output = component_shelf_output(&ctx, &mut app, Vec::new());
+    shelf.app.state.workbench.focus_placement_search = true;
+    let output = shelf.output(Vec::new());
     assert_eq!(
         focus(&output).as_deref(),
         Some("Place component or cell…"),
@@ -1410,7 +1453,7 @@ fn the_shelf_rail_walks_and_folds_from_the_keyboard() {
     // Step down to a folded catalog group the way a reader without a pointer
     // reaches it. The rail is finite, so a group that never takes the keyboard
     // is one such a reader could never open.
-    let mut output = component_shelf_output(&ctx, &mut app, vec![key_event(egui::Key::ArrowDown)]);
+    let mut output = shelf.output(vec![key_event(egui::Key::ArrowDown)]);
     assert!(
         focus(&output).is_some_and(|row| row != "Place component or cell…"),
         "and Down steps out of the query onto the rail"
@@ -1421,7 +1464,7 @@ fn the_shelf_rail_walks_and_folds_from_the_keyboard() {
             landed = true;
             break;
         }
-        output = component_shelf_output(&ctx, &mut app, vec![key_event(egui::Key::ArrowDown)]);
+        output = shelf.output(vec![key_event(egui::Key::ArrowDown)]);
     }
     assert!(landed, "the Sources group must be reachable by stepping");
     assert_eq!(
@@ -1430,8 +1473,8 @@ fn the_shelf_rail_walks_and_folds_from_the_keyboard() {
         "which a fresh shelf shows folded"
     );
 
-    let _ = component_shelf_output(&ctx, &mut app, vec![key_event(egui::Key::ArrowRight)]);
-    let output = component_shelf_output(&ctx, &mut app, Vec::new());
+    let _ = shelf.output(vec![key_event(egui::Key::ArrowRight)]);
+    let output = shelf.output(Vec::new());
     assert_eq!(
         expanded(&output, "Sources"),
         Some(true),
@@ -1443,24 +1486,24 @@ fn the_shelf_rail_walks_and_folds_from_the_keyboard() {
         "and leaves the keyboard on it"
     );
 
-    let _ = component_shelf_output(&ctx, &mut app, vec![key_event(egui::Key::ArrowRight)]);
-    let output = component_shelf_output(&ctx, &mut app, Vec::new());
+    let _ = shelf.output(vec![key_event(egui::Key::ArrowRight)]);
+    let output = shelf.output(Vec::new());
     assert_eq!(
         focus(&output).as_deref(),
         Some("Voltage Source"),
         "a second Right steps onto the first part it disclosed"
     );
 
-    let _ = component_shelf_output(&ctx, &mut app, vec![key_event(egui::Key::ArrowLeft)]);
-    let output = component_shelf_output(&ctx, &mut app, Vec::new());
+    let _ = shelf.output(vec![key_event(egui::Key::ArrowLeft)]);
+    let output = shelf.output(Vec::new());
     assert_eq!(
         focus(&output).as_deref(),
         Some("Sources"),
         "and Left climbs out of a part to the group that holds it"
     );
 
-    let _ = component_shelf_output(&ctx, &mut app, vec![key_event(egui::Key::ArrowLeft)]);
-    let output = component_shelf_output(&ctx, &mut app, Vec::new());
+    let _ = shelf.output(vec![key_event(egui::Key::ArrowLeft)]);
+    let output = shelf.output(Vec::new());
     assert_eq!(
         expanded(&output, "Sources"),
         Some(false),
@@ -1484,12 +1527,7 @@ fn the_pin_menu_opens_from_the_keyboard_on_the_focused_row() {
             .and_then(|(_, node)| node.label().map(str::to_owned))
     }
 
-    let mut app = RSpiceApp::test_instance();
-    let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
-    ctx.enable_accesskit();
-    let _ = component_shelf_output(&ctx, &mut app, Vec::new());
-    let _ = component_shelf_output(&ctx, &mut app, Vec::new());
+    let mut shelf = ShelfHarness::opened().reporting_accessibility().settled();
 
     let key = |key, modifiers| egui::Event::Key {
         key,
@@ -1503,11 +1541,7 @@ fn the_pin_menu_opens_from_the_keyboard_on_the_focused_row() {
     // row no such reader could ever pin.
     let mut landed = false;
     for _ in 0..80 {
-        let output = component_shelf_output(
-            &ctx,
-            &mut app,
-            vec![key(egui::Key::Tab, egui::Modifiers::NONE)],
-        );
+        let output = shelf.output(vec![key(egui::Key::Tab, egui::Modifiers::NONE)]);
         if focused_label(&output).as_deref() == Some("Transmission Line") {
             landed = true;
             break;
@@ -1515,22 +1549,18 @@ fn the_pin_menu_opens_from_the_keyboard_on_the_focused_row() {
     }
     assert!(landed, "a shelf row must be reachable from the keyboard");
 
-    let _ = component_shelf_frame(
-        &ctx,
-        &mut app,
-        vec![key(egui::Key::F10, egui::Modifiers::SHIFT)],
-    );
-    let (text, runs) = component_shelf_frame(&ctx, &mut app, Vec::new());
+    let _ = shelf.frame(vec![key(egui::Key::F10, egui::Modifiers::SHIFT)]);
+    let (text, runs) = shelf.frame(Vec::new());
     assert!(
         paints_line(&text, "Pin to shelf"),
         "Shift+F10 opens the focused row's pin menu: {text}"
     );
 
     let pin = run_rect(&runs, "Pin to shelf").expect("the open menu paints its one command");
-    let _ = component_shelf_frame(&ctx, &mut app, click_events(pin.center()));
+    let _ = shelf.frame(click_events(pin.center()));
     assert!(
         is_pinned(
-            &app.state,
+            &shelf.app.state,
             &ShelfEntry::Primitive(ComponentType::TransmissionLine)
         ),
         "and the menu acts on the row the keyboard was on"
