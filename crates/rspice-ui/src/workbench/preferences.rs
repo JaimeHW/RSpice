@@ -1633,9 +1633,12 @@ mod tests {
                 .engineering_export(),
             EngineeringExportFormat::Csv
         );
+        // HDF5 sits last, after every format the picker offers, so that the
+        // offered indices stay contiguous and `options[active]` in the
+        // preference page can never reach past its label list.
         assert!(
             preferences
-                .set_choice(ChoicePreference::EngineeringExport, 5)
+                .set_choice(ChoicePreference::EngineeringExport, 8)
                 .is_err()
         );
         assert_eq!(
@@ -1657,6 +1660,48 @@ mod tests {
             EngineeringExportFormat::Tsv
         );
         assert_eq!(preferences.choice(ChoicePreference::EngineeringExport), 2);
+    }
+
+    /// The picker index is runtime state; the durable file stores the name.
+    /// Both have to hold, because a saved preference outlives the index it was
+    /// chosen by and the export dispatcher reads the name.
+    #[test]
+    fn the_three_encoded_formats_are_runtime_choices_that_persist_by_name() {
+        for (index, format, durable) in [
+            (
+                5,
+                EngineeringExportFormat::ValueChangeDump,
+                "value-change-dump",
+            ),
+            (6, EngineeringExportFormat::NumpyArray, "numpy-array"),
+            (7, EngineeringExportFormat::NumpyArchive, "numpy-archive"),
+        ] {
+            let mut preferences = UserPreferences::default();
+            preferences
+                .set_choice(ChoicePreference::EngineeringExport, index)
+                .expect("the format is runtime supported");
+            assert_eq!(
+                preferences
+                    .result_presentation_policy()
+                    .engineering_export(),
+                format
+            );
+            assert_eq!(
+                preferences.choice(ChoicePreference::EngineeringExport),
+                index
+            );
+            assert!(format.is_runtime_supported());
+            assert_eq!(
+                serde_json::to_value(&preferences).unwrap()["results"]["engineering-export"],
+                durable
+            );
+            let reloaded: UserPreferences =
+                serde_json::from_value(serde_json::to_value(&preferences).unwrap()).unwrap();
+            assert_eq!(
+                reloaded.result_presentation_policy().engineering_export(),
+                format
+            );
+        }
     }
 
     #[test]
