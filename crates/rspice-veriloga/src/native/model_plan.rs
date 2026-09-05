@@ -48,6 +48,28 @@ pub(crate) struct NativeModelPlan {
     pub(crate) noise_exponents: Vec<Option<PlanProgram>>,
     pub(crate) published_current_pairs: Vec<Option<(usize, usize)>>,
     pub(crate) current_dependencies: JitCurrentDependencies,
+    /// What [`Self::assignments`] was rooted on. The CFG route replaces this
+    /// plan's entries and not its assignment pass, so this is the postfix
+    /// builder's answer and travels with the pass it describes.
+    pub(crate) assignment_coverage: NativeAssignmentCoverage,
+}
+
+/// What an image's assignment pass was rooted on, and therefore whether a
+/// named-variable readback has to run a pass of its own.
+///
+/// The two routes answer differently and must: a module the CFG route refuses
+/// keeps the postfix plan, whose pass is rooted on the observable set as well as
+/// on its entries' reads, so its evaluation leaves every declared name
+/// published. Running an observation for one of those would not add a value —
+/// it would re-execute operators the evaluation owns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NativeAssignmentCoverage {
+    /// Rooted on the observable set. An evaluation publishes every named
+    /// variable and a readback needs nothing further.
+    ObservableVariables,
+    /// Rooted on what the CFG plan reads. A readback goes through the
+    /// observation pass.
+    CfgPlanReads,
 }
 
 /// The assignment program that publishes a model's externally observable

@@ -12,9 +12,9 @@ use super::expr::{
     canonical_table_lookup_slots_for_equation, constant_dynamic_variable_slot,
     native_op_stack_effect, pair_canonical_state_slots,
 };
-use super::model_plan::NativeModelPlan;
 #[cfg(feature = "native")]
 use super::model_plan::NativeObservationPlan;
+use super::model_plan::{NativeAssignmentCoverage, NativeModelPlan};
 use super::plan_program::PlanProgram;
 use super::{JitError, JitResult};
 use crate::canonical_ir::{
@@ -542,6 +542,12 @@ fn build_model_plan_inner(
         noise_exponents,
         published_current_pairs,
         current_dependencies,
+        assignment_coverage: match policy {
+            AssignmentRootPolicy::PostfixEntries => NativeAssignmentCoverage::ObservableVariables,
+            AssignmentRootPolicy::CfgPreludeSlots => NativeAssignmentCoverage::CfgPlanReads,
+            #[cfg(feature = "native")]
+            AssignmentRootPolicy::ObservationPass => NativeAssignmentCoverage::ObservableVariables,
+        },
     };
     plan.validate_shape(model)?;
     Ok(plan)

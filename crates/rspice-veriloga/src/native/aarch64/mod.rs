@@ -24,7 +24,7 @@ use super::JitResult;
 #[cfg(target_arch = "aarch64")]
 use super::model::{NativeEntryOffsets, NativeModel, NativeRequiredStorage};
 #[cfg(target_arch = "aarch64")]
-use super::model_plan::{NativeModelPlan, NativeObservationPlan};
+use super::model_plan::{NativeAssignmentCoverage, NativeModelPlan, NativeObservationPlan};
 #[cfg(target_arch = "aarch64")]
 use super::runtime::ExecutableMemory;
 #[cfg(target_arch = "aarch64")]
@@ -183,11 +183,13 @@ pub(super) fn compile_model_plan(
         model.num_variables,
         model.parameters.len(),
         model.branch_sources.len(),
+        model.stamp_programs.len(),
         executable,
         entries,
         entry_starts,
         plan.current_dependencies.clone(),
         NativeRequiredStorage::for_model(model).with_prelude_slots(plan.prelude_slot_count()),
+        plan.assignment_coverage,
     )
 }
 
@@ -240,11 +242,13 @@ pub(super) fn compile_observation_image(
         model.num_variables,
         model.parameters.len(),
         model.branch_sources.len(),
+        model.stamp_programs.len(),
         executable,
         entries,
         entry_starts,
         plan.current_dependencies.clone(),
         NativeRequiredStorage::for_model(model),
+        NativeAssignmentCoverage::ObservableVariables,
     )
 }
 

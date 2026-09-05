@@ -4445,8 +4445,22 @@ impl VerilogADevice {
     ///
     /// The cost is one compile per model, then one pass per call. Call it once
     /// after convergence, not inside the loop.
+    ///
+    /// A module the CFG route refused keeps the postfix plan, whose assignment
+    /// pass is rooted on the observable set as well as on its entries' reads.
+    /// Its evaluation has already published every name, so this returns without
+    /// compiling anything — and that is a correctness rule, not an
+    /// optimization. Re-running such a module's pass would re-execute the
+    /// operators the evaluation owns, and a named `$limit` is the proof: its
+    /// candidate is stored as the previous value for the *next* Newton
+    /// evaluation, so a second execution at the same bias moves it. `$limit` is
+    /// also exactly what the CFG lowering refuses, which is why a CFG-planned
+    /// module has no named limiter for the observation pass to disturb.
     #[cfg(feature = "native")]
     pub fn observe_variables(&mut self, artifact: &CanonicalIrArtifact) -> Result<(), VmError> {
+        if self.native_model.publishes_observable_variables() {
+            return Ok(());
+        }
         let observation = Self::try_native_observation_compile(&self.model, artifact)?;
         let context = &mut self.context;
         let mut vm = Vm::new(context);
@@ -8910,7 +8924,13 @@ endmodule
             .try_update_all_voltages(&solution)
             .expect("update terminal and internal voltages");
 
-        let assert_outputs = |device: &VerilogADevice| {
+        // Every one of these names is a post-current assignment, so reading it
+        // back exercises the observation image's second phase as well as its
+        // first.
+        let assert_outputs = |device: &mut VerilogADevice| {
+            device
+                .observe_variables(&artifact)
+                .expect("observation pass publishes the named variables");
             assert_eq!(device.variable("sensed"), Some(5.0));
             assert_eq!(device.variable("reverse"), Some(-5.0));
             assert_eq!(device.variable("port_n"), Some(-5.0));
@@ -8920,17 +8940,17 @@ endmodule
             device.try_evaluate().expect("native device evaluation"),
             vec![4.0, 1.0]
         );
-        assert_outputs(&device);
+        assert_outputs(&mut device);
 
         device
             .try_compute_jacobian()
             .expect("native standalone Jacobian evaluation");
-        assert_outputs(&device);
+        assert_outputs(&mut device);
 
         device
             .try_stamp(&solution, |_, _, _| {}, |_, _| {})
             .expect("native fused stamp evaluation");
-        assert_outputs(&device);
+        assert_outputs(&mut device);
 
         assert!(
             device
@@ -8938,7 +8958,92 @@ endmodule
                 .expect("native noise operating-point evaluation")
                 .is_empty()
         );
-        assert_outputs(&device);
+        assert_outputs(&mut device);
+    }
+
+    /// The observation pass belongs to the CFG plan, and a module on the
+    /// postfix plan must be left alone.
+    ///
+    /// Both halves are load-bearing. The first keeps the observation from
+    /// becoming a no-op for the modules that need it — a pin that read a
+    /// variable back would otherwise still pass with the whole mechanism
+    /// disconnected. The second is a correctness rule: a named `$limit` stores
+    /// its candidate as the previous value for the next Newton evaluation, so
+    /// re-running the pass that computes it moves the limiter. `$limit` is also
+    /// what makes this module take the postfix plan in the first place, which
+    /// is why the two halves are one test.
+    #[test]
+    fn an_observation_serves_a_cfg_planned_module_and_leaves_a_postfix_one_alone() {
+        let cfg_planned = r#"
+`include "disciplines.vams"
+module observation_route_cfg(p, n);
+    inout p, n;
+    electrical p, n;
+    real scratch;
+    analog begin
+        scratch = V(p, n) * 3.0;
+        I(p, n) <+ scratch;
+    end
+endmodule
+"#;
+        let postfix_planned = r#"
+`include "disciplines.vams"
+module observation_route_postfix(p, n);
+    inout p, n;
+    electrical p, n;
+    real limited;
+    analog begin
+        limited = $limit(V(p, n), 0.5);
+        I(p, n) <+ limited;
+    end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+
+        let model = compiler
+            .compile(cfg_planned)
+            .expect("compile CFG-plan model");
+        let artifact = compiler
+            .compile_canonical_ir(cfg_planned)
+            .expect("compile CFG-plan canonical IR");
+        let mut device =
+            VerilogADevice::try_new_with_canonical_ir("OBSCFG1", model, &artifact, &[1, 0])
+                .expect("build CFG-plan native device");
+        assert!(
+            !device.native_model.publishes_observable_variables(),
+            "a CFG-planned module's evaluation is rooted on what the CFG plan reads"
+        );
+        device.update_voltages(&[2.0]);
+        device.try_evaluate().expect("CFG-plan evaluation");
+        device
+            .observe_variables(&artifact)
+            .expect("observation pass runs for a CFG-planned module");
+        assert_eq!(device.variable("scratch"), Some(6.0));
+
+        let model = compiler
+            .compile(postfix_planned)
+            .expect("compile postfix-plan model");
+        let artifact = compiler
+            .compile_canonical_ir(postfix_planned)
+            .expect("compile postfix-plan canonical IR");
+        let mut device =
+            VerilogADevice::try_new_with_canonical_ir("OBSPOST1", model, &artifact, &[1, 0])
+                .expect("build postfix-plan native device");
+        assert!(
+            device.native_model.publishes_observable_variables(),
+            "a named limiter refuses the CFG lowering, so this module keeps the postfix plan"
+        );
+        device.update_voltages(&[10.0]);
+        device.try_evaluate().expect("postfix-plan evaluation");
+        let limited = device.variable("limited");
+        device
+            .observe_variables(&artifact)
+            .expect("observation of a postfix-planned module");
+        assert_eq!(
+            device.variable("limited"),
+            limited,
+            "an observation must not advance a named limiter the evaluation owns"
+        );
     }
 
     #[test]
@@ -8974,6 +9079,9 @@ endmodule
             .expect("scalar stamp retains the inactive contribution slot");
 
         assert_eq!(device.context.currents, vec![0.0, 1.0]);
+        device
+            .observe_variables(&artifact)
+            .expect("observation pass publishes the named variables");
         assert_eq!(device.variable("sensed"), Some(1.0));
     }
 

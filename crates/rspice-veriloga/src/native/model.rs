@@ -14,6 +14,7 @@ use super::runtime::ExecutableMemory;
 use super::{EvalContext, JitError, JitResult};
 use crate::codegen::{AssignmentStep, BytecodeProgram, CompiledModel, Instruction};
 pub(crate) use crate::jit::current_dependencies::JitCurrentDependencies as NativeCurrentDependencies;
+use crate::jit::model_plan::NativeAssignmentCoverage;
 use crate::vm::terminal_pair_current_endpoints;
 
 type AssignmentEntry = unsafe extern "C" fn(*const EvalContext, *mut f64);
@@ -322,6 +323,7 @@ pub struct NativeModel {
     stamp_kernel_branch_unknowns: Vec<usize>,
     stamp_kernel_current_order_safe: bool,
     required_storage: NativeRequiredStorage,
+    assignment_coverage: NativeAssignmentCoverage,
     stats: PlanStats,
 }
 
@@ -360,11 +362,13 @@ impl NativeModel {
             num_variables,
             num_parameters,
             0,
+            entries.stamp_values.len(),
             image,
             entries,
             entry_starts,
             current_dependencies,
             NativeRequiredStorage::default(),
+            NativeAssignmentCoverage::ObservableVariables,
         )
     }
 
@@ -374,11 +378,13 @@ impl NativeModel {
         num_variables: usize,
         num_parameters: usize,
         num_branch_unknowns: usize,
+        num_contribution_currents: usize,
         image: ExecutableMemory,
         entries: NativeEntryOffsets,
         entry_starts: NativeEntryStarts,
         current_dependencies: NativeCurrentDependencies,
         required_storage: NativeRequiredStorage,
+        assignment_coverage: NativeAssignmentCoverage,
     ) -> JitResult<Self> {
         Self::validate_entry_offsets(&entries, &entry_starts, image.len(), num_parameters)?;
         Self::validate_current_dependencies(
@@ -386,6 +392,7 @@ impl NativeModel {
             &current_dependencies,
             num_terminals,
             num_branch_unknowns,
+            num_contribution_currents,
         )?;
 
         let jacobian_entry_points = entries.jacobians.iter().map(Vec::len).sum();
@@ -447,6 +454,7 @@ impl NativeModel {
             stamp_kernel_branch_unknowns,
             stamp_kernel_current_order_safe,
             required_storage,
+            assignment_coverage,
             stats,
         })
     }
@@ -521,11 +529,13 @@ impl NativeModel {
             num_variables,
             0,
             0,
+            entries.stamp_values.len(),
             image,
             entries,
             entry_starts,
             current_dependencies,
             NativeRequiredStorage::default(),
+            NativeAssignmentCoverage::ObservableVariables,
         )
         .expect("publish native test model")
     }
@@ -709,6 +719,7 @@ impl NativeModel {
         dependencies: &NativeCurrentDependencies,
         num_terminals: usize,
         num_branch_unknowns: usize,
+        num_contribution_currents: usize,
     ) -> JitResult<()> {
         if dependencies.static_condition_branch_unknowns.len() != entries.static_conditions.len()
             || dependencies.stamp_values.len() != entries.stamp_values.len()
@@ -801,15 +812,18 @@ impl NativeModel {
             num_terminals,
         )?;
 
+        // The assignment passes probe the *model's* contributions, which is not
+        // the same number as this image's stamp entries: an observation image
+        // carries the pass and no entry at all.
         Self::validate_prior_current_dependency_list(
             "assignment",
             &dependencies.assignment_prior_currents,
-            entries.stamp_values.len(),
+            num_contribution_currents,
         )?;
         Self::validate_prior_current_dependency_list(
             "post-assignment",
             &dependencies.post_assignment_prior_currents,
-            entries.stamp_values.len(),
+            num_contribution_currents,
         )?;
         Self::validate_prior_current_dependency_table(
             "stamp value",
@@ -1061,6 +1075,12 @@ impl NativeModel {
                 .prelude
                 .expect("compiled native model has a prelude"),
         )
+    }
+
+    /// Whether an evaluation of this image leaves every named variable
+    /// published, so a readback needs no observation pass.
+    pub(crate) fn publishes_observable_variables(&self) -> bool {
+        self.assignment_coverage == NativeAssignmentCoverage::ObservableVariables
     }
 
     pub(crate) fn run_assignments(&self, ctx: &EvalContext, vars: *mut f64) {
@@ -1491,8 +1511,9 @@ fn append_test_value_stub(bytes: &mut Vec<u8>, value: u32) -> CodeOffset {
 mod tests {
     use super::super::runtime::ExecutableMemory;
     use super::{
-        CodeOffset, EvalContext, JitResult, NativeCurrentDependencies, NativeEntryOffsets,
-        NativeEntryStarts, NativeModel, NativeRequiredStorage, append_test_value_stub,
+        CodeOffset, EvalContext, JitResult, NativeAssignmentCoverage, NativeCurrentDependencies,
+        NativeEntryOffsets, NativeEntryStarts, NativeModel, NativeRequiredStorage,
+        append_test_value_stub,
     };
     use std::sync::{Arc, Barrier};
 
@@ -1724,11 +1745,13 @@ mod tests {
             0,
             0,
             0,
+            entries.stamp_values.len(),
             image,
             entries,
             NativeEntryStarts::new(vec![CodeOffset::new(0)]),
             dependencies,
             NativeRequiredStorage::default(),
+            NativeAssignmentCoverage::ObservableVariables,
         )
         .expect_err("entry inside image but outside recorded function starts must be rejected");
 
@@ -1889,11 +1912,13 @@ mod tests {
             0,
             0,
             num_branch_unknowns,
+            entries.stamp_values.len(),
             image,
             entries,
             entry_starts,
             dependencies,
             NativeRequiredStorage::default(),
+            NativeAssignmentCoverage::ObservableVariables,
         )
     }
 

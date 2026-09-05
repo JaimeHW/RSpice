@@ -915,11 +915,13 @@ mod tests {
             2,
             1,
             0,
+            entries.stamp_values.len(),
             ExecutableMemory::allocate(&image)?,
             entries,
             entry_starts,
             dependencies,
             NativeRequiredStorage::default(),
+            crate::jit::model_plan::NativeAssignmentCoverage::ObservableVariables,
         )?;
 
         let mut currents = [-1.0_f64];

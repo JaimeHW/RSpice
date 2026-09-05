@@ -25,7 +25,7 @@ use super::model::{
     CodeOffset, NativeCurrentDependencies, NativeEntryOffsets, NativeEntryStarts, NativeModel,
     NativeRequiredStorage,
 };
-use super::model_plan::{NativeModelPlan, NativeObservationPlan};
+use super::model_plan::{NativeAssignmentCoverage, NativeModelPlan, NativeObservationPlan};
 use super::plan_program::PlanProgramRef;
 use super::runtime::ExecutableMemory;
 #[cfg(all(windows, target_arch = "x86_64"))]
@@ -415,11 +415,13 @@ pub(crate) fn compile_model_plan(
         model.num_variables,
         model.parameters.len(),
         model.branch_sources.len(),
+        model.stamp_programs.len(),
         executable,
         entries,
         NativeEntryStarts::new(entry_starts),
         plan.current_dependencies.clone(),
         NativeRequiredStorage::for_model(model).with_prelude_slots(plan.prelude_slot_count()),
+        plan.assignment_coverage,
     )
 }
 
@@ -486,11 +488,13 @@ pub(crate) fn compile_observation_image(
         model.num_variables,
         model.parameters.len(),
         model.branch_sources.len(),
+        model.stamp_programs.len(),
         executable,
         entries,
         NativeEntryStarts::new(entry_starts),
         plan.current_dependencies.clone(),
         NativeRequiredStorage::for_model(model),
+        NativeAssignmentCoverage::ObservableVariables,
     )
 }
 
