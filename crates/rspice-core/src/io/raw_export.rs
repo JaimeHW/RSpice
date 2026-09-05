@@ -19,6 +19,22 @@
 //! Binary: / Values:
 //! <data>
 //! ```
+//!
+//! # More than one plot
+//!
+//! A rawfile is a *sequence* of blocks like the one above: each `Plotname:`
+//! opens a plot with its own variables, and that plot's data ends where its
+//! own `No. Points` says it does. [`write_event_plots`] uses that to append
+//! the event histories a transient captured, one plot per node, after the
+//! analysis plot — which is left byte-identical, so a reader that wants only
+//! the analysis reads the first plot and stops exactly where it stopped
+//! before. [`crate::io::parse_raw_plots_file_with_limits`] is the reader that
+//! returns all of them, and
+//! [`crate::execution::decode_event_plots`] turns the appended ones back into
+//! event histories.
+//!
+//! Those plots declare their version in their *name* rather than in a header
+//! key or a `Command:` line, for the reason [`RawEventKind::plot_name`] gives.
 
 use crate::Value;
 use rspice_output::{AtomicArtifactError, write_atomic};

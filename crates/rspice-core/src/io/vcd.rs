@@ -46,6 +46,16 @@
 //! the data does not support. Everything that is modelled — ticks, bits,
 //! reals, widths, aliases and scope paths — comes back from
 //! [`parse_vcd_reader`] exactly as it went in.
+//!
+//! ## Versioning
+//!
+//! VCD has no schema version, and this module does not invent one. What
+//! [`VCD_WRITER_VERSION`] stamps into `$version` is provenance — which build
+//! produced the file — and a reader must not gate on it: a dump another tool
+//! wrote carries that tool's string, is read all the same, and comes back out
+//! of [`write_vcd`] still carrying it. The compatibility contract is the
+//! format itself, so the way to extend what RSpice dumps is to declare more
+//! `$var`s, never to add a directive a foreign reader would not know.
 
 use std::collections::HashMap;
 use std::fmt;

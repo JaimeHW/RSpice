@@ -11,6 +11,21 @@
 //! The format modules stay free of result types — they take names, times and
 //! values — so the mapping between an engine result and those plain columns
 //! lives here, in both directions.
+//!
+//! The round trip is exact, which is what makes a rawfile a lossless carrier
+//! of an event history rather than a picture of one. A digital value is
+//! written as the integer [`DigitalValue::event_code`] produces, and that
+//! integer names the resolved state *and* the drive strength, so
+//! [`decode_event_plots`] hands back the same twelve-state value the run
+//! committed, at the same time, with no interpolation and no rounding. That
+//! is the difference between this carrier and the two lossy ones: a `D(node)`
+//! grid column keeps three levels, and a VCD dump keeps four bit states and
+//! no strength at all.
+//!
+//! What the round trip does *not* carry is everything outside the timeline
+//! itself: no unit, no width, no bus grouping, and no record of which
+//! `.SAVE` or `.OPTIONS` decision selected the node in the first place. A
+//! plot is one node's times and one node's values.
 
 use thiserror::Error;
 
