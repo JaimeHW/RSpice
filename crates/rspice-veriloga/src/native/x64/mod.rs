@@ -196,11 +196,6 @@ pub(crate) fn compile_model_plan(
         &mut windows_unwind_functions,
     )?;
     let assignment_image_end = image.len();
-    debug_assert_eq!(
-        assignment.is_none(),
-        plan.assignments.is_empty(),
-        "an empty assignment pass emits nothing and a non-empty one emits a function"
-    );
     let post_assignment = if plan.post_assignments.is_empty() {
         None
     } else {

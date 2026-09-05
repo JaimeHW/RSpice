@@ -86,10 +86,11 @@ pub(crate) const FUSED_KERNEL_INLINE_LIMIT: usize = 32;
 use crate::canonical_ir::CanonicalIrArtifact;
 use crate::codegen::CompiledModel;
 
-#[cfg(feature = "native-bytecode-contract-tests")]
-pub fn compile_native(model: &CompiledModel) -> JitResult<NativeModel> {
-    validate_native_coverage(model)?;
-
+/// The host this crate is qualified to publish executable code on.
+///
+/// One answer for every entry point that publishes an image, because the
+/// qualification is a property of the host and not of what is being compiled.
+fn qualified_host_target() -> JitResult<TargetSpec> {
     let target = TargetSpec::host().ok_or_else(|| JitError::UnsupportedTarget {
         target: "unknown".into(),
         reason: "host architecture is not supported".into(),
@@ -101,6 +102,14 @@ pub fn compile_native(model: &CompiledModel) -> JitResult<NativeModel> {
                 .into(),
         });
     }
+    Ok(target)
+}
+
+#[cfg(feature = "native-bytecode-contract-tests")]
+pub fn compile_native(model: &CompiledModel) -> JitResult<NativeModel> {
+    validate_native_coverage(model)?;
+
+    let target = qualified_host_target()?;
     match target.arch {
         Architecture::X64 => x64::compile_model(model),
         Architecture::AArch64 => Err(JitError::UnsupportedTarget {
@@ -116,17 +125,7 @@ pub fn compile_native_with_canonical_ir(
 ) -> JitResult<NativeModel> {
     validate_native_coverage(model)?;
 
-    let target = TargetSpec::host().ok_or_else(|| JitError::UnsupportedTarget {
-        target: "unknown".into(),
-        reason: "host architecture is not supported".into(),
-    })?;
-    if !cfg!(any(target_os = "macos", target_os = "linux", windows)) {
-        return Err(JitError::UnsupportedTarget {
-            target: target.display_name().into(),
-            reason: "the native JIT is qualified only for macOS, Linux, and Windows desktop hosts"
-                .into(),
-        });
-    }
+    let target = qualified_host_target()?;
     match target.arch {
         Architecture::X64 => x64::compile_model_with_canonical_ir(model, artifact),
         Architecture::AArch64 => {
@@ -158,10 +157,7 @@ pub fn compile_observation_image_with_canonical_ir(
     model: &CompiledModel,
     artifact: &CanonicalIrArtifact,
 ) -> JitResult<NativeModel> {
-    let target = TargetSpec::host().ok_or_else(|| JitError::UnsupportedTarget {
-        target: "unknown".into(),
-        reason: "host architecture is not supported".into(),
-    })?;
+    let target = qualified_host_target()?;
     let plan = crate::jit::plan_builder::build_observation_plan(model, artifact)?;
     match target.arch {
         Architecture::X64 => x64::compile_observation_image(model, &plan),

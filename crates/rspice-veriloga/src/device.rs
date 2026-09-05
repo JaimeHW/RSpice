@@ -4450,24 +4450,27 @@ impl VerilogADevice {
     /// operator state, same time, so it reproduces the evaluation's values
     /// exactly rather than approximating them.
     ///
-    /// It does not advance state, and this is not an assertion about the
-    /// operators but about when it runs: a re-evaluation at an unchanged
-    /// operating point is what every Newton iteration already is, and each
-    /// stateful operator commits on `advance_state` rather than on evaluation.
-    ///
-    /// The cost is one compile per model, then one pass per call. Call it once
-    /// after convergence, not inside the loop.
+    /// It advances no state the evaluation owns, and that is a claim about
+    /// what can reach this pass rather than about analog operators in general.
+    /// Two facts make it true. Since W-F12 the CFG route has executed the
+    /// module body twice per evaluation — the assignment pass, then the
+    /// prelude — so every operator a CFG-planned module has is already being
+    /// run twice at an unchanged operating point, and a third execution is the
+    /// same class. And the one operator that is *not* idempotent under a second
+    /// execution, a named `$limit`, cannot appear in a CFG-planned module at
+    /// all: `$limit` is one of the constructs the CFG lowering refuses. Its
+    /// candidate is stored as the previous value for the *next* Newton
+    /// evaluation, so re-running the assignment that computes it moves the
+    /// limiter — which is why the guard below is a correctness rule and not an
+    /// optimization.
     ///
     /// A module the CFG route refused keeps the postfix plan, whose assignment
     /// pass is rooted on the observable set as well as on its entries' reads.
     /// Its evaluation has already published every name, so this returns without
-    /// compiling anything — and that is a correctness rule, not an
-    /// optimization. Re-running such a module's pass would re-execute the
-    /// operators the evaluation owns, and a named `$limit` is the proof: its
-    /// candidate is stored as the previous value for the *next* Newton
-    /// evaluation, so a second execution at the same bias moves it. `$limit` is
-    /// also exactly what the CFG lowering refuses, which is why a CFG-planned
-    /// module has no named limiter for the observation pass to disturb.
+    /// compiling anything and without running anything.
+    ///
+    /// The cost is one compile per model, then one pass per call. Call it once
+    /// after convergence, not inside the loop.
     #[cfg(feature = "native")]
     pub fn observe_variables(&mut self, artifact: &CanonicalIrArtifact) -> Result<(), VmError> {
         if self.native_model.publishes_observable_variables() {
