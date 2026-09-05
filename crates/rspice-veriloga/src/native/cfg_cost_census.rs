@@ -69,7 +69,7 @@ use crate::jit::plan_builder::{
 use crate::native::NativeModel;
 use crate::native::abi::EvalContext;
 
-/// The six modules the cost of the flip is reported on.
+/// The seven modules the cost of the flip is reported on.
 ///
 /// One of each shape the estate has: a small ESD clamp, a bipolar model, a
 /// HICUM with deep charge storage, and the two whose images the size census
@@ -82,13 +82,21 @@ use crate::native::abi::EvalContext;
 /// that omits it reads the two routes as costing the same because both were
 /// paying the same dominant term; including it is what makes retiring that
 /// term visible as time rather than only as bytes.
-const COST_MODELS: [&str; 6] = [
+///
+/// `l_utsoi` is the seventh and it is the one module in the estate whose CFG
+/// plan is not a straight win on size: eleven of its entries read a
+/// contribution current, so `LiveCurrentTaint` keeps them out of the prelude
+/// and each carries its own cone. Whether that costs *time* as well as bytes is
+/// what decides whether a post-current prelude is worth building, and this is
+/// where the ratio to the shipped postfix plan is read.
+const COST_MODELS: [&str; 7] = [
     "asmesd",
     "vbic13_4t",
     "hicumL2va",
     "bsimcmg_va",
     "asmhemt",
     "hisimhv_n5_va",
+    "l_utsoi",
 ];
 
 /// Timed samples per plan. The reported figure is the median of these.
