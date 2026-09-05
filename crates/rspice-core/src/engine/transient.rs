@@ -520,6 +520,26 @@ struct TransientCaptureRequest<'a> {
     trajectory_point_count: usize,
 }
 
+/// The run-lifetime buffers an accepted point's event state is taken into.
+///
+/// Every field outlives the accepted point, so taking a snapshot costs no
+/// allocation after the first step: the snapshot vectors are cleared and
+/// refilled, and the index maps grow only when a node first appears.
+struct TransientEventCapture<'a> {
+    /// Whether this run records event traces at all.
+    record_traces: bool,
+    /// Committed digital values of the accepted point, refilled per point.
+    digital_snapshot: &'a mut Vec<(crate::NodeId, crate::xspice::DigitalValue)>,
+    /// Committed real event values of the accepted point, refilled per point.
+    real_snapshot: &'a mut Vec<(crate::NodeId, Value)>,
+    /// Node id to index in `TransientResult::digital_traces`.
+    digital_trace_indices: &'a mut HashMap<crate::NodeId, usize>,
+    /// Node id to index in `TransientResult::real_traces`.
+    real_trace_indices: &'a mut HashMap<crate::NodeId, usize>,
+    /// Which nodes output projection retains an event trace for.
+    retained_event_nodes: &'a [bool],
+}
+
 /// Where the scheduled-checkpoint cursor currently stands.
 struct ScheduledCheckpointPoint<'a> {
     scheduled_times: &'a [Value],
@@ -1521,7 +1541,6 @@ impl Engine {
         sample: TransientSample<'_>,
         sources: TransientSampleSources<'_>,
         request: TransientCaptureRequest<'_>,
-        abort: &dyn AbortSignal,
     ) -> Result<usize, SimulationError> {
         let TransientCaptureRequest {
             record_device_op_traces,
@@ -1624,8 +1643,57 @@ impl Engine {
             );
         }
         circuit.accept_generic_switch_transient_step();
-        abort.observe_transient_sample(result.observable_sample());
         Ok(added_values)
+    }
+
+    /// Close an accepted point: record its committed event state, hold the
+    /// result to its budget, then publish the point to the sample hook.
+    ///
+    /// Both accept paths end this way — the ordinary one and the force-accept
+    /// recovery — and the order is the reason they share it. The hook is the
+    /// live view of a running analysis, so the event state it publishes has to
+    /// be the state this point committed; publishing before the snapshot would
+    /// hand every consumer the previous point's digital and real values on
+    /// every step but the first. Two copies of that sequence are two chances
+    /// to get it wrong.
+    fn commit_accepted_transient_point(
+        &self,
+        result: &mut TransientResult,
+        circuit: &crate::circuit::CircuitData,
+        time: Value,
+        events: TransientEventCapture<'_>,
+        mut retained_result_values: usize,
+        abort: &dyn AbortSignal,
+    ) -> Result<usize, SimulationError> {
+        let TransientEventCapture {
+            record_traces,
+            digital_snapshot,
+            real_snapshot,
+            digital_trace_indices,
+            real_trace_indices,
+            retained_event_nodes,
+        } = events;
+        if record_traces {
+            circuit.fill_xspice_digital_snapshot(digital_snapshot);
+            retained_result_values =
+                retained_result_values.saturating_add(result.record_digital_snapshot(
+                    time,
+                    digital_snapshot,
+                    digital_trace_indices,
+                    retained_event_nodes,
+                ));
+            circuit.fill_xspice_real_snapshot(real_snapshot);
+            retained_result_values =
+                retained_result_values.saturating_add(result.record_real_snapshot(
+                    time,
+                    real_snapshot,
+                    real_trace_indices,
+                    retained_event_nodes,
+                ));
+        }
+        self.ensure_transient_result_limits(result, retained_result_values)?;
+        abort.observe_transient_sample(result.observable_sample(digital_snapshot, real_snapshot));
+        Ok(retained_result_values)
     }
 
     fn backfill_initial_linear_capacitor_branch_currents(
@@ -4186,7 +4254,7 @@ impl Engine {
         }
         let mut retained_result_values = Self::transient_result_value_count(&result);
         self.ensure_transient_result_limits(&result, retained_result_values)?;
-        abort.observe_transient_sample(result.observable_sample());
+        abort.observe_transient_sample(result.observable_sample(&digital_snapshot, &real_snapshot));
         let mut t = resume_time;
         let force_accept_protected_nodes = circuit.force_accept_protected_nodes();
         let mut voltage_lte_excluded_nodes = circuit.xspice_transient_voltage_lte_excluded_nodes();
@@ -8395,28 +8463,23 @@ impl Engine {
                                 capture: &capture_plan,
                                 trajectory_point_count,
                             },
-                            abort,
                         )?,
                     );
-                    if record_xspice_event_traces {
-                        circuit.fill_xspice_digital_snapshot(&mut digital_snapshot);
-                        retained_result_values =
-                            retained_result_values.saturating_add(result.record_digital_snapshot(
-                                t,
-                                &digital_snapshot,
-                                &mut digital_trace_indices,
-                                &capture_plan.event_nodes,
-                            ));
-                        circuit.fill_xspice_real_snapshot(&mut real_snapshot);
-                        retained_result_values =
-                            retained_result_values.saturating_add(result.record_real_snapshot(
-                                t,
-                                &real_snapshot,
-                                &mut real_trace_indices,
-                                &capture_plan.event_nodes,
-                            ));
-                    }
-                    self.ensure_transient_result_limits(&result, retained_result_values)?;
+                    retained_result_values = self.commit_accepted_transient_point(
+                        &mut result,
+                        &circuit,
+                        t,
+                        TransientEventCapture {
+                            record_traces: record_xspice_event_traces,
+                            digital_snapshot: &mut digital_snapshot,
+                            real_snapshot: &mut real_snapshot,
+                            digital_trace_indices: &mut digital_trace_indices,
+                            real_trace_indices: &mut real_trace_indices,
+                            retained_event_nodes: &capture_plan.event_nodes,
+                        },
+                        retained_result_values,
+                        abort,
+                    )?;
                     let next_force_dt = Self::force_accept_recovery_timestep(
                         dt,
                         timestep.preferred_min_dt(),
@@ -8924,27 +8987,22 @@ impl Engine {
                         capture: &capture_plan,
                         trajectory_point_count,
                     },
-                    abort,
                 )?);
-            if record_xspice_event_traces {
-                circuit.fill_xspice_digital_snapshot(&mut digital_snapshot);
-                retained_result_values =
-                    retained_result_values.saturating_add(result.record_digital_snapshot(
-                        t,
-                        &digital_snapshot,
-                        &mut digital_trace_indices,
-                        &capture_plan.event_nodes,
-                    ));
-                circuit.fill_xspice_real_snapshot(&mut real_snapshot);
-                retained_result_values =
-                    retained_result_values.saturating_add(result.record_real_snapshot(
-                        t,
-                        &real_snapshot,
-                        &mut real_trace_indices,
-                        &capture_plan.event_nodes,
-                    ));
-            }
-            self.ensure_transient_result_limits(&result, retained_result_values)?;
+            retained_result_values = self.commit_accepted_transient_point(
+                &mut result,
+                &circuit,
+                t,
+                TransientEventCapture {
+                    record_traces: record_xspice_event_traces,
+                    digital_snapshot: &mut digital_snapshot,
+                    real_snapshot: &mut real_snapshot,
+                    digital_trace_indices: &mut digital_trace_indices,
+                    real_trace_indices: &mut real_trace_indices,
+                    retained_event_nodes: &capture_plan.event_nodes,
+                },
+                retained_result_values,
+                abort,
+            )?;
             if first_accepted_transient_step {
                 let span_ceiling = xyce_breakpoint_span_ceiling.ceiling();
                 let accepted_max_step = self

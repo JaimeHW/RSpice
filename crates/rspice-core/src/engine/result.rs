@@ -385,14 +385,27 @@ impl TransientResult {
     ///
     /// The hook sits at the bottom of the crate and must not name a driver
     /// result type, so the driver narrows itself on the way out: waveform
-    /// columns, their names, and the accepted times, and nothing else.
-    pub(crate) fn observable_sample(&self) -> crate::abort_signal::TransientSample<'_> {
+    /// columns, their names, the accepted times, and the committed event state
+    /// of the point being reported, and nothing else.
+    ///
+    /// The committed event state of the same accepted point is not stored
+    /// column-major and so cannot be read back off the result — the traces
+    /// keep only the changes. The caller therefore hands over the snapshot
+    /// buffers it just recorded from, which is also what keeps the hook
+    /// allocation-free.
+    pub(crate) fn observable_sample<'a>(
+        &'a self,
+        digital_values: &'a [(NodeId, DigitalValue)],
+        real_values: &'a [(NodeId, Value)],
+    ) -> crate::abort_signal::TransientSample<'a> {
         crate::abort_signal::TransientSample {
             time: &self.time,
             node_names: &self.node_names,
             node_voltages: &self.voltages,
             branch_names: &self.branch_names,
             branch_currents: &self.branch_currents,
+            digital_values,
+            real_values,
         }
     }
 

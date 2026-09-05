@@ -67,6 +67,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// own result type both because the abort layer sits below the analyses and
 /// because borrowing is what keeps the hook inert: a non-interactive run pays
 /// no allocation to report a sample nobody reads.
+///
+/// # Resolving an event node's name
+///
+/// The event slices are keyed by [`crate::NodeId`], the netlist node number,
+/// where ground is zero and never appears. `node_names` is the whole node
+/// table, so `node_names[node_id - 1]` is the name of the node an event value
+/// belongs to — the same arithmetic the result recorder does on its way into
+/// `digital_traces`. No second table and no lookup allocation is needed.
 #[derive(Debug, Clone, Copy)]
 pub struct TransientSample<'a> {
     /// Accepted time points. The reported sample is the last entry.
@@ -79,6 +87,28 @@ pub struct TransientSample<'a> {
     pub branch_names: &'a [String],
     /// Retained branch-current columns, indexed `[branch][sample]`.
     pub branch_currents: &'a [Vec<crate::Value>],
+    /// Committed digital event values at this accepted time, sorted by node id.
+    ///
+    /// This is the whole committed event state, not a delta: every digital
+    /// node the deck has carries its current value at every accepted point.
+    /// The value is final for this time — the engine records the same one into
+    /// `digital_traces` — so a live consumer never has to wait for a later
+    /// step to learn what happened at this one.
+    ///
+    /// Empty when the deck has no digital event nodes, and empty for every
+    /// point of a run whose `.OPTIONS`/`.CONTROL` turned event tracing off.
+    ///
+    /// Unlike the waveform columns above, this is not filtered by output
+    /// retention: a node that `.SAVE` excluded from `digital_traces` is still
+    /// reported here. A consumer that wants trace parity filters by name.
+    pub digital_values: &'a [(crate::NodeId, crate::xspice::DigitalValue)],
+    /// Committed real-valued event values at this accepted time, sorted by
+    /// node id.
+    ///
+    /// The real event nets carry the same guarantees as `digital_values`:
+    /// whole committed state, final for this time, unfiltered by retention,
+    /// empty when the deck has no real event nodes or event tracing is off.
+    pub real_values: &'a [(crate::NodeId, crate::Value)],
 }
 
 //=============================================================================
@@ -148,10 +178,11 @@ pub trait AbortSignal: Send + Sync {
 
     /// Observe one fully accepted transient sample.
     ///
-    /// This hook runs only after the sample has been committed to the
-    /// analysis result. Rejected Newton or timestep attempts never cross this
-    /// boundary. The default is intentionally inert so non-interactive
-    /// engine users pay no allocation or transport cost.
+    /// This hook runs once per accepted time point, after everything that
+    /// point contributes — waveform columns and committed event state alike —
+    /// has been recorded into the analysis result. Rejected Newton or timestep
+    /// attempts never cross this boundary. The default is intentionally inert
+    /// so non-interactive engine users pay no allocation or transport cost.
     fn observe_transient_sample(&self, _sample: TransientSample<'_>) {}
 }
 
