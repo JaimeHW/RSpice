@@ -114,7 +114,7 @@ fn dc_op_with_one_node() -> crate::state::DcOpResult {
 }
 
 #[test]
-fn export_registry_matches_the_fifteen_contract_ids_and_governs_availability() {
+fn export_registry_matches_the_ten_contract_ids_and_governs_availability() {
     assert_eq!(
         ResultExportFormat::ALL.map(ResultExportFormat::canonical_id),
         [
@@ -124,15 +124,10 @@ fn export_registry_matches_the_fifteen_contract_ids_and_governs_availability() {
             "tsv",
             "touchstone-v2",
             "hdf5",
-            "arrow-ipc",
-            "parquet",
             "numpy-npy",
             "numpy-npz",
             "matlab-v5",
-            "matlab-v7.3",
-            "json-lines",
             "vcd",
-            "fst",
         ]
     );
     for format in ResultExportFormat::ALL {

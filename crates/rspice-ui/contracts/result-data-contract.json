@@ -427,15 +427,10 @@
       "tsv",
       "touchstone-v2",
       "hdf5",
-      "arrow-ipc",
-      "parquet",
       "numpy-npy",
       "numpy-npz",
       "matlab-v5",
-      "matlab-v7.3",
-      "json-lines",
-      "vcd",
-      "fst"
+      "vcd"
     ],
     "failureCodeIds": [
       "result-document-schema-invalid",
@@ -8466,52 +8461,6 @@
         "qualification": "design-target-unqualified"
       },
       {
-        "id": "arrow-ipc",
-        "extensions": [
-          ".arrow"
-        ],
-        "mediaTypes": [
-          "application/vnd.apache.arrow.file"
-        ],
-        "dataKinds": [
-          "typed columns",
-          "record batches",
-          "metadata"
-        ],
-        "precisionDefault": "preserve compatible logical and physical types",
-        "explicitOptions": [
-          "schema metadata",
-          "batch sizing",
-          "dictionary policy",
-          "unit metadata"
-        ],
-        "transaction": "Stage, identify, parse or encode, validate schema and integrity, preview semantic and precision effects, then atomically commit or cancel without replacing a valid source.",
-        "qualification": "design-target-unqualified"
-      },
-      {
-        "id": "parquet",
-        "extensions": [
-          ".parquet"
-        ],
-        "mediaTypes": [
-          "application/vnd.apache.parquet"
-        ],
-        "dataKinds": [
-          "typed columnar tables",
-          "family and sample records"
-        ],
-        "precisionDefault": "preserve compatible logical and physical types",
-        "explicitOptions": [
-          "row groups",
-          "compression",
-          "statistics",
-          "nested mapping",
-          "unit metadata"
-        ],
-        "transaction": "Stage, identify, parse or encode, validate schema and integrity, preview semantic and precision effects, then atomically commit or cancel without replacing a valid source.",
-        "qualification": "design-target-unqualified"
-      },
-      {
         "id": "numpy-npy",
         "extensions": [
           ".npy"
@@ -8578,55 +8527,6 @@
         "qualification": "design-target-unqualified"
       },
       {
-        "id": "matlab-v7.3",
-        "extensions": [
-          ".mat"
-        ],
-        "mediaTypes": [
-          "application/x-matlab-hdf5"
-        ],
-        "dataKinds": [
-          "HDF5-backed arrays",
-          "structures",
-          "tables"
-        ],
-        "precisionDefault": "preserve representable numeric classes and complex components",
-        "explicitOptions": [
-          "variable naming",
-          "object layout",
-          "axes",
-          "units",
-          "compression"
-        ],
-        "transaction": "Stage, identify, parse or encode, validate schema and integrity, preview semantic and precision effects, then atomically commit or cancel without replacing a valid source.",
-        "qualification": "design-target-unqualified"
-      },
-      {
-        "id": "json-lines",
-        "extensions": [
-          ".jsonl"
-        ],
-        "mediaTypes": [
-          "application/x-ndjson"
-        ],
-        "dataKinds": [
-          "typed row records",
-          "events",
-          "measurements",
-          "provenance"
-        ],
-        "precisionDefault": "emit numeric type and exact lexical or encoded value metadata",
-        "explicitOptions": [
-          "record schema",
-          "scope",
-          "complex encoding",
-          "non-finite encoding",
-          "units"
-        ],
-        "transaction": "Stage, identify, parse or encode, validate schema and integrity, preview semantic and precision effects, then atomically commit or cancel without replacing a valid source.",
-        "qualification": "design-target-unqualified"
-      },
-      {
         "id": "vcd",
         "extensions": [
           ".vcd"
@@ -8645,29 +8545,6 @@
           "timescale",
           "bus ordering",
           "strength disposition"
-        ],
-        "transaction": "Stage, identify, parse or encode, validate schema and integrity, preview semantic and precision effects, then atomically commit or cancel without replacing a valid source.",
-        "qualification": "design-target-unqualified"
-      },
-      {
-        "id": "fst",
-        "extensions": [
-          ".fst"
-        ],
-        "mediaTypes": [
-          "application/vnd.gtkwave.fst"
-        ],
-        "dataKinds": [
-          "digital events",
-          "hierarchy",
-          "timescale"
-        ],
-        "precisionDefault": "preserve integer time ticks and four-state logic",
-        "explicitOptions": [
-          "scope",
-          "timescale",
-          "bus ordering",
-          "compression"
         ],
         "transaction": "Stage, identify, parse or encode, validate schema and integrity, preview semantic and precision effects, then atomically commit or cancel without replacing a valid source.",
         "qualification": "design-target-unqualified"
@@ -9183,7 +9060,7 @@
     "workflowSurfaces": 8,
     "entityContracts": 11,
     "importFormats": 17,
-    "exportFormats": 15,
+    "exportFormats": 10,
     "publicationFormats": 4,
     "platformCompositions": 4,
     "failureCodes": 28

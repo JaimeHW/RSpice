@@ -42,34 +42,24 @@ enum ResultExportFormat {
     Tsv,
     TouchstoneV2,
     Hdf5,
-    ArrowIpc,
-    Parquet,
     NumpyNpy,
     NumpyNpz,
     MatlabV5,
-    MatlabV73,
-    JsonLines,
     Vcd,
-    Fst,
 }
 
 impl ResultExportFormat {
-    const ALL: [Self; 15] = [
+    const ALL: [Self; 10] = [
         Self::RSpiceResultBundle,
         Self::RSpiceDatasetBundle,
         Self::CsvRfc4180,
         Self::Tsv,
         Self::TouchstoneV2,
         Self::Hdf5,
-        Self::ArrowIpc,
-        Self::Parquet,
         Self::NumpyNpy,
         Self::NumpyNpz,
         Self::MatlabV5,
-        Self::MatlabV73,
-        Self::JsonLines,
         Self::Vcd,
-        Self::Fst,
     ];
 
     const fn canonical_id(self) -> &'static str {
@@ -80,15 +70,10 @@ impl ResultExportFormat {
             Self::Tsv => "tsv",
             Self::TouchstoneV2 => "touchstone-v2",
             Self::Hdf5 => "hdf5",
-            Self::ArrowIpc => "arrow-ipc",
-            Self::Parquet => "parquet",
             Self::NumpyNpy => "numpy-npy",
             Self::NumpyNpz => "numpy-npz",
             Self::MatlabV5 => "matlab-v5",
-            Self::MatlabV73 => "matlab-v7.3",
-            Self::JsonLines => "json-lines",
             Self::Vcd => "vcd",
-            Self::Fst => "fst",
         }
     }
 
