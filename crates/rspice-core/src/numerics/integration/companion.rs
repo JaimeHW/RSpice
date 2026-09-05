@@ -243,7 +243,7 @@ impl CompanionCoefficients {
 
     /// Calculate the equivalent voltage-source magnitude for an inductor.
     ///
-    /// Exact dual of [`Self::capacitor_ieq`] (v <-> i, C <-> L): the i_n
+    /// Exact dual of `Self::capacitor_ieq` (v <-> i, C <-> L): the i_n
     /// history term uses `coeff_v_n` (NOT `coeff_g` — they differ for Gear2),
     /// the i_{n-1} term applies only when the method keeps two history points,
     /// and the conjugate-variable history v_n is weighted by `coeff_i_n`

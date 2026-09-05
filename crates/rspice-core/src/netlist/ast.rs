@@ -583,7 +583,7 @@ pub enum ElementKind {
     //-------------------------------------------------------------------------
     // Coupled Inductors
     //-------------------------------------------------------------------------
-    /// Coupling coefficient: K1 L1 L2 [L3...] coefficient [model]
+    /// Coupling coefficient: `K1 L1 L2 [L3...] coefficient [model]`
     Coupling {
         /// Names of coupled inductors
         inductors: Vec<String>,

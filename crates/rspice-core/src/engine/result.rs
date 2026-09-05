@@ -893,7 +893,7 @@ impl TransientResultCompressed {
     /// [`TransientResultCompressed::channels`], which keeps them as typed
     /// absences. A device operating-point parameter that a device did not
     /// report is expanded back to the `NaN` padding that
-    /// [`TransientResult::record_device_op_sample`] writes, which is the exact
+    /// `TransientResult::record_device_op_sample` writes, which is the exact
     /// representation it was compressed from.
     pub fn try_into_transient(self) -> Result<TransientResult, String> {
         self.validate()?;

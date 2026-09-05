@@ -884,7 +884,7 @@ impl NoiseSource {
     /// Compute current noise spectral density (A²/Hz) at given frequency.
     ///
     /// Invalid source state is represented by NaN. Production analyses use
-    /// [`Self::try_spectral_density`] so it becomes a typed failure rather
+    /// `Self::try_spectral_density` so it becomes a typed failure rather
     /// than an apparently inactive source.
     pub fn spectral_density(&self, frequency: Value, temperature: Value) -> Value {
         match self.noise_type {

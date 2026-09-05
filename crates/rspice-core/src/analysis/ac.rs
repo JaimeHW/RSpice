@@ -26,7 +26,7 @@ const SWEEP_RELTOL: Value = 1e-3;
 /// # Legacy compatibility
 ///
 /// This infallible wrapper is deprecated in favor of
-/// [`try_ac_sweep_frequencies`]. It preserves the historical empty-vector
+/// `try_ac_sweep_frequencies`. It preserves the historical empty-vector
 /// sentinel for downstream compatibility, but first-party execution paths
 /// must use the checked API so invalid input and resource failures cannot be
 /// mistaken for an analysis with no data.

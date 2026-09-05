@@ -987,7 +987,7 @@ impl EventScheduler {
     ///
     /// Both tiers are consulted and the earlier answer wins. The slot is
     /// asked what its events are *dated*, which is not the same question as
-    /// which slot is open: [`Self::open_due_slot`] sets `current_tick` to the
+    /// which slot is open: `Self::open_due_slot` sets `current_tick` to the
     /// caller's bound, and `open_next_due_tick` then fills the slot from the
     /// earliest pending tick at or before that bound. So a slot observed
     /// part-settled holds events dated before `current_tick`, and answering

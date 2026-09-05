@@ -44,9 +44,9 @@
 //!   chosen so the check is far cheaper than the work between two checks
 //!   while still bounding latency by a countable number of iterations.
 //!
-//! [`CountingAbort`] exists to hold this to an exact number: a test sets a
-//! poll threshold, runs the analysis, and asserts both that the analysis
-//! stopped and at which poll it did so.
+//! [`CountingAbort`](crate::abort_signal::CountingAbort) exists to hold this
+//! to an exact number: a test sets a poll threshold, runs the analysis, and
+//! asserts both that the analysis stopped and at which poll it did so.
 
 use std::io::{self, Read};
 use std::sync::Arc;

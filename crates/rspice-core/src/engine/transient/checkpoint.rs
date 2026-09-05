@@ -4824,7 +4824,7 @@ impl TransientCheckpoint {
     /// Every message arrives under exactly one source. The stored accepted
     /// integration runtime carries one flat inventory that already includes
     /// the extension-owned messages, so those are recognized on the way back
-    /// out by [`TransientCheckpoint::accepted_runtime_blocker_source`] rather
+    /// out by `TransientCheckpoint::accepted_runtime_blocker_source` rather
     /// than reported a second time as an integration-runtime blocker.
     pub fn capability(&self) -> TransientCheckpointCapability {
         let mut blockers = Vec::new();

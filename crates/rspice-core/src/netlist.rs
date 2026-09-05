@@ -1991,7 +1991,7 @@ impl Netlist {
     /// parser. We strip them since RSpice runs the circuit directly.
     ///
     /// This entry point sanitizes only. The parse pipeline uses
-    /// [`Self::sanitize_control_regions_with_abort`], which also promotes the
+    /// `Self::sanitize_control_regions_with_abort`, which also promotes the
     /// commands the engine can honour and records what became of each one.
     pub fn strip_control_blocks(input: &str) -> Result<String, ParseError> {
         finish_non_aborting_parse(Self::emit_sanitized_control_source(input, &[], &NoAbort))

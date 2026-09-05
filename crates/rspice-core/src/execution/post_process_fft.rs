@@ -41,7 +41,7 @@ pub struct PlannedFftSpectrum<'result> {
 /// it really is a pure ratio. An unnormalized spectrum keeps the probed
 /// column's own unit; a braced parameter expression has a unit the deck never
 /// declared, which is [`SignalUnit::Unspecified`] and not dimensionless —
-/// exactly the answer [`super::post_process::transient_output_unit`] gives the
+/// exactly the answer `super::post_process::transient_output_unit` gives the
 /// same column for `.FOUR`.
 pub fn transient_fft_output_unit(
     physical_type: &str,

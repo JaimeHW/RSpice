@@ -7,9 +7,9 @@
 //! equivalent source the same way, and they all need these coefficients.
 //!
 //! Around that contract sit the three decisions a variable-step integrator
-//! makes each step: how large the step should be ([`timestep`]), which
-//! discontinuities it must not step over ([`breakpoint`]), and whether the
-//! step it just took was accurate enough to accept ([`lte`]).
+//! makes each step: how large the step should be (`timestep`), which
+//! discontinuities it must not step over (`breakpoint`), and whether the
+//! step it just took was accurate enough to accept (`lte`).
 //!
 //! All of it used to live in `analysis::transient`, which put numerics
 //! primitives above the circuit store, the device models and the XSPICE

@@ -17,8 +17,8 @@
 //! rather than raise errors:
 //!
 //! - `LOG` is the natural logarithm, except under
-//!   [`ExpressionDialect::Xyce`] where it is base 10. `LN` and `LOG10` are
-//!   unambiguous and always mean what they say.
+//!   [`crate::config::ExpressionDialect::Xyce`] where it is base 10. `LN` and
+//!   `LOG10` are unambiguous and always mean what they say.
 //! - `PH`/`PHASE` returns degrees, not radians.
 //!
 //! Submodules: `parser` and `types` build the AST, `eval` walks it, `context`
