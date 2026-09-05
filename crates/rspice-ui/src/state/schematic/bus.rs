@@ -15,11 +15,15 @@ use super::component_type::ComponentType;
 use super::state::SchematicState;
 use super::{Point, WireRoutingMode};
 
-/// Highest supported bus member index.
+/// Highest supported bus member index: a 4,096-member budget, `0..=4095`.
 ///
-/// The limit prevents hostile or corrupt project files from requesting
-/// unbounded member expansion while remaining far above practical IC buses.
-pub const MAX_BUS_MEMBER_INDEX: u32 = 1_048_575;
+/// The budget prevents hostile or corrupt project files from requesting
+/// unbounded member expansion. It is a budget rather than a machine limit
+/// because every member a declaration expands to becomes a conductor the
+/// drawing, the connectivity model and the deck each carry one of, and 4,096
+/// of them is already well past the widest bus a schematic is drawn with — a
+/// vector wider than that is a generated structure, not a drawing.
+pub const MAX_BUS_MEMBER_INDEX: u32 = 4_095;
 
 /// Delimiter style used by a typed bus name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
@@ -528,7 +532,10 @@ pub enum BusParseError {
     InvalidSyntax,
     InvalidIdentifier,
     InvalidIndex,
-    IndexOutOfRange,
+    /// The member index a declaration or selector asked for, above
+    /// [`MAX_BUS_MEMBER_INDEX`]. Carried as written so the refusal echoes the
+    /// author's own spelling, a literal too wide for `u32` included.
+    IndexOutOfRange(String),
     DeclarationWidthTooSmall,
     MixedBase {
         expected: String,
@@ -557,7 +564,13 @@ impl fmt::Display for BusParseError {
             Self::InvalidSyntax => formatter.write_str("invalid bus declaration syntax"),
             Self::InvalidIdentifier => formatter.write_str("invalid bus base name"),
             Self::InvalidIndex => formatter.write_str("invalid bus member index"),
-            Self::IndexOutOfRange => formatter.write_str("bus member index is out of range"),
+            Self::IndexOutOfRange(index) => {
+                write!(
+                    formatter,
+                    "bus member index {index} is out of range: the highest member \
+                     a bus declares is {MAX_BUS_MEMBER_INDEX}"
+                )
+            }
             Self::DeclarationWidthTooSmall => {
                 formatter.write_str("a bus declaration must contain at least two members")
             }
@@ -671,16 +684,20 @@ fn parse_index(value: &str) -> Result<u32, BusParseError> {
     if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
         return Err(BusParseError::InvalidIndex);
     }
+    // A literal too wide for `u32` is past the budget by any reading, so it
+    // earns the same refusal an in-range type would have produced. What it
+    // cannot do is restate itself as a `u32`, which is why the refusal carries
+    // the digits rather than a number.
     let index = value
         .parse::<u32>()
-        .map_err(|_| BusParseError::IndexOutOfRange)?;
+        .map_err(|_| BusParseError::IndexOutOfRange(value.to_owned()))?;
     validate_index(index)?;
     Ok(index)
 }
 
 fn validate_index(index: u32) -> Result<(), BusParseError> {
     if index > MAX_BUS_MEMBER_INDEX {
-        Err(BusParseError::IndexOutOfRange)
+        Err(BusParseError::IndexOutOfRange(index.to_string()))
     } else {
         Ok(())
     }
@@ -1081,8 +1098,41 @@ mod tests {
             Err(BusParseError::DeclarationWidthTooSmall)
         );
         assert_eq!(
-            BusDeclaration::parse("DATA[1048576:0]"),
-            Err(BusParseError::IndexOutOfRange)
+            BusDeclaration::parse("DATA[4096:0]"),
+            Err(BusParseError::IndexOutOfRange("4096".to_owned()))
+        );
+    }
+
+    /// The member budget is exact at both ends, and the refusal says which
+    /// number it read and which one it holds authors to.
+    ///
+    /// A budget stated only in a constant is a budget nobody can see: the
+    /// message this asserts is the whole of what an author is told when a
+    /// declaration is refused, and "out of range" without either number left
+    /// them to guess the range. The boundary pair is here because an
+    /// off-by-one in the comparison is invisible to a test that only refuses
+    /// something far above it.
+    #[test]
+    fn the_member_budget_is_exact_and_the_refusal_names_both_numbers() {
+        assert_eq!(MAX_BUS_MEMBER_INDEX, 4_095, "a 4,096-member budget");
+
+        let widest = BusDeclaration::parse("DATA[4095:0]").expect("the whole budget is declarable");
+        assert_eq!(widest.width(), 4_096);
+
+        assert_eq!(
+            BusDeclaration::parse("DATA[4096:0]"),
+            Err(BusParseError::IndexOutOfRange("4096".to_owned()))
+        );
+        assert_eq!(
+            BusParseError::IndexOutOfRange("4096".to_owned()).to_string(),
+            "bus member index 4096 is out of range: the highest member a bus declares is 4095"
+        );
+
+        // A literal too wide for `u32` is refused by the same rule, and the
+        // refusal quotes it rather than a number it could not hold.
+        assert_eq!(
+            BusSlice::parse("DATA[99999999999]"),
+            Err(BusParseError::IndexOutOfRange("99999999999".to_owned()))
         );
     }
 
