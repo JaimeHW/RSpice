@@ -40,6 +40,49 @@ const SHIPPED_CENSUS_MODELS: usize = 43;
 /// move this pin exists to prevent — it converts a detector into a rubber
 /// stamp.
 ///
+/// # The block programs' back edges getting a counter
+///
+/// `001961cf…` moved to `86d6920e…` at W-F14b, when every back edge of every
+/// block program started counting its trips against the hundred-thousand
+/// iteration limit only an assignment-step loop was held to before.
+/// The reading is the sharpest of the four here, because the change has an
+/// exact predicate: a module's image moves **if and only if one of its block
+/// programs has a natural loop**.
+///
+/// **Seventeen moved and twenty-six are byte identical, and the seventeen are
+/// exactly the seventeen a plan-level count of `loop_ranges` names.** Not one
+/// module without a loop moved a byte, and not one with a loop stayed put.
+/// The corpus went from 354,110,368 bytes to **354,171,040, plus 0.017 per
+/// cent**, and the three `hisimhv` variants stay under
+/// [`crate::native::SHIPPED_MODEL_NATIVE_CODE_SIZE_BUDGET_BYTES`] with
+/// `hisimhv_n5_va` at 57.07 MiB.
+///
+/// The per-module growth divides into two rates, and both are accounted for.
+/// Fourteen modules pay only the guard, at **74 to 80 bytes per back edge**:
+/// `ekv3_rf`, `hicumL2va` and `bsimbulk` +80 for one loop each; `bsimsoi_va`
+/// and the 4.6.1 `bsimsoi` +144 for two; `hisimsotb_va` +1,600 for
+/// twenty-one; the three `hisimsoi_va` variants +2,800/+2,816 for
+/// thirty-seven; the three `hisimhv` variants +12,080 for a hundred and
+/// fifty-nine; and the two `l_utsoi` +1,800/+1,784 for twenty-four. Twenty of
+/// those bytes are the counter's load, increment, store and compare; the other
+/// fifty-five are the call to `rspice_native_loop_limit_error` on the path that
+/// never runs.
+///
+/// The three PSP variants pay more — +3,204, +3,236 and +3,864 for ten, ten and
+/// twelve loops — and the excess is not the guard. Their loop-carrying entries
+/// also call helpers, so they now keep the evaluation context in R12 and R13
+/// rather than in the volatile registers it arrives in, and a memory operand
+/// based on R12 needs a SIB byte while one based on R13 needs a displacement
+/// byte even at zero. One byte per context or variable access, across entries of
+/// nineteen thousand instructions, is the whole of the difference. `l_utsoi`'s
+/// cone entries take the same rule and are inside the first rate because they
+/// read the context far less often.
+///
+/// Measured 2026-09-05, peers idle, 805 s; the before column is this box's own,
+/// from a run on the pre-change sources that reproduced `001961cf…` exactly in
+/// 1,123 s. Both runs paid a cold front end — the census cache keys on the
+/// test binary, so a source change invalidates it — which is 502 s of the 805.
+///
 /// # The assignment pass leaving the CFG plan
 ///
 /// `8c19a2f5…` moved to `001961cf…` at W-F14, when the CFG plan's assignment
@@ -172,7 +215,7 @@ const SHIPPED_CENSUS_MODELS: usize = 43;
 /// `hicumL2va` `flicker_Pwr`, `r3_cmc` `gc`) — and the other thirty-five were
 /// digest identical (measured 2026-09-03 on `1ba20f27c`, peers idle, 893 s).
 const SHIPPED_CENSUS_DIGEST: &str =
-    "001961cfe6e3cbf7c6292a756ae9c0324e225f4d3028bffd31fcbbd93c622040";
+    "86d6920e3a7a8eec7af9879e687055dd1ffee892132c92716f01e0ac52886f8c";
 
 /// One shipped module's compiled machine-code digest.
 struct ModelImageDigest {
