@@ -512,18 +512,6 @@ mod legacy_catalog {
             release: ViewerReleaseClass::ReleasePlanned,
         },
         ViewerDocumentDefinition {
-            id: "viewer-wafer-map",
-            group: ViewerGroup::StatisticalAndTabular,
-            title: "Wafer / spatial map",
-            domain: "MC · die coordinates",
-            x_axis: "Die X",
-            y_axis: "Die Y",
-            art: ViewerArt::Contour,
-            analysis_ids: &["mc"],
-            external_capability: None,
-            release: ViewerReleaseClass::ReleasePlanned,
-        },
-        ViewerDocumentDefinition {
             id: "viewer-parallel-coordinates",
             group: ViewerGroup::StatisticalAndTabular,
             title: "Parallel coordinates",
@@ -778,7 +766,6 @@ mod tests {
         "viewer-scatter",
         "viewer-contour",
         "viewer-box-violin",
-        "viewer-wafer-map",
         "viewer-parallel-coordinates",
         "viewer-scatter-matrix",
         "viewer-contribution",
@@ -802,7 +789,7 @@ mod tests {
     #[test]
     fn catalog_has_exact_manifest_document_ids_and_order() {
         assert_eq!(VIEWER_DOCUMENTS.len(), CANONICAL_VIEWER_COUNT);
-        assert_eq!(CANONICAL_VIEWER_COUNT, 42);
+        assert_eq!(CANONICAL_VIEWER_COUNT, 41);
         assert_eq!(
             VIEWER_DOCUMENTS
                 .iter()
@@ -842,7 +829,7 @@ mod tests {
                 .iter()
                 .filter(|document| document.group == group)
                 .count()),
-            [5, 3, 9, 10, 4, 1, 3, 1, 6]
+            [5, 3, 9, 9, 4, 1, 3, 1, 6]
         );
     }
 

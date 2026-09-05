@@ -136,7 +136,6 @@
       "viewer-scatter",
       "viewer-contour",
       "viewer-box-violin",
-      "viewer-wafer-map",
       "viewer-parallel-coordinates",
       "viewer-scatter-matrix",
       "viewer-contribution",
@@ -667,8 +666,7 @@
       "visualForms": [
         "contour",
         "surface",
-        "load-pull",
-        "wafer map"
+        "load-pull"
       ],
       "exactAlternative": "dimension-slice, exact-cell, region, extrema, and contour-level tables"
     },
@@ -1156,7 +1154,6 @@
         "viewer-scatter",
         "viewer-contour",
         "viewer-box-violin",
-        "viewer-wafer-map",
         "viewer-parallel-coordinates",
         "viewer-scatter-matrix"
       ],
@@ -2272,25 +2269,6 @@
       "interactionBoundary": "Selection, viewport, and presentation edits create result-document state only; exact source values, coordinates, units, manifests, and producer receipts remain immutable.",
       "publication": "Vector and raster presentation plus the profile-owned exact structured alternative, complete provenance, currentness, and accessibility descriptions."
     },
-    "viewer-wafer-map": {
-      "engineeringTask": "Inspect die/site spatial variation, bins, clusters, exclusions, and wafer statistics.",
-      "primaryRepresentation": "wafer-coordinate map with reticle, die, site, and legend",
-      "selectionIdentity": "wafer · reticle · die X/Y · site · sample",
-      "exactReadouts": [
-        "die/site value",
-        "bin and status",
-        "spatial statistic",
-        "exclusion disposition"
-      ],
-      "domainActions": [
-        "Choose wafer",
-        "Choose metric",
-        "Brush region",
-        "Show spatial statistics"
-      ],
-      "interactionBoundary": "Selection, viewport, and presentation edits create result-document state only; exact source values, coordinates, units, manifests, and producer receipts remain immutable.",
-      "publication": "Vector and raster presentation plus the profile-owned exact structured alternative, complete provenance, currentness, and accessibility descriptions."
-    },
     "viewer-parallel-coordinates": {
       "engineeringTask": "Inspect multivariate sample relationships, constraints, clusters, and selected populations.",
       "primaryRepresentation": "parallel typed axes with sample polylines and density",
@@ -2834,7 +2812,6 @@
         "viewer-scatter",
         "viewer-contour",
         "viewer-box-violin",
-        "viewer-wafer-map",
         "viewer-parallel-coordinates",
         "viewer-scatter-matrix",
         "viewer-contribution"
@@ -5822,71 +5799,6 @@
         "externalCapabilityId": null
       },
       "structuredAlternativeId": "exact-coordinate-family-and-measurement-table",
-      "precisionPolicyId": "result-precision-policy",
-      "availability": "canonical-design-target",
-      "releaseEvidenceEligible": false
-    },
-    {
-      "id": "viewer-wafer-map",
-      "canonical": {
-        "group": "Statistical & tabular",
-        "title": "Wafer / spatial map",
-        "domain": "MC · die coordinates",
-        "x": "Die X",
-        "y": "Die Y",
-        "art": "contour",
-        "analysisIds": [
-          "mc"
-        ]
-      },
-      "capability": {
-        "viewerId": "viewer-wafer-map",
-        "classification": "release-planned",
-        "creationFamilyIds": [
-          "statistics-yield"
-        ],
-        "interactionProfileId": "statistical-instrument",
-        "design": {
-          "engineeringTask": "Inspect die/site spatial variation, bins, clusters, exclusions, and wafer statistics.",
-          "primaryRepresentation": "wafer-coordinate map with reticle, die, site, and legend",
-          "selectionIdentity": "wafer · reticle · die X/Y · site · sample",
-          "exactReadouts": [
-            "die/site value",
-            "bin and status",
-            "spatial statistic",
-            "exclusion disposition"
-          ],
-          "domainActions": [
-            "Choose wafer",
-            "Choose metric",
-            "Brush region",
-            "Show spatial statistics"
-          ],
-          "interactionBoundary": "Selection, viewport, and presentation edits create result-document state only; exact source values, coordinates, units, manifests, and producer receipts remain immutable.",
-          "publication": "Vector and raster presentation plus the profile-owned exact structured alternative, complete provenance, currentness, and accessibility descriptions."
-        },
-        "producerPolicy": "declared-analysis-or-postprocessor-required",
-        "defaultComposition": "primary viewer plus inspector and exact structured alternative",
-        "specificationStatus": "authoritative-profile-bound",
-        "mockupStatus": "unavailable-with-complete-design-and-exact-reason",
-        "supportedPlatforms": [
-          "desktop",
-          "browser",
-          "tablet"
-        ],
-        "phoneStatus": "deferred",
-        "releaseEvidenceEligible": false
-      },
-      "persistentModelId": "result-document",
-      "viewerFamilyId": "multidimensional",
-      "quickModeIds": [],
-      "inputAuthority": {
-        "analysisIds": [
-          "mc"
-        ],
-        "externalCapabilityId": null
-      },
-      "structuredAlternativeId": "dimension-slice-and-exact-cell-table",
       "precisionPolicyId": "result-precision-policy",
       "availability": "canonical-design-target",
       "releaseEvidenceEligible": false
@@ -9048,11 +8960,11 @@
   },
   "counts": {
     "analysisCoverage": 34,
-    "viewerDocuments": 42,
+    "viewerDocuments": 41,
     "quickModes": 21,
     "viewerFamilies": 9,
     "viewerInteractionProfiles": 13,
-    "viewerDesignSpecifications": 42,
+    "viewerDesignSpecifications": 41,
     "viewerOperationalStates": 16,
     "creationFamilies": 9,
     "plotPropertyPages": 59,
