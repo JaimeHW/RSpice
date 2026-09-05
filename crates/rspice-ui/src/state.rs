@@ -20,6 +20,7 @@ mod project_sources;
 pub(crate) mod property_types;
 mod schematic;
 mod simulation;
+pub(crate) mod stimulus_library;
 mod symbol;
 pub(crate) mod symbol_resolver;
 pub(crate) mod workspace;
@@ -180,6 +181,14 @@ pub use simulation::{
     ac_bode_shape_for_selection, ac_bode_summary_for_analysis, ac_bode_summary_for_selection,
     sealed_model_sources,
 };
+// Only the two types the persisted model itself names are hoisted here. The
+// rest of the stimulus vocabulary — the definition record, the draft state
+// machine, the adoption verbs — is read through `state::stimulus_library::*`,
+// where the module the name belongs to is part of the path: `adopt` and
+// `extract` say nothing on their own, and a `use` list is not where a reader
+// should have to learn what they act on.
+pub use stimulus_library::library::StimulusLibrary;
+pub use stimulus_library::provenance::StimulusProvenance;
 pub use symbol::{
     MAX_SYMBOL_DOCUMENT_BYTES, MAX_SYMBOL_PIN_NAME_BYTES, MAX_SYMBOL_TEXT_BYTES, PinFindingKind,
     PinSummary, SYMBOL_DOCUMENT_METADATA_KEY, SYMBOL_EDITOR_METADATA_KEY, SYMBOL_TERMINAL_GRID,

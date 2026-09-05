@@ -1557,7 +1557,14 @@ const OVERSIZED_FILES: &[(&str, usize)] = &[
     ("simulation/execution/snapshot.rs", 3_047),
     ("state/model_library/manager.rs", 3_847),
     ("state/pdk_config/technology_package.rs", 4_742),
-    ("state/workspace.rs", 3_455),
+    // 2026-09-05, +9 (3,455 -> 3,464): the `stimulus_library` project field,
+    // its doc comment, its wrapped serde attribute and its `Default`
+    // initializer. The field cannot live anywhere else — a stimulus definition
+    // is project state, and a sidecar file would spend from the durable-path
+    // budget every save already hangs sidecars off — and this file was standing
+    // exactly on its ceiling, so the ceiling moves to the new measurement
+    // rather than the field being refused a home.
+    ("state/workspace.rs", 3_464),
     ("state/workspace/tests.rs", 2_974),
     ("workbench/app/dialogs/drawing_sheet_setup/render.rs", 2_845),
     ("workbench/app/dialogs/hardcopy/render.rs", 3_112),

@@ -2369,6 +2369,14 @@ pub struct ProjectWorkspace {
     /// graph.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub visualization_documents: Vec<crate::results::visualization_document::VisualizationDocument>,
+    /// Reusable stimulus definitions this project owns. Placed sources adopt
+    /// them by copy and keep a provenance receipt, so nothing here is read
+    /// during netlist generation or execution.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::state::StimulusLibrary::is_empty"
+    )]
+    pub stimulus_library: crate::state::StimulusLibrary,
     /// Manually edited netlist source. When set, simulations run this
     /// deck instead of regenerating from the schematic (text-first mode);
     /// `None` means the netlist view shows the generated artifact.
@@ -2466,6 +2474,7 @@ impl Default for ProjectWorkspace {
             hardcopy_source_sets: Vec::new(),
             report_documents: Vec::new(),
             visualization_documents: Vec::new(),
+            stimulus_library: crate::state::StimulusLibrary::default(),
             netlist_source: None,
             netlist_document: None,
             netlist_descriptor: None,
