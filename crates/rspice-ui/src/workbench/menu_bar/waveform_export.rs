@@ -1,5 +1,7 @@
 //! Waveform export actions.
 
+mod vcd;
+
 use crate::analysis::eye_diagram::EyeTimebaseProvenance;
 use crate::workbench::EngineeringExportFormat;
 use crate::workbench::app_state::AppState;
@@ -85,6 +87,7 @@ impl ResultExportFormat {
                 | Self::CsvRfc4180
                 | Self::Tsv
                 | Self::TouchstoneV2
+                | Self::Vcd
         )
     }
 }
@@ -223,6 +226,7 @@ pub(crate) fn action_export_csv_with_io(
         EngineeringExportFormat::TouchstoneWhereCompatible => ResultExportFormat::TouchstoneV2,
         EngineeringExportFormat::RSpiceResultBundle => ResultExportFormat::RSpiceResultBundle,
         EngineeringExportFormat::RSpiceDatasetBundle => ResultExportFormat::RSpiceDatasetBundle,
+        EngineeringExportFormat::ValueChangeDump => ResultExportFormat::Vcd,
         EngineeringExportFormat::Hdf5EngineeringDataset => ResultExportFormat::Hdf5,
     };
     if let Err(error) = result_export_format_availability_by_id(contract_format.canonical_id()) {
@@ -258,6 +262,13 @@ pub(crate) fn action_export_csv_with_io(
         export_native_result_bundle(state, io, &displayed, kind);
         return;
     }
+    // A dump is the transient's event schedule, which no Results sheet
+    // renders and no viewer derives. Routing it through the sheet and payload
+    // routers below would hand it whatever table those found instead.
+    if matches!(export_format, EngineeringExportFormat::ValueChangeDump) {
+        vcd::export_vcd(state, io, &displayed);
+        return;
+    }
     // What the reader is looking at comes first. Three sheets derive their
     // curve in the viewer rather than reading a retained vector, so routing
     // on the payload alone handed back the transient samples the spectrum was
@@ -283,8 +294,9 @@ pub(crate) fn action_export_csv_with_io(
                 unreachable!("unsupported export preferences resolve to CSV")
             }
             EngineeringExportFormat::RSpiceResultBundle
-            | EngineeringExportFormat::RSpiceDatasetBundle => {
-                unreachable!("native bundle formats dispatch before derived exports")
+            | EngineeringExportFormat::RSpiceDatasetBundle
+            | EngineeringExportFormat::ValueChangeDump => {
+                unreachable!("native bundle and dump formats dispatch before derived exports")
             }
         }
         return;
@@ -315,8 +327,9 @@ pub(crate) fn action_export_csv_with_io(
                 unreachable!("unsupported export preferences resolve to CSV")
             }
             EngineeringExportFormat::RSpiceResultBundle
-            | EngineeringExportFormat::RSpiceDatasetBundle => {
-                unreachable!("native bundle formats dispatch before sheet exports")
+            | EngineeringExportFormat::RSpiceDatasetBundle
+            | EngineeringExportFormat::ValueChangeDump => {
+                unreachable!("native bundle and dump formats dispatch before sheet exports")
             }
         }
         return;
@@ -339,8 +352,9 @@ pub(crate) fn action_export_csv_with_io(
                 unreachable!("unsupported export preferences resolve to CSV")
             }
             EngineeringExportFormat::RSpiceResultBundle
-            | EngineeringExportFormat::RSpiceDatasetBundle => {
-                unreachable!("native bundle formats dispatch before typed exports")
+            | EngineeringExportFormat::RSpiceDatasetBundle
+            | EngineeringExportFormat::ValueChangeDump => {
+                unreachable!("native bundle and dump formats dispatch before typed exports")
             }
         }
         return;
@@ -367,8 +381,9 @@ pub(crate) fn action_export_csv_with_io(
                 unreachable!("unsupported export preferences resolve to CSV")
             }
             EngineeringExportFormat::RSpiceResultBundle
-            | EngineeringExportFormat::RSpiceDatasetBundle => {
-                unreachable!("native bundle formats dispatch before stacked exports")
+            | EngineeringExportFormat::RSpiceDatasetBundle
+            | EngineeringExportFormat::ValueChangeDump => {
+                unreachable!("native bundle and dump formats dispatch before stacked exports")
             }
         }
         return;
@@ -396,8 +411,9 @@ pub(crate) fn action_export_csv_with_io(
             unreachable!("unsupported export preferences resolve to CSV")
         }
         EngineeringExportFormat::RSpiceResultBundle
-        | EngineeringExportFormat::RSpiceDatasetBundle => {
-            unreachable!("native bundle formats dispatch before flat waveform exports")
+        | EngineeringExportFormat::RSpiceDatasetBundle
+        | EngineeringExportFormat::ValueChangeDump => {
+            unreachable!("native bundle and dump formats dispatch before flat waveform exports")
         }
     }
 }

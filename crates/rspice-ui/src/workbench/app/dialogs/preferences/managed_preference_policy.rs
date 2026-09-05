@@ -692,7 +692,18 @@ fn resolved_policy_rows(category: PreferenceCategory, state: &AppState) -> Vec<R
                 (
                     "Default engineering export",
                     ChoicePreference::EngineeringExport,
-                    &["CSV", "Touchstone where compatible"][..],
+                    // Positional: every format the picker offers must appear,
+                    // or a reader whose default is one of the later ones is
+                    // shown "Unknown value (blocked)" for a setting that is
+                    // neither unknown nor blocked.
+                    &[
+                        "CSV",
+                        "Touchstone where compatible",
+                        "TSV",
+                        "RSpice Result Bundle",
+                        "RSpice Dataset Bundle",
+                        "VCD · event timelines",
+                    ][..],
                 ),
             ] {
                 rows.push(choice_policy_row(

@@ -1,6 +1,6 @@
 //! The export registry is a closed contract, not a menu that grew.
 //!
-//! Fifteen ids, each governing its own availability, so a format cannot ship
+//! Ten ids, each governing its own availability, so a format cannot ship
 //! without a rule for when it is offered. The rest pin what each sheet
 //! actually writes: a report or table exports the evidence it rendered, and a
 //! saved path stays reopenable.
@@ -139,6 +139,7 @@ fn export_registry_matches_the_ten_contract_ids_and_governs_availability() {
                 | ResultExportFormat::CsvRfc4180
                 | ResultExportFormat::Tsv
                 | ResultExportFormat::TouchstoneV2
+                | ResultExportFormat::Vcd
         ) {
             assert!(availability.is_ok(), "{}", format.canonical_id());
         } else {

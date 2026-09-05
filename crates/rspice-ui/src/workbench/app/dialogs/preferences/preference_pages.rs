@@ -797,6 +797,7 @@ fn results(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageAction
             "TSV",
             "RSpice Result Bundle",
             "RSpice Dataset Bundle",
+            "VCD · event timelines",
         ],
     );
 }

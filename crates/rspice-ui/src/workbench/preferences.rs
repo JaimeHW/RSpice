@@ -343,8 +343,12 @@ pub enum EngineeringExportFormat {
     Tsv,
     RSpiceResultBundle,
     RSpiceDatasetBundle,
+    /// Value Change Dump: the event timelines of a transient, not its
+    /// waveform table.
+    ValueChangeDump,
     /// Reserved by the approved mockup. The UI must not offer this until the
-    /// UI crate has a verified cross-platform HDF5 publication backend.
+    /// UI crate has a verified cross-platform HDF5 publication backend. It is
+    /// last so that every offered format keeps a contiguous picker index.
     Hdf5EngineeringDataset,
 }
 
@@ -356,7 +360,8 @@ impl EngineeringExportFormat {
             Self::Tsv => 2,
             Self::RSpiceResultBundle => 3,
             Self::RSpiceDatasetBundle => 4,
-            Self::Hdf5EngineeringDataset => 5,
+            Self::ValueChangeDump => 5,
+            Self::Hdf5EngineeringDataset => 6,
         }
     }
 
@@ -367,7 +372,8 @@ impl EngineeringExportFormat {
             2 => Ok(Self::Tsv),
             3 => Ok(Self::RSpiceResultBundle),
             4 => Ok(Self::RSpiceDatasetBundle),
-            5 => Err("HDF5 engineering export is not available in this build"),
+            5 => Ok(Self::ValueChangeDump),
+            6 => Err("HDF5 engineering export is not available in this build"),
             _ => Err("engineering export index is outside its domain"),
         }
     }
