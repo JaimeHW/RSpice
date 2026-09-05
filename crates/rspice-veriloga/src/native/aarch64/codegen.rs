@@ -629,11 +629,7 @@ fn compile_fused_kernel(
     let inlined_ssa = || {
         value_ssa
             .iter()
-            .chain(
-                jacobian_ssa
-                    .iter()
-                    .flat_map(|rows| rows.iter().flatten()),
-            )
+            .chain(jacobian_ssa.iter().flat_map(|rows| rows.iter().flatten()))
             .filter(|program| inlines(program))
     };
     let inlined_allocations = || {
@@ -686,7 +682,8 @@ fn compile_fused_kernel(
             compiler.emit_program(program, allocation)?;
             compiler.materialize_location(allocation.result(), DReg::D0)?;
         } else {
-            compiler.emit_image_entry_call(kernel_image_offset, entries.stamp_values[stamp_index])?;
+            compiler
+                .emit_image_entry_call(kernel_image_offset, entries.stamp_values[stamp_index])?;
             compiler.emit_kernel_abort_if_failed()?;
         }
         compiler.emit_kernel_non_finite_guard(stamp_index)?;
