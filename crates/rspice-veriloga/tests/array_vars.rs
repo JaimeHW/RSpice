@@ -86,6 +86,7 @@ endmodule
     let total_rhs: f64 = rhs.values().map(|v| v.abs()).sum();
     assert!(total_rhs < 1e-15);
     // Element introspection by name
+    model.observe(&mut device);
     assert_eq!(device.variable("coef[2]"), Some(3.0e-3));
 }
 
@@ -106,6 +107,7 @@ endmodule
     let mut device = model.device("A1", &[1, 0]);
     let (matrix, _) = collect_stamps(&mut device, &[1.0]);
     assert!((matrix[&(0, 0)] - 4.0e-3).abs() < 1e-15);
+    model.observe(&mut device);
     assert_eq!(device.variable("c[1]"), Some(1.5e-3));
 }
 
@@ -137,6 +139,7 @@ endmodule
     let mut device = model.device("A1", &[1, 0]);
     let (matrix, _) = collect_stamps(&mut device, &[1.0]);
     assert!((matrix[&(0, 0)] - 10.0e-3).abs() < 1e-12);
+    model.observe(&mut device);
     assert_eq!(device.variable("w[3]"), Some(0.003));
     // Elements beyond the loop bound stay zero
     assert_eq!(device.variable("w[7]"), Some(0.0));
@@ -260,6 +263,7 @@ endmodule
     let mut device = model.device("A1", &[1, 0]);
     let (matrix, _) = collect_stamps(&mut device, &[1.0]);
     assert!((matrix[&(0, 0)] - 8.0e-3).abs() < 1e-12);
+    model.observe(&mut device);
     assert_eq!(device.variable("w[2]"), Some(0.0));
 
     // skip=5 lies past the loop bound: every written element survives

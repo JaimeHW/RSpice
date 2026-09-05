@@ -3777,6 +3777,7 @@ fn native_device_executes_analysis_guards_without_fallback() {
 #[test]
 fn native_device_executes_above_assignments_without_fallback() {
     let model = above_assignment_model();
+    let artifact = canonical_artifact_for_model(&model);
     let mut device =
         native_contract_try_new("ABV1", model, &[1, 0]).expect("above model uses native JIT");
     assert!(device.is_using_native());
@@ -3785,6 +3786,7 @@ fn native_device_executes_above_assignments_without_fallback() {
     let currents = device
         .try_evaluate()
         .expect("native below-threshold above evaluation succeeds");
+    observe(&mut device, &artifact);
     assert_eq!(device.variable("gate"), Some(0.0));
     assert_eq!(currents[0].to_bits(), 0.0_f64.to_bits());
     device.try_advance_state().unwrap();
@@ -3794,6 +3796,7 @@ fn native_device_executes_above_assignments_without_fallback() {
     let currents = device
         .try_evaluate()
         .expect("native above-threshold above evaluation succeeds");
+    observe(&mut device, &artifact);
     assert_eq!(device.variable("gate"), Some(1.0));
     assert_eq!(currents[0].to_bits(), 1.0_f64.to_bits());
 }
@@ -3802,6 +3805,7 @@ fn native_device_executes_above_assignments_without_fallback() {
 #[test]
 fn native_device_executes_timer_assignments_without_fallback() {
     let model = timer_assignment_model();
+    let artifact = canonical_artifact_for_model(&model);
     let mut device =
         native_contract_try_new("TMR1", model, &[1, 0]).expect("timer model uses native JIT");
     assert!(device.is_using_native());
@@ -3813,6 +3817,7 @@ fn native_device_executes_timer_assignments_without_fallback() {
         let currents = device
             .try_evaluate()
             .expect("native timer evaluation succeeds");
+        observe(&mut device, &artifact);
         assert_eq!(device.variable("tick"), Some(expected), "time: {time}");
         assert_eq!(currents[0].to_bits(), expected.to_bits(), "time: {time}");
     }
@@ -3822,6 +3827,7 @@ fn native_device_executes_timer_assignments_without_fallback() {
 #[test]
 fn native_device_executes_transition_assignments_without_fallback() {
     let model = transition_assignment_model();
+    let artifact = canonical_artifact_for_model(&model);
     let mut device =
         native_contract_try_new("TRN1", model, &[1, 0]).expect("transition model uses native JIT");
     assert!(device.is_using_native());
@@ -3844,6 +3850,7 @@ fn native_device_executes_transition_assignments_without_fallback() {
         let currents = device
             .try_evaluate()
             .expect("native transition evaluation succeeds");
+        observe(&mut device, &artifact);
         assert!(
             (device.variable("y").unwrap() - expected).abs() < 1e-12,
             "time: {time}"
@@ -3860,6 +3867,7 @@ fn native_device_executes_transition_assignments_without_fallback() {
 #[test]
 fn native_device_executes_slew_assignments_without_fallback() {
     let model = slew_assignment_model();
+    let artifact = canonical_artifact_for_model(&model);
     let mut device =
         native_contract_try_new("SLW1", model, &[1, 0]).expect("slew model uses native JIT");
     assert!(device.is_using_native());
@@ -3871,6 +3879,7 @@ fn native_device_executes_slew_assignments_without_fallback() {
         let currents = device
             .try_evaluate()
             .expect("native slew evaluation succeeds");
+        observe(&mut device, &artifact);
         assert!(
             (device.variable("y").unwrap() - expected).abs() < 1e-12,
             "time: {time}"
@@ -3887,6 +3896,7 @@ fn native_device_executes_slew_assignments_without_fallback() {
 #[test]
 fn native_device_executes_absdelay_assignments_without_fallback() {
     let model = absdelay_assignment_model();
+    let artifact = canonical_artifact_for_model(&model);
     let mut device =
         native_contract_try_new("DLY1", model, &[1, 0]).expect("absdelay model uses native JIT");
     assert!(device.is_using_native());
@@ -3896,6 +3906,7 @@ fn native_device_executes_absdelay_assignments_without_fallback() {
     let dc_currents = device
         .try_evaluate()
         .expect("native absdelay DC evaluation succeeds");
+    observe(&mut device, &artifact);
     assert_eq!(device.variable("y"), Some(7.0));
     assert_eq!(dc_currents[0], 7.0);
 
@@ -3906,6 +3917,7 @@ fn native_device_executes_absdelay_assignments_without_fallback() {
         let currents = device
             .try_evaluate()
             .expect("native absdelay transient evaluation succeeds");
+        observe(&mut device, &artifact);
         assert!(
             (device.variable("y").unwrap() - expected).abs() < 1e-12,
             "time: {time}"
@@ -3922,6 +3934,7 @@ fn native_device_executes_absdelay_assignments_without_fallback() {
     let currents = device
         .try_evaluate()
         .expect("native absdelay interpolation succeeds");
+    observe(&mut device, &artifact);
     assert!((device.variable("y").unwrap() - 2.0).abs() < 1e-12);
     assert!((currents[0] - 2.0).abs() < 1e-12);
 }
@@ -3962,6 +3975,7 @@ endmodule
 #[test]
 fn native_device_executes_cross_assignments_without_fallback() {
     let model = cross_assignment_model();
+    let artifact = canonical_artifact_for_model(&model);
     let mut device =
         native_contract_try_new("XNG1", model, &[1, 0]).expect("cross model uses native JIT");
     assert!(device.is_using_native());
@@ -3971,6 +3985,7 @@ fn native_device_executes_cross_assignments_without_fallback() {
     let dc_currents = device
         .try_evaluate()
         .expect("native cross DC evaluation succeeds");
+    observe(&mut device, &artifact);
     assert_eq!(device.variable("y"), Some(0.0));
     assert_eq!(dc_currents[0], 0.0);
 
@@ -3981,6 +3996,7 @@ fn native_device_executes_cross_assignments_without_fallback() {
         let currents = device
             .try_evaluate()
             .expect("native cross transient evaluation succeeds");
+        observe(&mut device, &artifact);
         assert!(
             (device.variable("y").unwrap() - expected).abs() < 1e-12,
             "time: {time}"
@@ -4033,6 +4049,7 @@ fn native_device_executes_sqrt_expression() {
 #[test]
 fn native_device_executes_abs_assignment() {
     let model = abs_assignment_model();
+    let artifact = canonical_artifact_for_model(&model);
     let mut device = native_contract_try_new("ABS1", model, &[1, 0])
         .expect("abs assignment model uses native JIT");
     assert!(device.is_using_native());
@@ -4044,6 +4061,7 @@ fn native_device_executes_abs_assignment() {
         .expect("native abs assignment evaluation succeeds");
 
     assert!((currents[0] - 20.0).abs() < 1e-12, "currents: {currents:?}");
+    observe(&mut device, &artifact);
     assert_eq!(device.variable("gain"), Some(5.0));
 }
 
@@ -4051,6 +4069,7 @@ fn native_device_executes_abs_assignment() {
 #[test]
 fn native_device_executes_ordered_comparison_assignments() {
     let model = comparison_assignment_model();
+    let artifact = canonical_artifact_for_model(&model);
     let mut device = native_contract_try_new("CMP1", model, &[1, 0])
         .expect("comparison assignment model uses native JIT");
     assert!(device.is_using_native());
@@ -4062,6 +4081,7 @@ fn native_device_executes_ordered_comparison_assignments() {
         .expect("native comparison assignment evaluation succeeds");
 
     assert!((currents[0] - 52.0).abs() < 1e-12, "currents: {currents:?}");
+    observe(&mut device, &artifact);
     assert_eq!(device.variable("gain"), Some(13.0));
 }
 
@@ -4069,6 +4089,7 @@ fn native_device_executes_ordered_comparison_assignments() {
 #[test]
 fn native_device_executes_equality_assignments() {
     let model = equality_assignment_model();
+    let artifact = canonical_artifact_for_model(&model);
     let mut device = native_contract_try_new("EQ1", model, &[1, 0])
         .expect("equality assignment model uses native JIT");
     assert!(device.is_using_native());
@@ -4080,6 +4101,7 @@ fn native_device_executes_equality_assignments() {
         .expect("native equality assignment evaluation succeeds");
 
     assert!((currents[0] - 36.0).abs() < 1e-12, "currents: {currents:?}");
+    observe(&mut device, &artifact);
     assert_eq!(device.variable("gain"), Some(9.0));
 }
 
@@ -4087,6 +4109,7 @@ fn native_device_executes_equality_assignments() {
 #[test]
 fn native_device_executes_logical_assignments() {
     let model = logical_assignment_model();
+    let artifact = canonical_artifact_for_model(&model);
     let mut device = native_contract_try_new("LOG1", model, &[1, 0])
         .expect("logical assignment model uses native JIT");
     assert!(device.is_using_native());
@@ -4098,6 +4121,7 @@ fn native_device_executes_logical_assignments() {
         .expect("native logical assignment evaluation succeeds");
 
     assert!((currents[0] - 28.0).abs() < 1e-12, "currents: {currents:?}");
+    observe(&mut device, &artifact);
     assert_eq!(device.variable("gain"), Some(7.0));
 }
 
@@ -4105,6 +4129,7 @@ fn native_device_executes_logical_assignments() {
 #[test]
 fn native_device_preserves_logical_truthiness_boundaries() {
     let model = logical_truthiness_model();
+    let artifact = canonical_artifact_for_model(&model);
     let cases = [
         ("zero", 0.0, 4.0),
         ("tiny-nonzero", 0.5e-15, 3.0),
@@ -4123,6 +4148,7 @@ fn native_device_preserves_logical_truthiness_boundaries() {
             .try_evaluate()
             .expect("native logical truthiness evaluation succeeds");
 
+        observe(&mut device, &artifact);
         assert_eq!(device.variable("gain"), Some(expected_gain), "{name}");
         assert!(
             (currents[0] - (expected_gain * 2.0)).abs() < 1e-12,
@@ -4135,6 +4161,7 @@ fn native_device_preserves_logical_truthiness_boundaries() {
 #[test]
 fn native_device_executes_ifelse_assignments() {
     let model = ifelse_assignment_model();
+    let artifact = canonical_artifact_for_model(&model);
     let cases = [
         ("zero", 0.0, 3.0),
         ("tiny-nonzero", 0.5e-15, 2.0),
@@ -4153,6 +4180,7 @@ fn native_device_executes_ifelse_assignments() {
             .try_evaluate()
             .expect("native ifelse assignment evaluation succeeds");
 
+        observe(&mut device, &artifact);
         assert_eq!(device.variable("gain"), Some(expected_gain), "{name}");
         assert!(
             (currents[0] - (expected_gain * 4.0)).abs() < 1e-12,
@@ -4165,6 +4193,7 @@ fn native_device_executes_ifelse_assignments() {
 #[test]
 fn native_device_executes_minmax_assignments() {
     let model = minmax_assignment_model();
+    let artifact = canonical_artifact_for_model(&model);
     let cases = [
         ("low-temperature", 295.0, 295.0),
         ("nominal-temperature", 315.0, 330.0),
@@ -4182,6 +4211,7 @@ fn native_device_executes_minmax_assignments() {
             .try_evaluate()
             .expect("native min/max assignment evaluation succeeds");
 
+        observe(&mut device, &artifact);
         assert_eq!(device.variable("gain"), Some(expected_gain), "{name}");
         assert!(
             (currents[0] - (expected_gain * 2.0)).abs() < 1e-12,
@@ -4194,6 +4224,7 @@ fn native_device_executes_minmax_assignments() {
 #[test]
 fn native_device_executes_exp_limexp_assignments() {
     let model = exp_limexp_assignment_model();
+    let artifact = canonical_artifact_for_model(&model);
     // The model evaluates `limexp(($temperature - 300.0) * 0.1)`, so each
     // temperature below is chosen for the limexp argument it produces. The
     // threshold is 80, which puts every boundary at a temperature no device
@@ -4240,6 +4271,7 @@ fn native_device_executes_exp_limexp_assignments() {
             .try_evaluate()
             .expect("native exp/limexp assignment evaluation succeeds");
 
+        observe(&mut device, &artifact);
         assert_eq!(device.variable("gain"), Some(expected_gain), "{name}");
         assert!(
             (currents[0] - (expected_gain * 2.0)).abs() < 1e-12,
@@ -4297,6 +4329,7 @@ fn native_device_executes_recognized_limited_exp_current_and_jacobian() {
 #[test]
 fn native_device_executes_transcendental_assignments() {
     let model = transcendental_assignment_model();
+    let artifact = canonical_artifact_for_model(&model);
     let cases = [("dc-ish", 0.0), ("mid", 0.5), ("large", 1.0)];
 
     for (name, time) in cases {
@@ -4325,6 +4358,7 @@ fn native_device_executes_transcendental_assignments() {
             .try_evaluate()
             .expect("native transcendental assignment evaluation succeeds");
 
+        observe(&mut device, &artifact);
         assert_eq!(device.variable("x"), Some(x), "{name}");
         assert_eq!(device.variable("gain"), Some(expected_gain), "{name}");
         assert!(
@@ -4338,6 +4372,7 @@ fn native_device_executes_transcendental_assignments() {
 #[test]
 fn native_device_executes_binary_math_assignments() {
     let model = binary_math_assignment_model();
+    let artifact = canonical_artifact_for_model(&model);
     let cases = [("dc-ish", 0.0), ("mid", 0.5), ("large", 1.0)];
 
     for (name, time) in cases {
@@ -4353,6 +4388,7 @@ fn native_device_executes_binary_math_assignments() {
             .try_evaluate()
             .expect("native binary math assignment evaluation succeeds");
 
+        observe(&mut device, &artifact);
         assert_eq!(device.variable("x"), Some(x), "{name}");
         assert!(
             (device.variable("gain").unwrap() - expected_gain).abs() < 1e-12,
@@ -4370,6 +4406,7 @@ fn native_device_executes_binary_math_assignments() {
 #[test]
 fn native_device_executes_rounding_and_mod_assignments_without_fallback() {
     let model = rounding_mod_assignment_model();
+    let artifact = canonical_artifact_for_model(&model);
     let mut device = native_contract_try_new("RNDMOD1", model, &[1, 0])
         .expect("rounding/mod assignment model uses native JIT");
     assert!(device.is_using_native());
@@ -4381,6 +4418,7 @@ fn native_device_executes_rounding_and_mod_assignments_without_fallback() {
         .try_evaluate()
         .expect("native rounding/mod assignment evaluation succeeds");
 
+    observe(&mut device, &artifact);
     assert_eq!(device.variable("x"), Some(x));
     assert_eq!(device.variable("gain"), Some(expected_gain));
     assert!((currents[0] - expected_gain).abs() < 1e-12);
@@ -4390,6 +4428,7 @@ fn native_device_executes_rounding_and_mod_assignments_without_fallback() {
 #[test]
 fn native_device_executes_integer_bit_assignments_without_fallback() {
     let model = integer_bit_assignment_model();
+    let artifact = canonical_artifact_for_model(&model);
     let mut device = native_contract_try_new("BITOPS1", model, &[1, 0])
         .expect("integer bit assignment model uses native JIT");
     assert!(device.is_using_native());
@@ -4402,6 +4441,7 @@ fn native_device_executes_integer_bit_assignments_without_fallback() {
         .try_evaluate()
         .expect("native integer bit assignment evaluation succeeds");
 
+    observe(&mut device, &artifact);
     assert_eq!(device.variable("x"), Some(f64::from(x)));
     assert_eq!(device.variable("gain"), Some(expected_gain));
     assert!((currents[0] - expected_gain).abs() < 1e-12);
@@ -4411,6 +4451,7 @@ fn native_device_executes_integer_bit_assignments_without_fallback() {
 #[test]
 fn native_device_executes_table_model_lookup_and_derivative_without_fallback() {
     let model = table_model_assignment_model();
+    let artifact = canonical_artifact_for_model(&model);
     let mut device = native_contract_try_new("TABLE1", model, &[1, 0])
         .expect("table model assignment uses native JIT");
     assert!(device.is_using_native());
@@ -4420,6 +4461,7 @@ fn native_device_executes_table_model_lookup_and_derivative_without_fallback() {
         .try_evaluate()
         .expect("native table model evaluation succeeds");
 
+    observe(&mut device, &artifact);
     assert_eq!(device.variable("x"), Some(1.5));
     assert_eq!(device.variable("gain"), Some(5.0));
     assert_eq!(currents.len(), 1);
@@ -4452,6 +4494,7 @@ fn native_device_executes_table_model_lookup_and_derivative_without_fallback() {
 #[test]
 fn native_device_executes_limit_assignments_without_fallback() {
     let model = limit_assignment_model();
+    let artifact = canonical_artifact_for_model(&model);
     let mut device = native_contract_try_new("LIM1", model, &[1, 0])
         .expect("limit assignment model uses native JIT");
     assert!(device.is_using_native());
@@ -4460,6 +4503,7 @@ fn native_device_executes_limit_assignments_without_fallback() {
     let currents = device
         .try_evaluate()
         .expect("native first limit evaluation succeeds");
+    observe(&mut device, &artifact);
     assert_eq!(device.variable("x"), Some(0.0));
     assert_eq!(device.variable("explicit_limit"), Some(0.0));
     assert_eq!(device.variable("default_limit"), Some(0.0));
@@ -4469,6 +4513,7 @@ fn native_device_executes_limit_assignments_without_fallback() {
     let currents = device
         .try_evaluate()
         .expect("native initialized upward limit evaluation succeeds");
+    observe(&mut device, &artifact);
     assert_eq!(device.variable("x"), Some(10.0));
     assert_eq!(device.variable("explicit_limit"), Some(0.5));
     assert_eq!(device.variable("default_limit"), Some(0.7));
@@ -4477,6 +4522,7 @@ fn native_device_executes_limit_assignments_without_fallback() {
     let currents = device
         .try_evaluate()
         .expect("native repeated limit evaluation succeeds");
+    observe(&mut device, &artifact);
     assert_eq!(device.variable("explicit_limit"), Some(1.0));
     assert_eq!(device.variable("default_limit"), Some(1.4));
     assert!((currents[0] - 2.4).abs() < 1e-12, "currents: {currents:?}");
@@ -4485,6 +4531,7 @@ fn native_device_executes_limit_assignments_without_fallback() {
     let currents = device
         .try_evaluate()
         .expect("native downward limit evaluation succeeds");
+    observe(&mut device, &artifact);
     assert_eq!(device.variable("explicit_limit"), Some(0.5));
     assert!(
         (device.variable("default_limit").unwrap() - 0.7).abs() < 1e-12,
@@ -4498,11 +4545,13 @@ fn native_device_executes_limit_assignments_without_fallback() {
 #[test]
 fn native_device_executes_param_given_and_port_connected_reads() {
     let model = flag_context_model();
+    let artifact = canonical_artifact_for_model(&model);
 
     let mut omitted = native_contract_try_new("FLG1", model.clone(), &[1, 0])
         .expect("flag model uses native JIT");
     omitted.update_voltages(&[2.0]);
     assert_eq!(omitted.try_evaluate().unwrap()[0], 0.0);
+    observe(&mut omitted, &artifact);
     assert_eq!(omitted.variable("gain"), Some(0.0));
 
     let mut param_only = native_contract_try_new("FLG2", model.clone(), &[1, 0])
@@ -4511,6 +4560,7 @@ fn native_device_executes_param_given_and_port_connected_reads() {
     param_only.update_voltages(&[2.0]);
     let currents = param_only.try_evaluate().unwrap();
     assert!((currents[0] - 4.0).abs() < 1e-12, "currents: {currents:?}");
+    observe(&mut param_only, &artifact);
     assert_eq!(param_only.variable("gain"), Some(2.0));
 
     let mut port_only = native_contract_try_new("FLG3", model.clone(), &[1, 0, 0])
@@ -4518,6 +4568,7 @@ fn native_device_executes_param_given_and_port_connected_reads() {
     port_only.update_voltages(&[2.0]);
     let currents = port_only.try_evaluate().unwrap();
     assert!((currents[0] - 6.0).abs() < 1e-12, "currents: {currents:?}");
+    observe(&mut port_only, &artifact);
     assert_eq!(port_only.variable("gain"), Some(3.0));
 
     let mut connected =
@@ -4527,6 +4578,7 @@ fn native_device_executes_param_given_and_port_connected_reads() {
 
     let currents = connected.try_evaluate().unwrap();
     assert!((currents[0] - 10.0).abs() < 1e-12, "currents: {currents:?}");
+    observe(&mut connected, &artifact);
     assert_eq!(connected.variable("gain"), Some(5.0));
 }
 
@@ -5614,6 +5666,7 @@ fn native_device_executes_zi_current_without_fallback() {
         "fixture must contain one compiled zi filter"
     );
 
+    let artifact = canonical_artifact_for_model(&model);
     let mut device =
         native_contract_try_new("ZI1", model, &[1, 0]).expect("zi model uses native JIT");
     assert!(device.is_using_native());
@@ -5627,6 +5680,7 @@ fn native_device_executes_zi_current_without_fallback() {
         (currents[0] - 2.0).abs() < 1.0e-12,
         "DC currents: {currents:?}"
     );
+    observe(&mut device, &artifact);
     assert_eq!(device.variable("y"), Some(2.0));
 
     device.try_begin_analysis(2).unwrap();

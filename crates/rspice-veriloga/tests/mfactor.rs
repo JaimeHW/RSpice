@@ -123,6 +123,7 @@ fn dollar_mfactor_reads_the_instance_multiplicity() {
     let mut device = model.device("M1", &[1, 0]);
     device.set_multiplicity(7.0);
     let _ = collect_stamps(&mut device, &[1.0]);
+    model.observe(&mut device);
     assert_eq!(device.variable("seen"), Some(7.0));
 }
 

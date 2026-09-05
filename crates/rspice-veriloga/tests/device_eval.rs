@@ -302,6 +302,7 @@ endmodule
     device.update_voltages(&[3.0]);
     let currents = device.evaluate();
 
+    model.observe(&mut device);
     assert!((device.variable("g").unwrap() - 6.0).abs() < 1e-12);
     assert!((device.variable("h").unwrap() - 6.0).abs() < 1e-12);
     assert!((currents[0] - 18.0).abs() < 1e-9, "got {}", currents[0]);

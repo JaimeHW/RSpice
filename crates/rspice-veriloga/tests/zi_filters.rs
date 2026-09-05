@@ -2,27 +2,40 @@
 //! difference-equation evolution in transient, and the candidate/commit
 //! protocol that keeps Newton re-evaluations idempotent.
 
+use rspice_veriloga::canonical_ir::CanonicalIrArtifact;
 use rspice_veriloga::device::VerilogADevice;
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 
 fn compile_device(instance: &str, source: &str) -> VerilogADevice {
+    compile_observable_device(instance, source).0
+}
+
+/// [`compile_device`], keeping the artifact a named-variable readback needs.
+fn compile_observable_device(
+    instance: &str,
+    source: &str,
+) -> (VerilogADevice, CanonicalIrArtifact) {
     let compiler = VerilogACompiler::new(CompilerOptions::default());
     let model = compiler
         .compile(source)
         .expect("compile sampled-data filter model");
+    let canonical_ir = compiler
+        .compile_canonical_ir(source)
+        .expect("compile sampled-data filter canonical IR");
     #[cfg(feature = "native")]
-    {
-        let canonical_ir = compiler
-            .compile_canonical_ir(source)
-            .expect("compile sampled-data filter canonical IR");
-        VerilogADevice::try_new_with_canonical_ir(instance, model, &canonical_ir, &[1, 0])
-            .expect("construct sampled-data filter device from canonical IR")
-    }
+    let device = VerilogADevice::try_new_with_canonical_ir(instance, model, &canonical_ir, &[1, 0])
+        .expect("construct sampled-data filter device from canonical IR");
     #[cfg(not(feature = "native"))]
-    {
-        VerilogADevice::try_new(instance, model, &[1, 0])
-            .expect("construct sampled-data filter bytecode device")
-    }
+    let device = VerilogADevice::try_new(instance, model, &[1, 0])
+        .expect("construct sampled-data filter bytecode device");
+    (device, canonical_ir)
+}
+
+/// Publish the filter's `y` so the difference-equation pins can read it.
+fn observe(device: &mut VerilogADevice, artifact: &CanonicalIrArtifact) {
+    device
+        .observe_variables(artifact)
+        .expect("observation pass publishes the named variables");
 }
 
 fn stamp_once(device: &mut VerilogADevice, voltages: &[f64]) {
@@ -51,16 +64,17 @@ endmodule
 
 #[test]
 fn dc_sits_at_unity_gain_steady_state() {
-    let mut device = compile_device("Z1", IIR);
+    let (mut device, artifact) = compile_observable_device("Z1", IIR);
     device.set_analysis_type(0);
     stamp_once(&mut device, &[2.0]);
     // H(1) = 0.25 / (1 - 0.75) = 1 -> y = input
+    observe(&mut device, &artifact);
     assert!((device.variable("y").unwrap() - 2.0).abs() < 1e-12);
 }
 
 #[test]
 fn transient_follows_the_difference_equation_with_hold() {
-    let mut device = compile_device("Z1", IIR);
+    let (mut device, artifact) = compile_observable_device("Z1", IIR);
     device.try_begin_analysis(2).unwrap();
     device.set_timestep(0.5e-6);
 
@@ -72,8 +86,10 @@ fn transient_follows_the_difference_equation_with_hold() {
         device.set_time(t);
         // Two Newton-style evaluations at the same point must agree
         stamp_once(&mut device, &[1.0]);
+        observe(&mut device, &artifact);
         let first = device.variable("y").unwrap();
         stamp_once(&mut device, &[1.0]);
+        observe(&mut device, &artifact);
         let second = device.variable("y").unwrap();
         assert_eq!(first, second, "evaluation must be idempotent");
 
@@ -92,7 +108,7 @@ fn transient_follows_the_difference_equation_with_hold() {
 #[test]
 fn zp_form_expands_z_roots() {
     // One zero at z=0, one pole at z=0.5: H(z) = z/(z-0.5), H(1) = 2
-    let mut device = compile_device(
+    let (mut device, artifact) = compile_observable_device(
         "Z2",
         r#"
 `include "disciplines.vams"
@@ -109,6 +125,7 @@ endmodule
     );
     device.set_analysis_type(0);
     stamp_once(&mut device, &[1.5]);
+    observe(&mut device, &artifact);
     assert!((device.variable("y").unwrap() - 3.0).abs() < 1e-12);
 }
 
@@ -221,7 +238,7 @@ endmodule
 
 #[test]
 fn explicit_zero_transition_is_legal_through_an_intermediate_variable() {
-    let mut device = compile_device(
+    let (mut device, artifact) = compile_observable_device(
         "ZI",
         r#"
 `include "disciplines.vams"
@@ -239,12 +256,13 @@ endmodule
     device.try_begin_analysis(2).unwrap();
     device.set_time(0.0);
     stamp_once(&mut device, &[2.0]);
+    observe(&mut device, &artifact);
     assert_eq!(device.variable("y"), Some(2.0));
 }
 
 #[test]
 fn omitted_transition_uses_default_ramp_and_exact_corner_breakpoint() {
-    let mut device = compile_device(
+    let (mut device, artifact) = compile_observable_device(
         "ZR",
         r#"
 `include "disciplines.vams"
@@ -263,6 +281,7 @@ endmodule
     device.set_time(0.0);
     device.set_timestep(0.0);
     stamp_once(&mut device, &[1.0]);
+    observe(&mut device, &artifact);
     assert_eq!(device.variable("y"), Some(0.0));
     assert_eq!(device.try_transient_bound_step().unwrap(), Some(1.0e-9));
     device.try_advance_state().unwrap();
@@ -270,6 +289,7 @@ endmodule
     device.set_time(0.5e-9);
     device.set_timestep(0.5e-9);
     stamp_once(&mut device, &[1.0]);
+    observe(&mut device, &artifact);
     assert!((device.variable("y").unwrap() - 0.125).abs() < 1.0e-15);
     assert_eq!(device.try_transient_bound_step().unwrap(), Some(0.5e-9));
     device.try_advance_state().unwrap();
@@ -277,6 +297,7 @@ endmodule
     device.set_time(1.0e-9);
     device.set_timestep(0.5e-9);
     stamp_once(&mut device, &[1.0]);
+    observe(&mut device, &artifact);
     assert!((device.variable("y").unwrap() - 0.25).abs() < 1.0e-15);
 }
 
@@ -322,10 +343,11 @@ fn a_step_crossing_many_sample_edges_fails_closed() {
 
 #[test]
 fn rejected_sample_candidate_rolls_back_exactly() {
-    let mut device = compile_device("Z1", IIR);
+    let (mut device, artifact) = compile_observable_device("Z1", IIR);
     device.try_begin_analysis(2).unwrap();
     device.set_time(0.0);
     stamp_once(&mut device, &[1.0]);
+    observe(&mut device, &artifact);
     assert!((device.variable("y").unwrap() - 0.25).abs() < 1.0e-15);
     device.try_advance_state().unwrap();
 
@@ -333,30 +355,35 @@ fn rejected_sample_candidate_rolls_back_exactly() {
     device.set_time(1.0e-6);
     device.set_timestep(1.0e-6);
     stamp_once(&mut device, &[10.0]);
+    observe(&mut device, &artifact);
     assert!((device.variable("y").unwrap() - 2.6875).abs() < 1.0e-15);
 
     // Accept an earlier retry. It must preserve only the t=0 history.
     device.set_time(0.5e-6);
     device.set_timestep(0.5e-6);
     stamp_once(&mut device, &[4.0]);
+    observe(&mut device, &artifact);
     assert!((device.variable("y").unwrap() - 0.25).abs() < 1.0e-15);
     device.try_advance_state().unwrap();
 
     device.set_time(1.0e-6);
     stamp_once(&mut device, &[1.0]);
+    observe(&mut device, &artifact);
     assert!((device.variable("y").unwrap() - 0.4375).abs() < 1.0e-15);
 }
 
 #[test]
 fn explicit_analysis_begin_clears_all_prior_transient_history() {
-    let mut device = compile_device("Z1", IIR);
+    let (mut device, artifact) = compile_observable_device("Z1", IIR);
     device.try_begin_analysis(2).unwrap();
     device.set_time(0.0);
     stamp_once(&mut device, &[4.0]);
+    observe(&mut device, &artifact);
     assert!((device.variable("y").unwrap() - 1.0).abs() < 1.0e-15);
     device.try_advance_state().unwrap();
     device.set_time(1.0e-6);
     stamp_once(&mut device, &[4.0]);
+    observe(&mut device, &artifact);
     assert!((device.variable("y").unwrap() - 1.75).abs() < 1.0e-15);
     device.try_advance_state().unwrap();
 
@@ -365,6 +392,7 @@ fn explicit_analysis_begin_clears_all_prior_transient_history() {
         .expect("same-code fresh transient must reset Zi state");
     device.set_time(0.0);
     stamp_once(&mut device, &[4.0]);
+    observe(&mut device, &artifact);
     assert!((device.variable("y").unwrap() - 1.0).abs() < 1.0e-15);
     assert_eq!(device.try_transient_bound_step().unwrap(), Some(1.0e-6));
     device.try_advance_state().unwrap();

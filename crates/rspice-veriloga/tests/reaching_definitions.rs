@@ -92,6 +92,7 @@ fn a_conductance_is_stamped_from_the_definition_reaching_the_contribution() {
         REACHING,
         "the conductance is d/dV of V*tmp with tmp at its reaching definition"
     );
+    fixture.observe(&mut device);
     assert_eq!(
         device.variable("reported"),
         Some(OVERWRITTEN),
@@ -128,6 +129,7 @@ fn a_reassignment_under_a_taken_condition_does_not_reach_the_equation_above_it()
     let (matrix, _) = collect_stamps(&mut device, &[BIAS]);
 
     assert_eq!(matrix[&(0, 0)], REACHING);
+    fixture.observe(&mut device);
     assert_eq!(
         device.variable("reported"),
         Some(OVERWRITTEN),
@@ -170,6 +172,7 @@ fn a_jacobian_entry_and_a_noise_magnitude_read_the_reaching_definition() {
     // I = 1e-3*V², so dI/dV = 2e-3*V and Ieq = I - G*V = -1e-3*V².
     assert_eq!(matrix[&(0, 0)], 2.0e-3 * BIAS);
     assert_eq!(rhs[&0], 1.0e-3 * BIAS * BIAS);
+    fixture.observe(&mut device);
     assert_eq!(device.variable("reported"), Some(OVERWRITTEN));
 
     let noise = device.noise_sources(&[BIAS]);

@@ -38,6 +38,16 @@ impl DeviceFixture {
             .expect("native device construction failed")
     }
 
+    /// Publish a device's named variables so a test can read one back.
+    ///
+    /// An evaluation computes what the equations read; a name a test asserts on
+    /// comes from the observation pass, and asks for it here.
+    pub fn observe(&self, device: &mut VerilogADevice) {
+        device
+            .observe_variables(&self.canonical_ir)
+            .expect("observation pass publishes the named variables");
+    }
+
     pub fn try_device(
         &self,
         name: &str,
