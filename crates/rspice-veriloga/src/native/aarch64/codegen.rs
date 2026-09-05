@@ -3890,21 +3890,25 @@ mod cross_target_contract_tests {
 
 #[cfg(all(test, target_arch = "aarch64"))]
 mod tests {
-    use super::{A64FusedKernelEntries, FunctionCompiler, PreparedInstruction};
+    use super::{
+        A64_VALUE_BANK, A64FusedKernelEntries, BlockLoopCounters, FunctionCompiler,
+        PreparedInstruction,
+    };
     use super::{
         compile_assignment_dispatch_function, compile_assignment_function,
         compile_assignment_pass_function, compile_fused_evaluation_kernel,
-        compile_fused_stamp_kernel, compile_value_function,
+        compile_fused_stamp_kernel, compile_value_function, compile_value_function_from_ssa,
     };
     use crate::jit::plan_program::PlanProgram;
     use crate::native::EvalContext;
-    use crate::native::aarch64::encoder::DReg;
+    use crate::native::aarch64::calling_convention::HOST_ABI;
+    use crate::native::aarch64::encoder::{A64Encoder, DReg, XReg};
     use crate::native::aarch64::verifier::verify_exact_function;
     use crate::native::assignment::NativeAssignment;
     use crate::native::expr::{CompareOp, ExtremumOp, LogicalOp, NativeOp, NativeProgram};
     use crate::native::model::{CodeOffset, NativeStampKernelIo};
     use crate::native::runtime::ExecutableMemory;
-    use crate::native::ssa::ValueLocation;
+    use crate::native::ssa::{Program, RegisterAllocation, ValueLocation};
 
     fn program(ops: Vec<NativeOp>, max_stack_depth: usize) -> NativeProgram {
         NativeProgram::from_ops_for_test(ops, max_stack_depth, Vec::new(), Vec::new())
@@ -4773,5 +4777,249 @@ mod tests {
         assert_eq!(execute_with_context(&limited, &context, &[]), 20.0);
         assert_eq!(state_values[0], 20.0);
         assert_eq!(initialized[0], 1);
+    }
+
+    // ------------------------------------------ the runtime loop guard, executed
+    //
+    // `cross_target_contract_tests` reads the guard off the image, which is
+    // all an x86-64 host can do. These five run it. They are the AArch64
+    // twins of the x64 pins in `native::x64::codegen`, over the same fixtures
+    // in `native::ssa` and against the same limit, so a divergence between
+    // the two backends shows up as one of them failing rather than as a
+    // silent difference in what a runaway Verilog-A loop does.
+
+    /// A context whose `params` array the loop fixtures can read.
+    #[cfg(target_arch = "aarch64")]
+    fn context_with_params(params: &[f64]) -> EvalContext {
+        let mut context = EvalContext::empty_for_test();
+        context.params = params.as_ptr();
+        context
+    }
+
+    /// Publish one compiled value entry and call it.
+    ///
+    /// The image is dropped with the allocation when this returns, so a
+    /// caller that wants to inspect it keeps its own copy of the bytes.
+    #[cfg(target_arch = "aarch64")]
+    fn run_published_value_entry(bytes: &[u8], context: &EvalContext) -> f64 {
+        let memory = ExecutableMemory::allocate(bytes).expect("publish the block program");
+        let entry: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(memory.ptr_at(0).expect("block-program entry pointer")) };
+        entry(context, std::ptr::null())
+    }
+
+    /// A block program's back edge is counted, and the hundred-thousandth
+    /// trip is refused.
+    ///
+    /// The fixture terminates on its own after `trips` iterations, so a build
+    /// without the guard answers rather than hanging and this reads as a wrong
+    /// answer instead of a timeout. 99,999 trips is the last one that passes
+    /// and 100,000 is the first that fails, which is
+    /// `MAX_RUNTIME_LOOP_ITERATIONS` read exactly as
+    /// `FunctionCompiler::emit_block_loop_back_edge_guard` reads it, and
+    /// 150,000 is a runaway a customer's Verilog-A would produce.
+    #[cfg(target_arch = "aarch64")]
+    #[test]
+    fn a_block_program_back_edge_hard_fails_the_runtime_iteration_limit() {
+        for trips in [100_000.0_f64, 150_000.0] {
+            let ssa =
+                Program::empty_block_loop_fixture_for_test(trips).expect("build the runaway loop");
+            let bytes = compile_value_function_from_ssa(&ssa).expect("compile the runaway loop");
+            let params = [1.0_f64];
+            let context = context_with_params(&params);
+            context.clear_runtime_error();
+
+            let returned = run_published_value_entry(&bytes, &context);
+
+            let error = context
+                .take_runtime_error()
+                .unwrap_or_else(|| panic!("{trips} trips must hard-fail the iteration limit"));
+            assert!(
+                error.contains("native runtime loop iteration limit exceeded"),
+                "error must carry the loop-limit diagnostic, got: {error}"
+            );
+            assert!(
+                error.contains("no interpreter fallback"),
+                "error must carry the native hard-fail contract, got: {error}"
+            );
+            assert_eq!(
+                returned.to_bits(),
+                0.0_f64.to_bits(),
+                "a refused evaluation returns a defined zero, not whatever the helper left"
+            );
+        }
+    }
+
+    /// The last trip count the guard admits, and the value it still computes.
+    #[cfg(target_arch = "aarch64")]
+    #[test]
+    fn a_block_program_back_edge_admits_the_trip_below_the_limit() {
+        let trips = 99_999.0_f64;
+        let value = 0.5_f64;
+        let ssa =
+            Program::empty_block_loop_fixture_for_test(trips).expect("build the long-running loop");
+        let bytes = compile_value_function_from_ssa(&ssa).expect("compile the long-running loop");
+        let params = [value];
+        let context = context_with_params(&params);
+        context.clear_runtime_error();
+
+        let returned = run_published_value_entry(&bytes, &context);
+
+        assert!(
+            context.take_runtime_error().is_none(),
+            "99,999 trips is one below the limit and must not fail"
+        );
+        assert_eq!(
+            returned.to_bits(),
+            Program::empty_block_loop_fixture_expectation(trips, value).to_bits(),
+        );
+    }
+
+    /// Nested loops are counted per entry, not cumulatively.
+    ///
+    /// Ten entries into an inner loop of twenty thousand trips is two hundred
+    /// thousand back-edge traversals in one evaluation, twice the limit; a
+    /// counter that was not zeroed on each entry to the inner loop would
+    /// refuse this program, and one shared between the two loops would refuse
+    /// it sooner still.
+    #[cfg(target_arch = "aarch64")]
+    #[test]
+    fn nested_block_loops_count_each_entry_from_zero() {
+        let (outer, inner) = (10.0_f64, 20_000.0_f64);
+        let ssa = Program::nested_loop_fixture_for_test(outer, inner).expect("build nested loops");
+        let bytes = compile_value_function_from_ssa(&ssa).expect("compile the nested loops");
+        let context = EvalContext::empty_for_test();
+        context.clear_runtime_error();
+
+        let returned = run_published_value_entry(&bytes, &context);
+
+        assert!(
+            context.take_runtime_error().is_none(),
+            "no single loop reaches the limit, so the evaluation must succeed"
+        );
+        assert_eq!(
+            returned.to_bits(),
+            Program::nested_loop_fixture_expectation(outer, inner).to_bits(),
+        );
+    }
+
+    /// The guard's failure path reaches the evaluation context even after the
+    /// loop body has called a helper.
+    ///
+    /// The context arrives in X0, and the diagnostic is recorded by handing
+    /// that pointer to `rspice_native_loop_limit_error`. A helper called in
+    /// the body is free to clobber X0, and the scan that decides whether to
+    /// keep the context in a callee-saved register reads the instruction list
+    /// in layout order, where the body's call comes *after* everything the
+    /// next trip re-executes — which is why a loop-carrying program on this
+    /// backend saves its entry arguments whenever it calls out at all. Both
+    /// halves are asserted: the prologue keeps the context in X19/X20, and
+    /// the recorded message is the real one rather than whatever a stale
+    /// pointer addressed.
+    #[cfg(target_arch = "aarch64")]
+    #[test]
+    fn a_loop_calling_a_helper_keeps_the_context_for_its_own_failure_path() {
+        let ssa = Program::helper_calling_loop_fixture_for_test(150_000.0)
+            .expect("build the helper-calling loop");
+        assert!(
+            ssa.uses_helper_calls() && !ssa.needs_saved_entry_args(),
+            "the fixture must be one the layout-order scan reads as needing nothing"
+        );
+        let bytes = compile_value_function_from_ssa(&ssa).expect("compile the helper-calling loop");
+
+        let mut prologue = A64Encoder::new();
+        prologue
+            .stp_x_pre(
+                HOST_ABI.saved_context,
+                HOST_ABI.saved_variables,
+                XReg::Sp,
+                -16,
+            )
+            .expect("encode the saved-entry-argument prologue");
+        let saved = prologue.into_bytes();
+        assert!(
+            bytes.chunks_exact(4).any(|word| word == saved.as_slice()),
+            "a loop that calls a helper must keep the context in X19/X20"
+        );
+
+        let context = EvalContext::empty_for_test();
+        context.clear_runtime_error();
+
+        run_published_value_entry(&bytes, &context);
+
+        let error = context
+            .take_runtime_error()
+            .expect("the runaway loop must hard-fail");
+        assert!(
+            error.contains("native runtime loop iteration limit exceeded"),
+            "the diagnostic must reach the context the entry was called with, got: {error}"
+        );
+    }
+
+    /// A program with no back edge reserves nothing, pays nothing, and still
+    /// answers on both arms.
+    ///
+    /// The encoding twin, `a_loop_free_block_program_encodes_no_iteration_counter`,
+    /// reads the same claim off the image on any host. Running it adds what
+    /// the image cannot say: the frame a loop-free program *does* reserve is
+    /// the one it needs, so paying nothing for the guard costs it nothing.
+    #[cfg(target_arch = "aarch64")]
+    #[test]
+    fn a_loop_free_block_program_reserves_no_iteration_counter() {
+        let source = NativeProgram::from_ops_for_test(
+            vec![
+                NativeOp::LoadParam(0),
+                NativeOp::LoadParam(1),
+                NativeOp::LoadParam(2),
+                NativeOp::Sqrt,
+                NativeOp::IfElse,
+            ],
+            3,
+            Vec::new(),
+            Vec::new(),
+        );
+        let ssa = Program::lower(&source)
+            .expect("lower the postfix program")
+            .with_branching_conditionals()
+            .expect("re-express the conditional as a branch");
+        assert!(
+            !ssa.is_single_block() && ssa.loop_ranges().expect("loop ranges").is_empty(),
+            "the fixture must have blocks and no back edge"
+        );
+        let allocation =
+            RegisterAllocation::build(&ssa, A64_VALUE_BANK).expect("allocate the branch form");
+        assert_eq!(
+            BlockLoopCounters::new(allocation.spill_slot_count(), 0)
+                .expect("empty band")
+                .frame_slots(),
+            allocation.spill_slot_count(),
+            "no loop reserves no slot beyond the spill frame"
+        );
+        let bytes = compile_value_function_from_ssa(&ssa).expect("compile the branch form");
+
+        let mut encoder = A64Encoder::new();
+        encoder
+            .add_x_imm(XReg::X9, XReg::X9, 1)
+            .expect("encode the counter increment");
+        let increment = encoder.into_bytes();
+        assert!(
+            !bytes
+                .chunks_exact(4)
+                .any(|word| word == increment.as_slice()),
+            "a loop-free program must not carry the iteration guard's increment"
+        );
+
+        // `IfElse` picks the then-value when the condition is non-zero, so the
+        // first row takes the arm that is a bare parameter and the second the
+        // arm that had to compute a square root.
+        for (params, expected) in [([1.0_f64, 7.0, 9.0], 7.0_f64), ([0.0, 7.0, 9.0], 3.0)] {
+            let context = context_with_params(&params);
+            context.clear_runtime_error();
+
+            let returned = run_published_value_entry(&bytes, &context);
+
+            assert_eq!(returned.to_bits(), expected.to_bits());
+            assert!(context.take_runtime_error().is_none());
+        }
     }
 }
