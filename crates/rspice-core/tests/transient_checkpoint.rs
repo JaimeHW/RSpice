@@ -1506,3 +1506,117 @@ q1 c b 0 qmod
         "resume must preserve accepted initial_step variables exactly"
     );
 }
+
+/// A checkpoint taken under the CFG plan resumes the same trajectory, every
+/// point of it, for a module whose declared variables are not all live.
+///
+/// The runtime Verilog-A payload carries the whole variable array by value, and
+/// under the CFG plan an evaluation publishes only the slots that plan reads.
+/// `unread` here is a declared name no contribution, condition or Jacobian
+/// loads. Capture does not run the observation pass that would fill it — it
+/// takes `&self` and so cannot — which is deliberate: a ten-second compile at
+/// the first checkpoint of a large deck is not acceptable, and a value derived
+/// after the fact is not accepted state. What the payload holds for such a slot
+/// is what the evaluation left, and this is the pin that says a resume does not
+/// depend on it. `stored` is the opposite case in the same module: a variable
+/// the residual reads, which the reactive history depends on.
+///
+/// Compared the way this suite compares a resume — the seam bit for bit, the
+/// segment against the unsegmented run — because a resumed adaptive run derives
+/// its own step sequence and lands on different points. The tolerance is two
+/// orders tighter than `segmented_run_continues_the_unsegmented_trajectory`'s
+/// and the failure it guards is not subtle: `stored` is the module's entire
+/// conductance, so a payload that lost it moves the node by volts.
+#[cfg(feature = "veriloga")]
+#[test]
+fn runtime_veriloga_checkpoint_resumes_a_partly_live_variable_array_exactly() {
+    use std::io::Write;
+
+    let mut model = std::env::temp_dir();
+    model.push(format!(
+        "rspice_checkpoint_partial_liveness_{}.va",
+        std::process::id()
+    ));
+    let mut file = std::fs::File::create(&model).expect("create model file");
+    file.write_all(
+        br#"
+`include "disciplines.vams"
+module va_partial_liveness(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real cap = 1.0e-9;
+    parameter real res = 1.0e3;
+    real stored, unread;
+    analog begin
+        stored = V(p, n) / res;
+        unread = stored * stored + 1.0;
+        I(p, n) <+ stored + ddt(cap * V(p, n));
+    end
+endmodule
+"#,
+    )
+    .expect("write model");
+
+    let deck = format!(
+        "* runtime Verilog-A checkpoint with a partly live variable array\n\
+         vin in 0 sin(0 1 1meg)\n\
+         rsrc in out 1k\n\
+         x1 out 0 va_partial_liveness\n\
+         .va \"{}\" va_partial_liveness\n\
+         .tran 1n 2u\n\
+         .end\n",
+        model.display().to_string().replace('\\', "/")
+    );
+    let netlist = Netlist::parse(&deck).expect("parse partial-liveness deck");
+    let engine = Engine::new(SimulationConfig::default());
+
+    let continuous = engine
+        .run_tran(&netlist, 2.0e-6, 1.0e-9)
+        .expect("continuous partial-liveness run");
+    let (first, checkpoint) = engine
+        .run_tran_checkpointed(&netlist, 1.0e-6, 1.0e-9)
+        .expect("partial-liveness checkpoint segment solves");
+    let serialized = TransientCheckpoint::from_text(&checkpoint.to_text())
+        .expect("runtime Verilog-A state survives portable text");
+    let (resumed, _) = engine
+        .run_tran_resume(&netlist, &serialized, 2.0e-6, 1.0e-9)
+        .expect("partial-liveness checkpoint resumes");
+
+    let out = |result: &rspice_core::engine::TransientResult| -> usize {
+        result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("out"))
+            .expect("out node is in the solved trajectory")
+    };
+
+    // The seam carries the whole solution across the capture, bit for bit.
+    assert_eq!(
+        first.voltages[out(&first)]
+            .last()
+            .expect("captured endpoint")
+            .to_bits(),
+        resumed.voltages[out(&resumed)][0].to_bits(),
+        "the resumed run must start on the captured solution exactly"
+    );
+
+    // And the resumed segment stays on the unsegmented trajectory. A variable
+    // the residual reads but the payload failed to carry would not perturb this
+    // at the integrator's tolerance — `stored` is the whole conductance, so
+    // losing it moves the node by volts.
+    let continuous_out = out(&continuous);
+    let resumed_out = out(&resumed);
+    let mut worst = 0.0_f64;
+    for step in 1..=40 {
+        let time = 1.0e-6 + f64::from(step) * 24.0e-9;
+        let expected = interpolate(&continuous.time, &continuous.voltages[continuous_out], time);
+        let actual = interpolate(&resumed.time, &resumed.voltages[resumed_out], time);
+        worst = worst.max((expected - actual).abs());
+    }
+    assert!(
+        worst < 1.0e-5,
+        "the resumed segment must track the unsegmented run (worst |Δ| = {worst})"
+    );
+
+    let _ = std::fs::remove_file(&model);
+}

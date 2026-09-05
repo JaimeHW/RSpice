@@ -3950,6 +3950,18 @@ impl VerilogADevice {
         self.prev_discontinuity = discontinuity;
     }
 
+    /// Capture the accepted state, and nothing derived from it.
+    ///
+    /// The payload carries the variable array as the last evaluation left it,
+    /// which under a CFG plan is the slots that plan reads and not every
+    /// declared name. Filling the rest would mean running the observation pass
+    /// here, and this method takes `&self` so that it cannot: a ten-second
+    /// compile at the first checkpoint of a hisimhv-class deck is not
+    /// acceptable, and a value computed after the fact for a reader is not
+    /// accepted state. A resume does not need them either — the roots the pass
+    /// writes are the only slots anything reads before writing, which is what
+    /// `runtime_veriloga_checkpoint_resumes_a_partly_live_variable_array_exactly`
+    /// in `rspice-core`'s `transient_checkpoint` suite pins.
     pub fn checkpoint_state(&self) -> Result<VerilogADeviceCheckpoint, VmError> {
         let checkpoint = VerilogADeviceCheckpoint {
             instance_name: self.name.clone(),
