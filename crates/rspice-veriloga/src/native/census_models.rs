@@ -399,14 +399,20 @@ impl CacheDir {
         // JSON has no spelling for an infinity or a NaN, so `serde_json`
         // writes one as `null`. A bare `f64` then refuses to load, which this
         // cache would treat as a permanent miss; but an `Option<f64>` loads
-        // `null` as `None`, which is a silent change to the artifact. Compact
-        // models are full of `from (0:inf)` ranges, so this is not
-        // hypothetical. An entry carrying one is simply not cached.
-        match count_non_finite_floats(&cached) {
-            Ok(0) => {}
-            Ok(count) => {
+        // `null` as `None`, which is a silent change to the artifact. Every
+        // field that can carry one now encodes it as a string
+        // (`crate::json_float`), so this refuses only an artifact that acquired
+        // a non-finite float in a field nobody annotated — the same defect the
+        // sealed browser payload refuses for, caught here as well because a
+        // cache that answered with a changed artifact would make every census
+        // downstream of it a lie.
+        match crate::json_float::non_finite_floats("entry", &cached) {
+            Ok(found) if found.is_empty() => {}
+            Ok(found) => {
                 eprintln!(
-                    "census-cache model={module} stored=false reason=non_finite_floats:{count}"
+                    "census-cache model={module} stored=false reason=non_finite_floats:{} first={}",
+                    found.len(),
+                    found[0]
                 );
                 return;
             }
@@ -534,308 +540,12 @@ fn hex(bytes: &[u8], count: usize) -> String {
         .collect()
 }
 
-/// How many non-finite floats a value would hand to a serializer.
-///
-/// Counted by driving `serde` with a serializer that keeps no output at all,
-/// so the answer is exact and costs no memory. JSON is otherwise lossless for
-/// these artifacts: every other scalar `serde_json` writes round-trips
-/// exactly, and `CompiledModel` already travels this way in production.
-fn count_non_finite_floats<T>(value: &T) -> Result<usize, serde_json::Error>
-where
-    T: serde::Serialize,
-{
-    let mut counter = NonFiniteFloats(0);
-    value.serialize(&mut counter)?;
-    Ok(counter.0)
-}
-
-struct NonFiniteFloats(usize);
-
-impl serde::Serializer for &mut NonFiniteFloats {
-    type Ok = ();
-    type Error = serde_json::Error;
-    type SerializeSeq = Self;
-    type SerializeTuple = Self;
-    type SerializeTupleStruct = Self;
-    type SerializeTupleVariant = Self;
-    type SerializeMap = Self;
-    type SerializeStruct = Self;
-    type SerializeStructVariant = Self;
-
-    fn serialize_bool(self, _: bool) -> Result<(), Self::Error> {
-        Ok(())
-    }
-    fn serialize_i8(self, _: i8) -> Result<(), Self::Error> {
-        Ok(())
-    }
-    fn serialize_i16(self, _: i16) -> Result<(), Self::Error> {
-        Ok(())
-    }
-    fn serialize_i32(self, _: i32) -> Result<(), Self::Error> {
-        Ok(())
-    }
-    fn serialize_i64(self, _: i64) -> Result<(), Self::Error> {
-        Ok(())
-    }
-    fn serialize_i128(self, _: i128) -> Result<(), Self::Error> {
-        Ok(())
-    }
-    fn serialize_u8(self, _: u8) -> Result<(), Self::Error> {
-        Ok(())
-    }
-    fn serialize_u16(self, _: u16) -> Result<(), Self::Error> {
-        Ok(())
-    }
-    fn serialize_u32(self, _: u32) -> Result<(), Self::Error> {
-        Ok(())
-    }
-    fn serialize_u64(self, _: u64) -> Result<(), Self::Error> {
-        Ok(())
-    }
-    fn serialize_u128(self, _: u128) -> Result<(), Self::Error> {
-        Ok(())
-    }
-    fn serialize_f32(self, value: f32) -> Result<(), Self::Error> {
-        if !value.is_finite() {
-            self.0 += 1;
-        }
-        Ok(())
-    }
-    fn serialize_f64(self, value: f64) -> Result<(), Self::Error> {
-        if !value.is_finite() {
-            self.0 += 1;
-        }
-        Ok(())
-    }
-    fn serialize_char(self, _: char) -> Result<(), Self::Error> {
-        Ok(())
-    }
-    fn serialize_str(self, _: &str) -> Result<(), Self::Error> {
-        Ok(())
-    }
-    fn serialize_bytes(self, _: &[u8]) -> Result<(), Self::Error> {
-        Ok(())
-    }
-    fn serialize_none(self) -> Result<(), Self::Error> {
-        Ok(())
-    }
-    fn serialize_some<T>(self, value: &T) -> Result<(), Self::Error>
-    where
-        T: ?Sized + serde::Serialize,
-    {
-        value.serialize(self)
-    }
-    fn serialize_unit(self) -> Result<(), Self::Error> {
-        Ok(())
-    }
-    fn serialize_unit_struct(self, _: &'static str) -> Result<(), Self::Error> {
-        Ok(())
-    }
-    fn serialize_unit_variant(
-        self,
-        _: &'static str,
-        _: u32,
-        _: &'static str,
-    ) -> Result<(), Self::Error> {
-        Ok(())
-    }
-    fn serialize_newtype_struct<T>(self, _: &'static str, value: &T) -> Result<(), Self::Error>
-    where
-        T: ?Sized + serde::Serialize,
-    {
-        value.serialize(self)
-    }
-    fn serialize_newtype_variant<T>(
-        self,
-        _: &'static str,
-        _: u32,
-        _: &'static str,
-        value: &T,
-    ) -> Result<(), Self::Error>
-    where
-        T: ?Sized + serde::Serialize,
-    {
-        value.serialize(self)
-    }
-    fn serialize_seq(self, _: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
-        Ok(self)
-    }
-    fn serialize_tuple(self, _: usize) -> Result<Self::SerializeTuple, Self::Error> {
-        Ok(self)
-    }
-    fn serialize_tuple_struct(
-        self,
-        _: &'static str,
-        _: usize,
-    ) -> Result<Self::SerializeTupleStruct, Self::Error> {
-        Ok(self)
-    }
-    fn serialize_tuple_variant(
-        self,
-        _: &'static str,
-        _: u32,
-        _: &'static str,
-        _: usize,
-    ) -> Result<Self::SerializeTupleVariant, Self::Error> {
-        Ok(self)
-    }
-    fn serialize_map(self, _: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
-        Ok(self)
-    }
-    fn serialize_struct(
-        self,
-        _: &'static str,
-        _: usize,
-    ) -> Result<Self::SerializeStruct, Self::Error> {
-        Ok(self)
-    }
-    fn serialize_struct_variant(
-        self,
-        _: &'static str,
-        _: u32,
-        _: &'static str,
-        _: usize,
-    ) -> Result<Self::SerializeStructVariant, Self::Error> {
-        Ok(self)
-    }
-}
-
-impl serde::ser::SerializeSeq for &mut NonFiniteFloats {
-    type Ok = ();
-    type Error = serde_json::Error;
-    fn serialize_element<T>(&mut self, value: &T) -> Result<(), Self::Error>
-    where
-        T: ?Sized + serde::Serialize,
-    {
-        value.serialize(&mut **self)
-    }
-    fn end(self) -> Result<(), Self::Error> {
-        Ok(())
-    }
-}
-
-impl serde::ser::SerializeTuple for &mut NonFiniteFloats {
-    type Ok = ();
-    type Error = serde_json::Error;
-    fn serialize_element<T>(&mut self, value: &T) -> Result<(), Self::Error>
-    where
-        T: ?Sized + serde::Serialize,
-    {
-        value.serialize(&mut **self)
-    }
-    fn end(self) -> Result<(), Self::Error> {
-        Ok(())
-    }
-}
-
-impl serde::ser::SerializeTupleStruct for &mut NonFiniteFloats {
-    type Ok = ();
-    type Error = serde_json::Error;
-    fn serialize_field<T>(&mut self, value: &T) -> Result<(), Self::Error>
-    where
-        T: ?Sized + serde::Serialize,
-    {
-        value.serialize(&mut **self)
-    }
-    fn end(self) -> Result<(), Self::Error> {
-        Ok(())
-    }
-}
-
-impl serde::ser::SerializeTupleVariant for &mut NonFiniteFloats {
-    type Ok = ();
-    type Error = serde_json::Error;
-    fn serialize_field<T>(&mut self, value: &T) -> Result<(), Self::Error>
-    where
-        T: ?Sized + serde::Serialize,
-    {
-        value.serialize(&mut **self)
-    }
-    fn end(self) -> Result<(), Self::Error> {
-        Ok(())
-    }
-}
-
-impl serde::ser::SerializeMap for &mut NonFiniteFloats {
-    type Ok = ();
-    type Error = serde_json::Error;
-    fn serialize_key<T>(&mut self, key: &T) -> Result<(), Self::Error>
-    where
-        T: ?Sized + serde::Serialize,
-    {
-        key.serialize(&mut **self)
-    }
-    fn serialize_value<T>(&mut self, value: &T) -> Result<(), Self::Error>
-    where
-        T: ?Sized + serde::Serialize,
-    {
-        value.serialize(&mut **self)
-    }
-    fn end(self) -> Result<(), Self::Error> {
-        Ok(())
-    }
-}
-
-impl serde::ser::SerializeStruct for &mut NonFiniteFloats {
-    type Ok = ();
-    type Error = serde_json::Error;
-    fn serialize_field<T>(&mut self, _: &'static str, value: &T) -> Result<(), Self::Error>
-    where
-        T: ?Sized + serde::Serialize,
-    {
-        value.serialize(&mut **self)
-    }
-    fn end(self) -> Result<(), Self::Error> {
-        Ok(())
-    }
-}
-
-impl serde::ser::SerializeStructVariant for &mut NonFiniteFloats {
-    type Ok = ();
-    type Error = serde_json::Error;
-    fn serialize_field<T>(&mut self, _: &'static str, value: &T) -> Result<(), Self::Error>
-    where
-        T: ?Sized + serde::Serialize,
-    {
-        value.serialize(&mut **self)
-    }
-    fn end(self) -> Result<(), Self::Error> {
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn a_finite_value_reports_no_non_finite_floats() {
-        let value = (1.0_f64, vec![0.5_f64, -3.25], Some(7.0_f64), None::<f64>);
-        assert_eq!(count_non_finite_floats(&value).unwrap(), 0);
-    }
-
-    #[test]
-    fn the_scan_finds_every_shape_json_would_lose() {
-        // The three losses that matter, in the three places they hide: a bare
-        // field, an `Option` that would come back `None`, and a value nested
-        // inside a sequence.
-        let value = (
-            f64::INFINITY,
-            Some(f64::NEG_INFINITY),
-            vec![1.0_f64, f64::NAN],
-        );
-        assert_eq!(count_non_finite_floats(&value).unwrap(), 3);
-    }
-
-    #[test]
-    fn an_infinite_option_really_does_come_back_as_none() {
-        // The reason the scan exists: `serde_json` loses this one silently
-        // rather than refusing it.
-        let encoded = serde_json::to_string(&Some(f64::INFINITY)).unwrap();
-        let decoded: Option<f64> = serde_json::from_str(&encoded).unwrap();
-        assert_eq!(encoded, "null");
-        assert_eq!(decoded, None);
-    }
+    // The scan itself, and the two shapes JSON loses, are pinned where they
+    // live now: `crate::json_float`.
 
     #[test]
     fn finite_floats_survive_the_encoding_the_cache_uses() {

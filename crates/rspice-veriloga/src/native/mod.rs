@@ -29,6 +29,8 @@ mod code_identity;
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod double_double;
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
+mod json_float_census;
+#[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod mir_postfix;
 mod model;
 mod runtime;
