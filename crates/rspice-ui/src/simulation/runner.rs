@@ -1253,6 +1253,8 @@ mod tests {
                 node_voltages: &result.voltages,
                 branch_names: &result.branch_names,
                 branch_currents: &result.branch_currents,
+                digital_values: &[],
+                real_values: &[],
             },
         );
 
