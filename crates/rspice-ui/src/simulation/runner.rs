@@ -76,11 +76,23 @@ pub(crate) struct AnalysisExecutionEnvironment {
 /// producing analysis is still running. Only retained analog traces are
 /// included, so the message is compact and has the same names as the final
 /// result conversion.
+///
+/// The event fields carry only the nodes whose committed value differs from
+/// the one this run last published. The engine reports its whole committed
+/// event state at every accepted point, which for a settled net is the same
+/// value thousands of times over; a live message that repeated it would cost
+/// a name and a number per node per step to say nothing.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct TransientSampleDelta {
     pub time: f64,
     pub waveforms: Vec<TransientWaveformSample>,
+    /// Digital event nodes that changed at this accepted time.
+    #[serde(default)]
+    pub events: Vec<TransientDigitalEventSample>,
+    /// Real-valued event nodes that changed at this accepted time.
+    #[serde(default)]
+    pub real_events: Vec<TransientRealEventSample>,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -89,6 +101,24 @@ pub(crate) struct TransientWaveformSample {
     pub name: String,
     pub value: f64,
     pub y_unit: String,
+}
+
+/// One digital event node's newly committed value at an accepted point.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct TransientDigitalEventSample {
+    pub name: String,
+    /// XSPICE 12-state event code, the same encoding the terminal result's
+    /// event evidence carries.
+    pub value_code: u8,
+}
+
+/// One real-valued event node's newly committed value at an accepted point.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct TransientRealEventSample {
+    pub name: String,
+    pub value: f64,
 }
 
 //=============================================================================
@@ -464,6 +494,32 @@ struct RunnerSignal {
     progress_observer: Option<ProgressObserver>,
     transient_samples: Option<Arc<Mutex<VecDeque<TransientSampleDelta>>>>,
     transient_sample_observer: Option<TransientSampleObserver>,
+    published_events: Mutex<PublishedEventValues>,
+}
+
+/// The last event value this run published for each node, so an accepted
+/// point can report changes instead of the whole committed state.
+///
+/// One signal serves one analysis — `run_simulation_thread` builds it after
+/// the deck is prepared and drops it when the engine returns — so the map is
+/// empty at the first accepted point of every run without being cleared.
+/// [`AbortSignal`](rspice_core::abort_signal::AbortSignal) observes through a
+/// shared reference, hence the lock; it is uncontended, because only the
+/// solver thread reports samples.
+#[derive(Debug, Default)]
+struct PublishedEventValues {
+    digital: std::collections::HashMap<rspice_core::NodeId, u8>,
+    real: std::collections::HashMap<rspice_core::NodeId, u64>,
+}
+
+/// The netlist name of an event node, or `None` when the node table does not
+/// cover it. Event values are keyed by node id, where ground is zero and never
+/// appears, so `node_names[node_id - 1]` is the node's name.
+fn event_node_name(node_names: &[String], node: rspice_core::NodeId) -> Option<&str> {
+    node_names
+        .get(node.checked_sub(1)?)
+        .map(String::as_str)
+        .filter(|name| !name.trim().is_empty())
 }
 
 fn push_live_transient_sample(
@@ -478,6 +534,61 @@ fn push_live_transient_sample(
         samples.pop_front();
     }
     samples.push_back(delta);
+}
+
+impl RunnerSignal {
+    /// The event nodes whose committed value differs from the one this run
+    /// last published, and the record of what was published updated to match.
+    ///
+    /// A node the node table cannot name is skipped without being recorded:
+    /// it stays a candidate, so the first accepted point at which a name does
+    /// resolve reports it rather than treating it as already seen.
+    fn changed_event_values(
+        &self,
+        sample: &rspice_core::abort_signal::TransientSample<'_>,
+    ) -> (
+        Vec<TransientDigitalEventSample>,
+        Vec<TransientRealEventSample>,
+    ) {
+        if sample.digital_values.is_empty() && sample.real_values.is_empty() {
+            return (Vec::new(), Vec::new());
+        }
+        let mut published = match self.published_events.lock() {
+            Ok(published) => published,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let mut events = Vec::new();
+        for &(node, code) in sample.digital_values {
+            let Some(name) = event_node_name(sample.node_names, node) else {
+                continue;
+            };
+            if published.digital.insert(node, code.0) == Some(code.0) {
+                continue;
+            }
+            events.push(TransientDigitalEventSample {
+                name: name.to_owned(),
+                value_code: code.0,
+            });
+        }
+        let mut real_events = Vec::new();
+        for &(node, value) in sample.real_values {
+            let Some(name) = event_node_name(sample.node_names, node) else {
+                continue;
+            };
+            // Compared as bits so the record is an exact account of what was
+            // published: two values that are not equal as floats are never
+            // treated as the same reported value.
+            let bits = value.to_bits();
+            if published.real.insert(node, bits) == Some(bits) {
+                continue;
+            }
+            real_events.push(TransientRealEventSample {
+                name: name.to_owned(),
+                value,
+            });
+        }
+        (events, real_events)
+    }
 }
 
 impl rspice_core::abort_signal::AbortSignal for RunnerSignal {
@@ -539,7 +650,13 @@ impl rspice_core::abort_signal::AbortSignal for RunnerSignal {
                 y_unit: "A".to_owned(),
             });
         }
-        let delta = TransientSampleDelta { time, waveforms };
+        let (events, real_events) = self.changed_event_values(&sample);
+        let delta = TransientSampleDelta {
+            time,
+            waveforms,
+            events,
+            real_events,
+        };
         if let Some(samples) = &self.transient_samples {
             push_live_transient_sample(samples, delta.clone());
         }
@@ -872,6 +989,7 @@ pub(in crate::simulation::runner) fn run_simulation_thread_with_progress_observe
         progress_observer,
         transient_samples,
         transient_sample_observer,
+        published_events: Mutex::default(),
     };
 
     let result = match request {
@@ -1229,6 +1347,7 @@ mod tests {
             progress_observer: None,
             transient_samples: Some(Arc::clone(&samples)),
             transient_sample_observer: None,
+            published_events: Mutex::default(),
         };
         let result = rspice_core::engine::TransientResult {
             time: vec![0.0, 2.5e-9],
@@ -1267,6 +1386,97 @@ mod tests {
         assert_eq!(sample.waveforms[1].name, "I(V1)");
         assert_eq!(sample.waveforms[1].value, -2.0e-3);
         assert_eq!(sample.waveforms[1].y_unit, "A");
+        assert!(sample.events.is_empty());
+        assert!(sample.real_events.is_empty());
+    }
+
+    #[test]
+    fn runner_signal_publishes_event_nodes_only_when_their_value_changes() {
+        use rspice_core::abort_signal::{AbortSignal as _, DigitalEventCode, TransientSample};
+
+        let samples = Arc::new(Mutex::new(VecDeque::new()));
+        let signal = RunnerSignal {
+            abort_flag: Arc::new(AtomicBool::new(false)),
+            progress: Arc::new(Mutex::new(SimulationProgress::default())),
+            progress_observer: None,
+            transient_samples: Some(Arc::clone(&samples)),
+            transient_sample_observer: None,
+            published_events: Mutex::default(),
+        };
+        let node_names = vec!["clk".to_owned(), "d".to_owned(), "vsense".to_owned()];
+        let voltages = vec![vec![0.0, 0.0, 0.0], Vec::new(), Vec::new()];
+        // Node 4 has no entry in the node table, so it cannot be named and is
+        // never reported; nodes 1 and 2 are digital, node 3 is real-valued.
+        let observe = |time: &[f64],
+                       digital: &[(rspice_core::NodeId, DigitalEventCode)],
+                       real: &[(rspice_core::NodeId, f64)]| {
+            signal.observe_transient_sample(TransientSample {
+                time,
+                node_names: &node_names,
+                node_voltages: &voltages,
+                branch_names: &[],
+                branch_currents: &[],
+                digital_values: digital,
+                real_values: real,
+            });
+        };
+
+        observe(
+            &[0.0],
+            &[(1, DigitalEventCode(0)), (2, DigitalEventCode(12))],
+            &[(3, 1.5), (4, 2.5)],
+        );
+        observe(
+            &[0.0, 1.0e-9],
+            &[(1, DigitalEventCode(0)), (2, DigitalEventCode(12))],
+            &[(3, 1.5), (4, 2.5)],
+        );
+        observe(
+            &[0.0, 1.0e-9, 2.0e-9],
+            &[(1, DigitalEventCode(1)), (2, DigitalEventCode(12))],
+            &[(3, 1.5), (4, 9.0)],
+        );
+
+        let queued = samples.lock().expect("live queue").clone();
+        assert_eq!(queued.len(), 3);
+
+        assert_eq!(
+            queued[0].events,
+            vec![
+                TransientDigitalEventSample {
+                    name: "clk".to_owned(),
+                    value_code: 0,
+                },
+                TransientDigitalEventSample {
+                    name: "d".to_owned(),
+                    value_code: 12,
+                },
+            ]
+        );
+        assert_eq!(
+            queued[0].real_events,
+            vec![TransientRealEventSample {
+                name: "vsense".to_owned(),
+                value: 1.5,
+            }]
+        );
+
+        assert!(
+            queued[1].events.is_empty() && queued[1].real_events.is_empty(),
+            "an unchanged committed state must publish nothing"
+        );
+
+        assert_eq!(
+            queued[2].events,
+            vec![TransientDigitalEventSample {
+                name: "clk".to_owned(),
+                value_code: 1,
+            }]
+        );
+        assert!(
+            queued[2].real_events.is_empty(),
+            "the only real node that changed has no name in the node table"
+        );
     }
 
     #[test]
@@ -1278,6 +1488,8 @@ mod tests {
                 TransientSampleDelta {
                     time: index as f64,
                     waveforms: Vec::new(),
+                    events: Vec::new(),
+                    real_events: Vec::new(),
                 },
             );
         }

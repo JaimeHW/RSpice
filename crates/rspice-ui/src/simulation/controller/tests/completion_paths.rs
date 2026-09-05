@@ -942,6 +942,8 @@ fn live_transient_accumulator_rejects_partial_or_schema_changing_points() {
                 },
             )
             .collect(),
+        events: Vec::new(),
+        real_events: Vec::new(),
     };
     let mut accumulator = LiveTransientAccumulator::default();
 
@@ -977,6 +979,8 @@ fn live_transient_accumulator_compacts_aligned_source_traces() {
                     y_unit: "V".to_owned(),
                 },
             ],
+            events: Vec::new(),
+            real_events: Vec::new(),
         })
         .collect();
 
