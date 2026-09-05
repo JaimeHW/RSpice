@@ -116,7 +116,16 @@ pub fn render_tabbed_property_dialog(
                 ui.allocate_ui_with_layout(
                     vec2(ui.available_width(), body_height),
                     Layout::top_down(Align::Min),
-                    |ui| evidence_pane(ui, state, context, component_type, &mut side_action),
+                    |ui| {
+                        evidence_pane(
+                            ui,
+                            state,
+                            context,
+                            component_type,
+                            registry,
+                            &mut side_action,
+                        )
+                    },
                 );
             });
         } else {
@@ -145,7 +154,16 @@ pub fn render_tabbed_property_dialog(
                 ui.allocate_ui_with_layout(
                     vec2(ui.available_width(), ui.available_height()),
                     Layout::top_down(Align::Min),
-                    |ui| evidence_pane(ui, state, context, component_type, &mut side_action),
+                    |ui| {
+                        evidence_pane(
+                            ui,
+                            state,
+                            context,
+                            component_type,
+                            registry,
+                            &mut side_action,
+                        )
+                    },
                 );
             });
         }
@@ -669,6 +687,7 @@ fn evidence_pane(
     state: &TabbedPropertyDialogState,
     context: &ComponentEditorContext,
     component_type: crate::state::ComponentType,
+    registry: &PropertyRegistry,
     action: &mut TabbedDialogResult,
 ) {
     egui::Frame::NONE
@@ -678,7 +697,7 @@ fn evidence_pane(
                 .id_salt("component-editor-evidence")
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
-                    evidence_contents(ui, state, context, component_type, action)
+                    evidence_contents(ui, state, context, component_type, registry, action)
                 });
         });
 }
@@ -688,41 +707,26 @@ fn evidence_contents(
     state: &TabbedPropertyDialogState,
     context: &ComponentEditorContext,
     component_type: crate::state::ComponentType,
+    registry: &PropertyRegistry,
     action: &mut TabbedDialogResult,
 ) {
     model_binding_card(ui, state, context, action);
     operating_point_card(ui, context, action);
     if supports_source_preview(component_type) {
-        source_preview_card(ui, state, component_type);
+        source_preview_card(ui, state, component_type, registry);
     }
     terminals_card(ui, context);
 }
 
+/// Whether this family has a card the engine can be asked about.
+///
+/// Every independent source does. Whether the engine can then *draw* it is a
+/// second question with its own answer — a missing data file, a noise train
+/// that only exists once a run builds it — and the card states that in place
+/// rather than disappearing, because a source that vanishes from the evidence
+/// pane looks like a source the editor does not understand.
 fn supports_source_preview(kind: crate::state::ComponentType) -> bool {
-    use crate::state::ComponentType;
-    matches!(
-        kind,
-        ComponentType::VoltageSource
-            | ComponentType::CurrentSource
-            | ComponentType::VoltageSourceAc
-            | ComponentType::CurrentSourceAc
-            | ComponentType::VoltageSourcePulse
-            | ComponentType::CurrentSourcePulse
-            | ComponentType::VoltageSourceSin
-            | ComponentType::CurrentSourceSin
-            | ComponentType::VoltageSourcePwl
-            | ComponentType::CurrentSourcePwl
-            | ComponentType::VoltageSourceExp
-            | ComponentType::CurrentSourceExp
-            | ComponentType::VoltageSourceSffm
-            | ComponentType::CurrentSourceSffm
-            | ComponentType::VoltageSourceAm
-            | ComponentType::CurrentSourceAm
-            | ComponentType::VoltageSourcePat
-            | ComponentType::CurrentSourcePat
-            | ComponentType::VoltageSourceNoise
-            | ComponentType::CurrentSourceNoise
-    )
+    crate::simulation::stimulus_realize::is_independent_source(kind)
 }
 
 fn section_band(ui: &mut Ui, title: &str, status: &str) {
@@ -1085,33 +1089,66 @@ fn terminal_table_row(
     );
 }
 
+/// The engine's own evaluation of this source, over the plan's transient.
+///
+/// Nothing here interprets a waveform. The draft becomes a component, the
+/// component becomes a card, the card becomes a `SourceSpec` through the
+/// engine's parser, and the curve is the transient evaluator stepped over the
+/// stop time — so every substitution the engine makes for an omitted field is
+/// visible here exactly as it will be in the run, which is what the dialog's
+/// own sampler could not promise.
 fn source_preview_card(
     ui: &mut Ui,
     state: &TabbedPropertyDialogState,
     kind: crate::state::ComponentType,
+    registry: &PropertyRegistry,
 ) {
-    let status = if matches!(
-        kind,
-        crate::state::ComponentType::CurrentSourceNoise
-            | crate::state::ComponentType::VoltageSourceNoise
-    ) {
-        "representative realization"
-    } else {
-        "exact expression"
-    };
-    section_band(ui, "Transient stimulus preview", status);
+    use crate::simulation::stimulus_realize;
+
+    let timing = state.preview_timing();
+    section_band(ui, "Transient stimulus preview", "engine evaluator");
+
+    // The generator's and the parser's refusals already name the component and
+    // the field; a preview that rewrote them would be a second voice saying the
+    // same thing differently.
+    let curve = preview_component(state, kind, registry)
+        .ok_or_else(|| "This editor has no instance to evaluate.".to_owned())
+        .and_then(|component| stimulus_realize::source_spec(&component))
+        .and_then(|spec| match stimulus_realize::preview_defect(&spec) {
+            Some(defect) => Err(defect),
+            None => Ok(stimulus_realize::evaluate_waveform(
+                &spec,
+                timing.window(PREVIEW_SAMPLES),
+                timing.tstep,
+                timing.tstop,
+                stimulus_realize::PREVIEW_DIALECT,
+            )),
+        });
+
     let (rect, response) =
         ui.allocate_exact_size(vec2(ui.available_width(), 132.0), Sense::hover());
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(
-            egui::WidgetType::Image,
-            true,
-            "Preview of the configured stimulus waveform",
-        )
-    });
+    let caption = timing.caption();
+    let readouts = curve
+        .as_ref()
+        .ok()
+        .and_then(|samples| stimulus_realize::WaveformReadouts::of(samples));
+    let label = match (&curve, readouts) {
+        (Ok(_), Some(_)) => format!("Engine-evaluated waveform of this source over {caption}"),
+        (Ok(_), None) => format!("This source has no curve over {caption}"),
+        (Err(reason), _) => reason.clone(),
+    };
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Image, true, &label));
+
     let t = Tokens::get(ui.ctx());
     ui.painter().rect_filled(rect, 0.0, t.color.bg_app);
     let plot = egui::Rect::from_min_max(rect.min + vec2(46.0, 8.0), rect.max - vec2(12.0, 20.0));
+    ui.painter().text(
+        pos2(plot.right(), rect.top() + 2.0),
+        egui::Align2::RIGHT_TOP,
+        &caption,
+        theme::mono(tokens::FS_0, FontWeight::Regular),
+        t.color.text_faint,
+    );
     ui.painter().line_segment(
         [plot.left_bottom(), plot.left_top()],
         Stroke::new(1.0, t.color.border),
@@ -1125,27 +1162,31 @@ fn source_preview_card(
         ui.painter()
             .hline(plot.x_range(), y, Stroke::new(0.5, t.color.border));
     }
-    let samples = source_preview_samples(state, kind, 96);
-    if samples.len() < 2 {
-        ui.painter().text(
-            plot.center(),
-            egui::Align2::CENTER_CENTER,
-            "Preview unavailable until values are valid",
-            theme::sans(tokens::FS_0, FontWeight::Regular),
-            t.color.text_dim,
-        );
-        return;
-    }
-    let (minimum, maximum) = samples.iter().fold(
-        (f64::INFINITY, f64::NEG_INFINITY),
-        |(minimum, maximum), value| (minimum.min(*value), maximum.max(*value)),
-    );
-    let raw_span = (maximum - minimum).abs();
-    let span = raw_span.max(1e-12);
+
+    let (samples, readouts) = match (curve, readouts) {
+        (Err(reason), _) => {
+            preview_card_statement(ui, plot, &reason, t.color.text_dim);
+            preview_card_rule(ui, rect, t.color.border);
+            return;
+        }
+        (Ok(_), None) => {
+            preview_card_statement(
+                ui,
+                plot,
+                "Preview unavailable until values are valid",
+                t.color.text_dim,
+            );
+            preview_card_rule(ui, rect, t.color.border);
+            return;
+        }
+        (Ok(samples), Some(readouts)) => (samples, readouts),
+    };
+
+    let span = readouts.span().max(1e-12);
     for (fraction, label) in [
-        (1.0_f32, format!("{maximum:.2e}")),
-        (0.5, format!("{:.2e}", (maximum + minimum) * 0.5)),
-        (0.0, format!("{minimum:.2e}")),
+        (1.0_f32, format!("{:.2e}", readouts.maximum)),
+        (0.5, format!("{:.2e}", readouts.midpoint)),
+        (0.0, format!("{:.2e}", readouts.minimum)),
     ] {
         let y = egui::lerp(plot.bottom()..=plot.top(), fraction);
         ui.painter().text(
@@ -1156,12 +1197,16 @@ fn source_preview_card(
             t.color.text_faint,
         );
     }
-    for (fraction, label) in [(0.0_f32, "0"), (0.5, "50%"), (1.0, "100%")] {
+    for (fraction, label) in [
+        (0.0_f32, "0".to_owned()),
+        (0.5, crate::state::format_engineering(timing.tstop * 0.5)),
+        (1.0, crate::state::format_engineering(timing.tstop)),
+    ] {
         let x = egui::lerp(plot.left()..=plot.right(), fraction);
         ui.painter().text(
             pos2(x, plot.bottom() + 5.0),
             egui::Align2::CENTER_TOP,
-            label,
+            format!("{label}s"),
             theme::mono(tokens::FS_0, FontWeight::Regular),
             t.color.text_faint,
         );
@@ -1169,15 +1214,15 @@ fn source_preview_card(
     let points = samples
         .iter()
         .enumerate()
-        .map(|(index, value)| {
+        .map(|(index, (_, value))| {
             let x = egui::lerp(
                 plot.left()..=plot.right(),
                 index as f32 / (samples.len() - 1) as f32,
             );
-            let normalized = if raw_span <= 1e-12 {
+            let normalized = if readouts.span() <= 1e-12 {
                 0.5
             } else {
-                ((*value - minimum) / span) as f32
+                ((value - readouts.minimum) / span) as f32
             };
             let y = egui::lerp(plot.bottom()..=plot.top(), normalized);
             pos2(x, y)
@@ -1185,376 +1230,53 @@ fn source_preview_card(
         .collect::<Vec<_>>();
     ui.painter()
         .add(egui::Shape::line(points, Stroke::new(1.5, t.color.accent)));
-    ui.painter().hline(
-        rect.x_range(),
-        rect.bottom(),
-        Stroke::new(1.0, t.color.border),
+    preview_card_rule(ui, rect, t.color.border);
+}
+
+/// How many points the preview asks the engine for.
+///
+/// Finer than the stroke at the card's widest, and the density the card has
+/// always drawn at.
+const PREVIEW_SAMPLES: usize = 96;
+
+fn preview_card_statement(ui: &Ui, plot: egui::Rect, message: &str, color: egui::Color32) {
+    ui.painter().text(
+        plot.center(),
+        egui::Align2::CENTER_CENTER,
+        message,
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        color,
     );
 }
 
-fn source_preview_samples(
+fn preview_card_rule(ui: &Ui, rect: egui::Rect, color: egui::Color32) {
+    ui.painter()
+        .hline(rect.x_range(), rect.bottom(), Stroke::new(1.0, color));
+}
+
+/// The instance as the draft currently describes it.
+///
+/// Built from the editor's live values rather than from the baseline, so the
+/// curve follows the field being typed into; built through the property bridge
+/// rather than field by field, so it is the same component a commit would
+/// write.
+fn preview_component(
     state: &TabbedPropertyDialogState,
     kind: crate::state::ComponentType,
-    count: usize,
-) -> Vec<f64> {
-    use crate::state::ComponentType;
-    if count < 2 {
-        return Vec::new();
-    }
-    let value = |key: &str, fallback: f64| {
+    registry: &PropertyRegistry,
+) -> Option<crate::state::Component> {
+    let mut component = state.component_baseline.clone().or_else(|| {
         state
-            .get_value(key)
-            .and_then(PropertyValue::as_number)
-            .or_else(|| {
-                state.get_value(key).and_then(|value| {
-                    crate::quantity::parse_engineering_value(&value.display_string()).ok()
-                })
-            })
-            .unwrap_or(fallback)
-    };
-    let enabled = |key: &str, fallback: bool| {
-        state
-            .get_value(key)
-            .map(|value| match value {
-                PropertyValue::Boolean(value) => *value,
-                _ => matches!(
-                    value.display_string().trim().to_ascii_lowercase().as_str(),
-                    "true" | "yes" | "on" | "1"
-                ),
-            })
-            .unwrap_or(fallback)
-    };
-    let sample_times = |duration: f64| {
-        let duration = duration.max(f64::EPSILON);
-        (0..count)
-            .map(|index| duration * index as f64 / (count - 1) as f64)
-            .collect::<Vec<_>>()
-    };
-    match kind {
-        ComponentType::VoltageSource | ComponentType::CurrentSource => {
-            vec![value("dc", 0.0); count]
-        }
-        ComponentType::VoltageSourceAc | ComponentType::CurrentSourceAc => {
-            let amplitude = value("ac", 1.0);
-            let phase_offset = value("acphase", 0.0).to_radians();
-            (0..count)
-                .map(|index| {
-                    let phase = index as f64 / (count - 1) as f64 * std::f64::consts::TAU;
-                    amplitude * (phase + phase_offset).sin()
-                })
-                .collect()
-        }
-        ComponentType::VoltageSourcePulse | ComponentType::CurrentSourcePulse => {
-            let low = value(
-                if kind == ComponentType::VoltageSourcePulse {
-                    "v1"
-                } else {
-                    "i1"
-                },
-                0.0,
-            );
-            let high = value(
-                if kind == ComponentType::VoltageSourcePulse {
-                    "v2"
-                } else {
-                    "i2"
-                },
-                1.0,
-            );
-            let delay = value("td", 0.0).max(0.0);
-            let rise = value("tr", 1e-9).max(0.0);
-            let fall = value("tf", 1e-9).max(0.0);
-            let width = value("pw", 1e-6).max(0.0);
-            let period = value("per", 2e-6).max(f64::EPSILON);
-            sample_times(delay + 2.0 * period)
-                .into_iter()
-                .map(|time| {
-                    if time < delay {
-                        return low;
-                    }
-                    let phase = (time - delay) % period;
-                    if rise > 0.0 && phase < rise {
-                        low + (high - low) * phase / rise
-                    } else if phase < rise + width {
-                        high
-                    } else if fall > 0.0 && phase < rise + width + fall {
-                        high - (high - low) * (phase - rise - width) / fall
-                    } else {
-                        low
-                    }
-                })
-                .collect()
-        }
-        ComponentType::VoltageSourceSin | ComponentType::CurrentSourceSin => {
-            let offset = value(
-                if kind == ComponentType::VoltageSourceSin {
-                    "vo"
-                } else {
-                    "io"
-                },
-                0.0,
-            );
-            let amplitude = value(
-                if kind == ComponentType::VoltageSourceSin {
-                    "va"
-                } else {
-                    "ia"
-                },
-                1.0,
-            );
-            let frequency = value("freq", 1e6).abs().max(f64::EPSILON);
-            let delay = value("td", 0.0).max(0.0);
-            let damping = value("theta", 0.0).max(0.0);
-            let phase = value("phase", 0.0).to_radians();
-            sample_times(delay + 2.0 / frequency)
-                .into_iter()
-                .map(|time| {
-                    if time < delay {
-                        offset + amplitude * phase.sin()
-                    } else {
-                        let elapsed = time - delay;
-                        offset
-                            + amplitude
-                                * (-damping * elapsed).exp()
-                                * (std::f64::consts::TAU * frequency * elapsed + phase).sin()
-                    }
-                })
-                .collect()
-        }
-        ComponentType::VoltageSourcePwl | ComponentType::CurrentSourcePwl => {
-            let points = state.pwl_editor.data.points();
-            if points.len() < 2 {
-                return Vec::new();
-            }
-            let delay = value("td", 0.0).max(0.0);
-            let end = points.last().map_or(1.0, |point| point.time).max(1e-18);
-            let repeat = enabled("repeat", false);
-            let duration = delay + if repeat { 2.0 * end } else { end };
-            sample_times(duration)
-                .into_iter()
-                .map(|time| {
-                    if time < delay {
-                        return points[0].value;
-                    }
-                    let mut time = time - delay;
-                    if repeat {
-                        time %= end;
-                    } else {
-                        time = time.min(end);
-                    }
-                    let right = points
-                        .iter()
-                        .position(|point| point.time >= time)
-                        .unwrap_or(points.len() - 1);
-                    if right == 0 {
-                        return points[0].value;
-                    }
-                    let left = right - 1;
-                    let span = (points[right].time - points[left].time).max(1e-18);
-                    let ratio = (time - points[left].time) / span;
-                    points[left].value + ratio * (points[right].value - points[left].value)
-                })
-                .collect()
-        }
-        ComponentType::VoltageSourceExp | ComponentType::CurrentSourceExp => {
-            let low = value(
-                if kind == ComponentType::VoltageSourceExp {
-                    "v1"
-                } else {
-                    "i1"
-                },
-                0.0,
-            );
-            let high = value(
-                if kind == ComponentType::VoltageSourceExp {
-                    "v2"
-                } else {
-                    "i2"
-                },
-                1.0,
-            );
-            let first_delay = value("td1", 0.0).max(0.0);
-            let first_tau = value("tau1", 1e-6).max(f64::EPSILON);
-            let second_delay = value("td2", 5e-6).max(first_delay);
-            let second_tau = value("tau2", 1e-6).max(f64::EPSILON);
-            let duration = second_delay + 5.0 * second_tau;
-            sample_times(duration)
-                .into_iter()
-                .map(|time| {
-                    let rise = if time < first_delay {
-                        0.0
-                    } else {
-                        1.0 - (-(time - first_delay) / first_tau).exp()
-                    };
-                    let fall = if time < second_delay {
-                        0.0
-                    } else {
-                        1.0 - (-(time - second_delay) / second_tau).exp()
-                    };
-                    low + (high - low) * (rise - fall)
-                })
-                .collect()
-        }
-        ComponentType::VoltageSourceSffm | ComponentType::CurrentSourceSffm => {
-            let offset = value("vo", 0.0);
-            let amplitude = value("va", 1.0);
-            let carrier_frequency = value("fc", 1e6).abs().max(f64::EPSILON);
-            let modulation = value("mdi", 1.0);
-            let signal_frequency = value("fs", 1e3).abs();
-            let delay = value("td", 0.0).max(0.0);
-            let phase_modulation = value("phasem", 0.0).to_radians();
-            let phase_carrier = value("phasec", 0.0).to_radians();
-            // ngspice holds the source at exactly 0 before TD rather than at
-            // the offset, so the preview has to show the same step.
-            sample_times(delay + 3.0 / carrier_frequency)
-                .into_iter()
-                .map(|time| {
-                    if time < delay {
-                        return 0.0;
-                    }
-                    let time = time - delay;
-                    offset
-                        + amplitude
-                            * (std::f64::consts::TAU * carrier_frequency * time
-                                + phase_carrier
-                                + modulation
-                                    * (std::f64::consts::TAU * signal_frequency * time
-                                        + phase_modulation)
-                                        .sin())
-                            .sin()
-                })
-                .collect()
-        }
-        ComponentType::VoltageSourceAm | ComponentType::CurrentSourceAm => {
-            let offset = value("vo", 0.0);
-            let modulation_offset = value("vmo", 0.0);
-            let modulation_amplitude = value("vma", 1.0);
-            let modulating_frequency = value("fm", 1e3).abs().max(f64::EPSILON);
-            let carrier_frequency = value("fc", 1e6).abs().max(f64::EPSILON);
-            let delay = value("td", 0.0).max(0.0);
-            let phase_modulation = value("phasem", 0.0).to_radians();
-            let phase_carrier = value("phasec", 0.0).to_radians();
-            // Two modulation periods make the envelope legible; a carrier-based
-            // window would draw a solid band at any realistic FC/FM ratio.
-            sample_times(delay + 2.0 / modulating_frequency)
-                .into_iter()
-                .map(|time| {
-                    if time < delay {
-                        return 0.0;
-                    }
-                    let time = time - delay;
-                    let envelope = modulation_offset
-                        + modulation_amplitude
-                            * (std::f64::consts::TAU * modulating_frequency * time
-                                + phase_modulation)
-                                .sin();
-                    offset
-                        + envelope
-                            * (std::f64::consts::TAU * carrier_frequency * time + phase_carrier)
-                                .sin()
-                })
-                .collect()
-        }
-        ComponentType::VoltageSourcePat | ComponentType::CurrentSourcePat => {
-            let high = value("vhi", 1.0);
-            let low = value("vlo", 0.0);
-            let delay = value("td", 0.0);
-            let rise = value("tr", 1e-9).max(f64::EPSILON);
-            let fall = value("tf", 1e-9).max(f64::EPSILON);
-            let interval = value("tsample", 1e-6).max(f64::EPSILON);
-            let bits = state
-                .get_value("data")
-                .map(|value| value.display_string())
-                .unwrap_or_default();
-            let bits = bits
-                .trim()
-                .trim_start_matches(['b', 'B'])
-                .chars()
-                .filter(|bit| matches!(bit, '0' | '1'))
-                .map(|bit| bit == '1')
-                .collect::<Vec<_>>();
-            if bits.is_empty() {
-                return vec![low; count];
-            }
-            let duration = delay + interval * bits.len() as f64;
-            sample_times(duration)
-                .into_iter()
-                .map(|time| {
-                    let time = time - delay;
-                    if time <= 0.0 {
-                        return low;
-                    }
-                    let index = ((time / interval).floor() as usize).min(bits.len() - 1);
-                    let target = if bits[index] { high } else { low };
-                    let previous = if index == 0 {
-                        low
-                    } else if bits[index - 1] {
-                        high
-                    } else {
-                        low
-                    };
-                    if previous == target {
-                        return target;
-                    }
-                    // Xyce ramps across TR/TF at the start of the bit slot.
-                    let edge = if target > previous { rise } else { fall };
-                    let into_bit = time - index as f64 * interval;
-                    if into_bit >= edge {
-                        target
-                    } else {
-                        previous + (target - previous) * (into_bit / edge)
-                    }
-                })
-                .collect()
-        }
-        ComponentType::VoltageSourceNoise | ComponentType::CurrentSourceNoise => {
-            let dc = value("dc", 0.0);
-            if !enabled("isnoisy", true) {
-                return vec![dc; count];
-            }
-            let white_amplitude = value("na", 1e-9).abs();
-            let interval = value("nt", 1e-6).max(f64::EPSILON);
-            let flicker_exponent = value("nalpha", 0.0).clamp(0.0, 2.0);
-            let flicker_amplitude = value("namp", 0.0).abs();
-            let duration = interval * 16.0;
-            sample_times(duration)
-                .into_iter()
-                .map(|time| {
-                    // Deterministic, sample-and-hold white component plus a
-                    // bounded multi-octave 1/f surrogate. This is explicitly
-                    // labeled a representative realization in the UI.
-                    let sample = (time / interval).floor();
-                    let x = (sample + 1.0) * 12.9898;
-                    let white = white_amplitude * (x.sin() * 43_758.545_3).sin();
-                    let flicker = if flicker_amplitude == 0.0 {
-                        0.0
-                    } else {
-                        let weighted = (1..=5)
-                            .map(|octave| {
-                                let frequency = 2_f64.powi(octave - 1) / duration;
-                                let weight =
-                                    frequency.powf(-0.5 * flicker_exponent.max(f64::EPSILON));
-                                weight
-                                    * (std::f64::consts::TAU * frequency * time
-                                        + octave as f64 * 0.731)
-                                        .sin()
-                            })
-                            .sum::<f64>();
-                        let normalization = (1..=5)
-                            .map(|octave| {
-                                let frequency = 2_f64.powi(octave - 1) / duration;
-                                frequency.powf(-0.5 * flicker_exponent.max(f64::EPSILON))
-                            })
-                            .sum::<f64>()
-                            .max(f64::EPSILON);
-                        flicker_amplitude * weighted / normalization
-                    };
-                    dc + white + flicker
-                })
-                .collect()
-        }
-        _ => Vec::new(),
-    }
+            .component_id
+            .map(|id| crate::state::Component::new(id, kind, crate::state::Point::origin()))
+    })?;
+    component.kind = kind;
+    crate::properties::property_bridge::apply_properties_to_component(
+        &mut component,
+        &state.values,
+        registry,
+    );
+    Some(component)
 }
 
 /// Folder inside a project that attached waveform data is copied into.
@@ -1965,49 +1687,115 @@ fn model_type_for_component(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::ComponentType;
+    use crate::properties::ComponentPropertySession;
+    use crate::simulation::stimulus_realize;
+    use crate::state::{Component, ComponentType, Point};
 
-    #[test]
-    fn sine_preview_preserves_phase_during_the_configured_delay() {
+    fn editor(kind: ComponentType) -> (TabbedPropertyDialogState, PropertyRegistry) {
+        let registry = PropertyRegistry::new();
+        let mut component = Component::new(4, kind, Point::origin());
+        component.name = format!("{}4", kind.spice_prefix());
+        let values = crate::properties::property_bridge::collect_properties_from_component(
+            &component, &registry,
+        );
+        let sheet = registry.get(kind).expect("sheet").clone();
         let mut state = TabbedPropertyDialogState::default();
-        state.set_value("vo", PropertyValue::number(1.0));
-        state.set_value("va", PropertyValue::number(2.0));
-        state.set_value("freq", PropertyValue::number(1.0));
-        state.set_value("td", PropertyValue::number(10.0));
-        state.set_value("phase", PropertyValue::number(90.0));
-
-        let samples = source_preview_samples(&state, ComponentType::VoltageSourceSin, 8);
-
-        assert!((samples[0] - 3.0).abs() < 1e-12);
-        assert!((samples[1] - 3.0).abs() < 1e-12);
+        state.open_for_component(
+            4,
+            component.name.clone(),
+            kind,
+            &sheet,
+            values,
+            ComponentPropertySession::new(component, 0, 0, "top".to_owned()).with_preview_timing(
+                stimulus_realize::PreviewTiming {
+                    tstep: 1e-9,
+                    tstop: 4e-6,
+                    from_analysis: true,
+                },
+            ),
+        );
+        (state, registry)
     }
 
-    #[test]
-    fn disabled_noise_preview_is_exactly_the_dc_bias() {
-        let mut state = TabbedPropertyDialogState::default();
-        state.set_value("dc", PropertyValue::number(2e-3));
-        state.set_value("na", PropertyValue::number(1e-3));
-        state.set_value("namp", PropertyValue::number(1e-3));
-        state.set_value("isnoisy", PropertyValue::Boolean(false));
-
-        let samples = source_preview_samples(&state, ComponentType::CurrentSourceNoise, 16);
-
-        assert_eq!(samples, vec![2e-3; 16]);
+    fn curve(
+        state: &TabbedPropertyDialogState,
+        kind: ComponentType,
+        registry: &PropertyRegistry,
+    ) -> Vec<(f64, f64)> {
+        let component = preview_component(state, kind, registry).expect("a component");
+        let spec = stimulus_realize::source_spec(&component).expect("spec");
+        let timing = state.preview_timing();
+        stimulus_realize::evaluate_waveform(
+            &spec,
+            timing.window(PREVIEW_SAMPLES),
+            timing.tstep,
+            timing.tstop,
+            stimulus_realize::PREVIEW_DIALECT,
+        )
     }
 
-    /// The preview re-reads a field the dialog holds as text. A period
-    /// authored `1ms` used to fail that read and fall through to the 2 µs
-    /// default, so the drawn pulse train disagreed with the field above it.
+    /// Every independent source has a card, so every independent source gets a
+    /// preview card — including the two file-backed families the old
+    /// hand-rolled sampler had no arm for and therefore hid.
+    #[test]
+    fn every_independent_source_is_offered_a_preview_and_nothing_else_is() {
+        for kind in ComponentType::ALL {
+            assert_eq!(
+                supports_source_preview(kind),
+                stimulus_realize::is_independent_source(kind),
+                "{kind:?}"
+            );
+        }
+        assert!(supports_source_preview(ComponentType::VoltageSourcePwlFile));
+        assert!(!supports_source_preview(ComponentType::BehavioralSource));
+    }
+
+    /// The draft is what the curve follows, and it reaches the engine through
+    /// the same bridge a commit writes through.
+    #[test]
+    fn the_preview_follows_the_draft_rather_than_the_baseline() {
+        let (mut state, registry) = editor(ComponentType::VoltageSourceSin);
+        let before = curve(&state, ComponentType::VoltageSourceSin, &registry);
+        state.set_value("va", PropertyValue::number(9.0));
+        let after = curve(&state, ComponentType::VoltageSourceSin, &registry);
+
+        let peak = |samples: &[(f64, f64)]| {
+            stimulus_realize::WaveformReadouts::of(samples)
+                .expect("readouts")
+                .maximum
+        };
+        // The sampling grid need not land exactly on a crest, so the amplitude
+        // is read to within one sample of the sine's own curvature.
+        assert!(peak(&after) > peak(&before) * 2.0, "{before:?} {after:?}");
+        assert!((peak(&after) - 9.0).abs() < 1e-2, "{after:?}");
+    }
+
+    /// The card is read back through the netlist grammar, so a field the dialog
+    /// holds as text is read the way the deck reads it. The old sampler parsed
+    /// `1ms` itself and fell through to its own 2 µs default when it could not.
     #[test]
     fn the_preview_reads_a_period_authored_with_its_unit() {
-        let mut typed = TabbedPropertyDialogState::default();
+        let (mut typed, registry) = editor(ComponentType::VoltageSourcePulse);
         typed.set_value("per", PropertyValue::String("1ms".to_owned()));
-        let mut numeric = TabbedPropertyDialogState::default();
+        let (mut numeric, _) = editor(ComponentType::VoltageSourcePulse);
         numeric.set_value("per", PropertyValue::number(1e-3));
 
         assert_eq!(
-            source_preview_samples(&typed, ComponentType::VoltageSourcePulse, 16),
-            source_preview_samples(&numeric, ComponentType::VoltageSourcePulse, 16)
+            curve(&typed, ComponentType::VoltageSourcePulse, &registry),
+            curve(&numeric, ComponentType::VoltageSourcePulse, &registry)
         );
+    }
+
+    /// The pin the hand-rolled sampler could not hold: a noise source is not a
+    /// waveform the spec can be asked for, so the card says so instead of
+    /// drawing a plausible-looking realization nobody will ever simulate.
+    #[test]
+    fn a_noise_source_states_its_defect_rather_than_drawing_a_realization() {
+        let (state, registry) = editor(ComponentType::CurrentSourceNoise);
+        let component =
+            preview_component(&state, ComponentType::CurrentSourceNoise, &registry).expect("built");
+        let spec = stimulus_realize::source_spec(&component).expect("spec");
+
+        assert!(stimulus_realize::preview_defect(&spec).is_some());
     }
 }

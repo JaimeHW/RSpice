@@ -52,6 +52,7 @@ mod vector_names;
 mod vector_nets;
 mod xspice;
 
+pub(crate) use instances::independent_source_card;
 pub use master_index::{EmissionRow, NetlistDefect};
 use master_index::{MasterIndex, validate_occurrence_interface};
 pub use subcircuits::HierarchySource;

@@ -1,5 +1,7 @@
 //! Opening the property editor for a schematic component.
 
+use crate::simulation::plan::AnalysisDraft;
+use crate::simulation::stimulus_realize::PreviewTiming;
 use crate::state::{
     Component, ComponentType, MODEL_BOUND_SYMBOL_METADATA_KEY, ModelBoundSymbolDefinition,
     PropertyDefinition, PropertySheet, PropertyType, PropertyValue, SymbolSourceContract,
@@ -540,10 +542,43 @@ pub(crate) fn open_property_editor(state: &mut AppState, component_id: u64) {
                     .project
                     .data_root()
                     .map(std::path::Path::to_path_buf),
-            ),
+            )
+            .with_preview_timing(stimulus_preview_timing(state)),
         );
     } else {
         log::warn!("No property sheet found for {:?}", component_type);
+    }
+}
+
+/// The transient the component editor's stimulus preview evaluates against.
+///
+/// Every omitted waveform field resolves against a stop time, so a preview has
+/// to name one. The plan's first enabled transient is that one; a plan without
+/// a transient yet gets the setup's own defaults, which is what a run would use
+/// if the user added one and changed nothing, and the card says the numbers came
+/// from there rather than from an analysis.
+fn stimulus_preview_timing(state: &AppState) -> PreviewTiming {
+    let authored = state.sim_setup.analysis_plan.as_ref().and_then(|plan| {
+        plan.instances()
+            .iter()
+            .filter(|instance| instance.enabled())
+            .find_map(|instance| match instance.draft() {
+                AnalysisDraft::Transient(setup) => Some(setup.clone()),
+                _ => None,
+            })
+    });
+    let from_analysis = authored.is_some();
+    let setup = authored.unwrap_or_default();
+    let seconds = |text: &str| crate::quantity::parse_engineering_value(text).ok();
+    let default = PreviewTiming::default();
+    PreviewTiming {
+        tstep: seconds(&setup.step)
+            .filter(|step| step.is_finite() && *step > 0.0)
+            .unwrap_or(default.tstep),
+        tstop: seconds(&setup.stop)
+            .filter(|stop| stop.is_finite() && *stop > 0.0)
+            .unwrap_or(default.tstop),
+        from_analysis,
     }
 }
 
@@ -672,6 +707,40 @@ mod tests {
         SymbolParameterDefault, SymbolParameterField, SymbolParameterForm, SymbolParameterSection,
         SymbolParameterVisibility, SymbolPinDefinition, SymbolPinSide, SymbolSourceContract, Wire,
     };
+
+    /// The preview's fallback timing names the plan's default transient, and
+    /// the type that owns that default lives above the layer the preview does,
+    /// so the two numbers are pinned together here — where both are in scope.
+    #[test]
+    fn the_preview_fallback_is_the_plans_own_default_transient() {
+        let setup = crate::workbench::app_state::TranSetup::default();
+        let default = PreviewTiming::default();
+
+        assert_eq!(
+            crate::quantity::parse_engineering_value(&setup.step).ok(),
+            Some(default.tstep)
+        );
+        assert_eq!(
+            crate::quantity::parse_engineering_value(&setup.stop).ok(),
+            Some(default.tstop)
+        );
+        assert!(!default.from_analysis);
+    }
+
+    #[test]
+    fn the_preview_reads_the_plans_transient_and_falls_back_when_there_is_none() {
+        let mut state = AppState::default();
+        let planned = stimulus_preview_timing(&state);
+        assert!(
+            planned.from_analysis,
+            "a new project's plan opens with a transient in it"
+        );
+
+        state.sim_setup.analysis_plan = None;
+        let fallback = stimulus_preview_timing(&state);
+        assert_eq!(fallback, PreviewTiming::default());
+        assert!(!fallback.from_analysis);
+    }
 
     #[test]
     fn generated_veriloga_scope_labels_cover_dual_storage() {

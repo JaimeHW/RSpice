@@ -371,13 +371,17 @@ impl StimulusLibrary {
         adopters
     }
 
-    /// The table a `PWL FILE=` instance's preview reads when the host has no
-    /// copy of the named file.
+    /// The table a `PWL FILE=` instance's definition retains, if it retains one.
     ///
-    /// Only an adopted instance has one, and only while its card still matches
-    /// the copy it took: retained bytes belong to a definition, and offering
-    /// them for a card someone has since pointed at a different file would show
-    /// a waveform the deck would not produce.
+    /// Only an adopted instance has one, and only while its card still names
+    /// the file the copy did: retained bytes belong to a definition, and
+    /// offering them for a card someone has since pointed elsewhere would
+    /// describe a run that will not happen.
+    ///
+    /// This is what makes a project self-contained — it is written into the
+    /// document and travels with it — and it is deliberately *not* what a
+    /// preview evaluates: the engine's PWL loader takes a path, so bytes the
+    /// app is holding are not something it can be asked to step through.
     #[must_use]
     pub fn retained_pwl_contents(&self, component: &Component) -> Option<&str> {
         if !matches!(

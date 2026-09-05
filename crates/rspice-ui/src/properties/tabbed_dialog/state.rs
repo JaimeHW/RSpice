@@ -95,6 +95,13 @@ pub struct TabbedPropertyDialogState {
     /// relative to. `None` for an unsaved project, which has no folder to be
     /// relative to, so a picked file keeps its absolute path.
     pub(super) data_root: Option<std::path::PathBuf>,
+
+    /// The transient the stimulus preview evaluates this source against.
+    ///
+    /// Every omitted waveform field resolves against a stop time, so the
+    /// preview cannot draw a source without one; the host binds the plan's own
+    /// transient when it has one, and the card says which it used.
+    pub(super) preview_timing: crate::simulation::stimulus_realize::PreviewTiming,
 }
 
 /// Durable document authority captured when a component property transaction
@@ -107,6 +114,7 @@ pub struct ComponentPropertySession {
     active_schematic_epoch: u64,
     view_path: String,
     data_root: Option<std::path::PathBuf>,
+    preview_timing: crate::simulation::stimulus_realize::PreviewTiming,
 }
 
 impl ComponentPropertySession {
@@ -122,6 +130,7 @@ impl ComponentPropertySession {
             active_schematic_epoch,
             view_path,
             data_root: None,
+            preview_timing: crate::simulation::stimulus_realize::PreviewTiming::default(),
         }
     }
 
@@ -131,6 +140,20 @@ impl ComponentPropertySession {
     #[must_use]
     pub fn with_data_root(mut self, data_root: Option<std::path::PathBuf>) -> Self {
         self.data_root = data_root;
+        self
+    }
+
+    /// Bind the transient the stimulus preview evaluates this source against.
+    ///
+    /// The plan owns which transient that is, and the preview card names it, so
+    /// it is captured when the editor opens rather than read from the plan on
+    /// every frame.
+    #[must_use]
+    pub fn with_preview_timing(
+        mut self,
+        preview_timing: crate::simulation::stimulus_realize::PreviewTiming,
+    ) -> Self {
+        self.preview_timing = preview_timing;
         self
     }
 }
@@ -220,8 +243,10 @@ impl TabbedPropertyDialogState {
             active_schematic_epoch,
             view_path,
             data_root,
+            preview_timing,
         } = session;
         self.data_root = data_root;
+        self.preview_timing = preview_timing;
         self.open = true;
         self.component_id = Some(component_id);
         self.component_name = Some(component_name.into());
@@ -447,6 +472,12 @@ impl TabbedPropertyDialogState {
     }
 
     /// Get the current value of a property
+    /// The transient the stimulus preview evaluates this source against.
+    #[must_use]
+    pub(super) fn preview_timing(&self) -> crate::simulation::stimulus_realize::PreviewTiming {
+        self.preview_timing
+    }
+
     pub fn get_value(&self, name: &str) -> Option<&PropertyValue> {
         self.values.get(name)
     }

@@ -5,6 +5,41 @@
 
 use super::*;
 
+/// The card one independent source emits, without a schematic around it.
+///
+/// Every surface that wants to know what a placed source *says* — a waveform
+/// preview, a stimulus definition's realization line, an adoption dialog's
+/// "after" card — comes through here rather than assembling a card of its own,
+/// so a preview can never show a waveform the deck would not write. The
+/// positional argument lists live in one place and this is that place's front
+/// door.
+///
+/// What comes back is the source's own line. A source carrying parasitics
+/// emits companion `R`/`C` elements beside it in a real deck, and those are
+/// separate devices with their own cards; a caller showing "the card this
+/// instance emits" is showing the source, not the network around it.
+///
+/// `Err` carries the generator's own refusals, in the words the netlist error
+/// list would have used.
+pub(crate) fn independent_source_card(
+    component: &Component,
+    node_names: [&str; 2],
+    instance_name: &str,
+) -> Result<String, Vec<String>> {
+    let schematic = SchematicState::default();
+    let mut generator = NetlistGenerator::new(&schematic);
+    let nodes = [node_names[0].to_owned(), node_names[1].to_owned()];
+    match generator.generate_independent_source(component, &nodes, instance_name) {
+        Some(card) if generator.errors.is_empty() => Ok(card),
+        _ if generator.errors.is_empty() => Err(vec![format!(
+            "{} '{}' emits no source card",
+            component.kind.display_name(),
+            component.name
+        )]),
+        _ => Err(generator.errors),
+    }
+}
+
 impl<'a> NetlistGenerator<'a> {
     pub(super) fn generate_instances(&mut self) {
         self.lines.push("* Circuit netlist".to_string());
