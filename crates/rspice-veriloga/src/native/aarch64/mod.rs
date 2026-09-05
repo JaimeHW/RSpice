@@ -24,7 +24,7 @@ use super::JitResult;
 #[cfg(target_arch = "aarch64")]
 use super::model::{NativeEntryOffsets, NativeModel, NativeRequiredStorage};
 #[cfg(target_arch = "aarch64")]
-use super::model_plan::NativeModelPlan;
+use super::model_plan::{NativeModelPlan, NativeObservationPlan};
 #[cfg(target_arch = "aarch64")]
 use super::runtime::ExecutableMemory;
 #[cfg(target_arch = "aarch64")]
@@ -188,6 +188,63 @@ pub(super) fn compile_model_plan(
         entry_starts,
         plan.current_dependencies.clone(),
         NativeRequiredStorage::for_model(model).with_prelude_slots(plan.prelude_slot_count()),
+    )
+}
+
+/// Emit the observation pass on its own: two functions, no entries, no kernels.
+///
+/// The x64 counterpart is `crate::native::x64::compile_observation_image`, and
+/// the two produce the same two entry points from the same plan for the same
+/// reason — the pass is the code an evaluation used to run, so it goes through
+/// the backend's own appender, verifier and unwind publisher unchanged.
+#[cfg(target_arch = "aarch64")]
+pub(super) fn compile_observation_image(
+    model: &CompiledModel,
+    plan: &NativeObservationPlan,
+) -> JitResult<NativeModel> {
+    let mut image = A64ImageBuilder::new();
+    let assignment = image.append_assignment_pass(&plan.assignments, "observation")?;
+    let post_assignment = if plan.post_assignments.is_empty() {
+        None
+    } else {
+        Some(image.append_assignment_pass(&plan.post_assignments, "post-current observation")?)
+    };
+    let entries = NativeEntryOffsets {
+        assignment,
+        prelude: None,
+        post_assignment,
+        evaluation_kernel: None,
+        stamp_kernel: None,
+        parameter_defaults: vec![None; model.parameters.len()],
+        static_conditions: Vec::new(),
+        stamp_values: Vec::new(),
+        jacobians: Vec::new(),
+        reactive_jacobians: Vec::new(),
+        noise_psd: Vec::new(),
+        noise_exponents: Vec::new(),
+    };
+    let (bytes, entry_starts, unwind_functions) = image.finish()?;
+    #[cfg(windows)]
+    let executable = {
+        let mut bytes = bytes;
+        let runtime_functions = unwind::append_windows_unwind_data(&mut bytes, &unwind_functions)?;
+        ExecutableMemory::allocate_with_aarch64_unwind(&bytes, &runtime_functions)?
+    };
+    #[cfg(unix)]
+    let executable = ExecutableMemory::allocate_with_aarch64_unwind(&bytes, &unwind_functions)?;
+    #[cfg(not(any(unix, windows)))]
+    let executable = ExecutableMemory::allocate(&bytes)?;
+    NativeModel::from_executable_image_with_dependencies(
+        model.num_terminals,
+        model.internal_nodes,
+        model.num_variables,
+        model.parameters.len(),
+        model.branch_sources.len(),
+        executable,
+        entries,
+        entry_starts,
+        plan.current_dependencies.clone(),
+        NativeRequiredStorage::for_model(model),
     )
 }
 

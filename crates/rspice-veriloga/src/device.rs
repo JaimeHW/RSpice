@@ -833,11 +833,28 @@ enum NativeCompileCacheKey {
         owner: std::sync::Weak<CompiledModel>,
     },
     CanonicalMir {
+        role: NativeCompileRole,
         mir_digest: SmolStr,
         source_digest: SmolStr,
         module: SmolStr,
         layout: CompiledModelLayoutIdentity,
     },
+}
+
+/// What one cached image is for.
+///
+/// The two roles compile the same model from the same artifact into different
+/// code, so they are different cache entries and not one entry reused: an
+/// evaluation image holds the entries, the kernels and the assignment pass the
+/// CFG plan still needs, and an observation image holds only the pass that
+/// publishes the externally observable variables. Sharing the key would hand a
+/// readback the evaluation's image, or an evaluation a set of entries that does
+/// not exist.
+#[cfg(feature = "native")]
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum NativeCompileRole {
+    Evaluation,
+    Observation,
 }
 
 #[cfg(feature = "native")]
@@ -859,19 +876,22 @@ impl PartialEq for NativeCompileCacheKey {
             ) => left_source == right_source && left_module == right_module,
             (
                 Self::CanonicalMir {
+                    role: left_role,
                     mir_digest: left_mir,
                     source_digest: left_source,
                     module: left_module,
                     layout: left_layout,
                 },
                 Self::CanonicalMir {
+                    role: right_role,
                     mir_digest: right_mir,
                     source_digest: right_source,
                     module: right_module,
                     layout: right_layout,
                 },
             ) => {
-                left_mir == right_mir
+                left_role == right_role
+                    && left_mir == right_mir
                     && left_source == right_source
                     && left_module == right_module
                     && left_layout == right_layout
@@ -3028,6 +3048,7 @@ impl VerilogADevice {
         artifact: &CanonicalIrArtifact,
     ) -> Result<std::sync::Arc<NativeModel>, VmError> {
         let cache_key = NativeCompileCacheKey::CanonicalMir {
+            role: NativeCompileRole::Evaluation,
             mir_digest: artifact.mir_digest.clone(),
             source_digest: model.source_digest.clone(),
             module: model.name.clone(),
@@ -3035,6 +3056,30 @@ impl VerilogADevice {
         };
         Self::try_native_compile_cached(model, cache_key, |model| {
             crate::native::compile_native_with_canonical_ir(model, artifact)
+        })
+    }
+
+    /// The observation image for this model, compiled on first use.
+    ///
+    /// Shared through the same process-wide cache as the evaluation image and
+    /// under the same byte budget and eviction, because it is the same kind of
+    /// thing: committed executable pages keyed on the content that produced
+    /// them. One model compiles it once however many instances read a variable
+    /// back, and a deck that never reads one never compiles it at all.
+    #[cfg(feature = "native")]
+    fn try_native_observation_compile(
+        model: &std::sync::Arc<CompiledModel>,
+        artifact: &CanonicalIrArtifact,
+    ) -> Result<std::sync::Arc<NativeModel>, VmError> {
+        let cache_key = NativeCompileCacheKey::CanonicalMir {
+            role: NativeCompileRole::Observation,
+            mir_digest: artifact.mir_digest.clone(),
+            source_digest: model.source_digest.clone(),
+            module: model.name.clone(),
+            layout: compiled_model_layout_identity(model),
+        };
+        Self::try_native_compile_cached(model, cache_key, |model| {
+            crate::native::compile_observation_image_with_canonical_ir(model, artifact)
         })
     }
 
@@ -4379,8 +4424,99 @@ impl VerilogADevice {
         self.branch_current_indices.get(ordinal).copied()
     }
 
-    /// Read an internal model variable by name (operating-point
-    /// inspection). Returns the value from the most recent evaluation.
+    /// Bring the whole named-variable array up to date from the inputs of the
+    /// last evaluation, so [`Self::variable`] and [`Self::variables`] can be
+    /// read.
+    ///
+    /// An evaluation computes what the equations need. The named variables a
+    /// module declares are a much larger set — on `hisimhv_n5_va`, 25,516 of
+    /// 116,906 — and computing all of them inside every Newton iteration to
+    /// serve a readback nobody asked for is what this replaces. The observation
+    /// pass is that computation, compiled into an image of its own the first
+    /// time it is asked for and run here against the context the evaluation
+    /// left: same parameters, same voltages, same branch unknowns, same
+    /// operator state, same time, so it reproduces the evaluation's values
+    /// exactly rather than approximating them.
+    ///
+    /// It does not advance state, and this is not an assertion about the
+    /// operators but about when it runs: a re-evaluation at an unchanged
+    /// operating point is what every Newton iteration already is, and each
+    /// stateful operator commits on `advance_state` rather than on evaluation.
+    ///
+    /// The cost is one compile per model, then one pass per call. Call it once
+    /// after convergence, not inside the loop.
+    #[cfg(feature = "native")]
+    pub fn observe_variables(&mut self, artifact: &CanonicalIrArtifact) -> Result<(), VmError> {
+        let observation = Self::try_native_observation_compile(&self.model, artifact)?;
+        let context = &mut self.context;
+        let mut vm = Vm::new(context);
+        Self::run_observation_pass(&mut vm, &self.model, observation.as_ref())
+    }
+
+    /// [`Self::observe_variables`] on the browser route, where the pass runs
+    /// through the bytecode interpreter instead of a second module.
+    ///
+    /// The web needs a different answer and this is it. A native observation
+    /// image is lazy because the device publishes it itself; a browser cannot.
+    /// Generated WebAssembly reaches a worker as bytes it validates, compiles
+    /// and installs under a cache key, and the solver can only *dispatch* into
+    /// a module already installed
+    /// ([`dispatch_model_entry`](crate::wasm_jit::install_browser_dispatcher)),
+    /// so there is no synchronous device-initiated compile to make lazy. The
+    /// two shapes that remain are a second module installed eagerly for every
+    /// model — up to another 32 MiB apiece in a worker registry that holds
+    /// sixty-four — or an interpreted pass over the assignment steps the
+    /// `CompiledModel` already carries. The second costs nothing until it is
+    /// called, and the readback it serves is not on any hot path in a browser.
+    #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+    pub fn observe_variables(&mut self, artifact: &CanonicalIrArtifact) -> Result<(), VmError> {
+        Self::validate_observation_artifact(&self.model, artifact)?;
+        let context = &mut self.context;
+        if context.variables.len() < self.model.num_variables {
+            context.variables.resize(self.model.num_variables, 0.0);
+        }
+        let mut vm = Vm::new(context);
+        Self::execute_assignment_steps(&mut vm, &self.model.assignment_steps)
+    }
+
+    /// [`Self::observe_variables`] on the interpreter route, where there is
+    /// nothing to do.
+    ///
+    /// The interpreter has no liveness filter: it executes every assignment
+    /// step of the module on every evaluation, so the array this would publish
+    /// is the array the evaluation already left. Running the pass again would
+    /// be a second evaluation of the module body for a result that is already
+    /// in place.
+    #[cfg(all(
+        not(feature = "native"),
+        not(all(feature = "wasm-jit", target_arch = "wasm32"))
+    ))]
+    pub fn observe_variables(&mut self, artifact: &CanonicalIrArtifact) -> Result<(), VmError> {
+        Self::validate_observation_artifact(&self.model, artifact)
+    }
+
+    /// Refuse an artifact that is not this model's, on the routes that do not
+    /// compile one and would otherwise ignore the argument.
+    #[cfg(not(feature = "native"))]
+    fn validate_observation_artifact(
+        model: &CompiledModel,
+        artifact: &CanonicalIrArtifact,
+    ) -> Result<(), VmError> {
+        if artifact.mir.module_name != model.name {
+            return Err(VmError::InvalidRuntimeConfiguration(format!(
+                "observation of Verilog-A model '{}' was given the canonical artifact of '{}'",
+                model.name, artifact.mir.module_name
+            )));
+        }
+        Ok(())
+    }
+
+    /// Read an internal model variable by name (operating-point inspection).
+    ///
+    /// The value is the array as the last observation left it: an evaluation
+    /// publishes only the variables the equations read, so a name that is not
+    /// one of those holds whatever [`Self::observe_variables`] last wrote there
+    /// — zero if it was never called.
     pub fn variable(&self, name: &str) -> Option<f64> {
         let idx = self
             .model
@@ -4390,7 +4526,8 @@ impl VerilogADevice {
         self.context.variables.get(idx).copied()
     }
 
-    /// Iterate (name, value) over all internal model variables
+    /// Iterate (name, value) over all internal model variables, as the last
+    /// observation left them ([`Self::variable`]).
     pub fn variables(&self) -> impl Iterator<Item = (&str, f64)> {
         self.model
             .variable_names
@@ -5716,6 +5853,65 @@ impl VerilogADevice {
         Ok(())
     }
 
+    /// Execute the observation pass through its own image.
+    ///
+    /// The same two phases in the same order as an evaluation ran them, and
+    /// validated the same way: the pre-current phase against storage that may
+    /// hold an unpublished contribution, the post-current phase against the
+    /// completed vector the evaluation published. There is no prelude here —
+    /// this image has no entries for one to publish slots for.
+    #[cfg(feature = "native")]
+    fn run_observation_pass(
+        vm: &mut Vm<'_>,
+        model: &CompiledModel,
+        observation: &NativeModel,
+    ) -> Result<(), VmError> {
+        if vm.context.variables.len() < model.num_variables {
+            vm.context.variables.resize(model.num_variables, 0.0);
+        }
+        Self::validate_native_storage(vm.context, observation)?;
+        Self::validate_native_current_pair_storage(
+            vm.context,
+            observation.num_terminals,
+            observation.assignment_current_pairs(),
+        )?;
+        Self::validate_native_prior_currents(vm.context, observation.assignment_prior_currents())?;
+        Self::validate_native_branch_unknowns(
+            vm.context,
+            observation.assignment_branch_unknowns(),
+        )?;
+        let has_post_pass = observation.plan_stats().assignment_entry_points > 1;
+        if has_post_pass {
+            Self::validate_native_current_pairs(
+                vm.context,
+                observation.num_terminals,
+                observation.post_assignment_current_pairs(),
+            )?;
+            Self::validate_native_prior_currents(
+                vm.context,
+                observation.post_assignment_prior_currents(),
+            )?;
+            Self::validate_native_branch_unknowns(
+                vm.context,
+                observation.post_assignment_branch_unknowns(),
+            )?;
+        }
+        let ctx = Self::eval_context_from(vm.context);
+        let vars_ptr = vm.context.variables.as_mut_ptr();
+        ctx.clear_runtime_error();
+        observation.run_assignments(&ctx, vars_ptr);
+        if let Some(error) = ctx.take_native_runtime_error() {
+            return Err(Self::native_runtime_error_to_vm(error));
+        }
+        if has_post_pass {
+            observation.run_post_assignments(&ctx, vars_ptr);
+            if let Some(error) = ctx.take_native_runtime_error() {
+                return Err(Self::native_runtime_error_to_vm(error));
+            }
+        }
+        Ok(())
+    }
+
     /// Execute assignments that consume the completed contribution-current
     /// vector. These entries are never run while contribution slots are still
     /// being populated.
@@ -5897,10 +6093,7 @@ impl VerilogADevice {
 
     /// Safety cap on runtime-loop iterations per evaluation (a model bug
     /// must not hang the Newton loop)
-    #[cfg(all(
-        not(feature = "native"),
-        not(all(feature = "wasm-jit", target_arch = "wasm32"))
-    ))]
+    #[cfg(not(feature = "native"))]
     const MAX_RUNTIME_LOOP_ITERATIONS: usize = 100_000;
 
     /// Execute assignment programs and update VM variable storage.
@@ -5917,11 +6110,12 @@ impl VerilogADevice {
     }
 
     /// Execute a sequence of evaluation steps (assignments and runtime
-    /// loops), recursively
-    #[cfg(all(
-        not(feature = "native"),
-        not(all(feature = "wasm-jit", target_arch = "wasm32"))
-    ))]
+    /// loops), recursively.
+    ///
+    /// The interpreter route runs this as its evaluation; the browser route
+    /// runs it only for [`Self::observe_variables`], which is why it is not
+    /// gated on the interpreter alone.
+    #[cfg(not(feature = "native"))]
     fn execute_assignment_steps(
         vm: &mut Vm<'_>,
         steps: &[crate::codegen::AssignmentStep],
@@ -8461,12 +8655,14 @@ endmodule
 
         let mut cache = NativeCompileCache::default();
         let first_key = NativeCompileCacheKey::CanonicalMir {
+            role: NativeCompileRole::Evaluation,
             mir_digest: "same-mir".into(),
             source_digest: model.source_digest.clone(),
             module: model.name.clone(),
             layout: first_layout,
         };
         let reordered_key = NativeCompileCacheKey::CanonicalMir {
+            role: NativeCompileRole::Evaluation,
             mir_digest: "same-mir".into(),
             source_digest: model.source_digest.clone(),
             module: model.name.clone(),
@@ -8485,6 +8681,7 @@ endmodule
         for index in 0..4_u32 {
             cache.insert(
                 NativeCompileCacheKey::CanonicalMir {
+                    role: NativeCompileRole::Evaluation,
                     mir_digest: SmolStr::new(format!("mir{index}")),
                     source_digest: SmolStr::new("src"),
                     module: SmolStr::new("m"),

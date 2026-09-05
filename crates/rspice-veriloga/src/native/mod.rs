@@ -147,6 +147,41 @@ pub fn compile_native_with_canonical_ir(
     }
 }
 
+/// Compile the observation pass — the program that publishes every externally
+/// observable variable — into an image of its own.
+///
+/// Its cost is one compile per model, paid the first time a readback is asked
+/// for and never on an evaluation, which is why this is a separate entry point
+/// rather than a field of the model image: a deck that never reads a named
+/// variable back never emits a byte of it.
+pub fn compile_observation_image_with_canonical_ir(
+    model: &CompiledModel,
+    artifact: &CanonicalIrArtifact,
+) -> JitResult<NativeModel> {
+    let target = TargetSpec::host().ok_or_else(|| JitError::UnsupportedTarget {
+        target: "unknown".into(),
+        reason: "host architecture is not supported".into(),
+    })?;
+    let plan = crate::jit::plan_builder::build_observation_plan(model, artifact)?;
+    match target.arch {
+        Architecture::X64 => x64::compile_observation_image(model, &plan),
+        Architecture::AArch64 => {
+            #[cfg(target_arch = "aarch64")]
+            {
+                aarch64::compile_observation_image(model, &plan)
+            }
+            #[cfg(not(target_arch = "aarch64"))]
+            {
+                Err(JitError::UnsupportedTarget {
+                    target: target.display_name().into(),
+                    reason: "AArch64 target dispatch cannot execute on this compilation host"
+                        .into(),
+                })
+            }
+        }
+    }
+}
+
 fn validate_native_coverage(model: &CompiledModel) -> JitResult<()> {
     crate::jit::coverage::validate_jit_coverage(model)
 }

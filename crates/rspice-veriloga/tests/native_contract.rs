@@ -16,25 +16,21 @@ use rspice_veriloga::native::compile_native;
 use rspice_veriloga::native::compile_native_with_canonical_ir;
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 use std::collections::HashMap;
-#[cfg(not(feature = "native-bytecode-contract-tests"))]
 use std::sync::{Mutex, OnceLock};
 
 fn compile(source: &str) -> rspice_veriloga::CompiledModel {
     let model = VerilogACompiler::new(CompilerOptions::default())
         .compile(source)
         .expect("Verilog-A source must compile");
-    #[cfg(not(feature = "native-bytecode-contract-tests"))]
     register_compiled_source(&model, source);
     model
 }
 
-#[cfg(not(feature = "native-bytecode-contract-tests"))]
 fn source_registry() -> &'static Mutex<HashMap<String, String>> {
     static SOURCES: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
     SOURCES.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-#[cfg(not(feature = "native-bytecode-contract-tests"))]
 fn source_key(model: &rspice_veriloga::CompiledModel) -> String {
     if model.source_digest.is_empty() {
         model.name.to_string()
@@ -43,7 +39,6 @@ fn source_key(model: &rspice_veriloga::CompiledModel) -> String {
     }
 }
 
-#[cfg(not(feature = "native-bytecode-contract-tests"))]
 fn register_compiled_source(model: &rspice_veriloga::CompiledModel, source: &str) {
     source_registry()
         .lock()
@@ -51,7 +46,6 @@ fn register_compiled_source(model: &rspice_veriloga::CompiledModel, source: &str
         .insert(source_key(model), source.to_string());
 }
 
-#[cfg(not(feature = "native-bytecode-contract-tests"))]
 fn canonical_artifact_for_model(model: &rspice_veriloga::CompiledModel) -> CanonicalIrArtifact {
     let source = source_registry()
         .lock()
@@ -62,6 +56,17 @@ fn canonical_artifact_for_model(model: &rspice_veriloga::CompiledModel) -> Canon
     VerilogACompiler::new(CompilerOptions::default())
         .compile_canonical_ir(&source)
         .expect("registered Verilog-A source must compile to canonical IR")
+}
+
+/// Publish the device's named variables so a test can read one back.
+///
+/// An evaluation computes what the equations read. Every assertion in this file
+/// that names a procedural variable is asking for the observation pass, and
+/// asks for it here.
+fn observe(device: &mut VerilogADevice, artifact: &CanonicalIrArtifact) {
+    device
+        .observe_variables(artifact)
+        .expect("observation pass publishes the named variables");
 }
 
 fn native_contract_try_new(
@@ -85,6 +90,15 @@ fn native_contract_try_new(
 
 #[cfg(target_arch = "x86_64")]
 fn canonical_device_from_source(instance: &str, source: &str) -> VerilogADevice {
+    canonical_device_and_artifact_from_source(instance, source).0
+}
+
+/// [`canonical_device_from_source`], keeping the artifact a readback needs.
+#[cfg(target_arch = "x86_64")]
+fn canonical_device_and_artifact_from_source(
+    instance: &str,
+    source: &str,
+) -> (VerilogADevice, CanonicalIrArtifact) {
     let compiler = VerilogACompiler::new(CompilerOptions::default());
     let model = compiler
         .compile(source)
@@ -96,7 +110,7 @@ fn canonical_device_from_source(instance: &str, source: &str) -> VerilogADevice 
         .expect("canonical native device must compile without fallback");
     assert!(device.is_using_native());
     device.update_voltages(&[0.0]);
-    device
+    (device, artifact)
 }
 
 #[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
@@ -3627,6 +3641,7 @@ fn native_device_executes_scalar_assignments_in_source_order() {
 #[test]
 fn native_device_executes_scalar_simulator_context_reads() {
     let model = scalar_context_model();
+    let artifact = canonical_artifact_for_model(&model);
     let mut device = native_contract_try_new("CTX1", model, &[1, 0])
         .expect("context scalar model uses native JIT");
     device.set_temperature(310.0);
@@ -3642,7 +3657,82 @@ fn native_device_executes_scalar_simulator_context_reads() {
         (currents[0] - 52.04).abs() < 1e-12,
         "currents: {currents:?}"
     );
+    observe(&mut device, &artifact);
     assert!((device.variable("gain").unwrap() - 13.01).abs() < 1e-12);
+}
+
+/// The observation pass publishes every named variable, including the ones no
+/// equation reads, and publishes exactly what the evaluation's own inputs give.
+///
+/// This is what makes [`VerilogADevice::variable`] mean "as the last
+/// observation left it". `unread` and `chained` are declared variables that no
+/// contribution, condition or Jacobian loads, so once the evaluation kernel is
+/// rooted on what it reads, nothing but the observation pass has any reason to
+/// compute them — and their values here are exact, not tolerances, because the
+/// pass is the same machine code the evaluation used to run.
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_observation_publishes_every_named_variable_including_unread_ones() {
+    let source = r#"
+`include "disciplines.vams"
+module observation_pin(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real scale = 3.0;
+    real driven, unread, chained;
+    analog begin
+        driven = V(p, n) * scale;
+        unread = driven * driven + 1.0;
+        chained = unread * 2.0;
+        I(p, n) <+ driven * 1.0e-3;
+    end
+endmodule
+"#;
+    let model = compile(source);
+    let artifact = canonical_artifact_for_model(&model);
+    let mut device = native_contract_try_new("OBS1", model, &[1, 0])
+        .expect("observation pin model uses native JIT");
+    device.update_voltages(&[2.0]);
+    let currents = device.try_evaluate().expect("native evaluation succeeds");
+    assert!(
+        (currents[0] - 6.0e-3).abs() < 1e-18,
+        "currents: {currents:?}"
+    );
+
+    observe(&mut device, &artifact);
+    assert_eq!(device.variable("driven"), Some(6.0));
+    assert_eq!(device.variable("unread"), Some(37.0));
+    assert_eq!(device.variable("chained"), Some(74.0));
+    let observed = named_variable_bits(&device);
+
+    // A second observation at the same operating point publishes the same
+    // values: it reads the context the evaluation left and advances nothing.
+    observe(&mut device, &artifact);
+    assert_eq!(
+        observed,
+        named_variable_bits(&device),
+        "an observation must not move the array it publishes"
+    );
+
+    // And it disturbed nothing the evaluation owns: the same bias still
+    // produces the same current.
+    let currents = device
+        .try_evaluate()
+        .expect("native re-evaluation succeeds");
+    assert!(
+        (currents[0] - 6.0e-3).abs() < 1e-18,
+        "currents: {currents:?}"
+    );
+}
+
+/// Every named variable by IEEE bits, so a comparison is exact and a NaN
+/// compares equal to itself.
+#[cfg(target_arch = "x86_64")]
+fn named_variable_bits(device: &VerilogADevice) -> Vec<(String, u64)> {
+    device
+        .variables()
+        .map(|(name, value)| (name.to_string(), value.to_bits()))
+        .collect()
 }
 
 #[cfg(target_arch = "x86_64")]

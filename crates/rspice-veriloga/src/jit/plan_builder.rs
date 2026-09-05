@@ -13,6 +13,8 @@ use super::expr::{
     native_op_stack_effect, pair_canonical_state_slots,
 };
 use super::model_plan::NativeModelPlan;
+#[cfg(feature = "native")]
+use super::model_plan::NativeObservationPlan;
 use super::plan_program::PlanProgram;
 use super::{JitError, JitResult};
 use crate::canonical_ir::{
@@ -47,6 +49,19 @@ pub(crate) enum AssignmentRootPolicy {
     /// What still reads a variable under this plan is named by
     /// [`mark_cfg_plan_variable_roots`].
     CfgPreludeSlots,
+    /// Nothing in this plan reads a variable: the plan *is* the variables.
+    ///
+    /// This is the observation pass — the program
+    /// [`VerilogADevice::observe_variables`](crate::device::VerilogADevice::observe_variables)
+    /// runs to bring the whole named-variable array up to date from the last
+    /// evaluation's context, and its only roots are the externally observable
+    /// names. It carries no entries, so there is nothing else it could root on.
+    ///
+    /// Native-only: the browser route has no way to publish a second module on
+    /// demand and serves a readback from the bytecode the `CompiledModel`
+    /// already carries.
+    #[cfg(feature = "native")]
+    ObservationPass,
 }
 
 /// Build the architecture-neutral native plan consumed by every machine
@@ -82,6 +97,79 @@ pub(crate) fn build_model_plan_with_canonical_ir_for_cfg(
 #[cfg(feature = "native-bytecode-contract-tests")]
 pub(crate) fn build_model_plan_from_bytecode(model: &CompiledModel) -> JitResult<NativeModelPlan> {
     build_model_plan_inner(model, None, AssignmentRootPolicy::PostfixEntries)
+}
+
+/// Lower the observation pass: the assignment program that publishes every
+/// externally observable variable, and nothing else.
+///
+/// This is the pass an evaluation used to run and no longer does. It carries no
+/// entries, no kernels and no prelude, because nothing in it is evaluated for a
+/// residual: its whole output is the variable array. It is sound to run *after*
+/// an evaluation rather than inside one because
+/// [`split_canonical_assignment_phases`] cuts the pass at the first assignment
+/// that reads a contribution current — everything before the cut is a function
+/// of parameters, voltages, branch unknowns, operator state and time, none of
+/// which an entry writes, and everything after the cut already ran after the
+/// entries on both routes.
+#[cfg(feature = "native")]
+pub(crate) fn build_observation_plan(
+    model: &CompiledModel,
+    artifact: &CanonicalIrArtifact,
+) -> JitResult<NativeObservationPlan> {
+    validate_canonical_artifact_for_model(model, artifact)?;
+    super::coverage::validate_jit_coverage(model)?;
+    let canonical_branch_unknown_map = canonical_branch_unknown_runtime_map(model, &artifact.mir)?;
+    let identifier_index = NativeIdentifierIndex::new(&artifact.mir, &model.variable_names);
+    let base_limits = NativeLoweringLimits::for_model(model)
+        .with_canonical_branch_unknown_map(&canonical_branch_unknown_map)
+        .with_identifier_index(&identifier_index)
+        .with_prevalidated_mir();
+    let prior_current_probes = assignment_prior_current_probes(model);
+    let (assignments, post_assignments, assignment_dependencies, post_assignment_dependencies) =
+        lower_assignment_phases(
+            model,
+            Some(artifact),
+            base_limits.with_prior_current_probes(&prior_current_probes),
+            AssignmentRootPolicy::ObservationPass,
+        )?;
+    Ok(NativeObservationPlan {
+        assignments,
+        post_assignments,
+        // Every entry-shaped dependency list stays empty because this plan has
+        // no entries; the shape check in `NativeModel` is what enforces that.
+        current_dependencies: NativeCurrentDependencies {
+            assignment_current_pairs: assignment_dependencies.current_pairs,
+            assignment_prior_currents: assignment_dependencies.prior_currents,
+            assignment_branch_unknowns: assignment_dependencies.branch_unknowns,
+            post_assignment_current_pairs: post_assignment_dependencies.current_pairs,
+            post_assignment_prior_currents: post_assignment_dependencies.prior_currents,
+            post_assignment_branch_unknowns: post_assignment_dependencies.branch_unknowns,
+            ..NativeCurrentDependencies::default()
+        },
+    })
+}
+
+/// The completed contribution currents an assignment may probe, in stamp order.
+///
+/// Shared by the model plan and the observation plan so the two lower the same
+/// assignment against the same probe aliases: an observation that saw a
+/// different probe set would publish a different value than the evaluation did.
+fn assignment_prior_current_probes(model: &CompiledModel) -> Vec<PriorCurrentProbe> {
+    let mut probes = Vec::new();
+    for (stamp_index, stamp) in model.stamp_programs.iter().enumerate() {
+        if stamp.branch_ordinal.is_none()
+            && let Some((pos, neg)) = infer_current_unified_pair(model, stamp)
+        {
+            push_completed_current_probe_aliases(
+                &mut probes,
+                stamp_index,
+                pos,
+                neg,
+                model.num_terminals,
+            );
+        }
+    }
+    probes
 }
 
 fn build_model_plan_inner(
@@ -120,22 +208,11 @@ fn build_model_plan_inner(
         None => None,
         Some(_) => None,
     };
-    let mut assignment_prior_current_probes = Vec::new();
-    if canonical_mir.is_some() {
-        for (stamp_index, stamp) in model.stamp_programs.iter().enumerate() {
-            if stamp.branch_ordinal.is_none()
-                && let Some((pos, neg)) = infer_current_unified_pair(model, stamp)
-            {
-                push_completed_current_probe_aliases(
-                    &mut assignment_prior_current_probes,
-                    stamp_index,
-                    pos,
-                    neg,
-                    model.num_terminals,
-                );
-            }
-        }
-    }
+    let assignment_prior_current_probes = if canonical_mir.is_some() {
+        assignment_prior_current_probes(model)
+    } else {
+        Vec::new()
+    };
     let (assignments, post_assignments, assignment_dependencies, post_assignment_dependencies) =
         lower_assignment_phases(
             model,
@@ -2748,6 +2825,10 @@ pub(crate) fn live_canonical_assignment_slots(
         AssignmentRootPolicy::CfgPreludeSlots => {
             mark_cfg_plan_variable_roots(model, mir, limits, &mut live)?;
         }
+        // The observable set, and nothing beyond it: this pass exists to
+        // publish those names and runs no entry that could read anything else.
+        #[cfg(feature = "native")]
+        AssignmentRootPolicy::ObservationPass => {}
     }
     propagate_live_assignment_slots(model, &mut live);
     Ok(live)

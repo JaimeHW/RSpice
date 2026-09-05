@@ -25,7 +25,7 @@ use super::model::{
     CodeOffset, NativeCurrentDependencies, NativeEntryOffsets, NativeEntryStarts, NativeModel,
     NativeRequiredStorage,
 };
-use super::model_plan::NativeModelPlan;
+use super::model_plan::{NativeModelPlan, NativeObservationPlan};
 use super::plan_program::PlanProgramRef;
 use super::runtime::ExecutableMemory;
 #[cfg(all(windows, target_arch = "x86_64"))]
@@ -420,6 +420,77 @@ pub(crate) fn compile_model_plan(
         NativeEntryStarts::new(entry_starts),
         plan.current_dependencies.clone(),
         NativeRequiredStorage::for_model(model).with_prelude_slots(plan.prelude_slot_count()),
+    )
+}
+
+/// Emit the observation pass on its own: two functions, no entries, no kernels.
+///
+/// The image is separate from the model's because its lifetime is: it is
+/// compiled the first time something asks to read a named variable back and
+/// never on an evaluation. Everything else here is the model image's own
+/// machinery, down to the verifier and the Windows unwind tables, because the
+/// pass is exactly the code an evaluation used to run.
+pub(crate) fn compile_observation_image(
+    model: &CompiledModel,
+    plan: &NativeObservationPlan,
+) -> JitResult<NativeModel> {
+    let mut image = Vec::new();
+    let mut entry_starts = Vec::new();
+    let mut windows_unwind_functions = Vec::new();
+
+    let assignment = append_assignment_pass(
+        &plan.assignments,
+        &mut image,
+        &mut entry_starts,
+        &mut windows_unwind_functions,
+    )?;
+    let post_assignment = if plan.post_assignments.is_empty() {
+        None
+    } else {
+        Some(append_assignment_pass(
+            &plan.post_assignments,
+            &mut image,
+            &mut entry_starts,
+            &mut windows_unwind_functions,
+        )?)
+    };
+
+    let entries = NativeEntryOffsets {
+        assignment,
+        prelude: None,
+        post_assignment,
+        evaluation_kernel: None,
+        stamp_kernel: None,
+        parameter_defaults: vec![None; model.parameters.len()],
+        static_conditions: Vec::new(),
+        stamp_values: Vec::new(),
+        jacobians: Vec::new(),
+        reactive_jacobians: Vec::new(),
+        noise_psd: Vec::new(),
+        noise_exponents: Vec::new(),
+    };
+    verify_x64_image_layout(model, &image, &entry_starts)?;
+
+    #[cfg(all(windows, target_arch = "x86_64"))]
+    let executable = {
+        let runtime_functions =
+            append_windows_x64_unwind_metadata(&mut image, &windows_unwind_functions)?;
+        ExecutableMemory::allocate_with_windows_unwind(&image, &runtime_functions)?
+    };
+    #[cfg(not(all(windows, target_arch = "x86_64")))]
+    let executable = ExecutableMemory::allocate(&image)?;
+
+    NativeModel::from_executable_image_with_dependencies(
+        model.num_terminals,
+        model.internal_nodes,
+        model.num_variables,
+        model.parameters.len(),
+        model.branch_sources.len(),
+        executable,
+        entries,
+        NativeEntryStarts::new(entry_starts),
+        plan.current_dependencies.clone(),
+        NativeRequiredStorage::for_model(model),
     )
 }
 
