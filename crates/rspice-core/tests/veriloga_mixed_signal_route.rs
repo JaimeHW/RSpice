@@ -20,7 +20,7 @@
 //!
 //! # What the tests here are
 //!
-//! Four end-to-end properties and the refusals that bound them:
+//! Five end-to-end properties and the refusals that bound them:
 //!
 //! * an analog oscillator counted by a digital counter, where the count in
 //!   `digital_traces` has to equal the number of times the recorded analog
@@ -32,13 +32,19 @@
 //!   nothing, at deck level;
 //! * the analog-only module, which has to keep answering the way a plain
 //!   resistor does, because nothing about this route may reach a deck that has
-//!   no mixed module in it.
+//!   no mixed module in it;
+//! * the accepted-sample hook a live consumer watches, whose view of a bridge
+//!   net has to be the history the finished result keeps — the deck-level
+//!   statement of D5 lockstep for anything reading the run as it goes.
 #![cfg(feature = "veriloga")]
 
+use rspice_core::abort_signal::{AbortSignal, TransientSample};
 use rspice_core::engine::TransientResult;
+use rspice_core::xspice::DigitalValue;
 use rspice_core::{Engine, Netlist, SimulationConfig};
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static MODEL_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -658,5 +664,105 @@ fn a_mixed_module_is_refused_by_the_analyses_that_cannot_represent_it() {
     assert!(
         lowered.contains("ac analysis") && lowered.contains("x1"),
         "the refusal must name the analysis and the instance: {error}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// (e) The boundary value a live consumer sees while the run is still going
+// ---------------------------------------------------------------------------
+
+/// An abort signal that keeps the committed digital state of every accepted
+/// point, with node ids resolved through the sample's own node table.
+#[derive(Default)]
+struct BoundaryRecorder {
+    samples: Mutex<Vec<(f64, Vec<(String, DigitalValue)>)>>,
+}
+
+impl AbortSignal for BoundaryRecorder {
+    fn is_aborted(&self) -> bool {
+        false
+    }
+
+    fn observe_transient_sample(&self, sample: TransientSample<'_>) {
+        let digital = sample
+            .digital_values
+            .iter()
+            .map(|&(node_id, value)| {
+                let name = node_id
+                    .checked_sub(1)
+                    .and_then(|index| sample.node_names.get(index))
+                    .cloned()
+                    .unwrap_or_else(|| format!("<node {node_id}>"));
+                (name, value)
+            })
+            .collect();
+        self.samples
+            .lock()
+            .expect("boundary recorder")
+            .push((sample.time.last().copied().unwrap_or(f64::NAN), digital));
+    }
+}
+
+/// **D5 lockstep, at the live boundary.** The committed digital value at an
+/// accepted analog time is final for that time — the digital wheel has already
+/// turned when the point is accepted, and no later step revises it.
+///
+/// That is what makes one message per accepted point enough for a live view of
+/// a mixed run, and it is only true if the value the hook publishes is the
+/// value the run's own trace keeps. So the hook's stream is change-compressed
+/// exactly the way `record_digital_snapshot` compresses a trace, and the two
+/// must be the same history: same values, same times, same order. A hook that
+/// ran before the boundary snapshot of its own step would reproduce the same
+/// values one accepted step late.
+#[test]
+fn the_live_hook_publishes_the_boundary_value_the_trace_keeps() {
+    let model = ModelFile::new("clock_divider_live_hook", CLOCK_DIVIDER);
+    let netlist = Netlist::parse(&divider_deck(&model)).expect("the deck parses");
+    let recorder = BoundaryRecorder::default();
+    let result = Engine::new(SimulationConfig::default())
+        .run_tran_with_abort(&netlist, 200.0e-9, 1.0e-9, &recorder)
+        .expect("the deck runs");
+    let samples = recorder.samples.into_inner().expect("boundary recorder");
+
+    assert_eq!(
+        samples.len(),
+        result.time.len(),
+        "the hook must fire exactly once per accepted point"
+    );
+    for (index, (time, _)) in samples.iter().enumerate() {
+        assert_eq!(
+            time.to_bits(),
+            result.time[index].to_bits(),
+            "hook call {index} reported t={time:e} for the result's point at t={:e}",
+            result.time[index]
+        );
+    }
+
+    let recorded: Vec<(f64, DigitalValue)> = result
+        .digital_trace_named("qdiv")
+        .expect("the divided output has a digital trace")
+        .iter()
+        .map(|point| (point.time, point.value))
+        .collect();
+    assert!(
+        recorded.len() > 10,
+        "the divider must toggle for this to test anything, its trace is {recorded:?}"
+    );
+
+    let mut observed: Vec<(f64, DigitalValue)> = Vec::new();
+    for (time, digital) in &samples {
+        for (name, value) in digital {
+            if !name.eq_ignore_ascii_case("qdiv") {
+                continue;
+            }
+            if observed.last().is_some_and(|(_, held)| held == value) {
+                continue;
+            }
+            observed.push((*time, *value));
+        }
+    }
+    assert_eq!(
+        observed, recorded,
+        "the hook's view of the bridge net is not the history the result kept"
     );
 }

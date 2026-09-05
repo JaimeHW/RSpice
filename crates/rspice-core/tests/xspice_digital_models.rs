@@ -1,10 +1,11 @@
 //! Native XSPICE digital code models pinned against ngspice code-model semantics.
 
+use rspice_core::abort_signal::{AbortSignal, TransientSample};
 use rspice_core::engine::{Engine, TransientResult};
 use rspice_core::netlist::Netlist;
 use rspice_core::xspice::{
-    CodeModelRegistry, ParamType, PortConnection, XspiceInstance, clear_registered_data_files,
-    register_data_file,
+    CodeModelRegistry, DigitalValue, ParamType, PortConnection, XspiceInstance,
+    clear_registered_data_files, register_data_file,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -3831,5 +3832,291 @@ rload out 0 1k
         (completion - 5.0).abs() < 1.0e-9,
         "dac_bridge should land on the 1.75 ns ramp completion breakpoint with out=5 V, got {completion}; times={:?}",
         result.time
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The accepted-sample hook and the event state it publishes
+// ---------------------------------------------------------------------------
+
+/// One call of `AbortSignal::observe_transient_sample`, recorded verbatim.
+struct LiveSample {
+    /// The accepted time the call reports: the last entry of the time column.
+    time: f64,
+    /// How many accepted points the result held when the call was made.
+    accepted_points: usize,
+    /// The last entry of every node-voltage column, `None` for a column output
+    /// projection did not retain.
+    voltages: Vec<Option<f64>>,
+    /// Committed digital event values, node ids resolved through `node_names`.
+    digital: Vec<(String, DigitalValue)>,
+    /// Committed real event values, node ids resolved through `node_names`.
+    real: Vec<(String, f64)>,
+}
+
+/// An abort signal that never aborts and keeps every sample it is shown.
+///
+/// Live streaming is this hook's only consumer, and what it needs is that the
+/// event state published at an accepted point is that point's own. The tests
+/// below hold the engine to that by replaying the hook's view and demanding it
+/// reproduce the result's own event traces exactly — a hook that fired before
+/// the snapshot of its own step would reproduce them shifted one step late.
+#[derive(Default)]
+struct LiveSampleRecorder {
+    samples: Mutex<Vec<LiveSample>>,
+}
+
+impl AbortSignal for LiveSampleRecorder {
+    fn is_aborted(&self) -> bool {
+        false
+    }
+
+    fn observe_transient_sample(&self, sample: TransientSample<'_>) {
+        let name_of = |node_id: usize| -> String {
+            node_id
+                .checked_sub(1)
+                .and_then(|index| sample.node_names.get(index))
+                .cloned()
+                // Unreachable through a deck: the ids come from the same node
+                // table. Spelled rather than panicked so a broken resolution
+                // rule fails the trace comparison instead of the solve.
+                .unwrap_or_else(|| format!("<node {node_id}>"))
+        };
+        self.samples
+            .lock()
+            .expect("live sample recorder")
+            .push(LiveSample {
+                time: sample.time.last().copied().unwrap_or(f64::NAN),
+                accepted_points: sample.time.len(),
+                voltages: sample
+                    .node_voltages
+                    .iter()
+                    .map(|column| column.last().copied())
+                    .collect(),
+                digital: sample
+                    .digital_values
+                    .iter()
+                    .map(|&(node_id, value)| (name_of(node_id), value))
+                    .collect(),
+                real: sample
+                    .real_values
+                    .iter()
+                    .map(|&(node_id, value)| (name_of(node_id), value))
+                    .collect(),
+            });
+    }
+}
+
+/// Run a transient with the accepted-sample hook recording.
+fn run_observed(deck: &str, tstop: f64, max_step: f64) -> (TransientResult, Vec<LiveSample>) {
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let recorder = LiveSampleRecorder::default();
+    let result = Engine::default()
+        .run_tran_with_abort(&netlist, tstop, max_step, &recorder)
+        .expect("transient solves");
+    let samples = recorder.samples.into_inner().expect("live sample recorder");
+    (result, samples)
+}
+
+/// Every accepted point is reported once, in order, with that point's own
+/// analog view.
+///
+/// `accepted_points` is the length of the result's time column as the call saw
+/// it, so requiring `index + 1` says the call is about the point just pushed: a
+/// hook that fired before the point was recorded would see one fewer, and a
+/// second hook on any accept path would repeat a length.
+fn assert_one_hook_call_per_accepted_point(result: &TransientResult, samples: &[LiveSample]) {
+    assert_eq!(
+        samples.len(),
+        result.time.len(),
+        "the hook must fire exactly once per accepted point"
+    );
+    for (index, sample) in samples.iter().enumerate() {
+        let accepted_time = result.time[index];
+        assert_eq!(
+            sample.time.to_bits(),
+            accepted_time.to_bits(),
+            "hook call {index} reported t={:e}, the result's point {index} is t={accepted_time:e}",
+            sample.time
+        );
+        assert_eq!(
+            sample.accepted_points,
+            index + 1,
+            "hook call {index} saw {} accepted points, so it did not report point {index}",
+            sample.accepted_points
+        );
+        assert_eq!(
+            sample.voltages.len(),
+            result.voltages.len(),
+            "hook call {index} reported a different node count from the result"
+        );
+        for (node, column) in result.voltages.iter().enumerate() {
+            assert_eq!(
+                sample.voltages[node],
+                column.get(index).copied(),
+                "hook call {index} disagrees with the result about node '{}'",
+                result.node_names[node]
+            );
+        }
+    }
+}
+
+/// The change-compressed history of one digital node, as the hook published it.
+///
+/// `record_digital_snapshot` writes a trace point only when a node's committed
+/// value differs from the one it last wrote, so compressing the hook's view the
+/// same way makes the two directly comparable. Any disagreement is the hook
+/// publishing a different value, or the same value at a different accepted
+/// time, from the one the result kept.
+fn hook_digital_history(samples: &[LiveSample], node: &str) -> Vec<(f64, DigitalValue)> {
+    let mut history: Vec<(f64, DigitalValue)> = Vec::new();
+    for sample in samples {
+        for (name, value) in &sample.digital {
+            if !name.eq_ignore_ascii_case(node) {
+                continue;
+            }
+            if history.last().is_some_and(|(_, held)| held == value) {
+                continue;
+            }
+            history.push((sample.time, *value));
+        }
+    }
+    history
+}
+
+/// The change-compressed history of one real event node, as the hook saw it.
+fn hook_real_history(samples: &[LiveSample], node: &str) -> Vec<(f64, f64)> {
+    let mut history: Vec<(f64, f64)> = Vec::new();
+    for sample in samples {
+        for (name, value) in &sample.real {
+            if !name.eq_ignore_ascii_case(node) {
+                continue;
+            }
+            if history.last().is_some_and(|(_, held)| held == value) {
+                continue;
+            }
+            history.push((sample.time, *value));
+        }
+    }
+    history
+}
+
+/// A node whose trace is shorter than this proves nothing about staleness: a
+/// value that never moves reads the same whichever step the hook took it from.
+const LEAST_INTERESTING_TRACE_POINTS: usize = 5;
+
+fn assert_hook_matches_digital_trace(result: &TransientResult, samples: &[LiveSample], node: &str) {
+    let recorded: Vec<(f64, DigitalValue)> = result
+        .digital_trace_named(node)
+        .unwrap_or_else(|| panic!("digital trace {node} missing from {:?}", result.node_names))
+        .iter()
+        .map(|point| (point.time, point.value))
+        .collect();
+    assert!(
+        recorded.len() >= LEAST_INTERESTING_TRACE_POINTS,
+        "node {node} must move for this to test anything, its trace is {recorded:?}"
+    );
+    assert_eq!(
+        hook_digital_history(samples, node),
+        recorded,
+        "the hook's view of digital node {node} is not the history the result kept"
+    );
+}
+
+fn assert_hook_matches_real_trace(result: &TransientResult, samples: &[LiveSample], node: &str) {
+    let recorded: Vec<(f64, f64)> = result
+        .real_trace_named(node)
+        .unwrap_or_else(|| panic!("real trace {node} missing from {:?}", result.node_names))
+        .iter()
+        .map(|point| (point.time, point.value))
+        .collect();
+    assert!(
+        recorded.len() >= LEAST_INTERESTING_TRACE_POINTS,
+        "node {node} must move for this to test anything, its trace has {} points",
+        recorded.len()
+    );
+    assert_eq!(
+        hook_real_history(samples, node),
+        recorded,
+        "the hook's view of real node {node} is not the history the result kept"
+    );
+}
+
+/// A clock crossing into the event world and back, in both event kinds.
+///
+/// `clk` is analog and toggles; `d` is its digitised copy; `q` is `d` inverted
+/// a third of a nanosecond later; `watched` carries `clk` as a real event value
+/// and so moves at every accepted step. The inverter's delay is what makes this
+/// deck test staleness rather than coincidence: `q` changes at accepted points
+/// that are not the ones `d` changes at, so a hook publishing the previous
+/// step's committed state would place the two sets of changes at wrong — and
+/// different — times.
+const EVENT_STATE_DECK: &str = "\
+* an analog clock crossing into the digital world and back, watched in real
+vclk clk 0 pulse(0 3.3 1n 0.2n 0.2n 4n 8n)
+rclk clk 0 1k
+aobs clk watched obs
+.model obs v_to_real
+aadc [clk] [d] adc
+.model adc adc_bridge (in_low=1.0 in_high=2.0)
+ainv [d] [q] inv
+.model inv d_inverter (rise_delay=0.3n fall_delay=0.3n)
+adac [q] [out] dac
+.model dac dac_bridge (out_low=0 out_high=3.3 t_rise=0.2n t_fall=0.2n)
+rout out 0 1k
+cout out 0 0.5p
+";
+
+fn event_state_deck(cards: &str) -> String {
+    format!("{EVENT_STATE_DECK}{cards}.end\n")
+}
+
+#[test]
+fn the_accepted_sample_hook_publishes_this_points_committed_event_state() {
+    let (result, samples) = run_observed(&event_state_deck(""), 4.0e-8, 2.0e-10);
+
+    assert_one_hook_call_per_accepted_point(&result, &samples);
+    // The initial point is a hook call like any other, and it is the first.
+    assert_eq!(
+        samples
+            .first()
+            .expect("the run accepted at least one point")
+            .accepted_points,
+        1,
+        "the initial point must be reported"
+    );
+
+    for node in ["d", "q"] {
+        assert_hook_matches_digital_trace(&result, &samples, node);
+    }
+    assert_hook_matches_real_trace(&result, &samples, "watched");
+}
+
+#[test]
+fn suppressed_event_tracing_leaves_the_hook_firing_with_empty_event_slices() {
+    let (result, samples) = run_observed(
+        &event_state_deck(".control\nesave none\n.endc\n"),
+        4.0e-8,
+        2.0e-10,
+    );
+
+    assert!(
+        result.digital_traces.is_empty() && result.real_traces.is_empty(),
+        "esave none should suppress event trace output"
+    );
+    // The analog half of the sample is unchanged, point for point, and the
+    // event half is empty rather than absent: the hook still fires.
+    assert_one_hook_call_per_accepted_point(&result, &samples);
+    assert!(
+        samples
+            .iter()
+            .all(|sample| sample.digital.is_empty() && sample.real.is_empty()),
+        "a run that traces no events must publish no event state"
+    );
+    assert!(
+        samples
+            .iter()
+            .all(|sample| sample.voltages.iter().any(Option::is_some)),
+        "the analog view must survive event tracing being off"
     );
 }
