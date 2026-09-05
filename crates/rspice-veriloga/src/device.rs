@@ -9061,6 +9061,71 @@ endmodule
         );
     }
 
+    /// The stepper's two reads survive a plan that publishes almost nothing.
+    ///
+    /// `$bound_step` and `$discontinuity` are read on `&self`, between
+    /// evaluations, out of the variable array — no observation, no compile, no
+    /// `&mut`. Under a CFG plan no entry reads either one, and the structured
+    /// body the CFG is built from does not carry their writes at all: the front
+    /// end puts those only in the flat statement stream. They stay published
+    /// because [`mark_cfg_plan_variable_roots`](crate::jit::plan_builder) names
+    /// them, and this is what says so on a module that is actually CFG-planned
+    /// rather than one that fell back.
+    ///
+    /// `tests/timestep_control.rs` covers the semantics — the min of active
+    /// calls, the per-evaluation reset, the rising-edge rule. What it cannot
+    /// say is which plan produced them, because the routing predicate is not
+    /// public. That is this test's whole subject.
+    #[test]
+    fn a_cfg_planned_module_still_publishes_the_simulator_control_tasks() {
+        let source = r#"
+`include "disciplines.vams"
+module cfg_planned_simulator_control(p, n);
+    inout p, n;
+    electrical p, n;
+    real scratch;
+    analog begin
+        scratch = V(p, n) * 3.0;
+        $bound_step(2.0e-6);
+        if (V(p, n) > 1.0)
+            $discontinuity(0);
+        I(p, n) <+ scratch;
+    end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler.compile(source).expect("compile model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        let mut device =
+            VerilogADevice::try_new_with_canonical_ir("STEPCFG1", model, &artifact, &[1, 0])
+                .expect("build native device");
+        assert!(
+            !device.native_model.publishes_observable_variables(),
+            "the fixture must take the CFG plan for this pin to mean anything"
+        );
+
+        device.context.analysis_type = 2;
+        device.update_voltages(&[0.5]);
+        device.try_evaluate().expect("sub-threshold evaluation");
+        assert_eq!(device.try_transient_bound_step().unwrap(), Some(2.0e-6));
+        assert!(!device.discontinuity_pending());
+
+        device.update_voltages(&[1.5]);
+        device.try_evaluate().expect("above-threshold evaluation");
+        assert_eq!(device.try_transient_bound_step().unwrap(), Some(2.0e-6));
+        assert!(device.discontinuity_pending());
+
+        // And the procedural variable beside them is not published, which is
+        // what makes the two above a root list rather than a leftover.
+        assert_eq!(device.variable("scratch"), Some(0.0));
+        device
+            .observe_variables(&artifact)
+            .expect("observation publishes the rest");
+        assert_eq!(device.variable("scratch"), Some(4.5));
+    }
+
     #[test]
     fn native_scalar_stamp_preserves_inactive_contribution_current_slots() {
         let source = r#"
