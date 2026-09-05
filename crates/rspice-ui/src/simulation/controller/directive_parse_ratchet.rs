@@ -271,14 +271,14 @@ fn an_inherited_temperature_axis_round_trips_as_the_axis_the_plan_declared() {
 
 /// An autonomous PSS reaches the deck as autonomous, and reads back that way.
 ///
-/// The second setting the parse walk cannot see. `.pss` is not a card the
-/// engine's own netlist parser owns — it has no `AnalysisCommand` for it — so
-/// `parse_netlist` accepting the line proves only that the line is well formed.
-/// The reader that turns it back into an analysis is the studio's own,
-/// `controller::manual_deck`, which is what a hand-written deck goes through,
-/// and that is where a dropped `autonomous=` or a lost oscillator node would
-/// show up: an oscillator solved as a driven circuit converges on the trivial
-/// answer and reports it confidently.
+/// The second setting the parse walk cannot see. `parse_netlist` accepting a
+/// `.pss` line proves the card is well formed and nothing more — the engine's
+/// `PssCard` is not the studio's typed request, and the reader that turns the
+/// line back into one is the studio's own `controller::manual_deck`, which is
+/// what a hand-written deck goes through. That is where a dropped
+/// `autonomous=` or a lost oscillator node would show up: an oscillator solved
+/// as a driven circuit converges on the trivial answer and reports it
+/// confidently.
 ///
 /// So the round trip is closed against that reader. Driven is asserted beside
 /// autonomous because a flag that is always true reads the same as one that is

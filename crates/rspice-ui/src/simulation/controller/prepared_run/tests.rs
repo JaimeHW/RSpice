@@ -1070,7 +1070,7 @@ fn manual_periodic_analyses_are_topologically_bound_to_seed_and_pss() {
     let mut state = AppState::default();
     state.simulation.run_intent = SimulationRunIntent::ManualDeck;
     state.workspace.netlist_source = Some(
-        "Periodic deck\nV1 in 0 SIN(0 1 1Meg)\nR1 in out 1k\nC1 out 0 1n\nLPROBE out sensed 1n\nR2 sensed 0 1k\n.pss 1Meg tones=V1 points_per_period=128 save_harmonics=8\n.pac dec 20 1k 100Meg input=V1 output=out\n.pnoise dec 10 1 1Meg output=out noiseref=output\n.pxf dec 10 1k 10Meg input=V1 output=out outsideband=1\n.pstb probe=LPROBE maxharm=8 nmults=6\n.end\n"
+        "Periodic deck\nV1 in 0 SIN(0 1 1Meg)\nR1 in out 1k\nC1 out 0 1n\nLPROBE out sensed 1n\nR2 sensed 0 1k\n.pss fund=1Meg points=128 harms=8\n.pac dec 20 1k 100Meg input=V1 out=out\n.pnoise dec 10 1 1Meg out=out\n.pxf dec 10 1k 10Meg input=V1 out=out outsideband=1\n.pstb probe=LPROBE maxharm=8 nmults=6\n.end\n"
             .to_owned(),
     );
 

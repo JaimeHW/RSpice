@@ -91,6 +91,19 @@ pub(super) fn build_manual_deck_queue(
         if matches!(command, AnalysisCommand::Temp { .. }) {
             continue;
         }
+        // The netlist parser owns `.PSS`, `.PAC` and `.PNOISE`, so they arrive
+        // here as parsed cards as well as in the periodic reader's queue. Only
+        // that reader can queue them: it is what binds each dependent card to
+        // the deck's one PSS operating point and freezes its execution
+        // options, and queueing them here too would run every periodic
+        // analysis twice. `.ENVELOPE` is left to its refusal below — it has no
+        // manual-deck route at all.
+        if matches!(
+            command,
+            AnalysisCommand::Pss(_) | AnalysisCommand::Pac(_) | AnalysisCommand::Pnoise(_)
+        ) {
+            continue;
+        }
         if let AnalysisCommand::Four {
             fundamental,
             outputs,
@@ -1149,10 +1162,14 @@ fn command_to_queue_item(
         AnalysisCommand::Temp { .. } => Err(
             ".temp directives must be planned as temperature sweeps before queueing".to_string(),
         ),
-        AnalysisCommand::Pss(_)
-        | AnalysisCommand::Pac(_)
-        | AnalysisCommand::Pnoise(_)
-        | AnalysisCommand::Envelope(_) => Err(format!(
+        AnalysisCommand::Pss(_) | AnalysisCommand::Pac(_) | AnalysisCommand::Pnoise(_) => {
+            Err(format!(
+                "{} is queued from the deck's own card by the periodic reader, which binds it to \
+                 the PSS operating point; reaching this route means the deck walk did not skip it",
+                command_name(command)
+            ))
+        }
+        AnalysisCommand::Envelope(_) => Err(format!(
             "{} has no manual-deck queue route in this build",
             command_name(command)
         )),
@@ -1360,7 +1377,7 @@ mod tests {
         let state = AppState::default();
         let queue = build_manual_deck_queue(
             &state,
-            "periodic\nV1 in 0 SIN(0 1 1Meg)\nR1 in out 1k\nC1 out 0 1n\n.pss 1Meg tones=V1 points_per_period=128 save_harmonics=8\n.pac dec 20 1k 100Meg input=V1 output=out maxsideband=4\n.pnoise dec 10 1 1Meg output=out noiseref=phase\n.end\n",
+            "periodic\nV1 in 0 SIN(0 1 1Meg)\nR1 in out 1k\nC1 out 0 1n\n.pss fund=1Meg points=128 harms=8\n.pac dec 20 1k 100Meg input=V1 out=out maxsideband=4\n.pnoise dec 10 1 1Meg out=out\n.end\n",
         )
         .expect("manual periodic queue");
 
