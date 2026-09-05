@@ -304,6 +304,39 @@ fn interoperability_filters_are_explicit_complete_and_non_mutating() {
     }));
 }
 
+/// The result-format row names what this build reads and writes.
+///
+/// It had drifted to claiming FSDB, which no adapter, encoder or contract id
+/// in the crate has ever mentioned, and to a single "import · export by
+/// format" that read as parity across the list while VCD and FST were
+/// import-only. The authorities are `ResultImportFormat::ALL`, every member of
+/// which `parse_result_dataset` dispatches to an adapter, and
+/// `ResultExportFormat::encoder_available`, which is true for exactly the
+/// RSpice bundles, CSV, TSV and Touchstone.
+///
+/// This pin is literal because the one test that compared this table against
+/// its authored copy — `interoperability_document_copy_matches_the_mockup_exactly`
+/// below — reads a mockup source outside the shipped tree and is `#[ignore]`d
+/// without it, so nothing in-tree was holding the claim still.
+#[test]
+fn the_result_format_row_names_the_formats_this_build_has() {
+    let row = INTEROPERABILITY_FORMAT_ROWS
+        .iter()
+        .find(|row| row.domain_format == "Results / events")
+        .expect("the results row is in the matrix");
+    assert_eq!(
+        row.version_dialect,
+        "RSpice bundle · RAW · PSF · VCD · FST · CSV · TSV · HDF5 · Arrow · Parquet · NumPy · MATLAB"
+    );
+    assert_eq!(row.direction, "import all · export RSpice bundle, CSV, TSV");
+    assert!(
+        !INTEROPERABILITY_FORMAT_ROWS
+            .iter()
+            .any(|row| row.version_dialect.contains("FSDB")),
+        "a format nothing in the crate implements must not be claimed"
+    );
+}
+
 #[test]
 #[ignore = "requires RSPICE_MOCKUP_ROOT and the separately governed workbench sources"]
 fn interoperability_document_copy_matches_the_mockup_exactly() {
