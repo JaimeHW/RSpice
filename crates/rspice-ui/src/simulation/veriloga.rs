@@ -144,10 +144,8 @@ impl PreparedVerilogARuntime {
             crate::state::project_veriloga_bundle_source_key(project_id, bundle, module_name)
                 .map_err(|error| error.to_string())?;
         let netlist_alias = netlist_alias.into();
-        let model_json = serde_json::to_string(&report.model)
-            .map_err(|error| format!("Could not serialize compiled Verilog-A model: {error}"))?;
-        let canonical_ir_json = serde_json::to_string(&report.canonical_ir)
-            .map_err(|error| format!("Could not serialize canonical Verilog-A IR: {error}"))?;
+        let model_json = seal_compiled_model(&report.model)?;
+        let canonical_ir_json = seal_canonical_ir(&report.canonical_ir)?;
         let artifact_digest = runtime_artifact_digest(
             &source_key,
             bundle.closure_digest(),
@@ -178,10 +176,8 @@ impl PreparedVerilogARuntime {
         compilation
             .validate_integrity()
             .map_err(|error| format!("Compiled Verilog-A bundle is invalid: {error}"))?;
-        let model_json = serde_json::to_string(&compilation.runtime.model)
-            .map_err(|error| format!("Could not serialize compiled Verilog-A model: {error}"))?;
-        let canonical_ir_json = serde_json::to_string(&compilation.runtime.canonical_ir)
-            .map_err(|error| format!("Could not serialize canonical Verilog-A IR: {error}"))?;
+        let model_json = seal_compiled_model(&compilation.runtime.model)?;
+        let canonical_ir_json = seal_canonical_ir(&compilation.runtime.canonical_ir)?;
         let artifact_digest = runtime_artifact_digest(
             &source_key,
             source_digest,
@@ -704,6 +700,40 @@ pub fn append_project_veriloga_directive(source: &mut String, source_key: &str, 
     }
 }
 
+/// Seal the compiled model as the JSON string the runtime carries.
+fn seal_compiled_model(model: &rspice_veriloga::CompiledModel) -> Result<String, String> {
+    seal_payload_json("model", "compiled Verilog-A model", model)
+}
+
+/// Seal the canonical IR the same way. It is a separate string with a separate
+/// parse, and the browser JIT lowers this one.
+fn seal_canonical_ir(
+    canonical_ir: &rspice_veriloga::canonical_ir::CanonicalIrArtifact,
+) -> Result<String, String> {
+    seal_payload_json("canonical_ir", "canonical Verilog-A IR", canonical_ir)
+}
+
+/// Write one payload as JSON, refusing first anything JSON cannot carry.
+///
+/// The scan runs before the write rather than after, because after the write
+/// there is nothing left to see: `serde_json` spells a non-finite float
+/// `null`, a bare `f64` then refuses to decode, and an `Option<f64>` decodes
+/// it as `None` — a bound silently deleted, with the artifact digest over the
+/// JSON text agreeing that nothing is wrong. Every field that can legitimately
+/// hold a non-finite float encodes it as a string through
+/// `rspice_veriloga::json_float`, so a path this names is a field that
+/// acquired one without being annotated, and the seal refuses rather than
+/// shipping a model the browser worker would build different physics from.
+fn seal_payload_json<T>(path_root: &str, description: &str, value: &T) -> Result<String, String>
+where
+    T: serde::Serialize,
+{
+    rspice_veriloga::json_float::refuse_non_finite_floats(path_root, value)
+        .map_err(|error| format!("Could not seal {description}: {error}"))?;
+    serde_json::to_string(value)
+        .map_err(|error| format!("Could not serialize {description}: {error}"))
+}
+
 fn runtime_artifact_digest(
     source_key: &str,
     source_digest: crate::product::ContentDigest,
@@ -802,29 +832,34 @@ module rspice_float_roundtrip_probe(p, n);
 endmodule
 "#;
 
-    fn seal_probe_runtime() -> PreparedVerilogARuntime {
+    /// Compile one fixture source and seal it exactly as a project source is
+    /// sealed. `try_from_virtual_compilation` is the constructor both the
+    /// project and the signed-PDK paths reach, so a fixture that seals here
+    /// seals in production.
+    fn seal_runtime(file: &str, module: &str, source: &str) -> PreparedVerilogARuntime {
         let bundle = rspice_veriloga::VirtualSourceBundle::new(
-            "probe.va",
-            [rspice_veriloga::VirtualSourceFile::new(
-                "probe.va",
-                EXACT_CONSTANT_SOURCE,
-            )],
+            file,
+            [rspice_veriloga::VirtualSourceFile::new(file, source)],
         )
-        .expect("probe bundle is well formed");
+        .expect("fixture bundle is well formed");
         let compilation = rspice_veriloga::VerilogACompiler::default()
-            .compile_virtual_runtime(
-                &bundle,
-                "rspice_float_roundtrip_probe",
-                project_virtual_compile_limits(),
-            )
-            .expect("probe module compiles");
+            .compile_virtual_runtime(&bundle, module, project_virtual_compile_limits())
+            .expect("fixture module compiles");
         PreparedVerilogARuntime::try_from_virtual_compilation(
-            "__rspice_project__/float-roundtrip/probe.va".to_owned(),
-            crate::product::ContentDigest::from_bytes([0x7c; 32]),
-            "rspice_float_roundtrip_probe".to_owned(),
+            format!("__rspice_project__/fixture/{file}"),
+            crate::product::ContentDigest::from_bytes([0x5a; 32]),
+            module.to_owned(),
             &compilation,
         )
-        .expect("probe compilation seals into a prepared runtime")
+        .expect("fixture compilation seals into a prepared runtime")
+    }
+
+    fn seal_probe_runtime() -> PreparedVerilogARuntime {
+        seal_runtime(
+            "probe.va",
+            "rspice_float_roundtrip_probe",
+            EXACT_CONSTANT_SOURCE,
+        )
     }
 
     /// A sealed runtime stores its `CompiledModel` as JSON and every consumer —
@@ -884,23 +919,303 @@ endmodule
         }
     }
 
-    #[cfg(feature = "browser-worker")]
-    fn seal_wasm_jit_runtime(file: &str, module: &str, source: &str) -> PreparedVerilogARuntime {
-        let bundle = rspice_veriloga::VirtualSourceBundle::new(
-            file,
-            [rspice_veriloga::VirtualSourceFile::new(file, source)],
+    /// `$bound_step` caps the next transient step. It lowers to a hidden task
+    /// variable reset to `+inf` at the top of every evaluation, so *every*
+    /// module that calls it carries an infinity in its compiled bytecode.
+    /// JSON has no spelling for one, so before `rspice_veriloga::json_float`
+    /// this module could not be sealed at all — `serde_json` wrote the reset
+    /// as `null` and the sealed payload then refused to decode, which took the
+    /// whole browser path away from every `$bound_step` model.
+    const BOUND_STEP_SOURCE: &str = r#"
+`include "disciplines.vams"
+module rspice_bound_step_probe(p, n);
+  inout p, n;
+  electrical p, n;
+  parameter real conductance = 0.5;
+  analog begin
+    $bound_step(1e-9);
+    I(p, n) <+ conductance * V(p, n);
+  end
+endmodule
+"#;
+
+    /// The declaration-side spellings, and the silent ones. Both are folded
+    /// constants, so neither is announced by anything in the source text.
+    ///
+    /// `folded` divides by a literal zero. The fold yields `+inf`, which lands
+    /// in `CompiledParameter.default` — a bare `f64` the sealed payload then
+    /// refused to decode — and in `HirParameter.default`, an `Option<f64>` that
+    /// decoded `null` back as `None`, the default simply gone with the artifact
+    /// digest over the JSON text agreeing nothing had happened.
+    ///
+    /// `unbounded` reaches a *range*. The grammar's `inf` shortcut is not the
+    /// only way `inf` can appear in a bound: written as part of an expression it
+    /// is the ordinary constant again, folds to `+inf`, and lands in
+    /// `CompiledParameter.max` and `HirParamRange.max` — `Option<f64>` again.
+    ///
+    /// `conductance` is the control, and it is here to keep a wrong premise
+    /// from coming back: `from (0:inf)` does *not* put an infinity anywhere.
+    /// The parser reads `inf` in a range bound as the absence of a bound
+    /// (`RangeBound.upper` is an `Option<Expression>` whose `None` means
+    /// `+inf`), so an open range never becomes a float at all — which is why
+    /// the shipped corpus, full of open ranges, carries no non-finite float.
+    const INFINITE_CONSTANT_SOURCE: &str = r#"
+`include "disciplines.vams"
+module rspice_infinite_constant_probe(p, n);
+  inout p, n;
+  electrical p, n;
+  parameter real folded = 1.0/0.0;
+  parameter real unbounded = 1.0 from (0:2*inf);
+  parameter real conductance = 0.5 from (0:inf);
+  analog I(p, n) <+ conductance * V(p, n);
+endmodule
+"#;
+
+    /// Every non-finite `PushConst` in a compiled program, however nested.
+    fn non_finite_constants(
+        steps: &[rspice_veriloga::codegen::AssignmentStep],
+    ) -> Vec<(usize, f64)> {
+        fn constants(program: &rspice_veriloga::codegen::BytecodeProgram) -> Vec<f64> {
+            program
+                .instructions
+                .iter()
+                .filter_map(|instruction| match instruction {
+                    rspice_veriloga::codegen::Instruction::PushConst(value)
+                        if !value.is_finite() =>
+                    {
+                        Some(*value)
+                    }
+                    _ => None,
+                })
+                .collect()
+        }
+
+        let mut found = Vec::new();
+        for step in steps {
+            match step {
+                rspice_veriloga::codegen::AssignmentStep::Assign(assignment) => found.extend(
+                    constants(&assignment.program)
+                        .into_iter()
+                        .map(|value| (assignment.var_index, value)),
+                ),
+                rspice_veriloga::codegen::AssignmentStep::AssignIndexed { base, value, .. } => {
+                    found.extend(constants(value).into_iter().map(|value| (*base, value)));
+                }
+                rspice_veriloga::codegen::AssignmentStep::Loop { body, .. } => {
+                    found.extend(non_finite_constants(body));
+                }
+            }
+        }
+        found
+    }
+
+    /// The seal is `serde_json::to_string`; decoding it is `from_str`. A
+    /// payload that is a fixed point of that pair lost nothing at all — not
+    /// only the non-finite values this change is about.
+    fn assert_payload_is_its_own_fixed_point<T>(what: &str, sealed: &str)
+    where
+        T: serde::Serialize + serde::de::DeserializeOwned,
+    {
+        let decoded: T = serde_json::from_str(sealed)
+            .unwrap_or_else(|error| panic!("sealed {what} payload decodes: {error}"));
+        let resealed = serde_json::to_string(&decoded).expect("decoded payload re-seals");
+        assert_eq!(
+            resealed, sealed,
+            "the sealed {what} payload is not a fixed point of its own encoding"
+        );
+    }
+
+    #[test]
+    fn a_bound_step_module_seals_with_its_infinite_step_sentinel_intact() {
+        let runtime = seal_runtime(
+            "bound-step.va",
+            "rspice_bound_step_probe",
+            BOUND_STEP_SOURCE,
+        );
+        assert_payload_is_its_own_fixed_point::<rspice_veriloga::CompiledModel>(
+            "model",
+            &runtime.model_json,
+        );
+        assert_payload_is_its_own_fixed_point::<rspice_veriloga::canonical_ir::CanonicalIrArtifact>(
+            "canonical IR",
+            &runtime.canonical_ir_json,
+        );
+
+        let decoded: rspice_veriloga::CompiledModel =
+            serde_json::from_str(&runtime.model_json).expect("sealed model payload parses");
+        let found = non_finite_constants(&decoded.assignment_steps);
+        assert_eq!(
+            found.len(),
+            1,
+            "the module resets exactly one task variable to a non-finite sentinel, found {found:?}"
+        );
+        let (var_index, value) = found[0];
+        assert_eq!(
+            decoded.variable_names[var_index].as_str(),
+            "$bound_step",
+            "the surviving sentinel belongs to the step bound"
+        );
+        assert_eq!(
+            value.to_bits(),
+            f64::INFINITY.to_bits(),
+            "the step bound came back as {value} instead of +inf"
+        );
+
+        // The canonical IR carries the same sentinel as an expression literal,
+        // and it is the payload the browser JIT lowers. Asserted separately
+        // because the two payloads are separate strings with separate parses.
+        let ir: rspice_veriloga::canonical_ir::CanonicalIrArtifact =
+            serde_json::from_str(&runtime.canonical_ir_json).expect("sealed IR payload parses");
+        let sentinels: Vec<f64> = ir
+            .hir
+            .expressions
+            .iter()
+            .filter_map(|expression| match &expression.kind {
+                rspice_veriloga::canonical_ir::hir::HirExprKind::Number { value, .. }
+                    if !value.is_finite() =>
+                {
+                    Some(*value)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            sentinels
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+            vec![f64::INFINITY.to_bits()],
+            "the IR literal for the step bound arrived as {sentinels:?}"
+        );
+    }
+
+    #[test]
+    fn an_infinite_folded_constant_survives_the_seal_in_both_payloads() {
+        let runtime = seal_runtime(
+            "infinite-constant.va",
+            "rspice_infinite_constant_probe",
+            INFINITE_CONSTANT_SOURCE,
+        );
+        assert_payload_is_its_own_fixed_point::<rspice_veriloga::CompiledModel>(
+            "model",
+            &runtime.model_json,
+        );
+        assert_payload_is_its_own_fixed_point::<rspice_veriloga::canonical_ir::CanonicalIrArtifact>(
+            "canonical IR",
+            &runtime.canonical_ir_json,
+        );
+
+        let decoded: rspice_veriloga::CompiledModel =
+            serde_json::from_str(&runtime.model_json).expect("sealed model payload parses");
+        let folded = decoded
+            .parameters
+            .iter()
+            .find(|parameter| parameter.name.as_str() == "folded")
+            .expect("probe model declares the infinite parameter");
+        assert_eq!(
+            folded.default.to_bits(),
+            f64::INFINITY.to_bits(),
+            "the default came back as {} instead of +inf",
+            folded.default
+        );
+
+        let ir: rspice_veriloga::canonical_ir::CanonicalIrArtifact =
+            serde_json::from_str(&runtime.canonical_ir_json).expect("sealed IR payload parses");
+        let folded = ir
+            .hir
+            .parameters
+            .iter()
+            .find(|parameter| parameter.name.as_str() == "folded")
+            .expect("probe IR declares the infinite parameter");
+        assert_eq!(
+            folded.default.map(f64::to_bits),
+            Some(f64::INFINITY.to_bits()),
+            "the IR default arrived as {:?}, which is the silent loss",
+            folded.default
+        );
+
+        let unbounded = ir
+            .hir
+            .parameters
+            .iter()
+            .find(|parameter| parameter.name.as_str() == "unbounded")
+            .expect("probe IR declares the expression-bounded range")
+            .range
+            .as_ref()
+            .expect("the parameter declares a range");
+        assert_eq!(
+            unbounded.max.map(f64::to_bits),
+            Some(f64::INFINITY.to_bits()),
+            "an infinite bound expression arrived as {:?}",
+            unbounded.max
+        );
+        assert_eq!(
+            decoded
+                .parameters
+                .iter()
+                .find(|parameter| parameter.name.as_str() == "unbounded")
+                .and_then(|parameter| parameter.max)
+                .map(f64::to_bits),
+            Some(f64::INFINITY.to_bits()),
+            "the bound the device range-checks against must be the declared one"
+        );
+    }
+
+    /// The control, and the correction of a premise worth not rediscovering:
+    /// an open range bound is an *absence*, not an infinity. Nothing about the
+    /// non-finite encoding applies to it, and the shipped corpus — hundreds of
+    /// `from (0:inf)` declarations across 43 modules — carries no non-finite
+    /// float because of this.
+    #[test]
+    fn an_open_range_bound_is_an_absence_rather_than_an_infinity() {
+        let runtime = seal_runtime(
+            "infinite-constant.va",
+            "rspice_infinite_constant_probe",
+            INFINITE_CONSTANT_SOURCE,
+        );
+        let decoded: rspice_veriloga::CompiledModel =
+            serde_json::from_str(&runtime.model_json).expect("sealed model payload parses");
+        let conductance = decoded
+            .parameters
+            .iter()
+            .find(|parameter| parameter.name.as_str() == "conductance")
+            .expect("probe model declares the ranged parameter");
+        assert_eq!(conductance.min.map(f64::to_bits), Some(0.0_f64.to_bits()));
+        assert_eq!(conductance.max, None, "`inf` in a range bound is no bound");
+
+        let ir: rspice_veriloga::canonical_ir::CanonicalIrArtifact =
+            serde_json::from_str(&runtime.canonical_ir_json).expect("sealed IR payload parses");
+        let range = ir
+            .hir
+            .parameters
+            .iter()
+            .find(|parameter| parameter.name.as_str() == "conductance")
+            .expect("probe IR declares the ranged parameter")
+            .range
+            .as_ref()
+            .expect("the parameter declares a range");
+        assert_eq!(range.min.map(f64::to_bits), Some(0.0_f64.to_bits()));
+        assert_eq!(range.max, None);
+    }
+
+    /// The guard the seal runs before it writes. Nothing in a compiled
+    /// artifact can reach it today — every field that carries a non-finite
+    /// float is annotated — so it is exercised on a value that stands in for
+    /// a field that acquired one without being annotated, which is the
+    /// regression it exists to catch.
+    #[test]
+    fn the_seal_refuses_a_payload_carrying_a_float_json_cannot_encode() {
+        let error = super::seal_payload_json(
+            "model",
+            "compiled Verilog-A model",
+            &vec![1.0_f64, f64::INFINITY],
         )
-        .expect("fixture bundle is well formed");
-        let compilation = rspice_veriloga::VerilogACompiler::default()
-            .compile_virtual_runtime(&bundle, module, project_virtual_compile_limits())
-            .expect("fixture module compiles");
-        PreparedVerilogARuntime::try_from_virtual_compilation(
-            format!("__rspice_project__/wasm-jit/{file}"),
-            crate::product::ContentDigest::from_bytes([0x5a; 32]),
-            module.to_owned(),
-            &compilation,
-        )
-        .expect("fixture compilation seals into a prepared runtime")
+        .expect_err("a bare non-finite float must stop the seal");
+        assert_eq!(
+            error,
+            "Could not seal compiled Verilog-A model: 1 non-finite float JSON cannot encode: \
+             model[1] = inf"
+        );
     }
 
     /// A module whose assignment pass has no steps exports no kernel for it,
@@ -947,7 +1262,7 @@ module rspice_one_assignment_probe(p, n);
 endmodule
 "#;
 
-        let empty = seal_wasm_jit_runtime(
+        let empty = seal_runtime(
             "no-assignment.va",
             "rspice_no_assignment_probe",
             NO_ASSIGNMENTS,
@@ -959,7 +1274,7 @@ endmodule
             "a pass with no steps must cross the wire as an absence"
         );
 
-        let control = seal_wasm_jit_runtime(
+        let control = seal_runtime(
             "one-assignment.va",
             "rspice_one_assignment_probe",
             ONE_ASSIGNMENT,
@@ -978,5 +1293,62 @@ endmodule
         let decoded: super::WasmJitWorkerArtifact =
             serde_json::from_str(&encoded).expect("worker artifact decodes");
         assert_eq!(decoded.assignment_export, None);
+    }
+
+    /// The reason the seal has to carry a non-finite float at all: this is the
+    /// production browser entry point, and it opens by decoding the sealed
+    /// model and canonical IR. A `$bound_step` module could not get past that
+    /// decode, so no shipped model that bounds its own transient step reached
+    /// the browser. `$bound_step` also roots the assignment pass, so the
+    /// artifact it produces names a kernel — the same control the
+    /// assignment-export test needed `$discontinuity` for, now available from
+    /// the operator that actually motivated this.
+    #[cfg(feature = "browser-worker")]
+    #[test]
+    fn a_bound_step_module_compiles_all_the_way_to_a_browser_worker_artifact() {
+        let artifact = seal_runtime(
+            "bound-step.va",
+            "rspice_bound_step_probe",
+            BOUND_STEP_SOURCE,
+        )
+        .compile_wasm_jit_artifact()
+        .expect("a $bound_step module qualifies for the browser JIT");
+        assert_eq!(
+            artifact.assignment_export.as_deref(),
+            Some("rspice_wasm_jit_assign"),
+            "$bound_step roots an assignment pass, so the artifact names its kernel"
+        );
+        assert!(
+            !artifact.module_bytes.is_empty(),
+            "the browser is handed a module, not an empty artifact"
+        );
+    }
+
+    /// The same for the infinite parameter default, whose loss was silent in
+    /// the canonical IR rather than loud: the browser JIT lowers that payload,
+    /// so it used to be handed a model whose default had quietly become absent.
+    #[cfg(feature = "browser-worker")]
+    #[test]
+    fn an_infinite_folded_constant_reaches_the_browser_worker_artifact_intact() {
+        let runtime = seal_runtime(
+            "infinite-constant.va",
+            "rspice_infinite_constant_probe",
+            INFINITE_CONSTANT_SOURCE,
+        );
+        runtime
+            .compile_wasm_jit_artifact()
+            .expect("a module with an infinite default qualifies for the browser JIT");
+        let ir: rspice_veriloga::canonical_ir::CanonicalIrArtifact =
+            serde_json::from_str(&runtime.canonical_ir_json).expect("sealed IR payload parses");
+        assert_eq!(
+            ir.hir
+                .parameters
+                .iter()
+                .find(|parameter| parameter.name.as_str() == "folded")
+                .and_then(|parameter| parameter.default)
+                .map(f64::to_bits),
+            Some(f64::INFINITY.to_bits()),
+            "the default the browser device elaborates from must be the declared one"
+        );
     }
 }
