@@ -20,6 +20,7 @@
 
 pub mod bounded_io;
 mod capability;
+mod event_projection;
 mod fingerprint;
 mod materialized;
 mod plan;
@@ -40,6 +41,9 @@ pub use capability::{
     ANALYSIS_CAPABILITY_MATRIX, AnalysisResultCapability, AnalysisResultKind, MappingStatus,
     NonUiSurface, SIGNAL_CAPABILITY_MATRIX, SignalCapability, SurfaceCapability,
     analysis_result_capability, analysis_result_kind, signal_capability,
+};
+pub use event_projection::{
+    EventProjectionError, digital_value_from_vcd_bit, digital_value_to_vcd_bit, event_vcd_document,
 };
 pub use fingerprint::{topology_fingerprint, topology_fingerprint_with_abort};
 pub use materialized::{

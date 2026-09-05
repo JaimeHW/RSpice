@@ -1,4 +1,4 @@
-//! Waveform file formats: reading and writing SPICE RAW.
+//! Waveform file formats: reading and writing SPICE RAW and VCD.
 //!
 //! Reading and writing the same format used to sit in two unrelated places —
 //! the reader under `compat` (as a foreign-simulator shim) and the writers
@@ -7,7 +7,9 @@
 //!
 //! The RAW modules remain leaf components: [`raw_export`] has no in-crate
 //! dependencies and [`waveform_stream`] needs only [`crate::resource`] for its
-//! read limits. [`xyce_prn`] deliberately consumes the typed `.PRINT` layout
+//! read limits. [`vcd`] carries the event-driven half — irregular four-state
+//! timelines rather than a sampled table — and needs the same read limits and
+//! nothing else. [`xyce_prn`] deliberately consumes the typed `.PRINT` layout
 //! and simulation output policy retained by [`crate::netlist`], but no format
 //! module reaches for a circuit or analysis-result type. Callers still provide
 //! names and columns of [`crate::Value`], keeping serialization independent of
@@ -19,6 +21,7 @@
 
 pub mod ltspice_raw;
 pub mod raw_export;
+pub mod vcd;
 pub mod waveform_stream;
 pub mod xyce_prn;
 
@@ -28,6 +31,11 @@ pub use ltspice_raw::{
 };
 pub use raw_export::{
     RawExporter, RawFormat, RawVariable, VariableType, export_dc_sweep, export_transient,
+};
+pub use vcd::{
+    VCD_WRITER_VERSION, VcdBit, VcdChange, VcdDocument, VcdError, VcdMagnitude, VcdSignal,
+    VcdSignalKind, VcdTimeUnit, VcdTimescale, VcdValue, VcdVariable, parse_vcd_file,
+    parse_vcd_file_with_limits, parse_vcd_reader, parse_vcd_reader_with_limits, write_vcd,
 };
 pub use waveform_stream::{StreamingWaveformWriter, WaveformStreamError};
 pub use xyce_prn::{

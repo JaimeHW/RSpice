@@ -372,7 +372,31 @@ use rspice_core::analysis::harmonic_balance::{
 // and each is either a physical model or an execution-contract entry point
 // whose consumer is another package's work in flight. Deleting them is a
 // decision for the package that owns the consumer, not for a visibility pass.
-const MAX_PUBLIC_ITEMS: usize = 4916;
+//
+// 2026-09-05, +29 deliberate (4,916 -> 4,945): the VCD codec in `io::vcd` and
+// the event projection that feeds it, which is case 2 above — an entry point
+// frontends are meant to call. The GUI has a VCD reader today, private to
+// `workbench::workflows`, mapping four-state logic onto `f64` and refusing
+// `x`/`z` outright; there is no writer anywhere. The CLI's `convert` and
+// `run --format vcd` and the GUI's import adapter consume this one instead, so
+// every name on the list is on the path from a deck to a `.vcd` file or back:
+//
+// - 23 in `io/vcd.rs`. The document vocabulary (`VcdDocument`, `VcdSignal`,
+//   `VcdVariable`, `VcdChange`, `VcdValue`, `VcdBit`, `VcdSignalKind`,
+//   `VcdTimescale`, `VcdMagnitude`, `VcdTimeUnit`, `VcdError`) is what a
+//   caller reads a dump out of and builds one from, and its fields are public,
+//   so `private_interfaces` makes the types public by construction. The four
+//   `parse_vcd_*` entry points mirror `ltspice_raw`'s file/reader pair because
+//   the CLI and the GUI already consume that pair; `write_vcd`,
+//   `VcdDocument::new`, `assign_canonical_identifiers`,
+//   `VcdVariable::scoped_name`, `VcdTimescale::ALL`,
+//   `VcdTimescale::femtoseconds`, `VcdTimescale::seconds` and
+//   `VCD_WRITER_VERSION` are the writer's half.
+// - 4 in `execution/event_projection.rs`: `event_vcd_document`, the two
+//   `DigitalValue` <-> `VcdBit` mapping functions, and
+//   `EventProjectionError`.
+// - 2 grouped re-export statements, in `io.rs` and `execution.rs`.
+const MAX_PUBLIC_ITEMS: usize = 4945;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
