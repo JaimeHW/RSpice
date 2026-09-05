@@ -77,7 +77,13 @@ pub const WASM_JIT_ABI_VERSION: u32 = 8;
 /// native side. Same exports, same frame, fewer assignments inside the kernel,
 /// so again nothing but the version tells a stale worker's module from a
 /// current one.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 10;
+/// 10 to 11 when a block program's back edge started counting its trips. A 10
+/// emits a `loop` a Verilog-A `while` can spin in forever; an 11 emits the same
+/// `loop` with a counter, and returns [`WASM_JIT_STATUS_RUNTIME_ERROR`] on the
+/// hundred-thousandth trip rather than hanging the worker. Same exports, same
+/// frame, one more local per loop, so again nothing but the version tells a
+/// stale worker's module from a current one.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 11;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
