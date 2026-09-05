@@ -335,6 +335,34 @@ impl DigitalValue {
         level + offset
     }
 
+    /// Decode the value one XSPICE event code names.
+    ///
+    /// The inverse of [`Self::event_code`]: every code in `0..=12` maps back
+    /// to the value that writes it, and re-encoding the result reproduces the
+    /// code. The mapping is onto the canonical spelling of each band — a code
+    /// says which of the twelve resolved states a node holds, so a value that
+    /// qualified its band twice (`ZeroR` carried at `Strong`) comes back with
+    /// the band its state names. Any other code is not an event code.
+    pub const fn from_event_code(code: u8) -> Option<Self> {
+        let (state, strength) = match code {
+            0 => (DigitalState::Zero, DigitalStrength::Strong),
+            1 => (DigitalState::One, DigitalStrength::Strong),
+            2 => (DigitalState::Unknown, DigitalStrength::Strong),
+            3 => (DigitalState::ZeroR, DigitalStrength::Resistive),
+            4 => (DigitalState::OneR, DigitalStrength::Resistive),
+            5 => (DigitalState::UnknownR, DigitalStrength::Resistive),
+            6 => (DigitalState::ZeroZ, DigitalStrength::HighZ),
+            7 => (DigitalState::OneZ, DigitalStrength::HighZ),
+            8 => (DigitalState::UnknownZ, DigitalStrength::HighZ),
+            9 => (DigitalState::Zero, DigitalStrength::Undetermined),
+            10 => (DigitalState::One, DigitalStrength::Undetermined),
+            11 => (DigitalState::Unknown, DigitalStrength::Undetermined),
+            12 => (DigitalState::HighZ, DigitalStrength::HighZ),
+            _ => return None,
+        };
+        Some(Self { state, strength })
+    }
+
     /// Invert the value
     pub fn invert(&self) -> Self {
         Self::new(self.state.invert(), self.strength)
@@ -429,6 +457,31 @@ mod tests {
         assert_eq!(
             DigitalValue::high_z().resolve(&DigitalValue::one()),
             DigitalValue::one()
+        );
+    }
+
+    #[test]
+    fn event_codes_round_trip_through_their_decoded_value() {
+        for code in 0u8..=12 {
+            let value =
+                DigitalValue::from_event_code(code).expect("0..=12 are the event codes themselves");
+            assert_eq!(value.event_code(), code, "code {code} did not re-encode");
+        }
+        assert_eq!(DigitalValue::from_event_code(13), None);
+        assert_eq!(DigitalValue::from_event_code(u8::MAX), None);
+    }
+
+    #[test]
+    fn event_code_decoding_names_the_band_the_state_already_carries() {
+        // `strength` decides the band only for the three unqualified levels,
+        // so a doubly-qualified value comes back on its state's own band.
+        let carried = DigitalValue::new(DigitalState::ZeroR, DigitalStrength::Strong);
+        assert_eq!(
+            DigitalValue::from_event_code(carried.event_code()),
+            Some(DigitalValue::new(
+                DigitalState::ZeroR,
+                DigitalStrength::Resistive
+            ))
         );
     }
 }
