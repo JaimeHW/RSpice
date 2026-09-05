@@ -132,10 +132,11 @@ const SHIPPED_CENSUS_MODELS: usize = 43;
 /// liveness stopped rooting on what the *postfix* plan's entries read. Under a
 /// CFG plan those entries are prelude-slot loads that read no variable, so the
 /// assignments they used to keep alive were a pass held open for programs the
-/// image no longer holds. The roots are now what this plan reads — the static
+/// image no longer holds. The roots became what this plan reads — the static
 /// conditions the route does not replace, the event-state leaves the prelude
-/// lowers to a `LoadVariable`, and the externally observable set, which stays
-/// until operating-point readback has somewhere else to come from.
+/// lowers to a `LoadVariable`, and the externally observable set, which stayed
+/// until operating-point readback had somewhere else to come from. The section
+/// above is where it got one.
 ///
 /// The reading is the same shape as the two below and it comes out cleaner than
 /// either: **forty-one modules moved, two are byte-identical, and not one image
