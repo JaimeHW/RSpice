@@ -14,8 +14,15 @@
 //!
 //! ```text
 //! .pxf dec 10 1k 1G
-//! + output=VOUT outsideband=1 input=VIN
+//! + out=VOUT outsideband=1 input=VIN
 //! ```
+//!
+//! `.PXF` is not a card the engine's netlist parser owns — it has no
+//! `AnalysisCommand` for it, and reads the line as an unsupported dot-command
+//! it records and ignores. The studio runs it through its own typed pipeline.
+//! The output probe is spelled `out=` regardless, so the whole periodic family
+//! reads one way: `.PAC` and `.PNOISE`, which the engine *does* own, spell it
+//! that way because the engine does.
 
 use super::options::parse_si_value;
 
@@ -102,12 +109,9 @@ impl PxfConfig {
 
         if !self.output_node.is_empty() {
             if self.output_ref.is_empty() {
-                cmd.push_str(&format!(" output={}", self.output_node));
+                cmd.push_str(&format!(" out={}", self.output_node));
             } else {
-                cmd.push_str(&format!(
-                    " output=({},{})",
-                    self.output_node, self.output_ref
-                ));
+                cmd.push_str(&format!(" out=V({},{})", self.output_node, self.output_ref));
             }
         }
 

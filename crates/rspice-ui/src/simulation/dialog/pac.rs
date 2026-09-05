@@ -15,7 +15,7 @@
 //!
 //! ```text
 //! .pac dec 10 1k 1G
-//! + maxsideband=5 input=VRF output=VOUT
+//! + maxsideband=5 input=VRF out=VOUT
 //! ```
 
 use super::options::parse_si_value;
@@ -96,7 +96,18 @@ impl Default for PacConfig {
 }
 
 impl PacConfig {
-    /// Generate SPICE directive
+    /// The `.PAC` card the engine reads, in the engine's own grammar.
+    ///
+    /// `rspice-core/src/netlist/parser/periodic_cards.rs::parse_pac_command`
+    /// reads `.PAC DEC|LIN|OCT np fstart fstop KEY=VALUE ...` and refuses any
+    /// keyword outside `INPUT`, `OUT`, `MAXSIDEBAND`, `SIDEBANDMIN`,
+    /// `SIDEBANDMAX`, `RELTOL`, `ABSTOL` and `FROM`. The output probe is
+    /// `OUT=`, spelled `V(node)` or `V(node,ref)` or a bare node name.
+    ///
+    /// `pacmag` and `includedc` are not written: the engine's card has no
+    /// field for either, and both already reach the run through the typed
+    /// execution options rather than through the deck
+    /// (`controller::analysis_run_config::pac_run_config_from_dialog`).
     pub fn to_spice(&self) -> String {
         let mut cmd = format!(
             ".pac {} {} {} {}",
@@ -114,21 +125,10 @@ impl PacConfig {
 
         if !self.output_node.is_empty() {
             if self.output_ref.is_empty() {
-                cmd.push_str(&format!(" output={}", self.output_node));
+                cmd.push_str(&format!(" out={}", self.output_node));
             } else {
-                cmd.push_str(&format!(
-                    " output=({},{})",
-                    self.output_node, self.output_ref
-                ));
+                cmd.push_str(&format!(" out=V({},{})", self.output_node, self.output_ref));
             }
-        }
-
-        if (self.pac_magnitude - 1.0).abs() > 0.001 {
-            cmd.push_str(&format!(" pacmag={}", self.pac_magnitude));
-        }
-
-        if !self.include_dc {
-            cmd.push_str(" includedc=no");
         }
 
         cmd
@@ -294,3 +294,31 @@ fn format_freq(freq: f64) -> String {
 // =============================================================================
 // Tests
 // =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The exact card, in the engine's spelling.
+    ///
+    /// `directive_parse_ratchet` proves the engine reads whatever this writes.
+    /// This pins which card was written — in particular `out=`, which is the
+    /// keyword the engine's `.PAC` arm knows. The `output=` this used to write
+    /// parsed for months as a card no parser owned, and then as one the parser
+    /// refused outright.
+    #[test]
+    fn the_card_spells_its_output_probe_the_way_the_engine_reads_it() {
+        assert_eq!(
+            PacConfig::default().to_spice(),
+            ".pac dec 10 1k 1G maxsideband=5 input=VRF out=VOUT"
+        );
+        assert_eq!(
+            PacConfig {
+                output_ref: "REF".to_owned(),
+                ..PacConfig::default()
+            }
+            .to_spice(),
+            ".pac dec 10 1k 1G maxsideband=5 input=VRF out=V(VOUT,REF)"
+        );
+    }
+}

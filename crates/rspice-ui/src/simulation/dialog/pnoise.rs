@@ -15,7 +15,7 @@
 //!
 //! ```text
 //! .pnoise dec 10 1 1Meg
-//! + output=VOUT maxsideband=5 noiseref=yes
+//! + out=VOUT maxsideband=5
 //! ```
 
 use super::options::parse_si_value;
@@ -61,17 +61,6 @@ pub enum NoiseReferenceType {
     Input,
     /// Phase noise (dBc/Hz)
     Phase,
-}
-
-impl NoiseReferenceType {
-    /// SPICE keyword
-    pub fn spice_keyword(&self) -> &'static str {
-        match self {
-            Self::Output => "output",
-            Self::Input => "input",
-            Self::Phase => "phase",
-        }
-    }
 }
 
 // =============================================================================
@@ -126,7 +115,21 @@ impl Default for PnoiseConfig {
 }
 
 impl PnoiseConfig {
-    /// Generate SPICE directive
+    /// The `.PNOISE` card the engine reads, in the engine's own grammar.
+    ///
+    /// `rspice-core/src/netlist/parser/periodic_cards.rs::parse_pnoise_command`
+    /// reads `.PNOISE DEC|LIN|OCT np fstart fstop KEY=VALUE ...` and refuses
+    /// any keyword outside `OUT`, `INPUT`, `MAXSIDEBAND` and `FROM`. `OUT=` is
+    /// the output probe, spelled `V(node)`, `V(node,ref)` or a bare node name;
+    /// `INPUT=` is, in the card's own words, the source used for
+    /// input-referred noise.
+    ///
+    /// `noiseref`, `integratedNoise` and `noiseSummary` are not written: the
+    /// engine's card has no field for any of them, and all three already reach
+    /// the run through the typed execution options
+    /// (`controller::analysis_run_config::pnoise_run_config_from_dialog`).
+    /// Phase noise is therefore a studio-side selection that the deck does not
+    /// state.
     pub fn to_spice(&self) -> String {
         let mut cmd = format!(
             ".pnoise {} {} {} {}",
@@ -138,12 +141,9 @@ impl PnoiseConfig {
 
         if !self.output_node.is_empty() {
             if self.output_ref.is_empty() {
-                cmd.push_str(&format!(" output={}", self.output_node));
+                cmd.push_str(&format!(" out={}", self.output_node));
             } else {
-                cmd.push_str(&format!(
-                    " output=({},{})",
-                    self.output_node, self.output_ref
-                ));
+                cmd.push_str(&format!(" out=V({},{})", self.output_node, self.output_ref));
             }
         }
 
@@ -152,18 +152,6 @@ impl PnoiseConfig {
         }
 
         cmd.push_str(&format!(" maxsideband={}", self.max_sideband));
-
-        if self.noise_ref != NoiseReferenceType::Output {
-            cmd.push_str(&format!(" noiseref={}", self.noise_ref.spice_keyword()));
-        }
-
-        if self.integrated_noise {
-            cmd.push_str(" integratedNoise=yes");
-        }
-
-        if self.noise_summary {
-            cmd.push_str(" noiseSummary=yes");
-        }
 
         cmd
     }
@@ -186,8 +174,13 @@ impl PnoiseConfig {
             return Err("Number of points must be at least 1".to_string());
         }
 
-        if self.max_sideband < 0 {
-            return Err("Maximum sideband must be non-negative".to_string());
+        // The engine's own bound on the folded sideband count, taken here so
+        // the form refuses what the card cannot spell: `.PNOISE MAXSIDEBAND=`
+        // is a signed integer of at least one
+        // (`rspice-core/src/netlist/parser/periodic_cards.rs`, the `.PNOISE`
+        // `MAXSIDEBAND` arm). Folding no sidebands is not periodic noise.
+        if self.max_sideband < 1 {
+            return Err("Maximum sideband must be at least 1".to_string());
         }
 
         if self.output_node.is_empty() {
@@ -387,3 +380,40 @@ fn format_freq(freq: f64) -> String {
 // =============================================================================
 // Tests
 // =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The exact card, in the engine's spelling.
+    ///
+    /// The output probe is `out=`, and `INPUT=` appears only for the
+    /// input-referred selection it means on the engine's card. Phase noise
+    /// writes the same card as output-referred noise, because the card has no
+    /// field for the difference — the selection reaches the run through the
+    /// typed execution options instead, which is why it is asserted here
+    /// rather than assumed.
+    #[test]
+    fn the_card_states_only_what_the_engine_reads_from_it() {
+        assert_eq!(
+            PnoiseConfig::default().to_spice(),
+            ".pnoise dec 10 1 1Meg out=VOUT maxsideband=5"
+        );
+        assert_eq!(
+            PnoiseConfig {
+                noise_ref: NoiseReferenceType::Input,
+                ..PnoiseConfig::default()
+            }
+            .to_spice(),
+            ".pnoise dec 10 1 1Meg out=VOUT input=VIN maxsideband=5"
+        );
+        assert_eq!(
+            PnoiseConfig {
+                noise_ref: NoiseReferenceType::Phase,
+                ..PnoiseConfig::default()
+            }
+            .to_spice(),
+            PnoiseConfig::default().to_spice()
+        );
+    }
+}
