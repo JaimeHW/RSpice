@@ -357,6 +357,9 @@ pub(super) fn write_dc_op_output(
                     message: "HDF5 handled before text writers".to_string(),
                 });
             }
+            OutputFormat::Vcd => {
+                return Err(crate::commands::vcd_io::unsupported_analysis("operating point"));
+            }
         }
 
         Ok(())
@@ -1030,6 +1033,22 @@ pub(super) fn run_transient(
                             builder,
                         )?))
                     }
+                    OutputFormat::Vcd => {
+                        if result.digital_traces.is_empty() && result.real_traces.is_empty() {
+                            eprintln!(
+                                "Warning: this transient captured no digital or real event node; \
+                                 {} declares no signal and records no change",
+                                output_path.display()
+                            );
+                        }
+                        TransientOutputDocument::Vcd(Box::new(
+                            crate::commands::vcd_io::event_document(
+                                &output_path,
+                                &result.digital_traces,
+                                &result.real_traces,
+                            )?,
+                        ))
+                    }
                     OutputFormat::Raw
                     | OutputFormat::RawAscii
                     | OutputFormat::Csv
@@ -1127,6 +1146,12 @@ pub(super) enum TransientOutputDocument {
     },
     /// The shared typed result document, published for `-f json`.
     Typed(Box<rspice_core::execution::AnalysisResultDocument>),
+    /// The event timelines as a Value Change Dump, published for `-f vcd`.
+    ///
+    /// This is the one transient artifact that carries no analog waveform:
+    /// the analysis grid is what the other formats are for, and an event dump
+    /// is for the times the events actually happened.
+    Vcd(Box<rspice_core::io::VcdDocument>),
 }
 
 impl TransientOutputDocument {
@@ -1151,11 +1176,14 @@ impl TransientOutputDocument {
                     OutputFormat::Csv
                     | OutputFormat::Tsv
                     | OutputFormat::Json
-                    | OutputFormat::Hdf5 => return Ok(()),
+                    | OutputFormat::Hdf5
+                    | OutputFormat::Vcd => return Ok(()),
                 };
                 rspice_core::io::write_event_plots(writer, events, raw_format)
                     .map_err(|error| CliError::output_error(path, error))
             }
+            Self::Vcd(document) => rspice_core::io::write_vcd(&mut *writer, document)
+                .map_err(|error| crate::commands::vcd_io::write_error(path, error)),
             Self::Typed(document) => {
                 let json = document
                     .to_json_with_abort(&crate::abort::ProcessAbort, byte_limit)

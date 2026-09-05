@@ -484,7 +484,7 @@ pub(super) fn parse_format_name(name: &str) -> Result<OutputFormat, CliError> {
     use clap::ValueEnum;
     OutputFormat::from_str(name, true).map_err(|_| CliError::ConfigError {
         message: format!(
-            "invalid output.format '{}'; expected one of: raw, ascii, csv, json, tsv, hdf5",
+            "invalid output.format '{}'; expected one of: raw, ascii, csv, json, tsv, hdf5, vcd",
             name
         ),
     })

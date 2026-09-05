@@ -198,6 +198,22 @@ shapes:
 TF, pole-zero, and sensitivity tables have no natural HDF5 section and reject
 `-f hdf5` with a clear error; use `csv`, `json`, or `raw`.
 
+#### `vcd`
+
+A Value Change Dump of the transient's event timelines: one `wire` per XSPICE
+digital node, one `real` per real event node, under a single `$scope module
+events`, at the times the events happened rather than on the analysis grid.
+The `$timescale` is the coarsest period that keeps every event time an exact
+integer tick, so a run whose edges land on nanoseconds is written `1 ns`; a
+time that is not a whole number of femtoseconds is refused by name rather than
+quantised. VCD has four bit states and no drive strength, so the level
+survives and the XSPICE strength band does not.
+
+Only a transient captures events. Every other analysis refuses `-f vcd` with a
+clear error; use `csv`, `json`, `raw`, or `hdf5`. A transient that captured no
+event node publishes a dump with no declarations and no changes, and says so on
+stderr.
+
 #### `hdf5`
 
 One document per analysis, whose section group is named by the analysis
@@ -268,7 +284,7 @@ Accepts `.sp`, `.cir`, `.net`, and `.spice` netlists, or `-` to read the netlist
 | Flag | Description |
 | :--- | :--- |
 | `-o, --output <FILE>` | Output file for results. With several analysis cards in one deck, each analysis writes its own file, namespaced by its canonical analysis identity: `out.csv` → `out.op-001.csv`, `out.tran-001.csv`, ... |
-| `-f, --format <FORMAT>` | Output format: `raw`, `ascii`, `csv`, `json`, `tsv`, `hdf5` (default: config `output.format`, else `raw`) |
+| `-f, --format <FORMAT>` | Output format: `raw`, `ascii`, `csv`, `json`, `tsv`, `hdf5`, `vcd` (default: config `output.format`, else `raw`) |
 | `--save <SIGNAL>` | Limit exported signals, replacing the netlist `.SAVE`/`.PROBE`/`.PRINT`/`.PLOT` selection: `V(out)`, `V(a,b)`, `I(v1)`, `@m1[id]`, `all` (repeatable) |
 | `--meas` | Print `.MEAS` measurement results |
 | `--summary <FILE>` | Write a versioned JSON run summary — build/run identity, execution counts and timing, effective resource limits, typed failures, every measurement, result files, and overall verdict — to FILE, or stdout with `-` |
@@ -439,7 +455,7 @@ Errors exit 65; `--strict` turns a warning-only deck into a usage failure, which
 
 ### `rspice compare` — Golden File Comparison
 
-Compare simulation results against a reference file for regression testing. Both files may be in any supported result format — rawfile (binary or ASCII), CSV, TSV, JSON, or HDF5, auto-detected by extension — so a binary rawfile result can be checked directly against a CSV golden. Complex AC data compares value-for-value as `Re(..)`/`Im(..)` series.
+Compare simulation results against a reference file for regression testing. Both files may be in any supported result format — rawfile (binary or ASCII), CSV, TSV, JSON, HDF5, or VCD, auto-detected by extension — so a binary rawfile result can be checked directly against a CSV golden, and an event dump against another dump. Complex AC data compares value-for-value as `Re(..)`/`Im(..)` series. A `.vcd` file is compared through the table form `convert` builds from it, on its own event ticks; the tolerances and alignment are the same ones every other format uses.
 
 The golden file defines the contract: golden variables missing from the result fail, point-count mismatches fail (a result truncated by a crashed run cannot pass on the overlap it wrote), and NaN never matches anything. A passing comparison exits `0`; mismatches exit `3` (verification failure).
 
@@ -462,6 +478,8 @@ rspice compare <RESULT> <GOLDEN> [OPTIONS]
 ### `rspice convert` — Format Conversion
 
 Convert between simulation output formats: `raw`, `ascii`, `csv`, `json`, `tsv`, `hdf5`. Complex AC data is preserved across every round trip (`Re(..)`/`Im(..)` column pairs in CSV/TSV, `Flags: complex` in rawfiles, real/imag arrays in JSON and HDF5).
+
+Converting **from** `vcd` builds a table whose rows are the dump's distinct ticks: time is tick × `$timescale`, each signal holds its last value, `x` and `z` become `0.5` in a `digital` column, and a logic signal wider than one bit becomes its unsigned integer value (at most 53 bits, which is what an `f64` column holds exactly). Columns are named `D(node)` and `E(node)`, dropping the scope levels every signal shares — so a dump RSpice wrote reads back under the same names its CSV uses, and a foreign dump keeps whatever path still tells its signals apart. Before its first change a logic signal reads `0.5`; a real signal, which has no unknown to show, holds its first value backwards. `compare` reads `.vcd` on either side through this same table.
 
 ```bash
 rspice convert <INPUT> <OUTPUT> --to <FORMAT> [OPTIONS]

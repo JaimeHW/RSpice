@@ -2213,6 +2213,11 @@ fn write_fft_to_writer(
             requests,
             timeout_seconds,
         )?,
+        OutputFormat::Vcd => {
+            return Err(crate::commands::vcd_io::unsupported_analysis(
+                "transient FFT",
+            ));
+        }
         OutputFormat::Hdf5 => {
             let mut data = Hdf5SimulationData::new();
             data.title = format!("Transient FFT ({parent_analysis_id})");

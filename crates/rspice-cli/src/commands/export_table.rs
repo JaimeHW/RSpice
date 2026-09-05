@@ -12,7 +12,9 @@
 //! - `json`: a `{"analysis", "scale", "signals"}` document
 //!
 //! The same structure is what `convert` and `compare` read files back into;
-//! see [`crate::commands::waveform_io`].
+//! see [`crate::commands::waveform_io`]. `vcd` is not among them: a dump
+//! carries irregular event timelines rather than grid columns, so it is built
+//! by [`crate::commands::vcd_io`] and refused here.
 
 use crate::cli::{CliError, OutputFormat};
 use crate::commands::publish;
@@ -200,11 +202,18 @@ impl ExportTable {
     /// Write the table to `path` in the requested format.
     ///
     /// HDF5 has analysis-specific sections and must be handled by the caller.
+    /// VCD is not a table at all — it carries event timelines, which only a
+    /// transient captures — so it is refused here rather than flattened.
     pub(crate) fn write(&self, path: &Path, format: OutputFormat) -> Result<(), CliError> {
         if format == OutputFormat::Hdf5 {
             return Err(CliError::InternalError {
                 message: "HDF5 export must be handled by the analysis-specific writer".to_string(),
             });
+        }
+        if format == OutputFormat::Vcd {
+            return Err(crate::commands::vcd_io::unsupported_analysis(
+                &self.analysis,
+            ));
         }
 
         publish::artifact(path, |writer| self.write_to(writer, path, format))
@@ -227,6 +236,9 @@ impl ExportTable {
             OutputFormat::Hdf5 => Err(CliError::InternalError {
                 message: "HDF5 export must be handled by the analysis-specific writer".to_string(),
             }),
+            OutputFormat::Vcd => Err(crate::commands::vcd_io::unsupported_analysis(
+                &self.analysis,
+            )),
         }
     }
 

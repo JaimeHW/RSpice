@@ -211,6 +211,14 @@ pub enum Commands {
     Check(CheckArgs),
 
     /// Convert between output formats
+    ///
+    /// Rawfile, CSV, TSV, JSON and HDF5 all carry the same table, and complex
+    /// AC data survives every round trip between them.
+    ///
+    /// Converting from `vcd` builds a table whose rows are the dump's distinct
+    /// ticks: time is tick times timescale, each signal holds its last value,
+    /// x and z become 0.5 in a `digital` column, and a logic signal wider than
+    /// one bit becomes its unsigned integer value.
     Convert(ConvertArgs),
 
     /// Compare results against golden file (regression testing)
@@ -753,6 +761,8 @@ pub enum OutputFormat {
     Tsv,
     /// HDF5 format
     Hdf5,
+    /// Value Change Dump (digital and real event timelines)
+    Vcd,
 }
 
 #[cfg(test)]

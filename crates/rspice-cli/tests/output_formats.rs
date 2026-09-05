@@ -928,3 +928,189 @@ fn transient_hdf5_preserves_xspice_digital_type_when_converted() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// `-f vcd` publishes the event timelines themselves: every captured node, at
+/// its own times, in the four states VCD can name.
+///
+/// The rawfile's event plots are the reference, because they are the lossless
+/// carrier this dump is projected from. Every edge must land on the same
+/// femtosecond, and an XSPICE `Unknown` — which the grid `D()` column
+/// flattens to 0.5 along with high impedance — must read back as `x`.
+#[test]
+fn transient_vcd_carries_every_event_node_at_its_own_time() {
+    use rspice_core::io::{VcdBit, VcdSignalKind, VcdValue};
+    use rspice_core::xspice::DigitalState;
+
+    let dir = test_dir("tran_xspice_event_vcd");
+    let vcd = run_export(&dir, "events_vcd", XSPICE_EVENT_TRAN_DECK, "vcd");
+    let raw = run_export(&dir, "events_reference", XSPICE_EVENT_TRAN_DECK, "raw");
+
+    let reference = rspice_core::execution::decode_event_plots(
+        &rspice_core::io::parse_raw_plots_file_with_limits(
+            &raw,
+            rspice_core::ResourceLimits::default(),
+        )
+        .expect("read the reference rawfile"),
+    )
+    .expect("decode the reference event plots");
+
+    let document = rspice_core::io::parse_vcd_file(&vcd).expect("read the published dump");
+    assert_eq!(
+        document.signals.len(),
+        reference.digital_traces.len() + reference.real_traces.len(),
+        "every captured event node is one signal: {document:?}"
+    );
+    let period = document.timescale.femtoseconds();
+
+    let signal_of = |node: &str| {
+        document
+            .signals
+            .iter()
+            .find(|signal| {
+                signal
+                    .variables
+                    .iter()
+                    .any(|variable| variable.name.eq_ignore_ascii_case(node))
+            })
+            .unwrap_or_else(|| panic!("node '{node}' is not in the dump: {document:?}"))
+    };
+
+    let mut unknowns = 0_usize;
+    for trace in &reference.digital_traces {
+        let signal = signal_of(&trace.node_name);
+        assert_eq!(signal.kind, VcdSignalKind::Logic);
+        assert_eq!(signal.width, 1);
+        assert_eq!(
+            signal.variables[0].scope,
+            vec!["events".to_string()],
+            "the run's nodes are declared under one scope"
+        );
+        assert_eq!(signal.changes.len(), trace.points.len());
+        for (change, point) in signal.changes.iter().zip(&trace.points) {
+            assert_eq!(
+                change.tick * period,
+                (point.time * 1e15).round() as u64,
+                "an edge moved: tick {} at {period} fs/tick is not {} s",
+                change.tick,
+                point.time
+            );
+            let expected = match point.value.state {
+                DigitalState::Zero | DigitalState::ZeroR | DigitalState::ZeroZ => VcdBit::Zero,
+                DigitalState::One | DigitalState::OneR | DigitalState::OneZ => VcdBit::One,
+                DigitalState::Unknown | DigitalState::UnknownR | DigitalState::UnknownZ => {
+                    unknowns += 1;
+                    VcdBit::Unknown
+                }
+                DigitalState::HighZ => VcdBit::HighImpedance,
+            };
+            assert_eq!(change.value, VcdValue::Logic(vec![expected]));
+        }
+    }
+    assert!(
+        unknowns > 0,
+        "the bridged node passes through Unknown, which is what `x` is for"
+    );
+
+    for trace in &reference.real_traces {
+        let signal = signal_of(&trace.node_name);
+        assert_eq!(signal.kind, VcdSignalKind::Real);
+        assert_eq!(signal.changes.len(), trace.points.len());
+        for (change, point) in signal.changes.iter().zip(&trace.points) {
+            assert_eq!(change.tick * period, (point.time * 1e15).round() as u64);
+            assert_eq!(change.value, VcdValue::Real(point.value));
+        }
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A transient with nothing to dump still publishes a valid dump, and says so.
+#[test]
+fn transient_vcd_without_event_nodes_declares_nothing_and_warns() {
+    let dir = test_dir("tran_vcd_empty");
+    let deck = dir.join("empty_events.sp");
+    std::fs::write(&deck, TRAN_DECK).expect("write deck");
+    let out = dir.join("empty_events.vcd");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args([
+            "--quiet",
+            "run",
+            deck.to_str().unwrap(),
+            "-o",
+            out.to_str().unwrap(),
+            "-f",
+            "vcd",
+        ])
+        .output()
+        .expect("run rspice");
+    assert!(
+        output.status.success(),
+        "an event-free transient still publishes: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("captured no digital or real event node"),
+        "the run must say the dump is empty: {stderr}"
+    );
+
+    let document = rspice_core::io::parse_vcd_file(&out).expect("an empty dump is still valid VCD");
+    assert!(document.signals.is_empty());
+    let text = std::fs::read_to_string(&out).expect("read the dump");
+    assert!(
+        text.contains("$enddefinitions $end"),
+        "declarations are still closed: {text}"
+    );
+    assert!(
+        !text.lines().any(|line| line.starts_with('#')),
+        "there is no change to record: {text}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Only a transient captures events, so every other analysis refuses `-f vcd`
+/// by name rather than publishing a dump of nothing.
+#[test]
+fn analyses_without_an_event_timeline_refuse_vcd_output() {
+    let dir = test_dir("vcd_refusal");
+    for (tag, deck, what) in [
+        ("op", OP_DECK, "operating point"),
+        ("dc", DC_DECK, "dc_sweep"),
+        ("ac", AC_DECK, "ac"),
+        ("noise", NOISE_DECK, "noise"),
+    ] {
+        let deck_path = dir.join(format!("{tag}.sp"));
+        std::fs::write(&deck_path, deck).expect("write deck");
+        let out = dir.join(format!("{tag}.vcd"));
+
+        let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+            .args([
+                "--quiet",
+                "run",
+                deck_path.to_str().unwrap(),
+                "-o",
+                out.to_str().unwrap(),
+                "-f",
+                "vcd",
+            ])
+            .output()
+            .expect("run rspice");
+        assert!(
+            !output.status.success(),
+            "{tag}: a result with no event timeline must not publish a dump"
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains(&format!("VCD output is not supported for {what} results")),
+            "{tag}: unexpected refusal: {stderr}"
+        );
+        assert!(
+            !out.exists(),
+            "{tag}: a refused publication leaves no file behind"
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

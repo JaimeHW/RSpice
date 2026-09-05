@@ -26,6 +26,7 @@ pub mod models;
 pub(crate) mod publish;
 pub mod run;
 mod run_signals;
+pub(crate) mod vcd_io;
 pub(crate) mod waveform_io;
 
 pub use check::execute as check;

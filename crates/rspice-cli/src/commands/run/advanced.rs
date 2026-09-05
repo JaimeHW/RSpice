@@ -155,7 +155,10 @@ pub(super) fn export_step_sweep(
         }
         crate::cli::OutputFormat::Csv
         | crate::cli::OutputFormat::Tsv
-        | crate::cli::OutputFormat::Json => {
+        | crate::cli::OutputFormat::Json
+        // A step sweep has no event timeline, so the table writer refuses VCD
+        // by name rather than this arm deciding it a second time.
+        | crate::cli::OutputFormat::Vcd => {
             super::export::scalar_table(
                 "step_sweep",
                 "Step Sweep",

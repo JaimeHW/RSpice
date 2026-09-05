@@ -559,15 +559,69 @@ impl Config {
         }
         if !matches!(
             self.output.format.to_ascii_lowercase().as_str(),
-            "raw" | "ascii" | "csv" | "json" | "tsv" | "hdf5"
+            "raw" | "ascii" | "csv" | "json" | "tsv" | "hdf5" | "vcd"
         ) {
             return Err(ConfigError::InvalidValue {
                 field: "output.format".to_string(),
                 value: self.output.format.clone(),
-                message: "must be one of raw, ascii, csv, json, tsv, hdf5".to_string(),
+                message: "must be one of raw, ascii, csv, json, tsv, hdf5, vcd".to_string(),
             });
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cli::OutputFormat;
+    use clap::ValueEnum;
+
+    /// `output.format` and `-f` name the same set of formats.
+    ///
+    /// The validator lists its spellings literally, so it can only be checked
+    /// against the enum clap parses `-f` with. Without this, a new format is
+    /// reachable from the command line and refused from the config file — the
+    /// shape a `--format vcd` run and a `format = "vcd"` config file diverged
+    /// into while this was being written.
+    #[test]
+    fn the_config_accepts_exactly_the_formats_the_command_line_does() {
+        for format in OutputFormat::value_variants() {
+            let spelling = format
+                .to_possible_value()
+                .expect("every output format is selectable")
+                .get_name()
+                .to_string();
+            let mut config = Config::default();
+            config.output.format = spelling.clone();
+            config
+                .validate()
+                .unwrap_or_else(|error| panic!("config refused '{spelling}': {error}"));
+            assert_eq!(
+                OutputFormat::from_str(&spelling, true).expect("clap parses its own spelling"),
+                *format
+            );
+        }
+    }
+
+    #[test]
+    fn an_unknown_output_format_is_refused_and_lists_the_ones_that_exist() {
+        let mut config = Config::default();
+        config.output.format = "fst".to_string();
+        let error = config
+            .validate()
+            .expect_err("a format the CLI cannot write must be refused");
+        let message = error.to_string();
+        for spelling in OutputFormat::value_variants() {
+            let spelling = spelling
+                .to_possible_value()
+                .expect("every output format is selectable");
+            assert!(
+                message.contains(spelling.get_name()),
+                "the refusal must name '{}': {message}",
+                spelling.get_name()
+            );
+        }
     }
 }
 

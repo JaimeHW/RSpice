@@ -1,7 +1,10 @@
 //! Read simulation results back into an [`ExportTable`] from any format the
-//! CLI can write: SPICE rawfile (binary or ASCII), CSV, TSV, JSON, and HDF5.
+//! CLI can write: SPICE rawfile (binary or ASCII), CSV, TSV, JSON, HDF5, and
+//! VCD.
 //!
 //! Used by `convert` and `compare` so every command understands every format.
+//! A VCD is not a table on disk; [`crate::commands::vcd_io`] makes one out of
+//! it, so a dump reads here like everything else.
 
 use crate::cli::{CliError, OutputFormat};
 use crate::commands::export_table::{ColumnData, ExportColumn, ExportTable};
@@ -21,6 +24,7 @@ pub(crate) fn detect_format(path: &Path) -> OutputFormat {
         Some("tsv") => OutputFormat::Tsv,
         Some("json") => OutputFormat::Json,
         Some("h5") | Some("hdf5") => OutputFormat::Hdf5,
+        Some("vcd") => OutputFormat::Vcd,
         _ => OutputFormat::Raw,
     }
 }
@@ -37,11 +41,12 @@ pub(crate) fn load_table(
         OutputFormat::Tsv => load_delimited(path, '\t', resource_limits),
         OutputFormat::Json => load_json(path, resource_limits),
         OutputFormat::Hdf5 => load_hdf5(path, resource_limits),
+        OutputFormat::Vcd => crate::commands::vcd_io::load_vcd_table(path, resource_limits),
     }?;
     validate_table_shape(path, table, resource_limits)
 }
 
-fn conversion_error(path: &Path, message: impl std::fmt::Display) -> CliError {
+pub(crate) fn conversion_error(path: &Path, message: impl std::fmt::Display) -> CliError {
     CliError::ConversionError {
         message: format!("{}: {}", path.display(), message),
     }
@@ -63,7 +68,7 @@ fn resource_limit_error(
     }
 }
 
-fn enforce_resource_limit(
+pub(crate) fn enforce_resource_limit(
     path: &Path,
     resource: rspice_core::ResourceKind,
     requested: usize,
@@ -76,7 +81,7 @@ fn enforce_resource_limit(
     }
 }
 
-fn read_utf8_input_limited(path: &Path, limit: usize) -> Result<String, CliError> {
+pub(crate) fn read_utf8_input_limited(path: &Path, limit: usize) -> Result<String, CliError> {
     let file = std::fs::File::open(path).map_err(|source| CliError::InputReadError {
         path: path.to_path_buf(),
         source,
@@ -871,6 +876,31 @@ mod tests {
         assert_eq!(source.resource, resource);
         assert_eq!(source.requested, requested);
         assert_eq!(source.limit, limit);
+    }
+
+    /// `convert` and `compare` resolve a file's format from its extension, so
+    /// the extension table is the only thing that decides whether a dump is
+    /// read as a dump or as a rawfile.
+    #[test]
+    fn every_written_format_is_recognised_by_the_extension_it_is_written_under() {
+        for (extension, expected) in [
+            ("csv", OutputFormat::Csv),
+            ("CSV", OutputFormat::Csv),
+            ("tsv", OutputFormat::Tsv),
+            ("json", OutputFormat::Json),
+            ("h5", OutputFormat::Hdf5),
+            ("hdf5", OutputFormat::Hdf5),
+            ("vcd", OutputFormat::Vcd),
+            ("VCD", OutputFormat::Vcd),
+            ("raw", OutputFormat::Raw),
+            ("out", OutputFormat::Raw),
+        ] {
+            assert_eq!(
+                detect_format(Path::new(&format!("result.{extension}"))),
+                expected,
+                "unexpected format for .{extension}"
+            );
+        }
     }
 
     #[test]

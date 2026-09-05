@@ -574,3 +574,120 @@ fn bless_missing_golden_validates_result_before_copying() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A digital bridge and a real event node, so a run has a dump to compare.
+const XSPICE_EVENT_DECK: &str = "* xspice event compare test
+v1 in 0 pulse(0 5 0 1n 1n 5n 10n)
+abridge1 [in] [d] adc
+adac [d] [out] dac
+aobs out rnode obs
+rout out 0 1k
+.model adc adc_bridge(in_low=1 in_high=4)
+.model dac dac_bridge(out_low=0 out_high=5 out_undef=2.5)
+.model obs v_to_real(gain=2)
+.tran 1n 20n
+.end
+";
+
+fn simulate_deck(dir: &Path, deck: &str, format: &str, out_name: &str) -> PathBuf {
+    let deck_path = dir.join("event_deck.sp");
+    std::fs::write(&deck_path, deck).expect("write deck");
+    let out = dir.join(out_name);
+    rspice_ok(&[
+        "run",
+        deck_path.to_str().unwrap(),
+        "-o",
+        out.to_str().unwrap(),
+        "-f",
+        format,
+    ]);
+    out
+}
+
+/// A dump compares like any other result: against another dump, and against
+/// the same dump written as a table.
+///
+/// A dump lives on its own event ticks rather than on the analysis grid, so
+/// the table it is compared against is the one made from it — which is exactly
+/// what `compare` reading `.vcd` through the table form is for. The two dumps
+/// are two runs of one deck, so this also says the published dump is a
+/// function of the solve and nothing else.
+#[test]
+fn a_dump_compares_against_another_dump_and_against_its_own_table() {
+    let dir = test_dir("vcd_vs_vcd");
+    let published = simulate_deck(&dir, XSPICE_EVENT_DECK, "vcd", "result.vcd");
+    let golden = simulate_deck(&dir, XSPICE_EVENT_DECK, "vcd", "golden.vcd");
+
+    rspice_ok(&[
+        "compare",
+        published.to_str().unwrap(),
+        golden.to_str().unwrap(),
+        "--abstol",
+        "0",
+        "--reltol",
+        "0",
+    ]);
+
+    let table = dir.join("golden.csv");
+    rspice_ok(&[
+        "convert",
+        golden.to_str().unwrap(),
+        table.to_str().unwrap(),
+        "--to",
+        "csv",
+    ]);
+    rspice_ok(&[
+        "compare",
+        published.to_str().unwrap(),
+        table.to_str().unwrap(),
+        "--abstol",
+        "0",
+        "--reltol",
+        "0",
+    ]);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// One changed level fails the comparison, at the existing tolerances.
+#[test]
+fn a_dump_that_holds_a_different_level_fails_the_comparison() {
+    let dir = test_dir("vcd_diff");
+    let header = "$timescale\n\t1 ns\n$end\n\
+                  $scope module events $end\n\
+                  $var wire 1 ! clk $end\n\
+                  $upscope $end\n\
+                  $enddefinitions $end\n";
+    std::fs::write(
+        dir.join("result.vcd"),
+        format!("{header}#0\n0!\n#1\n1!\n#2\n0!\n"),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("golden.vcd"),
+        format!("{header}#0\n0!\n#1\nx!\n#2\n0!\n"),
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args([
+            "compare",
+            dir.join("result.vcd").to_str().unwrap(),
+            dir.join("golden.vcd").to_str().unwrap(),
+        ])
+        .output()
+        .expect("run rspice");
+    assert!(!output.status.success());
+    assert_eq!(
+        output.status.code(),
+        Some(3),
+        "a dump mismatch exits with the verification-failure code"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("D(clk)"),
+        "the difference should name the dumped signal: {stdout}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
