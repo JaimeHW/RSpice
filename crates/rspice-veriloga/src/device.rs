@@ -5906,7 +5906,7 @@ impl VerilogADevice {
             vm.context,
             observation.assignment_branch_unknowns(),
         )?;
-        let has_post_pass = observation.plan_stats().assignment_entry_points > 1;
+        let has_post_pass = observation.has_post_assignment_pass();
         if has_post_pass {
             Self::validate_native_current_pairs(
                 vm.context,
@@ -5947,7 +5947,7 @@ impl VerilogADevice {
         model: &CompiledModel,
         native: &NativeModel,
     ) -> Result<(), VmError> {
-        if native.plan_stats().assignment_entry_points == 1 {
+        if !native.has_post_assignment_pass() {
             return Ok(());
         }
         if vm.context.variables.len() < model.num_variables {

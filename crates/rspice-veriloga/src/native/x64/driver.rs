@@ -31,7 +31,7 @@ const DRIVER_IO_SLOT: i32 = 48;
 #[cfg(test)]
 pub(crate) fn compile_stamp_kernel(
     driver_image_offset: usize,
-    assignment: CodeOffset,
+    assignment: Option<CodeOffset>,
     stamp_values: &[CodeOffset],
     jacobians: &[Vec<CodeOffset>],
     published_current_pairs: &[Option<(usize, usize)>],
@@ -49,7 +49,7 @@ pub(crate) fn compile_stamp_kernel(
 #[allow(dead_code)]
 pub(crate) fn compile_evaluation_kernel(
     driver_image_offset: usize,
-    assignment: CodeOffset,
+    assignment: Option<CodeOffset>,
     stamp_values: &[CodeOffset],
     published_current_pairs: &[Option<(usize, usize)>],
 ) -> JitResult<Vec<u8>> {
@@ -65,7 +65,7 @@ pub(crate) fn compile_evaluation_kernel(
 
 pub(super) fn compile_evaluation_kernel_artifact(
     driver_image_offset: usize,
-    assignment: CodeOffset,
+    assignment: Option<CodeOffset>,
     prelude: Option<CodeOffset>,
     stamp_values: &[CodeOffset],
     published_current_pairs: &[Option<(usize, usize)>],
@@ -86,7 +86,7 @@ pub(super) fn compile_evaluation_kernel_artifact(
 #[cfg(test)]
 pub(super) fn compile_stamp_kernel_artifact(
     driver_image_offset: usize,
-    assignment: CodeOffset,
+    assignment: Option<CodeOffset>,
     stamp_values: &[CodeOffset],
     jacobians: &[Vec<CodeOffset>],
     published_current_pairs: &[Option<(usize, usize)>],
@@ -104,7 +104,7 @@ pub(super) fn compile_stamp_kernel_artifact(
 
 fn compile_kernel_artifact(
     driver_image_offset: usize,
-    assignment: CodeOffset,
+    assignment: Option<CodeOffset>,
     prelude: Option<CodeOffset>,
     stamp_values: &[CodeOffset],
     jacobians: Option<&[Vec<CodeOffset>]>,
@@ -154,9 +154,13 @@ fn compile_kernel_artifact(
     }
     let windows_unwind_prologue_size = current_windows_unwind_code_offset(&encoder);
 
-    emit_entry_call(&mut encoder, driver_image_offset, assignment)?;
-    restore_internal_args(&mut encoder);
-    abort_branches.push(emit_abort_if_failed(&mut encoder, runtime_failed_offset));
+    // A module whose assignment pass has no steps emits none, and there is
+    // nothing here to call — the same rule the prelude below already follows.
+    if let Some(assignment) = assignment {
+        emit_entry_call(&mut encoder, driver_image_offset, assignment)?;
+        restore_internal_args(&mut encoder);
+        abort_branches.push(emit_abort_if_failed(&mut encoder, runtime_failed_offset));
+    }
 
     // The CFG route's assignment pass, once, before the first value entry —
     // every one of which is a read of a slot it publishes. A plan without one
@@ -430,7 +434,7 @@ mod tests {
     fn rejects_mismatched_entry_shapes() {
         let error = compile_stamp_kernel(
             128,
-            CodeOffset::new(0),
+            Some(CodeOffset::new(0)),
             &[CodeOffset::new(16)],
             &[],
             &[None],
@@ -443,7 +447,7 @@ mod tests {
     fn guards_every_direct_call_with_a_runtime_failure_abort() {
         let bytes = compile_stamp_kernel(
             128,
-            CodeOffset::new(0),
+            Some(CodeOffset::new(0)),
             &[CodeOffset::new(16), CodeOffset::new(32)],
             &[
                 vec![CodeOffset::new(48), CodeOffset::new(64)],
@@ -467,7 +471,7 @@ mod tests {
     fn evaluation_driver_omits_jacobian_calls_and_guards_every_entry() {
         let bytes = compile_evaluation_kernel(
             128,
-            CodeOffset::new(0),
+            Some(CodeOffset::new(0)),
             &[CodeOffset::new(16), CodeOffset::new(32)],
             &[None, Some((0, 1))],
         )
@@ -482,7 +486,7 @@ mod tests {
 
         let stamp_bytes = compile_stamp_kernel(
             128,
-            CodeOffset::new(0),
+            Some(CodeOffset::new(0)),
             &[CodeOffset::new(16), CodeOffset::new(32)],
             &[vec![CodeOffset::new(48)], vec![CodeOffset::new(64)]],
             &[None, Some((0, 1))],
@@ -499,7 +503,7 @@ mod tests {
 
         let bytes = compile_stamp_kernel(
             256,
-            CodeOffset::new(0),
+            Some(CodeOffset::new(0)),
             &[CodeOffset::new(16), CodeOffset::new(32)],
             &[
                 vec![CodeOffset::new(48), CodeOffset::new(64)],

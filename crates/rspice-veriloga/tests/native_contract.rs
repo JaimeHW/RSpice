@@ -3725,6 +3725,75 @@ endmodule
     );
 }
 
+/// A module whose assignment pass has no steps emits no pass, and the kernels
+/// that used to call it call nothing.
+///
+/// The fixture is the smallest module that reaches the backend: nothing
+/// procedural to assign, so no static condition, no event state and no
+/// simulator-control task variable to publish either. What the image used to
+/// hold for it was a function whose whole body was a return, called from both
+/// kernels and both drivers on every Newton iteration. The control below has
+/// one assignment and gets its pass back, so this is a statement about the pass
+/// and not about the compiler declining to emit one.
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn a_module_with_no_assignments_emits_no_assignment_pass() {
+    let model = compile(
+        r#"
+`include "disciplines.vams"
+module native_no_assignments(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real resistance = 500.0;
+    analog I(p, n) <+ V(p, n) / resistance;
+endmodule
+"#,
+    );
+    assert!(
+        model.assignment_steps.is_empty(),
+        "the fixture must have nothing to assign"
+    );
+    let mut device = native_contract_try_new("NOASSIGN1", model, &[1, 0])
+        .expect("assignment-free model uses native JIT");
+    assert_eq!(
+        device.native_plan_stats().assignment_entry_points,
+        0,
+        "an assignment pass with no steps must not be emitted"
+    );
+
+    // And the image is still whole: the kernel that no longer calls a pass
+    // still evaluates the module.
+    device.update_voltages(&[10.0]);
+    let currents = device
+        .try_evaluate()
+        .expect("assignment-free native evaluation succeeds");
+    assert!((currents[0] - 0.02).abs() < 1e-18, "currents: {currents:?}");
+    assert!(device.fused_stamp_driver_is_active());
+
+    let model = compile(
+        r#"
+`include "disciplines.vams"
+module native_one_assignment(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real resistance = 500.0;
+    real conductance;
+    analog begin
+        conductance = 1.0 / resistance;
+        I(p, n) <+ V(p, n) * conductance;
+    end
+endmodule
+"#,
+    );
+    let device = native_contract_try_new("ONEASSIGN1", model, &[1, 0])
+        .expect("single-assignment model uses native JIT");
+    assert_eq!(
+        device.native_plan_stats().assignment_entry_points,
+        1,
+        "a pass with steps is emitted exactly as it was"
+    );
+}
+
 /// Every named variable by IEEE bits, so a comparison is exact and a NaN
 /// compares equal to itself.
 #[cfg(target_arch = "x86_64")]

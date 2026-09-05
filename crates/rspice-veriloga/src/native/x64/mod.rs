@@ -196,15 +196,20 @@ pub(crate) fn compile_model_plan(
         &mut windows_unwind_functions,
     )?;
     let assignment_image_end = image.len();
+    debug_assert_eq!(
+        assignment.is_none(),
+        plan.assignments.is_empty(),
+        "an empty assignment pass emits nothing and a non-empty one emits a function"
+    );
     let post_assignment = if plan.post_assignments.is_empty() {
         None
     } else {
-        Some(append_assignment_pass(
+        append_assignment_pass(
             &plan.post_assignments,
             &mut image,
             &mut entry_starts,
             &mut windows_unwind_functions,
-        )?)
+        )?
     };
     let post_assignment_image_end = image.len();
 
@@ -449,12 +454,12 @@ pub(crate) fn compile_observation_image(
     let post_assignment = if plan.post_assignments.is_empty() {
         None
     } else {
-        Some(append_assignment_pass(
+        append_assignment_pass(
             &plan.post_assignments,
             &mut image,
             &mut entry_starts,
             &mut windows_unwind_functions,
-        )?)
+        )?
     };
 
     let entries = NativeEntryOffsets {
@@ -1156,17 +1161,19 @@ fn compiled_entry_shape_error(
     }
 }
 
+/// Publish an assignment pass, or nothing at all when it has no steps.
+///
+/// A pass with no steps used to be a function whose whole body was a return,
+/// called from both kernels and both drivers on every evaluation. There is
+/// nothing for it to do and nothing for a caller to call.
 fn append_assignment_pass(
     assignments: &[NativeAssignment],
     image: &mut Vec<u8>,
     entry_starts: &mut Vec<CodeOffset>,
     windows_unwind_functions: &mut Vec<PendingWindowsX64UnwindFunction>,
-) -> JitResult<CodeOffset> {
+) -> JitResult<Option<CodeOffset>> {
     if assignments.is_empty() {
-        let artifact = CompiledX64Function::code_only(vec![0xC3], None);
-        let offset = align_image_for_entry(image, entry_starts);
-        append_compiled_function_at_offset(image, offset, windows_unwind_functions, artifact)?;
-        return Ok(offset);
+        return Ok(None);
     }
 
     let chunk_ranges = assignment_chunk_ranges(assignments);
@@ -1189,7 +1196,7 @@ fn append_assignment_pass(
         append_compiled_function_at_offset(image, offset, windows_unwind_functions, artifact)?;
         offset
     };
-    Ok(assignment)
+    Ok(Some(assignment))
 }
 
 /// Publish one plan entry into the image, reusing an identical body if one is
@@ -4018,7 +4025,8 @@ endmodule
         let mut unwind = Vec::new();
         let dispatcher =
             append_assignment_pass(&assignments, &mut image, &mut entry_starts, &mut unwind)
-                .expect("compile chunked assignment dispatcher");
+                .expect("compile chunked assignment dispatcher")
+                .expect("a non-empty pass emits a function");
         assert_eq!(entry_starts.len(), 3, "two chunks plus one dispatcher");
         assert_eq!(dispatcher, entry_starts[2]);
 
@@ -4071,7 +4079,8 @@ endmodule
         let mut unwind = Vec::new();
         let dispatcher =
             append_assignment_pass(&assignments, &mut image, &mut entry_starts, &mut unwind)
-                .expect("compile failing chunk dispatcher");
+                .expect("compile failing chunk dispatcher")
+                .expect("a non-empty pass emits a function");
         let memory = ExecutableMemory::allocate(&image).expect("allocate failing dispatcher");
         let entry = memory
             .ptr_at(dispatcher.as_usize())
@@ -4246,7 +4255,7 @@ endmodule
     ) -> (NativeEntryOffsets, NativeCurrentDependencies) {
         let offset = CodeOffset::new(0);
         let entries = NativeEntryOffsets {
-            assignment: offset,
+            assignment: Some(offset),
             prelude: None,
             post_assignment: None,
             evaluation_kernel: None,

@@ -156,11 +156,19 @@ impl A64ImageBuilder {
         Ok(offset)
     }
 
+    /// Publish an assignment pass, or nothing at all when it has no steps.
+    ///
+    /// A pass with no steps used to be a function whose whole body was a
+    /// return, called from both kernels and both drivers on every evaluation.
+    /// There is nothing for it to do and nothing for a caller to call.
     pub(super) fn append_assignment_pass(
         &mut self,
         assignments: &[NativeAssignment],
         entry_kind: &str,
-    ) -> JitResult<CodeOffset> {
+    ) -> JitResult<Option<CodeOffset>> {
+        if assignments.is_empty() {
+            return Ok(None);
+        }
         if std::env::var_os("RSPICE_NATIVE_A64_IMAGE_TRACE").is_some() {
             let mut direct_count = 0_usize;
             let mut native_operations = 0_usize;
@@ -217,7 +225,8 @@ impl A64ImageBuilder {
         let ranges = chunk_ranges(assignments);
         if ranges.is_empty() {
             return self
-                .append_function(compile_assignment_pass_function(assignments)?, entry_kind);
+                .append_function(compile_assignment_pass_function(assignments)?, entry_kind)
+                .map(Some);
         }
 
         let mut chunks = Vec::with_capacity(ranges.len());
@@ -226,13 +235,13 @@ impl A64ImageBuilder {
             self.append_bounded_assignment_chunk(&assignments[range], &chunk_kind, &mut chunks)?;
         }
         if let [only] = chunks.as_slice() {
-            return Ok(*only);
+            return Ok(Some(*only));
         }
 
         let dispatcher = self.prepare_entry_offset();
         let bytes = compile_assignment_dispatch_function(dispatcher.as_usize(), &chunks)?;
         self.append_function_at(dispatcher, bytes, entry_kind)?;
-        Ok(dispatcher)
+        Ok(Some(dispatcher))
     }
 
     fn append_bounded_assignment_chunk(
@@ -393,7 +402,7 @@ impl A64ImageBuilder {
 
     pub(super) fn append_fused_evaluation_kernel(
         &mut self,
-        assignment: CodeOffset,
+        assignment: Option<CodeOffset>,
         prelude: Option<CodeOffset>,
         stamp_values: &[PlanProgram],
         stamp_value_entries: &[CodeOffset],
@@ -428,7 +437,7 @@ impl A64ImageBuilder {
 
     pub(super) fn append_fused_stamp_kernel(
         &mut self,
-        assignment: CodeOffset,
+        assignment: Option<CodeOffset>,
         prelude: Option<CodeOffset>,
         stamp_values: &[PlanProgram],
         jacobians: &[Vec<PlanProgram>],
@@ -571,6 +580,30 @@ fn relocation_error(detail: impl Into<String>) -> JitError {
 #[cfg(test)]
 mod tests {
     use super::A64ImageBuilder;
+
+    /// An assignment pass with no steps publishes no function, so the kernels
+    /// and drivers that take its offset have nothing to call.
+    ///
+    /// The A64 half of the same rule x64 applies, checked on the image builder
+    /// because the model compiler around it only runs on an AArch64 host. What
+    /// it says is that the image is untouched: not a padded entry, not a
+    /// `RET`, nothing.
+    #[test]
+    fn an_assignment_pass_with_no_steps_publishes_no_function() {
+        let mut image = A64ImageBuilder::new();
+        assert_eq!(
+            image
+                .append_assignment_pass(&[], "assignment")
+                .expect("an empty pass is not an error"),
+            None
+        );
+        assert_eq!(
+            image.prepare_entry_offset().as_usize(),
+            0,
+            "an empty pass must leave the image untouched: no entry, no padding, no RET"
+        );
+    }
+
     #[cfg(target_arch = "aarch64")]
     use crate::native::aarch64::codegen::{
         compile_assignment_dispatch_function, compile_assignment_pass_function,

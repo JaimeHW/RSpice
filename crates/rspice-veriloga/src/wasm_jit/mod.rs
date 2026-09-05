@@ -199,7 +199,8 @@ pub struct WasmJitModelArtifact {
     module: WasmJitArtifact,
     cache_key: String,
     entries: Vec<WasmJitValueEntry>,
-    assignment_export: String,
+    /// The module assignment pass, when it has steps to run.
+    assignment_export: Option<String>,
     /// The CFG route's assignment pass, when the plan carried one.
     prelude_export: Option<String>,
     /// How many prelude slots one evaluation of that pass publishes.
@@ -234,8 +235,9 @@ impl WasmJitModelArtifact {
         self.prelude_slots
     }
 
-    pub fn assignment_export(&self) -> &str {
-        &self.assignment_export
+    /// The module assignment pass, when this artifact carries one.
+    pub fn assignment_export(&self) -> Option<&str> {
+        self.assignment_export.as_deref()
     }
 
     pub fn post_assignment_export(&self) -> Option<&str> {
@@ -557,11 +559,20 @@ fn emit_model_value_module(
         .iter()
         .map(|entry| entry.program)
         .collect::<Vec<_>>();
-    let mut kernels = vec![codegen::WasmAssignmentKernel {
-        export_name: codegen::WASM_JIT_ASSIGNMENT_EXPORT,
-        assignments: assignment_kernel,
-    }];
-    if !post_assignment_kernel.is_empty() {
+    // A module whose assignment pass has no steps emits no kernel for it, so
+    // nothing exports one and no driver calls one.
+    let mut kernels = Vec::with_capacity(2);
+    let assignment_kernel_index = if assignment_kernel.is_empty() {
+        None
+    } else {
+        kernels.push(codegen::WasmAssignmentKernel {
+            export_name: codegen::WASM_JIT_ASSIGNMENT_EXPORT,
+            assignments: assignment_kernel,
+        });
+        Some(u32_index(kernels.len() - 1, "assignment kernel")?)
+    };
+    let has_post_assignment_kernel = !post_assignment_kernel.is_empty();
+    if has_post_assignment_kernel {
         kernels.push(codegen::WasmAssignmentKernel {
             export_name: codegen::WASM_JIT_POST_ASSIGNMENT_EXPORT,
             assignments: post_assignment_kernel,
@@ -609,7 +620,7 @@ fn emit_model_value_module(
         evaluation_kernel_export = Some(codegen::WASM_JIT_EVALUATION_KERNEL_EXPORT.to_owned());
         fused.push(codegen::WasmFusedKernel {
             export_name: codegen::WASM_JIT_EVALUATION_KERNEL_EXPORT,
-            assignment_kernel: 0,
+            assignment_kernel: assignment_kernel_index,
             prelude_entry,
             stamps: stamps.clone(),
             with_jacobians: false,
@@ -618,7 +629,7 @@ fn emit_model_value_module(
             stamp_kernel_export = Some(codegen::WASM_JIT_STAMP_KERNEL_EXPORT.to_owned());
             fused.push(codegen::WasmFusedKernel {
                 export_name: codegen::WASM_JIT_STAMP_KERNEL_EXPORT,
-                assignment_kernel: 0,
+                assignment_kernel: assignment_kernel_index,
                 prelude_entry,
                 stamps,
                 with_jacobians: true,
@@ -656,10 +667,11 @@ fn emit_model_value_module(
         },
         cache_key,
         entries,
-        assignment_export: codegen::WASM_JIT_ASSIGNMENT_EXPORT.to_owned(),
+        assignment_export: assignment_kernel_index
+            .map(|_| codegen::WASM_JIT_ASSIGNMENT_EXPORT.to_owned()),
         prelude_export: prelude_export_name,
         prelude_slots: plan.prelude_slot_count(),
-        post_assignment_export: (kernels.len() == 2)
+        post_assignment_export: has_post_assignment_kernel
             .then(|| codegen::WASM_JIT_POST_ASSIGNMENT_EXPORT.to_owned()),
         evaluation_kernel_export,
         stamp_kernel_export,
@@ -1224,6 +1236,77 @@ mod tests {
         assert!(verify_architecture_probe(&bytes).is_err());
     }
 
+    /// A module whose assignment pass has no steps emits no kernel for it, and
+    /// no driver calls one.
+    ///
+    /// The fixture is deliberately the smallest thing that reaches the
+    /// backend: no procedural variable to assign, so no static condition to
+    /// evaluate, no event state to commit and no simulator-control task
+    /// variable to publish. The exports say the shape directly — an absent
+    /// `assignment_export` is a module with no kernel to call — and the
+    /// module still validates, which is what says the drivers agree.
+    #[test]
+    fn a_module_with_no_assignments_emits_no_assignment_kernel() {
+        let source = r#"
+`include "disciplines.vams"
+module wasm_no_assignments(p, n);
+  inout p, n;
+  electrical p, n;
+  parameter real resistance = 2.0 from (0:inf);
+  analog I(p, n) <+ V(p, n) / resistance;
+endmodule
+"#;
+        let report = VerilogACompiler::new(CompilerOptions::default())
+            .compile_runtime(source, Some("wasm_no_assignments"))
+            .expect("compile assignment-free WASM JIT inputs");
+        assert!(
+            report.model.assignment_steps.is_empty(),
+            "the fixture must have nothing to assign"
+        );
+
+        let module = compile_model_value_module(&report.model, &report.canonical_ir)
+            .expect("compile assignment-free model module");
+        assert_eq!(
+            module.assignment_export(),
+            None,
+            "an assignment pass with no steps must not be exported"
+        );
+        assert_eq!(module.post_assignment_export(), None);
+        assert!(
+            module.evaluation_kernel_export().is_some(),
+            "the driver this pin is about has to be present to be checked"
+        );
+        assert!(
+            !module
+                .entries()
+                .iter()
+                .any(|entry| matches!(entry.role(), WasmJitValueRole::Assignment { .. })),
+            "no assignment entry can exist for a pass with no steps"
+        );
+
+        // The control: one procedural variable and the kernel is back, so this
+        // is a statement about the pass and not about the emitter giving up.
+        let with_assignment = r#"
+`include "disciplines.vams"
+module wasm_one_assignment(p, n);
+  inout p, n;
+  electrical p, n;
+  parameter real resistance = 2.0 from (0:inf);
+  real voltage;
+  analog begin
+    voltage = V(p, n);
+    I(p, n) <+ voltage / resistance;
+  end
+endmodule
+"#;
+        let report = VerilogACompiler::new(CompilerOptions::default())
+            .compile_runtime(with_assignment, Some("wasm_one_assignment"))
+            .expect("compile single-assignment WASM JIT inputs");
+        let module = compile_model_value_module(&report.model, &report.canonical_ir)
+            .expect("compile single-assignment model module");
+        assert_eq!(module.assignment_export(), Some("rspice_wasm_jit_assign"));
+    }
+
     #[test]
     fn complete_resistor_model_uses_shared_canonical_plan() {
         let source = r#"
@@ -1260,7 +1343,7 @@ endmodule
         assert_eq!(module.cache_key(), first.cache_key());
         assert!(module.module().bytes().len() > first.emitted_value_module_bytes());
         assert_eq!(module.module().digest().len(), 64);
-        assert_eq!(module.assignment_export(), "rspice_wasm_jit_assign");
+        assert_eq!(module.assignment_export(), Some("rspice_wasm_jit_assign"));
         assert!(module.entries().iter().enumerate().all(|(index, entry)| {
             entry.export_name() == format!("rspice_wasm_jit_value_{index:08x}")
         }));
@@ -1702,7 +1785,11 @@ endmodule
             .iter()
             .position(|name| name == "reported")
             .expect("the module declares the reporting variable");
-        let assignment_export = harness.artifact.assignment_export().to_owned();
+        let assignment_export = harness
+            .artifact
+            .assignment_export()
+            .expect("a non-empty pass exports a kernel")
+            .to_owned();
         let value_export = harness.stamp_value_export(0);
 
         harness.reset();
@@ -1746,7 +1833,11 @@ endmodule
             .evaluation_kernel_export()
             .expect("a model with no prior-current reads must fuse")
             .to_owned();
-        let assignment_export = harness.artifact.assignment_export().to_owned();
+        let assignment_export = harness
+            .artifact
+            .assignment_export()
+            .expect("a non-empty pass exports a kernel")
+            .to_owned();
         let stamp_count = harness.stamp_count();
         assert!(stamp_count >= 3, "the model must exercise several stamps");
 
@@ -1815,7 +1906,11 @@ endmodule
             .stamp_kernel_export()
             .expect("a model whose Jacobians read no later contribution must fuse")
             .to_owned();
-        let assignment_export = harness.artifact.assignment_export().to_owned();
+        let assignment_export = harness
+            .artifact
+            .assignment_export()
+            .expect("a non-empty pass exports a kernel")
+            .to_owned();
         let stamp_count = harness.stamp_count();
         assert!(
             harness.stamp_jacobians.iter().any(|entries| *entries >= 2),
@@ -2101,7 +2196,12 @@ endmodule
             .expect("clear WASM variables");
 
         let assignment = instance
-            .get_typed_func::<i32, i32>(&store, artifact.assignment_export())
+            .get_typed_func::<i32, i32>(
+                &store,
+                artifact
+                    .assignment_export()
+                    .expect("a non-empty pass exports a kernel"),
+            )
             .expect("resolve WASM assignment kernel");
         assert_eq!(
             assignment

@@ -237,7 +237,7 @@ fn compile_assignment_function_artifact(
 
 pub(super) fn compile_fused_stamp_kernel_artifact(
     kernel_image_offset: usize,
-    assignment: crate::native::model::CodeOffset,
+    assignment: Option<crate::native::model::CodeOffset>,
     prelude: Option<crate::native::model::CodeOffset>,
     stamp_values: &[PlanProgram],
     jacobians: &[Vec<PlanProgram>],
@@ -269,7 +269,7 @@ pub(super) struct FusedKernelEntries<'a> {
 
 fn compile_fused_kernel_artifact(
     kernel_image_offset: usize,
-    assignment: crate::native::model::CodeOffset,
+    assignment: Option<crate::native::model::CodeOffset>,
     prelude: Option<crate::native::model::CodeOffset>,
     stamp_values: &[PlanProgram],
     jacobians: Option<&[Vec<PlanProgram>]>,
@@ -404,8 +404,12 @@ fn compile_fused_kernel_artifact(
         callee_saved_xmm_count,
     )?;
 
-    compiler.emit_image_entry_call(kernel_image_offset, assignment)?;
-    compiler.emit_kernel_abort_if_failed()?;
+    // A module whose assignment pass has no steps emits none; the kernel calls
+    // what exists, exactly as it does for the prelude below.
+    if let Some(assignment) = assignment {
+        compiler.emit_image_entry_call(kernel_image_offset, assignment)?;
+        compiler.emit_kernel_abort_if_failed()?;
+    }
 
     // The prelude, once, before any entry reads a slot it publishes. It is
     // *called* rather than inlined for the same reason the assignment pass is:
@@ -5115,7 +5119,7 @@ mod tests {
         ));
         let artifact = super::compile_fused_stamp_kernel_artifact(
             1024,
-            CodeOffset::new(0),
+            Some(CodeOffset::new(0)),
             None,
             std::slice::from_ref(&value),
             &[vec![value.clone(), value.clone()]],

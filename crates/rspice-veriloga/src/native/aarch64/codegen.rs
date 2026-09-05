@@ -415,7 +415,7 @@ pub(crate) struct A64FusedKernelEntries<'a> {
 
 pub(crate) fn compile_fused_evaluation_kernel(
     kernel_image_offset: usize,
-    assignment: CodeOffset,
+    assignment: Option<CodeOffset>,
     prelude: Option<CodeOffset>,
     stamp_values: &[PlanProgram],
     entries: A64FusedKernelEntries<'_>,
@@ -435,7 +435,7 @@ pub(crate) fn compile_fused_evaluation_kernel(
 
 pub(crate) fn compile_fused_stamp_kernel(
     kernel_image_offset: usize,
-    assignment: CodeOffset,
+    assignment: Option<CodeOffset>,
     prelude: Option<CodeOffset>,
     stamp_values: &[PlanProgram],
     jacobians: &[Vec<PlanProgram>],
@@ -456,7 +456,7 @@ pub(crate) fn compile_fused_stamp_kernel(
 
 pub(crate) fn compile_fused_evaluation_driver(
     kernel_image_offset: usize,
-    assignment: CodeOffset,
+    assignment: Option<CodeOffset>,
     prelude: Option<CodeOffset>,
     stamp_values: &[CodeOffset],
     published_current_pairs: &[Option<(usize, usize)>],
@@ -474,7 +474,7 @@ pub(crate) fn compile_fused_evaluation_driver(
 
 pub(crate) fn compile_fused_stamp_driver(
     kernel_image_offset: usize,
-    assignment: CodeOffset,
+    assignment: Option<CodeOffset>,
     prelude: Option<CodeOffset>,
     stamp_values: &[CodeOffset],
     jacobians: &[Vec<CodeOffset>],
@@ -493,7 +493,7 @@ pub(crate) fn compile_fused_stamp_driver(
 
 fn compile_fused_driver(
     kernel_image_offset: usize,
-    assignment: CodeOffset,
+    assignment: Option<CodeOffset>,
     prelude: Option<CodeOffset>,
     stamp_values: &[CodeOffset],
     jacobians: Option<&[Vec<CodeOffset>]>,
@@ -510,8 +510,12 @@ fn compile_fused_driver(
     }
 
     let mut compiler = FunctionCompiler::new_with_kernel_io(0, true, true)?;
-    compiler.emit_image_entry_call(kernel_image_offset, assignment)?;
-    compiler.emit_kernel_abort_if_failed()?;
+    // A module whose assignment pass has no steps emits none, and there is
+    // nothing here to call - the rule the prelude below already follows.
+    if let Some(assignment) = assignment {
+        compiler.emit_image_entry_call(kernel_image_offset, assignment)?;
+        compiler.emit_kernel_abort_if_failed()?;
+    }
     // The CFG route's assignment pass, once, before the first entry that reads
     // a slot it publishes. `None` for every postfix plan, so a shipped driver
     // emits exactly the bytes it did before.
@@ -551,7 +555,7 @@ fn compile_fused_driver(
 
 fn compile_fused_kernel(
     kernel_image_offset: usize,
-    assignment: CodeOffset,
+    assignment: Option<CodeOffset>,
     prelude: Option<CodeOffset>,
     stamp_values: &[PlanProgram],
     jacobians: Option<&[Vec<PlanProgram>]>,
@@ -660,8 +664,12 @@ fn compile_fused_kernel(
         .unwrap_or(0);
     let frame_bytes = aligned_frame_bytes(maximum_spill_slots)?;
     let mut compiler = FunctionCompiler::new_with_kernel_io(frame_bytes, true, true)?;
-    compiler.emit_image_entry_call(kernel_image_offset, assignment)?;
-    compiler.emit_kernel_abort_if_failed()?;
+    // A module whose assignment pass has no steps emits none, and there is
+    // nothing here to call - the rule the prelude below already follows.
+    if let Some(assignment) = assignment {
+        compiler.emit_image_entry_call(kernel_image_offset, assignment)?;
+        compiler.emit_kernel_abort_if_failed()?;
+    }
     // Called rather than inlined, like the assignment pass above it: the one
     // copy in the image serves this kernel and the per-entry path both, and
     // inlining it would put back the code size the prelude exists to remove.

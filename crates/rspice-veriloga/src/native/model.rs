@@ -62,7 +62,8 @@ impl NativeEntryStarts {
 
     #[cfg(all(test, target_arch = "x86_64"))]
     pub(crate) fn from_entries(entries: &NativeEntryOffsets) -> Self {
-        let mut starts = vec![entries.assignment];
+        let mut starts = Vec::new();
+        starts.extend(entries.assignment);
         starts.extend(entries.prelude);
         starts.extend(entries.post_assignment);
         starts.extend(entries.evaluation_kernel);
@@ -88,7 +89,15 @@ impl NativeEntryStarts {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct NativeEntryOffsets {
-    pub assignment: CodeOffset,
+    /// The module's assignment pass, when it has one.
+    ///
+    /// `None` when the pass has no steps: under the CFG plan a module whose
+    /// declared variables are all published by the prelude has nothing left to
+    /// assign, and emitting a function whose whole body is a return — then
+    /// calling it from both kernels and both drivers on every evaluation — is a
+    /// call for no work. Every backend skips it the way it already skips an
+    /// absent prelude.
+    pub assignment: Option<CodeOffset>,
     /// The CFG route's assignment pass, when the plan carried one.
     ///
     /// Called once per evaluation, between [`Self::assignment`] and the first
@@ -430,7 +439,8 @@ impl NativeModel {
             current_dependencies.evaluation_kernel_order_safe();
         let stamp_kernel_current_order_safe = current_dependencies.stamp_kernel_order_safe();
         let stats = PlanStats {
-            assignment_entry_points: 1 + usize::from(entries.post_assignment.is_some()),
+            assignment_entry_points: usize::from(entries.assignment.is_some())
+                + usize::from(entries.post_assignment.is_some()),
             evaluation_kernel_entry_points: usize::from(entries.evaluation_kernel.is_some()),
             stamp_kernel_entry_points: usize::from(entries.stamp_kernel.is_some()),
             parameter_default_entry_points,
@@ -501,7 +511,7 @@ impl NativeModel {
             "test native model must provide one reactive-Jacobian row per stamp"
         );
         let entries = NativeEntryOffsets {
-            assignment: CodeOffset::new(0),
+            assignment: Some(CodeOffset::new(0)),
             prelude: None,
             post_assignment: None,
             evaluation_kernel: None,
@@ -587,7 +597,9 @@ impl NativeModel {
             Self::validate_entry_start(offset, image_len)?;
         }
 
-        Self::validate_entry_offset(entries.assignment, entry_starts, image_len)?;
+        if let Some(offset) = entries.assignment {
+            Self::validate_entry_offset(offset, entry_starts, image_len)?;
+        }
         if let Some(offset) = entries.prelude {
             Self::validate_entry_offset(offset, entry_starts, image_len)?;
         }
@@ -1083,14 +1095,24 @@ impl NativeModel {
         self.assignment_coverage == NativeAssignmentCoverage::ObservableVariables
     }
 
-    pub(crate) fn run_assignments(&self, ctx: &EvalContext, vars: *mut f64) {
+    /// Runs the module's assignment pass. Returns `false` when the plan had no
+    /// steps for one, in which case there is no function to call.
+    pub(crate) fn run_assignments(&self, ctx: &EvalContext, vars: *mut f64) -> bool {
+        let Some(offset) = self.entries.assignment else {
+            return false;
+        };
         // Safety: from_executable_image validated this offset is inside the
         // executable image owned by self, and the backend records it with the
         // AssignmentEntry ABI.
-        let entry: AssignmentEntry =
-            unsafe { std::mem::transmute(self.entry_ptr(self.entries.assignment)) };
+        let entry: AssignmentEntry = unsafe { std::mem::transmute(self.entry_ptr(offset)) };
         // Safety: callers provide pointers matching the native assignment ABI.
         unsafe { entry(ctx as *const EvalContext, vars) };
+        true
+    }
+
+    /// Whether this image carries the post-current half of the assignment pass.
+    pub(crate) fn has_post_assignment_pass(&self) -> bool {
+        self.entries.post_assignment.is_some()
     }
 
     /// Runs the CFG route's assignment pass, which publishes every value entry's
@@ -1567,7 +1589,7 @@ mod tests {
             0,
             image,
             NativeEntryOffsets {
-                assignment: CodeOffset::new(0),
+                assignment: Some(CodeOffset::new(0)),
                 prelude: None,
                 post_assignment: None,
                 evaluation_kernel: None,
@@ -1699,7 +1721,7 @@ mod tests {
             0,
             image,
             NativeEntryOffsets {
-                assignment: CodeOffset::new(1),
+                assignment: Some(CodeOffset::new(1)),
                 prelude: None,
                 post_assignment: None,
                 evaluation_kernel: None,
@@ -1724,7 +1746,7 @@ mod tests {
         let image =
             ExecutableMemory::allocate(&[0xC3, 0x90, 0xC3]).expect("allocate native test image");
         let entries = NativeEntryOffsets {
-            assignment: CodeOffset::new(0),
+            assignment: Some(CodeOffset::new(0)),
             prelude: None,
             post_assignment: None,
             evaluation_kernel: None,
@@ -1771,7 +1793,7 @@ mod tests {
             1,
             image,
             NativeEntryOffsets {
-                assignment: CodeOffset::new(0),
+                assignment: Some(CodeOffset::new(0)),
                 prelude: None,
                 post_assignment: None,
                 evaluation_kernel: None,
@@ -1869,7 +1891,7 @@ mod tests {
 
     fn one_stamp_entries() -> NativeEntryOffsets {
         NativeEntryOffsets {
-            assignment: CodeOffset::new(0),
+            assignment: Some(CodeOffset::new(0)),
             prelude: None,
             post_assignment: None,
             evaluation_kernel: None,

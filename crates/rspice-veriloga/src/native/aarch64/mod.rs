@@ -41,7 +41,7 @@ pub(super) fn compile_model_plan(
     let post_assignment = if plan.post_assignments.is_empty() {
         None
     } else {
-        Some(image.append_assignment_pass(&plan.post_assignments, "post-assignment")?)
+        image.append_assignment_pass(&plan.post_assignments, "post-assignment")?
     };
     // The CFG route's assignment pass, emitted before every entry that reads a
     // slot it publishes. It is a value function of `(ctx, vars)` like any other,
@@ -209,7 +209,7 @@ pub(super) fn compile_observation_image(
     let post_assignment = if plan.post_assignments.is_empty() {
         None
     } else {
-        Some(image.append_assignment_pass(&plan.post_assignments, "post-current observation")?)
+        image.append_assignment_pass(&plan.post_assignments, "post-current observation")?
     };
     let entries = NativeEntryOffsets {
         assignment,

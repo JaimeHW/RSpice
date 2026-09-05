@@ -23,7 +23,8 @@ pub(crate) enum WasmJitExecutableEntry {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct WasmJitExecutable {
     cache_key: String,
-    assignment_export: String,
+    /// The module assignment pass, when it has steps to run.
+    assignment_export: Option<String>,
     /// The CFG route's assignment pass, run once between the assignment pass
     /// and the first value entry that reads one of its slots.
     prelude_export: Option<String>,
@@ -51,7 +52,7 @@ impl WasmJitExecutable {
     ) -> WasmJitResult<Self> {
         let mut executable = Self {
             cache_key: artifact.cache_key().to_owned(),
-            assignment_export: artifact.assignment_export().to_owned(),
+            assignment_export: artifact.assignment_export().map(str::to_owned),
             prelude_export: artifact.prelude_export().map(str::to_owned),
             prelude_slots: artifact.prelude_slots(),
             post_assignment_export: artifact.post_assignment_export().map(str::to_owned),
@@ -299,8 +300,13 @@ impl WasmJitExecutable {
         self.dispatch(&export, context).map(|frame| frame.result)
     }
 
+    /// Run the module assignment pass. A module whose pass has no steps emits
+    /// no kernel for it and this is a no-op.
     pub(crate) fn run_assignments(&self, context: &mut crate::vm::VmContext) -> Result<(), String> {
-        self.dispatch(&self.assignment_export, context).map(|_| ())
+        let Some(export) = self.assignment_export.as_deref() else {
+            return Ok(());
+        };
+        self.dispatch(export, context).map(|_| ())
     }
 
     /// Run the CFG route's assignment pass, which publishes every value entry's

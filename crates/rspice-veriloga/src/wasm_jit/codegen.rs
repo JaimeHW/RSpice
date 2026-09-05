@@ -188,8 +188,9 @@ pub(crate) struct WasmKernelStamp {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct WasmFusedKernel {
     pub(crate) export_name: &'static str,
-    /// Index of the assignment kernel this driver runs first.
-    pub(crate) assignment_kernel: u32,
+    /// Index of the assignment kernel this driver runs first. `None` when the
+    /// module's assignment pass has no steps and no kernel was emitted for it.
+    pub(crate) assignment_kernel: Option<u32>,
     /// Scalar entry of the CFG route's assignment pass, run once after the
     /// assignment kernel and before the first stamp. `None` for a postfix plan,
     /// which is why a shipped driver's body is unchanged.
@@ -792,9 +793,12 @@ fn encode_fused_kernel(
     scalar_count: u32,
     kernel_count: u32,
 ) -> WasmJitResult<Function> {
-    if kernel.assignment_kernel >= kernel_count {
+    if kernel
+        .assignment_kernel
+        .is_some_and(|index| index >= kernel_count)
+    {
         return Err(WasmJitError::Encoding(format!(
-            "fused kernel references assignment kernel {} outside count {kernel_count}",
+            "fused kernel references assignment kernel {:?} outside count {kernel_count}",
             kernel.assignment_kernel
         )));
     }
@@ -805,16 +809,20 @@ fn encode_fused_kernel(
 
     // The assignment kernels follow every scalar entry in the function index
     // space, so the driver calls its own sibling rather than duplicating the
-    // assignment lowering.
-    body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
-    body.instruction(&WasmInstruction::Call(
-        ENTRY_FUNCTION_INDEX + scalar_count + kernel.assignment_kernel,
-    ));
-    body.instruction(&WasmInstruction::LocalTee(KERNEL_STATUS_LOCAL));
-    body.instruction(&WasmInstruction::If(BlockType::Empty));
-    body.instruction(&WasmInstruction::LocalGet(KERNEL_STATUS_LOCAL));
-    body.instruction(&WasmInstruction::Return);
-    body.instruction(&WasmInstruction::End);
+    // assignment lowering. A module whose assignment pass has no steps emits no
+    // kernel and the driver calls nothing, the way it already treats an absent
+    // prelude below.
+    if let Some(assignment_kernel) = kernel.assignment_kernel {
+        body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
+        body.instruction(&WasmInstruction::Call(
+            ENTRY_FUNCTION_INDEX + scalar_count + assignment_kernel,
+        ));
+        body.instruction(&WasmInstruction::LocalTee(KERNEL_STATUS_LOCAL));
+        body.instruction(&WasmInstruction::If(BlockType::Empty));
+        body.instruction(&WasmInstruction::LocalGet(KERNEL_STATUS_LOCAL));
+        body.instruction(&WasmInstruction::Return);
+        body.instruction(&WasmInstruction::End);
+    }
 
     // The CFG route's assignment pass, once, before the first stamp: every
     // value entry below is a read of a slot it publishes.
