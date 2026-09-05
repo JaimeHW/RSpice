@@ -108,6 +108,19 @@ rout out 0 1k
 .end
 ";
 
+const XSPICE_EVENT_TRAN_DECK: &str = "* xspice event export test
+v1 in 0 pulse(0 5 0 1n 1n 5n 10n)
+abridge1 [in] [d] adc
+adac [d] [out] dac
+aobs out rnode obs
+rout out 0 1k
+.model adc adc_bridge(in_low=1 in_high=4)
+.model dac dac_bridge(out_low=0 out_high=5 out_undef=2.5)
+.model obs v_to_real(gain=2)
+.tran 1n 20n
+.end
+";
+
 const XSPICE_DIGITAL_SAVE_TRAN_DECK: &str = "* xspice digital save export test
 v1 in 0 pulse(0 5 0 1n 1n 5n 10n)
 abridge1 [in] [d] adc
@@ -652,6 +665,173 @@ fn transient_export_includes_xspice_digital_traces() {
         "digital export should include high samples: {text}"
     );
 
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The rawfile carries each event node's own timeline as its own plot, and
+/// leaves the analysis plot exactly where it was.
+///
+/// The grid `D()` column answers what a node held at each analysis time point;
+/// it cannot answer when the node changed, and it says nothing at all about
+/// drive strength or about real-valued event nodes, which reach no table.
+#[test]
+fn transient_rawfile_appends_lossless_event_plots() {
+    use rspice_core::xspice::{DigitalState, DigitalStrength};
+
+    let dir = test_dir("tran_xspice_event_plots");
+    for format in ["raw", "ascii"] {
+        let tag = format!("events_{format}");
+        let path = run_export(&dir, &tag, XSPICE_EVENT_TRAN_DECK, format);
+
+        // The single-plot reader every existing caller uses still reads the
+        // analysis plot, with its grid-sampled digital column intact.
+        let analysis = rspice_core::io::parse_raw_file(&path)
+            .unwrap_or_else(|error| panic!("{format}: legacy read of plot 1: {error}"));
+        assert_eq!(analysis.header.plotname, "Transient Analysis");
+        let digital_column = analysis
+            .variables
+            .iter()
+            .position(|variable| variable.name.eq_ignore_ascii_case("D(d)"))
+            .unwrap_or_else(|| panic!("{format}: plot 1 must still carry D(d)"));
+        assert_eq!(analysis.variables[digital_column].var_type, "digital");
+        assert_eq!(
+            analysis.waveforms[digital_column].y.len(),
+            analysis.header.no_points,
+            "{format}: the digital column is still on the analysis grid"
+        );
+
+        let file = rspice_core::io::parse_raw_plots_file_with_limits(
+            &path,
+            rspice_core::ResourceLimits::default(),
+        )
+        .unwrap_or_else(|error| panic!("{format}: multi-plot read: {error}"));
+        assert_eq!(
+            file.plots.len(),
+            3,
+            "{format}: one analysis plot, one digital node, one real node"
+        );
+        let traces = rspice_core::execution::decode_event_plots(&file)
+            .unwrap_or_else(|error| panic!("{format}: decode event plots: {error}"));
+
+        let digital = traces
+            .digital_traces
+            .iter()
+            .find(|trace| trace.node_name.eq_ignore_ascii_case("d"))
+            .unwrap_or_else(|| panic!("{format}: the digital node's timeline: {traces:?}"));
+        assert!(
+            digital
+                .points
+                .windows(2)
+                .all(|pair| pair[0].time < pair[1].time),
+            "{format}: event times are strictly increasing: {digital:?}"
+        );
+        assert!(
+            digital.points.len() < analysis.header.no_points,
+            "{format}: an event timeline is irregular, not the analysis grid"
+        );
+        let states: Vec<DigitalState> = digital.points.iter().map(|p| p.value.state).collect();
+        assert!(
+            states.contains(&DigitalState::Zero) && states.contains(&DigitalState::One),
+            "{format}: the pulsed node must toggle: {states:?}"
+        );
+        assert!(
+            digital
+                .points
+                .iter()
+                .all(|point| point.value.strength == DigitalStrength::Strong),
+            "{format}: a driven bridge output carries strong drive: {digital:?}"
+        );
+
+        // Real event nodes reach no table at all; the rawfile is the first
+        // flat artifact that carries them.
+        let real = traces
+            .real_traces
+            .iter()
+            .find(|trace| trace.node_name.eq_ignore_ascii_case("rnode"))
+            .unwrap_or_else(|| panic!("{format}: the real node's timeline: {traces:?}"));
+        assert!(
+            !real.points.is_empty() && real.points.iter().all(|point| point.value.is_finite()),
+            "{format}: real event values are carried as themselves: {real:?}"
+        );
+        assert!(
+            !analysis
+                .variables
+                .iter()
+                .any(|variable| variable.name.eq_ignore_ascii_case("E(rnode)")),
+            "{format}: real event nodes are not columns of the analysis plot"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `convert` and `compare` read the analysis plot and are untroubled by the
+/// plots behind it.
+#[test]
+fn generic_conversion_still_reads_plot_one_of_a_multi_plot_rawfile() {
+    let dir = test_dir("tran_xspice_event_convert");
+    // `compare` resolves each side's format from its extension, so the golden
+    // is published under its own.
+    let golden = dir.join("events_golden.csv");
+    let golden_deck = dir.join("events_golden.sp");
+    std::fs::write(&golden_deck, XSPICE_EVENT_TRAN_DECK).expect("write golden deck");
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .arg("--quiet")
+        .arg("run")
+        .arg(&golden_deck)
+        .arg("-o")
+        .arg(&golden)
+        .arg("-f")
+        .arg("csv")
+        .output()
+        .expect("publish the CSV golden");
+    assert!(
+        output.status.success(),
+        "golden run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    for format in ["raw", "ascii"] {
+        let tag = format!("events_convert_{format}");
+        let path = run_export(&dir, &tag, XSPICE_EVENT_TRAN_DECK, format);
+        let converted = dir.join(format!("{tag}.csv"));
+
+        let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+            .arg("--quiet")
+            .arg("convert")
+            .arg(&path)
+            .arg(&converted)
+            .arg("--to")
+            .arg("csv")
+            .output()
+            .expect("convert a rawfile carrying event plots");
+        assert!(
+            output.status.success(),
+            "{format} convert failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let header = std::fs::read_to_string(&converted).expect("read converted CSV");
+        let header = header.lines().next().expect("converted CSV header");
+        assert!(
+            header
+                .split(',')
+                .any(|column| column.eq_ignore_ascii_case("D(d)")),
+            "{format}: conversion must carry plot 1's columns: {header:?}"
+        );
+
+        let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+            .arg("--quiet")
+            .arg("compare")
+            .arg(&path)
+            .arg(&golden)
+            .arg("--abstol")
+            .arg("1e-9")
+            .output()
+            .expect("compare a rawfile carrying event plots");
+        assert!(
+            output.status.success(),
+            "{format} compare failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }
 

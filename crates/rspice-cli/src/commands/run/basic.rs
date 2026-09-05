@@ -1033,16 +1033,20 @@ pub(super) fn run_transient(
                     OutputFormat::Raw
                     | OutputFormat::RawAscii
                     | OutputFormat::Csv
-                    | OutputFormat::Tsv => {
-                        TransientOutputDocument::Table(super::export::scalar_table(
+                    | OutputFormat::Tsv => TransientOutputDocument::Table {
+                        table: super::export::scalar_table(
                             "transient",
                             "Transient Analysis",
                             "time",
                             "time",
                             output_time,
                             &signals,
-                        ))
-                    }
+                        ),
+                        events: rspice_core::execution::transient_event_plots(
+                            &result.digital_traces,
+                            &result.real_traces,
+                        ),
+                    },
                 };
                 ctx.record_published(super::PublishedResult {
                     analysis_id: analysis_id.tag(),
@@ -1109,7 +1113,18 @@ pub(super) fn run_transient(
 
 pub(super) enum TransientOutputDocument {
     Hdf5(Box<Hdf5SimulationData>),
-    Table(super::export::ExportTable),
+    /// The flat tabular projection, and the event timelines the run captured.
+    ///
+    /// The table is exactly what it has always been. The timelines travel
+    /// beside it rather than in it because a rawfile is a sequence of plots
+    /// and an event history — irregular, with times of its own — is a plot
+    /// rather than a column. Only the rawfile formats have anywhere to put
+    /// them; the delimited ones carry the grid-sampled `D()` columns the
+    /// table already holds and nothing more.
+    Table {
+        table: super::export::ExportTable,
+        events: Vec<rspice_core::io::RawEventTimeline>,
+    },
     /// The shared typed result document, published for `-f json`.
     Typed(Box<rspice_core::execution::AnalysisResultDocument>),
 }
@@ -1125,7 +1140,22 @@ impl TransientOutputDocument {
         match self {
             Self::Hdf5(data) => write_hdf5_to_writer(writer, data)
                 .map_err(|error| map_hdf5_output_error(path, error)),
-            Self::Table(table) => table.write_to(writer, path, format),
+            Self::Table { table, events } => {
+                table.write_to(writer, path, format)?;
+                // Appended inside the caller's staging closure, so a rawfile
+                // that carries event plots is still published whole or not at
+                // all.
+                let raw_format = match format {
+                    OutputFormat::Raw => rspice_core::io::RawFormat::Binary,
+                    OutputFormat::RawAscii => rspice_core::io::RawFormat::Ascii,
+                    OutputFormat::Csv
+                    | OutputFormat::Tsv
+                    | OutputFormat::Json
+                    | OutputFormat::Hdf5 => return Ok(()),
+                };
+                rspice_core::io::write_event_plots(writer, events, raw_format)
+                    .map_err(|error| CliError::output_error(path, error))
+            }
             Self::Typed(document) => {
                 let json = document
                     .to_json_with_abort(&crate::abort::ProcessAbort, byte_limit)
