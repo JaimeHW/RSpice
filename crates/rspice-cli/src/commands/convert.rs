@@ -1,12 +1,19 @@
 //! Convert Command - Format conversion
 //!
 //! Converts simulation results between every format the CLI can produce:
-//! SPICE rawfile (binary or ASCII), CSV, TSV, JSON, and HDF5. Complex AC
+//! SPICE rawfile (binary or ASCII), CSV, TSV, JSON, HDF5, and VCD. Complex AC
 //! data survives every round trip; `--variables`, `--start`, and `--stop`
 //! select a subset of the data.
+//!
+//! VCD is the one target that is not a table, so it is built from the event
+//! timelines rather than from the tabular model — exactly when the source
+//! carries them, and from the flattened `D(node)` / `E(node)` grid columns
+//! when it does not. [`crate::commands::vcd_io`] holds both directions and
+//! states what each one keeps.
 
 use crate::cli::{CliError, Config, ConvertArgs, OutputFormat};
 use crate::commands::export_table::{ColumnData, ExportTable};
+use crate::commands::vcd_io;
 use crate::commands::waveform_io::{detect_format, load_table};
 use crate::hdf5::{Hdf5AcSection, Hdf5SimulationData, Hdf5WaveformSection, write_hdf5};
 
@@ -34,6 +41,18 @@ pub fn execute(
     }
 
     let from_format = args.from.unwrap_or_else(|| detect_format(&args.input));
+
+    if args.to == OutputFormat::Vcd {
+        let mut document =
+            vcd_io::load_vcd_document(&args.input, from_format, config.resources.limits())?;
+        vcd_io::select_and_clip(&mut document, &args.variables, args.start, args.stop)?;
+        vcd_io::write_vcd_artifact(&args.output, &document)?;
+        if !quiet {
+            println!("✓ Conversion complete: {}", args.output.display());
+        }
+        return Ok(());
+    }
+
     let mut table = load_table(&args.input, from_format, config.resources.limits())?;
 
     table.select_variables(&args.variables)?;

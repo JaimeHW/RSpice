@@ -215,6 +215,13 @@ pub enum Commands {
     /// Rawfile, CSV, TSV, JSON and HDF5 all carry the same table, and complex
     /// AC data survives every round trip between them.
     ///
+    /// `--to vcd` writes a Value Change Dump instead of a table. A rawfile
+    /// carrying event plots and a typed JSON result document both hold the
+    /// event timelines themselves, and convert exactly. Any other source is
+    /// converted from its `D(node)` and `E(node)` grid columns: 0, 1 and 0.5
+    /// become 0, 1 and x, one change per distinct value, and the XSPICE drive
+    /// strength a grid column already dropped is not recovered.
+    ///
     /// Converting from `vcd` builds a table whose rows are the dump's distinct
     /// ticks: time is tick times timescale, each signal holds its last value,
     /// x and z become 0.5 in a `digital` column, and a logic signal wider than

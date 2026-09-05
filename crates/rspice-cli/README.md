@@ -477,7 +477,9 @@ rspice compare <RESULT> <GOLDEN> [OPTIONS]
 
 ### `rspice convert` — Format Conversion
 
-Convert between simulation output formats: `raw`, `ascii`, `csv`, `json`, `tsv`, `hdf5`. Complex AC data is preserved across every round trip (`Re(..)`/`Im(..)` column pairs in CSV/TSV, `Flags: complex` in rawfiles, real/imag arrays in JSON and HDF5).
+Convert between simulation output formats: `raw`, `ascii`, `csv`, `json`, `tsv`, `hdf5`, `vcd`. Complex AC data is preserved across every round trip (`Re(..)`/`Im(..)` column pairs in CSV/TSV, `Flags: complex` in rawfiles, real/imag arrays in JSON and HDF5).
+
+`--to vcd` writes an event dump rather than a table. A rawfile carrying event plots and a typed JSON result document both hold the timelines themselves and convert exactly — the file is identical to what `run -f vcd` publishes. Any other source is converted from its grid `D(node)`/`E(node)` columns, which is lossy: `0`, `1` and `0.5` become `0`, `1` and `x`, one change per level held rather than one per grid point, and the drive strength those columns already dropped is not recovered. A source with neither event timelines nor such columns is refused.
 
 Converting **from** `vcd` builds a table whose rows are the dump's distinct ticks: time is tick × `$timescale`, each signal holds its last value, `x` and `z` become `0.5` in a `digital` column, and a logic signal wider than one bit becomes its unsigned integer value (at most 53 bits, which is what an `f64` column holds exactly). Columns are named `D(node)` and `E(node)`, dropping the scope levels every signal shares — so a dump RSpice wrote reads back under the same names its CSV uses, and a foreign dump keeps whatever path still tells its signals apart. Before its first change a logic signal reads `0.5`; a real signal, which has no unknown to show, holds its first value backwards. `compare` reads `.vcd` on either side through this same table.
 
@@ -497,6 +499,7 @@ rspice convert <INPUT> <OUTPUT> --to <FORMAT> [OPTIONS]
 rspice convert results.raw results.csv --to csv
 rspice convert results.csv results.h5 --to hdf5
 rspice convert tran.raw window.csv --to csv --variables "V(out)" --start 1u --stop 5u
+rspice convert tran.raw events.vcd --to vcd
 ```
 
 ### `rspice compile-va` — Compile Verilog-A
