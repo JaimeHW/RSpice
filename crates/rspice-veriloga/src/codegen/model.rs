@@ -478,6 +478,9 @@ pub struct CompiledParameter {
     /// Alternate instance-facing names (aliasparam); setting an alias
     /// writes this parameter
     pub aliases: Vec<SmolStr>,
+    /// `parameter real x = inf;` names the Verilog-AMS infinity, which JSON has
+    /// no spelling for, so this encodes through [`crate::json_float`].
+    #[serde(with = "crate::json_float")]
     pub default: f64,
     /// Program computing the default from other parameters (evaluated in
     /// declaration order for parameters the instance did not set)
@@ -485,7 +488,14 @@ pub struct CompiledParameter {
     /// Whether the declared parameter type is `integer`.
     #[serde(default)]
     pub is_integer: bool,
+    /// Declared literal range bounds. `from (0:inf)` does *not* put an infinity
+    /// here — the parser reads `inf` in a bound as the absence of a bound — but
+    /// a bound literal too large for a `f64` parses to one, so both encode
+    /// through [`crate::json_float`]. Written as `null` an infinite bound would
+    /// read back as `None`, deleting the declared bound instead of refusing it.
+    #[serde(with = "crate::json_float::option")]
     pub min: Option<f64>,
+    #[serde(with = "crate::json_float::option")]
     pub max: Option<f64>,
     /// Runtime parameter index supplying the lower bound.
     #[serde(default)]
@@ -645,8 +655,10 @@ pub struct BytecodeProgram {
 /// VM Instructions
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Instruction {
-    /// Push constant
-    PushConst(f64),
+    /// Push constant. `$bound_step` resets its hidden task variable to `+inf`
+    /// on every evaluation, and `inf` is a Verilog-AMS constant a body may push
+    /// directly, so this encodes through [`crate::json_float`].
+    PushConst(#[serde(with = "crate::json_float")] f64),
     /// Push parameter value
     PushParam(usize),
     /// Push 1.0 if the parameter was explicitly set on the instance

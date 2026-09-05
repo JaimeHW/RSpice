@@ -58,6 +58,9 @@ pub struct MirParameterSlot {
     pub value_type: CanonicalValueType,
     #[serde(default)]
     pub dimensions: Vec<HirParameterDimension>,
+    /// The HIR slot's folded literal default, carried through unchanged; see
+    /// [`HirParameter::default`](crate::canonical_ir::hir::HirParameter).
+    #[serde(with = "crate::json_float::option")]
     pub default: Option<f64>,
     pub default_expr: Option<HirExprRef>,
     pub range: Option<HirParamRange>,

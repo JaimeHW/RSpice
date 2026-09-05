@@ -62,7 +62,13 @@ impl From<ValueType> for CanonicalValueType {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HirParamRange {
+    /// Declared literal bounds. `inf` in a bound is the *absence* of a bound,
+    /// not an infinity, but a bound literal too large for a `f64` parses to
+    /// one, so both encode through [`crate::json_float`]: written as `null` an
+    /// infinite bound reads back as `None`, deleting it rather than refusing.
+    #[serde(with = "crate::json_float::option")]
     pub min: Option<f64>,
+    #[serde(with = "crate::json_float::option")]
     pub max: Option<f64>,
     #[serde(default)]
     pub min_parameter: Option<SmolStr>,
@@ -147,6 +153,10 @@ pub enum HirExprKind {
     /// LRM grammar assigns meaning to a null argument may retain this node.
     NullArgument,
     Number {
+        /// Non-finite when the literal is the `inf` constant or the `+inf`
+        /// sentinel `$bound_step` resets its task variable to, so it encodes
+        /// through [`crate::json_float`].
+        #[serde(with = "crate::json_float")]
         value: f64,
         raw: SmolStr,
     },
@@ -235,6 +245,10 @@ pub struct HirParameter {
     /// change an array's shape during instance elaboration.
     #[serde(default)]
     pub dimensions: Vec<HirParameterDimension>,
+    /// Folded literal default. `parameter real x = inf;` names the Verilog-AMS
+    /// infinity, so this can be non-finite and encodes through
+    /// [`crate::json_float`] — `null` here would delete the default silently.
+    #[serde(with = "crate::json_float::option")]
     pub default: Option<f64>,
     pub default_expr: Option<HirExprRef>,
     pub range: Option<HirParamRange>,
