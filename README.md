@@ -23,18 +23,18 @@ operating points and transient waveforms through harmonic balance and phase nois
 
 ## Overview
 
-RSpice reads a SPICE netlist and computes what the circuit does — DC operating
-points, transient waveforms, small-signal frequency response, noise, and
-distortion, along with RF steady-state analyses like harmonic balance, periodic
-steady state, and phase noise. It covers the standard SPICE device set next to
-modern compact models: BSIM3, BSIM4, BSIM-SOI, VBIC, EKV, and 43 CMC models
-generated from their Verilog-A sources.
+RSpice is a circuit simulator for standard SPICE netlists. It has DC operating
+point, transient, small-signal AC, noise, and distortion analyses, plus RF
+steady-state coverage through harmonic balance, periodic steady state, and phase
+noise. Its device library spans the classic SPICE elements, native BSIM3, BSIM4,
+BSIM-SOI, VBIC, and EKV compact models, and 43 CMC models generated from their
+Verilog-A sources.
 
-One engine sits behind every interface. The same `rspice-core` code runs under
-the command line, the desktop IDE, the Python bindings, and the WebAssembly
-build, so a result never depends on how the run was launched. Where a deck asks
-for physics RSpice has not implemented, it stops and names the parameter or
-model level responsible instead of approximating around it.
+RSpice has one engine behind every interface. The command line, the desktop IDE,
+the Python bindings, and the WebAssembly build are all the same `rspice-core`
+code, so a result is never a function of how the run was launched. Where a deck
+needs physics RSpice does not have, the answer is a typed error naming the
+parameter or model level responsible — never a silent approximation.
 
 ## Quick start
 
@@ -115,7 +115,7 @@ complete set of ways to reach it.
 
 ## Devices
 
-A single descriptor per device drives every surface it touches — properties,
+Every device has a single descriptor behind all of its surfaces — properties,
 persistence, hierarchy, DRC, netlisting, preview, export, and hardcopy — across
 74 stable schematic kinds, 64 canonical XSPICE catalog entries under 115
 registered names, and 43 generated Verilog-A models. A device whose id, registry
@@ -343,16 +343,14 @@ a before/after scoreboard.
 
 ## Under the hood
 
-The engine assembles modified nodal analysis systems and solves them with a
-damped Newton iteration, supported by a merit-based line search and — when a
-circuit resists convergence — gmin stepping, source stepping, pseudo-transient
-continuation, and arc-length continuation. Transient runs choose their own
-timestep under local-truncation-error control.
+The engine is a modified-nodal-analysis formulation with a damped Newton solver.
+It has a merit-based line search, four convergence aids for hard circuits — gmin
+stepping, source stepping, pseudo-transient continuation, and arc-length
+continuation — and local-truncation-error control over the transient timestep.
 
-Real-valued factorization uses an in-tree KLU-class sparse solver whose stored
-pivots make refactorization cheap while the sparsity pattern holds;
-[faer](https://crates.io/crates/faer) backs the complex solves behind the
-AC-family analyses.
+Real factorization is an in-tree KLU-class sparse solver whose stored pivots keep
+refactorization cheap while the sparsity pattern holds. Complex solves behind the
+AC-family analyses are [faer](https://crates.io/crates/faer).
 
 ## Repository
 
