@@ -115,21 +115,27 @@ impl Default for PnoiseConfig {
 }
 
 impl PnoiseConfig {
+    /// What the engine's `.PNOISE` card means by an unwritten
+    /// `INTEGRATEDNOISE=`.
+    pub(crate) const CARD_DEFAULT_INTEGRATED_NOISE: bool = false;
+    /// What the engine's `.PNOISE` card means by an unwritten
+    /// `NOISESUMMARY=`.
+    pub(crate) const CARD_DEFAULT_NOISE_SUMMARY: bool = true;
+
     /// The `.PNOISE` card the engine reads, in the engine's own grammar.
     ///
     /// `rspice-core/src/netlist/parser/periodic_cards.rs::parse_pnoise_command`
     /// reads `.PNOISE DEC|LIN|OCT np fstart fstop KEY=VALUE ...` and refuses
-    /// any keyword outside `OUT`, `INPUT`, `MAXSIDEBAND` and `FROM`. `OUT=` is
-    /// the output probe, spelled `V(node)`, `V(node,ref)` or a bare node name;
-    /// `INPUT=` is, in the card's own words, the source used for
-    /// input-referred noise.
+    /// any keyword outside `OUT`, `INPUT`, `MAXSIDEBAND`, `NOISEREF`,
+    /// `INTEGRATEDNOISE`, `NOISESUMMARY` and `FROM`. `OUT=` is the output
+    /// probe, spelled `V(node)`, `V(node,ref)` or a bare node name.
     ///
-    /// `noiseref`, `integratedNoise` and `noiseSummary` are not written: the
-    /// engine's card has no field for any of them, and all three already reach
-    /// the run through the typed execution options
-    /// (`controller::analysis_run_config::pnoise_run_config_from_dialog`).
-    /// Phase noise is therefore a studio-side selection that the deck does not
-    /// state.
+    /// `INPUT=` alone means input-referred noise, so `noiseref=input` beside
+    /// it would restate what the source already said and the card refuses the
+    /// pair as redundant only when they disagree; the writer states the source
+    /// and stops. `noiseref=phase` has no such shorthand and is written
+    /// outright. `integratednoise=` and `noisesummary=` appear only where they
+    /// differ from what the card means without them.
     pub fn to_spice(&self) -> String {
         let mut cmd = format!(
             ".pnoise {} {} {} {}",
@@ -151,7 +157,19 @@ impl PnoiseConfig {
             cmd.push_str(&format!(" input={}", self.input_source.trim()));
         }
 
+        if self.noise_ref == NoiseReferenceType::Phase {
+            cmd.push_str(" noiseref=phase");
+        }
+
         cmd.push_str(&format!(" maxsideband={}", self.max_sideband));
+
+        if self.integrated_noise != Self::CARD_DEFAULT_INTEGRATED_NOISE {
+            cmd.push_str(" integratednoise=yes");
+        }
+
+        if self.noise_summary != Self::CARD_DEFAULT_NOISE_SUMMARY {
+            cmd.push_str(" noisesummary=no");
+        }
 
         cmd
     }
@@ -388,11 +406,7 @@ mod tests {
     /// The exact card, in the engine's spelling.
     ///
     /// The output probe is `out=`, and `INPUT=` appears only for the
-    /// input-referred selection it means on the engine's card. Phase noise
-    /// writes the same card as output-referred noise, because the card has no
-    /// field for the difference — the selection reaches the run through the
-    /// typed execution options instead, which is why it is asserted here
-    /// rather than assumed.
+    /// input-referred selection it means on the engine's card.
     #[test]
     fn the_card_states_only_what_the_engine_reads_from_it() {
         assert_eq!(
@@ -407,9 +421,40 @@ mod tests {
             .to_spice(),
             ".pnoise dec 10 1 1Meg out=VOUT input=VIN maxsideband=5"
         );
+    }
+
+    /// Phase noise is a different measurement from output-referred noise, and
+    /// the card now says which one it is instead of leaving the difference to
+    /// a typed option the deck cannot carry.
+    #[test]
+    fn the_card_states_phase_noise_outright() {
         assert_eq!(
             PnoiseConfig {
                 noise_ref: NoiseReferenceType::Phase,
+                ..PnoiseConfig::default()
+            }
+            .to_spice(),
+            ".pnoise dec 10 1 1Meg out=VOUT noiseref=phase maxsideband=5"
+        );
+    }
+
+    /// The reporting switches appear only when they differ from what the card
+    /// means without them.
+    #[test]
+    fn the_card_states_the_reporting_switches_only_when_they_differ() {
+        assert_eq!(
+            PnoiseConfig {
+                integrated_noise: true,
+                noise_summary: false,
+                ..PnoiseConfig::default()
+            }
+            .to_spice(),
+            ".pnoise dec 10 1 1Meg out=VOUT maxsideband=5 integratednoise=yes noisesummary=no"
+        );
+        assert_eq!(
+            PnoiseConfig {
+                integrated_noise: PnoiseConfig::CARD_DEFAULT_INTEGRATED_NOISE,
+                noise_summary: PnoiseConfig::CARD_DEFAULT_NOISE_SUMMARY,
                 ..PnoiseConfig::default()
             }
             .to_spice(),

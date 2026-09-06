@@ -23,9 +23,9 @@
 //!   rather than parsed and dropped. That is the rule `periodic_cards.rs`
 //!   states for the ngspice fields RSpice cannot honour, applied one layer up.
 //! - `.PXF` and `.PSTB` are *not* engine cards: the parser records them as
-//!   unsupported dot-commands and ignores them, so this reader owns their
-//!   whole grammar. They spell their output probe `out=` like the rest of the
-//!   family.
+//!   unsupported dot-commands, warns that whatever they request will not run,
+//!   and ignores them, so this reader owns their whole grammar. They spell
+//!   their output probe `out=` like the rest of the family.
 
 use std::collections::{HashMap, HashSet};
 
@@ -45,6 +45,21 @@ struct ParsedCard {
     source: String,
     positional: Vec<String>,
     keyed: HashMap<String, String>,
+}
+
+/// What the deck's one `.PSS` card settled, as every dependent card needs it.
+///
+/// The four numbers travel together because they describe one operating point:
+/// splitting them across argument lists let a dependent card be bound to three
+/// of them and not the fourth, which is how `noiseref=phase` used to reach a
+/// driven carrier.
+#[derive(Debug, Clone, Copy, Default)]
+struct PeriodicCarrier {
+    fundamental_freq: f64,
+    num_harmonics: usize,
+    tolerance: f64,
+    /// Whether the period is a solver unknown rather than authored input.
+    autonomous: bool,
 }
 
 pub(super) fn parse_periodic_tasks(
@@ -103,14 +118,20 @@ pub(super) fn parse_periodic_tasks(
     // retains no harmonic is refused by `parse_pss` — the engine's card has no
     // `HARMS=0` — so the fallbacks here are only reached when the deck holds
     // no periodic analysis at all, and nothing reads them.
-    let (pss_fundamental, pss_harmonics, pss_tolerance) = match &pss_spec {
+    let carrier = match &pss_spec {
         Some(AnalysisSpec::Pss {
             fundamental_freq,
             num_harmonics,
             tolerance,
+            oscillator_mode,
             ..
-        }) => (*fundamental_freq, *num_harmonics, *tolerance),
-        _ => (0.0, 0, 0.0),
+        }) => PeriodicCarrier {
+            fundamental_freq: *fundamental_freq,
+            num_harmonics: *num_harmonics,
+            tolerance: *tolerance,
+            autonomous: *oscillator_mode,
+        },
+        _ => PeriodicCarrier::default(),
     };
     let reltol = netlist
         .options
@@ -139,9 +160,7 @@ pub(super) fn parse_periodic_tasks(
                 let config = parse_pac(
                     &card,
                     &netlist.params,
-                    pss_fundamental,
-                    pss_harmonics,
-                    pss_tolerance,
+                    carrier,
                     reltol,
                     abstol,
                 )
@@ -161,9 +180,7 @@ pub(super) fn parse_periodic_tasks(
                 let config = parse_pnoise(
                     &card,
                     &netlist.params,
-                    pss_fundamental,
-                    pss_harmonics,
-                    pss_tolerance,
+                    carrier,
                     reltol,
                     abstol,
                 )
@@ -183,9 +200,7 @@ pub(super) fn parse_periodic_tasks(
                 let config = parse_pxf(
                     &card,
                     &netlist.params,
-                    pss_fundamental,
-                    pss_harmonics,
-                    pss_tolerance,
+                    carrier,
                     reltol,
                     abstol,
                 )
@@ -205,9 +220,7 @@ pub(super) fn parse_periodic_tasks(
                 let config = parse_pstb(
                     &card,
                     &netlist.params,
-                    pss_fundamental,
-                    pss_harmonics,
-                    pss_tolerance,
+                    carrier,
                 )
                 .map_err(|error| vec![format!("line {line}: {error}")])?;
                 QueuedAnalysis {
@@ -401,9 +414,7 @@ fn parse_pss(
 fn parse_pac(
     card: &ParsedCard,
     params: &ParamContext,
-    pss_fundamental_freq: f64,
-    pss_num_harmonics: usize,
-    pss_tolerance: f64,
+    carrier: PeriodicCarrier,
     reltol: f64,
     abstol: f64,
 ) -> Result<PacRunConfig, String> {
@@ -417,6 +428,8 @@ fn parse_pac(
             "sidebandmax",
             "reltol",
             "abstol",
+            "pacmag",
+            "includedc",
             "from",
         ],
         &[],
@@ -426,9 +439,9 @@ fn parse_pac(
     let input_source = required_text(card, "input", ".PAC")?;
     let (output_node, output_ref) = required_output(card, ".PAC")?;
     let config = PacRunConfig {
-        pss_fundamental_freq,
-        pss_num_harmonics,
-        pss_tolerance,
+        pss_fundamental_freq: carrier.fundamental_freq,
+        pss_num_harmonics: carrier.num_harmonics,
+        pss_tolerance: carrier.tolerance,
         start_freq,
         stop_freq,
         points_per_unit,
@@ -441,12 +454,11 @@ fn parse_pac(
         input_source,
         output_node,
         output_ref,
-        // The engine's `.PAC` has no field for either, so neither is authored:
-        // both reach a studio-configured run through the typed execution
-        // options instead, and a manual deck takes the same values the direct
-        // periodic AC entry point defaults to.
-        pac_magnitude: 1.0,
-        include_dc: true,
+        // The engine's card carries both, at these defaults, so a deck that
+        // says nothing means what a studio run with the untouched options
+        // means.
+        pac_magnitude: optional_value(card, "pacmag", 1.0, params)?,
+        include_dc: optional_bool(card, "includedc", true)?,
         // The card may state the frequency-domain tolerances; a deck that does
         // not falls back to its own `.options`, which is a sharper answer than
         // the card constant and the one this reader has always given.
@@ -468,21 +480,35 @@ fn parse_pac(
     {
         return Err(".PAC reltol and abstol must be finite and positive".to_owned());
     }
+    if !config.pac_magnitude.is_finite() || config.pac_magnitude <= 0.0 {
+        return Err(".PAC pacmag must be a finite positive drive amplitude".to_owned());
+    }
+    // The engine's card refuses this pairing where it is written; so does the
+    // reader, rather than letting the run fail with nothing to publish.
+    if !config.include_dc && config.max_sideband == 0 {
+        return Err(".PAC includedc=no withholds the only sideband this card analyses".to_owned());
+    }
     Ok(config)
 }
 
 fn parse_pnoise(
     card: &ParsedCard,
     params: &ParamContext,
-    pss_fundamental_freq: f64,
-    pss_num_harmonics: usize,
-    pss_tolerance: f64,
+    carrier: PeriodicCarrier,
     reltol: f64,
     abstol: f64,
 ) -> Result<PnoiseRunConfig, String> {
     reject_unsupported_keys(
         card,
-        &["out", "input", "maxsideband", "from"],
+        &[
+            "out",
+            "input",
+            "maxsideband",
+            "noiseref",
+            "integratednoise",
+            "noisesummary",
+            "from",
+        ],
         &[],
         ".PNOISE",
     )?;
@@ -494,22 +520,54 @@ fn parse_pnoise(
         .map(|value| unquote(value).trim().to_owned())
         .filter(|value| !value.is_empty())
         .unwrap_or_default();
-    // The engine's card has one field for the noise reference and it is
-    // `INPUT=`, described there as "the independent source used for
-    // input-referred noise, when authored". A card that names one asks for
-    // input-referred noise; a card that does not asks for output-referred.
-    // Phase noise has no spelling on the card and so no manual-deck route: a
-    // studio-configured PNoise still selects it, through the typed execution
-    // options rather than through the deck.
-    let noise_ref = if input_source.is_empty() {
-        PnoiseReference::Output
-    } else {
-        PnoiseReference::Input
+    // `NOISEREF=` states the measurement and `INPUT=` alone implies
+    // input-referred, which is the spelling that predates the keyword. The
+    // engine's card refuses the two when they disagree; so does this reader,
+    // in the same words, so a deck means one thing to both.
+    let noise_ref = match card.keyed.get("noiseref") {
+        Some(spelling) => match unquote(spelling).trim().to_ascii_lowercase().as_str() {
+            "output" | "out" => PnoiseReference::Output,
+            "input" | "in" => PnoiseReference::Input,
+            "phase" | "pm" => PnoiseReference::Phase,
+            other => {
+                return Err(format!(
+                    ".PNOISE noiseref={other:?} is not one of output, input or phase"
+                ));
+            }
+        },
+        None if input_source.is_empty() => PnoiseReference::Output,
+        None => PnoiseReference::Input,
     };
+    if noise_ref == PnoiseReference::Input && input_source.is_empty() {
+        return Err(".PNOISE noiseref=input requires input=<source>".to_owned());
+    }
+    if noise_ref != PnoiseReference::Input && !input_source.is_empty() {
+        return Err(
+            ".PNOISE names an input source and then measures something other than \
+             input-referred noise"
+                .to_owned(),
+        );
+    }
+    // The engine refuses the same two pairings when it runs the card; refusing
+    // them here means the deck is told which line is wrong.
+    if noise_ref == PnoiseReference::Phase && !carrier.autonomous {
+        return Err(
+            ".PNOISE noiseref=phase needs an autonomous carrier: a driven orbit has no free \
+             phase to diffuse, so author .PSS autonomous=yes"
+                .to_owned(),
+        );
+    }
+    if noise_ref == PnoiseReference::Input && carrier.autonomous {
+        return Err(
+            ".PNOISE input= refers noise to a driving source, and an autonomous .PSS has none; \
+             author noiseref=phase for an oscillator's phase noise"
+                .to_owned(),
+        );
+    }
     let config = PnoiseRunConfig {
-        pss_fundamental_freq,
-        pss_num_harmonics,
-        pss_tolerance,
+        pss_fundamental_freq: carrier.fundamental_freq,
+        pss_num_harmonics: carrier.num_harmonics,
+        pss_tolerance: carrier.tolerance,
         start_freq,
         stop_freq,
         points_per_unit,
@@ -524,11 +582,9 @@ fn parse_pnoise(
         output_ref,
         input_source,
         noise_ref,
-        // Neither has a field on the engine's card. Both keep the value the
-        // direct periodic-noise entry point defaults to, and both remain
-        // authorable from the studio through the typed execution options.
-        integrated_noise: false,
-        noise_summary: true,
+        // The engine's card carries both, at these defaults.
+        integrated_noise: optional_bool(card, "integratednoise", false)?,
+        noise_summary: optional_bool(card, "noisesummary", true)?,
         reltol,
         abstol,
     };
@@ -549,9 +605,7 @@ fn parse_pnoise(
 fn parse_pxf(
     card: &ParsedCard,
     params: &ParamContext,
-    pss_fundamental_freq: f64,
-    pss_num_harmonics: usize,
-    pss_tolerance: f64,
+    carrier: PeriodicCarrier,
     reltol: f64,
     abstol: f64,
 ) -> Result<PxfRunConfig, String> {
@@ -571,9 +625,9 @@ fn parse_pxf(
     let input_source = required_text(card, "input", ".PXF")?;
     let (output_node, output_ref) = required_output(card, ".PXF")?;
     let config = PxfRunConfig {
-        pss_fundamental_freq,
-        pss_num_harmonics,
-        pss_tolerance,
+        pss_fundamental_freq: carrier.fundamental_freq,
+        pss_num_harmonics: carrier.num_harmonics,
+        pss_tolerance: carrier.tolerance,
         start_freq,
         stop_freq,
         points_per_unit,
@@ -616,9 +670,7 @@ fn parse_pxf(
 fn parse_pstb(
     card: &ParsedCard,
     params: &ParamContext,
-    pss_fundamental_freq: f64,
-    pss_num_harmonics: usize,
-    pss_tolerance: f64,
+    carrier: PeriodicCarrier,
 ) -> Result<PstbRunConfig, String> {
     reject_unsupported_keys(
         card,
@@ -637,9 +689,9 @@ fn parse_pstb(
         return Err(".PSTB accepts keyed options only".to_owned());
     }
     let config = PstbRunConfig {
-        pss_fundamental_freq,
-        pss_num_harmonics,
-        pss_tolerance,
+        pss_fundamental_freq: carrier.fundamental_freq,
+        pss_num_harmonics: carrier.num_harmonics,
+        pss_tolerance: carrier.tolerance,
         probe_instance: required_text(card, "probe", ".PSTB")?,
         max_harmonics: optional_usize(card, "maxharm", 10, params)?,
         num_multipliers: optional_usize(card, "nmults", 10, params)?,
@@ -1087,6 +1139,66 @@ mod tests {
         assert!(!pstb.detect_subharmonics);
     }
 
+    /// The five options that used to reach a run only through the Studio's
+    /// typed request now reach it from the deck, and mean the same thing.
+    #[test]
+    fn periodic_cards_carry_the_drive_amplitude_and_the_noise_reporting_options() {
+        let source = "periodic\nV1 in 0 SIN(0 1 1Meg)\nR1 in out 1k\nC1 out 0 1n\n\
+.pss fund=1Meg\n\
+.pac dec 10 1k 100Meg maxsideband=7 input=V1 out=out pacmag=25m includedc=no\n\
+.pnoise dec 10 1 1Meg out=out maxsideband=9 integratednoise=yes noisesummary=no\n.end\n";
+        let netlist = Netlist::parse(source).unwrap();
+
+        let tasks = parse_periodic_tasks(&netlist, source).unwrap();
+
+        let pac = tasks
+            .iter()
+            .find_map(|task| task.spec_options.pac.as_ref())
+            .expect("the .PAC card is queued");
+        assert!(
+            (pac.pac_magnitude - 25e-3).abs() <= 1e-18,
+            "pacmag was {}",
+            pac.pac_magnitude
+        );
+        assert!(!pac.include_dc);
+        let pnoise = tasks
+            .iter()
+            .find_map(|task| task.spec_options.pnoise.as_ref())
+            .expect("the .PNOISE card is queued");
+        assert!(pnoise.integrated_noise);
+        assert!(!pnoise.noise_summary);
+        assert_eq!(pnoise.noise_ref, PnoiseReference::Output);
+    }
+
+    /// Phase noise is authorable in a deck, and only around the carrier that
+    /// has a phase to diffuse.
+    #[test]
+    fn a_deck_authors_phase_noise_only_around_an_autonomous_carrier() {
+        const CIRCUIT: &str = "periodic\nV1 in 0 SIN(0 1 1Meg)\nR1 in out 1k\nC1 out 0 1n\n";
+        let source = format!(
+            "{CIRCUIT}.pss fund=1Meg autonomous=yes oscnode=out\n\
+             .pnoise dec 10 1 1Meg out=out noiseref=phase\n.end\n"
+        );
+        let netlist = Netlist::parse(&source).expect("the autonomous deck parses");
+        let tasks = parse_periodic_tasks(&netlist, &source).expect("the deck queues");
+        let pnoise = tasks
+            .iter()
+            .find_map(|task| task.spec_options.pnoise.as_ref())
+            .expect("the .PNOISE card is queued");
+        assert_eq!(pnoise.noise_ref, PnoiseReference::Phase);
+
+        let driven = format!(
+            "{CIRCUIT}.pss fund=1Meg\n.pnoise dec 10 1 1Meg out=out noiseref=phase\n.end\n"
+        );
+        let netlist = Netlist::parse(&driven).expect("the driven deck parses");
+        let errors = parse_periodic_tasks(&netlist, &driven)
+            .expect_err("phase noise around a driven carrier is refused");
+        assert!(
+            errors.iter().any(|error| error.contains("autonomous")),
+            "unexpected refusal: {errors:?}"
+        );
+    }
+
     #[test]
     fn periodic_dependents_fail_closed_without_pss() {
         let source =
@@ -1135,6 +1247,14 @@ mod tests {
             // Two spellings of one quantity on one card.
             ".pac dec 10 1k 1Meg input=V1 out=out maxsideband=2 sidebandmin=-1",
             ".pss fund=1Meg oscnode=out autonomous=no",
+            // A drive amplitude that is not a positive number, a card that
+            // withholds the only sideband it analyses, and a noise reference
+            // that disagrees with the source the card names.
+            ".pac dec 10 1k 1Meg input=V1 out=out pacmag=0",
+            ".pac dec 10 1k 1Meg input=V1 out=out maxsideband=0 includedc=no",
+            ".pnoise dec 10 1 1Meg out=out noiseref=input",
+            ".pnoise dec 10 1 1Meg out=out input=V1 noiseref=output",
+            ".pnoise dec 10 1 1Meg out=out noiseref=amplitude",
         ] {
             let seed = if card.starts_with(".pss") { "" } else { SEED };
             let source = format!("{CIRCUIT}{seed}{card}\n.end\n");

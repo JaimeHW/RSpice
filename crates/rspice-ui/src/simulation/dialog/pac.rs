@@ -96,18 +96,23 @@ impl Default for PacConfig {
 }
 
 impl PacConfig {
+    /// What the engine's `.PAC` card means by an unwritten `PACMAG=`.
+    pub(crate) const CARD_DEFAULT_PAC_MAGNITUDE: f64 = 1.0;
+    /// What the engine's `.PAC` card means by an unwritten `INCLUDEDC=`.
+    pub(crate) const CARD_DEFAULT_INCLUDE_DC: bool = true;
+
     /// The `.PAC` card the engine reads, in the engine's own grammar.
     ///
     /// `rspice-core/src/netlist/parser/periodic_cards.rs::parse_pac_command`
     /// reads `.PAC DEC|LIN|OCT np fstart fstop KEY=VALUE ...` and refuses any
     /// keyword outside `INPUT`, `OUT`, `MAXSIDEBAND`, `SIDEBANDMIN`,
-    /// `SIDEBANDMAX`, `RELTOL`, `ABSTOL` and `FROM`. The output probe is
-    /// `OUT=`, spelled `V(node)` or `V(node,ref)` or a bare node name.
+    /// `SIDEBANDMAX`, `RELTOL`, `ABSTOL`, `PACMAG`, `INCLUDEDC` and `FROM`.
+    /// The output probe is `OUT=`, spelled `V(node)` or `V(node,ref)` or a
+    /// bare node name.
     ///
-    /// `pacmag` and `includedc` are not written: the engine's card has no
-    /// field for either, and both already reach the run through the typed
-    /// execution options rather than through the deck
-    /// (`controller::analysis_run_config::pac_run_config_from_dialog`).
+    /// `pacmag=` and `includedc=` are written only where they differ from the
+    /// card's own defaults, which are these defaults: a statement carries what
+    /// the run does differently, not a restatement of every default.
     pub fn to_spice(&self) -> String {
         let mut cmd = format!(
             ".pac {} {} {} {}",
@@ -129,6 +134,14 @@ impl PacConfig {
             } else {
                 cmd.push_str(&format!(" out=V({},{})", self.output_node, self.output_ref));
             }
+        }
+
+        if self.pac_magnitude != Self::CARD_DEFAULT_PAC_MAGNITUDE {
+            cmd.push_str(&format!(" pacmag={}", self.pac_magnitude));
+        }
+
+        if self.include_dc != Self::CARD_DEFAULT_INCLUDE_DC {
+            cmd.push_str(" includedc=no");
         }
 
         cmd
@@ -319,6 +332,30 @@ mod tests {
             }
             .to_spice(),
             ".pac dec 10 1k 1G maxsideband=5 input=VRF out=V(VOUT,REF)"
+        );
+    }
+
+    /// The drive amplitude and the sideband-zero choice appear only when they
+    /// differ from what the card means without them.
+    #[test]
+    fn the_card_states_the_drive_and_the_sideband_zero_choice_only_when_they_differ() {
+        assert_eq!(
+            PacConfig {
+                pac_magnitude: 0.05,
+                include_dc: false,
+                ..PacConfig::default()
+            }
+            .to_spice(),
+            ".pac dec 10 1k 1G maxsideband=5 input=VRF out=VOUT pacmag=0.05 includedc=no"
+        );
+        assert_eq!(
+            PacConfig {
+                pac_magnitude: PacConfig::CARD_DEFAULT_PAC_MAGNITUDE,
+                include_dc: PacConfig::CARD_DEFAULT_INCLUDE_DC,
+                ..PacConfig::default()
+            }
+            .to_spice(),
+            PacConfig::default().to_spice()
         );
     }
 }

@@ -269,6 +269,91 @@ fn an_inherited_temperature_axis_round_trips_as_the_axis_the_plan_declared() {
     );
 }
 
+/// The periodic small-signal options reach the deck and read back as
+/// themselves.
+///
+/// The third setting the parse walk cannot see, and the one this pair of cards
+/// used to lose outright: the drive amplitude, the sideband-zero choice and
+/// the three noise-reporting selections had no field on the engine's cards, so
+/// a `.pac` or `.pnoise` line was a card the parser accepted while the run
+/// behind it was configured by something the deck never said. A deck handed to
+/// a colleague produced different numbers from the studio session it came
+/// from, and nothing anywhere reported a difference.
+///
+/// So each is set away from its default, written, and read back through the
+/// same `manual_deck` reader a hand-written deck goes through.
+#[test]
+fn the_periodic_small_signal_options_round_trip_through_the_deck_reader() {
+    use crate::simulation::plan::AnalysisDraft;
+
+    let mut pac_draft = fixture_draft(AnalysisKind::Pac);
+    let AnalysisDraft::Pac(pac) = &mut pac_draft else {
+        panic!("the PAC kind carries a PAC draft");
+    };
+    pac.initialized = true;
+    pac.pac_magnitude = "0.05".to_owned();
+    pac.include_dc = false;
+
+    let mut pnoise_draft = fixture_draft(AnalysisKind::Pnoise);
+    let AnalysisDraft::Pnoise(pnoise) = &mut pnoise_draft else {
+        panic!("the PNoise kind carries a PNoise draft");
+    };
+    pnoise.initialized = true;
+    pnoise.noise_ref_idx = 0; // Output-referred; the input source stays unnamed.
+    pnoise.integrated_noise = true;
+    pnoise.noise_summary = false;
+
+    let controller = SimulationController::new();
+    let pac_state = engine_facing_state(&pac_draft);
+    let pac_directive = controller
+        .analysis_draft_directive(&pac_state, &pac_draft)
+        .expect("a PAC draft emits a card");
+    let pnoise_state = engine_facing_state(&pnoise_draft);
+    let pnoise_directive = controller
+        .analysis_draft_directive(&pnoise_state, &pnoise_draft)
+        .expect("a PNoise draft emits a card");
+
+    // A dependent card binds to the deck's one `.PSS`, so the seed is written
+    // by the same emitter rather than spelled here.
+    let pss_draft = fixture_draft(AnalysisKind::Pss);
+    let pss_state = engine_facing_state(&pss_draft);
+    let pss_directive = controller
+        .analysis_draft_directive(&pss_state, &pss_draft)
+        .expect("a PSS draft emits a card");
+
+    let deck =
+        format!("{FIXTURE_DECK}{pss_directive}\n{pac_directive}\n{pnoise_directive}\n.end\n");
+    rspice_core::netlist::parse_netlist(&deck)
+        .unwrap_or_else(|error| panic!("the engine must read the deck back: {error}\n{deck}"));
+    let queue = super::manual_deck::build_manual_deck_queue(&pac_state, &deck)
+        .unwrap_or_else(|errors| panic!("the deck reader refused: {}", errors.join("; ")));
+
+    let pac = queue
+        .iter()
+        .find_map(|queued| queued.spec_options.pac.as_ref())
+        .expect("the deck reader recovers the PAC configuration");
+    assert!(
+        (pac.pac_magnitude - 0.05).abs() <= 1.0e-18,
+        "the drive amplitude the card stated is {}",
+        pac.pac_magnitude
+    );
+    assert!(
+        !pac.include_dc,
+        "a card that withheld sideband zero read back as one that publishes it"
+    );
+
+    let pnoise = queue
+        .iter()
+        .find_map(|queued| queued.spec_options.pnoise.as_ref())
+        .expect("the deck reader recovers the PNoise configuration");
+    assert!(pnoise.integrated_noise);
+    assert!(!pnoise.noise_summary);
+    assert_eq!(
+        pnoise.noise_ref,
+        crate::services::simulation_runner::PnoiseReference::Output
+    );
+}
+
 /// An autonomous PSS reaches the deck as autonomous, and reads back that way.
 ///
 /// The second setting the parse walk cannot see. `parse_netlist` accepting a
