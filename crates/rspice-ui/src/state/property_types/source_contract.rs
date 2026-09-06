@@ -32,12 +32,14 @@
 //! substitution instead of predicting its value, so this module needs no plan
 //! state and cannot disagree with the plan.
 //!
-//! A refusal here mirrors something the deck would refuse, and nothing else. Two
-//! rule sets have to be read with the netlist generator open beside them,
+//! A refusal here mirrors something the deck would refuse, and nothing else.
+//! Some rule sets have to be read with the netlist generator open beside them,
 //! because the generator normalizes fields before the parser ever sees them: an
 //! omitted `PAT` edge time takes the sheet's default rather than reaching the
-//! parser as a zero, and a bit pattern typed without its leading `B` is given
-//! one. A rule for either would refuse a card the generator was about to fix.
+//! parser as a zero, a bit pattern typed without its leading `B` is given one,
+//! and a `TRRANDOM` card is written with all five fields whether or not anyone
+//! set them. A rule for any of those would refuse a card the generator was
+//! about to fix.
 //!
 //! These rules audit a stimulus *definition* as well as a placed instance. A
 //! definition is the same `(component type, value, params)` triple, so it is
@@ -230,6 +232,9 @@ pub fn source_contract_findings(
         }
         ComponentType::VoltageSourceNoise | ComponentType::CurrentSourceNoise => {
             trnoise_findings(fields, &mut findings);
+        }
+        ComponentType::VoltageSourceRandom | ComponentType::CurrentSourceRandom => {
+            trrandom_findings(fields, &mut findings);
         }
         _ => {}
     }
@@ -736,6 +741,88 @@ fn trnoise_findings(fields: &SourceFields<'_>, findings: &mut Vec<SourceContract
     findings.push(SourceContractFinding::advisory(
         "nt",
         "The operating point sees exactly 0 from this source: the noise train is zero-mean and transient-only",
+    ));
+}
+
+/// `TRRANDOM(TYPE TS TD PARAM1 PARAM2)`.
+///
+/// The refusals are the parser's own, in the order it makes them
+/// (`netlist/parser/source_specs.rs` `parse_trrandom_spec`, lines 663-728): a
+/// TYPE that is not an integer from 1 through 4, a TS that is not positive, and
+/// a negative TD or PARAM1. Omission is not among them — the parser refuses a
+/// card with no TYPE or TS, but the generator substitutes the sheet's default
+/// for every omitted field before the parser sees one, so a rule for an unset
+/// field would refuse a card that was about to be written correctly. That is
+/// the same reason `pat_findings` does not refuse a blank pattern.
+///
+/// The advisories are what TYPE does to the other two fields. PARAM1 and PARAM2
+/// keep one label across four distributions that read them differently
+/// (`engine/transient/noise.rs` `generate_trrandom_points`), and that is exactly
+/// the class of thing this module exists to state.
+fn trrandom_findings(fields: &SourceFields<'_>, findings: &mut Vec<SourceContractFinding>) {
+    let authored_type = fields.text("type");
+    let distribution = authored_type
+        .as_deref()
+        .and_then(trrandom_distribution_number);
+    if authored_type.is_some() && distribution.is_none() {
+        findings.push(SourceContractFinding::refusal(
+            "type",
+            "TRRANDOM TYPE must be one of uniform, gaussian, exponential or poisson — the netlist \
+             parser refuses anything but the integers 1 through 4",
+        ));
+    }
+    if fields.number("ts").is_some_and(|interval| interval <= 0.0) {
+        findings.push(SourceContractFinding::refusal(
+            "ts",
+            "TRRANDOM requires a positive sample interval TS",
+        ));
+    }
+    if fields.number("td").is_some_and(|delay| delay < 0.0) {
+        findings.push(SourceContractFinding::refusal(
+            "td",
+            "TRRANDOM refuses a negative TD: the draw starts at or after time zero",
+        ));
+    }
+    if fields.number("param1").is_some_and(|spread| spread < 0.0) {
+        findings.push(SourceContractFinding::refusal(
+            "param1",
+            "TRRANDOM refuses a negative PARAM1 — use PARAM2 to move the level, not the spread",
+        ));
+    }
+    match distribution {
+        Some(1) => findings.push(SourceContractFinding::advisory(
+            "param1",
+            "PARAM1 is a half-range here: every sample lands between PARAM2 - PARAM1 and \
+             PARAM2 + PARAM1",
+        )),
+        Some(3) => findings.push(SourceContractFinding::advisory(
+            "param1",
+            "The exponential draw is one-sided: PARAM1 is its mean and no sample ever falls below \
+             PARAM2",
+        )),
+        Some(4) => findings.push(SourceContractFinding::advisory(
+            "param1",
+            "Poisson reads PARAM1 as a mean count rather than an amplitude, and adds the whole \
+             number it draws to PARAM2",
+        )),
+        _ => {}
+    }
+    if fields.number("param1") == Some(0.0) {
+        findings.push(SourceContractFinding::advisory(
+            "param1",
+            "A PARAM1 of 0 leaves nothing to draw: every sample is exactly PARAM2",
+        ));
+    }
+    if fields.number("td").is_some_and(|delay| delay > 0.0) {
+        findings.push(SourceContractFinding::advisory(
+            "td",
+            "Before TD the output holds PARAM2, not 0",
+        ));
+    }
+    findings.push(SourceContractFinding::advisory(
+        "ts",
+        "The operating point sees exactly PARAM2 from this source: the draw is expanded into a \
+         seeded sample train, one value every TS, only when a transient builds its circuit",
     ));
 }
 
@@ -1248,6 +1335,97 @@ mod tests {
                 .iter()
                 .any(|finding| finding.field == "vscale"
                     && finding.message.contains("VALUE * VSCALE + VOFFSET")),
+            "{findings:?}"
+        );
+    }
+
+    /// Every TRRANDOM refusal is one the netlist parser makes, and nothing else
+    /// is a refusal (`netlist/parser/source_specs.rs:693-719`).
+    #[test]
+    fn the_trrandom_refusals_are_exactly_the_parsers_own() {
+        for (pairs, field) in [
+            (vec![("type", "normal"), ("ts", "1u")], "type"),
+            (vec![("type", "5"), ("ts", "1u")], "type"),
+            (vec![("type", "uniform"), ("ts", "0")], "ts"),
+            (vec![("type", "uniform"), ("ts", "-1u")], "ts"),
+            (vec![("type", "uniform"), ("ts", "1u"), ("td", "-1u")], "td"),
+            (
+                vec![("type", "uniform"), ("ts", "1u"), ("param1", "-1")],
+                "param1",
+            ),
+        ] {
+            let findings = findings_for(ComponentType::VoltageSourceRandom, &pairs);
+            assert_eq!(refusals(&findings).len(), 1, "{pairs:?} {findings:?}");
+            assert_eq!(refusals(&findings)[0].field, field, "{findings:?}");
+        }
+
+        // The sheet's own defaults, and the four spellings it offers, are clean.
+        for distribution in TRRANDOM_DISTRIBUTIONS {
+            let findings = findings_for(
+                ComponentType::CurrentSourceRandom,
+                &[("type", distribution), ("ts", "1u"), ("param1", "1")],
+            );
+            assert!(refusals(&findings).is_empty(), "{findings:?}");
+        }
+    }
+
+    /// A field nobody has set is not a refusal even though the parser would
+    /// refuse the card without it: the generator writes the sheet's default
+    /// first. The same doctrine as `pat_findings`.
+    #[test]
+    fn an_unset_trrandom_type_is_left_to_the_generator() {
+        let findings = findings_for(ComponentType::VoltageSourceRandom, &[("ts", "1u")]);
+        assert!(refusals(&findings).is_empty(), "{findings:?}");
+    }
+
+    /// PARAM1 keeps one label across four distributions that read it
+    /// differently (`engine/transient/noise.rs` `generate_trrandom_points`), so
+    /// each one says what it will do with the number.
+    #[test]
+    fn each_trrandom_distribution_states_what_it_makes_of_param1() {
+        for (distribution, fragment) in [
+            ("uniform", "half-range"),
+            ("exponential", "one-sided"),
+            ("poisson", "mean count"),
+        ] {
+            let findings = findings_for(
+                ComponentType::VoltageSourceRandom,
+                &[("type", distribution), ("ts", "1u"), ("param1", "1")],
+            );
+            assert!(
+                advisories(&findings).iter().any(|finding| finding.field
+                    == "param1"
+                    && finding.message.to_lowercase().contains(fragment)),
+                "{distribution}: {findings:?}"
+            );
+        }
+        // Gaussian reads PARAM1 as its label already says, so it says nothing.
+        let gaussian = findings_for(
+            ComponentType::VoltageSourceRandom,
+            &[("type", "gaussian"), ("ts", "1u"), ("param1", "1")],
+        );
+        assert!(
+            !advisories(&gaussian)
+                .iter()
+                .any(|finding| finding.field == "param1"),
+            "{gaussian:?}"
+        );
+    }
+
+    /// The operating point sees PARAM2, not zero and not a draw — the same
+    /// class of statement TRNOISE's closing advisory makes, with the offset the
+    /// engine actually returns (`circuit/storage/sources.rs:1385`).
+    #[test]
+    fn a_random_source_always_states_that_the_draw_waits_for_a_transient() {
+        let findings = findings_for(
+            ComponentType::CurrentSourceRandom,
+            &[("type", "gaussian"), ("ts", "1u"), ("param1", "1")],
+        );
+        assert!(
+            advisories(&findings)
+                .iter()
+                .any(|finding| finding.field == "ts"
+                    && finding.message.contains("exactly PARAM2")),
             "{findings:?}"
         );
     }
