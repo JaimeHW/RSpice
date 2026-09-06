@@ -5,10 +5,11 @@
 //! delegation lives here, as a second inherent impl. `engine/internals.rs` is
 //! the same split for the same reason.
 //!
-//! Both helpers are shared by several of those signatures: the column layout
-//! is what `export_columns`, `to_csv` and the two raw exporters agree on, and
-//! the Fourier evaluation is what `fourier`, `fourier_of` and
-//! `fourier_current` all reach.
+//! Every helper here is shared by several of those signatures: the column
+//! layout is what `export_columns`, `to_csv` and the two raw exporters agree
+//! on, the raw bytes are what `to_raw` and `write_raw` both publish, the
+//! Fourier evaluation is what `fourier`, `fourier_of` and `fourier_current`
+//! all reach, and the authored-output projection is `saved_signals`.
 
 use super::*;
 
@@ -61,6 +62,53 @@ impl PyTransientResult {
             complex: false,
             timestamp: None,
         }
+    }
+
+    /// The SPICE raw bytes `to_raw` returns and `write_raw` writes.
+    ///
+    /// One body rather than two: the file and the in-memory bytes are the same
+    /// export, and two copies of the title default, the timestamp assignment
+    /// and the format parse are two chances for them to stop being.
+    pub(super) fn raw_bytes(
+        &self,
+        format: &str,
+        title: Option<&str>,
+        timestamp: Option<&str>,
+    ) -> PyResult<Vec<u8>> {
+        let mut plot = self.raw_plot(title.unwrap_or("RSpice transient analysis"));
+        plot.timestamp = timestamp.map(str::to_string);
+        raw_export_bytes(
+            &plot,
+            crate::export::RawFormat::parse(format).map_err(crate::errors::value_error)?,
+        )
+    }
+
+    /// The columns a deck's own output cards select, in authored order.
+    pub(super) fn authored_signals(
+        &self,
+        netlist: &crate::netlist::PyNetlist,
+    ) -> PyResult<Vec<crate::results::PyProjectedSignal>> {
+        let inventory = rspice_core::execution::transient_projection_signals(&self.inner)
+            .map_err(|error| crate::errors::value_error(error.to_string()))?;
+        let projection = rspice_core::execution::SignalProjection::from_netlist(&netlist.inner)
+            .map_err(crate::errors::simulation_error_to_pyerr)?;
+        let ordered = projection
+            .ordered_transient_columns(
+                &netlist.inner,
+                &self.inner,
+                netlist.resource_limits,
+                &rspice_core::abort_signal::NoAbort,
+            )
+            .map_err(crate::errors::simulation_error_to_pyerr)?;
+        crate::results::projection::project_real(
+            &netlist.inner,
+            rspice_core::execution::AnalysisResultKind::Transient,
+            "TRAN",
+            &self.inner.time,
+            inventory,
+            rspice_core::analysis::measure_signals::transient_signal_map(&self.inner),
+            ordered,
+        )
     }
 
     /// Shared `.FOUR` evaluation for every waveform source.

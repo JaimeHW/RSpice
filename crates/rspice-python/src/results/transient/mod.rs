@@ -509,27 +509,7 @@ impl PyTransientResult {
         &self,
         netlist: &crate::netlist::PyNetlist,
     ) -> PyResult<Vec<crate::results::PyProjectedSignal>> {
-        let inventory = rspice_core::execution::transient_projection_signals(&self.inner)
-            .map_err(|error| crate::errors::value_error(error.to_string()))?;
-        let projection = rspice_core::execution::SignalProjection::from_netlist(&netlist.inner)
-            .map_err(crate::errors::simulation_error_to_pyerr)?;
-        let ordered = projection
-            .ordered_transient_columns(
-                &netlist.inner,
-                &self.inner,
-                netlist.resource_limits,
-                &rspice_core::abort_signal::NoAbort,
-            )
-            .map_err(crate::errors::simulation_error_to_pyerr)?;
-        crate::results::projection::project_real(
-            &netlist.inner,
-            rspice_core::execution::AnalysisResultKind::Transient,
-            "TRAN",
-            &self.inner.time,
-            inventory,
-            rspice_core::analysis::measure_signals::transient_signal_map(&self.inner),
-            ordered,
-        )
+        self.authored_signals(netlist)
     }
 
     /// Node names with a recorded XSPICE digital event history
@@ -745,12 +725,7 @@ impl PyTransientResult {
         title: Option<&str>,
         timestamp: Option<&str>,
     ) -> PyResult<Bound<'py, pyo3::types::PyBytes>> {
-        let mut plot = self.raw_plot(title.unwrap_or("RSpice transient analysis"));
-        plot.timestamp = timestamp.map(str::to_string);
-        let bytes = raw_export_bytes(
-            &plot,
-            crate::export::RawFormat::parse(format).map_err(crate::errors::value_error)?,
-        )?;
+        let bytes = self.raw_bytes(format, title, timestamp)?;
         Ok(pyo3::types::PyBytes::new(py, &bytes))
     }
 
@@ -766,13 +741,7 @@ impl PyTransientResult {
         title: Option<&str>,
         timestamp: Option<&str>,
     ) -> PyResult<()> {
-        let mut plot = self.raw_plot(title.unwrap_or("RSpice transient analysis"));
-        plot.timestamp = timestamp.map(str::to_string);
-        let bytes = raw_export_bytes(
-            &plot,
-            crate::export::RawFormat::parse(format).map_err(crate::errors::value_error)?,
-        )?;
-        write_export_file(&path, &bytes)
+        write_export_file(&path, &self.raw_bytes(format, title, timestamp)?)
     }
 
     /// Get the number of time points
