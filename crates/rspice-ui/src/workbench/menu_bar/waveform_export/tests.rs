@@ -114,7 +114,7 @@ fn dc_op_with_one_node() -> crate::state::DcOpResult {
 }
 
 #[test]
-fn export_registry_matches_the_ten_contract_ids_and_governs_availability() {
+fn export_registry_matches_the_ten_contract_ids_and_refuses_any_other() {
     assert_eq!(
         ResultExportFormat::ALL.map(ResultExportFormat::canonical_id),
         [
@@ -130,27 +130,15 @@ fn export_registry_matches_the_ten_contract_ids_and_governs_availability() {
             "vcd",
         ]
     );
+    // Every id in the vocabulary has an encoder now that MATLAB v5 has one,
+    // so the only thing left to refuse is an id that is not in it.
     for format in ResultExportFormat::ALL {
-        let availability = result_export_format_availability(format);
-        if matches!(
-            format,
-            ResultExportFormat::RSpiceResultBundle
-                | ResultExportFormat::RSpiceDatasetBundle
-                | ResultExportFormat::CsvRfc4180
-                | ResultExportFormat::Tsv
-                | ResultExportFormat::TouchstoneV2
-                | ResultExportFormat::Hdf5
-                | ResultExportFormat::NumpyNpy
-                | ResultExportFormat::NumpyNpz
-                | ResultExportFormat::Vcd
-        ) {
-            assert!(availability.is_ok(), "{}", format.canonical_id());
-        } else {
-            let error = availability.expect_err("encoder is governed unavailable");
-            assert!(error.contains(format.canonical_id()), "{error}");
-            assert!(error.contains("verified lossless encoder"), "{error}");
-        }
+        result_export_format_availability_by_id(format.canonical_id())
+            .unwrap_or_else(|error| panic!("{error}"));
     }
+    let error = result_export_format_availability_by_id("matlab-v7.3")
+        .expect_err("an import-only id is not part of the export vocabulary");
+    assert!(error.contains("matlab-v7.3"), "{error}");
 }
 
 fn complex_waveform(
@@ -1717,15 +1705,12 @@ fn a_domain_the_hdf5_layout_has_no_section_for_refuses_and_writes_nothing() {
     assert!(io.dialog_titles.borrow().is_empty());
     assert!(io.byte_files.borrow().is_empty());
     assert!(io.text_files.borrow().is_empty());
-    // The refusal names the three sections HDF5 carries, not the registry's
-    // generic "no verified lossless encoder" sentence, which no longer governs
-    // this format at all.
+    // The refusal names the three sections HDF5 carries.
     assert!(
         state.log_buffer.entries().any(|entry| {
             entry
                 .message
                 .contains("a transient, a DC sweep or an AC sweep")
-                && !entry.message.contains("verified lossless encoder")
         }),
         "{:?}",
         state
@@ -1754,12 +1739,86 @@ fn a_transient_without_event_evidence_refuses_the_dump_and_writes_nothing() {
     assert!(io.dialog_titles.borrow().is_empty());
     assert!(io.byte_files.borrow().is_empty());
     assert!(io.text_files.borrow().is_empty());
-    // The refusal names what a dump carries, not the registry's generic
-    // "no verified lossless encoder" sentence.
+    // The refusal names what a dump carries.
+    assert!(
+        state
+            .log_buffer
+            .entries()
+            .any(|entry| entry.message.contains("event timelines")),
+        "{:?}",
+        state
+            .log_buffer
+            .entries()
+            .map(|entry| entry.message.clone())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn engineering_export_preference_dispatches_a_matlab_v5_file() {
+    let transient =
+        AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(vec![
+            waveform("V(out)", vec![0.0, 1.0e-6, 2.0e-6], vec![0.0, 1.25, -0.5]),
+        ]);
+    let mut state = state_with_typed_result(transient);
+    state
+        .ui
+        .preferences
+        .set_choice(crate::workbench::ChoicePreference::EngineeringExport, 9)
+        .expect("MATLAB preference");
+    let io = MockExportWorkflowIo::default();
+    action_export_csv_with_io(&mut state, &io);
+
+    assert_eq!(
+        io.dialog_titles.borrow().as_slice(),
+        &["Export MATLAB v5 File"]
+    );
+    let files = io.byte_files.borrow();
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].0, PathBuf::from("waveforms.mat"));
+    assert_eq!(files[0].2, "application/x-matlab-data");
+    assert!(
+        files[0].1.starts_with(b"MATLAB 5.0 MAT-file"),
+        "the Level 5 header signature"
+    );
+    let reopened = crate::workbench::workflows::result_import_workflow::parse_result_dataset(
+        "waveforms.mat",
+        &files[0].1,
+    )
+    .expect("reopen the dataset");
+    assert_eq!(reopened.coordinate_name, "time");
+    // MAT names are MATLAB identifiers, so the reader sees the sanitised one.
+    assert_eq!(reopened.waveforms[0].name, "V_out_");
+    assert_eq!(reopened.waveforms[0].y.as_ref(), &[0.0, 1.25, -0.5]);
+}
+
+#[test]
+fn a_domain_the_matlab_layout_has_no_coordinate_for_refuses_and_writes_nothing() {
+    let noise =
+        AnalysisResult::new(1, AnalysisType::Noise, "Noise (1Hz-100Hz)").with_waveforms(vec![
+            waveform(
+                "V(onoise)",
+                vec![1.0, 10.0, 100.0],
+                vec![1.0e-9, 2.0e-9, 3.0e-9],
+            ),
+        ]);
+    let mut state = state_with_typed_result(noise);
+    state
+        .ui
+        .preferences
+        .set_choice(crate::workbench::ChoicePreference::EngineeringExport, 9)
+        .expect("MATLAB preference");
+    let io = MockExportWorkflowIo::default();
+    action_export_csv_with_io(&mut state, &io);
+
+    assert!(io.dialog_titles.borrow().is_empty());
+    assert!(io.byte_files.borrow().is_empty());
+    assert!(io.text_files.borrow().is_empty());
+    // The refusal names the three coordinates a MAT file can be read back by.
     assert!(
         state.log_buffer.entries().any(|entry| {
-            entry.message.contains("event timelines")
-                && !entry.message.contains("verified lossless encoder")
+            entry.message.contains("a transient on 'time'")
+                && entry.message.contains("an AC sweep on 'frequency'")
         }),
         "{:?}",
         state

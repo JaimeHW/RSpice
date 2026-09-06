@@ -326,7 +326,6 @@ mod tests {
     fn a_result_with_no_event_history_is_refused_by_what_a_dump_carries() {
         let error = prepare_vcd(&analysis(None)).expect_err("nothing to dump");
         assert_eq!(error, NO_EVENT_EVIDENCE_MESSAGE);
-        assert!(!error.contains("verified lossless encoder"), "{error}");
         assert!(error.contains("event timelines"), "{error}");
     }
 

@@ -1,6 +1,7 @@
 //! Waveform export actions.
 
 mod hdf5;
+mod matlab;
 mod numpy;
 mod typed_csv;
 mod vcd;
@@ -93,40 +94,20 @@ impl ResultExportFormat {
             Self::Vcd => "vcd",
         }
     }
-
-    const fn encoder_available(self) -> bool {
-        matches!(
-            self,
-            Self::RSpiceResultBundle
-                | Self::RSpiceDatasetBundle
-                | Self::CsvRfc4180
-                | Self::Tsv
-                | Self::TouchstoneV2
-                | Self::Hdf5
-                | Self::NumpyNpy
-                | Self::NumpyNpz
-                | Self::Vcd
-        )
-    }
 }
 
-fn result_export_format_availability(format: ResultExportFormat) -> Result<(), String> {
-    if format.encoder_available() {
-        Ok(())
-    } else {
-        Err(format!(
-            "Format '{}' is declared by the result-data contract, but this build does not include a verified lossless encoder.",
-            format.canonical_id()
-        ))
-    }
-}
-
+/// Refuse an id this build cannot write.
+///
+/// Every id in [`ResultExportFormat`] now has an encoder, so the only refusal
+/// left is an id that is not in the vocabulary at all. The check stays because
+/// the vocabulary is the contract's, not the picker's: a caller may hand over
+/// a string that came from a durable preference or an automation script.
 fn result_export_format_availability_by_id(canonical_id: &str) -> Result<(), String> {
-    let format = ResultExportFormat::ALL
+    ResultExportFormat::ALL
         .into_iter()
         .find(|format| format.canonical_id() == canonical_id)
-        .ok_or_else(|| format!("Unknown result export format '{canonical_id}'."))?;
-    result_export_format_availability(format)
+        .map(|_| ())
+        .ok_or_else(|| format!("Unknown result export format '{canonical_id}'."))
 }
 
 /// The formats a table of the displayed view can answer.
@@ -262,6 +243,7 @@ pub(crate) fn action_export_csv_with_io(
         EngineeringExportFormat::NumpyArray => ResultExportFormat::NumpyNpy,
         EngineeringExportFormat::NumpyArchive => ResultExportFormat::NumpyNpz,
         EngineeringExportFormat::Hdf5EngineeringDataset => ResultExportFormat::Hdf5,
+        EngineeringExportFormat::MatlabV5File => ResultExportFormat::MatlabV5,
     };
     if let Err(error) = result_export_format_availability_by_id(contract_format.canonical_id()) {
         state.push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
@@ -316,6 +298,10 @@ pub(crate) fn action_export_csv_with_io(
             hdf5::export_hdf5(state, io, &displayed);
             return;
         }
+        EngineeringExportFormat::MatlabV5File => {
+            matlab::export_matlab(state, io, &displayed);
+            return;
+        }
         _ => {}
     }
     // Everything past this point publishes a table of the displayed view, so
@@ -331,8 +317,9 @@ pub(crate) fn action_export_csv_with_io(
         | EngineeringExportFormat::ValueChangeDump
         | EngineeringExportFormat::NumpyArray
         | EngineeringExportFormat::NumpyArchive
-        | EngineeringExportFormat::Hdf5EngineeringDataset => {
-            unreachable!("native bundle, dump, NumPy and HDF5 formats dispatch above")
+        | EngineeringExportFormat::Hdf5EngineeringDataset
+        | EngineeringExportFormat::MatlabV5File => {
+            unreachable!("native bundle, dump, NumPy, HDF5 and MATLAB formats dispatch above")
         }
     };
     // What the reader is looking at comes first, and exactly one view owns

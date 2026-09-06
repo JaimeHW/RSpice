@@ -357,6 +357,11 @@ pub enum EngineeringExportFormat {
     /// real/imaginary pairs. The backend is pure Rust, so the browser
     /// publishes it too.
     Hdf5EngineeringDataset,
+    /// One analysis as a MATLAB Level 5 file: one `double` column vector per
+    /// column, complex for AC, under names MATLAB accepts. MAT has no unit
+    /// slot and no free-form names, so both are stated on export rather than
+    /// invented into the file.
+    MatlabV5File,
 }
 
 impl EngineeringExportFormat {
@@ -371,6 +376,7 @@ impl EngineeringExportFormat {
             Self::NumpyArray => 6,
             Self::NumpyArchive => 7,
             Self::Hdf5EngineeringDataset => 8,
+            Self::MatlabV5File => 9,
         }
     }
 
@@ -385,6 +391,7 @@ impl EngineeringExportFormat {
             6 => Ok(Self::NumpyArray),
             7 => Ok(Self::NumpyArchive),
             8 => Ok(Self::Hdf5EngineeringDataset),
+            9 => Ok(Self::MatlabV5File),
             _ => Err("engineering export index is outside its domain"),
         }
     }
@@ -1653,17 +1660,17 @@ mod tests {
         );
     }
 
-    /// Nine offered indices, and nothing past them.
+    /// Ten offered indices, and nothing past them.
     #[test]
     fn the_picker_offers_every_index_it_has_a_label_for_and_no_more() {
-        for index in 0..=8 {
+        for index in 0..=9 {
             UserPreferences::default()
                 .set_choice(ChoicePreference::EngineeringExport, index)
                 .unwrap_or_else(|error| panic!("index {index} is offered: {error}"));
         }
         assert!(
             UserPreferences::default()
-                .set_choice(ChoicePreference::EngineeringExport, 9)
+                .set_choice(ChoicePreference::EngineeringExport, 10)
                 .is_err()
         );
     }
@@ -1687,7 +1694,7 @@ mod tests {
     /// Both have to hold, because a saved preference outlives the index it was
     /// chosen by and the export dispatcher reads the name.
     #[test]
-    fn the_four_encoded_formats_are_runtime_choices_that_persist_by_name() {
+    fn the_five_encoded_formats_are_runtime_choices_that_persist_by_name() {
         for (index, format, durable) in [
             (
                 5,
@@ -1701,6 +1708,7 @@ mod tests {
                 EngineeringExportFormat::Hdf5EngineeringDataset,
                 "hdf5-engineering-dataset",
             ),
+            (9, EngineeringExportFormat::MatlabV5File, "matlab-v5-file"),
         ] {
             let mut preferences = UserPreferences::default();
             preferences
