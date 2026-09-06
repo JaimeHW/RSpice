@@ -2268,10 +2268,16 @@ fn analysis_form_body(
         model_binding_count: app.state.sim_setup.model_bindings.len(),
         parallelism: crate::simulation::execution::execution_target_parallelism(),
     };
-    // Only the noise form reads the elaborated vocabulary, and measuring it
-    // costs a circuit build. Every other analysis leaves it unmeasured.
-    let noise_domain =
-        matches!(draft, AnalysisDraft::Noise(_)).then(|| noise_domain_catalog(ui, app));
+    // The noise and transfer-function forms ask for the same two quantities —
+    // one independent source, one measured expression — so they offer the one
+    // elaborated vocabulary rather than a copy each. Measuring it costs a
+    // circuit build, so it is keyed by the design digest and every other
+    // analysis leaves it unmeasured.
+    let noise_domain = matches!(
+        draft,
+        AnalysisDraft::Noise(_) | AnalysisDraft::TransferFunction(_)
+    )
+    .then(|| noise_domain_catalog(ui, app));
     // Only the stability form offers the drawing's loop probes, and the scan
     // allocates. Every other analysis leaves it unmeasured.
     let placed_loop_probes = matches!(draft, AnalysisDraft::Stb(_))

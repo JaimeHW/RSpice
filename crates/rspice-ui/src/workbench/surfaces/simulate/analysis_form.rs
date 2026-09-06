@@ -540,6 +540,24 @@ fn noise_domain_control(
     );
 }
 
+/// What a form says when the elaborated vocabulary could not be measured.
+///
+/// The reason travels with the fact: a form that says a vocabulary is
+/// unavailable and not why leaves the reader with nothing to go and fix.
+/// Noise and the transfer function ask for the same two quantities from the
+/// same catalog, so they state its absence in the same words rather than in
+/// two sentences that would drift apart.
+fn noise_domain_advisory(ui: &mut Ui, reason: &str) {
+    field_advisory(
+        ui,
+        &format!(
+            "The elaborated node and source lists are unavailable: {reason}. Both \r
+             fields still take a name typed in full, and the run checks it against \r
+             the design before it starts."
+        ),
+    );
+}
+
 fn noise_domain_row(
     ui: &mut Ui,
     label: &str,
@@ -1335,6 +1353,22 @@ fn sp_port_fields(
     }
 }
 
+/// The output presets the transfer-function form offers: every elaborated
+/// node, spelled as the voltage measured there.
+///
+/// The field takes an expression, not a node — `validate_output_expression`
+/// admits `V(node)`, `V(node,ref)` and `I(element)` and nothing else — so a
+/// picker that offered bare node names would be one whose every choice fails
+/// validation. A differential pair or a branch current is typed through the
+/// exact-expression escape beside the selector.
+fn xf_output_presets(nodes: &[String]) -> Vec<String> {
+    nodes
+        .iter()
+        .take(NOISE_DOMAIN_PRESET_LIMIT)
+        .map(|node| format!("V({node})"))
+        .collect()
+}
+
 /// The design's own answer to the transfer-function form's two ports.
 ///
 /// A pre-fill, not a run. Pressing this writes the deck's only independent
@@ -1613,14 +1647,7 @@ pub(super) fn form(
                 &mut setup.input,
             );
             if let Some(reason) = noise_domain.unavailable {
-                field_advisory(
-                    ui,
-                    &format!(
-                        "The elaborated node and source lists are unavailable: {reason}. Both \
-                         fields still take a name typed in full, and the run checks it against \
-                         the design before it starts."
-                    ),
-                );
+                noise_domain_advisory(ui, reason);
             }
             if let Some(selection) = noise_enum_choice_row(
                 ui,
@@ -1941,8 +1968,48 @@ pub(super) fn form(
              Margins are always extracted from the Floquet multipliers."
         }
         AnalysisDraft::TransferFunction(setup) => {
-            input_row(ui, XF_FIELD_LABELS[0], &mut setup.input_source);
-            input_row(ui, XF_FIELD_LABELS[1], &mut setup.output_expression);
+            // The two ports are the same two quantities the noise form asks
+            // for — one independent source in, one measured expression out —
+            // so they are offered from the same elaborated vocabulary the
+            // noise rows read rather than typed blind against a design the
+            // form already knows. A name this design does not carry is not a
+            // suggestion; it is a run that fails at validation.
+            let offered_sources = noise_domain
+                .sources
+                .get(..NOISE_DOMAIN_PRESET_LIMIT)
+                .unwrap_or(noise_domain.sources);
+            noise_domain_row(
+                ui,
+                XF_FIELD_LABELS[0],
+                "xf-input",
+                &noise_domain_hint(
+                    "sources",
+                    offered_sources.len(),
+                    noise_domain.sources.len(),
+                    noise_domain.unavailable.is_some(),
+                ),
+                offered_sources,
+                NOISE_INPUT_CUSTOM_CHOICE,
+                &mut setup.input_source,
+            );
+            let offered_outputs = xf_output_presets(noise_domain.nodes);
+            noise_domain_row(
+                ui,
+                XF_FIELD_LABELS[1],
+                "xf-output",
+                &noise_domain_hint(
+                    "nodes",
+                    offered_outputs.len(),
+                    noise_domain.nodes.len(),
+                    noise_domain.unavailable.is_some(),
+                ),
+                &offered_outputs,
+                NOISE_OUTPUT_CUSTOM_CHOICE,
+                &mut setup.output_expression,
+            );
+            if let Some(reason) = noise_domain.unavailable {
+                noise_domain_advisory(ui, reason);
+            }
             xf_inference_action(ui, setup, tf_inference);
             property_row(ui, XF_FIELD_LABELS[2], XF_SOLVE_POINT);
             enabled_choice_row(ui, XF_FIELD_LABELS[3], &mut setup.transfer_gain);

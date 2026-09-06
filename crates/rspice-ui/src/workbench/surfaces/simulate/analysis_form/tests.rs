@@ -988,6 +988,7 @@ fn drawing_the_form_does_not_stamp_a_port_source_choice() {
 #[cfg(not(target_arch = "wasm32"))]
 fn xf_form_frames(
     draft: &mut AnalysisDraft,
+    noise_domain: NoiseDomain<'_>,
     inference: &Result<TfRunConfig, String>,
     press: Option<&str>,
 ) -> (Vec<String>, Vec<egui::accesskit::Node>) {
@@ -1025,7 +1026,7 @@ fn xf_form_frames(
                             &[],
                             &[],
                             &[],
-                            NoiseDomain::default(),
+                            noise_domain,
                             Some(inference),
                             OpContextAvailability::default(),
                             &run_space_fixture,
@@ -1096,7 +1097,7 @@ fn the_transfer_function_form_fills_both_ports_from_the_deck() {
     });
     let mut draft = AnalysisDraft::for_kind(AnalysisKind::TransferFunction);
 
-    let (offered, _) = xf_form_frames(&mut draft, &inference, None);
+    let (offered, _) = xf_form_frames(&mut draft, NoiseDomain::default(), &inference, None);
     assert!(
         offered
             .iter()
@@ -1109,7 +1110,12 @@ fn the_transfer_function_form_fills_both_ports_from_the_deck() {
         "painting the offer must not write it"
     );
 
-    let (painted, nodes) = xf_form_frames(&mut draft, &inference, Some(XF_INFER_LABEL));
+    let (painted, nodes) = xf_form_frames(
+        &mut draft,
+        NoiseDomain::default(),
+        &inference,
+        Some(XF_INFER_LABEL),
+    );
 
     assert_eq!(xf_ports(&draft), ("VIN".to_owned(), "V(OUT)".to_owned()));
     let editable = editable_values(&nodes);
@@ -1125,6 +1131,74 @@ fn the_transfer_function_form_fills_both_ports_from_the_deck() {
     );
 }
 
+/// The two ports are picked from the design, not typed against it.
+///
+/// A transfer function asks for exactly what the noise form asks for — one
+/// independent source in, one measured expression out — and asked for both by
+/// free text while the noise rows offered the elaborated vocabulary for the
+/// same two quantities. A name this design does not carry is not a
+/// suggestion; it is a run that fails at validation.
+///
+/// The output picker offers `V(node)` rather than the bare node, because that
+/// is what `simulation::dialog::xf` admits; anything else — a
+/// differential pair, a branch current — goes through the escape beside it.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_transfer_function_ports_are_picked_from_the_designs_own_vocabulary() {
+    let design_nodes = vec!["MID".to_owned(), "OUT".to_owned()];
+    let design_sources = vec!["VDD".to_owned(), "VIN".to_owned()];
+    let domain = || NoiseDomain {
+        nodes: &design_nodes,
+        sources: &design_sources,
+        unavailable: None,
+    };
+    let inference = Ok(TfRunConfig {
+        input_source: "VIN".to_owned(),
+        output_expression: "V(OUT)".to_owned(),
+        ..TfRunConfig::default()
+    });
+    let mut draft = AnalysisDraft::for_kind(AnalysisKind::TransferFunction);
+
+    let picker = |nodes: &[egui::accesskit::Node], label: &str| {
+        nodes
+            .iter()
+            .find(|node| {
+                node.role() == egui::accesskit::Role::ComboBox && node.label() == Some(label)
+            })
+            .unwrap_or_else(|| panic!("{label} publishes no picker"))
+            .value()
+            .map(str::to_owned)
+    };
+
+    let (_, empty) = xf_form_frames(&mut draft, domain(), &inference, None);
+    assert_eq!(
+        picker(&empty, XF_FIELD_LABELS[0]),
+        Some(NOISE_INPUT_CUSTOM_CHOICE.to_owned()),
+        "an unfilled port rests on the escape, with its editor live"
+    );
+    assert_eq!(
+        picker(&empty, XF_FIELD_LABELS[1]),
+        Some(NOISE_OUTPUT_CUSTOM_CHOICE.to_owned())
+    );
+
+    // The deck-inference action still writes into the same two fields, and
+    // what it writes is in both offered lists — which is what proves the
+    // presets are the design's own names rather than a second vocabulary.
+    let (_, filled) = xf_form_frames(&mut draft, domain(), &inference, Some(XF_INFER_LABEL));
+    assert_eq!(xf_ports(&draft), ("VIN".to_owned(), "V(OUT)".to_owned()));
+    assert_eq!(picker(&filled, XF_FIELD_LABELS[0]), Some("VIN".to_owned()));
+    assert_eq!(
+        picker(&filled, XF_FIELD_LABELS[1]),
+        Some("V(OUT)".to_owned()),
+        "the output picker offers the voltage at a node, which is what the \
+         analysis reads"
+    );
+    assert_eq!(
+        xf_output_presets(&design_nodes),
+        ["V(MID)".to_owned(), "V(OUT)".to_owned()]
+    );
+}
+
 /// A deck with a supply beside its signal generator is exactly the case an
 /// inference must not answer, and the form says so where the offer would be.
 #[test]
@@ -1135,7 +1209,7 @@ fn the_transfer_function_form_refuses_a_deck_that_names_no_single_input() {
     let inference = Err(REFUSAL.to_owned());
     let mut draft = AnalysisDraft::for_kind(AnalysisKind::TransferFunction);
 
-    let (painted, nodes) = xf_form_frames(&mut draft, &inference, None);
+    let (painted, nodes) = xf_form_frames(&mut draft, NoiseDomain::default(), &inference, None);
 
     assert!(painted.iter().any(|line| line == REFUSAL), "{painted:?}");
     let action = nodes
