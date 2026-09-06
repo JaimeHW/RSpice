@@ -460,7 +460,11 @@ fn format_noise_label(params: &HashMap<String, String>, primary: &str, is_voltag
 /// than the integer the card carries, which is what the property sheet shows.
 /// TD is printed only when it delays the draw, and PARAM2 only when it moves
 /// the level — the same rule the other source labels follow for their tails.
-fn format_random_label(params: &HashMap<String, String>, primary: &str, is_voltage: bool) -> String {
+fn format_random_label(
+    params: &HashMap<String, String>,
+    primary: &str,
+    is_voltage: bool,
+) -> String {
     let unit = if is_voltage { "V" } else { "A" };
     let distribution = get_param_with_aliases(params, &["type"], "", "uniform");
     let ts = get_param_with_aliases(params, &["ts"], primary, "1u");

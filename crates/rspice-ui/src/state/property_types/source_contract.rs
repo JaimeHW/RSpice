@@ -1393,9 +1393,10 @@ mod tests {
                 &[("type", distribution), ("ts", "1u"), ("param1", "1")],
             );
             assert!(
-                advisories(&findings).iter().any(|finding| finding.field
-                    == "param1"
-                    && finding.message.to_lowercase().contains(fragment)),
+                advisories(&findings)
+                    .iter()
+                    .any(|finding| finding.field == "param1"
+                        && finding.message.to_lowercase().contains(fragment)),
                 "{distribution}: {findings:?}"
             );
         }
@@ -1424,8 +1425,7 @@ mod tests {
         assert!(
             advisories(&findings)
                 .iter()
-                .any(|finding| finding.field == "ts"
-                    && finding.message.contains("exactly PARAM2")),
+                .any(|finding| finding.field == "ts" && finding.message.contains("exactly PARAM2")),
             "{findings:?}"
         );
     }

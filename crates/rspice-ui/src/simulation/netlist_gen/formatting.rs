@@ -404,7 +404,10 @@ impl<'a> NetlistGenerator<'a> {
                 }
                 let authored_type = Self::get_param_owned(&params, "type", "", "uniform");
                 let distribution = crate::state::trrandom_distribution_number(&authored_type)
-                    .map_or_else(|| authored_type.trim().to_owned(), |number| number.to_string());
+                    .map_or_else(
+                        || authored_type.trim().to_owned(),
+                        |number| number.to_string(),
+                    );
                 let ts = Self::get_param_owned(&params, "ts", value, "1u");
                 let td = Self::get_param_owned(&params, "td", "", "0");
                 let param1 = Self::get_param_owned(&params, "param1", "", "1");
