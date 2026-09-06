@@ -34,13 +34,14 @@ pub enum AnalysisResultKind {
     MonteCarlo,
     Pss,
     Pac,
+    Pxf,
     PNoise,
     HarmonicBalance,
     Envelope,
 }
 
 impl AnalysisResultKind {
-    pub const ALL: [Self; 20] = [
+    pub const ALL: [Self; 21] = [
         Self::OperatingPoint,
         Self::DcSweep,
         Self::Ac,
@@ -58,6 +59,7 @@ impl AnalysisResultKind {
         Self::MonteCarlo,
         Self::Pss,
         Self::Pac,
+        Self::Pxf,
         Self::PNoise,
         Self::HarmonicBalance,
         Self::Envelope,
@@ -82,6 +84,7 @@ impl AnalysisResultKind {
             Self::MonteCarlo => "monte-carlo",
             Self::Pss => "pss",
             Self::Pac => "pac",
+            Self::Pxf => "pxf",
             Self::PNoise => "pnoise",
             Self::HarmonicBalance => "hb",
             Self::Envelope => "envelope",
@@ -108,6 +111,7 @@ pub const fn analysis_result_kind(kind: AnalysisKind) -> AnalysisResultKind {
         AnalysisKind::TransferFunction => AnalysisResultKind::TransferFunction,
         AnalysisKind::Pss => AnalysisResultKind::Pss,
         AnalysisKind::Pac => AnalysisResultKind::Pac,
+        AnalysisKind::Pxf => AnalysisResultKind::Pxf,
         AnalysisKind::PNoise => AnalysisResultKind::PNoise,
         AnalysisKind::HarmonicBalance => AnalysisResultKind::HarmonicBalance,
         AnalysisKind::Envelope => AnalysisResultKind::Envelope,
@@ -247,7 +251,7 @@ const fn adapter_typed_axes() -> SurfaceCapability {
 ///
 /// Every constructor is deliberately visible in source: unsupported cells are
 /// declarations, never a wildcard/default inferred by the renderer.
-pub const ANALYSIS_CAPABILITY_MATRIX: [AnalysisResultCapability; 20] = [
+pub const ANALYSIS_CAPABILITY_MATRIX: [AnalysisResultCapability; 21] = [
     AnalysisResultCapability {
         result: AnalysisResultKind::OperatingPoint,
         cli: cli_mapped_axes(),
@@ -368,6 +372,13 @@ pub const ANALYSIS_CAPABILITY_MATRIX: [AnalysisResultCapability; 20] = [
         engine_adapter: adapter_typed_axes(),
     },
     AnalysisResultCapability {
+        result: AnalysisResultKind::Pxf,
+        cli: cli_mapped_axes(),
+        python: python_mapped_axes(),
+        wasm: wasm_mapped_axes(),
+        engine_adapter: adapter_typed_axes(),
+    },
+    AnalysisResultCapability {
         result: AnalysisResultKind::PNoise,
         cli: cli_mapped_axes(),
         python: python_mapped_axes(),
@@ -413,9 +424,10 @@ pub const fn analysis_result_capability(
         AnalysisResultKind::MonteCarlo => &ANALYSIS_CAPABILITY_MATRIX[14],
         AnalysisResultKind::Pss => &ANALYSIS_CAPABILITY_MATRIX[15],
         AnalysisResultKind::Pac => &ANALYSIS_CAPABILITY_MATRIX[16],
-        AnalysisResultKind::PNoise => &ANALYSIS_CAPABILITY_MATRIX[17],
-        AnalysisResultKind::HarmonicBalance => &ANALYSIS_CAPABILITY_MATRIX[18],
-        AnalysisResultKind::Envelope => &ANALYSIS_CAPABILITY_MATRIX[19],
+        AnalysisResultKind::Pxf => &ANALYSIS_CAPABILITY_MATRIX[17],
+        AnalysisResultKind::PNoise => &ANALYSIS_CAPABILITY_MATRIX[18],
+        AnalysisResultKind::HarmonicBalance => &ANALYSIS_CAPABILITY_MATRIX[19],
+        AnalysisResultKind::Envelope => &ANALYSIS_CAPABILITY_MATRIX[20],
     }
 }
 

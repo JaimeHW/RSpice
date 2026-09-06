@@ -1,5 +1,5 @@
 //! Authored cards for the periodic large-signal analysis family:
-//! `.PSS`, `.PAC`, `.PNOISE` and `.ENVELOPE`.
+//! `.PSS`, `.PAC`, `.PXF`, `.PNOISE` and `.ENVELOPE`.
 //!
 //! Every card is fully validated here, so the analysis layer converts the AST
 //! rather than re-deriving what the deck asked for. A field another simulator
@@ -1019,6 +1019,202 @@ pub(super) fn parse_pac_command(
 }
 
 //=============================================================================
+// .PXF
+//=============================================================================
+
+/// Parse `.PXF DEC|LIN|OCT np fstart fstop KEY=VALUE ...`.
+///
+/// The sweep is the offset-frequency grid the transfer is reported over, the
+/// same grid `.PAC` sweeps, because a `.PXF` run is one path read out of the
+/// conversion matrix a `.PAC` solve fills.
+///
+/// `RELTOL=`/`ABSTOL=` follow `.PAC`: they govern the periodic operating
+/// point, and the Studio's writer omits them because its Solver options
+/// channel owns them.
+pub(super) fn parse_pxf_command(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+) -> Result<AnalysisCommand, ParseError> {
+    const CARD: AnalysisCard = AnalysisCard::Pxf;
+
+    let sweep = card_sweep(stream, line_num, params, CARD)?;
+
+    let mut input_source = None;
+    let mut input_sideband = None;
+    let mut output = None;
+    let mut output_sideband = None;
+    let mut max_sideband = None;
+    let mut reltol = None;
+    let mut abstol = None;
+    let mut source = None;
+
+    loop {
+        skip_commas(stream);
+        if at_card_end(stream) {
+            break;
+        }
+        let Some(keyword) = take_keyword(stream) else {
+            return Err(card_error(
+                CARD,
+                line_num,
+                AnalysisCardIssue::TrailingToken {
+                    token: stream.peek().lexeme.clone(),
+                },
+            ));
+        };
+        match keyword.as_str() {
+            "INPUT" => bind_once(
+                &mut input_source,
+                card_name(stream, line_num, CARD, "INPUT")?,
+                CARD,
+                line_num,
+                "INPUT",
+            )?,
+            "OUT" => bind_once(
+                &mut output,
+                card_output_probe(stream, line_num, CARD)?,
+                CARD,
+                line_num,
+                "OUT",
+            )?,
+            "INPUTSIDEBAND" => bind_once(
+                &mut input_sideband,
+                card_signed(stream, line_num, params, CARD, "INPUTSIDEBAND", i32::MIN)?,
+                CARD,
+                line_num,
+                "INPUTSIDEBAND",
+            )?,
+            "OUTSIDEBAND" => bind_once(
+                &mut output_sideband,
+                card_signed(stream, line_num, params, CARD, "OUTSIDEBAND", i32::MIN)?,
+                CARD,
+                line_num,
+                "OUTSIDEBAND",
+            )?,
+            // Zero is admissible, as it is for `.PAC`: a `.PXF` reading
+            // sideband 0 to sideband 0 is the ordinary small-signal response
+            // at the drive frequency, with no conversion at all.
+            "MAXSIDEBAND" => bind_once(
+                &mut max_sideband,
+                card_signed(stream, line_num, params, CARD, "MAXSIDEBAND", 0)?,
+                CARD,
+                line_num,
+                "MAXSIDEBAND",
+            )?,
+            "RELTOL" => bind_once(
+                &mut reltol,
+                card_number(
+                    stream,
+                    line_num,
+                    params,
+                    CARD,
+                    "RELTOL",
+                    "a positive relative tolerance",
+                    |value| value > 0.0,
+                )?,
+                CARD,
+                line_num,
+                "RELTOL",
+            )?,
+            "ABSTOL" => bind_once(
+                &mut abstol,
+                card_number(
+                    stream,
+                    line_num,
+                    params,
+                    CARD,
+                    "ABSTOL",
+                    "a positive absolute tolerance",
+                    |value| value > 0.0,
+                )?,
+                CARD,
+                line_num,
+                "ABSTOL",
+            )?,
+            "FROM" => bind_once(
+                &mut source,
+                card_source_selector(stream, line_num, CARD)?,
+                CARD,
+                line_num,
+                "FROM",
+            )?,
+            _ => {
+                return Err(card_error(
+                    CARD,
+                    line_num,
+                    AnalysisCardIssue::UnknownKeyword { keyword },
+                ));
+            }
+        }
+    }
+
+    let Some(input_source) = input_source else {
+        return Err(card_error(
+            CARD,
+            line_num,
+            AnalysisCardIssue::MissingField { field: "INPUT" },
+        ));
+    };
+    let Some((output_node, output_ref)) = output else {
+        return Err(card_error(
+            CARD,
+            line_num,
+            AnalysisCardIssue::MissingField { field: "OUT" },
+        ));
+    };
+
+    let input_sideband = input_sideband.unwrap_or(PxfCard::DEFAULT_INPUT_SIDEBAND);
+    let output_sideband = output_sideband.unwrap_or(PxfCard::DEFAULT_OUTPUT_SIDEBAND);
+    let max_sideband = max_sideband.unwrap_or(PxfCard::DEFAULT_MAX_SIDEBAND);
+    // A card that states a conversion depth and then measures outside it
+    // contradicts itself: the transfer it names is not an element the solve it
+    // asked for would contain. Refused where it is written rather than widened
+    // silently, which is also what the studio's reader does with the same line.
+    for (field, sideband) in [
+        ("INPUTSIDEBAND", input_sideband),
+        ("OUTSIDEBAND", output_sideband),
+    ] {
+        if sideband.saturating_abs() > max_sideband {
+            return Err(card_error(
+                CARD,
+                line_num,
+                AnalysisCardIssue::ConflictingFields {
+                    first: field,
+                    second: "MAXSIDEBAND",
+                },
+            ));
+        }
+    }
+    if output_ref
+        .as_deref()
+        .is_some_and(|reference| reference.eq_ignore_ascii_case(&output_node))
+    {
+        return Err(card_error(
+            CARD,
+            line_num,
+            AnalysisCardIssue::ConflictingFields {
+                first: "OUT node",
+                second: "OUT reference",
+            },
+        ));
+    }
+
+    Ok(AnalysisCommand::Pxf(Box::new(PxfCard {
+        sweep,
+        input_source: input_source.to_ascii_uppercase(),
+        input_sideband,
+        output_node: output_node.to_ascii_uppercase(),
+        output_ref: output_ref.map(|node| node.to_ascii_uppercase()),
+        output_sideband,
+        max_sideband,
+        reltol: reltol.unwrap_or(PxfCard::DEFAULT_RELTOL),
+        abstol: abstol.unwrap_or(PxfCard::DEFAULT_ABSTOL),
+        source: source.unwrap_or_default(),
+    })))
+}
+
+//=============================================================================
 // .PNOISE
 //=============================================================================
 
@@ -1328,7 +1524,7 @@ fn card_source_list(
 mod tests {
     use crate::netlist::{
         AnalysisCard, AnalysisCardIssue, AnalysisCommand, EnvelopeCard, FreqVariation, Netlist,
-        PacCard, ParseError, PeriodicSourceSelector, PnoiseCard, PnoiseReference, PssCard,
+        PacCard, ParseError, PeriodicSourceSelector, PnoiseCard, PnoiseReference, PssCard, PxfCard,
     };
 
     const CIRCUIT: &str = "periodic card parser\n\
@@ -1367,6 +1563,14 @@ mod tests {
         match netlist.analyses.into_iter().next_back() {
             Some(AnalysisCommand::Pac(card)) => card,
             other => panic!("expected .PAC, got {other:?}"),
+        }
+    }
+
+    fn pxf(card: &str) -> Box<PxfCard> {
+        let netlist = Netlist::parse(&deck(card)).expect("card parses");
+        match netlist.analyses.into_iter().next_back() {
+            Some(AnalysisCommand::Pxf(card)) => card,
+            other => panic!("expected .PXF, got {other:?}"),
         }
     }
 
@@ -1825,6 +2029,147 @@ mod tests {
         ));
         assert!(matches!(
             card_failure(".HB 1G\n.PAC DEC 10 1k 1G INPUT=VRF OUT=out FROM=TRAN").2,
+            AnalysisCardIssue::InvalidChoice { field: "FROM", .. }
+        ));
+    }
+
+    //-------------------------------------------------------------------------
+    // .PXF
+    //-------------------------------------------------------------------------
+
+    #[test]
+    fn pxf_defaults_every_optional_field() {
+        let card = pxf(".HB 1G\n.PXF DEC 10 1k 1G INPUT=VRF OUT=V(out)");
+        assert_eq!(card.sweep.variation, FreqVariation::Dec);
+        assert_eq!(card.sweep.points, 10);
+        assert_eq!(card.sweep.start_freq, 1.0e3);
+        assert_eq!(card.sweep.stop_freq, 1.0e9);
+        assert_eq!(card.input_source, "VRF");
+        assert_eq!(card.output_node, "OUT");
+        assert_eq!(card.output_ref, None);
+        // The defaults the studio's manual-deck reader has always applied.
+        assert_eq!(card.input_sideband, 1);
+        assert_eq!(card.output_sideband, 1);
+        assert_eq!(card.max_sideband, 5);
+        assert_eq!(card.reltol, PacCard::DEFAULT_RELTOL);
+        assert_eq!(card.abstol, PacCard::DEFAULT_ABSTOL);
+        assert_eq!(card.source, PeriodicSourceSelector::Preceding);
+    }
+
+    #[test]
+    fn pxf_accepts_the_line_the_studios_dialog_writes_today() {
+        // `PxfConfig::to_spice` emits exactly this shape, keys in this order.
+        let card = pxf(".HB 1G\n.pxf dec 10 1k 1G out=VOUT outsideband=1 input=VIN maxsideband=5");
+        assert_eq!(card.input_source, "VIN");
+        assert_eq!(card.output_node, "VOUT");
+        assert_eq!(card.output_sideband, 1);
+        assert_eq!(card.max_sideband, 5);
+        // And the differential probe spelling the same writer emits.
+        let differential =
+            pxf(".HB 1G\n.pxf dec 10 1k 1G out=V(VOUT,VREF) outsideband=1 input=VIN maxsideband=5");
+        assert_eq!(differential.output_node, "VOUT");
+        assert_eq!(differential.output_ref.as_deref(), Some("VREF"));
+    }
+
+    #[test]
+    fn pxf_binds_every_authored_field() {
+        let card = pxf(
+            ".HB 1G\n.PXF LIN 21 1meg 5meg INPUT=vrf OUT=v(out,ref) INPUTSIDEBAND=-1 \
+             OUTSIDEBAND=2 MAXSIDEBAND=3 RELTOL=1e-5 ABSTOL=1e-15 FROM=HB",
+        );
+        assert_eq!(card.sweep.variation, FreqVariation::Lin);
+        assert_eq!(card.sweep.points, 21);
+        assert_eq!(card.sweep.start_freq, 1.0e6);
+        assert_eq!(card.sweep.stop_freq, 5.0e6);
+        assert_eq!(card.input_source, "VRF");
+        assert_eq!(card.output_node, "OUT");
+        assert_eq!(card.output_ref.as_deref(), Some("REF"));
+        assert_eq!(card.input_sideband, -1);
+        assert_eq!(card.output_sideband, 2);
+        assert_eq!(card.max_sideband, 3);
+        assert_eq!(card.reltol, 1e-5);
+        assert_eq!(card.abstol, 1e-15);
+        assert_eq!(card.source, PeriodicSourceSelector::Hb);
+    }
+
+    #[test]
+    fn pxf_requires_both_ends_of_the_path_it_measures() {
+        assert!(matches!(
+            card_failure(".HB 1G\n.PXF DEC 10 1k 1G OUT=V(out)").2,
+            AnalysisCardIssue::MissingField { field: "INPUT" }
+        ));
+        assert!(matches!(
+            card_failure(".HB 1G\n.PXF DEC 10 1k 1G INPUT=VRF").2,
+            AnalysisCardIssue::MissingField { field: "OUT" }
+        ));
+    }
+
+    #[test]
+    fn pxf_refuses_a_sideband_outside_the_depth_it_states() {
+        // The transfer would not be an element of the matrix the stated depth
+        // produces, so the card contradicts itself.
+        assert!(matches!(
+            card_failure(".HB 1G\n.PXF DEC 10 1k 1G INPUT=VRF OUT=out MAXSIDEBAND=1 OUTSIDEBAND=3")
+                .2,
+            AnalysisCardIssue::ConflictingFields {
+                first: "OUTSIDEBAND",
+                second: "MAXSIDEBAND"
+            }
+        ));
+        assert!(matches!(
+            card_failure(
+                ".HB 1G\n.PXF DEC 10 1k 1G INPUT=VRF OUT=out MAXSIDEBAND=1 INPUTSIDEBAND=-4"
+            )
+            .2,
+            AnalysisCardIssue::ConflictingFields {
+                first: "INPUTSIDEBAND",
+                second: "MAXSIDEBAND"
+            }
+        ));
+        // Zero depth is admissible where the path stays on the drive itself.
+        let baseband = pxf(
+            ".HB 1G\n.PXF DEC 10 1k 1G INPUT=VRF OUT=out MAXSIDEBAND=0 INPUTSIDEBAND=0 OUTSIDEBAND=0",
+        );
+        assert_eq!(baseband.max_sideband, 0);
+    }
+
+    #[test]
+    fn pxf_refuses_a_probe_measured_against_itself() {
+        assert!(matches!(
+            card_failure(".HB 1G\n.PXF DEC 10 1k 1G INPUT=VRF OUT=V(out,out)").2,
+            AnalysisCardIssue::ConflictingFields {
+                first: "OUT node",
+                second: "OUT reference"
+            }
+        ));
+    }
+
+    #[test]
+    fn pxf_refuses_unknown_duplicate_and_malformed_fields() {
+        assert!(matches!(
+            card_failure(".HB 1G\n.PXF DEC 10 1k 1G INPUT=VRF OUT=out SIDEBANDMIN=-1").2,
+            AnalysisCardIssue::UnknownKeyword { .. }
+        ));
+        assert!(matches!(
+            card_failure(".HB 1G\n.PXF DEC 10 1k 1G INPUT=VRF OUT=out MAXSIDEBAND=-1").2,
+            AnalysisCardIssue::InvalidNumber {
+                field: "MAXSIDEBAND",
+                ..
+            }
+        ));
+        assert!(matches!(
+            card_failure(".HB 1G\n.PXF DEC 10 1k 1G INPUT=VRF OUT=out RELTOL=0").2,
+            AnalysisCardIssue::InvalidNumber {
+                field: "RELTOL",
+                ..
+            }
+        ));
+        assert!(matches!(
+            card_failure(".HB 1G\n.PXF DEC 10 1k 1G INPUT=VRF INPUT=VLO OUT=out").2,
+            AnalysisCardIssue::DuplicateKeyword { keyword: "INPUT" }
+        ));
+        assert!(matches!(
+            card_failure(".HB 1G\n.PXF DEC 10 1k 1G INPUT=VRF OUT=out FROM=TRAN").2,
             AnalysisCardIssue::InvalidChoice { field: "FROM", .. }
         ));
     }

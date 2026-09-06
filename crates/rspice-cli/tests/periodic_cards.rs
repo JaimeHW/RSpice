@@ -1,8 +1,8 @@
 //! End-to-end contracts for the authored periodic large-signal family.
 //!
-//! `.PSS` and `.HB` are carriers; `.PAC`, `.PNOISE` and `.ENVELOPE` linearize
-//! or continue around the carrier the canonical plan bound them to. These
-//! tests drive the real binary against circuits whose answers are known
+//! `.PSS` and `.HB` are carriers; `.PAC`, `.PXF`, `.PNOISE` and `.ENVELOPE`
+//! linearize or continue around the carrier the canonical plan bound them to.
+//! These tests drive the real binary against circuits whose answers are known
 //! analytically, so a route that runs but computes the wrong thing fails here
 //! rather than merely producing a well-shaped artifact.
 
@@ -145,6 +145,21 @@ fn sideband_series(document: &serde_json::Value, name: &str, sideband: i64) -> V
         .collect()
 }
 
+/// One unqualified complex series of a published document, by canonical name.
+fn complex_series(document: &serde_json::Value, name: &str) -> Vec<(f64, f64)> {
+    signal(document, name)["values"]["samples"]
+        .as_array()
+        .unwrap_or_else(|| panic!("series '{name}' carries no complex samples in {document:#}"))
+        .iter()
+        .map(|sample| {
+            (
+                sample["real"].as_f64().expect("real part"),
+                sample["imaginary"].as_f64().expect("imaginary part"),
+            )
+        })
+        .collect()
+}
+
 fn assert_close(actual: f64, expected: f64, tolerance: f64, what: &str) {
     assert!(
         (actual - expected).abs() <= tolerance,
@@ -193,6 +208,106 @@ fn a_pac_sweep_publishes_the_rc_transfer_at_every_offset() {
         let denominator = 1.0 + ratio * ratio;
         assert_close(real, 1.0 / denominator, 1e-9, "Re H at {offset} Hz");
         assert_close(imaginary, -ratio / denominator, 1e-9, "Im H at {offset} Hz");
+    }
+}
+
+/// `.PXF` reads one conversion path out of the same solve `.PAC` runs, so on a
+/// linear network — which cannot convert between sidebands — the sideband-zero
+/// path is the ordinary one-pole response, and the sideband-one path is that
+/// response evaluated a fundamental higher. Both are published over the offset
+/// sweep the card authored, with the absolute converted output frequency
+/// beside them.
+#[test]
+fn a_pxf_sweep_publishes_the_conversion_path_its_sideband_pair_names() {
+    let dir = test_dir("pxf_transfer");
+    let (output, requested) = run_deck(
+        &dir,
+        RC_CARRIER,
+        ".HB 1G\n.PXF DEC 2 1meg 10meg INPUT=V1 OUT=V(out) INPUTSIDEBAND=0 OUTSIDEBAND=0 \
+         MAXSIDEBAND=1\n",
+        &[],
+    );
+    assert_ran(&output);
+
+    let document = read_json(&artifact(&requested, "pxf-001"));
+    assert_eq!(document["resultKind"], "pxf");
+    assert_eq!(document["analysis"]["tag"], "pxf-001");
+    assert_eq!(
+        document["parentAnalysis"]["tag"], "hb-001",
+        "a PXF document names the carrier it linearized around"
+    );
+    assert_eq!(document["payload"]["fundamentalFrequency"], 1e9);
+    assert_eq!(document["payload"]["inputSideband"], 0);
+    assert_eq!(document["payload"]["outputSideband"], 0);
+    assert_eq!(document["payload"]["maxSideband"], 1);
+    assert_eq!(document["payload"]["inputSource"], "V1");
+    assert_eq!(document["payload"]["outputNode"], "OUT");
+
+    let offsets = document["axes"][0]["values"]["values"]
+        .as_array()
+        .expect("offset axis")
+        .iter()
+        .map(|value| value.as_f64().expect("finite offset"))
+        .collect::<Vec<_>>();
+    let transfer = complex_series(&document, "transfer");
+    assert_eq!(transfer.len(), offsets.len());
+    for (offset, (real, imaginary)) in offsets.iter().zip(&transfer) {
+        let ratio = offset / RC_CORNER_HZ;
+        let denominator = 1.0 + ratio * ratio;
+        assert_close(*real, 1.0 / denominator, 1e-9, "Re H at the offset");
+        assert_close(*imaginary, -ratio / denominator, 1e-9, "Im H at the offset");
+    }
+
+    // Sideband zero converts nothing, so the output frequency is the offset.
+    let converted = real_series(&document, "output_frequency");
+    assert_eq!(converted.len(), offsets.len());
+    for (offset, output_frequency) in offsets.iter().zip(&converted) {
+        assert_close(*output_frequency, *offset, 1e-6, "converted frequency");
+    }
+
+    // Group delay lives in the payload on its own midpoint abscissa, because a
+    // difference-derived delay has one fewer sample than the sweep.
+    let group_delay = document["payload"]["groupDelay"]
+        .as_array()
+        .expect("the payload carries the group-delay curve");
+    assert_eq!(group_delay.len(), offsets.len() - 1);
+}
+
+/// The `.PXF` line the studio's own dialog writes today parses, runs and
+/// publishes on the command line, and the sideband-one path it defaults to
+/// puts the converted response a fundamental above the swept offset.
+#[test]
+fn the_pxf_line_the_studio_writes_runs_and_converts_by_one_fundamental() {
+    let dir = test_dir("pxf_studio_line");
+    let (output, requested) = run_deck(
+        &dir,
+        RC_CARRIER,
+        // Byte-for-byte the shape of `PxfConfig::to_spice`.
+        ".HB 1G\n.pxf dec 2 1meg 10meg out=out outsideband=1 input=V1 maxsideband=1\n",
+        &[],
+    );
+    assert_ran(&output);
+
+    let document = read_json(&artifact(&requested, "pxf-001"));
+    assert_eq!(document["resultKind"], "pxf");
+    // `inputsideband=` is absent from the line, and its default is 1.
+    assert_eq!(document["payload"]["inputSideband"], 1);
+    assert_eq!(document["payload"]["outputSideband"], 1);
+
+    let offsets = document["axes"][0]["values"]["values"]
+        .as_array()
+        .expect("offset axis")
+        .iter()
+        .map(|value| value.as_f64().expect("finite offset"))
+        .collect::<Vec<_>>();
+    let converted = real_series(&document, "output_frequency");
+    for (offset, output_frequency) in offsets.iter().zip(&converted) {
+        assert_close(
+            *output_frequency,
+            offset + 1e9,
+            1e-3,
+            "the +1 sideband appears one fundamental above the offset",
+        );
     }
 }
 

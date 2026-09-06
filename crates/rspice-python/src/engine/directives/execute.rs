@@ -466,6 +466,30 @@ pub(super) fn execute(
                 describe_analysis(analysis),
             ));
         }
+        AnalysisCommand::Pxf(card) => {
+            let engine = py_engine.engine_for_netlist(net);
+            // Core's card runner decides what the card means: it runs the
+            // periodic AC solve the card describes and reads the one
+            // conversion path its sideband pair names, around either carrier.
+            let result = match upstream_operating_point(out, context, ".PXF")? {
+                PeriodicOperatingPoint::Shooting(point) => {
+                    run_interruptible(py, &py_engine.active_runs, |abort| {
+                        engine.run_pxf_card_from_pss_with_abort(net, card, point, abort)
+                    })?
+                }
+                PeriodicOperatingPoint::HarmonicBalance(point) => {
+                    run_interruptible(py, &py_engine.active_runs, |abort| {
+                        engine.run_pxf_card_from_hb_with_abort(net, card, point, abort)
+                    })?
+                }
+            };
+            out.pxf
+                .push(identified(PyPxfResult::from_core(card, &result), context));
+            out.records.push(PyAnalysisRecord::executed(
+                "pxf",
+                describe_analysis(analysis),
+            ));
+        }
         AnalysisCommand::Pnoise(card) => {
             // The offset grid is preflighted against this binding's own
             // analysis-point limit before the card runs; core reads the same

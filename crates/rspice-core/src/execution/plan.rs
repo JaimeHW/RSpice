@@ -748,6 +748,15 @@ impl DeckPlan {
                                 last_periodic,
                             )?)
                         }
+                        AnalysisCommand::Pxf(card) => {
+                            AnalysisRequest::new(kind).with_upstream(resolve_periodic_source(
+                                card.source,
+                                ".PXF",
+                                last_pss,
+                                last_hb,
+                                last_periodic,
+                            )?)
+                        }
                         AnalysisCommand::Pnoise(card) => {
                             AnalysisRequest::new(kind).with_upstream(resolve_periodic_source(
                                 card.source,
@@ -1532,6 +1541,7 @@ pub(super) fn analysis_kind(command: &crate::netlist::AnalysisCommand) -> Analys
         AnalysisCommand::Four { .. } => AnalysisKind::Fourier,
         AnalysisCommand::Pss(_) => AnalysisKind::Pss,
         AnalysisCommand::Pac(_) => AnalysisKind::Pac,
+        AnalysisCommand::Pxf(_) => AnalysisKind::Pxf,
         AnalysisCommand::Pnoise(_) => AnalysisKind::PNoise,
         AnalysisCommand::Envelope(_) => AnalysisKind::Envelope,
         AnalysisCommand::Step(_) | AnalysisCommand::Temp { .. } => AnalysisKind::ImplicitOp,

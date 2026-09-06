@@ -27,10 +27,10 @@ use super::payload::{
     NyquistSample, OperatingPointPayload, OscillatorPhaseNoiseDocument, PNoiseBandwidth,
     PNoiseContribution, PNoiseContributor, PNoisePayload, PacConversionEntry,
     PacConversionMatrixDocument, PacPayload, PacSidebandDescriptor, PoleZeroPayload, PortDocument,
-    PortNoiseCovarianceNormalization, PortNoisePayload, RealEventPoint, RealEventTrace,
-    ResultPayload, RootSetEvidenceDocument, SParameterPayload, SensitivityElementTag,
-    SensitivityEntry, SensitivityPayload, StabilityPayload, TransferFunctionPayload,
-    TransientPayload, TwoPortNoiseEntry,
+    PortNoiseCovarianceNormalization, PortNoisePayload, PxfGroupDelaySample, PxfPayload,
+    RealEventPoint, RealEventTrace, ResultPayload, RootSetEvidenceDocument, SParameterPayload,
+    SensitivityElementTag, SensitivityEntry, SensitivityPayload, StabilityPayload,
+    TransferFunctionPayload, TransientPayload, TwoPortNoiseEntry,
 };
 use super::{
     AnalysisResultDocument, AnalysisResultDocumentBuilder, AxisValues, ComplexSample,
@@ -49,6 +49,7 @@ use crate::analysis::pac::PacResult;
 use crate::analysis::pnoise::{PhaseNoisePoint, PnoiseResult};
 use crate::analysis::pole_zero::PoleZeroResult;
 use crate::analysis::pss::PssResult;
+use crate::analysis::pxf::PxfResult;
 use crate::analysis::s_param::{PortNoiseAssembly, SParameterResult};
 use crate::analysis::sensitivity::{AcSensitivityResult, SensitivityResult};
 use crate::analysis::stb::StbResult;
@@ -334,6 +335,34 @@ fn crossover_frequency_scalar(
                 reason: ScalarUnavailability::NoCrossover,
             },
         )
+    }
+}
+
+/// One `.PXF` curve metric, which exists only where the curve has the feature
+/// it measures.
+///
+/// A transfer that never falls 3 dB below its peak has no -3 dB bandwidth, one
+/// that never reaches unity has no 0 dB crossing, and a transfer that is
+/// identically zero has no finite magnitude anywhere to peak at. Those are
+/// determinations about the response, so they are recorded as such rather than
+/// reported as a zero the sweep would read as DC.
+fn pxf_metric_scalar(
+    location: &'static str,
+    name: &str,
+    display: &str,
+    unit: SignalUnit,
+    value: Option<Value>,
+) -> Result<ResultScalar, ResultDocumentError> {
+    match value {
+        Some(value) => real_or_unbounded_scalar(location, name, display, unit, value),
+        None => ResultScalar::new(
+            name,
+            display,
+            Some(unit),
+            ScalarValue::Unavailable {
+                reason: ScalarUnavailability::NoCrossover,
+            },
+        ),
     }
 }
 
@@ -2770,6 +2799,188 @@ impl AnalysisResultDocument {
 
         Ok(
             Self::builder(analysis, ResultPayload::Pac(payload), point_count)
+                .axis(axis)
+                .signals(signals)
+                .scalars(scalars),
+        )
+    }
+
+    /// Project one periodic transfer function: the single conversion path an
+    /// authored `.PXF` card names, over the offset-frequency sweep it asked
+    /// for.
+    ///
+    /// The card travels beside the result because a `PxfResult` is the
+    /// numbers, not the measurement: which source drove the transfer and which
+    /// probe read it are the card's own statement, and the same shape is why
+    /// `from_pnoise` carries its authored output beside the spectrum.
+    ///
+    /// The four curve metrics are published as scalars. The Studio's own route
+    /// computes and drops them; a curve with no -3 dB point or no 0 dB
+    /// crossing records that determination rather than a fabricated number.
+    pub fn from_pxf(
+        analysis: AnalysisInstanceId,
+        card: &crate::netlist::PxfCard,
+        result: &PxfResult,
+    ) -> Result<AnalysisResultDocumentBuilder, ResultDocumentError> {
+        const LOCATION: &str = "PXF result";
+        let point_count = result.points.len();
+        if point_count == 0 {
+            return Err(source_error(
+                LOCATION,
+                "a PXF sweep needs at least one transfer point",
+            ));
+        }
+        // The card states the measurement and the result carries it out. If
+        // the two name different sideband pairs they are not the same run, and
+        // the document would describe a path nothing computed.
+        if card.input_sideband != result.input_sideband
+            || card.output_sideband != result.output_sideband
+        {
+            return Err(source_error(
+                LOCATION,
+                format!(
+                    "the card measures sideband {} -> {} but the result carries {} -> {}",
+                    card.input_sideband,
+                    card.output_sideband,
+                    result.input_sideband,
+                    result.output_sideband
+                ),
+            ));
+        }
+
+        let offsets = result
+            .points
+            .iter()
+            .map(|point| point.freq_in)
+            .collect::<Vec<_>>();
+        let axis = ResultAxis::new(
+            "offset_frequency",
+            "Offset frequency",
+            ResultAxisKind::OffsetFrequency,
+            SignalUnit::Hertz,
+            AxisValues::Real {
+                values: finite_axis(LOCATION, "offset frequency", &offsets)?,
+            },
+        )?;
+
+        let qualifier = SeriesQualifier::PxfConversion {
+            input: card.input_sideband,
+            output: card.output_sideband,
+        };
+        let transfers = result
+            .points
+            .iter()
+            .map(|point| point.transfer)
+            .collect::<Vec<_>>();
+        let output_frequencies = result
+            .points
+            .iter()
+            .map(|point| point.freq_out)
+            .collect::<Vec<_>>();
+        let signals = vec![
+            ResultSignal::new(
+                analysis_descriptor(
+                    LOCATION,
+                    "transfer",
+                    "Transfer",
+                    // Volts out per unit of whatever the drive's own unit is:
+                    // dimensionless for a voltage source, ohms for a current
+                    // one. The document does not carry which kind of source
+                    // `input_source` names, and `Dimensionless` would assert a
+                    // pure ratio for a case that is not one.
+                    SignalUnit::Unspecified,
+                    SignalValueType::Complex,
+                    point_count,
+                )?,
+                Some(qualifier),
+                SeriesAvailability::Available,
+                SeriesValues::Complex {
+                    samples: finite_complex_samples(LOCATION, "transfer", &transfers)?,
+                },
+            )?,
+            ResultSignal::new(
+                analysis_descriptor(
+                    LOCATION,
+                    "output_frequency",
+                    "Converted output frequency",
+                    SignalUnit::Hertz,
+                    SignalValueType::Real,
+                    point_count,
+                )?,
+                None,
+                SeriesAvailability::Available,
+                SeriesValues::Real {
+                    samples: finite_samples(LOCATION, "output_frequency", &output_frequencies)?,
+                },
+            )?,
+        ];
+
+        let scalars = vec![
+            pxf_metric_scalar(
+                LOCATION,
+                "peak_gain_db",
+                "Peak gain",
+                decibel(),
+                result.peak_gain.map(|(_, gain_db)| gain_db),
+            )?,
+            pxf_metric_scalar(
+                LOCATION,
+                "peak_gain_frequency",
+                "Peak gain frequency",
+                SignalUnit::Hertz,
+                result.peak_gain.map(|(frequency, _)| frequency),
+            )?,
+            pxf_metric_scalar(
+                LOCATION,
+                "bandwidth_3db",
+                "-3 dB bandwidth",
+                SignalUnit::Hertz,
+                result.bandwidth_3db,
+            )?,
+            pxf_metric_scalar(
+                LOCATION,
+                "unity_gain_frequency",
+                "Unity gain frequency",
+                SignalUnit::Hertz,
+                result.unity_gain_freq,
+            )?,
+        ];
+
+        let mut group_delay = Vec::with_capacity(point_count.saturating_sub(1));
+        for (frequency, delay) in result.group_delay_curve() {
+            if !frequency.is_finite() || !delay.is_finite() {
+                return Err(source_error(
+                    LOCATION,
+                    format!("group delay at {frequency} Hz is not representable"),
+                ));
+            }
+            group_delay.push(PxfGroupDelaySample { frequency, delay });
+        }
+        let dc_gain = result
+            .dc_gain
+            .map(|gain| {
+                if gain.re.is_finite() && gain.im.is_finite() {
+                    Ok(ComplexSample::new(gain.re, gain.im))
+                } else {
+                    Err(source_error(LOCATION, "the PXF DC gain is not finite"))
+                }
+            })
+            .transpose()?;
+
+        let payload = PxfPayload {
+            fundamental_frequency: result.fundamental_freq,
+            input_sideband: card.input_sideband,
+            output_sideband: card.output_sideband,
+            max_sideband: card.max_sideband,
+            input_source: card.input_source.clone(),
+            output_node: card.output_node.clone(),
+            reference_node: card.output_ref.clone(),
+            group_delay,
+            dc_gain,
+        };
+
+        Ok(
+            Self::builder(analysis, ResultPayload::Pxf(payload), point_count)
                 .axis(axis)
                 .signals(signals)
                 .scalars(scalars),

@@ -1,11 +1,11 @@
-//! Execution of the periodic large-signal family: `.PSS`, `.PAC`, `.PNOISE`
-//! and `.ENVELOPE`.
+//! Execution of the periodic large-signal family: `.PSS`, `.PAC`, `.PXF`,
+//! `.PNOISE` and `.ENVELOPE`.
 //!
 //! `.PSS` is the carrier: it solves a periodic steady state and retains the
 //! exact numerical operating point core exposes beside the result. `.PAC`,
-//! `.PNOISE` and `.ENVELOPE` linearize or continue around a carrier, and the
-//! canonical plan — not source proximity guessed here — says which instance
-//! each one belongs to. That binding is read off the plan and the retained
+//! `.PXF`, `.PNOISE` and `.ENVELOPE` linearize or continue around a carrier,
+//! and the canonical plan — not source proximity guessed here — says which
+//! instance each one belongs to. That binding is read off the plan and the retained
 //! state is consumed directly, so a deck with two carriers cannot attach a
 //! dependent card to the wrong one, and the large-signal problem is solved
 //! once per carrier rather than once per dependent card.
@@ -15,7 +15,7 @@
 //! do.
 
 use rspice_core::execution::{AnalysisInstanceId, AnalysisResultDocument, AnalysisResultKind};
-use rspice_core::netlist::{EnvelopeCard, PacCard, PeriodicSweep, PnoiseCard, PssCard};
+use rspice_core::netlist::{EnvelopeCard, PacCard, PeriodicSweep, PnoiseCard, PssCard, PxfCard};
 
 use super::RunContext;
 use super::context::PeriodicArtifact;
@@ -93,6 +93,54 @@ pub(super) fn run_pac_card(ctx: &RunContext<'_>, card: &PacCard) -> Result<(), C
     export_pac(ctx, &artifact, path, upstream, &result.result)
 }
 
+/// Run one authored `.PXF` card against the carrier the plan bound it to.
+pub(super) fn run_pxf_card(ctx: &RunContext<'_>, card: &PxfCard) -> Result<(), CliError> {
+    let artifact = ctx.resolve_periodic_analysis("pxf")?;
+    preflight_periodic_sweep(ctx, &card.sweep, "PXF")?;
+    let upstream = ctx.planned_upstream(artifact.analysis, "PXF")?;
+    if !ctx.quiet {
+        println!(
+            "Running PXF analysis around {upstream}: {} points, sideband {} -> {} on {}",
+            card.sweep.points, card.input_sideband, card.output_sideband, card.output_node
+        );
+    }
+
+    let result = {
+        let periodic = ctx.periodic();
+        if let Some(operating_point) = periodic.pss(upstream) {
+            ctx.engine.run_pxf_card_from_pss_with_abort(
+                ctx.netlist,
+                card,
+                operating_point,
+                &crate::abort::ProcessAbort,
+            )
+        } else if let Some((operating_point, _)) = periodic.hb(upstream) {
+            ctx.engine.run_pxf_card_from_hb_with_abort(
+                ctx.netlist,
+                card,
+                operating_point,
+                &crate::abort::ProcessAbort,
+            )
+        } else {
+            return Err(missing_carrier(".PXF", artifact.analysis, upstream));
+        }
+    }
+    .map_err(|error| map_periodic_error(ctx, "PXF", error))?;
+    ensure_not_cancelled(ctx)?;
+
+    if !ctx.quiet {
+        println!(
+            "✓ PXF complete: {} transfer points from sideband {} to sideband {}",
+            result.points.len(),
+            result.input_sideband,
+            result.output_sideband
+        );
+    }
+    let Some(path) = &artifact.path else {
+        return Ok(());
+    };
+    export_pxf(ctx, &artifact, path, upstream, card, &result)
+}
 /// Run one authored `.PNOISE` card against the carrier the plan bound it to.
 pub(super) fn run_pnoise_card(ctx: &RunContext<'_>, card: &PnoiseCard) -> Result<(), CliError> {
     let artifact = ctx.resolve_periodic_analysis("pnoise")?;
@@ -370,6 +418,122 @@ fn pac_export_table(frequencies: &[f64], sidebands: &[PacSideband]) -> ExportTab
             })
             .collect(),
     }
+}
+
+/// Publish one periodic transfer function over its offset-frequency axis.
+///
+/// Two columns: the complex transfer the card's sideband pair names, and the
+/// absolute frequency the converted response appears at. The output frequency
+/// is a real column in a complex table, so it carries a zero imaginary part in
+/// the rawfile and HDF5 renderings exactly as a rawfile's own scale does.
+fn export_pxf(
+    ctx: &RunContext<'_>,
+    artifact: &PeriodicArtifact,
+    path: &std::path::Path,
+    upstream: AnalysisInstanceId,
+    card: &PxfCard,
+    result: &rspice_core::analysis::pxf::PxfResult,
+) -> Result<(), CliError> {
+    let analysis_id = artifact.analysis;
+    let offsets = result
+        .points
+        .iter()
+        .map(|point| point.freq_in)
+        .collect::<Vec<_>>();
+    let transfer_name = format!(
+        "H(sb{}->sb{})",
+        result.input_sideband, result.output_sideband
+    );
+    let table = ExportTable {
+        analysis: "pxf".to_string(),
+        plot_name: "Periodic Transfer Function".to_string(),
+        scale_name: "offset_frequency".to_string(),
+        scale_type: "frequency".to_string(),
+        scale: offsets.clone(),
+        columns: vec![
+            ExportColumn {
+                name: transfer_name.clone(),
+                var_type: "voltage".to_string(),
+                data: ColumnData::Complex {
+                    real: result
+                        .points
+                        .iter()
+                        .map(|point| point.transfer.re)
+                        .collect(),
+                    imag: result
+                        .points
+                        .iter()
+                        .map(|point| point.transfer.im)
+                        .collect(),
+                },
+            },
+            ExportColumn {
+                name: "output_frequency".to_string(),
+                var_type: "frequency".to_string(),
+                data: ColumnData::Real(result.points.iter().map(|point| point.freq_out).collect()),
+            },
+        ],
+    };
+    let schema = super::document::distinct_schema([
+        rspice_core::execution::signal_descriptor(
+            &transfer_name,
+            &transfer_name,
+            rspice_core::execution::SignalKind::Scalar,
+            rspice_core::execution::SignalValueType::Complex,
+        ),
+        rspice_core::execution::signal_descriptor(
+            "output_frequency",
+            "output_frequency",
+            rspice_core::execution::SignalKind::Scalar,
+            rspice_core::execution::SignalValueType::Real,
+        ),
+    ])?;
+
+    super::document::publish_analysis_result(
+        ctx,
+        path,
+        analysis_id,
+        schema,
+        || {
+            AnalysisResultDocument::from_pxf(analysis_id, card, result)
+                .map(|builder| builder.parent_analysis(upstream))
+        },
+        |path, format| {
+            if matches!(format, OutputFormat::Hdf5) {
+                let mut data = crate::hdf5::Hdf5SimulationData::new();
+                data.title = "Periodic Transfer Function".to_string();
+                data.identity = Some(super::document::hdf5_identity(ctx, analysis_id)?);
+                let mut section = crate::hdf5::Hdf5AcSection::new(offsets.clone());
+                for column in &table.columns {
+                    let (real, imag, unit) = match &column.data {
+                        ColumnData::Complex { real, imag } => (
+                            real.clone(),
+                            imag.clone(),
+                            // Volts out per unit of the drive's own unit, which
+                            // the artifact does not record; see `from_pxf`.
+                            rspice_core::execution::SignalUnit::Unspecified,
+                        ),
+                        ColumnData::Real(values) => (
+                            values.clone(),
+                            vec![0.0; values.len()],
+                            rspice_core::execution::SignalUnit::Hertz,
+                        ),
+                    };
+                    section.add_signal(column.name.clone(), Some(unit.symbol()), real, imag);
+                }
+                data.ac = Some(section);
+                crate::hdf5::write_hdf5(path, &data)
+                    .map_err(|error| super::shared::map_hdf5_output_error(path, error))
+            } else {
+                table.write(path, format)
+            }
+        },
+    )?;
+    ctx.record_output(path.to_path_buf());
+    if !ctx.quiet {
+        println!("  PXF transfer exported to: {}", path.display());
+    }
+    Ok(())
 }
 
 /// Publish one periodic-noise sweep over its offset-frequency axis.

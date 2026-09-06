@@ -182,10 +182,10 @@ pub use payload::{
     OscillatorPhaseNoiseDocument, PNoiseBandwidth, PNoiseContribution, PNoiseContributor,
     PNoisePayload, PacConversionEntry, PacConversionMatrixDocument, PacPayload,
     PacSidebandDescriptor, PoleZeroPayload, PortDocument, PortNoiseCovarianceNormalization,
-    PortNoisePayload, PssPayload, RealEventPoint, RealEventTrace, ResultPayload,
-    RootSetEvidenceDocument, SParameterPayload, SensitivityElementTag, SensitivityEntry,
-    SensitivityPayload, SpectrumCertificateDocument, StabilityPayload, TransferFunctionPayload,
-    TransientPayload, TwoPortNoiseEntry,
+    PortNoisePayload, PssPayload, PxfGroupDelaySample, PxfPayload, RealEventPoint, RealEventTrace,
+    ResultPayload, RootSetEvidenceDocument, SParameterPayload, SensitivityElementTag,
+    SensitivityEntry, SensitivityPayload, SpectrumCertificateDocument, StabilityPayload,
+    TransferFunctionPayload, TransientPayload, TwoPortNoiseEntry,
 };
 
 use crate::abort_signal::{AbortSignal, NoAbort};
@@ -508,7 +508,7 @@ impl AnalysisResultDocument {
             AnalysisResultKind::Fft | AnalysisResultKind::Fourier => {
                 Some((true, &[AnalysisKind::Tran]))
             }
-            AnalysisResultKind::Pac | AnalysisResultKind::PNoise => {
+            AnalysisResultKind::Pac | AnalysisResultKind::Pxf | AnalysisResultKind::PNoise => {
                 Some((false, &[AnalysisKind::Pss, AnalysisKind::HarmonicBalance]))
             }
             AnalysisResultKind::Envelope => Some((false, &[AnalysisKind::HarmonicBalance])),
@@ -1124,6 +1124,14 @@ pub enum SeriesQualifier {
     DistortionProduct { product: DistortionProductTag },
     /// One PAC sideband spectrum.
     PacSideband { sideband: i32 },
+    /// One PXF conversion path, from an input sideband to an output sideband.
+    ///
+    /// A single sideband does not name a transfer: `H(+1 -> 0)` and
+    /// `H(0 -> +1)` are different numbers over the same offset axis, and a
+    /// future `.PXF` reporting every input sideband into one output would
+    /// publish them side by side. The qualifier is what keeps two series with
+    /// the same descriptor distinguishable, so it carries the ordered pair.
+    PxfConversion { input: i32, output: i32 },
 }
 
 impl SeriesQualifier {
@@ -1132,6 +1140,7 @@ impl SeriesQualifier {
             Self::DistortionFundamental { tone } => format!("fundamental:{tone:?}"),
             Self::DistortionProduct { product } => format!("product:{}", product.label()),
             Self::PacSideband { sideband } => format!("sideband:{sideband}"),
+            Self::PxfConversion { input, output } => format!("conversion:{input}->{output}"),
         }
     }
 }

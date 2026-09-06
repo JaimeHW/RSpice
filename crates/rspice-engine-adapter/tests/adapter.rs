@@ -421,6 +421,14 @@ fn family_expectation(kind: AnalysisResultKind) -> FamilyExpectation {
             deck: "rf periodic ac\nV1 in 0 SIN(0 1 1G)\nR1 in out 1k\nC1 out 0 1p\n\
                    .pss fund=1g\n.pac dec 2 1k 10k input=v1 out=v(out)\n.end\n",
         },
+        AnalysisResultKind::Pxf => FamilyExpectation::Runs {
+            request_kind: "pxf",
+            analysis_tag: "pxf-001",
+            declared: DeclaredStatus::Mapped,
+            deck: "rf periodic transfer function\nV1 in 0 SIN(0 1 1G)\nR1 in out 1k\n\
+                   C1 out 0 1p\n\
+                   .pss fund=1g\n.pxf dec 2 1k 10k input=v1 out=v(out) maxsideband=1\n.end\n",
+        },
         AnalysisResultKind::Envelope => FamilyExpectation::Runs {
             request_kind: "envelope",
             analysis_tag: "env-001",

@@ -514,6 +514,9 @@ pub struct PyRunReport {
     /// Periodic small-signal AC result (last .pac)
     #[pyo3(get)]
     pub pac: Option<PyPacResult>,
+    /// Periodic transfer-function result (last .pxf)
+    #[pyo3(get)]
+    pub pxf: Option<PyPxfResult>,
     /// Driven periodic-noise result (last .pnoise)
     #[pyo3(get)]
     pub pnoise: Option<PyPeriodicNoiseResult>,
@@ -598,6 +601,9 @@ pub struct PyRunReport {
     /// Every `.pac` result, in deck/coordinate order. `pac` is the last.
     #[pyo3(get)]
     pub all_pac: Vec<PyPacResult>,
+    /// Every `.pxf` result, in deck/coordinate order. `pxf` is the last.
+    #[pyo3(get)]
+    pub all_pxf: Vec<PyPxfResult>,
     /// Every driven `.pnoise` result, in deck/coordinate order. `pnoise` is
     /// the last.
     #[pyo3(get)]

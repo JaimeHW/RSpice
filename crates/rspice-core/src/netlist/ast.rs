@@ -2236,6 +2236,10 @@ pub enum AnalysisCommand {
     /// Periodic small-signal AC around a periodic operating point: `.PAC`.
     Pac(Box<PacCard>),
 
+    /// Periodic transfer function between one input sideband and one output
+    /// sideband around a periodic operating point: `.PXF`.
+    Pxf(Box<PxfCard>),
+
     /// Periodic (cyclostationary) noise around a periodic operating
     /// point: `.PNOISE`.
     Pnoise(Box<PnoiseCard>),
@@ -2462,6 +2466,21 @@ pub struct PxfCard {
     pub source: PeriodicSourceSelector,
 }
 
+impl PxfCard {
+    /// Input sideband when the card does not say.
+    pub(crate) const DEFAULT_INPUT_SIDEBAND: i32 = 1;
+    /// Output sideband when the card does not say; see the field's own note
+    /// for why this is 1 rather than `PxfConfig::default()`'s 0.
+    pub(crate) const DEFAULT_OUTPUT_SIDEBAND: i32 = 1;
+    /// Conversion depth when the card does not say; the same depth
+    /// [`PacCard::DEFAULT_SIDEBAND_MAX`] gives a `.PAC` that does not say.
+    pub(crate) const DEFAULT_MAX_SIDEBAND: i32 = PacCard::DEFAULT_SIDEBAND_MAX;
+    /// Relative tolerance when the card does not say.
+    pub(crate) const DEFAULT_RELTOL: Value = PacCard::DEFAULT_RELTOL;
+    /// Absolute tolerance when the card does not say.
+    pub(crate) const DEFAULT_ABSTOL: Value = PacCard::DEFAULT_ABSTOL;
+}
+
 /// What a `.PNOISE` card measures the noise against.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PnoiseReference {
@@ -2554,6 +2573,7 @@ pub enum PeriodicSourceSelector {
 pub enum AnalysisCard {
     Pss,
     Pac,
+    Pxf,
     Pnoise,
     Envelope,
 }
@@ -2564,6 +2584,7 @@ impl AnalysisCard {
         match self {
             Self::Pss => ".PSS",
             Self::Pac => ".PAC",
+            Self::Pxf => ".PXF",
             Self::Pnoise => ".PNOISE",
             Self::Envelope => ".ENVELOPE",
         }

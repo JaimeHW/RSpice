@@ -68,6 +68,7 @@ pub const fn projection_analysis_kind(kind: AnalysisResultKind) -> Option<Output
         | AnalysisResultKind::Fft
         | AnalysisResultKind::MonteCarlo
         | AnalysisResultKind::Pac
+        | AnalysisResultKind::Pxf
         | AnalysisResultKind::PNoise
         | AnalysisResultKind::Envelope => None,
     }

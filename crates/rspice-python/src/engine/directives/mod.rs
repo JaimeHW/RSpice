@@ -203,6 +203,7 @@ pub(super) struct DirectiveOutcomes {
     hb: LastAndAll<PyHbResult>,
     pub(super) pss: LastAndAll<PyPssResult>,
     pac: LastAndAll<PyPacResult>,
+    pxf: LastAndAll<PyPxfResult>,
     pnoise: LastAndAll<PyPeriodicNoiseResult>,
     /// Autonomous-carrier `.PNOISE` results. An oscillator's phase noise is a
     /// carrier-normalized dBc/Hz spectrum with a phase-diffusion constant, not
@@ -248,6 +249,7 @@ impl DirectiveOutcomes {
         self.hb.append(other.hb);
         self.pss.append(other.pss);
         self.pac.append(other.pac);
+        self.pxf.append(other.pxf);
         self.pnoise.append(other.pnoise);
         self.oscillator_noise.append(other.oscillator_noise);
         self.envelope.append(other.envelope);
@@ -535,6 +537,7 @@ fn into_report(out: DirectiveOutcomes, measurements: Vec<PyMeasurement>) -> PyRu
     let (hb, all_hb) = out.hb.into_parts();
     let (pss, all_pss) = out.pss.into_parts();
     let (pac, all_pac) = out.pac.into_parts();
+    let (pxf, all_pxf) = out.pxf.into_parts();
     let (pnoise, all_pnoise) = out.pnoise.into_parts();
     let (oscillator_noise, all_oscillator_noise) = out.oscillator_noise.into_parts();
     let (envelope, all_envelope) = out.envelope.into_parts();
@@ -555,6 +558,7 @@ fn into_report(out: DirectiveOutcomes, measurements: Vec<PyMeasurement>) -> PyRu
         hb,
         pss,
         pac,
+        pxf,
         pnoise,
         oscillator_noise,
         envelope,
@@ -580,6 +584,7 @@ fn into_report(out: DirectiveOutcomes, measurements: Vec<PyMeasurement>) -> PyRu
         all_hb,
         all_pss,
         all_pac,
+        all_pxf,
         all_pnoise,
         all_oscillator_noise,
         all_envelope,

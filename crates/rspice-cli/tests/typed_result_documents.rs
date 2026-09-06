@@ -254,6 +254,20 @@ fn coverage(kind: AnalysisResultKind) -> FamilyCoverage {
             series: Some(("v(out)", "volt")),
             scalar: Some("residual_norm"),
         }),
+        // `.PXF` reads one conversion path out of the same solve `.PAC` runs,
+        // so the sideband pair it names has to be inside the depth it states.
+        // The transfer is volts out per unit of the drive's own unit, which
+        // the artifact does not record, so the checked series is the converted
+        // output frequency, whose unit is not in doubt.
+        AnalysisResultKind::Pxf => FamilyCoverage::Document(FamilyRun {
+            circuit: None,
+            cards: ".HB 1k\n.PXF DEC 2 1k 10k INPUT=V1 OUT=V(out) MAXSIDEBAND=1\n",
+            flags: &[],
+            artifact: "pxf-001",
+            analysis_tag: "pxf-001",
+            series: Some(("output_frequency", "hertz")),
+            scalar: Some("peak_gain_db"),
+        }),
         AnalysisResultKind::PNoise => FamilyCoverage::Document(FamilyRun {
             circuit: None,
             cards: ".HB 1k\n.PNOISE DEC 2 1k 10k OUT=V(out) INPUT=V1 MAXSIDEBAND=1\n",

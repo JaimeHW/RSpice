@@ -197,6 +197,23 @@ pub(crate) fn describe_analysis(analysis: &AnalysisCommand) -> String {
                 card.sideband_max
             )
         }
+        AnalysisCommand::Pxf(card) => {
+            let probe = match &card.output_ref {
+                Some(reference) => format!("v({},{reference})", card.output_node),
+                None => format!("v({})", card.output_node),
+            };
+            format!(
+                ".pxf {} {} {} {} {} {probe} (sideband {} -> {}, depth {})",
+                describe_variation(card.sweep.variation),
+                card.sweep.points,
+                card.sweep.start_freq,
+                card.sweep.stop_freq,
+                card.input_source,
+                card.input_sideband,
+                card.output_sideband,
+                card.max_sideband
+            )
+        }
         AnalysisCommand::Pnoise(card) => {
             let probe = match &card.reference_node {
                 Some(reference) => format!("v({},{reference})", card.output_node),

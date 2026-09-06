@@ -692,6 +692,30 @@ fn execute_analysis(
             ])
         }
 
+        AnalysisCommand::Pxf(card) => {
+            preflight_periodic_sweep(&card.sweep, resource_limits)?;
+            let upstream = upstream_or_refuse(upstream, ".PXF", card.source)?;
+            let result = if let Some(operating_point) = periodic.pss(upstream) {
+                engine
+                    .run_pxf_card_from_pss_with_abort(netlist, card, operating_point, abort)
+                    .map_err(simulation_error)?
+            } else if let Some(operating_point) = periodic.hb(upstream) {
+                engine
+                    .run_pxf_card_from_hb_with_abort(netlist, card, operating_point, abort)
+                    .map_err(simulation_error)?
+            } else {
+                return Err(unsupported_deck_analysis(format!(
+                    "authored .PXF card names upstream {upstream}, which produced no retained periodic operating point"
+                )));
+            };
+            ensure_not_aborted(abort)?;
+            Ok(vec![
+                AnalysisResultDocument::from_pxf(id, card, &result)
+                    .map_err(document_projection_error)?
+                    .parent_analysis(upstream),
+            ])
+        }
+
         AnalysisCommand::Pnoise(card) => {
             preflight_periodic_sweep(&card.sweep, resource_limits)?;
             let upstream = upstream_or_refuse(upstream, ".PNOISE", card.source)?;
@@ -937,6 +961,7 @@ fn unroutable_reason(command: &AnalysisCommand) -> Option<&'static str> {
         | AnalysisCommand::Temp { .. }
         | AnalysisCommand::Pss(_)
         | AnalysisCommand::Pac(_)
+        | AnalysisCommand::Pxf(_)
         | AnalysisCommand::Pnoise(_)
         | AnalysisCommand::Envelope(_) => None,
     }
@@ -963,6 +988,7 @@ fn card_spelling(command: &AnalysisCommand) -> &'static str {
         AnalysisCommand::Temp { .. } => ".TEMP",
         AnalysisCommand::Pss(_) => ".PSS",
         AnalysisCommand::Pac(_) => ".PAC",
+        AnalysisCommand::Pxf(_) => ".PXF",
         AnalysisCommand::Pnoise(_) => ".PNOISE",
         AnalysisCommand::Envelope(_) => ".ENVELOPE",
     }
@@ -1335,6 +1361,13 @@ C4 a 0 160p\n";
                     LINEAR,
                     ".PSS FUND=1G HARMS=3 POINTS=32 TSTABPERIODS=2\n\
 .PAC LIN 2 1meg 10meg INPUT=V1 OUT=V(out)\n",
+                ),
+            },
+            AnalysisResultKind::Pxf => Expectation::Routed {
+                deck: deck(
+                    LINEAR,
+                    ".PSS FUND=1G HARMS=3 POINTS=32 TSTABPERIODS=2\n\
+.PXF LIN 2 1meg 10meg INPUT=V1 OUT=V(out) MAXSIDEBAND=1\n",
                 ),
             },
             AnalysisResultKind::PNoise => Expectation::Routed {

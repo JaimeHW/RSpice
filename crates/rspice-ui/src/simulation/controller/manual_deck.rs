@@ -100,7 +100,10 @@ pub(super) fn build_manual_deck_queue(
         // manual-deck route at all.
         if matches!(
             command,
-            AnalysisCommand::Pss(_) | AnalysisCommand::Pac(_) | AnalysisCommand::Pnoise(_)
+            AnalysisCommand::Pss(_)
+                | AnalysisCommand::Pac(_)
+                | AnalysisCommand::Pxf(_)
+                | AnalysisCommand::Pnoise(_)
         ) {
             continue;
         }
@@ -548,6 +551,7 @@ fn command_name(command: &AnalysisCommand) -> &'static str {
         AnalysisCommand::Temp { .. } => ".temp",
         AnalysisCommand::Pss(_) => ".pss",
         AnalysisCommand::Pac(_) => ".pac",
+        AnalysisCommand::Pxf(_) => ".pxf",
         AnalysisCommand::Pnoise(_) => ".pnoise",
         AnalysisCommand::Envelope(_) => ".envelope",
     }
@@ -1162,13 +1166,14 @@ fn command_to_queue_item(
         AnalysisCommand::Temp { .. } => Err(
             ".temp directives must be planned as temperature sweeps before queueing".to_string(),
         ),
-        AnalysisCommand::Pss(_) | AnalysisCommand::Pac(_) | AnalysisCommand::Pnoise(_) => {
-            Err(format!(
-                "{} is queued from the deck's own card by the periodic reader, which binds it to \
+        AnalysisCommand::Pss(_)
+        | AnalysisCommand::Pac(_)
+        | AnalysisCommand::Pxf(_)
+        | AnalysisCommand::Pnoise(_) => Err(format!(
+            "{} is queued from the deck's own card by the periodic reader, which binds it to \
                  the PSS operating point; reaching this route means the deck walk did not skip it",
-                command_name(command)
-            ))
-        }
+            command_name(command)
+        )),
         AnalysisCommand::Envelope(_) => Err(format!(
             "{} has no manual-deck queue route in this build",
             command_name(command)

@@ -34,11 +34,11 @@ use rspice_core::execution::result_document::{
     NoiseMechanismTag, NoisePayload, NoiseSourceIdentityDocument, NyquistSample,
     OperatingPointPayload, PNoiseBandwidth, PNoiseContribution, PNoiseContributor, PNoisePayload,
     PacPayload, PacSidebandDescriptor, PoleZeroPayload, PortDocument,
-    PortNoiseCovarianceNormalization, PortNoisePayload, PssPayload, ResultAxis, ResultAxisKind,
-    ResultDocumentError, ResultNamespaces, ResultPayload, ResultScalar, ResultSignal,
-    RootSetEvidenceDocument, SParameterPayload, ScalarValue, SensitivityElementTag,
-    SensitivityEntry, SensitivityPayload, SeriesAvailability, SeriesValues, StabilityPayload,
-    TransferFunctionPayload, TransientPayload,
+    PortNoiseCovarianceNormalization, PortNoisePayload, PssPayload, PxfGroupDelaySample,
+    PxfPayload, ResultAxis, ResultAxisKind, ResultDocumentError, ResultNamespaces, ResultPayload,
+    ResultScalar, ResultSignal, RootSetEvidenceDocument, SParameterPayload, ScalarValue,
+    SensitivityElementTag, SensitivityEntry, SensitivityPayload, SeriesAvailability, SeriesValues,
+    StabilityPayload, TransferFunctionPayload, TransientPayload,
 };
 use rspice_core::execution::{
     AnalysisInstanceId, AnalysisKind, AnalysisRequest, DeckPlan, SignalDescriptor, SignalKind,
@@ -645,6 +645,30 @@ fn document(family: usize, shape: &Shape) -> AnalysisResultDocument {
             }),
         ),
         18 => (
+            AnalysisKind::Pxf,
+            Some(analysis_id(AnalysisKind::Pss)),
+            ResultAxisKind::OffsetFrequency,
+            axis_values.clone(),
+            ResultPayload::Pxf(PxfPayload {
+                fundamental_frequency: 1e9,
+                input_sideband: 1,
+                output_sideband: -1,
+                max_sideband: 1,
+                input_source: "v1".to_owned(),
+                output_node: "out".to_owned(),
+                reference_node: Some("ref".to_owned()),
+                group_delay: shape
+                    .finite_reals()
+                    .into_iter()
+                    .map(|frequency| PxfGroupDelaySample {
+                        frequency,
+                        delay: 1e-9,
+                    })
+                    .collect(),
+                dc_gain: Some(ComplexSample::new(0.5, -0.25)),
+            }),
+        ),
+        19 => (
             AnalysisKind::HarmonicBalance,
             None,
             ResultAxisKind::HarmonicIndex,
@@ -720,7 +744,7 @@ fn document(family: usize, shape: &Shape) -> AnalysisResultDocument {
 }
 
 /// Number of families the fixture covers; one per [`ResultPayload`] variant.
-const FAMILY_COUNT: usize = 20;
+const FAMILY_COUNT: usize = 21;
 
 #[test]
 fn law_every_result_family_round_trips_through_json_exactly() {

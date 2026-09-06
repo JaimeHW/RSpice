@@ -59,6 +59,7 @@ pub enum ResultPayload {
     MonteCarlo(MonteCarloPayload),
     Pss(PssPayload),
     Pac(PacPayload),
+    Pxf(PxfPayload),
     PNoise(PNoisePayload),
     Hb(HarmonicBalancePayload),
     /// Boxed because an envelope payload embeds a whole transient payload
@@ -89,6 +90,7 @@ impl ResultPayload {
             Self::MonteCarlo(_) => AnalysisResultKind::MonteCarlo,
             Self::Pss(_) => AnalysisResultKind::Pss,
             Self::Pac(_) => AnalysisResultKind::Pac,
+            Self::Pxf(_) => AnalysisResultKind::Pxf,
             Self::PNoise(_) => AnalysisResultKind::PNoise,
             Self::Hb(_) => AnalysisResultKind::HarmonicBalance,
             Self::Envelope(_) => AnalysisResultKind::Envelope,
@@ -137,6 +139,7 @@ impl ResultPayload {
                 .fold(0, usize::saturating_add),
             Self::Pss(payload) => payload.floquet_multipliers.len().saturating_mul(2),
             Self::Pac(payload) => payload.value_count(),
+            Self::Pxf(payload) => payload.value_count(),
             Self::PNoise(payload) => payload
                 .contributors
                 .iter()
@@ -173,6 +176,7 @@ impl ResultPayload {
             Self::MonteCarlo(payload) => payload.validate(),
             Self::Pss(payload) => payload.validate(),
             Self::Pac(payload) => payload.validate(),
+            Self::Pxf(payload) => payload.validate(),
             Self::PNoise(payload) => payload.validate(),
             Self::Hb(payload) => payload.validate(),
             Self::Envelope(payload) => payload.validate(),
@@ -2349,6 +2353,100 @@ pub struct PacConversionEntry {
     pub output_sideband: i32,
     pub input_sideband: i32,
     pub value: ComplexSample,
+}
+
+/// What a `.PXF` run measured, beside the transfer curve itself.
+///
+/// A PAC document publishes every sideband's spectrum and needs the sideband
+/// range to say what it covers. A PXF document publishes exactly one path
+/// through that same conversion matrix, so what it has to state instead is
+/// *which* path — the ordered sideband pair, the source it was driven from and
+/// the probe it was read at — plus the depth the solve spanned, without which
+/// the numbers cannot be reproduced.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PxfPayload {
+    /// Large-signal fundamental of the carrier, in hertz.
+    pub fundamental_frequency: f64,
+    /// Sideband the drive was applied at.
+    pub input_sideband: i32,
+    /// Sideband the response was read at.
+    pub output_sideband: i32,
+    /// Conversion depth the solve spanned: sidebands `-n..=n` participated.
+    /// Never smaller than either end of the measured path.
+    pub max_sideband: i32,
+    /// Independent source the transfer was driven from.
+    pub input_source: String,
+    /// Probe node the transfer was read at.
+    pub output_node: String,
+    /// Reference node of a differential probe, absent for a single-ended one.
+    pub reference_node: Option<String>,
+    /// Midpoint group-delay curve.
+    ///
+    /// It carries its own abscissa, the way `StabilityPayload::nyquist` does,
+    /// because a `ResultSignal` must have exactly `point_count` samples and a
+    /// difference-derived delay has one fewer, on a grid of its own.
+    pub group_delay: Vec<PxfGroupDelaySample>,
+    /// Transfer at the lowest swept offset, when that offset is low enough for
+    /// the curve to have a DC end. Absent means the sweep never went there.
+    pub dc_gain: Option<ComplexSample>,
+}
+
+/// One midpoint group-delay sample of a `.PXF` transfer curve.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PxfGroupDelaySample {
+    /// Midpoint of the offset-frequency interval the delay was taken over.
+    pub frequency: f64,
+    /// Group delay in seconds.
+    pub delay: f64,
+}
+
+impl PxfPayload {
+    fn value_count(&self) -> usize {
+        self.group_delay.len().saturating_mul(2)
+    }
+
+    fn validate(&self) -> Result<(), ResultDocumentError> {
+        finite("PXF fundamental frequency", self.fundamental_frequency)?;
+        super::require_name("PXF input source", &self.input_source)?;
+        super::require_name("PXF output node", &self.output_node)?;
+        if let Some(reference) = &self.reference_node {
+            super::require_name("PXF reference node", reference)?;
+        }
+        if self.max_sideband < 0 {
+            return Err(ResultDocumentError::Malformed {
+                location: "PXF conversion depth",
+                detail: "a sideband span cannot be negative".to_owned(),
+            });
+        }
+        // The transfer is an element of a matrix spanning `-n..=n`. A payload
+        // that names a sideband outside that span describes a number the
+        // conversion matrix never held.
+        for (role, sideband) in [
+            ("input", self.input_sideband),
+            ("output", self.output_sideband),
+        ] {
+            if sideband.saturating_abs() > self.max_sideband {
+                return Err(ResultDocumentError::Malformed {
+                    location: "PXF sideband pair",
+                    detail: format!(
+                        "the {role} sideband {sideband} is outside the analyzed span +/-{}",
+                        self.max_sideband
+                    ),
+                });
+            }
+        }
+        for sample in &self.group_delay {
+            finite("PXF group-delay frequency", sample.frequency)?;
+            finite("PXF group delay", sample.delay)?;
+        }
+        if let Some(gain) = self.dc_gain {
+            finite("PXF DC gain real part", gain.real)?;
+            finite("PXF DC gain imaginary part", gain.imaginary)?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

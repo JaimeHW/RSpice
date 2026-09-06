@@ -43,9 +43,9 @@ use crate::results::{
     PyCompressedTransientResult, PyDcSweepResult, PyDistortionResult, PyEnvelopeResult,
     PyFourierResult, PyHbResult, PyMeasurement, PyMonteCarloResult, PyNoiseResult,
     PyOscillatorNoiseResult, PyPacResult, PyPeriodicNoiseResult, PyPoleZeroResult, PyPssResult,
-    PyRunCoordinate, PyRunReport, PySParameterResult, PySensitivityResult, PySimulationResult,
-    PyStbResult, PyTransferFunctionResult, PyTransientCheckpoint, PyTransientResult,
-    is_ground_name, periodic_noise_probe,
+    PyPxfResult, PyRunCoordinate, PyRunReport, PySParameterResult, PySensitivityResult,
+    PySimulationResult, PyStbResult, PyTransferFunctionResult, PyTransientCheckpoint,
+    PyTransientResult, is_ground_name, periodic_noise_probe,
 };
 
 mod directives;

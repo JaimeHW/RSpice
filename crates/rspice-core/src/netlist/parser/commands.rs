@@ -157,6 +157,9 @@ pub(super) fn parse_command(
         ".PAC" => {
             analyses.push(periodic_cards::parse_pac_command(stream, line_num, params)?);
         }
+        ".PXF" => {
+            analyses.push(periodic_cards::parse_pxf_command(stream, line_num, params)?);
+        }
         ".PNOISE" => {
             analyses.push(periodic_cards::parse_pnoise_command(
                 stream, line_num, params,

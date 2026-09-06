@@ -320,6 +320,11 @@ fn qualifier_tag(qualifier: &SeriesQualifier) -> String {
         SeriesQualifier::DistortionFundamental { tone } => format!("fundamental-{tone:?}"),
         SeriesQualifier::DistortionProduct { product } => format!("product-{}", product.label()),
         SeriesQualifier::PacSideband { sideband } => format!("sideband-{sideband}"),
+        // Both ends of the path, because one sideband does not name a
+        // transfer: H(+1 -> 0) and H(0 -> +1) are different measurements.
+        SeriesQualifier::PxfConversion { input, output } => {
+            format!("conversion-{input}-to-{output}")
+        }
     }
 }
 

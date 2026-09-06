@@ -455,6 +455,10 @@ fn document_for(kind: AnalysisResultKind) -> AnalysisResultDocument {
         AnalysisResultKind::Pac => {
             AnalysisResultDocument::from_pac(instance(AnalysisKind::Pac), &pac_result())
         }
+        AnalysisResultKind::Pxf => {
+            let (card, result) = pxf_measurement();
+            AnalysisResultDocument::from_pxf(instance(AnalysisKind::Pxf), &card, &result)
+        }
         AnalysisResultKind::PNoise => AnalysisResultDocument::from_pnoise(
             instance(AnalysisKind::PNoise),
             &PeriodicNoiseResult::Spectral(pnoise_result()),
@@ -561,6 +565,47 @@ fn pac_result() -> crate::analysis::PacResult {
     result.iterations = 2;
     result.residual = 1.0e-12;
     result
+}
+
+/// One authored `.PXF` measurement and the transfer it produced.
+///
+/// The card and the result travel together because the document needs both:
+/// the numbers, and the statement of what was measured.
+fn pxf_measurement() -> (crate::netlist::PxfCard, crate::analysis::pxf::PxfResult) {
+    use crate::analysis::pxf::{PxfResult, TransferPoint};
+
+    let card = crate::netlist::PxfCard {
+        sweep: crate::netlist::PeriodicSweep {
+            variation: crate::netlist::FreqVariation::Lin,
+            points: 3,
+            start_freq: 1.0e3,
+            stop_freq: 3.0e3,
+        },
+        input_source: "V1".to_owned(),
+        input_sideband: 1,
+        output_node: "OUT".to_owned(),
+        output_ref: None,
+        output_sideband: 0,
+        max_sideband: 1,
+        reltol: 1.0e-3,
+        abstol: 1.0e-12,
+        source: crate::netlist::PeriodicSourceSelector::Preceding,
+    };
+    let mut result = PxfResult::new(1.0e6, card.input_sideband, card.output_sideband);
+    // A magnitude that falls past unity and past -3 dB, so all four curve
+    // metrics resolve to a number rather than to a determination.
+    for (index, magnitude) in [4.0, 1.0, 0.25].into_iter().enumerate() {
+        let freq_in = 1.0e3 + 1.0e3 * index as f64;
+        result.add_point(TransferPoint {
+            freq_in,
+            freq_out: freq_in + f64::from(card.output_sideband) * 1.0e6,
+            transfer: Complex64::new(magnitude, -0.5 * magnitude),
+            sideband_in: card.input_sideband,
+            sideband_out: card.output_sideband,
+        });
+    }
+    result.compute_metrics();
+    (card, result)
 }
 
 fn envelope_result() -> crate::engine::EnvelopeResult {
@@ -1052,6 +1097,46 @@ fn monte_carlo_pss_pac_and_pnoise_documents_keep_their_typed_payloads() {
         .collect::<Vec<_>>();
     assert!(sideband_qualifiers.contains(&SeriesQualifier::PacSideband { sideband: -1 }));
     assert!(sideband_qualifiers.contains(&SeriesQualifier::PacSideband { sideband: 1 }));
+
+    let pxf = document_for(AnalysisResultKind::Pxf);
+    let ResultPayload::Pxf(payload) = pxf.payload() else {
+        panic!("PXF payload");
+    };
+    assert_eq!(payload.input_sideband, 1);
+    assert_eq!(payload.output_sideband, 0);
+    assert_eq!(payload.max_sideband, 1);
+    assert_eq!(payload.input_source, "V1");
+    assert_eq!(payload.output_node, "OUT");
+    // Group delay is one shorter than the sweep and carries its own abscissa,
+    // which is why it is a payload table and not a signal.
+    assert_eq!(payload.group_delay.len(), pxf.point_count() - 1);
+    assert_eq!(pxf.axes()[0].unit(), &SignalUnit::Hertz);
+    assert!(
+        pxf.signals()
+            .iter()
+            .filter_map(ResultSignal::qualifier)
+            .any(|qualifier| *qualifier
+                == SeriesQualifier::PxfConversion {
+                    input: 1,
+                    output: 0
+                }),
+        "the transfer names the ordered sideband pair it was measured over"
+    );
+    // The four curve metrics the Studio's own route drops.
+    for name in [
+        "peak_gain_db",
+        "peak_gain_frequency",
+        "bandwidth_3db",
+        "unity_gain_frequency",
+    ] {
+        assert!(
+            matches!(
+                scalar_of(&pxf, name).value(),
+                ScalarValue::Real { value: Some(_) }
+            ),
+            "{name} resolves to a number on a curve that has the feature"
+        );
+    }
 
     let pnoise = document_for(AnalysisResultKind::PNoise);
     let ResultPayload::PNoise(payload) = pnoise.payload() else {

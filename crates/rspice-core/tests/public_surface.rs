@@ -645,7 +645,27 @@ use rspice_core::analysis::harmonic_balance::{
 // - 1 in `netlist/ast.rs`: `PxfCard`, beside `PacCard` and `PnoiseCard`.
 // - 2 in `engine/hb/pac.rs`: `Engine::run_pxf_card_from_pss_with_abort` and
 //   `..._from_hb_with_abort`, beside the `.PAC` entries whose solve they read.
-const MAX_PUBLIC_ITEMS: usize = 5008;
+// 2026-09-06, +3 deliberate (5,008 -> 5,011): the `.PXF` result family, so a
+// deck that authors the card publishes a document on all four non-UI surfaces.
+//
+// A projection was not an option: payload variant to result kind is a
+// bijection enforced at construction, and `PacPayload` has no home for a
+// sideband *pair*, the curve metrics or group delay. The three are what a
+// caller has to name to build or read one.
+//
+// - 2 in `execution/result_document/payload.rs`: `PxfPayload` and
+//   `PxfGroupDelaySample`. The latter is its own type because the group-delay
+//   curve carries its own abscissa — a `ResultSignal` must have exactly
+//   `point_count` samples and a midpoint delay has one fewer.
+// - 1 in `.../builders.rs`: `AnalysisResultDocument::from_pxf`, which the CLI,
+//   the engine adapter, the WASM deck route and `rspice-python` all call.
+//
+// Free, and deliberately so: `AnalysisCommand::Pxf`, `AnalysisKind::Pxf`,
+// `AnalysisResultKind::Pxf`, `ResultPayload::Pxf`, `AnalysisCard::Pxf` and
+// `SeriesQualifier::PxfConversion` are enum variants; `PxfCard::DEFAULT_*` are
+// `pub(crate)` as `PacCard`'s are; the payload re-export joins the existing
+// grouped `pub use`.
+const MAX_PUBLIC_ITEMS: usize = 5011;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

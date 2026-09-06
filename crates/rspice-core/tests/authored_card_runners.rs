@@ -250,10 +250,16 @@ const PXF_FUNDAMENTAL: f64 = 1.0e6;
 
 /// An RC low-pass whose corner sits exactly on the carrier fundamental, so
 /// `H(f) = 1 / (1 + j f / 1 MHz)` is a closed-form answer at every sideband.
+///
+/// The cards are authored so the deck plans a `pxf-001` bound to a carrier;
+/// the runs below drive the engine entries directly with cards built by hand,
+/// which is what this file exists to gate.
 const PXF_LOW_PASS: &str = "PXF card runner\n\
      vin in 0 dc 0 ac 1\n\
      r1 in out 1k\n\
      c1 out 0 159.154943091895p\n\
+     .pss fund=1meg harms=8 points=128 tstabperiods=1\n\
+     .pxf lin 3 100k 500k input=vin out=v(out) maxsideband=1\n\
      .end\n";
 
 fn pxf_card(input_sideband: i32, output_sideband: i32) -> rspice_core::netlist::PxfCard {
@@ -389,6 +395,71 @@ fn an_authored_pxf_card_publishes_the_curve_metrics_core_computes() {
         pxf.group_delay_curve().len(),
         pxf.points.len() - 1,
         "group delay lives on the midpoint grid"
+    );
+
+    // And what the document publishes is those same numbers, not a second
+    // derivation of them. The Studio's own route computes the four metrics and
+    // drops them; the engine route is where they become evidence.
+    let document = AnalysisResultDocument::from_pxf(instance(&netlist, "pxf-001"), &card, &pxf)
+        .expect("the shared document accepts exactly what the runner returns")
+        .build()
+        .expect("document builds");
+    assert_eq!(document.point_count(), pxf.points.len());
+    let scalar = |name: &str| {
+        document
+            .scalars()
+            .iter()
+            .find(|scalar| scalar.name() == name)
+            .unwrap_or_else(|| panic!("the document publishes {name}"))
+            .value()
+            .clone()
+    };
+    let published = |name: &str| match scalar(name) {
+        ScalarValue::Real { value } => value,
+        // The four metrics record "the curve has no such point" as a typed
+        // determination rather than as a number.
+        ScalarValue::Unavailable { .. } => None,
+        other => panic!("{name} is neither a real nor a determination: {other:?}"),
+    };
+    assert_eq!(
+        published("peak_gain_db"),
+        oracle.peak_gain.map(|(_, db)| db)
+    );
+    assert_eq!(
+        published("peak_gain_frequency"),
+        oracle.peak_gain.map(|(frequency, _)| frequency)
+    );
+    assert_eq!(published("bandwidth_3db"), oracle.bandwidth_3db);
+    assert_eq!(published("unity_gain_frequency"), oracle.unity_gain_freq);
+    let ResultPayload::Pxf(payload) = document.payload() else {
+        panic!("a .PXF card projects a PXF payload");
+    };
+    assert_eq!(payload.group_delay.len(), pxf.group_delay_curve().len());
+    for (sample, (frequency, delay)) in payload.group_delay.iter().zip(pxf.group_delay_curve()) {
+        assert_eq!(sample.frequency, frequency);
+        assert_eq!(sample.delay, delay);
+    }
+}
+
+#[test]
+fn a_pxf_document_refuses_a_card_that_did_not_produce_its_result() {
+    // The card states the measurement and the result carries it out. Pairing
+    // one card's statement with another's numbers would publish a path nothing
+    // computed, so the projection refuses rather than relabelling.
+    let netlist = Netlist::parse(PXF_LOW_PASS).expect("deck parses");
+    let engine = Engine::new(SimulationConfig::default());
+    let carrier = pxf_carrier(&engine, &netlist);
+    let pxf = engine
+        .run_pxf_card_from_pss_with_abort(&netlist, &pxf_card(1, 1), &carrier, &NoAbort)
+        .expect(".PXF runs");
+
+    let error =
+        AnalysisResultDocument::from_pxf(instance(&netlist, "pxf-001"), &pxf_card(0, 1), &pxf)
+            .expect_err("a card naming a different sideband pair must be refused");
+    let message = error.to_string();
+    assert!(
+        message.contains("sideband"),
+        "the refusal names the disagreement: {message}"
     );
 }
 

@@ -539,6 +539,7 @@ fn axis_analysis_kind(kind: PlannedAnalysisKind) -> Option<AxisAnalysisKind> {
         PlannedAnalysisKind::HarmonicBalance => AxisAnalysisKind::HarmonicBalance,
         PlannedAnalysisKind::Pss => AxisAnalysisKind::Pss,
         PlannedAnalysisKind::Pac => AxisAnalysisKind::Pac,
+        PlannedAnalysisKind::Pxf => AxisAnalysisKind::Pxf,
         PlannedAnalysisKind::PNoise => AxisAnalysisKind::PNoise,
         PlannedAnalysisKind::Sp => AxisAnalysisKind::SParameters,
         PlannedAnalysisKind::Envelope => AxisAnalysisKind::Envelope,

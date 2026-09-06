@@ -62,6 +62,7 @@ pub const REQUEST_KINDS: &[(&str, PlannedAnalysisKind)] = &[
     ("harmonic_balance", PlannedAnalysisKind::HarmonicBalance),
     ("pss", PlannedAnalysisKind::Pss),
     ("pac", PlannedAnalysisKind::Pac),
+    ("pxf", PlannedAnalysisKind::Pxf),
     ("pnoise", PlannedAnalysisKind::PNoise),
     ("s_parameters", PlannedAnalysisKind::Sp),
     ("envelope", PlannedAnalysisKind::Envelope),
@@ -610,6 +611,48 @@ pub(crate) fn run_directive(
                 .map(|builder| builder.parent_analysis(upstream_id))
                 .map_err(map_result_document_error)
         }
+        AnalysisCommand::Pxf(card) => {
+            let (upstream_id, upstream) = upstream_card(analysis, peers)?;
+            // A `.PXF` run reads one path out of the conversion matrix a
+            // periodic AC solve fills, so it takes the same two carriers
+            // `.PAC` does and records either as the parent.
+            let result = match upstream {
+                AnalysisCommand::Pss(pss) => {
+                    let operating_point = engine.run_pss_operating_point_with_abort(
+                        netlist,
+                        PssConfig::from(pss.as_ref()),
+                        abort,
+                    )?;
+                    engine.run_pxf_card_from_pss_with_abort(
+                        netlist,
+                        card,
+                        &operating_point,
+                        abort,
+                    )?
+                }
+                AnalysisCommand::Hb { frequencies } => {
+                    let carrier = engine.run_hb_with_abort(
+                        netlist,
+                        hb_config(netlist, frequencies)?,
+                        abort,
+                    )?;
+                    engine.run_pxf_card_from_hb_with_abort(
+                        netlist,
+                        card,
+                        &carrier.operating_point,
+                        abort,
+                    )?
+                }
+                _ => {
+                    return Err(DirectiveFailure::ResultDocument(format!(
+                        "the canonical plan bound {id} to {upstream_id}, which is not a periodic carrier"
+                    )));
+                }
+            };
+            AnalysisResultDocument::from_pxf(id, card, &result)
+                .map(|builder| builder.parent_analysis(upstream_id))
+                .map_err(map_result_document_error)
+        }
         AnalysisCommand::Pnoise(card) => {
             let (upstream_id, upstream) = upstream_card(analysis, peers)?;
             let result = match upstream {
@@ -877,6 +920,7 @@ mod tests {
                 | AnalysisResultKind::HarmonicBalance
                 | AnalysisResultKind::Pss
                 | AnalysisResultKind::Pac
+                | AnalysisResultKind::Pxf
                 | AnalysisResultKind::Envelope => false,
             };
             assert!(

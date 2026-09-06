@@ -334,20 +334,16 @@ impl From<&crate::netlist::PxfCard> for PacConfig {
     ///
     /// A `.PXF` run *is* a PAC solve: the transfer it reports is one element
     /// of the conversion matrix that solve already fills. Only the sideband
-    /// span differs. `MAXSIDEBAND` states the conversion depth, but the two
-    /// ends of the measured path must be inside the solved span or the element
-    /// would not exist, so the span is widened to whichever of the three is
-    /// largest rather than refused — a card that asks for the transfer to
-    /// sideband 7 at depth 5 is asking for a depth-7 solve.
+    /// span differs, and `MAXSIDEBAND` states it outright — the span is
+    /// `-MAXSIDEBAND..=MAXSIDEBAND` and nothing here second-guesses it. A card
+    /// whose sideband pair falls outside the depth it states is refused: by
+    /// the parser where a deck writes one, and by the conversion lookup, which
+    /// names the missing coordinate, where a caller builds one by hand.
     ///
     /// `fundamental_freq` stays zero: the runner binds it from the upstream
     /// `.PSS`/`.HB` operating point, exactly as the `.PAC` conversion does.
     fn from(card: &crate::netlist::PxfCard) -> Self {
-        let depth = card
-            .input_sideband
-            .saturating_abs()
-            .max(card.output_sideband.saturating_abs())
-            .max(card.max_sideband);
+        let depth = card.max_sideband;
         Self {
             sweep_start: card.sweep.start_freq,
             sweep_stop: card.sweep.stop_freq,
@@ -604,19 +600,23 @@ mod pxf_card_conversion_tests {
     }
 
     #[test]
-    fn a_sideband_beyond_the_authored_depth_widens_the_solve_rather_than_falling_outside_it() {
-        // The transfer the card names has to be an element the solve filled,
-        // so the span follows whichever of the three bounds is largest.
-        for (input, output, depth) in [(7, 1, 5), (1, -7, 5), (0, 0, 0)] {
+    fn the_authored_depth_is_the_span_and_nothing_widens_it() {
+        // The card states the conversion depth; the conversion lookup, not
+        // this conversion, is what refuses a pair outside it.
+        for (input, output, depth) in [(0, 0, 0), (1, -1, 1), (7, 1, 5)] {
             let converted = PacConfig::from(&card(input, output, depth));
-            let expected = input.abs().max(output.abs()).max(depth);
-            assert_eq!(converted.sideband_min, -expected);
-            assert_eq!(converted.sideband_max, expected);
-            assert!(
-                converted.sideband_min <= input.min(output)
-                    && converted.sideband_max >= input.max(output),
-                "the span must contain both ends of the measured path"
-            );
+            assert_eq!(converted.sideband_min, -depth);
+            assert_eq!(converted.sideband_max, depth);
         }
+    }
+
+    #[test]
+    fn a_negative_depth_is_refused_by_the_configuration_validator() {
+        // The parser cannot produce one, but the card's fields are public.
+        let converted = PacConfig::from(&card(0, 0, -3));
+        assert!(
+            converted.validate().is_err(),
+            "an inverted sideband span must not reach a solve"
+        );
     }
 }

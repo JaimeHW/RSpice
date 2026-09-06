@@ -1,7 +1,7 @@
 //! Authored periodic large-signal cards on the browser deck route.
 //!
-//! `.PSS`, `.PAC`, `.HB`, `.ENVELOPE` and `.PNOISE` all execute and publish
-//! shared result documents, each named by the identity the canonical plan
+//! `.PSS`, `.PAC`, `.PXF`, `.HB`, `.ENVELOPE` and `.PNOISE` all execute and
+//! publish shared result documents, each named by the identity the canonical plan
 //! assigned it and — for the small-signal cards — bound to the carrier they
 //! linearized around.
 
@@ -87,5 +87,38 @@ fn a_deck_without_a_periodic_card_still_publishes_its_document() {
     assert!(
         !execution.results.is_empty(),
         "the supported control deck must publish its results"
+    );
+}
+
+#[test]
+fn an_authored_pxf_card_publishes_a_document_bound_to_its_carrier() {
+    let execution = run_authored_deck_document_detailed(&deck(
+        ".PSS FUND=1G HARMS=3 POINTS=32 TSTABPERIODS=2\n\
+         .PXF LIN 2 1meg 10meg INPUT=V1 OUT=V(out) MAXSIDEBAND=1\n",
+    ))
+    .expect("an authored .PXF executes on the browser deck route");
+    let document = execution
+        .results
+        .iter()
+        .find(|document| document.analysis().tag() == "pxf-001")
+        .expect("the PXF result keeps its canonical identity");
+    assert_eq!(
+        document.result_kind(),
+        rspice_core::execution::AnalysisResultKind::Pxf
+    );
+    assert_eq!(
+        document.parent_analysis().map(|parent| parent.tag()),
+        Some("pss-001".to_owned()),
+        "a transfer-function result must name the carrier it linearized around"
+    );
+    let rspice_core::execution::ResultPayload::Pxf(payload) = document.payload() else {
+        panic!("a .PXF card publishes a PXF payload");
+    };
+    assert_eq!(payload.input_sideband, 1);
+    assert_eq!(payload.output_sideband, 1);
+    assert_eq!(payload.output_node, "OUT");
+    assert!(
+        document.point_count() > 0,
+        "a transfer-function sweep retains its offset grid"
     );
 }
