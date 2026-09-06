@@ -379,6 +379,15 @@ tran.fourier_current("V1", 1e3)                # branch-current .FOUR
 tran.digital_nodes()                           # event node names, capture order
 for event in tran.digital_events("d"):
     print(event.time_s, event.state, event.strength, event.code)
+tran.real_trace_names                          # real event nodes, capture order
+tran.real_trace("rnode")                       # [(time, value), ...]
+
+# A vector boundary port of a mixed Verilog-AMS module is recorded one net per
+# bit and declared as a bus over them, so the word is readable as a word.
+for bus in tran.digital_buses():
+    print(bus.name, bus.msb, bus.lsb, bus.members, bus.source)
+for event in tran.bus_events("x1.count"):
+    print(event.time_s, event.value, event.bits)  # "10", [1, 0] MSB first
 
 # When the netlist contains .FFT, each directive executes with the transient
 # and retains source/configuration metadata and calibrated complex bins.
@@ -408,6 +417,8 @@ compressed.channel_absence("v(out)")  # [None, None, "non-finite", ...]
 # the exact accepted trajectory rather than on the retained grid.
 compressed.digital_trace("d")
 compressed.real_trace("rnode")
+compressed.digital_buses()          # the declarations the run published
+compressed.bus_events("x1.count")   # the same rows TransientResult returns
 compressed.measurements
 compressed.fourier_results
 compressed.fft_results

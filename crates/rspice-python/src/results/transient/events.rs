@@ -1,4 +1,4 @@
-//! Typed access to a transient's XSPICE digital event histories.
+//! Typed access to a transient's XSPICE event histories, digital and real.
 //!
 //! An event history is not a column on the analog grid. It is the sparse list
 //! of values the event solver committed, at the times it committed them, and
@@ -24,6 +24,11 @@
 //! one name returning two spellings of one state would be worse than two
 //! names. The two vocabularies want converging, which is a change to a
 //! published accessor rather than a new one.
+//!
+//! A **real** event node has no vocabulary problem and no flattened column at
+//! all: [`real_nodes`] and [`real_trace`] are the same names and the same row
+//! shape `CompressedTransientResult` publishes, so the two containers answer
+//! one question one way.
 //!
 //! # The dump
 //!
@@ -52,14 +57,17 @@ const EVENT_SCOPE: &str = "events";
 /// budget. A history past the ceiling is refused by number rather than
 /// silently truncated, and the refusal names the two routes that carry an
 /// unbounded history: `document()` and `to_vcd()`.
-const MAX_DIGITAL_EVENT_ROWS: usize = 2_000_000;
+///
+/// [`super::buses`] charges the same ceiling against the number of events a
+/// bus can have, so one accessor's ceiling is the binding's ceiling.
+pub(super) const MAX_DIGITAL_EVENT_ROWS: usize = 2_000_000;
 
 /// Points converted between two cancellation checks.
 ///
 /// The conversion of one point is a few tens of nanoseconds, so polling every
 /// point would cost more than the work; polling every few thousand keeps the
 /// observed latency of a `KeyboardInterrupt` under a millisecond.
-const ABORT_POLL_ROWS: usize = 4_096;
+pub(super) const ABORT_POLL_ROWS: usize = 4_096;
 
 /// One committed digital event: when it happened, and what the node became.
 ///
@@ -121,6 +129,39 @@ pub(super) fn digital_nodes(result: &TransientResult) -> Vec<String> {
         .iter()
         .map(|trace| trace.node_name.clone())
         .collect()
+}
+
+/// Node names with a committed real-valued event history, in capture order.
+///
+/// A real event node carries an `f64` on its own event timeline rather than a
+/// logic level, and it has no column on the analog grid at all, so this and
+/// [`real_trace`] are the only typed route to one.
+pub(super) fn real_nodes(result: &TransientResult) -> Vec<String> {
+    result
+        .real_traces
+        .iter()
+        .map(|trace| trace.node_name.clone())
+        .collect()
+}
+
+/// One real event node's whole committed history, as `(time, value)` rows.
+///
+/// The name resolves ASCII-case-insensitively, and the rows are the shape
+/// `CompressedTransientResult::real_trace` returns, so the two containers
+/// answer one question one way.
+pub(super) fn real_trace(result: &TransientResult, node: &str) -> PyResult<Vec<(f64, f64)>> {
+    result
+        .real_traces
+        .iter()
+        .find(|trace| trace.node_name.eq_ignore_ascii_case(node))
+        .map(|trace| {
+            trace
+                .points
+                .iter()
+                .map(|point| (point.time, point.value))
+                .collect()
+        })
+        .ok_or_else(|| crate::errors::key_error(format!("unknown XSPICE real event node '{node}'")))
 }
 
 /// A node the result recorded no event history for.

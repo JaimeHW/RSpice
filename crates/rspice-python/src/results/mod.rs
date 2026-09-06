@@ -6,7 +6,7 @@
 //! | Module                  | Types                                                          |
 //! |-------------------------|----------------------------------------------------------------|
 //! | [`dc`]                   | `SimulationResult`, `DcSweepResult`, `DeviceOperatingPoint`     |
-//! | [`transient`]            | `TransientResult`, `DigitalEvent`                               |
+//! | [`transient`]            | `TransientResult`, `DigitalEvent`, `DigitalBus`, `BusEvent`     |
 //! | [`transient_compression`]| `CompressedTransientResult`, `TransientCheckpoint`              |
 //! | [`fft`]                  | `FftResult`, `FftBin`, `FftMetrics`, `FftHarmonic`               |
 //! | [`fourier`]              | `FourierResult`, `Harmonic`                                     |
@@ -117,7 +117,9 @@ pub(crate) use stability::{
     PyPoleZeroResult, PyRootSetEvidence, PySpectrumCertificate, PyStbResult,
     PyTransferFunctionResult,
 };
-pub(crate) use transient::{PyDigitalEvent, PyTransientResult};
+pub(crate) use transient::{
+    PyBusEvent, PyDigitalBus, PyDigitalEvent, PyTransientResult, bus_event_rows, digital_bus_list,
+};
 pub(crate) use transient_compression::{PyCompressedTransientResult, PyTransientCheckpoint};
 pub(crate) use verification::{
     PyAnalysisRecord, PyMeasurement, PyRunAxisAssignment, PyRunCoordinate, PyRunReport,

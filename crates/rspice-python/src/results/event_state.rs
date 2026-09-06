@@ -86,6 +86,21 @@ pub(super) fn digital_strength_label(
     }
 }
 
+/// Stable wire spelling of who declared a digital bus.
+///
+/// The spellings are core's own `DigitalBusSourceTag`, so a bus named by the
+/// typed accessor, by a pickle and by `document()` names the same declarer.
+pub(super) fn digital_bus_source_label(
+    source: rspice_core::engine::DigitalBusSource,
+) -> &'static str {
+    use rspice_core::execution::result_document::DigitalBusSourceTag as Tag;
+    match Tag::from(source) {
+        Tag::Engine => "engine",
+        Tag::Schematic => "schematic",
+        Tag::Import => "import",
+    }
+}
+
 fn digital_strength_from_label(
     label: &str,
 ) -> Result<rspice_core::xspice::DigitalStrength, String> {
@@ -220,6 +235,12 @@ mod event_pickle_tests {
         DigitalState::HighZ,
     ];
 
+    const EVERY_SOURCE: [rspice_core::engine::DigitalBusSource; 3] = [
+        rspice_core::engine::DigitalBusSource::Engine,
+        rspice_core::engine::DigitalBusSource::Schematic,
+        rspice_core::engine::DigitalBusSource::Import,
+    ];
+
     const EVERY_STRENGTH: [DigitalStrength; 4] = [
         DigitalStrength::Undetermined,
         DigitalStrength::HighZ,
@@ -244,6 +265,21 @@ mod event_pickle_tests {
             );
             assert_eq!(digital_strength_from_label(label).unwrap(), strength);
         }
+    }
+
+    /// Every declarer has a label of its own, spelled as the shared document's
+    /// `DigitalBusSourceTag` spells it.
+    #[test]
+    fn every_digital_bus_source_has_its_own_label() {
+        let mut labels = std::collections::BTreeSet::new();
+        for source in EVERY_SOURCE {
+            let label = digital_bus_source_label(source);
+            assert!(labels.insert(label), "duplicate bus source label '{label}'");
+        }
+        assert_eq!(
+            labels.into_iter().collect::<Vec<_>>(),
+            ["engine", "import", "schematic"]
+        );
     }
 
     #[test]

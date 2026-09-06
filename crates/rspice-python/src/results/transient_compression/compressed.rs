@@ -395,6 +395,36 @@ impl PyCompressedTransientResult {
             })
     }
 
+    /// The digital buses this result declares, in declaration order.
+    ///
+    /// Compression never touches a declaration or an event history, so this is
+    /// the table the producing run published, and the members it names are the
+    /// same conductors `digital_trace_names` lists.
+    fn digital_buses(&self) -> Vec<PyDigitalBus> {
+        digital_bus_list(&self.inner.digital_buses)
+    }
+
+    /// Every event of one declared bus, as the whole word at each of them.
+    ///
+    /// The rows are `TransientResult.bus_events`'s exactly: `bits` carries the
+    /// `0..=12` event code of each member declared MSB first, `value` the same
+    /// word in VCD's four states, and both come from the one reassembly
+    /// `rspice_core` performs for every route.
+    ///
+    /// Raises:
+    ///     KeyError: If this result declares no bus by that name
+    ///     ValueError: If the declaration names a member this result recorded
+    ///         no history for, or the history is past the row limit this
+    ///         accessor materializes
+    fn bus_events(&self, py: Python<'_>, name: &str) -> PyResult<Vec<PyBusEvent>> {
+        bus_event_rows(
+            py,
+            &self.inner.digital_buses,
+            &self.inner.digital_traces,
+            name,
+        )
+    }
+
     /// XSPICE real event node names carried exactly through compression.
     #[getter]
     fn real_trace_names(&self) -> Vec<String> {

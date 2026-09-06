@@ -6,6 +6,8 @@
 
 use super::*;
 
+/// Typed access to the digital buses a result declares, and to their events.
+mod buses;
 /// Typed access to the XSPICE event histories, and the dump they project onto.
 mod events;
 /// Helper bodies the `#[pymethods]` block delegates to.
@@ -14,7 +16,9 @@ mod internals;
 /// proves it is a complete, aligned waveform set.
 mod structure;
 
+pub(crate) use buses::{PyBusEvent, PyDigitalBus, bus_event_rows, digital_bus_list};
 pub(crate) use events::PyDigitalEvent;
+use events::{ABORT_POLL_ROWS, MAX_DIGITAL_EVENT_ROWS};
 pub(crate) use structure::clip_transient_to_start;
 /// The structural pass now runs inside [`structure`]'s own restore and publish
 /// helpers, so the chaos suite is what still names it from outside.
@@ -575,6 +579,91 @@ impl PyTransientResult {
     ///     ...     print(event.time_s, event.state, event.strength, event.code)
     fn digital_events(&self, py: Python<'_>, node: &str) -> PyResult<Vec<PyDigitalEvent>> {
         events::digital_events(py, &self.inner, node)
+    }
+
+    /// The digital buses this result declares, in declaration order
+    ///
+    /// A bus is a declaration over member nodes, not a recording of its own:
+    /// the engine commits state per node, so the word is reassembled from the
+    /// members' held values. `members` runs from the declared MSB to the
+    /// declared LSB, whichever way the range does, and every member appears in
+    /// `digital_nodes()`.
+    ///
+    /// `source` is `engine` for a vector boundary port of a mixed Verilog-AMS
+    /// module, `schematic` for a bus a drawing declared over the deck it
+    /// generated, and `import` for one read out of a foreign artifact.
+    ///
+    /// Returns:
+    ///     list[DigitalBus]: The declared buses; empty when the run declared
+    ///         none
+    ///
+    /// Example:
+    ///     >>> for bus in tran.digital_buses():
+    ///     ...     print(bus.name, bus.msb, bus.lsb, bus.members)
+    fn digital_buses(&self) -> Vec<PyDigitalBus> {
+        digital_bus_list(&self.inner.digital_buses)
+    }
+
+    /// Every event of one declared bus, as the whole word at each of them
+    ///
+    /// A bus event is any time at which at least one member changed; members
+    /// that did not change carry the value they held, and a member the run has
+    /// not stated a value for yet is `None` in `bits` and `x` in `value`. Two
+    /// members changing at one accepted time are one event, because the engine
+    /// commits the whole event state at an accepted point.
+    ///
+    /// `bits` carries the `0..=12` XSPICE event code of each member, declared
+    /// MSB first, which keeps the drive strength; `value` is the same word in
+    /// VCD's four states, which does not. The reassembly is the one
+    /// `rspice_core` performs for the dump and the rawfile bus plots, so all
+    /// three agree.
+    ///
+    /// The bus name resolves ASCII-case-insensitively.
+    ///
+    /// Args:
+    ///     name: Declared bus name, without a range suffix
+    ///
+    /// Returns:
+    ///     list[BusEvent]: Every event, in time order
+    ///
+    /// Raises:
+    ///     KeyError: If this result declares no bus by that name
+    ///     ValueError: If the declaration names a member this result recorded
+    ///         no history for, or the history is past the row limit this
+    ///         accessor materializes
+    ///
+    /// Example:
+    ///     >>> for event in tran.bus_events("x1.count"):
+    ///     ...     print(event.time_s, event.value)
+    fn bus_events(&self, py: Python<'_>, name: &str) -> PyResult<Vec<PyBusEvent>> {
+        bus_event_rows(
+            py,
+            &self.inner.digital_buses,
+            &self.inner.digital_traces,
+            name,
+        )
+    }
+
+    /// XSPICE real-valued event node names, in capture order.
+    ///
+    /// A real event node carries an `f64` on its own event timeline rather than
+    /// a logic level, and has no column on the analog grid at all, so this and
+    /// `real_trace` are the only typed route to one.
+    #[getter]
+    fn real_trace_names(&self) -> Vec<String> {
+        events::real_nodes(&self.inner)
+    }
+
+    /// Committed `(time, value)` events for one real event node.
+    ///
+    /// The name resolves ASCII-case-insensitively. The rows are the same shape
+    /// `CompressedTransientResult.real_trace` returns, so the two containers
+    /// answer one question one way.
+    ///
+    /// Raises:
+    ///     KeyError: If the result recorded no real event history for that node
+    fn real_trace(&self, name: &str) -> PyResult<Vec<(f64, f64)>> {
+        events::real_trace(&self.inner, name)
     }
 
     /// Render the event histories as a Value Change Dump

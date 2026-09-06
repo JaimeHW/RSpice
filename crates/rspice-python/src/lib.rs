@@ -149,6 +149,8 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<results::PyDeviceOperatingPoint>()?;
     m.add_class::<results::PyTransientResult>()?;
     m.add_class::<results::PyDigitalEvent>()?;
+    m.add_class::<results::PyDigitalBus>()?;
+    m.add_class::<results::PyBusEvent>()?;
     m.add_class::<results::PyProjectedSignal>()?;
     m.add_class::<results::PyCompressedTransientResult>()?;
     m.add_class::<results::PyTransientCheckpoint>()?;
@@ -249,6 +251,8 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
             "DeviceOperatingPoint",
             "TransientResult",
             "DigitalEvent",
+            "DigitalBus",
+            "BusEvent",
             "ProjectedSignal",
             "CompressedTransientResult",
             "TransientCheckpoint",
