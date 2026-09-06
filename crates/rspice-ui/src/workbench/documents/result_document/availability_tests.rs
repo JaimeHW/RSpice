@@ -1699,8 +1699,8 @@ fn draw_sheet_and_tessellate(app: &mut RSpiceApp, viewer: ResultViewer) {
 /// display scaling of a real workstation produces, and a wide one.
 const SHEET_FIT_GATES: [(f32, f32); 2] = [(1_024.0, 640.0), (1_680.0, 1_020.0)];
 
-/// Every control of the three catalog sheets is inside the window it is drawn
-/// in, at both gates.
+/// Every control of the four sheets that own a domain bar is inside the window
+/// it is drawn in, at both gates.
 ///
 /// Measured through AccessKit rather than through painted shapes, for the
 /// reason the Studio's own gate states: a decorative shape may legitimately be
@@ -1708,6 +1708,10 @@ const SHEET_FIT_GATES: [(f32, f32); 2] = [(1_024.0, 640.0), (1_680.0, 1_020.0)];
 /// behind a horizontal scroll, which is the thing these sheets' single bar
 /// exists to avoid; one past the bottom is a register the reader cannot reach
 /// without scrolling a document well that does not scroll.
+///
+/// The Events sheet joined the list when it gained a bar of its own: its bus
+/// radix, and the per-row disclosure that opens a word to its member rows,
+/// are controls that a reader has to be able to reach.
 #[test]
 fn the_catalog_sheets_fit_their_window_at_both_gates() {
     // Sub-pixel: a control resting exactly on the edge is inside it.
@@ -1715,10 +1719,15 @@ fn the_catalog_sheets_fit_their_window_at_both_gates() {
 
     let mut offenders = Vec::new();
     let mut measured = 0_usize;
+    // Counted separately: a disclosure that names the bus it opens is the one
+    // control here whose absence would look exactly like a sheet that simply
+    // declared no bus.
+    let mut buses_measured = 0_usize;
     for viewer in [
         ResultViewer::Polar,
         ResultViewer::Scatter,
         ResultViewer::BoxViolin,
+        ResultViewer::Events,
     ] {
         for (width, height) in SHEET_FIT_GATES {
             let mut app = app_showing(viewer);
@@ -1730,6 +1739,7 @@ fn the_catalog_sheets_fit_their_window_at_both_gates() {
                         | egui::accesskit::Role::CheckBox
                         | egui::accesskit::Role::ComboBox
                         | egui::accesskit::Role::Link
+                        | egui::accesskit::Role::RadioButton
                         | egui::accesskit::Role::TextInput
                 ) {
                     continue;
@@ -1738,6 +1748,12 @@ fn the_catalog_sheets_fit_their_window_at_both_gates() {
                     continue;
                 };
                 measured += 1;
+                if node
+                    .label()
+                    .is_some_and(|label| label.starts_with("Bits of "))
+                {
+                    buses_measured += 1;
+                }
                 if bounds.x1 > f64::from(width) + TOLERANCE
                     || bounds.x0 < -TOLERANCE
                     || bounds.y1 > f64::from(height) + TOLERANCE
@@ -1768,8 +1784,13 @@ fn the_catalog_sheets_fit_their_window_at_both_gates() {
         )
     );
     assert!(
-        measured >= 3 * SHEET_FIT_GATES.len(),
+        measured >= 4 * SHEET_FIT_GATES.len(),
         "the gate measured {measured} controls, so it is not looking at the sheets' bars"
+    );
+    assert!(
+        buses_measured >= 2 * SHEET_FIT_GATES.len(),
+        "the gate measured {buses_measured} bus disclosures, so the Events fixture's two \
+         declarations are not reaching the sheet"
     );
 }
 
@@ -2489,3 +2510,4 @@ fn a_failed_frequency_response_is_not_offered_as_a_bode_sheet() {
         "a failed solve was offered a frequency-response sheet"
     );
 }
+

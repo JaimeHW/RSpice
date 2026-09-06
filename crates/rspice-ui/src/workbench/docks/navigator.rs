@@ -3398,22 +3398,41 @@ fn retained_result_artifacts(
             AnalysisResultPayload::TransientEvents {
                 digital_traces,
                 real_traces,
-                ..
-            } => (
-                "payload/transient-events",
-                "Committed mixed-signal event streams",
-                ResultArtifactKind::EventStream,
-                digital_traces
-                    .iter()
-                    .map(|trace| trace.points.len())
-                    .sum::<usize>()
-                    + real_traces
+                digital_buses,
+            } => {
+                // One child row per declaration, under the artifact that
+                // carries them: a bus is a node of the browser in its own
+                // right — it is what the Events sheet lists and what a dump
+                // writes as one vector — and its members are the traces
+                // already listed beside it, so the row states the range and
+                // the width rather than repeating them.
+                for bus in digital_buses {
+                    push(
+                        "payload/transient-events/bus",
+                        format!("Digital bus {}[{}:{}]", bus.name, bus.msb, bus.lsb),
+                        ResultArtifactKind::EventStream,
+                        bus.members.len(),
+                        "",
+                        Some(bus.members.join(" ")),
+                        ResultViewer::Events,
+                    );
+                }
+                (
+                    "payload/transient-events",
+                    "Committed mixed-signal event streams",
+                    ResultArtifactKind::EventStream,
+                    digital_traces
                         .iter()
                         .map(|trace| trace.points.len())
-                        .sum::<usize>(),
-                None,
-                ResultViewer::Events,
-            ),
+                        .sum::<usize>()
+                        + real_traces
+                            .iter()
+                            .map(|trace| trace.points.len())
+                            .sum::<usize>(),
+                    None,
+                    ResultViewer::Events,
+                )
+            }
         };
         push(canonical, name.to_owned(), kind, count, "", value, viewer);
     }

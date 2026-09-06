@@ -50,6 +50,10 @@ pub(crate) struct ResultSheetTable {
     pub(crate) rows: Vec<Vec<String>>,
 }
 
+// The Events sheet's own model: which row a selection names, the merged
+// order it is an index into, and the buses declared over it. `ResultsState`
+// holds two of them, which is why they are named here.
+pub(crate) use events::{BusRadix, DigitalEventSelection, EventOrderCache};
 pub(crate) use manifest::export_csv as export_manifest_csv;
 pub(crate) use noise_contrib::export_csv as export_noise_contribution_csv;
 pub(crate) use op_inspector::export_csv as export_operating_point_csv;
@@ -2122,59 +2126,6 @@ pub(crate) struct OptimizationSelection {
     pub iteration_index: usize,
 }
 
-/// Where one row of the event history came from.
-///
-/// Exact rows are the schedule the event solver committed. Projected rows are
-/// reconstructed from an older project's `D(..)`/`E(..)` waveforms, which were
-/// sampled on the analog grid — the distinction is reported, never hidden,
-/// because a projected time is an approximation of the real one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum EventSelectionSource {
-    ExactDigital,
-    ExactReal,
-    ProjectedDigital,
-    ProjectedReal,
-}
-
-/// One event row's position in the merged, time-ordered history.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct EventOrderEntry {
-    pub source: EventSelectionSource,
-    pub trace_index: usize,
-    pub point_index: usize,
-    pub time_s: f64,
-    pub initial: bool,
-}
-
-/// The merged event order for one analysis.
-///
-/// Built once per generation of one analysis rather than per frame: merging
-/// every node's schedule is O(events log events), and the answer only changes
-/// when the evidence does. The data version is part of the key for the same
-/// reason it is part of the evidence-validity memo's — a run still accepting
-/// points republishes one analysis identity with a longer history, so identity
-/// alone would freeze the sheet at whatever it held on the frame it opened.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct EventOrderCache {
-    pub analysis: AnalysisPresentationKey,
-    pub data_version: u64,
-    /// Whether the rows are the committed schedule rather than a projection.
-    pub exact: bool,
-    pub rows: Vec<EventOrderEntry>,
-}
-
-/// One event picked out of the history.
-///
-/// Addressed by node name rather than trace ordinal so the selection survives
-/// a re-run that registers event nodes in a different order.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct DigitalEventSelection {
-    pub analysis: AnalysisPresentationKey,
-    pub source: EventSelectionSource,
-    pub trace_name: String,
-    pub point_index: usize,
-}
-
 /// Whether one analysis' retained evidence passes its own validator.
 ///
 /// This is the workspace's single owner of that question. The validator walks
@@ -2522,6 +2473,17 @@ pub struct ResultsState {
     /// Exact non-waveform Data Browser row selected for inspection. Like
     /// `selected_trace`, this is only an immutable source identity.
     pub(crate) selected_result_artifact: Option<ResultArtifactPresentationKey>,
+    /// How the Events sheet spells a bus word. One per sheet, like the polar
+    /// sheet's radius ruling: a radix is how the reader is reading, not a
+    /// property of any one declaration.
+    pub(crate) event_bus_radix: BusRadix,
+    /// Buses whose member rows the Events sheet lists beside the bus row.
+    ///
+    /// Keyed by bus name alone rather than by analysis: a reader who opened
+    /// `count[1:0]` to its bits wants the same of the same bus in the next
+    /// run, and a declaration that is not in the active analysis contributes
+    /// no rows either way.
+    pub(crate) expanded_event_buses: std::collections::BTreeSet<String>,
     /// User-placed markers across every waveform strip.
     pub markers: Vec<ResultMarker>,
     /// Signals starred in the results data browser. A deliberate,
@@ -5400,6 +5362,7 @@ fn sheet_domain_controls(ui: &mut Ui, state: &mut AppState) -> bool {
         ResultViewer::Polar => polar::domain_bar(ui, &mut context),
         ResultViewer::Scatter => scatter::domain_bar(ui, &mut context),
         ResultViewer::BoxViolin => box_violin::domain_bar(ui, &mut context),
+        ResultViewer::Events => events::domain_bar(ui, &mut context),
         _ => false,
     }
 }
