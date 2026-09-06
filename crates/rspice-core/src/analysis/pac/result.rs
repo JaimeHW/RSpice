@@ -221,6 +221,24 @@ pub struct PacResult {
 
     /// Final residual norm
     pub residual: Value,
+
+    /// Amplitude of the small-signal drive the run was asked for, in the
+    /// input source's own unit.
+    ///
+    /// The solve uses a unit excitation, so `conversion_matrix` and the
+    /// per-sideband spectra below are transfers and unit responses. A
+    /// publisher that reports absolute response quantities multiplies by this
+    /// number; one that reports a gain does not. Default `1.0`, where the two
+    /// coincide.
+    pub pac_magnitude: Value,
+
+    /// Whether the sideband-zero spectra are part of what this run reports.
+    ///
+    /// The solve always spans `sideband_min..=sideband_max` — dropping a
+    /// sideband from the lifted system would change the answer at the
+    /// sidebands that remain — so this selects what a publisher emits, not
+    /// what was computed. Default `true`.
+    pub include_dc: bool,
 }
 
 impl PacResult {
@@ -365,6 +383,8 @@ impl PacResult {
             output_node: None,
             iterations: 0,
             residual: 0.0,
+            pac_magnitude: 1.0,
+            include_dc: true,
         })
     }
 

@@ -82,8 +82,17 @@ pub struct PacConfig {
     /// Absolute tolerance for small-signal currents (A)
     pub abstol: Value,
 
-    /// Include DC component (sideband 0) in analysis
+    /// Publish the sideband-zero spectra. The lifted system always spans
+    /// `sideband_min..=sideband_max`, because dropping a sideband from it
+    /// would change the answer at the sidebands that remain; this selects
+    /// what the result reports, and travels on [`PacResult::include_dc`].
     pub include_dc: bool,
+
+    /// Amplitude of the small-signal drive applied at `input_source`, in the
+    /// source's own unit. The solve itself uses a unit excitation so the
+    /// conversion matrix stays a transfer function; the amplitude travels on
+    /// [`PacResult::pac_magnitude`] and scales the published responses.
+    pub pac_magnitude: Value,
 
     /// Fundamental frequency from PSS (will be set from PSS result)
     pub fundamental_freq: Value,
@@ -104,6 +113,7 @@ impl Default for PacConfig {
             reltol: 1e-3,  // 0.1% relative tolerance
             abstol: 1e-12, // 1 pA absolute tolerance
             include_dc: true,
+            pac_magnitude: 1.0,    // Unit drive
             fundamental_freq: 0.0, // Set from PSS
         }
     }
@@ -179,7 +189,7 @@ impl PacConfig {
         self
     }
 
-    /// Enable or disable DC sideband (sideband 0)
+    /// Publish or withhold the sideband-zero spectra.
     pub fn with_dc(mut self, include: bool) -> Self {
         self.include_dc = include;
         self
@@ -255,6 +265,16 @@ impl PacConfig {
         {
             return Err("Tolerances must be positive and finite".to_string());
         }
+        if !self.pac_magnitude.is_finite() || self.pac_magnitude <= 0.0 {
+            return Err("PAC drive amplitude must be positive and finite".to_string());
+        }
+        if !self.include_dc && self.sideband_min == 0 && self.sideband_max == 0 {
+            return Err(
+                "PAC withholds sideband zero and analyses no other sideband, so it would \
+                 publish nothing"
+                    .to_string(),
+            );
+        }
         Ok(())
     }
 
@@ -301,7 +321,8 @@ impl From<&crate::netlist::PacCard> for PacConfig {
             output_ref: card.output_ref.as_ref().map(|node| node.to_uppercase()),
             reltol: card.reltol,
             abstol: card.abstol,
-            include_dc: Self::default().include_dc,
+            include_dc: card.include_dc,
+            pac_magnitude: card.pac_magnitude,
             fundamental_freq: 0.0,
         }
     }
@@ -335,6 +356,8 @@ mod card_conversion_tests {
         assert_eq!(PacCard::DEFAULT_SIDEBAND_MAX, defaults.sideband_max);
         assert_eq!(PacCard::DEFAULT_RELTOL, defaults.reltol);
         assert_eq!(PacCard::DEFAULT_ABSTOL, defaults.abstol);
+        assert_eq!(PacCard::DEFAULT_PAC_MAGNITUDE, defaults.pac_magnitude);
+        assert_eq!(PacCard::DEFAULT_INCLUDE_DC, defaults.include_dc);
     }
 
     #[test]
@@ -350,6 +373,7 @@ mod card_conversion_tests {
         assert_eq!(converted.reltol, defaults.reltol);
         assert_eq!(converted.abstol, defaults.abstol);
         assert_eq!(converted.include_dc, defaults.include_dc);
+        assert_eq!(converted.pac_magnitude, defaults.pac_magnitude);
         assert_eq!(converted.input_source.as_deref(), Some("VRF"));
         assert_eq!(converted.output_node.as_deref(), Some("OUT"));
         assert_eq!(converted.output_ref, None);
@@ -362,8 +386,10 @@ mod card_conversion_tests {
     fn every_authored_field_survives_the_conversion() {
         let converted = PacConfig::from(&card(
             ".pac lin 21 1meg 5meg input=vrf out=v(out,ref) sidebandmin=-3 \
-             sidebandmax=7 reltol=1e-5 abstol=1e-15 from=hb",
+             sidebandmax=7 reltol=1e-5 abstol=1e-15 pacmag=0.25 includedc=no from=hb",
         ));
+        assert_eq!(converted.pac_magnitude, 0.25);
+        assert!(!converted.include_dc);
         assert_eq!(converted.sweep_type, PacSweepType::Linear);
         assert_eq!(converted.num_points, 21);
         assert_eq!(converted.sweep_start, 1.0e6);
@@ -384,6 +410,7 @@ mod card_conversion_tests {
             ".PAC OCT 4 1k 1meg INPUT=VRF OUT=out MAXSIDEBAND=3",
             ".PAC LIN 2 1k 1k INPUT=VRF OUT=out SIDEBANDMIN=0 SIDEBANDMAX=0",
             ".PAC DEC 1 1 1G INPUT=VRF OUT=out RELTOL=1e-9 ABSTOL=1e-18",
+            ".PAC DEC 10 1k 1G INPUT=VRF OUT=out PACMAG=1e-3 INCLUDEDC=NO",
         ] {
             let converted = PacConfig::from(&card(source));
             assert!(

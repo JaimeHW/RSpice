@@ -2610,6 +2610,13 @@ impl AnalysisResultDocument {
     }
 
     /// Project one periodic AC result with all of its sideband spectra.
+    ///
+    /// Two authored settings travel on the result rather than in it. The
+    /// spectra are solved at a unit drive, so every published response is
+    /// scaled by [`PacResult::pac_magnitude`]; the conversion matrix is a
+    /// transfer and is published unscaled. [`PacResult::include_dc`] selects
+    /// whether the sideband-zero spectra are reported at all — the solve
+    /// always spanned them, because the sidebands are coupled.
     pub fn from_pac(
         analysis: AnalysisInstanceId,
         result: &PacResult,
@@ -2620,6 +2627,13 @@ impl AnalysisResultDocument {
             return Err(source_error(
                 LOCATION,
                 "a PAC sweep needs at least one frequency",
+            ));
+        }
+        let drive = result.pac_magnitude;
+        if !drive.is_finite() || drive <= 0.0 {
+            return Err(source_error(
+                LOCATION,
+                "a PAC drive amplitude must be finite and positive",
             ));
         }
         let axis = ResultAxis::new(
@@ -2635,6 +2649,9 @@ impl AnalysisResultDocument {
         let mut signals = Vec::new();
         let mut sidebands = Vec::new();
         for sideband in result.sideband_indices() {
+            if sideband == 0 && !result.include_dc {
+                continue;
+            }
             let qualifier = SeriesQualifier::PacSideband { sideband };
             let mut offsets = Vec::with_capacity(point_count);
             let mut absolutes = Vec::with_capacity(point_count);
@@ -2659,10 +2676,10 @@ impl AnalysisResultDocument {
                     ));
                 }
                 for (column, value) in node_columns.iter_mut().zip(&data.node_voltages) {
-                    column.push(*value);
+                    column.push(value * drive);
                 }
                 for (column, value) in branch_columns.iter_mut().zip(&data.branch_currents) {
-                    column.push(*value);
+                    column.push(value * drive);
                 }
             }
             for (name, column) in result.node_names.iter().zip(&node_columns) {
@@ -2690,6 +2707,12 @@ impl AnalysisResultDocument {
                 frequency_offsets: finite_axis(LOCATION, "sideband offset", &offsets)?,
                 absolute_frequencies: finite_axis(LOCATION, "sideband frequency", &absolutes)?,
             });
+        }
+        if sidebands.is_empty() {
+            return Err(source_error(
+                LOCATION,
+                "a PAC run that withholds sideband zero must analyse another sideband",
+            ));
         }
 
         let conversion_matrix = if result.conversion_matrix.is_materialized() {

@@ -464,6 +464,12 @@ impl Engine {
         if let Some(ref out) = config.output_node {
             result.set_output_node(out);
         }
+        // The solve below drives a unit excitation so the conversion matrix
+        // stays a transfer function. The authored drive amplitude and the
+        // sideband-zero selection travel on the result for whoever publishes
+        // it; see `PacResult::pac_magnitude` and `PacResult::include_dc`.
+        result.pac_magnitude = config.pac_magnitude;
+        result.include_dc = config.include_dc;
 
         // Excitation columns: the input source's own frequency (m = 0)
         // always; every input sideband when a conversion matrix is wanted.

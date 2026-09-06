@@ -2392,6 +2392,16 @@ pub struct PacCard {
     pub reltol: Value,
     /// Absolute tolerance for small-signal currents, in amps.
     pub abstol: Value,
+    /// Amplitude of the small-signal drive applied at `input_source`, in the
+    /// source's own unit. The conversion matrix stays a unit-normalized
+    /// transfer; every published response spectrum is this amplitude's.
+    pub pac_magnitude: Value,
+    /// Retain the sideband-zero spectra in the published result. A mixer
+    /// measurement that only wants the converted sidebands says
+    /// `INCLUDEDC=NO`; the solve itself always spans `sideband_min..=sideband_max`,
+    /// because dropping a sideband from the lifted system would change the
+    /// answer at the sidebands that remain.
+    pub include_dc: bool,
     /// Which upstream periodic analysis this card linearizes around.
     pub source: PeriodicSourceSelector,
 }
@@ -2405,6 +2415,10 @@ impl PacCard {
     pub(crate) const DEFAULT_RELTOL: Value = 1e-3;
     /// Absolute tolerance when the card does not say.
     pub(crate) const DEFAULT_ABSTOL: Value = 1e-12;
+    /// Small-signal drive amplitude when the card does not say.
+    pub(crate) const DEFAULT_PAC_MAGNITUDE: Value = 1.0;
+    /// Whether sideband zero is published when the card does not say.
+    pub(crate) const DEFAULT_INCLUDE_DC: bool = true;
 }
 
 /// Authored `.PNOISE` card.

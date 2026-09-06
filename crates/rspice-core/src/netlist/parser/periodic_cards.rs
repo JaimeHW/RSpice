@@ -792,6 +792,8 @@ pub(super) fn parse_pac_command(
     let mut sideband_max = None;
     let mut reltol = None;
     let mut abstol = None;
+    let mut pac_magnitude = None;
+    let mut include_dc = None;
     let mut source = None;
 
     loop {
@@ -823,6 +825,13 @@ pub(super) fn parse_pac_command(
                 line_num,
                 "OUT",
             )?,
+            // `.PAC MAXSIDEBAND=0` is admissible and `.PNOISE MAXSIDEBAND=0`
+            // is not, on purpose. A `.PAC` at zero sidebands is the ordinary
+            // small-signal response at the drive frequency itself — a
+            // meaningful, and the cheapest, periodic AC measurement. Periodic
+            // noise has no such degenerate case: folding zero sidebands means
+            // no aliased noise is folded at all, which is stationary noise
+            // (`.NOISE`) rather than a periodic-noise run.
             "MAXSIDEBAND" => bind_once(
                 &mut max_sideband,
                 card_signed(stream, line_num, params, CARD, "MAXSIDEBAND", 0)?,
@@ -873,6 +882,28 @@ pub(super) fn parse_pac_command(
                 CARD,
                 line_num,
                 "ABSTOL",
+            )?,
+            "PACMAG" => bind_once(
+                &mut pac_magnitude,
+                card_number(
+                    stream,
+                    line_num,
+                    params,
+                    CARD,
+                    "PACMAG",
+                    "a positive small-signal drive amplitude",
+                    |value| value > 0.0,
+                )?,
+                CARD,
+                line_num,
+                "PACMAG",
+            )?,
+            "INCLUDEDC" => bind_once(
+                &mut include_dc,
+                card_bool(stream, line_num, CARD, "INCLUDEDC")?,
+                CARD,
+                line_num,
+                "INCLUDEDC",
             )?,
             "FROM" => bind_once(
                 &mut source,
@@ -934,6 +965,21 @@ pub(super) fn parse_pac_command(
         ));
     }
 
+    let include_dc = include_dc.unwrap_or(PacCard::DEFAULT_INCLUDE_DC);
+    // A card that both withholds sideband zero and analyses no other sideband
+    // states a run with nothing to publish, so it is refused where it is
+    // written rather than at the end of a solve.
+    if !include_dc && sideband_min == 0 && sideband_max == 0 {
+        return Err(card_error(
+            CARD,
+            line_num,
+            AnalysisCardIssue::ConflictingFields {
+                first: "INCLUDEDC",
+                second: "MAXSIDEBAND",
+            },
+        ));
+    }
+
     Ok(AnalysisCommand::Pac(Box::new(PacCard {
         sweep,
         input_source: input_source.to_ascii_uppercase(),
@@ -943,6 +989,8 @@ pub(super) fn parse_pac_command(
         sideband_max,
         reltol: reltol.unwrap_or(PacCard::DEFAULT_RELTOL),
         abstol: abstol.unwrap_or(PacCard::DEFAULT_ABSTOL),
+        pac_magnitude: pac_magnitude.unwrap_or(PacCard::DEFAULT_PAC_MAGNITUDE),
+        include_dc,
         source: source.unwrap_or_default(),
     })))
 }
@@ -1552,7 +1600,59 @@ mod tests {
         assert_eq!(card.input_source, "VRF");
         assert_eq!(card.output_node, "OUT");
         assert_eq!(card.output_ref, None);
+        assert_eq!(card.pac_magnitude, PacCard::DEFAULT_PAC_MAGNITUDE);
+        assert_eq!(card.include_dc, PacCard::DEFAULT_INCLUDE_DC);
         assert_eq!(card.source, PeriodicSourceSelector::Preceding);
+    }
+
+    #[test]
+    fn pac_binds_the_drive_amplitude_and_the_sideband_zero_selection() {
+        let card = pac(".HB 1G\n.PAC DEC 10 1k 1G INPUT=VRF OUT=out PACMAG=25m INCLUDEDC=no");
+        assert!(
+            (card.pac_magnitude - 25e-3).abs() <= 1e-18,
+            "pacmag was {}",
+            card.pac_magnitude
+        );
+        assert!(!card.include_dc);
+    }
+
+    #[test]
+    fn pac_refuses_a_drive_amplitude_that_is_not_a_positive_number() {
+        assert!(matches!(
+            card_failure(".HB 1G\n.PAC DEC 10 1k 1G INPUT=VRF OUT=out PACMAG=0").2,
+            AnalysisCardIssue::InvalidNumber {
+                field: "PACMAG",
+                ..
+            }
+        ));
+        assert!(matches!(
+            card_failure(".HB 1G\n.PAC DEC 10 1k 1G INPUT=VRF OUT=out PACMAG=-1").2,
+            AnalysisCardIssue::InvalidNumber {
+                field: "PACMAG",
+                ..
+            }
+        ));
+        assert!(matches!(
+            card_failure(".HB 1G\n.PAC DEC 10 1k 1G INPUT=VRF OUT=out PACMAG=1 PACMAG=2").2,
+            AnalysisCardIssue::DuplicateKeyword { keyword: "PACMAG" }
+        ));
+    }
+
+    #[test]
+    fn pac_refuses_withholding_the_only_sideband_it_analyses() {
+        assert!(matches!(
+            card_failure(".HB 1G\n.PAC DEC 10 1k 1G INPUT=VRF OUT=out MAXSIDEBAND=0 INCLUDEDC=NO")
+                .2,
+            AnalysisCardIssue::ConflictingFields {
+                first: "INCLUDEDC",
+                second: "MAXSIDEBAND"
+            }
+        ));
+        // One other sideband is enough for the card to publish something.
+        assert!(
+            !pac(".HB 1G\n.PAC DEC 10 1k 1G INPUT=VRF OUT=out MAXSIDEBAND=1 INCLUDEDC=NO")
+                .include_dc
+        );
     }
 
     #[test]
