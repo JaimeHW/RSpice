@@ -8,12 +8,10 @@ use std::path::Path;
 use num_complex::Complex64;
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
-use rspice_core::engine::Engine;
 
 use super::super::error::{ensure_not_aborted, poll_periodically};
 use super::super::{
-    ServiceRunError, ServiceRunResult, build_engine_config, build_voltage_output_expr,
-    infer_primary_output_node_with_abort, infer_primary_source_name_with_abort, is_ground_like,
+    ServiceRunError, ServiceRunResult, build_voltage_output_expr, is_ground_like,
     parse_runner_netlist_with_abort,
 };
 use super::pac::{
@@ -208,15 +206,7 @@ pub fn run_pxf_analysis_with_config_and_source_path_and_abort(
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PxfData> {
     let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
-    run_pxf_analysis_for_netlist_with_abort(&netlist, config, abort)
-}
-
-fn run_pxf_analysis_for_netlist_with_abort(
-    netlist: &rspice_core::Netlist,
-    config: &PxfRunConfig,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PxfData> {
-    run_pxf_analysis_for_netlist_with_operating_point_abort(netlist, config, None, abort)
+    run_pxf_analysis_for_netlist_with_operating_point_abort(&netlist, config, None, abort)
 }
 
 fn run_pxf_analysis_for_netlist_with_operating_point_abort(
@@ -554,47 +544,6 @@ fn pxf_group_delay_with_abort(
     }
     ensure_not_aborted(abort)?;
     Ok(group_delay)
-}
-
-/// Run PXF analysis with the input source and output node inferred from the
-/// netlist, rather than configured by the user.
-///
-/// Unwired, and part of the same unshipped capability as the TF, PAC, and
-/// PNOISE inference entries; see
-/// [`super::super::pnoise::run_pnoise_analysis_with_source_path_and_abort`] for
-/// the shared removal condition.
-#[allow(dead_code)]
-pub fn run_pxf_analysis_with_source_path_and_abort(
-    netlist_text: &str,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PxfData> {
-    let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
-    let engine = Engine::new(build_engine_config(&netlist, None));
-    let dc_result = engine
-        .run_dc_op_with_abort(&netlist, abort)
-        .map_err(|error| {
-            ServiceRunError::from_core("DC OP error (required for PXF defaults)", error)
-        })?;
-    let input_source = infer_primary_source_name_with_abort(&netlist, abort)?.ok_or_else(|| {
-        ServiceRunError::Failure(
-            "PXF requires at least one independent source in the netlist".to_string(),
-        )
-    })?;
-    let output_node = infer_primary_output_node_with_abort(&dc_result.node_names, abort)?
-        .ok_or_else(|| {
-            ServiceRunError::Failure(
-                "PXF could not infer an output node; ensure at least one non-ground node exists"
-                    .to_string(),
-            )
-        })?;
-
-    let cfg = PxfRunConfig {
-        input_source,
-        output_node,
-        ..PxfRunConfig::default()
-    };
-    run_pxf_analysis_for_netlist_with_abort(&netlist, &cfg, abort)
 }
 
 #[cfg(test)]

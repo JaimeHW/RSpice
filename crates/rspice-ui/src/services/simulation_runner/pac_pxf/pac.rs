@@ -9,12 +9,10 @@ use std::path::Path;
 use num_complex::Complex64;
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
-use rspice_core::engine::Engine;
 
 use super::super::error::{ensure_not_aborted, poll_periodically};
 use super::super::{
-    ServiceRunError, ServiceRunResult, build_engine_config, build_resolved_periodic_engine,
-    infer_primary_output_node_with_abort, infer_primary_source_name_with_abort,
+    ServiceRunError, ServiceRunResult, build_resolved_periodic_engine,
     parse_runner_netlist_with_abort,
 };
 use super::shared::{normalize_pac_node_name, resolve_pac_output_node_with_abort};
@@ -469,15 +467,7 @@ pub fn run_pac_analysis_with_source_path_and_abort(
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PacData> {
     let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
-    run_pac_analysis_for_netlist_with_abort(&netlist, config, abort)
-}
-
-fn run_pac_analysis_for_netlist_with_abort(
-    netlist: &rspice_core::Netlist,
-    config: &PacRunConfig,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PacData> {
-    run_pac_analysis_for_netlist_with_operating_point_abort(netlist, config, None, abort)
+    run_pac_analysis_for_netlist_with_operating_point_abort(&netlist, config, None, abort)
 }
 
 fn run_pac_analysis_for_netlist_with_operating_point_abort(
@@ -604,47 +594,6 @@ fn run_pac_analysis_for_netlist_with_operating_point_abort(
         frequencies,
         traces,
     })
-}
-
-/// Run PAC analysis with the input source and output node inferred from the
-/// netlist, rather than configured by the user.
-///
-/// Unwired, and part of the same unshipped capability as the TF, PXF, and
-/// PNOISE inference entries; see
-/// [`super::super::pnoise::run_pnoise_analysis_with_source_path_and_abort`] for
-/// the shared removal condition.
-#[allow(dead_code)]
-pub fn run_pac_analysis_auto_with_source_path_and_abort(
-    netlist_text: &str,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PacData> {
-    let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
-    let engine = Engine::new(build_engine_config(&netlist, None));
-    let dc_result = engine
-        .run_dc_op_with_abort(&netlist, abort)
-        .map_err(|error| {
-            ServiceRunError::from_core("DC OP error (required for PAC defaults)", error)
-        })?;
-    let input_source = infer_primary_source_name_with_abort(&netlist, abort)?.ok_or_else(|| {
-        ServiceRunError::Failure(
-            "PAC requires at least one independent source in the netlist".to_string(),
-        )
-    })?;
-    let output_node = infer_primary_output_node_with_abort(&dc_result.node_names, abort)?
-        .ok_or_else(|| {
-            ServiceRunError::Failure(
-                "PAC could not infer an output node; ensure at least one non-ground node exists"
-                    .to_string(),
-            )
-        })?;
-
-    let cfg = PacRunConfig {
-        input_source,
-        output_node,
-        ..PacRunConfig::default()
-    };
-    run_pac_analysis_for_netlist_with_abort(&netlist, &cfg, abort)
 }
 
 #[cfg(test)]

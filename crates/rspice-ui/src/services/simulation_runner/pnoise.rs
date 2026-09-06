@@ -6,9 +6,8 @@
 
 use super::error::{ensure_not_aborted, poll_periodically};
 use super::{
-    ServiceRunError, ServiceRunResult, build_engine_config, build_resolved_periodic_engine,
-    generate_freq_points_with_abort, infer_primary_output_node_with_abort,
-    infer_primary_source_name_with_abort, is_ground_like,
+    ServiceRunError, ServiceRunResult, build_resolved_periodic_engine,
+    generate_freq_points_with_abort, is_ground_like,
     netlist_has_independent_source_named_with_abort, parse_runner_netlist_with_abort,
     run_pss_analysis_with_source_path_and_abort,
 };
@@ -197,18 +196,7 @@ pub fn run_pnoise_analysis_with_config_and_abort(
     config: &PnoiseRunConfig,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PnoiseData> {
-    run_pnoise_analysis_with_config_and_source_path_and_abort(netlist_text, config, None, abort)
-}
-
-/// Run PNoise analysis with source-path resolution and cooperative
-/// cancellation through periodic solve, sideband folding, and conversion.
-pub fn run_pnoise_analysis_with_config_and_source_path_and_abort(
-    netlist_text: &str,
-    config: &PnoiseRunConfig,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PnoiseData> {
-    run_pnoise_analysis_impl(netlist_text, config, source_path, None, abort)
+    run_pnoise_analysis_impl(netlist_text, config, None, None, abort)
 }
 
 /// Run PNOISE from an exact retained PSS state while resolving any unsealed
@@ -296,56 +284,6 @@ fn run_pnoise_analysis_impl(
         config,
         frequencies,
         &pss_data.operating_point,
-        abort,
-    )
-}
-
-/// Run PNoise analysis with the input source and output node inferred from the
-/// netlist, rather than configured by the user.
-///
-/// Unwired, and part of the same unshipped capability as the TF, PAC, and PXF
-/// inference entries: the dialogs require the user to name both ports, and
-/// wiring these up would let an unambiguous deck run without that step. This
-/// entry owns the only reachable use of
-/// [`infer_primary_output_node_with_abort`] beside those three. Remove the
-/// allow when a caller exists, or remove all four when the product decides
-/// inference is not wanted.
-#[allow(dead_code)]
-pub fn run_pnoise_analysis_with_source_path_and_abort(
-    netlist_text: &str,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PnoiseData> {
-    let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
-    let engine = Engine::new(build_engine_config(&netlist, None));
-    let dc_result = engine
-        .run_dc_op_with_abort(&netlist, abort)
-        .map_err(|error| {
-            ServiceRunError::from_core("DC OP error (required for PNOISE defaults)", error)
-        })?;
-    let output_node = infer_primary_output_node_with_abort(&dc_result.node_names, abort)?
-        .ok_or_else(|| {
-            ServiceRunError::Failure(
-                "PNOISE could not infer an output node; ensure at least one non-ground node exists"
-                    .to_string(),
-            )
-        })?;
-    let input_source = infer_primary_source_name_with_abort(&netlist, abort)?.ok_or_else(|| {
-        ServiceRunError::Failure(
-            "PNOISE could not infer an input source; configure an independent source explicitly"
-                .to_owned(),
-        )
-    })?;
-
-    let cfg = PnoiseRunConfig {
-        output_node,
-        input_source,
-        ..PnoiseRunConfig::default()
-    };
-    run_pnoise_analysis_with_config_and_source_path_and_abort(
-        netlist_text,
-        &cfg,
-        source_path,
         abort,
     )
 }

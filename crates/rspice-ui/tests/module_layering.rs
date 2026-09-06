@@ -1293,7 +1293,13 @@ fn source_files_have_no_byte_order_mark() {
 /// behind a logger no test installs. Both forms suppress, so both are counted;
 /// prefer whichever states the reason, and expect the number to move either
 /// way.
-const MAX_LINT_SUPPRESSIONS: usize = 59;
+///
+/// 59 -> 56 when the product answered the question the four inference entries
+/// were held open for. PAC, PXF and PNOISE infer a periodic-tone source and an
+/// output node from the deck and then *run* on them, which is a guess presented
+/// as a result: those three are deleted. The TF entry's answer is the other
+/// half of the same decision and lands next.
+const MAX_LINT_SUPPRESSIONS: usize = 56;
 
 /// The crate does not accumulate lint suppressions.
 #[test]
