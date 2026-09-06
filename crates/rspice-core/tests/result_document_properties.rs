@@ -666,7 +666,7 @@ fn document(family: usize, shape: &Shape) -> AnalysisResultDocument {
             Some(analysis_id(AnalysisKind::HarmonicBalance)),
             ResultAxisKind::Time,
             axis_values.clone(),
-            ResultPayload::Envelope(EnvelopePayload {
+            ResultPayload::Envelope(Box::new(EnvelopePayload {
                 continuation: EnvelopeContinuationDocument {
                     guarantee: EnvelopeGuaranteeTag::ExactLinearRcMnaV1,
                     carrier_fundamental_frequency: 1e9,
@@ -692,7 +692,7 @@ fn document(family: usize, shape: &Shape) -> AnalysisResultDocument {
                     }],
                 },
                 transient: transient_payload(shape),
-            }),
+            })),
         ),
     };
 

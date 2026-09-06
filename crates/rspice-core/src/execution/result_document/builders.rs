@@ -3273,7 +3273,7 @@ impl AnalysisResultDocument {
             },
             transient: transient_payload_of(&transient)?,
         };
-        Ok(transient.replace_payload(ResultPayload::Envelope(payload)))
+        Ok(transient.replace_payload(ResultPayload::Envelope(Box::new(payload))))
     }
 }
 

@@ -61,7 +61,11 @@ pub enum ResultPayload {
     Pac(PacPayload),
     PNoise(PNoisePayload),
     Hb(HarmonicBalancePayload),
-    Envelope(EnvelopePayload),
+    /// Boxed because an envelope payload embeds a whole transient payload
+    /// beside its carrier and continuation evidence, which made this one
+    /// variant several times the size of every other and made every document
+    /// of every family pay for it.
+    Envelope(Box<EnvelopePayload>),
 }
 
 impl ResultPayload {
