@@ -536,9 +536,9 @@ impl PyTransientResult {
     /// and not a sample of a grid. The strength band is the part the flattened
     /// `D(node)` column of `to_csv` and the raw exporters cannot carry.
     ///
-    /// States and strengths are spelled as `document()` spells them.
-    /// `CompressedTransientResult.digital_trace` uses the other core spelling,
-    /// which hyphenates where this one underscores.
+    /// States and strengths are spelled as `document()` spells them, which is
+    /// what `CompressedTransientResult.digital_trace` and the browser binding
+    /// spell them too.
     ///
     /// The node name resolves ASCII-case-insensitively, as a deck node name
     /// does.

@@ -5,6 +5,13 @@
 //! waveforms, so decimation never touches them and their pickled form is the
 //! event list itself. Digital states, strengths and bus sources travel as the
 //! stable tags core exposes, never as enum ordinals.
+//!
+//! The state and strength tags here are core's `engine::digital_state_tag`
+//! spelling, which hyphenates where the shared document underscores. That is
+//! deliberate and stays: this is a private wire format that only writes and
+//! reads itself, and rewriting it would make every pickle already on disk
+//! unreadable to buy nothing a caller can see. The bus source has only one
+//! spelling, so it uses it.
 
 use super::*;
 

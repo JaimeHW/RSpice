@@ -372,6 +372,13 @@ impl PyCompressedTransientResult {
     }
 
     /// Committed `(time, state, strength)` events for one digital node.
+    ///
+    /// States and strengths are spelled as the shared result document spells
+    /// them — `zero_resistive`, `high_z` — which is what `document()`, this
+    /// result's own pickle, `TransientResult.digital_events` and the browser
+    /// binding all publish. This accessor used to answer with core's other
+    /// spelling, which hyphenates where the document underscores, so one
+    /// state had two names depending on which container a caller held.
     fn digital_trace(&self, name: &str) -> PyResult<Vec<(f64, &'static str, &'static str)>> {
         self.inner
             .digital_traces
@@ -384,8 +391,8 @@ impl PyCompressedTransientResult {
                     .map(|point| {
                         (
                             point.time,
-                            rspice_core::engine::digital_state_tag(point.value.state),
-                            rspice_core::engine::digital_strength_tag(point.value.strength),
+                            digital_state_label(point.value.state),
+                            digital_strength_label(point.value.strength),
                         )
                     })
                     .collect()

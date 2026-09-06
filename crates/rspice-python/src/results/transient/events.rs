@@ -17,13 +17,12 @@
 //! spelling the rawfile event plots, the accepted-sample hook and the browser
 //! worker contract use.
 //!
-//! `CompressedTransientResult::digital_trace` answers the same question with
-//! the *other* core spelling, `rspice_core::engine::digital_state_tag`, which
-//! hyphenates where this one underscores (`zero-resistive` against
-//! `zero_resistive`). That is why this accessor is not named `digital_trace`:
-//! one name returning two spellings of one state would be worse than two
-//! names. The two vocabularies want converging, which is a change to a
-//! published accessor rather than a new one.
+//! `CompressedTransientResult::digital_trace` answers the same question in the
+//! same spelling. It used to answer in core's *other* one,
+//! `rspice_core::engine::digital_state_tag`, which hyphenates where the
+//! document underscores; that is converged, so one state has one name on this
+//! surface however a caller reached it. The two accessors keep their two names
+//! because the two containers keep theirs.
 //!
 //! A **real** event node has no vocabulary problem and no flattened column at
 //! all: [`real_nodes`] and [`real_trace`] are the same names and the same row

@@ -415,6 +415,7 @@ compressed.channel_unit("v(out)")   # "volt"
 compressed.channel_absence("v(out)")  # [None, None, "non-finite", ...]
 # Event traces are never decimated, and post-process products are computed on
 # the exact accepted trajectory rather than on the retained grid.
+# States and strengths spell as document() spells them: zero_resistive, high_z.
 compressed.digital_trace("d")
 compressed.real_trace("rnode")
 compressed.digital_buses()          # the declarations the run published
