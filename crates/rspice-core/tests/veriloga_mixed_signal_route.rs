@@ -670,11 +670,19 @@ fn a_mixed_module_is_refused_by_the_analyses_that_cannot_represent_it() {
 // (e) The boundary value a live consumer sees while the run is still going
 // ---------------------------------------------------------------------------
 
+/// The committed digital state at one accepted point: every digital node the
+/// sample carries, named through the sample's own node table.
+type DigitalState = Vec<(String, DigitalEventCode)>;
+
+/// One point as a live consumer sees it: the accepted analog time paired with
+/// the digital state committed at that time.
+type BoundarySample = (f64, DigitalState);
+
 /// An abort signal that keeps the committed digital state of every accepted
 /// point, with node ids resolved through the sample's own node table.
 #[derive(Default)]
 struct BoundaryRecorder {
-    samples: Mutex<Vec<(f64, Vec<(String, DigitalEventCode)>)>>,
+    samples: Mutex<Vec<BoundarySample>>,
 }
 
 impl AbortSignal for BoundaryRecorder {
