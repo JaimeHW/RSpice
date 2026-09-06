@@ -1056,6 +1056,43 @@ pub struct GeneratedDdtCoefficients {
     pub previous_derivative_scale: Value,
 }
 
+/// Smallest transient interval a generated `ddt` companion rule will integrate.
+///
+/// Below this the rule stops describing a derivative. Every coefficient is
+/// built from `1/dt`, so the conductance leaves the model's own numeric scale
+/// while the history term meant to cancel it does not, and what reaches the
+/// matrix is roundoff. Returning inactive coefficients instead would evaluate
+/// the module with no `ddt` contribution at all: a step this small is exactly
+/// where nothing should change, and dropping the reactive term is where a
+/// charge-storing device abruptly becomes a resistor.
+pub const GENERATED_DDT_TIMESTEP_FLOOR: Value = 1.0e-20;
+
+/// A transient interval a generated `ddt` companion rule cannot integrate.
+///
+/// Zero is not one of these: it is the static-evaluation convention, and it
+/// yields inactive coefficients. This names a step the caller intended to
+/// integrate over and the rule cannot represent.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GeneratedDdtTimestepError {
+    /// The interval the caller asked for.
+    pub timestep: Value,
+    /// [`GENERATED_DDT_TIMESTEP_FLOOR`], repeated so the message is complete
+    /// wherever it is rendered.
+    pub floor: Value,
+}
+
+impl std::fmt::Display for GeneratedDdtTimestepError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "generated ddt cannot integrate a transient timestep of {:.16e}s: the companion rule needs at least {:.16e}s",
+            self.timestep, self.floor
+        )
+    }
+}
+
+impl std::error::Error for GeneratedDdtTimestepError {}
+
 impl GeneratedDdtCoefficients {
     #[inline]
     pub const fn inactive() -> Self {
@@ -1076,7 +1113,7 @@ impl GeneratedDdtCoefficients {
         needs_two_history: bool,
         needs_current_history: bool,
         timestep: Value,
-    ) -> Self {
+    ) -> Result<Self, GeneratedDdtTimestepError> {
         Self::from_companion_values_with_derivative_scale(
             coeff_g,
             coeff_v_n,
@@ -1089,6 +1126,12 @@ impl GeneratedDdtCoefficients {
 
     /// Construct generalized integration coefficients whose previous
     /// derivative term may have a fractional weight.
+    ///
+    /// A zero timestep is the static-evaluation convention and yields inactive
+    /// coefficients. Any other interval the rule cannot represent —
+    /// non-finite, or below [`GENERATED_DDT_TIMESTEP_FLOOR`] — is refused, so
+    /// the caller decides what an unintegrable step means instead of receiving
+    /// a module silently evaluated without its `ddt` terms.
     #[inline]
     pub fn from_companion_values_with_derivative_scale(
         coeff_g: Value,
@@ -1097,14 +1140,19 @@ impl GeneratedDdtCoefficients {
         needs_two_history: bool,
         previous_derivative_scale: Value,
         timestep: Value,
-    ) -> Self {
-        const DDT_EPSILON: Value = 1.0e-20;
-        if !timestep.is_finite() || timestep.abs() <= DDT_EPSILON {
-            return Self::inactive();
+    ) -> Result<Self, GeneratedDdtTimestepError> {
+        if timestep == 0.0 {
+            return Ok(Self::inactive());
+        }
+        if !timestep.is_finite() || timestep.abs() <= GENERATED_DDT_TIMESTEP_FLOOR {
+            return Err(GeneratedDdtTimestepError {
+                timestep,
+                floor: GENERATED_DDT_TIMESTEP_FLOOR,
+            });
         }
 
         let inverse_timestep = 1.0 / timestep;
-        Self {
+        Ok(Self {
             active: true,
             derivative_scale: coeff_g * inverse_timestep,
             previous_value_scale: coeff_v_n * inverse_timestep,
@@ -1114,7 +1162,7 @@ impl GeneratedDdtCoefficients {
                 0.0
             },
             previous_derivative_scale,
-        }
+        })
     }
 
     /// Scale the complete dynamic residual without changing its history
@@ -7824,15 +7872,62 @@ mod fixed_lane_tests {
             false,
             0.49 / 0.51,
             0.25,
-        );
+        )
+        .expect("a quarter-second step is integrable");
         assert_eq!(generalized.derivative_scale, (1.0 / 0.51) / 0.25);
         assert_eq!(generalized.previous_value_scale, (1.0 / 0.51) / 0.25);
         assert_eq!(generalized.older_value_scale, 0.0);
         assert_eq!(generalized.previous_derivative_scale, 0.49 / 0.51);
 
         let canonical =
-            GeneratedDdtCoefficients::from_companion_values(2.0, 2.0, 0.0, false, true, 0.25);
+            GeneratedDdtCoefficients::from_companion_values(2.0, 2.0, 0.0, false, true, 0.25)
+                .expect("a quarter-second step is integrable");
         assert_eq!(canonical.previous_derivative_scale, 1.0);
+    }
+
+    #[test]
+    fn generated_ddt_coefficients_refuse_an_unintegrable_timestep() {
+        // Zero is the static-evaluation convention, not an unintegrable step.
+        assert_eq!(
+            GeneratedDdtCoefficients::from_companion_values(1.0, 1.0, 0.0, false, false, 0.0),
+            Ok(GeneratedDdtCoefficients::inactive())
+        );
+
+        for timestep in [
+            1.0e-21,
+            -1.0e-21,
+            GENERATED_DDT_TIMESTEP_FLOOR,
+            Value::NAN,
+            Value::INFINITY,
+        ] {
+            let error = GeneratedDdtCoefficients::from_companion_values(
+                1.0, 1.0, 0.0, false, false, timestep,
+            )
+            .expect_err("a step the companion rule cannot represent must be refused");
+            assert_eq!(error.floor, GENERATED_DDT_TIMESTEP_FLOOR);
+            assert_eq!(error.timestep.to_bits(), timestep.to_bits());
+            let rendered = error.to_string();
+            assert!(
+                rendered.contains("generated ddt cannot integrate")
+                    && rendered.contains(&format!(
+                        "needs at least {GENERATED_DDT_TIMESTEP_FLOOR:.16e}"
+                    )),
+                "the refusal must name the timestep and the floor, got: {rendered}"
+            );
+        }
+
+        // One ulp above the floor still integrates: the refusal is a floor,
+        // not a band.
+        let above = GeneratedDdtCoefficients::from_companion_values(
+            1.0,
+            1.0,
+            0.0,
+            false,
+            false,
+            GENERATED_DDT_TIMESTEP_FLOOR.next_up(),
+        )
+        .expect("a step above the floor is integrable");
+        assert!(above.active);
     }
 
     #[test]

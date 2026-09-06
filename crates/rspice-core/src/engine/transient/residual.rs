@@ -1679,14 +1679,16 @@ impl Engine {
             }
             #[cfg(feature = "veriloga-builtins-base")]
             if circuit.has_generated_veriloga_devices() {
-                circuit.prepare_generated_veriloga_timepoint(
-                    time,
-                    dt,
-                    &companion_coeff,
-                    if ctx.xyce_one_step_order2 { 2.0 } else { 1.0 },
-                    ctx.analysis_initial_step,
-                    ctx.analysis_final_step,
-                );
+                circuit
+                    .prepare_generated_veriloga_timepoint(
+                        time,
+                        dt,
+                        &companion_coeff,
+                        if ctx.xyce_one_step_order2 { 2.0 } else { 1.0 },
+                        ctx.analysis_initial_step,
+                        ctx.analysis_final_step,
+                    )
+                    .map_err(SimulationError::Circuit)?;
             }
             let static_nonlinear_snapshot = ctx
                 .xyce_one_step_order2

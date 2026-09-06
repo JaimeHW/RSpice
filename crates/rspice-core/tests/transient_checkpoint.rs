@@ -1820,3 +1820,65 @@ fn a_locked_target_inside_the_hard_minimum_folds_into_the_accepted_point() {
         );
     }
 }
+
+#[cfg(feature = "veriloga")]
+#[test]
+fn runtime_veriloga_refuses_a_locked_step_below_the_integration_floor() {
+    use std::io::Write;
+
+    // At picosecond times the solver hard minimum is 1e-23 s, so a grid may
+    // legitimately prescribe a 1e-21 s step and the engine will try to take
+    // it. The companion rule cannot build `1/dt` from that interval. Silently
+    // returning inactive coefficients would evaluate the module with no `ddt`
+    // term at all -- a charge-storing device abruptly becoming a resistor,
+    // converged and plausible and wrong.
+    const MAX_STEP: f64 = 1.0e-12;
+    const STOP: f64 = 3.0e-12;
+
+    let mut model = std::env::temp_dir();
+    model.push(format!("rspice_locked_grid_floor_{}.va", std::process::id()));
+    let mut file = std::fs::File::create(&model).expect("create model file");
+    file.write_all(
+        br#"
+`include "disciplines.vams"
+module va_reactive(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real cap = 1.0e-9;
+    parameter real res = 1.0e3;
+    analog I(p, n) <+ V(p, n) / res + ddt(cap * V(p, n));
+endmodule
+"#,
+    )
+    .expect("write model");
+
+    let deck = format!(
+        "* runtime Verilog-A under a locked grid finer than the companion rule\n\
+         vin in 0 sin(0 1 1meg)\n\
+         rsrc in out 1k\n\
+         x1 out 0 va_reactive\n\
+         .va \"{}\" va_reactive\n\
+         .tran 1p 3p\n\
+         .end\n",
+        model.display().to_string().replace('\\', "/")
+    );
+    let crowded = 1.0e-12 + 1.0e-21;
+    let sub_floor_dt = crowded - 1.0e-12;
+    let netlist = Netlist::parse(&deck).expect("parse sub-floor deck");
+    let error = Engine::new(SimulationConfig {
+        locked_time_grid: Some(Arc::new(vec![1.0e-12, crowded, 2.0e-12, 3.0e-12])),
+        ..Default::default()
+    })
+    .run_tran(&netlist, STOP, MAX_STEP)
+    .expect_err("a step the companion rule cannot integrate must be refused");
+
+    let text = error.to_string();
+    assert!(
+        text.contains("Verilog-A devices cannot advance")
+            && text.contains(&format!("{sub_floor_dt:.16e}"))
+            && text.contains(&format!("needs at least {:.16e}s", 1.0e-20)),
+        "the refusal must name the timestep ({sub_floor_dt:.16e}) and the floor, got: {text}"
+    );
+
+    let _ = std::fs::remove_file(&model);
+}

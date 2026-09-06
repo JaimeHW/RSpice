@@ -65,28 +65,38 @@ const MAX_BOUNDARY_SETTLE_PASSES: u32 = 64;
 ///
 /// The same arithmetic `prepare_veriloga_timepoint` does, because a mixed
 /// module's continuous half is integrated by the same runtime as an analog
-/// instance's and must be handed the same numbers.
+/// instance's and must be handed the same numbers — including the same refusal
+/// of an interval the companion rule cannot represent. A zero interval is the
+/// operating point and carries no rule.
 fn mixed_integration_coefficients(
+    time: Value,
     dt: Value,
     coefficients: &crate::numerics::integration::CompanionCoefficients,
-) -> rspice_veriloga::vm::IntegrationCoefficients {
-    const INTEGRATION_EPSILON: Value = 1.0e-20;
-    if dt.is_finite() && dt.abs() > INTEGRATION_EPSILON {
-        let inverse_timestep = 1.0 / dt;
-        rspice_veriloga::vm::IntegrationCoefficients {
-            active: true,
-            derivative_scale: coefficients.coeff_g * inverse_timestep,
-            previous_value_scale: coefficients.coeff_v_n * inverse_timestep,
-            older_value_scale: if coefficients.needs_two_history {
-                coefficients.coeff_v_n_minus_1 * inverse_timestep
-            } else {
-                0.0
-            },
-            previous_derivative_scale: coefficients.coeff_i_n,
-        }
-    } else {
-        rspice_veriloga::vm::IntegrationCoefficients::inactive()
+) -> Result<rspice_veriloga::vm::IntegrationCoefficients, SimulationError> {
+    if dt == 0.0 {
+        return Ok(rspice_veriloga::vm::IntegrationCoefficients::inactive());
     }
+    if !dt.is_finite() || dt.abs() <= rspice_veriloga_runtime::GENERATED_DDT_TIMESTEP_FLOOR {
+        return Err(SimulationError::Circuit(format!(
+            "mixed Verilog-AMS modules cannot advance to t={time:.16e}s: {}",
+            rspice_veriloga_runtime::GeneratedDdtTimestepError {
+                timestep: dt,
+                floor: rspice_veriloga_runtime::GENERATED_DDT_TIMESTEP_FLOOR,
+            }
+        )));
+    }
+    let inverse_timestep = 1.0 / dt;
+    Ok(rspice_veriloga::vm::IntegrationCoefficients {
+        active: true,
+        derivative_scale: coefficients.coeff_g * inverse_timestep,
+        previous_value_scale: coefficients.coeff_v_n * inverse_timestep,
+        older_value_scale: if coefficients.needs_two_history {
+            coefficients.coeff_v_n_minus_1 * inverse_timestep
+        } else {
+            0.0
+        },
+        previous_derivative_scale: coefficients.coeff_i_n,
+    })
 }
 
 fn mixed_error(instance: &str, error: MixedSignalError) -> SimulationError {
@@ -191,7 +201,7 @@ impl CircuitData {
         initial_step: bool,
         final_step: bool,
     ) -> Result<(), SimulationError> {
-        let integration = mixed_integration_coefficients(dt, coefficients);
+        let integration = mixed_integration_coefficients(time, dt, coefficients)?;
         for host in &mut self.mixed_signal_hosts {
             let started = host.begin_probe_trial(time, dt, integration, initial_step, final_step);
             named(host, started)?;
@@ -269,7 +279,7 @@ impl CircuitData {
         initial_step: bool,
         final_step: bool,
     ) -> Result<(), SimulationError> {
-        let integration = mixed_integration_coefficients(dt, coefficients);
+        let integration = mixed_integration_coefficients(time, dt, coefficients)?;
         for host in &mut self.mixed_signal_hosts {
             let started = host.begin_trial(time, dt, integration, initial_step, final_step);
             named(host, started)?;

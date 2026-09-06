@@ -2065,6 +2065,12 @@ impl CircuitData {
     }
 
     /// Prepare build-time generated Verilog-A devices for a transient timepoint.
+    ///
+    /// Refuses an interval the `ddt` companion rule cannot represent. Silently
+    /// dropping the reactive term instead would leave every generated device
+    /// stamping only its static branch at that step, which is a different
+    /// circuit — and one whose native equivalents (a capacitor's `C/dt`
+    /// companion) remain exact at the same interval.
     #[cfg(feature = "veriloga-builtins-base")]
     pub fn prepare_generated_veriloga_timepoint(
         &mut self,
@@ -2074,7 +2080,7 @@ impl CircuitData {
         dynamic_residual_scale: Value,
         initial_step: bool,
         final_step: bool,
-    ) {
+    ) -> Result<(), String> {
         let ddt_coefficients =
             crate::device::veriloga_builtins::GeneratedDdtCoefficients::from_companion_values_with_derivative_scale(
                     coefficients.coeff_g,
@@ -2084,11 +2090,15 @@ impl CircuitData {
                     coefficients.coeff_i_n,
                     dt,
                 )
+            .map_err(|error| {
+                format!("Verilog-A generated devices cannot advance to t={time:.16e}s: {error}")
+            })?
             .scaled(dynamic_residual_scale);
         self.generated_veriloga_devices
             .set_timepoint(time, dt, ddt_coefficients);
         self.generated_veriloga_devices
             .set_analysis_step(initial_step, final_step);
+        Ok(())
     }
 
     /// Re-evaluate generated Verilog-A devices at an exact accepted solution
@@ -2671,6 +2681,13 @@ impl CircuitData {
         Ok(())
     }
 
+    /// Prepare runtime-compiled Verilog-A devices for a transient timepoint.
+    ///
+    /// A zero interval is the t=0 static evaluation and carries no companion
+    /// rule. Any other interval the rule cannot represent is refused rather
+    /// than reduced to inactive coefficients: a module evaluated with its
+    /// `ddt` contributions dropped is a different circuit, and the caller
+    /// would see a converged, plausible, wrong solution instead of a failure.
     #[cfg(feature = "veriloga")]
     pub fn prepare_veriloga_timepoint(
         &mut self,
@@ -2680,8 +2697,10 @@ impl CircuitData {
         initial_step: bool,
         final_step: bool,
     ) -> Result<(), String> {
-        const INTEGRATION_EPSILON: Value = 1.0e-20;
-        let integration = if dt.is_finite() && dt.abs() > INTEGRATION_EPSILON {
+        let integration = if dt == 0.0 {
+            rspice_veriloga::vm::IntegrationCoefficients::inactive()
+        } else if dt.is_finite() && dt.abs() > rspice_veriloga_runtime::GENERATED_DDT_TIMESTEP_FLOOR
+        {
             let inverse_timestep = 1.0 / dt;
             rspice_veriloga::vm::IntegrationCoefficients {
                 active: true,
@@ -2695,7 +2714,13 @@ impl CircuitData {
                 previous_derivative_scale: coefficients.coeff_i_n,
             }
         } else {
-            rspice_veriloga::vm::IntegrationCoefficients::inactive()
+            return Err(format!(
+                "Verilog-A devices cannot advance to t={time:.16e}s: {}",
+                rspice_veriloga_runtime::GeneratedDdtTimestepError {
+                    timestep: dt,
+                    floor: rspice_veriloga_runtime::GENERATED_DDT_TIMESTEP_FLOOR,
+                }
+            ));
         };
         for device in self.veriloga_devices.iter_mut() {
             let instance = device.name.clone();
