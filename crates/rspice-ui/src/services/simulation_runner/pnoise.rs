@@ -183,6 +183,15 @@ pub struct PnoiseData {
     pub input_noise: Option<Vec<Value>>,
     /// Device contributors (name, percentage) at the measured output port.
     pub contributors: Vec<(String, Value)>,
+    /// Total output noise over the swept band in volts RMS, when the run was
+    /// asked to integrate. `None` means the question was not asked — or that
+    /// the reference has no answer in volts, which is the phase-noise case:
+    /// its band total is an RMS phase error in radians, and the retained
+    /// [`crate::state::NoiseSummary`] states volts.
+    pub output_rms: Option<Value>,
+    /// Total input-referred noise over the swept band in volts RMS, on the
+    /// same terms.
+    pub input_rms: Option<Value>,
 }
 
 /// Run PNoise analysis standalone -- computing its own periodic solution
@@ -321,6 +330,13 @@ fn run_pnoise_from_retained_state(
             output_noise: oscillator.phase_noise_dbc,
             input_noise: None,
             contributors: Vec::new(),
+            // A phase-noise band total is an RMS phase error in radians, and
+            // the only place this pipeline retains a band total says volts.
+            // Reporting radians there would be a mislabelled number, so the
+            // total is withheld rather than renamed; the engine's own
+            // `.PNOISE` route publishes it as `integrated_phase_noise`.
+            output_rms: None,
+            input_rms: None,
         });
     }
 
@@ -360,12 +376,41 @@ fn run_pnoise_from_retained_state(
     } else {
         Vec::new()
     };
+    // The band totals the card asked for. Both are volts RMS: the driven
+    // spectra are power densities in V^2/Hz, so the integral over the swept
+    // band is a mean square and its root is the total.
+    let (output_rms, input_rms) = if config.integrated_noise {
+        let output = integrate_psd_power_with_abort(
+            &frequencies,
+            &exact.output_noise,
+            "exact PNOISE output spectrum",
+            abort,
+        )?
+        .sqrt();
+        let input = input_noise
+            .as_ref()
+            .map(|density| {
+                integrate_psd_power_with_abort(
+                    &frequencies,
+                    density,
+                    "exact PNOISE input-referred spectrum",
+                    abort,
+                )
+            })
+            .transpose()?
+            .map(Value::sqrt);
+        (Some(output), input)
+    } else {
+        (None, None)
+    };
     ensure_not_aborted(abort)?;
     Ok(PnoiseData {
         frequencies,
         output_noise: exact.output_noise,
         input_noise,
         contributors,
+        output_rms,
+        input_rms,
     })
 }
 
@@ -475,31 +520,6 @@ fn integrate_psd_power_with_abort(
 }
 
 #[cfg(test)]
-fn integrate_noise_rms_with_abort(
-    frequencies: &[Value],
-    psd: &[Value],
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<Value> {
-    ensure_not_aborted(abort)?;
-    if frequencies.len() < 2 || psd.len() < 2 {
-        return Ok(0.0);
-    }
-    let n = frequencies.len().min(psd.len());
-    let mut integrated = 0.0;
-    for idx in 1..n {
-        poll_periodically(abort, idx)?;
-        let df = frequencies[idx] - frequencies[idx - 1];
-        if df <= 0.0 {
-            continue;
-        }
-        let avg = (psd[idx].max(0.0) + psd[idx - 1].max(0.0)) * 0.5;
-        integrated += avg * df;
-    }
-    ensure_not_aborted(abort)?;
-    Ok(integrated.max(0.0).sqrt())
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
     use rspice_core::abort_signal::{CountingAbort, ImmediateAbort};
@@ -517,14 +537,66 @@ mod tests {
 
     #[test]
     fn pnoise_integration_honors_in_loop_abort() {
-        let frequencies = (0..256).map(|index| index as Value).collect::<Vec<_>>();
+        let frequencies = (1..257).map(|index| index as Value).collect::<Vec<_>>();
         let psd = vec![1e-18; frequencies.len()];
         let abort = CountingAbort::new(1);
 
-        let result = integrate_noise_rms_with_abort(&frequencies, &psd, &abort);
+        let result =
+            integrate_psd_power_with_abort(&frequencies, &psd, "abort fixture spectrum", &abort);
 
         assert!(matches!(result, Err(ServiceRunError::Aborted)));
         assert!(abort.count() > 1);
+    }
+
+    /// `integratedNoise` reaches the band total it asks for.
+    ///
+    /// The flag reached `PnoiseRunConfig` and was read by nothing: a run
+    /// configured to integrate produced the same result as one configured not
+    /// to, and the studio's own checkbox was inert. Now that a deck can state
+    /// it, an unread flag would be a card that says something and means
+    /// nothing.
+    #[test]
+    fn an_integrating_pnoise_run_reports_the_band_total_and_a_plain_one_does_not() {
+        const DECK: &str = "* pnoise integration fixture\n\
+                            V1 in 0 SIN(0 1 1Meg)\n\
+                            R1 in out 1k\n\
+                            C1 out 0 1n\n\
+                            .end\n";
+        let base = PnoiseRunConfig {
+            pss_fundamental_freq: 1.0e6,
+            pss_num_harmonics: 3,
+            pss_tolerance: 1.0e-6,
+            start_freq: 1.0e3,
+            stop_freq: 1.0e5,
+            points_per_unit: 3,
+            max_sideband: 1,
+            output_node: "out".to_owned(),
+            input_source: String::new(),
+            ..PnoiseRunConfig::default()
+        };
+
+        let plain = run_pnoise_analysis_with_config_and_abort(DECK, &base, &NoAbort)
+            .expect("the periodic-noise fixture runs");
+        assert_eq!(plain.output_rms, None);
+
+        let integrating = run_pnoise_analysis_with_config_and_abort(
+            DECK,
+            &PnoiseRunConfig {
+                integrated_noise: true,
+                ..base
+            },
+            &NoAbort,
+        )
+        .expect("the periodic-noise fixture runs");
+        let total = integrating
+            .output_rms
+            .expect("an integrating run reports its band total");
+        assert!(
+            total.is_finite() && total > 0.0,
+            "the band total of a noisy resistor is {total}"
+        );
+        // The spectra themselves are untouched by the request to integrate.
+        assert_eq!(integrating.output_noise, plain.output_noise);
     }
 
     #[test]

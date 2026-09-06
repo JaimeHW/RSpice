@@ -422,14 +422,29 @@ fn run_pnoise(
         contributors.insert(name, vec![percentage; freq_len]);
     }
 
+    // `integratedNoise` asked for the band total, and this is where the run
+    // keeps one. The ranked rows stay empty: PNoise carries cyclostationary
+    // percentages, not band-integrated mechanism powers, and inventing a row
+    // from a percentage would publish a number nothing computed.
+    let summary = data.output_rms.map(|total_rms| {
+        let band = (
+            data.frequencies.first().copied().unwrap_or_default(),
+            data.frequencies.last().copied().unwrap_or_default(),
+        );
+        crate::state::NoiseSummary {
+            rows: Vec::new(),
+            total_rms: Some(total_rms),
+            input_rms: data.input_rms,
+            band,
+        }
+    });
+
     Ok(SimulationResult::Noise {
         frequencies: data.frequencies,
         output_noise: data.output_noise,
         input_noise: data.input_noise,
         contributors,
-        // PNoise carries cyclostationary percentages, not band-integrated
-        // mechanism contributions; no ranked summary for it (yet).
-        summary: None,
+        summary,
         measurements: Vec::new(),
     })
 }
