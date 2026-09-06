@@ -775,6 +775,9 @@ impl PyTransientResult {
             node_names,
             branch_names,
             digital_traces,
+            // The pickled event state is version 1 and carries no bus table,
+            // so a restored result declares none rather than inventing one.
+            digital_buses: Vec::new(),
             real_traces,
             device_op_traces: device_op_traces
                 .into_iter()
