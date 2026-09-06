@@ -13,6 +13,7 @@
 //! - [`errors`]: the structured [`WasmError`] and its JavaScript projection
 //! - [`dto`]: parser-diagnostic and readiness summaries
 //! - [`document`]: the descriptor-only projection of one core result document
+//! - [`events`]: the typed digital event rows and the Value Change Dump
 //! - [`handles`]: the retained handle that publishes bounded typed-array windows
 //! - [`js_interop`]: JavaScript value decoding and typed-array publication
 //! - [`runners`]: the authored-deck route and the direct entry points
@@ -35,6 +36,7 @@ mod abort;
 mod document;
 mod dto;
 mod errors;
+mod events;
 mod exports;
 mod handles;
 mod hb_config;
@@ -53,6 +55,7 @@ pub use dto::{
     WasmStartupDirectiveScope,
 };
 pub use errors::{WasmError, WasmUnresolvedOutputSymbol};
+pub use events::{BusMembership, DigitalEventRow, DigitalNodeDescriptor};
 pub use handles::{
     BROWSER_RESULT_SCHEMA, BROWSER_RESULT_VERSION, HandleMetadata, ResultSummary,
     RunAxisDescriptor, StepTargetDescriptor, WasmResultHandle,

@@ -20,6 +20,7 @@ use crate::DetailedWasmResult;
 use crate::abort::aborted_error;
 use crate::document::{AnalysisIdentity, ResultMetadata, result_metadata, window_transfer_values};
 use crate::errors::{WasmError, wasm_error_to_js};
+use crate::events::{DigitalEventRow, DigitalNodeDescriptor};
 use crate::js_interop::{serialize_result_window_to_js, serialize_to_js};
 use crate::options::{DEFAULT_MAX_RESULT_JSON_BYTES, DEFAULT_MAX_TRANSFER_VALUES};
 
@@ -247,6 +248,25 @@ impl WasmResultHandle {
             .map_err(|error| window_error(error.to_string()))
     }
 
+    pub(crate) fn digital_nodes_snapshot(
+        &self,
+        index: usize,
+    ) -> DetailedWasmResult<Vec<DigitalNodeDescriptor>> {
+        crate::events::digital_nodes(self.document(index)?)
+    }
+
+    pub(crate) fn digital_events_snapshot(
+        &self,
+        index: usize,
+        node: &str,
+    ) -> DetailedWasmResult<Vec<DigitalEventRow>> {
+        crate::events::digital_events(self.document(index)?, node, self.maximum_window_values)
+    }
+
+    pub(crate) fn vcd_snapshot(&self, index: usize) -> DetailedWasmResult<String> {
+        crate::events::vcd_text(self.document(index)?)
+    }
+
     pub(crate) fn result_json_snapshot(
         &self,
         index: usize,
@@ -327,6 +347,59 @@ impl WasmResultHandle {
             .window_snapshot(result_index, start, count)
             .map_err(|error| wasm_error_to_js(*error))?;
         serialize_result_window_to_js(&window)
+    }
+
+    /// Every XSPICE digital event node of one result.
+    ///
+    /// Each entry carries the node name, how many changes it committed, and
+    /// the bus that claims it when the document declares one. No points cross
+    /// here; `digitalEvents` fetches those one node at a time.
+    #[wasm_bindgen(js_name = digitalNodes)]
+    pub fn digital_nodes_js(&self, result_index: usize) -> Result<JsValue, JsValue> {
+        let nodes = self
+            .digital_nodes_snapshot(result_index)
+            .map_err(|error| wasm_error_to_js(*error))?;
+        serialize_to_js(&nodes)
+    }
+
+    /// One digital node's whole committed event history, as typed rows.
+    ///
+    /// A row is `{time, state, strength, code}`: the accepted time in seconds,
+    /// the document's own state and strength spellings, and the `0..=12`
+    /// XSPICE event code encoding the same pair. Only changes are recorded, so
+    /// a row is a value the run committed rather than a sample of a grid.
+    ///
+    /// The history is charged against the same transfer ceiling a window is,
+    /// two values per row, and fails closed with
+    /// `code: "invalid_result_window"` when it does not fit. An unknown node
+    /// fails with `code: "unknown_event_node"`.
+    #[wasm_bindgen(js_name = digitalEvents)]
+    pub fn digital_events_js(
+        &self,
+        result_index: usize,
+        node_name: &str,
+    ) -> Result<JsValue, JsValue> {
+        let events = self
+            .digital_events_snapshot(result_index, node_name)
+            .map_err(|error| wasm_error_to_js(*error))?;
+        serialize_to_js(&events)
+    }
+
+    /// One result's event histories as a Value Change Dump.
+    ///
+    /// The same bytes `rspice run -f vcd` publishes for the same run: one
+    /// `$scope module events`, digital nodes as one-bit wires, real event
+    /// nodes as `real` variables, each on its own event timeline. VCD has four
+    /// bit states and no drive strength, so the twelve resolved states
+    /// collapse onto `0`, `1`, `x` and `z`; `digitalEvents` carries the band.
+    ///
+    /// A result with no event history fails with
+    /// `code: "no_event_history"` rather than returning a dump that declares
+    /// no signal.
+    #[wasm_bindgen(js_name = toVcd)]
+    pub fn to_vcd_js(&self, result_index: usize) -> Result<String, JsValue> {
+        self.vcd_snapshot(result_index)
+            .map_err(|error| wasm_error_to_js(*error))
     }
 
     /// The complete core result document for one result, as JSON.
@@ -530,6 +603,83 @@ C1 out 0 1p\n\
             .expect("the lossless export encodes");
         let decoded = AnalysisResultDocument::from_json(&json).expect("the export decodes");
         assert_eq!(&decoded, &handle.documents()[0]);
+    }
+
+    /// A transient that captures event nodes answers the typed accessors, and
+    /// the payload descriptor's counts are the same run's.
+    #[test]
+    fn the_event_accessors_and_the_payload_counts_describe_one_run() {
+        const EVENT_DECK: &str = "browser event handle deck
+v1 in 0 pulse(0 5 0 1n 1n 5n 10n)
+abridge1 [in] [d] adc
+adac [d] [out] dac
+aobs out rnode obs
+rout out 0 1k
+.model adc adc_bridge(in_low=1 in_high=4)
+.model dac dac_bridge(out_low=0 out_high=5 out_undef=2.5)
+.model obs v_to_real(gain=2)
+.tran 1n 20n
+.end
+";
+        let handle = handle(EVENT_DECK, crate::options::browser_resource_limits());
+        let nodes = handle
+            .digital_nodes_snapshot(0)
+            .expect("a transient answers the inventory");
+        assert!(!nodes.is_empty());
+
+        let metadata = handle
+            .result_metadata_snapshot(0)
+            .expect("result metadata projects");
+        assert_eq!(metadata.payload.digital_node_count, nodes.len());
+        assert_eq!(
+            metadata.payload.digital_event_count,
+            nodes.iter().map(|node| node.event_count).sum::<usize>()
+        );
+        assert_eq!(metadata.payload.digital_bus_count, 0);
+        assert!(metadata.payload.real_node_count > 0);
+        assert!(metadata.payload.real_event_count > 0);
+
+        let rows = handle
+            .digital_events_snapshot(0, &nodes[0].node_name)
+            .expect("a named node answers");
+        assert_eq!(rows.len(), nodes[0].event_count);
+
+        let dump = handle.vcd_snapshot(0).expect("the run dumps");
+        assert!(dump.contains("$scope module events $end"), "{dump}");
+
+        let error = *handle
+            .digital_nodes_snapshot(handle.result_count())
+            .expect_err("an unknown result index must fail closed");
+        assert_eq!(error.code, "invalid_result_index");
+    }
+
+    /// A tighter `maxResultValues` tightens an event history the way it
+    /// tightens a window; the two obey one budget.
+    #[test]
+    fn the_transfer_budget_bounds_an_event_history_too() {
+        const EVENT_DECK: &str = "browser event budget deck
+v1 in 0 pulse(0 5 0 1n 1n 5n 10n)
+abridge1 [in] [d] adc
+rin in 0 1k
+.model adc adc_bridge(in_low=1 in_high=4)
+.tran 1n 20n
+.end
+";
+        let mut limits = crate::options::browser_resource_limits();
+        limits.max_result_values = 1;
+        let handle = handle(EVENT_DECK, limits);
+        let nodes = handle
+            .digital_nodes_snapshot(0)
+            .expect("a transient answers the inventory");
+        let error = *handle
+            .digital_events_snapshot(0, &nodes[0].node_name)
+            .expect_err("a one-value budget cannot carry a history");
+        assert_eq!(error.code, "invalid_result_window");
+        assert!(
+            error.message.contains("the limit is 1"),
+            "{}",
+            error.message
+        );
     }
 
     /// Projection is cancellable: a pre-set abort stops the export instead of

@@ -297,9 +297,11 @@ impl DeviceStateDescriptor {
 /// Descriptor-level provenance of the family-specific payload.
 ///
 /// The payload's bulk (per-point step sizes, event traces, per-trial samples,
-/// spectra) is reachable losslessly through the handle's bounded JSON export;
-/// what belongs in a metadata object is the family tag, the compression
-/// certificate, and the identity of the post-processes this result produced.
+/// spectra) is reachable losslessly through the handle's bounded JSON export
+/// and, for the event histories, through `digitalNodes`/`digitalEvents`; what
+/// belongs in a metadata object is the family tag, the compression
+/// certificate, the identity of the post-processes this result produced, and
+/// how much event history there is to ask for.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PayloadDescriptor<'a> {
@@ -310,25 +312,60 @@ pub struct PayloadDescriptor<'a> {
     /// Identity of each `.FFT` spectrum this transient produced. The spectra
     /// are separate results in the same handle.
     pub fft_children: &'a [FftChildReference],
+    /// XSPICE digital event nodes this result captured.
+    pub digital_node_count: usize,
+    /// Committed digital changes across all of them. This is what
+    /// `digitalEvents` is charged against the transfer ceiling for.
+    pub digital_event_count: usize,
+    /// Buses declared over those nodes.
+    pub digital_bus_count: usize,
+    /// XSPICE real-valued event nodes this result captured.
+    pub real_node_count: usize,
+    /// Committed real changes across all of them.
+    pub real_event_count: usize,
 }
 
 impl<'a> PayloadDescriptor<'a> {
     fn project(payload: &'a ResultPayload) -> Self {
-        let (compression, fft_children) = match payload {
-            ResultPayload::Tran(transient) => (
-                transient.compression.as_ref(),
-                transient.fft_children.as_slice(),
-            ),
-            ResultPayload::Envelope(envelope) => (
-                envelope.transient.compression.as_ref(),
-                envelope.transient.fft_children.as_slice(),
-            ),
-            _ => (None, [].as_slice()),
+        let transient = match payload {
+            ResultPayload::Tran(transient) => Some(transient),
+            ResultPayload::Envelope(envelope) => Some(&envelope.transient),
+            _ => None,
         };
+        let counts = transient.map(|transient| {
+            (
+                transient.digital_traces.len(),
+                transient
+                    .digital_traces
+                    .iter()
+                    .map(|trace| trace.points.len())
+                    .fold(0, usize::saturating_add),
+                transient.digital_buses.len(),
+                transient.real_traces.len(),
+                transient
+                    .real_traces
+                    .iter()
+                    .map(|trace| trace.points.len())
+                    .fold(0, usize::saturating_add),
+            )
+        });
+        let (
+            digital_node_count,
+            digital_event_count,
+            digital_bus_count,
+            real_node_count,
+            real_event_count,
+        ) = counts.unwrap_or((0, 0, 0, 0, 0));
         Self {
             family: payload.result_kind().tag(),
-            compression,
-            fft_children,
+            compression: transient.and_then(|transient| transient.compression.as_ref()),
+            fft_children: transient
+                .map_or([].as_slice(), |transient| transient.fft_children.as_slice()),
+            digital_node_count,
+            digital_event_count,
+            digital_bus_count,
+            real_node_count,
+            real_event_count,
         }
     }
 }

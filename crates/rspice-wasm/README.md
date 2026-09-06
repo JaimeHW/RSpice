@@ -43,8 +43,10 @@ and caller-bounded numeric windows cross into JavaScript.
   descriptors: `resultKind`, `analysis`, `parentAnalysis`, `coordinateId`, the
   full `coordinate`, `topologyFingerprint`, `namespaces`, `pointCount`, `axes`,
   `signals`, `scalars`, `deviceStates`, a `payload` descriptor carrying the
-  family tag plus the compression certificate and the FFT children, and the
-  `valuesPerPoint` / `totalValueCount` / `maximumWindowValues` budget figures.
+  family tag plus the compression certificate, the FFT children and the event
+  counts (`digitalNodeCount`, `digitalEventCount`, `digitalBusCount`,
+  `realNodeCount`, `realEventCount`), and the `valuesPerPoint` /
+  `totalValueCount` / `maximumWindowValues` budget figures.
 - `readWindow(resultIndex, start, count)` — a half-open aligned slice. Axis and
   real/complex sample columns are `Float64Array`; every signal carries a
   `Uint8Array` `validity` mask. **A zero validity entry is an explicitly
@@ -55,6 +57,24 @@ and caller-bounded numeric windows cross into JavaScript.
 - `resultJson(resultIndex)` — the complete core document as JSON. This is the
   lossless export path: it is bounded by an explicit byte budget and fails
   closed rather than truncating.
+- `digitalNodes(resultIndex)` — every XSPICE digital event node the transient
+  captured, each with its `eventCount` and the `bus` that claims it, or `null`.
+  No points cross here. A family that captures no event timeline fails with
+  `code: "unsupported_result_family"`.
+- `digitalEvents(resultIndex, nodeName)` — one node's whole committed history
+  as `{time, state, strength, code}` rows: the accepted time in seconds, the
+  document's own state and strength spellings, and the `0..=12` XSPICE event
+  code encoding the same pair. Only changes are recorded. The name resolves
+  ASCII-case-insensitively. The history is charged against the same transfer
+  ceiling a window is, two values per row, and fails with
+  `code: "invalid_result_window"` when it does not fit; an unknown node fails
+  with `code: "unknown_event_node"`.
+- `toVcd(resultIndex)` — the event histories as a Value Change Dump, byte for
+  byte what `rspice run -f vcd` publishes for the same run. VCD has four bit
+  states and no drive strength, so the twelve resolved states collapse onto
+  `0`, `1`, `x` and `z`; `digitalEvents` carries the band. A result with no
+  event history fails with `code: "no_event_history"` rather than returning a
+  dump that declares no signal.
 
 The default transfer ceiling is 262,144 numeric/validity values and is further
 reduced by `maxResultValues`. A window charges for its numeric columns plus one
@@ -238,6 +258,7 @@ through the JavaScript handle.
 - `errors`: the structured `WasmError` and its JavaScript projection
 - `dto`: parser-diagnostic and readiness summaries
 - `document`: the descriptor-only projection of one core result document
+- `events`: the typed digital event rows and the Value Change Dump
 - `hb_config`: the authored `.HB` tone list, resolved through the core constructors
 - `handles`: the retained handle that publishes bounded typed-array windows
 - `js_interop`: JavaScript value decoding and typed-array publication
@@ -300,6 +321,12 @@ coordinate products and collision-free artifact namespaces, `.ALTER` refusal
 through the core materializer, coordinate-local failure attribution,
 compression certificates, direct-entry-point planning and argument validation,
 and the periodic large-signal cards.
+
+The event accessors are covered beside them: that the inventory counts what
+`digitalEvents` then returns, that a row's `code` re-encodes to the state and
+strength it was built from, that the transfer ceiling bounds a history the way
+it bounds a window, and that the dump is byte-identical to the projection
+`crates/rspice-cli/src/commands/vcd_io.rs` builds for `rspice run -f vcd`.
 
 A `wasm-bindgen-test` module in `exports` covers what only the real JavaScript
 boundary can show: that window columns arrive as `Float64Array`/`Uint8Array`,
