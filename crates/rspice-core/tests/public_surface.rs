@@ -531,7 +531,27 @@ use rspice_core::analysis::harmonic_balance::{
 // - 1 grouped re-export statement, in `execution.rs`, for the new
 //   `event_bus` module. The `event_export`, `event_projection` and `io.rs`
 //   re-exports were widened in place.
-const MAX_PUBLIC_ITEMS: usize = 4977;
+// 2026-09-06, +1 deliberate (4,977 -> 4,978): `DigitalValue::from_event_code`,
+// raised back to `pub` the day after it was narrowed above. The narrowing was
+// correct when it was measured — the decoder had one caller, inside this crate
+// — and is wrong now: the GUI's VCD encoder,
+// `rspice-ui/src/workbench/menu_bar/waveform_export/vcd.rs`, had spelled the
+// thirteen-entry table a second time because the inverse was crate-private,
+// and that copy is deleted in the same change.
+//
+// It is the one frontend that needs it, because it is the one that holds the
+// code rather than the value: the accepted-sample hook publishes a `u8`
+// through `abort_signal::DigitalEventCode`, the GUI's worker contract carries
+// that `u8` across the message boundary, and its retained evidence stores it,
+// so the GUI has to decode where the Python and browser bindings — which read
+// typed `DigitalStateTag`/`DigitalStrengthTag` values out of a result document
+// — only ever encode, through the `event_code` beside this.
+//
+// One external caller is enough here, and the ratchet's own rule says why: a
+// decoder a frontend must otherwise restate is not internal machinery. A second
+// copy of the table is a second definition of what a code means, and the only
+// way to keep two definitions agreeing is to have one.
+const MAX_PUBLIC_ITEMS: usize = 4978;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

@@ -31,7 +31,7 @@ use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogC
 use rspice_core::engine::{DigitalTrace, DigitalTracePoint, RealTrace, RealTracePoint};
 use rspice_core::execution::event_vcd_document;
 use rspice_core::io::write_vcd;
-use rspice_core::xspice::{DigitalState, DigitalStrength, DigitalValue};
+use rspice_core::xspice::DigitalValue;
 
 /// The single scope every RSpice dump declares. `rspice-cli`'s `vcd_io.rs`
 /// uses this exact string; the two exports differ the moment they disagree.
@@ -48,34 +48,6 @@ const NO_EVENT_EVIDENCE_MESSAGE: &str = "A Value Change Dump carries the digital
 const EMPTY_EVENT_EVIDENCE_MESSAGE: &str = "This transient retained an event history with no node in it, so a Value Change Dump would \
      declare no signal and record no change. Publishing it would be indistinguishable from a \
      failed export.";
-
-/// The digital value one XSPICE event code names.
-///
-/// `rspice_core::xspice::DigitalValue::event_code` — the encoder that produced
-/// the `value_code` this crate retains — is public, but its inverse is
-/// crate-private to `rspice-core`, so the thirteen-entry table is spelled
-/// here. It cannot drift silently: `the_event_code_table_inverts_the_core_encoder`
-/// re-encodes every entry through the public `event_code` and requires the
-/// same code back, and requires every other code to decode to `None`.
-fn digital_value_from_event_code(code: u8) -> Option<DigitalValue> {
-    let (state, strength) = match code {
-        0 => (DigitalState::Zero, DigitalStrength::Strong),
-        1 => (DigitalState::One, DigitalStrength::Strong),
-        2 => (DigitalState::Unknown, DigitalStrength::Strong),
-        3 => (DigitalState::ZeroR, DigitalStrength::Resistive),
-        4 => (DigitalState::OneR, DigitalStrength::Resistive),
-        5 => (DigitalState::UnknownR, DigitalStrength::Resistive),
-        6 => (DigitalState::ZeroZ, DigitalStrength::HighZ),
-        7 => (DigitalState::OneZ, DigitalStrength::HighZ),
-        8 => (DigitalState::UnknownZ, DigitalStrength::HighZ),
-        9 => (DigitalState::Zero, DigitalStrength::Undetermined),
-        10 => (DigitalState::One, DigitalStrength::Undetermined),
-        11 => (DigitalState::Unknown, DigitalStrength::Undetermined),
-        12 => (DigitalState::HighZ, DigitalStrength::HighZ),
-        _ => return None,
-    };
-    Some(DigitalValue::new(state, strength))
-}
 
 /// What a published dump contains, for the completion message.
 #[derive(Debug)]
@@ -99,7 +71,7 @@ fn core_traces(
     for trace in digital_traces {
         let mut points = Vec::with_capacity(trace.points.len());
         for point in &trace.points {
-            let value = digital_value_from_event_code(point.value_code).ok_or_else(|| {
+            let value = DigitalValue::from_event_code(point.value_code).ok_or_else(|| {
                 format!(
                     "node '{}' records event code {} at {} s, which is not one of the thirteen \
                      XSPICE event codes",
@@ -234,8 +206,6 @@ mod tests {
         RealEventPointEvidence, RealEventTraceEvidence,
     };
 
-    const MAX_EVENT_CODE: u8 = 12;
-
     /// `with_result_payload` debug-asserts the payload is valid for the
     /// analysis, which is exactly what the corrupt-code test has to defeat, so
     /// the field is set directly.
@@ -278,25 +248,6 @@ mod tests {
         AnalysisResultPayload::TransientEvents {
             digital_traces,
             real_traces,
-        }
-    }
-
-    #[test]
-    fn the_event_code_table_inverts_the_core_encoder() {
-        for code in 0..=MAX_EVENT_CODE {
-            let value = digital_value_from_event_code(code)
-                .unwrap_or_else(|| panic!("{code} is an XSPICE event code"));
-            assert_eq!(
-                value.event_code(),
-                code,
-                "decoding {code} produced {value:?}, which re-encodes differently"
-            );
-        }
-        for code in (MAX_EVENT_CODE + 1)..=u8::MAX {
-            assert!(
-                digital_value_from_event_code(code).is_none(),
-                "{code} is not an event code"
-            );
         }
     }
 

@@ -343,7 +343,7 @@ impl DigitalValue {
     /// says which of the twelve resolved states a node holds, so a value that
     /// qualified its band twice (`ZeroR` carried at `Strong`) comes back with
     /// the band its state names. Any other code is not an event code.
-    pub(crate) const fn from_event_code(code: u8) -> Option<Self> {
+    pub const fn from_event_code(code: u8) -> Option<Self> {
         let (state, strength) = match code {
             0 => (DigitalState::Zero, DigitalStrength::Strong),
             1 => (DigitalState::One, DigitalStrength::Strong),
@@ -467,8 +467,13 @@ mod tests {
                 DigitalValue::from_event_code(code).expect("0..=12 are the event codes themselves");
             assert_eq!(value.event_code(), code, "code {code} did not re-encode");
         }
-        assert_eq!(DigitalValue::from_event_code(13), None);
-        assert_eq!(DigitalValue::from_event_code(u8::MAX), None);
+        for code in 13u8..=u8::MAX {
+            assert_eq!(
+                DigitalValue::from_event_code(code),
+                None,
+                "code {code} is not an event code"
+            );
+        }
     }
 
     #[test]
