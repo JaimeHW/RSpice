@@ -226,6 +226,14 @@ pub enum Commands {
     /// ticks: time is tick times timescale, each signal holds its last value,
     /// x and z become 0.5 in a `digital` column, and a logic signal wider than
     /// one bit becomes its unsigned integer value.
+    ///
+    /// A declared digital bus — a vector boundary port of a mixed Verilog-AMS
+    /// module, or a wide `$var` in a dump being read — reaches `--to vcd` as
+    /// one `$var wire N` named `bus [msb:lsb]`, with no member scalar beside
+    /// it; every artifact of one run therefore converts to the same dump.
+    /// Converting to a table format writes the members as the separate
+    /// flattened D(node) columns the grid already holds, and a dump's own
+    /// vector packs to one unsigned column.
     Convert(ConvertArgs),
 
     /// Compare results against golden file (regression testing)

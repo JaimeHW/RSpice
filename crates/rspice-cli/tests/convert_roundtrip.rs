@@ -448,6 +448,53 @@ fn a_declared_bus_reaches_every_carrier_as_one_vector() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A table format keeps a bus as its members, and only a dump keeps the word.
+///
+/// A `D(node)` column is one conductor per column and always was; converting a
+/// bus-declaring artifact to CSV therefore writes the flattened member columns
+/// the grid already holds, and the declaration is simply not a thing a table
+/// has a place for. The one column that does carry a whole word is the one
+/// `load_vcd_table` packs from a dump's own vector, and it is an unsigned
+/// number rather than a declaration. Both are documented in `convert --help`;
+/// this is what they mean.
+#[test]
+fn a_bus_converts_to_a_table_as_its_member_columns_and_to_a_dump_as_a_word() {
+    let dir = test_dir("vcd_bus_table");
+    let deck = bus_deck(&dir);
+    let raw = simulate(&dir, &deck, "raw", "run.raw");
+
+    let grid = dir.join("grid.csv");
+    convert(&raw, &grid, "csv", &[]);
+    let (header, _) = read_csv(&grid);
+    for member in ["D(COUNT#1)", "D(COUNT#0)"] {
+        assert!(
+            header.iter().any(|column| column.eq_ignore_ascii_case(member)),
+            "a table carries the members, one column each: {header:?}"
+        );
+    }
+    assert!(
+        !header.iter().any(|column| column.contains("[1:0]")),
+        "a table has no place for a declaration: {header:?}"
+    );
+
+    // Out through the dump, the word is one column holding its unsigned value.
+    let dump = simulate(&dir, &deck, "vcd", "run.vcd");
+    let packed = dir.join("packed.csv");
+    convert(&dump, &packed, "csv", &[]);
+    let (header, rows) = read_csv(&packed);
+    let word = header
+        .iter()
+        .position(|column| column.eq_ignore_ascii_case("D(x1.count [1:0])"))
+        .unwrap_or_else(|| panic!("the vector is one packed column: {header:?}"));
+    assert_eq!(
+        rows.iter().map(|row| row[word]).collect::<Vec<_>>(),
+        vec![0.0, 1.0, 2.0, 3.0],
+        "a two-bit counter counts 0, 1, 2, 3"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A rawfile's event plots survive the trip out through a dump and back into a
 /// table: the same nodes, the same times, the same levels.
 ///
