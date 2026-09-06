@@ -179,6 +179,83 @@ fn hdf5_and_matlab_v73_import_real_root_vectors() {
     assert!(parse_hdf5(&bytes[..16], ResultImportFormat::Hdf5).is_err());
 }
 
+/// One RSpice HDF5 document holding a single section, named `group` and
+/// declaring `section_type`.
+///
+/// Written through `rspice_core::io`, which is the one encoder both the CLI's
+/// `--format hdf5` and this product's own export come through, so the fixture
+/// is a file this product actually produces rather than a hand-built shape.
+fn rspice_hdf5_section(group: &str, section_type: &str) -> Vec<u8> {
+    use rspice_core::io::{Hdf5Column, Hdf5Coordinate, Hdf5Document, Hdf5Table, write_hdf5};
+
+    let mut document = Hdf5Document::new("fixture".to_owned());
+    document
+        .add_table(&Hdf5Table {
+            group: group.to_owned(),
+            section_type: section_type.to_owned(),
+            coordinate: Hdf5Coordinate::Independent {
+                name: "time".to_owned(),
+                values: vec![0.0, 1e-9, 2e-9],
+            },
+            columns: vec![Hdf5Column::Real {
+                name: "V(out)".to_owned(),
+                quantity: "voltage".to_owned(),
+                unit: Some("V".to_owned()),
+                values: vec![0.0, 1.0, 0.0],
+            }],
+        })
+        .expect("the fixture table stands on one coordinate");
+    let mut bytes = Vec::new();
+    write_hdf5(&mut bytes, &document).expect("fixture bytes");
+    bytes
+}
+
+/// A section group is read by what it declares it is, not by what it is called.
+///
+/// The layout contract says the group name is the producer's choice and
+/// `section_type` names the family. The command line names its one section
+/// group after the analysis instance that produced it — `tran1` — so a reader
+/// keyed on the name alone read every identity-named file as an anonymous
+/// root, fell through to the generic reader and refused a file this product
+/// had just written.
+#[test]
+fn an_hdf5_section_is_read_from_what_it_declares_not_what_it_is_called() {
+    for group in ["tran1", "transient"] {
+        let parsed = parse_hdf5(
+            &rspice_hdf5_section(group, "transient"),
+            ResultImportFormat::Hdf5,
+        )
+        .unwrap_or_else(|error| panic!("a section group named '{group}': {error}"));
+        assert_eq!(parsed.analysis_type, AnalysisType::Transient);
+        assert_eq!(parsed.coordinate_name, "time");
+        assert_eq!(parsed.waveforms.len(), 1);
+        assert_eq!(parsed.waveforms[0].name, "V(out)");
+        assert_eq!(parsed.waveforms[0].y.as_slice(), [0.0, 1.0, 0.0]);
+        assert_eq!(parsed.waveforms[0].unit.as_deref(), Some("V"));
+    }
+
+    // A DC sweep under an instance name is the same claim on the other family,
+    // and it must not be read as a transient because it is not called `ac`.
+    let sweep = parse_hdf5(
+        &rspice_hdf5_section("dc3", "dc_sweep"),
+        ResultImportFormat::Hdf5,
+    )
+    .expect("an identity-named DC sweep");
+    assert_eq!(sweep.analysis_type, AnalysisType::DcSweep);
+
+    // A family this reader has no domain for is refused by name at the root
+    // rather than imported under a heading that would rename the result.
+    let error = parse_hdf5(
+        &rspice_hdf5_section("op1", "operating_point"),
+        ResultImportFormat::Hdf5,
+    )
+    .expect_err("an operating point is not one of the three sampled domains");
+    assert!(
+        error.contains("no unambiguous root coordinate dataset"),
+        "{error}"
+    );
+}
+
 fn arrow_batch() -> (Arc<Schema>, RecordBatch) {
     let mut metadata = HashMap::new();
     metadata.insert("rspice.coordinate".to_owned(), "frequency".to_owned());

@@ -501,22 +501,63 @@ pub(super) fn parse_hdf5(
     })?;
     let supported = groups
         .iter()
-        .filter(|name| matches!(name.as_str(), "transient" | "dc_sweep" | "ac"))
-        .cloned()
+        .filter_map(|name| hdf5_section_family(&file, name).map(|family| (name.clone(), family)))
         .collect::<Vec<_>>();
     if supported.len() > 1 {
         return Err(adapter_error(
             format,
             format_args!(
                 "the file contains multiple waveform sections ({}); import one analysis per file",
-                supported.join(", ")
+                supported
+                    .iter()
+                    .map(|(name, _)| name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ),
         ));
     }
-    if let Some(section) = supported.first() {
-        return parse_rspice_hdf5_section(&file, section, format);
+    if let Some((section, family)) = supported.first() {
+        return parse_rspice_hdf5_section(&file, section, *family, format);
     }
     parse_generic_hdf5_root(&file, format)
+}
+
+/// The analysis family one root group holds, or `None` when this reader has no
+/// section shape for it.
+///
+/// The layout contract in `rspice_core::io::hdf5` is explicit that a section
+/// group's *name* is the producer's choice and its `section_type` attribute is
+/// what names the family. The command line names its one section group after
+/// the analysis instance that produced it — `tran1`, not `transient` — so a
+/// reader keyed on the name alone read every identity-named file as an
+/// anonymous root, fell through to [`parse_generic_hdf5_root`], and refused a
+/// file this product had just written. The name is still consulted, because a
+/// file written before the attribute existed carries nothing else.
+///
+/// `operating_point`, `noise`, `distortion` and `fft` are families the layout
+/// defines and this reader has no domain for; they return `None` and are
+/// refused by name at the root, rather than imported under a heading that
+/// would make the result something it is not.
+fn hdf5_section_family(file: &rustyhdf5::File, group: &str) -> Option<Hdf5SectionFamily> {
+    let declared = file
+        .group(group)
+        .ok()
+        .and_then(|opened| opened.attrs().ok())
+        .and_then(|attrs| hdf_optional_string_attr(&attrs, "section_type"));
+    match declared.as_deref().unwrap_or(group) {
+        "transient" => Some(Hdf5SectionFamily::Transient),
+        "dc_sweep" => Some(Hdf5SectionFamily::DcSweep),
+        "ac" => Some(Hdf5SectionFamily::Ac),
+        _ => None,
+    }
+}
+
+/// One of the three analysis families this reader has a section shape for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Hdf5SectionFamily {
+    Transient,
+    DcSweep,
+    Ac,
 }
 
 pub(super) fn parse_matlab_v73(
@@ -535,6 +576,7 @@ pub(super) fn parse_matlab_v73(
 fn parse_rspice_hdf5_section(
     file: &rustyhdf5::File,
     section: &str,
+    family: Hdf5SectionFamily,
     format: ResultImportFormat,
 ) -> Result<ParsedResultDataset, String> {
     let group = file.group(section).map_err(|error| {
@@ -559,7 +601,7 @@ fn parse_rspice_hdf5_section(
             format_args!("/{section} declares invalid signal_count {signal_count}"),
         ));
     }
-    if section == "ac" {
+    if family == Hdf5SectionFamily::Ac {
         let coordinate = hdf_f64_dataset(&group, "frequency", format)?;
         ensure_table_value_limit(format, coordinate.len(), 1 + signal_count.saturating_mul(2))?;
         let mut signals = Vec::with_capacity(signal_count);
@@ -589,7 +631,7 @@ fn parse_rspice_hdf5_section(
             unit: hdf_stated_unit(&attrs, &format!("{prefix}_unit")),
         });
     }
-    let analysis = if section == "transient" {
+    let analysis = if family == Hdf5SectionFamily::Transient {
         AnalysisType::Transient
     } else {
         AnalysisType::DcSweep
@@ -761,6 +803,18 @@ fn hdf_string_attr(
 /// value is read the same way: a waveform must not come back claiming "" as
 /// its unit.
 fn hdf_stated_unit(attrs: &HashMap<String, rustyhdf5::AttrValue>, name: &str) -> Option<String> {
+    hdf_optional_string_attr(attrs, name)
+}
+
+/// A text attribute the producer may or may not have written.
+///
+/// An absent attribute, a non-string one and an empty one are all "unstated":
+/// the reader is asking whether the file says something, and "" is not a
+/// statement.
+fn hdf_optional_string_attr(
+    attrs: &HashMap<String, rustyhdf5::AttrValue>,
+    name: &str,
+) -> Option<String> {
     match attrs.get(name) {
         Some(rustyhdf5::AttrValue::String(value)) if !value.trim().is_empty() => {
             Some(value.clone())
