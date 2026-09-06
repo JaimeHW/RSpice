@@ -4,6 +4,8 @@
 //! 1. Automatic differentiation (Jacobian generation)
 //! 2. Code generation for MNA matrix stamping
 
+pub mod arena;
+
 use crate::ast::{BinaryOp, UnaryOp};
 use crate::error::CompileResult;
 use crate::semantic::AnalyzedModule;

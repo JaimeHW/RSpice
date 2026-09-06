@@ -72,6 +72,7 @@ const GENERATOR_SOURCE_DIGEST_INPUTS: &[&str] = &[
     "src/expr_converter.rs",
     "src/four_state.rs",
     "src/integer_runtime.rs",
+    "src/ir",
     "src/ir.rs",
     "src/json_float.rs",
     "src/laplace.rs",
