@@ -71,7 +71,9 @@ pub fn execute(
 
     table.select_variables(&args.variables)?;
     table.clip_scale_range(args.start, args.stop);
-    if table.scale.is_empty() {
+    // The load refuses an empty coordinate by name, so reaching zero here is
+    // always the clip's doing and the message can say so without guessing.
+    if table.scale.len() < crate::commands::waveform_io::MIN_RESULT_SAMPLES {
         return Err(CliError::ConversionError {
             message: "no data points remain after applying --start/--stop".to_string(),
         });

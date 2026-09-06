@@ -130,11 +130,38 @@ pub(crate) fn read_utf8_input_limited(path: &Path, limit: usize) -> Result<Strin
     })
 }
 
+/// The fewest coordinate samples a result may have and still be a result.
+///
+/// **One.** A `.OP` is a single point by construction, and the command line
+/// writes it in every table format and reads every one of them back; so a rule
+/// that wanted two would have to make an exception for the one analysis whose
+/// result is always one sample, and an export the product refuses to reopen is
+/// worse than a small file. A caller who wants two points asks for two points.
+///
+/// Zero is not a result. An empty coordinate has no row to write, no shape for
+/// a column to match, and nothing for `--start`/`--stop` to clip, so it is
+/// refused where it is read rather than after a later step fails for a reason
+/// that is not the real one.
+///
+/// The GUI's result *importer* is stricter — its `MIN_RESULT_ROWS` is two, so
+/// it will not reopen a one-point file this writes. That is a defect on its
+/// side of the same boundary, and this constant is what it should agree with.
+pub(crate) const MIN_RESULT_SAMPLES: usize = 1;
+
 fn validate_table_shape(
     path: &Path,
     table: ExportTable,
     resource_limits: rspice_core::ResourceLimits,
 ) -> Result<ExportTable, CliError> {
+    if table.scale.len() < MIN_RESULT_SAMPLES {
+        return Err(conversion_error(
+            path,
+            format!(
+                "the '{}' coordinate carries no samples, so the file holds no result to convert",
+                table.scale_name
+            ),
+        ));
+    }
     let mut retained_values = table.scale.len();
     for column in &table.columns {
         retained_values = retained_values.saturating_add(match &column.data {
@@ -256,6 +283,105 @@ fn load_rawfile(
     })
 }
 
+/// The transposed table an operating point publishes, read back as a table.
+///
+/// `run -f csv` writes a `.OP` as `signal,value` rows rather than as one wide
+/// row, because a single point read down a column is what a reader of an
+/// operating point wants. That shape is not a second CSV dialect being
+/// invented here: it is the one this command line writes and, before this,
+/// could not read — `convert op.csv --to csv` refused its own output with
+/// "non-numeric value 'V(IN)' in column 'signal'".
+///
+/// It comes back as the same table the HDF5 artifact of that run comes back
+/// as: one `point` sample at zero, one column per signal. So all six formats
+/// an operating point is published in read back to one result.
+///
+/// `Ok(None)` means this is not that shape, and the ordinary numeric reader
+/// takes over. The discriminator is both halves of the header *and* a
+/// non-numeric first field: a genuine numeric table whose columns happen to be
+/// called `signal` and `value` still reads as a table.
+fn load_operating_point_report(
+    path: &Path,
+    content: &str,
+    separator: char,
+    header: &[String],
+) -> Result<Option<ExportTable>, CliError> {
+    if header.len() != 2
+        || !header[0].trim().eq_ignore_ascii_case("signal")
+        || !header[1].trim().eq_ignore_ascii_case("value")
+    {
+        return Ok(None);
+    }
+
+    let rows: Vec<&str> = content
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .skip(1)
+        .collect();
+    let Some(first) = rows.first() else {
+        return Ok(None);
+    };
+    let first = parse_delimited_record(first, separator)
+        .map_err(|message| conversion_error(path, format!("row 2: {message}")))?;
+    if first
+        .first()
+        .is_some_and(|name| name.trim().parse::<f64>().is_ok())
+    {
+        return Ok(None);
+    }
+
+    let mut columns = Vec::new();
+    for (row, line) in rows.iter().enumerate() {
+        let line_number = row + 2;
+        let fields = parse_delimited_record(line, separator)
+            .map_err(|message| conversion_error(path, format!("row {line_number}: {message}")))?;
+        if fields.len() != 2 {
+            return Err(conversion_error(
+                path,
+                format!(
+                    "row {line_number} has {} columns; an operating point states one signal and \
+                     one value per row",
+                    fields.len()
+                ),
+            ));
+        }
+        let name = fields[0].trim();
+        if name.is_empty() {
+            return Err(conversion_error(
+                path,
+                format!("row {line_number} names no signal"),
+            ));
+        }
+        let token = fields[1].trim();
+        let value = token.parse::<f64>().map_err(|_| {
+            conversion_error(
+                path,
+                format!("non-numeric value '{token}' for signal '{name}', row {line_number}"),
+            )
+        })?;
+        if !value.is_finite() {
+            return Err(conversion_error(
+                path,
+                format!("non-finite value '{token}' for signal '{name}', row {line_number}"),
+            ));
+        }
+        columns.push(ExportColumn {
+            name: name.to_string(),
+            var_type: signal_var_type(name),
+            data: ColumnData::Real(vec![value]),
+        });
+    }
+
+    Ok(Some(ExportTable {
+        analysis: "dc_op".to_string(),
+        plot_name: "DC Operating Point".to_string(),
+        scale_name: "point".to_string(),
+        scale_type: "voltage".to_string(),
+        scale: vec![0.0],
+        columns,
+    }))
+}
+
 fn load_delimited(
     path: &Path,
     separator: char,
@@ -280,6 +406,10 @@ fn load_delimited(
         header.len(),
         resource_limits.max_external_data_values,
     )?;
+
+    if let Some(table) = load_operating_point_report(path, &content, separator, &header)? {
+        return Ok(table);
+    }
 
     let mut scale = Vec::new();
     let mut series: Vec<Vec<f64>> = vec![Vec::new(); header.len().saturating_sub(1)];

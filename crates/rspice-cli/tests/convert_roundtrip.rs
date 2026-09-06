@@ -1076,3 +1076,89 @@ fn an_analog_only_table_has_no_dump_to_write() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// One sample is a result, and none is not.
+///
+/// An operating point is a single point by construction, so a two-sample
+/// minimum would have to make an exception for the one analysis whose result
+/// is always one sample. The command line has no such minimum: every table
+/// format writes the point and reads it back, which is the whole rule, stated
+/// once in `waveform_io::MIN_RESULT_SAMPLES` and in `convert --help`.
+///
+/// Two of those six formats did not read back before this test existed, and
+/// both failed on the *shape* of a one-point result rather than on its size:
+///
+/// - `raw` and `ascii` put the point index on a line of its own, so the
+///   column-oriented body counted it as a value and ran out of file — "plot 1
+///   ends before 25 remaining byte(s)";
+/// - `csv` and `tsv` publish the transposed `signal,value` report, which the
+///   numeric reader refused with "non-numeric value 'V(IN)' in column
+///   'signal'".
+///
+/// So this is the round trip, not just the row count: the file has to come
+/// back with its signals and their values.
+///
+/// The other half is that zero samples is refused *where the file is read*,
+/// naming the coordinate. Before this it fell through to the clip check and
+/// came back as "no data points remain after applying --start/--stop" on a
+/// command line that had given neither flag.
+#[test]
+fn one_sample_survives_every_table_format_and_none_is_refused_by_name() {
+    let dir = test_dir("single_sample");
+
+    // The real one-point result, from the analysis that always produces one.
+    // The divider puts 5 V on `in` and half of it on `out`.
+    let op_deck = "* single point\nv1 in 0 dc 5\nr1 in out 1k\nr2 out 0 1k\n.op\n.end\n";
+    for format in ["raw", "ascii", "csv", "tsv", "json", "hdf5"] {
+        let published = simulate(&dir, op_deck, format, &format!("op.{format}"));
+        let back = dir.join(format!("op_{format}.csv"));
+        convert(&published, &back, "csv", &[]);
+        let (header, rows) = read_csv(&back);
+        assert_eq!(
+            rows.len(),
+            1,
+            "the {format} artifact of an operating point reads back as one row: {header:?}"
+        );
+        let row = &rows[0];
+        for (signal, expected) in [("V(IN)", 5.0), ("V(OUT)", 2.5)] {
+            let column = header
+                .iter()
+                .position(|column| column.eq_ignore_ascii_case(signal))
+                .unwrap_or_else(|| panic!("the {format} artifact lost {signal}: {header:?}"));
+            assert!(
+                (row[column] - expected).abs() < 1e-9,
+                "the {format} artifact gave {signal} = {} instead of {expected}",
+                row[column]
+            );
+        }
+    }
+
+    // And a coordinate with no samples at all is refused when it is read.
+    let empty = dir.join("empty.csv");
+    std::fs::write(&empty, "time,V(out)\n").expect("write the header-only table");
+    let out = dir.join("empty.out.csv");
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args([
+            "--quiet",
+            "convert",
+            empty.to_str().unwrap(),
+            out.to_str().unwrap(),
+            "--to",
+            "csv",
+        ])
+        .output()
+        .expect("run rspice");
+    assert!(!output.status.success(), "an empty table is not a result");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("carries no samples"),
+        "the refusal should name what is missing: {stderr}"
+    );
+    assert!(
+        !stderr.contains("--start"),
+        "and must not blame a flag that was not given: {stderr}"
+    );
+    assert!(!out.exists(), "a refused conversion leaves no file behind");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -340,16 +340,21 @@ pub(super) fn write_dc_op_output(
                     path: path.to_path_buf(),
                     source: e,
                 })?;
-                writeln!(file, "0").map_err(|e| CliError::OutputError {
-                    path: path.to_path_buf(),
-                    source: e,
-                })?;
-                for signal in signals {
-                    writeln!(file, "\t{:.17e}", signal.values[0]).map_err(|e| {
-                        CliError::OutputError {
-                            path: path.to_path_buf(),
-                            source: e,
-                        }
+                // The point index belongs on the first value's line, not on a
+                // line of its own: a rawfile's column-oriented body is one
+                // value per line with the row index prefixed to the first, and
+                // an index alone is a row this product's own reader — and
+                // ngspice's — counts as a value and then runs out of file.
+                for (index, signal) in signals.iter().enumerate() {
+                    let value = signal.values[0];
+                    if index == 0 {
+                        writeln!(file, "0\t{value:.17e}")
+                    } else {
+                        writeln!(file, "\t{value:.17e}")
+                    }
+                    .map_err(|e| CliError::OutputError {
+                        path: path.to_path_buf(),
+                        source: e,
                     })?;
                 }
             }

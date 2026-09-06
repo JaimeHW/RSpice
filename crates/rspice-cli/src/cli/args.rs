@@ -215,6 +215,10 @@ pub enum Commands {
     /// Rawfile, CSV, TSV, JSON and HDF5 all carry the same table, and complex
     /// AC data survives every round trip between them.
     ///
+    /// One sample is a result: an operating point is a single point, and every
+    /// table format writes it and reads it back. An empty coordinate is not,
+    /// and is refused when the file is read.
+    ///
     /// `--to vcd` writes a Value Change Dump instead of a table. A rawfile
     /// carrying event plots and a typed JSON result document both hold the
     /// event timelines themselves, and convert exactly. Any other source is
