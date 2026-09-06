@@ -551,7 +551,26 @@ use rspice_core::analysis::harmonic_balance::{
 // decoder a frontend must otherwise restate is not internal machinery. A second
 // copy of the table is a second definition of what a code means, and the only
 // way to keep two definitions agreeing is to have one.
-const MAX_PUBLIC_ITEMS: usize = 4978;
+//
+// 2026-09-06, +19 deliberate (4,978 -> 4,997): the HDF5 writer, moved out of
+// `rspice-cli` into `io/hdf5.rs` so that the CLI, the GUI and the browser all
+// publish one layout instead of two encoders agreeing by hand. Every item is
+// named by both frontends:
+// - 2 constants, `HDF5_SCHEMA_VERSION` and `HDF5_SIMULATOR`, the two root
+//   attributes a reader identifies an RSpice document by.
+// - 6 for the document: `Hdf5Document`, `Hdf5Group`, `Hdf5Attribute`,
+//   `Hdf5Values`, and `Hdf5Document::{new, set_attr}`. The CLI builds its
+//   `.DISTO` and `.FFT` groups out of these, because those two families are
+//   its own semantics but must not be a second serializer.
+// - 4 for a group's contents: `Hdf5Group::{new, set_attr, set_real_dataset,
+//   set_integer_dataset}`.
+// - 5 for the layout itself: `Hdf5Table`, `Hdf5Coordinate`, `Hdf5Column`,
+//   `Hdf5Document::add_table`, and `Hdf5Error`. `Hdf5Table::to_group` stays
+//   private: `add_table` is the only way in, so the validation cannot be
+//   stepped around.
+// - 1 for `write_hdf5`, the one entry point that serializes.
+// - 1 grouped re-export statement in `io.rs`.
+const MAX_PUBLIC_ITEMS: usize = 4997;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

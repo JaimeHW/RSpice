@@ -1,4 +1,4 @@
-//! Waveform file formats: reading and writing SPICE RAW and VCD.
+//! Waveform file formats: reading and writing SPICE RAW, VCD and HDF5.
 //!
 //! Reading and writing the same format used to sit in two unrelated places —
 //! the reader under `compat` (as a foreign-simulator shim) and the writers
@@ -15,16 +15,25 @@
 //! names and columns of [`crate::Value`], keeping serialization independent of
 //! solver internals.
 //!
+//! [`hdf5`] is the third leaf: the one HDF5 writer in the product. Its layout
+//! is what the CLI publishes and what the GUI's own HDF5 reader expects, so it
+//! is stated once here rather than agreed between two encoders.
+//!
 //! Waveform *compression* is not here. `TransientResultCompressed` is a shape
 //! of transient result rather than a file format, so it lives beside the
 //! uncompressed one in [`crate::engine`].
 
+pub mod hdf5;
 pub mod ltspice_raw;
 pub mod raw_export;
 pub mod vcd;
 pub mod waveform_stream;
 pub mod xyce_prn;
 
+pub use hdf5::{
+    HDF5_SCHEMA_VERSION, HDF5_SIMULATOR, Hdf5Attribute, Hdf5Column, Hdf5Coordinate, Hdf5Document,
+    Hdf5Error, Hdf5Group, Hdf5Table, Hdf5Values, write_hdf5,
+};
 pub use ltspice_raw::{
     RawFile, RawFileHeader, RawParseError, RawWaveform, RawWaveformData, parse_raw_file,
     parse_raw_file_with_limits, parse_raw_plots_file_with_limits,
