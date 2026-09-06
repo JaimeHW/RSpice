@@ -4811,7 +4811,7 @@
       },
       "capability": {
         "viewerId": "viewer-polar",
-        "classification": "release-planned",
+        "classification": "release-target",
         "creationFamilyIds": [
           "rf-network"
         ],

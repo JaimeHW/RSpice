@@ -18,14 +18,19 @@ use super::frame_work::{self, DatasetWalk};
 use super::strip::{self, LegendChip};
 use super::well_hint;
 
+/// The network term one retained trace name spells.
+///
+/// Shared with the polar sheet: both read the same S-parameter naming
+/// contract, and a second parser would be a second answer to what `Sdd21`
+/// means.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct SParameterTraceIdentity {
-    output_port: usize,
-    input_port: usize,
-    physical_ports: bool,
+pub(super) struct SParameterTraceIdentity {
+    pub(super) output_port: usize,
+    pub(super) input_port: usize,
+    pub(super) physical_ports: bool,
 }
 
-fn trace_identity(name: &str) -> Option<SParameterTraceIdentity> {
+pub(super) fn trace_identity(name: &str) -> Option<SParameterTraceIdentity> {
     let core = name
         .trim()
         .trim_matches('|')

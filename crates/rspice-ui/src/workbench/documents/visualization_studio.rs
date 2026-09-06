@@ -2812,7 +2812,11 @@ fn resolved_viewer_availability_for_binding(
         ResultViewer::Hist
         | ResultViewer::Op
         | ResultViewer::NoiseContrib
-        | ResultViewer::Nyquist => {
+        | ResultViewer::Nyquist
+        // These three read the active selection's own retained evidence
+        // through state-aware gates — the population memo and the workspace's
+        // requirements — exactly as the histogram does.
+        | ResultViewer::Polar => {
             binding_is_active && result_document::viewer_is_available(state, viewer)
         }
         // Dataset-native Results projections, which therefore can never be

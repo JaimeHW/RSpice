@@ -809,6 +809,9 @@ impl Command {
             Self::ResultViewer(crate::workbench::ResultViewer::Smith) => {
                 spec("result-smith", "Open Smith-chart viewer", "Results")
             }
+            Self::ResultViewer(crate::workbench::ResultViewer::Polar) => {
+                spec("result-polar", "Open polar-response viewer", "Results")
+            }
             Self::ResultViewer(crate::workbench::ResultViewer::PoleZero) => {
                 spec("result-pole-zero", "Open pole-zero viewer", "Results")
             }
@@ -1266,6 +1269,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ResultViewer(crate::workbench::ResultViewer::Table),
     Command::ResultViewer(crate::workbench::ResultViewer::Nyquist),
     Command::ResultViewer(crate::workbench::ResultViewer::Smith),
+    Command::ResultViewer(crate::workbench::ResultViewer::Polar),
     Command::ResultViewer(crate::workbench::ResultViewer::PoleZero),
     Command::ResultViewer(crate::workbench::ResultViewer::Events),
     Command::ResultViewer(crate::workbench::ResultViewer::Soa),

@@ -653,6 +653,7 @@ fn result_tabs_follow_the_upgraded_mockup_mode_order() {
             ResultViewer::HarmonicBalance,
             ResultViewer::PhaseNoise,
             ResultViewer::Smith,
+            ResultViewer::Polar,
             ResultViewer::TransferFunction,
             ResultViewer::Contribution,
             ResultViewer::Op,
@@ -705,6 +706,7 @@ fn structured_result_controls_have_a_reachable_40_px_strip() {
         ResultViewer::Contribution,
         ResultViewer::Nyquist,
         ResultViewer::Smith,
+        ResultViewer::Polar,
         ResultViewer::PoleZero,
     ] {
         assert!(!viewer_has_structured_strip(viewer), "{viewer:?}");
@@ -1222,7 +1224,7 @@ fn app_showing(viewer: ResultViewer) -> RSpiceApp {
                 "#00aaff",
             )]),
         ResultViewer::Bode | ResultViewer::Nyquist => ac_analysis(),
-        ResultViewer::Smith => sparameter_analysis(),
+        ResultViewer::Smith | ResultViewer::Polar => sparameter_analysis(),
         ResultViewer::HarmonicBalance => {
             AnalysisResult::new(1, AnalysisType::HarmonicBalance, "HB").with_waveforms(vec![
                 WaveformData::new(
@@ -1591,6 +1593,117 @@ fn draw_sheet_and_tessellate(app: &mut RSpiceApp, viewer: ResultViewer) {
             );
         }
     }
+}
+
+/// The two gates a Results sheet is looked at through: the small window the
+/// display scaling of a real workstation produces, and a wide one.
+const SHEET_FIT_GATES: [(f32, f32); 2] = [(1_024.0, 640.0), (1_680.0, 1_020.0)];
+
+/// Every control of the polar sheet is inside the window it is drawn
+/// in, at both gates.
+///
+/// Measured through AccessKit rather than through painted shapes, for the
+/// reason the Studio's own gate states: a decorative shape may legitimately be
+/// clipped and a control may not. A control past the right edge is a control
+/// behind a horizontal scroll, which is the thing these sheets' single bar
+/// exists to avoid; one past the bottom is a register the reader cannot reach
+/// without scrolling a document well that does not scroll.
+#[test]
+fn the_polar_sheet_fits_its_window_at_both_gates() {
+    // Sub-pixel: a control resting exactly on the edge is inside it.
+    const TOLERANCE: f64 = 0.5;
+
+    let mut offenders = Vec::new();
+    let mut measured = 0_usize;
+    for viewer in [ResultViewer::Polar] {
+        for (width, height) in SHEET_FIT_GATES {
+            let mut app = app_showing(viewer);
+            app.state.ui.results.viewer = viewer;
+            for (_, node) in sheet_route_nodes(app, width, height) {
+                if !matches!(
+                    node.role(),
+                    egui::accesskit::Role::Button
+                        | egui::accesskit::Role::CheckBox
+                        | egui::accesskit::Role::ComboBox
+                        | egui::accesskit::Role::Link
+                        | egui::accesskit::Role::TextInput
+                ) {
+                    continue;
+                }
+                let Some(bounds) = node.bounds() else {
+                    continue;
+                };
+                measured += 1;
+                if bounds.x1 > f64::from(width) + TOLERANCE
+                    || bounds.x0 < -TOLERANCE
+                    || bounds.y1 > f64::from(height) + TOLERANCE
+                    || bounds.y0 < -TOLERANCE
+                {
+                    offenders.push(format!(
+                        "{width:.0}x{height:.0} {viewer:?}: {:?} {:?} spans x {:.1}..{:.1}, y {:.1}..{:.1}",
+                        node.role(),
+                        node.label().unwrap_or_default(),
+                        bounds.x0,
+                        bounds.x1,
+                        bounds.y0,
+                        bounds.y1
+                    ));
+                }
+            }
+        }
+    }
+    offenders.sort();
+    offenders.dedup();
+    assert!(
+        offenders.is_empty(),
+        "controls drawn outside the window they belong to:
+{}",
+        offenders.join(
+            "
+"
+        )
+    );
+    assert!(
+        measured >= 3 * SHEET_FIT_GATES.len(),
+        "the gate measured {measured} controls, so it is not looking at the sheet's bar"
+    );
+}
+
+/// The Results workspace at one window size, as its controls published
+/// themselves. Two passes: the first settles the layout the second is
+/// measured on.
+fn sheet_route_nodes(
+    mut app: RSpiceApp,
+    width: f32,
+    height: f32,
+) -> Vec<(egui::accesskit::NodeId, egui::accesskit::Node)> {
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let mut nodes = Vec::new();
+    for _ in 0..2 {
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(width, height),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::Panel::right("inspector").show(ctx, |ui| right_panel(ui, &mut app.state));
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ctx, |ui| show(ui, &mut app));
+            },
+        );
+        nodes = output
+            .platform_output
+            .accesskit_update
+            .map(|update| update.nodes)
+            .unwrap_or_default();
+    }
+    nodes
 }
 
 /// Paint one sheet and count the primitives it actually emits.

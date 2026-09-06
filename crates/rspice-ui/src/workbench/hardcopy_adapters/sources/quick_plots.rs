@@ -49,6 +49,12 @@ pub(super) fn resolve_results_quick_view_parts(
         ResultViewer::Smith => {
             HardcopySemanticDocument::Plot(quick_complex_plot(active, ResultViewer::Smith)?)
         }
+        // The polar sheet's evidence is the same retained complex locus; the
+        // printed figure states it on the coefficient plane, where a page has
+        // no reader to rotate the ruling for.
+        ResultViewer::Polar => {
+            HardcopySemanticDocument::Plot(quick_complex_plot(active, ResultViewer::Polar)?)
+        }
         ResultViewer::NoiseContrib => HardcopySemanticDocument::Plot(quick_noise_spectrum_plot(
             active,
             &presentation.overlay.for_analysis(active.analysis.id),
@@ -999,5 +1005,6 @@ pub(super) const fn is_curve_viewer(viewer: ResultViewer) -> bool {
             | ResultViewer::Hist
             | ResultViewer::Nyquist
             | ResultViewer::Smith
+            | ResultViewer::Polar
     )
 }

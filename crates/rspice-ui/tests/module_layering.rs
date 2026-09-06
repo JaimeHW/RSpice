@@ -1588,7 +1588,17 @@ const OVERSIZED_FILES: &[(&str, usize)] = &[
     ("workbench/docks/inspector.rs", 3_221),
     ("workbench/docks/navigator.rs", 6_668),
     ("workbench/documents/model_editor.rs", 2_614),
-    ("workbench/documents/result_document.rs", 6_418),
+    // 2026-09-06, +52 (6_418 -> 6_470): the polar sheet joined the workspace.
+    // Every line is a single-owner table this file exists to own -- the
+    // `ResultViewer` variant and its tab order, the two directions of the
+    // viewer-document identity map, the sheet and inspector dispatch, the
+    // availability gate, the hook that lets a custom sheet paint its own
+    // domain bar, and `SheetContext`, which is how the sheet takes the session
+    // slices it reads instead of `AppState` (see ALLOWED_WORKBENCH_VIOLATIONS:
+    // that edge holds at 34). The sheet's own model, painter, register and
+    // tests are in `polar.rs`; what is left here is exactly the registration
+    // that cannot be anywhere else.
+    ("workbench/documents/result_document.rs", 6_470),
     ("workbench/documents/result_document/waves.rs", 4_229),
     ("workbench/documents/visualization_studio.rs", 4_695),
     ("workbench/documents/visualization_studio/dock.rs", 3_520),

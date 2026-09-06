@@ -21,6 +21,7 @@ pub(crate) mod operational_state;
 mod optimization;
 mod persistent_document;
 mod phase_noise;
+mod polar;
 mod pz;
 mod reliability;
 mod sensitivity;
@@ -941,6 +942,8 @@ pub enum ResultViewer {
     Nyquist,
     /// Smith-chart RF/network surface.
     Smith,
+    /// One retained complex response on the polar plane.
+    Polar,
     /// Complex-plane pole-zero surface.
     PoleZero,
     /// Committed XSPICE digital and real-valued event history.
@@ -978,6 +981,7 @@ impl ResultViewer {
             ResultViewer::Table => "TABLE",
             ResultViewer::Nyquist => "NYQ",
             ResultViewer::Smith => "SMITH",
+            ResultViewer::Polar => "POLAR",
             ResultViewer::PoleZero => "PZ",
             ResultViewer::Events => "EVENTS",
             ResultViewer::Soa => "SOA",
@@ -987,7 +991,7 @@ impl ResultViewer {
         }
     }
 
-    const PRIMARY: [ResultViewer; 21] = [
+    const PRIMARY: [ResultViewer; 22] = [
         ResultViewer::Waves,
         ResultViewer::DcSweep,
         ResultViewer::Bode,
@@ -997,6 +1001,7 @@ impl ResultViewer {
         ResultViewer::HarmonicBalance,
         ResultViewer::PhaseNoise,
         ResultViewer::Smith,
+        ResultViewer::Polar,
         ResultViewer::TransferFunction,
         ResultViewer::Contribution,
         ResultViewer::Op,
@@ -1045,6 +1050,7 @@ impl ResultViewer {
             ResultViewer::Table => "Table",
             ResultViewer::Nyquist => "Nyquist",
             ResultViewer::Smith => "Smith",
+            ResultViewer::Polar => "Polar",
             ResultViewer::PoleZero => "PZ",
             ResultViewer::Events => "Events",
             ResultViewer::Soa => "SOA",
@@ -1081,6 +1087,7 @@ impl ResultViewer {
             ResultViewer::Contribution => "viewer-contribution",
             ResultViewer::TransferFunction => "viewer-transfer-function",
             ResultViewer::Smith => "viewer-smith",
+            ResultViewer::Polar => "viewer-polar",
             ResultViewer::PoleZero => "viewer-pz",
             ResultViewer::Events => "viewer-digital-events",
             ResultViewer::Soa => "viewer-soa",
@@ -1106,6 +1113,7 @@ impl ResultViewer {
             "viewer-spectrum" => ResultViewer::Fft,
             "viewer-phase-noise" => ResultViewer::PhaseNoise,
             "viewer-smith" => ResultViewer::Smith,
+            "viewer-polar" => ResultViewer::Polar,
             "viewer-table" => ResultViewer::Table,
             "viewer-histogram" => ResultViewer::Hist,
             "eye-viewer" => ResultViewer::Eye,
@@ -1134,6 +1142,7 @@ impl ResultViewer {
             ResultViewer::Eye
             | ResultViewer::Nyquist
             | ResultViewer::Smith
+            | ResultViewer::Polar
             | ResultViewer::PoleZero => WorkbenchIcon::Target,
             ResultViewer::Op
             | ResultViewer::TransferFunction
@@ -1321,6 +1330,29 @@ impl ViewerAvailability {
         Self {
             available: false,
             reason,
+        }
+    }
+}
+
+/// The session slices a custom-canvas sheet reads.
+///
+/// Sheets take the slices they use instead of the whole session aggregate.
+/// `documents/result_document -> app_state` is an edge this crate is retiring
+/// — a module that needs the retained runs, the requirements and its own
+/// presentation state should say so — and a sheet that reached for `AppState`
+/// would extend it by one more file for nothing.
+pub(super) struct SheetContext<'a> {
+    pub(super) simulation: &'a crate::state::SimulationState,
+    pub(super) results: &'a mut ResultsState,
+    pub(super) policy: crate::quantity::QuantityPresentationPolicy,
+}
+
+impl<'a> SheetContext<'a> {
+    fn of(state: &'a mut AppState) -> Self {
+        Self {
+            policy: state.ui.preferences.quantity_presentation_policy(),
+            simulation: &state.simulation,
+            results: &mut state.ui.results,
         }
     }
 }
@@ -2450,6 +2482,9 @@ pub struct ResultsState {
     document_markers: Vec<DocumentMarker>,
     /// The A│B cursor tool.
     pub cursor_tool: CursorTool,
+    /// Polar sheet controls: the network term, the radius ruling, the decade
+    /// marks and the normalization.
+    pub(crate) polar: polar::PolarSheetState,
     /// The marker tool.
     pub marker_tool: MarkerTool,
     /// Primary plot pointer tool shown in the 31 px instrument strip.
@@ -4938,6 +4973,7 @@ fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
         ResultViewer::Table => table::show(ui, &mut app.state),
         ResultViewer::Nyquist => nyquist::show(ui, &mut app.state),
         ResultViewer::Smith => smith::show(ui, &mut app.state),
+        ResultViewer::Polar => polar::show(ui, &mut SheetContext::of(&mut app.state)),
         ResultViewer::PoleZero => pz::show(ui, &mut app.state),
         ResultViewer::Events => events::show(ui, &mut app.state),
         ResultViewer::Soa => soa::show(ui, &mut app.state),
@@ -5308,6 +5344,9 @@ fn show_sheet_bar(ui: &mut Ui, state: &mut AppState) {
                 remaining,
                 egui::Layout::left_to_right(egui::Align::Center),
                 |ui| {
+                    if sheet_domain_controls(ui, state) {
+                        return;
+                    }
                     ui.label(
                         egui::RichText::new(sheet_purpose(state))
                             .font(theme::mono(tokens::FS_0, FontWeight::Regular))
@@ -5316,6 +5355,22 @@ fn show_sheet_bar(ui: &mut Ui, state: &mut AppState) {
                 },
             );
         });
+    }
+}
+
+/// The domain controls a custom-canvas sheet owns, drawn left-aligned in its
+/// bar. `false` means the sheet owns none and the bar states its purpose.
+///
+/// The controls live with the sheet that reads them rather than in one
+/// growing match here: each is a statement about that sheet's own evidence —
+/// which network term, which two columns, which normalization — and the sheet
+/// is the only place that knows what the retained result can offer.
+fn sheet_domain_controls(ui: &mut Ui, state: &mut AppState) -> bool {
+    let viewer = state.ui.results.viewer;
+    let mut context = SheetContext::of(state);
+    match viewer {
+        ResultViewer::Polar => polar::domain_bar(ui, &mut context),
+        _ => false,
     }
 }
 
@@ -6131,6 +6186,22 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
                 )
             }
         }
+        ResultViewer::Polar => {
+            if active_run.is_some_and(|run| {
+                state.simulation.active_analysis().is_some_and(|analysis| {
+                    !polar::quantities(analysis).is_empty()
+                        && analysis_evidence_is_valid(state, run.dataset_id, analysis)
+                })
+            }) {
+                ViewerAvailability::available(
+                    "Retained complex responses are available for the active analysis",
+                )
+            } else {
+                ViewerAvailability::unavailable(
+                    "Requires AC, SP, or HB with retained complex responses",
+                )
+            }
+        }
         ResultViewer::PoleZero => specialized_availability(state, ActiveViewer::PoleZero),
         ResultViewer::Events => {
             if events::active_analysis_is_renderable(state) {
@@ -6392,6 +6463,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         ResultViewer::Table => table::right_panel(ui, state),
         ResultViewer::Nyquist => nyquist::right_panel(ui, state),
         ResultViewer::Smith => smith::right_panel(ui, state),
+        ResultViewer::Polar => polar::right_panel(ui, &mut SheetContext::of(state)),
         ResultViewer::PoleZero => pz::right_panel(ui, state),
         ResultViewer::Events => events::right_panel(ui, state),
         ResultViewer::Soa => soa::right_panel(ui, state),
