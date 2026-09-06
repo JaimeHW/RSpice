@@ -18,18 +18,19 @@ use num_complex::Complex64;
 
 use super::payload::{
     AcPayload, AcSensitivityEntry, CompressionReportDocument, DcSweepAxisDocument, DcSweepPayload,
-    DigitalEventPoint, DigitalEventTrace, DistortionPayload, DistortionProductSeries,
-    DistortionProductTag, DistortionTone, EnvelopeCarrierDocument, EnvelopeContinuationDocument,
-    EnvelopeNodeSpectrum, EnvelopePayload, FftMetricsDocument, FftPayload, FftSourceDocument,
-    FloquetEvidenceDocument, FourierPayload, HarmonicBalancePayload, HbReactiveSpectrumDocument,
-    MonteCarloPayload, MonteCarloVariableStatistics, NamedObservable, NamedObservableSeries,
-    NoiseContributionSeries, NoisePayload, NoiseSourceIdentityDocument, NyquistSample,
-    OperatingPointPayload, OscillatorPhaseNoiseDocument, PNoiseBandwidth, PNoiseContribution,
-    PNoiseContributor, PNoisePayload, PacConversionEntry, PacConversionMatrixDocument, PacPayload,
-    PacSidebandDescriptor, PoleZeroPayload, PortDocument, PortNoiseCovarianceNormalization,
-    PortNoisePayload, RealEventPoint, RealEventTrace, ResultPayload, RootSetEvidenceDocument,
-    SParameterPayload, SensitivityElementTag, SensitivityEntry, SensitivityPayload,
-    StabilityPayload, TransferFunctionPayload, TransientPayload, TwoPortNoiseEntry,
+    DigitalEventBus, DigitalEventPoint, DigitalEventTrace, DistortionPayload,
+    DistortionProductSeries, DistortionProductTag, DistortionTone, EnvelopeCarrierDocument,
+    EnvelopeContinuationDocument, EnvelopeNodeSpectrum, EnvelopePayload, FftMetricsDocument,
+    FftPayload, FftSourceDocument, FloquetEvidenceDocument, FourierPayload, HarmonicBalancePayload,
+    HbReactiveSpectrumDocument, MonteCarloPayload, MonteCarloVariableStatistics, NamedObservable,
+    NamedObservableSeries, NoiseContributionSeries, NoisePayload, NoiseSourceIdentityDocument,
+    NyquistSample, OperatingPointPayload, OscillatorPhaseNoiseDocument, PNoiseBandwidth,
+    PNoiseContribution, PNoiseContributor, PNoisePayload, PacConversionEntry,
+    PacConversionMatrixDocument, PacPayload, PacSidebandDescriptor, PoleZeroPayload, PortDocument,
+    PortNoiseCovarianceNormalization, PortNoisePayload, RealEventPoint, RealEventTrace,
+    ResultPayload, RootSetEvidenceDocument, SParameterPayload, SensitivityElementTag,
+    SensitivityEntry, SensitivityPayload, StabilityPayload, TransferFunctionPayload,
+    TransientPayload, TwoPortNoiseEntry,
 };
 use super::{
     AnalysisResultDocument, AnalysisResultDocumentBuilder, AxisValues, ComplexSample,
@@ -57,7 +58,10 @@ use crate::engine::waveform::{
     TransientChannelAvailability, TransientChannelRole, TransientChannelUnit,
     TransientCompressedChannel, TransientCompressionReport, TransientResultCompressed,
 };
-use crate::engine::{DcSweepPointResult, TransientFftResult, TransientResult};
+use crate::engine::{
+    DcSweepPointResult, DigitalBusDeclaration, DigitalTrace, TransientFftResult, TransientResult,
+    validate_digital_bus_table,
+};
 use crate::engine::{EnvelopeResult, PeriodicNoiseResult};
 use crate::execution::plan::AnalysisInstanceId;
 use crate::execution::schema::{
@@ -224,6 +228,28 @@ fn finite_axis(
         }
     }
     Ok(values.to_vec())
+}
+
+/// Project a run's bus declarations onto the document's spelling of one.
+///
+/// The table is judged against the traces it declares over *before* it is
+/// published rather than only when the finished document validates itself, so
+/// a producer that declares a bus over a node it did not retain is told which
+/// bus and which member at the point it made the mistake.
+fn digital_bus_documents(
+    location: &'static str,
+    buses: &[DigitalBusDeclaration],
+    digital_traces: &[DigitalTrace],
+) -> Result<Vec<DigitalEventBus>, ResultDocumentError> {
+    if buses.is_empty() {
+        return Ok(Vec::new());
+    }
+    validate_digital_bus_table(
+        buses,
+        digital_traces.iter().map(|trace| trace.node_name.as_str()),
+    )
+    .map_err(|error| source_error(location, error.to_string()))?;
+    Ok(buses.iter().map(DigitalEventBus::from).collect())
 }
 
 fn finite_scalar(
@@ -973,6 +999,11 @@ impl AnalysisResultDocument {
             step_sizes: finite_axis(LOCATION, "step size", &result.step_sizes)?,
             store_traces,
             digital_traces,
+            digital_buses: digital_bus_documents(
+                LOCATION,
+                &result.digital_buses,
+                &result.digital_traces,
+            )?,
             real_traces,
             fft_children,
             compression: compression.map(CompressionReportDocument::from),
@@ -1138,6 +1169,11 @@ impl AnalysisResultDocument {
             step_sizes: finite_axis(LOCATION, "step size", &compressed.step_sizes)?,
             store_traces,
             digital_traces,
+            digital_buses: digital_bus_documents(
+                LOCATION,
+                &compressed.digital_buses,
+                &compressed.digital_traces,
+            )?,
             real_traces,
             fft_children,
             compression: Some(CompressionReportDocument::from(

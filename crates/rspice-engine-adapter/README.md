@@ -16,7 +16,7 @@ reads nothing outside the request's own manifested artifacts.
 | Request digest version | `1` |
 | Revision content digest version | `2` |
 | Result manifest format | `rspice-result-v3` |
-| Typed result document | `rspice-analysis-result` v1 (`rspice-core`) |
+| Typed result document | `rspice-analysis-result` v2 (`rspice-core`) |
 | Run-axis orchestration record | `rspice-axis-execution` v1 |
 
 A request whose `protocol_version` is anything other than `4` is refused as

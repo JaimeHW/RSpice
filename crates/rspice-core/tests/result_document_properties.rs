@@ -321,6 +321,7 @@ fn transient_payload(shape: &Shape) -> TransientPayload {
             values: shape.reals(),
         }],
         digital_traces: Vec::new(),
+        digital_buses: Vec::new(),
         real_traces: Vec::new(),
         fft_children: Vec::new(),
         compression: None,

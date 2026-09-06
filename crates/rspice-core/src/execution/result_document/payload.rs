@@ -19,11 +19,13 @@ use crate::analysis::harmonic_balance::{HbContinuationLimitation, HbReactiveKind
 use crate::analysis::noise::NoiseSourceType;
 use crate::analysis::pole_zero::{RootSetEvidence, SpectrumCertificate};
 use crate::analysis::sensitivity::ElementType;
-use crate::engine::HbEnvelopeStateGuarantee;
 use crate::engine::waveform::{
     TransientCompressionAlgorithm, TransientCompressionErrorObservation,
     TransientCompressionPolicy, TransientCompressionReport, TransientCompressionSampleDomain,
     TransientCompressionSignal, TransientCompressionSignalKind,
+};
+use crate::engine::{
+    DigitalBusDeclaration, DigitalBusSource, HbEnvelopeStateGuarantee, validate_digital_bus_table,
 };
 use crate::execution::capability::AnalysisResultKind;
 use crate::execution::plan::AnalysisInstanceId;
@@ -308,6 +310,17 @@ pub struct TransientPayload {
     /// the `D(node)` column the tabular projection builds does not carry it.
     /// [`DigitalEventTrace`] states what a consumer may rely on.
     pub digital_traces: Vec<DigitalEventTrace>,
+    /// Buses declared over `digital_traces`, in declaration order.
+    ///
+    /// A bus records nothing of its own; it says which member traces belong
+    /// together and in which order, which is what lets a consumer reassemble
+    /// an XSPICE vector port instead of guessing that four separately named
+    /// nodes are one word. [`DigitalEventBus`] states the rules.
+    ///
+    /// Absent from the encoding when empty, and absent from every version-1
+    /// document, which is why a version-1 document still decodes here.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub digital_buses: Vec<DigitalEventBus>,
     /// XSPICE real-valued event histories, under the same rules as
     /// `digital_traces`.
     ///
@@ -341,11 +354,20 @@ impl TransientPayload {
             .iter()
             .map(|trace| trace.points.len().saturating_mul(2))
             .fold(0, usize::saturating_add);
+        // A bus declares no sample, but a member name costs a document as much
+        // room as a value does, and a table of 4,096-member declarations is a
+        // way to grow a document without any of it counting.
+        let buses = self
+            .digital_buses
+            .iter()
+            .map(|bus| bus.members.len())
+            .fold(0, usize::saturating_add);
         self.step_sizes
             .len()
             .saturating_add(stores)
             .saturating_add(digital)
             .saturating_add(real)
+            .saturating_add(buses)
     }
 
     fn validate(&self) -> Result<(), ResultDocumentError> {
@@ -385,10 +407,41 @@ impl TransientPayload {
                 finite("real event value", point.value)?;
             }
         }
+        self.validate_digital_buses()?;
         if let Some(report) = &self.compression {
             report.validate()?;
         }
         Ok(())
+    }
+
+    /// Judge the bus table against the traces it declares over.
+    ///
+    /// The rules are the engine's, applied to the document's own spelling of a
+    /// declaration, so a document cannot carry a bus a result could not: the
+    /// range and the member list describe one width within
+    /// [`crate::engine::MAX_DIGITAL_BUS_WIDTH`], no member is named twice, every member names
+    /// a trace *in this payload*, and no conductor is claimed by two buses.
+    /// The last two are what make the table readable — a declaration whose
+    /// member is not here says nothing a reader can act on.
+    fn validate_digital_buses(&self) -> Result<(), ResultDocumentError> {
+        if self.digital_buses.is_empty() {
+            return Ok(());
+        }
+        let declarations = self
+            .digital_buses
+            .iter()
+            .map(DigitalBusDeclaration::from)
+            .collect::<Vec<_>>();
+        validate_digital_bus_table(
+            &declarations,
+            self.digital_traces
+                .iter()
+                .map(|trace| trace.node_name.as_str()),
+        )
+        .map_err(|error| ResultDocumentError::Malformed {
+            location: "transient digital buses",
+            detail: error.to_string(),
+        })
     }
 }
 
@@ -432,8 +485,12 @@ pub struct FftChildReference {
 /// four-state registers, its `wreal` nets, and every vector-valued signal stop
 /// at the module boundary and are not published in any result. A vector port
 /// on an XSPICE model is a set of per-element nodes, so each element arrives
-/// as its own trace under its own node name — no width, bus, or element-index
-/// metadata exists anywhere in this document to reassemble them.
+/// as its own trace under its own node name; what groups those names back into
+/// a word is a [`DigitalEventBus`] beside them, which carries the range and
+/// the member order and nothing else. A trace itself still carries no width
+/// and no element index, and a run the engine produced declares no bus at all
+/// — the boundary that could is refused today — so a document's buses were
+/// declared by a frontend or read out of an imported artifact.
 ///
 /// Capture is also two gates wide, and a consumer that finds a node missing
 /// should look at both before concluding the node has no events: event tracing
@@ -454,9 +511,17 @@ pub struct FftChildReference {
 /// version of its own. Every struct in that document is
 /// `deny_unknown_fields`, so a field cannot be added to it compatibly: a
 /// reader of an older build refuses the document outright rather than
-/// silently ignoring what it does not understand. The version that governs it
-/// is [`crate::execution::ANALYSIS_RESULT_DOCUMENT_VERSION`], and a document
-/// declaring any other value is refused on load.
+/// silently ignoring what it does not understand. Adding one therefore costs
+/// a version, and [`crate::execution::ANALYSIS_RESULT_DOCUMENT_VERSION`] is
+/// what a reader gates on.
+///
+/// This build writes version 2 and decodes 1 and 2. The two differ in one
+/// place: version 2's transient payload may carry
+/// [`DigitalEventBus`] declarations, and a version-1 document declares none.
+/// Nothing else moved, and a version-1 document is read as a version-2
+/// document with no bus — a version-1 document that carries one is refused
+/// rather than read, because it was written by something that had already
+/// stopped meaning version 1.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DigitalEventTrace {
@@ -486,6 +551,115 @@ pub struct DigitalEventPoint {
     pub state: DigitalStateTag,
     /// Drive strength band the level resolved at.
     pub strength: DigitalStrengthTag,
+}
+
+/// Wire spelling of who declared a digital bus.
+///
+/// One variant per [`DigitalBusSource`], and the `From` impls below are a
+/// bijection in the same way [`DigitalStateTag`]'s are. It is carried because
+/// the three are not interchangeable: an engine declaration is a fact about
+/// the design that ran, a schematic one is a fact about the drawing that
+/// produced the deck, and an imported one is whatever a foreign artifact
+/// claimed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DigitalBusSourceTag {
+    Engine,
+    Schematic,
+    Import,
+}
+
+impl From<DigitalBusSource> for DigitalBusSourceTag {
+    fn from(source: DigitalBusSource) -> Self {
+        match source {
+            DigitalBusSource::Engine => Self::Engine,
+            DigitalBusSource::Schematic => Self::Schematic,
+            DigitalBusSource::Import => Self::Import,
+        }
+    }
+}
+
+impl From<DigitalBusSourceTag> for DigitalBusSource {
+    fn from(source: DigitalBusSourceTag) -> Self {
+        match source {
+            DigitalBusSourceTag::Engine => Self::Engine,
+            DigitalBusSourceTag::Schematic => Self::Schematic,
+            DigitalBusSourceTag::Import => Self::Import,
+        }
+    }
+}
+
+/// One digital bus: a declaration over the member traces that carry it.
+///
+/// # What a consumer may rely on
+///
+/// - **The members are traces of this payload.** Every name in `members`
+///   appears as a [`DigitalEventTrace::node_name`] in the same
+///   [`TransientPayload`], and no member is claimed by two buses. A document
+///   that breaks either is refused on load, so a reader never has to handle a
+///   declaration it cannot answer.
+/// - **The order is the declared one.** `members` runs from the declared MSB
+///   to the declared LSB, whichever way the range does. An ascending `[0:7]`
+///   and a descending `[7:0]` are different declarations and both are carried
+///   as written; nothing normalizes a range to an ascending pair, because the
+///   bit order is the author's.
+/// - **The value of the bus is not stored.** A bus has no points of its own.
+///   Its value at a time is each member's held value in declaration order —
+///   [`crate::execution::bus_events`] is the one implementation of that
+///   reassembly, and every route in this build reads a bus through it.
+/// - **A member may not have been observed yet.** Members change at times of
+///   their own, so at the first change of one of them the others may have no
+///   recorded point at all. That is a missing bit, not a zero.
+///
+/// # Bounds
+///
+/// `msb` and `lsb` are signed because Verilog admits negative and ascending
+/// ranges. The width they describe equals `members.len()` and is at most
+/// [`crate::engine::MAX_DIGITAL_BUS_WIDTH`]; both are checked on load, so the width field
+/// cannot be used to make a reader reserve without bound.
+///
+/// # What is not carried
+///
+/// No value, no unit, no strength — a member keeps its own — and no rendering.
+/// A frontend spells a bus in the notation its own drawing declared it in;
+/// this document carries the parts, not a string.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DigitalEventBus {
+    /// Bus name, without any range suffix.
+    pub name: String,
+    /// Declared most significant index, exactly as declared.
+    pub msb: i64,
+    /// Declared least significant index, exactly as declared.
+    pub lsb: i64,
+    /// Member trace names in declaration order, declared MSB first.
+    pub members: Vec<String>,
+    /// Who declared this bus.
+    pub source: DigitalBusSourceTag,
+}
+
+impl From<&DigitalBusDeclaration> for DigitalEventBus {
+    fn from(bus: &DigitalBusDeclaration) -> Self {
+        Self {
+            name: bus.name.clone(),
+            msb: bus.msb,
+            lsb: bus.lsb,
+            members: bus.members.clone(),
+            source: bus.source.into(),
+        }
+    }
+}
+
+impl From<&DigitalEventBus> for DigitalBusDeclaration {
+    fn from(bus: &DigitalEventBus) -> Self {
+        Self {
+            name: bus.name.clone(),
+            msb: bus.msb,
+            lsb: bus.lsb,
+            members: bus.members.clone(),
+            source: bus.source.into(),
+        }
+    }
 }
 
 /// One real-valued event node's whole history, in the order it was recorded.

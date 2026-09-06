@@ -63,7 +63,7 @@ tell a placeholder from a measurement.
 
 ### Result documents
 
-Documents are `rspice-analysis-result` version 1, defined and validated by
+Documents are `rspice-analysis-result` version 2, defined and validated by
 `rspice-core`. Their JSON encoding, missingness rules, per-family payloads, and
 identity fields are documented on
 `rspice_core::execution::result_document`; this crate does not restate or

@@ -2,6 +2,7 @@
 
 use num_complex::Complex64;
 
+use super::payload::{DigitalBusSourceTag, DigitalEventBus};
 use super::*;
 use crate::abort_signal::{CountingAbort, ImmediateAbort, NoAbort};
 use crate::analysis::ac::AcResult;
@@ -1189,7 +1190,11 @@ fn envelope_runner_composes_the_two_authenticated_halves() {
 fn a_forward_version_is_rejected_before_any_field_is_decoded() {
     let document = document_for(AnalysisResultKind::Ac);
     let json = document.to_json().expect("encode");
-    let forward = json.replace("\"schemaVersion\":1", "\"schemaVersion\":2");
+    let next = ANALYSIS_RESULT_DOCUMENT_VERSION + 1;
+    let forward = json.replace(
+        &format!("\"schemaVersion\":{ANALYSIS_RESULT_DOCUMENT_VERSION}"),
+        &format!("\"schemaVersion\":{next}"),
+    );
     assert_ne!(forward, json, "the version field must be present");
     // Also add a field this build has never seen, so a decoder that got past
     // the version check would fail with an unknown-field error instead.
@@ -1197,7 +1202,7 @@ fn a_forward_version_is_rejected_before_any_field_is_decoded() {
     assert_eq!(
         AnalysisResultDocument::from_json(&forward),
         Err(ResultDocumentError::UnsupportedVersion {
-            found: 2,
+            found: next,
             current: ANALYSIS_RESULT_DOCUMENT_VERSION,
         })
     );
@@ -1207,6 +1212,124 @@ fn a_forward_version_is_rejected_before_any_field_is_decoded() {
         AnalysisResultDocument::from_json(&wrong_schema),
         Err(ResultDocumentError::WrongSchema { .. })
     ));
+}
+
+#[test]
+fn a_version_one_document_reads_back_declaring_no_bus() {
+    // The compatible half of the bump: version 1 differs from version 2 in one
+    // field, so a version-1 document is a version-2 document with no bus and is
+    // read rather than refused. Anything else in a version-1 document that this
+    // build cannot decode would still fail, which is what the second half
+    // checks.
+    let document = document_for(AnalysisResultKind::Transient);
+    let json = document.to_json().expect("encode");
+    let version_one = json.replace(
+        &format!("\"schemaVersion\":{ANALYSIS_RESULT_DOCUMENT_VERSION}"),
+        "\"schemaVersion\":1",
+    );
+    assert_ne!(version_one, json, "the version field must be present");
+    let decoded = AnalysisResultDocument::from_json(&version_one)
+        .expect("a version-1 document is still decodable");
+    assert_eq!(decoded.schema_version(), 1);
+    let ResultPayload::Tran(payload) = decoded.payload() else {
+        panic!("the transient fixture carries a transient payload");
+    };
+    assert!(payload.digital_buses.is_empty());
+}
+
+#[test]
+fn a_version_one_document_that_declares_a_bus_is_refused() {
+    // A defaulted field is what makes reading version 1 sound; it also lets a
+    // producer stamp the old version on new content. That document's version
+    // has stopped describing it, so it is refused by name rather than read.
+    let mut document = document_for(AnalysisResultKind::Transient);
+    let ResultPayload::Tran(payload) = &mut document.payload else {
+        panic!("the transient fixture carries a transient payload");
+    };
+    payload.digital_traces = vec![
+        DigitalEventTrace {
+            node_name: "d1".to_owned(),
+            points: Vec::new(),
+        },
+        DigitalEventTrace {
+            node_name: "d0".to_owned(),
+            points: Vec::new(),
+        },
+    ];
+    payload.digital_buses = vec![DigitalEventBus {
+        name: "D".to_owned(),
+        msb: 1,
+        lsb: 0,
+        members: vec!["d1".to_owned(), "d0".to_owned()],
+        source: DigitalBusSourceTag::Import,
+    }];
+    let json = document.to_json().expect("encode");
+    assert!(json.contains("\"digitalBuses\""));
+    let version_one = json.replace(
+        &format!("\"schemaVersion\":{ANALYSIS_RESULT_DOCUMENT_VERSION}"),
+        "\"schemaVersion\":1",
+    );
+    let error = AnalysisResultDocument::from_json(&version_one)
+        .expect_err("version 1 predates the bus table");
+    let ResultDocumentError::Malformed { location, detail } = error else {
+        panic!("a version-1 document carrying a bus is malformed, not unversioned");
+    };
+    assert_eq!(location, "transient digital buses");
+    assert!(detail.contains("version 2"), "{detail}");
+}
+
+#[test]
+fn an_empty_bus_table_leaves_no_trace_in_the_encoding() {
+    // The field is skipped when empty, which is what lets a version-2 document
+    // that declares no bus stay byte-comparable with the version-1 document it
+    // would otherwise have been.
+    let json = document_for(AnalysisResultKind::Transient)
+        .to_json()
+        .expect("encode");
+    assert!(!json.contains("digitalBuses"), "{json}");
+}
+
+#[test]
+fn a_bus_is_judged_against_the_traces_it_declares_over() {
+    let bus = |members: Vec<String>| DigitalEventBus {
+        name: "D".to_owned(),
+        msb: 1,
+        lsb: 0,
+        members,
+        source: DigitalBusSourceTag::Schematic,
+    };
+    let with_bus = |traces: Vec<DigitalEventTrace>, buses: Vec<DigitalEventBus>| {
+        let mut document = document_for(AnalysisResultKind::Transient);
+        let ResultPayload::Tran(payload) = &mut document.payload else {
+            panic!("the transient fixture carries a transient payload");
+        };
+        payload.digital_traces = traces;
+        payload.digital_buses = buses;
+        document.validate()
+    };
+    let trace = |name: &str| DigitalEventTrace {
+        node_name: name.to_owned(),
+        points: Vec::new(),
+    };
+
+    assert_eq!(
+        with_bus(
+            vec![trace("d1"), trace("d0")],
+            vec![bus(vec!["d1".to_owned(), "d0".to_owned()])]
+        ),
+        Ok(())
+    );
+
+    let error = with_bus(
+        vec![trace("d1")],
+        vec![bus(vec!["d1".to_owned(), "d0".to_owned()])],
+    )
+    .expect_err("a member with no trace cannot say what the bus held");
+    let ResultDocumentError::Malformed { location, detail } = error else {
+        panic!("a bus over a missing trace is malformed");
+    };
+    assert_eq!(location, "transient digital buses");
+    assert!(detail.contains("d0"), "{detail}");
 }
 
 #[test]
@@ -1261,6 +1384,7 @@ fn a_series_whose_length_disagrees_with_the_point_count_is_rejected() {
             step_sizes: vec![0.0, 1.0],
             store_traces: Vec::new(),
             digital_traces: Vec::new(),
+            digital_buses: Vec::new(),
             real_traces: Vec::new(),
             fft_children: Vec::new(),
             compression: None,

@@ -200,8 +200,25 @@ use crate::execution::topology::TopologyFingerprint;
 /// Stable schema identifier written into every document.
 pub const ANALYSIS_RESULT_DOCUMENT_SCHEMA: &str = "rspice-analysis-result";
 
-/// Schema version this build produces and is the only one it decodes.
-pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 1;
+/// Schema version this build produces.
+pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 2;
+
+/// Every schema version this build decodes, oldest first.
+///
+/// A document in this schema is `deny_unknown_fields` throughout, so a field
+/// cannot be added to it compatibly and adding one costs a version. Version 2
+/// added exactly one: a transient payload's `digitalBuses`, the declarations
+/// that group XSPICE vector-port members back into a word. Nothing else moved,
+/// so a version-1 document is a version-2 document that declares no bus, which
+/// is what the defaulted field decodes it as — a build that only writes
+/// version 2 is not a build that has to refuse everything written before it.
+///
+/// The reverse does not hold and is not made to: a version-1 reader refuses a
+/// version-2 document outright, which is the whole reason the version moved.
+const DECODABLE_ANALYSIS_RESULT_DOCUMENT_VERSIONS: [u32; 2] = [1, 2];
+
+/// First version whose transient payload may declare a digital bus.
+const FIRST_DIGITAL_BUS_DOCUMENT_VERSION: u32 = 2;
 
 /// How often long validation and serialization loops poll the abort source.
 const ABORT_POLL_STRIDE: usize = 256;
@@ -426,10 +443,27 @@ impl AnalysisResultDocument {
                 found: self.schema.clone(),
             });
         }
-        if self.schema_version != ANALYSIS_RESULT_DOCUMENT_VERSION {
+        if !DECODABLE_ANALYSIS_RESULT_DOCUMENT_VERSIONS.contains(&self.schema_version) {
             return Err(ResultDocumentError::UnsupportedVersion {
                 found: self.schema_version,
                 current: ANALYSIS_RESULT_DOCUMENT_VERSION,
+            });
+        }
+        // A defaulted field decodes an older document as one that declares
+        // nothing, which is what makes reading version 1 sound. It also lets a
+        // document declare the older version and carry the newer content, and
+        // that is a document whose version stopped describing it.
+        if self.schema_version < FIRST_DIGITAL_BUS_DOCUMENT_VERSION
+            && let ResultPayload::Tran(payload) = &self.payload
+            && !payload.digital_buses.is_empty()
+        {
+            return Err(ResultDocumentError::Malformed {
+                location: "transient digital buses",
+                detail: format!(
+                    "a version-{} document declares {} digital bus(es); buses arrived in version {FIRST_DIGITAL_BUS_DOCUMENT_VERSION}",
+                    self.schema_version,
+                    payload.digital_buses.len()
+                ),
             });
         }
         if self.payload.result_kind() != self.result_kind {
@@ -655,7 +689,7 @@ impl AnalysisResultDocument {
                 found: header.schema,
             });
         }
-        if header.schema_version != ANALYSIS_RESULT_DOCUMENT_VERSION {
+        if !DECODABLE_ANALYSIS_RESULT_DOCUMENT_VERSIONS.contains(&header.schema_version) {
             return Err(ResultDocumentError::UnsupportedVersion {
                 found: header.schema_version,
                 current: ANALYSIS_RESULT_DOCUMENT_VERSION,
