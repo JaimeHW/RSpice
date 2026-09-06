@@ -2318,3 +2318,304 @@ fn rewrite_heavy(
         | Heavy::NoiseTable { .. } => heavy.clone(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ir::autodiff::visit_expr;
+    use crate::ir::autodiff::visit_expr_parity_tests::one_of_every_variant;
+
+    /// The leading identifier of a `Debug` rendering, which for a derived
+    /// `Debug` is the variant's name.
+    fn variant_name(rendered: &str) -> String {
+        rendered
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
+            .collect()
+    }
+
+    /// The [`IrExpr`] variant name a [`Node`] stands for.
+    fn node_variant_name(node: &Node) -> String {
+        match node {
+            Node::Heavy(kind, _) => format!("{kind:?}"),
+            Node::CallSpilled { .. } => "Call".to_string(),
+            other => variant_name(&format!("{other:?}")),
+        }
+    }
+
+    fn marker(arena: &mut ExprArena, name: &str) -> NodeId {
+        let name = arena.intern(name);
+        arena.push(Node::Var(name))
+    }
+
+    #[test]
+    fn node_is_sixteen_bytes() {
+        assert_eq!(std::mem::size_of::<Node>(), 16);
+        assert_eq!(std::mem::size_of::<NodeId>(), 4);
+        assert_eq!(std::mem::size_of::<Option<NodeId>>(), 4);
+    }
+
+    #[test]
+    fn import_then_export_reproduces_every_variant() {
+        for expr in one_of_every_variant() {
+            let mut arena = ExprArena::new();
+            let id = arena.import(&expr);
+            assert_eq!(
+                format!("{:?}", arena.export(id)),
+                format!("{expr:?}"),
+                "the arena lost something importing {expr:?}"
+            );
+        }
+    }
+
+    /// The awkward payloads the parity fixture set does not carry: a named
+    /// noise process, a `last_crossing` without a direction, a `ddx` on a
+    /// branch current, a ground terminal, and a call whose argument list is
+    /// longer than any `IrFunction`'s arity.
+    #[test]
+    fn import_then_export_reproduces_the_awkward_payloads() {
+        let site = NoiseSiteId {
+            source: 1,
+            start: 2,
+            end: 3,
+            ordinal: 4,
+        };
+        let awkward = vec![
+            IrExpr::WhiteNoise {
+                site,
+                power: Box::new(IrExpr::Const(1.0)),
+                name: Some("thermal".to_string()),
+            },
+            IrExpr::FlickerNoise {
+                site,
+                power: Box::new(IrExpr::Const(1.0)),
+                exponent: Box::new(IrExpr::Const(2.0)),
+                name: Some("flicker".to_string()),
+            },
+            IrExpr::NoiseTable {
+                site,
+                points: vec![(1.0, 2.0), (3.0, 4.0)],
+                log_interp: true,
+                name: Some("table".to_string()),
+            },
+            IrExpr::LastCrossing {
+                expr: Box::new(IrExpr::Const(1.0)),
+                direction: None,
+            },
+            IrExpr::Ddx {
+                expr: Box::new(IrExpr::Const(1.0)),
+                axis: DdxAxis::BranchCurrent {
+                    ordinal: 7,
+                    reversed: true,
+                },
+            },
+            IrExpr::Voltage(0, usize::MAX),
+            IrExpr::Current(usize::MAX, 3),
+            IrExpr::VarIndexed {
+                array: SmolStr::new("a"),
+                base: 4,
+                len: 5,
+                lower: -3,
+                index: Box::new(IrExpr::Const(1.0)),
+            },
+            IrExpr::Call(IrFunction::Min, Vec::new()),
+            IrExpr::Call(IrFunction::Min, vec![IrExpr::Const(1.0)]),
+            IrExpr::Call(
+                IrFunction::Min,
+                vec![IrExpr::Const(1.0), IrExpr::Const(2.0), IrExpr::Const(3.0)],
+            ),
+            IrExpr::LaplaceZP {
+                site: LaplaceSiteId {
+                    source: 1,
+                    start: 2,
+                    end: 3,
+                    ordinal: 4,
+                },
+                expr: Box::new(IrExpr::Const(1.0)),
+                zeros: vec![(1.0, -1.0)],
+                poles: vec![(2.0, -2.0), (3.0, -3.0)],
+                gain: 0.5,
+            },
+        ];
+        for expr in awkward {
+            let mut arena = ExprArena::new();
+            let id = arena.import(&expr);
+            assert_eq!(
+                format!("{:?}", arena.export(id)),
+                format!("{expr:?}"),
+                "the arena lost something importing {expr:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_call_of_more_than_two_arguments_spills() {
+        let mut arena = ExprArena::new();
+        let expr = IrExpr::Call(
+            IrFunction::Max,
+            vec![IrExpr::Const(1.0), IrExpr::Const(2.0), IrExpr::Const(3.0)],
+        );
+        let id = arena.import(&expr);
+        assert!(matches!(arena.node(id), Node::CallSpilled { .. }));
+        assert_eq!(arena.arguments(arena.node(id)).len(), 3);
+    }
+
+    #[test]
+    fn visit_walks_the_same_variants_in_the_same_order_as_visit_expr() {
+        for expr in one_of_every_variant() {
+            let mut boxed = Vec::new();
+            visit_expr(&expr, &mut |node| {
+                boxed.push(variant_name(&format!("{node:?}")));
+            });
+
+            let mut arena = ExprArena::new();
+            let id = arena.import(&expr);
+            let mut arena_names = Vec::new();
+            visit(&arena, id, &mut |node| {
+                arena_names.push(node_variant_name(node));
+            });
+
+            assert_eq!(
+                arena_names, boxed,
+                "visit disagrees with visit_expr on {expr:?}"
+            );
+        }
+    }
+
+    /// The slots the generic walks stop at, and the walk that reaches them.
+    #[test]
+    fn operator_operands_reaches_what_visit_does_not() {
+        let mut arena = ExprArena::new();
+        let expr = IrExpr::Cross {
+            expr: Box::new(IrExpr::Var(SmolStr::new("monitored"))),
+            direction: Some(Box::new(IrExpr::Const(1.0))),
+            time_tol: None,
+            expr_tol: None,
+            enable: Some(Box::new(IrExpr::Var(SmolStr::new("enabled")))),
+        };
+        let id = arena.import(&expr);
+
+        let mut visited = 0;
+        visit(&arena, id, &mut |_| visited += 1);
+        assert_eq!(visited, 1, "the generic walk must stop at a cross");
+
+        let operands = operator_operands(&arena, arena.node(id));
+        assert_eq!(operands.len(), 3);
+        let names = operands
+            .iter()
+            .map(|operand| node_variant_name(arena.node(*operand)))
+            .collect::<Vec<_>>();
+        assert_eq!(names, vec!["Var", "Const", "Var"]);
+    }
+
+    #[test]
+    fn rewrite_that_changes_nothing_returns_the_input_and_pushes_nothing() {
+        for expr in one_of_every_variant() {
+            let mut arena = ExprArena::new();
+            let id = arena.import(&expr);
+            let before = arena.len();
+            let rewritten = rewrite(&mut arena, id, &mut |_, _| None);
+            assert_eq!(rewritten, id, "rewrite moved an unchanged {expr:?}");
+            assert_eq!(
+                arena.len(),
+                before,
+                "rewrite allocated on an unchanged {expr:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rewrite_appends_only_the_path_that_changed() {
+        let mut arena = ExprArena::new();
+        let left = marker(&mut arena, "left");
+        let right = marker(&mut arena, "right");
+        let root = arena.push(Node::Binary(BinaryOp::Add, left, right));
+        let before = arena.len();
+
+        let replacement = arena.intern("replacement");
+        let rewritten = rewrite(&mut arena, root, &mut |arena, node| match node {
+            Node::Var(name) if arena.name(name).as_str() == "right" => Some(Node::Var(replacement)),
+            _ => None,
+        });
+
+        assert_ne!(rewritten, root);
+        // One replacement node and one rebuilt parent; the untouched left
+        // operand keeps its id.
+        assert_eq!(arena.len(), before + 2);
+        let Node::Binary(_, new_left, new_right) = *arena.node(rewritten) else {
+            panic!("the rewritten root is still a binary node");
+        };
+        assert_eq!(new_left, left);
+        assert_ne!(new_right, right);
+    }
+
+    #[test]
+    fn a_subtree_cloned_twice_imports_as_two_node_ranges() {
+        let shared = IrExpr::Binary(
+            BinaryOp::Mul,
+            Box::new(IrExpr::Var(SmolStr::new("x"))),
+            Box::new(IrExpr::Var(SmolStr::new("x"))),
+        );
+        let expr = IrExpr::Binary(
+            BinaryOp::Add,
+            Box::new(shared.clone()),
+            Box::new(shared.clone()),
+        );
+
+        let mut arena = ExprArena::new();
+        let id = arena.import(&expr);
+
+        // Seven nodes: four `Var`s, two `Mul`s and the `Add`. Import never
+        // deduplicates, so the cloned subtree is present twice — while the
+        // name it reads is interned once.
+        assert_eq!(arena.len(), 7);
+        let Node::Binary(_, left, right) = *arena.node(id) else {
+            panic!("the imported root is a binary node");
+        };
+        assert_ne!(left, right);
+        let Node::Binary(left_op, first, second) = *arena.node(left) else {
+            panic!("the first copy is a binary node");
+        };
+        let Node::Binary(right_op, third, fourth) = *arena.node(right) else {
+            panic!("the second copy is a binary node");
+        };
+        assert_eq!(left_op, right_op);
+        for id in [first, second] {
+            assert!(![third, fourth].contains(&id), "the ranges overlap");
+        }
+        let names = [first, second, third, fourth]
+            .iter()
+            .map(|id| match arena.node(*id) {
+                Node::Var(name) => *name,
+                other => panic!("expected a variable read, found {other:?}"),
+            })
+            .collect::<Vec<_>>();
+        assert!(names.windows(2).all(|pair| pair[0] == pair[1]));
+        assert_eq!(format!("{:?}", arena.export(id)), format!("{expr:?}"));
+    }
+
+    #[test]
+    fn the_interner_answers_by_name_and_only_by_name() {
+        let mut arena = ExprArena::new();
+        let first = arena.intern("gm");
+        let again = arena.intern("gm");
+        let other = arena.intern("gds");
+        assert_eq!(first, again);
+        assert_ne!(first, other);
+        assert_eq!(arena.name(first).as_str(), "gm");
+        assert_eq!(arena.name(other).as_str(), "gds");
+    }
+
+    #[test]
+    fn nodes_read_back_across_a_chunk_boundary() {
+        let mut arena = ExprArena::new();
+        let count = CHUNK_LEN + 16;
+        let ids = (0..count)
+            .map(|index| arena.push(Node::Const(index as f64)))
+            .collect::<Vec<_>>();
+        assert_eq!(arena.len() as usize, count);
+        for (index, id) in ids.iter().enumerate() {
+            assert_eq!(*arena.node(*id), Node::Const(index as f64));
+        }
+    }
+}

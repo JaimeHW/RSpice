@@ -5266,7 +5266,7 @@ pub mod autodiff {
     }
 
     #[cfg(test)]
-    mod visit_expr_parity_tests {
+    pub(crate) mod visit_expr_parity_tests {
         use super::*;
 
         fn marker(index: usize) -> Box<IrExpr> {
@@ -5305,7 +5305,11 @@ pub mod autodiff {
         /// `map_expr` deliberately does not descend into, so a visitor that
         /// descended too far would be caught as surely as one that stopped
         /// short.
-        fn one_of_every_variant() -> Vec<IrExpr> {
+        ///
+        /// [`crate::ir::arena`] round-trips the same set through its bridges,
+        /// so one list keeps both representations honest about the same 48
+        /// variants.
+        pub(crate) fn one_of_every_variant() -> Vec<IrExpr> {
             let site = ZiSiteId {
                 source: 0,
                 start: 0,
