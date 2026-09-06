@@ -1,20 +1,20 @@
-# RSpice Bench
+# rspice-bench
 
 The macro-benchmark rig: a standalone binary that times **whole simulator
-processes** — `rspice run <deck> -q` against a locally installed
-`ngspice -b <deck>` — over the shared deck set in
+processes**: `rspice run <deck> -q` against a locally installed
+`ngspice -b <deck>`, over the shared deck set in
 [`benchmarks/circuits/`](../../benchmarks/circuits/), and emits a JSON
 scoreboard plus a human-readable table. It is deliberately macro, not
 micro: parsing, solving, and output formatting are all inside the measured
 wall-clock, so the numbers reflect what a user actually waits for. It is
-the regression yardstick for performance work — the convention is that no
+the regression yardstick for performance work; the convention is that no
 optimization claim lands without a before/after scoreboard from this rig.
 
 It is **not** a Criterion/Divan harness and has no `[[bench]]` targets;
 timing is `std::time::Instant` around child-process spawn and an OS-backed
 timed wait, without polling-interval quantization. Alongside it, the
-in-process subcommands isolate one layer each — `klu` for the solver kernels,
-`native-jit` for generated Verilog-A entrypoints — so an optimization there is
+in-process subcommands isolate one layer each (`klu` for the solver kernels,
+`native-jit` for generated Verilog-A entrypoints) so an optimization there is
 attributable to a phase rather than diluted across a whole process.
 
 ## Layout
@@ -23,12 +23,13 @@ attributable to a phase rather than diluted across a whole process.
 | :--- | :--- |
 | `src/main.rs` | CLI entry point: `gen`, `generated-rust`, `generated-compile`, `generated-stamp`, `klu`, `native-jit`, and `run` subcommands |
 | `src/runner.rs` | The `run` subcommand: locates executables, runs warmup + timed repeats per deck/simulator, computes min/median/mean and the median speedup, writes the scoreboard, prints the table |
-| `src/generate.rs` | The `gen` subcommand: deterministically regenerates the generated decks (RC ladders, MOS array) with byte-stable output — fixed formatting, no timestamps |
+| `src/generate.rs` | The `gen` subcommand: deterministically regenerates the generated decks (RC ladders, MOS array) with byte-stable output: fixed formatting, no timestamps |
 | `src/generated_rust.rs` | Authenticated source-resource report and budget gate for checked-in Verilog-A Rust kernels |
 | `src/generated_compile.rs` | Reproducible generated-catalog compile-time measurement with package-only rebuild auditing |
+| `src/generated_stamp.rs` | The `generated-stamp` subcommand: per-model stamp-evaluation timing over the generated corpus, against the hand-written reference |
 | `src/provenance.rs` | Shared source, toolchain, target, host, and repository provenance capture |
 | `src/report.rs` | Deterministic JSON report serialization and fail-closed verdict helpers |
-| `src/klu.rs` | The `klu` subcommand: in-process KLU kernel benchmark — analyze/factor/refactor/solve medians and fill per circuit-shaped pattern, with optional per-nonzero budgets |
+| `src/klu.rs` | The `klu` subcommand: in-process KLU kernel benchmark: analyze/factor/refactor/solve medians and fill per circuit-shaped pattern, with optional per-nonzero budgets |
 | `src/native_jit.rs` | The `native-jit` subcommand: in-process Verilog-A native JIT benchmark gate with median speedup and optional p95 budgets |
 | `src/error.rs` | `BenchError` with full context on every failure path |
 
@@ -109,7 +110,7 @@ stamping in one call, then measures the hand-written BSIM4 implementation in
 the same process. Same-run ratios are the portable release signal; absolute
 nanosecond limits are available for controlled hardware only. Use
 `--features generated-stamp-subset` for the five-model routine tier or
-`--features generated-stamp` for the complete 42-model corpus.
+`--features generated-stamp` for the complete 43-model corpus.
 
 | Flag | Default | Meaning |
 | :--- | :--- | :--- |
@@ -138,7 +139,7 @@ Environment variables:
 | Variable | Meaning |
 | :--- | :--- |
 | `RSPICE_BENCH_RSPICE` | RSpice executable override. Default: the `rspice` binary next to `rspice-bench` in `target/release/` |
-| `RSPICE_BENCH_NGSPICE` | ngspice executable for the comparison column. Unset = the ngspice column is skipped (noted in the scoreboard, not a failure). Use a release/console build — a debug ngspice makes RSpice look artificially fast |
+| `RSPICE_BENCH_NGSPICE` | ngspice executable for the comparison column. Unset = the ngspice column is skipped (noted in the scoreboard, not a failure). Use a release or console build; a debug ngspice makes RSpice look artificially fast |
 
 The process exits non-zero if any simulator run or baseline comparison fails.
 Baseline comparison requires the same repeat count, exact deck set, and
@@ -150,9 +151,9 @@ The scoreboard is still written on a regression and carries a machine-readable
 
 This isolates the solver kernels so an optimization is attributable to a
 phase. It times `analyze`, `factor`, `refactor` and `solve` separately on
-circuit-shaped matrices — a banded RC-ladder pattern and a denser ring-like
+circuit-shaped matrices: a banded RC-ladder pattern and a denser ring-like
 pattern with off-diagonal couplings, both diagonally dominant, with a
-Newton-style value drift between refactors — and reports fill as
+Newton-style value drift between refactors, and reports fill as
 `(L+U) nnz / A nnz`. Each case is reseeded from its own identity rather than
 from sweep position, so changing `--sizes` cannot silently perturb another
 case's matrix. Drift is applied outside the timed region: it is fixture work,
@@ -165,8 +166,8 @@ patterns.
 
 Budgets are normalized per `(L+U)` nonzero rather than absolute per iteration,
 because a sparse direct solve is proportional to factor nonzeros. That holds in
-practice — measured `refactor` cost is ~2.14, 2.13, 2.16 ns/nnz for the ladder
-at n=100, 1000, 10000 — so one threshold covers the whole sweep.
+practice: measured `refactor` cost is ~2.14, 2.13, 2.16 ns/nnz for the ladder
+at n=100, 1000, 10000, so one threshold covers the whole sweep.
 
 | Flag | Default | Meaning |
 | :--- | :--- | :--- |
@@ -183,7 +184,7 @@ at n=100, 1000, 10000 — so one threshold covers the whole sweep.
 Every budget is off unless passed explicitly, so an unqualified run measures
 and reports without ever failing. This is a deliberate difference from
 `native-jit`, whose defaults enforce: KLU budgets cannot be chosen before
-baselines exist, and the solver is still moving. Use release builds — debug
+baselines exist, and the solver is still moving. Use release builds; debug
 numbers are a smoke test of the machinery only.
 
 ### `rspice-bench native-jit`
@@ -195,12 +196,20 @@ against bytecode VM reference paths, and gates each case on median native
 speedup. It also records p95 so a single lucky fastest sample cannot hide a
 regression.
 
+Every budget below has an enforcing default: the gate is on unless a flag
+relaxes it.
+
 | Flag | Default | Meaning |
 | :--- | :--- | :--- |
 | `--iterations <N>` | 200000 | Entry-point sweeps per timed sample |
 | `--samples <N>` | 7 | Timed samples; report computes min/median/p95/mean |
 | `--min-speedup <X>` | 3.00 | Required `bytecode_median / native_median`; below this exits non-zero |
-| `--max-native-p95-ns-per-sweep <NS>` | unset | Optional absolute native p95 budget |
+| `--min-dense-speedup <X>` | 2.00 | Same, for the dense entrypoint case |
+| `--min-full-stamp-speedup <X>` | 2.00 | Same, for the full-stamp case |
+| `--max-native-setup-ms <MS>` | 10.0 | Canonical-IR-to-native setup budget per case |
+| `--max-native-p95-ns-per-sweep <NS>` | 5000.0 | Absolute native p95 budget |
+| `--max-relative-stddev <RATIO>` | 0.25 | Sample dispersion ceiling; a noisy host fails rather than reporting |
+| `--max-native-code-bytes <BYTES>` | 16384 | Generated native image size per case |
 | `--out <PATH>` | unset | Optional JSON report path |
 
 Use release builds for comparable numbers. Debug runs are useful only as a
@@ -213,7 +222,7 @@ functional smoke test of the benchmark machinery.
 | `--dir <DIR>` | `benchmarks/circuits` | Where to write the generated decks |
 
 The generated decks (the three RC ladders and the 4,096-stage MOS array)
-are checked in; never hand-edit them — change
+are checked in; never hand-edit them. Change
 `src/generate.rs` and regenerate.
 
 ## The deck set
@@ -224,10 +233,10 @@ share):
 
 | Deck | What it measures |
 | :--- | :--- |
-| `divider_ac.cir` | Startup floor: trivial DC + AC sweep — process overhead, parse, output |
+| `divider_ac.cir` | Startup floor: trivial DC + AC sweep, so process overhead, parse, and output |
 | `diode_rectifier.cir` | Nonlinear transient: Newton iterations with diode limiting |
 | `ring51.cir` | 51-stage MOSFET ring oscillator: device-evaluation-dominated transient |
-| `mos_array_4096.cir` | Device-evaluation tier: 4,096 level-1 NMOS stages — Newton time in model code, not factorization |
+| `mos_array_4096.cir` | Device-evaluation tier: 4,096 level-1 NMOS stages, so Newton time in model code rather than factorization |
 | `rc_ladder_100.cir` | Small linear transient (100 nodes, ~10k steps) |
 | `rc_ladder_1000.cir` | Medium linear transient (1k nodes, ~10k steps): stamp + solve balance |
 | `rc_ladder_10000.cir` | Scale tier (10k nodes, ~1k steps): factorization/solve dominated |
@@ -235,7 +244,7 @@ share):
 ## Methodology and scoreboards
 
 [`benchmarks/README.md`](../../benchmarks/README.md) is the canonical
-methodology document — comparability rules (same machine, release builds,
+methodology document: comparability rules (same machine, release builds,
 nothing heavy running concurrently), the warmup convention, and the
 result-directory authorities (`scoreboards/scoreboard.json` for the latest
 run, `results/` for runs worth keeping, `baselines/` for approved gates,
@@ -243,11 +252,8 @@ run, `results/` for runs worth keeping, `baselines/` for approved gates,
 is the **median**; min and mean are recorded alongside, and each
 scoreboard embeds the methodology string, host info, repeat count, and
 both executable paths so archived numbers stay self-describing. The
-speedup column is `ngspice_median / rspice_median` — greater than 1.0
+speedup column is `ngspice_median / rspice_median`, so greater than 1.0
 means RSpice is faster. Benchmark runs are invoked manually; CI does not
 run timing comparisons.
 
-## License
-
-RSpice Bench is part of the RSpice project and is licensed under the
-[RSpice Personal Use License](../../LICENSE).
+Licensed under the [RSpice Personal Use License](../../LICENSE).
