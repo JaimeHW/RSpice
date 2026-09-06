@@ -117,9 +117,9 @@ mod tests {
             .collect()
     }
 
-    fn library(app: &mut RSpiceApp, names: &[&str]) {
+    fn library(state: &mut AppState, names: &[&str]) {
         for name in names {
-            app.state
+            state
                 .workspace
                 .stimulus_library
                 .insert(
@@ -133,7 +133,7 @@ mod tests {
     #[test]
     fn every_definition_the_project_owns_gets_a_row() {
         let mut app = RSpiceApp::test_instance();
-        library(&mut app, &["bridge_drive", "vdd_operate"]);
+        library(&mut app.state, &["bridge_drive", "vdd_operate"]);
         let published = published(&mut app.state);
         assert!(published.contains(&"bridge_drive".to_owned()));
         assert!(published.contains(&"vdd_operate".to_owned()));
@@ -151,7 +151,7 @@ mod tests {
         );
 
         let mut filtered = RSpiceApp::test_instance();
-        library(&mut filtered, &["bridge_drive"]);
+        library(&mut filtered.state, &["bridge_drive"]);
         filtered
             .state
             .workbench
