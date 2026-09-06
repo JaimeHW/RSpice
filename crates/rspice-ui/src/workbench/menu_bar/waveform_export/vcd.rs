@@ -113,7 +113,7 @@ pub(super) fn prepare_vcd(analysis: &crate::state::AnalysisResult) -> Result<Pre
     let Some(AnalysisResultPayload::TransientEvents {
         digital_traces,
         real_traces,
-        ..
+        digital_buses,
     }) = analysis.result_payload.as_ref()
     else {
         return Err(NO_EVENT_EVIDENCE_MESSAGE.to_owned());
@@ -122,7 +122,15 @@ pub(super) fn prepare_vcd(analysis: &crate::state::AnalysisResult) -> Result<Pre
         return Err(EMPTY_EVENT_EVIDENCE_MESSAGE.to_owned());
     }
     let (digital, real) = core_traces(digital_traces, real_traces)?;
-    let document = event_vcd_document(EVENT_SCOPE, &digital, &real, &[])
+    // The declarations go through as the result holds them. A bus is one
+    // `$var wire N` in place of its members' scalars — the projection decides
+    // that, not this arm — which is why passing an empty table here wrote a
+    // different dump from the command line's for the same run.
+    let buses = digital_buses
+        .iter()
+        .map(rspice_core::engine::DigitalBusDeclaration::from)
+        .collect::<Vec<_>>();
+    let document = event_vcd_document(EVENT_SCOPE, &digital, &real, &buses)
         .map_err(|error| format!("The event history cannot be dumped exactly: {error}"))?;
     let node_count = document.signals.len();
     let change_count = document
@@ -357,5 +365,89 @@ mod tests {
         ))))
         .expect_err("half a femtosecond has no tick");
         assert!(error.contains("cannot be dumped exactly"), "{error}");
+    }
+
+    /// BUS-L2's `vector_mixed` counter, as the GUI retains it: two member
+    /// traces and the `x1.count[1:0]` declaration over them, over `.tran 1n
+    /// 15n`. The command line runs the deck itself; the GUI cannot run a
+    /// mixed Verilog-A module from a unit test, so the same history is stated
+    /// as the retained evidence a completed run would leave.
+    fn bus_declaring_events() -> AnalysisResultPayload {
+        AnalysisResultPayload::TransientEvents {
+            digital_traces: vec![
+                digital("count#1", &[(0.0, 0), (10.0e-9, 1)]),
+                digital(
+                    "count#0",
+                    &[(0.0, 0), (5.0e-9, 1), (10.0e-9, 0), (15.0e-9, 1)],
+                ),
+            ],
+            real_traces: Vec::new(),
+            digital_buses: vec![crate::state::DigitalBusEvidence {
+                name: "x1.count".to_owned(),
+                msb: 1,
+                lsb: 0,
+                members: vec!["count#1".to_owned(), "count#0".to_owned()],
+                source: crate::state::DigitalBusSourceEvidence::Engine,
+            }],
+        }
+    }
+
+    /// The GUI's dump of a bus-declaring run is the command line's, byte for
+    /// byte.
+    ///
+    /// The number is BUS-L3's: `rspice run bus.sp -o run.vcd -f vcd` on the
+    /// `vector_mixed` deck writes 220 bytes whose SHA-256 begins
+    /// `cf5eb916…`, and the Python and browser routes write the same bytes.
+    /// This arm passed `&[]` where the table belongs, so it wrote the members
+    /// as two scalars — a different file for the same run, and one that no
+    /// longer said which two conductors were one word.
+    #[test]
+    fn a_bus_declaring_dump_is_the_bytes_the_command_line_writes() {
+        use sha2::{Digest as _, Sha256};
+
+        let prepared = prepare_vcd(&analysis(Some(bus_declaring_events())))
+            .expect("a transient that declares a bus dumps");
+
+        assert_eq!(prepared.bytes.len(), 220);
+        let digest = Sha256::digest(&prepared.bytes);
+        assert_eq!(
+            digest
+                .iter()
+                .take(16)
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>(),
+            "cf5eb91631523b1ceb714b716fb74afc",
+            "the GUI and the command line publish one dump of one run"
+        );
+
+        let text = String::from_utf8(prepared.bytes).expect("a dump is ASCII text");
+        assert!(text.contains("$var wire 2 ! x1.count [1:0] $end"), "{text}");
+        assert!(
+            !text.contains("count#1"),
+            "a declared member is a bit of the vector, not a scalar beside it: {text}"
+        );
+        assert!(text.contains("\n#5\nb01 !\n"), "{text}");
+        assert!(text.contains("\n#15\nb11 !\n"), "{text}");
+        assert_eq!(
+            prepared.node_count, 1,
+            "two members declared as one bus are one signal in the dump"
+        );
+        assert_eq!(prepared.change_count, 4);
+    }
+
+    /// The same members with no declaration are the two scalars they were
+    /// before, so nothing about this arm changed for a run without a bus.
+    #[test]
+    fn undeclared_members_still_dump_as_the_scalars_they_are() {
+        let AnalysisResultPayload::TransientEvents { digital_traces, .. } = bus_declaring_events()
+        else {
+            unreachable!("the fixture is an event payload")
+        };
+        let prepared = prepare_vcd(&analysis(Some(events(digital_traces, Vec::new()))))
+            .expect("a transient with event evidence dumps");
+        let text = String::from_utf8(prepared.bytes).expect("a dump is ASCII text");
+        assert!(text.contains("$var wire 1 ! count#1 $end"), "{text}");
+        assert!(text.contains("$var wire 1 \" count#0 $end"), "{text}");
+        assert!(!text.contains("[1:0]"), "{text}");
     }
 }
