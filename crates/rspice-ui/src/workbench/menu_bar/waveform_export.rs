@@ -16,6 +16,17 @@ const NO_SAMPLES_MESSAGE: &str = "No waveform samples available to export.";
 const ALL_TRACES_HIDDEN_MESSAGE: &str = "Every trace in the displayed analysis is hidden, so there is nothing to export. \
      Show at least one trace first.";
 
+// Touchstone carries an S-parameter network on a frequency axis and nothing
+// else, so each table route names what it holds instead of the reader being
+// told only that the format did not fit.
+const DERIVED_VIEWER_TOUCHSTONE_REFUSAL: &str =
+    "Touchstone export is not compatible with a derived viewer; select CSV export.";
+const RESULTS_SHEET_TOUCHSTONE_REFUSAL: &str =
+    "Touchstone export is not compatible with this Results sheet; select CSV export.";
+const TYPED_RESULT_TOUCHSTONE_REFUSAL: &str =
+    "Touchstone export is not compatible with the active typed result; select CSV export.";
+const ANALYSIS_STACK_TOUCHSTONE_REFUSAL: &str = "Touchstone export requires one selected analysis; maximize one displayed strip or select CSV export.";
+
 fn note_result_export_failure(state: &mut AppState, detail: impl Into<String>) {
     let data_version = state.simulation.data_version;
     state.ui.results.record_runtime_condition(
@@ -119,8 +130,8 @@ fn result_export_format_availability_by_id(canonical_id: &str) -> Result<(), Str
 /// Every other offered format publishes something a table is not — a native
 /// bundle, a transient's event schedule, a NumPy array — and is routed to its
 /// own module before any table is prepared. Narrowing to those three once, at
-/// the point the routing is decided, is what keeps the five payload routers
-/// below from each restating which formats never reach them.
+/// the point the routing is decided, is what keeps the two table routers below
+/// from each restating which formats never reach them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TabularExportFormat {
     Csv,
@@ -264,13 +275,8 @@ pub(crate) fn action_export_csv_with_io(
         // A native bundle carries the exact retained waveform analysis. It
         // must not quietly substitute that source for a derived or tabular
         // sheet that the reader is currently looking at.
-        let owns_non_waveform_view = prepare_active_derived_view_csv(state, &displayed).is_some()
-            || prepare_active_sheet_csv(state, &displayed).is_some()
-            || displayed
-                .primary_analysis(state)
-                .and_then(prepare_typed_result_csv)
-                .is_some()
-            || displayed.analysis_indices.len() != 1;
+        let owns_non_waveform_view = displayed.analysis_indices.len() != 1
+            || prepare_displayed_table(state, &displayed).is_some();
         if owns_non_waveform_view {
             state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
                 "Native RSpice bundles export one retained shared-axis waveform analysis. Select a waveform sheet, or choose CSV/TSV for this derived or tabular view."
@@ -281,23 +287,28 @@ pub(crate) fn action_export_csv_with_io(
         export_native_result_bundle(state, io, &displayed, kind);
         return;
     }
-    // A dump is the transient's event schedule, which no Results sheet
-    // renders and no viewer derives. Routing it through the sheet and payload
-    // routers below would hand it whatever table those found instead.
-    if matches!(export_format, EngineeringExportFormat::ValueChangeDump) {
-        vcd::export_vcd(state, io, &displayed);
-        return;
-    }
-    // A NumPy export publishes the retained waveform analysis with its complex
-    // signals still complex, which the flat dataset below has already split
-    // into magnitude and re/im columns.
-    if let Some(kind) = match export_format {
-        EngineeringExportFormat::NumpyArray => Some(numpy::NumpyKind::Array),
-        EngineeringExportFormat::NumpyArchive => Some(numpy::NumpyKind::Archive),
-        _ => None,
-    } {
-        numpy::export_numpy(state, io, &displayed, kind);
-        return;
+    // Binary payloads of the retained analysis, each publishing its own bytes
+    // and returning here. A dump is the transient's event schedule, which no
+    // Results sheet renders and no viewer derives; a NumPy export keeps the
+    // complex signals complex, which the flat dataset below has already split
+    // into magnitude and re/im columns. Routing either through the table
+    // routers below would hand it whatever table those happened to find. A
+    // format that falls through is narrowed to a table immediately after, and
+    // that narrowing is exhaustive, so a new variant cannot be lost here.
+    match export_format {
+        EngineeringExportFormat::ValueChangeDump => {
+            vcd::export_vcd(state, io, &displayed);
+            return;
+        }
+        EngineeringExportFormat::NumpyArray => {
+            numpy::export_numpy(state, io, &displayed, numpy::NumpyKind::Array);
+            return;
+        }
+        EngineeringExportFormat::NumpyArchive => {
+            numpy::export_numpy(state, io, &displayed, numpy::NumpyKind::Archive);
+            return;
+        }
+        _ => {}
     }
     // Everything past this point publishes a table of the displayed view, so
     // the format is narrowed once here rather than re-examined by each router.
@@ -318,90 +329,22 @@ pub(crate) fn action_export_csv_with_io(
             unreachable!("an offered format without an encoder is refused above")
         }
     };
-    // What the reader is looking at comes first. Three sheets derive their
-    // curve in the viewer rather than reading a retained vector, so routing
-    // on the payload alone handed back the transient samples the spectrum was
-    // computed from and called it the result.
-    if let Some(derived) = prepare_active_derived_view_csv(state, &displayed) {
-        let derived = match derived {
-            Ok(derived) => derived,
+    // What the reader is looking at comes first, and exactly one view owns
+    // that table. Three sheets derive their curve in the viewer rather than
+    // reading a retained vector, so routing on the payload alone handed back
+    // the transient samples the spectrum was computed from and called it the
+    // result.
+    if let Some(table) = prepare_displayed_table(state, &displayed) {
+        match table {
+            Ok((prepared, touchstone_refusal)) => {
+                export_prepared_table(state, io, export_format, &prepared, touchstone_refusal);
+            }
+            // The view owns this export and cannot produce it. Falling through
+            // to the waveform router below is how an operating-point export
+            // came back holding a transient's event history.
             Err(reason) => {
                 state.push_user_message(crate::diagnostics::ConsoleMessage::warning(reason));
-                return;
             }
-        };
-        match export_format {
-            TabularExportFormat::Csv => export_typed_result_csv(state, io, &derived),
-            TabularExportFormat::Tsv => export_typed_result_tsv(state, io, &derived),
-            TabularExportFormat::TouchstoneWhereCompatible => {
-                state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
-                    "Touchstone export is not compatible with a derived viewer; select CSV export."
-                        .to_owned(),
-                ))
-            }
-        }
-        return;
-    }
-
-    let sheet = match prepare_active_sheet_csv(state, &displayed) {
-        // The sheet owns this viewer's export and cannot produce it. Falling
-        // through to the payload router below is how an operating-point
-        // export came back holding a transient's event history.
-        Some(Err(reason)) => {
-            state.push_user_message(crate::diagnostics::ConsoleMessage::warning(reason));
-            return;
-        }
-        Some(Ok(sheet)) => Some(sheet),
-        None => None,
-    };
-    if let Some(sheet) = sheet {
-        match export_format {
-            TabularExportFormat::Csv => export_typed_result_csv(state, io, &sheet),
-            TabularExportFormat::Tsv => export_typed_result_tsv(state, io, &sheet),
-            TabularExportFormat::TouchstoneWhereCompatible => {
-                state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
-                    "Touchstone export is not compatible with this Results sheet; select CSV export."
-                        .to_owned(),
-                ));
-            }
-        }
-        return;
-    }
-
-    if let Some(typed) = displayed
-        .primary_analysis(state)
-        .and_then(prepare_typed_result_csv)
-    {
-        match export_format {
-            TabularExportFormat::Csv => export_typed_result_csv(state, io, &typed),
-            TabularExportFormat::Tsv => export_typed_result_tsv(state, io, &typed),
-            TabularExportFormat::TouchstoneWhereCompatible => state.push_user_message(
-                crate::diagnostics::ConsoleMessage::warning(
-                    "Touchstone export is not compatible with the active typed result; select CSV export."
-                        .to_owned(),
-                ),
-            ),
-        }
-        return;
-    }
-
-    if displayed.analysis_indices.len() > 1 {
-        let prepared = match prepare_displayed_analysis_stack_csv(state, &displayed) {
-            Ok(prepared) => prepared,
-            Err(message) => {
-                state.push_user_message(crate::diagnostics::ConsoleMessage::warning(message));
-                return;
-            }
-        };
-        match export_format {
-            TabularExportFormat::Csv => export_typed_result_csv(state, io, &prepared),
-            TabularExportFormat::Tsv => export_typed_result_tsv(state, io, &prepared),
-            TabularExportFormat::TouchstoneWhereCompatible => state.push_user_message(
-                crate::diagnostics::ConsoleMessage::warning(
-                    "Touchstone export requires one selected analysis; maximize one displayed strip or select CSV export."
-                        .to_owned(),
-                ),
-            ),
         }
         return;
     }
@@ -431,6 +374,54 @@ struct PreparedTypedResultCsv {
     default_name: &'static str,
     contents: String,
     detail: String,
+}
+
+/// The one table the displayed view publishes, and the sentence Touchstone
+/// refuses that table with.
+///
+/// `None` means no view owns the export and the waveform payload below
+/// answers for it. `Some(Err)` means a view owns it and cannot produce it,
+/// which is a refusal rather than a reason to keep looking down the list.
+fn prepare_displayed_table(
+    state: &AppState,
+    displayed: &crate::workbench::documents::result_document::view_context::ResolvedResultView,
+) -> Option<Result<(PreparedTypedResultCsv, &'static str), String>> {
+    if let Some(derived) = prepare_active_derived_view_csv(state, displayed) {
+        return Some(derived.map(|derived| (derived, DERIVED_VIEWER_TOUCHSTONE_REFUSAL)));
+    }
+    if let Some(sheet) = prepare_active_sheet_csv(state, displayed) {
+        return Some(sheet.map(|sheet| (sheet, RESULTS_SHEET_TOUCHSTONE_REFUSAL)));
+    }
+    if let Some(typed) = displayed
+        .primary_analysis(state)
+        .and_then(prepare_typed_result_csv)
+    {
+        return Some(Ok((typed, TYPED_RESULT_TOUCHSTONE_REFUSAL)));
+    }
+    if displayed.analysis_indices.len() > 1 {
+        return Some(
+            prepare_displayed_analysis_stack_csv(state, displayed)
+                .map(|prepared| (prepared, ANALYSIS_STACK_TOUCHSTONE_REFUSAL)),
+        );
+    }
+    None
+}
+
+/// Publish one prepared table, or say why Touchstone cannot carry this one.
+fn export_prepared_table(
+    state: &mut AppState,
+    io: &(impl ExportWorkflowIo + ?Sized),
+    format: TabularExportFormat,
+    prepared: &PreparedTypedResultCsv,
+    touchstone_refusal: &'static str,
+) {
+    match format {
+        TabularExportFormat::Csv => export_typed_result_csv(state, io, prepared),
+        TabularExportFormat::Tsv => export_typed_result_tsv(state, io, prepared),
+        TabularExportFormat::TouchstoneWhereCompatible => state.push_user_message(
+            crate::diagnostics::ConsoleMessage::warning(touchstone_refusal.to_owned()),
+        ),
+    }
 }
 
 /// The export a Results sheet owns, if this viewer has one.
@@ -1571,45 +1562,15 @@ fn export_typed_result_csv(
     io: &(impl ExportWorkflowIo + ?Sized),
     prepared: &PreparedTypedResultCsv,
 ) {
-    match io.show_save_dialog(SaveDialogConfig {
-        title: "Export Result CSV",
-        default_name: prepared.default_name,
-        filter_name: "CSV Files",
-        filter_extensions: &["csv"],
-    }) {
-        Ok(Some(mut path)) => {
-            crate::workbench::workflows::file_actions::ensure_file_extension(&mut path, "csv");
-            let export = io.observe_destination(&path).and_then(|destination| {
-                io.write_text_file_observed(&destination, &prepared.contents)
-            });
-            match export {
-                Ok(()) => {
-                    note_result_export_success(state, "CSV");
-                    state.push_user_message(crate::diagnostics::ConsoleMessage::info(
-                        crate::workbench::workflows::export_workflow::export_completion_message(
-                            "CSV",
-                            &path,
-                            Some(prepared.detail.clone()),
-                            io,
-                        ),
-                    ));
-                }
-                Err(error) => {
-                    note_result_export_failure(state, format!("CSV export failed: {error}"));
-                    state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-                        "CSV export failed: {error}"
-                    )));
-                }
-            }
-        }
-        Ok(None) => {}
-        Err(error) => {
-            note_result_export_failure(state, format!("CSV destination failed: {error}"));
-            state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-                "CSV export failed: {error}"
-            )));
-        }
-    }
+    publish_result_text(
+        state,
+        io,
+        "CSV",
+        "csv",
+        prepared.default_name,
+        &prepared.contents,
+        &prepared.detail,
+    );
 }
 
 fn export_typed_result_tsv(
@@ -1630,43 +1591,71 @@ fn export_typed_result_tsv(
         .default_name
         .strip_suffix(".csv")
         .unwrap_or(prepared.default_name);
-    let default_name = format!("{stem}.tsv");
-    match io.show_save_dialog(SaveDialogConfig {
-        title: "Export Result TSV",
-        default_name: &default_name,
-        filter_name: "TSV Files",
-        filter_extensions: &["tsv"],
+    publish_result_text(
+        state,
+        io,
+        "TSV",
+        "tsv",
+        &format!("{stem}.tsv"),
+        &contents,
+        &prepared.detail,
+    );
+}
+
+/// Ask for a destination, write the text there, and tell the reader what they
+/// now have.
+///
+/// CSV and TSV differ in the delimiter, the extension and the label they are
+/// reported under. Nothing else about publishing a table of text differs, so
+/// the dialog, the observed compare-and-exchange write and both completion
+/// messages are stated once here.
+fn publish_result_text(
+    state: &mut AppState,
+    io: &(impl ExportWorkflowIo + ?Sized),
+    label: &str,
+    extension: &str,
+    default_name: &str,
+    contents: &str,
+    detail: &str,
+) {
+    let title = format!("Export Result {label}");
+    let filter_name = format!("{label} Files");
+    let (path, export) = match io.show_save_dialog(SaveDialogConfig {
+        title: &title,
+        default_name,
+        filter_name: &filter_name,
+        filter_extensions: &[extension],
     }) {
         Ok(Some(mut path)) => {
-            crate::workbench::workflows::file_actions::ensure_file_extension(&mut path, "tsv");
+            crate::workbench::workflows::file_actions::ensure_file_extension(&mut path, extension);
             let export = io
                 .observe_destination(&path)
-                .and_then(|destination| io.write_text_file_observed(&destination, &contents));
-            match export {
-                Ok(()) => {
-                    note_result_export_success(state, "TSV");
-                    state.push_user_message(crate::diagnostics::ConsoleMessage::info(
-                        crate::workbench::workflows::export_workflow::export_completion_message(
-                            "TSV",
-                            &path,
-                            Some(prepared.detail.clone()),
-                            io,
-                        ),
-                    ));
-                }
-                Err(error) => {
-                    note_result_export_failure(state, format!("TSV export failed: {error}"));
-                    state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-                        "TSV export failed: {error}"
-                    )));
-                }
-            }
+                .and_then(|destination| io.write_text_file_observed(&destination, contents))
+                .map_err(|error| (format!("{label} export failed: {error}"), error));
+            (path, export)
         }
-        Ok(None) => {}
-        Err(error) => {
-            note_result_export_failure(state, format!("TSV destination failed: {error}"));
+        Ok(None) => return,
+        Err(error) => (
+            std::path::PathBuf::new(),
+            Err((format!("{label} destination failed: {error}"), error)),
+        ),
+    };
+    match export {
+        Ok(()) => {
+            note_result_export_success(state, label);
+            state.push_user_message(crate::diagnostics::ConsoleMessage::info(
+                crate::workbench::workflows::export_workflow::export_completion_message(
+                    label,
+                    &path,
+                    Some(detail.to_owned()),
+                    io,
+                ),
+            ));
+        }
+        Err((note, error)) => {
+            note_result_export_failure(state, note);
             state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-                "TSV export failed: {error}"
+                "{label} export failed: {error}"
             )));
         }
     }
