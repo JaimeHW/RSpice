@@ -953,6 +953,13 @@ endmodule
     /// is the ordinary constant again, folds to `+inf`, and lands in
     /// `CompiledParameter.max` and `HirParamRange.max` — `Option<f64>` again.
     ///
+    /// `excluded` reaches the *third* range field, and it is the one place
+    /// where a bare `inf` really is an infinity: `exclude` takes a plain
+    /// expression, with none of a bound's absence rule, so `exclude inf` folds
+    /// to `+inf` and lands in `HirParamRange.exclude` and
+    /// `CompiledParameter.exclude` — a `Vec<f64>`, filled by the very same
+    /// closure that fills `min` and `max` (`SemanticAnalyzer::parse_range`).
+    ///
     /// `conductance` is the control, and it is here to keep a wrong premise
     /// from coming back: `from (0:inf)` does *not* put an infinity anywhere.
     /// The parser reads `inf` in a range bound as the absence of a bound
@@ -966,6 +973,7 @@ module rspice_infinite_constant_probe(p, n);
   electrical p, n;
   parameter real folded = 1.0/0.0;
   parameter real unbounded = 1.0 from (0:2*inf);
+  parameter real excluded = 0.5 from (0:1) exclude inf;
   parameter real conductance = 0.5 from (0:inf);
   analog I(p, n) <+ conductance * V(p, n);
 endmodule
@@ -1158,6 +1166,75 @@ endmodule
                 .map(f64::to_bits),
             Some(f64::INFINITY.to_bits()),
             "the bound the device range-checks against must be the declared one"
+        );
+    }
+
+    /// The third range field, and the one whose loss was *loud*: `exclude` is
+    /// a `Vec<f64>` of bare elements, so before it was annotated `serde_json`
+    /// wrote the infinity as `null` and the whole payload then refused to
+    /// decode. The seal caught that and refused a legal declaration by field
+    /// path; now it encodes it instead.
+    #[test]
+    fn an_excluded_value_that_folds_to_an_infinity_survives_the_seal() {
+        let runtime = seal_runtime(
+            "infinite-constant.va",
+            "rspice_infinite_constant_probe",
+            INFINITE_CONSTANT_SOURCE,
+        );
+
+        let decoded: rspice_veriloga::CompiledModel =
+            serde_json::from_str(&runtime.model_json).expect("sealed model payload parses");
+        let excluded = decoded
+            .parameters
+            .iter()
+            .find(|parameter| parameter.name.as_str() == "excluded")
+            .expect("probe model declares the excluding parameter");
+        assert_eq!(
+            excluded
+                .exclude
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+            vec![f64::INFINITY.to_bits()],
+            "the excluded value arrived as {:?}",
+            excluded.exclude
+        );
+
+        let ir: rspice_veriloga::canonical_ir::CanonicalIrArtifact =
+            serde_json::from_str(&runtime.canonical_ir_json).expect("sealed IR payload parses");
+        let range = ir
+            .hir
+            .parameters
+            .iter()
+            .find(|parameter| parameter.name.as_str() == "excluded")
+            .expect("probe IR declares the excluding parameter")
+            .range
+            .as_ref()
+            .expect("the parameter declares a range");
+        assert_eq!(
+            range
+                .exclude
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+            vec![f64::INFINITY.to_bits()],
+            "the IR excluded value arrived as {:?}",
+            range.exclude
+        );
+
+        // The seal already ran its guard — `seal_runtime` would have panicked
+        // otherwise — but assert the guard's own answer too, so a regression
+        // that puts `exclude` back in a refusal is named here rather than
+        // showing up as an opaque panic.
+        assert_eq!(
+            rspice_veriloga::json_float::non_finite_floats("model", &decoded).unwrap(),
+            Vec::new(),
+            "no bare non-finite float may remain in the compiled model"
+        );
+        assert_eq!(
+            rspice_veriloga::json_float::non_finite_floats("canonical_ir", &ir).unwrap(),
+            Vec::new(),
+            "no bare non-finite float may remain in the canonical IR"
         );
     }
 

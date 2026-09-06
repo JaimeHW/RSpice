@@ -80,6 +80,12 @@ pub struct HirParamRange {
     pub max_expression: Option<HirExprRef>,
     pub min_exclusive: bool,
     pub max_exclusive: bool,
+    /// Literal excluded values. Filled by the same constant fold as `min` and
+    /// `max` (`SemanticAnalyzer::parse_range`), but with none of a bound's
+    /// `inf`-is-an-absence rule: `exclude` takes a plain expression, so
+    /// `exclude inf` folds to an infinity and lands here. Encodes through
+    /// [`crate::json_float`].
+    #[serde(with = "crate::json_float::vec")]
     pub exclude: Vec<f64>,
     #[serde(default)]
     pub exclude_parameters: Vec<SmolStr>,

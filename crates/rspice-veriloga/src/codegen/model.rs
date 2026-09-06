@@ -515,8 +515,11 @@ pub struct CompiledParameter {
     /// Whether equality with the upper bound is forbidden.
     #[serde(default)]
     pub max_exclusive: bool,
-    /// Explicitly excluded values.
-    #[serde(default)]
+    /// Explicitly excluded values. The same fold that fills `min` and `max`,
+    /// and without a bound's `inf`-is-an-absence rule — `exclude inf` is the
+    /// ordinary constant and folds to an infinity — so this encodes through
+    /// [`crate::json_float`] too.
+    #[serde(default, with = "crate::json_float::vec")]
     pub exclude: Vec<f64>,
     /// Runtime parameter indices whose values are explicitly excluded.
     #[serde(default)]

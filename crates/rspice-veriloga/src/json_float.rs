@@ -92,6 +92,48 @@ pub mod option {
     }
 }
 
+/// The `Vec<f64>` twin.
+///
+/// Elementwise: a finite element is the plain JSON number it always was and a
+/// non-finite one takes its spelling, so a list with nothing to rescue encodes
+/// byte for byte as it did without this module. Unlike [`option`] there is no
+/// absence to preserve — a list has a length, and it is the same length either
+/// way.
+pub mod vec {
+    use serde::ser::SerializeSeq;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    /// Encode a list of `f64`, rescuing every non-finite element.
+    ///
+    /// Takes a slice rather than a `&Vec<f64>` so the same function serves a
+    /// field of either shape; `#[serde(with)]` coerces the field reference at
+    /// the call site.
+    pub fn serialize<S>(values: &[f64], serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut sequence = serializer.serialize_seq(Some(values.len()))?;
+        for value in values {
+            sequence.serialize_element(&super::Encoded(*value))?;
+        }
+        sequence.end()
+    }
+
+    /// Decode a list of `f64`, element by element through the same decoder
+    /// [`super::deserialize`] uses, so the three spellings and a plain number
+    /// mean here exactly what they mean anywhere else.
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<f64>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let values = Vec::<super::Encoded>::deserialize(deserializer)?;
+        Ok(values
+            .into_iter()
+            .map(|super::Encoded(value)| value)
+            .collect())
+    }
+}
+
 /// A `f64` that serializes through [`serialize`], for the places that need a
 /// value rather than a field attribute.
 struct Encoded(f64);
@@ -102,6 +144,15 @@ impl Serialize for Encoded {
         S: Serializer,
     {
         serialize(&self.0, serializer)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Encoded {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserialize(deserializer).map(Self)
     }
 }
 
@@ -727,6 +778,17 @@ mod tests {
         max: Option<f64>,
     }
 
+    #[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    struct Excluding {
+        #[serde(with = "crate::json_float::vec")]
+        exclude: Vec<f64>,
+    }
+
+    #[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    struct PlainExcluding {
+        exclude: Vec<f64>,
+    }
+
     #[test]
     fn a_finite_value_encodes_byte_for_byte_as_it_did_without_the_helper() {
         // The whole reason the encoding is a string only for the values JSON
@@ -760,6 +822,96 @@ mod tests {
                 "{value:e} must encode identically with and without the helper"
             );
         }
+    }
+
+    #[test]
+    fn a_finite_list_encodes_byte_for_byte_as_it_did_without_the_helper() {
+        // The `Vec<f64>` twin owes the same debt as the scalar one: a list with
+        // nothing to rescue must serialize to the bytes it always did, or every
+        // artifact carrying an `exclude` list moves its digest.
+        for values in [
+            Vec::new(),
+            vec![0.0_f64],
+            vec![-0.0, 1.0, -2.5],
+            vec![1.380_650_5e-23, f64::MIN, f64::MAX],
+            vec![f64::MIN_POSITIVE, f64::EPSILON, 6.25e41],
+        ] {
+            assert_eq!(
+                serde_json::to_string(&Excluding {
+                    exclude: values.clone()
+                })
+                .unwrap(),
+                serde_json::to_string(&PlainExcluding {
+                    exclude: values.clone()
+                })
+                .unwrap(),
+                "{values:?} must encode identically with and without the helper"
+            );
+        }
+    }
+
+    #[test]
+    fn a_list_keeps_every_non_finite_element_in_place() {
+        // An excluded value is identified by position as well as by value, so
+        // the encoding has to preserve the length and the order, not only the
+        // values it can spell.
+        let excluding = Excluding {
+            exclude: vec![1.0, f64::INFINITY, -2.5, f64::NEG_INFINITY, f64::NAN],
+        };
+        let encoded = serde_json::to_string(&excluding).unwrap();
+        assert_eq!(encoded, r#"{"exclude":[1.0,"inf",-2.5,"-inf","nan"]}"#);
+
+        let decoded: Excluding = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(
+            decoded
+                .exclude
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+            excluding
+                .exclude
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn a_bare_list_loses_its_non_finite_elements_the_loud_way() {
+        // The failure the annotation removes: `serde_json` writes each one as
+        // `null`, and a bare `f64` element refuses to load it back, so the
+        // whole artifact is unreadable rather than subtly wrong.
+        let plain = serde_json::to_string(&PlainExcluding {
+            exclude: vec![1.0, f64::INFINITY],
+        })
+        .unwrap();
+        assert_eq!(plain, r#"{"exclude":[1.0,null]}"#);
+        assert!(serde_json::from_str::<PlainExcluding>(&plain).is_err());
+    }
+
+    #[test]
+    fn a_list_written_before_the_helper_existed_still_decodes() {
+        let decoded: Excluding = serde_json::from_str(r#"{"exclude":[3,-1.5]}"#).unwrap();
+        assert_eq!(decoded.exclude, vec![3.0, -1.5]);
+    }
+
+    #[test]
+    fn an_annotated_list_is_not_reported_because_its_elements_are_no_longer_bare() {
+        let excluding = Excluding {
+            exclude: vec![1.0, f64::INFINITY],
+        };
+        assert_eq!(non_finite_floats("model", &excluding).unwrap(), Vec::new());
+        assert_eq!(refuse_non_finite_floats("model", &excluding), Ok(()));
+
+        let plain = PlainExcluding {
+            exclude: vec![1.0, f64::INFINITY],
+        };
+        let error = refuse_non_finite_floats("model", &plain)
+            .expect_err("a bare non-finite element must be refused");
+        assert_eq!(
+            error.to_string(),
+            "1 non-finite float JSON cannot encode: model.exclude[1] = inf"
+        );
     }
 
     #[test]
