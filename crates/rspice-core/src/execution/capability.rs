@@ -454,8 +454,8 @@ impl SignalCapability {
 // a surface can see was declared by a frontend or read out of an imported
 // artifact, and none of these rows can claim more until that boundary opens.
 const CLI_DIGITAL_FLATTENED_PLUS_EVENTS: &str = "every table format writes the flattened D(node) column (0, 1 or 0.5 per analysis time point, drive strength dropped); the exact twelve-state histories ride beside it only in the rawfile event plots --format raw/ascii append and in the typed document --format json publishes, and --format vcd keeps the timeline and four bit states but not the strength; bus declarations are carried on all three of those routes, but no run declares one because the engine boundary that would is still refused";
-const PYTHON_DIGITAL_NO_TYPED_ACCESSOR: &str = "the shared document's JSON view and the pickled result both carry the event histories with their state and strength labels, but no typed accessor exposes them: saved_signals, to_csv and the raw exporters all read the flattened D(node) projection; the pickled structure carries no bus declarations at all, and the ones the document carries have no accessor either";
-const WASM_LOGIC_SAMPLES: &str = "the event histories cross the browser boundary with the shared document and are reachable losslessly through the handle's bounded JSON export, but the payload descriptor deliberately omits them and no typed digital accessor exists on the browser side; the document's bus declarations cross with it and are likewise reachable only by reading the whole JSON";
+const PYTHON_DIGITAL_TYPED_EVENTS_FLAT_COLUMN: &str = "the twelve-state event histories reach a caller typed: digital_nodes() lists the event nodes a transient captured, digital_events(node) returns every committed change with the state and strength labels the shared document publishes and the 0..=12 event code encoding the same pair, and to_vcd()/write_vcd() publish the dump the command line publishes byte for byte; what stays partial is the descriptor inventory, where a digital signal is still the flattened D(node) column that saved_signals, to_csv and the raw exporters read, the real event histories, which only CompressedTransientResult exposes typed, and the bus declarations, which no accessor names and the version-1 pickle cannot carry";
+const WASM_DIGITAL_TYPED_EVENTS_FLAT_COLUMN: &str = "the twelve-state event histories cross the browser boundary typed: digitalNodes(resultIndex) lists the event nodes with their change counts and the bus that claims each one, digitalEvents(resultIndex, node) returns every committed change with the document's own state and strength tags and the 0..=12 event code, bounded by the same transfer ceiling a window obeys, toVcd(resultIndex) writes the dump the command line writes, and the payload descriptor now counts what there is to ask for; what stays partial is the descriptor inventory, where a digital signal is still the flattened logic column, and the real event histories, still reachable only through the whole-document JSON export";
 const ADAPTER_DIGITAL_DOCUMENT_ONLY: &str = "the typed document the adapter publishes carries the event histories verbatim, state and strength included, and any bus declarations beside them, but the adapter adds no digital-specific handling of its own: the descriptor columns beside them are the flattened projection, and the whole result travels as one size-bounded JSON artifact";
 
 /// Signal-descriptor adapter coverage, kept beside result coverage so adding a
@@ -492,8 +492,8 @@ pub const SIGNAL_CAPABILITY_MATRIX: [SignalCapability; 5] = [
     SignalCapability {
         signal: SignalKind::Digital,
         cli: MappingStatus::Partial(CLI_DIGITAL_FLATTENED_PLUS_EVENTS),
-        python: MappingStatus::Partial(PYTHON_DIGITAL_NO_TYPED_ACCESSOR),
-        wasm: MappingStatus::Partial(WASM_LOGIC_SAMPLES),
+        python: MappingStatus::Partial(PYTHON_DIGITAL_TYPED_EVENTS_FLAT_COLUMN),
+        wasm: MappingStatus::Partial(WASM_DIGITAL_TYPED_EVENTS_FLAT_COLUMN),
         engine_adapter: MappingStatus::Partial(ADAPTER_DIGITAL_DOCUMENT_ONLY),
     },
 ];
