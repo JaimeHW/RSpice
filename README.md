@@ -302,7 +302,11 @@ API details and the feature-flag matrix: [crates/rspice-core/README.md](crates/r
 runs to JavaScript through `wasm-bindgen`, returning JSON-serializable snapshots
 under configurable resource limits.
 
-### Verilog-A and Verilog-AMS
+### Verilog-AMS
+
+Verilog-A is the analog subset of Verilog-AMS, and RSpice treats them as the one
+language they are: a single compiler against LRM 2.4, with `.va` and `.vams`
+sources going through the same pipeline and no mode selector between them.
 
 `rspice-veriloga` compiles behavioral modules through parser, semantic analysis,
 canonical IR, and either a bytecode VM or the RSpice-owned native JIT (x86-64
@@ -312,15 +316,14 @@ interpreter. The same crate owns the Rust backend that produces the generated
 built-in devices above. External models compile standalone with
 `rspice compile-va`; examples live in [models/veriloga/](models/veriloga/).
 
-Beyond the analog half, RSpice has the discrete half of Verilog-AMS: the IEEE
-1364-2005 digital subset with four-state (`0 1 x z`) logic, gate primitives,
-blocking and non-blocking assignment, vectors, and module hierarchy, driven by
-an event wheel alongside the analog solve. Real-number modeling has `wreal` nets
-and the four resolved forms. Mixed-discipline boundaries follow Verilog-AMS LRM
-2.4 clause 7 — discipline resolution, `connect_mode` auto-insertion, `resolveto`
-with `exclude`, and `merged`/`split` segmentation — with the detail resolution
-mode of Annex F.2.2 refused by name rather than approximated. `.vams` modules
-load through the same discovery path as `.va` ones.
+The discrete half is the IEEE 1364-2005 digital subset: four-state (`0 1 x z`)
+logic, gate primitives, blocking and non-blocking assignment, vectors, and
+module hierarchy, driven by an event wheel alongside the analog solve.
+Real-number modeling has `wreal` nets and the four resolved forms.
+Mixed-discipline boundaries follow LRM 2.4 clause 7 — discipline resolution,
+`connect_mode` auto-insertion, `resolveto` with `exclude`, and `merged`/`split`
+segmentation — with the detail resolution mode of Annex F.2.2 refused by name
+rather than approximated.
 
 Digital and mixed runs export to VCD with `rspice run --format vcd`, one wire
 per digital node and one N-bit vector per declared bus (`--expand-buses` writes
