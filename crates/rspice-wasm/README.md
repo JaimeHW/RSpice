@@ -126,25 +126,6 @@ The declared coverage of every family on this surface lives in
 registry as its input: a cell that says `Mapped` must publish a document of
 that family, and a cell that says `Unsupported` must refuse by name.
 
-### Renames from the previous browser schemas
-
-This build replaces the three browser-owned result schemas
-(`rspice-analog-result`, `rspice-deck-result`, `rspice-stb-result`) with the
-shared core document. Consumers of the old handles should note:
-
-| Was | Now |
-| :--- | :--- |
-| `WasmAnalogResultHandle`, `WasmDeckResultHandle`, `WasmStbResultHandle` | one `WasmResultHandle` |
-| `handle.readWindow(start, count)` | `handle.readWindow(resultIndex, start, count)` |
-| `handle.metadata()` returning one result's descriptors | `handle.resultMetadata(resultIndex)`; `metadata()` now describes the plan |
-| coordinate `index` / `namespace` / assignment `target` | coordinate `ordinal` / `label` / assignment `stepTarget` |
-| coordinate `id` as a string | `coordinate.id` as `{semantic, occurrence}`; the flat string stays available as `coordinateId` |
-| `analysis: {id, kind, request_kind, ordinal}` | `analysis: {id, kind, ordinal}`, with the core's own kind tags |
-| scalar calls taking a one-based `ordinal` argument | removed; a one-analysis request is `kind-001` by construction |
-| `runStbAnalysisDocument(...)` | author `.STB` in the deck and call `runAuthoredDeckDocument` |
-| `runDcOperatingPoint`, `runAcAnalysis`, `runTransientAnalysis`, `runTransientAnalysisCompressed` | removed; they copied whole results into JavaScript arrays. Use the corresponding `*Document` call, and request compression through `options.transientCompression` |
-| the separate `TransientFftSnapshot` DTO family | each `.FFT` spectrum is its own `fft` document naming its parent `tran` analysis |
-
 ### Execution options
 
 The optional object is additive; existing calls need no changes:
