@@ -1,7 +1,10 @@
 //! # RSpice Verilog-A/AMS Compiler
 //!
-//! A Verilog-A compiler targeting the supported analog subset of the
-//! Verilog-AMS Language Reference Manual (LRM) 2.4 for RSpice.
+//! A compiler for the supported subset of the Verilog-AMS Language Reference
+//! Manual (LRM) 2.4, both halves of it: the analog subset commonly called
+//! Verilog-A, and the discrete subset — IEEE 1364-2005 digital constructs
+//! carrying four-state values ([`four_state`]) and real-valued nets — with the
+//! mixed-discipline net-boundary machinery of clause 7 in [`connect`].
 //!
 //! ## Architecture
 //!
@@ -50,13 +53,15 @@
 //! parse, and `compile_virtual_runtime*` for sealed [`VirtualSourceBundle`]s
 //! that never touch the file system.
 //!
-//! ## Verilog-A language support
+//! ## Language support
 //!
 //! The supported subset, the constructs that are accepted but inert, and the
-//! constructs that are rejected outright are enumerated in the crate README.
-//! Unsupported input is always a [`CompileError`] naming the construct and its
-//! span — the compiler does not silently drop what it cannot lower, and
-//! [`semantic`] carries tests pinning that.
+//! constructs that are rejected outright are enumerated in the crate README;
+//! [`connect`] carries its own clause-by-clause table for the net-boundary
+//! rules, including what it refuses by name. Unsupported input is always a
+//! [`CompileError`] naming the construct and its span — the compiler does not
+//! silently drop what it cannot lower, and [`semantic`] carries tests pinning
+//! that.
 
 #![allow(
     clippy::assertions_on_constants,
