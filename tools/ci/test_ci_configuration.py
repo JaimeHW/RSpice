@@ -1239,6 +1239,10 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("cargo check --locked -p rspice-cli -p rspice-ui", workflow)
         self.assertIn("cargo test --locked -p rspice-cli --tests", workflow)
         self.assertIn("cargo test --locked -p rspice-ui --lib", workflow)
+        # The desktop claim includes reclaiming a killed run's staging files,
+        # whose liveness answer is per-host and pinned in `rspice-output`. The
+        # job checked and tested the two crates above and never built that one.
+        self.assertIn("cargo test --locked -p rspice-output", workflow)
 
     def test_ui_readme_matches_current_feature_flags_and_modules(self) -> None:
         readme = read_text("crates/rspice-ui/README.md")

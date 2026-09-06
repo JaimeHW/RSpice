@@ -657,6 +657,13 @@ jobs:
         env:
           RUSTFLAGS: -D warnings
         run: cargo check --locked -p rspice-core --no-default-features --features veriloga-model-diode-cmc,veriloga-builtins-noise
+      - name: Output-layer tests
+        # The desktop CLI reclaims a killed run's staging files through
+        # `rspice-output`, whose liveness answer is per-host: the macOS
+        # `kill(pid, 0)` arm exists because this runner used to answer "unknown"
+        # and reclaim nothing. That pin lives in `rspice-output`, which nothing
+        # else on this runner builds, so the job meant to prove it never ran it.
+        run: cargo test --locked -p rspice-output
       - name: CLI integration tests
         run: cargo test --locked -p rspice-cli --tests
       - name: UI library tests
