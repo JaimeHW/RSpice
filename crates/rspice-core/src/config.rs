@@ -370,6 +370,18 @@ pub struct SimulationConfig {
     /// (TXL/CPL/LTRA convolutions) sample accepted points. Built for oracle
     /// comparison: replaying a reference grid isolates physics parity from
     /// adaptive step-selection parity.
+    ///
+    /// Across a checkpoint resume the grid is filtered to the points after the
+    /// checkpoint time, and the checkpoint time itself is the resumed run's
+    /// first sample. For a point-for-point comparison against an unsegmented
+    /// run, make the checkpoint time a grid point bit-exactly — build it from
+    /// the same expression as the grid, because `1000.0 * 1e-9` and `1.0e-6`
+    /// are different doubles. Otherwise the resumed run carries one extra
+    /// sample at the seam and a partial first interval, and its samples are
+    /// offset by one index from the unsegmented run's for the rest of the
+    /// segment. Internal sub-step points between targets are the integrator's
+    /// own business and are not reproducible across a resume; only the target
+    /// samples are.
     pub locked_time_grid: Option<std::sync::Arc<Vec<Value>>>,
     /// Optional accepted-step history paired with `locked_time_grid`.
     ///
