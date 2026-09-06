@@ -10,11 +10,17 @@ use super::*;
 mod events;
 /// Helper bodies the `#[pymethods]` block delegates to.
 mod internals;
-/// Structural proof that a transient result is a complete, aligned waveform set.
+/// The persisted form of a transient result, and the structural pass that
+/// proves it is a complete, aligned waveform set.
 mod structure;
 
 pub(crate) use events::PyDigitalEvent;
-pub(crate) use structure::{clip_transient_to_start, validate_transient_state};
+pub(crate) use structure::clip_transient_to_start;
+/// The structural pass now runs inside [`structure`]'s own restore and publish
+/// helpers, so the chaos suite is what still names it from outside.
+#[cfg(test)]
+pub(crate) use structure::validate_transient_state;
+use structure::{TransientPersistenceState, restore_transient_result, transient_persistence_state};
 
 /// Authored spelling of a node a caller addressed by name or by index.
 ///
@@ -748,99 +754,27 @@ impl PyTransientResult {
         fft_state: Option<TransientFftPersistenceState>,
         event_state: Option<TransientEventPersistenceState>,
     ) -> PyResult<Self> {
-        let (digital_traces, real_traces) =
-            rebuild_transient_event_traces(event_state).map_err(crate::errors::value_error)?;
-        let (node_names, branch_names) = names;
-        let restored = TransientResult {
+        Ok(Self::restored(restore_transient_result(
             time,
             step_sizes,
             voltages,
             branch_currents,
             num_nodes,
-            node_names,
-            branch_names,
-            digital_traces,
-            // The pickled event state is version 1 and carries no bus table,
-            // so a restored result declares none rather than inventing one.
-            digital_buses: Vec::new(),
-            real_traces,
-            device_op_traces: device_op_traces
-                .into_iter()
-                .map(|(device_name, parameter, values)| {
-                    rspice_core::engine::TransientDeviceOpTrace {
-                        device_name,
-                        parameter,
-                        values,
-                    }
-                })
-                .collect(),
-            store_traces: store_traces
-                .into_iter()
-                .map(|(name, values)| rspice_core::engine::TransientStoreTrace { name, values })
-                .collect(),
-            fft_results: rebuild_transient_fft_results(fft_state)?,
-        };
-        validate_transient_state(&restored).map_err(crate::errors::value_error)?;
-        Ok(Self::restored(restored))
+            names,
+            device_op_traces,
+            store_traces,
+            fft_state,
+            event_state,
+        )?))
     }
 
-    #[allow(clippy::type_complexity)]
     fn __reduce__<'py>(
         &self,
         py: Python<'py>,
-    ) -> PyResult<(
-        Bound<'py, PyAny>,
-        (
-            Vec<f64>,
-            Vec<f64>,
-            Vec<Vec<f64>>,
-            Vec<Vec<f64>>,
-            usize,
-            (Vec<String>, Vec<String>),
-            Vec<(String, String, Vec<f64>)>,
-            Vec<(String, Vec<f64>)>,
-            TransientFftPersistenceState,
-            TransientEventPersistenceState,
-        ),
-    )> {
-        // Refuse to publish a state the unpickler would refuse to read: a
-        // pickle is evidence, and a file that cannot be loaded back is worse
-        // than a failed call.
-        validate_transient_state(&self.inner).map_err(crate::errors::value_error)?;
+    ) -> PyResult<(Bound<'py, PyAny>, TransientPersistenceState)> {
         Ok((
             unpickler::<Self>(py)?,
-            (
-                self.inner.time.clone(),
-                self.inner.step_sizes.clone(),
-                self.inner.voltages.clone(),
-                self.inner.branch_currents.clone(),
-                self.inner.num_nodes,
-                (
-                    self.inner.node_names.clone(),
-                    self.inner.branch_names.clone(),
-                ),
-                self.inner
-                    .device_op_traces
-                    .iter()
-                    .map(|trace| {
-                        (
-                            trace.device_name.clone(),
-                            trace.parameter.clone(),
-                            trace.values.clone(),
-                        )
-                    })
-                    .collect(),
-                self.inner
-                    .store_traces
-                    .iter()
-                    .map(|trace| (trace.name.clone(), trace.values.clone()))
-                    .collect(),
-                transient_fft_persistence_state(&self.inner.fft_results)?,
-                transient_event_persistence_state(
-                    &self.inner.digital_traces,
-                    &self.inner.real_traces,
-                ),
-            ),
+            transient_persistence_state(&self.inner)?,
         ))
     }
 }

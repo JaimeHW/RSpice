@@ -1,11 +1,121 @@
-//! Structural validation of a complete transient waveform set.
+//! The persisted form of a transient result, and the structural pass it must
+//! survive in both directions.
 //!
-//! This is the pass a persisted result must survive in both directions: a
-//! restored result can never be shorter, wider, or less aligned than the one
-//! that was written, and a result that could not be read back is never
-//! written in the first place.
+//! A restored result can never be shorter, wider, or less aligned than the one
+//! that was written, and a result that could not be read back is never written
+//! in the first place. Both directions of that contract live here: the state
+//! `__reduce__` publishes, the reconstruction `_unpickle` performs, and
+//! [`validate_transient_state`], the pass each of them runs.
 
 use super::*;
+
+/// Everything a pickled transient result carries, in `_unpickle` order.
+///
+/// Naming the tuple keeps the shape in one place: `__reduce__` publishes it and
+/// `_unpickle` consumes it, and a field added to one that is missing from the
+/// other would not compile.
+pub(super) type TransientPersistenceState = (
+    Vec<f64>,
+    Vec<f64>,
+    Vec<Vec<f64>>,
+    Vec<Vec<f64>>,
+    usize,
+    (Vec<String>, Vec<String>),
+    Vec<(String, String, Vec<f64>)>,
+    Vec<(String, Vec<f64>)>,
+    TransientFftPersistenceState,
+    TransientEventPersistenceState,
+);
+
+/// Rebuild a transient result from the state `_unpickle` was handed.
+///
+/// Nothing here is zero-filled: a state that does not describe a complete,
+/// aligned result is rejected rather than repaired, because a result that
+/// reads back as something else is worse than one that does not read back.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn restore_transient_result(
+    time: Vec<f64>,
+    step_sizes: Vec<f64>,
+    voltages: Vec<Vec<f64>>,
+    branch_currents: Vec<Vec<f64>>,
+    num_nodes: usize,
+    names: (Vec<String>, Vec<String>),
+    device_op_traces: Vec<(String, String, Vec<f64>)>,
+    store_traces: Vec<(String, Vec<f64>)>,
+    fft_state: Option<TransientFftPersistenceState>,
+    event_state: Option<TransientEventPersistenceState>,
+) -> PyResult<TransientResult> {
+    let (digital_traces, real_traces) =
+        rebuild_transient_event_traces(event_state).map_err(crate::errors::value_error)?;
+    let (node_names, branch_names) = names;
+    let restored = TransientResult {
+        time,
+        step_sizes,
+        voltages,
+        branch_currents,
+        num_nodes,
+        node_names,
+        branch_names,
+        digital_traces,
+        // The pickled event state is version 1 and carries no bus table,
+        // so a restored result declares none rather than inventing one.
+        digital_buses: Vec::new(),
+        real_traces,
+        device_op_traces: device_op_traces
+            .into_iter()
+            .map(
+                |(device_name, parameter, values)| rspice_core::engine::TransientDeviceOpTrace {
+                    device_name,
+                    parameter,
+                    values,
+                },
+            )
+            .collect(),
+        store_traces: store_traces
+            .into_iter()
+            .map(|(name, values)| rspice_core::engine::TransientStoreTrace { name, values })
+            .collect(),
+        fft_results: rebuild_transient_fft_results(fft_state)?,
+    };
+    validate_transient_state(&restored).map_err(crate::errors::value_error)?;
+    Ok(restored)
+}
+
+/// Publish the state `_unpickle` will be handed back.
+///
+/// The structural pass runs before anything is published: a pickle is
+/// evidence, and a file that cannot be loaded back is worse than a failed call.
+pub(super) fn transient_persistence_state(
+    result: &TransientResult,
+) -> PyResult<TransientPersistenceState> {
+    validate_transient_state(result).map_err(crate::errors::value_error)?;
+    Ok((
+        result.time.clone(),
+        result.step_sizes.clone(),
+        result.voltages.clone(),
+        result.branch_currents.clone(),
+        result.num_nodes,
+        (result.node_names.clone(), result.branch_names.clone()),
+        result
+            .device_op_traces
+            .iter()
+            .map(|trace| {
+                (
+                    trace.device_name.clone(),
+                    trace.parameter.clone(),
+                    trace.values.clone(),
+                )
+            })
+            .collect(),
+        result
+            .store_traces
+            .iter()
+            .map(|trace| (trace.name.clone(), trace.values.clone()))
+            .collect(),
+        transient_fft_persistence_state(&result.fft_results)?,
+        transient_event_persistence_state(&result.digital_traces, &result.real_traces),
+    ))
+}
 
 /// Prove a transient result is a complete, internally aligned waveform set.
 ///
