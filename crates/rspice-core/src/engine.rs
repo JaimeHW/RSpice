@@ -30,7 +30,8 @@
 //! - `transient` - time-domain integration, including checkpoint/resume
 //! - `distortion` - third-order Volterra distortion (`.DISTO`)
 //! - `hb` - harmonic balance
-//! - `pss`, `pss_noise` - periodic steady state and periodic noise
+//! - `pss`, `pss_noise`, `pstb` - periodic steady state, periodic noise, and
+//!   the Floquet stability of a retained periodic orbit
 //! - `stb` - loop-gain stability
 //! - `transfer` - small-signal transfer function (`.TF`)
 //! - `noise`, `monte_carlo`, `pole_zero`, `sensitivity`, `step` - the rest,
@@ -71,6 +72,8 @@ pub(crate) mod periodic_capability;
 mod pole_zero;
 mod pss;
 mod pss_noise;
+mod pstb;
+pub use pstb::PeriodicStabilityResult;
 mod result;
 mod sensitivity;
 pub use sensitivity::SensitivityCardResult;

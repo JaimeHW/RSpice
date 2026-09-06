@@ -2533,6 +2533,45 @@ impl PnoiseCard {
     pub(crate) const DEFAULT_INTEGRATED_NOISE: bool = false;
 }
 
+/// Authored `.PSTB` card: the Floquet stability of a periodic orbit, read at
+/// one loop probe.
+///
+/// Like [`PacCard`], the large-signal carrier is deliberately absent: the
+/// period and the monodromy matrix come from the upstream `.PSS` instance when
+/// the analysis runs. There is deliberately no `FROM=` key either, and no
+/// harmonic-balance spelling of this card: [`crate::engine::PssAnalysisResult`]
+/// is the only thing in the engine that carries a monodromy matrix, so a
+/// harmonic-balance carrier cannot answer what this card asks.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PstbCard {
+    /// Instance name of the inductor whose branch current breaks the loop.
+    ///
+    /// Resolved against the carrier's own shooting-state basis, so the probe
+    /// names a coordinate of the retained monodromy rather than of a circuit
+    /// rebuilt beside it.
+    pub probe_instance: String,
+    /// Harmonics of the carrier orbit this study is stated over.
+    ///
+    /// The card does not solve its own carrier, so this is a precondition on
+    /// the one it is bound to: a retained orbit whose spectral capacity is
+    /// below this cannot represent the motion the card asks about, and the run
+    /// refuses rather than reporting a spectrum from an aliased orbit.
+    pub max_harmonics: usize,
+    /// Floquet multipliers a presentation layer is asked to show.
+    ///
+    /// The published spectrum is always complete — a truncated spectrum cannot
+    /// prove stability — so this is a display limit, carried into the result
+    /// document so a viewer can honour the card without re-reading the deck.
+    pub num_multipliers: usize,
+    /// Outer magnitude boundary above which a multiplier is called unstable.
+    /// At least one, so the physical `|lambda| = 1` boundary is never inside it.
+    pub stability_threshold: Value,
+    /// Report modes sitting near a root of unity as subharmonic orders.
+    pub detect_subharmonics: bool,
+    /// Numerical tolerance of the eigen-decomposition.
+    pub eigenvalue_tolerance: Value,
+}
+
 /// Authored `.ENVELOPE` card: harmonic-balance envelope continuation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EnvelopeCard {

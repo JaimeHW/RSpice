@@ -1,5 +1,5 @@
-//! Authored `.SENS`, `.PZ`, `.SP` and `.PXF` cards run through core entry
-//! points that take the card, and their results project into the shared
+//! Authored `.SENS`, `.PZ`, `.SP`, `.PXF` and `.PSTB` cards run through core
+//! entry points that take the card, and their results project into the shared
 //! result document.
 
 use rspice_core::abort_signal::NoAbort;
@@ -508,6 +508,262 @@ fn an_authored_pxf_card_honours_cancellation() {
             &rspice_core::abort_signal::ImmediateAbort,
         )
         .expect_err("an aborted .PXF run must not publish a partial transfer");
+    assert!(matches!(
+        error,
+        rspice_core::engine::SimulationError::Aborted
+    ));
+}
+
+//=============================================================================
+// .PSTB
+//=============================================================================
+
+const PSTB_FUNDAMENTAL: f64 = 1.0e6;
+
+/// A driven series-RLC with one capacitor and one inductor, so the shooting
+/// state carries both kinds of coordinate and the loop probe's index is a
+/// non-trivial offset into the basis rather than zero by luck.
+const PSTB_RESONATOR: &str = "PSTB card runner\n\
+     vin in 0 SIN(0 1 1meg)\n\
+     r1 in a 50\n\
+     l1 a out 10u\n\
+     c1 out 0 1n\n\
+     .end\n";
+
+fn pstb_card(probe: &str) -> rspice_core::netlist::PstbCard {
+    rspice_core::netlist::PstbCard {
+        probe_instance: probe.to_owned(),
+        max_harmonics: 4,
+        num_multipliers: 10,
+        stability_threshold: 1.0 + 1.0e-6,
+        detect_subharmonics: true,
+        eigenvalue_tolerance: 1.0e-10,
+    }
+}
+
+fn pstb_carrier(engine: &Engine, netlist: &Netlist) -> rspice_core::engine::PssOperatingPoint {
+    engine
+        .run_pss_operating_point_with_abort(
+            netlist,
+            rspice_core::analysis::PssConfig::new(PSTB_FUNDAMENTAL)
+                .with_harmonics(8)
+                .with_points_per_period(64)
+                .with_tstab_periods(2),
+            &NoAbort,
+        )
+        .expect("the driven resonator converges")
+}
+
+/// The engine entry is the carrier's monodromy put through `PstbAnalyzer` with
+/// the configuration the card states, plus the probe's participation in each
+/// mode shape. This pins that it is exactly that and nothing else, which is
+/// what the Studio's own route produces for the same deck by way of a circuit
+/// it builds itself and 260 lines of re-derivation it no longer needs.
+#[test]
+fn an_authored_pstb_card_reproduces_the_spectrum_its_configuration_asks_for() {
+    let netlist = Netlist::parse(PSTB_RESONATOR).expect("deck parses");
+    let engine = Engine::new(SimulationConfig::default());
+    let carrier = pstb_carrier(&engine, &netlist);
+    let card = pstb_card("L1");
+
+    let stability = engine
+        .run_pstb_card_from_pss_with_abort(&netlist, &card, &carrier, &NoAbort)
+        .expect("the authored .PSTB card runs against its carrier");
+
+    let oracle = rspice_core::analysis::pstb::PstbAnalyzer::new(
+        rspice_core::analysis::pstb::PstbConfig::new()
+            .with_num_eigenvalues(card.num_multipliers)
+            .with_orbit_kind(carrier.analysis().result.floquet_orbit_kind)
+            .with_eigenvectors(true)
+            .with_tolerance(card.eigenvalue_tolerance)
+            .with_stability_threshold(card.stability_threshold)
+            .with_subharmonic_detection(card.detect_subharmonics),
+    )
+    .analyze_monodromy_with_abort(
+        &carrier.analysis().monodromy,
+        carrier.analysis().period,
+        &NoAbort,
+    )
+    .expect("the same configuration describes a runnable Floquet study");
+
+    assert_eq!(stability.result.period, oracle.period);
+    assert_eq!(stability.result.stability_verdict, oracle.stability_verdict);
+    assert_eq!(stability.result.stability, oracle.stability);
+    assert_eq!(stability.result.num_unstable, oracle.num_unstable);
+    assert_eq!(
+        stability.result.max_multiplier_magnitude,
+        oracle.max_multiplier_magnitude
+    );
+    assert_eq!(
+        stability.result.min_stability_margin_db,
+        oracle.min_stability_margin_db
+    );
+    assert_eq!(stability.result.subharmonics, oracle.subharmonics);
+    assert_eq!(stability.result.multipliers.len(), oracle.multipliers.len());
+    for (mine, theirs) in stability.result.multipliers.iter().zip(&oracle.multipliers) {
+        assert_eq!(mine.value, theirs.value, "the multiplier itself");
+        assert_eq!(mine.exponent, theirs.exponent);
+        assert_eq!(mine.is_unstable, theirs.is_unstable);
+        assert_eq!(mine.is_trivial, theirs.is_trivial);
+        assert_eq!(mine.subharmonic_order, theirs.subharmonic_order);
+    }
+
+    // The participation is the probe coordinate's share of each mode shape,
+    // stated for every retained mode and never only the displayed ones.
+    assert_eq!(
+        stability.probe_participation.len(),
+        stability.result.multipliers.len()
+    );
+    for (index, multiplier) in oracle.multipliers.iter().enumerate() {
+        let vector = multiplier.eigenvector.as_ref().expect("eigenvector");
+        let mut norm = 0.0_f64;
+        for value in vector {
+            norm = norm.hypot(value.norm());
+        }
+        let expected = (vector[stability.probe_state_index].norm() / norm).clamp(0.0, 1.0);
+        assert_eq!(
+            stability.probe_participation[index],
+            expected,
+            "mode {} participation",
+            index + 1
+        );
+    }
+}
+
+/// The probe index the engine derives from the carrier's shooting-state basis
+/// and the one `CircuitData` derives from a built circuit are the same number.
+///
+/// They are two derivations of one fact, `capacitors.len() + inductor_index`,
+/// reached by different routes, and nothing but this gate stops them drifting
+/// apart. The deck deliberately carries a capacitor as well as an inductor, so
+/// a wrong offset cannot hide behind a zero-length capacitor block.
+#[test]
+fn the_basis_derived_probe_index_is_the_circuits_own_inductor_state_index() {
+    let netlist = Netlist::parse(PSTB_RESONATOR).expect("deck parses");
+    let engine = Engine::new(SimulationConfig::default());
+    let carrier = pstb_carrier(&engine, &netlist);
+
+    let basis = carrier.shooting_state_basis();
+    assert!(
+        basis.iter().any(|name| name.starts_with("C:"))
+            && basis.iter().any(|name| name.starts_with("L:")),
+        "the fixture must exercise a non-zero capacitor offset: {basis:?}"
+    );
+
+    let circuit = engine.build_circuit(&netlist).expect("the circuit builds");
+    let branch = circuit
+        .get_branch_by_name("L1")
+        .expect("the probe is a branch-capable element");
+    let from_circuit = circuit
+        .inductor_probe_for_branch(branch)
+        .expect("the probe is an inductor");
+
+    let stability = engine
+        .run_pstb_card_from_pss_with_abort(&netlist, &pstb_card("l1"), &carrier, &NoAbort)
+        .expect(".PSTB runs");
+
+    assert_eq!(stability.probe_state_index, from_circuit.state_index);
+    assert_eq!(stability.probe_instance, from_circuit.canonical_name);
+    assert_eq!(basis[stability.probe_state_index], "L:L1");
+    assert!(
+        stability.probe_state_index < carrier.analysis().monodromy.len(),
+        "the resolved coordinate must index the retained monodromy"
+    );
+}
+
+/// A legacy identityless operating point carries no shooting-state basis, so
+/// there is nothing to resolve a probe against. Resolving anyway would name
+/// coordinate zero, which is some other circuit's capacitor, so it is a typed
+/// refusal instead.
+#[test]
+fn a_carrier_with_no_shooting_state_basis_refuses_the_probe() {
+    let netlist = Netlist::parse(PSTB_RESONATOR).expect("deck parses");
+    let engine = Engine::new(SimulationConfig::default());
+    let carrier = pstb_carrier(&engine, &netlist);
+
+    let legacy = rspice_core::engine::PssOperatingPoint::try_from_parts(
+        carrier.config().clone(),
+        carrier.analysis().clone(),
+        carrier.shooting_state().to_vec(),
+    )
+    .expect("a legacy artifact is still structurally valid");
+    assert!(legacy.shooting_state_basis().is_empty());
+
+    let message = engine
+        .run_pstb_card_from_pss_with_abort(&netlist, &pstb_card("L1"), &legacy, &NoAbort)
+        .expect_err("an identityless carrier cannot name its own coordinates")
+        .to_string();
+    assert!(
+        message.contains("shooting-state basis"),
+        "the refusal must name what is missing: {message}"
+    );
+}
+
+#[test]
+fn a_pstb_probe_that_is_not_an_inductor_current_is_refused_by_name() {
+    let netlist = Netlist::parse(PSTB_RESONATOR).expect("deck parses");
+    let engine = Engine::new(SimulationConfig::default());
+    let carrier = pstb_carrier(&engine, &netlist);
+
+    let missing = engine
+        .run_pstb_card_from_pss_with_abort(&netlist, &pstb_card("LNOPE"), &carrier, &NoAbort)
+        .expect_err("a probe the deck does not author must be refused")
+        .to_string();
+    assert!(
+        missing.contains("branch") && missing.contains("L1"),
+        "the refusal must list what the deck does offer: {missing}"
+    );
+
+    let not_inductive = engine
+        .run_pstb_card_from_pss_with_abort(&netlist, &pstb_card("VIN"), &carrier, &NoAbort)
+        .expect_err("a voltage source is branch-capable but carries no reactive state")
+        .to_string();
+    assert!(
+        not_inductive.contains("inductor") && not_inductive.contains("L1"),
+        "the refusal must name the inductor probes: {not_inductive}"
+    );
+}
+
+#[test]
+fn an_authored_pstb_card_refuses_a_carrier_it_cannot_be_read_from() {
+    let netlist = Netlist::parse(PSTB_RESONATOR).expect("deck parses");
+    let engine = Engine::new(SimulationConfig::default());
+    let carrier = pstb_carrier(&engine, &netlist);
+
+    let mut coarse = pstb_card("L1");
+    coarse.max_harmonics = 1_000;
+    let error = engine
+        .run_pstb_card_from_pss_with_abort(&netlist, &coarse, &carrier, &NoAbort)
+        .expect_err("a carrier that cannot represent the requested harmonics is refused")
+        .to_string();
+    assert!(
+        error.contains("MAXHARM") && error.contains("capacity"),
+        "the refusal must name the precondition: {error}"
+    );
+
+    let mut impossible = pstb_card("L1");
+    impossible.stability_threshold = 0.5;
+    assert!(
+        engine
+            .run_pstb_card_from_pss_with_abort(&netlist, &impossible, &carrier, &NoAbort)
+            .is_err(),
+        "a boundary inside the unit circle would call a stable mode unstable"
+    );
+}
+
+#[test]
+fn an_authored_pstb_card_honours_cancellation() {
+    let netlist = Netlist::parse(PSTB_RESONATOR).expect("deck parses");
+    let engine = Engine::new(SimulationConfig::default());
+    let carrier = pstb_carrier(&engine, &netlist);
+    let error = engine
+        .run_pstb_card_from_pss_with_abort(
+            &netlist,
+            &pstb_card("L1"),
+            &carrier,
+            &rspice_core::abort_signal::ImmediateAbort,
+        )
+        .expect_err("an aborted .PSTB run must not publish a partial spectrum");
     assert!(matches!(
         error,
         rspice_core::engine::SimulationError::Aborted

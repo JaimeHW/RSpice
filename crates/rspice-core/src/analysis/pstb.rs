@@ -329,6 +329,20 @@ pub struct PstbResult {
     /// Detected subharmonics (if any)
     pub subharmonics: Vec<usize>,
 
+    /// Exact outer magnitude boundary this spectrum was classified under.
+    ///
+    /// Without it the result cannot say what it means: [`FloquetMultiplier::
+    /// is_unstable`] is defined relative to a boundary the result did not
+    /// carry, so every consumer had to be told the number separately and
+    /// trusted to have been told the same one the analyzer used.
+    pub stability_threshold: Value,
+
+    /// Whether subharmonic orders were retained.
+    ///
+    /// An empty [`Self::subharmonics`] is otherwise ambiguous between "no mode
+    /// sits near a root of unity" and "nobody looked".
+    pub detect_subharmonics: bool,
+
     /// Whether the analysis converged
     pub converged: bool,
 
@@ -342,6 +356,228 @@ impl PstbResult {
     pub fn is_stable(&self) -> bool {
         self.stability_verdict == FloquetStabilityVerdict::Stable
     }
+
+    /// Re-derive every quantity this result publishes and refuse the result if
+    /// any of them disagrees with the spectrum it was derived from.
+    ///
+    /// These are the result's own invariants, not a consumer's. Before this
+    /// existed, one caller — the Studio's PSTB service — re-derived all of
+    /// them and refused the result when they disagreed, which meant the
+    /// command line, python and the browser shipped a *weaker* guarantee than
+    /// the GUI for the same numbers. The analyzer establishes them here
+    /// instead, so every route inherits the same refusal.
+    ///
+    /// What is checked: the period/frequency pair, the classification boundary
+    /// and the convergence flag; Floquet evidence currency and consistency
+    /// with the retained multipliers; autonomous phase-mode selection; the
+    /// verdict and the rich classification it refines; canonical sort order;
+    /// monodromy squareness and finiteness against the spectrum's order; the
+    /// four aggregates; and per-mode identity, finiteness, flags, derived
+    /// display quantities and eigenvector cardinality.
+    pub(crate) fn validate_contract(&self, abort: &dyn AbortSignal) -> Result<(), SimulationError> {
+        ensure_not_aborted(abort)?;
+        if !self.period.is_finite()
+            || self.period <= 0.0
+            || !self.fundamental_frequency.is_finite()
+            || self.fundamental_frequency <= 0.0
+            || self.fundamental_frequency != 1.0 / self.period
+        {
+            return Err(contract_violation(
+                "period and fundamental frequency are not a finite reciprocal pair",
+            ));
+        }
+        if !self.stability_threshold.is_finite() || self.stability_threshold < 1.0 {
+            return Err(contract_violation(
+                "the retained stability boundary is not a finite magnitude of at least one",
+            ));
+        }
+        if !self.converged {
+            return Err(contract_violation(
+                "the spectrum is published as converged only when the qualified eigensolve completed",
+            ));
+        }
+
+        let values = self
+            .multipliers
+            .iter()
+            .map(|multiplier| multiplier.value)
+            .collect::<Vec<_>>();
+        if !matches!(
+            &self.floquet_evidence,
+            FloquetSpectrumEvidence::NoDynamicModes | FloquetSpectrumEvidence::Qualified { .. }
+        ) || !self.floquet_evidence.is_consistent_with(&values)
+        {
+            return Err(contract_violation(
+                "Floquet evidence is absent, non-current, or inconsistent with the spectrum",
+            ));
+        }
+
+        let expected_trivial_index = if self.orbit_kind == FloquetOrbitKind::Autonomous
+            && matches!(
+                &self.floquet_evidence,
+                FloquetSpectrumEvidence::Qualified { .. }
+            ) {
+            select_autonomous_phase_mode(&values)
+        } else {
+            None
+        };
+        if self.trivial_multiplier_index != expected_trivial_index {
+            return Err(contract_violation(
+                "autonomous phase-mode selection is inconsistent with the spectrum",
+            ));
+        }
+
+        let expected_verdict = classify_floquet_stability(
+            &values,
+            &self.floquet_evidence,
+            self.orbit_kind,
+            self.trivial_multiplier_index,
+            self.stability_threshold - 1.0,
+        );
+        if self.stability_verdict != expected_verdict
+            || !classification_refines_verdict(self.stability_verdict, self.stability)
+        {
+            return Err(contract_violation(
+                "the stability verdict or the classification refining it is inconsistent with the spectrum",
+            ));
+        }
+        if !multipliers_are_sorted(&self.multipliers) {
+            return Err(contract_violation(
+                "Floquet modes are not in canonical sorted order",
+            ));
+        }
+
+        let order = self.multipliers.len();
+        if self.monodromy.len() != order {
+            return Err(contract_violation(
+                "the retained monodromy order does not match the spectrum it produced",
+            ));
+        }
+        for (row_index, row) in self.monodromy.iter().enumerate() {
+            poll_periodically(abort, row_index)?;
+            if row.len() != order || row.iter().any(|value| !value.is_finite()) {
+                return Err(contract_violation(
+                    "the retained monodromy is not a finite square matrix of the spectrum's order",
+                ));
+            }
+        }
+
+        for (index, multiplier) in self.multipliers.iter().enumerate() {
+            poll_periodically(abort, index)?;
+            let magnitude = multiplier.magnitude();
+            let trivial = self.trivial_multiplier_index == Some(index);
+            let natural_frequency = multiplier.natural_frequency();
+            if multiplier.index != index
+                || !multiplier.value.re.is_finite()
+                || !multiplier.value.im.is_finite()
+                || !multiplier.exponent.re.is_finite()
+                || !multiplier.exponent.im.is_finite()
+                || !magnitude.is_finite()
+                || magnitude <= 0.0
+                || multiplier.is_trivial != trivial
+                || multiplier.is_unstable != (!trivial && magnitude > self.stability_threshold)
+                || (!self.detect_subharmonics && multiplier.subharmonic_order.is_some())
+                // A caller that did not ask for eigenvectors gets none; one
+                // that did gets a full set. A vector of the wrong length is
+                // neither, and would index a mode shape onto the wrong state.
+                || multiplier
+                    .eigenvector
+                    .as_ref()
+                    .is_some_and(|vector| vector.len() != order)
+                || !multiplier.phase_degrees().is_finite()
+                || !multiplier.damping().is_finite()
+                || !natural_frequency.is_finite()
+                || natural_frequency < 0.0
+                || !multiplier.stability_margin_db().is_finite()
+            {
+                return Err(SimulationError::Circuit(format!(
+                    "PSTB mode {} violates its own contract: identity, finite values, flags, \
+                     derived quantities, or eigenvector cardinality is invalid",
+                    index + 1
+                )));
+            }
+        }
+
+        let expected_num_unstable = self
+            .multipliers
+            .iter()
+            .filter(|multiplier| multiplier.is_unstable)
+            .count();
+        let expected_max_magnitude = self
+            .multipliers
+            .first()
+            .map_or(0.0, FloquetMultiplier::magnitude);
+        let expected_min_margin = self
+            .multipliers
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| self.trivial_multiplier_index != Some(*index))
+            .map(|(_, multiplier)| multiplier.stability_margin_db())
+            .min_by(Value::total_cmp);
+        let expected_subharmonics = self
+            .multipliers
+            .iter()
+            .filter_map(|multiplier| multiplier.subharmonic_order)
+            .collect::<Vec<_>>();
+        if self.num_unstable != expected_num_unstable
+            || !self.max_multiplier_magnitude.is_finite()
+            || self.max_multiplier_magnitude != expected_max_magnitude
+            || self
+                .min_stability_margin_db
+                .is_some_and(|margin| !margin.is_finite())
+            || self.min_stability_margin_db != expected_min_margin
+            || self.subharmonics != expected_subharmonics
+        {
+            return Err(contract_violation(
+                "aggregate counts, margins, or subharmonics do not match the complete spectrum",
+            ));
+        }
+        Ok(())
+    }
+}
+
+fn contract_violation(detail: &str) -> SimulationError {
+    SimulationError::Circuit(format!("PSTB result violates its own contract: {detail}"))
+}
+
+/// Whether the rich PSTB classification is one of the labels the shared
+/// four-state verdict admits.
+///
+/// The two are not independent: every [`StabilityType`] belongs to exactly one
+/// [`FloquetStabilityVerdict`], so publishing the classification publishes the
+/// verdict. This is the partition, stated once.
+fn classification_refines_verdict(
+    verdict: FloquetStabilityVerdict,
+    classification: StabilityType,
+) -> bool {
+    match verdict {
+        FloquetStabilityVerdict::Stable => classification == StabilityType::Stable,
+        FloquetStabilityVerdict::Unstable => matches!(
+            classification,
+            StabilityType::UnstableReal | StabilityType::UnstableComplex
+        ),
+        FloquetStabilityVerdict::Marginal => matches!(
+            classification,
+            StabilityType::PeriodDoubling
+                | StabilityType::NeimarkSacker
+                | StabilityType::SaddleNode
+                | StabilityType::Marginal
+        ),
+        FloquetStabilityVerdict::Indeterminate => classification == StabilityType::Indeterminate,
+    }
+}
+
+/// Whether the retained modes are in the analyzer's canonical order:
+/// magnitude descending, then real part, then imaginary part.
+fn multipliers_are_sorted(multipliers: &[FloquetMultiplier]) -> bool {
+    multipliers.windows(2).all(|pair| {
+        pair[1]
+            .magnitude()
+            .total_cmp(&pair[0].magnitude())
+            .then_with(|| pair[0].value.re.total_cmp(&pair[1].value.re))
+            .then_with(|| pair[0].value.im.total_cmp(&pair[1].value.im))
+            .is_le()
+    })
 }
 
 //=============================================================================
@@ -415,7 +651,7 @@ impl PstbAnalyzer {
             } else {
                 StabilityType::Indeterminate
             };
-            return Ok(PstbResult {
+            let result = PstbResult {
                 period,
                 fundamental_frequency,
                 multipliers: Vec::new(),
@@ -429,9 +665,13 @@ impl PstbAnalyzer {
                 min_stability_margin_db: None,
                 max_multiplier_magnitude: 0.0,
                 subharmonics: Vec::new(),
+                stability_threshold: self.config.stability_threshold,
+                detect_subharmonics: self.config.detect_subharmonics,
                 converged: true,
                 iterations: 0,
-            });
+            };
+            result.validate_contract(abort)?;
+            return Ok(result);
         }
 
         let spectrum = qualified_real_eigenspectrum(monodromy, abort)
@@ -458,6 +698,13 @@ impl PstbAnalyzer {
                 )));
             }
             let mut fm = FloquetMultiplier::new(ev, period, self.config.stability_threshold);
+            // A run that was told not to look for subharmonics does not report
+            // finding one. Masking here rather than at each display keeps the
+            // per-mode order and the aggregate from disagreeing about whether
+            // anybody looked.
+            if !self.config.detect_subharmonics {
+                fm.subharmonic_order = None;
+            }
             if !fm.exponent.re.is_finite() || !fm.exponent.im.is_finite() {
                 return Err(SimulationError::Circuit(format!(
                     "PSTB Floquet exponent {i} is non-finite"
@@ -540,13 +787,13 @@ impl PstbAnalyzer {
             });
         }
 
-        // Detect subharmonics
+        // Collect subharmonics. The per-mode order was already cleared above
+        // when detection is off, so the aggregate follows the modes rather
+        // than re-reading the configuration and risking the two disagreeing.
         let mut subharmonics = Vec::new();
         for (index, multiplier) in multipliers.iter().enumerate() {
             poll_periodically(abort, index)?;
-            if self.config.detect_subharmonics
-                && let Some(order) = multiplier.subharmonic_order
-            {
+            if let Some(order) = multiplier.subharmonic_order {
                 subharmonics.push(order);
             }
         }
@@ -564,7 +811,7 @@ impl PstbAnalyzer {
         }
         ensure_not_aborted(abort)?;
 
-        Ok(PstbResult {
+        let result = PstbResult {
             period,
             fundamental_frequency,
             multipliers,
@@ -578,11 +825,15 @@ impl PstbAnalyzer {
             min_stability_margin_db: min_margin_db,
             max_multiplier_magnitude: max_magnitude,
             subharmonics,
+            stability_threshold: self.config.stability_threshold,
+            detect_subharmonics: self.config.detect_subharmonics,
             // The qualified eigenspectrum helper returns only after every
             // eigenpair has passed the canonical residual criterion.
             converged: true,
             iterations: 0,
-        })
+        };
+        result.validate_contract(abort)?;
+        Ok(result)
     }
 
     /// Classify stability based on multipliers
@@ -908,5 +1159,70 @@ mod tests {
 
         assert_eq!(result.stability, StabilityType::PeriodDoubling);
         assert!(result.subharmonics.is_empty());
+        // The per-mode order is cleared too. A run told not to look does not
+        // report a finding on one mode while its aggregate says nobody looked.
+        assert_eq!(result.multipliers[0].subharmonic_order, None);
+        assert!(!result.detect_subharmonics);
+    }
+
+    #[test]
+    fn the_result_retains_the_boundary_it_was_classified_under() {
+        let mut analyzer = PstbAnalyzer::new(PstbConfig::default().with_stability_threshold(1.25));
+        let result = analyzer
+            .analyze_monodromy_with_abort(&[vec![1.5, 0.0], vec![0.0, 0.5]], 1.0, &NoAbort)
+            .unwrap();
+
+        assert_eq!(result.stability_threshold, 1.25);
+        assert!(result.detect_subharmonics);
+        // Which is what makes `is_unstable` checkable at all: 1.5 is outside
+        // 1.25 and 0.5 is not, and a reader can now verify that without being
+        // handed the boundary separately.
+        assert!(result.multipliers[0].is_unstable);
+        assert!(!result.multipliers[1].is_unstable);
+        result.validate_contract(&NoAbort).unwrap();
+    }
+
+    /// Every aggregate the analyzer publishes is re-derived before the result
+    /// leaves it, so no consumer has to re-derive them to be safe.
+    #[test]
+    fn a_result_whose_published_quantities_drifted_is_refused_by_its_own_contract() {
+        let sound = || {
+            PstbAnalyzer::new(PstbConfig::default().with_eigenvectors(true))
+                .analyze_monodromy_with_abort(&[vec![0.5, 0.0], vec![0.0, 0.25]], 1.0, &NoAbort)
+                .unwrap()
+        };
+        sound().validate_contract(&NoAbort).unwrap();
+
+        type Mutation = (&'static str, fn(&mut PstbResult));
+        let mutations: [Mutation; 7] = [
+            ("aggregate counts", |result| result.num_unstable = 1),
+            ("aggregate counts", |result| {
+                result.max_multiplier_magnitude = 2.0
+            }),
+            ("aggregate counts", |result| {
+                result.min_stability_margin_db = None
+            }),
+            ("canonical sorted order", |result| {
+                result.multipliers.swap(0, 1)
+            }),
+            ("monodromy", |result| {
+                result.monodromy.pop();
+            }),
+            ("mode 1", |result| result.multipliers[0].is_unstable = true),
+            ("mode 1", |result| {
+                result.multipliers[0].eigenvector = Some(Vec::new())
+            }),
+        ];
+        for (expected, mutate) in mutations {
+            let mut result = sound();
+            mutate(&mut result);
+            let error = result
+                .validate_contract(&NoAbort)
+                .expect_err("a drifted quantity must be refused");
+            assert!(
+                error.to_string().contains(expected),
+                "the refusal must name what drifted, got: {error}"
+            );
+        }
     }
 }

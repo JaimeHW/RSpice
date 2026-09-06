@@ -665,7 +665,32 @@ use rspice_core::analysis::harmonic_balance::{
 // `SeriesQualifier::PxfConversion` are enum variants; `PxfCard::DEFAULT_*` are
 // `pub(crate)` as `PacCard`'s are; the payload re-export joins the existing
 // grouped `pub use`.
-const MAX_PUBLIC_ITEMS: usize = 5011;
+// 2026-09-06, +4 deliberate (5,011 -> 5,015): the `.PSTB` card type, the
+// engine entry that runs it, and the re-export statement that surfaces the
+// entry's result type from the new module it lives in.
+//
+// `.PSTB` had no engine route either: the periodic stability run lived in
+// rspice-ui, which built a circuit only to turn a probe name into a shooting
+// coordinate the retained carrier already names, and then re-derived every
+// invariant of core's own result in 260 lines before it would use it. These
+// are the whole path from an authored card to a qualified Floquet spectrum,
+// and the CLI, python, WASM and engine-adapter routes all call them.
+//
+// - 1 in `netlist/ast.rs`: `PstbCard`, beside `PxfCard` and `PnoiseCard`.
+// - 2 in `engine/pstb.rs`: `PeriodicStabilityResult`, which carries the probe
+//   identity the spectrum was read through, and
+//   `Engine::run_pstb_card_from_pss_with_abort`. There is no `..._from_hb_`
+//   sibling: only a shooting `.PSS` produces a monodromy matrix.
+// - 1 in `engine.rs`: `pub use pstb::PeriodicStabilityResult`. A new engine
+//   module cannot reach the crate root any other way, which is why
+//   `pss_noise` and `sensitivity` each carry one too. The `.PXF` half needed
+//   none because every type it added already sat inside a module with a
+//   grouped re-export.
+//
+// Free, and deliberately so: `PstbResult::validate_contract` is `pub(crate)`,
+// called by the analyzer, so every route inherits the invariants instead of
+// re-checking them.
+const MAX_PUBLIC_ITEMS: usize = 5015;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
