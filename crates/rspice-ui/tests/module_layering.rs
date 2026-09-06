@@ -1297,9 +1297,20 @@ fn source_files_have_no_byte_order_mark() {
 /// 59 -> 56 when the product answered the question the four inference entries
 /// were held open for. PAC, PXF and PNOISE infer a periodic-tone source and an
 /// output node from the deck and then *run* on them, which is a guess presented
-/// as a result: those three are deleted. The TF entry's answer is the other
-/// half of the same decision and lands next.
-const MAX_LINT_SUPPRESSIONS: usize = 56;
+/// as a result: those three are deleted.
+///
+/// 56 -> 55 for the fourth, TF, which was answered the other way and is the
+/// reason the four were worth holding. Its inference is now the Studio's
+/// "Infer from deck" action: `tf::infer_tf_run_config` reads the design's only
+/// independent source and one output node into the two fields of the transfer
+/// function form, where the reader sees both and still presses Run. The
+/// difference between that and the three deletions is the whole rule -- a
+/// guess shown in an editable field is an offer, and a guess a run reports as
+/// a result is a lie -- and the entry point that ran on one is gone with them.
+/// `helpers::infer_primary_{source_name,output_node}_with_abort` went too:
+/// both took a first-or-last element off a solved deck, and the offer needs a
+/// *sole* source or it has nothing to offer.
+const MAX_LINT_SUPPRESSIONS: usize = 55;
 
 /// The crate does not accumulate lint suppressions.
 #[test]

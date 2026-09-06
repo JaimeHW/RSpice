@@ -32,6 +32,7 @@ use std::collections::HashSet;
 use egui::{Align, Align2, Color32, Layout, Rect, ScrollArea, Sense, Stroke, Ui, Vec2, vec2};
 
 use crate::product::{AnalysisInstanceId, ContentDigest, SimulationPlanId};
+use crate::services::simulation_runner::{TfRunConfig, infer_tf_run_config};
 use crate::simulation::dialog::{NoiseReferenceType, PssDialogState};
 use crate::simulation::plan::{
     AnalysisDependency, AnalysisDependencyRepairContext, AnalysisDraft, AnalysisKind,
@@ -1519,6 +1520,50 @@ fn build_noise_domain_catalog_with_digest(
     }
 }
 
+/// What the transfer-function form's "Infer from deck" action would fill, or
+/// why the design offers it nothing.
+///
+/// Measured from the same design deck the run would execute. A design that
+/// cannot be elaborated at all is a refusal like any other: the form paints
+/// the reason where the offer would have been.
+#[derive(Clone)]
+struct TfInferenceCatalog {
+    source_digest: ContentDigest,
+    inference: Result<TfRunConfig, String>,
+}
+
+/// Reading a design costs a netlist build and a parse, so this is keyed by the
+/// same cheap digest the noise and periodic-source catalogs use and rebuilt
+/// only when the design behind it changes.
+fn tf_inference_catalog(ui: &Ui, app: &RSpiceApp) -> TfInferenceCatalog {
+    let source_digest = envelope_source_catalog_input_digest(&app.state);
+    let cache_id = egui::Id::new("simulation-tf-inference-catalog");
+    if let Some(cached) = ui
+        .ctx()
+        .data(|data| data.get_temp::<TfInferenceCatalog>(cache_id))
+        && cached.source_digest == source_digest
+    {
+        return cached;
+    }
+
+    let inference = (|| -> Result<TfRunConfig, String> {
+        let source =
+            crate::simulation::controller::SimulationController::prepare_design_netlist_for_inspection(
+                &app.state,
+            )
+            .map_err(|error| error.to_string())?;
+        let netlist = rspice_core::Netlist::parse(&source).map_err(|error| error.to_string())?;
+        infer_tf_run_config(&netlist)
+    })();
+    let catalog = TfInferenceCatalog {
+        source_digest,
+        inference,
+    };
+    ui.ctx()
+        .data_mut(|data| data.insert_temp(cache_id, catalog.clone()));
+    catalog
+}
+
 fn analysis_editor(
     ui: &mut Ui,
     app: &mut RSpiceApp,
@@ -2238,6 +2283,11 @@ fn analysis_form_body(
     let placed_rf_ports = matches!(draft, AnalysisDraft::SParameter(_))
         .then(|| crate::simulation::placed_sources::placed_rf_ports(&app.state.schematic, None))
         .unwrap_or_default();
+    // Only the transfer-function form offers to fill itself from the deck, and
+    // reading one costs a netlist build. Every other analysis leaves it
+    // unmeasured.
+    let tf_inference =
+        matches!(draft, AnalysisDraft::TransferFunction(_)).then(|| tf_inference_catalog(ui, app));
     let t = Tokens::get(ui.ctx());
     let content_width = (ui.available_width() - 16.0).max(1.0);
     egui::Frame::new()
@@ -2263,6 +2313,7 @@ fn analysis_form_body(
                     .as_ref()
                     .map(NoiseDomainCatalog::domain)
                     .unwrap_or_default(),
+                tf_inference.as_ref().map(|catalog| &catalog.inference),
                 op_context,
                 &run_space,
                 route,

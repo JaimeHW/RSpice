@@ -49,8 +49,7 @@ pub use hbnoise::{
     run_hbnoise_analysis_from_hb_with_source_path_and_abort,
 };
 use helpers::{
-    build_voltage_output_expr, generate_freq_points_with_abort,
-    infer_primary_output_node_with_abort, infer_primary_source_name_with_abort, is_ground_like,
+    build_voltage_output_expr, generate_freq_points_with_abort, is_ground_like,
     netlist_has_independent_source_named_with_abort, normalize_voltage_signal_name,
     parse_runner_netlist_with_abort, parse_runner_netlist_with_statistical_sampling_and_abort,
 };
@@ -106,7 +105,7 @@ pub(crate) use sweeps::{
     map_temperature_results, materialize_corner_process_source,
 };
 pub use tf::{
-    TfAccuracy, TfNormalization, TfQuantity, TfRunConfig,
+    TfAccuracy, TfNormalization, TfQuantity, TfRunConfig, infer_tf_run_config,
     run_tf_analysis_with_config_and_source_path_and_abort,
 };
 pub use transient::{TransientData, run_transient_analysis_with_source_path_and_abort};

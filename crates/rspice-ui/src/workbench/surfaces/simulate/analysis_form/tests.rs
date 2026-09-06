@@ -61,7 +61,13 @@ fn render_analysis_form_against(
     noise_domain: NoiseDomain<'_>,
     placed_rf_ports: &[crate::simulation::placed_sources::PlacedRfPort],
 ) -> (f32, Vec<String>) {
-    render_analysis_form_into(&mut draft, noise_domain, placed_rf_ports, VIEWPORT_HEIGHT)
+    render_analysis_form_into(
+        &mut draft,
+        noise_domain,
+        placed_rf_ports,
+        None,
+        VIEWPORT_HEIGHT,
+    )
 }
 
 /// The viewport every geometry assertion is measured in. A form taller than
@@ -80,6 +86,7 @@ fn render_analysis_form_into(
     draft: &mut AnalysisDraft,
     noise_domain: NoiseDomain<'_>,
     placed_rf_ports: &[crate::simulation::placed_sources::PlacedRfPort],
+    tf_inference: Option<&Result<TfRunConfig, String>>,
     viewport_height: f32,
 ) -> (f32, Vec<String>) {
     // The run-space forms read the plan; a height measurement supplies a
@@ -117,6 +124,7 @@ fn render_analysis_form_into(
                         &["VLOOP1".to_owned()],
                         placed_rf_ports,
                         noise_domain,
+                        tf_inference,
                         OpContextAvailability::default(),
                         &run_space_fixture,
                         &mut None,
@@ -936,6 +944,7 @@ fn ad_hoc_mode_beside_placed_ports_states_that_the_table_is_not_what_runs() {
         &mut AnalysisDraft::SParameter(setup),
         NoiseDomain::default(),
         &bench,
+        None,
         1200.0,
     );
     assert!(painted.contains(&reason), "{painted:?}");
@@ -955,6 +964,7 @@ fn drawing_the_form_does_not_stamp_a_port_source_choice() {
         &mut draft,
         NoiseDomain::default(),
         &placed_ports(&[("P1", "port=1"), ("P2", "port=2")]),
+        None,
         VIEWPORT_HEIGHT,
     );
     let AnalysisDraft::SParameter(setup) = &mut draft else {
@@ -963,5 +973,182 @@ fn drawing_the_form_does_not_stamp_a_port_source_choice() {
     assert_eq!(
         setup.port_source_idx, None,
         "an untouched row leaves the choice to the design"
+    );
+}
+
+// ------------------------------------------------- the transfer-function deck
+
+/// Render the transfer-function form against one deck reading, optionally
+/// pressing one of the controls it publishes.
+///
+/// The press is delivered by the AccessKit action the node advertises, the way
+/// the studio's own sweep delivers one, so a control that paints a label but
+/// publishes nothing pressable fails here instead of passing on a rectangle's
+/// behalf. Returns the last frame's painted text and the nodes it published.
+#[cfg(not(target_arch = "wasm32"))]
+fn xf_form_frames(
+    draft: &mut AnalysisDraft,
+    inference: &Result<TfRunConfig, String>,
+    press: Option<&str>,
+) -> (Vec<String>, Vec<egui::accesskit::Node>) {
+    let fixture_run_set = crate::simulation::run_set::RunSetState::default();
+    let run_space_fixture = RunSpaceContext {
+        run_set: &fixture_run_set,
+        reference: crate::simulation::run_set::ReferencePoint::default(),
+        nominal_failure: crate::state::NominalFailurePolicy::Block,
+        model_binding_count: 0,
+        parallelism: ("Desktop background thread", 1),
+    };
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+
+    let pass = |draft: &mut AnalysisDraft, events: Vec<egui::Event>| {
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(964.0, 900.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ctx, |ui| {
+                        form(
+                            ui,
+                            draft,
+                            QuantityPresentationPolicy::default(),
+                            UiNumberLocale::default(),
+                            &[],
+                            &[],
+                            &[],
+                            NoiseDomain::default(),
+                            Some(inference),
+                            OpContextAvailability::default(),
+                            &run_space_fixture,
+                            &mut None,
+                        );
+                    });
+            },
+        );
+        let nodes = output
+            .platform_output
+            .accesskit_update
+            .expect("the form publishes an AccessKit tree")
+            .nodes;
+        (painted_lines(&output.shapes), nodes)
+    };
+
+    let (painted, nodes) = pass(draft, Vec::new());
+    let Some(label) = press else {
+        return (painted, nodes.into_iter().map(|(_, node)| node).collect());
+    };
+    let target = nodes
+        .iter()
+        .find(|(_, node)| node.label() == Some(label))
+        .map(|(id, _)| *id)
+        .unwrap_or_else(|| panic!("no node announces {label:?}"));
+    pass(
+        draft,
+        vec![egui::Event::AccessKitActionRequest(
+            egui::accesskit::ActionRequest {
+                action: egui::accesskit::Action::Click,
+                target_tree: egui::accesskit::TreeId::ROOT,
+                target_node: target,
+                data: None,
+            },
+        )],
+    );
+    let (painted, nodes) = pass(draft, Vec::new());
+    (painted, nodes.into_iter().map(|(_, node)| node).collect())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn xf_ports(draft: &AnalysisDraft) -> (String, String) {
+    let AnalysisDraft::TransferFunction(setup) = draft else {
+        unreachable!("the draft is the one just built");
+    };
+    (setup.input_source.clone(), setup.output_expression.clone())
+}
+
+/// Every editable field the form publishes, by value.
+#[cfg(not(target_arch = "wasm32"))]
+fn editable_values(nodes: &[egui::accesskit::Node]) -> Vec<String> {
+    nodes
+        .iter()
+        .filter(|node| node.role() == egui::accesskit::Role::TextInput && !node.is_disabled())
+        .filter_map(|node| node.value().map(str::to_owned))
+        .collect()
+}
+
+/// The affordance the deck-inference decision bought: the form fills its own
+/// two ports, and they stay the reader's to change.
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn the_transfer_function_form_fills_both_ports_from_the_deck() {
+    let inference = Ok(TfRunConfig {
+        input_source: "VIN".to_owned(),
+        output_expression: "V(OUT)".to_owned(),
+        ..TfRunConfig::default()
+    });
+    let mut draft = AnalysisDraft::for_kind(AnalysisKind::TransferFunction);
+
+    let (offered, _) = xf_form_frames(&mut draft, &inference, None);
+    assert!(
+        offered
+            .iter()
+            .any(|line| line == "This design offers input VIN and output V(OUT)."),
+        "the offer states what pressing it would write: {offered:?}"
+    );
+    assert_eq!(
+        xf_ports(&draft),
+        (String::new(), String::new()),
+        "painting the offer must not write it"
+    );
+
+    let (painted, nodes) = xf_form_frames(&mut draft, &inference, Some(XF_INFER_LABEL));
+
+    assert_eq!(xf_ports(&draft), ("VIN".to_owned(), "V(OUT)".to_owned()));
+    let editable = editable_values(&nodes);
+    assert!(
+        editable.contains(&"VIN".to_owned()) && editable.contains(&"V(OUT)".to_owned()),
+        "both ports stay editable after the fill: {editable:?}"
+    );
+    assert!(
+        !painted
+            .iter()
+            .any(|line| line.starts_with("This design offers")),
+        "the offer retires once the form already says it: {painted:?}"
+    );
+}
+
+/// A deck with a supply beside its signal generator is exactly the case an
+/// inference must not answer, and the form says so where the offer would be.
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn the_transfer_function_form_refuses_a_deck_that_names_no_single_input() {
+    const REFUSAL: &str = "This design places 2 independent sources (VIN, VDD), so no single \
+                           one is the input. Name the input source yourself.";
+    let inference = Err(REFUSAL.to_owned());
+    let mut draft = AnalysisDraft::for_kind(AnalysisKind::TransferFunction);
+
+    let (painted, nodes) = xf_form_frames(&mut draft, &inference, None);
+
+    assert!(painted.iter().any(|line| line == REFUSAL), "{painted:?}");
+    let action = nodes
+        .iter()
+        .find(|node| node.label() == Some(XF_INFER_LABEL))
+        .expect("the action is still announced, so its refusal has something to sit under");
+    assert!(
+        action.is_disabled(),
+        "an action whose only answer is a refusal is not offered"
+    );
+    assert_eq!(
+        xf_ports(&draft),
+        (String::new(), String::new()),
+        "a refused inference writes nothing"
     );
 }

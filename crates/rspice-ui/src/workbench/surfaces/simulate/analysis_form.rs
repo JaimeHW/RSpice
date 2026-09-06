@@ -20,6 +20,7 @@ use egui::{Align, Layout, Rect, Response, Ui, UiBuilder, vec2};
 use crate::quantity::{
     QuantityInputKind, QuantityPresentationPolicy, UiNumberLocale, parse_ui_quantity,
 };
+use crate::services::simulation_runner::TfRunConfig;
 use crate::simulation::config::{NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType};
 
 use crate::simulation::plan::{
@@ -171,6 +172,8 @@ const XF_FIELD_LABELS: [&str; 8] = [
     "Accuracy",
 ];
 const XF_SOLVE_POINT: &str = "DC operating point";
+/// The action that fills the two fields above it from the design's own deck.
+const XF_INFER_LABEL: &str = "Infer from deck";
 const XF_ENABLED_CHOICES: &[&str] = &["Enabled", "Disabled"];
 const XF_NORMALIZATION_CHOICES: &[&str] = &["Disabled", "Relative to nominal", "Per source unit"];
 const XF_ACCURACY_CHOICES: &[&str] = &["Fast", "Balanced", "Accurate", "Robust"];
@@ -1142,30 +1145,52 @@ fn sub_header(ui: &mut Ui, text: &str) {
     ui.add(egui::Label::new(job));
 }
 
-/// A full-width advisory under the rows it is about.
+/// A full-width line of prose under the rows it is about.
 ///
 /// The two-column field grid has no cell for prose, so this leaves the grid the
 /// way [`sub_header`] does and takes the whole width; the text wraps rather
-/// than being clipped, because an advisory that is cut off is worse than none.
-fn field_advisory(ui: &mut Ui, text: &str) {
+/// than being clipped, because a sentence that is cut off is worse than none.
+fn field_prose(ui: &mut Ui, text: &str, color: egui::Color32) {
     clear_pending_cell(ui);
-    let t = Tokens::get(ui.ctx());
     ui.add_space(2.0);
     ui.add(
         egui::Label::new(
             egui::RichText::new(text)
                 .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                .color(t.color.warn),
+                .color(color),
         )
         .wrap(),
     );
 }
 
+/// A full-width advisory: something here will refuse the run.
+fn field_advisory(ui: &mut Ui, text: &str) {
+    field_prose(ui, text, Tokens::get(ui.ctx()).color.warn);
+}
+
+/// A full-width note: something the design holds, which the reader may take or
+/// leave.
+///
+/// Not [`field_advisory`], and the colour is the difference. Painting a fact in
+/// the warning colour teaches a reader to stop believing the warning colour.
+fn field_note(ui: &mut Ui, text: &str) {
+    field_prose(ui, text, Tokens::get(ui.ctx()).color.text_dim);
+}
+
 /// A full-width ghost add/remove action line. Returns `true` on click.
 fn action_line(ui: &mut Ui, label: &str) -> bool {
+    action_line_enabled(ui, label, true)
+}
+
+/// The same line, offered or withheld.
+///
+/// A disabled line still announces itself, so the reason it is disabled has to
+/// be painted beside it rather than left to the greying.
+fn action_line_enabled(ui: &mut Ui, label: &str, enabled: bool) -> bool {
     clear_pending_cell(ui);
     Button::new(label)
         .ghost()
+        .enabled(enabled)
         .min_width(ui.available_width())
         .show(ui)
         .clicked()
@@ -1310,6 +1335,60 @@ fn sp_port_fields(
     }
 }
 
+/// The design's own answer to the transfer-function form's two ports.
+///
+/// A pre-fill, not a run. Pressing this writes the deck's only independent
+/// source and the node that source does not connect to into the two fields
+/// above, where both stay editable and the reader still presses Run — which is
+/// the whole reason a positional guess at the output is acceptable here and was
+/// not acceptable in the PAC, PXF and PNOISE runners that ran on one.
+///
+/// When the deck names no single obvious pair the action is offered and
+/// refused, with the reason in its place: a button whose only answer is a
+/// refusal teaches nothing, and a button that has silently vanished teaches
+/// less.
+///
+/// The note retires itself. It says what the deck offers only while the form
+/// does not already say it, so a reader who has pressed the action — or typed
+/// the same two names — is not told a third time.
+fn xf_inference_action(
+    ui: &mut Ui,
+    setup: &mut crate::simulation::dialog::XfDialogState,
+    inference: Option<&Result<TfRunConfig, String>>,
+) {
+    // `None` is "not measured", which only a caller that painted this form
+    // without resolving a design can produce. There is nothing honest to say
+    // about a deck nobody read.
+    let Some(inference) = inference else {
+        return;
+    };
+    match inference {
+        Ok(config) => {
+            if action_line(ui, XF_INFER_LABEL) {
+                setup.input_source.clone_from(&config.input_source);
+                setup
+                    .output_expression
+                    .clone_from(&config.output_expression);
+            }
+            if setup.input_source != config.input_source
+                || setup.output_expression != config.output_expression
+            {
+                field_note(
+                    ui,
+                    &format!(
+                        "This design offers input {} and output {}.",
+                        config.input_source, config.output_expression
+                    ),
+                );
+            }
+        }
+        Err(reason) => {
+            action_line_enabled(ui, XF_INFER_LABEL, false);
+            field_advisory(ui, reason);
+        }
+    }
+}
+
 fn network_port_fields(ui: &mut Ui, index: usize, port: &mut NetworkPortDraft) {
     sub_header(ui, &format!("Port {}", index + 1));
     input_row(ui, "Node +", &mut port.node_pos);
@@ -1330,6 +1409,10 @@ pub(super) fn form(
     // second declaration of the same ports is what this list replaces.
     placed_rf_ports: &[crate::simulation::placed_sources::PlacedRfPort],
     noise_domain: NoiseDomain<'_>,
+    // What the design deck offers the transfer-function form's two ports, or
+    // why it offers nothing. Resolved once per design by the caller, and
+    // `None` for every analysis that is not a transfer function.
+    tf_inference: Option<&Result<TfRunConfig, String>>,
     op_context: OpContextAvailability,
     run_space: &run_space::RunSpaceContext<'_>,
     route: &mut Option<crate::workbench::state::SimulationPage>,
@@ -1860,6 +1943,7 @@ pub(super) fn form(
         AnalysisDraft::TransferFunction(setup) => {
             input_row(ui, XF_FIELD_LABELS[0], &mut setup.input_source);
             input_row(ui, XF_FIELD_LABELS[1], &mut setup.output_expression);
+            xf_inference_action(ui, setup, tf_inference);
             property_row(ui, XF_FIELD_LABELS[2], XF_SOLVE_POINT);
             enabled_choice_row(ui, XF_FIELD_LABELS[3], &mut setup.transfer_gain);
             enabled_choice_row(ui, XF_FIELD_LABELS[4], &mut setup.input_resistance);

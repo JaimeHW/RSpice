@@ -6,8 +6,8 @@
 
 use super::error::ensure_not_aborted;
 use super::{
-    ServiceRunError, ServiceRunResult, build_engine_config, infer_primary_output_node_with_abort,
-    infer_primary_source_name_with_abort, parse_runner_netlist_with_abort,
+    ServiceRunError, ServiceRunResult, build_engine_config, is_ground_like,
+    parse_runner_netlist_with_abort,
 };
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
@@ -268,53 +268,95 @@ fn retain_resistance(
     Ok(Some(value))
 }
 
-/// Run transfer-function analysis with the input source and output port
-/// inferred from the netlist, rather than configured by the user.
+/// How many source names a refusal spells out before it stops naming them.
 ///
-/// Unwired, and unlike the retired wrappers around it this is not a duplicate
-/// of anything that ships: [`infer_tf_run_config`] below is reachable from here
-/// and nowhere else, so deleting this would delete the inference itself. The
-/// TF dialog requires the user to name both ports; wiring this up would let a
-/// deck with one obvious source and one obvious output run without that step.
-/// Remove the allow when a caller exists, or remove both when the product
-/// decides inference is not wanted.
-#[allow(dead_code)]
-pub fn run_tf_analysis_with_source_path_and_abort(
-    netlist_text: &str,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<TfData> {
-    let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
-    let engine = Engine::new(build_engine_config(&netlist, None));
-    let dc_result = engine
-        .run_dc_op_with_abort(&netlist, abort)
-        .map_err(|error| {
-            ServiceRunError::from_core("DC OP error (required for TF defaults)", error)
-        })?;
+/// A design with forty supplies would otherwise put forty names into one
+/// sentence in a form field's advisory. The count is always exact; the list is
+/// the sample that makes the count actionable.
+const REFUSAL_NAME_LIMIT: usize = 4;
 
-    let cfg = infer_tf_run_config(&netlist, &dc_result.node_names, abort)?;
-    run_tf_analysis_with_config_and_source_path_and_abort(netlist_text, &cfg, source_path, abort)
-}
-
-fn infer_tf_run_config(
-    netlist: &rspice_core::Netlist,
-    node_names: &[String],
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<TfRunConfig> {
-    let input_source = infer_primary_source_name_with_abort(netlist, abort)?.ok_or_else(|| {
-        ServiceRunError::Failure(
-            "TF requires at least one independent source in the netlist".to_string(),
-        )
-    })?;
-    let output_node =
-        infer_primary_output_node_with_abort(node_names, abort)?.ok_or_else(|| {
-            ServiceRunError::Failure(
-                "TF could not infer an output node; ensure at least one non-ground node exists"
-                    .to_string(),
+/// The transfer-function ports a deck names on its own.
+///
+/// This is a pre-fill, not a run. The Studio's "Infer from deck" action writes
+/// the result into the form's two fields and the reader still presses Run, so
+/// the rule is narrow rather than clever:
+///
+/// * The input is the deck's *only* independent source. A design carrying a
+///   supply and a signal generator has no obvious input, and is told so rather
+///   than guessed at -- which is the same reading that retired the PAC, PXF
+///   and PNOISE inference runners.
+/// * The output is the last non-ground node the deck mentions that the input
+///   source does not itself connect to, which is where a deck written in
+///   signal order puts it. When the source connects to every node there is, it
+///   is the last non-ground node outright.
+///
+/// A guessed output is safe here only because it is *shown*: the reader sees
+/// `V(OUT)` sitting in an editable field before anything runs.
+///
+/// `Err` is the sentence the form paints instead, and it names what the design
+/// holds rather than only what was wanted.
+pub fn infer_tf_run_config(netlist: &rspice_core::Netlist) -> Result<TfRunConfig, String> {
+    let sources: Vec<&rspice_core::netlist::Element> = netlist
+        .elements
+        .iter()
+        .filter(|element| {
+            matches!(
+                &element.kind,
+                ElementKind::VoltageSource(_) | ElementKind::CurrentSource(_)
             )
+        })
+        .collect();
+    let input = match sources.as_slice() {
+        [] => {
+            return Err(
+                "This design places no independent source, so there is nothing for a transfer \
+                 function to be measured from."
+                    .to_string(),
+            );
+        }
+        [only] => *only,
+        many => {
+            let named: Vec<&str> = many
+                .iter()
+                .take(REFUSAL_NAME_LIMIT)
+                .map(|element| element.name.as_str())
+                .collect();
+            let ellipsis = if many.len() > named.len() {
+                ", \u{2026}"
+            } else {
+                ""
+            };
+            return Err(format!(
+                "This design places {} independent sources ({}{}), so no single one is the \
+                 input. Name the input source yourself.",
+                many.len(),
+                named.join(", "),
+                ellipsis,
+            ));
+        }
+    };
+
+    let mentioned = || {
+        netlist
+            .elements
+            .iter()
+            .flat_map(|element| element.nodes.iter())
+            .filter(|node| !is_ground_like(node))
+    };
+    let output_node = mentioned()
+        .rfind(|node| {
+            !input
+                .nodes
+                .iter()
+                .any(|driven| driven.eq_ignore_ascii_case(node))
+        })
+        .or_else(|| mentioned().next_back())
+        .ok_or_else(|| {
+            "This design has no node above ground, so there is no output to measure.".to_string()
         })?;
+
     Ok(TfRunConfig {
-        input_source,
+        input_source: input.name.clone(),
         output_expression: format!("V({output_node})"),
         ..TfRunConfig::default()
     })
@@ -881,5 +923,78 @@ VZERO out 0 0
             // used to reset it to 1e-3 here and leave it alone elsewhere.
             assert!(resolved.convergence_config.voltage_reltol <= 1.0e-6);
         }
+    }
+
+    /// The two-port case the affordance exists for: one source, one far node.
+    #[test]
+    fn deck_inference_names_the_only_source_and_the_node_it_does_not_touch() {
+        let netlist = rspice_core::Netlist::parse(DIVIDER).expect("divider parses");
+
+        let inferred = infer_tf_run_config(&netlist).expect("a one-source deck infers");
+
+        assert_eq!(inferred.input_source, "VIN");
+        assert_eq!(inferred.output_expression, "V(OUT)");
+        // A pre-fill fills the two ports and nothing else: every other field
+        // is still whatever the form already held.
+        assert_eq!(
+            TfRunConfig {
+                input_source: String::new(),
+                output_expression: String::new(),
+                ..inferred
+            },
+            TfRunConfig::default()
+        );
+    }
+
+    /// A supply beside the signal generator is the ordinary case, and it is
+    /// exactly the one no inference should answer.
+    #[test]
+    fn deck_inference_refuses_a_deck_with_more_than_one_source() {
+        const TWO_SOURCES: &str = "Divider with a supply
+VIN in 0 1
+VDD sup 0 5
+R1 in out 1k
+R2 out 0 2k
+R3 sup out 10k
+.end
+";
+        let netlist = rspice_core::Netlist::parse(TWO_SOURCES).expect("deck parses");
+
+        let refusal = infer_tf_run_config(&netlist).expect_err("two sources is not one");
+
+        assert!(refusal.contains("2 independent sources"), "{refusal}");
+        assert!(refusal.contains("VIN"), "{refusal}");
+        assert!(refusal.contains("VDD"), "{refusal}");
+    }
+
+    #[test]
+    fn deck_inference_refuses_a_deck_with_no_source() {
+        const PASSIVE: &str = "Nothing driving it
+R1 a b 1k
+R2 b 0 1k
+.end
+";
+        let netlist = rspice_core::Netlist::parse(PASSIVE).expect("deck parses");
+
+        let refusal = infer_tf_run_config(&netlist).expect_err("nothing drives this");
+
+        assert!(refusal.contains("no independent source"), "{refusal}");
+    }
+
+    /// A current source connects to the node it drives, so excluding its own
+    /// terminals would leave nothing at all. The output is that node.
+    #[test]
+    fn deck_inference_falls_back_when_the_source_touches_every_node() {
+        const SHUNT: &str = "One node, driven
+I1 0 out 1m
+R1 out 0 1k
+.end
+";
+        let netlist = rspice_core::Netlist::parse(SHUNT).expect("deck parses");
+
+        let inferred = infer_tf_run_config(&netlist).expect("a one-source deck infers");
+
+        assert_eq!(inferred.input_source, "I1");
+        assert_eq!(inferred.output_expression, "V(OUT)");
     }
 }

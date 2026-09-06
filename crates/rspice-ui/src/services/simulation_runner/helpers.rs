@@ -107,23 +107,6 @@ pub(super) fn is_ground_like(name: &str) -> bool {
     crate::state::is_ground_reference(name)
 }
 
-pub(crate) fn infer_primary_source_name_with_abort(
-    netlist: &rspice_core::Netlist,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<Option<String>> {
-    ensure_not_aborted(abort)?;
-    for element in &netlist.elements {
-        ensure_not_aborted(abort)?;
-        if matches!(
-            &element.kind,
-            ElementKind::VoltageSource(_) | ElementKind::CurrentSource(_)
-        ) {
-            return Ok(Some(element.name.clone()));
-        }
-    }
-    Ok(None)
-}
-
 pub(crate) fn netlist_has_independent_source_named_with_abort(
     netlist: &rspice_core::Netlist,
     source_name: &str,
@@ -141,20 +124,6 @@ pub(crate) fn netlist_has_independent_source_named_with_abort(
         }
     }
     Ok(false)
-}
-
-pub(crate) fn infer_primary_output_node_with_abort(
-    node_names: &[String],
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<Option<String>> {
-    ensure_not_aborted(abort)?;
-    for name in node_names.iter().rev() {
-        ensure_not_aborted(abort)?;
-        if !is_ground_like(name) {
-            return Ok(Some(name.clone()));
-        }
-    }
-    Ok(None)
 }
 
 pub(super) fn normalize_voltage_signal_name(name: &str) -> String {
