@@ -43,9 +43,9 @@ pub(super) fn restore_transient_result(
     device_op_traces: Vec<(String, String, Vec<f64>)>,
     store_traces: Vec<(String, Vec<f64>)>,
     fft_state: Option<TransientFftPersistenceState>,
-    event_state: Option<TransientEventPersistenceState>,
+    event_state: Option<VersionedTransientEventState>,
 ) -> PyResult<TransientResult> {
-    let (digital_traces, real_traces) =
+    let (digital_traces, digital_buses, real_traces) =
         rebuild_transient_event_traces(event_state).map_err(crate::errors::value_error)?;
     let (node_names, branch_names) = names;
     let restored = TransientResult {
@@ -57,9 +57,7 @@ pub(super) fn restore_transient_result(
         node_names,
         branch_names,
         digital_traces,
-        // The pickled event state is version 1 and carries no bus table,
-        // so a restored result declares none rather than inventing one.
-        digital_buses: Vec::new(),
+        digital_buses,
         real_traces,
         device_op_traces: device_op_traces
             .into_iter()
@@ -113,7 +111,11 @@ pub(super) fn transient_persistence_state(
             .map(|trace| (trace.name.clone(), trace.values.clone()))
             .collect(),
         transient_fft_persistence_state(&result.fft_results)?,
-        transient_event_persistence_state(&result.digital_traces, &result.real_traces),
+        transient_event_persistence_state(
+            &result.digital_traces,
+            &result.real_traces,
+            &result.digital_buses,
+        ),
     ))
 }
 

@@ -1,10 +1,22 @@
-//! Pickle encoding of a transient result's XSPICE event histories.
+//! Pickle encoding of a transient result's XSPICE event histories and the
+//! digital buses declared over them.
 //!
 //! Digital and real event traces are change histories rather than one sample
 //! per accepted point, and their logic states have no natural numeric form, so
 //! they need their own stable wire spelling. That spelling is core's own
-//! `DigitalStateTag`/`DigitalStrengthTag`, so a pickle and a shared result
-//! document name the same states.
+//! `DigitalStateTag`/`DigitalStrengthTag`/`DigitalBusSourceTag`, so a pickle
+//! and a shared result document name the same states and the same declarers.
+//!
+//! # Versions
+//!
+//! Version 1 carried the two trace lists. Version 2 carries a bus table beside
+//! them, and the two differ in exactly that: a version-1 state is a version-2
+//! state with no bus, and is read as one rather than refused, because nothing
+//! that could write a version-1 state could declare a bus. The two shapes are
+//! told apart by their own field count, so a state of one version claiming the
+//! other's number is refused rather than read as either.
+
+use pyo3::FromPyObject;
 
 /// Pickle schema version of the full transient result's structural contract.
 ///
@@ -13,7 +25,14 @@
 /// digital-trace list would equally mean "this deck has no event nodes" and
 /// "an older binding dropped them", so a version-zero state is rejected rather
 /// than restored as an analog-only result.
-pub(super) const TRANSIENT_STRUCTURE_STATE_VERSION: usize = 1;
+pub(super) const TRANSIENT_STRUCTURE_STATE_VERSION: usize = 2;
+
+/// The version written before the digital bus contract existed.
+///
+/// Read, not refused: the engine boundary that declares a bus landed after it,
+/// so a version-1 state has no bus table because there was no bus to put in
+/// one — which is not the same as a bus having been dropped.
+pub(super) const TRANSIENT_STRUCTURE_STATE_VERSION_WITHOUT_BUSES: usize = 1;
 
 /// One digital event as `(time, state label, strength label)`.
 pub(super) type DigitalEventState = (f64, String, String);
@@ -24,9 +43,39 @@ pub(super) type DigitalTraceState = (String, Vec<DigitalEventState>);
 /// One XSPICE real-valued event node's committed history.
 pub(super) type RealTraceState = (String, Vec<(f64, f64)>);
 
-/// Version plus the event histories a full transient result carries.
-pub(super) type TransientEventPersistenceState =
+/// One declared digital bus as `(name, msb, lsb, members, source label)`.
+///
+/// The members are node names in declaration order, declared MSB first, and
+/// the range is carried exactly as declared — neither is normalized, because a
+/// descending and an ascending range are different declarations.
+pub(super) type DigitalBusState = (String, i64, i64, Vec<String>, String);
+
+/// Version plus the event histories and bus table a transient result carries.
+pub(super) type TransientEventPersistenceState = (
+    usize,
+    Vec<DigitalTraceState>,
+    Vec<RealTraceState>,
+    Vec<DigitalBusState>,
+);
+
+/// The same state as written by a build that had no bus contract.
+pub(super) type TransientEventPersistenceStateWithoutBuses =
     (usize, Vec<DigitalTraceState>, Vec<RealTraceState>);
+
+/// A pickled event state at whichever version wrote it.
+///
+/// The variants are tried in order and told apart by field count, which is
+/// what lets one `_unpickle` signature read both without a version tag it has
+/// not read yet deciding the shape it is about to extract.
+#[derive(Debug, Clone, FromPyObject)]
+pub(super) enum VersionedTransientEventState {
+    /// Four fields: the current contract, carrying a bus table.
+    #[pyo3(transparent)]
+    Current(TransientEventPersistenceState),
+    /// Three fields: written before the bus contract existed.
+    #[pyo3(transparent)]
+    WithoutBuses(TransientEventPersistenceStateWithoutBuses),
+}
 
 /// Stable wire spelling of one digital logic state.
 ///
@@ -101,6 +150,25 @@ pub(super) fn digital_bus_source_label(
     }
 }
 
+/// The inverse of [`digital_bus_source_label`], shared with the compressed
+/// container's own codec so the two pickles read one spelling.
+pub(super) fn digital_bus_source_from_label(
+    label: &str,
+) -> Result<rspice_core::engine::DigitalBusSource, String> {
+    use rspice_core::execution::result_document::DigitalBusSourceTag as Tag;
+    let tag = match label {
+        "engine" => Tag::Engine,
+        "schematic" => Tag::Schematic,
+        "import" => Tag::Import,
+        other => {
+            return Err(format!(
+                "unknown digital bus source '{other}' in pickled transient state"
+            ));
+        }
+    };
+    Ok(tag.into())
+}
+
 fn digital_strength_from_label(
     label: &str,
 ) -> Result<rspice_core::xspice::DigitalStrength, String> {
@@ -119,10 +187,11 @@ fn digital_strength_from_label(
     Ok(tag.into())
 }
 
-/// Persist the XSPICE event histories a transient result carries.
+/// Persist the XSPICE event histories and bus table a transient result carries.
 pub(super) fn transient_event_persistence_state(
     digital_traces: &[rspice_core::engine::DigitalTrace],
     real_traces: &[rspice_core::engine::RealTrace],
+    digital_buses: &[rspice_core::engine::DigitalBusDeclaration],
 ) -> TransientEventPersistenceState {
     (
         TRANSIENT_STRUCTURE_STATE_VERSION,
@@ -158,32 +227,71 @@ pub(super) fn transient_event_persistence_state(
                 )
             })
             .collect(),
+        digital_buses
+            .iter()
+            .map(|bus| {
+                (
+                    bus.name.clone(),
+                    bus.msb,
+                    bus.lsb,
+                    bus.members.clone(),
+                    digital_bus_source_label(bus.source).to_string(),
+                )
+            })
+            .collect(),
     )
 }
 
-/// Rebuild the event histories, rejecting a state this build cannot read.
+/// A state whose version number does not match the shape it arrived in.
+fn unsupported_state_version(version: usize, fields: usize) -> String {
+    format!(
+        "unsupported transient pickle state version {version} in a {fields}-field state; this \
+         build reads version {TRANSIENT_STRUCTURE_STATE_VERSION_WITHOUT_BUSES} (three fields, no \
+         bus table) and version {TRANSIENT_STRUCTURE_STATE_VERSION} (four fields)"
+    )
+}
+
+/// Rebuild the event histories and the bus table, rejecting a state this build
+/// cannot read.
+///
+/// The bus table is judged against the traces it was restored beside, through
+/// core's own [`rspice_core::engine::validate_digital_bus_table`], so a pickle
+/// that declares a bus over a conductor it did not carry is refused rather
+/// than restored as a declaration nothing can answer.
 #[allow(clippy::type_complexity)]
 pub(super) fn rebuild_transient_event_traces(
-    state: Option<TransientEventPersistenceState>,
+    state: Option<VersionedTransientEventState>,
 ) -> Result<
     (
         Vec<rspice_core::engine::DigitalTrace>,
+        Vec<rspice_core::engine::DigitalBusDeclaration>,
         Vec<rspice_core::engine::RealTrace>,
     ),
     String,
 > {
-    let Some((version, digital, real)) = state else {
+    let Some(state) = state else {
         return Err(
             "legacy transient pickle predates the versioned result contract and carries no XSPICE \
              event histories; rerun the analysis"
                 .to_string(),
         );
     };
-    if version != TRANSIENT_STRUCTURE_STATE_VERSION {
-        return Err(format!(
-            "unsupported transient pickle state version {version}; this build reads version {TRANSIENT_STRUCTURE_STATE_VERSION}"
-        ));
-    }
+    let (digital, real, buses) = match state {
+        VersionedTransientEventState::Current((version, digital, real, buses)) => {
+            if version != TRANSIENT_STRUCTURE_STATE_VERSION {
+                return Err(unsupported_state_version(version, 4));
+            }
+            (digital, real, buses)
+        }
+        VersionedTransientEventState::WithoutBuses((version, digital, real)) => {
+            if version != TRANSIENT_STRUCTURE_STATE_VERSION_WITHOUT_BUSES {
+                return Err(unsupported_state_version(version, 3));
+            }
+            // Nothing that wrote this state could declare a bus, so an empty
+            // table is what it says rather than what it lost.
+            (digital, real, Vec::new())
+        }
+    };
     let digital_traces = digital
         .into_iter()
         .map(|(node_name, points)| {
@@ -214,7 +322,26 @@ pub(super) fn rebuild_transient_event_traces(
                 .collect(),
         })
         .collect();
-    Ok((digital_traces, real_traces))
+    let digital_buses = buses
+        .into_iter()
+        .map(|(name, msb, lsb, members, source)| {
+            Ok(rspice_core::engine::DigitalBusDeclaration {
+                name,
+                msb,
+                lsb,
+                members,
+                source: digital_bus_source_from_label(&source)?,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    rspice_core::engine::validate_digital_bus_table(
+        &digital_buses,
+        digital_traces.iter().map(|trace| trace.node_name.as_str()),
+    )
+    .map_err(|error| {
+        format!("pickled transient state declares a digital bus it cannot carry: {error}")
+    })?;
+    Ok((digital_traces, digital_buses, real_traces))
 }
 #[cfg(test)]
 mod event_pickle_tests {
@@ -311,12 +438,36 @@ mod event_pickle_tests {
             }],
         }];
 
-        let state = transient_event_persistence_state(&digital, &real);
+        let buses = vec![
+            rspice_core::engine::DigitalBusDeclaration::new(
+                "x1.count",
+                1,
+                0,
+                vec!["clk".to_string(), "clk2".to_string()],
+                rspice_core::engine::DigitalBusSource::Engine,
+            )
+            .expect("the fixture declaration is well formed"),
+        ];
+        let mut digital = digital;
+        digital.push(DigitalTrace {
+            node_name: "clk2".to_string(),
+            points: vec![DigitalTracePoint {
+                time: 0.0,
+                value: DigitalValue {
+                    state: DigitalState::Zero,
+                    strength: DigitalStrength::Strong,
+                },
+            }],
+        });
+
+        let state = transient_event_persistence_state(&digital, &real, &buses);
         assert_eq!(state.0, TRANSIENT_STRUCTURE_STATE_VERSION);
-        let (restored_digital, restored_real) =
-            rebuild_transient_event_traces(Some(state)).unwrap();
+        let (restored_digital, restored_buses, restored_real) =
+            rebuild_transient_event_traces(Some(VersionedTransientEventState::Current(state)))
+                .unwrap();
         assert_eq!(restored_digital, digital);
         assert_eq!(restored_real, real);
+        assert_eq!(restored_buses, buses);
     }
 
     #[test]
@@ -327,28 +478,142 @@ mod event_pickle_tests {
         assert!(error.contains("rerun the analysis"), "{error}");
     }
 
+    /// A version-1 state is read, not refused: nothing that wrote one could
+    /// declare a bus, so an empty table is what it says.
+    #[test]
+    fn a_state_written_before_the_bus_contract_restores_with_no_bus() {
+        let (digital, buses, real) =
+            rebuild_transient_event_traces(Some(VersionedTransientEventState::WithoutBuses((
+                TRANSIENT_STRUCTURE_STATE_VERSION_WITHOUT_BUSES,
+                vec![(
+                    "clk".to_string(),
+                    vec![(0.0, "one".to_string(), "strong".to_string())],
+                )],
+                vec![("ctrl".to_string(), vec![(1.0e-9, 0.25)])],
+            ))))
+            .expect("a version-1 state is a version-2 state with no bus");
+        assert_eq!(digital.len(), 1);
+        assert_eq!(real.len(), 1);
+        assert!(buses.is_empty());
+    }
+
     #[test]
     fn a_future_state_version_is_refused_by_number() {
         let future = TRANSIENT_STRUCTURE_STATE_VERSION + 1;
-        let error = rebuild_transient_event_traces(Some((future, Vec::new(), Vec::new())))
-            .expect_err("a newer contract cannot be read by this build");
+        let error = rebuild_transient_event_traces(Some(VersionedTransientEventState::Current((
+            future,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        ))))
+        .expect_err("a newer contract cannot be read by this build");
         assert!(
             error.contains(&format!("state version {future}")),
             "{error}"
         );
     }
 
+    /// A state's version has to agree with the shape it arrived in, so a
+    /// version-1 tag on a four-field state is refused rather than read as
+    /// either version.
+    #[test]
+    fn a_version_that_contradicts_the_state_shape_is_refused() {
+        let error = rebuild_transient_event_traces(Some(VersionedTransientEventState::Current((
+            TRANSIENT_STRUCTURE_STATE_VERSION_WITHOUT_BUSES,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        ))))
+        .expect_err("version 1 has three fields, not four");
+        assert!(error.contains("4-field state"), "{error}");
+
+        let error =
+            rebuild_transient_event_traces(Some(VersionedTransientEventState::WithoutBuses((
+                TRANSIENT_STRUCTURE_STATE_VERSION,
+                Vec::new(),
+                Vec::new(),
+            ))))
+            .expect_err("version 2 has four fields, not three");
+        assert!(error.contains("3-field state"), "{error}");
+    }
+
     #[test]
     fn an_unknown_logic_label_is_refused_rather_than_defaulted() {
-        let error = rebuild_transient_event_traces(Some((
+        let error = rebuild_transient_event_traces(Some(VersionedTransientEventState::Current((
             TRANSIENT_STRUCTURE_STATE_VERSION,
             vec![(
                 "clk".to_string(),
                 vec![(0.0, "floating".to_string(), "strong".to_string())],
             )],
             Vec::new(),
-        )))
+            Vec::new(),
+        ))))
         .expect_err("an unknown logic state must not become Unknown");
         assert!(error.contains("'floating'"), "{error}");
+    }
+
+    #[test]
+    fn an_unknown_bus_source_is_refused_rather_than_defaulted() {
+        let error = rebuild_transient_event_traces(Some(VersionedTransientEventState::Current((
+            TRANSIENT_STRUCTURE_STATE_VERSION,
+            vec![
+                ("q1".to_string(), Vec::new()),
+                ("q0".to_string(), Vec::new()),
+            ],
+            Vec::new(),
+            vec![(
+                "q".to_string(),
+                1,
+                0,
+                vec!["q1".to_string(), "q0".to_string()],
+                "guessed".to_string(),
+            )],
+        ))))
+        .expect_err("an unknown declarer must not become one of the three");
+        assert!(error.contains("'guessed'"), "{error}");
+    }
+
+    /// A pickled bus is judged against the traces restored beside it, so a
+    /// declaration nothing can answer is refused rather than restored.
+    #[test]
+    fn a_pickled_bus_whose_member_has_no_trace_is_refused() {
+        let error = rebuild_transient_event_traces(Some(VersionedTransientEventState::Current((
+            TRANSIENT_STRUCTURE_STATE_VERSION,
+            vec![("q1".to_string(), Vec::new())],
+            Vec::new(),
+            vec![(
+                "q".to_string(),
+                1,
+                0,
+                vec!["q1".to_string(), "q0".to_string()],
+                "engine".to_string(),
+            )],
+        ))))
+        .expect_err("a member with no trace cannot be restored");
+        assert!(error.contains("cannot carry"), "{error}");
+        assert!(error.contains("q0"), "{error}");
+    }
+
+    /// A range that does not describe the member list is refused by core's own
+    /// declaration check, reached through the table check.
+    #[test]
+    fn a_pickled_bus_whose_range_contradicts_its_members_is_refused() {
+        let error = rebuild_transient_event_traces(Some(VersionedTransientEventState::Current((
+            TRANSIENT_STRUCTURE_STATE_VERSION,
+            vec![
+                ("q1".to_string(), Vec::new()),
+                ("q0".to_string(), Vec::new()),
+            ],
+            Vec::new(),
+            vec![(
+                "q".to_string(),
+                7,
+                0,
+                vec!["q1".to_string(), "q0".to_string()],
+                "engine".to_string(),
+            )],
+        ))))
+        .expect_err("a [7:0] range needs eight members");
+        assert!(error.contains("cannot carry"), "{error}");
     }
 }

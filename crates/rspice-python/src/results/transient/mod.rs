@@ -791,12 +791,15 @@ impl PyTransientResult {
 
     /// Rebuild from pickled state. Not part of the public API.
     ///
-    /// `event_state` carries the pickle's version tag and the XSPICE digital
-    /// and real event histories. It is the last parameter and defaults to
-    /// `None` so a state written before it existed still reaches this method
-    /// and is refused with a message that says what to do, instead of failing
-    /// as an arity mismatch. Nothing this method builds is zero-filled: a
-    /// state that does not describe a complete, aligned result is rejected.
+    /// `event_state` carries the pickle's version tag, the XSPICE digital and
+    /// real event histories, and — from version 2 — the bus table declared
+    /// over them. It is the last parameter and defaults to `None` so a state
+    /// written before it existed still reaches this method and is refused with
+    /// a message that says what to do, instead of failing as an arity
+    /// mismatch. A version-1 state is read, with no bus table, because nothing
+    /// that wrote one could declare a bus. Nothing this method builds is
+    /// zero-filled: a state that does not describe a complete, aligned result
+    /// is rejected.
     #[staticmethod]
     #[allow(clippy::too_many_arguments)]
     #[pyo3(signature = (time, step_sizes, voltages, branch_currents, num_nodes, names, device_op_traces, store_traces, fft_state=None, event_state=None))]
@@ -810,7 +813,7 @@ impl PyTransientResult {
         device_op_traces: Vec<(String, String, Vec<f64>)>,
         store_traces: Vec<(String, Vec<f64>)>,
         fft_state: Option<TransientFftPersistenceState>,
-        event_state: Option<TransientEventPersistenceState>,
+        event_state: Option<VersionedTransientEventState>,
     ) -> PyResult<Self> {
         Ok(Self::restored(restore_transient_result(
             time,

@@ -34,7 +34,8 @@ use rspice_core::xspice::{DigitalState, DigitalStrength, DigitalValue};
 
 use super::event_state::{
     TRANSIENT_STRUCTURE_STATE_VERSION, TransientEventPersistenceState,
-    rebuild_transient_event_traces, transient_event_persistence_state,
+    VersionedTransientEventState, rebuild_transient_event_traces,
+    transient_event_persistence_state,
 };
 use super::transient::validate_transient_state;
 
@@ -125,26 +126,50 @@ const STATE_LABELS: &[&str] = &[
 
 const STRENGTH_LABELS: &[&str] = &["undetermined", "high_z", "resistive", "strong"];
 
+const BUS_SOURCE_LABELS: &[&str] = &["engine", "schematic", "import"];
+
 fn valid_event_state() -> TransientEventPersistenceState {
-    let digital = vec![DigitalTrace {
-        node_name: "clk".to_string(),
-        points: vec![
-            DigitalTracePoint {
+    let digital = vec![
+        DigitalTrace {
+            node_name: "clk".to_string(),
+            points: vec![
+                DigitalTracePoint {
+                    time: 0.0,
+                    value: DigitalValue {
+                        state: DigitalState::ZeroZ,
+                        strength: DigitalStrength::HighZ,
+                    },
+                },
+                DigitalTracePoint {
+                    time: 1.0e-9,
+                    value: DigitalValue {
+                        state: DigitalState::One,
+                        strength: DigitalStrength::Strong,
+                    },
+                },
+            ],
+        },
+        DigitalTrace {
+            node_name: "count#1".to_string(),
+            points: vec![DigitalTracePoint {
                 time: 0.0,
                 value: DigitalValue {
-                    state: DigitalState::ZeroZ,
-                    strength: DigitalStrength::HighZ,
+                    state: DigitalState::Zero,
+                    strength: DigitalStrength::Strong,
                 },
-            },
-            DigitalTracePoint {
+            }],
+        },
+        DigitalTrace {
+            node_name: "count#0".to_string(),
+            points: vec![DigitalTracePoint {
                 time: 1.0e-9,
                 value: DigitalValue {
                     state: DigitalState::One,
                     strength: DigitalStrength::Strong,
                 },
-            },
-        ],
-    }];
+            }],
+        },
+    ];
     let real = vec![RealTrace {
         node_name: "ctrl".to_string(),
         points: vec![RealTracePoint {
@@ -152,12 +177,22 @@ fn valid_event_state() -> TransientEventPersistenceState {
             value: -0.5,
         }],
     }];
-    transient_event_persistence_state(&digital, &real)
+    let buses = vec![
+        rspice_core::engine::DigitalBusDeclaration::new(
+            "x1.count",
+            1,
+            0,
+            vec!["count#1".to_string(), "count#0".to_string()],
+            rspice_core::engine::DigitalBusSource::Engine,
+        )
+        .expect("the fixture declaration is well formed"),
+    ];
+    transient_event_persistence_state(&digital, &real, &buses)
 }
 
 /// Damage one field of a valid event state.
 fn mutate_event_state(rng: &mut Rng, state: &mut TransientEventPersistenceState) {
-    match rng.below(8) {
+    match rng.below(14) {
         0 => state.0 = rng.below(4),
         1 => state.1.clear(),
         2 => state.2.clear(),
@@ -181,6 +216,43 @@ fn mutate_event_state(rng: &mut Rng, state: &mut TransientEventPersistenceState)
                 point.2 = rng.hostile_label(STRENGTH_LABELS);
             }
         }
+        // A bus whose member no longer names a trace must be refused rather
+        // than kept as a declaration nothing can answer.
+        7 => {
+            if let Some(bus) = state.3.first_mut()
+                && let Some(member) = bus.3.first_mut()
+            {
+                *member = rng.hostile_label(&["count#1", "count#0", "clk"]);
+            }
+        }
+        // A range that no longer describes the member list, or one that walked
+        // off the width bound.
+        8 => {
+            if let Some(bus) = state.3.first_mut() {
+                bus.1 = rng.below(9) as i64 - 2;
+            }
+        }
+        9 => {
+            if let Some(bus) = state.3.first_mut() {
+                bus.2 = rng.below(9) as i64 - 2;
+            }
+        }
+        10 => {
+            if let Some(bus) = state.3.first_mut() {
+                bus.4 = rng.hostile_label(BUS_SOURCE_LABELS);
+            }
+        }
+        11 => {
+            if let Some(bus) = state.3.first_mut() {
+                bus.0 = rng.hostile_label(&["x1.count", "data"]);
+            }
+        }
+        // Two buses claiming one conductor, and a member claimed twice by one.
+        12 => {
+            if let Some(bus) = state.3.first().cloned() {
+                state.3.push(bus);
+            }
+        }
         _ => {
             if let Some(point) = state.1.first_mut().and_then(|trace| trace.1.first_mut()) {
                 point.0 = rng.hostile_f64();
@@ -201,7 +273,9 @@ fn event_state_decoder_survives_chaos_without_inventing_a_value() {
         |rng| {
             let mut state = valid_event_state();
             mutate_event_state(rng, &mut state);
-            let Ok((digital, real)) = rebuild_transient_event_traces(Some(state.clone())) else {
+            let Ok((digital, buses, real)) = rebuild_transient_event_traces(Some(
+                VersionedTransientEventState::Current(state.clone()),
+            )) else {
                 return;
             };
             assert_eq!(
@@ -209,8 +283,9 @@ fn event_state_decoder_survives_chaos_without_inventing_a_value() {
                 "a state of another version was accepted"
             );
             // Anything accepted must re-serialize to exactly the state it came
-            // from, bit for bit, so a silently repaired label or time is caught.
-            let reserialized = transient_event_persistence_state(&digital, &real);
+            // from, bit for bit, so a silently repaired label, time, range or
+            // member name is caught.
+            let reserialized = transient_event_persistence_state(&digital, &real, &buses);
             assert_event_state_bitwise_eq(&reserialized, &state);
         },
     );
@@ -231,11 +306,14 @@ fn every_declared_event_label_round_trips_and_nothing_else_is_accepted() {
                     )],
                 )],
                 Vec::new(),
+                Vec::new(),
             );
-            let (digital, real) = rebuild_transient_event_traces(Some(state.clone()))
-                .expect("a declared label pair must decode");
+            let (digital, buses, real) = rebuild_transient_event_traces(Some(
+                VersionedTransientEventState::Current(state.clone()),
+            ))
+            .expect("a declared label pair must decode");
             assert_event_state_bitwise_eq(
-                &transient_event_persistence_state(&digital, &real),
+                &transient_event_persistence_state(&digital, &real, &buses),
                 &state,
             );
         }
@@ -243,17 +321,69 @@ fn every_declared_event_label_round_trips_and_nothing_else_is_accepted() {
 
     // A near miss is a refusal, never the nearest declared state.
     for label in ["Zero", "zero ", "zero_", "", "floating"] {
-        let refused = rebuild_transient_event_traces(Some((
-            TRANSIENT_STRUCTURE_STATE_VERSION,
-            vec![(
-                "n".to_string(),
-                vec![(0.0, label.to_string(), "strong".to_string())],
-            )],
-            Vec::new(),
-        )));
+        let refused =
+            rebuild_transient_event_traces(Some(VersionedTransientEventState::Current((
+                TRANSIENT_STRUCTURE_STATE_VERSION,
+                vec![(
+                    "n".to_string(),
+                    vec![(0.0, label.to_string(), "strong".to_string())],
+                )],
+                Vec::new(),
+                Vec::new(),
+            ))));
         assert!(
             refused.is_err(),
             "the undeclared state label {label:?} was accepted"
+        );
+    }
+
+    // The same rule for a declarer: every declared source decodes, and nothing
+    // near one does.
+    for source_label in BUS_SOURCE_LABELS {
+        let state = (
+            TRANSIENT_STRUCTURE_STATE_VERSION,
+            vec![
+                ("q1".to_string(), Vec::new()),
+                ("q0".to_string(), Vec::new()),
+            ],
+            Vec::new(),
+            vec![(
+                "q".to_string(),
+                1,
+                0,
+                vec!["q1".to_string(), "q0".to_string()],
+                (*source_label).to_string(),
+            )],
+        );
+        let (digital, buses, real) = rebuild_transient_event_traces(Some(
+            VersionedTransientEventState::Current(state.clone()),
+        ))
+        .expect("a declared bus source must decode");
+        assert_event_state_bitwise_eq(
+            &transient_event_persistence_state(&digital, &real, &buses),
+            &state,
+        );
+    }
+    for label in ["Engine", "engine ", "engine_", "", "declared"] {
+        let refused =
+            rebuild_transient_event_traces(Some(VersionedTransientEventState::Current((
+                TRANSIENT_STRUCTURE_STATE_VERSION,
+                vec![
+                    ("q1".to_string(), Vec::new()),
+                    ("q0".to_string(), Vec::new()),
+                ],
+                Vec::new(),
+                vec![(
+                    "q".to_string(),
+                    1,
+                    0,
+                    vec!["q1".to_string(), "q0".to_string()],
+                    label.to_string(),
+                )],
+            ))));
+        assert!(
+            refused.is_err(),
+            "the undeclared bus source {label:?} was accepted"
         );
     }
 }
@@ -281,6 +411,13 @@ fn assert_event_state_bitwise_eq(
             assert_eq!(left.0.to_bits(), right.0.to_bits());
             assert_eq!(left.1.to_bits(), right.1.to_bits());
         }
+    }
+    assert_eq!(left.3.len(), right.3.len());
+    for (left, right) in left.3.iter().zip(&right.3) {
+        assert_eq!(left.0, right.0);
+        assert_eq!((left.1, left.2), (right.1, right.2));
+        assert_eq!(left.3, right.3);
+        assert_eq!(left.4, right.4);
     }
 }
 
@@ -401,9 +538,14 @@ fn the_unmutated_fixtures_are_themselves_valid() {
     // A chaos suite whose seed is already refused proves nothing, so the two
     // fixtures are asserted valid before anything damages them.
     let state = valid_event_state();
-    let (digital, real) =
-        rebuild_transient_event_traces(Some(state.clone())).expect("the event fixture decodes");
-    assert_event_state_bitwise_eq(&transient_event_persistence_state(&digital, &real), &state);
+    let (digital, buses, real) =
+        rebuild_transient_event_traces(Some(VersionedTransientEventState::Current(state.clone())))
+            .expect("the event fixture decodes");
+    assert_event_state_bitwise_eq(
+        &transient_event_persistence_state(&digital, &real, &buses),
+        &state,
+    );
+    assert_eq!(buses.len(), 1, "the fixture declares one bus");
     validate_transient_state(&valid_transient_result())
         .expect("the transient fixture is structurally valid");
 }

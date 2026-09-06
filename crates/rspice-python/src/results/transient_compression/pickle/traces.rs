@@ -1,9 +1,10 @@
-//! XSPICE event traces, which compression carries through untouched.
+//! XSPICE event traces and their bus declarations, which compression carries
+//! through untouched.
 //!
 //! Digital and real event traces are committed events rather than sampled
 //! waveforms, so decimation never touches them and their pickled form is the
-//! event list itself. Digital states and strengths travel as the stable tags
-//! core exposes, never as enum ordinals.
+//! event list itself. Digital states, strengths and bus sources travel as the
+//! stable tags core exposes, never as enum ordinals.
 
 use super::*;
 
@@ -11,6 +12,8 @@ use super::*;
 pub(crate) type CompressedDigitalTracePersistenceState = (String, Vec<(f64, String, String)>);
 /// One real event trace: node name and `(time, value)` events.
 pub(crate) type CompressedRealTracePersistenceState = (String, Vec<(f64, f64)>);
+/// One declared digital bus: `(name, msb, lsb, members, source tag)`.
+pub(crate) type CompressedDigitalBusPersistenceState = (String, i64, i64, Vec<String>, String);
 
 pub(crate) fn digital_trace_persistence_state(
     trace: &rspice_core::engine::DigitalTrace,
@@ -56,6 +59,38 @@ pub(crate) fn rebuild_digital_trace(
     Ok(rspice_core::engine::DigitalTrace {
         node_name,
         points: rebuilt,
+    })
+}
+
+/// Persist one declared bus.
+///
+/// The source travels as the shared document's `DigitalBusSourceTag` spelling,
+/// which is the only spelling a bus source has: unlike a digital state, it was
+/// never given a second, hyphenated one on the engine side.
+pub(crate) fn digital_bus_persistence_state(
+    bus: &rspice_core::engine::DigitalBusDeclaration,
+) -> CompressedDigitalBusPersistenceState {
+    (
+        bus.name.clone(),
+        bus.msb,
+        bus.lsb,
+        bus.members.clone(),
+        digital_bus_source_label(bus.source).to_string(),
+    )
+}
+
+/// Rebuild one declared bus. The table it belongs to is judged against the
+/// restored traces by the caller, through core's own checker.
+pub(crate) fn rebuild_digital_bus(
+    state: CompressedDigitalBusPersistenceState,
+) -> PyResult<rspice_core::engine::DigitalBusDeclaration> {
+    let (name, msb, lsb, members, source) = state;
+    Ok(rspice_core::engine::DigitalBusDeclaration {
+        name,
+        msb,
+        lsb,
+        members,
+        source: digital_bus_source_from_label(&source).map_err(crate::errors::value_error)?,
     })
 }
 

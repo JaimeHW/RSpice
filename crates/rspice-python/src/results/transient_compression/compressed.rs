@@ -759,7 +759,7 @@ impl PyCompressedTransientResult {
         compression_ratio: f64,
         input_points: usize,
         fft_state: Option<TransientFftPersistenceState>,
-        analog_state: Option<CompressedTransientAnalogState>,
+        analog_state: Option<VersionedCompressedTransientAnalogState>,
         compression_state: Option<CompressionReportPersistenceState>,
     ) -> PyResult<Self> {
         rebuild_compressed_transient(
