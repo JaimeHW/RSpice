@@ -1082,4 +1082,117 @@ mod tests {
             refuse_non_finite_floats("ir", &value).expect_err("bare non-finite floats are refused");
         assert!(error.to_string().ends_with(", and 3 more"), "{error}");
     }
+
+    /// The digital half's constants are the one part of a sealed artifact that
+    /// looks like it should need the encoding and does not, so the reason is
+    /// pinned rather than written down: three separate refusals stand between
+    /// a source and a non-finite `CfgValueKind::RealConstant`, and if any one
+    /// of them goes, this test says so and the field needs annotating.
+    ///
+    /// `CanonicalIrArtifact.digital` is the only place a [`CfgFunction`] is
+    /// serialized, and `digital_lower` is its only producer — no optimizer or
+    /// derivative pass runs over a process function — so what that lowering
+    /// can emit is the whole question.
+    ///
+    /// [`CfgFunction`]: crate::canonical_ir::cfg::CfgFunction
+    #[test]
+    fn a_digital_process_cannot_carry_a_non_finite_constant() {
+        fn compile(source: &str) -> Result<crate::RuntimeCompileReport, String> {
+            crate::VerilogACompiler::new(crate::CompilerOptions {
+                enable_ams: true,
+                ..crate::CompilerOptions::default()
+            })
+            .compile_runtime(source, None)
+            .map_err(|error| error.to_string())
+        }
+
+        // 1. A `parameter real` whose default folds to an infinity never enters
+        //    the digital constant table at all: `digital_constants` keeps only
+        //    finite defaults, so the name is not a discrete-domain identifier
+        //    and the module is refused rather than lowered.
+        let refused = compile(
+            r#"
+module rspice_digital_parameter_probe(p, n, clk, q);
+  inout p, n; electrical p, n;
+  input clk; output q; wire clk; reg q;
+  parameter real big = 1.0/0.0;
+  real acc;
+  initial q = 1'b0;
+  always @(posedge clk) begin acc = big; q <= ~q; end
+  analog I(p, n) <+ V(p, n) / 1000.0;
+endmodule
+"#,
+        )
+        .expect_err("an infinite real parameter is invisible to the discrete domain");
+        assert!(
+            refused.contains("`big` is not a discrete-domain signal"),
+            "{refused}"
+        );
+
+        // 2. A literal too large for a `f64` is refused by the number parser,
+        //    which is the same refusal the continuous domain gets.
+        let refused = compile(
+            r#"
+module rspice_digital_literal_probe(p, n, clk, q);
+  inout p, n; electrical p, n;
+  input clk; output q; wire clk; reg q;
+  real acc;
+  initial q = 1'b0;
+  always @(posedge clk) begin acc = 1.0e400; q <= ~q; end
+  analog I(p, n) <+ V(p, n) / 1000.0;
+endmodule
+"#,
+        )
+        .expect_err("an overflowing literal is not a number");
+        assert!(
+            refused.contains("outside the finite real range"),
+            "{refused}"
+        );
+
+        // 3. Arithmetic that *evaluates* to an infinity is not folded at
+        //    lowering: it stays an operation over finite operands, so the plan
+        //    carries `1.0` and `0.0` and the infinity only ever exists at run
+        //    time, where JSON never sees it.
+        let report = compile(
+            r#"
+module rspice_digital_division_probe(p, n, clk, q);
+  inout p, n; electrical p, n;
+  input clk; output q; wire clk; reg q;
+  real acc;
+  initial q = 1'b0;
+  always @(posedge clk) begin acc = 1.0 / 0.0; q <= ~q; end
+  analog I(p, n) <+ V(p, n) / 1000.0;
+endmodule
+"#,
+        )
+        .expect("a division by a literal zero is a legal discrete-domain expression");
+        let plan = &report.canonical_ir.digital;
+        assert!(
+            !plan.is_empty(),
+            "the fixture must actually carry a digital half"
+        );
+        let constants: Vec<f64> = plan
+            .processes
+            .iter()
+            .flat_map(|process| process.function.values.iter())
+            .filter_map(|value| match value.kind {
+                crate::canonical_ir::cfg::CfgValueKind::RealConstant(constant) => Some(constant),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            constants.iter().all(|constant| constant.is_finite()),
+            "a folded infinity would need annotating, found {constants:?}"
+        );
+
+        // And the whole artifact, which is the question the seal asks.
+        assert_eq!(
+            non_finite_floats("canonical_ir", &report.canonical_ir).unwrap(),
+            Vec::new()
+        );
+        assert_eq!(
+            non_finite_floats("model", &report.model).unwrap(),
+            Vec::new()
+        );
+    }
 }
