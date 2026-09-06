@@ -24,6 +24,21 @@ pub(crate) fn raw_variable_type(kind: SignalKind) -> &'static str {
     rspice_core::execution::raw_variable_type(kind)
 }
 
+/// The unit a projected column is published under, when its kind states one.
+///
+/// `None` is *unstated*, not dimensionless: a format with a unit field leaves
+/// it out rather than claiming a quantity nothing declared. Every kind the
+/// projection produces states one today, so the `None` arm exists for the
+/// kinds a later core revision may add — [`SignalKind`] is `non_exhaustive`
+/// and a column whose unit this build does not know must say nothing rather
+/// than guess.
+pub(crate) fn unit_symbol(kind: SignalKind) -> Option<String> {
+    match rspice_core::execution::signal_unit(kind) {
+        rspice_core::execution::SignalUnit::Unspecified => None,
+        unit => Some(unit.symbol()),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ScalarSignal {
     pub(crate) display_name: String,
@@ -35,6 +50,10 @@ pub(crate) struct ScalarSignal {
 impl ScalarSignal {
     pub(crate) fn raw_variable_type(&self) -> &'static str {
         raw_variable_type(self.kind)
+    }
+
+    pub(crate) fn unit_symbol(&self) -> Option<String> {
+        unit_symbol(self.kind)
     }
 }
 
@@ -50,6 +69,10 @@ pub(crate) struct ComplexSignal {
 impl ComplexSignal {
     pub(crate) fn raw_variable_type(&self) -> &'static str {
         raw_variable_type(self.kind)
+    }
+
+    pub(crate) fn unit_symbol(&self) -> Option<String> {
+        unit_symbol(self.kind)
     }
 }
 
@@ -1095,5 +1118,27 @@ mod tests {
         let error = ac_signals(&[unnamed])
             .expect_err("empty canonical AC names must not fall back to ordinals");
         assert!(error.to_string().contains("empty node name"));
+    }
+
+    /// The one unit vocabulary: what a published column states is what core's
+    /// descriptor says the kind carries, spelled core's way.
+    ///
+    /// A second table here would drift from the engine adapter's measurement
+    /// manifest and from the GUI's HDF5 reader without anything failing,
+    /// because a unit attribute is free text. The pairing with
+    /// [`raw_variable_type`] is asserted alongside so the two vocabularies
+    /// cannot be given to different kinds.
+    #[test]
+    fn a_published_unit_is_the_symbol_core_gives_the_signal_kind() {
+        for (kind, var_type, unit) in [
+            (SignalKind::Voltage, "voltage", "V"),
+            (SignalKind::Current, "current", "A"),
+            (SignalKind::Digital, "digital", "logic"),
+            (SignalKind::Scalar, "parameter", "1"),
+            (SignalKind::DeviceObservable, "parameter", "1"),
+        ] {
+            assert_eq!(raw_variable_type(kind), var_type, "{kind:?}");
+            assert_eq!(unit_symbol(kind).as_deref(), Some(unit), "{kind:?}");
+        }
     }
 }

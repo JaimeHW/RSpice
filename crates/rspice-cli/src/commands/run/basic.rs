@@ -245,6 +245,7 @@ pub(super) fn write_dc_op_output(
             operating_point.add_typed_signal(
                 signal.display_name.clone(),
                 signal.raw_variable_type(),
+                signal.unit_symbol(),
                 signal.values.clone(),
             );
         }
@@ -486,6 +487,7 @@ pub(super) fn run_dc_sweep(
                                 dc_sweep.add_typed_signal(
                                     signal.display_name.clone(),
                                     signal.raw_variable_type(),
+                                    signal.unit_symbol(),
                                     signal.values.clone(),
                                 );
                             }
@@ -996,6 +998,7 @@ pub(super) fn run_transient(
                             transient.add_typed_signal(
                                 signal.display_name.clone(),
                                 signal.raw_variable_type(),
+                                signal.unit_symbol(),
                                 signal.values.clone(),
                             );
                         }

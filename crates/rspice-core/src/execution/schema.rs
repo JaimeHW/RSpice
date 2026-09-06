@@ -84,6 +84,37 @@ pub enum SignalUnit {
     Custom(String),
 }
 
+impl SignalUnit {
+    /// Short symbol a published artifact spells this unit with.
+    ///
+    /// One table, because two surfaces that disagree on how a volt is written
+    /// publish two files a reader cannot compare: the engine adapter's
+    /// measurement manifest and the command line's HDF5 columns both come
+    /// through here.
+    ///
+    /// `SignalUnit` is `#[non_exhaustive]`, so a future core unit renders as
+    /// its own lower-case tag rather than being folded onto an existing
+    /// symbol: an unrecognized unit must never be reported as a different one.
+    #[must_use]
+    pub fn symbol(&self) -> String {
+        match self {
+            Self::Volt => "V".to_owned(),
+            Self::Ampere => "A".to_owned(),
+            Self::Ohm => "ohm".to_owned(),
+            Self::Siemens => "S".to_owned(),
+            Self::Watt => "W".to_owned(),
+            Self::Hertz => "Hz".to_owned(),
+            Self::Second => "s".to_owned(),
+            Self::Degree => "deg".to_owned(),
+            Self::Radian => "rad".to_owned(),
+            Self::Dimensionless => "1".to_owned(),
+            Self::Logic => "logic".to_owned(),
+            Self::Custom(symbol) => symbol.clone(),
+            other => format!("{other:?}").to_ascii_lowercase(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub enum SignalOwner {
@@ -615,5 +646,30 @@ mod tests {
                 .expect("second values"),
             vec![Some(10.0), Some(20.0)]
         );
+    }
+
+    #[test]
+    fn every_core_unit_has_a_distinct_non_empty_symbol() {
+        let units = [
+            SignalUnit::Volt,
+            SignalUnit::Ampere,
+            SignalUnit::Ohm,
+            SignalUnit::Siemens,
+            SignalUnit::Watt,
+            SignalUnit::Hertz,
+            SignalUnit::Second,
+            SignalUnit::Degree,
+            SignalUnit::Radian,
+            SignalUnit::Dimensionless,
+            SignalUnit::Logic,
+            SignalUnit::Unspecified,
+            SignalUnit::Custom("V^2/Hz".to_owned()),
+        ];
+        let mut seen = std::collections::BTreeSet::new();
+        for unit in &units {
+            let symbol = unit.symbol();
+            assert!(!symbol.trim().is_empty(), "{unit:?} has no symbol");
+            assert!(seen.insert(symbol), "{unit:?} shares a symbol");
+        }
     }
 }

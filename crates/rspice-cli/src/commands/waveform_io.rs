@@ -953,7 +953,7 @@ mod tests {
         let mut data = crate::hdf5::Hdf5SimulationData::new();
         data.title = "combined waveform and FFT".to_string();
         let mut transient = crate::hdf5::Hdf5WaveformSection::new("time", vec![0.0, 1.0]);
-        transient.add_typed_signal("V(out)", "voltage", vec![0.0, 1.0]);
+        transient.add_typed_signal("V(out)", "voltage", Some("V".to_string()), vec![0.0, 1.0]);
         data.transient = Some(transient);
         data.fft = Some(crate::hdf5::Hdf5FftSection {
             parent_analysis_id: "tran-001".to_string(),

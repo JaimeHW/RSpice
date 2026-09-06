@@ -795,6 +795,7 @@ fn finish_ac_results(
                     for signal in &signals {
                         ac.add_signal(
                             signal.display_name.clone(),
+                            signal.unit_symbol(),
                             signal.real.clone(),
                             signal.imag.clone(),
                         );
@@ -959,6 +960,11 @@ pub(super) fn run_stb(
                     let mut ac = Hdf5AcSection::new(stb.frequencies.clone());
                     ac.add_signal(
                         "loopgain".to_string(),
+                        // A loop gain is a ratio of two voltages. The
+                        // dimensionless symbol would be `1`, which reads as a
+                        // value rather than a unit; the column is published
+                        // with no unit stated instead.
+                        None,
                         stb.loop_gains.iter().map(|g| g.re).collect(),
                         stb.loop_gains.iter().map(|g| g.im).collect(),
                     );

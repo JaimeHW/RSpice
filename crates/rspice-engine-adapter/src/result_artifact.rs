@@ -77,7 +77,7 @@ impl ResultSchemaSignature {
                 "axis={};kind={:?};unit={}",
                 axis.name(),
                 axis.kind(),
-                unit_symbol(axis.unit())
+                axis.unit().symbol()
             ));
         }
         for signal in document.signals() {
@@ -88,7 +88,7 @@ impl ResultSchemaSignature {
                 signal.qualifier().map_or_else(String::new, qualifier_tag),
                 descriptor.kind(),
                 descriptor.owner(),
-                unit_symbol(descriptor.unit()),
+                descriptor.unit().symbol(),
                 descriptor.value_type(),
                 descriptor.shape(),
             ));
@@ -97,7 +97,7 @@ impl ResultSchemaSignature {
             entries.push(format!(
                 "scalar={};unit={}",
                 scalar.name(),
-                scalar.unit().map_or_else(String::new, unit_symbol),
+                scalar.unit().map_or_else(String::new, SignalUnit::symbol),
             ));
         }
         for state in document.device_states() {
@@ -114,7 +114,7 @@ impl ResultSchemaSignature {
                     parameter
                         .unit
                         .as_ref()
-                        .map_or_else(String::new, unit_symbol),
+                        .map_or_else(String::new, SignalUnit::symbol),
                 ));
             }
         }
@@ -193,7 +193,7 @@ pub(crate) fn measurements_from_document(
         push_series(
             &mut measurements,
             measurement_name("axis", axis.name()),
-            unit_symbol(axis.unit()),
+            axis.unit().symbol(),
             &samples,
             abort,
         )?;
@@ -210,7 +210,7 @@ pub(crate) fn measurements_from_document(
             ),
             None => descriptor.canonical_name().to_owned(),
         };
-        let unit = unit_symbol(descriptor.unit());
+        let unit = descriptor.unit().symbol();
         match signal.values() {
             SeriesValues::Real { samples } => push_series(
                 &mut measurements,
@@ -248,7 +248,9 @@ pub(crate) fn measurements_from_document(
 
     for scalar in document.scalars() {
         check_abort(abort)?;
-        let unit = scalar.unit().map_or_else(|| "1".to_owned(), unit_symbol);
+        let unit = scalar
+            .unit()
+            .map_or_else(|| "1".to_owned(), SignalUnit::symbol);
         let name = measurement_name("scalar", scalar.name());
         let value = match scalar.value() {
             ScalarValue::Real { value } => *value,
@@ -318,29 +320,6 @@ fn qualifier_tag(qualifier: &SeriesQualifier) -> String {
         SeriesQualifier::DistortionFundamental { tone } => format!("fundamental-{tone:?}"),
         SeriesQualifier::DistortionProduct { product } => format!("product-{}", product.label()),
         SeriesQualifier::PacSideband { sideband } => format!("sideband-{sideband}"),
-    }
-}
-
-/// Short symbol for one core signal unit.
-///
-/// `SignalUnit` is `#[non_exhaustive]`, so a future core unit renders as its
-/// own lower-case tag rather than being folded onto an existing symbol: an
-/// unrecognized unit must never be reported as a different one.
-pub(crate) fn unit_symbol(unit: &SignalUnit) -> String {
-    match unit {
-        SignalUnit::Volt => "V".to_owned(),
-        SignalUnit::Ampere => "A".to_owned(),
-        SignalUnit::Ohm => "ohm".to_owned(),
-        SignalUnit::Siemens => "S".to_owned(),
-        SignalUnit::Watt => "W".to_owned(),
-        SignalUnit::Hertz => "Hz".to_owned(),
-        SignalUnit::Second => "s".to_owned(),
-        SignalUnit::Degree => "deg".to_owned(),
-        SignalUnit::Radian => "rad".to_owned(),
-        SignalUnit::Dimensionless => "1".to_owned(),
-        SignalUnit::Logic => "logic".to_owned(),
-        SignalUnit::Custom(symbol) => symbol.clone(),
-        other => format!("{other:?}").to_ascii_lowercase(),
     }
 }
 
@@ -442,29 +421,5 @@ mod tests {
             content_type.ends_with(&format!("version={ANALYSIS_RESULT_DOCUMENT_VERSION}")),
             "{content_type}"
         );
-    }
-
-    #[test]
-    fn every_core_unit_has_a_distinct_non_empty_symbol() {
-        let units = [
-            SignalUnit::Volt,
-            SignalUnit::Ampere,
-            SignalUnit::Ohm,
-            SignalUnit::Siemens,
-            SignalUnit::Watt,
-            SignalUnit::Hertz,
-            SignalUnit::Second,
-            SignalUnit::Degree,
-            SignalUnit::Radian,
-            SignalUnit::Dimensionless,
-            SignalUnit::Logic,
-            SignalUnit::Custom("V^2/Hz".to_owned()),
-        ];
-        let mut seen = std::collections::BTreeSet::new();
-        for unit in &units {
-            let symbol = unit_symbol(unit);
-            assert!(!symbol.trim().is_empty(), "{unit:?} has no symbol");
-            assert!(seen.insert(symbol), "{unit:?} shares a symbol");
-        }
     }
 }

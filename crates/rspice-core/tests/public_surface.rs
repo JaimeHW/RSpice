@@ -617,7 +617,24 @@ use rspice_core::analysis::harmonic_balance::{
 // callers are `bus_events` itself and every consumer that binds the result:
 // the VCD projection, the rawfile bus plots, `rspice-python`'s accessor and
 // `rspice-wasm`'s handle.
-const MAX_PUBLIC_ITEMS: usize = 5003;
+// 2026-09-06, +2 deliberate (5,003 -> 5,005): what unit a column carries, and
+// how that unit is spelled. `rspice run --format hdf5` now states
+// `signal_NNNN_unit` on every column, which the GUI's HDF5 reader reads back,
+// and answering that needed both halves in one place.
+//
+// - 1 in `execution/schema.rs`: `SignalUnit::symbol`. Not a new table —
+//   `rspice-engine-adapter`'s `result_artifact.rs` held exactly this match as
+//   a `pub(crate) fn unit_symbol`, and that function and its property test
+//   moved here. The CLI does not depend on the engine adapter, so a copy
+//   there would have been a second answer to one question (is a volt written
+//   `V` or `volt`) published into files a third surface reads.
+// - 1 in `execution/projection.rs`: `signal_unit`, lifted out of
+//   `signal_descriptor`, which now calls it. It sits beside the already
+//   public `raw_variable_type(kind)` and states the same fact in the other
+//   vocabulary. The CLI's export rows keep a `SignalKind`, not the whole
+//   descriptor, so without this the rawfile header and the HDF5 unit
+//   attribute of one run would be derived from two separate rules.
+const MAX_PUBLIC_ITEMS: usize = 5005;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

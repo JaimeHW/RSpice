@@ -72,22 +72,30 @@ pub type Result<T> = std::result::Result<T, Hdf5Error>;
 pub struct Hdf5Signal {
     pub name: String,
     pub var_type: String,
+    /// Unit symbol, or `None` when nothing stated one.
+    ///
+    /// `None` is not dimensionless: the layout writes `signal_NNNN_unit` only
+    /// for a signal whose producer named a quantity, so a reader can tell a
+    /// pure ratio from a column nobody declared a unit for.
+    pub unit: Option<String>,
     pub values: Vec<f64>,
 }
 
 impl Hdf5Signal {
     pub fn new(name: impl Into<String>, values: Vec<f64>) -> Self {
-        Self::new_typed(name, "value", values)
+        Self::new_typed(name, "value", None, values)
     }
 
     pub fn new_typed(
         name: impl Into<String>,
         var_type: impl Into<String>,
+        unit: Option<String>,
         values: Vec<f64>,
     ) -> Self {
         Self {
             name: name.into(),
             var_type: var_type.into(),
+            unit,
             values,
         }
     }
@@ -117,10 +125,11 @@ impl Hdf5WaveformSection {
         &mut self,
         name: impl Into<String>,
         var_type: impl Into<String>,
+        unit: Option<String>,
         values: Vec<f64>,
     ) {
         self.signals
-            .push(Hdf5Signal::new_typed(name, var_type, values));
+            .push(Hdf5Signal::new_typed(name, var_type, unit, values));
     }
 
     fn validate(&self, section_name: &str) -> Result<()> {
@@ -141,14 +150,22 @@ impl Hdf5WaveformSection {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Hdf5ComplexSignal {
     pub name: String,
+    /// Unit symbol, or `None` when nothing stated one. See [`Hdf5Signal::unit`].
+    pub unit: Option<String>,
     pub real: Vec<f64>,
     pub imag: Vec<f64>,
 }
 
 impl Hdf5ComplexSignal {
-    pub fn new(name: impl Into<String>, real: Vec<f64>, imag: Vec<f64>) -> Self {
+    pub fn new(
+        name: impl Into<String>,
+        unit: Option<String>,
+        real: Vec<f64>,
+        imag: Vec<f64>,
+    ) -> Self {
         Self {
             name: name.into(),
+            unit,
             real,
             imag,
         }
@@ -169,8 +186,15 @@ impl Hdf5AcSection {
         }
     }
 
-    pub fn add_signal(&mut self, name: impl Into<String>, real: Vec<f64>, imag: Vec<f64>) {
-        self.signals.push(Hdf5ComplexSignal::new(name, real, imag));
+    pub fn add_signal(
+        &mut self,
+        name: impl Into<String>,
+        unit: Option<String>,
+        real: Vec<f64>,
+        imag: Vec<f64>,
+    ) {
+        self.signals
+            .push(Hdf5ComplexSignal::new(name, unit, real, imag));
     }
 
     fn validate(&self) -> Result<()> {
@@ -1182,10 +1206,7 @@ fn add_waveform_section(
             .map(|signal| Hdf5Column::Real {
                 name: signal.name.clone(),
                 quantity: signal.var_type.clone(),
-                // A CLI run states a quantity, never a unit: the `.raw` and
-                // `.csv` paths it shares its vectors with do not carry one
-                // either, so claiming one here would invent it.
-                unit: None,
+                unit: signal.unit.clone(),
                 values: signal.values.clone(),
             })
             .collect(),
@@ -1207,8 +1228,14 @@ fn read_waveform_section(file: &Hdf5File, group_name: &str) -> Result<Hdf5Wavefo
         let signal_name = read_required_string_attr(&attrs, &format!("{dataset_name}_name"))?;
         let signal_type = read_string_attr(&attrs, &format!("{dataset_name}_type"))?
             .unwrap_or_else(|| "value".to_string());
+        let unit = stated_unit(&attrs, &dataset_name)?;
         let values = group.dataset(&dataset_name)?.read_f64()?;
-        signals.push(Hdf5Signal::new_typed(signal_name, signal_type, values));
+        signals.push(Hdf5Signal::new_typed(
+            signal_name,
+            signal_type,
+            unit,
+            values,
+        ));
     }
 
     let section = Hdf5WaveformSection {
@@ -1230,7 +1257,7 @@ fn add_ac_section(document: &mut Hdf5Document, name: &str, section: &Hdf5AcSecti
             .iter()
             .map(|signal| Hdf5Column::Complex {
                 name: signal.name.clone(),
-                unit: None,
+                unit: signal.unit.clone(),
                 real: signal.real.clone(),
                 imag: signal.imag.clone(),
             })
@@ -1249,9 +1276,10 @@ fn read_ac_section(file: &Hdf5File, group_name: &str) -> Result<Hdf5AcSection> {
     for index in 0..signal_count {
         let prefix = format!("signal_{index:04}");
         let name = read_required_string_attr(&attrs, &format!("{prefix}_name"))?;
+        let unit = stated_unit(&attrs, &prefix)?;
         let real = group.dataset(&format!("{prefix}_real"))?.read_f64()?;
         let imag = group.dataset(&format!("{prefix}_imag"))?.read_f64()?;
-        signals.push(Hdf5ComplexSignal::new(name, real, imag));
+        signals.push(Hdf5ComplexSignal::new(name, unit, real, imag));
     }
 
     let section = Hdf5AcSection { frequency, signals };
@@ -1890,6 +1918,17 @@ fn read_string_attr(attrs: &HashMap<String, AttrValue>, name: &str) -> Result<Op
     }
 }
 
+/// The unit one signal column states, if it states one.
+///
+/// An absent or empty `signal_NNNN_unit` both mean *unstated*, and neither is
+/// a schema error: the layout writes the attribute only for a producer that
+/// named a quantity, and a file written before this build states none at all.
+/// Reading an empty string back as `Some("")` would turn "nobody said" into a
+/// unit whose symbol is nothing.
+fn stated_unit(attrs: &HashMap<String, AttrValue>, prefix: &str) -> Result<Option<String>> {
+    Ok(read_string_attr(attrs, &format!("{prefix}_unit"))?.filter(|unit| !unit.is_empty()))
+}
+
 fn read_required_string_attr(attrs: &HashMap<String, AttrValue>, name: &str) -> Result<String> {
     read_string_attr(attrs, name)?.ok_or_else(|| {
         Hdf5Error::InvalidSchema(format!("missing required string attribute '{name}'"))
@@ -2043,20 +2082,36 @@ mod tests {
     /// The byte-identity oracle for the waveform and AC layout after it moved
     /// to `rspice_core::io::hdf5`.
     ///
-    /// This spells the `FileBuilder` calls this module used to make, in the
-    /// order it made them, and requires the same file back. A layout change
-    /// that a reader would notice fails here first, before any round trip can
-    /// hide it by agreeing with itself.
+    /// This spells the `FileBuilder` calls the layout makes, in the order it
+    /// makes them, and requires the same file back. A layout change that a
+    /// reader would notice fails here first, before any round trip can hide it
+    /// by agreeing with itself.
+    ///
+    /// Re-blessed once, deliberately, when the CLI started stating units: a
+    /// column whose producer named a quantity now writes `signal_NNNN_unit`
+    /// after `signal_NNNN_type`, and `I(R1)` — added through the untyped
+    /// `add_signal`, which names no quantity — still writes none, so the
+    /// difference between *stated* and *unstated* is in these bytes too.
     #[test]
     fn the_moved_layout_writes_the_bytes_this_module_used_to_write() {
         let mut data = Hdf5SimulationData::new();
         data.title = "byte identity".to_string();
         let mut transient = Hdf5WaveformSection::new("time", vec![0.0, 1.0, 2.0]);
-        transient.add_typed_signal("V(out)", "voltage", vec![0.0, 2.0, 4.0]);
+        transient.add_typed_signal(
+            "V(out)",
+            "voltage",
+            Some("V".to_string()),
+            vec![0.0, 2.0, 4.0],
+        );
         transient.add_signal("I(R1)", vec![1.0, 2.0, 3.0]);
         data.transient = Some(transient);
         let mut ac = Hdf5AcSection::new(vec![1.0, 10.0]);
-        ac.add_signal("V(out)", vec![1.0, 0.5], vec![0.0, -0.5]);
+        ac.add_signal(
+            "V(out)",
+            Some("V".to_string()),
+            vec![1.0, 0.5],
+            vec![0.0, -0.5],
+        );
         data.ac = Some(ac);
         data.measurements = vec![Hdf5Measurement::new("rise", 1.5e-9)];
 
@@ -2077,6 +2132,7 @@ mod tests {
             .with_f64_data(&[0.0, 1.0, 2.0]);
         group.set_attr("signal_0000_name", AttrValue::String("V(out)".to_string()));
         group.set_attr("signal_0000_type", AttrValue::String("voltage".to_string()));
+        group.set_attr("signal_0000_unit", AttrValue::String("V".to_string()));
         group
             .create_dataset("signal_0000")
             .with_f64_data(&[0.0, 2.0, 4.0]);
@@ -2094,6 +2150,7 @@ mod tests {
             .create_dataset("frequency")
             .with_f64_data(&[1.0, 10.0]);
         group.set_attr("signal_0000_name", AttrValue::String("V(out)".to_string()));
+        group.set_attr("signal_0000_unit", AttrValue::String("V".to_string()));
         group
             .create_dataset("signal_0000_real")
             .with_f64_data(&[1.0, 0.5]);
@@ -2257,6 +2314,49 @@ mod tests {
             data
         );
         assert_only_destination_remains(&directory.0, &destination, true);
+    }
+
+    /// A stated unit survives the round trip and an unstated one stays
+    /// unstated.
+    ///
+    /// The second half is the part worth a test: `Some("")` would say the
+    /// quantity's symbol is the empty string, which is a claim, while `None`
+    /// says nobody made one. Files written before the CLI stated units read
+    /// back through this same branch.
+    #[test]
+    fn a_stated_unit_round_trips_and_an_unstated_one_stays_unstated() {
+        let directory = TestDirectory::new("unit-round-trip");
+        let destination = directory.0.join("units.h5");
+        let mut data = Hdf5SimulationData::new();
+        data.title = "units".to_string();
+
+        let mut transient = Hdf5WaveformSection::new("time", vec![0.0, 1.0]);
+        transient.add_typed_signal("V(out)", "voltage", Some("V".to_string()), vec![0.0, 2.0]);
+        transient.add_typed_signal("I(R1)", "current", Some("A".to_string()), vec![1.0, 2.0]);
+        transient.add_typed_signal("ratio", "parameter", None, vec![0.5, 0.5]);
+        data.transient = Some(transient);
+
+        let mut ac = Hdf5AcSection::new(vec![1.0, 10.0]);
+        ac.add_signal(
+            "V(out)",
+            Some("V".to_string()),
+            vec![1.0, 0.5],
+            vec![0.0, -0.5],
+        );
+        ac.add_signal("loopgain", None, vec![2.0, 1.0], vec![0.0, 0.0]);
+        data.ac = Some(ac);
+
+        write_hdf5(&destination, &data).expect("write the unit artifact");
+        let read_back = read_hdf5(&destination).expect("read the unit artifact");
+        assert_eq!(read_back, data);
+
+        let transient = read_back.transient.expect("a transient section");
+        assert_eq!(transient.signals[0].unit.as_deref(), Some("V"));
+        assert_eq!(transient.signals[1].unit.as_deref(), Some("A"));
+        assert_eq!(transient.signals[2].unit, None);
+        let ac = read_back.ac.expect("an AC section");
+        assert_eq!(ac.signals[0].unit.as_deref(), Some("V"));
+        assert_eq!(ac.signals[1].unit, None);
     }
 
     #[test]

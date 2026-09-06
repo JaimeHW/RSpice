@@ -122,6 +122,7 @@ pub(super) fn export_step_sweep(
                 sweep.add_typed_signal(
                     signal.display_name.clone(),
                     signal.raw_variable_type(),
+                    signal.unit_symbol(),
                     signal.values.clone(),
                 );
             }
@@ -320,6 +321,7 @@ fn export_monte_carlo(
                     sweep.add_typed_signal(
                         signal.display_name.clone(),
                         signal.raw_variable_type(),
+                        signal.unit_symbol(),
                         signal.values.clone(),
                     );
                 }
@@ -530,6 +532,7 @@ pub(super) fn export_pss(
                         section.add_typed_signal(
                             signal.display_name.clone(),
                             signal.raw_variable_type(),
+                            signal.unit_symbol(),
                             signal.values.clone(),
                         );
                     }
@@ -749,6 +752,7 @@ fn export_hb(
                 for signal in &signals {
                     section.add_signal(
                         signal.display_name.clone(),
+                        signal.unit_symbol(),
                         signal.real.clone(),
                         signal.imag.clone(),
                     );
@@ -1452,6 +1456,7 @@ pub(super) fn run_sparam_from_command(
                     for signal in &signals {
                         section.add_signal(
                             signal.display_name.clone(),
+                            signal.unit_symbol(),
                             signal.real.clone(),
                             signal.imag.clone(),
                         );
@@ -1882,6 +1887,7 @@ pub(super) fn run_sparam(ctx: &RunContext<'_>, ports_spec: &str, z0: f64) -> Res
                         for s in &signals {
                             section.add_signal(
                                 s.display_name.clone(),
+                                s.unit_symbol(),
                                 s.real.clone(),
                                 s.imag.clone(),
                             );

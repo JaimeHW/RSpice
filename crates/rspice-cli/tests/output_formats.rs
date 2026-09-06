@@ -885,6 +885,68 @@ fn transient_voltage_save_does_not_select_xspice_digital_trace() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Every column a run publishes as HDF5 states the unit of its quantity.
+///
+/// The layout writes `signal_NNNN_unit` only for a column whose producer
+/// named a quantity, and this is the assertion that the CLI is such a
+/// producer: without it the attribute is simply absent and nothing fails,
+/// which is exactly how the CLI shipped a unit-less file while the GUI's
+/// writer published one and its reader read it.
+///
+/// The listing this walks is the file's own: group attributes read back
+/// through the same `rustyhdf5` reader `rspice convert --from hdf5` uses.
+#[test]
+fn every_signal_a_run_publishes_as_hdf5_states_its_unit() {
+    let dir = test_dir("hdf5_units");
+    let mut checked = 0_usize;
+    // Node voltages and branch currents are the only quantities these four
+    // decks project, so the whole vocabulary a correct file may use is two
+    // symbols; a third would mean a column was given someone else's unit.
+    let expected = ["V", "A"];
+    for (tag, deck) in [
+        ("op", OP_DECK),
+        ("dc", DC_DECK),
+        ("tran", TRAN_DECK),
+        ("ac", AC_DECK),
+    ] {
+        let path = run_export(&dir, &format!("hdf5_units_{tag}"), deck, "hdf5");
+        let file = rustyhdf5::File::open(&path).expect("open the published HDF5 file");
+        let root = file.root();
+        for group_name in root.groups().expect("list groups") {
+            let group = file.group(&group_name).expect("open group");
+            let attrs = group.attrs().expect("read group attributes");
+            let Some(rustyhdf5::AttrValue::I64(count)) = attrs.get("signal_count") else {
+                // `measurements` is the one group with no columns on it.
+                continue;
+            };
+            for index in 0..usize::try_from(*count).expect("a non-negative signal count") {
+                let prefix = format!("signal_{index:04}");
+                let name = attrs.get(&format!("{prefix}_name"));
+                let unit = attrs.get(&format!("{prefix}_unit"));
+                let Some(rustyhdf5::AttrValue::String(unit)) = unit else {
+                    panic!(
+                        "{tag}: group '{group_name}' column {name:?} states no {prefix}_unit; \
+                         attributes are {:?}",
+                        attrs.keys().collect::<Vec<_>>()
+                    );
+                };
+                assert!(
+                    expected.contains(&unit.as_str()),
+                    "{tag}: group '{group_name}' column {name:?} states unit {unit:?}, \
+                     expected one of {expected:?}"
+                );
+                checked += 1;
+            }
+        }
+    }
+    assert!(
+        checked >= 4,
+        "expected the four analyses to publish columns, checked {checked}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn transient_hdf5_preserves_xspice_digital_type_when_converted() {
     let dir = test_dir("tran_xspice_digital_hdf5_type");

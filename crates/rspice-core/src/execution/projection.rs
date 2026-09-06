@@ -194,29 +194,17 @@ pub fn signal_descriptor(
     kind: SignalKind,
     value_type: SignalValueType,
 ) -> Result<SignalDescriptor, SignalSchemaError> {
-    let (unit, owner) = match kind {
-        SignalKind::Voltage => (
-            SignalUnit::Volt,
-            SignalOwner::Node(registry_name.to_string()),
+    let owner = match kind {
+        SignalKind::Voltage | SignalKind::Digital => SignalOwner::Node(registry_name.to_string()),
+        SignalKind::Current => SignalOwner::Branch(registry_name.to_string()),
+        SignalKind::DeviceObservable => SignalOwner::Device(
+            device_of_parameter_probe(registry_name)
+                .unwrap_or(registry_name)
+                .to_string(),
         ),
-        SignalKind::Current => (
-            SignalUnit::Ampere,
-            SignalOwner::Branch(registry_name.to_string()),
-        ),
-        SignalKind::Digital => (
-            SignalUnit::Logic,
-            SignalOwner::Node(registry_name.to_string()),
-        ),
-        SignalKind::DeviceObservable => (
-            SignalUnit::Dimensionless,
-            SignalOwner::Device(
-                device_of_parameter_probe(registry_name)
-                    .unwrap_or(registry_name)
-                    .to_string(),
-            ),
-        ),
-        SignalKind::Scalar => (SignalUnit::Dimensionless, SignalOwner::Analysis),
+        SignalKind::Scalar => SignalOwner::Analysis,
     };
+    let unit = signal_unit(kind);
     // A digital trace is carried as numeric samples so it can share one table
     // with analog columns, but its declared value type stays logic: the
     // samples are states, not volts.
@@ -821,6 +809,26 @@ pub const fn raw_variable_type(kind: SignalKind) -> &'static str {
         SignalKind::Current => "current",
         SignalKind::Digital => "digital",
         SignalKind::DeviceObservable | SignalKind::Scalar => "parameter",
+    }
+}
+
+/// The physical unit one signal kind's column carries.
+///
+/// The same fact [`raw_variable_type`] states as a rawfile type name, in the
+/// vocabulary a descriptor and a published artifact use. It is one function
+/// because [`signal_descriptor`] stamps every descriptor with it and a
+/// frontend that has only the kind — the CLI's export rows keep the kind, not
+/// the whole descriptor — must reach the same answer, or one run's `.raw`
+/// header and its `.h5` unit attribute would describe different quantities.
+///
+/// [`SignalUnit::symbol`] turns the result into the string an artifact writes.
+#[must_use]
+pub fn signal_unit(kind: SignalKind) -> SignalUnit {
+    match kind {
+        SignalKind::Voltage => SignalUnit::Volt,
+        SignalKind::Current => SignalUnit::Ampere,
+        SignalKind::Digital => SignalUnit::Logic,
+        SignalKind::DeviceObservable | SignalKind::Scalar => SignalUnit::Dimensionless,
     }
 }
 

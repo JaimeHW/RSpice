@@ -243,7 +243,9 @@ fn export_pac(
                             message: "a PAC sideband published a real response column".to_string(),
                         });
                     };
-                    section.add_signal(column.name.clone(), real.clone(), imag.clone());
+                    // A sideband response is assembled as a table column, so
+                    // no descriptor unit reaches here to state.
+                    section.add_signal(column.name.clone(), None, real.clone(), imag.clone());
                 }
                 data.ac = Some(section);
                 crate::hdf5::write_hdf5(path, &data)
@@ -549,6 +551,7 @@ fn export_envelope(
                     section.add_typed_signal(
                         signal.display_name.clone(),
                         signal.raw_variable_type(),
+                        signal.unit_symbol(),
                         signal.values.clone(),
                     );
                 }

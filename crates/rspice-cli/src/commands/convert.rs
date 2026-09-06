@@ -93,16 +93,21 @@ fn write_hdf5_output(path: &std::path::Path, table: &ExportTable) -> Result<(), 
     let mut data = Hdf5SimulationData::new();
     data.title = table.plot_name.clone();
 
+    // No unit anywhere below: a converted file states what the source stated,
+    // and the tabular model every carrier reads back into keeps the rawfile
+    // variable type and nothing else. Only a run knows a column's quantity,
+    // and only its own writers publish one.
     if table.is_complex() {
         let mut section = Hdf5AcSection::new(table.scale.clone());
         for column in &table.columns {
             match &column.data {
                 ColumnData::Complex { real, imag } => {
-                    section.add_signal(column.name.clone(), real.clone(), imag.clone());
+                    section.add_signal(column.name.clone(), None, real.clone(), imag.clone());
                 }
                 ColumnData::Real(values) => {
                     section.add_signal(
                         column.name.clone(),
+                        None,
                         values.clone(),
                         vec![0.0; values.len()],
                     );
@@ -117,6 +122,7 @@ fn write_hdf5_output(path: &std::path::Path, table: &ExportTable) -> Result<(), 
                 section.add_typed_signal(
                     column.name.clone(),
                     column.var_type.clone(),
+                    None,
                     values.clone(),
                 );
             }
