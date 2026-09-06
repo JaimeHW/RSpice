@@ -5310,6 +5310,24 @@ impl Engine {
                         .min(span_ceiling.unwrap_or(Value::INFINITY)),
                 );
             }
+            // A locked grid is often built from another tool's printed table,
+            // and rounded timestamps can put a target within the solver's own
+            // clock resolution of the accepted time. Advancing to it would
+            // request a step the controller refuses everywhere else it looks
+            // (`hard_min_dt` already governs device events and every LTE
+            // clamp): the interval is not representable as a difference of
+            // times at this magnitude, and every companion conductance built
+            // from `1/dt` is noise. The target names the point already
+            // accepted, so consume it here rather than solving for it.
+            if let Some(grid) = locked_grid.as_ref() {
+                let hard_min_dt = timestep.hard_min_dt();
+                while grid
+                    .get(locked_cursor)
+                    .is_some_and(|&target| target - t < hard_min_dt)
+                {
+                    locked_cursor += 1;
+                }
+            }
             let mut locked_step_lands_on_grid = locked_grid.is_some();
             let locked_schedule_aligned = locked_grid
                 .as_ref()

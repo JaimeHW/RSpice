@@ -1782,3 +1782,41 @@ endmodule
 
     let _ = std::fs::remove_file(&model);
 }
+
+#[test]
+fn a_locked_target_inside_the_hard_minimum_folds_into_the_accepted_point() {
+    // A microsecond ceiling puts the solver hard minimum at 1e-17 s. The
+    // crowded point below sits above the normalizer's duplicate margin (64
+    // ulps of 1 us, about 1.4e-20) and below that minimum, so only a floor on
+    // the locked step itself can reject it.
+    const MAX_STEP: f64 = 1.0e-6;
+    const STOP: f64 = 2.0e-6;
+    const HARD_MIN_DT: f64 = MAX_STEP * 1.0e-11;
+
+    let mut grid: Vec<f64> = (0..=20).map(|index| index as f64 * 1.0e-7).collect();
+    let crowded = grid[10] + 1.0e-18;
+    assert!(crowded > grid[10] && crowded - grid[10] < HARD_MIN_DT);
+    grid.insert(11, crowded);
+
+    let netlist = Netlist::parse(DECK).expect("checkpoint bench parses");
+    let result = Engine::new(SimulationConfig {
+        locked_time_grid: Some(Arc::new(grid.clone())),
+        ..Default::default()
+    })
+    .run_tran(&netlist, STOP, MAX_STEP)
+    .expect("locked run over a crowded grid completes");
+
+    assert!(
+        result
+            .time
+            .iter()
+            .all(|time| time.to_bits() != crowded.to_bits()),
+        "a target the clock cannot separate from the accepted point is not a step of its own"
+    );
+    for (index, &step) in result.step_sizes.iter().enumerate().skip(1) {
+        assert!(
+            step >= HARD_MIN_DT,
+            "accepted step {index} of {step} is below the solver hard minimum {HARD_MIN_DT}"
+        );
+    }
+}
