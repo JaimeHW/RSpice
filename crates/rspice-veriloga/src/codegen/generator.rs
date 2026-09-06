@@ -371,6 +371,7 @@ impl CodeGenerator {
     fn generate_from_ir(&self, ir: &mut DeviceIR) -> CompileResult<CompiledModel> {
         let timings = compile_timings_enabled();
         let emit_ctx = EmitContext::from_ir(ir);
+        let num_terminals = ir.terminals.len();
         self.lookup_tables.borrow_mut().clear();
         self.laplace_filters.borrow_mut().clear();
         self.laplace_sites.borrow_mut().clear();
@@ -476,8 +477,8 @@ impl CodeGenerator {
                 .branch_unknowns
                 .iter()
                 .map(|b| CompiledBranchSource {
-                    pos: Self::node_stamp_index(ir, b.pos),
-                    neg: Self::node_stamp_index(ir, b.neg),
+                    pos: Self::node_stamp_index(num_terminals, b.pos),
+                    neg: Self::node_stamp_index(num_terminals, b.neg),
                     indirect: b.indirect,
                 })
                 .collect(),
@@ -531,7 +532,7 @@ impl CodeGenerator {
         // Generate stamp programs for each equation
         let phase_start = web_time::Instant::now();
         for eq in &ir.equations {
-            let program = self.compile_equation(eq, ir, &emit_ctx)?;
+            let program = self.compile_equation(eq, num_terminals, &emit_ctx)?;
             model.stamp_programs.push(program);
         }
         if timings {
@@ -565,8 +566,8 @@ impl CodeGenerator {
                         1.0
                     };
                     Ok(crate::codegen::CompiledNoiseInjection {
-                        pos: Self::node_stamp_index(ir, injection.branch.pos_terminal),
-                        neg: Self::node_stamp_index(ir, injection.branch.neg_terminal),
+                        pos: Self::node_stamp_index(num_terminals, injection.branch.pos_terminal),
+                        neg: Self::node_stamp_index(num_terminals, injection.branch.neg_terminal),
                         is_current: injection.is_current,
                         branch_ordinal: injection.branch_ordinal,
                         program_idx: injection.equation_index,
@@ -577,8 +578,8 @@ impl CodeGenerator {
                 .collect::<CompileResult<Vec<_>>>()?;
             model.noise_sources.push(CompiledNoiseSource {
                 process_id: source.process_id,
-                pos: Self::node_stamp_index(ir, source.branch.pos_terminal),
-                neg: Self::node_stamp_index(ir, source.branch.neg_terminal),
+                pos: Self::node_stamp_index(num_terminals, source.branch.pos_terminal),
+                neg: Self::node_stamp_index(num_terminals, source.branch.neg_terminal),
                 is_current: source.is_current,
                 branch_ordinal: source.branch_ordinal,
                 program_idx: source.equation_index,
@@ -645,22 +646,27 @@ impl CodeGenerator {
 
     /// Map a unified node index (terminals, then internal nodes, ground
     /// sentinel) to a stamp index
-    fn node_stamp_index(ir: &DeviceIR, node: usize) -> StampIndex {
+    ///
+    /// The terminal count is the whole of the IR this needs, and passing it
+    /// alone is what lets an equation's trees be moved out of the IR while
+    /// its stamps are laid out.
+    fn node_stamp_index(num_terminals: usize, node: usize) -> StampIndex {
         if node == crate::expr_converter::GROUND_NODE {
             StampIndex::Ground
-        } else if node < ir.terminals.len() {
+        } else if node < num_terminals {
             StampIndex::Terminal(node)
         } else {
-            StampIndex::Internal(node - ir.terminals.len())
+            StampIndex::Internal(node - num_terminals)
         }
     }
 
     /// Map a derivative axis to its stamp column and column-axis record
-    fn axis_stamp_column(ir: &DeviceIR, wrt: &DerivativeWrt) -> (StampIndex, ColumnAxis) {
+    fn axis_stamp_column(num_terminals: usize, wrt: &DerivativeWrt) -> (StampIndex, ColumnAxis) {
         match wrt {
-            DerivativeWrt::Voltage(node) => {
-                (Self::node_stamp_index(ir, *node), ColumnAxis::Node(*node))
-            }
+            DerivativeWrt::Voltage(node) => (
+                Self::node_stamp_index(num_terminals, *node),
+                ColumnAxis::Node(*node),
+            ),
             DerivativeWrt::BranchCurrent(k) => (StampIndex::Branch(*k), ColumnAxis::Branch(*k)),
             DerivativeWrt::Noise(_) => {
                 unreachable!("noise-process derivatives are not matrix Jacobian columns")
@@ -683,7 +689,7 @@ impl CodeGenerator {
     fn compile_equation(
         &self,
         eq: &BranchEquation,
-        ir: &DeviceIR,
+        num_terminals: usize,
         emit_ctx: &EmitContext,
     ) -> CompileResult<StampProgram> {
         let value_program = self.compile_expr(&eq.expr, emit_ctx)?;
@@ -693,8 +699,8 @@ impl CodeGenerator {
             .map(|cond| self.compile_expr(cond, emit_ctx))
             .transpose()?;
 
-        let pos = Self::node_stamp_index(ir, eq.branch.pos_terminal);
-        let neg = Self::node_stamp_index(ir, eq.branch.neg_terminal);
+        let pos = Self::node_stamp_index(num_terminals, eq.branch.pos_terminal);
+        let neg = Self::node_stamp_index(num_terminals, eq.branch.neg_terminal);
 
         let mut jacobian_programs = Vec::new();
 
@@ -710,7 +716,7 @@ impl CodeGenerator {
             })?;
             let branch_row = StampIndex::Branch(ordinal);
             for deriv in &eq.derivatives {
-                let (col, col_axis) = Self::axis_stamp_column(ir, &deriv.wrt);
+                let (col, col_axis) = Self::axis_stamp_column(num_terminals, &deriv.wrt);
                 let program = self.compile_expr(&deriv.expr, emit_ctx)?;
                 jacobian_programs.push(JacobianEntry {
                     row: branch_row.clone(),
@@ -723,7 +729,7 @@ impl CodeGenerator {
 
             let mut reactive_jacobians = Vec::new();
             for deriv in &eq.reactive_derivatives {
-                let (col, col_axis) = Self::axis_stamp_column(ir, &deriv.wrt);
+                let (col, col_axis) = Self::axis_stamp_column(num_terminals, &deriv.wrt);
                 let program = self.compile_expr(&deriv.expr, emit_ctx)?;
                 reactive_jacobians.push(JacobianEntry {
                     row: branch_row.clone(),
@@ -756,7 +762,7 @@ impl CodeGenerator {
             // unknown receives -dE/dx for every axis
             let branch_row = StampIndex::Branch(ordinal);
             for deriv in &eq.derivatives {
-                let (col, col_axis) = Self::axis_stamp_column(ir, &deriv.wrt);
+                let (col, col_axis) = Self::axis_stamp_column(num_terminals, &deriv.wrt);
                 let program = self.compile_expr(&deriv.expr, emit_ctx)?;
                 jacobian_programs.push(JacobianEntry {
                     row: branch_row.clone(),
@@ -771,7 +777,7 @@ impl CodeGenerator {
             // -jw * dQ/dx into the branch row in AC
             let mut reactive_jacobians = Vec::new();
             for deriv in &eq.reactive_derivatives {
-                let (col, col_axis) = Self::axis_stamp_column(ir, &deriv.wrt);
+                let (col, col_axis) = Self::axis_stamp_column(num_terminals, &deriv.wrt);
                 let program = self.compile_expr(&deriv.expr, emit_ctx)?;
                 reactive_jacobians.push(JacobianEntry {
                     row: branch_row.clone(),
@@ -802,7 +808,7 @@ impl CodeGenerator {
 
         // Current contribution
         for deriv in &eq.derivatives {
-            let (col, col_axis) = Self::axis_stamp_column(ir, &deriv.wrt);
+            let (col, col_axis) = Self::axis_stamp_column(num_terminals, &deriv.wrt);
             let program = self.compile_expr(&deriv.expr, emit_ctx)?;
 
             // KCL row of the positive node gains +dI/dx, the negative node
@@ -827,7 +833,7 @@ impl CodeGenerator {
         // same KCL row pairing
         let mut reactive_jacobians = Vec::new();
         for deriv in &eq.reactive_derivatives {
-            let (col, col_axis) = Self::axis_stamp_column(ir, &deriv.wrt);
+            let (col, col_axis) = Self::axis_stamp_column(num_terminals, &deriv.wrt);
             let program = self.compile_expr(&deriv.expr, emit_ctx)?;
             reactive_jacobians.push(JacobianEntry {
                 row: pos.clone(),
