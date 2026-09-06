@@ -7,6 +7,7 @@
 //! differentiates — it schedules and serializes what exists.
 
 use super::*;
+use crate::ir::arena::{ExprArena, Heavy, Node, NodeId, ZiPolynomial, unpack_index};
 use std::collections::HashMap;
 
 struct EmitContext {
@@ -38,11 +39,9 @@ mod absdelay_derivative_tests {
         let site = AbsDelaySiteId::from_span(crate::source::Span::dummy());
         let primal = primal(site, true);
         let derivative = autodiff::differentiate(&primal, &DerivativeWrt::Voltage(0));
-        let derivative_program = generator
-            .compile_expr(&derivative, &emit_context)
+        let derivative_program = compile_fixture(&generator, &derivative, &emit_context)
             .expect("compile absdelay derivative first");
-        let primal_program = generator
-            .compile_expr(&primal, &emit_context)
+        let primal_program = compile_fixture(&generator, &primal, &emit_context)
             .expect("compile absdelay primal second");
 
         assert!(matches!(
@@ -61,15 +60,15 @@ mod absdelay_derivative_tests {
         let site = AbsDelaySiteId::from_span(crate::source::Span::dummy());
         let first = autodiff::differentiate(&primal(site, false), &DerivativeWrt::Voltage(0));
         let second = autodiff::differentiate(&first, &DerivativeWrt::Voltage(0));
-        let error = CodeGenerator::new()
-            .compile_expr(
-                &second,
-                &EmitContext {
-                    parameter_indices: HashMap::new(),
-                    variable_indices: HashMap::new(),
-                },
-            )
-            .expect_err("unsupported absdelay Hessian must fail compilation");
+        let error = compile_fixture(
+            &CodeGenerator::new(),
+            &second,
+            &EmitContext {
+                parameter_indices: HashMap::new(),
+                variable_indices: HashMap::new(),
+            },
+        )
+        .expect_err("unsupported absdelay Hessian must fail compilation");
         assert!(error.to_string().contains("higher-order derivatives"));
     }
 
@@ -355,19 +354,32 @@ impl CodeGenerator {
         }
     }
 
-    /// Generate from IR
+    /// Generate compiled model from IR
+    ///
+    /// # The arena is the emitter's input
+    ///
+    /// From here on the emitter reads an [`ExprArena`], not `IrExpr`. Every
+    /// family of trees this function compiles — the parameter default and
+    /// range programs, the assignment items, the branch equations and the
+    /// noise PSD, exponent and gain programs — is imported into one arena at
+    /// the point it is compiled, and the import is **one way by design**: the
+    /// tree is moved out of the IR, its 16-byte nodes are appended to the
+    /// arena, and the `Box` tree is dropped there and then. Nothing on this
+    /// path calls [`ExprArena::export`]; a step that finds itself exporting a
+    /// forest has been split in the place the design says never to split it.
     ///
     /// # Why the IR is taken by `&mut`
     ///
     /// The shadow-expanded assignment forest is the largest allocation of the
     /// whole compile — 122 bytes per node, eighteen million nodes on
-    /// `bsimcmg` — and nothing after the assignment pass reads it. Emitting
-    /// that pass and then *dropping the forest before* the noise pass takes
-    /// the peak from "forest plus two bytecode passes" to "forest plus one",
-    /// which is what lets the largest shipped models compile inside a 32 GB
-    /// box. The generator's emission state ([`EmitContext`], the site maps,
-    /// the per-emission counters) is owned by `self` and by a context built
-    /// before the take, so nothing borrows the forest across the drop.
+    /// `bsimcmg` — and nothing after the assignment pass reads it. Handing it
+    /// over item by item, rather than borrowing it and dropping it whole at
+    /// the end, takes the peak from "forest plus two bytecode passes" to a
+    /// forest that is already shrinking while the first pass is written, which
+    /// is what lets the largest shipped models compile inside a 32 GB box.
+    /// The generator's emission state ([`EmitContext`], the site maps, the
+    /// per-emission counters) is owned by `self` and by a context built before
+    /// the first take, so nothing borrows the IR across a drop.
     fn generate_from_ir(&self, ir: &mut DeviceIR) -> CompileResult<CompiledModel> {
         let timings = compile_timings_enabled();
         let emit_ctx = EmitContext::from_ir(ir);
@@ -388,11 +400,15 @@ impl CodeGenerator {
         self.cross_detector_count.set(0);
         self.timer_state_count.set(0);
 
+        // Every tree this module emits is imported into this one arena, at the
+        // point it is compiled, and the arena dies with the call.
+        let mut arena = ExprArena::new();
+
         let phase_start = web_time::Instant::now();
-        let parameters = ir
-            .parameters
-            .iter()
+        let parameters = std::mem::take(&mut ir.parameters)
+            .into_iter()
             .map(|p| {
+                let param_name = p.name.clone();
                 let resolve_bound = |name: &SmolStr| {
                     emit_ctx
                         .parameter_indices
@@ -401,8 +417,7 @@ impl CodeGenerator {
                         .ok_or_else(|| {
                             crate::error::CodeGenError::new(
                                 crate::error::CodeGenErrorKind::Internal(format!(
-                                    "parameter '{}' range references unknown parameter '{name}'",
-                                    p.name
+                                    "parameter '{param_name}' range references unknown parameter '{name}'"
                                 )),
                             )
                             .into()
@@ -410,13 +425,12 @@ impl CodeGenerator {
                 };
                 let default_program = p
                     .default_expr
-                    .as_ref()
-                    .map(|expr| self.compile_expr(expr, &emit_ctx))
+                    .map(|expr| self.compile_owned_expr(&mut arena, expr, &emit_ctx))
                     .transpose()?;
                 Ok(CompiledParameter {
-                    name: p.name.clone(),
+                    name: p.name,
                     is_public: p.is_public,
-                    aliases: p.aliases.clone(),
+                    aliases: p.aliases,
                     default: p.default,
                     default_program,
                     is_integer: p.is_integer,
@@ -426,17 +440,15 @@ impl CodeGenerator {
                     max_parameter: p.max_parameter.as_ref().map(resolve_bound).transpose()?,
                     min_program: p
                         .min_expr
-                        .as_ref()
-                        .map(|expr| self.compile_expr(expr, &emit_ctx))
+                        .map(|expr| self.compile_owned_expr(&mut arena, expr, &emit_ctx))
                         .transpose()?,
                     max_program: p
                         .max_expr
-                        .as_ref()
-                        .map(|expr| self.compile_expr(expr, &emit_ctx))
+                        .map(|expr| self.compile_owned_expr(&mut arena, expr, &emit_ctx))
                         .transpose()?,
                     min_exclusive: p.min_exclusive,
                     max_exclusive: p.max_exclusive,
-                    exclude: p.exclude.clone(),
+                    exclude: p.exclude,
                     exclude_parameters: p
                         .exclude_parameters
                         .iter()
@@ -444,8 +456,8 @@ impl CodeGenerator {
                         .collect::<CompileResult<Vec<_>>>()?,
                     exclude_programs: p
                         .exclude_exprs
-                        .iter()
-                        .map(|expr| self.compile_expr(expr, &emit_ctx))
+                        .into_iter()
+                        .map(|expr| self.compile_owned_expr(&mut arena, expr, &emit_ctx))
                         .collect::<CompileResult<Vec<_>>>()?,
                 })
             })
@@ -492,11 +504,16 @@ impl CodeGenerator {
 
         // Generate evaluation steps (executed in order before contributions)
         let phase_start = web_time::Instant::now();
-        model.assignment_steps = self.compile_assignment_items(&ir.assignments, &emit_ctx)?;
-        // Nothing after this reads the ordinary forest, and it is the compile's
-        // largest allocation: drop it here rather than at the end of the
-        // function so the noise pass never coexists with it.
-        drop(std::mem::take(&mut ir.assignments));
+        // The ordinary forest is the compile's largest allocation and nothing
+        // after this pass reads it, so it is handed over rather than borrowed:
+        // each item's boxed trees are freed the moment they are in the arena,
+        // and the list itself is gone when the call returns. That is what lets
+        // the largest shipped models compile inside a 32 GB box.
+        model.assignment_steps = self.compile_assignment_items(
+            std::mem::take(&mut ir.assignments),
+            &mut arena,
+            &emit_ctx,
+        )?;
         // A mirrored noise pass *is* the ordinary pass, so say so by leaving the
         // list empty rather than by carrying a copy of it
         // ([`CompiledModel::noise_assignment_steps`] documents the convention;
@@ -516,9 +533,11 @@ impl CodeGenerator {
         model.noise_assignment_steps = if ir.noise_assignments_mirror_ordinary {
             Vec::new()
         } else {
-            let steps = self.compile_assignment_items(&ir.noise_assignments, &emit_ctx)?;
-            drop(std::mem::take(&mut ir.noise_assignments));
-            steps
+            self.compile_assignment_items(
+                std::mem::take(&mut ir.noise_assignments),
+                &mut arena,
+                &emit_ctx,
+            )?
         };
         if timings {
             eprintln!(
@@ -531,8 +550,24 @@ impl CodeGenerator {
 
         // Generate stamp programs for each equation
         let phase_start = web_time::Instant::now();
-        for eq in &ir.equations {
-            let program = self.compile_equation(eq, num_terminals, &emit_ctx)?;
+        // The equations are consumed here, one at a time, so the one fact the
+        // noise pass still needs of them — the sign its residual stamps with —
+        // is read off first.
+        let equation_rhs_signs = ir
+            .equations
+            .iter()
+            .map(|eq| {
+                if eq.indirect || eq.is_current {
+                    -1.0
+                } else {
+                    1.0
+                }
+            })
+            .collect::<Vec<f64>>();
+        let equations = std::mem::take(&mut ir.equations);
+        let equation_count = equations.len();
+        for eq in equations {
+            let program = self.compile_equation(eq, num_terminals, &mut arena, &emit_ctx)?;
             model.stamp_programs.push(program);
         }
         if timings {
@@ -540,7 +575,7 @@ impl CodeGenerator {
                 "timing codegen.equations module={} elapsed={:.3}s equations={} programs={}",
                 ir.name,
                 phase_start.elapsed().as_secs_f64(),
-                ir.equations.len(),
+                equation_count,
                 model.stamp_programs.len()
             );
         }
@@ -548,23 +583,17 @@ impl CodeGenerator {
         // Compile noise-source PSD programs (evaluated at the operating
         // point during noise analysis)
         let phase_start = web_time::Instant::now();
-        for source in &ir.noise_sources {
-            let psd_program = self.compile_expr(&source.psd, &emit_ctx)?;
+        for source in std::mem::take(&mut ir.noise_sources) {
+            let psd_program = self.compile_owned_expr(&mut arena, source.psd, &emit_ctx)?;
             let exponent_program = source
                 .exponent
-                .as_ref()
-                .map(|e| self.compile_expr(e, &emit_ctx))
+                .map(|e| self.compile_owned_expr(&mut arena, e, &emit_ctx))
                 .transpose()?;
             let injections = source
                 .injections
-                .iter()
+                .into_iter()
                 .map(|injection| {
-                    let equation = &ir.equations[injection.equation_index];
-                    let rhs_sign = if equation.indirect || equation.is_current {
-                        -1.0
-                    } else {
-                        1.0
-                    };
+                    let rhs_sign = equation_rhs_signs[injection.equation_index];
                     Ok(crate::codegen::CompiledNoiseInjection {
                         pos: Self::node_stamp_index(num_terminals, injection.branch.pos_terminal),
                         neg: Self::node_stamp_index(num_terminals, injection.branch.neg_terminal),
@@ -572,7 +601,11 @@ impl CodeGenerator {
                         branch_ordinal: injection.branch_ordinal,
                         program_idx: injection.equation_index,
                         rhs_sign,
-                        gain_program: self.compile_expr(&injection.gain, &emit_ctx)?,
+                        gain_program: self.compile_owned_expr(
+                            &mut arena,
+                            injection.gain,
+                            &emit_ctx,
+                        )?,
                     })
                 })
                 .collect::<CompileResult<Vec<_>>>()?;
@@ -585,11 +618,8 @@ impl CodeGenerator {
                 program_idx: source.equation_index,
                 psd_program,
                 exponent_program,
-                table: source
-                    .table
-                    .as_ref()
-                    .map(|t| (t.points.clone(), t.log_interp)),
-                name: source.name.clone(),
+                table: source.table.map(|t| (t.points, t.log_interp)),
+                name: source.name,
                 injections,
             });
         }
@@ -611,37 +641,44 @@ impl CodeGenerator {
     }
 
     /// Compile assignment items (assignments and runtime loops) to steps
+    ///
+    /// The list is taken by value and consumed item by item: each item's
+    /// expression trees are imported into the arena and their boxes freed
+    /// there and then, so the compile never holds a whole shadow-expanded
+    /// `Box` forest and a whole arena at once.
     fn compile_assignment_items(
         &self,
-        items: &[crate::ir::IrAssignmentItem],
+        items: Vec<crate::ir::IrAssignmentItem>,
+        arena: &mut ExprArena,
         emit_ctx: &EmitContext,
     ) -> CompileResult<Vec<AssignmentStep>> {
-        items
-            .iter()
-            .map(|item| match item {
+        let mut steps = Vec::with_capacity(items.len());
+        for item in items {
+            steps.push(match item {
                 crate::ir::IrAssignmentItem::Assign(assign) => {
-                    let program = self.compile_expr(&assign.expr, emit_ctx)?;
-                    match &assign.index {
-                        Some(target) => Ok(AssignmentStep::AssignIndexed {
+                    let program = self.compile_owned_expr(arena, assign.expr, emit_ctx)?;
+                    match assign.index {
+                        Some(target) => AssignmentStep::AssignIndexed {
                             base: assign.var_index,
                             len: target.len,
                             lower: target.lower,
-                            index: self.compile_expr(&target.index, emit_ctx)?,
+                            index: self.compile_owned_expr(arena, target.index, emit_ctx)?,
                             value: program,
-                        }),
-                        None => Ok(AssignmentStep::Assign(AssignmentProgram {
+                        },
+                        None => AssignmentStep::Assign(AssignmentProgram {
                             var_index: assign.var_index,
                             program,
-                        })),
+                        }),
                     }
                 }
                 crate::ir::IrAssignmentItem::Loop { condition, body } => {
-                    let condition = self.compile_expr(condition, emit_ctx)?;
-                    let body = self.compile_assignment_items(body, emit_ctx)?;
-                    Ok(AssignmentStep::Loop { condition, body })
+                    let condition = self.compile_owned_expr(arena, condition, emit_ctx)?;
+                    let body = self.compile_assignment_items(body, arena, emit_ctx)?;
+                    AssignmentStep::Loop { condition, body }
                 }
-            })
-            .collect()
+            });
+        }
+        Ok(steps)
     }
 
     /// Map a unified node index (terminals, then internal nodes, ground
@@ -676,6 +713,10 @@ impl CodeGenerator {
 
     /// Compile a branch equation to a stamp program
     ///
+    /// The equation is taken by value: its trees go into the arena and its
+    /// boxes are freed one program at a time, so a module's equations never
+    /// sit in memory as a whole forest behind the one being compiled.
+    ///
     /// Current contributions use the standard SPICE companion form: the
     /// Jacobian G stamps both KCL rows and the RHS receives -/+ Ieq where
     /// Ieq = I - sum(G*x) is computed by the device at stamp time.
@@ -688,15 +729,15 @@ impl CodeGenerator {
     /// branch RHS.
     fn compile_equation(
         &self,
-        eq: &BranchEquation,
+        eq: BranchEquation,
         num_terminals: usize,
+        arena: &mut ExprArena,
         emit_ctx: &EmitContext,
     ) -> CompileResult<StampProgram> {
-        let value_program = self.compile_expr(&eq.expr, emit_ctx)?;
+        let value_program = self.compile_owned_expr(arena, eq.expr, emit_ctx)?;
         let static_condition = eq
             .static_condition
-            .as_ref()
-            .map(|cond| self.compile_expr(cond, emit_ctx))
+            .map(|cond| self.compile_owned_expr(arena, cond, emit_ctx))
             .transpose()?;
 
         let pos = Self::node_stamp_index(num_terminals, eq.branch.pos_terminal);
@@ -715,9 +756,9 @@ impl CodeGenerator {
                 ))
             })?;
             let branch_row = StampIndex::Branch(ordinal);
-            for deriv in &eq.derivatives {
+            for deriv in eq.derivatives {
                 let (col, col_axis) = Self::axis_stamp_column(num_terminals, &deriv.wrt);
-                let program = self.compile_expr(&deriv.expr, emit_ctx)?;
+                let program = self.compile_owned_expr(arena, deriv.expr, emit_ctx)?;
                 jacobian_programs.push(JacobianEntry {
                     row: branch_row.clone(),
                     col,
@@ -728,9 +769,9 @@ impl CodeGenerator {
             }
 
             let mut reactive_jacobians = Vec::new();
-            for deriv in &eq.reactive_derivatives {
+            for deriv in eq.reactive_derivatives {
                 let (col, col_axis) = Self::axis_stamp_column(num_terminals, &deriv.wrt);
-                let program = self.compile_expr(&deriv.expr, emit_ctx)?;
+                let program = self.compile_owned_expr(arena, deriv.expr, emit_ctx)?;
                 reactive_jacobians.push(JacobianEntry {
                     row: branch_row.clone(),
                     col,
@@ -761,9 +802,9 @@ impl CodeGenerator {
             // Potential contribution: constitutive row of the branch
             // unknown receives -dE/dx for every axis
             let branch_row = StampIndex::Branch(ordinal);
-            for deriv in &eq.derivatives {
+            for deriv in eq.derivatives {
                 let (col, col_axis) = Self::axis_stamp_column(num_terminals, &deriv.wrt);
-                let program = self.compile_expr(&deriv.expr, emit_ctx)?;
+                let program = self.compile_owned_expr(arena, deriv.expr, emit_ctx)?;
                 jacobian_programs.push(JacobianEntry {
                     row: branch_row.clone(),
                     col,
@@ -776,9 +817,9 @@ impl CodeGenerator {
             // Reactive part of the source (flux: V <+ ddt(L*i)) stamps
             // -jw * dQ/dx into the branch row in AC
             let mut reactive_jacobians = Vec::new();
-            for deriv in &eq.reactive_derivatives {
+            for deriv in eq.reactive_derivatives {
                 let (col, col_axis) = Self::axis_stamp_column(num_terminals, &deriv.wrt);
-                let program = self.compile_expr(&deriv.expr, emit_ctx)?;
+                let program = self.compile_owned_expr(arena, deriv.expr, emit_ctx)?;
                 reactive_jacobians.push(JacobianEntry {
                     row: branch_row.clone(),
                     col,
@@ -807,9 +848,9 @@ impl CodeGenerator {
         }
 
         // Current contribution
-        for deriv in &eq.derivatives {
+        for deriv in eq.derivatives {
             let (col, col_axis) = Self::axis_stamp_column(num_terminals, &deriv.wrt);
-            let program = self.compile_expr(&deriv.expr, emit_ctx)?;
+            let program = self.compile_owned_expr(arena, deriv.expr, emit_ctx)?;
 
             // KCL row of the positive node gains +dI/dx, the negative node
             // row gains -dI/dx
@@ -832,9 +873,9 @@ impl CodeGenerator {
         // Reactive (capacitance) entries: AC stamps jw * dQ/dx with the
         // same KCL row pairing
         let mut reactive_jacobians = Vec::new();
-        for deriv in &eq.reactive_derivatives {
+        for deriv in eq.reactive_derivatives {
             let (col, col_axis) = Self::axis_stamp_column(num_terminals, &deriv.wrt);
-            let program = self.compile_expr(&deriv.expr, emit_ctx)?;
+            let program = self.compile_owned_expr(arena, deriv.expr, emit_ctx)?;
             reactive_jacobians.push(JacobianEntry {
                 row: pos.clone(),
                 col: col.clone(),
@@ -878,20 +919,39 @@ impl CodeGenerator {
         })
     }
 
-    /// Compile an IR expression to bytecode
+    /// Compile one arena expression to bytecode
     fn compile_expr(
         &self,
-        expr: &IrExpr,
+        arena: &ExprArena,
+        id: NodeId,
         emit_ctx: &EmitContext,
     ) -> CompileResult<BytecodeProgram> {
         let mut program = BytecodeProgram::default();
-        self.emit_expr(expr, emit_ctx, &mut program)?;
+        self.emit_expr(arena, id, emit_ctx, &mut program)?;
         // Grown by `push`, a program's vector carries up to half its length
         // again in slack; over the eighteen million instructions of a large
         // compact model that was 0.4 GB per assignment pass held for the
         // model's whole lifetime.
         program.instructions.shrink_to_fit();
         Ok(program)
+    }
+
+    /// Import one owned `IrExpr` tree at the seam and compile it from the arena
+    ///
+    /// This is the only door between the two representations on the emission
+    /// path, and it swings one way: the boxed tree is dropped the moment its
+    /// nodes are in the arena, so a forest is freed tree by tree as the
+    /// emission consumes it rather than all at once when the pass ends.
+    /// Nothing here ever calls [`ExprArena::export`].
+    fn compile_owned_expr(
+        &self,
+        arena: &mut ExprArena,
+        expr: IrExpr,
+        emit_ctx: &EmitContext,
+    ) -> CompileResult<BytecodeProgram> {
+        let id = arena.import(&expr);
+        drop(expr);
+        self.compile_expr(arena, id, emit_ctx)
     }
 
     #[inline]
@@ -946,25 +1006,24 @@ impl CodeGenerator {
 
     fn compile_zi_polynomial(
         &self,
-        definition: &crate::ir::ZiPolynomialDefinition,
+        arena: &ExprArena,
+        definition: &ZiPolynomial,
         emit_ctx: &EmitContext,
     ) -> CompileResult<CompiledZiPolynomial> {
         Ok(match definition {
-            crate::ir::ZiPolynomialDefinition::Coefficients(values) => {
-                CompiledZiPolynomial::Coefficients(
-                    values
-                        .iter()
-                        .map(|value| self.compile_expr(value, emit_ctx))
-                        .collect::<CompileResult<Vec<_>>>()?,
-                )
-            }
-            crate::ir::ZiPolynomialDefinition::Roots(values) => CompiledZiPolynomial::Roots(
+            ZiPolynomial::Coefficients(values) => CompiledZiPolynomial::Coefficients(
+                values
+                    .iter()
+                    .map(|value| self.compile_expr(arena, *value, emit_ctx))
+                    .collect::<CompileResult<Vec<_>>>()?,
+            ),
+            ZiPolynomial::Roots(values) => CompiledZiPolynomial::Roots(
                 values
                     .iter()
                     .map(|(real, imaginary)| {
                         Ok((
-                            self.compile_expr(real, emit_ctx)?,
-                            self.compile_expr(imaginary, emit_ctx)?,
+                            self.compile_expr(arena, *real, emit_ctx)?,
+                            self.compile_expr(arena, *imaginary, emit_ctx)?,
                         ))
                     })
                     .collect::<CompileResult<Vec<_>>>()?,
@@ -974,21 +1033,22 @@ impl CodeGenerator {
 
     fn emit_zi_polynomial_operands(
         &self,
-        definition: &crate::ir::ZiPolynomialDefinition,
+        arena: &ExprArena,
+        definition: &ZiPolynomial,
         emit_ctx: &EmitContext,
         program: &mut BytecodeProgram,
     ) -> CompileResult<ZiPolynomialLayout> {
         match definition {
-            crate::ir::ZiPolynomialDefinition::Coefficients(values) => {
+            ZiPolynomial::Coefficients(values) => {
                 for value in values {
-                    self.emit_expr(value, emit_ctx, program)?;
+                    self.emit_expr(arena, *value, emit_ctx, program)?;
                 }
                 Ok(ZiPolynomialLayout::Coefficients { len: values.len() })
             }
-            crate::ir::ZiPolynomialDefinition::Roots(values) => {
+            ZiPolynomial::Roots(values) => {
                 for (real, imaginary) in values {
-                    self.emit_expr(real, emit_ctx, program)?;
-                    self.emit_expr(imaginary, emit_ctx, program)?;
+                    self.emit_expr(arena, *real, emit_ctx, program)?;
+                    self.emit_expr(arena, *imaginary, emit_ctx, program)?;
                 }
                 Ok(ZiPolynomialLayout::Roots { len: values.len() })
             }
@@ -997,20 +1057,19 @@ impl CodeGenerator {
 
     fn zi_site_slot(
         &self,
+        arena: &ExprArena,
         site: crate::ir::ZiSiteId,
-        numerator: &crate::ir::ZiPolynomialDefinition,
-        denominator: &crate::ir::ZiPolynomialDefinition,
-        period: &IrExpr,
-        first_transition: &IrExpr,
+        numerator: &ZiPolynomial,
+        denominator: &ZiPolynomial,
+        period: NodeId,
+        first_transition: NodeId,
         emit_ctx: &EmitContext,
     ) -> CompileResult<usize> {
-        let polynomial_layout = |definition: &crate::ir::ZiPolynomialDefinition| match definition {
-            crate::ir::ZiPolynomialDefinition::Coefficients(values) => {
+        let polynomial_layout = |definition: &ZiPolynomial| match definition {
+            ZiPolynomial::Coefficients(values) => {
                 ZiPolynomialLayout::Coefficients { len: values.len() }
             }
-            crate::ir::ZiPolynomialDefinition::Roots(values) => {
-                ZiPolynomialLayout::Roots { len: values.len() }
-            }
+            ZiPolynomial::Roots(values) => ZiPolynomialLayout::Roots { len: values.len() },
         };
         let numerator_layout = polynomial_layout(numerator);
         let denominator_layout = polynomial_layout(denominator);
@@ -1036,10 +1095,10 @@ impl CodeGenerator {
             return Ok(slot);
         }
         let definition = CompiledZiFilterDefinition {
-            numerator: self.compile_zi_polynomial(numerator, emit_ctx)?,
-            denominator: self.compile_zi_polynomial(denominator, emit_ctx)?,
-            period: self.compile_expr(period, emit_ctx)?,
-            first_transition: self.compile_expr(first_transition, emit_ctx)?,
+            numerator: self.compile_zi_polynomial(arena, numerator, emit_ctx)?,
+            denominator: self.compile_zi_polynomial(arena, denominator, emit_ctx)?,
+            period: self.compile_expr(arena, period, emit_ctx)?,
+            first_transition: self.compile_expr(arena, first_transition, emit_ctx)?,
         };
         let slot = self.zi_filter_definitions.borrow().len();
         self.zi_filter_definitions.borrow_mut().push(definition);
@@ -1061,44 +1120,90 @@ impl CodeGenerator {
         Ok(slot)
     }
 
-    /// Emit bytecode for an expression
+    /// The index one parameter reference resolves to
+    fn parameter_index(name: &SmolStr, emit_ctx: &EmitContext) -> CompileResult<usize> {
+        emit_ctx
+            .parameter_indices
+            .get(name)
+            .copied()
+            .ok_or_else(|| {
+                CodeGenError::new(CodeGenErrorKind::Internal(format!(
+                    "Unknown parameter: {}",
+                    name
+                )))
+                .into()
+            })
+    }
+
+    /// The instruction one built-in call lowers to
+    fn call_instruction(func: IrFunction) -> Instruction {
+        match func {
+            IrFunction::Abs => Instruction::Abs,
+            IrFunction::Sqrt => Instruction::Sqrt,
+            IrFunction::Exp => Instruction::Exp,
+            IrFunction::Log => Instruction::Log,
+            IrFunction::Log10 => Instruction::Log10,
+            IrFunction::Sin => Instruction::Sin,
+            IrFunction::Cos => Instruction::Cos,
+            IrFunction::Tan => Instruction::Tan,
+            IrFunction::Sinh => Instruction::Sinh,
+            IrFunction::Cosh => Instruction::Cosh,
+            IrFunction::Tanh => Instruction::Tanh,
+            IrFunction::Min => Instruction::Min,
+            IrFunction::Max => Instruction::Max,
+            IrFunction::LimitedExp => Instruction::LimitedExp,
+            // Inverse trig
+            IrFunction::Asin => Instruction::Asin,
+            IrFunction::Acos => Instruction::Acos,
+            IrFunction::Atan => Instruction::Atan,
+            IrFunction::Asinh => Instruction::Asinh,
+            IrFunction::Acosh => Instruction::Acosh,
+            IrFunction::Atanh => Instruction::Atanh,
+            IrFunction::Atan2 => Instruction::Atan2,
+            // Rounding
+            IrFunction::Floor => Instruction::Floor,
+            IrFunction::Ceil => Instruction::Ceil,
+            // Power
+            IrFunction::Pow => Instruction::FnPow,
+        }
+    }
+
+    /// Emit bytecode for the arena expression rooted at `id`
+    ///
+    /// The traversal is the boxed tree's, slot for slot: every child is
+    /// emitted in the field order it was declared in and the node's own
+    /// instruction goes last. That order is an identity obligation rather
+    /// than a convenience — the per-emission state slots
+    /// (`limit_state_count`, `cross_detector_count`, `timer_state_count`) and
+    /// a Zi site's sub-programs are handed out *at the visit*, so a subtree
+    /// two parents share is emitted once per path, exactly as its two copies
+    /// were emitted before the arena existed.
+    ///
+    /// The event, noise and companion operands are reached explicitly here.
+    /// [`crate::ir::arena::for_each_child`] stops at them because the generic
+    /// walks do — those operands are compiled into programs of their own — so
+    /// this walk is deliberately not written over it.
     fn emit_expr(
         &self,
-        expr: &IrExpr,
+        arena: &ExprArena,
+        id: NodeId,
         emit_ctx: &EmitContext,
         program: &mut BytecodeProgram,
     ) -> CompileResult<()> {
-        match expr {
-            IrExpr::Const(v) => {
-                program.instructions.push(Instruction::PushConst(*v));
+        match *arena.node(id) {
+            Node::Const(v) => {
+                program.instructions.push(Instruction::PushConst(v));
             }
-            IrExpr::Param(name) => {
-                let idx = emit_ctx
-                    .parameter_indices
-                    .get(name)
-                    .copied()
-                    .ok_or_else(|| {
-                        CodeGenError::new(CodeGenErrorKind::Internal(format!(
-                            "Unknown parameter: {}",
-                            name
-                        )))
-                    })?;
+            Node::Param(name) => {
+                let idx = Self::parameter_index(arena.name(name), emit_ctx)?;
                 program.instructions.push(Instruction::PushParam(idx));
             }
-            IrExpr::ParamGiven(name) => {
-                let idx = emit_ctx
-                    .parameter_indices
-                    .get(name)
-                    .copied()
-                    .ok_or_else(|| {
-                        CodeGenError::new(CodeGenErrorKind::Internal(format!(
-                            "Unknown parameter: {}",
-                            name
-                        )))
-                    })?;
+            Node::ParamGiven(name) => {
+                let idx = Self::parameter_index(arena.name(name), emit_ctx)?;
                 program.instructions.push(Instruction::PushParamGiven(idx));
             }
-            IrExpr::Var(name) => {
+            Node::Var(name) => {
+                let name = arena.name(name);
                 let idx = emit_ctx
                     .variable_indices
                     .get(name)
@@ -1111,51 +1216,50 @@ impl CodeGenerator {
                     })?;
                 program.instructions.push(Instruction::PushVariable(idx));
             }
-            IrExpr::VarIndexed {
-                base,
-                len,
-                lower,
-                index,
-                ..
-            } => {
-                self.emit_expr(index, emit_ctx, program)?;
+            Node::VarIndexed { payload, index } => {
+                self.emit_expr(arena, index, emit_ctx, program)?;
+                let read = arena.indexed(payload);
                 program.instructions.push(Instruction::PushVariableDyn {
-                    base: *base,
-                    len: *len,
-                    lower: *lower,
+                    base: read.base,
+                    len: read.len,
+                    lower: read.lower,
                 });
             }
-            IrExpr::Voltage(p, n) => {
-                program.instructions.push(Instruction::PushVoltage(*p, *n));
-            }
-            IrExpr::Current(p, n) => {
-                program.instructions.push(Instruction::PushCurrent(*p, *n));
-            }
-            IrExpr::BranchCurrent(k) => {
+            Node::Voltage(p, n) => {
                 program
                     .instructions
-                    .push(Instruction::PushBranchCurrent(*k));
+                    .push(Instruction::PushVoltage(unpack_index(p), unpack_index(n)));
             }
-            IrExpr::Temperature => {
+            Node::Current(p, n) => {
+                program
+                    .instructions
+                    .push(Instruction::PushCurrent(unpack_index(p), unpack_index(n)));
+            }
+            Node::BranchCurrent(k) => {
+                program
+                    .instructions
+                    .push(Instruction::PushBranchCurrent(unpack_index(k)));
+            }
+            Node::Temperature => {
                 program.instructions.push(Instruction::PushTemperature);
             }
-            IrExpr::Vt => {
+            Node::Vt => {
                 program.instructions.push(Instruction::PushVt);
             }
-            IrExpr::Time => {
+            Node::Time => {
                 program.instructions.push(Instruction::PushTime);
             }
-            IrExpr::Mfactor => {
+            Node::Mfactor => {
                 program.instructions.push(Instruction::PushMfactor);
             }
-            IrExpr::PortConnected(index) => {
+            Node::PortConnected(index) => {
                 program
                     .instructions
-                    .push(Instruction::PushPortConnected(*index));
+                    .push(Instruction::PushPortConnected(unpack_index(index)));
             }
-            IrExpr::Binary(op, left, right) => {
-                self.emit_expr(left, emit_ctx, program)?;
-                self.emit_expr(right, emit_ctx, program)?;
+            Node::Binary(op, left, right) => {
+                self.emit_expr(arena, left, emit_ctx, program)?;
+                self.emit_expr(arena, right, emit_ctx, program)?;
                 program.instructions.push(match op {
                     // Arithmetic
                     BinaryOp::Add => Instruction::Add,
@@ -1182,103 +1286,83 @@ impl CodeGenerator {
                     BinaryOp::BitXor => Instruction::BitXor,
                 });
             }
-            IrExpr::Unary(crate::ast::UnaryOp::Neg, inner) => {
-                self.emit_expr(inner, emit_ctx, program)?;
-                program.instructions.push(Instruction::Neg);
-            }
-            // Unary plus is the identity
-            IrExpr::Unary(crate::ast::UnaryOp::Pos, inner) => {
-                self.emit_expr(inner, emit_ctx, program)?;
-            }
-            // Bitwise complement is represented through the shared integer
-            // conversion and 32-bit XOR contract: ~x == x ^ -1.
-            IrExpr::Unary(crate::ast::UnaryOp::BitNot, inner) => {
-                self.emit_expr(inner, emit_ctx, program)?;
-                program.instructions.push(Instruction::PushConst(-1.0));
-                program.instructions.push(Instruction::BitXor);
-            }
-            IrExpr::Call(func, args) => {
-                for arg in args {
-                    self.emit_expr(arg, emit_ctx, program)?;
+            Node::Unary(op, inner) => {
+                self.emit_expr(arena, inner, emit_ctx, program)?;
+                match op {
+                    crate::ast::UnaryOp::Neg => program.instructions.push(Instruction::Neg),
+                    // Unary plus is the identity
+                    crate::ast::UnaryOp::Pos => {}
+                    crate::ast::UnaryOp::Not => program.instructions.push(Instruction::Not),
+                    // Bitwise complement is represented through the shared
+                    // integer conversion and 32-bit XOR contract: ~x == x ^ -1.
+                    crate::ast::UnaryOp::BitNot => {
+                        program.instructions.push(Instruction::PushConst(-1.0));
+                        program.instructions.push(Instruction::BitXor);
+                    }
                 }
-                program.instructions.push(match func {
-                    IrFunction::Abs => Instruction::Abs,
-                    IrFunction::Sqrt => Instruction::Sqrt,
-                    IrFunction::Exp => Instruction::Exp,
-                    IrFunction::Log => Instruction::Log,
-                    IrFunction::Log10 => Instruction::Log10,
-                    IrFunction::Sin => Instruction::Sin,
-                    IrFunction::Cos => Instruction::Cos,
-                    IrFunction::Tan => Instruction::Tan,
-                    IrFunction::Sinh => Instruction::Sinh,
-                    IrFunction::Cosh => Instruction::Cosh,
-                    IrFunction::Tanh => Instruction::Tanh,
-                    IrFunction::Min => Instruction::Min,
-                    IrFunction::Max => Instruction::Max,
-                    IrFunction::LimitedExp => Instruction::LimitedExp,
-                    // Inverse trig
-                    IrFunction::Asin => Instruction::Asin,
-                    IrFunction::Acos => Instruction::Acos,
-                    IrFunction::Atan => Instruction::Atan,
-                    IrFunction::Asinh => Instruction::Asinh,
-                    IrFunction::Acosh => Instruction::Acosh,
-                    IrFunction::Atanh => Instruction::Atanh,
-                    IrFunction::Atan2 => Instruction::Atan2,
-                    // Rounding
-                    IrFunction::Floor => Instruction::Floor,
-                    IrFunction::Ceil => Instruction::Ceil,
-                    // Power
-                    IrFunction::Pow => Instruction::FnPow,
-                });
             }
-            IrExpr::Limexp(inner) => {
-                self.emit_expr(inner, emit_ctx, program)?;
+            Node::Call { func, a, b, .. } => {
+                if let Some(a) = a {
+                    self.emit_expr(arena, a, emit_ctx, program)?;
+                }
+                if let Some(b) = b {
+                    self.emit_expr(arena, b, emit_ctx, program)?;
+                }
+                program.instructions.push(Self::call_instruction(func));
+            }
+            // No `IrFunction` takes a third argument; this encoding exists
+            // only because the converter never checked a source call's
+            // argument list against an arity, and it emits like the pair.
+            Node::CallSpilled { func, args } => {
+                for arg in arena.call_args(args) {
+                    self.emit_expr(arena, *arg, emit_ctx, program)?;
+                }
+                program.instructions.push(Self::call_instruction(func));
+            }
+            Node::Limexp(inner) => {
+                self.emit_expr(arena, inner, emit_ctx, program)?;
                 program.instructions.push(Instruction::Limexp);
             }
-            IrExpr::Conditional(cond, then_expr, else_expr) => {
-                self.emit_expr(cond, emit_ctx, program)?;
-                self.emit_expr(then_expr, emit_ctx, program)?;
-                self.emit_expr(else_expr, emit_ctx, program)?;
+            Node::Conditional(cond, then_expr, else_expr) => {
+                self.emit_expr(arena, cond, emit_ctx, program)?;
+                self.emit_expr(arena, then_expr, emit_ctx, program)?;
+                self.emit_expr(arena, else_expr, emit_ctx, program)?;
                 program.instructions.push(Instruction::IfElse);
             }
-            IrExpr::Unary(crate::ast::UnaryOp::Not, inner) => {
-                self.emit_expr(inner, emit_ctx, program)?;
-                program.instructions.push(Instruction::Not);
-            }
-            IrExpr::Ddt(inner) => {
+            Node::Ddt(inner) => {
                 // Backward-Euler time derivative with a dedicated state slot:
                 // (value - prev_value) / dt in transient, 0 at DC. The state
                 // slot records the operand so the next step has its history.
-                self.emit_expr(inner, emit_ctx, program)?;
+                self.emit_expr(arena, inner, emit_ctx, program)?;
                 let state_id = Self::allocate_slot(&self.limit_state_count);
                 program.instructions.push(Instruction::DdtState(state_id));
             }
-            IrExpr::Idt(inner, ic) => {
+            Node::Idt(inner, ic) => {
                 // Time integral: state + value*dt in transient; the initial
                 // condition (default 0) seeds the integral at DC/IC.
-                self.emit_expr(inner, emit_ctx, program)?;
+                self.emit_expr(arena, inner, emit_ctx, program)?;
                 if let Some(ic_expr) = ic {
-                    self.emit_expr(ic_expr, emit_ctx, program)?;
+                    self.emit_expr(arena, ic_expr, emit_ctx, program)?;
                 } else {
                     program.instructions.push(Instruction::PushConst(0.0));
                 }
                 let state_id = Self::allocate_slot(&self.limit_state_count);
                 program.instructions.push(Instruction::IdtState(state_id));
             }
-            IrExpr::IdtMod {
+            Node::IdtMod {
                 expr,
-                ic,
                 modulus,
-                offset,
+                payload,
             } => {
-                self.emit_expr(expr, emit_ctx, program)?;
+                let (ic, offset) = arena.optional_pair(payload);
+                self.emit_expr(arena, expr, emit_ctx, program)?;
                 match ic {
-                    Some(ic) => self.emit_expr(ic, emit_ctx, program)?,
+                    Some(ic) => self.emit_expr(arena, ic, emit_ctx, program)?,
                     None => program.instructions.push(Instruction::PushConst(0.0)),
                 }
-                self.emit_expr(modulus, emit_ctx, program)?;
+                self.emit_expr(arena, modulus, emit_ctx, program)?;
                 match offset {
-                    Some(offset) => self.emit_expr(offset, emit_ctx, program)?,
+                    Some(offset) => self.emit_expr(arena, offset, emit_ctx, program)?,
                     None => program.instructions.push(Instruction::PushConst(0.0)),
                 }
                 let state_id = Self::allocate_slot(&self.limit_state_count);
@@ -1286,38 +1370,35 @@ impl CodeGenerator {
                     .instructions
                     .push(Instruction::IdtModState(state_id));
             }
-            IrExpr::DdtCompanion(inner) => {
+            Node::DdtCompanion(inner) => {
                 // Jacobian companion factor: operand / dt (0 at DC)
-                self.emit_expr(inner, emit_ctx, program)?;
+                self.emit_expr(arena, inner, emit_ctx, program)?;
                 program.instructions.push(Instruction::DdtJacobian);
             }
-            IrExpr::IdtCompanion(inner) => {
+            Node::IdtCompanion(inner) => {
                 // Jacobian companion factor: operand * dt (0 at DC)
-                self.emit_expr(inner, emit_ctx, program)?;
+                self.emit_expr(arena, inner, emit_ctx, program)?;
                 program.instructions.push(Instruction::IdtJacobian);
             }
-            IrExpr::TableDerivative {
-                input,
-                x_data,
-                y_data,
-            } => {
-                self.emit_expr(input, emit_ctx, program)?;
+            Node::TableDerivative { input, table } => {
+                self.emit_expr(arena, input, emit_ctx, program)?;
+                let (x_data, y_data) = arena.table(table);
                 let table_id = self.register_lookup_table(x_data, y_data)?;
                 program
                     .instructions
                     .push(Instruction::TableDerivative(table_id));
             }
-            IrExpr::Ddx { .. } => {
+            Node::Ddx { .. } => {
                 return Err(CompileError::CodeGen(CodeGenError::new(
                     CodeGenErrorKind::Internal("unresolved ddx() reached code generation".into()),
                 )));
             }
-            IrExpr::Limit(inner, step) => {
+            Node::Limit(inner, step) => {
                 // $limit(expr, step) - bounds value change per Newton iteration
                 // For DC, we track previous value and limit the step
-                self.emit_expr(inner, emit_ctx, program)?;
+                self.emit_expr(arena, inner, emit_ctx, program)?;
                 if let Some(step_expr) = step {
-                    self.emit_expr(step_expr, emit_ctx, program)?;
+                    self.emit_expr(arena, step_expr, emit_ctx, program)?;
                 } else {
                     // Default step limit for pn-junction type limiting
                     program.instructions.push(Instruction::PushConst(0.7)); // ~2*Vt
@@ -1325,248 +1406,25 @@ impl CodeGenerator {
                 let state_id = Self::allocate_slot(&self.limit_state_count);
                 program.instructions.push(Instruction::LimitState(state_id));
             }
-            IrExpr::CanonicalLimit(inner) => {
-                self.emit_expr(inner, emit_ctx, program)?;
+            Node::CanonicalLimit(inner) => {
+                self.emit_expr(arena, inner, emit_ctx, program)?;
                 let state_id = Self::allocate_slot(&self.limit_state_count);
                 program
                     .instructions
                     .push(Instruction::CanonicalLimitState(state_id));
             }
-            IrExpr::TableLookup {
-                input,
-                x_data,
-                y_data,
-            } => {
+            Node::TableLookup { input, table } => {
                 // $table_model lookup with linear interpolation
                 // Emit input expression, then TableLookup instruction referencing the table
-                self.emit_expr(input, emit_ctx, program)?;
+                self.emit_expr(arena, input, emit_ctx, program)?;
+                let (x_data, y_data) = arena.table(table);
                 let table_id = self.register_lookup_table(x_data, y_data)?;
                 program
                     .instructions
                     .push(Instruction::TableLookup(table_id));
             }
-            IrExpr::AbsDelay {
-                site,
-                expr,
-                delay_time,
-                max_delay,
-            } => {
-                self.emit_expr(expr, emit_ctx, program)?;
-                self.emit_expr(delay_time, emit_ctx, program)?;
-                if let Some(max_delay) = max_delay {
-                    self.emit_expr(max_delay, emit_ctx, program)?;
-                }
-                let buffer_id = self.absdelay_site_slot(*site);
-                program.instructions.push(if max_delay.is_some() {
-                    Instruction::AbsDelayStateMax(buffer_id)
-                } else {
-                    Instruction::AbsDelayState(buffer_id)
-                });
-            }
-            IrExpr::AbsDelayDerivative {
-                site,
-                input,
-                input_derivative,
-                delay_time,
-                delay_derivative,
-                max_delay,
-                derivative_order,
-            } => {
-                if *derivative_order != 1 {
-                    return Err(CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(
-                        "absdelay higher-order derivatives are not implemented".into(),
-                    ))
-                    .into());
-                }
-                self.emit_expr(input, emit_ctx, program)?;
-                self.emit_expr(input_derivative, emit_ctx, program)?;
-                self.emit_expr(delay_time, emit_ctx, program)?;
-                self.emit_expr(delay_derivative, emit_ctx, program)?;
-                if let Some(max_delay) = max_delay {
-                    self.emit_expr(max_delay, emit_ctx, program)?;
-                }
-                let buffer_id = self.absdelay_site_slot(*site);
-                program.instructions.push(if max_delay.is_some() {
-                    Instruction::AbsDelayStateDerivativeMax(buffer_id)
-                } else {
-                    Instruction::AbsDelayStateDerivative(buffer_id)
-                });
-            }
-            IrExpr::Transition {
-                site,
-                expr,
-                delay,
-                rise_time,
-                fall_time,
-            } => {
-                // transition(expr, delay, rise_time, fall_time)
-                self.emit_expr(expr, emit_ctx, program)?;
-                // Emit delay (default 0)
-                if let Some(d) = delay {
-                    self.emit_expr(d, emit_ctx, program)?;
-                } else {
-                    program.instructions.push(Instruction::PushConst(0.0));
-                }
-                // Semantic lowering normally materializes the module-scoped
-                // rise default; retain an instantaneous defensive default for
-                // directly constructed IR.
-                if let Some(r) = rise_time {
-                    self.emit_expr(r, emit_ctx, program)?;
-                } else {
-                    program.instructions.push(Instruction::PushConst(0.0));
-                }
-                // An omitted fall time reuses the effective rise expression.
-                if let Some(f) = fall_time {
-                    self.emit_expr(f, emit_ctx, program)?;
-                } else if let Some(r) = rise_time {
-                    self.emit_expr(r, emit_ctx, program)?;
-                } else {
-                    program.instructions.push(Instruction::PushConst(0.0));
-                }
-                let filter_id = self.transition_site_slot(*site);
-                program
-                    .instructions
-                    .push(Instruction::TransitionState(filter_id));
-            }
-            IrExpr::TransitionDerivative {
-                site,
-                input,
-                input_derivative,
-                delay,
-                rise_time,
-                fall_time,
-            } => {
-                self.emit_expr(input, emit_ctx, program)?;
-                self.emit_expr(input_derivative, emit_ctx, program)?;
-                if let Some(delay) = delay {
-                    self.emit_expr(delay, emit_ctx, program)?;
-                } else {
-                    program.instructions.push(Instruction::PushConst(0.0));
-                }
-                if let Some(rise_time) = rise_time {
-                    self.emit_expr(rise_time, emit_ctx, program)?;
-                } else {
-                    program.instructions.push(Instruction::PushConst(0.0));
-                }
-                if let Some(fall_time) = fall_time {
-                    self.emit_expr(fall_time, emit_ctx, program)?;
-                } else if let Some(rise_time) = rise_time {
-                    self.emit_expr(rise_time, emit_ctx, program)?;
-                } else {
-                    program.instructions.push(Instruction::PushConst(0.0));
-                }
-                let filter_id = self.transition_site_slot(*site);
-                program
-                    .instructions
-                    .push(Instruction::TransitionStateDerivative(filter_id));
-            }
-            IrExpr::Slew {
-                site,
-                expr,
-                max_pos_slew,
-                max_neg_slew,
-            } => {
-                // With no authored rates the LRM defines an exact passthrough;
-                // do not allocate or touch state in that form.
-                if max_pos_slew.is_none() && max_neg_slew.is_none() {
-                    self.emit_expr(expr, emit_ctx, program)?;
-                    return Ok(());
-                }
-                self.emit_expr(expr, emit_ctx, program)?;
-                let positive = max_pos_slew.as_ref().ok_or_else(|| {
-                    CodeGenError::new(CodeGenErrorKind::InvalidExpression(
-                        "slew negative rate cannot be authored without a positive rate".into(),
-                    ))
-                })?;
-                self.emit_expr(positive, emit_ctx, program)?;
-                if let Some(n) = max_neg_slew {
-                    self.emit_expr(n, emit_ctx, program)?;
-                } else {
-                    self.emit_expr(positive, emit_ctx, program)?;
-                    program.instructions.push(Instruction::Neg);
-                }
-                let filter_id = self.slew_site_slot(*site);
-                program.instructions.push(Instruction::SlewState(filter_id));
-            }
-            IrExpr::SlewDerivative {
-                site,
-                input,
-                input_derivative,
-                max_pos_slew,
-                max_pos_slew_derivative,
-                max_neg_slew,
-                max_neg_slew_derivative,
-            } => {
-                if max_pos_slew.is_none() && max_neg_slew.is_none() {
-                    self.emit_expr(input_derivative, emit_ctx, program)?;
-                    return Ok(());
-                }
-                let positive = max_pos_slew.as_ref().ok_or_else(|| {
-                    CodeGenError::new(CodeGenErrorKind::InvalidExpression(
-                        "slew negative rate cannot be authored without a positive rate".into(),
-                    ))
-                })?;
-                let positive_derivative = max_pos_slew_derivative.as_ref().ok_or_else(|| {
-                    CodeGenError::new(CodeGenErrorKind::InvalidExpression(
-                        "slew positive-rate derivative is missing".into(),
-                    ))
-                })?;
-                self.emit_expr(input, emit_ctx, program)?;
-                self.emit_expr(input_derivative, emit_ctx, program)?;
-                self.emit_expr(positive, emit_ctx, program)?;
-                self.emit_expr(positive_derivative, emit_ctx, program)?;
-                if let (Some(negative), Some(negative_derivative)) =
-                    (max_neg_slew, max_neg_slew_derivative)
-                {
-                    self.emit_expr(negative, emit_ctx, program)?;
-                    self.emit_expr(negative_derivative, emit_ctx, program)?;
-                } else {
-                    self.emit_expr(positive, emit_ctx, program)?;
-                    program.instructions.push(Instruction::Neg);
-                    self.emit_expr(positive_derivative, emit_ctx, program)?;
-                    program.instructions.push(Instruction::Neg);
-                }
-                let filter_id = self.slew_site_slot(*site);
-                program
-                    .instructions
-                    .push(Instruction::SlewStateDerivative(filter_id));
-            }
-            IrExpr::Cross {
-                expr,
-                direction,
-                time_tol,
-                expr_tol,
-                enable,
-            } => {
-                // cross(expr, direction, time_tol, expr_tol, enable)
-                self.emit_expr(expr, emit_ctx, program)?;
-                if let Some(direction) = direction {
-                    self.emit_expr(direction, emit_ctx, program)?;
-                } else {
-                    program.instructions.push(Instruction::PushConst(0.0));
-                }
-                if let Some(tolerance) = time_tol {
-                    self.emit_expr(tolerance, emit_ctx, program)?;
-                } else {
-                    program.instructions.push(Instruction::PushConst(0.0));
-                }
-                if let Some(tolerance) = expr_tol {
-                    self.emit_expr(tolerance, emit_ctx, program)?;
-                } else {
-                    program.instructions.push(Instruction::PushConst(0.0));
-                }
-                if let Some(enable) = enable {
-                    self.emit_expr(enable, emit_ctx, program)?;
-                } else {
-                    program.instructions.push(Instruction::PushConst(1.0));
-                }
-                let detector_id = Self::allocate_slot(&self.cross_detector_count);
-                program
-                    .instructions
-                    .push(Instruction::CrossState(detector_id));
-            }
-            IrExpr::LastCrossing { expr, direction } => {
-                self.emit_expr(expr, emit_ctx, program)?;
+            Node::LastCrossing { expr, direction } => {
+                self.emit_expr(arena, expr, emit_ctx, program)?;
                 program
                     .instructions
                     .push(Instruction::PushConst(direction.unwrap_or(0) as f64));
@@ -1575,99 +1433,9 @@ impl CodeGenerator {
                     .instructions
                     .push(Instruction::LastCrossingState(detector_id));
             }
-            IrExpr::WhiteNoise {
-                power: _, name: _, ..
-            } => {
-                // The large-signal contribution is zero. The PSD operand is
-                // compiled separately into model.noise_sources for noise
-                // analysis and must not create stamp-time dependencies.
-                program.instructions.push(Instruction::PushConst(0.0));
-            }
-            IrExpr::NoiseTable { .. } => {
-                // Like the other noise functions, the large-signal value
-                // is zero; the table feeds the noise-analysis sources
-                program.instructions.push(Instruction::PushConst(0.0));
-            }
-            IrExpr::ZiFilter {
-                site,
-                expr,
-                numerator,
-                denominator,
-                period,
-                transition,
-                first_transition,
-                direct_assignment,
-            } => {
-                let filter_id = self.zi_site_slot(
-                    *site,
-                    numerator,
-                    denominator,
-                    period,
-                    first_transition,
-                    emit_ctx,
-                )?;
-                let numerator = self.emit_zi_polynomial_operands(numerator, emit_ctx, program)?;
-                let denominator =
-                    self.emit_zi_polynomial_operands(denominator, emit_ctx, program)?;
-                self.emit_expr(period, emit_ctx, program)?;
-                self.emit_expr(first_transition, emit_ctx, program)?;
-                self.emit_expr(expr, emit_ctx, program)?;
-                self.emit_expr(transition, emit_ctx, program)?;
-                program
-                    .instructions
-                    .push(Instruction::ZiState(ZiRuntimeLayout {
-                        filter_id,
-                        numerator,
-                        denominator,
-                        direct_assignment: *direct_assignment,
-                    }));
-            }
-            IrExpr::ZiFilterDerivative {
-                site,
-                expr,
-                numerator,
-                denominator,
-                period,
-                transition,
-                first_transition,
-                direct_assignment,
-            } => {
-                let filter_id = self.zi_site_slot(
-                    *site,
-                    numerator,
-                    denominator,
-                    period,
-                    first_transition,
-                    emit_ctx,
-                )?;
-                let numerator = self.emit_zi_polynomial_operands(numerator, emit_ctx, program)?;
-                let denominator =
-                    self.emit_zi_polynomial_operands(denominator, emit_ctx, program)?;
-                self.emit_expr(period, emit_ctx, program)?;
-                self.emit_expr(first_transition, emit_ctx, program)?;
-                self.emit_expr(expr, emit_ctx, program)?;
-                self.emit_expr(transition, emit_ctx, program)?;
-                program
-                    .instructions
-                    .push(Instruction::ZiStateDerivative(ZiRuntimeLayout {
-                        filter_id,
-                        numerator,
-                        denominator,
-                        direct_assignment: *direct_assignment,
-                    }));
-            }
-            IrExpr::FlickerNoise {
-                power: _,
-                exponent: _,
-                name: _,
-                ..
-            } => {
-                // The large-signal contribution is zero. PSD and exponent
-                // programs are compiled separately for noise analysis.
-                program.instructions.push(Instruction::PushConst(0.0));
-            }
-            IrExpr::Analysis(name) => {
+            Node::Analysis(name) => {
                 // analysis(name) - check current analysis type
+                let name = arena.name(name);
                 let analysis_id = match name.to_lowercase().as_str() {
                     "dc" | "op" => 0,
                     "ac" => 1,
@@ -1691,26 +1459,266 @@ impl CodeGenerator {
                     .instructions
                     .push(Instruction::Analysis(analysis_id));
             }
-            IrExpr::Above {
+            Node::Heavy(_, heavy) => {
+                self.emit_heavy(arena, arena.heavy(heavy), emit_ctx, program)?
+            }
+        }
+        Ok(())
+    }
+
+    /// Emit bytecode for one site-bearing, event, noise or filter operator
+    ///
+    /// Split out of [`Self::emit_expr`] because these eighteen payloads live
+    /// beside the nodes rather than inside them. The emission order within
+    /// each is the boxed variant's field order, unchanged.
+    fn emit_heavy(
+        &self,
+        arena: &ExprArena,
+        heavy: &Heavy,
+        emit_ctx: &EmitContext,
+        program: &mut BytecodeProgram,
+    ) -> CompileResult<()> {
+        match heavy {
+            Heavy::AbsDelay {
+                site,
+                expr,
+                delay_time,
+                max_delay,
+            } => {
+                self.emit_expr(arena, *expr, emit_ctx, program)?;
+                self.emit_expr(arena, *delay_time, emit_ctx, program)?;
+                if let Some(max_delay) = max_delay {
+                    self.emit_expr(arena, *max_delay, emit_ctx, program)?;
+                }
+                let buffer_id = self.absdelay_site_slot(*site);
+                program.instructions.push(if max_delay.is_some() {
+                    Instruction::AbsDelayStateMax(buffer_id)
+                } else {
+                    Instruction::AbsDelayState(buffer_id)
+                });
+            }
+            Heavy::AbsDelayDerivative {
+                site,
+                input,
+                input_derivative,
+                delay_time,
+                delay_derivative,
+                max_delay,
+                derivative_order,
+            } => {
+                if *derivative_order != 1 {
+                    return Err(CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(
+                        "absdelay higher-order derivatives are not implemented".into(),
+                    ))
+                    .into());
+                }
+                self.emit_expr(arena, *input, emit_ctx, program)?;
+                self.emit_expr(arena, *input_derivative, emit_ctx, program)?;
+                self.emit_expr(arena, *delay_time, emit_ctx, program)?;
+                self.emit_expr(arena, *delay_derivative, emit_ctx, program)?;
+                if let Some(max_delay) = max_delay {
+                    self.emit_expr(arena, *max_delay, emit_ctx, program)?;
+                }
+                let buffer_id = self.absdelay_site_slot(*site);
+                program.instructions.push(if max_delay.is_some() {
+                    Instruction::AbsDelayStateDerivativeMax(buffer_id)
+                } else {
+                    Instruction::AbsDelayStateDerivative(buffer_id)
+                });
+            }
+            Heavy::Transition {
+                site,
+                expr,
+                delay,
+                rise_time,
+                fall_time,
+            } => {
+                // transition(expr, delay, rise_time, fall_time)
+                self.emit_expr(arena, *expr, emit_ctx, program)?;
+                // Emit delay (default 0)
+                if let Some(d) = delay {
+                    self.emit_expr(arena, *d, emit_ctx, program)?;
+                } else {
+                    program.instructions.push(Instruction::PushConst(0.0));
+                }
+                // Semantic lowering normally materializes the module-scoped
+                // rise default; retain an instantaneous defensive default for
+                // directly constructed IR.
+                if let Some(r) = rise_time {
+                    self.emit_expr(arena, *r, emit_ctx, program)?;
+                } else {
+                    program.instructions.push(Instruction::PushConst(0.0));
+                }
+                // An omitted fall time reuses the effective rise expression.
+                if let Some(f) = fall_time {
+                    self.emit_expr(arena, *f, emit_ctx, program)?;
+                } else if let Some(r) = rise_time {
+                    self.emit_expr(arena, *r, emit_ctx, program)?;
+                } else {
+                    program.instructions.push(Instruction::PushConst(0.0));
+                }
+                let filter_id = self.transition_site_slot(*site);
+                program
+                    .instructions
+                    .push(Instruction::TransitionState(filter_id));
+            }
+            Heavy::TransitionDerivative {
+                site,
+                input,
+                input_derivative,
+                delay,
+                rise_time,
+                fall_time,
+            } => {
+                self.emit_expr(arena, *input, emit_ctx, program)?;
+                self.emit_expr(arena, *input_derivative, emit_ctx, program)?;
+                if let Some(delay) = delay {
+                    self.emit_expr(arena, *delay, emit_ctx, program)?;
+                } else {
+                    program.instructions.push(Instruction::PushConst(0.0));
+                }
+                if let Some(rise_time) = rise_time {
+                    self.emit_expr(arena, *rise_time, emit_ctx, program)?;
+                } else {
+                    program.instructions.push(Instruction::PushConst(0.0));
+                }
+                if let Some(fall_time) = fall_time {
+                    self.emit_expr(arena, *fall_time, emit_ctx, program)?;
+                } else if let Some(rise_time) = rise_time {
+                    self.emit_expr(arena, *rise_time, emit_ctx, program)?;
+                } else {
+                    program.instructions.push(Instruction::PushConst(0.0));
+                }
+                let filter_id = self.transition_site_slot(*site);
+                program
+                    .instructions
+                    .push(Instruction::TransitionStateDerivative(filter_id));
+            }
+            Heavy::Slew {
+                site,
+                expr,
+                max_pos_slew,
+                max_neg_slew,
+            } => {
+                // With no authored rates the LRM defines an exact passthrough;
+                // do not allocate or touch state in that form.
+                if max_pos_slew.is_none() && max_neg_slew.is_none() {
+                    self.emit_expr(arena, *expr, emit_ctx, program)?;
+                    return Ok(());
+                }
+                self.emit_expr(arena, *expr, emit_ctx, program)?;
+                let positive = max_pos_slew.ok_or_else(|| {
+                    CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                        "slew negative rate cannot be authored without a positive rate".into(),
+                    ))
+                })?;
+                self.emit_expr(arena, positive, emit_ctx, program)?;
+                if let Some(n) = max_neg_slew {
+                    self.emit_expr(arena, *n, emit_ctx, program)?;
+                } else {
+                    self.emit_expr(arena, positive, emit_ctx, program)?;
+                    program.instructions.push(Instruction::Neg);
+                }
+                let filter_id = self.slew_site_slot(*site);
+                program.instructions.push(Instruction::SlewState(filter_id));
+            }
+            Heavy::SlewDerivative {
+                site,
+                input,
+                input_derivative,
+                max_pos_slew,
+                max_pos_slew_derivative,
+                max_neg_slew,
+                max_neg_slew_derivative,
+            } => {
+                if max_pos_slew.is_none() && max_neg_slew.is_none() {
+                    self.emit_expr(arena, *input_derivative, emit_ctx, program)?;
+                    return Ok(());
+                }
+                let positive = max_pos_slew.ok_or_else(|| {
+                    CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                        "slew negative rate cannot be authored without a positive rate".into(),
+                    ))
+                })?;
+                let positive_derivative = max_pos_slew_derivative.ok_or_else(|| {
+                    CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                        "slew positive-rate derivative is missing".into(),
+                    ))
+                })?;
+                self.emit_expr(arena, *input, emit_ctx, program)?;
+                self.emit_expr(arena, *input_derivative, emit_ctx, program)?;
+                self.emit_expr(arena, positive, emit_ctx, program)?;
+                self.emit_expr(arena, positive_derivative, emit_ctx, program)?;
+                if let (Some(negative), Some(negative_derivative)) =
+                    (*max_neg_slew, *max_neg_slew_derivative)
+                {
+                    self.emit_expr(arena, negative, emit_ctx, program)?;
+                    self.emit_expr(arena, negative_derivative, emit_ctx, program)?;
+                } else {
+                    self.emit_expr(arena, positive, emit_ctx, program)?;
+                    program.instructions.push(Instruction::Neg);
+                    self.emit_expr(arena, positive_derivative, emit_ctx, program)?;
+                    program.instructions.push(Instruction::Neg);
+                }
+                let filter_id = self.slew_site_slot(*site);
+                program
+                    .instructions
+                    .push(Instruction::SlewStateDerivative(filter_id));
+            }
+            Heavy::Cross {
+                expr,
+                direction,
+                time_tol,
+                expr_tol,
+                enable,
+            } => {
+                // cross(expr, direction, time_tol, expr_tol, enable)
+                self.emit_expr(arena, *expr, emit_ctx, program)?;
+                if let Some(direction) = direction {
+                    self.emit_expr(arena, *direction, emit_ctx, program)?;
+                } else {
+                    program.instructions.push(Instruction::PushConst(0.0));
+                }
+                if let Some(tolerance) = time_tol {
+                    self.emit_expr(arena, *tolerance, emit_ctx, program)?;
+                } else {
+                    program.instructions.push(Instruction::PushConst(0.0));
+                }
+                if let Some(tolerance) = expr_tol {
+                    self.emit_expr(arena, *tolerance, emit_ctx, program)?;
+                } else {
+                    program.instructions.push(Instruction::PushConst(0.0));
+                }
+                if let Some(enable) = enable {
+                    self.emit_expr(arena, *enable, emit_ctx, program)?;
+                } else {
+                    program.instructions.push(Instruction::PushConst(1.0));
+                }
+                let detector_id = Self::allocate_slot(&self.cross_detector_count);
+                program
+                    .instructions
+                    .push(Instruction::CrossState(detector_id));
+            }
+            Heavy::Above {
                 expr,
                 time_tol,
                 expr_tol,
                 enable,
             } => {
                 // above(expr, time_tol, expr_tol, enable)
-                self.emit_expr(expr, emit_ctx, program)?;
+                self.emit_expr(arena, *expr, emit_ctx, program)?;
                 if let Some(tolerance) = time_tol {
-                    self.emit_expr(tolerance, emit_ctx, program)?;
+                    self.emit_expr(arena, *tolerance, emit_ctx, program)?;
                 } else {
                     program.instructions.push(Instruction::PushConst(0.0));
                 }
                 if let Some(tolerance) = expr_tol {
-                    self.emit_expr(tolerance, emit_ctx, program)?;
+                    self.emit_expr(arena, *tolerance, emit_ctx, program)?;
                 } else {
                     program.instructions.push(Instruction::PushConst(0.0));
                 }
                 if let Some(enable) = enable {
-                    self.emit_expr(enable, emit_ctx, program)?;
+                    self.emit_expr(arena, *enable, emit_ctx, program)?;
                 } else {
                     program.instructions.push(Instruction::PushConst(1.0));
                 }
@@ -1719,40 +1727,56 @@ impl CodeGenerator {
                     .instructions
                     .push(Instruction::AboveState(detector_id));
             }
-            IrExpr::Timer {
+            Heavy::Timer {
                 start_time,
                 period,
                 time_tol,
                 enable,
             } => {
                 // timer(start, period, time_tol, enable)
-                self.emit_expr(start_time, emit_ctx, program)?;
+                self.emit_expr(arena, *start_time, emit_ctx, program)?;
                 if let Some(p) = period {
-                    self.emit_expr(p, emit_ctx, program)?;
+                    self.emit_expr(arena, *p, emit_ctx, program)?;
                 } else {
                     program.instructions.push(Instruction::PushConst(0.0));
                 }
                 if let Some(tolerance) = time_tol {
-                    self.emit_expr(tolerance, emit_ctx, program)?;
+                    self.emit_expr(arena, *tolerance, emit_ctx, program)?;
                 } else {
                     program.instructions.push(Instruction::PushConst(0.0));
                 }
                 if let Some(enable) = enable {
-                    self.emit_expr(enable, emit_ctx, program)?;
+                    self.emit_expr(arena, *enable, emit_ctx, program)?;
                 } else {
                     program.instructions.push(Instruction::PushConst(1.0));
                 }
                 let timer_id = Self::allocate_slot(&self.timer_state_count);
                 program.instructions.push(Instruction::TimerState(timer_id));
             }
-            IrExpr::LaplaceZP {
+            Heavy::WhiteNoise { .. } => {
+                // The large-signal contribution is zero. The PSD operand is
+                // compiled separately into model.noise_sources for noise
+                // analysis and must not create stamp-time dependencies.
+                program.instructions.push(Instruction::PushConst(0.0));
+            }
+            Heavy::FlickerNoise { .. } => {
+                // The large-signal contribution is zero. PSD and exponent
+                // programs are compiled separately for noise analysis.
+                program.instructions.push(Instruction::PushConst(0.0));
+            }
+            Heavy::NoiseTable { .. } => {
+                // Like the other noise functions, the large-signal value
+                // is zero; the table feeds the noise-analysis sources
+                program.instructions.push(Instruction::PushConst(0.0));
+            }
+            Heavy::LaplaceZP {
                 site,
                 expr,
                 zeros,
                 poles,
                 gain,
             } => {
-                self.emit_expr(expr, emit_ctx, program)?;
+                self.emit_expr(arena, *expr, emit_ctx, program)?;
 
                 let p_complex: Vec<Complex64> = poles
                     .iter()
@@ -1778,13 +1802,13 @@ impl CodeGenerator {
                     .instructions
                     .push(Instruction::LaplaceState(filter_id));
             }
-            IrExpr::LaplaceND {
+            Heavy::LaplaceND {
                 site,
                 expr,
                 numerator,
                 denominator,
             } => {
-                self.emit_expr(expr, emit_ctx, program)?;
+                self.emit_expr(arena, *expr, emit_ctx, program)?;
 
                 let filter_id = self.laplace_site_slot(*site, || {
                     // IR has ascending powers: n0 + n1*s + ...
@@ -1807,14 +1831,14 @@ impl CodeGenerator {
                     .instructions
                     .push(Instruction::LaplaceState(filter_id));
             }
-            IrExpr::LaplaceZPDerivative {
+            Heavy::LaplaceZPDerivative {
                 site,
                 expr,
                 zeros,
                 poles,
                 gain,
             } => {
-                self.emit_expr(expr, emit_ctx, program)?;
+                self.emit_expr(arena, *expr, emit_ctx, program)?;
 
                 let p_complex = poles
                     .iter()
@@ -1838,13 +1862,13 @@ impl CodeGenerator {
                     .instructions
                     .push(Instruction::LaplaceStateDerivative(filter_id));
             }
-            IrExpr::LaplaceNDDerivative {
+            Heavy::LaplaceNDDerivative {
                 site,
                 expr,
                 numerator,
                 denominator,
             } => {
-                self.emit_expr(expr, emit_ctx, program)?;
+                self.emit_expr(arena, *expr, emit_ctx, program)?;
 
                 let filter_id = self.laplace_site_slot(*site, || {
                     let mut num_desc = numerator.clone();
@@ -1863,6 +1887,78 @@ impl CodeGenerator {
                 program
                     .instructions
                     .push(Instruction::LaplaceStateDerivative(filter_id));
+            }
+            Heavy::ZiFilter {
+                site,
+                expr,
+                numerator,
+                denominator,
+                period,
+                transition,
+                first_transition,
+                direct_assignment,
+            } => {
+                let filter_id = self.zi_site_slot(
+                    arena,
+                    *site,
+                    numerator,
+                    denominator,
+                    *period,
+                    *first_transition,
+                    emit_ctx,
+                )?;
+                let numerator =
+                    self.emit_zi_polynomial_operands(arena, numerator, emit_ctx, program)?;
+                let denominator =
+                    self.emit_zi_polynomial_operands(arena, denominator, emit_ctx, program)?;
+                self.emit_expr(arena, *period, emit_ctx, program)?;
+                self.emit_expr(arena, *first_transition, emit_ctx, program)?;
+                self.emit_expr(arena, *expr, emit_ctx, program)?;
+                self.emit_expr(arena, *transition, emit_ctx, program)?;
+                program
+                    .instructions
+                    .push(Instruction::ZiState(ZiRuntimeLayout {
+                        filter_id,
+                        numerator,
+                        denominator,
+                        direct_assignment: *direct_assignment,
+                    }));
+            }
+            Heavy::ZiFilterDerivative {
+                site,
+                expr,
+                numerator,
+                denominator,
+                period,
+                transition,
+                first_transition,
+                direct_assignment,
+            } => {
+                let filter_id = self.zi_site_slot(
+                    arena,
+                    *site,
+                    numerator,
+                    denominator,
+                    *period,
+                    *first_transition,
+                    emit_ctx,
+                )?;
+                let numerator =
+                    self.emit_zi_polynomial_operands(arena, numerator, emit_ctx, program)?;
+                let denominator =
+                    self.emit_zi_polynomial_operands(arena, denominator, emit_ctx, program)?;
+                self.emit_expr(arena, *period, emit_ctx, program)?;
+                self.emit_expr(arena, *first_transition, emit_ctx, program)?;
+                self.emit_expr(arena, *expr, emit_ctx, program)?;
+                self.emit_expr(arena, *transition, emit_ctx, program)?;
+                program
+                    .instructions
+                    .push(Instruction::ZiStateDerivative(ZiRuntimeLayout {
+                        filter_id,
+                        numerator,
+                        denominator,
+                        direct_assignment: *direct_assignment,
+                    }));
             }
         }
         Ok(())
@@ -1911,6 +2007,23 @@ fn count_ir_assignment_items(items: &[crate::ir::IrAssignmentItem]) -> usize {
         .sum()
 }
 
+/// Compile one hand-built `IrExpr` fixture through the emitter's seam
+///
+/// The fixtures below still build `IrExpr` trees, because that is what
+/// `autodiff::differentiate` and the converter produce; they cross into the
+/// arena exactly where the production path crosses. A fixture is one tree, so
+/// it gets one arena.
+#[cfg(test)]
+fn compile_fixture(
+    generator: &CodeGenerator,
+    expr: &IrExpr,
+    emit_ctx: &EmitContext,
+) -> CompileResult<BytecodeProgram> {
+    let mut arena = ExprArena::new();
+    let id = arena.import(expr);
+    generator.compile_expr(&arena, id, emit_ctx)
+}
+
 fn count_assignment_steps_for_timing(items: &[AssignmentStep]) -> usize {
     items
         .iter()
@@ -1954,11 +2067,9 @@ mod laplace_derivative_tests {
         };
         let site = LaplaceSiteId::from_span(crate::source::Span::dummy());
 
-        let derivative = generator
-            .compile_expr(&laplace_nd(site, true), &emit_context)
+        let derivative = compile_fixture(&generator, &laplace_nd(site, true), &emit_context)
             .expect("compile derivative first");
-        let primal = generator
-            .compile_expr(&laplace_nd(site, false), &emit_context)
+        let primal = compile_fixture(&generator, &laplace_nd(site, false), &emit_context)
             .expect("compile primal second");
 
         assert!(matches!(
@@ -2047,11 +2158,9 @@ mod transition_derivative_tests {
         };
         let site = TransitionSiteId::from_span(crate::source::Span::dummy());
 
-        let derivative = generator
-            .compile_expr(&transition(site, true), &emit_context)
+        let derivative = compile_fixture(&generator, &transition(site, true), &emit_context)
             .expect("compile transition derivative first");
-        let primal = generator
-            .compile_expr(&transition(site, false), &emit_context)
+        let primal = compile_fixture(&generator, &transition(site, false), &emit_context)
             .expect("compile transition primal second");
 
         assert!(matches!(
@@ -2068,13 +2177,13 @@ mod transition_derivative_tests {
         // An omitted fall time re-emits the rise expression, so the slots
         // between the delay and the terminating filter instruction are the
         // rise expression's own emission twice, back to back.
-        let rise_ops: Vec<String> = generator
-            .compile_expr(&nonconstant_rise_time(), &emit_context)
-            .expect("compile the rise expression on its own")
-            .instructions
-            .iter()
-            .map(|instruction| format!("{instruction:?}"))
-            .collect();
+        let rise_ops: Vec<String> =
+            compile_fixture(&generator, &nonconstant_rise_time(), &emit_context)
+                .expect("compile the rise expression on its own")
+                .instructions
+                .iter()
+                .map(|instruction| format!("{instruction:?}"))
+                .collect();
         let expected: Vec<String> = rise_ops.iter().chain(rise_ops.iter()).cloned().collect();
         for (label, instructions) in [
             ("primal", &primal.instructions),
@@ -2131,11 +2240,9 @@ mod slew_derivative_tests {
         };
         let site = SlewSiteId::from_span(crate::source::Span::dummy());
 
-        let derivative = generator
-            .compile_expr(&slew(site, true), &emit_context)
+        let derivative = compile_fixture(&generator, &slew(site, true), &emit_context)
             .expect("compile derivative first");
-        let primal = generator
-            .compile_expr(&slew(site, false), &emit_context)
+        let primal = compile_fixture(&generator, &slew(site, false), &emit_context)
             .expect("compile primal second");
 
         assert!(matches!(
@@ -2165,17 +2272,17 @@ mod slew_derivative_tests {
             parameter_indices: HashMap::new(),
             variable_indices: HashMap::new(),
         };
-        let program = generator
-            .compile_expr(
-                &IrExpr::Slew {
-                    site: SlewSiteId::from_span(crate::source::Span::dummy()),
-                    expr: Box::new(IrExpr::Const(3.0)),
-                    max_pos_slew: None,
-                    max_neg_slew: None,
-                },
-                &emit_context,
-            )
-            .expect("compile passthrough slew");
+        let program = compile_fixture(
+            &generator,
+            &IrExpr::Slew {
+                site: SlewSiteId::from_span(crate::source::Span::dummy()),
+                expr: Box::new(IrExpr::Const(3.0)),
+                max_pos_slew: None,
+                max_neg_slew: None,
+            },
+            &emit_context,
+        )
+        .expect("compile passthrough slew");
 
         assert!(matches!(
             program.instructions.as_slice(),
@@ -2222,8 +2329,7 @@ mod slew_derivative_tests {
             variable_indices: HashMap::new(),
         };
         for derivative in [&first, &second] {
-            let program = generator
-                .compile_expr(derivative, &emit_context)
+            let program = compile_fixture(&generator, derivative, &emit_context)
                 .expect("compile branch-exact slew derivative");
             assert!(matches!(
                 program.instructions.last(),
