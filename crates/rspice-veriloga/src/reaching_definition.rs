@@ -682,7 +682,14 @@ endmodule
 /// `#[ignore]`d for the reason every other census is — it front-end compiles
 /// the shipped corpus — and narrowed by `RSPICE_CFG_CENSUS_FILTER` the same
 /// way, so one module can be surveyed without paying for forty-two.
-#[cfg(all(test, feature = "native"))]
+///
+/// Gated to x86-64 like every other census, because that is the gate on the
+/// provider they share: `native::census_models` is
+/// `all(test, feature = "native", target_arch = "x86_64")`, and a survey that
+/// asked for it on AArch64 did not merely skip — it failed to resolve, and one
+/// unresolved import takes the whole test binary out. Nothing here is
+/// arch-specific; the corpus compile these censuses run is a front-end pass.
+#[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod survey {
     use super::SNAPSHOT_MARKER;
     use crate::native::census_models::shipped_census_models_matching;

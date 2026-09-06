@@ -461,7 +461,12 @@ impl ExecutableMemory {
     }
 
     /// The published image as bytes, for digesting a compiled model.
-    #[cfg(test)]
+    ///
+    /// Gated like [`Self::is_empty`] above it: its one caller is
+    /// `NativeModel::image_bytes`, which the identity and cost censuses read
+    /// and which is x86-64 only, so an AArch64 test build denies this as dead
+    /// code.
+    #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
     pub(crate) fn as_bytes(&self) -> &[u8] {
         // Safety: the allocation is `len` bytes long and lives as long as
         // `self`; publication has already made it read-execute, and reading

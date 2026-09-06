@@ -37,6 +37,14 @@ mod runtime;
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod state_pairing_census;
 mod target;
+/// A machine backend for another instruction set is dead code on this host:
+/// its dispatch is compiled out, and so is every test that reaches into it.
+/// [`aarch64`] states the mirror image of this inside itself; the x64 module
+/// is stated here so the two backends carry the same rule without this crate's
+/// x64 tree being edited for a lint that is about where it is *not* compiled.
+///
+/// The lint is untouched on x86-64, which is where it earns its keep.
+#[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
 pub mod x64;
 
 pub(crate) use crate::jit::{assignment, expr, model_plan, plan_program, ssa, value_cache};

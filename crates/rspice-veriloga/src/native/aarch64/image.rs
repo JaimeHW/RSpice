@@ -619,6 +619,8 @@ mod tests {
         NativeStampKernelIo,
     };
     #[cfg(target_arch = "aarch64")]
+    use crate::native::plan_program::{PlanProgram, PlanProgramRef};
+    #[cfg(target_arch = "aarch64")]
     use crate::native::runtime::ExecutableMemory;
     #[cfg(target_arch = "aarch64")]
     use crate::native::{EvalContext, JitResult};
@@ -882,26 +884,42 @@ mod tests {
         let assignment = builder.append_assignment_pass(&assignments, "assignment")?;
         let post_assignment =
             builder.append_assignment_pass(&post_assignments, "post-assignment")?;
-        let parameter_default_entry =
-            builder.append_value(&parameter_default, "parameter default")?;
-        let static_condition_entry = builder.append_value(&static_condition, "static condition")?;
-        let stamp_value_entry = builder.append_value(&stamp_value, "stamp value")?;
-        let jacobian_entry = builder.append_value(&jacobian, "Jacobian")?;
-        let reactive_jacobian_entry =
-            builder.append_value(&reactive_jacobian, "reactive Jacobian")?;
-        let noise_psd_entry = builder.append_value(&noise_psd, "noise PSD")?;
-        let noise_exponent_entry = builder.append_value(&noise_exponent, "noise exponent")?;
-        let stamp_programs = [stamp_value];
-        let jacobian_programs = [vec![jacobian]];
+        let parameter_default_entry = builder.append_value(
+            PlanProgramRef::Postfix(&parameter_default),
+            "parameter default",
+        )?;
+        let static_condition_entry = builder.append_value(
+            PlanProgramRef::Postfix(&static_condition),
+            "static condition",
+        )?;
+        let stamp_value_entry =
+            builder.append_value(PlanProgramRef::Postfix(&stamp_value), "stamp value")?;
+        let jacobian_entry =
+            builder.append_value(PlanProgramRef::Postfix(&jacobian), "Jacobian")?;
+        let reactive_jacobian_entry = builder.append_value(
+            PlanProgramRef::Postfix(&reactive_jacobian),
+            "reactive Jacobian",
+        )?;
+        let noise_psd_entry =
+            builder.append_value(PlanProgramRef::Postfix(&noise_psd), "noise PSD")?;
+        let noise_exponent_entry =
+            builder.append_value(PlanProgramRef::Postfix(&noise_exponent), "noise exponent")?;
+        let stamp_programs = [PlanProgram::Postfix(stamp_value)];
+        let jacobian_programs = [vec![PlanProgram::Postfix(jacobian)]];
         let published_pairs = [None];
+        // A postfix image: no CFG prelude for either kernel to call, which is
+        // what `compile_model_plan` passes for every plan production compiles.
+        let prelude = None;
         let evaluation_kernel = builder.append_fused_evaluation_kernel(
             assignment,
+            prelude,
             &stamp_programs,
             &[stamp_value_entry],
             &published_pairs,
         )?;
         let stamp_kernel = builder.append_fused_stamp_kernel(
             assignment,
+            prelude,
             &stamp_programs,
             &jacobian_programs,
             &[stamp_value_entry],
@@ -912,7 +930,8 @@ mod tests {
 
         let entries = NativeEntryOffsets {
             assignment,
-            post_assignment: Some(post_assignment),
+            prelude,
+            post_assignment,
             evaluation_kernel: Some(evaluation_kernel),
             stamp_kernel: Some(stamp_kernel),
             parameter_defaults: vec![Some(parameter_default_entry)],

@@ -1509,7 +1509,11 @@ impl NativeModel {
     }
 
     /// The published image, for digesting a compiled model's machine code.
-    #[cfg(test)]
+    ///
+    /// Gated like the two censuses that read it — `code_identity` and
+    /// `cfg_cost_census` — because they are its only callers, and an AArch64
+    /// test build compiles them out and then denies this as dead code.
+    #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
     pub(crate) fn image_bytes(&self) -> &[u8] {
         self.image.as_bytes()
     }

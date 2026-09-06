@@ -155,7 +155,11 @@ pub(crate) enum Terminator {
 }
 
 impl Terminator {
-    #[cfg_attr(not(test), allow(dead_code))]
+    // Read by the x64 codegen tests, which are the only callers on any target,
+    // and this file is compiled twice — as `native::ssa` and as `jit::ssa` — so
+    // the copy the caller does not reach is dead in every test build too. That
+    // is what made the AArch64 test binary fail its own `-D warnings`.
+    #[cfg_attr(any(not(test), not(target_arch = "x86_64")), allow(dead_code))]
     pub(crate) fn edge_count(&self) -> usize {
         match self {
             Self::Return(_) => 0,
@@ -766,7 +770,14 @@ impl Program {
     }
 
     /// What [`Self::loop_fixture_for_test`] must compute.
+    ///
+    /// Its callers — the x64 codegen tests, the block-walk test and the
+    /// WebAssembly codegen tests — are all gated to x86-64 or to the wasm-jit
+    /// feature, so on AArch64 nothing reads it and the item is dead. It stays
+    /// present rather than being cfg'd away because this file is also compiled
+    /// as `jit::ssa`, which a wasm32 build reaches.
     #[cfg(test)]
+    #[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
     pub(crate) fn loop_fixture_expectation(limit: f64, k: f64, first: f64, second: f64) -> f64 {
         let mut counter = 0.0_f64;
         let mut left = first;

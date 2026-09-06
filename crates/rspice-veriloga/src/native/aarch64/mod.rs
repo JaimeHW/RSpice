@@ -260,7 +260,7 @@ mod tests {
     use crate::native::assignment::NativeAssignment;
     use crate::native::expr::{NativeOp, NativeProgram};
     use crate::native::model::{NativeCurrentDependencies, NativeStampKernelIo};
-    use crate::native::model_plan::NativeModelPlan;
+    use crate::native::model_plan::{NativeAssignmentCoverage, NativeModelPlan};
     use smol_str::SmolStr;
 
     fn empty_model(num_variables: usize) -> CompiledModel {
@@ -284,6 +284,7 @@ mod tests {
             zi_filter_definitions: Vec::new(),
             noise_process_schema: 1,
             noise_sources: Vec::new(),
+            reaching_snapshots: crate::ir::ReachingSnapshotPlan::default(),
         }
     }
 
@@ -296,6 +297,10 @@ mod tests {
     fn shared_model_plan_publishes_through_aarch64_backend() {
         let model = empty_model(1);
         let plan = NativeModelPlan {
+            // A postfix plan, which is what production compiles: no CFG
+            // prelude, and a pass rooted on the observable set.
+            prelude: None,
+            assignment_coverage: NativeAssignmentCoverage::ObservableVariables,
             assignments: vec![NativeAssignment::Direct {
                 var_index: 0,
                 program: constant(3.0),
