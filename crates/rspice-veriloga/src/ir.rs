@@ -4438,7 +4438,7 @@ pub mod autodiff {
                             IrExpr::Const(c) => {
                                 let u_pow = IrExpr::Binary(
                                     BinaryOp::Pow,
-                                    left.clone(),
+                                    Box::new(power_rule_base_term_base(left.as_ref(), Some(*c))),
                                     Box::new(IrExpr::Const(*c - 1.0)),
                                 );
                                 IrExpr::Binary(
@@ -4454,7 +4454,7 @@ pub mod autodiff {
                             _ => {
                                 let reduced = IrExpr::Binary(
                                     BinaryOp::Pow,
-                                    left.clone(),
+                                    Box::new(power_rule_base_term_base(left.as_ref(), None)),
                                     Box::new(IrExpr::Binary(
                                         BinaryOp::Sub,
                                         right.clone(),
@@ -5037,6 +5037,44 @@ pub mod autodiff {
             // probes are treated as constants in the DC Jacobian
             _ => IrExpr::Const(0.0),
         }
+    }
+
+    /// The base the power rule's `u^(v−1)` factor is raised from: `u` itself
+    /// wherever that factor is finite, and `u` nudged off exactly zero
+    /// wherever it is not.
+    ///
+    /// `v · u^(v−1) · u'` is `∞ · 0 = NaN` at `u = 0` for every `v < 1`, and
+    /// `u'` is numerically 0 exactly where this matters — an axis a merge
+    /// keeps live whose taken arm does not carry it. Adding
+    /// `(u == 0) · MIN_POSITIVE` adds nothing at all to any other `u`, so the
+    /// term stays bit-exact — including for a negative base under an integral
+    /// exponent, where clamping with `max` would silently return the wrong
+    /// derivative — and the factor becomes a large finite number at `u = 0`,
+    /// so a zero derivative multiplies to exactly zero.
+    ///
+    /// `exponent` is the constant exponent when the rule knows one: a
+    /// constant of 1 or more has no singularity to guard, and those are
+    /// almost all of them, so their derivative programs are left exactly as
+    /// they were. The canonical CFG pass reads the same constant and makes
+    /// the same choice (`canonical_ir/ad.rs`).
+    fn power_rule_base_term_base(base: &IrExpr, exponent: Option<f64>) -> IrExpr {
+        if exponent.is_some_and(|value| value >= 1.0) {
+            return base.clone();
+        }
+        let is_zero = IrExpr::Binary(
+            BinaryOp::Eq,
+            Box::new(base.clone()),
+            Box::new(IrExpr::Const(0.0)),
+        );
+        IrExpr::Binary(
+            BinaryOp::Add,
+            Box::new(base.clone()),
+            Box::new(IrExpr::Binary(
+                BinaryOp::Mul,
+                Box::new(is_zero),
+                Box::new(IrExpr::Const(f64::MIN_POSITIVE)),
+            )),
+        )
     }
 
     /// `ln(u)` as the power rule's exponent term needs it: the logarithm where

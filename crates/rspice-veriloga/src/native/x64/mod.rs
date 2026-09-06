@@ -4670,6 +4670,106 @@ endmodule
         );
     }
 
+    /// The base term of the power rule at a zero base, the sibling of
+    /// [`FINITE_RED_POW_EXPONENT_SOURCE`]: `b · a^(b−1) · da` is `∞ · 0` at
+    /// `a = 0` for every `b < 1`, and `da` is exactly 0 along an axis a merge
+    /// keeps live but whose taken arm does not carry — the SHMOD shape again,
+    /// this time on the base rather than the exponent.
+    const FINITE_RED_POW_BASE_SOURCE: &str = r#"
+module finite_red_pow_base_ddt(p, n, t);
+  inout p, n, t;
+  electrical p, n, t;
+  parameter integer sh = 0;
+  real a, q;
+  analog begin
+    if (sh != 0)
+      a = V(p, n) + V(t);
+    else
+      a = V(p, n);
+    q = 1.0e-12 * pow(a, 0.5);
+    I(p, n) <+ ddt(q);
+    I(p, n) <+ 1.0e-3 * V(p, n);
+  end
+endmodule
+
+module finite_red_pow_base_resistive(p, n, t);
+  inout p, n, t;
+  electrical p, n, t;
+  parameter integer sh = 0;
+  real a;
+  analog begin
+    if (sh != 0)
+      a = V(p, n) + V(t);
+    else
+      a = V(p, n);
+    I(p, n) <+ 1.0e-3 * pow(a, 0.5);
+  end
+endmodule
+"#;
+
+    #[test]
+    fn power_rule_base_term_is_finite_at_a_zero_base() {
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+
+        // (a) Through the finite oracle, the way the shipped census runs.
+        let name = "finite_red_pow_base_ddt";
+        let runtime = compiler
+            .compile_runtime(FINITE_RED_POW_BASE_SOURCE, Some(name))
+            .expect("compile ddt fixture");
+        let native = compile_model_with_canonical_ir(&runtime.model, &runtime.canonical_ir)
+            .expect("native x64 compile ddt fixture");
+        let mut context = native_model_benchmark_context(&runtime.model, name);
+        resolve_native_parameter_defaults(&runtime.model, &native, &mut context);
+        let stats = assert_native_matches_bytecode_finite_entries(
+            &runtime.model,
+            &runtime.canonical_ir,
+            &native,
+            context,
+            name,
+        )
+        .expect("d(ddt q)/dV(t) at V(p, n) = 0 must be finite on both routes");
+        assert!(
+            stats.jacobians > 0,
+            "the fixture must compare Jacobian entries"
+        );
+
+        // (b) The resistive form against the analytic derivative, on both
+        //     routes: the taken arm does not depend on V(t), so
+        //     d I(p, n) / d V(t) is 0 however singular `a^(b−1)` is.
+        let name = "finite_red_pow_base_resistive";
+        let runtime = compiler
+            .compile_runtime(FINITE_RED_POW_BASE_SOURCE, Some(name))
+            .expect("compile resistive fixture");
+        let native = compile_model_with_canonical_ir(&runtime.model, &runtime.canonical_ir)
+            .expect("native x64 compile resistive fixture");
+        let mut context = native_model_benchmark_context(&runtime.model, name);
+        resolve_native_parameter_defaults(&runtime.model, &native, &mut context);
+        let ctx = eval_context_from_vm_context(&mut context);
+        ctx.clear_runtime_error();
+        run_assignment_and_prelude(&native, &ctx, context.variables.as_mut_ptr());
+        require_clean_native_context(&ctx, "fixture assignments").expect("assignments");
+        let stamp = &runtime.model.stamp_programs[0];
+        let (entry, _) = stamp
+            .jacobian_programs
+            .iter()
+            .enumerate()
+            .find(|(_, entry)| matches!(entry.col_axis, ColumnAxis::Node(2)))
+            .expect("the contribution's Jacobian row must carry a column for V(t)");
+        let value = native
+            .run_jacobian(0, entry, &ctx, context.variables.as_ptr())
+            .expect("jacobian entry");
+        require_clean_native_context(&ctx, "fixture jacobian").expect("jacobian");
+        assert_eq!(
+            value, 0.0,
+            "d I(p, n) / d V(t) at V(p, n) = 0: the base term is 0.5 · 0^-0.5 · 0 and must be 0"
+        );
+        let reference = fixture_bytecode_jacobian_for_node(&runtime.model, &native, name, 2);
+        assert_eq!(
+            reference, 0.0,
+            "the bytecode's d I(p, n) / d V(t) at V(p, n) = 0 must be 0 too"
+        );
+    }
+
     /// One Jacobian entry of a single-contribution fixture module, evaluated
     /// on the bytecode route at the same context the native fixtures use.
     fn fixture_bytecode_jacobian_for_node(

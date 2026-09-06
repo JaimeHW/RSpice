@@ -1988,6 +1988,69 @@ endmodule
         assert_eq!(value, 0.0);
     }
 
+    /// The power rule's base term at a zero base, under wasmi.
+    ///
+    /// Sibling of [`power_rule_exponent_term_is_finite_at_a_zero_base_under_wasm`]
+    /// and of the x64 fixture
+    /// (`native::x64::tests::power_rule_base_term_is_finite_at_a_zero_base`):
+    /// `b · a^(b−1) · da` is `∞ · 0` at `a = 0` for `b < 1`, and the merge
+    /// keeps `da/dV(t)` a live lane whose value is exactly 0.
+    #[test]
+    fn power_rule_base_term_is_finite_at_a_zero_base_under_wasm() {
+        use std::mem::size_of;
+
+        use super::abi::FRAME_RESULT_OFFSET;
+
+        const SOURCE: &str = r#"
+module wasm_pow_base_zero_base(p, n, t);
+  inout p, n, t;
+  electrical p, n, t;
+  parameter integer sh = 0;
+  real a;
+  analog begin
+    if (sh != 0)
+      a = V(p, n) + V(t);
+    else
+      a = V(p, n);
+    I(p, n) <+ 1.0e-3 * pow(a, 0.5);
+  end
+endmodule
+"#;
+        let report = VerilogACompiler::new(CompilerOptions::default())
+            .compile_runtime(SOURCE, Some("wasm_pow_base_zero_base"))
+            .expect("compile fixture");
+        let entry = report.model.stamp_programs[0]
+            .jacobian_programs
+            .iter()
+            .position(|entry| matches!(entry.col_axis, crate::codegen::ColumnAxis::Node(2)))
+            .expect("a Jacobian column for V(t)");
+
+        let mut harness = FusedKernelHarness::for_source(SOURCE, "wasm_pow_base_zero_base");
+        harness.reset();
+        for (index, parameter) in report.model.parameters.iter().enumerate() {
+            harness.write_f64(
+                FusedKernelHarness::PARAMETERS as usize + index * size_of::<f64>(),
+                parameter.default,
+            );
+        }
+        for index in 0..3 {
+            harness.write_f64(
+                FusedKernelHarness::VOLTAGES as usize + index * size_of::<f64>(),
+                0.0,
+            );
+        }
+        harness.call_assignments();
+        harness.call_prelude();
+        let export = harness.jacobian_export(0, entry);
+        assert_eq!(harness.call(&export), 0);
+        let value = harness.read_f64(FRAME_RESULT_OFFSET as usize);
+        assert!(
+            value.is_finite(),
+            "d I(p, n) / d V(t) at V(p, n) = 0 under wasm is {value}; the base term is 0.5 · 0^-0.5 · 0 and must be 0"
+        );
+        assert_eq!(value, 0.0);
+    }
+
     /// The fused stamp driver writes each derivative to the slot the device
     /// reads it back from.
     ///

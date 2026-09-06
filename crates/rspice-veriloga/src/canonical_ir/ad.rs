@@ -1409,7 +1409,8 @@ impl<'a> ScalarDdxBuilder<'a> {
             CfgBinaryOp::Pow => {
                 let from_base = d_left.map(|derivative| {
                     let exponent = self.push_binary(CfgBinaryOp::Sub, right, self.one);
-                    let reduced = self.push_binary(CfgBinaryOp::Pow, left, exponent);
+                    let base = self.power_rule_base_term_base(left, right);
+                    let reduced = self.push_binary(CfgBinaryOp::Pow, base, exponent);
                     let factor = self.push_binary(CfgBinaryOp::Mul, right, reduced);
                     self.push_binary(CfgBinaryOp::Mul, derivative, factor)
                 });
@@ -1588,6 +1589,36 @@ impl<'a> ScalarDdxBuilder<'a> {
         let id = self.new_value(CfgValueType::Real, CfgValueKind::RealConstant(value));
         self.constants.insert(value.to_bits(), id);
         id
+    }
+
+    /// The base the power rule's `a^(b−1)` factor is raised from: `a` itself
+    /// wherever that factor is finite, and `a` nudged off exactly zero
+    /// wherever it is not.
+    ///
+    /// `b · a^(b−1) · da` is `∞ · 0 = NaN` at `a = 0` for every `b < 1`, and
+    /// `da` is numerically 0 exactly where this matters — a lane the merge
+    /// keeps live whose taken arm does not carry the axis. The nudge is
+    /// `a + (a == 0) · MIN_POSITIVE`, which adds nothing at all to any other
+    /// `a` (so the term stays bit-exact, including for a negative base under
+    /// an integral exponent, where clamping with `max` would silently return
+    /// the wrong derivative) and makes the factor a large finite number at
+    /// `a = 0`, so a zero lane multiplies to exactly zero.
+    ///
+    /// A constant exponent of 1 or more has no singularity to guard, and
+    /// those are almost all of them, so the rule is left alone there — which
+    /// also keeps the bytecode route, whose own power rule reads the same
+    /// constant, emitting exactly what it emitted before.
+    fn power_rule_base_term_base(&mut self, base: ValueId, exponent: ValueId) -> ValueId {
+        if let CfgValueKind::RealConstant(value) = self.values[usize::from(exponent)].kind
+            && value >= 1.0
+        {
+            return base;
+        }
+        let zero = self.constant(0.0);
+        let is_zero = self.push_typed(CfgValueType::Boolean, CfgBinaryOp::Eq, base, zero);
+        let floor = self.constant(f64::MIN_POSITIVE);
+        let nudge = self.push_binary(CfgBinaryOp::Mul, is_zero, floor);
+        self.push_binary(CfgBinaryOp::Add, base, nudge)
     }
 
     fn new_value(&mut self, value_type: CfgValueType, kind: CfgValueKind) -> ValueId {
@@ -2543,7 +2574,8 @@ impl<'a> AdBuilder<'a> {
                 let from_base = d_left.map(|d_left| {
                     let one = self.one;
                     let exponent = self.push_binary(CfgBinaryOp::Sub, right, one);
-                    let reduced = self.push_binary(CfgBinaryOp::Pow, left, exponent);
+                    let base = self.power_rule_base_term_base(left, right);
+                    let reduced = self.push_binary(CfgBinaryOp::Pow, base, exponent);
                     let scaled = self.push_binary(CfgBinaryOp::Mul, right, reduced);
                     self.scale(d_left, scaled)
                 });
@@ -2832,6 +2864,20 @@ impl<'a> AdBuilder<'a> {
         let id = self.new_value(CfgValueType::Real, CfgValueKind::RealConstant(value));
         self.constants.insert(value.to_bits(), id);
         id
+    }
+
+    /// [`ScalarDdxBuilder::power_rule_base_term_base`], for the lane rule set.
+    fn power_rule_base_term_base(&mut self, base: ValueId, exponent: ValueId) -> ValueId {
+        if let CfgValueKind::RealConstant(value) = self.values[usize::from(exponent)].kind
+            && value >= 1.0
+        {
+            return base;
+        }
+        let zero = self.constant(0.0);
+        let is_zero = self.push_typed(CfgValueType::Boolean, CfgBinaryOp::Eq, base, zero);
+        let floor = self.constant(f64::MIN_POSITIVE);
+        let nudge = self.push_binary(CfgBinaryOp::Mul, is_zero, floor);
+        self.push_binary(CfgBinaryOp::Add, base, nudge)
     }
 
     fn new_value(&mut self, value_type: CfgValueType, kind: CfgValueKind) -> ValueId {
