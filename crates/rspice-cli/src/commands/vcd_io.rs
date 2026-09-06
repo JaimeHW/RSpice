@@ -172,6 +172,10 @@ fn parse_vcd(path: &Path, resource_limits: ResourceLimits) -> Result<VcdDocument
 /// scalar `$var` carries no strength either, so the members say exactly what
 /// the vector said. What it costs is the declaration itself, which no scalar
 /// dump has a place for.
+///
+/// Expanding a dump keeps the dump's own scopes. A source that is not already
+/// a dump has no scope tree to keep, so its variables are declared under
+/// [`EVENT_SCOPE`] whether they are expanded or not.
 pub(crate) fn load_vcd_document(
     path: &Path,
     format: OutputFormat,
@@ -179,20 +183,13 @@ pub(crate) fn load_vcd_document(
     expand_buses: bool,
 ) -> Result<VcdDocument, CliError> {
     if format == OutputFormat::Vcd {
-        let document = parse_vcd(path, resource_limits)?;
-        if !expand_buses {
-            // Reading and rewriting normalises the file: canonical identifier
-            // codes, one declaration order, the writer's layout.
-            return Ok(document);
+        // Reading and rewriting normalises the file: canonical identifier
+        // codes, one declaration order, the writer's layout.
+        let mut document = parse_vcd(path, resource_limits)?;
+        if expand_buses {
+            expand_vector_variables(path, &mut document)?;
         }
-        // Expanding is a reshaping rather than a normalisation, so the source
-        // is read back into histories -- a wide `$var` becomes a declaration
-        // and one `name[k]` trace per bit -- and reprojected with no bus
-        // table. That re-declares every variable under this CLI's own scope,
-        // the way converting any other source does.
-        let histories = rspice_core::execution::vcd_event_histories(&document)
-            .map_err(|error| projection_error(path, &error))?;
-        return event_document(path, &histories.digital_traces, &histories.real_traces, &[]);
+        return Ok(document);
     }
 
     if let Some(document) = event_traces_of(path, format, resource_limits, expand_buses)? {
@@ -207,6 +204,168 @@ pub(crate) fn load_vcd_document(
         &traces.real_traces,
         &traces.digital_buses,
     )
+}
+
+/// Replace every vector variable in a parsed dump with its member bits.
+///
+/// Each member is declared in the scope the vector was declared in, so a
+/// foreign dump keeps its own hierarchy. That is the whole reason this is a
+/// document rewrite rather than a trip through the event histories: histories
+/// carry a flat node name, and reprojecting them re-declares every variable —
+/// scalars included — under [`EVENT_SCOPE`], which silently renamed the
+/// scopes of a dump that had its own.
+///
+/// A member is named `bus[index]`, walking the declared range from its most
+/// significant end, because a dump does not carry the engine's member node
+/// names: what a vector `$var` declares is the range, and its bits are the
+/// bit-selects of that range.
+///
+/// The declaration order is the source's: a vector's members stand where the
+/// vector stood, so a dump of scalars and vectors keeps its column order.
+fn expand_vector_variables(path: &Path, document: &mut VcdDocument) -> Result<(), CliError> {
+    if !document
+        .signals
+        .iter()
+        .any(|signal| signal.kind == VcdSignalKind::Logic && signal.width > 1)
+    {
+        return Ok(());
+    }
+
+    let mut expanded: Vec<VcdSignal> = Vec::new();
+    for signal in std::mem::take(&mut document.signals) {
+        if signal.kind != VcdSignalKind::Logic || signal.width <= 1 {
+            expanded.push(signal);
+            continue;
+        }
+        expanded.extend(expand_one_vector(path, &signal)?);
+    }
+    document.signals = expanded;
+    Ok(())
+}
+
+/// One vector variable's bits, in declared order, most significant first.
+fn expand_one_vector(path: &Path, signal: &VcdSignal) -> Result<Vec<VcdSignal>, CliError> {
+    let width = signal.width as usize;
+    // Expanding costs one change per member per recorded change before the
+    // per-member deduplication can shrink it, which is the same product
+    // `rspice_core::execution::MAX_BUS_EVENT_CELLS` bounds on the way in.
+    let cells = signal.changes.len().saturating_mul(width);
+    if cells > rspice_core::execution::MAX_BUS_EVENT_CELLS {
+        return Err(conversion_error(
+            path,
+            format!(
+                "expanding '{}' would materialize {cells} member values, past the {} this build \
+                 holds at once",
+                variable_reference(signal),
+                rspice_core::execution::MAX_BUS_EVENT_CELLS
+            ),
+        ));
+    }
+
+    // Every declared name for the timeline is expanded, so an aliased vector
+    // keeps both of its names on each bit. The bit positions come from each
+    // name's own declared range: an alias may spell the same wire's range
+    // differently, and a name that declares none is read as `width-1 .. 0`.
+    let mut member_names: Vec<Vec<VcdVariable>> = vec![Vec::new(); width];
+    for variable in &signal.variables {
+        for (position, index) in declared_indices(path, signal, &variable.name)?
+            .into_iter()
+            .enumerate()
+        {
+            member_names[position].push(VcdVariable {
+                scope: variable.scope.clone(),
+                name: format!("{}[{index}]", split_bus_notation(&variable.name).0),
+            });
+        }
+    }
+
+    let mut members: Vec<VcdSignal> = member_names
+        .into_iter()
+        .map(|variables| VcdSignal {
+            identifier: String::new(),
+            variables,
+            width: 1,
+            kind: VcdSignalKind::Logic,
+            changes: Vec::new(),
+        })
+        .collect();
+
+    for change in &signal.changes {
+        let VcdValue::Logic(bits) = &change.value else {
+            return Err(conversion_error(
+                path,
+                format!(
+                    "vector '{}' carries a real value at tick {}",
+                    variable_reference(signal),
+                    change.tick
+                ),
+            ));
+        };
+        if bits.len() != width {
+            return Err(conversion_error(
+                path,
+                format!(
+                    "vector '{}' is {width} bits wide but carries {} at tick {}",
+                    variable_reference(signal),
+                    bits.len(),
+                    change.tick
+                ),
+            ));
+        }
+        for (member, bit) in members.iter_mut().zip(bits) {
+            // A dump records changes, not samples: a bit that did not move
+            // when its neighbour did has nothing to say at that tick.
+            if member
+                .changes
+                .last()
+                .is_some_and(|last| last.value == VcdValue::Logic(vec![*bit]))
+            {
+                continue;
+            }
+            member.changes.push(rspice_core::io::VcdChange {
+                tick: change.tick,
+                value: VcdValue::Logic(vec![*bit]),
+            });
+        }
+    }
+
+    Ok(members)
+}
+
+/// The bit indices one vector name declares, most significant first.
+///
+/// A name with no range (`data`) is read as `width-1 .. 0`; a range whose span
+/// disagrees with the declared width is refused rather than truncated, because
+/// either the range or the width is wrong and nothing here can tell which.
+fn declared_indices(path: &Path, signal: &VcdSignal, name: &str) -> Result<Vec<i64>, CliError> {
+    let width = i64::from(signal.width);
+    let (msb, lsb) = match split_bus_notation(name).1 {
+        Some((msb, lsb)) => {
+            let span = msb.abs_diff(lsb).saturating_add(1);
+            if span != u64::from(signal.width) {
+                return Err(conversion_error(
+                    path,
+                    format!(
+                        "vector '{name}' is {} bits wide but declares [{msb}:{lsb}], a range of \
+                         {span}",
+                        signal.width
+                    ),
+                ));
+            }
+            (msb, lsb)
+        }
+        None => (width - 1, 0),
+    };
+    let step = if msb >= lsb { -1 } else { 1 };
+    Ok((0..width).map(|offset| msb + step * offset).collect())
+}
+
+/// A signal's first declared name, for a message about it.
+fn variable_reference(signal: &VcdSignal) -> String {
+    signal
+        .variables
+        .first()
+        .map_or_else(|| signal.identifier.clone(), VcdVariable::scoped_name)
 }
 
 /// The event timelines a source carries in full, when it carries any.

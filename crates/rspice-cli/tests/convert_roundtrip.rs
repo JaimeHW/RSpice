@@ -648,6 +648,93 @@ fn expanding_a_bus_writes_its_members_as_the_scalars_a_dump_had_before() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A dump written elsewhere keeps its own hierarchy when its buses expand.
+///
+/// Expanding is a reshaping of one variable, not a re-publication of the file:
+/// the members stand where the vector stood, in the scope it stood in, and
+/// every scalar beside them is untouched. Before this, expanding a foreign
+/// dump reprojected the whole document — every variable came back under the
+/// CLI's own `events` scope with its hierarchy flattened into a dotted name,
+/// and the file's `$date` and `$version` were replaced by RSpice's.
+#[test]
+fn expanding_a_foreign_dump_keeps_its_scopes_dates_and_scalars() {
+    let dir = test_dir("vcd_foreign_expand");
+    let source = dir.join("foreign.vcd");
+    std::fs::write(
+        &source,
+        "$date\n\tMon Sep  1 00:00:00 2026\n$end\n\
+         $version\n\tForeign VCD writer 1.0\n$end\n\
+         $timescale\n\t1 ns\n$end\n\
+         $scope module top $end\n\
+         $var wire 1 ! rst $end\n\
+         $scope module core $end\n\
+         $var wire 4 # data [3:0] $end\n\
+         $var wire 1 $ clk $end\n\
+         $upscope $end\n$upscope $end\n\
+         $enddefinitions $end\n\
+         #0\n$dumpvars\n0!\nb0000 #\n0$\n$end\n\
+         #5\nb0011 #\n1$\n\
+         #10\nb1010 #\n0$\n1!\n",
+    )
+    .expect("write the foreign dump");
+
+    let expanded = dir.join("foreign.expanded.vcd");
+    convert(&source, &expanded, "vcd", &["--expand-buses"]);
+    let text = std::fs::read_to_string(&expanded).expect("read the expanded dump");
+
+    assert!(
+        text.contains("$scope module top $end") && text.contains("$scope module core $end"),
+        "both source scopes survive: {text}"
+    );
+    assert!(
+        !text.contains("$scope module events $end"),
+        "and the CLI's own scope is not imposed on a document that had one: {text}"
+    );
+    for member in ["data[3]", "data[2]", "data[1]", "data[0]"] {
+        assert!(
+            text.lines().any(|line| {
+                line.starts_with("$var wire 1 ") && line.ends_with(&format!(" {member} $end"))
+            }),
+            "member {member} is declared bare inside its own scope: {text}"
+        );
+    }
+    assert!(
+        !text.contains("core.data") && !text.contains("wire 4"),
+        "no dotted name and no vector left behind: {text}"
+    );
+    assert!(
+        text.contains("Foreign VCD writer 1.0") && text.contains("Mon Sep 1 00:00:00 2026"),
+        "the source's own header survives a reshaping: {text}"
+    );
+
+    // The scalars keep their timelines, and a bit that did not move when its
+    // neighbours did says nothing: `data` goes 0000 -> 0011 -> 1010, so bit 2
+    // never changes and bit 1 changes once.
+    let changes: Vec<&str> = text
+        .lines()
+        .skip_while(|line| *line != "$enddefinitions $end")
+        .collect();
+    let body = changes.join("\n");
+    assert!(
+        body.contains("#5") && body.contains("#10"),
+        "both later ticks survive: {body}"
+    );
+
+    // The plain conversion of the same file keeps the scopes too, so the flag
+    // is now the only difference between the two.
+    let plain = dir.join("foreign.plain.vcd");
+    convert(&source, &plain, "vcd", &[]);
+    let plain_text = std::fs::read_to_string(&plain).expect("read the plain dump");
+    assert!(
+        plain_text.contains("$scope module top $end")
+            && plain_text.contains("$var wire 4 ")
+            && !plain_text.contains("$scope module events $end"),
+        "a plain conversion still writes the vector, in the same scopes: {plain_text}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// `--expand-buses` is about the VCD grammar, so every other format refuses it.
 ///
 /// A table already writes each member as its own `D(node)` column, so

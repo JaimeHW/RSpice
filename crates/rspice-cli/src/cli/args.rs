@@ -700,7 +700,8 @@ pub struct ConvertArgs {
     pub stop: Option<f64>,
 
     /// Write each digital bus member as its own one-bit $var instead of one
-    /// vector (--to vcd only), for readers that cannot take vectors
+    /// vector (--to vcd only), for readers that cannot take vectors. Each
+    /// member is declared where the vector was, so a dump keeps its own scopes
     #[arg(long)]
     pub expand_buses: bool,
 }
