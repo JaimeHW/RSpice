@@ -155,8 +155,10 @@ impl Instance {
 		let AJI=2f64;
 		let AJJ=-1f64;
 		let AJK=L4([0f64;4]);
-		let AJY=L2([0f64;2]);
-		let AKM=L4([0f64;4]);
+		let AJL=0f64;
+		let AJP=2.2250738585072014e-308f64;
+		let AKA=L2([0f64;2]);
+		let AKP=L4([0f64;4]);
 		let B=parameters[5]+ 273.15f64;
 		let D=(temperature+ parameters[3])+ node_potentials[4];
 		let E=D< 3.1499999999999773f64;
@@ -263,14 +265,14 @@ impl Instance {
 		if BM{
 		let BN=node_potentials[23]- node_potentials[22];
 		let BP=(BN.abs())/ BO;
-		let AJL=((L2([0.0,1f64])- L2([1f64,0.0]))* ((AJI* ((BN>= 0f64) as u8 as f64))- AIB))/ BO;
+		let AJM=((L2([0.0,1f64])- L2([1f64,0.0]))* ((AJI* ((BN>= AJL) as u8 as f64))- AIB))/ BO;
 		let BQ=node_potentials[26]- node_potentials[25];
-		let AJM=((L2([0.0,1f64])- L2([1f64,0.0]))* ((AJI* ((BQ>= 0f64) as u8 as f64))- AIB))/ BR;
+		let AJN=((L2([0.0,1f64])- L2([1f64,0.0]))* ((AJI* ((BQ>= AJL) as u8 as f64))- AIB))/ BR;
 		let BS=(C+ BP)+ ((BQ.abs())/ BR);
 		let BT=C/ BS;
-		let AJN=(((L4([AJL[0],AJL[1],0.0,0.0])+ L4([0.0,0.0,AJM[0],AJM[1]]))* BT)* AJJ)/ BS;
+		let AJO=(((L4([AJM[0],AJM[1],0.0,0.0])+ L4([0.0,0.0,AJN[0],AJN[1]]))* BT)* AJJ)/ BS;
 		DC=BT;
-		AIH=AJN;
+		AIH=AJO;
 		}else{
 		DC=C;
 		AIH=AJK;
@@ -289,33 +291,33 @@ impl Instance {
 		let DH;
 		let AII;
 		if BD{
-		let AJP=AJG* BA;
+		let AJR=AJG* BA;
 		let DD=((BA* BA)+ BE).sqrt();
-		let AJQ=(AJP+ AJP)* (AIB/ (AJI* DD));
+		let AJS=(AJR+ AJR)* (AIB/ (AJI* DD));
 		DH=DD;
-		AII=AJQ;
+		AII=AJS;
 		}else{
 		let DE=BG/ BE;
 		let DF=(DE* BA).tanh();
 		let DG=BA* DF;
-		let AJO=(AJG* DF)+ (((AJG* DE)* (AIB- (DF* DF)))* BA);
+		let AJQ=(AJG* DF)+ (((AJG* DE)* (AIB- (DF* DF)))* BA);
 		DH=DG;
-		AII=AJO;
+		AII=AJQ;
 		}
 		let DI=BC- BA;
-		let AJR=L3([0.0,AJH[0],AJH[1]]);
-		let AJS=AJR- L3([AJG[0],0.0,AJG[1]]);
+		let AJT=L3([0.0,AJH[0],AJH[1]]);
+		let AJU=AJT- L3([AJG[0],0.0,AJG[1]]);
 		let DJ=CW* AM;
-		let AJT=AJC* CW;
+		let AJV=AJC* CW;
 		let DK=CB* AM;
 		let DL=parameters[36]/ DK;
-		let AJU=AII* CV;
+		let AJW=AII* CV;
 		let DM=DL+ (CV* DH);
-		let AJV=L3([((((AJC* CB)* DL)* AJJ)/ DK),0.0,0.0])+ L3([0.0,AJU[0],AJU[1]]);
-		let AJW=AID* CS;
+		let AJX=L3([((((AJC* CB)* DL)* AJJ)/ DK),0.0,0.0])+ L3([0.0,AJW[0],AJW[1]]);
+		let AJY=AID* CS;
 		let DN=parameters[35]+ (CS* AN);
 		let DO=AO.powf(BY);
-		let AJX=AJD* (BY* (AO.powf((BY- AIB))));
+		let AJZ=AJD* (BY* ((AO+ (((AO== AJL) as u8 as f64)* AJP)).powf((BY- AIB))));
 		let DP=BX!= A;
 		let DV;
 		let AIJ;
@@ -325,68 +327,69 @@ impl Instance {
 		let DS=C/ CY;
 		let DT=DR.powf(DS);
 		let DU=DH/ DT;
-		let AJZ=(AII- ((((AII/ BX)* (CY* (DQ.powf((CY- AIB)))))* (DS* (DR.powf((DS- AIB)))))* DU))/ DT;
+		let AKB=(((AII/ BX)* (CY* ((DQ+ (((DQ== AJL) as u8 as f64)* AJP)).powf((CY- AIB)))))* (DS* ((DR+ (((DR== AJL) as u8 as f64)* AJP)).powf((DS- AIB)))))* DU;
+		let AKC=(AII- AKB)/ DT;
 		DV=DU;
-		AIJ=AJZ;
+		AIJ=AKC;
 		}else{
 		DV=A;
-		AIJ=AJY;
+		AIJ=AKA;
 		}
 		let DW=parameters[37]- (DV* CU);
-		let AKA=(((AIJ* CU)* AJJ)* DH)+ (AII* DW);
+		let AKD=(((AIJ* CU)* AJJ)* DH)+ (AII* DW);
 		let DX=DN- (DW* DH);
-		let AKB=L3([AJW,0.0,0.0])- L3([0.0,AKA[0],AKA[1]]);
+		let AKE=L3([AJY,0.0,0.0])- L3([0.0,AKD[0],AKD[1]]);
 		let DY=BL* DM;
 		let DZ=DY* AM;
-		let AKC=((AJV* BL)* AM)+ L3([(AJC* DY),0.0,0.0]);
+		let AKF=((AJX* BL)* AM)+ L3([(AJC* DY),0.0,0.0]);
 		let EA=AW* DZ;
-		let AKD=L3([(AJF* DZ),0.0,0.0])+ (AKC* AW);
+		let AKG=L3([(AJF* DZ),0.0,0.0])+ (AKF* AW);
 		let EB=(CC* DJ)/ BL;
 		let EC=DX- EB;
-		let AKE=AKB- L3([((AJT* CC)/ BL),0.0,0.0]);
+		let AKH=AKE- L3([((AJV* CC)/ BL),0.0,0.0]);
 		let EK;
 		let AIK;
 		if BD{
 		let ED=BC- DI;
-		let AKH=(AJR- AJS)* ED;
+		let AKK=(AJT- AJU)* ED;
 		let EE=((ED* ED)+ BE).sqrt();
 		let EF=BF* ((BC+ DI)+ EE);
-		let AKI=((AJR+ AJS)+ ((AKH+ AKH)* (AIB/ (AJI* EE))))* BF;
+		let AKL=((AJT+ AJU)+ ((AKK+ AKK)* (AIB/ (AJI* EE))))* BF;
 		EK=EF;
-		AIK=AKI;
+		AIK=AKL;
 		}else{
 		let EG=BC- DI;
-		let AKF=AJR- AJS;
+		let AKI=AJT- AJU;
 		let EH=BG/ BE;
 		let EI=(EH* EG).tanh();
 		let EJ=BF* ((BC+ DI)+ (EG* EI));
-		let AKG=((AJR+ AJS)+ ((AKF* EI)+ (((AKF* EH)* (AIB- (EI* EI)))* EG)))* BF;
+		let AKJ=((AJT+ AJU)+ ((AKI* EI)+ (((AKI* EH)* (AIB- (EI* EI)))* EG)))* BF;
 		EK=EJ;
-		AIK=AKG;
+		AIK=AKJ;
 		}
-		let AKJ=L4([AKE[0],AKE[1],0.0,AKE[2]]);
+		let AKM=L4([AKH[0],AKH[1],0.0,AKH[2]]);
 		let EL=(EK- EC)/ DJ;
-		let AKK=((L4([0.0,AIK[0],AIK[1],AIK[2]])- AKJ)- L4([(AJT* EL),0.0,0.0,0.0]))/ DJ;
+		let AKN=((L4([0.0,AIK[0],AIK[1],AIK[2]])- AKM)- L4([(AJV* EL),0.0,0.0,0.0]))/ DJ;
 		let EM=EL> BK;
 		let FB;
 		let AIL;
 		if EM{
 		FB=A;
-		AIL=AKM;
+		AIL=AKP;
 		}else{
 		let EN=EL< -50f64;
 		let FC;
 		let AIM;
 		if EN{
 		FC=C;
-		AIM=AKM;
+		AIM=AKP;
 		}else{
 		let EO=EL.exp();
 		let EP=C+ EO;
 		let EQ=C/ EP;
-		let AKL=(((AKK* EO)* EQ)* AJJ)/ EP;
+		let AKO=(((AKN* EO)* EQ)* AJJ)/ EP;
 		FC=EQ;
-		AIM=AKL;
+		AIM=AKO;
 		}
 		FB=FC;
 		AIL=AIM;
@@ -395,38 +398,38 @@ impl Instance {
 		let AIN;
 		if BD{
 		let ER=BC- DI;
-		let AKP=(AJR- AJS)* ER;
+		let AKS=(AJT- AJU)* ER;
 		let ES=((ER* ER)+ BE).sqrt();
 		let ET=BF* ((BC+ DI)+ ES);
-		let AKQ=((AJR+ AJS)+ ((AKP+ AKP)* (AIB/ (AJI* ES))))* BF;
+		let AKT=((AJT+ AJU)+ ((AKS+ AKS)* (AIB/ (AJI* ES))))* BF;
 		EY=ET;
-		AIN=AKQ;
+		AIN=AKT;
 		}else{
 		let EU=BC- DI;
-		let AKN=AJR- AJS;
+		let AKQ=AJT- AJU;
 		let EV=BG/ BE;
 		let EW=(EV* EU).tanh();
 		let EX=BF* ((BC+ DI)+ (EU* EW));
-		let AKO=((AJR+ AJS)+ ((AKN* EW)+ (((AKN* EV)* (AIB- (EW* EW)))* EU)))* BF;
+		let AKR=((AJT+ AJU)+ ((AKQ* EW)+ (((AKQ* EV)* (AIB- (EW* EW)))* EU)))* BF;
 		EY=EX;
-		AIN=AKO;
+		AIN=AKR;
 		}
 		let EZ=CC* AB;
 		let FA=EZ* DJ;
-		let AKR=AJT* EZ;
-		let AKS=L4([AKB[0],AKB[1],0.0,AKB[2]]);
+		let AKU=AJV* EZ;
+		let AKV=L4([AKE[0],AKE[1],0.0,AKE[2]]);
 		let FD=(EY- (DX- (FA* FB)))/ DZ;
-		let AKT=AKC* FD;
-		let AKU=((L4([0.0,AIN[0],AIN[1],AIN[2]])- (AKS- (L4([(AKR* FB),0.0,0.0,0.0])+ (AIL* FA))))- L4([AKT[0],AKT[1],0.0,AKT[2]]))/ DZ;
+		let AKW=AKF* FD;
+		let AKX=((L4([0.0,AIN[0],AIN[1],AIN[2]])- (AKV- (L4([(AKU* FB),0.0,0.0,0.0])+ (AIL* FA))))- L4([AKW[0],AKW[1],0.0,AKW[2]]))/ DZ;
 		let FE=FD> BK;
 		let FN;
 		let AIO;
 		if FE{
 		let FF=EA* FD;
-		let AKZ=AKD* FD;
-		let ALA=L4([AKZ[0],AKZ[1],0.0,AKZ[2]])+ (AKU* EA);
+		let ALC=AKG* FD;
+		let ALD=L4([ALC[0],ALC[1],0.0,ALC[2]])+ (AKX* EA);
 		FN=FF;
-		AIO=ALA;
+		AIO=ALD;
 		}else{
 		let FG=FD< -50f64;
 		let FO;
@@ -434,19 +437,19 @@ impl Instance {
 		if FG{
 		let FH=FD.exp();
 		let FI=EA* FH;
-		let AKX=AKD* FH;
-		let AKY=L4([AKX[0],AKX[1],0.0,AKX[2]])+ ((AKU* FH)* EA);
+		let ALA=AKG* FH;
+		let ALB=L4([ALA[0],ALA[1],0.0,ALA[2]])+ ((AKX* FH)* EA);
 		FO=FI;
-		AIP=AKY;
+		AIP=ALB;
 		}else{
 		let FJ=FD.exp();
 		let FK=C+ FJ;
 		let FL=FK.ln();
 		let FM=EA* FL;
-		let AKV=AKD* FL;
-		let AKW=L4([AKV[0],AKV[1],0.0,AKV[2]])+ (((AKU* FJ)* (AIB/ FK))* EA);
+		let AKY=AKG* FL;
+		let AKZ=L4([AKY[0],AKY[1],0.0,AKY[2]])+ (((AKX* FJ)* (AIB/ FK))* EA);
 		FO=FM;
-		AIP=AKW;
+		AIP=AKZ;
 		}
 		FN=FO;
 		AIO=AIP;
@@ -455,138 +458,140 @@ impl Instance {
 		let FQ=C+ FP;
 		let FR=DO* FQ;
 		let FS=BH/ FR;
-		let ALB=(((L4([(AJX* FQ),0.0,0.0,0.0])+ ((((AIO* CZ)- L4([(AJF* FP),0.0,0.0,0.0]))/ AW)* DO))* FS)* AJJ)/ FR;
+		let ALE=(((L4([(AJZ* FQ),0.0,0.0,0.0])+ ((((AIO* CZ)- L4([(AJF* FP),0.0,0.0,0.0]))/ AW)* DO))* FS)* AJJ)/ FR;
 		let FT=C+ (BZ* W);
 		let FU=(C+ (BZ* B))/ FT;
 		let FV=CX* FU;
 		let FW=C+ ((CA* DH)/ CT);
-		let ALC=((AII* CA)/ CT)* FV;
-		let ALD=L3([((((((AID* BZ)* FU)* AJJ)/ FT)* CX)* FW),0.0,0.0])+ L3([0.0,ALC[0],ALC[1]]);
+		let ALF=((AII* CA)/ CT)* FV;
+		let ALG=L3([((((((AID* BZ)* FU)* AJJ)/ FT)* CX)* FW),0.0,0.0])+ L3([0.0,ALF[0],ALF[1]]);
 		let FX=(DA* FN)/ AW;
 		let FY=C+ FX;
 		let FZ=(FV* FW)/ FY;
-		let ALE=(L4([ALD[0],ALD[1],0.0,ALD[2]])- ((((AIO* DA)- L4([(AJF* FX),0.0,0.0,0.0]))/ AW)* FZ))/ FY;
+		let ALH=(L4([ALG[0],ALG[1],0.0,ALG[2]])- ((((AIO* DA)- L4([(AJF* FX),0.0,0.0,0.0]))/ AW)* FZ))/ FY;
 		let GA=BL* FB;
 		let GB=GA* AM;
 		let GC=C- FB;
-		let ALF=AIL* AJJ;
+		let ALI=AIL* AJJ;
 		let GD=((GB* FS)/ CT)+ (GC* FZ);
-		let ALG=((((((AIL* BL)* AM)+ L4([(AJC* GA),0.0,0.0,0.0]))* FS)+ (ALB* GB))/ CT)+ ((ALF* FZ)+ (ALE* GC));
+		let ALJ=((((((AIL* BL)* AM)+ L4([(AJC* GA),0.0,0.0,0.0]))* FS)+ (ALE* GB))/ CT)+ ((ALI* FZ)+ (ALH* GC));
 		let GE=(FZ* CT)/ FS;
-		let ALH=((ALE* CT)- (ALB* GE))/ FS;
+		let ALK=((ALH* CT)- (ALE* GE))/ FS;
 		let GF=(BL* FN)/ AW;
 		let GG=GF/ GE;
 		let GH=(C+ GG).sqrt();
 		let GI=(GE* GH)- GE;
 		let GJ=DZ* FB;
-		let ALI=AKC* FB;
-		let ALJ=L4([ALI[0],ALI[1],0.0,ALI[2]])+ (AIL* DZ);
+		let ALL=AKF* FB;
+		let ALM=L4([ALL[0],ALL[1],0.0,ALL[2]])+ (AIL* DZ);
 		let GK=(GE* GC)+ GJ;
-		let ALK=((ALH* GC)+ (ALF* GE))+ ALJ;
-		let ALL=((((ALH* GH)+ (((((((AIO* BL)- L4([(AJF* GF),0.0,0.0,0.0]))/ AW)- (ALH* GG))/ GE)* (AIB/ (AJI* GH)))* GE))- ALH)* GC)+ (ALF* GI);
+		let ALN=((ALK* GC)+ (ALI* GE))+ ALM;
+		let ALO=((((ALK* GH)+ (((((((AIO* BL)- L4([(AJF* GF),0.0,0.0,0.0]))/ AW)- (ALK* GG))/ GE)* (AIB/ (AJI* GH)))* GE))- ALK)* GC)+ (ALI* GI);
 		let GL=(GI* GC)+ GJ;
-		let ALM=ALL+ ALJ;
+		let ALP=ALO+ ALM;
 		let GM=BA/ GL;
-		let ALN=(L4([0.0,AJG[0],0.0,AJG[1]])- (ALM* GM))/ GL;
+		let ALQ=(L4([0.0,AJG[0],0.0,AJG[1]])- (ALP* GM))/ GL;
 		let GU;
 		let AIQ;
 		if BD{
 		let GN=A- GM;
-		let ALQ=(ALN* AJJ)* GN;
+		let ALT=(ALQ* AJJ)* GN;
 		let GO=((GN* GN)+ BE).sqrt();
 		let GP=BF* (GM+ GO);
-		let ALR=(ALN+ ((ALQ+ ALQ)* (AIB/ (AJI* GO))))* BF;
+		let ALU=(ALQ+ ((ALT+ ALT)* (AIB/ (AJI* GO))))* BF;
 		GU=GP;
-		AIQ=ALR;
+		AIQ=ALU;
 		}else{
 		let GQ=A- GM;
-		let ALO=ALN* AJJ;
+		let ALR=ALQ* AJJ;
 		let GR=BG/ BE;
 		let GS=(GR* GQ).tanh();
 		let GT=BF* (GM+ (GQ* GS));
-		let ALP=(ALN+ ((ALO* GS)+ (((ALO* GR)* (AIB- (GS* GS)))* GQ)))* BF;
+		let ALS=(ALQ+ ((ALR* GS)+ (((ALR* GR)* (AIB- (GS* GS)))* GQ)))* BF;
 		GU=GT;
-		AIQ=ALP;
+		AIQ=ALS;
 		}
-		let ALS=CY- AIB;
+		let ALV=CY- AIB;
 		let GV=C+ (GU.powf(CY));
 		let GW=C/ CY;
 		let GX=GV.powf(GW);
-		let ALT=GW- AIB;
+		let ALW=GW- AIB;
 		let GY=C/ GX;
 		let GZ=BA* GY;
-		let ALU=AJG* GY;
-		let ALV=L4([0.0,ALU[0],0.0,ALU[1]])+ ((((((AIQ* (CY* (GU.powf(ALS))))* (GW* (GV.powf(ALT))))* GY)* AJJ)/ GX)* BA);
+		let ALX=AJG* GY;
+		let ALY=(((((AIQ* (CY* ((GU+ (((GU== AJL) as u8 as f64)* AJP)).powf(ALV))))* (GW* ((GV+ (((GV== AJL) as u8 as f64)* AJP)).powf(ALW))))* GY)* AJJ)/ GX)* BA;
+		let ALZ=L4([0.0,ALX[0],0.0,ALX[1]])+ ALY;
 		let HA=-BA;
-		let ALW=AJG* AJJ;
+		let AMA=AJG* AJJ;
 		let HB=HA/ GL;
-		let ALX=(L4([0.0,ALW[0],0.0,ALW[1]])- (ALM* HB))/ GL;
+		let AMB=(L4([0.0,AMA[0],0.0,AMA[1]])- (ALP* HB))/ GL;
 		let HJ;
 		let AIR;
 		if BD{
 		let HC=A- HB;
-		let AMA=(ALX* AJJ)* HC;
+		let AME=(AMB* AJJ)* HC;
 		let HD=((HC* HC)+ BE).sqrt();
 		let HE=BF* (HB+ HD);
-		let AMB=(ALX+ ((AMA+ AMA)* (AIB/ (AJI* HD))))* BF;
+		let AMF=(AMB+ ((AME+ AME)* (AIB/ (AJI* HD))))* BF;
 		HJ=HE;
-		AIR=AMB;
+		AIR=AMF;
 		}else{
 		let HF=A- HB;
-		let ALY=ALX* AJJ;
+		let AMC=AMB* AJJ;
 		let HG=BG/ BE;
 		let HH=(HG* HF).tanh();
 		let HI=BF* (HB+ (HF* HH));
-		let ALZ=(ALX+ ((ALY* HH)+ (((ALY* HG)* (AIB- (HH* HH)))* HF)))* BF;
+		let AMD=(AMB+ ((AMC* HH)+ (((AMC* HG)* (AIB- (HH* HH)))* HF)))* BF;
 		HJ=HI;
-		AIR=ALZ;
+		AIR=AMD;
 		}
 		let HK=C+ (HJ.powf(CY));
 		let HL=HK.powf(GW);
 		let HM=C/ HL;
 		let HN=HA* HM;
-		let AMC=ALW* HM;
-		let AMD=L4([0.0,AMC[0],0.0,AMC[1]])+ ((((((AIR* (CY* (HJ.powf(ALS))))* (GW* (HK.powf(ALT))))* HM)* AJJ)/ HL)* HA);
-		let AME=L4([0.0,0.0,AJH[0],AJH[1]]);
+		let AMG=AMA* HM;
+		let AMH=(((((AIR* (CY* ((HJ+ (((HJ== AJL) as u8 as f64)* AJP)).powf(ALV))))* (GW* ((HK+ (((HK== AJL) as u8 as f64)* AJP)).powf(ALW))))* HM)* AJJ)/ HL)* HA;
+		let AMI=L4([0.0,AMG[0],0.0,AMG[1]])+ AMH;
+		let AMJ=L4([0.0,0.0,AJH[0],AJH[1]]);
 		let HO=(BC- EC)/ DJ;
-		let AMF=((AME- AKJ)- L4([(AJT* HO),0.0,0.0,0.0]))/ DJ;
+		let AMK=((AMJ- AKM)- L4([(AJV* HO),0.0,0.0,0.0]))/ DJ;
 		let HP=HO> BK;
 		let HU;
 		let AIS;
 		if HP{
 		HU=A;
-		AIS=AKM;
+		AIS=AKP;
 		}else{
 		let HQ=HO< -50f64;
 		let HV;
 		let AIT;
 		if HQ{
 		HV=C;
-		AIT=AKM;
+		AIT=AKP;
 		}else{
 		let HR=HO.exp();
 		let HS=C+ HR;
 		let HT=C/ HS;
-		let AMG=(((AMF* HR)* HT)* AJJ)/ HS;
+		let AML=(((AMK* HR)* HT)* AJJ)/ HS;
 		HV=HT;
-		AIT=AMG;
+		AIT=AML;
 		}
 		HU=HV;
 		AIS=AIT;
 		}
-		let AMH=L4([0.0,AJS[0],AJS[1],AJS[2]]);
+		let AMM=L4([0.0,AJU[0],AJU[1],AJU[2]]);
 		let HW=((DI- HN)- (DX- (FA* HU)))/ DZ;
-		let AMI=AKC* HW;
-		let AMJ=(((AMH- AMD)- (AKS- (L4([(AKR* HU),0.0,0.0,0.0])+ (AIS* FA))))- L4([AMI[0],AMI[1],0.0,AMI[2]]))/ DZ;
+		let AMN=AKF* HW;
+		let AMO=(((AMM- AMI)- (AKV- (L4([(AKU* HU),0.0,0.0,0.0])+ (AIS* FA))))- L4([AMN[0],AMN[1],0.0,AMN[2]]))/ DZ;
 		let HX=HW> BK;
 		let IY;
 		let AIU;
 		if HX{
 		let HY=EA* HW;
-		let AMO=AKD* HW;
-		let AMP=L4([AMO[0],AMO[1],0.0,AMO[2]])+ (AMJ* EA);
+		let AMT=AKG* HW;
+		let AMU=L4([AMT[0],AMT[1],0.0,AMT[2]])+ (AMO* EA);
 		IY=HY;
-		AIU=AMP;
+		AIU=AMU;
 		}else{
 		let HZ=HW< -50f64;
 		let IZ;
@@ -594,61 +599,61 @@ impl Instance {
 		if HZ{
 		let IA=HW.exp();
 		let IB=EA* IA;
-		let AMM=AKD* IA;
-		let AMN=L4([AMM[0],AMM[1],0.0,AMM[2]])+ ((AMJ* IA)* EA);
+		let AMR=AKG* IA;
+		let AMS=L4([AMR[0],AMR[1],0.0,AMR[2]])+ ((AMO* IA)* EA);
 		IZ=IB;
-		AIV=AMN;
+		AIV=AMS;
 		}else{
 		let IC=HW.exp();
 		let ID=C+ IC;
 		let IE=ID.ln();
 		let IF=EA* IE;
-		let AMK=AKD* IE;
-		let AML=L4([AMK[0],AMK[1],0.0,AMK[2]])+ (((AMJ* IC)* (AIB/ ID))* EA);
+		let AMP=AKG* IE;
+		let AMQ=L4([AMP[0],AMP[1],0.0,AMP[2]])+ (((AMO* IC)* (AIB/ ID))* EA);
 		IZ=IF;
-		AIV=AML;
+		AIV=AMQ;
 		}
 		IY=IZ;
 		AIU=AIV;
 		}
 		let IG=(DI- EC)/ DJ;
-		let AMQ=((AMH- AKJ)- L4([(AJT* IG),0.0,0.0,0.0]))/ DJ;
+		let AMV=((AMM- AKM)- L4([(AJV* IG),0.0,0.0,0.0]))/ DJ;
 		let IH=IG> BK;
 		let IM;
 		let AIW;
 		if IH{
 		IM=A;
-		AIW=AKM;
+		AIW=AKP;
 		}else{
 		let II=IG< -50f64;
 		let IN;
 		let AIX;
 		if II{
 		IN=C;
-		AIX=AKM;
+		AIX=AKP;
 		}else{
 		let IJ=IG.exp();
 		let IK=C+ IJ;
 		let IL=C/ IK;
-		let AMR=(((AMQ* IJ)* IL)* AJJ)/ IK;
+		let AMW=(((AMV* IJ)* IL)* AJJ)/ IK;
 		IN=IL;
-		AIX=AMR;
+		AIX=AMW;
 		}
 		IM=IN;
 		AIW=AIX;
 		}
 		let IO=((BC- GZ)- (DX- (FA* IM)))/ DZ;
-		let AMS=AKC* IO;
-		let AMT=(((AME- ALV)- (AKS- (L4([(AKR* IM),0.0,0.0,0.0])+ (AIW* FA))))- L4([AMS[0],AMS[1],0.0,AMS[2]]))/ DZ;
+		let AMX=AKF* IO;
+		let AMY=(((AMJ- ALZ)- (AKV- (L4([(AKU* IM),0.0,0.0,0.0])+ (AIW* FA))))- L4([AMX[0],AMX[1],0.0,AMX[2]]))/ DZ;
 		let IP=IO> BK;
 		let JA;
 		let AIY;
 		if IP{
 		let IQ=EA* IO;
-		let AMY=AKD* IO;
-		let AMZ=L4([AMY[0],AMY[1],0.0,AMY[2]])+ (AMT* EA);
+		let AND=AKG* IO;
+		let ANE=L4([AND[0],AND[1],0.0,AND[2]])+ (AMY* EA);
 		JA=IQ;
-		AIY=AMZ;
+		AIY=ANE;
 		}else{
 		let IR=IO< -50f64;
 		let JB;
@@ -656,55 +661,55 @@ impl Instance {
 		if IR{
 		let IS=IO.exp();
 		let IT=EA* IS;
-		let AMW=AKD* IS;
-		let AMX=L4([AMW[0],AMW[1],0.0,AMW[2]])+ ((AMT* IS)* EA);
+		let ANB=AKG* IS;
+		let ANC=L4([ANB[0],ANB[1],0.0,ANB[2]])+ ((AMY* IS)* EA);
 		JB=IT;
-		AIZ=AMX;
+		AIZ=ANC;
 		}else{
 		let IU=IO.exp();
 		let IV=C+ IU;
 		let IW=IV.ln();
 		let IX=EA* IW;
-		let AMU=AKD* IW;
-		let AMV=L4([AMU[0],AMU[1],0.0,AMU[2]])+ (((AMT* IU)* (AIB/ IV))* EA);
+		let AMZ=AKG* IW;
+		let ANA=L4([AMZ[0],AMZ[1],0.0,AMZ[2]])+ (((AMY* IU)* (AIB/ IV))* EA);
 		JB=IX;
-		AIZ=AMV;
+		AIZ=ANA;
 		}
 		JA=JB;
 		AIY=AIZ;
 		}
 		let JC=(IY- JA)/ AW;
 		let JD=JC/ GK;
-		let ANA=((((AIU- AIY)- L4([(AJF* JC),0.0,0.0,0.0]))/ AW)- (ALK* JD))/ GK;
+		let ANF=((((AIU- AIY)- L4([(AJF* JC),0.0,0.0,0.0]))/ AW)- (ALN* JD))/ GK;
 		let JI;
 		let AJA;
 		if BD{
-		let ANC=ANA* JD;
+		let ANH=ANF* JD;
 		let JE=((JD* JD)+ BE).sqrt();
-		let AND=(ANC+ ANC)* (AIB/ (AJI* JE));
+		let ANI=(ANH+ ANH)* (AIB/ (AJI* JE));
 		JI=JE;
-		AJA=AND;
+		AJA=ANI;
 		}else{
 		let JF=BG/ BE;
 		let JG=(JF* JD).tanh();
 		let JH=JD* JG;
-		let ANB=(ANA* JG)+ (((ANA* JF)* (AIB- (JG* JG)))* JD);
+		let ANG=(ANF* JG)+ (((ANF* JF)* (AIB- (JG* JG)))* JD);
 		JI=JH;
-		AJA=ANB;
+		AJA=ANG;
 		}
 		let JJ=C+ (JI.powf(CY));
 		let JK=JJ.powf(GW);
 		let JL=JD/ JK;
 		let JM=GD* JL;
+		let ANJ=((ANF- (((AJA* (CY* ((JI+ (((JI== AJL) as u8 as f64)* AJP)).powf(ALV))))* (GW* ((JJ+ (((JJ== AJL) as u8 as f64)* AJP)).powf(ALW))))* JL))/ JK)* GD;
 		let JN=(AX* K)* L;
 		let JO=JN* BF;
 		let JP=JO* (IY+ JA);
 		let JQ=JP* JM;
-		let ANE=(((AIU+ AIY)* JO)* JM)+ (((ALG* JL)+ (((ANA- (((AJA* (CY* (JI.powf(ALS))))* (GW* (JJ.powf(ALT))))* JL))/ JK)* GD))* JP);
 		let JR=JQ* DB;
-		let ANF=ANE* DB;
-		let ANG=AIG* JQ;
-		let ANH=L8([ANF[0],ANF[1],ANF[2],ANF[3],0.0,0.0,0.0,0.0])+ L8([0.0,0.0,0.0,0.0,ANG[0],ANG[1],ANG[2],ANG[3]]);
+		let ANK=((((AIU+ AIY)* JO)* JM)+ (((ALJ* JL)+ ANJ)* JP))* DB;
+		let ANL=AIG* JQ;
+		let ANM=L8([ANK[0],ANK[1],ANK[2],ANK[3],0.0,0.0,0.0,0.0])+ L8([0.0,0.0,0.0,0.0,ANL[0],ANL[1],ANL[2],ANL[3]]);
 		let JS=(BL* DL)* AM;
 		let JT=AW* JS;
 		let JU=DN- EB;
@@ -1766,7 +1771,7 @@ impl Instance {
 		}else{
 		AFA
 		};
-		let AFF=(5.52248e-23f64* W)* ANH[2];
+		let AFF=(5.52248e-23f64* W)* ANM[2];
 		let AFG=(AFF* (MS+ MT))/ (MR* AR);
 		let AFH=P!= A;
 		let AFI=CL&& AFH;
@@ -2300,7 +2305,7 @@ impl Instance {
         let ABI=1.9287498479639178e-22f64;
         let ACG=1.9287498479639178e-22f64;
         let ADT=parameters[352];
-        let AJJ=1f64;
+        let AHI=2.2250738585072014e-308f64;
         let AJK=1f64;
         let AJL=1f64;
         let AJM=1f64;
@@ -2316,7 +2321,7 @@ impl Instance {
         let AJW=1f64;
         let AJX=1f64;
         let AJY=1f64;
-        let AKZ=0f64;
+        let AJZ=1f64;
         let ALA=0f64;
         let ALB=0f64;
         let ALC=0f64;
@@ -2332,6 +2337,7 @@ impl Instance {
         let ALM=0f64;
         let ALN=0f64;
         let ALO=0f64;
+        let ALP=0f64;
         let B=parameters[5]+ 273.15f64;
         let D=(temperature+ parameters[3])+ node_potentials[4];
         let E=D< 3.1499999999999773f64;
@@ -2462,24 +2468,24 @@ impl Instance {
         let AGQ;
         if BB{
         let DF=BA- CR;
-        let AHK=(AV- AV)* DF;
+        let AHL=(AV- AV)* DF;
         let DG=((DF* DF)+ BC).sqrt();
         let DH=BD* ((BA+ CR)+ DG);
-        let AHL=((AV+ AV)+ ((AHK+ AHK)* (C/ (BJ* DG))))* BD;
+        let AHM=((AV+ AV)+ ((AHL+ AHL)* (C/ (BJ* DG))))* BD;
         DM=DH;
-        AGQ=AHL;
+        AGQ=AHM;
         }else{
         let DI=BA- CR;
-        let AHI=AV- AV;
+        let AHJ=AV- AV;
         let DJ=BE/ BC;
         let DK=(DJ* DI).tanh();
         let DL=BD* ((BA+ CR)+ (DI* DK));
-        let AHJ=((AV+ AV)+ ((AHI* DK)+ (((AHI* DJ)* (C- (DK* DK)))* DI)))* BD;
+        let AHK=((AV+ AV)+ ((AHJ* DK)+ (((AHJ* DJ)* (C- (DK* DK)))* DI)))* BD;
         DM=DL;
-        AGQ=AHJ;
+        AGQ=AHK;
         }
         let DN=(DM- DE)/ CS;
-        let AHM=AGQ/ CS;
+        let AHN=AGQ/ CS;
         let DO=DN> BI;
         let EC;
         let AGR;
@@ -2497,9 +2503,9 @@ impl Instance {
         let DQ=DN.exp();
         let DR=C+ DQ;
         let DS=C/ DR;
-        let AHN=(-(DS* (AHM* DQ)))/ DR;
+        let AHO=(-(DS* (AHN* DQ)))/ DR;
         ED=DS;
-        AGS=AHN;
+        AGS=AHO;
         }
         EC=ED;
         AGR=AGS;
@@ -2508,33 +2514,33 @@ impl Instance {
         let AGT;
         if BB{
         let DT=BA- CR;
-        let AHQ=(AV- AV)* DT;
+        let AHR=(AV- AV)* DT;
         let DU=((DT* DT)+ BC).sqrt();
         let DV=BD* ((BA+ CR)+ DU);
-        let AHR=((AV+ AV)+ ((AHQ+ AHQ)* (C/ (BJ* DU))))* BD;
+        let AHS=((AV+ AV)+ ((AHR+ AHR)* (C/ (BJ* DU))))* BD;
         EA=DV;
-        AGT=AHR;
+        AGT=AHS;
         }else{
         let DW=BA- CR;
-        let AHO=AV- AV;
+        let AHP=AV- AV;
         let DX=BE/ BC;
         let DY=(DX* DW).tanh();
         let DZ=BD* ((BA+ CR)+ (DW* DY));
-        let AHP=((AV+ AV)+ ((AHO* DY)+ (((AHO* DX)* (C- (DY* DY)))* DW)))* BD;
+        let AHQ=((AV+ AV)+ ((AHP* DY)+ (((AHP* DX)* (C- (DY* DY)))* DW)))* BD;
         EA=DZ;
-        AGT=AHP;
+        AGT=AHQ;
         }
         let EB=(BS* AB)* CS;
         let EE=(EA- (DA- (EB* EC)))/ DB;
-        let AHS=(AGT- (-(AGR* EB)))/ DB;
+        let AHT=(AGT- (-(AGR* EB)))/ DB;
         let EF=EE> BI;
         let EN;
         let AGU;
         if EF{
         let EG=DC* EE;
-        let AHV=AHS* DC;
+        let AHW=AHT* DC;
         EN=EG;
-        AGU=AHV;
+        AGU=AHW;
         }else{
         let EH=EE< -50f64;
         let EO;
@@ -2542,103 +2548,103 @@ impl Instance {
         if EH{
         let EI=EE.exp();
         let EJ=DC* EI;
-        let AHU=(AHS* EI)* DC;
+        let AHV=(AHT* EI)* DC;
         EO=EJ;
-        AGV=AHU;
+        AGV=AHV;
         }else{
         let EK=EE.exp();
         let EL=C+ EK;
         let EM=DC* (EL.ln());
-        let AHT=((AHS* EK)* (C/ EL))* DC;
+        let AHU=((AHT* EK)* (C/ EL))* DC;
         EO=EM;
-        AGV=AHT;
+        AGV=AHU;
         }
         EN=EO;
         AGU=AGV;
         }
         let EP=CW* (C+ ((CK* EN)/ AU));
         let EQ=BF/ EP;
-        let AHW=(-(EQ* (((AGU* CK)/ AU)* CW)))/ EP;
+        let AHX=(-(EQ* (((AGU* CK)/ AU)* CW)))/ EP;
         let ER=parameters[32]* ((C+ (BR* B))/ (C+ (BR* W)));
         let ES=C+ ((CL* EN)/ AU);
         let ET=(ER* (C+ ((parameters[42]* CQ)/ CI)))/ ES;
-        let AHX=(-(ET* ((AGU* CL)/ AU)))/ ES;
+        let AHY=(-(ET* ((AGU* CL)/ AU)))/ ES;
         let EU=(BJ* EC)* AL;
         let EV=C- EC;
-        let AHY=-AGR;
+        let AHZ=-AGR;
         let EW=((EU* EQ)/ CI)+ (EV* ET);
-        let AHZ=(((((AGR* BJ)* AL)* EQ)+ (AHW* EU))/ CI)+ ((AHY* ET)+ (AHX* EV));
+        let AIA=(((((AGR* BJ)* AL)* EQ)+ (AHX* EU))/ CI)+ ((AHZ* ET)+ (AHY* EV));
         let EX=(ET* CI)/ EQ;
-        let AIA=((AHX* CI)- (EX* AHW))/ EQ;
+        let AIB=((AHY* CI)- (EX* AHX))/ EQ;
         let EY=((BJ* EN)/ AU)/ EX;
         let EZ=(C+ EY).sqrt();
         let FA=(EX* EZ)- EX;
         let FB=DB* EC;
-        let AIB=AGR* DB;
+        let AIC=AGR* DB;
         let FC=(EX* EV)+ FB;
-        let AIC=((AIA* EV)+ (AHY* EX))+ AIB;
+        let AID=((AIB* EV)+ (AHZ* EX))+ AIC;
         let FD=(FA* EV)+ FB;
-        let AID=(((((AIA* EZ)+ ((((((AGU* BJ)/ AU)- (EY* AIA))/ EX)* (C/ (BJ* EZ)))* EX))- AIA)* EV)+ (AHY* FA))+ AIB;
+        let AIE=(((((AIB* EZ)+ ((((((AGU* BJ)/ AU)- (EY* AIB))/ EX)* (C/ (BJ* EZ)))* EX))- AIB)* EV)+ (AHZ* FA))+ AIC;
         let FE=AY/ FD;
-        let AIE=(-(FE* AID))/ FD;
+        let AIF=(-(FE* AIE))/ FD;
         let FM;
         let AGW;
         if BB{
         let FF=A- FE;
-        let AIH=(-AIE)* FF;
+        let AII=(-AIF)* FF;
         let FG=((FF* FF)+ BC).sqrt();
         let FH=BD* (FE+ FG);
-        let AII=(AIE+ ((AIH+ AIH)* (C/ (BJ* FG))))* BD;
+        let AIJ=(AIF+ ((AII+ AII)* (C/ (BJ* FG))))* BD;
         FM=FH;
-        AGW=AII;
+        AGW=AIJ;
         }else{
         let FI=A- FE;
-        let AIF=-AIE;
+        let AIG=-AIF;
         let FJ=BE/ BC;
         let FK=(FJ* FI).tanh();
         let FL=BD* (FE+ (FI* FK));
-        let AIG=(AIE+ ((AIF* FK)+ (((AIF* FJ)* (C- (FK* FK)))* FI)))* BD;
+        let AIH=(AIF+ ((AIG* FK)+ (((AIG* FJ)* (C- (FK* FK)))* FI)))* BD;
         FM=FL;
-        AGW=AIG;
+        AGW=AIH;
         }
-        let AIJ=CJ- C;
+        let AIK=CJ- C;
         let FN=C+ (FM.powf(CJ));
         let FO=C/ CJ;
         let FP=FN.powf(FO);
-        let AIK=FO- C;
+        let AIL=FO- C;
         let FQ=C/ FP;
         let FR=AY* FQ;
-        let AIL=((-(FQ* ((AGW* (CJ* (FM.powf(AIJ))))* (FO* (FN.powf(AIK))))))/ FP)* AY;
+        let AIM=((-(FQ* ((AGW* (CJ* ((FM+ (((FM== A) as u8 as f64)* AHI)).powf(AIK))))* (FO* ((FN+ (((FN== A) as u8 as f64)* AHI)).powf(AIL))))))/ FP)* AY;
         let FS=-AY;
         let FT=FS/ FD;
-        let AIM=(-(FT* AID))/ FD;
+        let AIN=(-(FT* AIE))/ FD;
         let GB;
         let AGX;
         if BB{
         let FU=A- FT;
-        let AIP=(-AIM)* FU;
+        let AIQ=(-AIN)* FU;
         let FV=((FU* FU)+ BC).sqrt();
         let FW=BD* (FT+ FV);
-        let AIQ=(AIM+ ((AIP+ AIP)* (C/ (BJ* FV))))* BD;
+        let AIR=(AIN+ ((AIQ+ AIQ)* (C/ (BJ* FV))))* BD;
         GB=FW;
-        AGX=AIQ;
+        AGX=AIR;
         }else{
         let FX=A- FT;
-        let AIN=-AIM;
+        let AIO=-AIN;
         let FY=BE/ BC;
         let FZ=(FY* FX).tanh();
         let GA=BD* (FT+ (FX* FZ));
-        let AIO=(AIM+ ((AIN* FZ)+ (((AIN* FY)* (C- (FZ* FZ)))* FX)))* BD;
+        let AIP=(AIN+ ((AIO* FZ)+ (((AIO* FY)* (C- (FZ* FZ)))* FX)))* BD;
         GB=GA;
-        AGX=AIO;
+        AGX=AIP;
         }
         let GC=C+ (GB.powf(CJ));
         let GD=GC.powf(FO);
         let GE=C/ GD;
         let GF=FS* GE;
-        let AIR=((-(GE* ((AGX* (CJ* (GB.powf(AIJ))))* (FO* (GC.powf(AIK))))))/ GD)* FS;
+        let AIS=((-(GE* ((AGX* (CJ* ((GB+ (((GB== A) as u8 as f64)* AHI)).powf(AIK))))* (FO* ((GC+ (((GC== A) as u8 as f64)* AHI)).powf(AIL))))))/ GD)* FS;
         let GG=(BA- DE)/ CS;
-        let AIS=AV/ CS;
+        let AIT=AV/ CS;
         let GH=GG> BI;
         let GM;
         let AGY;
@@ -2656,23 +2662,23 @@ impl Instance {
         let GJ=GG.exp();
         let GK=C+ GJ;
         let GL=C/ GK;
-        let AIT=(-(GL* (AIS* GJ)))/ GK;
+        let AIU=(-(GL* (AIT* GJ)))/ GK;
         GN=GL;
-        AGZ=AIT;
+        AGZ=AIU;
         }
         GM=GN;
         AGY=AGZ;
         }
         let GO=((CR- GF)- (DA- (EB* GM)))/ DB;
-        let AIU=((AV- AIR)- (-(AGY* EB)))/ DB;
+        let AIV=((AV- AIS)- (-(AGY* EB)))/ DB;
         let GP=GO> BI;
         let HO;
         let AHA;
         if GP{
         let GQ=DC* GO;
-        let AIX=AIU* DC;
+        let AIY=AIV* DC;
         HO=GQ;
-        AHA=AIX;
+        AHA=AIY;
         }else{
         let GR=GO< -50f64;
         let HP;
@@ -2680,16 +2686,16 @@ impl Instance {
         if GR{
         let GS=GO.exp();
         let GT=DC* GS;
-        let AIW=(AIU* GS)* DC;
+        let AIX=(AIV* GS)* DC;
         HP=GT;
-        AHB=AIW;
+        AHB=AIX;
         }else{
         let GU=GO.exp();
         let GV=C+ GU;
         let GW=DC* (GV.ln());
-        let AIV=((AIU* GU)* (C/ GV))* DC;
+        let AIW=((AIV* GU)* (C/ GV))* DC;
         HP=GW;
-        AHB=AIV;
+        AHB=AIW;
         }
         HO=HP;
         AHA=AHB;
@@ -2712,23 +2718,23 @@ impl Instance {
         let HA=GX.exp();
         let HB=C+ HA;
         let HC=C/ HB;
-        let AIY=(-(HC* (AIS* HA)))/ HB;
+        let AIZ=(-(HC* (AIT* HA)))/ HB;
         HE=HC;
-        AHD=AIY;
+        AHD=AIZ;
         }
         HD=HE;
         AHC=AHD;
         }
         let HF=((BA- FR)- (DA- (EB* HD)))/ DB;
-        let AIZ=((AV- AIL)- (-(AHC* EB)))/ DB;
+        let AJA=((AV- AIM)- (-(AHC* EB)))/ DB;
         let HG=HF> BI;
         let HQ;
         let AHE;
         if HG{
         let HH=DC* HF;
-        let AJC=AIZ* DC;
+        let AJD=AJA* DC;
         HQ=HH;
-        AHE=AJC;
+        AHE=AJD;
         }else{
         let HI=HF< -50f64;
         let HR;
@@ -2736,48 +2742,48 @@ impl Instance {
         if HI{
         let HJ=HF.exp();
         let HK=DC* HJ;
-        let AJB=(AIZ* HJ)* DC;
+        let AJC=(AJA* HJ)* DC;
         HR=HK;
-        AHF=AJB;
+        AHF=AJC;
         }else{
         let HL=HF.exp();
         let HM=C+ HL;
         let HN=DC* (HM.ln());
-        let AJA=((AIZ* HL)* (C/ HM))* DC;
+        let AJB=((AJA* HL)* (C/ HM))* DC;
         HR=HN;
-        AHF=AJA;
+        AHF=AJB;
         }
         HQ=HR;
         AHE=AHF;
         }
         let HS=((HO- HQ)/ AU)/ FC;
-        let AJD=(((AHA- AHE)/ AU)- (HS* AIC))/ FC;
+        let AJE=(((AHA- AHE)/ AU)- (HS* AID))/ FC;
         let HX;
         let AHG;
         if BB{
-        let AJF=AJD* HS;
+        let AJG=AJE* HS;
         let HT=((HS* HS)+ BC).sqrt();
-        let AJG=(AJF+ AJF)* (C/ (BJ* HT));
+        let AJH=(AJG+ AJG)* (C/ (BJ* HT));
         HX=HT;
-        AHG=AJG;
+        AHG=AJH;
         }else{
         let HU=BE/ BC;
         let HV=(HU* HS).tanh();
         let HW=HS* HV;
-        let AJE=(AJD* HV)+ (((AJD* HU)* (C- (HV* HV)))* HS);
+        let AJF=(AJE* HV)+ (((AJE* HU)* (C- (HV* HV)))* HS);
         HX=HW;
-        AHG=AJE;
+        AHG=AJF;
         }
         let HY=C+ (HX.powf(CJ));
         let HZ=HY.powf(FO);
         let IA=HS/ HZ;
         let IB=EW* IA;
+        let AJI=((AJE- (IA* ((AHG* (CJ* ((HX+ (((HX== A) as u8 as f64)* AHI)).powf(AIK))))* (FO* ((HY+ (((HY== A) as u8 as f64)* AHI)).powf(AIL))))))/ HZ)* EW;
         let IC=(AV* K)* L;
         let ID=IC* BD;
         let IE=ID* (HO+ HQ);
-        let AJH=(((AHA+ AHE)* ID)* IB)+ (((AHZ* IA)+ (((AJD- (IA* ((AHG* (CJ* (HX.powf(AIJ))))* (FO* (HY.powf(AIK))))))/ HZ)* EW))* IE);
         let IF=(IE* IB)* CM;
-        let AJI=AJH* CM;
+        let AJJ=((((AHA+ AHE)* ID)* IB)+ (((AIA* IA)+ AJI)* IE))* CM;
         let IG=(BJ* CT)* AL;
         let IH=AU* IG;
         let II=CV- DD;
@@ -3825,7 +3831,6 @@ impl Instance {
         let AGK;
         let AGM;
         let AGO;
-        let AJZ;
         let AKA;
         let AKB;
         let AKC;
@@ -3841,6 +3846,7 @@ impl Instance {
         let AKM;
         let AKN;
         let AKO;
+        let AKP;
         if ACQ{
         let ACR=parameters[348]* AK;
         let ACY=ACR* ((ACS+ (BJ* (ACU+ ACW))).abs());
@@ -3856,146 +3862,146 @@ impl Instance {
         }else{
         ADP
         };
-        let ADU=(5.52248e-23f64* W)* AJI;
+        let ADU=(5.52248e-23f64* W)* AJJ;
         let ADV=(ADU* (LG+ LH))/ (LF* AQ);
         let ADW=P!= A;
         let ADX=CB&& ADW;
         let AFD;
         let AFF;
-        let AKP;
+        let AKQ;
         if ADX{
         let ADY=(5.52248e-23f64* W)/ ((P* CA)/ LE);
         AFD=C;
         AFF=ADY;
-        AKP=AJP;
+        AKQ=AJQ;
         }else{
         AFD=A;
         AFF=A;
-        AKP=ALF;
+        AKQ=ALG;
         }
         let ADZ=CD&& ADW;
         let AFH;
         let AFJ;
-        let AKQ;
+        let AKR;
         if ADZ{
         let AEA=(5.52248e-23f64* W)/ ((P* CC)/ LE);
         AFH=C;
         AFJ=AEA;
-        AKQ=AJQ;
+        AKR=AJR;
         }else{
         AFH=A;
         AFJ=A;
-        AKQ=ALG;
+        AKR=ALH;
         }
         let AEB=CF&& ADW;
         let AFL;
         let AFN;
-        let AKR;
+        let AKS;
         if AEB{
         let AEC=(5.52248e-23f64* W)/ ((P* CE)/ LE);
         AFL=C;
         AFN=AEC;
-        AKR=AJR;
+        AKS=AJS;
         }else{
         AFL=A;
         AFN=A;
-        AKR=ALH;
+        AKS=ALI;
         }
         let AED=CH&& ADW;
         let AFP;
         let AFR;
-        let AKS;
+        let AKT;
         if AED{
         let AEE=(5.52248e-23f64* W)/ ((P* CG)/ LE);
         AFP=C;
         AFR=AEE;
-        AKS=AJS;
+        AKT=AJT;
         }else{
         AFP=A;
         AFR=A;
-        AKS=ALI;
+        AKT=ALJ;
         }
         let AEF=BZ&& ADW;
         let AFT;
         let AFV;
-        let AKT;
+        let AKU;
         if AEF{
         let AEG=(5.52248e-23f64* W)/ ((P* BY)/ LE);
         AFT=C;
         AFV=AEG;
-        AKT=AJT;
+        AKU=AJU;
         }else{
         AFT=A;
         AFV=A;
-        AKT=ALJ;
+        AKU=ALK;
         }
         let AEH=BX&& ADW;
         let AFX;
         let AFZ;
-        let AKU;
+        let AKV;
         if AEH{
         let AEI=(5.52248e-23f64* W)/ ((P* BW)/ LE);
         AFX=C;
         AFZ=AEI;
-        AKU=AJU;
+        AKV=AJV;
         }else{
         AFX=A;
         AFZ=A;
-        AKU=ALK;
+        AKV=ALL;
         }
         let AEJ=BV&& ADW;
         let AGB;
         let AGD;
-        let AKV;
+        let AKW;
         if AEJ{
         let AEK=(5.52248e-23f64* W)/ ((P* BU)/ LE);
         AGB=C;
         AGD=AEK;
-        AKV=AJV;
+        AKW=AJW;
         }else{
         AGB=A;
         AGD=A;
-        AKV=ALL;
+        AKW=ALM;
         }
         let AEL=BP&& ADW;
         let AGF;
         let AGH;
-        let AKW;
+        let AKX;
         if AEL{
         let AEM=(5.52248e-23f64* W)/ ((P* BN)/ LE);
         AGF=C;
         AGH=AEM;
-        AKW=AJW;
+        AKX=AJX;
         }else{
         AGF=A;
         AGH=A;
-        AKW=ALM;
+        AKX=ALN;
         }
         let AGJ;
         let AGL;
-        let AKX;
+        let AKY;
         if U{
         let AEN=(5.52248e-23f64* W)/ ACO;
         AGJ=C;
         AGL=AEN;
-        AKX=AJX;
+        AKY=AJY;
         }else{
         AGJ=A;
         AGL=A;
-        AKX=ALN;
+        AKY=ALO;
         }
         let AGN;
         let AGP;
-        let AKY;
+        let AKZ;
         if AF{
         let AEO=(5.52248e-23f64* W)/ ACM;
         AGN=C;
         AGP=AEO;
-        AKY=AJY;
+        AKZ=AJZ;
         }else{
         AGN=A;
         AGP=A;
-        AKY=ALO;
+        AKZ=ALP;
         }
         AEP=C;
         AEQ=ACY;
@@ -4030,13 +4036,12 @@ impl Instance {
         AGK=AGL;
         AGM=AGN;
         AGO=AGP;
-        AJZ=AJJ;
         AKA=AJK;
         AKB=AJL;
         AKC=AJM;
         AKD=AJN;
         AKE=AJO;
-        AKF=AKP;
+        AKF=AJP;
         AKG=AKQ;
         AKH=AKR;
         AKI=AKS;
@@ -4046,6 +4051,7 @@ impl Instance {
         AKM=AKW;
         AKN=AKX;
         AKO=AKY;
+        AKP=AKZ;
         }else{
         AEP=A;
         AEQ=A;
@@ -4080,7 +4086,6 @@ impl Instance {
         AGK=A;
         AGM=A;
         AGO=A;
-        AJZ=AKZ;
         AKA=ALA;
         AKB=ALB;
         AKC=ALC;
@@ -4096,8 +4101,8 @@ impl Instance {
         AKM=ALM;
         AKN=ALN;
         AKO=ALO;
+        AKP=ALP;
         }
-        let ALP=AJZ;
         let ALQ=AKA;
         let ALR=AKB;
         let ALS=AKC;
@@ -4113,6 +4118,7 @@ impl Instance {
         let AMC=AKM;
         let AMD=AKN;
         let AME=AKO;
+        let AMF=AKP;
         let omega = core::f64::consts::TAU * frequency_hz;
         let process_0_active = AEP != 0.0;
         let process_0_psd = (AEQ).abs();
@@ -4120,7 +4126,7 @@ impl Instance {
         let process_0_exponent: Option<f64> = None;
         if let Some(value) = process_0_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 0, quantity: "exponent", value }); } }
         let process_0_table = [];
-        let process_0_gain_0 = GeneratedNoiseComplex { re: (ALP) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
+        let process_0_gain_0 = GeneratedNoiseComplex { re: (ALQ) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
         if !process_0_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 0, injection: 0, re: process_0_gain_0.re, im: process_0_gain_0.im }); }
         let process_0_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 0, gain: process_0_gain_0 }];
         if !visitor.visit_process(0, GeneratedNoiseProcessEvaluationRef { active: process_0_active, psd: process_0_psd, exponent: process_0_exponent, table_operands: &process_0_table, injections: &process_0_injections }) { return Ok(()); }
@@ -4130,7 +4136,7 @@ impl Instance {
         let process_1_exponent: Option<f64> = None;
         if let Some(value) = process_1_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 1, quantity: "exponent", value }); } }
         let process_1_table = [];
-        let process_1_gain_0 = GeneratedNoiseComplex { re: (ALQ) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
+        let process_1_gain_0 = GeneratedNoiseComplex { re: (ALR) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
         if !process_1_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 1, injection: 0, re: process_1_gain_0.re, im: process_1_gain_0.im }); }
         let process_1_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 1, gain: process_1_gain_0 }];
         if !visitor.visit_process(1, GeneratedNoiseProcessEvaluationRef { active: process_1_active, psd: process_1_psd, exponent: process_1_exponent, table_operands: &process_1_table, injections: &process_1_injections }) { return Ok(()); }
@@ -4140,7 +4146,7 @@ impl Instance {
         let process_2_exponent: Option<f64> = None;
         if let Some(value) = process_2_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 2, quantity: "exponent", value }); } }
         let process_2_table = [];
-        let process_2_gain_0 = GeneratedNoiseComplex { re: (ALR) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
+        let process_2_gain_0 = GeneratedNoiseComplex { re: (ALS) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
         if !process_2_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 2, injection: 0, re: process_2_gain_0.re, im: process_2_gain_0.im }); }
         let process_2_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 2, gain: process_2_gain_0 }];
         if !visitor.visit_process(2, GeneratedNoiseProcessEvaluationRef { active: process_2_active, psd: process_2_psd, exponent: process_2_exponent, table_operands: &process_2_table, injections: &process_2_injections }) { return Ok(()); }
@@ -4150,7 +4156,7 @@ impl Instance {
         let process_3_exponent: Option<f64> = None;
         if let Some(value) = process_3_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 3, quantity: "exponent", value }); } }
         let process_3_table = [];
-        let process_3_gain_0 = GeneratedNoiseComplex { re: (ALS) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
+        let process_3_gain_0 = GeneratedNoiseComplex { re: (ALT) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
         if !process_3_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 3, injection: 0, re: process_3_gain_0.re, im: process_3_gain_0.im }); }
         let process_3_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 3, gain: process_3_gain_0 }];
         if !visitor.visit_process(3, GeneratedNoiseProcessEvaluationRef { active: process_3_active, psd: process_3_psd, exponent: process_3_exponent, table_operands: &process_3_table, injections: &process_3_injections }) { return Ok(()); }
@@ -4160,7 +4166,7 @@ impl Instance {
         let process_4_exponent: Option<f64> = Some(AEZ);
         if let Some(value) = process_4_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 4, quantity: "exponent", value }); } }
         let process_4_table = [];
-        let process_4_gain_0 = GeneratedNoiseComplex { re: (ALT) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
+        let process_4_gain_0 = GeneratedNoiseComplex { re: (ALU) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
         if !process_4_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 4, injection: 0, re: process_4_gain_0.re, im: process_4_gain_0.im }); }
         let process_4_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 4, gain: process_4_gain_0 }];
         if !visitor.visit_process(4, GeneratedNoiseProcessEvaluationRef { active: process_4_active, psd: process_4_psd, exponent: process_4_exponent, table_operands: &process_4_table, injections: &process_4_injections }) { return Ok(()); }
@@ -4170,7 +4176,7 @@ impl Instance {
         let process_5_exponent: Option<f64> = None;
         if let Some(value) = process_5_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 5, quantity: "exponent", value }); } }
         let process_5_table = [];
-        let process_5_gain_0 = GeneratedNoiseComplex { re: (ALU) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
+        let process_5_gain_0 = GeneratedNoiseComplex { re: (ALV) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
         if !process_5_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 5, injection: 0, re: process_5_gain_0.re, im: process_5_gain_0.im }); }
         let process_5_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 5, gain: process_5_gain_0 }];
         if !visitor.visit_process(5, GeneratedNoiseProcessEvaluationRef { active: process_5_active, psd: process_5_psd, exponent: process_5_exponent, table_operands: &process_5_table, injections: &process_5_injections }) { return Ok(()); }
@@ -4180,7 +4186,7 @@ impl Instance {
         let process_6_exponent: Option<f64> = None;
         if let Some(value) = process_6_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 6, quantity: "exponent", value }); } }
         let process_6_table = [];
-        let process_6_gain_0 = GeneratedNoiseComplex { re: (ALV) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
+        let process_6_gain_0 = GeneratedNoiseComplex { re: (ALW) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
         if !process_6_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 6, injection: 0, re: process_6_gain_0.re, im: process_6_gain_0.im }); }
         let process_6_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 6, gain: process_6_gain_0 }];
         if !visitor.visit_process(6, GeneratedNoiseProcessEvaluationRef { active: process_6_active, psd: process_6_psd, exponent: process_6_exponent, table_operands: &process_6_table, injections: &process_6_injections }) { return Ok(()); }
@@ -4190,7 +4196,7 @@ impl Instance {
         let process_7_exponent: Option<f64> = None;
         if let Some(value) = process_7_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 7, quantity: "exponent", value }); } }
         let process_7_table = [];
-        let process_7_gain_0 = GeneratedNoiseComplex { re: (ALW) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
+        let process_7_gain_0 = GeneratedNoiseComplex { re: (ALX) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
         if !process_7_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 7, injection: 0, re: process_7_gain_0.re, im: process_7_gain_0.im }); }
         let process_7_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 7, gain: process_7_gain_0 }];
         if !visitor.visit_process(7, GeneratedNoiseProcessEvaluationRef { active: process_7_active, psd: process_7_psd, exponent: process_7_exponent, table_operands: &process_7_table, injections: &process_7_injections }) { return Ok(()); }
@@ -4200,7 +4206,7 @@ impl Instance {
         let process_8_exponent: Option<f64> = None;
         if let Some(value) = process_8_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 8, quantity: "exponent", value }); } }
         let process_8_table = [];
-        let process_8_gain_0 = GeneratedNoiseComplex { re: (ALX) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
+        let process_8_gain_0 = GeneratedNoiseComplex { re: (ALY) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
         if !process_8_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 8, injection: 0, re: process_8_gain_0.re, im: process_8_gain_0.im }); }
         let process_8_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 8, gain: process_8_gain_0 }];
         if !visitor.visit_process(8, GeneratedNoiseProcessEvaluationRef { active: process_8_active, psd: process_8_psd, exponent: process_8_exponent, table_operands: &process_8_table, injections: &process_8_injections }) { return Ok(()); }
@@ -4210,7 +4216,7 @@ impl Instance {
         let process_9_exponent: Option<f64> = None;
         if let Some(value) = process_9_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 9, quantity: "exponent", value }); } }
         let process_9_table = [];
-        let process_9_gain_0 = GeneratedNoiseComplex { re: (ALY) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
+        let process_9_gain_0 = GeneratedNoiseComplex { re: (ALZ) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
         if !process_9_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 9, injection: 0, re: process_9_gain_0.re, im: process_9_gain_0.im }); }
         let process_9_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 9, gain: process_9_gain_0 }];
         if !visitor.visit_process(9, GeneratedNoiseProcessEvaluationRef { active: process_9_active, psd: process_9_psd, exponent: process_9_exponent, table_operands: &process_9_table, injections: &process_9_injections }) { return Ok(()); }
@@ -4220,7 +4226,7 @@ impl Instance {
         let process_10_exponent: Option<f64> = None;
         if let Some(value) = process_10_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 10, quantity: "exponent", value }); } }
         let process_10_table = [];
-        let process_10_gain_0 = GeneratedNoiseComplex { re: (ALZ) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
+        let process_10_gain_0 = GeneratedNoiseComplex { re: (AMA) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
         if !process_10_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 10, injection: 0, re: process_10_gain_0.re, im: process_10_gain_0.im }); }
         let process_10_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 10, gain: process_10_gain_0 }];
         if !visitor.visit_process(10, GeneratedNoiseProcessEvaluationRef { active: process_10_active, psd: process_10_psd, exponent: process_10_exponent, table_operands: &process_10_table, injections: &process_10_injections }) { return Ok(()); }
@@ -4230,7 +4236,7 @@ impl Instance {
         let process_11_exponent: Option<f64> = None;
         if let Some(value) = process_11_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 11, quantity: "exponent", value }); } }
         let process_11_table = [];
-        let process_11_gain_0 = GeneratedNoiseComplex { re: (AMA) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
+        let process_11_gain_0 = GeneratedNoiseComplex { re: (AMB) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
         if !process_11_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 11, injection: 0, re: process_11_gain_0.re, im: process_11_gain_0.im }); }
         let process_11_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 11, gain: process_11_gain_0 }];
         if !visitor.visit_process(11, GeneratedNoiseProcessEvaluationRef { active: process_11_active, psd: process_11_psd, exponent: process_11_exponent, table_operands: &process_11_table, injections: &process_11_injections }) { return Ok(()); }
@@ -4240,7 +4246,7 @@ impl Instance {
         let process_12_exponent: Option<f64> = None;
         if let Some(value) = process_12_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 12, quantity: "exponent", value }); } }
         let process_12_table = [];
-        let process_12_gain_0 = GeneratedNoiseComplex { re: (AMB) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
+        let process_12_gain_0 = GeneratedNoiseComplex { re: (AMC) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
         if !process_12_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 12, injection: 0, re: process_12_gain_0.re, im: process_12_gain_0.im }); }
         let process_12_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 12, gain: process_12_gain_0 }];
         if !visitor.visit_process(12, GeneratedNoiseProcessEvaluationRef { active: process_12_active, psd: process_12_psd, exponent: process_12_exponent, table_operands: &process_12_table, injections: &process_12_injections }) { return Ok(()); }
@@ -4250,7 +4256,7 @@ impl Instance {
         let process_13_exponent: Option<f64> = None;
         if let Some(value) = process_13_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 13, quantity: "exponent", value }); } }
         let process_13_table = [];
-        let process_13_gain_0 = GeneratedNoiseComplex { re: (AMC) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
+        let process_13_gain_0 = GeneratedNoiseComplex { re: (AMD) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
         if !process_13_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 13, injection: 0, re: process_13_gain_0.re, im: process_13_gain_0.im }); }
         let process_13_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 13, gain: process_13_gain_0 }];
         if !visitor.visit_process(13, GeneratedNoiseProcessEvaluationRef { active: process_13_active, psd: process_13_psd, exponent: process_13_exponent, table_operands: &process_13_table, injections: &process_13_injections }) { return Ok(()); }
@@ -4260,7 +4266,7 @@ impl Instance {
         let process_14_exponent: Option<f64> = None;
         if let Some(value) = process_14_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 14, quantity: "exponent", value }); } }
         let process_14_table = [];
-        let process_14_gain_0 = GeneratedNoiseComplex { re: (AMD) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
+        let process_14_gain_0 = GeneratedNoiseComplex { re: (AME) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
         if !process_14_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 14, injection: 0, re: process_14_gain_0.re, im: process_14_gain_0.im }); }
         let process_14_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 14, gain: process_14_gain_0 }];
         if !visitor.visit_process(14, GeneratedNoiseProcessEvaluationRef { active: process_14_active, psd: process_14_psd, exponent: process_14_exponent, table_operands: &process_14_table, injections: &process_14_injections }) { return Ok(()); }
@@ -4270,7 +4276,7 @@ impl Instance {
         let process_15_exponent: Option<f64> = None;
         if let Some(value) = process_15_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 15, quantity: "exponent", value }); } }
         let process_15_table = [];
-        let process_15_gain_0 = GeneratedNoiseComplex { re: (AME) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
+        let process_15_gain_0 = GeneratedNoiseComplex { re: (AMF) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
         if !process_15_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 15, injection: 0, re: process_15_gain_0.re, im: process_15_gain_0.im }); }
         let process_15_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 15, gain: process_15_gain_0 }];
         if !visitor.visit_process(15, GeneratedNoiseProcessEvaluationRef { active: process_15_active, psd: process_15_psd, exponent: process_15_exponent, table_operands: &process_15_table, injections: &process_15_injections }) { return Ok(()); }

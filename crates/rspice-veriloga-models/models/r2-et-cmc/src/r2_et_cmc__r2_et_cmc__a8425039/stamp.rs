@@ -653,7 +653,7 @@ impl Instance {
 		let FZ=FX* FW;
 		let GA=C+ (FY* FW);
 		let GE=(((C- GC)- GD)+ (GC* FU))+ (GD* (GA.powf(GB)));
-		let GF=(((FT+ FT)* (1f64/ (2f64* FU)))* GC)+ (((((FZ+ FZ)* FW)+ (FX* FY))* (GB* (GA.powf(-0.6666666666666667f64))))* GD);
+		let GF=(((FT+ FT)* (1f64/ (2f64* FU)))* GC)+ (((((FZ+ FZ)* FW)+ (FX* FY))* (GB* ((GA+ (((GA== 0f64) as u8 as f64)* 2.2250738585072014e-308f64)).powf(-0.6666666666666667f64))))* GD);
 		GH=GE;
 		GI=GF;
 		}else{

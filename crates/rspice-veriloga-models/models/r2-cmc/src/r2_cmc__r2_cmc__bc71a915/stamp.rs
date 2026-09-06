@@ -536,7 +536,7 @@ impl Instance {
 		let EC=EA* DZ;
 		let ED=C+ (EB* DZ);
 		let EH=(((C- EF)- EG)+ (EF* DX))+ (EG* (ED.powf(EE)));
-		let EI=(((DW+ DW)* (1f64/ (2f64* DX)))* EF)+ (((((EC+ EC)* DZ)+ (EA* EB))* (EE* (ED.powf(-0.6666666666666667f64))))* EG);
+		let EI=(((DW+ DW)* (1f64/ (2f64* DX)))* EF)+ (((((EC+ EC)* DZ)+ (EA* EB))* (EE* ((ED+ (((ED== 0f64) as u8 as f64)* 2.2250738585072014e-308f64)).powf(-0.6666666666666667f64))))* EG);
 		EK=EH;
 		EL=EI;
 		}else{
