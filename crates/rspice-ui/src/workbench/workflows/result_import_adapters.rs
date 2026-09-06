@@ -569,7 +569,7 @@ fn parse_rspice_hdf5_section(
                 name,
                 real: hdf_f64_dataset(&group, &format!("{prefix}_real"), format)?,
                 imag: Some(hdf_f64_dataset(&group, &format!("{prefix}_imag"), format)?),
-                unit: None,
+                unit: hdf_stated_unit(&attrs, &format!("{prefix}_unit")),
             });
         }
         return finish_dataset(format, AnalysisType::Ac, "frequency", coordinate, signals);
@@ -585,7 +585,7 @@ fn parse_rspice_hdf5_section(
             name: hdf_string_attr(&attrs, &format!("{prefix}_name"), format)?,
             real: hdf_f64_dataset(&group, &prefix, format)?,
             imag: None,
-            unit: None,
+            unit: hdf_stated_unit(&attrs, &format!("{prefix}_unit")),
         });
     }
     let analysis = if section == "transient" {
@@ -749,6 +749,22 @@ fn hdf_string_attr(
             format,
             format_args!("missing attribute '{name}'"),
         )),
+    }
+}
+
+/// The unit a section states for one column, if it states one.
+///
+/// `rspice_core::io::hdf5` writes `signal_NNNN_unit` only when the producer
+/// had a unit to state, so an absent attribute means unstated rather than
+/// dimensionless, and it is never an import error. An empty or non-string
+/// value is read the same way: a waveform must not come back claiming "" as
+/// its unit.
+fn hdf_stated_unit(attrs: &HashMap<String, rustyhdf5::AttrValue>, name: &str) -> Option<String> {
+    match attrs.get(name) {
+        Some(rustyhdf5::AttrValue::String(value)) if !value.trim().is_empty() => {
+            Some(value.clone())
+        }
+        _ => None,
     }
 }
 

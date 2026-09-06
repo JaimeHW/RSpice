@@ -705,6 +705,7 @@ fn resolved_policy_rows(category: PreferenceCategory, state: &AppState) -> Vec<R
                         "VCD · event timelines",
                         "NumPy .npy · one array, column order stated",
                         "NumPy .npz · one named array per signal",
+                        "HDF5 dataset · one analysis, names and units carried",
                     ][..],
                 ),
             ] {

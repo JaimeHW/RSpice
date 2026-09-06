@@ -351,9 +351,11 @@ pub enum EngineeringExportFormat {
     NumpyArray,
     /// A NumPy archive: one named array per signal, plus the coordinate.
     NumpyArchive,
-    /// Reserved by the approved mockup. The UI must not offer this until the
-    /// UI crate has a verified cross-platform HDF5 publication backend. It is
-    /// last so that every offered format keeps a contiguous picker index.
+    /// One analysis as an HDF5 dataset, in the layout `rspice_core::io::hdf5`
+    /// defines and the CLI publishes: named columns on one coordinate, with
+    /// quantities and units as group attributes and complex signals as
+    /// real/imaginary pairs. The backend is pure Rust, so the browser
+    /// publishes it too.
     Hdf5EngineeringDataset,
 }
 
@@ -382,14 +384,18 @@ impl EngineeringExportFormat {
             5 => Ok(Self::ValueChangeDump),
             6 => Ok(Self::NumpyArray),
             7 => Ok(Self::NumpyArchive),
-            8 => Err("HDF5 engineering export is not available in this build"),
+            8 => Ok(Self::Hdf5EngineeringDataset),
             _ => Err("engineering export index is outside its domain"),
         }
     }
 
+    /// Every offered format now has an encoder. The check stays because the
+    /// picker's storage is durable: a preference written by a build that
+    /// offered something this one does not must fall back rather than dispatch
+    /// into a format with no writer.
     #[must_use]
     pub const fn is_runtime_supported(self) -> bool {
-        !matches!(self, Self::Hdf5EngineeringDataset)
+        true
     }
 }
 
@@ -1619,31 +1625,46 @@ mod tests {
         assert_eq!(serde_json::to_value(preferences).unwrap()["results"], 17);
     }
 
+    /// A choice stored while HDF5 was reserved names it by the same kebab
+    /// case it always did, and now resolves to the encoder instead of falling
+    /// back to CSV. HDF5 stays at the end of the picker: the durable file
+    /// stores the name, so moving it would gain nothing and would change what
+    /// a legacy numeric choice meant.
     #[test]
-    fn reserved_hdf5_value_is_preserved_but_never_exposed_as_runtime_policy() {
+    fn a_stored_hdf5_choice_resolves_to_the_encoder_it_names() {
         let mut preferences: UserPreferences = serde_json::from_str(
             r#"{"results":{"engineering-export":"hdf5-engineering-dataset"}}"#,
         )
         .unwrap();
 
-        assert_eq!(preferences.choice(ChoicePreference::EngineeringExport), 0);
+        assert_eq!(preferences.choice(ChoicePreference::EngineeringExport), 8);
         assert_eq!(
             preferences
                 .result_presentation_policy()
                 .engineering_export(),
-            EngineeringExportFormat::Csv
+            EngineeringExportFormat::Hdf5EngineeringDataset
         );
-        // HDF5 sits last, after every format the picker offers, so that the
-        // offered indices stay contiguous and `options[active]` in the
-        // preference page can never reach past its label list.
-        assert!(
-            preferences
-                .set_choice(ChoicePreference::EngineeringExport, 8)
-                .is_err()
-        );
+        preferences
+            .set_choice(ChoicePreference::EngineeringExport, 8)
+            .expect("HDF5 is runtime supported");
         assert_eq!(
             serde_json::to_value(preferences).unwrap()["results"]["engineering-export"],
             "hdf5-engineering-dataset"
+        );
+    }
+
+    /// Nine offered indices, and nothing past them.
+    #[test]
+    fn the_picker_offers_every_index_it_has_a_label_for_and_no_more() {
+        for index in 0..=8 {
+            UserPreferences::default()
+                .set_choice(ChoicePreference::EngineeringExport, index)
+                .unwrap_or_else(|error| panic!("index {index} is offered: {error}"));
+        }
+        assert!(
+            UserPreferences::default()
+                .set_choice(ChoicePreference::EngineeringExport, 9)
+                .is_err()
         );
     }
 
@@ -1666,7 +1687,7 @@ mod tests {
     /// Both have to hold, because a saved preference outlives the index it was
     /// chosen by and the export dispatcher reads the name.
     #[test]
-    fn the_three_encoded_formats_are_runtime_choices_that_persist_by_name() {
+    fn the_four_encoded_formats_are_runtime_choices_that_persist_by_name() {
         for (index, format, durable) in [
             (
                 5,
@@ -1675,6 +1696,11 @@ mod tests {
             ),
             (6, EngineeringExportFormat::NumpyArray, "numpy-array"),
             (7, EngineeringExportFormat::NumpyArchive, "numpy-archive"),
+            (
+                8,
+                EngineeringExportFormat::Hdf5EngineeringDataset,
+                "hdf5-engineering-dataset",
+            ),
         ] {
             let mut preferences = UserPreferences::default();
             preferences

@@ -139,6 +139,7 @@ fn export_registry_matches_the_ten_contract_ids_and_governs_availability() {
                 | ResultExportFormat::CsvRfc4180
                 | ResultExportFormat::Tsv
                 | ResultExportFormat::TouchstoneV2
+                | ResultExportFormat::Hdf5
                 | ResultExportFormat::NumpyNpy
                 | ResultExportFormat::NumpyNpz
                 | ResultExportFormat::Vcd
@@ -1654,6 +1655,85 @@ fn engineering_export_preference_dispatches_the_three_new_encoders() {
     // An archive keeps the names an array cannot.
     assert_eq!(npz_reopened.waveforms[0].name, "V(out)");
     assert_eq!(npz_reopened.waveforms[0].y.as_ref(), &[0.0, 1.25, -0.5]);
+}
+
+#[test]
+fn engineering_export_preference_dispatches_an_hdf5_dataset() {
+    let transient =
+        AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(vec![
+            waveform("V(out)", vec![0.0, 1.0e-6, 2.0e-6], vec![0.0, 1.25, -0.5]),
+        ]);
+    let mut state = state_with_typed_result(transient);
+    state
+        .ui
+        .preferences
+        .set_choice(crate::workbench::ChoicePreference::EngineeringExport, 8)
+        .expect("HDF5 preference");
+    let io = MockExportWorkflowIo::default();
+    action_export_csv_with_io(&mut state, &io);
+
+    assert_eq!(
+        io.dialog_titles.borrow().as_slice(),
+        &["Export HDF5 Dataset"]
+    );
+    let files = io.byte_files.borrow();
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].0, PathBuf::from("waveforms.h5"));
+    assert_eq!(files[0].2, "application/x-hdf5");
+    assert_eq!(
+        files[0].1[..8],
+        [0x89, b'H', b'D', b'F', 0x0d, 0x0a, 0x1a, 0x0a],
+        "the HDF5 signature"
+    );
+    let reopened = crate::workbench::workflows::result_import_workflow::parse_result_dataset(
+        "waveforms.h5",
+        &files[0].1,
+    )
+    .expect("reopen the dataset");
+    assert_eq!(reopened.coordinate_name, "time");
+    assert_eq!(reopened.waveforms[0].name, "V(out)");
+    assert_eq!(reopened.waveforms[0].y.as_ref(), &[0.0, 1.25, -0.5]);
+}
+
+#[test]
+fn a_domain_the_hdf5_layout_has_no_section_for_refuses_and_writes_nothing() {
+    let noise =
+        AnalysisResult::new(1, AnalysisType::Noise, "Noise (1Hz-100Hz)").with_waveforms(vec![
+            waveform(
+                "V(onoise)",
+                vec![1.0, 10.0, 100.0],
+                vec![1.0e-9, 2.0e-9, 3.0e-9],
+            ),
+        ]);
+    let mut state = state_with_typed_result(noise);
+    state
+        .ui
+        .preferences
+        .set_choice(crate::workbench::ChoicePreference::EngineeringExport, 8)
+        .expect("HDF5 preference");
+    let io = MockExportWorkflowIo::default();
+    action_export_csv_with_io(&mut state, &io);
+
+    assert!(io.dialog_titles.borrow().is_empty());
+    assert!(io.byte_files.borrow().is_empty());
+    assert!(io.text_files.borrow().is_empty());
+    // The refusal names the three sections HDF5 carries, not the registry's
+    // generic "no verified lossless encoder" sentence, which no longer governs
+    // this format at all.
+    assert!(
+        state.log_buffer.entries().any(|entry| {
+            entry
+                .message
+                .contains("a transient, a DC sweep or an AC sweep")
+                && !entry.message.contains("verified lossless encoder")
+        }),
+        "{:?}",
+        state
+            .log_buffer
+            .entries()
+            .map(|entry| entry.message.clone())
+            .collect::<Vec<_>>()
+    );
 }
 
 #[test]

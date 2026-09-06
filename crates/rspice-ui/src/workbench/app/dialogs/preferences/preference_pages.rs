@@ -800,6 +800,7 @@ fn results(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageAction
             "VCD · event timelines",
             "NumPy .npy · one array, column order stated",
             "NumPy .npz · one named array per signal",
+            "HDF5 dataset · one analysis, names and units carried",
         ],
     );
 }

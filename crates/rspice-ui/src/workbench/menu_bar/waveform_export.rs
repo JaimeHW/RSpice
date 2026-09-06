@@ -1,5 +1,6 @@
 //! Waveform export actions.
 
+mod hdf5;
 mod numpy;
 mod vcd;
 
@@ -99,6 +100,7 @@ impl ResultExportFormat {
                 | Self::CsvRfc4180
                 | Self::Tsv
                 | Self::TouchstoneV2
+                | Self::Hdf5
                 | Self::NumpyNpy
                 | Self::NumpyNpz
                 | Self::Vcd
@@ -308,6 +310,10 @@ pub(crate) fn action_export_csv_with_io(
             numpy::export_numpy(state, io, &displayed, numpy::NumpyKind::Archive);
             return;
         }
+        EngineeringExportFormat::Hdf5EngineeringDataset => {
+            hdf5::export_hdf5(state, io, &displayed);
+            return;
+        }
         _ => {}
     }
     // Everything past this point publishes a table of the displayed view, so
@@ -322,11 +328,9 @@ pub(crate) fn action_export_csv_with_io(
         | EngineeringExportFormat::RSpiceDatasetBundle
         | EngineeringExportFormat::ValueChangeDump
         | EngineeringExportFormat::NumpyArray
-        | EngineeringExportFormat::NumpyArchive => {
-            unreachable!("native bundle, dump and NumPy formats dispatch above")
-        }
-        EngineeringExportFormat::Hdf5EngineeringDataset => {
-            unreachable!("an offered format without an encoder is refused above")
+        | EngineeringExportFormat::NumpyArchive
+        | EngineeringExportFormat::Hdf5EngineeringDataset => {
+            unreachable!("native bundle, dump, NumPy and HDF5 formats dispatch above")
         }
     };
     // What the reader is looking at comes first, and exactly one view owns
