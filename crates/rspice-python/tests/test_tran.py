@@ -461,7 +461,235 @@ class TestDigitalEvents:
             ]
 
 
+class TestDigitalVocabulary:
+    """One digital state has one spelling on this surface.
+
+    `CompressedTransientResult.digital_trace` used to answer in core's other
+    spelling, which hyphenates where the shared document underscores, so the
+    same committed value read `zero-resistive` through one container and
+    `zero_resistive` through the other.
+    """
+
+    def test_both_transient_containers_spell_one_state_one_way(self, event_transient):
+        netlist = rspice.Netlist.parse(XSPICE_EVENTS)
+        compressed = rspice.Engine().run_tran_compressed(
+            netlist, stop_time=20e-9, max_step=1e-9
+        )
+        assert compressed.digital_trace_names == event_transient.digital_nodes()
+        for node in compressed.digital_trace_names:
+            rows = compressed.digital_trace(node)
+            assert rows == [
+                (event.time_s, event.state, event.strength)
+                for event in event_transient.digital_events(node)
+            ], node
+            for _, state, strength in rows:
+                assert state in DIGITAL_STATES, state
+                assert strength in DIGITAL_STRENGTHS, strength
+
+    def test_a_compressed_result_answers_the_same_real_rows(self, event_transient):
+        netlist = rspice.Netlist.parse(XSPICE_EVENTS)
+        compressed = rspice.Engine().run_tran_compressed(
+            netlist, stop_time=20e-9, max_step=1e-9
+        )
+        assert compressed.real_trace_names == event_transient.real_trace_names
+        for node in compressed.real_trace_names:
+            assert compressed.real_trace(node) == event_transient.real_trace(node)
+
+
+class TestRealEventNodes:
+    def test_every_real_event_node_answers_with_its_committed_rows(
+        self, event_transient
+    ):
+        names = event_transient.real_trace_names
+        assert names, "the v_to_real observer drives a real event node"
+        traces = event_transient.document()["payload"]["realTraces"]
+        assert [trace["nodeName"] for trace in traces] == names
+        for trace in traces:
+            rows = event_transient.real_trace(trace["nodeName"])
+            assert rows == [(point["time"], point["value"]) for point in trace["points"]]
+            assert [time for time, _ in rows] == sorted(time for time, _ in rows)
+
+    def test_a_real_node_name_resolves_the_way_a_deck_node_name_does(
+        self, event_transient
+    ):
+        node = event_transient.real_trace_names[0]
+        assert event_transient.real_trace(node.upper()) == event_transient.real_trace(
+            node
+        )
+
+    def test_an_unknown_real_event_node_is_refused_by_name(self, event_transient):
+        with pytest.raises(KeyError, match="not_a_node"):
+            event_transient.real_trace("not_a_node")
+
+
+# The declared word, its members, and the events the pair produce. No deck this
+# build can run declares a bus: the mixed Verilog-AMS boundary that does needs
+# the `veriloga` feature, which the Python extension does not build with. The
+# declaration therefore arrives the way a loaded file's does, through the
+# versioned pickle state and its own decoder.
+#
+# The histories are the ones BUS-L2's `output [1:0] count` records on a `#5`
+# grid, so the word counts 00 01 10 11 and the dump below is that lane's own
+# oracle.
+BUS_NAME = "x1.count"
+BUS_MEMBERS = ["COUNT#1", "COUNT#0"]
+BUS_HISTORIES = [
+    (
+        "COUNT#1",
+        [(0.0, "zero", "strong"), (1.0e-8, "one", "strong")],
+    ),
+    (
+        "COUNT#0",
+        [
+            (0.0, "zero", "strong"),
+            (5.0e-9, "one", "strong"),
+            (1.0e-8, "zero", "strong"),
+            (1.5e-8, "one", "strong"),
+        ],
+    ),
+]
+BUS_EVENTS = [(0.0, "00"), (5.0e-9, "01"), (1.0e-8, "10"), (1.5e-8, "11")]
+BUS_DECLARATION = (BUS_NAME, 1, 0, BUS_MEMBERS, "engine")
+
+
+def _with_event_state(result, event_state):
+    """Rebuild `result` with a different event state, through `_unpickle`."""
+    unpickler, state = result.__reduce__()
+    return unpickler(*state[:-1], event_state)
+
+
+@pytest.fixture(scope="module")
+def bus_transient(event_transient):
+    version = event_transient.__reduce__()[1][-1][0]
+    # No real event node, so this result's dump is exactly the browser
+    # binding's for the same declaration - which is what the two surfaces are
+    # compared on.
+    return _with_event_state(
+        event_transient,
+        (version, BUS_HISTORIES, [], [BUS_DECLARATION]),
+    )
+
+
+class TestDigitalBuses:
+    def test_a_run_without_a_bus_declares_none(self, event_transient):
+        assert event_transient.digital_buses() == []
+
+    def test_a_declaration_carries_its_range_and_its_members_in_order(
+        self, bus_transient
+    ):
+        buses = bus_transient.digital_buses()
+        assert len(buses) == 1
+        bus = buses[0]
+        assert isinstance(bus, rspice.DigitalBus)
+        assert (bus.name, bus.msb, bus.lsb) == (BUS_NAME, 1, 0)
+        assert bus.members == BUS_MEMBERS
+        assert bus.source == "engine"
+        assert repr(bus).startswith("DigitalBus(")
+
+    def test_a_bus_event_is_every_member_change_with_the_whole_word(
+        self, bus_transient
+    ):
+        events = bus_transient.bus_events(BUS_NAME)
+        assert [(event.time_s, event.value) for event in events] == BUS_EVENTS
+        for event in events:
+            assert isinstance(event, rspice.BusEvent)
+            assert len(event.bits) == len(BUS_MEMBERS)
+            assert repr(event).startswith("BusEvent(")
+        # The word is the members' held values, MSB first, as event codes.
+        assert events[-1].bits == [1, 1]
+
+    def test_a_bus_name_resolves_the_way_a_deck_node_name_does(self, bus_transient):
+        shouted = [
+            (event.time_s, event.value) for event in bus_transient.bus_events("X1.COUNT")
+        ]
+        assert shouted == BUS_EVENTS
+
+    def test_an_undeclared_bus_lists_what_is_declared(self, bus_transient):
+        with pytest.raises(KeyError, match=BUS_NAME):
+            bus_transient.bus_events("data")
+
+    def test_the_declaration_survives_a_pickle(self, bus_transient):
+        import pickle
+
+        restored = pickle.loads(pickle.dumps(bus_transient))
+        original = bus_transient.digital_buses()[0]
+        rebuilt = restored.digital_buses()[0]
+        assert (rebuilt.name, rebuilt.msb, rebuilt.lsb) == (
+            original.name,
+            original.msb,
+            original.lsb,
+        )
+        assert rebuilt.members == original.members
+        assert rebuilt.source == original.source
+        assert [
+            (event.time_s, event.value, event.bits)
+            for event in restored.bus_events(BUS_NAME)
+        ] == [
+            (event.time_s, event.value, event.bits)
+            for event in bus_transient.bus_events(BUS_NAME)
+        ]
+
+    def test_a_state_written_before_the_bus_contract_restores_with_no_bus(
+        self, event_transient
+    ):
+        """A version-1 state is three fields and carries no table.
+
+        It is read rather than refused: nothing that could write one could
+        declare a bus, so an empty table is what it says.
+        """
+        _, digital, real, _ = event_transient.__reduce__()[1][-1]
+        restored = _with_event_state(event_transient, (1, digital, real))
+        assert restored.digital_buses() == []
+        assert restored.digital_nodes() == event_transient.digital_nodes()
+
+    def test_a_version_that_contradicts_the_state_shape_is_refused(
+        self, event_transient
+    ):
+        version, digital, real, buses = event_transient.__reduce__()[1][-1]
+        with pytest.raises(ValueError, match="4-field state"):
+            _with_event_state(event_transient, (1, digital, real, buses))
+        with pytest.raises(ValueError, match="3-field state"):
+            _with_event_state(event_transient, (version, digital, real))
+
+    def test_a_pickled_bus_whose_member_has_no_trace_is_refused(self, event_transient):
+        version, _, real, _ = event_transient.__reduce__()[1][-1]
+        with pytest.raises(ValueError, match="cannot carry"):
+            _with_event_state(
+                event_transient,
+                (
+                    version,
+                    BUS_HISTORIES[:1],
+                    real,
+                    [BUS_DECLARATION],
+                ),
+            )
+
+    def test_a_pickled_bus_with_an_unknown_declarer_is_refused(self, event_transient):
+        version, _, real, _ = event_transient.__reduce__()[1][-1]
+        with pytest.raises(ValueError, match="guessed"):
+            _with_event_state(
+                event_transient,
+                (
+                    version,
+                    BUS_HISTORIES,
+                    real,
+                    [(BUS_NAME, 1, 0, BUS_MEMBERS, "guessed")],
+                ),
+            )
+
+
 class TestValueChangeDump:
+    def test_a_declared_bus_is_dumped_as_one_vector(self, bus_transient):
+        dump = bus_transient.to_vcd()
+        assert f"$var wire 2 ! {BUS_NAME} [1:0] $end" in dump
+        # The members are in the vector, bit for bit, so they are not declared
+        # a second time as scalars.
+        for member in BUS_MEMBERS:
+            assert member not in dump
+        assert "b00 !" in dump
+        assert "b01 !" in dump
+        assert "b10 !" in dump
+
     def test_the_dump_declares_every_event_node_under_one_scope(self, event_transient):
         dump = event_transient.to_vcd()
         assert "$scope module events $end" in dump

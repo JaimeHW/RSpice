@@ -987,9 +987,18 @@ class TestCompressedTransientResult:
             identity,
             fourier,
             measurements,
+            buses,
         ) = state[-2]
         compression_report = state[-1]
-        tail = (channels, digital_traces, real_traces, identity, fourier, measurements)
+        tail = (
+            channels,
+            digital_traces,
+            real_traces,
+            identity,
+            fourier,
+            measurements,
+            buses,
+        )
         legacy = (2, step_sizes, *tail)
         with pytest.raises(
             ValueError, match="predates the descriptor-indexed channel container"
@@ -999,6 +1008,20 @@ class TestCompressedTransientResult:
         future = (999, step_sizes, *tail)
         with pytest.raises(ValueError, match="unsupported compressed-transient analog"):
             unpickler(*state[:-2], future, compression_report)
+
+        # The version has to agree with the shape: a nine-field state is
+        # version 4 and an eight-field one is version 3, so a state carrying
+        # the other's number is refused rather than read as either.
+        mismatched = (3, step_sizes, *tail)
+        with pytest.raises(ValueError, match="unsupported compressed-transient analog"):
+            unpickler(*state[:-2], mismatched, compression_report)
+
+        # A state written before the bus contract is read, not refused: it is
+        # this state with no bus table, and nothing that wrote one could
+        # declare a bus.
+        without_buses = (3, step_sizes, *tail[:-1])
+        restored = unpickler(*state[:-2], without_buses, compression_report)
+        assert restored.digital_buses() == []
 
         # A sample is a number or a typed absence, never both and never
         # neither: the validity mask cannot be silently dropped or invented.

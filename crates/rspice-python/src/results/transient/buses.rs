@@ -340,8 +340,8 @@ mod tests {
         }
     }
 
-    /// A two-bit bus whose low bit toggles twice as often as its high bit — the
-    /// shape BUS-L2's `output [1:0] count` records.
+    /// A two-bit bus on a five-nanosecond grid: the history BUS-L2's
+    /// `output [1:0] count` records, so the word counts `00 01 10 11`.
     fn counter() -> (Vec<DigitalBusDeclaration>, Vec<DigitalTrace>) {
         let traces = vec![
             trace(
@@ -357,6 +357,7 @@ mod tests {
                     (0.0, DigitalState::Zero, DigitalStrength::Strong),
                     (5.0e-9, DigitalState::One, DigitalStrength::Strong),
                     (1.0e-8, DigitalState::Zero, DigitalStrength::Strong),
+                    (1.5e-8, DigitalState::One, DigitalStrength::Strong),
                 ],
             ),
         ];
@@ -408,9 +409,41 @@ mod tests {
             rows.iter()
                 .map(|row| (row.time_s, row.value.as_str()))
                 .collect::<Vec<_>>(),
-            [(0.0, "00"), (5.0e-9, "01"), (1.0e-8, "10")]
+            [(0.0, "00"), (5.0e-9, "01"), (1.0e-8, "10"), (1.5e-8, "11")]
         );
         assert_eq!(rows[2].bits, vec![Some(1), Some(0)]);
+    }
+
+    /// The row ceiling is checked against the members' committed changes,
+    /// which is the exact upper bound on the number of events a bus can have,
+    /// so the refusal comes before the work rather than after it.
+    #[test]
+    fn a_history_past_the_row_ceiling_is_refused_by_number() {
+        let mut points: Vec<(f64, DigitalState, DigitalStrength)> =
+            Vec::with_capacity(MAX_DIGITAL_EVENT_ROWS + 1);
+        for index in 0..=MAX_DIGITAL_EVENT_ROWS {
+            points.push((
+                index as f64 * 1e-12,
+                DigitalState::Zero,
+                DigitalStrength::Strong,
+            ));
+        }
+        let traces = vec![trace("wide#1", &points), trace("wide#0", &points)];
+        let bus = DigitalBusDeclaration::new(
+            "wide",
+            1,
+            0,
+            vec!["wide#1".to_string(), "wide#0".to_string()],
+            DigitalBusSource::Engine,
+        )
+        .expect("the fixture declaration is well formed");
+        let error = rows(std::slice::from_ref(&bus), &traces, "wide")
+            .expect_err("a history past the ceiling must be refused");
+        let BusAccessError::Invalid(message) = &error else {
+            panic!("a ceiling is a value error, not {error:?}");
+        };
+        assert!(message.contains("committed member changes"), "{message}");
+        assert!(message.contains("to_vcd()"), "{message}");
     }
 
     /// The name resolves the way a deck node name does.
