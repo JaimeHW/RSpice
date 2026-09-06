@@ -135,8 +135,35 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         library(&mut app.state, &["bridge_drive", "vdd_operate"]);
         let published = published(&mut app.state);
-        assert!(published.contains(&"bridge_drive".to_owned()));
-        assert!(published.contains(&"vdd_operate".to_owned()));
+        // A row is announced as its name and its meta column together — see
+        // `a_row_announces_the_family_and_revision_beside_its_name` — so this
+        // asks for the name at the head of a published run rather than for a
+        // run that is only the name.
+        for name in ["bridge_drive", "vdd_operate"] {
+            assert!(
+                published.iter().any(|run| run.starts_with(name)),
+                "{name} has no row: {published:?}"
+            );
+        }
+    }
+
+    /// A row announces the family and revision it paints, not just its name.
+    ///
+    /// `SIN · r1` is the whole of what distinguishes one definition from the
+    /// next in a library that holds several spellings of `drive`, and it was
+    /// painted into the meta column and dropped from the accessibility tree —
+    /// a reader working by ear heard the one part of the row they already
+    /// knew. Every indented navigator row is painted by one helper, so this
+    /// case stands for the counts on every other rail as well.
+    #[test]
+    fn a_row_announces_the_family_and_revision_beside_its_name() {
+        let mut app = RSpiceApp::test_instance();
+        library(&mut app.state, &["bridge_drive"]);
+        let published = published(&mut app.state);
+        assert!(
+            published.contains(&"bridge_drive, SIN \u{b7} r1".to_owned()),
+            "the meta column never reached AccessKit: {published:?}"
+        );
     }
 
     /// A library nobody has authored into and a filter nobody's definitions

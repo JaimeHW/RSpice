@@ -277,12 +277,19 @@ pub(super) fn nav_row_indented_styled_with_metrics(
 ) -> Response {
     let t = Tokens::get(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(egui::vec2(ui.available_width(), height), sense);
+    // The meta column is half of what the row says. `bridge_drive  SIN · r1`
+    // states a family and a revision, `Libraries` rows state their cell count
+    // and whether they are writable, and a name built from the label alone
+    // hands a screen reader the half that is not the answer. Same shape as
+    // `ui::widgets::tree`, which is where the label-comma-meta spelling the
+    // rest of the product announces comes from.
+    let announced = meta.map_or_else(|| label.to_owned(), |meta| format!("{label}, {meta}"));
     response.widget_info(|| {
         egui::WidgetInfo::selected(
             egui::WidgetType::SelectableLabel,
             ui.is_enabled(),
             selected,
-            label,
+            &announced,
         )
     });
     if selected || response.hovered() {

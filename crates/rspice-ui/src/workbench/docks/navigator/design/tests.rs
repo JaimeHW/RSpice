@@ -773,6 +773,63 @@ fn the_nets_section_states_an_unresolved_configuration_instead_of_buffer_nets() 
     );
 }
 
+/// A net row announces its connection count, not only its name.
+///
+/// The nets rail paints the count in the meta column and the shared indented
+/// row published the label alone, so a reader working by ear was told a net
+/// exists and never how many pins reach it — which is the one number that
+/// separates a wired node from a stub. The Stimulus Library's own case is in
+/// `docks::navigator::stimulus`; both rails are painted by
+/// `nav_row_indented_styled_with_metrics`, and this pair is what holds it.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_net_row_announces_the_meta_column_it_paints() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.schematic.wires.push(crate::state::Wire::segment(
+        1,
+        crate::state::Point::new(0, 0),
+        crate::state::Point::new(40, 0),
+    ));
+    app.state
+        .schematic
+        .net_labels
+        .push(crate::state::NetLabel::new(
+            2,
+            crate::state::Point::new(0, 0),
+            "VOUT",
+        ));
+    app.state.sync_active_schematic_to_workspace();
+
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let output = ctx.run_ui(Default::default(), |ctx| {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE)
+            .show(ctx, |ui| {
+                ui.set_width(260.0);
+                net_section(ui, &mut app);
+            });
+    });
+    let announced = output
+        .platform_output
+        .accesskit_update
+        .expect("AccessKit tree")
+        .nodes
+        .into_iter()
+        .filter_map(|(_, node)| announced_name(&node))
+        .collect::<Vec<_>>();
+
+    assert!(
+        !announced.iter().any(|name| name == "VOUT"),
+        "the row dropped its meta column on the way to AccessKit: {announced:?}"
+    );
+    assert!(
+        announced.iter().any(|name| name.starts_with("VOUT, ")),
+        "the net row must announce the count it paints beside the name: {announced:?}"
+    );
+}
+
 // ---------------------------------------------------------- rails that fold
 
 /// One interface pin, drawn as the typed port editor writes it.
