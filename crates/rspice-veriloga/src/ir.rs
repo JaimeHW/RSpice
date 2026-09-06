@@ -245,9 +245,9 @@ pub struct DeviceIR {
     /// which is every shipped compact model: neither the whole shadow-expanded
     /// forest — 18 M nodes and 2.1 GB on bsimcmg, held only to be handed back
     /// unchanged — nor a second emission of it is then materialised, and
-    /// [`crate::codegen::CodeGenerator`] clones the ordinary pass's bytecode
-    /// instead. `noise_assignments` is empty while this is set; it is non-empty
-    /// only when the two passes really differ.
+    /// [`crate::codegen::CodeGenerator`] leaves the compiled noise pass empty
+    /// to say so. `noise_assignments` is empty while this is set; it is
+    /// non-empty only when the two passes really differ.
     pub noise_assignments_mirror_ordinary: bool,
     /// Array variables (elements are contiguous slots in `variables`)
     pub arrays: Vec<ArrayDef>,
