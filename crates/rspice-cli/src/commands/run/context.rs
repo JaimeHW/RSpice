@@ -94,8 +94,8 @@ pub(super) struct RunContext<'a> {
     /// manifest.
     pub(super) outputs: std::cell::RefCell<Vec<std::path::PathBuf>>,
     /// Completed authored transients a planned `.FOUR` card post-processes,
-    /// in authored order. `.FOUR` cards run after every physical analysis â€”
-    /// ngspice accepts a `.FOUR` card above the `.TRAN` it belongs to â€” so a
+    /// in authored order. `.FOUR` cards run after every physical analysis —
+    /// ngspice accepts a `.FOUR` card above the `.TRAN` it belongs to — so a
     /// deck with several transients must still be able to reach the one the
     /// plan bound each card to, not merely the one that ran last. A transient
     /// no planned card names is not retained at all.
@@ -765,7 +765,7 @@ impl<'a> RunContext<'a> {
     /// identity and authored spelling of each of its operands.
     ///
     /// The core evaluates one Fourier spectrum per resolved operand and the
-    /// shared result document names one spectrum, so an operand â€” not a card â€”
+    /// shared result document names one spectrum, so an operand — not a card —
     /// is the analysis instance. The plan already assigned those identities
     /// and already bound the card to its transient, so the CLI reads both off
     /// it instead of counting operands and assuming the transient that ran
@@ -1034,7 +1034,7 @@ impl<'a> RunContext<'a> {
 /// The canonical plan identity of every authored analysis one concrete deck
 /// run publishes under.
 ///
-/// Both sources resolve to the same thing â€” the `AnalysisInstanceId` the
+/// Both sources resolve to the same thing — the `AnalysisInstanceId` the
 /// canonical planner minted for each authored card, in source order. A scalar
 /// deck reads them straight off its `DeckPlan`; an axis coordinate reads them
 /// off that coordinate's `MaterializedAnalysis` list, which additionally binds

@@ -343,7 +343,7 @@ fn nonfinite_negative_and_reactive_g_cards_still_fail_closed() {
 /// applies to the two transfer coefficients.
 ///
 /// Neither the ngspice source tree nor `Xyce_Regression-master` ships a
-/// finite-length RG fixture â€” both carry only `LEN=0` RG cards â€” so this is
+/// finite-length RG fixture — both carry only `LEN=0` RG cards — so this is
 /// the reference algorithm rather than a captured waveform. It is the exact
 /// arithmetic the reference simulator performs, so a match pins RSpice to the
 /// oracle's matrix load and not merely to a re-derivation of the same physics.

@@ -290,7 +290,7 @@ impl NativeIdentifierIndex {
     /// hold the definitions reaching it.
     ///
     /// `reads` pairs the name the equation was written with against the
-    /// snapshot capturing the definition it reads â see
+    /// snapshot capturing the definition it reads — see
     /// [`crate::ir::EquationSnapshotReads`]. The lowerer reaches a derivative
     /// shadow by appending axis suffixes to the value's name, so re-pointing
     /// the bare name alone would give the equation the reaching *value* and the
@@ -7069,9 +7069,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
 
     /// `$simparam`, answered at compile time.
     ///
-    /// The generated-Rust backend answers it at run time instead â the CFG
+    /// The generated-Rust backend answers it at run time instead — the CFG
     /// carries a `SimParam` value and the emitter turns it into a
-    /// `simparam("gmin", fallback)` call â so the two backends disagree about
+    /// `simparam("gmin", fallback)` call — so the two backends disagree about
     /// exactly the parameter that moves: a model reading `$simparam("gmin")`
     /// follows gmin stepping when it is generated and does not when it is
     /// compiled here. Closing that needs a `NativeOp` and a place for the

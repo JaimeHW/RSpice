@@ -83,7 +83,7 @@ pub(super) fn run_hb_from_command(
 }
 
 /// Write the .STEP sweep table: one row per step value, one column per
-/// node voltage â€” the same shape as a DC sweep with the stepped quantity
+/// node voltage — the same shape as a DC sweep with the stepped quantity
 /// as the abscissa.
 pub(super) fn export_step_sweep(
     ctx: &RunContext<'_>,
@@ -241,7 +241,7 @@ pub(super) fn run_monte_carlo(
 
             if !ctx.quiet {
                 println!(
-                    "âœ“ Monte Carlo complete: {} runs (seed={})",
+                    "✓ Monte Carlo complete: {} runs (seed={})",
                     result.num_runs, seed
                 );
                 if !variables.is_empty() {
@@ -865,25 +865,19 @@ pub(super) fn run_corner_sweep(ctx: &RunContext<'_>, corners_str: &str) -> Resul
     ensure_not_cancelled(ctx)?;
 
     if !ctx.quiet {
-        println!(
-            "\nâ”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”"
-        );
-        println!("â”‚        Corner Sweep Summary         â”‚");
-        println!(
-            "â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¤"
-        );
+        println!("\n┌─────────────────────────────────────┐");
+        println!("│        Corner Sweep Summary         │");
+        println!("├─────────────────────────────────────┤");
         for (name, simulation_passed, measurements_passed) in &results {
             let passed = *simulation_passed && *measurements_passed;
-            let status = if passed {
-                "âœ“ PASS"
-            } else {
-                "âœ— FAIL"
-            };
-            println!("â”‚  {:6}  {:>24}  â”‚", name, status);
+            let status = if passed { "✓ PASS" } else { "✗ FAIL" };
+            // The status field is one column wider than the frame's interior
+            // minus the four padding columns, because the frame is 37 columns
+            // wide: a 24-column field left this row one short of its own
+            // border, which nobody could see while every rune was mojibake.
+            println!("│  {:6}  {:>25}  │", name, status);
         }
-        println!(
-            "â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜"
-        );
+        println!("└─────────────────────────────────────┘");
 
         let passed_count = results
             .iter()
@@ -892,7 +886,7 @@ pub(super) fn run_corner_sweep(ctx: &RunContext<'_>, corners_str: &str) -> Resul
             })
             .count();
         println!(
-            "\nâœ“ Corner sweep complete: {}/{} corners passed",
+            "\n✓ Corner sweep complete: {}/{} corners passed",
             passed_count,
             corners.len()
         );
@@ -961,8 +955,8 @@ fn corner_setup<'a>(ctx: &RunContext<'a>) -> Result<CornerSetup<'a>, CliError> {
 }
 
 /// Run one corner in isolation: re-elaborate, simulate every analysis,
-/// evaluate measurements. Quiet by construction â€” workers must not
-/// interleave solver chatter â€” and self-contained so it can run on any
+/// evaluate measurements. Quiet by construction — workers must not
+/// interleave solver chatter — and self-contained so it can run on any
 /// thread.
 fn run_corner_job(
     setup: &CornerSetup<'_>,
@@ -1630,7 +1624,7 @@ fn write_touchstone_nport(
 /// Standard matched-termination wave method: for each drive port, a source
 /// of 2 V AC behind Z0 excites the port (incident wave of 1 V) while the
 /// other port is terminated in Z0. The port voltages then read off the
-/// S-parameters directly â€” `Sjj = Vj âˆ’ 1`, `Sij = Vi` â€” with no matrix
+/// S-parameters directly — `Sjj = Vj − 1`, `Sij = Vi` — with no matrix
 /// inversion and no floating-port hazard. The deck supplies the bias
 /// network and sweep; its own sources must not carry AC specifications.
 pub(super) fn run_sparam(ctx: &RunContext<'_>, ports_spec: &str, z0: f64) -> Result<(), CliError> {
@@ -1692,7 +1686,7 @@ pub(super) fn run_sparam(ctx: &RunContext<'_>, ports_spec: &str, z0: f64) -> Res
 
     if !ctx.quiet {
         println!(
-            "Running 2-port S-parameter extraction: Z0={}Î©, {} frequency points",
+            "Running 2-port S-parameter extraction: Z0={}Ω, {} frequency points",
             z0,
             frequencies.len()
         );

@@ -518,7 +518,7 @@ fn parse_define(define: &str) -> Result<(String, f64), CliError> {
 /// Each override is injected as a `.param` right after the title so it exists
 /// before first use, and every top-level `.param` assignment of the same name
 /// is rewritten in place so the deck cannot re-assign it. Assignments inside
-/// `.subckt` bodies are left alone â€” overrides target global parameters only.
+/// `.subckt` bodies are left alone — overrides target global parameters only.
 fn apply_defines_to_source(source: &str, defines: &[(String, f64)]) -> String {
     let mut out = String::with_capacity(source.len() + defines.len() * 32);
     let mut lines = source.lines();

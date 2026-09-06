@@ -661,8 +661,8 @@ struct CoordinateValidity {
 /// Union each analysis instance's coordinate-local schemas and record, per
 /// coordinate, which union columns that coordinate actually carried.
 ///
-/// An analysis that only some coordinates published â€” a conditional that adds
-/// or drops a card â€” is still named, with its own coordinate list. Nothing is
+/// An analysis that only some coordinates published — a conditional that adds
+/// or drops a card — is still named, with its own coordinate list. Nothing is
 /// inferred from a coordinate that did not publish it.
 fn analysis_schema_unions(
     published: &[CoordinatePublication],

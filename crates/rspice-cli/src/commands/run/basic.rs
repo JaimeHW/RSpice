@@ -531,7 +531,7 @@ pub(super) fn run_dc_sweep(
 fn describe_compression_error(report: &rspice_core::engine::TransientCompressionReport) -> String {
     let Some(worst) = report.worst_observed.as_ref() else {
         return format!(
-            "Worst compression error: none â€” all {} accepted samples were retained exactly",
+            "Worst compression error: none — all {} accepted samples were retained exactly",
             report.input_points
         );
     };
@@ -539,7 +539,7 @@ fn describe_compression_error(report: &rspice_core::engine::TransientCompression
         .relative_error
         .map_or_else(|| "n/a".to_string(), |relative| format!("{:.3e}", relative));
     format!(
-        "Worst compression error: {} {} at t={:.6e}s â€” absolute {:.3e}, relative {}, \
+        "Worst compression error: {} {} at t={:.6e}s — absolute {:.3e}, relative {}, \
          tolerance {:.3e} ({:.1}% used)",
         worst.signal.kind.as_str(),
         worst.signal.canonical_name,
@@ -913,7 +913,7 @@ pub(super) fn run_transient(
 
             if !ctx.quiet && !ctx.compress {
                 println!(
-                    "âœ“ Transient complete: {} time points computed",
+                    "✓ Transient complete: {} time points computed",
                     result.time.len()
                 );
             }

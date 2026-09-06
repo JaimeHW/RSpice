@@ -339,12 +339,22 @@ mod tests {
         })
     }
 
+    /// Every authored `.rs` file under `directory`, recursively.
+    ///
+    /// Build output is skipped: a crate that has been built on its own — the
+    /// repository's ignore rules say `crates/rspice-core` and the benchmark
+    /// probes both grow one — holds a `target/` directory full of generated
+    /// sources that no guard here has anything to say about, and walking it
+    /// would turn a scan of the workspace into a scan of a build cache.
     fn rust_sources(directory: &Path, out: &mut Vec<PathBuf>) {
         let entries = std::fs::read_dir(directory)
             .unwrap_or_else(|error| panic!("read {}: {error}", directory.display()));
         for entry in entries {
             let path = entry.expect("directory entry").path();
             if path.is_dir() {
+                if path.file_name().is_some_and(|name| name == "target") {
+                    continue;
+                }
                 rust_sources(&path, out);
             } else if path.extension().is_some_and(|extension| extension == "rs") {
                 out.push(path);
@@ -613,13 +623,29 @@ mod tests {
     /// test code as well as shipped code: a fixture spelled in mojibake is how
     /// a re-encoded expectation gets frozen into a passing test.
     ///
-    /// It covers the engine crate as well as this one. Re-encoding happens to
-    /// whatever a tool opens, not to whatever ships a user interface, and the
-    /// engine carried two of its own: an approximation sign in a
-    /// discretization comment and a delta in a checkpoint assertion. The roots
-    /// are reached from `CARGO_MANIFEST_DIR` rather than named absolutely, and
-    /// each is asserted to have contributed files — a root that stops
-    /// resolving is a scan that has stopped scanning.
+    /// It covers every crate in the workspace, not only this one. Re-encoding
+    /// happens to whatever a tool opens, not to whatever ships a user
+    /// interface, and the two-crate version of this scan proved that by
+    /// missing what the command-line interface shipped: 49 lines across eight
+    /// files of `rspice-cli`, including the check marks a multi-run prints
+    /// beside every deck, the box frame of the corner-sweep summary, and the
+    /// whole Fourier results table, plus three em dashes in `rspice-veriloga`.
+    /// Every one of them was outside the root list and every one of them
+    /// reached a user's terminal as mojibake.
+    ///
+    /// The roots are the crate directories `crates/` actually holds, read at
+    /// run time rather than listed here, so a crate added to the workspace is
+    /// scanned without anyone remembering to add it. Each is asserted to have
+    /// contributed files — a root that stops resolving is a scan that has
+    /// stopped scanning.
+    ///
+    /// This is a repository-hygiene scan rather than anything about a user
+    /// interface, so `rspice-ui` is not its natural owner; it lives here
+    /// because the workspace has no crate whose subject is the repository, and
+    /// adding one would add a workspace member, which edits `Cargo.toml` and
+    /// `Cargo.lock` — both source-digest inputs of the Verilog-A built-ins
+    /// generator — and restamp the whole generated model tree. If such a crate
+    /// ever exists, this test and [`rust_sources`] belong in it.
     #[test]
     fn no_source_file_carries_double_encoded_utf8() {
         // The pairs the scan is looking for, written as escapes so this file
@@ -650,27 +676,40 @@ mod tests {
         let crates = manifest
             .parent()
             .expect("this crate sits in the workspace's crates/ directory");
+        // A crate is a directory here with a manifest in it. Nested members —
+        // the generated Verilog-A model crates — are reached by recursion from
+        // the directory that holds them, so only the top level is enumerated.
+        let mut roots: Vec<PathBuf> = std::fs::read_dir(crates)
+            .unwrap_or_else(|error| panic!("read {}: {error}", crates.display()))
+            .map(|entry| entry.expect("directory entry").path())
+            .filter(|path| path.join("Cargo.toml").is_file())
+            .collect();
+        roots.sort();
+        // A floor, not a tally: crates come and go, but a `crates/` that
+        // resolves to a handful of them is a scan that has lost its roots.
+        assert!(
+            roots.len() >= 20,
+            "the workspace scan found only {} crates under {}; a root list that stops \
+             resolving is a scan that has stopped scanning",
+            roots.len(),
+            crates.display()
+        );
+
         let mut paths = Vec::new();
-        for root in [
-            manifest.join("src"),
-            manifest.join("tests"),
-            crates.join("rspice-core").join("src"),
-            crates.join("rspice-core").join("tests"),
-        ] {
+        for root in &roots {
             let before = paths.len();
-            rust_sources(&root, &mut paths);
+            rust_sources(root, &mut paths);
             assert!(
-                paths.len() > before + 2,
-                "the scan found {} files under {}; a root that stops resolving is a scan \
-                 that has stopped scanning",
-                paths.len() - before,
+                paths.len() > before,
+                "the scan found no Rust source under {}; a root that stops resolving is a \
+                 scan that has stopped scanning",
                 root.display()
             );
         }
         paths.sort();
         assert!(
-            paths.len() > 400,
-            "the two-crate scan found only {} files; a scan that reaches nothing passes \
+            paths.len() > 2_000,
+            "the workspace scan found only {} files; a scan that reaches nothing passes \
              forever",
             paths.len()
         );

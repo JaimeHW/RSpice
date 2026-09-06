@@ -1336,7 +1336,7 @@ fn report_pz(
     let poles = result.poles.as_slice();
     let zeros = result.zeros.as_slice();
     if !ctx.quiet {
-        println!("âœ“ Pole-Zero analysis complete");
+        println!("✓ Pole-Zero analysis complete");
         println!("  Poles: {}", poles.len());
         println!("  Zeros: {}", zeros.len());
 
@@ -1487,7 +1487,7 @@ pub(super) fn run_sensitivity(
 ) -> Result<(), CliError> {
     if !ctx.quiet {
         println!(
-            "Running Sensitivity analysis: âˆ‚V({})/âˆ‚{} at {}={:.6e}",
+            "Running Sensitivity analysis: ∂V({})/∂{} at {}={:.6e}",
             output_name, param_name, param_name, param_value
         );
     }
@@ -1502,9 +1502,9 @@ pub(super) fn run_sensitivity(
     ) {
         Ok(sensitivity) => {
             if !ctx.quiet {
-                println!("âœ“ Sensitivity analysis complete");
+                println!("✓ Sensitivity analysis complete");
                 println!(
-                    "  âˆ‚V({})/âˆ‚{} = {:.6e} V/unit",
+                    "  ∂V({})/∂{} = {:.6e} V/unit",
                     output_name, param_name, sensitivity
                 );
 
@@ -1708,10 +1708,10 @@ pub(super) fn run_sensitivity_from_command(
     });
 
     if !ctx.quiet {
-        println!("âœ“ Sensitivity analysis complete");
+        println!("✓ Sensitivity analysis complete");
         for sensitivity in &sensitivities {
             println!(
-                "  âˆ‚{}/âˆ‚{} = {:.6e} {} per native parameter unit (normalized: {:.6e})",
+                "  ∂{}/∂{} = {:.6e} {} per native parameter unit (normalized: {:.6e})",
                 output_label,
                 sensitivity.vector_name,
                 sensitivity.absolute,

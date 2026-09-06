@@ -253,8 +253,8 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
     if workers > 1 {
         // Parallel multi-run execution: every run is independent (own
         // parse, own engine, tagged output files). Per-run console
-        // output is silenced â€” interleaved analysis chatter from N
-        // workers is noise â€” and replaced by ordered status lines.
+        // output is silenced — interleaved analysis chatter from N
+        // workers is noise — and replaced by ordered status lines.
         if !quiet {
             println!("Running {} runs on {workers} workers", plan.len());
         }
@@ -283,7 +283,7 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
                         .iter()
                         .map(|report| report.duration_secs)
                         .sum();
-                    println!("  âœ“ {label} ({duration:.3}s)");
+                    println!("  ✓ {label} ({duration:.3}s)");
                 } else {
                     let failure = outcome
                         .reports
@@ -294,7 +294,7 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
                                 "multi-run aggregate for '{label}' reported failure without a failed child report"
                             ),
                         })?;
-                    println!("  âœ— {label}: {}", status_failure_summary(failure));
+                    println!("  ✗ {label}: {}", status_failure_summary(failure));
                 }
             }
             if first_error.is_none() {
@@ -627,7 +627,7 @@ struct ConcreteDeckOutcome {
 }
 
 /// Run one concrete deck (all of its analyses) and assemble its report.
-/// Multi-run failures don't abort the remaining runs â€” HSPICE semantics â€”
+/// Multi-run failures don't abort the remaining runs — HSPICE semantics —
 /// so errors land in the report instead of bubbling, except for setup
 /// errors (bad output paths, alternate-mode failures).
 fn run_concrete_deck(
@@ -772,7 +772,7 @@ fn simulation_error_message(e: &CliError) -> String {
 /// published.
 ///
 /// The message alone used to be all that survived, which turned every deck
-/// failure â€” a capability refusal, a convergence failure, an exceeded budget â€”
+/// failure — a capability refusal, a convergence failure, an exceeded budget —
 /// into one undifferentiated simulation error at the process boundary.
 fn first_reported_failure(
     reports: &[SimulationReport],
