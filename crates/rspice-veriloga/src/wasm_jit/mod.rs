@@ -1468,8 +1468,6 @@ endmodule
         /// Jacobian entry count per stamp, in model order.
         stamp_jacobians: Vec<usize>,
         parameters: usize,
-        /// Compiled variable names, so a test can name the slot it reads back.
-        variable_names: Vec<smol_str::SmolStr>,
     }
 
     impl FusedKernelHarness {
@@ -1529,7 +1527,6 @@ endmodule
             let stamp_count = stamp_jacobians.len();
             let jacobian_count = stamp_jacobians.iter().sum::<usize>();
             let parameters = report.model.parameters.len();
-            let variable_names = report.model.variable_names.clone();
 
             let engine = Engine::default();
             let module = Module::new(&engine, artifact.module().bytes())
@@ -1622,7 +1619,6 @@ endmodule
                 frame,
                 stamp_jacobians,
                 parameters,
-                variable_names,
             }
         }
 

@@ -471,7 +471,14 @@ pub(crate) struct CfgModelPlan {
     pub(crate) plan: NativeModelPlan,
     /// Read by the CFG-versus-MIR census, which is what the figures are for.
     /// [`build_default_model_plan`] takes the plan and drops this.
-    #[cfg_attr(not(test), allow(dead_code))]
+    ///
+    /// Every reader is a test compiled with the `native` feature — this file's
+    /// own and the censuses in [`crate::native`] — so the field is carried
+    /// under exactly that cfg. It used to be carried always and excused by
+    /// `cfg_attr(not(test), allow(dead_code))`, which names the wrong set: a
+    /// `wasm-jit` build has no reader in *either* half, and `--all-targets`
+    /// compiles the `test` half, where the excuse did not apply.
+    #[cfg(all(test, feature = "native"))]
     pub(crate) report: CfgPlanReport,
 }
 
@@ -1589,7 +1596,11 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
     plan.noise_exponents = noise_exponents;
     plan.validate_shape(model)
         .map_err(|error| refuse(CfgPlanRefusal::EquationsUnpaired, error.to_string()))?;
-    Ok(CfgModelPlan { plan, report })
+    Ok(CfgModelPlan {
+        plan,
+        #[cfg(all(test, feature = "native"))]
+        report,
+    })
 }
 
 /// The plan every backend compiles.
