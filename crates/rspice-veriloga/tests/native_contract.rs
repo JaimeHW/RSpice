@@ -3,7 +3,16 @@
 //! Native mode is full JIT or error. These tests intentionally exercise the
 //! foundation backend before broad canonical-IR codegen exists: construction
 //! must return a native JIT error, not create a device that runs the VM.
+//!
+//! All but three of the tests here assert what the x64 machine backend
+//! compiles, so they are gated to that architecture, and the model fixtures
+//! they build are dead code everywhere else — 61 of them. The ARM job builds
+//! this binary with `-D warnings`, where a dead fixture is not a finding but
+//! the shape of the gating: the lint stays on for x86-64, which is the host
+//! that can tell an unused fixture from an unrun test. `native::mod` states
+//! the same blanket over `x64` for the same reason.
 #![cfg(feature = "native")]
+#![cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
 
 use rspice_veriloga::canonical_ir::CanonicalIrArtifact;
 #[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
@@ -13,6 +22,9 @@ use rspice_veriloga::codegen::Instruction;
 use rspice_veriloga::device::VerilogADevice;
 #[cfg(feature = "native-bytecode-contract-tests")]
 use rspice_veriloga::native::compile_native;
+// An unused import is not dead code, so the blanket above does not cover it:
+// every caller of this one is an x86-64 test.
+#[cfg(target_arch = "x86_64")]
 use rspice_veriloga::native::compile_native_with_canonical_ir;
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 use std::collections::HashMap;
