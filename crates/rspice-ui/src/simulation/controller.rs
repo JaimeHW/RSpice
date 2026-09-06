@@ -239,8 +239,11 @@ impl LiveTransientAccumulator {
             if self.retained_event_points >= Self::MAX_LIVE_EVENT_POINTS {
                 return;
             }
+            // The typed decoder is the bound: a code is one of the thirteen
+            // XSPICE states or it is not a code, and asking the type that owns
+            // the encoding leaves no second spelling of the ceiling to drift.
             if event.name.trim().is_empty()
-                || event.value_code > crate::state::MAX_DIGITAL_EVENT_CODE
+                || rspice_core::xspice::DigitalValue::from_event_code(event.value_code).is_none()
             {
                 continue;
             }

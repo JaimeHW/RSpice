@@ -30,10 +30,6 @@ pub use ac_bode::{
     ac_bode_shape_for_analysis, ac_bode_shape_for_selection, ac_bode_summary_for_analysis,
     ac_bode_summary_for_selection,
 };
-/// Crate-visible because the bound is a property of the encoding, not of the
-/// evidence type: the live accumulator has to apply the same rule the
-/// retained-evidence validator does.
-pub(crate) use analysis_result::MAX_DIGITAL_EVENT_CODE;
 pub use analysis_result::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,
     AnalysisResultPvtPoint, AnalysisResultSourceDomain, ComplexResultValue, DcOpResult,

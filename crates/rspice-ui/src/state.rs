@@ -148,7 +148,6 @@ pub use schematic::*;
 // the tests can name an attribution's vocabulary directly.
 #[cfg(test)]
 pub use simulation::ConvergenceFailureClass;
-pub(crate) use simulation::MAX_DIGITAL_EVENT_CODE;
 pub use simulation::{
     AnalysisAvailability, AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload,
     AnalysisResultProvenance, AnalysisResultPvtPoint, AnalysisResultSourceDomain, AnalysisType,

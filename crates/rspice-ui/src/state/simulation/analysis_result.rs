@@ -703,9 +703,6 @@ pub struct RealEventTraceEvidence {
     pub points: Vec<RealEventPointEvidence>,
 }
 
-/// The highest XSPICE event code a digital event may carry.
-pub(crate) const MAX_DIGITAL_EVENT_CODE: u8 = 12;
-
 /// Electrical quantity governed by a retained safe-operating-area rule.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
@@ -1830,11 +1827,14 @@ impl AnalysisResultPayload {
                     }
                     let times = trace.points.iter().map(|point| point.time_s);
                     validate_event_times(&trace.node_name, times)?;
-                    if trace
-                        .points
-                        .iter()
-                        .any(|point| point.value_code > MAX_DIGITAL_EVENT_CODE)
-                    {
+                    // The typed decoder owns the encoding: a code it refuses
+                    // is not a state this build can name, and asking it here
+                    // leaves one spelling of that bound rather than a
+                    // constant beside it that has to be kept in step.
+                    if trace.points.iter().any(|point| {
+                        rspice_core::xspice::DigitalValue::from_event_code(point.value_code)
+                            .is_none()
+                    }) {
                         return Err(format!(
                             "event node '{}' has a value outside the XSPICE 12-state encoding",
                             trace.node_name
