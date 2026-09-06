@@ -4385,123 +4385,152 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             };
         }
 
-        let q_first_nonzero = !(left_a_zero && right_a_zero);
-        let q_second_nonzero = !(left_b_zero && right_b_zero);
-        let q_product_nonzero = q_first_nonzero && q_second_nonzero;
-        let q_second_derivative_nonzero = !right_ab_zero
-            || !(right_a_zero || left_b_zero)
-            || !(right_b_zero || left_a_zero)
-            || !left_ab_zero
-            || !(left_a_zero || left_b_zero);
-        if !q_product_nonzero && !q_second_derivative_nonzero {
-            return self.push(NativeOp::Const(0.0));
-        }
-
-        // a^b * (q_a*q_b + q_ab), where
-        // q_x = b_x*ln(a) + b*a_x/a and
-        // q_ab = b_ab*ln(a) + b_a*a_b/a + b_b*a_a/a
-        //        + b*a_ab/a - b*a_a*a_b/a^2.
-        self.lower(left)?;
-        self.lower(right)?;
-        self.append_binary_math("Pow")?;
-
-        let mut factor_emitted = false;
-        if q_product_nonzero {
-            self.lower_pow_log_derivative_factor(left, right, first, left_a_zero, right_a_zero)?;
-            self.lower_pow_log_derivative_factor(left, right, second, left_b_zero, right_b_zero)?;
-            self.append_arithmetic("Mul")?;
-            factor_emitted = true;
-        }
-
-        let mut qab_emitted = false;
-        if !right_ab_zero {
-            self.lower_second_derivative(right, first, second)?;
-            self.lower_power_rule_guarded_log(left)?;
-            self.append_arithmetic("Mul")?;
-            qab_emitted = true;
-        }
-        if !(right_a_zero || left_b_zero) {
-            self.lower_derivative(right, first)?;
-            self.lower_derivative(left, second)?;
-            self.append_arithmetic("Mul")?;
-            self.lower(left)?;
-            self.append_arithmetic("Div")?;
-            if qab_emitted {
-                self.append_arithmetic("Add")?;
-            }
-            qab_emitted = true;
-        }
-        if !(right_b_zero || left_a_zero) {
-            self.lower_derivative(right, second)?;
-            self.lower_derivative(left, first)?;
-            self.append_arithmetic("Mul")?;
-            self.lower(left)?;
-            self.append_arithmetic("Div")?;
-            if qab_emitted {
-                self.append_arithmetic("Add")?;
-            }
-            qab_emitted = true;
-        }
-        if !left_ab_zero {
-            self.lower(right)?;
-            self.lower_second_derivative(left, first, second)?;
-            self.append_arithmetic("Mul")?;
-            self.lower(left)?;
-            self.append_arithmetic("Div")?;
-            if qab_emitted {
-                self.append_arithmetic("Add")?;
-            }
-            qab_emitted = true;
-        }
-        if !(left_a_zero || left_b_zero) {
-            self.lower(right)?;
-            self.lower_derivative(left, first)?;
-            self.append_arithmetic("Mul")?;
-            self.lower_derivative(left, second)?;
-            self.append_arithmetic("Mul")?;
-            self.lower(left)?;
-            self.lower(left)?;
-            self.append_arithmetic("Mul")?;
-            self.append_arithmetic("Div")?;
-            self.append_unary(NativeOp::Neg)?;
-            if qab_emitted {
-                self.append_arithmetic("Add")?;
-            }
-            qab_emitted = true;
-        }
-
-        if factor_emitted && qab_emitted {
-            self.append_arithmetic("Add")?;
-        }
-        self.append_arithmetic("Mul")
-    }
-
-    fn lower_pow_log_derivative_factor(
-        &mut self,
-        left: ExprId,
-        right: ExprId,
-        wrt: CanonicalDerivativeAxis,
-        left_zero: bool,
-        right_zero: bool,
-    ) -> JitResult<()> {
+        // `a^b · (q_a·q_b + q_ab)` with `q_x = b_x·ln(a) + b·a_x/a` is the
+        // textbook form, and it cannot be evaluated at a zero base: the
+        // quotient is `∞` wherever `a_x ≠ 0`, `a^b` is `0`, and the product is
+        // NaN. Nudging the *divisor* off zero does not rescue it either —
+        // `b·a_x/MIN_POSITIVE` is `4.5e307`, so `q_a·q_b` overflows to `∞`
+        // before the `a^b` factor can bring it back down.
+        //
+        // So multiply the `a^b` through *before* forming any product. Every
+        // quotient becomes a power of the base, which is what the guard can
+        // hold, exactly as the first-order rule and the two arms above carry
+        // theirs:
+        //
+        //     a^b·ln²(a)·b_x·b_y                          (i)
+        //   + a^(b−1)·(b·ln(a) + 1)·(b_x·a_y + b_y·a_x)   (ii)
+        //   + a^(b−2)·b·(b−1)·a_x·a_y                     (iii)
+        //   + a^b·ln(a)·b_xy                              (iv)
+        //   + a^(b−1)·b·a_xy                              (v)
+        //
+        // These are the same nine products the quotient form had, regrouped:
+        // (iii) merges `q_a·q_b`'s `b²·a_x·a_y` with `q_ab`'s `−b·a_x·a_y`,
+        // which is the `b(b−1)` cross term the constant-exponent rule emits;
+        // (ii) merges `q_a·q_b`'s logarithmic cross terms with `q_ab`'s bare
+        // ones. The five conditions below are the same union the two
+        // `q_*_nonzero` predicates formed, so nothing new is emitted and
+        // nothing that was is dropped — including the all-zero case, which
+        // falls through to the `Const(0.0)` at the end.
+        //
+        // The exponent is never a literal here — `lower_pow_second_derivative`
+        // would have taken the constant arm if it were — so every base factor
+        // takes [`Self::lower_power_rule_base`] unconditionally, and every
+        // logarithm the guarded form the first-order exponent term uses.
+        let cross_first = !(right_a_zero || left_b_zero);
+        let cross_second = !(right_b_zero || left_a_zero);
         let mut emitted = false;
-        if !right_zero {
-            self.lower_derivative(right, wrt)?;
+
+        // (i) a^b·ln(a)·ln(a)·b_x·b_y
+        if !(right_a_zero || right_b_zero) {
+            self.lower(left)?;
+            self.lower(right)?;
+            self.append_binary_math("Pow")?;
             self.lower_power_rule_guarded_log(left)?;
+            self.append_arithmetic("Mul")?;
+            self.lower_power_rule_guarded_log(left)?;
+            self.append_arithmetic("Mul")?;
+            self.lower_derivative(right, first)?;
+            self.append_arithmetic("Mul")?;
+            self.lower_derivative(right, second)?;
             self.append_arithmetic("Mul")?;
             emitted = true;
         }
-        if !left_zero {
+
+        // (ii) a^(b−1)·(b·ln(a) + 1)·(b_x·a_y + b_y·a_x)
+        if cross_first || cross_second {
+            self.lower_power_rule_base(left, None)?;
             self.lower(right)?;
-            self.lower_derivative(left, wrt)?;
+            self.push(NativeOp::Const(1.0))?;
+            self.append_arithmetic("Sub")?;
+            self.append_binary_math("Pow")?;
+            self.lower(right)?;
+            self.lower_power_rule_guarded_log(left)?;
             self.append_arithmetic("Mul")?;
-            self.lower(left)?;
-            self.append_arithmetic("Div")?;
+            self.push(NativeOp::Const(1.0))?;
+            self.append_arithmetic("Add")?;
+            self.append_arithmetic("Mul")?;
+            let mut cross_emitted = false;
+            if cross_first {
+                self.lower_derivative(right, first)?;
+                self.lower_derivative(left, second)?;
+                self.append_arithmetic("Mul")?;
+                cross_emitted = true;
+            }
+            if cross_second {
+                self.lower_derivative(right, second)?;
+                self.lower_derivative(left, first)?;
+                self.append_arithmetic("Mul")?;
+                if cross_emitted {
+                    self.append_arithmetic("Add")?;
+                }
+            }
+            self.append_arithmetic("Mul")?;
             if emitted {
                 self.append_arithmetic("Add")?;
             }
+            emitted = true;
         }
-        Ok(())
+
+        // (iii) a^(b−2)·b·(b−1)·a_x·a_y
+        if !(left_a_zero || left_b_zero) {
+            self.lower_power_rule_base(left, None)?;
+            self.lower(right)?;
+            self.push(NativeOp::Const(2.0))?;
+            self.append_arithmetic("Sub")?;
+            self.append_binary_math("Pow")?;
+            self.lower(right)?;
+            self.append_arithmetic("Mul")?;
+            self.lower(right)?;
+            self.push(NativeOp::Const(1.0))?;
+            self.append_arithmetic("Sub")?;
+            self.append_arithmetic("Mul")?;
+            self.lower_derivative(left, first)?;
+            self.append_arithmetic("Mul")?;
+            self.lower_derivative(left, second)?;
+            self.append_arithmetic("Mul")?;
+            if emitted {
+                self.append_arithmetic("Add")?;
+            }
+            emitted = true;
+        }
+
+        // (iv) a^b·ln(a)·b_xy
+        if !right_ab_zero {
+            self.lower(left)?;
+            self.lower(right)?;
+            self.append_binary_math("Pow")?;
+            self.lower_power_rule_guarded_log(left)?;
+            self.append_arithmetic("Mul")?;
+            self.lower_second_derivative(right, first, second)?;
+            self.append_arithmetic("Mul")?;
+            if emitted {
+                self.append_arithmetic("Add")?;
+            }
+            emitted = true;
+        }
+
+        // (v) a^(b−1)·b·a_xy
+        if !left_ab_zero {
+            self.lower_power_rule_base(left, None)?;
+            self.lower(right)?;
+            self.push(NativeOp::Const(1.0))?;
+            self.append_arithmetic("Sub")?;
+            self.append_binary_math("Pow")?;
+            self.lower(right)?;
+            self.append_arithmetic("Mul")?;
+            self.lower_second_derivative(left, first, second)?;
+            self.append_arithmetic("Mul")?;
+            if emitted {
+                self.append_arithmetic("Add")?;
+            }
+            emitted = true;
+        }
+
+        if emitted {
+            Ok(())
+        } else {
+            self.push(NativeOp::Const(0.0))
+        }
     }
 
     fn lower_call_derivative(

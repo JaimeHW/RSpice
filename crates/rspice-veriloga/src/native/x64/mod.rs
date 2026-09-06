@@ -5106,6 +5106,85 @@ endmodule
         );
     }
 
+    /// The arm above cannot reach: an exponent that is itself axis-dependent.
+    ///
+    /// `native::expr::lower_variable_pow_second_derivative` has three arms. The
+    /// two the fixture above exercises — a literal exponent and a runtime
+    /// parameter independent of every axis — keep the literal-exponent formula
+    /// and carry `a^(b−1)` and `a^(b−2)` factors, so the base guard reaches
+    /// them. The third, where *both* operands move with an axis, is the
+    /// general one, and it used to form the logarithmic-derivative quotients
+    /// `q_x = b_x·ln(a) + b·a_x/a` first and multiply by `a^b` afterwards.
+    /// That divides by the bare base: at `a = 0` with `a_x ≠ 0` the quotient is
+    /// `∞`, `a^b` is `0`, and the product is NaN — and nudging the *divisor*
+    /// does not rescue it, because `q_a·q_b` is then `(4.5e307)²`, which
+    /// overflows before the `a^b` factor can bring it back down.
+    ///
+    /// The base carries `V(t)` linearly, so `a = 0` while `da/dV(t) = 1` — the
+    /// exact shape the quotient form cannot survive — and the exponent carries
+    /// it too, which is what selects the general arm. `ex = 3` keeps every
+    /// nudged factor finite: `MIN_POSITIVE^(b−2)` is `MIN_POSITIVE` itself and
+    /// `MIN_POSITIVE^(b−1)` underflows to zero, so the whole answer is the
+    /// cross term's `6·MIN_POSITIVE` residue against an analytic value of 0.
+    const POW_SECOND_GENERAL_ZERO_BASE_SOURCE: &str = r#"
+module native_pow_second_general_zero_base(p, n, t);
+  inout p, n, t;
+  electrical p, n, t;
+  parameter real ex = 3.0;
+  analog I(p, n) <+ pow(V(p, n) + V(t) + V(t) * V(t), ex + V(t));
+endmodule
+"#;
+
+    /// What both routes must return for [`POW_SECOND_GENERAL_ZERO_BASE_SOURCE`].
+    ///
+    /// The analytic second derivative is 0, and only the cross term survives
+    /// the guard: `MIN_POSITIVE^(b−2)` is `MIN_POSITIVE` itself at `b = 3`,
+    /// times `b·(b−1)·a_x·a_y = 6`. The other three emitted terms carry
+    /// `MIN_POSITIVE^(b−1)`, which underflows to zero. The wasmi twin pins this
+    /// same number by identity, which is what "the two machines agree on the
+    /// shared lowering" means for this program.
+    const POW_SECOND_GENERAL_ZERO_BASE_RESIDUE: f64 = 6.0 * f64::MIN_POSITIVE;
+
+    #[test]
+    fn second_derivative_power_rule_is_finite_at_a_zero_base_with_a_moving_exponent() {
+        let artifact = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(POW_SECOND_GENERAL_ZERO_BASE_SOURCE)
+            .expect("compile canonical IR");
+        let expression = artifact.mir.equations[0].expression.id;
+        let axis = CanonicalDerivativeAxis::Node(NodeId::from(2));
+        let program = NativeProgram::from_mir_expression_second_derivative(
+            "native_pow_second_general_zero_base",
+            EntryKind::Jacobian,
+            &artifact.mir,
+            crate::canonical_ir::EquationId::new(0),
+            expression,
+            axis,
+            axis,
+            NativeLoweringLimits::new(3, 0, 1, 0, 0),
+        )
+        .expect("lower the second derivative of a power at a zero base");
+        let bytes =
+            super::codegen::compile_value_function(&program).expect("compile derivative leaf");
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate derivative leaf");
+        let entry = memory.ptr_at(0).expect("derivative entry");
+        let function: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let ctx = eval_context(&[3.0], &[0.0, 0.0, 0.0]);
+
+        let value = function(&ctx, std::ptr::null());
+        assert!(
+            value.is_finite(),
+            "d²(a^b)/dV(t)² at a = 0 with an axis-dependent exponent is {value}; the general \
+             arm's `b·a_x/a` is `∞` there and `a^b · ∞` is NaN"
+        );
+        assert_eq!(
+            value.to_bits(),
+            POW_SECOND_GENERAL_ZERO_BASE_RESIDUE.to_bits(),
+            "the analytic second derivative is 0 and the nudge's own residue is \
+             {POW_SECOND_GENERAL_ZERO_BASE_RESIDUE:e}; this route returned {value:e}"
+        );
+    }
+
     fn run_shipped_model_device_probe(name: &str, path: &Path, module: Option<&str>) {
         shipped_probe_trace(name, "compile-runtime:start");
         let frontend_start = web_time::Instant::now();
