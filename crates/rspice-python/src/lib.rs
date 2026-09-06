@@ -248,6 +248,7 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
             "SimulationResult",
             "DeviceOperatingPoint",
             "TransientResult",
+            "DigitalEvent",
             "ProjectedSignal",
             "CompressedTransientResult",
             "TransientCheckpoint",
