@@ -204,7 +204,7 @@ impl PreparedVerilogARuntime {
         project_id: crate::product::ProjectId,
         bundle: &crate::state::ProjectSourceBundle,
         receipt: &VerilogACompileReceipt,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, crate::simulation::veriloga::PreparedRuntimeError> {
         Self::try_from_current_bundle_receipt_with_alias(
             project_id,
             bundle,
@@ -218,7 +218,7 @@ impl PreparedVerilogARuntime {
         bundle: &crate::state::ProjectSourceBundle,
         receipt: &VerilogACompileReceipt,
         netlist_alias: impl Into<String>,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, crate::simulation::veriloga::PreparedRuntimeError> {
         Self::try_new(
             project_id,
             bundle,
