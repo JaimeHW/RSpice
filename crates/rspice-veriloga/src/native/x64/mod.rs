@@ -5047,12 +5047,21 @@ endmodule
         let frontend_elapsed = frontend_start.elapsed();
         shipped_probe_trace(name, "native-device:start");
         let native_start = web_time::Instant::now();
-        let model = std::sync::Arc::new(runtime.model.clone());
+        // Move the model out of the runtime rather than clone it. The clone was
+        // a second copy of the largest structure in the process — 2.0 GB on
+        // bsimcmg, 3.8 GB on bsimsoi100 — held for the whole probe, and it was
+        // the probe's, not the compile's.
+        let crate::CompiledRuntimeFile {
+            model,
+            canonical_ir,
+            ..
+        } = runtime;
+        let model = std::sync::Arc::new(model);
         let nodes = (1..=model.num_terminals).collect::<Vec<_>>();
         let mut device = VerilogADevice::try_new_with_canonical_ir(
             format!("{name}_device"),
             std::sync::Arc::clone(&model),
-            &runtime.canonical_ir,
+            &canonical_ir,
             &nodes,
         )
         .unwrap_or_else(|error| {
@@ -5094,8 +5103,7 @@ endmodule
         for (terminal, node) in nodes.iter().copied().enumerate() {
             solution[node - 1] = shipped_device_terminal_bias(name, terminal);
         }
-        let canonical_internal_nodes = runtime
-            .canonical_ir
+        let canonical_internal_nodes = canonical_ir
             .mir
             .nodes
             .iter()
