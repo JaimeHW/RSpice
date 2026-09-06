@@ -183,15 +183,26 @@ a bytecode expression VM that also backs B-sources, and
 engineering suffixes are accepted, and unrecognized dot-commands surface as
 diagnostics rather than being silently dropped.
 
+HSPICE `.ALTER` and `.DATA` expand into a plan of concrete decks, each parsed
+and solved independently, tagged so one run cannot overwrite another and spread
+across workers with `-j`. `--spice-dialect` picks the expression, measurement,
+and device semantics to match: `ngspice`, `xyce`, or `best` for RSpice's most
+accurate evaluator with ngspice-compatible expression syntax.
+
 Beyond plain SPICE, the parser ingests SPEF (IEEE 1481) parasitics as
 back-annotation onto a parsed netlist, XSPICE code-model cards, and
-Laplace-defined sources. LTspice `.raw` files can be read back for comparison.
+Laplace-defined sources. A fail-closed Spectre front end handles the statements
+foundry model libraries and macromodels use, lowering them to canonical SPICE
+with unsupported semantics raised as errors rather than guessed. LTspice `.raw`
+files can be read back for comparison.
 
 Every product build ships the small, generic
 [foundation library](models/spice/foundation/) — the only SPICE pack in this
 repository, and like everything under `models/spice/`, authored by the RSpice
-project. Further packs are published through the Model Hub pipeline rather than
-committed here, and projects can import their own model sources.
+project. Projects can import their own model sources. Further packs are
+published through the Model Hub as signed, immutable archives: a canonical
+manifest under ed25519 trust, a signed catalog snapshot, and hardened archive
+reading, so an installed pack's provenance is checkable rather than assumed.
 
 ## Interfaces
 
@@ -252,6 +263,10 @@ verification evidence, model and PDK binding, and direct netlist editing. Its
 simulation runner is the only surface that reaches PXF, PSTB, SOA, and
 reliability analyses.
 
+The IDE also hosts the surfaces built around a run rather than inside it: signed
+model packs, governed Python automation, published figure and report bundles,
+organization-managed drawing sheets, and an optional cloud worker client.
+
 ```bash
 cargo run --release -p rspice-ui
 ```
@@ -278,6 +293,11 @@ Transient and AC results come back as NumPy arrays. The crate README carries the
 full API reference, the maturin/pytest workflow CI uses, and the Windows
 `PYO3_PYTHON` workaround for Microsoft Store interpreter aliases:
 [crates/rspice-python/README.md](crates/rspice-python/README.md).
+
+These bindings put RSpice inside your Python. The desktop IDE has the reverse —
+Python automation inside RSpice — and the two are separate: automation runs on a
+signed, application-local CPython staged into the release, never an interpreter
+discovered from `PATH`, the registry, a virtualenv, or user site-packages.
 
 ### Rust
 
