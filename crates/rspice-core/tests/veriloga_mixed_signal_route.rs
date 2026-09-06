@@ -20,7 +20,7 @@
 //!
 //! # What the tests here are
 //!
-//! Five end-to-end properties and the refusals that bound them:
+//! End-to-end properties, and the refusals that bound them:
 //!
 //! * an analog oscillator counted by a digital counter, where the count in
 //!   `digital_traces` has to equal the number of times the recorded analog
@@ -39,7 +39,11 @@
 //! * a vector discrete port, bridged one net per bit and declared as one bus:
 //!   the bits are co-timed because the discrete half publishes the whole
 //!   vector at once, the declaration reaches the live hook and both
-//!   interchange routes, and saving one member retains them all.
+//!   interchange routes, and saving one member retains them all;
+//! * a vector discrete port whose range is not anchored at zero — `[7:4]` and
+//!   `[4:7]` — where a declared index is a name for a bit rather than an offset
+//!   into the value, so the deck's first net for the port is whichever bit the
+//!   left declared bound calls out.
 #![cfg(feature = "veriloga")]
 
 use rspice_core::abort_signal::{AbortSignal, DigitalEventCode, TransientSample};
@@ -1044,5 +1048,300 @@ fn a_boundary_bus_reaches_the_vcd_and_the_rawfile_as_one_vector() {
             .any(|trace| trace.node_name.eq_ignore_ascii_case("count#0")),
         "the member plots are written beside the bus plot, so a reader that never heard of the \
          family still sees every conductor"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// (g) A boundary port whose range is not anchored at zero
+// ---------------------------------------------------------------------------
+
+/// `[7:4]` and `[1:0]` on one module: four conductors carrying bits called 7,
+/// 6, 5 and 4, and two carrying bits called 1 and 0.
+///
+/// IEEE 1364-2005 section 3.3.1 lets a vector be declared over any two bounds,
+/// and `count[7]` is then a name for the port's most significant bit rather
+/// than an offset into it. The boundary refused this declaration for as long as
+/// the discrete half read the name as an offset — a `[7:4]` port would have
+/// bound four deck nets to four bits the module could not read.
+const HIGH_VECTOR_PORT: &str = r#"
+`include "disciplines.vams"
+module high_vector_mixed(p, n, count, sel, hit);
+    inout p, n;
+    electrical p, n;
+    output [7:4] count;
+    reg [7:4] count;
+    input [1:0] sel;
+    wire [1:0] sel;
+    output hit;
+    wire hit;
+    assign hit = sel[1] & ~sel[0];
+    initial count = 4'b0000;
+    always #5 count = count + 4'b0001;
+    analog I(p, n) <+ V(p, n) / 1000.0;
+endmodule
+"#;
+
+/// The deck a `[7:4]` output and a `[1:0]` input need: one node per bit of
+/// each, declared MSB first, in port order.
+fn high_vector_deck(model: &ModelFile) -> String {
+    format!(
+        "* a four-bit output declared [7:4] and a two-bit input declared [1:0]\n\
+         x1 p 0 count#7 count#6 count#5 count#4 sel#1 sel#0 hit high_vector_mixed\n\
+         rp p 0 1meg\n\
+         vsel1 sel#1 0 3.3\n\
+         vsel0 sel#0 0 0\n\
+         rhit hit 0 1meg\n\
+         .va \"{}\" high_vector_mixed\n\
+         .tran 1n 80n\n\
+         .end\n",
+        model.deck_path()
+    )
+}
+
+/// The value words one declared vector carries, in order.
+///
+/// Found through the `$var` line's identifier rather than by taking every `b…`
+/// line, because a module with two vector ports declares two vectors and their
+/// value changes are interleaved in one stream.
+fn vcd_bus_words(vcd: &str, reference: &str) -> Vec<String> {
+    let identifier = vcd
+        .lines()
+        .find_map(|line| {
+            let rest = line.strip_prefix("$var wire ")?;
+            let mut parts = rest.split_whitespace();
+            let _width = parts.next()?;
+            let identifier = parts.next()?;
+            let name = parts.next()?;
+            let range = parts.next()?;
+            (format!("{name} {range}") == reference).then(|| identifier.to_string())
+        })
+        .unwrap_or_else(|| panic!("no `$var` declares `{reference}`:\n{vcd}"));
+    vcd.lines()
+        .filter_map(|line| {
+            let mut parts = line.split_whitespace();
+            let value = parts.next()?;
+            let owner = parts.next()?;
+            (value.starts_with('b') && owner == identifier).then(|| value.to_string())
+        })
+        .collect()
+}
+
+/// The last value a boundary net's recorded history holds.
+fn final_state(result: &TransientResult, net: &str) -> rspice_core::xspice::DigitalState {
+    result
+        .digital_trace_named(net)
+        .unwrap_or_else(|| panic!("net '{net}' has no digital trace"))
+        .last()
+        .expect("a recorded trace has at least its opening point")
+        .value
+        .state
+}
+
+/// **A declared index is a name, all the way out to the deck's conductors.**
+///
+/// The counter runs `0000` to `1111` and wraps, and every step reaches the
+/// result as one four-bit word under the range its author wrote. The bits are
+/// the ones the module calls 7, 6, 5 and 4 — the deck's first net for the port
+/// is its most significant bit, which is what the left declared bound means.
+#[test]
+fn a_boundary_port_declared_above_bit_zero_bridges_every_bit_it_names() {
+    let model = ModelFile::new("high_vector", HIGH_VECTOR_PORT);
+    let result = run(&high_vector_deck(&model), 80.0e-9, 1.0e-9);
+
+    let bus = result
+        .digital_buses
+        .iter()
+        .find(|bus| bus.name == "x1.count")
+        .unwrap_or_else(|| panic!("no bus for the [7:4] port: {:?}", result.digital_buses));
+    assert_eq!((bus.msb, bus.lsb), (7, 4));
+    assert_eq!(
+        bus.members,
+        vec![
+            "COUNT#7".to_string(),
+            "COUNT#6".to_string(),
+            "COUNT#5".to_string(),
+            "COUNT#4".to_string(),
+        ],
+        "members are the deck nodes, declared MSB first"
+    );
+    assert_eq!(bus.source, DigitalBusSource::Engine);
+
+    // Every bit is a conductor of its own, and the one called 4 is the one
+    // that toggles at every step while the one called 7 divides it by eight.
+    let low = change_times(&result, "count#4");
+    let high = change_times(&result, "count#7");
+    assert!(
+        low.len() >= 16,
+        "the counter must run through a whole cycle, saw {low:?}"
+    );
+    assert_eq!(
+        high.len(),
+        low.len() / 8,
+        "the bit named 7 is the most significant of four: bit 4 {low:?}, bit 7 {high:?}"
+    );
+
+    // The vector input's first deck net is its bit 1, which is the bit `hit`
+    // reads: `sel` is `2'b10`, and the module says so.
+    assert_eq!(
+        final_state(&result, "hit"),
+        rspice_core::xspice::DigitalState::One,
+        "`hit` is `sel[1] & ~sel[0]`, and the deck drives sel#1 high and sel#0 low"
+    );
+
+    // The VCD is where the word order is visible: one four-bit value per
+    // change, counting up and wrapping.
+    let document = rspice_core::execution::event_vcd_document(
+        "tran",
+        &result.digital_traces,
+        &result.real_traces,
+        &result.digital_buses,
+    )
+    .expect("the run's event histories project onto a VCD document");
+    let mut vcd = Vec::new();
+    rspice_core::io::write_vcd(&mut vcd, &document).expect("the VCD document writes");
+    let vcd = String::from_utf8(vcd).expect("the VCD writer emits UTF-8");
+    assert!(
+        vcd.contains("$var wire 4 ") && vcd.contains("x1.count [7:4] $end"),
+        "the VCD must declare the port under the range its author wrote:\n{vcd}"
+    );
+
+    let words = vcd_bus_words(&vcd, "x1.count [7:4]");
+    let expected: Vec<String> = (0..16).map(|value| format!("b{value:04b}")).collect();
+    assert!(
+        words.len() >= expected.len(),
+        "the counter must reach 1111, saw {words:?}"
+    );
+    assert_eq!(
+        &words[..expected.len()],
+        expected.as_slice(),
+        "the port counts 0000 to 1111 as one word"
+    );
+
+    // And the rawfile carries the same grouping back.
+    let mut raw = Vec::new();
+    rspice_core::io::write_event_plots(
+        &mut raw,
+        &rspice_core::execution::transient_event_plots(&result.digital_traces, &result.real_traces),
+        &rspice_core::execution::transient_bus_plots(&result.digital_traces, &result.digital_buses)
+            .expect("a four-bit bus over one counter cycle fits the reassembly ceiling"),
+        rspice_core::io::RawFormat::Ascii,
+    )
+    .expect("the run's event histories write as rawfile plots");
+    let file = rspice_core::io::parse_raw_plots_reader_with_limits(
+        &mut std::io::Cursor::new(raw),
+        rspice_core::resource::ResourceLimits::default(),
+    )
+    .expect("the rawfile parses back");
+    let decoded =
+        rspice_core::execution::decode_event_plots(&file).expect("the appended plots decode");
+    let read_back = decoded
+        .digital_buses
+        .iter()
+        .find(|bus| bus.name == "x1.count")
+        .expect("the rawfile carries the [7:4] bus");
+    assert_eq!((read_back.msb, read_back.lsb), (7, 4));
+    assert_eq!(
+        read_back.members,
+        vec![
+            "COUNT#7".to_string(),
+            "COUNT#6".to_string(),
+            "COUNT#5".to_string(),
+            "COUNT#4".to_string(),
+        ]
+    );
+}
+
+/// The same range written the other way round, where the leading declared
+/// index is the *smaller* number and still the most significant bit.
+///
+/// The two writes are what tell the readings apart: `q[4]` is the port's top
+/// bit and `q[7]` its bottom one, so the deck's first net rises first and its
+/// last net rises second. A boundary that read a declared index as a position
+/// would have bridged neither.
+const ASCENDING_VECTOR_PORT: &str = r#"
+`include "disciplines.vams"
+module ascending_vector_mixed(p, n, q);
+    inout p, n;
+    electrical p, n;
+    output [4:7] q;
+    reg [4:7] q;
+    initial begin
+        q = 4'b0000;
+        #5 q[4] = 1'b1;
+        #5 q[7] = 1'b1;
+    end
+    analog I(p, n) <+ V(p, n) / 1000.0;
+endmodule
+"#;
+
+#[test]
+fn an_ascending_boundary_port_puts_its_leading_index_on_the_decks_first_net() {
+    let model = ModelFile::new("ascending_vector", ASCENDING_VECTOR_PORT);
+    let deck = format!(
+        "* a four-bit output declared [4:7], leading index first\n\
+         x1 p 0 q#4 q#5 q#6 q#7 ascending_vector_mixed\n\
+         rp p 0 1meg\n\
+         .va \"{}\" ascending_vector_mixed\n\
+         .tran 1n 20n\n\
+         .end\n",
+        model.deck_path()
+    );
+    let result = run(&deck, 20.0e-9, 1.0e-9);
+
+    let bus = result
+        .digital_buses
+        .iter()
+        .find(|bus| bus.name == "x1.q")
+        .unwrap_or_else(|| panic!("no bus for the [4:7] port: {:?}", result.digital_buses));
+    assert_eq!((bus.msb, bus.lsb), (4, 7));
+    assert_eq!(
+        bus.members,
+        vec![
+            "Q#4".to_string(),
+            "Q#5".to_string(),
+            "Q#6".to_string(),
+            "Q#7".to_string(),
+        ],
+        "declaration order is the deck's node order, and it starts at the left bound"
+    );
+
+    use rspice_core::xspice::DigitalState;
+    assert_eq!(
+        final_state(&result, "q#4"),
+        DigitalState::One,
+        "`q[4]` is the left declared bound, so it is the port's most significant bit"
+    );
+    assert_eq!(final_state(&result, "q#5"), DigitalState::Zero);
+    assert_eq!(final_state(&result, "q#6"), DigitalState::Zero);
+    assert_eq!(
+        final_state(&result, "q#7"),
+        DigitalState::One,
+        "`q[7]` is the right declared bound, so it is the port's least significant bit"
+    );
+
+    // The two writes land one after the other, five nanoseconds apart, so the
+    // word goes 0000, 1000, 1001 — the top bit first.
+    let document = rspice_core::execution::event_vcd_document(
+        "tran",
+        &result.digital_traces,
+        &result.real_traces,
+        &result.digital_buses,
+    )
+    .expect("the run's event histories project onto a VCD document");
+    let mut vcd = Vec::new();
+    rspice_core::io::write_vcd(&mut vcd, &document).expect("the VCD document writes");
+    let vcd = String::from_utf8(vcd).expect("the VCD writer emits UTF-8");
+    assert!(
+        vcd.contains("$var wire 4 ") && vcd.contains("x1.q [4:7] $end"),
+        "the VCD must declare the port as `[4:7]`, the range its author wrote:\n{vcd}"
+    );
+    assert_eq!(
+        vcd_bus_words(&vcd, "x1.q [4:7]"),
+        vec![
+            "b0000".to_string(),
+            "b1000".to_string(),
+            "b1001".to_string()
+        ],
+        "the write to `q[4]` moves the leading bit and the write to `q[7]` the trailing one"
     );
 }
