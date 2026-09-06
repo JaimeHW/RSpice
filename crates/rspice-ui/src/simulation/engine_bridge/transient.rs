@@ -577,7 +577,29 @@ fn collect_event_history(
         }
     }
 
-    Ok(TransientEventHistory { digital, real })
+    // The declarations are copied whole, before the window filter above can
+    // have dropped a member trace: a bus whose members did not all survive
+    // the window would be a declaration over traces that are not there, and
+    // `validate_digital_bus_table` refuses exactly that. Retaining the table
+    // only when every member it names survived keeps the payload judgeable.
+    let digital_buses = tran_result
+        .digital_buses
+        .iter()
+        .filter(|bus| {
+            bus.members.iter().all(|member| {
+                digital
+                    .iter()
+                    .any(|trace: &EventNodeHistory<DigitalEventPoint>| &trace.node_name == member)
+            })
+        })
+        .map(crate::state::DigitalBusEvidence::from)
+        .collect();
+
+    Ok(TransientEventHistory {
+        digital,
+        real,
+        digital_buses,
+    })
 }
 
 #[cfg(test)]

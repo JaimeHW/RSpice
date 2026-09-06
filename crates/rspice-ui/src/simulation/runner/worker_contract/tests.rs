@@ -298,7 +298,7 @@ pub(super) fn nondefault_op_config() -> crate::simulation::dialog::OpConfig {
 
 #[test]
 fn browser_worker_transfer_protocol_matches_rust_transport() {
-    assert_eq!(WORKER_RESPONSE_TRANSPORT_PROTOCOL, 14);
+    assert_eq!(WORKER_RESPONSE_TRANSPORT_PROTOCOL, 15);
     assert_eq!(WORKER_REQUEST_TRANSPORT_PROTOCOL, 8);
     let source = include_str!("../../../../web/simulation-worker.js");
     assert!(source.contains(&format!(
@@ -823,6 +823,7 @@ fn transient_worker_result_round_trips_through_json() {
                     value: 0.75,
                 }],
             }],
+            buses: Vec::new(),
         },
     };
 
@@ -984,6 +985,7 @@ fn event_histories_survive_the_worker_edge_in_both_directions() {
                 }],
             }],
             real: Vec::new(),
+            digital_buses: Vec::new(),
         },
     };
     let wire = WorkerSimulationResult::try_from(source.clone()).expect("transient converts");

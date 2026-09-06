@@ -111,9 +111,20 @@ pub struct EventNodeHistory<P> {
 pub struct TransientEventHistory {
     pub digital: Vec<EventNodeHistory<DigitalEventPoint>>,
     pub real: Vec<EventNodeHistory<RealEventPoint>>,
+    /// Buses the run declared over `digital`, in declaration order.
+    ///
+    /// A declaration only, carried beside the member histories it names — the
+    /// engine states which conductors are one word, never what the word is.
+    pub digital_buses: Vec<crate::state::DigitalBusEvidence>,
 }
 
 impl TransientEventHistory {
+    /// Whether this run committed no event history at all.
+    ///
+    /// A bus is a claim *about* member traces, so a table with no traces
+    /// under it says nothing and does not make a history non-empty; the
+    /// engine cannot produce one, and `validate_digital_bus_table` refuses it
+    /// if anything ever does.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.digital.is_empty() && self.real.is_empty()

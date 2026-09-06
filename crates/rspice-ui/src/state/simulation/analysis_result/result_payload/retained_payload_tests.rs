@@ -934,3 +934,85 @@ fn reliability_and_soa_axes_are_canonical_engineering_coordinates() {
         .is_ok()
     );
 }
+
+/// A two-member bus over two recorded traces, and the traces on their own.
+fn bussed_event_payload(digital_buses: Vec<DigitalBusEvidence>) -> AnalysisResultPayload {
+    let trace = |name: &str| DigitalEventTraceEvidence {
+        node_name: name.to_owned(),
+        points: vec![
+            DigitalEventPointEvidence {
+                time_s: 0.0,
+                value_code: 0,
+            },
+            DigitalEventPointEvidence {
+                time_s: 5.0e-9,
+                value_code: 1,
+            },
+        ],
+    };
+    AnalysisResultPayload::TransientEvents {
+        digital_traces: vec![trace("count#1"), trace("count#0")],
+        real_traces: Vec::new(),
+        digital_buses,
+    }
+}
+
+fn two_bit_counter_bus() -> DigitalBusEvidence {
+    DigitalBusEvidence {
+        name: "count".to_owned(),
+        msb: 1,
+        lsb: 0,
+        members: vec!["count#1".to_owned(), "count#0".to_owned()],
+        source: DigitalBusSourceEvidence::Engine,
+    }
+}
+
+/// A result retained before buses existed has no `digitalBuses` key at all.
+/// It must load as a result that declares none, which is what it means — and
+/// `deny_unknown_fields` must still refuse anything else the file invents.
+#[test]
+fn an_event_payload_without_a_bus_table_loads_as_one_declaring_none() {
+    let without = r#"{"kind":"transient_events","digital_traces":[{"node_name":"clk","points":[{"time_s":0.0,"value_code":0}]}],"real_traces":[]}"#;
+    let payload: AnalysisResultPayload =
+        serde_json::from_str(without).expect("a pre-bus event payload still loads");
+    let AnalysisResultPayload::TransientEvents { digital_buses, .. } = &payload else {
+        panic!("event payload");
+    };
+    assert!(digital_buses.is_empty());
+    payload
+        .validate_for(AnalysisType::Transient)
+        .expect("a history with no declaration is valid evidence");
+
+    let invented =
+        r#"{"kind":"transient_events","digital_traces":[],"real_traces":[],"digital_bus":[]}"#;
+    assert!(serde_json::from_str::<AnalysisResultPayload>(invented).is_err());
+}
+
+/// The engine's own validator decides what a bus table may say, so a table
+/// the GUI accepts is exactly one the CLI and the bindings accept. These are
+/// its refusals, reached through this crate's carrier.
+#[test]
+fn a_bus_is_judged_against_the_traces_it_names() {
+    bussed_event_payload(vec![two_bit_counter_bus()])
+        .validate_for(AnalysisType::Transient)
+        .expect("a declaration over two recorded traces is valid");
+
+    let mut unknown_member = two_bit_counter_bus();
+    unknown_member.members[1] = "count#9".to_owned();
+    let error = bussed_event_payload(vec![unknown_member])
+        .validate_for(AnalysisType::Transient)
+        .expect_err("a member with no trace is refused");
+    assert!(error.contains("count#9"), "{error}");
+
+    let mut narrow = two_bit_counter_bus();
+    narrow.msb = 7;
+    let error = bussed_event_payload(vec![narrow])
+        .validate_for(AnalysisType::Transient)
+        .expect_err("a range that does not match the member count is refused");
+    assert!(error.contains("count"), "{error}");
+
+    let error = bussed_event_payload(vec![two_bit_counter_bus(), two_bit_counter_bus()])
+        .validate_for(AnalysisType::Transient)
+        .expect_err("two buses of one name are refused");
+    assert!(error.contains("count"), "{error}");
+}

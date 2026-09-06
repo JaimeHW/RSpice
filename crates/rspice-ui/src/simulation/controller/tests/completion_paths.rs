@@ -944,6 +944,7 @@ fn live_transient_accumulator_rejects_partial_or_schema_changing_points() {
             .collect(),
         events: Vec::new(),
         real_events: Vec::new(),
+        buses: Vec::new(),
     };
     let mut accumulator = LiveTransientAccumulator::default();
 
@@ -987,6 +988,7 @@ fn live_transient_accumulator_keeps_a_change_compressed_event_history() {
                     value: *value,
                 })
                 .collect(),
+            buses: Vec::new(),
         };
 
     let mut accumulator = LiveTransientAccumulator::default();
@@ -1006,6 +1008,7 @@ fn live_transient_accumulator_keeps_a_change_compressed_event_history() {
     let AnalysisResultPayload::TransientEvents {
         digital_traces,
         real_traces,
+        ..
     } = payload
     else {
         panic!("live events are retained as a transient event payload");
@@ -1070,6 +1073,7 @@ fn live_transient_accumulator_bounds_the_provisional_event_history() {
                 value_code: (index % 2) as u8,
             }],
             real_events: Vec::new(),
+            buses: Vec::new(),
         })
         .collect();
 
@@ -1117,6 +1121,7 @@ fn live_transient_accumulator_compacts_aligned_source_traces() {
             ],
             events: Vec::new(),
             real_events: Vec::new(),
+            buses: Vec::new(),
         })
         .collect();
 

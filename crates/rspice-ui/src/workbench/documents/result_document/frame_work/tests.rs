@@ -121,6 +121,7 @@ fn transient_analysis() -> AnalysisResult {
         .with_result_payload(AnalysisResultPayload::TransientEvents {
             digital_traces,
             real_traces: Vec::new(),
+            digital_buses: Vec::new(),
         })
 }
 

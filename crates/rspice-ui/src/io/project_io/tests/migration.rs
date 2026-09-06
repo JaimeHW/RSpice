@@ -1602,3 +1602,147 @@ fn prepared_result_provenance_validation_rejects_aliases_and_partial_history() {
 }
 
 mod result_history;
+
+/// A completed transient whose retained events are two conductors, sealed the
+/// way a schema-v18 file was: with the V9 encoding, which had no bus table.
+fn persisted_events_at_schema_v18() -> ProjectSimulationResults {
+    use crate::state::{DigitalEventPointEvidence, DigitalEventTraceEvidence};
+
+    let trace = |name: &str| DigitalEventTraceEvidence {
+        node_name: name.to_owned(),
+        points: vec![
+            DigitalEventPointEvidence {
+                time_s: 0.0,
+                value_code: 0,
+            },
+            DigitalEventPointEvidence {
+                time_s: 5.0e-9,
+                value_code: 1,
+            },
+        ],
+    };
+    let mut run = SimulationRun::new(19);
+    run.mark_running().expect("fixture run starts");
+    run.finish_lifecycle(SimulationRunLifecycle::Completed)
+        .expect("fixture run completes");
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_result_payload(
+            AnalysisResultPayload::TransientEvents {
+                digital_traces: vec![trace("count#1"), trace("count#0")],
+                real_traces: Vec::new(),
+                digital_buses: Vec::new(),
+            },
+        ),
+    );
+    seal_legacy_unattributed(&mut run);
+
+    let mut simulation = SimulationState::default();
+    simulation.runs = vec![run];
+    simulation.next_run_id = 19;
+    let mut persisted = ProjectSimulationResults::from_state(&simulation);
+    persisted.schema_version = MEASUREMENT_VERIFICATION_RESULTS_SCHEMA_VERSION;
+    for persisted_run in &mut persisted.runs {
+        let restored = persisted_run
+            .clone()
+            .into_run()
+            .expect("event fixture restores before the V9 digest downgrade");
+        for (persisted_analysis, analysis) in
+            persisted_run.analyses.iter_mut().zip(&restored.analyses)
+        {
+            persisted_analysis.result_data_digest =
+                PersistedField::Value(analysis.legacy_v9_result_data_digest());
+        }
+        persisted_run.dataset_content_digest =
+            PersistedField::Value(restored.legacy_v9_dataset_content_digest());
+    }
+    persisted
+}
+
+#[test]
+fn schema_v18_is_authenticated_then_resealed_with_an_empty_bus_table() {
+    let mut persisted = persisted_events_at_schema_v18();
+    let legacy_digest = persisted.runs[0].analyses[0]
+        .result_data_digest
+        .as_ref()
+        .copied()
+        .expect("schema-v18 fixture carries a digest");
+
+    persisted
+        .migrate_to_current(ProjectId::new())
+        .expect("an authentic schema-v18 event history migrates");
+
+    assert_eq!(
+        persisted.schema_version,
+        PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION
+    );
+    let Some(AnalysisResultPayload::TransientEvents { digital_buses, .. }) =
+        persisted.runs[0].analyses[0].result_payload.as_ref()
+    else {
+        panic!("the migrated analysis still carries its event history");
+    };
+    assert!(
+        digital_buses.is_empty(),
+        "a file written before buses existed declares none"
+    );
+    let current_digest = persisted.runs[0].analyses[0]
+        .result_data_digest
+        .as_ref()
+        .copied()
+        .expect("migrated fixture carries a current digest");
+    assert_ne!(legacy_digest, current_digest);
+    persisted.validate().expect("migrated schema validates");
+}
+
+#[test]
+fn schema_v18_rejects_tampering_and_a_smuggled_bus_table() {
+    let mut tampered = persisted_events_at_schema_v18();
+    let Some(AnalysisResultPayload::TransientEvents { digital_traces, .. }) =
+        tampered.runs[0].analyses[0].result_payload.as_mut()
+    else {
+        panic!("event payload");
+    };
+    digital_traces[0].points[1].value_code = 2;
+    let error = tampered
+        .migrate_to_current(ProjectId::new())
+        .expect_err("schema-v18 content must match its retained V9 digest");
+    assert!(
+        error.contains("schema-v18 analysis 1 result data digest"),
+        "{error}"
+    );
+
+    let mut smuggled = persisted_events_at_schema_v18();
+    let Some(AnalysisResultPayload::TransientEvents { digital_buses, .. }) =
+        smuggled.runs[0].analyses[0].result_payload.as_mut()
+    else {
+        panic!("event payload");
+    };
+    digital_buses.push(crate::state::DigitalBusEvidence {
+        name: "count".to_owned(),
+        msb: 1,
+        lsb: 0,
+        members: vec!["count#1".to_owned(), "count#0".to_owned()],
+        source: crate::state::DigitalBusSourceEvidence::Engine,
+    });
+    let error = smuggled
+        .migrate_to_current(ProjectId::new())
+        .expect_err("a schema-v18 file cannot have declared a bus");
+    assert!(
+        error.contains("digital bus 'count', which was introduced by schema v19"),
+        "{error}"
+    );
+}
+
+/// A file that says it was written by a later build is refused rather than
+/// read as if this build understood it.
+#[test]
+fn a_results_schema_from_the_future_is_refused_by_number() {
+    let mut ahead = persisted_events_at_schema_v18();
+    ahead.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION + 1;
+    let error = ahead
+        .migrate_to_current(ProjectId::new())
+        .expect_err("a forward schema version is not migrated");
+    assert!(
+        error.contains("unsupported simulation results schema version 20"),
+        "{error}"
+    );
+}

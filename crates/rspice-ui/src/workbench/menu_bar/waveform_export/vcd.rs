@@ -113,6 +113,7 @@ pub(super) fn prepare_vcd(analysis: &crate::state::AnalysisResult) -> Result<Pre
     let Some(AnalysisResultPayload::TransientEvents {
         digital_traces,
         real_traces,
+        ..
     }) = analysis.result_payload.as_ref()
     else {
         return Err(NO_EVENT_EVIDENCE_MESSAGE.to_owned());
@@ -248,6 +249,7 @@ mod tests {
         AnalysisResultPayload::TransientEvents {
             digital_traces,
             real_traces,
+            digital_buses: Vec::new(),
         }
     }
 

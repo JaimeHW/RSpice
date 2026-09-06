@@ -402,6 +402,7 @@ fn viewer_can_render(
             Some(AnalysisResultPayload::TransientEvents {
                 ref digital_traces,
                 ref real_traces,
+                ..
             }) if !digital_traces.is_empty() || !real_traces.is_empty()
         ),
         ResultViewer::Soa => matches!(

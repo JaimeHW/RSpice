@@ -1137,6 +1137,7 @@ fn payload_values_label(payload: &AnalysisResultPayload) -> String {
         AnalysisResultPayload::TransientEvents {
             digital_traces,
             real_traces,
+            ..
         } => {
             let events: usize = digital_traces
                 .iter()

@@ -59,9 +59,16 @@ fn transient_events_payload(
         })
         .collect::<Vec<_>>();
     real_traces.sort_by(|left, right| left.node_name.cmp(&right.node_name));
+    // Declaration order, not name order: a bus states which conductor is the
+    // most significant bit, and sorting the members would restate the word.
+    // The table itself is ordered by name for the same digest reason the
+    // traces are.
+    let mut digital_buses = events.digital_buses;
+    digital_buses.sort_by(|left, right| left.name.cmp(&right.name));
     let payload = AnalysisResultPayload::TransientEvents {
         digital_traces,
         real_traces,
+        digital_buses,
     };
     // A history the validator would reject is retained as nothing at all: a
     // viewer must never have to decide whether its own evidence is usable.

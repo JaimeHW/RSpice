@@ -1784,6 +1784,7 @@ mod tests {
                     ],
                 }],
                 real_traces: Vec::new(),
+                digital_buses: Vec::new(),
             });
         let soa_time = vec![0.0, 1.0e-9];
         let soa = AnalysisResult::new(22, AnalysisType::Soa, "SOA")

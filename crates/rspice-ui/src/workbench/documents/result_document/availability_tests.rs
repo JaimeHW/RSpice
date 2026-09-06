@@ -983,30 +983,47 @@ fn optimization_analysis() -> AnalysisResult {
         ])
 }
 
+/// A committed event history with all three kinds of row the Events sheet
+/// draws: a scalar conductor, a real-valued event node, and two declared
+/// buses over their own member traces.
+///
+/// The buses are here rather than in a second fixture because every gate that
+/// reads this one is a gate about the sheet — the fit gate below measures the
+/// radix bar and the per-row disclosures, which a history declaring no bus
+/// does not paint at all.
 fn events_analysis() -> AnalysisResult {
     use crate::state::{
-        DigitalEventPointEvidence, DigitalEventTraceEvidence, RealEventPointEvidence,
-        RealEventTraceEvidence,
+        DigitalBusEvidence, DigitalBusSourceEvidence, DigitalEventPointEvidence,
+        DigitalEventTraceEvidence, RealEventPointEvidence, RealEventTraceEvidence,
+    };
+    let trace = |name: &str, points: &[(f64, u8)]| DigitalEventTraceEvidence {
+        node_name: name.to_owned(),
+        points: points
+            .iter()
+            .map(|(time_s, value_code)| DigitalEventPointEvidence {
+                time_s: *time_s,
+                value_code: *value_code,
+            })
+            .collect(),
+    };
+    let bus = |name: &str| DigitalBusEvidence {
+        name: name.to_owned(),
+        msb: 1,
+        lsb: 0,
+        members: vec![format!("{name}[1]"), format!("{name}[0]")],
+        source: DigitalBusSourceEvidence::Import,
     };
     AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_result_payload(
         AnalysisResultPayload::TransientEvents {
-            digital_traces: vec![DigitalEventTraceEvidence {
-                node_name: "clk".to_owned(),
-                points: vec![
-                    DigitalEventPointEvidence {
-                        time_s: 0.0,
-                        value_code: 0,
-                    },
-                    DigitalEventPointEvidence {
-                        time_s: 5.0e-10,
-                        value_code: 1,
-                    },
-                    DigitalEventPointEvidence {
-                        time_s: 1.0e-9,
-                        value_code: 12,
-                    },
-                ],
-            }],
+            digital_traces: vec![
+                trace("clk", &[(0.0, 0), (5.0e-10, 1), (1.0e-9, 12)]),
+                trace("addr[1]", &[(0.0, 0), (1.0e-9, 1)]),
+                trace("addr[0]", &[(0.0, 0), (5.0e-10, 1), (1.0e-9, 0)]),
+                // One bit the run never states before its first change, so a
+                // word the sheet cannot spell as a number is on screen too.
+                trace("data[1]", &[(5.0e-10, 2)]),
+                trace("data[0]", &[(0.0, 1), (1.0e-9, 12)]),
+            ],
             real_traces: vec![RealEventTraceEvidence {
                 node_name: "level".to_owned(),
                 points: vec![RealEventPointEvidence {
@@ -1014,6 +1031,7 @@ fn events_analysis() -> AnalysisResult {
                     value: 0.75,
                 }],
             }],
+            digital_buses: vec![bus("addr"), bus("data")],
         },
     )
 }

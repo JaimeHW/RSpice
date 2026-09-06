@@ -3398,6 +3398,7 @@ fn retained_result_artifacts(
             AnalysisResultPayload::TransientEvents {
                 digital_traces,
                 real_traces,
+                ..
             } => (
                 "payload/transient-events",
                 "Committed mixed-signal event streams",

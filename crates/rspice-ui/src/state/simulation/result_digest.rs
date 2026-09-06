@@ -28,6 +28,11 @@ const RESULT_DIGEST_ENCODING_VERSION_V6: u16 = 6;
 const RESULT_DIGEST_ENCODING_VERSION_V7: u16 = 7;
 const RESULT_DIGEST_ENCODING_VERSION_V8: u16 = 8;
 const RESULT_DIGEST_ENCODING_VERSION_V9: u16 = 9;
+/// 2026-09-06: the digital bus table declared over a transient's retained
+/// event traces. A declaration is data, not presentation — the same members
+/// read as one 8-bit word rather than as eight conductors is a different
+/// claim about the run — so a result that gained one is a different result.
+const RESULT_DIGEST_ENCODING_VERSION_V10: u16 = 10;
 const CANONICAL_NAN_BITS: u64 = 0x7ff8_0000_0000_0000;
 
 struct ResultDigestWriter {
@@ -65,6 +70,13 @@ impl ResultDigestWriter {
 
     fn usize(&mut self, value: usize) {
         self.u64(u64::try_from(value).expect("supported Rust targets use at most 64-bit usize"));
+    }
+
+    /// A signed index, encoded in the unsigned tag with its two's-complement
+    /// bits. A declared bus range is stated exactly as it was declared, and a
+    /// descending range's indices are negative in the general case.
+    fn i64(&mut self, value: i64) {
+        self.u64(u64::from_be_bytes(value.to_be_bytes()));
     }
 
     fn f64(&mut self, value: f64) {
@@ -143,7 +155,7 @@ impl AnalysisResult {
     /// derived display caches are intentionally not part of the identity.
     #[must_use]
     pub fn result_data_digest(&self) -> ContentDigest {
-        self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V9)
+        self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V10)
     }
 
     /// Logical bytes occupied by all authoritative retained result evidence.
@@ -155,7 +167,7 @@ impl AnalysisResult {
     /// excluded from immutable content identity.
     #[must_use]
     pub fn retained_storage_bytes(&self) -> u64 {
-        let writer = self.result_data_writer_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V9);
+        let writer = self.result_data_writer_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V10);
         let cache_bytes = self.waveforms.iter().fold(0_u64, |total, waveform| {
             let bytes = waveform.display_cache.as_ref().map_or(0_u64, |cache| {
                 u64::try_from(cache.x.len())
@@ -224,6 +236,13 @@ impl AnalysisResult {
         self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V8)
     }
 
+    /// Schema-v18 digest retained solely for authenticated migration. It
+    /// predates the digital bus table declared over retained event traces.
+    #[must_use]
+    pub(crate) fn legacy_v9_result_data_digest(&self) -> ContentDigest {
+        self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V9)
+    }
+
     fn result_data_digest_with_encoding(&self, version: u16) -> ContentDigest {
         self.result_data_writer_with_encoding(version).finish()
     }
@@ -239,6 +258,7 @@ impl AnalysisResult {
             RESULT_DIGEST_ENCODING_VERSION_V7 => "rspice.analysis-result-data/v7",
             RESULT_DIGEST_ENCODING_VERSION_V8 => "rspice.analysis-result-data/v8",
             RESULT_DIGEST_ENCODING_VERSION_V9 => "rspice.analysis-result-data/v9",
+            RESULT_DIGEST_ENCODING_VERSION_V10 => "rspice.analysis-result-data/v10",
             _ => unreachable!("supported result digest encoding"),
         };
         let mut writer = ResultDigestWriter::new(domain, version);
@@ -332,7 +352,7 @@ impl SimulationRun {
     /// they address the dataset but do not define its sample content.
     #[must_use]
     pub fn dataset_content_digest(&self) -> ContentDigest {
-        self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V9)
+        self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V10)
     }
 
     /// Schema-v8 dataset digest retained solely for authenticated migration.
@@ -384,6 +404,12 @@ impl SimulationRun {
         self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V8)
     }
 
+    /// Schema-v18 dataset digest retained solely for authenticated migration.
+    #[must_use]
+    pub(crate) fn legacy_v9_dataset_content_digest(&self) -> ContentDigest {
+        self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V9)
+    }
+
     fn dataset_content_digest_with_encoding(&self, version: u16) -> ContentDigest {
         let domain = match version {
             RESULT_DIGEST_ENCODING_VERSION_V1 => "rspice.simulation-dataset-data/v1",
@@ -395,6 +421,7 @@ impl SimulationRun {
             RESULT_DIGEST_ENCODING_VERSION_V7 => "rspice.simulation-dataset-data/v7",
             RESULT_DIGEST_ENCODING_VERSION_V8 => "rspice.simulation-dataset-data/v8",
             RESULT_DIGEST_ENCODING_VERSION_V9 => "rspice.simulation-dataset-data/v9",
+            RESULT_DIGEST_ENCODING_VERSION_V10 => "rspice.simulation-dataset-data/v10",
             _ => unreachable!("supported dataset digest encoding"),
         };
         let mut writer = ResultDigestWriter::new(domain, version);
@@ -410,7 +437,8 @@ impl SimulationRun {
                 RESULT_DIGEST_ENCODING_VERSION_V6 => analysis.legacy_v6_result_data_digest(),
                 RESULT_DIGEST_ENCODING_VERSION_V7 => analysis.legacy_v7_result_data_digest(),
                 RESULT_DIGEST_ENCODING_VERSION_V8 => analysis.legacy_v8_result_data_digest(),
-                RESULT_DIGEST_ENCODING_VERSION_V9 => analysis.result_data_digest(),
+                RESULT_DIGEST_ENCODING_VERSION_V9 => analysis.legacy_v9_result_data_digest(),
+                RESULT_DIGEST_ENCODING_VERSION_V10 => analysis.result_data_digest(),
                 _ => unreachable!("supported dataset digest encoding"),
             });
         }
@@ -787,6 +815,7 @@ fn encode_result_payload(
         AnalysisResultPayload::TransientEvents {
             digital_traces,
             real_traces,
+            digital_buses,
         } => {
             writer.u8(7);
             writer.sequence(digital_traces.len());
@@ -807,7 +836,32 @@ fn encode_result_payload(
                     writer.f64(point.value);
                 }
             }
+            // A declaration is authoritative data, not presentation: the same
+            // eight traces read as one byte are a different claim about the
+            // run than eight independent conductors, and a result that gained
+            // or lost one must not keep the identity of the one it replaced.
+            if encoding_version >= RESULT_DIGEST_ENCODING_VERSION_V10 {
+                writer.sequence(digital_buses.len());
+                for bus in digital_buses {
+                    writer.string(&bus.name);
+                    writer.i64(bus.msb);
+                    writer.i64(bus.lsb);
+                    writer.sequence(bus.members.len());
+                    for member in &bus.members {
+                        writer.string(member);
+                    }
+                    writer.u8(digital_bus_source_tag(bus.source));
+                }
+            }
         }
+    }
+}
+
+const fn digital_bus_source_tag(source: DigitalBusSourceEvidence) -> u8 {
+    match source {
+        DigitalBusSourceEvidence::Engine => 0,
+        DigitalBusSourceEvidence::Schematic => 1,
+        DigitalBusSourceEvidence::Import => 2,
     }
 }
 
@@ -2175,5 +2229,70 @@ mod tests {
         evaluations[0].sample_count = 1_002;
         assert_ne!(soa.result_data_digest(), changed_soa.result_data_digest());
         assert_eq!(soa.result_data_digest(), soa.clone().result_data_digest());
+    }
+    /// Two results whose event histories are identical, one of which says
+    /// eight of the conductors are one word.
+    fn events_with_and_without_a_bus() -> (AnalysisResult, AnalysisResult) {
+        use crate::state::simulation::analysis_result::{
+            DigitalBusEvidence, DigitalBusSourceEvidence, DigitalEventPointEvidence,
+            DigitalEventTraceEvidence,
+        };
+
+        let trace = |name: &str| DigitalEventTraceEvidence {
+            node_name: name.to_owned(),
+            points: vec![
+                DigitalEventPointEvidence {
+                    time_s: 0.0,
+                    value_code: 0,
+                },
+                DigitalEventPointEvidence {
+                    time_s: 5.0e-9,
+                    value_code: 1,
+                },
+            ],
+        };
+        let payload = |digital_buses| AnalysisResultPayload::TransientEvents {
+            digital_traces: vec![trace("count#1"), trace("count#0")],
+            real_traces: Vec::new(),
+            digital_buses,
+        };
+        let analysis = |digital_buses| {
+            AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
+                .with_result_payload(payload(digital_buses))
+        };
+        (
+            analysis(Vec::new()),
+            analysis(vec![DigitalBusEvidence {
+                name: "count".to_owned(),
+                msb: 1,
+                lsb: 0,
+                members: vec!["count#1".to_owned(), "count#0".to_owned()],
+                source: DigitalBusSourceEvidence::Engine,
+            }]),
+        )
+    }
+
+    #[test]
+    fn declaring_a_bus_over_the_same_traces_is_a_different_result() {
+        let (plain, bussed) = events_with_and_without_a_bus();
+        assert_ne!(plain.result_data_digest(), bussed.result_data_digest());
+        assert_eq!(bussed.result_data_digest(), bussed.result_data_digest());
+    }
+
+    /// The V9 encoding is what schema-v18 files were sealed with. It has to
+    /// keep answering the same way for a table it never knew about, or every
+    /// such file fails authentication the moment one is added.
+    #[test]
+    fn the_schema_v18_encoding_cannot_see_a_bus_table() {
+        let (plain, bussed) = events_with_and_without_a_bus();
+        assert_eq!(
+            plain.legacy_v9_result_data_digest(),
+            bussed.legacy_v9_result_data_digest()
+        );
+        assert_ne!(
+            plain.legacy_v9_result_data_digest(),
+            plain.result_data_digest(),
+            "V10 states the table, even an empty one, so it is a different domain"
+        );
     }
 }

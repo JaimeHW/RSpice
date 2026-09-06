@@ -607,6 +607,7 @@ pub(super) fn prepare_typed_result_csv(
         AnalysisResultPayload::TransientEvents {
             digital_traces,
             real_traces,
+            ..
         } => {
             let mut contents = String::from("node,domain,time_s,value_code,value\n");
             for trace in digital_traces {

@@ -544,9 +544,23 @@ pub(crate) struct WorkerRealEventTrace {
     pub points: Vec<WorkerRealEventPoint>,
 }
 
+/// One digital bus declared over the digital traces beside it, on the wire.
+///
+/// The declaration crosses; the word does not. Reassembling a bus is
+/// `rspice_core::execution::bus_events` reading the member histories, so a
+/// worker and its host can never disagree about what a bus held.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct WorkerDigitalBus {
+    pub name: String,
+    pub msb: i64,
+    pub lsb: i64,
+    pub members: Vec<String>,
+    pub source: crate::state::DigitalBusSourceEvidence,
+}
+
 /// Every event node a transient run committed, on the wire.
 ///
-/// Both fields default so a worker built before event transport still
+/// All three fields default so a worker built before event transport still
 /// deserializes — it simply reports no events, which is the truth for it.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct WorkerEventHistory {
@@ -554,6 +568,10 @@ pub(crate) struct WorkerEventHistory {
     pub digital: Vec<WorkerDigitalEventTrace>,
     #[serde(default)]
     pub real: Vec<WorkerRealEventTrace>,
+    /// Buses declared over `digital`. Defaulted so a protocol-14 worker's
+    /// response, which could not have declared one, reads as declaring none.
+    #[serde(default)]
+    pub buses: Vec<WorkerDigitalBus>,
 }
 
 impl From<TransientEventHistory> for WorkerEventHistory {
@@ -587,6 +605,17 @@ impl From<TransientEventHistory> for WorkerEventHistory {
                             value: point.value,
                         })
                         .collect(),
+                })
+                .collect(),
+            buses: value
+                .digital_buses
+                .into_iter()
+                .map(|bus| WorkerDigitalBus {
+                    name: bus.name,
+                    msb: bus.msb,
+                    lsb: bus.lsb,
+                    members: bus.members,
+                    source: bus.source,
                 })
                 .collect(),
         }
@@ -624,6 +653,17 @@ impl From<WorkerEventHistory> for TransientEventHistory {
                             value: point.value,
                         })
                         .collect(),
+                })
+                .collect(),
+            digital_buses: value
+                .buses
+                .into_iter()
+                .map(|bus| crate::state::DigitalBusEvidence {
+                    name: bus.name,
+                    msb: bus.msb,
+                    lsb: bus.lsb,
+                    members: bus.members,
+                    source: bus.source,
                 })
                 .collect(),
         }
@@ -1402,11 +1442,15 @@ pub(super) fn event_history_payload_bytes(events: &WorkerEventHistory) -> usize 
         .iter()
         .map(|trace| f64_payload_bytes(trace.points.len()).saturating_add(trace.points.len()))
         .fold(0usize, |total, bytes| total.saturating_add(bytes));
-    events
+    let real = events
         .real
         .iter()
         .map(|trace| f64_payload_bytes(trace.points.len().saturating_mul(2)))
-        .fold(digital, |total, bytes| total.saturating_add(bytes))
+        .fold(digital, |total, bytes| total.saturating_add(bytes));
+    // A bus contributes its two declared indices and nothing else: the
+    // members are names, which this budget does not count for a trace either,
+    // and there is no value in a declaration to count.
+    real.saturating_add(events.buses.len().saturating_mul(2 * size_of::<i64>()))
 }
 
 #[cfg(test)]

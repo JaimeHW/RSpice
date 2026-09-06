@@ -703,6 +703,88 @@ pub struct RealEventTraceEvidence {
     pub points: Vec<RealEventPointEvidence>,
 }
 
+/// Who declared a digital bus that a retained result carries.
+///
+/// The same three claims `rspice_core::engine::DigitalBusSource` makes, kept
+/// as this crate's own enum so a retained project file's encoding is owned
+/// here and does not move when the engine's derives do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DigitalBusSourceEvidence {
+    /// A model declared it: a vector port on the mixed-signal boundary.
+    Engine,
+    /// The schematic declared it: a drawn bus over its member nets.
+    Schematic,
+    /// A file claimed it: a VCD vector variable, or a rawfile bus plot.
+    Import,
+}
+
+impl From<rspice_core::engine::DigitalBusSource> for DigitalBusSourceEvidence {
+    fn from(value: rspice_core::engine::DigitalBusSource) -> Self {
+        match value {
+            rspice_core::engine::DigitalBusSource::Engine => Self::Engine,
+            rspice_core::engine::DigitalBusSource::Schematic => Self::Schematic,
+            rspice_core::engine::DigitalBusSource::Import => Self::Import,
+        }
+    }
+}
+
+impl From<DigitalBusSourceEvidence> for rspice_core::engine::DigitalBusSource {
+    fn from(value: DigitalBusSourceEvidence) -> Self {
+        match value {
+            DigitalBusSourceEvidence::Engine => Self::Engine,
+            DigitalBusSourceEvidence::Schematic => Self::Schematic,
+            DigitalBusSourceEvidence::Import => Self::Import,
+        }
+    }
+}
+
+/// One digital bus declared over retained event traces.
+///
+/// A bus is a *declaration*, never a fourth kind of history: the members keep
+/// their own [`DigitalEventTraceEvidence`], and every word this crate shows is
+/// reassembled from them by `rspice_core::execution::bus_events`. Nothing here
+/// stores a value, so a bus and its members can never disagree.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DigitalBusEvidence {
+    /// Bus name, without any range suffix.
+    pub name: String,
+    /// Declared most significant index, exactly as declared.
+    pub msb: i64,
+    /// Declared least significant index, exactly as declared.
+    pub lsb: i64,
+    /// Member node names in declaration order, declared MSB first. Each names
+    /// a retained digital event trace.
+    pub members: Vec<String>,
+    /// Who declared this bus.
+    pub source: DigitalBusSourceEvidence,
+}
+
+impl From<&rspice_core::engine::DigitalBusDeclaration> for DigitalBusEvidence {
+    fn from(value: &rspice_core::engine::DigitalBusDeclaration) -> Self {
+        Self {
+            name: value.name.clone(),
+            msb: value.msb,
+            lsb: value.lsb,
+            members: value.members.clone(),
+            source: value.source.into(),
+        }
+    }
+}
+
+impl From<&DigitalBusEvidence> for rspice_core::engine::DigitalBusDeclaration {
+    fn from(value: &DigitalBusEvidence) -> Self {
+        Self {
+            name: value.name.clone(),
+            msb: value.msb,
+            lsb: value.lsb,
+            members: value.members.clone(),
+            source: value.source.into(),
+        }
+    }
+}
+
 /// Electrical quantity governed by a retained safe-operating-area rule.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
@@ -1102,6 +1184,14 @@ pub enum AnalysisResultPayload {
     TransientEvents {
         digital_traces: Vec<DigitalEventTraceEvidence>,
         real_traces: Vec<RealEventTraceEvidence>,
+        /// Buses declared over `digital_traces`, in declaration order.
+        ///
+        /// Defaulted so a result retained before buses existed loads as one
+        /// that declares none — which is what it means. An empty table is
+        /// also the truth for every run whose model declared no vector port,
+        /// so nothing is painted for it.
+        #[serde(default)]
+        digital_buses: Vec<DigitalBusEvidence>,
     },
 }
 
@@ -1807,6 +1897,7 @@ impl AnalysisResultPayload {
             Self::TransientEvents {
                 digital_traces,
                 real_traces,
+                digital_buses,
             } => {
                 if analysis_type != AnalysisType::Transient {
                     return Err(format!(
@@ -1858,6 +1949,19 @@ impl AnalysisResultPayload {
                         ));
                     }
                 }
+                // Width, membership, uniqueness and the 4,096-member ceiling
+                // are the engine's rules about a bus, not this crate's, and
+                // they are asked of the engine's own validator so a table the
+                // GUI accepts is exactly one the CLI and the bindings accept.
+                let declarations = digital_buses
+                    .iter()
+                    .map(rspice_core::engine::DigitalBusDeclaration::from)
+                    .collect::<Vec<_>>();
+                rspice_core::engine::validate_digital_bus_table(
+                    &declarations,
+                    digital_traces.iter().map(|trace| trace.node_name.as_str()),
+                )
+                .map_err(|error| error.to_string())?;
             }
         }
         Ok(())
@@ -1883,6 +1987,7 @@ impl AnalysisResultPayload {
             Self::TransientEvents {
                 digital_traces,
                 real_traces,
+                ..
             } => !digital_traces.is_empty() || !real_traces.is_empty(),
         }
     }

@@ -38,7 +38,8 @@ use crate::simulation::output_contract::{
 use crate::simulation::plan::AnalysisNumericOverride;
 use crate::simulation::runner::SpecExecutionOptions;
 use crate::simulation::runner::{
-    SimulationError, TransientDigitalEventSample, TransientRealEventSample, TransientSampleDelta,
+    SimulationError, TransientDigitalBusSample, TransientDigitalEventSample,
+    TransientRealEventSample, TransientSampleDelta,
 };
 use crate::simulation::{AnalysisConfig, SimulationRunner, SimulationStatus};
 use crate::state::{
@@ -121,6 +122,8 @@ struct LiveTransientAccumulator {
     waveforms: Vec<LiveTransientWaveform>,
     digital_events: Vec<DigitalEventTraceEvidence>,
     real_events: Vec<RealEventTraceEvidence>,
+    /// The run's declared buses, as the runner published them once.
+    digital_buses: Vec<crate::state::DigitalBusEvidence>,
     retained_event_points: usize,
 }
 
@@ -147,6 +150,7 @@ impl LiveTransientAccumulator {
         self.waveforms.clear();
         self.digital_events.clear();
         self.real_events.clear();
+        self.digital_buses.clear();
         self.retained_event_points = 0;
     }
 
@@ -182,6 +186,7 @@ impl LiveTransientAccumulator {
             // grid, so they are kept whenever the message itself is sound.
             // The alignment rule below governs only the grid.
             self.ingest_events(delta.time, delta.events, delta.real_events);
+            self.ingest_buses(delta.buses);
             if samples.is_empty() {
                 continue;
             }
@@ -310,6 +315,29 @@ impl LiveTransientAccumulator {
         }
     }
 
+    /// Adopt the run's bus declarations from the one message that carries
+    /// them.
+    ///
+    /// The runner publishes the run-constant table once, so a later message
+    /// carrying one is a second claim about the same run and is ignored
+    /// rather than merged: the first one is what the engine declared, and a
+    /// live viewer must not have to reconcile two.
+    fn ingest_buses(&mut self, buses: Vec<TransientDigitalBusSample>) {
+        if buses.is_empty() || !self.digital_buses.is_empty() {
+            return;
+        }
+        self.digital_buses = buses
+            .into_iter()
+            .map(|bus| crate::state::DigitalBusEvidence {
+                name: bus.name,
+                msb: bus.msb,
+                lsb: bus.lsb,
+                members: bus.members,
+                source: crate::state::DigitalBusSourceEvidence::Engine,
+            })
+            .collect();
+    }
+
     /// The provisional event schedule as retained evidence, ordered by node
     /// name so the result digest is a function of the history alone.
     ///
@@ -324,9 +352,28 @@ impl LiveTransientAccumulator {
         digital_traces.sort_by(|left, right| left.node_name.cmp(&right.node_name));
         let mut real_traces = self.real_events.clone();
         real_traces.sort_by(|left, right| left.node_name.cmp(&right.node_name));
+        // A bus whose members the run has not yet reported a value for is
+        // withheld: it would be a declaration over traces that are not there,
+        // which the validator refuses and which would take the whole
+        // provisional payload down with it. The declaration arrives the frame
+        // the last member first changes.
+        let mut digital_buses = self
+            .digital_buses
+            .iter()
+            .filter(|bus| {
+                bus.members.iter().all(|member| {
+                    digital_traces
+                        .iter()
+                        .any(|trace| &trace.node_name == member)
+                })
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        digital_buses.sort_by(|left, right| left.name.cmp(&right.name));
         let payload = AnalysisResultPayload::TransientEvents {
             digital_traces,
             real_traces,
+            digital_buses,
         };
         payload
             .validate_for(analysis_type)

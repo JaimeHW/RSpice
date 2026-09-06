@@ -26,7 +26,7 @@ pub use executed_deck::{ProjectExecutedDeck, ProjectExecutedDeckPoint};
 use legacy_digests::{
     validate_v8_result_digests, validate_v9_result_digests, validate_v10_result_digests,
     validate_v11_result_digests, validate_v12_result_digests, validate_v13_to_v15_result_digests,
-    validate_v16_result_digests, validate_v17_result_digests,
+    validate_v16_result_digests, validate_v17_result_digests, validate_v18_result_digests,
 };
 pub use provenance::*;
 use provenance::{
@@ -220,6 +220,21 @@ impl ProjectSimulationResults {
 
     fn migrate_to_current_in_place(&mut self, project_id: ProjectId) -> Result<(), String> {
         let source_schema = self.schema_version;
+        reject_digital_buses_before_schema_v19(self, source_schema)?;
+        if source_schema == MEASUREMENT_VERIFICATION_RESULTS_SCHEMA_VERSION {
+            for run in &self.runs {
+                validate_v18_result_digests(run)?;
+            }
+            for run in &mut self.runs {
+                // `seal_` rather than `reseal_`: a schema-v18 file already
+                // carries real measurement-verification evidence, and the
+                // reseal path exists to synthesize that evidence for files
+                // written before it, which would overwrite it here.
+                seal_project_result_digests(run)?;
+            }
+            self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
+            return self.validate();
+        }
         reject_measurement_verification_before_schema_v18(self, source_schema)?;
         if source_schema == PERIODIC_STABILITY_RESULTS_SCHEMA_VERSION {
             for run in &self.runs {
@@ -1001,6 +1016,34 @@ fn reject_measurement_verification_before_schema_v18(
                         analysis.id, measurement.name
                     ));
                 }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// A digital bus table is schema-v19 evidence. A file that says it was
+/// written under an earlier schema cannot have had one, so one that carries a
+/// bus is not an old file — it is a file whose stated version disagrees with
+/// its content, and admitting it would authenticate a table under a digest
+/// encoding that never covered it.
+fn reject_digital_buses_before_schema_v19(
+    results: &ProjectSimulationResults,
+    source_schema: u32,
+) -> Result<(), String> {
+    if source_schema >= DIGITAL_BUS_RESULTS_SCHEMA_VERSION {
+        return Ok(());
+    }
+    for run in &results.runs {
+        for analysis in &run.analyses {
+            if let Some(AnalysisResultPayload::TransientEvents { digital_buses, .. }) =
+                analysis.result_payload.as_ref()
+                && !digital_buses.is_empty()
+            {
+                return Err(format!(
+                    "schema-v{source_schema} analysis {} declares digital bus '{}', which was introduced by schema v19",
+                    analysis.id, digital_buses[0].name
+                ));
             }
         }
     }

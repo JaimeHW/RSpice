@@ -1255,6 +1255,7 @@ fn quick_result_availability(
             Some(AnalysisResultPayload::TransientEvents {
                 digital_traces,
                 real_traces,
+                ..
             }) if !digital_traces.is_empty() || !real_traces.is_empty()
         ),
         ResultViewer::Soa => matches!(

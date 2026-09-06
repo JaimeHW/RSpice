@@ -1335,6 +1335,7 @@ pub(super) fn semantic_result_summary(
             let Some(AnalysisResultPayload::TransientEvents {
                 digital_traces,
                 real_traces,
+                ..
             }) = &analysis.result_payload
             else {
                 return Err(HardcopySourceError::MissingViewerEvidence("event history"));

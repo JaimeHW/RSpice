@@ -1115,6 +1115,15 @@ mod tests {
     #[test]
     fn the_member_budget_is_exact_and_the_refusal_names_both_numbers() {
         assert_eq!(MAX_BUS_MEMBER_INDEX, 4_095, "a 4,096-member budget");
+        // The drawn bus and the retained one are the same budget. A schematic
+        // that could declare a wider bus than a result can carry would draw
+        // something no run could ever report, and the two numbers are stated
+        // in different crates, so nothing but this holds them together.
+        assert_eq!(
+            u64::from(MAX_BUS_MEMBER_INDEX) + 1,
+            u64::from(rspice_core::engine::MAX_DIGITAL_BUS_WIDTH),
+            "a drawn bus and a retained bus admit the same number of members"
+        );
 
         let widest = BusDeclaration::parse("DATA[4095:0]").expect("the whole budget is declarable");
         assert_eq!(widest.width(), 4_096);

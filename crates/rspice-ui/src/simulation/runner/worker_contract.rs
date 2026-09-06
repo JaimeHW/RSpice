@@ -1598,7 +1598,11 @@ impl WorkerSimulationResult {
     }
 }
 
-const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 14;
+/// 15 (2026-09-06): a transient's event history carries its digital bus
+/// declarations. The field defaults, so a protocol-14 payload still decodes
+/// as one declaring no bus; the number moves anyway, because the version is
+/// what says which side may be trusted to have looked for the table at all.
+const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 15;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WorkerResponseTransport {

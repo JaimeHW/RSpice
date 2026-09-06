@@ -93,6 +93,26 @@ pub(crate) struct TransientSampleDelta {
     /// Real-valued event nodes that changed at this accepted time.
     #[serde(default)]
     pub real_events: Vec<TransientRealEventSample>,
+    /// The run's digital bus declarations, published once.
+    ///
+    /// The table is run-constant — the engine hands the same borrowed slice
+    /// at every accepted point — so it rides the first message that can name
+    /// its members and is empty on every one after. Repeating it would cost a
+    /// name per member per step to say what the first message already said.
+    #[serde(default)]
+    pub buses: Vec<TransientDigitalBusSample>,
+}
+
+/// One digital bus a run declared, as it crosses to the live viewer.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct TransientDigitalBusSample {
+    pub name: String,
+    pub msb: i64,
+    pub lsb: i64,
+    /// Member node names, declared MSB first — the engine's node ids resolved
+    /// through the run's node table, because a live viewer holds names.
+    pub members: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -510,6 +530,8 @@ struct RunnerSignal {
 struct PublishedEventValues {
     digital: std::collections::HashMap<rspice_core::NodeId, u8>,
     real: std::collections::HashMap<rspice_core::NodeId, u64>,
+    /// Whether this run has already published its bus declarations.
+    buses: bool,
 }
 
 /// The netlist name of an event node, or `None` when the node table does not
@@ -589,6 +611,47 @@ impl RunnerSignal {
         }
         (events, real_events)
     }
+
+    /// The run's bus declarations, the first time they can be stated.
+    ///
+    /// The engine's table names members by node id; a live message names them
+    /// the way the terminal evidence does, so a bus whose members the node
+    /// table cannot name yet is not published *and not recorded* — the next
+    /// accepted point tries again rather than the run losing its table to one
+    /// early sample.
+    fn declared_buses(
+        &self,
+        sample: &rspice_core::abort_signal::TransientSample<'_>,
+    ) -> Vec<TransientDigitalBusSample> {
+        if sample.digital_buses.is_empty() {
+            return Vec::new();
+        }
+        let mut published = match self.published_events.lock() {
+            Ok(published) => published,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        if published.buses {
+            return Vec::new();
+        }
+        let mut buses = Vec::with_capacity(sample.digital_buses.len());
+        for bus in sample.digital_buses {
+            let mut members = Vec::with_capacity(bus.members.len());
+            for &node in &bus.members {
+                let Some(name) = event_node_name(sample.node_names, node) else {
+                    return Vec::new();
+                };
+                members.push(name.to_owned());
+            }
+            buses.push(TransientDigitalBusSample {
+                name: bus.name.clone(),
+                msb: bus.msb,
+                lsb: bus.lsb,
+                members,
+            });
+        }
+        published.buses = true;
+        buses
+    }
 }
 
 impl rspice_core::abort_signal::AbortSignal for RunnerSignal {
@@ -651,11 +714,13 @@ impl rspice_core::abort_signal::AbortSignal for RunnerSignal {
             });
         }
         let (events, real_events) = self.changed_event_values(&sample);
+        let buses = self.declared_buses(&sample);
         let delta = TransientSampleDelta {
             time,
             waveforms,
             events,
             real_events,
+            buses,
         };
         if let Some(samples) = &self.transient_samples {
             push_live_transient_sample(samples, delta.clone());
@@ -1493,6 +1558,7 @@ mod tests {
                     waveforms: Vec::new(),
                     events: Vec::new(),
                     real_events: Vec::new(),
+                    buses: Vec::new(),
                 },
             );
         }

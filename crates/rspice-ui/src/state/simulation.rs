@@ -33,9 +33,10 @@ pub use ac_bode::{
 pub use analysis_result::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,
     AnalysisResultPvtPoint, AnalysisResultSourceDomain, ComplexResultValue, DcOpResult,
-    DigitalEventPointEvidence, DigitalEventTraceEvidence, FloquetOrbitKindEvidence,
-    FloquetSpectrumCertificateEvidence, FloquetSpectrumEvidence, FloquetStabilityVerdictEvidence,
-    MonteCarloVariableMetadata, NoiseContributorRow, NoiseSummary, OperatingPointAccuracyEvidence,
+    DigitalBusEvidence, DigitalBusSourceEvidence, DigitalEventPointEvidence,
+    DigitalEventTraceEvidence, FloquetOrbitKindEvidence, FloquetSpectrumCertificateEvidence,
+    FloquetSpectrumEvidence, FloquetStabilityVerdictEvidence, MonteCarloVariableMetadata,
+    NoiseContributorRow, NoiseSummary, OperatingPointAccuracyEvidence,
     OperatingPointAnnotationEvidence, OperatingPointDeviceDetailEvidence,
     OperatingPointHomotopyEvidence, OperatingPointInitialGuessEvidence,
     OperatingPointNodeInitializationEvidence, OperatingPointProcessEvidence,

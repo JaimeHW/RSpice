@@ -218,6 +218,7 @@ fn analysis_is_renderable(analysis: &AnalysisResult) -> bool {
             Some(AnalysisResultPayload::TransientEvents {
                 digital_traces,
                 real_traces,
+                ..
             }) if !digital_traces.is_empty() || !real_traces.is_empty()
         ) || analysis.waveforms.iter().any(waveform_is_event))
 }
