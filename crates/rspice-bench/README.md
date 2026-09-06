@@ -38,7 +38,8 @@ The macro runner has no feature flags. The `native-jit` subcommand links the
 entrypoints without exposing the low-level JIT ABI outside the compiler crate.
 The `klu` subcommand depends on `rspice-matrix` directly rather than on the
 `rspice-core` re-export, which keeps it clear of the optional corpus-building
-dependency and off the ~40-minute build path.
+dependency: measuring the solver kernels never compiles the generated model
+catalog.
 
 ## Building and running
 
