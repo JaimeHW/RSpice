@@ -45,7 +45,14 @@ pub fn execute(
     if args.to == OutputFormat::Vcd {
         let mut document =
             vcd_io::load_vcd_document(&args.input, from_format, config.resources.limits())?;
-        vcd_io::select_and_clip(&mut document, &args.variables, args.start, args.stop)?;
+        let notes =
+            vcd_io::select_and_clip(&mut document, &args.variables, args.start, args.stop)?;
+        // Not gated on `--quiet`: the selection is wider than what was asked
+        // for, and silently writing more than a caller requested is the thing
+        // the note exists to prevent.
+        for note in &notes {
+            eprintln!("Note: {note}");
+        }
         vcd_io::write_vcd_artifact(&args.output, &document)?;
         if !quiet {
             println!("✓ Conversion complete: {}", args.output.display());

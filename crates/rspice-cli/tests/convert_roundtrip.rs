@@ -495,6 +495,85 @@ fn a_bus_converts_to_a_table_as_its_member_columns_and_to_a_dump_as_a_word() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// `--variables` reaches a bus by its name, its range, or one of its bits.
+///
+/// The bare bus name is not one of the vector variable's own spellings — it is
+/// declared `x1.count [1:0]` — so without the bus grammar the obvious thing to
+/// type would have failed. A bit-select does select, and takes the whole word
+/// with it, because a `$var` is as wide as it is declared and no dump carries
+/// one bit of one; that is said out loud rather than done quietly.
+#[test]
+fn a_bus_is_selected_by_its_name_its_range_or_any_of_its_bits() {
+    let dir = test_dir("vcd_bus_variables");
+    let deck = bus_deck(&dir);
+    let published = simulate(&dir, &deck, "vcd", "run.vcd");
+
+    for (tag, want) in [
+        ("name", "x1.count"),
+        ("range", "x1.count[1:0]"),
+        ("spaced", "x1.count [1:0]"),
+        ("column", "D(x1.count [1:0])"),
+    ] {
+        let filtered = dir.join(format!("by_{tag}.vcd"));
+        convert(&published, &filtered, "vcd", &["--variables", want]);
+        let text = std::fs::read_to_string(&filtered).expect("read the filtered dump");
+        assert!(
+            text.contains("$var wire 2 ! x1.count [1:0] $end"),
+            "'{want}' must select the vector: {text}"
+        );
+    }
+
+    // One bit keeps the word, and says why.
+    let one_bit = dir.join("by_bit.vcd");
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args([
+            "--quiet",
+            "convert",
+            published.to_str().unwrap(),
+            one_bit.to_str().unwrap(),
+            "--to",
+            "vcd",
+            "--variables",
+            "x1.count[0]",
+        ])
+        .output()
+        .expect("run rspice");
+    assert!(output.status.success(), "a bit of a declared bus is a variable");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("x1.count[0]") && stderr.contains("whole"),
+        "widening the selection must be stated: {stderr}"
+    );
+    let text = std::fs::read_to_string(&one_bit).expect("read the dump");
+    assert!(
+        text.contains("$var wire 2 ! x1.count [1:0] $end"),
+        "the vector is kept whole: {text}"
+    );
+
+    // An index the range does not cover is still an unknown variable.
+    let missing = dir.join("by_missing_bit.vcd");
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args([
+            "--quiet",
+            "convert",
+            published.to_str().unwrap(),
+            missing.to_str().unwrap(),
+            "--to",
+            "vcd",
+            "--variables",
+            "x1.count[7]",
+        ])
+        .output()
+        .expect("run rspice");
+    assert!(!output.status.success(), "bit 7 of a two-bit bus is nothing");
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("available variables"),
+        "the refusal should list what the dump has"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A rawfile's event plots survive the trip out through a dump and back into a
 /// table: the same nodes, the same times, the same levels.
 ///

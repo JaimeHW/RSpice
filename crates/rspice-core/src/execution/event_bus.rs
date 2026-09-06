@@ -197,7 +197,12 @@ pub fn bus_events(
 /// bit-select — the name of one conductor — and comes back whole, which is
 /// what lets a member trace be named that way without being mistaken for a
 /// one-bit vector declaration.
-pub(crate) fn split_bus_notation(text: &str) -> (&str, Option<(i64, i64)>) {
+///
+/// It is public because the readers of those two fields are not all in this
+/// crate: the command line's `--variables` has to decide whether `data`,
+/// `data[7:0]` or `data [7:0]` names the vector variable a dump declares, and
+/// deciding that with a second parser would be a second grammar.
+pub fn split_bus_notation(text: &str) -> (&str, Option<(i64, i64)>) {
     let trimmed = text.trim_end();
     let Some(open) = trimmed.rfind('[') else {
         return (text, None);

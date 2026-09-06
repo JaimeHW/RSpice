@@ -578,7 +578,18 @@ use rspice_core::analysis::harmonic_balance::{
 //   plots, the Python accessor and the browser handle refuse the same document
 //   for the same reason with the same numbers; that makes both items part of
 //   the signature every one of those callers already names.
-const MAX_PUBLIC_ITEMS: usize = 4982;
+// 2026-09-06, +1 deliberate (4,982 -> 4,983): `split_bus_notation` in
+// `execution/event_bus.rs`, raised from `pub(crate)`.
+//
+// Core writes a bus reference in exactly two places a single field has to hold
+// the whole declaration — a VCD `$var` and a rawfile bus plot's `Title:` — and
+// this is the one parser of that grammar, which is why it was written once
+// rather than twice. The readers of those fields are not all in this crate:
+// `rspice convert --variables` has to decide whether `data`, `data[7:0]` or
+// `data [7:0]` names the vector variable a dump declares, and the bare name is
+// not one of the variable's own spellings. A second parser in the CLI would be
+// a second grammar, and the two would agree until the day they did not.
+const MAX_PUBLIC_ITEMS: usize = 4983;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

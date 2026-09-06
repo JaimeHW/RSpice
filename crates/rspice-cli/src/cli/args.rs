@@ -676,7 +676,10 @@ pub struct ConvertArgs {
     #[arg(long, value_name = "FORMAT")]
     pub to: OutputFormat,
 
-    /// Variables to include (default: all)
+    /// Variables to include (default: all). Writing a dump, a declared
+    /// digital bus answers to its name (DATA), its range (DATA[7:0] or
+    /// DATA [7:0]) and any of its bits (DATA[3]) — naming one bit keeps the
+    /// whole vector, because a VCD vector is written whole or not at all
     #[arg(long, value_name = "VAR")]
     pub variables: Vec<String>,
 
