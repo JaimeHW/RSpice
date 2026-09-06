@@ -69,6 +69,19 @@ and caller-bounded numeric windows cross into JavaScript.
   ceiling a window is, two values per row, and fails with
   `code: "invalid_result_window"` when it does not fit; an unknown node fails
   with `code: "unknown_event_node"`.
+- `digitalBuses(resultIndex)` — every digital bus the result declares, as
+  `{name, msb, lsb, members, source}`. The range is carried exactly as it was
+  declared and `members` runs from the declared MSB to the declared LSB;
+  `source` is `engine`, `schematic` or `import`. No points cross here.
+- `busEvents(resultIndex, busName)` — one bus's whole history as
+  `{time, bits, value}` rows: the accepted time in seconds, one `0..=12` event
+  code per member declared MSB first, and the same word in VCD's four states.
+  `bits` keeps the drive strength; `value` does not. A member the run has not
+  stated a value for yet is `null` and `x`. Two members changing at one
+  accepted time are one row. The name resolves ASCII-case-insensitively. A row
+  is charged `1 + width` values against the same transfer ceiling a window
+  obeys and fails with `code: "invalid_result_window"` when it does not fit; an
+  undeclared bus fails with `code: "unknown_event_bus"`.
 - `toVcd(resultIndex)` — the event histories as a Value Change Dump, byte for
   byte what `rspice run -f vcd` publishes for the same run. VCD has four bit
   states and no drive strength, so the twelve resolved states collapse onto

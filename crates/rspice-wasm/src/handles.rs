@@ -20,7 +20,7 @@ use crate::DetailedWasmResult;
 use crate::abort::aborted_error;
 use crate::document::{AnalysisIdentity, ResultMetadata, result_metadata, window_transfer_values};
 use crate::errors::{WasmError, wasm_error_to_js};
-use crate::events::{DigitalEventRow, DigitalNodeDescriptor};
+use crate::events::{BusEventRow, DigitalBusDescriptor, DigitalEventRow, DigitalNodeDescriptor};
 use crate::js_interop::{serialize_result_window_to_js, serialize_to_js};
 use crate::options::{DEFAULT_MAX_RESULT_JSON_BYTES, DEFAULT_MAX_TRANSFER_VALUES};
 
@@ -263,6 +263,21 @@ impl WasmResultHandle {
         crate::events::digital_events(self.document(index)?, node, self.maximum_window_values)
     }
 
+    pub(crate) fn digital_buses_snapshot(
+        &self,
+        index: usize,
+    ) -> DetailedWasmResult<Vec<DigitalBusDescriptor>> {
+        crate::events::digital_buses(self.document(index)?)
+    }
+
+    pub(crate) fn bus_events_snapshot(
+        &self,
+        index: usize,
+        name: &str,
+    ) -> DetailedWasmResult<Vec<BusEventRow>> {
+        crate::events::bus_events(self.document(index)?, name, self.maximum_window_values)
+    }
+
     pub(crate) fn vcd_snapshot(&self, index: usize) -> DetailedWasmResult<String> {
         crate::events::vcd_text(self.document(index)?)
     }
@@ -381,6 +396,44 @@ impl WasmResultHandle {
     ) -> Result<JsValue, JsValue> {
         let events = self
             .digital_events_snapshot(result_index, node_name)
+            .map_err(|error| wasm_error_to_js(*error))?;
+        serialize_to_js(&events)
+    }
+
+    /// Every digital bus one result declares, in declaration order.
+    ///
+    /// An entry is `{name, msb, lsb, members, source}`: the word's name, the
+    /// range exactly as it was declared, the member trace names from the
+    /// declared MSB to the declared LSB, and who declared it — `engine` for a
+    /// vector boundary port of a mixed Verilog-AMS module, `schematic` for a
+    /// drawing's own declaration over the deck it generated, `import` for one
+    /// read out of a foreign artifact. No point crosses here; `busEvents`
+    /// fetches the word one bus at a time.
+    #[wasm_bindgen(js_name = digitalBuses)]
+    pub fn digital_buses_js(&self, result_index: usize) -> Result<JsValue, JsValue> {
+        let buses = self
+            .digital_buses_snapshot(result_index)
+            .map_err(|error| wasm_error_to_js(*error))?;
+        serialize_to_js(&buses)
+    }
+
+    /// One declared bus's whole history, as the word at each of its events.
+    ///
+    /// A row is `{time, bits, value}`: the accepted time in seconds, one
+    /// `0..=12` XSPICE event code per member declared MSB first, and the same
+    /// word in VCD's four states. `bits` keeps the drive strength; `value`
+    /// does not. A member that did not change at this time carries the value
+    /// it held; one the run has not stated a value for yet is `null` in `bits`
+    /// and `x` in `value`.
+    ///
+    /// A row is charged `1 + width` values against the same transfer ceiling a
+    /// window obeys, computed from the members' committed changes, and fails
+    /// closed with `code: "invalid_result_window"` when it does not fit. An
+    /// undeclared bus fails with `code: "unknown_event_bus"`.
+    #[wasm_bindgen(js_name = busEvents)]
+    pub fn bus_events_js(&self, result_index: usize, bus_name: &str) -> Result<JsValue, JsValue> {
+        let events = self
+            .bus_events_snapshot(result_index, bus_name)
             .map_err(|error| wasm_error_to_js(*error))?;
         serialize_to_js(&events)
     }
