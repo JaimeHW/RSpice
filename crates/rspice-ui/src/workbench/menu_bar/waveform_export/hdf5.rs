@@ -377,6 +377,25 @@ mod tests {
         assert_eq!(parsed.waveforms[1].unit.as_deref(), Some("A"));
     }
 
+    /// A one-point result publishes and reopens.
+    ///
+    /// A `.OP` is a single sample by construction, and the importer's
+    /// `MIN_RESULT_ROWS` was two — so this writer published files this product
+    /// then refused to read. An export the product cannot reopen is worse than
+    /// a small file.
+    #[test]
+    fn a_single_sample_result_publishes_and_reopens() {
+        let waveforms = [waveform("V(out)", vec![0.0], vec![2.5]).with_unit("V")];
+        let export = prepared(AnalysisType::Transient, &waveforms).expect("prepares");
+        assert_eq!(export.rows, 1);
+        let bytes = encode_hdf5(&export).expect("encodes");
+        let parsed = parse_result_dataset("waveforms.h5", &bytes).expect("re-imports");
+        assert_eq!(parsed.sample_count, 1);
+        assert_eq!(parsed.waveforms[0].x.as_slice(), [0.0]);
+        assert_eq!(parsed.waveforms[0].y.as_slice(), [2.5]);
+        assert_eq!(parsed.waveforms[0].unit.as_deref(), Some("V"));
+    }
+
     #[test]
     fn an_ac_result_round_trips_its_complex_pairs() {
         let waveforms = [WaveformData::new(

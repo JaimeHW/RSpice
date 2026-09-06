@@ -65,8 +65,8 @@ fn finish_dataset(
         return Err(adapter_error(
             format,
             format_args!(
-                "the coordinate contains {} samples; at least {MIN_RESULT_ROWS} are required",
-                coordinate.len()
+                "the '{coordinate_name}' coordinate carries no samples, so the source holds no \
+                 result to import"
             ),
         ));
     }

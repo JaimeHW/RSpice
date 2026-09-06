@@ -256,6 +256,30 @@ fn an_hdf5_section_is_read_from_what_it_declares_not_what_it_is_called() {
     );
 }
 
+/// A result of one sample is a result, and reopens.
+///
+/// `MIN_RESULT_ROWS` was two, so a `.OP` — a single point by construction —
+/// exported to HDF5, MAT or NumPy and then refused on the way back in. The
+/// command line settled the rule at one first (`MIN_RESULT_SAMPLES`); this is
+/// the same rule on this side of the boundary a file crosses.
+///
+/// Zero is still not a result, and the sentence that says so is pinned where
+/// the reader can reach it: `parse_delimited_result_dataset`'s own case in
+/// `result_import_workflow`.
+#[test]
+fn a_single_sample_source_is_a_result_and_imports() {
+    let one_sample = {
+        let mut builder = rustyhdf5::FileBuilder::new();
+        builder.create_dataset("time").with_f64_data(&[0.0]);
+        builder.create_dataset("V(out)").with_f64_data(&[2.5]);
+        builder.finish().expect("HDF5 fixture")
+    };
+    let parsed = parse_hdf5(&one_sample, ResultImportFormat::Hdf5).expect("one point is a result");
+    assert_eq!(parsed.sample_count, 1);
+    assert_eq!(parsed.waveforms[0].x.as_slice(), [0.0]);
+    assert_eq!(parsed.waveforms[0].y.as_slice(), [2.5]);
+}
+
 fn arrow_batch() -> (Arc<Schema>, RecordBatch) {
     let mut metadata = HashMap::new();
     metadata.insert("rspice.coordinate".to_owned(), "frequency".to_owned());

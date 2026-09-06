@@ -143,9 +143,9 @@ pub(crate) fn read_utf8_input_limited(path: &Path, limit: usize) -> Result<Strin
 /// refused where it is read rather than after a later step fails for a reason
 /// that is not the real one.
 ///
-/// The GUI's result *importer* is stricter — its `MIN_RESULT_ROWS` is two, so
-/// it will not reopen a one-point file this writes. That is a defect on its
-/// side of the same boundary, and this constant is what it should agree with.
+/// The GUI's result *importer* agrees: its own `MIN_RESULT_ROWS` is one, and
+/// its doc comment names this constant as the thing it agrees with. One rule,
+/// stated on both sides of the boundary a file crosses.
 pub(crate) const MIN_RESULT_SAMPLES: usize = 1;
 
 fn validate_table_shape(

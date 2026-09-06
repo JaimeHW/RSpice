@@ -55,7 +55,24 @@ pub(crate) const MAX_RESULT_DATASET_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_RESULT_COLUMNS: usize = 1_024;
 const MAX_RESULT_ROWS: usize = 1_000_000;
 const MAX_HEADER_BYTES: usize = 256;
-const MIN_RESULT_ROWS: usize = 2;
+/// The fewest coordinate samples a source may carry and still be a result.
+///
+/// **One.** A `.OP` is a single point by construction, and this product's own
+/// HDF5, MAT and NumPy exports publish one — so a rule that wanted two refused
+/// to reopen a file it had just written, which is the one thing an interchange
+/// format must not do. The command line settled the same rule on its side of
+/// the boundary first (`rspice-cli`'s `MIN_RESULT_SAMPLES`, also one) and this
+/// constant is what agrees with it.
+///
+/// Zero is not a result: an empty coordinate has no row to draw, no shape for
+/// a column to match, and nothing for a domain check to check.
+///
+/// Nothing downstream needs two. The waveform sheets draw whatever the run
+/// kept — a lone sample is one of the degenerate shapes
+/// `documents::result_document::waves` is pinned against — and the sheets that
+/// do need a span (Bode, phase noise, the raw frequency curve) already ask for
+/// one themselves and decline to render rather than refusing the dataset.
+const MIN_RESULT_ROWS: usize = 1;
 const RESULT_IMPORT_WINDOW_MARGIN: f32 = 24.0;
 const RESULT_IMPORT_FOOTER_RESERVE: f32 = 82.0;
 
@@ -1342,9 +1359,8 @@ fn parse_delimited_result_dataset(
     }
     if coordinate.len() < MIN_RESULT_ROWS {
         return Err(format!(
-            "the dataset contains {} sample rows; at least {} are required",
-            coordinate.len(),
-            MIN_RESULT_ROWS
+            "the '{}' column carries no samples, so the file holds no result to import",
+            headers[0].name
         ));
     }
 
@@ -1974,6 +1990,30 @@ mod tests {
             let error = parse_result_dataset("bad.csv", source).expect_err("invalid import");
             assert!(error.contains(expected), "{error:?}");
         }
+    }
+
+    /// One sample is a result; none is not.
+    ///
+    /// `MIN_RESULT_ROWS` was two, so a single operating point — the one
+    /// analysis whose result is always one sample — could be exported by this
+    /// product and not reopened by it. A header with no rows under it is the
+    /// other end of the same rule, and it is refused where the file is read
+    /// rather than by a later step failing for a reason that is not the real
+    /// one.
+    #[test]
+    fn one_sample_is_a_result_and_a_header_with_no_rows_is_refused_by_name() {
+        let parsed = parse_result_dataset("op.csv", b"time [s],V(out) [V]\n0,2.5\n")
+            .expect("a single operating point is a result");
+        assert_eq!(parsed.sample_count, 1);
+        assert_eq!(parsed.waveforms[0].y.as_slice(), [2.5]);
+
+        let error = parse_result_dataset("empty.csv", b"time [s],V(out) [V]\n")
+            .expect_err("a header with no rows holds no result");
+        assert!(error.contains("carries no samples"), "{error:?}");
+        assert!(
+            error.contains("time"),
+            "the refusal names the column: {error:?}"
+        );
     }
 
     #[test]

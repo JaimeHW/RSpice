@@ -568,6 +568,21 @@ mod tests {
         assert_eq!(parsed.waveforms[0].y.as_slice(), [0.0, 1.0, 2.0]);
     }
 
+    /// A one-point result publishes and reopens. See the HDF5 case: the
+    /// importer's floor was two rows, so the three table writers published
+    /// files this product then refused to read.
+    #[test]
+    fn a_single_sample_result_publishes_and_reopens() {
+        let waveforms = [waveform("V(out)", vec![0.0], vec![2.5])];
+        let export = prepared(AnalysisType::Transient, &waveforms).expect("prepares");
+        assert_eq!(export.rows, 1);
+        let bytes = encode_matlab(&export).expect("encodes");
+        let parsed = parse_result_dataset("waveforms.mat", &bytes).expect("re-imports");
+        assert_eq!(parsed.sample_count, 1);
+        assert_eq!(parsed.waveforms[0].x.as_slice(), [0.0]);
+        assert_eq!(parsed.waveforms[0].y.as_slice(), [2.5]);
+    }
+
     #[test]
     fn an_ac_trace_with_no_retained_phase_is_published_with_zero_and_named() {
         let waveforms = [waveform("V(out)", vec![1.0, 10.0], vec![1.0, 0.5])];
