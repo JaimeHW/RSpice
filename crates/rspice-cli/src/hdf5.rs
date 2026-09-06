@@ -1,17 +1,27 @@
 //! HDF5 storage for simulation results.
 //!
-//! The CLI uses a stable, self-describing layout with path-safe dataset names
-//! so exported files remain robust even when signal names contain SPICE syntax.
+//! The layout — path-safe dataset names, so an exported file stays robust when
+//! a signal name carries SPICE syntax — belongs to [`rspice_core::io::hdf5`],
+//! which is also what the GUI writes and reads. This module maps the CLI's
+//! result types onto that document and adds the two section families only a
+//! command-line run produces: a `.DISTO` series and an `.FFT` result with its
+//! metrics. Reading stays here too: the CLI reads back everything it writes,
+//! including those two.
 
 use crate::commands::publish;
+use rspice_core::io::{
+    Hdf5Attribute, Hdf5Column, Hdf5Coordinate, Hdf5Document, Hdf5Group, Hdf5Table,
+};
 use rspice_output::AtomicArtifactError;
-use rustyhdf5::{AttrValue, File as Hdf5File, FileBuilder};
+use rustyhdf5::{AttrValue, File as Hdf5File};
 use thiserror::Error;
 
 use std::collections::HashMap;
 use std::path::Path;
 
-const SCHEMA_VERSION: &str = "1";
+/// The document version this build reads. The writer's half of the same
+/// number lives with the layout, so a reader and a writer cannot drift.
+const SCHEMA_VERSION: &str = rspice_core::io::HDF5_SCHEMA_VERSION;
 const FFT_SECTION_SCHEMA_VERSION: &str = "2";
 
 #[derive(Debug, Error)]
@@ -35,7 +45,25 @@ enum Hdf5StagingError {
     #[error(transparent)]
     Backend(#[from] rustyhdf5::Error),
     #[error(transparent)]
+    Core(#[from] rspice_core::io::Hdf5Error),
+    #[error(transparent)]
     Io(#[from] std::io::Error),
+}
+
+/// The core writer's refusals, in this module's vocabulary.
+///
+/// A backend failure and a failed write keep the variants they already had, so
+/// a caller that matched on them before the layout moved still matches. Every
+/// other refusal is the document contradicting the layout, which is what
+/// `InvalidSchema` says.
+impl From<rspice_core::io::Hdf5Error> for Hdf5Error {
+    fn from(error: rspice_core::io::Hdf5Error) -> Self {
+        match error {
+            rspice_core::io::Hdf5Error::Backend(error) => Self::Backend(error),
+            rspice_core::io::Hdf5Error::Write(error) => Self::ArtifactWrite(error),
+            other => Self::InvalidSchema(other.to_string()),
+        }
+    }
 }
 
 pub type Result<T> = std::result::Result<T, Hdf5Error>;
@@ -955,8 +983,10 @@ impl Hdf5SimulationData {
 }
 
 pub fn write_hdf5(path: &Path, data: &Hdf5SimulationData) -> Result<()> {
-    let builder = build_hdf5(data)?;
-    write_hdf5_builder(path, builder)
+    let document = build_hdf5(data)?;
+    write_hdf5_staged(path, |file| {
+        rspice_core::io::write_hdf5(file, &document).map_err(Hdf5StagingError::Core)
+    })
 }
 
 /// Serialize an HDF5 document into an already prepared artifact. Callers that
@@ -966,27 +996,21 @@ pub(crate) fn write_hdf5_to_writer(
     writer: &mut dyn std::io::Write,
     data: &Hdf5SimulationData,
 ) -> Result<()> {
-    let bytes = build_hdf5(data)?.finish()?;
-    writer.write_all(&bytes).map_err(Hdf5Error::ArtifactWrite)
+    let document = build_hdf5(data)?;
+    rspice_core::io::write_hdf5(writer, &document).map_err(Hdf5Error::from)
 }
 
-fn build_hdf5(data: &Hdf5SimulationData) -> Result<FileBuilder> {
+fn build_hdf5(data: &Hdf5SimulationData) -> Result<Hdf5Document> {
     data.validate()?;
 
-    let mut builder = FileBuilder::new();
-    builder.set_attr(
-        "schema_version",
-        AttrValue::String(SCHEMA_VERSION.to_string()),
-    );
-    builder.set_attr("simulator", AttrValue::String("RSpice".to_string()));
-    builder.set_attr("title", AttrValue::String(data.title.clone()));
+    let mut document = Hdf5Document::new(data.title.clone());
     // The identity travels on the root as well as in the group name, so a
     // reader that walks groups by their `section_type` still learns which
     // analysis instance and coordinate produced them.
     if let Some(identity) = &data.identity {
-        builder.set_attr(
+        document.set_attr(
             "analysis_id",
-            AttrValue::String(identity.analysis_id.clone()),
+            Hdf5Attribute::Text(identity.analysis_id.clone()),
         );
         for (name, value) in [
             ("coordinate_id", identity.coordinate_id.as_ref()),
@@ -1001,7 +1025,7 @@ fn build_hdf5(data: &Hdf5SimulationData) -> Result<FileBuilder> {
             ),
         ] {
             if let Some(value) = value {
-                builder.set_attr(name, AttrValue::String(value.clone()));
+                document.set_attr(name, Hdf5Attribute::Text(value.clone()));
             }
         }
     }
@@ -1017,7 +1041,7 @@ fn build_hdf5(data: &Hdf5SimulationData) -> Result<FileBuilder> {
 
     if let Some(operating_point) = &data.operating_point {
         add_waveform_section(
-            &mut builder,
+            &mut document,
             &section_name("operating_point"),
             "operating_point",
             operating_point,
@@ -1025,7 +1049,7 @@ fn build_hdf5(data: &Hdf5SimulationData) -> Result<FileBuilder> {
     }
     if let Some(transient) = &data.transient {
         add_waveform_section(
-            &mut builder,
+            &mut document,
             &section_name("transient"),
             "transient",
             transient,
@@ -1033,40 +1057,42 @@ fn build_hdf5(data: &Hdf5SimulationData) -> Result<FileBuilder> {
     }
     if let Some(dc_sweep) = &data.dc_sweep {
         add_waveform_section(
-            &mut builder,
+            &mut document,
             &section_name("dc_sweep"),
             "dc_sweep",
             dc_sweep,
         )?;
     }
     if let Some(noise) = &data.noise {
-        add_waveform_section(&mut builder, &section_name("noise"), "noise", noise)?;
+        add_waveform_section(&mut document, &section_name("noise"), "noise", noise)?;
     }
     if let Some(ac) = &data.ac {
-        add_ac_section(&mut builder, &section_name("ac"), ac)?;
+        add_ac_section(&mut document, &section_name("ac"), ac)?;
     }
     if let Some(distortion) = &data.distortion {
-        add_distortion_section(&mut builder, &section_name("distortion"), distortion)?;
+        add_distortion_section(&mut document, &section_name("distortion"), distortion)?;
     }
     if let Some(fft) = &data.fft {
-        add_fft_section(&mut builder, &section_name("fft"), fft)?;
+        add_fft_section(&mut document, &section_name("fft"), fft)?;
     }
     if !data.measurements.is_empty() {
-        add_measurements(&mut builder, &data.measurements)?;
+        add_measurements(&mut document, &data.measurements)?;
     }
 
-    Ok(builder)
+    Ok(document)
 }
 
-fn write_hdf5_builder(path: &Path, builder: FileBuilder) -> Result<()> {
-    publish::artifact(path, |file| {
-        let bytes = builder.finish()?;
-        file.write_all(&bytes)?;
-        Ok(())
-    })
-    .map_err(|error| match error {
+/// Publish HDF5 bytes atomically: the destination this replaces survives
+/// intact when serialization fails, because nothing is committed until the
+/// whole document has been encoded.
+fn write_hdf5_staged(
+    path: &Path,
+    write: impl FnOnce(&mut dyn std::io::Write) -> std::result::Result<(), Hdf5StagingError>,
+) -> Result<()> {
+    publish::artifact(path, write).map_err(|error| match error {
         AtomicArtifactError::Prepare(error) => Hdf5Error::ArtifactPreparation(error),
         AtomicArtifactError::Write(Hdf5StagingError::Backend(error)) => Hdf5Error::Backend(error),
+        AtomicArtifactError::Write(Hdf5StagingError::Core(error)) => Hdf5Error::from(error),
         AtomicArtifactError::Write(Hdf5StagingError::Io(error)) => Hdf5Error::ArtifactWrite(error),
         AtomicArtifactError::Flush { source, .. } => Hdf5Error::ArtifactFlush(source),
         AtomicArtifactError::Commit { source, .. } => Hdf5Error::ArtifactCommit(source),
@@ -1138,38 +1164,32 @@ pub fn read_hdf5(path: &Path) -> Result<Hdf5SimulationData> {
 }
 
 fn add_waveform_section(
-    builder: &mut FileBuilder,
+    document: &mut Hdf5Document,
     name: &str,
     family: &str,
     section: &Hdf5WaveformSection,
 ) -> Result<()> {
-    let mut group = builder.create_group(name);
-    group.set_attr("section_type", AttrValue::String(family.to_string()));
-    group.set_attr(
-        "independent_name",
-        AttrValue::String(section.independent_name.clone()),
-    );
-    group.set_attr("signal_count", AttrValue::I64(section.signals.len() as i64));
-    group
-        .create_dataset("independent")
-        .with_f64_data(&section.independent_values);
-
-    for (index, signal) in section.signals.iter().enumerate() {
-        let dataset_name = format!("signal_{index:04}");
-        group.set_attr(
-            &format!("{dataset_name}_name"),
-            AttrValue::String(signal.name.clone()),
-        );
-        group.set_attr(
-            &format!("{dataset_name}_type"),
-            AttrValue::String(signal.var_type.clone()),
-        );
-        group
-            .create_dataset(&dataset_name)
-            .with_f64_data(&signal.values);
-    }
-
-    builder.add_group(group.finish());
+    document.add_table(&Hdf5Table {
+        group: name.to_string(),
+        section_type: family.to_string(),
+        coordinate: Hdf5Coordinate::Independent {
+            name: section.independent_name.clone(),
+            values: section.independent_values.clone(),
+        },
+        columns: section
+            .signals
+            .iter()
+            .map(|signal| Hdf5Column::Real {
+                name: signal.name.clone(),
+                quantity: signal.var_type.clone(),
+                // A CLI run states a quantity, never a unit: the `.raw` and
+                // `.csv` paths it shares its vectors with do not carry one
+                // either, so claiming one here would invent it.
+                unit: None,
+                values: signal.values.clone(),
+            })
+            .collect(),
+    })?;
     Ok(())
 }
 
@@ -1200,29 +1220,22 @@ fn read_waveform_section(file: &Hdf5File, group_name: &str) -> Result<Hdf5Wavefo
     Ok(section)
 }
 
-fn add_ac_section(builder: &mut FileBuilder, name: &str, section: &Hdf5AcSection) -> Result<()> {
-    let mut group = builder.create_group(name);
-    group.set_attr("section_type", AttrValue::String("ac".to_string()));
-    group.set_attr("signal_count", AttrValue::I64(section.signals.len() as i64));
-    group
-        .create_dataset("frequency")
-        .with_f64_data(&section.frequency);
-
-    for (index, signal) in section.signals.iter().enumerate() {
-        let prefix = format!("signal_{index:04}");
-        group.set_attr(
-            &format!("{prefix}_name"),
-            AttrValue::String(signal.name.clone()),
-        );
-        group
-            .create_dataset(&format!("{prefix}_real"))
-            .with_f64_data(&signal.real);
-        group
-            .create_dataset(&format!("{prefix}_imag"))
-            .with_f64_data(&signal.imag);
-    }
-
-    builder.add_group(group.finish());
+fn add_ac_section(document: &mut Hdf5Document, name: &str, section: &Hdf5AcSection) -> Result<()> {
+    document.add_table(&Hdf5Table {
+        group: name.to_string(),
+        section_type: "ac".to_string(),
+        coordinate: Hdf5Coordinate::Frequency(section.frequency.clone()),
+        columns: section
+            .signals
+            .iter()
+            .map(|signal| Hdf5Column::Complex {
+                name: signal.name.clone(),
+                unit: None,
+                real: signal.real.clone(),
+                imag: signal.imag.clone(),
+            })
+            .collect(),
+    })?;
     Ok(())
 }
 
@@ -1247,82 +1260,80 @@ fn read_ac_section(file: &Hdf5File, group_name: &str) -> Result<Hdf5AcSection> {
 }
 
 fn add_distortion_section(
-    builder: &mut FileBuilder,
+    document: &mut Hdf5Document,
     name: &str,
     section: &Hdf5DistortionSection,
 ) -> Result<()> {
-    let mut group = builder.create_group(name);
-    group.set_attr("section_type", AttrValue::String("distortion".to_string()));
-    group.set_attr("mode", AttrValue::String(section.mode.clone()));
+    let mut group = Hdf5Group::new(name);
+    group.set_attr(
+        "section_type",
+        Hdf5Attribute::Text("distortion".to_string()),
+    );
+    group.set_attr("mode", Hdf5Attribute::Text(section.mode.clone()));
     group.set_attr(
         "phasor_convention",
-        AttrValue::String(section.phasor_convention.clone()),
+        Hdf5Attribute::Text(section.phasor_convention.clone()),
     );
     group.set_attr(
         "ratio_normalization",
-        AttrValue::String(section.ratio_normalization.clone()),
+        Hdf5Attribute::Text(section.ratio_normalization.clone()),
     );
     if let Some(ratio) = section.f2_over_f1 {
-        group.set_attr("f2_over_f1", AttrValue::F64(ratio));
+        group.set_attr("f2_over_f1", Hdf5Attribute::Real(ratio));
     }
-    group.set_attr("series_count", AttrValue::I64(section.series.len() as i64));
-    group
-        .create_dataset("f1_frequency")
-        .with_f64_data(&section.f1_frequency);
+    group.set_attr(
+        "series_count",
+        Hdf5Attribute::Integer(section.series.len() as i64),
+    );
+    group.set_real_dataset("f1_frequency", &section.f1_frequency);
 
     for (series_index, series) in section.series.iter().enumerate() {
         let series_prefix = format!("series_{series_index:04}");
         group.set_attr(
             &format!("{series_prefix}_label"),
-            AttrValue::String(series.label.clone()),
+            Hdf5Attribute::Text(series.label.clone()),
         );
         group.set_attr(
             &format!("{series_prefix}_is_product"),
-            AttrValue::I64(i64::from(series.is_product)),
+            Hdf5Attribute::Integer(i64::from(series.is_product)),
         );
         group.set_attr(
             &format!("{series_prefix}_signal_count"),
-            AttrValue::I64(series.signals.len() as i64),
+            Hdf5Attribute::Integer(series.signals.len() as i64),
         );
-        group
-            .create_dataset(&format!("{series_prefix}_frequency"))
-            .with_f64_data(&series.physical_frequency);
+        group.set_real_dataset(
+            &format!("{series_prefix}_frequency"),
+            &series.physical_frequency,
+        );
 
         for (signal_index, signal) in series.signals.iter().enumerate() {
             let signal_prefix = format!("{series_prefix}_signal_{signal_index:04}");
             group.set_attr(
                 &format!("{signal_prefix}_name"),
-                AttrValue::String(signal.name.clone()),
+                Hdf5Attribute::Text(signal.name.clone()),
             );
             group.set_attr(
                 &format!("{signal_prefix}_type"),
-                AttrValue::String(signal.var_type.clone()),
+                Hdf5Attribute::Text(signal.var_type.clone()),
             );
             group.set_attr(
                 &format!("{signal_prefix}_has_ratio"),
-                AttrValue::I64(i64::from(signal.magnitude_ratio_to_f1.is_some())),
+                Hdf5Attribute::Integer(i64::from(signal.magnitude_ratio_to_f1.is_some())),
             );
-            group
-                .create_dataset(&format!("{signal_prefix}_real"))
-                .with_f64_data(&signal.real);
-            group
-                .create_dataset(&format!("{signal_prefix}_imag"))
-                .with_f64_data(&signal.imag);
-            group
-                .create_dataset(&format!("{signal_prefix}_magnitude"))
-                .with_f64_data(&signal.magnitude);
-            group
-                .create_dataset(&format!("{signal_prefix}_phase_degrees"))
-                .with_f64_data(&signal.phase_degrees);
+            group.set_real_dataset(&format!("{signal_prefix}_real"), &signal.real);
+            group.set_real_dataset(&format!("{signal_prefix}_imag"), &signal.imag);
+            group.set_real_dataset(&format!("{signal_prefix}_magnitude"), &signal.magnitude);
+            group.set_real_dataset(
+                &format!("{signal_prefix}_phase_degrees"),
+                &signal.phase_degrees,
+            );
             if let Some(ratio) = &signal.magnitude_ratio_to_f1 {
-                group
-                    .create_dataset(&format!("{signal_prefix}_magnitude_ratio_to_f1"))
-                    .with_f64_data(ratio);
+                group.set_real_dataset(&format!("{signal_prefix}_magnitude_ratio_to_f1"), ratio);
             }
         }
     }
 
-    builder.add_group(group.finish());
+    document.groups.push(group);
     Ok(())
 }
 
@@ -1416,39 +1427,46 @@ fn checked_i64(value: usize, name: &str) -> Result<i64> {
     })
 }
 
-fn add_fft_section(builder: &mut FileBuilder, name: &str, section: &Hdf5FftSection) -> Result<()> {
-    let mut group = builder.create_group(name);
-    group.set_attr("section_type", AttrValue::String("fft".to_string()));
+fn add_fft_section(
+    document: &mut Hdf5Document,
+    name: &str,
+    section: &Hdf5FftSection,
+) -> Result<()> {
+    let mut group = Hdf5Group::new(name);
+    group.set_attr("section_type", Hdf5Attribute::Text("fft".to_string()));
     group.set_attr(
         "schema_version",
-        AttrValue::String(FFT_SECTION_SCHEMA_VERSION.to_string()),
+        Hdf5Attribute::Text(FFT_SECTION_SCHEMA_VERSION.to_string()),
     );
     group.set_attr(
         "parent_analysis_id",
-        AttrValue::String(section.parent_analysis_id.clone()),
+        Hdf5Attribute::Text(section.parent_analysis_id.clone()),
     );
     group.set_attr(
         "has_coordinate",
-        AttrValue::I64(i64::from(section.coordinate.is_some())),
+        Hdf5Attribute::Integer(i64::from(section.coordinate.is_some())),
     );
     if let Some(coordinate) = &section.coordinate {
         group.set_attr(
             "coordinate_id",
-            AttrValue::String(coordinate.coordinate_id.clone()),
+            Hdf5Attribute::Text(coordinate.coordinate_id.clone()),
         );
         group.set_attr(
             "coordinate_ordinal",
-            AttrValue::I64(checked_i64(coordinate.ordinal, "FFT coordinate ordinal")?),
+            Hdf5Attribute::Integer(checked_i64(coordinate.ordinal, "FFT coordinate ordinal")?),
         );
-        group.set_attr("coordinate_tag", AttrValue::String(coordinate.tag.clone()));
+        group.set_attr(
+            "coordinate_tag",
+            Hdf5Attribute::Text(coordinate.tag.clone()),
+        );
         group.set_attr(
             "coordinate_assignment",
-            AttrValue::String(coordinate.assignment.clone()),
+            Hdf5Attribute::Text(coordinate.assignment.clone()),
         );
     }
     group.set_attr(
         "result_count",
-        AttrValue::I64(checked_i64(section.results.len(), "FFT result count")?),
+        Hdf5Attribute::Integer(checked_i64(section.results.len(), "FFT result count")?),
     );
 
     for (index, result) in section.results.iter().enumerate() {
@@ -1467,17 +1485,17 @@ fn add_fft_section(builder: &mut FileBuilder, name: &str, section: &Hdf5FftSecti
         ] {
             group.set_attr(
                 &format!("{prefix}_{suffix}"),
-                AttrValue::String(value.to_string()),
+                Hdf5Attribute::Text(value.to_string()),
             );
         }
         group.set_attr(
             &format!("{prefix}_has_value_unit"),
-            AttrValue::I64(i64::from(result.value_unit.is_some())),
+            Hdf5Attribute::Integer(i64::from(result.value_unit.is_some())),
         );
         if let Some(unit) = &result.value_unit {
             group.set_attr(
                 &format!("{prefix}_value_unit"),
-                AttrValue::String(unit.clone()),
+                Hdf5Attribute::Text(unit.clone()),
             );
         }
         for (suffix, value) in [
@@ -1488,7 +1506,7 @@ fn add_fft_section(builder: &mut FileBuilder, name: &str, section: &Hdf5FftSecti
             ("coherent_gain", result.coherent_gain),
             ("frequency_resolution_hz", result.frequency_resolution_hz),
         ] {
-            group.set_attr(&format!("{prefix}_{suffix}"), AttrValue::F64(value));
+            group.set_attr(&format!("{prefix}_{suffix}"), Hdf5Attribute::Real(value));
         }
         for (suffix, value) in [
             ("ordinal", result.ordinal),
@@ -1500,16 +1518,16 @@ fn add_fft_section(builder: &mut FileBuilder, name: &str, section: &Hdf5FftSecti
         ] {
             group.set_attr(
                 &format!("{prefix}_{suffix}"),
-                AttrValue::I64(checked_i64(value, &format!("{prefix}_{suffix}"))?),
+                Hdf5Attribute::Integer(checked_i64(value, &format!("{prefix}_{suffix}"))?),
             );
         }
         group.set_attr(
             &format!("{prefix}_accurate_sampling"),
-            AttrValue::I64(i64::from(result.accurate_sampling)),
+            Hdf5Attribute::Integer(i64::from(result.accurate_sampling)),
         );
         group.set_attr(
             &format!("{prefix}_has_metrics"),
-            AttrValue::I64(i64::from(result.metrics.is_some())),
+            Hdf5Attribute::Integer(i64::from(result.metrics.is_some())),
         );
         let bin_indices = result
             .bin_indices
@@ -1522,9 +1540,7 @@ fn add_fft_section(builder: &mut FileBuilder, name: &str, section: &Hdf5FftSecti
                 })
             })
             .collect::<Result<Vec<_>>>()?;
-        group
-            .create_dataset(&format!("{prefix}_bin_index"))
-            .with_i64_data(&bin_indices);
+        group.set_integer_dataset(&format!("{prefix}_bin_index"), &bin_indices);
         for (suffix, values) in [
             ("frequency_hz", &result.frequency_hz),
             ("real", &result.real),
@@ -1532,9 +1548,7 @@ fn add_fft_section(builder: &mut FileBuilder, name: &str, section: &Hdf5FftSecti
             ("magnitude", &result.magnitude),
             ("phase_degrees", &result.phase_degrees),
         ] {
-            group
-                .create_dataset(&format!("{prefix}_{suffix}"))
-                .with_f64_data(values);
+            group.set_real_dataset(&format!("{prefix}_{suffix}"), values);
         }
 
         if let Some(metrics) = &result.metrics {
@@ -1547,22 +1561,25 @@ fn add_fft_section(builder: &mut FileBuilder, name: &str, section: &Hdf5FftSecti
                 ("snr_db", metrics.snr_db),
                 ("sfdr_db", metrics.sfdr_db),
             ] {
-                group.set_attr(&format!("{prefix}_metrics_{suffix}"), AttrValue::F64(value));
+                group.set_attr(
+                    &format!("{prefix}_metrics_{suffix}"),
+                    Hdf5Attribute::Real(value),
+                );
             }
             group.set_attr(
                 &format!("{prefix}_metrics_has_spur"),
-                AttrValue::I64(i64::from(metrics.sfdr_spur_bin.is_some())),
+                Hdf5Attribute::Integer(i64::from(metrics.sfdr_spur_bin.is_some())),
             );
             if let (Some(bin), Some(frequency)) =
                 (metrics.sfdr_spur_bin, metrics.sfdr_spur_frequency_hz)
             {
                 group.set_attr(
                     &format!("{prefix}_metrics_sfdr_spur_bin"),
-                    AttrValue::I64(checked_i64(bin, "FFT SFDR spur bin")?),
+                    Hdf5Attribute::Integer(checked_i64(bin, "FFT SFDR spur bin")?),
                 );
                 group.set_attr(
                     &format!("{prefix}_metrics_sfdr_spur_frequency_hz"),
-                    AttrValue::F64(frequency),
+                    Hdf5Attribute::Real(frequency),
                 );
             }
             let ranks = metrics
@@ -1575,12 +1592,8 @@ fn add_fft_section(builder: &mut FileBuilder, name: &str, section: &Hdf5FftSecti
                 .iter()
                 .map(|harmonic| checked_i64(harmonic.bin, "FFT harmonic bin"))
                 .collect::<Result<Vec<_>>>()?;
-            group
-                .create_dataset(&format!("{prefix}_metrics_harmonic_rank"))
-                .with_i64_data(&ranks);
-            group
-                .create_dataset(&format!("{prefix}_metrics_harmonic_bin"))
-                .with_i64_data(&bins);
+            group.set_integer_dataset(&format!("{prefix}_metrics_harmonic_rank"), &ranks);
+            group.set_integer_dataset(&format!("{prefix}_metrics_harmonic_bin"), &bins);
             for (suffix, values) in [
                 (
                     "frequency_hz",
@@ -1615,14 +1628,12 @@ fn add_fft_section(builder: &mut FileBuilder, name: &str, section: &Hdf5FftSecti
                         .collect::<Vec<_>>(),
                 ),
             ] {
-                group
-                    .create_dataset(&format!("{prefix}_metrics_harmonic_{suffix}"))
-                    .with_f64_data(&values);
+                group.set_real_dataset(&format!("{prefix}_metrics_harmonic_{suffix}"), &values);
             }
         }
     }
 
-    builder.add_group(group.finish());
+    document.groups.push(group);
     Ok(())
 }
 
@@ -1833,24 +1844,24 @@ fn read_fft_section(file: &Hdf5File, group_name: &str) -> Result<Hdf5FftSection>
     Ok(section)
 }
 
-fn add_measurements(builder: &mut FileBuilder, measurements: &[Hdf5Measurement]) -> Result<()> {
-    let mut group = builder.create_group("measurements");
+fn add_measurements(document: &mut Hdf5Document, measurements: &[Hdf5Measurement]) -> Result<()> {
+    let mut group = Hdf5Group::new("measurements");
     group.set_attr(
         "measurement_count",
-        AttrValue::I64(measurements.len() as i64),
+        Hdf5Attribute::Integer(measurements.len() as i64),
     );
     for (index, measurement) in measurements.iter().enumerate() {
         let prefix = format!("measurement_{index:04}");
         group.set_attr(
             &format!("{prefix}_name"),
-            AttrValue::String(measurement.name.clone()),
+            Hdf5Attribute::Text(measurement.name.clone()),
         );
         group.set_attr(
             &format!("{prefix}_value"),
-            AttrValue::F64(measurement.value),
+            Hdf5Attribute::Real(measurement.value),
         );
     }
-    builder.add_group(group.finish());
+    document.groups.push(group);
     Ok(())
 }
 
@@ -1986,10 +1997,14 @@ mod tests {
                     .expect("seed existing HDF5 destination");
             }
 
-            let mut incomplete_builder = FileBuilder::new();
+            let mut incomplete_builder = rustyhdf5::FileBuilder::new();
             incomplete_builder.create_dataset("missing_data");
-            let error = write_hdf5_builder(&destination, incomplete_builder)
-                .expect_err("incomplete dataset must fail serialization");
+            let error = write_hdf5_staged(&destination, |file| {
+                let bytes = incomplete_builder.finish()?;
+                file.write_all(&bytes)?;
+                Ok(())
+            })
+            .expect_err("incomplete dataset must fail serialization");
             assert!(matches!(error, Hdf5Error::Backend(_)));
 
             if preexisting {
@@ -2023,6 +2038,84 @@ mod tests {
             data
         );
         assert_only_destination_remains(&directory.0, &destination, true);
+    }
+
+    /// The byte-identity oracle for the waveform and AC layout after it moved
+    /// to `rspice_core::io::hdf5`.
+    ///
+    /// This spells the `FileBuilder` calls this module used to make, in the
+    /// order it made them, and requires the same file back. A layout change
+    /// that a reader would notice fails here first, before any round trip can
+    /// hide it by agreeing with itself.
+    #[test]
+    fn the_moved_layout_writes_the_bytes_this_module_used_to_write() {
+        let mut data = Hdf5SimulationData::new();
+        data.title = "byte identity".to_string();
+        let mut transient = Hdf5WaveformSection::new("time", vec![0.0, 1.0, 2.0]);
+        transient.add_typed_signal("V(out)", "voltage", vec![0.0, 2.0, 4.0]);
+        transient.add_signal("I(R1)", vec![1.0, 2.0, 3.0]);
+        data.transient = Some(transient);
+        let mut ac = Hdf5AcSection::new(vec![1.0, 10.0]);
+        ac.add_signal("V(out)", vec![1.0, 0.5], vec![0.0, -0.5]);
+        data.ac = Some(ac);
+        data.measurements = vec![Hdf5Measurement::new("rise", 1.5e-9)];
+
+        let mut moved = Vec::new();
+        write_hdf5_to_writer(&mut moved, &data).expect("the moved writer publishes");
+
+        let mut legacy = rustyhdf5::FileBuilder::new();
+        legacy.set_attr("schema_version", AttrValue::String("1".to_string()));
+        legacy.set_attr("simulator", AttrValue::String("RSpice".to_string()));
+        legacy.set_attr("title", AttrValue::String("byte identity".to_string()));
+
+        let mut group = legacy.create_group("transient");
+        group.set_attr("section_type", AttrValue::String("transient".to_string()));
+        group.set_attr("independent_name", AttrValue::String("time".to_string()));
+        group.set_attr("signal_count", AttrValue::I64(2));
+        group
+            .create_dataset("independent")
+            .with_f64_data(&[0.0, 1.0, 2.0]);
+        group.set_attr("signal_0000_name", AttrValue::String("V(out)".to_string()));
+        group.set_attr("signal_0000_type", AttrValue::String("voltage".to_string()));
+        group
+            .create_dataset("signal_0000")
+            .with_f64_data(&[0.0, 2.0, 4.0]);
+        group.set_attr("signal_0001_name", AttrValue::String("I(R1)".to_string()));
+        group.set_attr("signal_0001_type", AttrValue::String("value".to_string()));
+        group
+            .create_dataset("signal_0001")
+            .with_f64_data(&[1.0, 2.0, 3.0]);
+        legacy.add_group(group.finish());
+
+        let mut group = legacy.create_group("ac");
+        group.set_attr("section_type", AttrValue::String("ac".to_string()));
+        group.set_attr("signal_count", AttrValue::I64(1));
+        group
+            .create_dataset("frequency")
+            .with_f64_data(&[1.0, 10.0]);
+        group.set_attr("signal_0000_name", AttrValue::String("V(out)".to_string()));
+        group
+            .create_dataset("signal_0000_real")
+            .with_f64_data(&[1.0, 0.5]);
+        group
+            .create_dataset("signal_0000_imag")
+            .with_f64_data(&[0.0, -0.5]);
+        legacy.add_group(group.finish());
+
+        let mut group = legacy.create_group("measurements");
+        group.set_attr("measurement_count", AttrValue::I64(1));
+        group.set_attr(
+            "measurement_0000_name",
+            AttrValue::String("rise".to_string()),
+        );
+        group.set_attr("measurement_0000_value", AttrValue::F64(1.5e-9));
+        legacy.add_group(group.finish());
+
+        assert_eq!(
+            moved,
+            legacy.finish().expect("the old call order encodes"),
+            "the moved layout changed the published bytes"
+        );
     }
 
     fn fft_result(
@@ -2304,7 +2397,7 @@ mod tests {
         let directory = TestDirectory::new("fft-future-schema");
 
         let future_root = directory.0.join("future-root.h5");
-        let mut root_builder = FileBuilder::new();
+        let mut root_builder = rustyhdf5::FileBuilder::new();
         root_builder.set_attr("schema_version", AttrValue::String("2".to_string()));
         std::fs::write(
             &future_root,
@@ -2316,7 +2409,7 @@ mod tests {
 
         for (label, version) in [("old", "1"), ("future", "3")] {
             let fft_path = directory.0.join(format!("{label}-fft.h5"));
-            let mut fft_builder = FileBuilder::new();
+            let mut fft_builder = rustyhdf5::FileBuilder::new();
             fft_builder.set_attr(
                 "schema_version",
                 AttrValue::String(SCHEMA_VERSION.to_string()),
