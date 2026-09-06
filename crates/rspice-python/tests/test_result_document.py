@@ -120,7 +120,9 @@ def test_every_family_publishes_the_shared_document(results):
     for kind, result in results:
         document = result.document()
         assert document["schema"] == "rspice-analysis-result", kind
-        assert document["schemaVersion"] == 1, kind
+        # Version 2 is what this build writes: a transient payload may carry
+        # digital bus declarations, which a version-1 document could not.
+        assert document["schemaVersion"] == 2, kind
         assert document["resultKind"] == kind, kind
         assert document["analysis"]["tag"], kind
 
