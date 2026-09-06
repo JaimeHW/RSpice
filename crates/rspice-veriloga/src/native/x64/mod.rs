@@ -4658,6 +4658,40 @@ endmodule
             value, 0.0,
             "d I(p, n) / d V(t) at V(p, n) = 0: the exponent term is 0 · ln(0) · 0 and must be 0"
         );
+
+        // (c) The same entry on the bytecode route, whose own power rule
+        //     (`ir.rs` `d(u^v)`) carried the identical `0 · −∞` — and, while
+        //     it was written factored as `u^v · (v'·ln u + v·u'/u)`, a
+        //     quotient that divided by a zero base on EVERY axis.
+        let reference = fixture_bytecode_jacobian_for_node(&runtime.model, &native, name, 2);
+        assert_eq!(
+            reference, 0.0,
+            "the bytecode's d I(p, n) / d V(t) at V(p, n) = 0 must be 0 too"
+        );
+    }
+
+    /// One Jacobian entry of a single-contribution fixture module, evaluated
+    /// on the bytecode route at the same context the native fixtures use.
+    fn fixture_bytecode_jacobian_for_node(
+        model: &CompiledModel,
+        native: &NativeModel,
+        name: &str,
+        node: usize,
+    ) -> f64 {
+        let mut context = native_model_benchmark_context(model, name);
+        resolve_native_parameter_defaults(model, native, &mut context);
+        let stamp = &model.stamp_programs[0];
+        let (entry, _) = stamp
+            .jacobian_programs
+            .iter()
+            .enumerate()
+            .find(|(_, entry)| matches!(entry.col_axis, ColumnAxis::Node(index) if index == node))
+            .expect("the contribution's Jacobian row must carry a column for the node");
+        let mut vm = Vm::new(&mut context);
+        execute_bytecode_assignment_steps(&mut vm, &model.assignment_steps)
+            .expect("bytecode assignments");
+        vm.execute(&stamp.jacobian_programs[entry].program)
+            .expect("bytecode Jacobian entry")
     }
 
     fn run_shipped_model_device_probe(name: &str, path: &Path, module: Option<&str>) {

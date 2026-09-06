@@ -4422,7 +4422,18 @@ pub mod autodiff {
                     BinaryOp::Pow => {
                         // d(u^v) =
                         //   if v is const c: c*u^(c-1)*u'
-                        //   else: u^v * (v' * ln(u) + v * u'/u)
+                        //   else: v*u^(v-1)*u' + u^v*ln(u)*v'
+                        //
+                        // The two terms are written separately rather than as
+                        // the factored `u^v * (v'*ln u + v*u'/u)`, which is
+                        // singular at `u = 0` on EVERY axis: the quotient
+                        // divides by zero for the base term as well, so a model
+                        // evaluated at zero bias got NaN derivatives along
+                        // axes whose `u'` is zero. The separated form is the
+                        // one the canonical CFG pass builds
+                        // (`canonical_ir/ad.rs`), so the two routes now compute
+                        // the same expression and the finite oracle compares
+                        // them instead of skipping a non-finite reference.
                         match right.as_ref() {
                             IrExpr::Const(c) => {
                                 let u_pow = IrExpr::Binary(
@@ -4441,31 +4452,42 @@ pub mod autodiff {
                                 )
                             }
                             _ => {
-                                let u_pow_v =
-                                    IrExpr::Binary(BinaryOp::Pow, left.clone(), right.clone());
-                                let vprime_ln_u = IrExpr::Binary(
+                                let reduced = IrExpr::Binary(
+                                    BinaryOp::Pow,
+                                    left.clone(),
+                                    Box::new(IrExpr::Binary(
+                                        BinaryOp::Sub,
+                                        right.clone(),
+                                        Box::new(IrExpr::Const(1.0)),
+                                    )),
+                                );
+                                let from_base = IrExpr::Binary(
+                                    BinaryOp::Mul,
+                                    Box::new(dl),
+                                    Box::new(IrExpr::Binary(
+                                        BinaryOp::Mul,
+                                        right.clone(),
+                                        Box::new(reduced),
+                                    )),
+                                );
+                                let from_exponent = IrExpr::Binary(
                                     BinaryOp::Mul,
                                     Box::new(dr),
-                                    Box::new(IrExpr::Call(
-                                        IrFunction::Log,
-                                        vec![left.as_ref().clone()],
-                                    )),
-                                );
-                                let v_uprime_over_u = IrExpr::Binary(
-                                    BinaryOp::Mul,
-                                    right.clone(),
                                     Box::new(IrExpr::Binary(
-                                        BinaryOp::Div,
-                                        Box::new(dl),
-                                        left.clone(),
+                                        BinaryOp::Mul,
+                                        Box::new(IrExpr::Binary(
+                                            BinaryOp::Pow,
+                                            left.clone(),
+                                            right.clone(),
+                                        )),
+                                        Box::new(power_rule_guarded_log(left.as_ref())),
                                     )),
                                 );
-                                let term = IrExpr::Binary(
+                                IrExpr::Binary(
                                     BinaryOp::Add,
-                                    Box::new(vprime_ln_u),
-                                    Box::new(v_uprime_over_u),
-                                );
-                                IrExpr::Binary(BinaryOp::Mul, Box::new(u_pow_v), Box::new(term))
+                                    Box::new(from_base),
+                                    Box::new(from_exponent),
+                                )
                             }
                         }
                     }
@@ -5015,6 +5037,35 @@ pub mod autodiff {
             // probes are treated as constants in the DC Jacobian
             _ => IrExpr::Const(0.0),
         }
+    }
+
+    /// `ln(u)` as the power rule's exponent term needs it: the logarithm where
+    /// it exists, and exactly zero where it does not.
+    ///
+    /// `u^v · ln(u) · v'` is defined only for `u > 0`. At `u = 0` the power is
+    /// 0 and the logarithm −∞, and IEEE makes their product NaN even when `v'`
+    /// is 0 — which it numerically is wherever the exponent's dependence on the
+    /// differentiation axis is only structural. Clamping the logarithm's
+    /// argument to the smallest positive normal and masking the result by
+    /// `u > 0` leaves the term exactly the textbook one wherever it exists and
+    /// makes it exactly 0 at the boundary. This is the same guard, in the same
+    /// shape, that the canonical CFG pass emits (`canonical_ir/ad.rs`), so the
+    /// bytecode and native routes agree term by term.
+    fn power_rule_guarded_log(base: &IrExpr) -> IrExpr {
+        let clamped = IrExpr::Call(
+            IrFunction::Max,
+            vec![base.clone(), IrExpr::Const(f64::MIN_POSITIVE)],
+        );
+        let positive = IrExpr::Binary(
+            BinaryOp::Gt,
+            Box::new(base.clone()),
+            Box::new(IrExpr::Const(0.0)),
+        );
+        IrExpr::Binary(
+            BinaryOp::Mul,
+            Box::new(IrExpr::Call(IrFunction::Log, vec![clamped])),
+            Box::new(positive),
+        )
     }
 
     fn limited_exp_derivative_scale(inner: IrExpr) -> IrExpr {
