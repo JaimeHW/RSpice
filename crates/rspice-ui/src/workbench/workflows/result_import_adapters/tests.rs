@@ -726,14 +726,14 @@ fn fst_preflight_bounds_lz4_fastlz_and_zlib_signal_expansion() {
     }
 }
 
+/// One retained digital trace as `(node, [(time_s, value_code)])`.
+type ImportedTrace = (String, Vec<(f64, u8)>);
+/// One retained declaration as `(name, msb, lsb, members)`.
+type ImportedBus = (String, i64, i64, Vec<String>);
+
 /// The exact digital event evidence an import retained, for the tests that
-/// read it: `(node, [(time_s, value_code)])` and the declarations over them.
-fn imported_events(
-    parsed: &ParsedResultDataset,
-) -> (
-    Vec<(String, Vec<(f64, u8)>)>,
-    Vec<(String, i64, i64, Vec<String>)>,
-) {
+/// read it: the member histories and the declarations over them.
+fn imported_events(parsed: &ParsedResultDataset) -> (Vec<ImportedTrace>, Vec<ImportedBus>) {
     let Some(crate::state::AnalysisResultPayload::TransientEvents {
         digital_traces,
         digital_buses,
