@@ -1341,7 +1341,7 @@ pub const INTEROPERABILITY_FORMAT_ROWS: [InteroperabilityFormatRow; 12] = [
         support_levels: NATIVE_CONNECTOR,
         domain_format: "Results / events",
         version_dialect: "RSpice bundle · RAW · PSF · VCD · FST · CSV · TSV · HDF5 · Arrow · Parquet · NumPy · MATLAB",
-        direction: "import all · export RSpice bundle, CSV, TSV, VCD, NumPy",
+        direction: "import all · export RSpice bundle, CSV, TSV, VCD, NumPy, HDF5, MATLAB",
         release_contract: "native or licensed connector",
         release_tone: ContractTone::Warning,
         round_trip_loss_policy: "axes, units, precision, sample/event digest",

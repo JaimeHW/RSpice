@@ -312,10 +312,10 @@ fn interoperability_filters_are_explicit_complete_and_non_mutating() {
 /// format" that read as parity across the list while VCD and FST were
 /// import-only. The authorities are `ResultImportFormat::ALL`, every member of
 /// which `parse_result_dataset` dispatches to an adapter, and
-/// `ResultExportFormat::encoder_available`, which is true for exactly the
-/// RSpice bundles, CSV, TSV, Touchstone, VCD and the two NumPy formats.
-/// Touchstone is named on the RF row above rather than this one, so it is the
-/// other seven this row's export half has to hold.
+/// `ResultExportFormat::ALL`, every member of which now has an encoder: the
+/// RSpice bundles, CSV, TSV, Touchstone, VCD, the two NumPy formats, HDF5 and
+/// MATLAB v5. Touchstone is named on the RF row above rather than this one, so
+/// it is the other nine this row's export half has to hold.
 ///
 /// This pin is literal because the one test that compared this table against
 /// its authored copy — `interoperability_document_copy_matches_the_mockup_exactly`
@@ -333,7 +333,7 @@ fn the_result_format_row_names_the_formats_this_build_has() {
     );
     assert_eq!(
         row.direction,
-        "import all · export RSpice bundle, CSV, TSV, VCD, NumPy"
+        "import all · export RSpice bundle, CSV, TSV, VCD, NumPy, HDF5, MATLAB"
     );
     assert!(
         !INTEROPERABILITY_FORMAT_ROWS
