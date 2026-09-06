@@ -36,12 +36,14 @@
 //! * the accepted-sample hook a live consumer watches, whose view of a bridge
 //!   net has to be the history the finished result keeps — the deck-level
 //!   statement of D5 lockstep for anything reading the run as it goes;
-//! * a vector discrete port, bridged one net per bit, whose bits are co-timed
-//!   because the discrete half publishes the whole vector at once.
+//! * a vector discrete port, bridged one net per bit and declared as one bus:
+//!   the bits are co-timed because the discrete half publishes the whole
+//!   vector at once, the declaration reaches the live hook and both
+//!   interchange routes, and saving one member retains them all.
 #![cfg(feature = "veriloga")]
 
 use rspice_core::abort_signal::{AbortSignal, DigitalEventCode, TransientSample};
-use rspice_core::engine::TransientResult;
+use rspice_core::engine::{DigitalBusSource, TransientResult};
 use rspice_core::{Engine, Netlist, SimulationConfig};
 use std::io::Write;
 use std::path::PathBuf;
@@ -626,16 +628,35 @@ fn change_times(result: &TransientResult, net: &str) -> Vec<f64> {
         .collect()
 }
 
-/// **A vector discrete port is one net per bit.**
+/// **A vector discrete port is one net per bit, and the declaration says the
+/// bits are one word.**
 ///
 /// The deck has no spelling for a vector: a node list is flat, so an N-bit
-/// boundary is N nodes and each is its own recordable conductor. Every bit is
-/// bridged and recorded, and the bits move together, because the discrete half
-/// publishes the whole vector at once.
+/// boundary is N nodes and each is its own recordable conductor. What would
+/// otherwise be lost — that those N nodes are one port of one module, with the
+/// range its author wrote — is exactly what the bus declaration carries, and
+/// this pins both halves: the members are bridged and recorded, and the
+/// declaration names them MSB first under the instance's own name.
 #[test]
 fn a_vector_discrete_port_bridges_one_net_per_bit() {
     let model = ModelFile::new("vector", VECTOR_PORT);
     let result = run(&vector_deck(&model, ""), 40.0e-9, 1.0e-9);
+
+    assert_eq!(
+        result.digital_buses.len(),
+        1,
+        "one vector boundary port declares one bus, saw {:?}",
+        result.digital_buses
+    );
+    let bus = &result.digital_buses[0];
+    assert_eq!(bus.name, "x1.count");
+    assert_eq!((bus.msb, bus.lsb), (1, 0));
+    assert_eq!(
+        bus.members,
+        vec!["COUNT#1".to_string(), "COUNT#0".to_string()],
+        "members are the deck nodes, in the engine's own spelling, declared MSB first"
+    );
+    assert_eq!(bus.source, DigitalBusSource::Engine);
 
     // `always #5 count = count + 2'b01` steps the whole vector every five
     // nanoseconds, and a whole-vector step is one bus event: bit zero moves at
@@ -686,6 +707,32 @@ fn a_vector_discrete_port_refuses_a_deck_that_names_one_node_for_it() {
     assert!(
         lowered.contains("needing 4 nodes") && lowered.contains("one net per bit"),
         "the refusal must say how many nodes the boundary needs and why: {error}"
+    );
+}
+
+/// **Selecting one member retains the whole bus.**
+///
+/// A declaration whose member has no trace cannot say what the bus held, so
+/// retention is per bus rather than per node — the rule `TransientCapturePlan`
+/// applies, seen from a deck.
+#[test]
+fn saving_one_bus_member_retains_every_member() {
+    let model = ModelFile::new("vector_save", VECTOR_PORT);
+    let result = run(&vector_deck(&model, ".save count#0\n"), 40.0e-9, 1.0e-9);
+    assert_eq!(
+        result.digital_buses.len(),
+        1,
+        "the saved member's bus must still be declared, saw {:?}",
+        result.digital_buses
+    );
+    assert!(
+        result.digital_trace_named("count#1").is_some(),
+        "'.save count#0' selected one member; the other must be retained with it, traces are {:?}",
+        result
+            .digital_traces
+            .iter()
+            .map(|trace| trace.node_name.as_str())
+            .collect::<Vec<_>>()
     );
 }
 
@@ -846,5 +893,155 @@ fn the_live_hook_publishes_the_boundary_value_the_trace_keeps() {
     assert_eq!(
         observed, recorded,
         "the hook's view of the bridge net is not the history the result kept"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// (f) The bus a live consumer sees, and the two interchange routes it reaches
+// ---------------------------------------------------------------------------
+
+/// One declared bus as a live consumer can read it: the name, the declared
+/// range, and the member nodes resolved through the sample's own node table.
+type NamedBus = (String, i64, i64, Vec<String>);
+
+/// An abort signal that keeps the bus table of every accepted point, with
+/// member node ids resolved through the sample's own node table.
+#[derive(Default)]
+struct BusRecorder {
+    tables: Mutex<Vec<Vec<NamedBus>>>,
+}
+
+impl AbortSignal for BusRecorder {
+    fn is_aborted(&self) -> bool {
+        false
+    }
+
+    fn observe_transient_sample(&self, sample: TransientSample<'_>) {
+        let table = sample
+            .digital_buses
+            .iter()
+            .map(|bus| {
+                let members = bus
+                    .members
+                    .iter()
+                    .map(|node_id| {
+                        node_id
+                            .checked_sub(1)
+                            .and_then(|index| sample.node_names.get(index))
+                            .cloned()
+                            .unwrap_or_else(|| format!("<node {node_id}>"))
+                    })
+                    .collect();
+                (bus.name.clone(), bus.msb, bus.lsb, members)
+            })
+            .collect();
+        self.tables.lock().expect("bus recorder").push(table);
+    }
+}
+
+/// **The hook and the result declare one bus, over the same nodes.**
+///
+/// The sample's table is resolved once when the run's capture plan is compiled
+/// and is run-constant thereafter, so a live view can key its columns by node
+/// id and never re-resolve. That is only safe if it is the same declaration
+/// the finished result publishes — a hook naming other nodes would give a live
+/// viewer a bus the saved run does not have.
+#[test]
+fn the_live_hook_names_the_bus_the_result_declares() {
+    let model = ModelFile::new("vector_live_hook", VECTOR_PORT);
+    let netlist = Netlist::parse(&vector_deck(&model, "")).expect("the deck parses");
+    let recorder = BusRecorder::default();
+    let result = Engine::new(SimulationConfig::default())
+        .run_tran_with_abort(&netlist, 40.0e-9, 1.0e-9, &recorder)
+        .expect("the deck runs");
+    let tables = recorder.tables.into_inner().expect("bus recorder");
+
+    assert_eq!(
+        tables.len(),
+        result.time.len(),
+        "the hook must fire exactly once per accepted point"
+    );
+    let expected: Vec<NamedBus> = result
+        .digital_buses
+        .iter()
+        .map(|bus| (bus.name.clone(), bus.msb, bus.lsb, bus.members.clone()))
+        .collect();
+    assert_eq!(expected.len(), 1, "the run must declare the boundary's bus");
+    for (index, table) in tables.iter().enumerate() {
+        assert_eq!(
+            *table, expected,
+            "the hook's bus table at accepted point {index} is not the run's declaration"
+        );
+    }
+}
+
+/// **The declaration reaches both interchange routes as one vector.**
+///
+/// Neither route is new here — L1 gave the VCD projection its `$var` and the
+/// rawfile its `Digital Bus` plot family — and that is the point: an engine
+/// producer had to feed the same declaration those routes already read, not a
+/// second one shaped for each. The rawfile is round-tripped rather than
+/// inspected, because what matters is that a reader gets the grouping back.
+#[test]
+fn a_boundary_bus_reaches_the_vcd_and_the_rawfile_as_one_vector() {
+    use rspice_core::execution::{decode_event_plots, transient_bus_plots, transient_event_plots};
+    use rspice_core::io::{RawFormat, parse_raw_plots_reader_with_limits, write_event_plots};
+    use rspice_core::resource::ResourceLimits;
+
+    let model = ModelFile::new("vector_routes", VECTOR_PORT);
+    let result = run(&vector_deck(&model, ""), 40.0e-9, 1.0e-9);
+
+    let document = rspice_core::execution::event_vcd_document(
+        "tran",
+        &result.digital_traces,
+        &result.real_traces,
+        &result.digital_buses,
+    )
+    .expect("the run's event histories project onto a VCD document");
+    let mut vcd = Vec::new();
+    rspice_core::io::write_vcd(&mut vcd, &document).expect("the VCD document writes");
+    let vcd = String::from_utf8(vcd).expect("the VCD writer emits UTF-8");
+    assert!(
+        vcd.contains("$var wire 2 ") && vcd.contains("x1.count [1:0] $end"),
+        "the VCD must declare the boundary bus as one two-bit vector:\n{vcd}"
+    );
+    assert!(
+        !vcd.contains("COUNT#1") && !vcd.contains("COUNT#0"),
+        "a member of a declared bus is carried by the vector, not beside it:\n{vcd}"
+    );
+
+    let mut raw = Vec::new();
+    write_event_plots(
+        &mut raw,
+        &transient_event_plots(&result.digital_traces, &result.real_traces),
+        &transient_bus_plots(&result.digital_traces, &result.digital_buses),
+        RawFormat::Ascii,
+    )
+    .expect("the run's event histories write as rawfile plots");
+    let file = parse_raw_plots_reader_with_limits(
+        &mut std::io::Cursor::new(raw),
+        ResourceLimits::default(),
+    )
+    .expect("the rawfile parses back");
+    let decoded = decode_event_plots(&file).expect("the appended plots decode");
+    assert_eq!(
+        decoded.digital_buses.len(),
+        1,
+        "the rawfile must carry the one bus the run declared"
+    );
+    let read_back = &decoded.digital_buses[0];
+    assert_eq!(read_back.name, "x1.count");
+    assert_eq!((read_back.msb, read_back.lsb), (1, 0));
+    assert_eq!(
+        read_back.members,
+        vec!["COUNT#1".to_string(), "COUNT#0".to_string()]
+    );
+    assert!(
+        decoded
+            .digital_traces
+            .iter()
+            .any(|trace| trace.node_name.eq_ignore_ascii_case("count#0")),
+        "the member plots are written beside the bus plot, so a reader that never heard of the \
+         family still sees every conductor"
     );
 }

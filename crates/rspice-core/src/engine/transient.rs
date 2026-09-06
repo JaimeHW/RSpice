@@ -686,6 +686,71 @@ fn transient_sample_buses(
     Ok(resolved)
 }
 
+/// The buses this circuit's mixed Verilog-AMS boundaries declare.
+///
+/// The builder recorded which deck nodes one vector discrete port's bits landed
+/// on and the range the module declared; this names those nodes and turns each
+/// into a checked [`DigitalBusDeclaration`]. `Engine` is the source because the
+/// engine is what knows it: the declaration comes from a compiled module's own
+/// port, not from a schematic's drawing or a document being read back.
+///
+/// A node id the run's name table does not cover is a build that produced a
+/// boundary net outside its own circuit, which is a bug rather than a deck
+/// error — it is refused here rather than published as a bus with a hole.
+#[cfg(feature = "veriloga")]
+fn mixed_module_bus_declarations(
+    circuit: &crate::circuit::CircuitData,
+    node_names: &[String],
+) -> Result<Vec<DigitalBusDeclaration>, SimulationError> {
+    let mut declarations = Vec::new();
+    for bus in circuit.mixed_signal_boundary_buses() {
+        let mut members = Vec::with_capacity(bus.members.len());
+        for &node in &bus.members {
+            let name = node
+                .checked_sub(1)
+                .and_then(|index| node_names.get(index))
+                .ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "mixed boundary bus '{}' names circuit node {node}, which this run has no \
+                         name for",
+                        bus.name
+                    ))
+                })?;
+            members.push(name.clone());
+        }
+        declarations.push(
+            DigitalBusDeclaration::new(
+                bus.name.clone(),
+                bus.msb,
+                bus.lsb,
+                members,
+                super::DigitalBusSource::Engine,
+            )
+            .map_err(|error| {
+                SimulationError::Circuit(format!(
+                    "mixed boundary bus '{}' is not a well-formed declaration: {error}",
+                    bus.name
+                ))
+            })?,
+        );
+    }
+    Ok(declarations)
+}
+
+/// The same answer for a build with no Verilog-A route compiled in.
+///
+/// A mixed module's vector discrete port is the only boundary in the engine
+/// that declares a bus, and without the `veriloga` feature there is no such
+/// module to instantiate — so the honest answer is an empty table rather than
+/// a second retention rule and a second `TransientResult` shape.
+#[cfg(not(feature = "veriloga"))]
+fn mixed_module_bus_declarations(
+    _circuit: &crate::circuit::CircuitData,
+    _node_names: &[String],
+) -> Result<Vec<DigitalBusDeclaration>, SimulationError> {
+    Ok(Vec::new())
+}
+
 /// Node name to zero-based node index, under the event-name spelling.
 fn canonical_node_index(node_names: &[String]) -> HashMap<String, usize> {
     node_names
@@ -955,6 +1020,24 @@ impl TransientCapturePlan {
                 }
             }
         }
+    }
+
+    /// Whether every member of `bus` is an event node this run records.
+    ///
+    /// The companion to [`Self::retain_declared_buses`], asked after the plan
+    /// is compiled: that widens retention to a whole bus, and this says whether
+    /// it was widened or the bus went unselected altogether. A member the
+    /// circuit does not have counts as unrecorded, which is the same answer
+    /// [`transient_sample_buses`] refuses on.
+    fn records_whole_bus(&self, bus: &DigitalBusDeclaration, node_names: &[String]) -> bool {
+        let index_of = canonical_node_index(node_names);
+        bus.members.iter().all(|member| {
+            index_of
+                .get(&canonical_event_name(member))
+                .and_then(|&index| self.event_nodes.get(index))
+                .copied()
+                .unwrap_or(false)
+        })
     }
 
     fn analog_values_per_sample(&self) -> usize {
@@ -4275,17 +4358,14 @@ impl Engine {
         } else {
             None
         };
-        // The digital buses this run declares over its own event nodes. It is
-        // empty on every deck today: the one boundary that could declare a bus
-        // is a Verilog-AMS module's vector discrete port, and the builder
-        // refuses that port before a run starts. It is materialized here all
-        // the same because three things have to agree about it inside one run
-        // — the retention plan below, the result the run publishes, and the
-        // live sample hook — and one producer is what keeps them from drifting
-        // apart when that boundary opens.
-        let digital_buses: Vec<DigitalBusDeclaration> = Vec::new();
-        let sample_buses = transient_sample_buses(&digital_buses, &node_names)
-            .map_err(SimulationError::Circuit)?;
+        // The digital buses this run declares over its own event nodes: one
+        // per vector discrete port of a mixed Verilog-AMS module, which is the
+        // only boundary in the engine that knows a set of deck nodes is one
+        // word. Materialized here, once, because three things have to agree
+        // about it inside one run — the retention plan below, the result the
+        // run publishes, and the live sample hook — and one producer is what
+        // keeps them from drifting apart.
+        let mut digital_buses = mixed_module_bus_declarations(&circuit, &node_names)?;
         let capture_plan = TransientCapturePlan::compile(
             netlist,
             &node_names,
@@ -4295,6 +4375,15 @@ impl Engine {
             external_wildcard_nodes.as_ref(),
             &digital_buses,
         );
+        // A declaration whose members this run does not record cannot be
+        // answered: every route that carries a bus judges it against the
+        // traces and refuses one whose member has none. Retention is
+        // all-or-nothing per bus, so a bus is either wholly recorded or wholly
+        // absent, and an absent one is dropped rather than published as a
+        // claim nothing can honour.
+        digital_buses.retain(|bus| capture_plan.records_whole_bus(bus, &node_names));
+        let sample_buses = transient_sample_buses(&digital_buses, &node_names)
+            .map_err(SimulationError::Circuit)?;
         let trace_capacity = self.transient_initial_trace_capacity(
             (tstop - resume_time).max(0.0),
             hinted_max_step,

@@ -441,6 +441,29 @@ struct Bridges {
     dac: Vec<DacBridge>,
 }
 
+/// One vector boundary port, as a bus over the deck nodes its bits landed on.
+///
+/// Declared where the module is wired, because that is the only place that
+/// knows both halves of it: the range the module's author wrote, and the deck
+/// nodes the X-card named for its bits. Everything downstream sees node ids
+/// and would have to guess which of them were one word.
+///
+/// The engine turns this into a `DigitalBusDeclaration` when a run starts, by
+/// naming the nodes; it is not that type here because a boundary sits eleven
+/// layers below the result types and may not reach up for one.
+#[derive(Clone, Debug)]
+pub(crate) struct BoundaryBus {
+    /// `<instance>.<port>` — the deck's name for the instance and the module's
+    /// for the port, which is the only pair that is unique across a deck.
+    pub(crate) name: String,
+    /// Declared most significant index, exactly as the module wrote it.
+    pub(crate) msb: i64,
+    /// Declared least significant index, exactly as the module wrote it.
+    pub(crate) lsb: i64,
+    /// Circuit-node ids of the members, declared MSB first.
+    pub(crate) members: Vec<usize>,
+}
+
 /// The solver inputs the host pushes into the analog device before it is
 /// evaluated.
 ///
@@ -715,6 +738,14 @@ pub struct MixedSignalHost {
     /// which is what makes the whole cross-domain read path cost such a module
     /// nothing.
     analog_probes: Vec<AnalogProbeWiring>,
+    /// Every vector boundary port, as a bus over the deck nodes its bits
+    /// landed on. Empty for a module whose discrete ports are all scalar,
+    /// which is every module this route carried before vectors were bridged.
+    ///
+    /// Wiring data, not running state: it is fixed before the first trial and
+    /// never read by one, so it sits beside the probe table rather than inside
+    /// [`MixedState`].
+    boundary_buses: Vec<BoundaryBus>,
     max_circuit_node: usize,
     max_bridge_iterations: u32,
 }
@@ -854,6 +885,7 @@ impl MixedSignalHost {
             scratch: TrialScratch::default(),
             trial: None,
             analog_probes,
+            boundary_buses: Vec::new(),
             max_circuit_node: terminal_nodes.iter().copied().max().unwrap_or(0),
             max_bridge_iterations,
         })
@@ -912,6 +944,28 @@ impl MixedSignalHost {
                 sink(bridge.positive, value.bit(bridge.bit));
             }
         }
+    }
+
+    /// Every bus this module's vector boundary ports declare over deck nodes.
+    ///
+    /// Empty for a module with no vector discrete port, which is what makes a
+    /// scalar-only deck publish the same empty bus table it always did.
+    pub(crate) fn boundary_buses(&self) -> &[BoundaryBus] {
+        &self.boundary_buses
+    }
+
+    /// Record that one vector boundary port's bits are one word.
+    ///
+    /// A declaration, like a bridge: taken while the module is being wired and
+    /// never during a trial, which is why it is refused on a running host
+    /// rather than merged into one.
+    pub(crate) fn declare_boundary_bus(
+        &mut self,
+        bus: BoundaryBus,
+    ) -> Result<(), MixedSignalError> {
+        self.require_idle("declare a boundary bus")?;
+        self.boundary_buses.push(bus);
+        Ok(())
     }
 
     /// Add an analog-to-digital bridge with hysteresis onto one bit of

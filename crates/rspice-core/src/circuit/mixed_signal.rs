@@ -47,7 +47,7 @@
 use crate::circuit::CircuitData;
 use crate::{SimulationError, Value};
 
-use crate::xspice::verilog::{MixedSignalError, MixedSignalHost};
+use crate::xspice::verilog::{BoundaryBus, MixedSignalError, MixedSignalHost};
 
 /// How many times one trial may re-settle its boundary before the engine gives
 /// up on it.
@@ -158,6 +158,18 @@ impl CircuitData {
         self.mixed_signal_hosts
             .iter()
             .map(MixedSignalHost::coupled_nodes)
+    }
+
+    /// Every bus the mixed modules' vector boundary ports declare over deck
+    /// nodes, in instantiation order.
+    ///
+    /// Wiring data the builder recorded, handed on unchanged: this says which
+    /// deck nodes are one word, and naming them is the caller's job because
+    /// only the analysis holds the run's node-name table.
+    pub(crate) fn mixed_signal_boundary_buses(&self) -> impl Iterator<Item = &BoundaryBus> + '_ {
+        self.mixed_signal_hosts
+            .iter()
+            .flat_map(MixedSignalHost::boundary_buses)
     }
 
     /// Refuse an analysis this route does not implement.

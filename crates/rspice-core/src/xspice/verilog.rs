@@ -122,6 +122,7 @@ use crate::xspice::event_scheduler::{SchedulerLimits, TimeResolution};
 
 use host::DigitalHost;
 pub use host::DigitalRunError;
+pub(crate) use mixed::BoundaryBus;
 pub use mixed::{MixedSignalCheckpoint, MixedSignalError, MixedSignalHost};
 
 /// What one tick of the digital host's clock is, and why it is not read from

@@ -39,9 +39,11 @@
 //! it is what makes the port's bits recordable at all, since every value that
 //! reaches a result is keyed by circuit node.
 //!
-//! The discrete half never sees the split: its own transitions stay
-//! whole-vector, because the A/D settle composes a port's bit drives into one
-//! write.
+//! The bits are still one word, and saying so is the bus declaration this
+//! builder attaches to the host: `<instance>.<port>`, the range the module
+//! declared, and the member nodes MSB first. The discrete half never sees the
+//! split — its own transitions stay whole-vector, because the A/D settle
+//! composes a port's bit drives into one write.
 //!
 //! # Where the bridge's numbers come from
 //!
@@ -62,7 +64,7 @@
 //! therefore refused rather than silently ignored.
 
 use crate::xspice::event_scheduler::SchedulerLimits;
-use crate::xspice::verilog::MixedSignalHost;
+use crate::xspice::verilog::{BoundaryBus, MixedSignalHost};
 use crate::{CircuitData, SimulationError};
 
 use super::connect_modules::{self, DesignConnectRules};
@@ -121,6 +123,8 @@ struct BoundaryLayout {
     analog_terminals: Vec<usize>,
     /// Every bridged net, in port order and declared MSB first within a port.
     ports: Vec<BoundaryPort>,
+    /// One entry per vector boundary port, over the nodes its bits landed on.
+    buses: Vec<BoundaryBus>,
 }
 
 /// Build a mixed module instance, or report that this model is not mixed.
@@ -280,11 +284,22 @@ pub(super) fn try_build_mixed_signal_instance(
         })?;
     }
 
+    for bus in layout.buses {
+        let name = bus.name.clone();
+        host.declare_boundary_bus(bus).map_err(|error| {
+            SimulationError::Circuit(format!(
+                "mixed Verilog-AMS instance '{}' could not declare boundary bus '{name}': {error}",
+                element.name
+            ))
+        })?;
+    }
+
     log::info!(
-        "Instantiated mixed Verilog-AMS module '{}' as '{}' with {} boundary net(s)",
+        "Instantiated mixed Verilog-AMS module '{}' as '{}' with {} boundary net(s) in {} bus(es)",
         subckt_name,
         element.name,
-        boundary.len()
+        boundary.len(),
+        host.boundary_buses().len()
     );
     circuit.add_mixed_signal_host(host);
     Ok(true)
@@ -352,6 +367,7 @@ fn classify_boundary_ports(
     let mut layout = BoundaryLayout {
         analog_terminals: Vec::with_capacity(artifact.hir.ports.len()),
         ports: Vec::new(),
+        buses: Vec::new(),
     };
     let mut cursor = 0usize;
     for port in &artifact.hir.ports {
@@ -421,6 +437,14 @@ fn classify_boundary_ports(
                 node,
                 deck_index,
                 direction,
+            });
+        }
+        if let Some((msb, lsb)) = signal.bounds {
+            layout.buses.push(BoundaryBus {
+                name: format!("{}.{}", element.name, port.name),
+                msb,
+                lsb,
+                members: terminal_nodes[first..first + bits.len()].to_vec(),
             });
         }
     }
