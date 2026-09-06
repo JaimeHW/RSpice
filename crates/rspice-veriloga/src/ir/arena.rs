@@ -17,6 +17,42 @@
 //! [`ExprArena::export`] bridge losslessly to and from [`IrExpr`] so the
 //! emitter, the AD core and the producers can each be ported against a type
 //! that already exists.
+//!
+//! # What a consumer of the arena owes
+//!
+//! Under `Box` trees a subtree has exactly one parent. In the arena it can
+//! have several: the eighty-six `.clone()` sites in the shadow builder become
+//! id copies, which is where the memory goes. Sharing is identity-neutral for
+//! a walk that unfolds the tree (it visits a shared node once per path, as the
+//! copies are visited today) and for a pure function of the subtree (the same
+//! answer however often it is computed). It is *not* neutral for anything
+//! else, and no digest in this crate hashes the forest, so these four rules
+//! are the whole of what keeps the compiler's output byte-identical:
+//!
+//! 1. **The emitter reproduces `emit_expr`'s post-order.** Children in field
+//!    order, then the node's own instruction — never the reverse, never a
+//!    child skipped because its id was seen before. The order is not merely
+//!    the instruction stream: the per-emission state slots (`limit_state_count`,
+//!    `cross_detector_count`, `timer_state_count`) and a Zi site's sub-programs
+//!    are allocated *at the visit*, so a visit that happens once instead of
+//!    twice renumbers them.
+//! 2. **The five `assign_*_site_ordinals` walks stay tree-unfolding path
+//!    walks.** They carry a preorder counter, so a site reached by two paths
+//!    must take two ordinals, exactly as its two copies do today. Never
+//!    memoize them by [`NodeId`] — that is the one rewrite whose result is not
+//!    a function of the subtree alone.
+//! 3. **Pure rewrites may memoize by [`NodeId`].** `simplify`, `resolve_ddx`,
+//!    `rewrite_branch_probes`, `rename_variable_reads`, `simplified_constant`
+//!    and the noise-axis collector all answer a question about a subtree, so
+//!    computing the answer once and reusing it is the same answer. The two
+//!    memos keyed by node address today become [`NodeId`]-keyed.
+//! 4. **Hash-consing, if it comes, applies to pure kinds only.** Never to a
+//!    site-bearing node (`AbsDelay`, `Transition`, `Slew`, the Laplace and Zi
+//!    filters, the noise processes) and never to a state-allocating one
+//!    (`Ddt`, `Idt`, `IdtMod`, `Limit`, `CanonicalLimit`, `Cross`, `Above`,
+//!    `LastCrossing`, `Timer`): merging two of those merges two slots, two
+//!    candidates or two ordinals into one. That is why [`ExprArena::import`]
+//!    deduplicates nothing.
 
 use crate::ast::{BinaryOp, UnaryOp};
 use smol_str::SmolStr;
