@@ -170,12 +170,17 @@ impl ComponentType {
                 Some("v_src_noise.svg"),
                 Native,
             ),
-            // TRRANDOM draws the same stochastic mark as TRNOISE: both are a
-            // source whose transient value is drawn rather than authored, and
-            // the schematic tells them apart by the card their label prints.
+            // TRRANDOM and TRNOISE are both drawn rather than authored, and
+            // they are not the same waveform: TRNOISE is a continuous
+            // perturbation, TRRANDOM holds one drawn value for a stated
+            // interval and then draws again. The mark says which — a jagged
+            // trace against a staircase of unequal levels — because reading a
+            // sheet at a glance is what a symbol is for, and a reader who has
+            // to check the label to tell two sources apart has been given one
+            // symbol for two devices.
             VoltageSourceRandom => (
                 "rspice.native.voltage_source.random",
-                Some("v_src_noise.svg"),
+                Some("v_src_random.svg"),
                 Native,
             ),
             CurrentSourceAc => (
@@ -230,7 +235,7 @@ impl ComponentType {
             ),
             CurrentSourceRandom => (
                 "rspice.native.current_source.random",
-                Some("i_src_noise.svg"),
+                Some("i_src_random.svg"),
                 Native,
             ),
             Vcvs => ("rspice.native.vcvs", Some("vcvs.svg"), Native),
@@ -382,6 +387,64 @@ mod tests {
                     descriptor.stable_id
                 );
             }
+        }
+    }
+
+    /// Two devices share a symbol only when they draw the same waveform.
+    ///
+    /// A symbol is what lets a sheet be read at a glance, so two devices
+    /// wearing one mark are two the reader cannot tell apart without stopping
+    /// to read a label. TRRANDOM shipped wearing TRNOISE's, which is exactly
+    /// that: a drawn-and-held staircase and a continuous perturbation are not
+    /// the same waveform.
+    ///
+    /// The one pair left is deliberate and is named here rather than allowed
+    /// by a count: an AC source and a SIN source are the same sinusoid — the
+    /// small-signal magnitude and the transient shape of one SPICE card — and
+    /// the sine mark is the honest drawing of both.
+    #[test]
+    fn two_devices_share_a_symbol_only_when_they_draw_the_same_waveform() {
+        // Asset order, because the walk below is a `BTreeMap` over the file
+        // name: a listing sorted by anything else would make the pin depend on
+        // the order the descriptors happen to be declared in.
+        const SHARED_BY_DESIGN: [(&str, [ComponentType; 2]); 2] = [
+            (
+                "i_src_ac.svg",
+                [
+                    ComponentType::CurrentSourceAc,
+                    ComponentType::CurrentSourceSin,
+                ],
+            ),
+            (
+                "v_src_ac_vertical.svg",
+                [
+                    ComponentType::VoltageSourceAc,
+                    ComponentType::VoltageSourceSin,
+                ],
+            ),
+        ];
+
+        let mut owners: std::collections::BTreeMap<&'static str, Vec<ComponentType>> =
+            std::collections::BTreeMap::new();
+        for kind in ComponentType::ALL {
+            if let Some(asset) = kind.descriptor().default_symbol_asset {
+                owners.entry(asset).or_default().push(kind);
+            }
+        }
+        let shared: Vec<_> = owners
+            .into_iter()
+            .filter(|(_, kinds)| kinds.len() > 1)
+            .collect();
+        assert_eq!(
+            shared.len(),
+            SHARED_BY_DESIGN.len(),
+            "a symbol is shared by devices that do not draw the same waveform: {shared:?}"
+        );
+        for ((asset, kinds), (expected_asset, expected_kinds)) in
+            shared.iter().zip(SHARED_BY_DESIGN)
+        {
+            assert_eq!(*asset, expected_asset);
+            assert_eq!(kinds.as_slice(), expected_kinds.as_slice());
         }
     }
 
