@@ -48,10 +48,16 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
             }
             ui.spacing_mut().item_spacing.x = 0.0;
             ui.horizontal(|ui| {
+                // The drawer projection reserves its fifth slot for the More
+                // entry; the full projection is exactly the rail. Both are
+                // counted rather than repeated as literals: a hard-coded
+                // divisor lays the row out for a rail the shell no longer has
+                // the moment a workspace is added or withdrawn, and the items
+                // run past the right edge with nothing failing.
                 let item_count = if layout.workspaces_uses_drawer {
-                    5.0
+                    Workspace::PHONE_PRIMARY.len() as f32 + 1.0
                 } else {
-                    7.0
+                    Workspace::ALL.len() as f32
                 };
                 let width = ui.available_width() / item_count;
                 let workspaces: &[Workspace] = if layout.workspaces_uses_drawer {
