@@ -59,12 +59,15 @@
 //! sizes, and the difference is structural rather than incidental: the bytecode
 //! generator allocates a fresh scalar-state slot at each *emission* of an
 //! integration operator, and the generator compiles the same source operator
-//! more than once in two different ways. A statement is compiled twice when the
-//! module has noise — once as `assignment_steps` and again as
-//! `noise_assignment_steps`, `DeviceIR::noise_assignments` being a clone of
-//! `assignments` carrying noise shadows — and a contribution's operator is
-//! compiled again inside each Jacobian entry that the product rule leaves it
-//! in. One canonical `ddt` site therefore owns two or more bytecode slots.
+//! more than once in two different ways. A statement is compiled twice when a
+//! module's noise replay genuinely differs from its ordinary pass — once as
+//! `assignment_steps` and again as `noise_assignment_steps`, the latter from
+//! `DeviceIR::noise_assignments` carrying noise shadows — and a contribution's
+//! operator is compiled again inside each Jacobian entry that the product rule
+//! leaves it in. One canonical `ddt` site therefore owns two or more bytecode
+//! slots. (A module whose two passes are the same — every shipped compact
+//! model — leaves `noise_assignment_steps` empty and emits its statements
+//! once; the numberings then differ only through the contributions.)
 //! [`CfgStateAllocation`] carries the measurement over the shipped corpus.
 //!
 //! So a CFG-sourced backend cannot adopt the bytecode numbering; it allocates
@@ -954,8 +957,10 @@ impl CfgStateAllocation {
 /// 1. every parameter's `default_expr`, `min_expr`, `max_expr` and each
 ///    `exclude_exprs` entry;
 /// 2. `ir.assignments` — the module's statements;
-/// 3. `ir.noise_assignments` — *a clone of* `ir.assignments` carrying noise
-///    shadows, built only when the module has noise sources;
+/// 3. `ir.noise_assignments` — `ir.assignments` carrying noise shadows, built
+///    only when the module has noise sources *and* some variable is
+///    noise-shadowed; when the replay would mirror the ordinary pass the
+///    generator emits nothing here and leaves `noise_assignment_steps` empty;
 /// 4. every equation: its value program, its peeled static condition, each
 ///    resistive `derivatives[i].expr` and each `reactive_derivatives[i].expr`;
 /// 5. every noise source: its `psd`, its `exponent`, and each injection's
@@ -1003,12 +1008,20 @@ pub struct EmissionCensus {
     /// families, whose slot is fixed by first emission.
     pub parameters: usize,
     /// Counter-family sites reachable from the module's statements. Emitted
-    /// twice when [`Self::has_noise`], once otherwise.
+    /// twice when [`Self::has_noise`] *and* the module's noise replay is not a
+    /// mirror of its ordinary pass, once otherwise. The mirror case is the one
+    /// this level cannot see — whether a variable is noise-shadowed is
+    /// `ir::autodiff`'s answer, not the HIR's — so `has_noise` alone is used,
+    /// and a mirrored module is counted as if it re-emitted. That is precision
+    /// lost in the safe direction: [`Self::agrees`] then answers `false` for a
+    /// module whose numberings do coincide, never `true` for one whose do not.
     pub statements: usize,
     /// Counter-family sites reachable from the module's contributions.
     pub contributions: usize,
-    /// Whether `ir.noise_assignments` exists at all: the generator builds it
-    /// only when the module has at least one noise source.
+    /// Whether the module has a noise expression at all: the generator
+    /// considers a second statement pass only then. It does not say the second
+    /// pass was *emitted* — a module with noise whose replay mirrors the
+    /// ordinary pass emits none — so this over-counts rather than under-counts.
     pub has_noise: bool,
 }
 

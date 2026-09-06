@@ -92,7 +92,35 @@ endmodule
     );
     assert_eq!(model.noise_sources.len(), 1);
     assert_eq!(model.noise_sources[0].injections.len(), 1);
+    // `shaped` reads a noise process, so this module's replay is not the
+    // ordinary pass and the list has to be carried. An empty list here would
+    // mean "replay the ordinary assignments", which would drop the shadows.
     assert!(!model.noise_assignment_steps.is_empty());
+}
+
+#[test]
+fn a_mirrored_noise_replay_is_an_empty_step_list() {
+    let model = compile(
+        r#"
+module mirrored_noise(p, n);
+    inout p, n;
+    electrical p, n;
+    real g;
+    analog begin
+        g = 1.0e-3 * V(p, n);
+        I(p, n) <+ g * V(p, n);
+        I(p, n) <+ white_noise(1.0e-18, "mirror");
+    end
+endmodule
+"#,
+    );
+    assert_eq!(model.noise_sources.len(), 1);
+    assert!(!model.assignment_steps.is_empty());
+    // Nothing here reads a noise process, so the replay *is* the ordinary
+    // pass and the model says so by carrying nothing: empty means "replay
+    // `assignment_steps`", which both small-signal entry points resolve. The
+    // copy this replaces was half the compiled size of a large compact model.
+    assert!(model.noise_assignment_steps.is_empty());
 }
 
 #[test]

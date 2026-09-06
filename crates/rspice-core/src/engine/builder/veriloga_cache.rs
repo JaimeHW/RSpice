@@ -228,6 +228,17 @@ use super::*;
 // version-42 record's `null` is indistinguishable from a parameter that never
 // declared a bound, so the loss is not recoverable from the record. Rebuilding
 // is the only reading.
+//
+// The compiler leaving a mirrored `CompiledModel::noise_assignment_steps` empty
+// does *not* move the version, and the rule is why. Every bump above names a
+// record the new runtime would read *wrongly*; this one changes what a new
+// record contains, not how an old one reads. A version-43 record written before
+// the convention carries the full twin, which was byte-identical to
+// `assignment_steps` after state renumbering, and the noise replay executes
+// `noise_assignment_steps` when it is non-empty — so the old record replays
+// exactly the steps it always did, and the new one replays the same steps
+// through the ordinary list. Nothing in the record becomes ambiguous, so
+// rebuilding it would buy nothing.
 pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 43;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";

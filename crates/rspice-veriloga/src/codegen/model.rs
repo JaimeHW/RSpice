@@ -77,6 +77,24 @@ pub struct CompiledModel {
     /// before the contributions
     pub assignment_steps: Vec<AssignmentStep>,
     /// Assignment replay augmented with noise-process derivative shadows.
+    ///
+    /// # Empty means "the ordinary pass"
+    ///
+    /// A module whose noise replay is the ordinary pass — every shipped
+    /// compact model, because none of them noise-shadows a variable — carries
+    /// this empty rather than carrying a second copy of
+    /// [`Self::assignment_steps`]. Readers of the replay resolve the
+    /// convention at the point of use (`VerilogADevice`'s two small-signal
+    /// entries), so an empty list is never "no assignments to replay": it is
+    /// "replay the ordinary ones". Only a module whose two passes really
+    /// differ carries a list here, and then it is that different list.
+    ///
+    /// The twin it replaces was byte-identical after
+    /// [`crate::codegen::state_renumbering`] put both passes onto the same
+    /// per-site records, and it was half of a large model's retained size —
+    /// 1.9 GB of bsimsoi100's 3.8. A record serialized before the convention
+    /// carries the twin, and reads back as a list that is still exactly what
+    /// the replay should execute, so old artifacts stay readable.
     #[serde(default)]
     pub noise_assignment_steps: Vec<AssignmentStep>,
     /// Compiled stamp programs for each contribution

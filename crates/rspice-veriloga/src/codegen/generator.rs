@@ -496,23 +496,24 @@ impl CodeGenerator {
         // largest allocation: drop it here rather than at the end of the
         // function so the noise pass never coexists with it.
         drop(std::mem::take(&mut ir.assignments));
-        // A mirrored noise pass is the ordinary pass. Emitting it a second time
+        // A mirrored noise pass *is* the ordinary pass, so say so by leaving the
+        // list empty rather than by carrying a copy of it
+        // ([`CompiledModel::noise_assignment_steps`] documents the convention;
+        // the replay's two callers resolve it). Emitting it a second time
         // produced the same instructions with a second set of per-emission slot
         // numbers, which `state_renumbering` then rewrote back onto the first
-        // pass's sites — the two lists are identical in every model that leaves
-        // this compiler. Cloning the first pass's bytecode is that same list for
-        // a quarter of the memory and none of the emission time, and it leaves
-        // the site-keyed families (`laplace`, `zi`, `$table_model`, `absdelay`,
-        // `transition`, `slew`) exactly where they were, because those dedupe by
-        // site and a second emission never allocated from them either. What it
-        // does move is the *raw* per-emission numbering of everything compiled
-        // after this pass: equations and noise sources now start where the
-        // ordinary pass ended rather than where a second emission of it ended.
-        // That shift is uniform across every per-emission family, so the k-th
-        // emission is still the k-th site and the renumbered model — the only
-        // one any runtime addresses — is unchanged.
+        // pass's sites — the two lists were identical in every model that left
+        // this compiler, and the twin was half of a large model's retained size.
+        // The site-keyed families (`laplace`, `zi`, `$table_model`, `absdelay`,
+        // `transition`, `slew`) are untouched, because those dedupe by site and
+        // a second emission never allocated from them either. What does move is
+        // the per-emission numbering of everything compiled after this pass:
+        // equations and noise sources now start where the ordinary pass ended
+        // rather than where a second emission of it ended. That shift is uniform
+        // across every per-emission family, so the k-th emission is still the
+        // k-th site and the renumbered slots are the ones they always were.
         model.noise_assignment_steps = if ir.noise_assignments_mirror_ordinary {
-            model.assignment_steps.clone()
+            Vec::new()
         } else {
             let steps = self.compile_assignment_items(&ir.noise_assignments, &emit_ctx)?;
             drop(std::mem::take(&mut ir.noise_assignments));

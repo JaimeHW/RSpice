@@ -2,12 +2,12 @@
 //!
 //! The bytecode generator hands out a fresh scalar-state slot at each
 //! *emission* of an integration operator, and it compiles one source operator
-//! more than once: a statement is compiled twice when the module has noise
-//! (once as `assignment_steps`, again as the noise-shadowed
-//! `noise_assignment_steps`), and a contribution's operator is compiled again
-//! inside every Jacobian entry the product rule leaves it in. One canonical
-//! `ddt` site therefore owned two or more runtime records, each integrating its
-//! own copy of the history.
+//! more than once: a statement is compiled twice when the module's noise replay
+//! differs from its ordinary pass (once as `assignment_steps`, again as the
+//! noise-shadowed `noise_assignment_steps`), and a contribution's operator is
+//! compiled again inside every Jacobian entry the product rule leaves it in.
+//! One canonical `ddt` site therefore owned two or more runtime records, each
+//! integrating its own copy of the history.
 //!
 //! That was survivable while exactly one route evaluated each program. It stops
 //! being survivable at the CFG flip, where the canonical route supplies
@@ -31,8 +31,9 @@
 //!
 //! * **parameters** — the parameter's own default, bound or exclude
 //!   expression.
-//! * **assignments** and the **noise-assignment clone** — the module's whole
-//!   statement pass at once, against
+//! * **assignments** and the **noise-assignment pass** (empty, and so nothing
+//!   to pair, whenever the replay mirrors the ordinary pass) — the module's
+//!   whole statement pass at once, against
 //!   [`CanonicalStateLayout::statement_prefix`]. Pass level rather than step
 //!   level because the step-to-statement correspondence is a reconstruction
 //!   from target variable indices, and the question the renumbering actually
@@ -642,6 +643,11 @@ impl StateSlotMapping {
     }
 
     /// Pair a whole assignment pass against the module's statement sites.
+    ///
+    /// An empty pass pairs nothing and claims nothing, which is exactly right
+    /// for the noise pass of a module whose replay is the ordinary pass: the
+    /// records that replay addresses are the ordinary pass's own, and the
+    /// ordinary pass has already claimed them.
     ///
     /// Spelled against [`CanonicalStateLayout::statement_prefix`] rather than
     /// against a scan because the layout is the numbering the rewrite writes
