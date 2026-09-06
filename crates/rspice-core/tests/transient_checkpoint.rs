@@ -1836,7 +1836,10 @@ fn runtime_veriloga_refuses_a_locked_step_below_the_integration_floor() {
     const STOP: f64 = 3.0e-12;
 
     let mut model = std::env::temp_dir();
-    model.push(format!("rspice_locked_grid_floor_{}.va", std::process::id()));
+    model.push(format!(
+        "rspice_locked_grid_floor_{}.va",
+        std::process::id()
+    ));
     let mut file = std::fs::File::create(&model).expect("create model file");
     file.write_all(
         br#"
