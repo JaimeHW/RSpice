@@ -4,10 +4,10 @@
 
 # RSpice
 
-**An analog and mixed-signal circuit simulator written in Rust.**
+**An analog and mixed-signal circuit simulator, written in Rust.**
 
-SPICE netlists, measured continuously against ngspice and Xyce, with a CLI, a
-desktop IDE, Python and WebAssembly bindings, and a Verilog-A compiler.
+Run SPICE netlists from a command line, a desktop IDE, Python, or the browser —
+operating points and transient waveforms through harmonic balance and phase noise.
 
 [![License](https://img.shields.io/badge/license-source--available-informational?style=flat-square)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.94-orange?style=flat-square)](rust-toolchain.toml)
@@ -21,17 +21,28 @@ desktop IDE, Python and WebAssembly bindings, and a Verilog-A compiler.
 
 ---
 
-RSpice assembles modified-nodal-analysis systems and solves them with a damped
-Newton iteration — merit-based line search, gmin and source stepping,
-pseudo-transient and arc-length continuation — under an adaptive-timestep
-transient loop with local-truncation-error control. Real-valued factorization
-uses an in-tree KLU-class sparse solver whose stored pivots make refactorization
-on a frozen sparsity pattern cheap; [faer](https://crates.io/crates/faer) backs
-the complex solves for AC-family analyses.
+## Overview
 
-Where physics is unported, RSpice raises a typed error naming the parameter or
-mode selector rather than falling back to an approximation. A model card that
-would silently produce plausible but wrong currents fails closed instead.
+Give RSpice a SPICE netlist and it tells you what the circuit does: operating
+points, transient waveforms, frequency response, noise, distortion, and RF
+steady-state behaviour. It builds to a single binary with no runtime
+dependencies, and one engine sits behind every interface — the CLI, the desktop
+IDE, the Python package, and the WebAssembly build all run the same code.
+
+Three commitments shape the project:
+
+**Accuracy is measured, not asserted.** Every analysis is checked against
+independent reference output on real decks, and the nightly failure watermark
+only ever tightens. [Validation](#validation) has the harnesses and the numbers.
+
+**Nothing degrades quietly.** When a deck asks for physics RSpice has not
+implemented, it stops and names the parameter or model level responsible,
+rather than substituting an approximation that would return plausible but wrong
+currents.
+
+**The tables below describe today.** Everything listed is implemented and
+exercised. Depth of validation still varies by subsystem — [Status](#status)
+says where.
 
 ## Quick start
 
@@ -89,7 +100,7 @@ complete set of ways to reach it.
 | DC sweep | `.DC` | single source, or nested two-source |
 | Temperature sweep | `.TEMP` | list of temperatures |
 | Parametric sweep | `.STEP` | parameter, device, or `DATA=` table |
-| Transient | `.TRAN` | LTE-controlled timestep, breakpoint handling, `--checkpoint`/`--resume` segmentation |
+| Transient | `.TRAN` | adaptive timestep, breakpoint handling, `--checkpoint`/`--resume` segmentation |
 | AC small-signal | `.AC` | sweep parallelized across cores |
 | Noise | `.NOISE` | |
 | Pole-zero | `.PZ` | |
@@ -97,7 +108,7 @@ complete set of ways to reach it.
 | Sensitivity | `.SENS` | DC and AC |
 | Distortion | `.DISTO` | third-order Volterra; harmonic and two-tone intermodulation |
 | Fourier / THD | `.FOUR` | |
-| Typed transient spectrum | `.FFT` | uniform resampling, Xyce-compatible windows/options, calibrated DC-through-Nyquist bins, optional `FFTOUT` metrics |
+| Transient spectrum | `.FFT` | typed spectra, Xyce-compatible windows, calibrated DC-through-Nyquist bins |
 | Monte Carlo | `.MC`, `--monte-carlo` | operating-point parameter variation; gaussian, uniform, or worst-case |
 | Process corners | `--corners` | corner definitions via `--corner-lib` |
 | Harmonic balance | `.HB`, `--hb-freq` | with envelope continuation |
@@ -110,27 +121,15 @@ complete set of ways to reach it.
 | Periodic stability | IDE | Floquet multipliers from the monodromy matrix |
 | Measurements | `.MEAS` | over TRAN/DC/AC/NOISE; `GOAL`/`TOL` gates the exit status |
 
-Transient `.FFT` directives produce typed spectra in source order. Probe and
-expression operands use the same hierarchy-aware resolver as other output
-cards; adaptive histories are sampled on `[START, STOP)` at `NP` uniform
-points, windowed, coherently calibrated, and returned from DC through Nyquist.
-`FFT_MODE=0|1` selects symmetric/periodic windows and the corresponding
-`NORM`/`UNORM` default. `FFT_ACCURATE=1` (the default) schedules exact solver
-stops at sample times, while `FFT_ACCURATE=0` uses linear interpolation over
-the accepted transient history; an
-authored output `INITIAL_INTERVAL` schedule also selects interpolation.
-`FFTOUT=1` adds typed ENOB, SFDR, SNR, SNDR, THD, and ranked-harmonic results;
-`FREQ`, `FMIN`, and `FMAX` select their fundamental and metric limits.
-
 ## Devices
 
-One descriptor drives every surface a device touches — properties, persistence,
-hierarchy, DRC, netlisting, preview, export, and hardcopy — across 74 stable
-schematic kinds, 64 canonical XSPICE catalog entries covering 113 registered
-canonical and alias names, and 43 generated Verilog-A models. A device whose
-stable id, registry entry, terminal contract, parameter contract, or symbol
-cannot be resolved fails closed; nothing silently degrades to a generic
-two-terminal element or drops unsupported parameters.
+A single descriptor per device drives every surface it touches — properties,
+persistence, hierarchy, DRC, netlisting, preview, export, and hardcopy — across
+74 stable schematic kinds, 64 canonical XSPICE catalog entries under 113
+registered names, and 43 generated Verilog-A models. A device whose id, registry
+entry, terminal contract, parameter contract, or symbol cannot be resolved fails
+closed; nothing falls back to a generic two-terminal element or drops
+unsupported parameters.
 
 | Family | Models |
 | :--- | :--- |
@@ -142,75 +141,62 @@ two-terminal element or drops unsupported parameters.
 | Sources | Independent V/I with `PULSE`, `SIN`, `EXP`, `PWL`, `PAT`, `SFFM`, `AM`, and `TRNOISE` white + 1/f waveforms; E/F/G/H controlled sources; B behavioral sources; PWL-from-file sources |
 | Switches & macromodels | Voltage- and current-controlled switches, op-amp macromodel |
 | Mixed-signal | XSPICE-style analog and digital code models, tri-state drivers, A/D–D/A bridges |
-| Verilog-A | Generated CMC devices and externally compiled modules — below |
+| Verilog-A | Generated CMC devices and externally compiled modules — [below](#generated-verilog-a-devices) |
 
 Unlisted `M` levels fail closed rather than falling through to the simplified
 MOS approximation. HICUM/L0, HICUM/L2, MEXTRAM, and Xyce HBT_X `Q` levels are
 rejected by name; those families are reachable as generated Verilog-A devices.
-
-BSIM-class cards raise typed errors when they request unported physics —
-distributed gate and body resistance networks, NQS, material-mode effects,
-unknown charge paths. BSIM4 `RDSMOD=0/1` source/drain resistance is native,
-including `RGEOMOD=1..8` implicit geometry when `NRD`/`NRS` are omitted, as are
-`GEOMOD=0..10`, `WPEMOD=1`, gate tunneling, stress layout correction, and
-`DIOMOD=0/1/2`.
+BSIM-class cards raise typed errors for unported physics rather than
+approximating around it.
 
 ### Generated Verilog-A devices
 
 CMC compact-model families with redistributable sources under
 [models/veriloga/cmc/](models/veriloga/cmc/) are not hand-ported. They are
 generated to Rust from the upstream Verilog-A and checked in under
-`crates/rspice-veriloga-models/models/` — one reusable Cargo artifact per
-model, 43 devices today, among
-them ASM-HEMT, BSIM-BULK, BSIM-CMG, BSIM-IMG, BSIM-SOI, DIODE_CMC, HICUM/L0
-and /L2, HiSIM-HV, HiSIM-SOI, JUNCAP200, L-UTSOI, MEXTRAM 505, MVSG-CMC,
-PSP104, and VBIC 1.3.
+`crates/rspice-veriloga-models/models/`, one reusable Cargo artifact per model.
+The 43 devices available today include ASM-HEMT, BSIM-BULK, BSIM-CMG, BSIM-IMG,
+BSIM-SOI, DIODE_CMC, HICUM/L0 and /L2, HiSIM-HV, HiSIM-SOI, JUNCAP200, L-UTSOI,
+MEXTRAM 505, MVSG-CMC, PSP104, and VBIC 1.3.
 
-A generated device is instantiated by its module name on an `X` line, not
-through an `M`/`Q` `LEVEL` selector, and each compiles in only when its
-`veriloga-model-*` feature is enabled — granular features keep compile time,
-peak rustc memory, and binary size proportional to the models you actually use.
-Where a bundled source exists the generated device is the canonical
-implementation; a hand-written native port of the same family serves the
-`LEVEL`-card decks that reach it. The generated ASM-HEMT and MVSG-CMC devices
-are present but not yet oracle-qualified; the in-tree `Z`-device GaN HEMT is a
+Instantiate a generated device by its module name on an `X` line, not through an
+`M`/`Q` `LEVEL` selector. Each compiles in only when its `veriloga-model-*`
+feature is enabled, so compile time, peak rustc memory, and binary size stay
+proportional to the models you actually use. Where a bundled source exists the
+generated device is the canonical implementation, and a hand-written native port
+of the same family serves the `LEVEL`-card decks that reach it.
+
+All 43 models reach every shipped target: desktop via
+`rspice-ui --features generated-veriloga-catalog`, WebAssembly with no native
+JIT dependency, and Android or iOS ARM64 via
+`rspice-core --no-default-features --features veriloga-builtins`.
+
+Catalog and round-trip checks prove a device is reachable and consistently
+represented, not that it is numerically accurate — that needs golden comparisons
+against independent references, per compact-model version. ASM-HEMT and MVSG-CMC
+are not yet oracle-qualified, and the in-tree `Z`-device GaN HEMT is a
 physics-style model, not a CMC one.
-
-The full catalog is available on every shipped target:
-
-| Target | Release configuration | Catalog status |
-| :--- | :--- | :--- |
-| Windows, Linux, macOS desktop | `rspice-ui --features generated-veriloga-catalog` | All 43 generated models compile into the GUI catalog; native and XSPICE catalogs are always present |
-| Browser / WebAssembly | `wasm32-unknown-unknown`, UI release feature enabled | All 43 generated models and the complete GUI catalog, with no native JIT dependency |
-| Android ARM64 | `rspice-core --no-default-features --features veriloga-builtins` | All 43 generated model crates, portable hash implementation |
-| iOS ARM64 | `rspice-core --no-default-features --features veriloga-builtins` | All 43 generated model crates, portable hash implementation |
-
-Catalog, schema, symbol, round-trip, netlist, and cross-target checks prove a
-device is reachable and consistently represented. They do not establish
-semiconductor-model accuracy: golden operating-point, DC, AC, transient, noise,
-temperature, corner, and convergence comparisons against independent references
-remain required per compact-model version before RSpice claims numerical
-equivalence.
 
 ## Netlist dialect
 
 `.SUBCKT` subcircuits are flattened during elaboration, with hierarchical path
 handling and scoped parameters. `.PARAM`/`.CSPARAM` and `.FUNC` evaluate through
-a bytecode expression VM that also backs B-sources; `.IF`/`.ELSEIF`/`.ELSE`/`.ENDIF`
-select at parse time. `.INCLUDE`, `.LIB`, and `.MODEL` bring in model cards.
-Every product build ships the small, generic, RSpice-authored
-[foundation library](models/spice/foundation/). It is the only SPICE pack in
-this repository: every pack under `models/spice/` is authored by the RSpice
-project, and further authored packs are developed and published through the
-Model Hub pipeline rather than committed here. Users can import their own model
-sources into a project. `.GLOBAL`,
-`.IC`, `.NODESET`, `.SAVE`/`.PROBE`, `.PRINT`/`.PLOT`, `.OPTIONS`, and `.TEMP`
-behave as expected, and the usual engineering suffixes are accepted. Unrecognized
-dot-commands surface as diagnostics rather than being silently dropped.
+a bytecode expression VM that also backs B-sources, and
+`.IF`/`.ELSEIF`/`.ELSE`/`.ENDIF` select at parse time. `.INCLUDE`, `.LIB`, and
+`.MODEL` bring in model cards. `.GLOBAL`, `.IC`, `.NODESET`, `.SAVE`/`.PROBE`,
+`.PRINT`/`.PLOT`, `.OPTIONS`, and `.TEMP` behave as expected, the usual
+engineering suffixes are accepted, and unrecognized dot-commands surface as
+diagnostics rather than being silently dropped.
 
 Beyond plain SPICE, the parser ingests SPEF (IEEE 1481) parasitics as
-back-annotation onto a parsed netlist, XSPICE code-model cards, and Laplace-defined
-sources. LTspice `.raw` files can be read back for comparison.
+back-annotation onto a parsed netlist, XSPICE code-model cards, and
+Laplace-defined sources. LTspice `.raw` files can be read back for comparison.
+
+Every product build ships the small, generic
+[foundation library](models/spice/foundation/) — the only SPICE pack in this
+repository, and like everything under `models/spice/`, authored by the RSpice
+project. Further packs are published through the Model Hub pipeline rather than
+committed here, and projects can import their own model sources.
 
 ## Interfaces
 
@@ -294,22 +280,6 @@ full API reference, the maturin/pytest workflow CI uses, and the Windows
 `PYO3_PYTHON` workaround for Microsoft Store interpreter aliases:
 [crates/rspice-python/README.md](crates/rspice-python/README.md).
 
-### WebAssembly
-
-`rspice-wasm` exposes netlist summaries, DC operating-point, AC, and transient
-runs to JavaScript through `wasm-bindgen`, returning JSON-serializable snapshots
-under configurable resource limits.
-
-### Verilog-A
-
-`rspice-veriloga` compiles behavioral modules through parser, semantic analysis,
-canonical IR, and either a bytecode VM or the RSpice-owned native JIT (x86-64
-hosts plus AArch64 on macOS, Linux, and Windows). When native mode is requested, construction is full JIT or a typed
-error — never a silent fall back to the interpreter. The same crate owns the
-Rust backend that produces the generated built-in devices above. External models
-compile standalone with `rspice compile-va`; examples live in
-[models/veriloga/](models/veriloga/).
-
 ### Rust
 
 `rspice-core` is the engine every other crate wraps. `Netlist::parse` is the
@@ -326,6 +296,22 @@ assert_eq!(result.voltage(1), 10.0);
 ```
 
 API details and the feature-flag matrix: [crates/rspice-core/README.md](crates/rspice-core/README.md).
+
+### WebAssembly
+
+`rspice-wasm` exposes netlist summaries, DC operating-point, AC, and transient
+runs to JavaScript through `wasm-bindgen`, returning JSON-serializable snapshots
+under configurable resource limits.
+
+### Verilog-A
+
+`rspice-veriloga` compiles behavioral modules through parser, semantic analysis,
+canonical IR, and either a bytecode VM or the RSpice-owned native JIT (x86-64
+hosts plus AArch64 on macOS, Linux, and Windows). When native mode is requested,
+construction is full JIT or a typed error — never a silent fall back to the
+interpreter. The same crate owns the Rust backend that produces the generated
+built-in devices above. External models compile standalone with
+`rspice compile-va`; examples live in [models/veriloga/](models/veriloga/).
 
 ## Validation
 
@@ -358,20 +344,18 @@ processes against a locally installed ngspice over the shared decks in
 [benchmarks/circuits/](benchmarks/circuits/); no optimization claim lands without
 a before/after scoreboard.
 
-## Operations
+## Under the hood
 
-The native backend is a stateless, one-shot worker process. Deployments pin
-admission limits through the `[resources]` table of an operator-supplied config
-file, or the matching `RSPICE_*` variables; both are documented per key in
-[the CLI reference](crates/rspice-cli/README.md). Derive the ceilings from the
-deployment's own deck mix and container quotas — the defaults assume a
-workstation, not an isolated worker.
+The engine assembles modified nodal analysis systems and solves them with a
+damped Newton iteration, supported by a merit-based line search and — when a
+circuit resists convergence — gmin stepping, source stepping, pseudo-transient
+continuation, and arc-length continuation. Transient runs choose their own
+timestep under local-truncation-error control.
 
-Releases are cut from annotated version tags for six Linux, macOS, and Windows
-target triples, bound to deterministic archives, SHA-256 sidecars, CycloneDX
-SBOMs, and GitHub artifact attestations, and published without permitting an
-existing asset to be replaced. Archives carry a manifest recording the exact
-source commit and payload hashes.
+Real-valued factorization uses an in-tree KLU-class sparse solver whose stored
+pivots make refactorization cheap while the sparsity pattern holds;
+[faer](https://crates.io/crates/faer) backs the complex solves behind the
+AC-family analyses.
 
 ## Repository
 
@@ -413,12 +397,7 @@ reporting.
 
 ## Acknowledgments
 
-RSpice's device models and transient engine owe a great deal to
-[ngspice](https://ngspice.sourceforge.io/): several models are ported from
-BSD-licensed portions of ngspice 46, native BSIM4 acknowledges the UC Berkeley
-BSIM Research Group under the upstream BSIM4 terms, and the ngspice test suite is
-RSpice's primary accuracy reference. The Xyce Regression Suite is vendored under
-its GPL terms and drives the second corpus harness. Compact models come from the
-Compact Model Coalition under their respective package licenses. Sparse linear
-algebra uses the in-tree KLU-class real solver plus
-[faer](https://crates.io/crates/faer) for complex and AC-family paths.
+Some device models derive from BSD-licensed ngspice 46 source, and native BSIM4
+acknowledges the UC Berkeley BSIM Research Group under the upstream BSIM4 terms.
+Compact models come from the Compact Model Coalition; the Xyce Regression Suite
+is vendored under GPL terms. Full attributions and license texts: [NOTICE](NOTICE).
