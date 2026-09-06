@@ -3674,6 +3674,29 @@ endmodule
         }
     }
 
+    /// Every shipped compact model through the finite oracle.
+    ///
+    /// Run this one model at a time on a workstation:
+    /// `RSPICE_NATIVE_SHIPPED_MODEL_FILTER` takes a comma-separated list of
+    /// the names below. Nothing accumulates across the loop — each iteration
+    /// owns its frontend output, canonical artifact, x64 image and contexts,
+    /// and drops them before the next; four models whose largest is 3.05 GB
+    /// run together in one process at 3.10 GB. What does not fit is a single
+    /// model. Peak working sets measured on this corpus (Windows, release):
+    /// bsimcmg 7.2 GB, bsimbulk 8.8 GB, and psp104_nqs, bsimsoi100, hisimhv
+    /// and asmhemt each still climbing when a 12 GB watchdog killed them —
+    /// an uncapped run reached 22.1 GB on bsimsoi100 before it was stopped.
+    /// Unfiltered, the loop is killed by that watchdog on the ninth of
+    /// eighteen models in 44 s.
+    ///
+    /// The compile is where it goes, not the comparison:
+    /// [`native_x64_shipped_model_devices_run_without_interpreter_fallback`]
+    /// compiles bsimsoi100 once, builds no reference and compares nothing,
+    /// and peaks at 13.3 GB on its own. So the unfiltered command in the
+    /// `#[ignore]` note needs a runner with at least 24 GB of memory free for
+    /// this process alone; on a 32 GB box with anything else resident it
+    /// exhausts the commit charge, which presents as an access violation here
+    /// or a bugcheck on the box rather than as an allocation failure.
     #[test]
     #[ignore = "release-only shipped-model native x64 finite oracle; run with --release --features native -- --ignored --nocapture"]
     fn native_x64_shipped_model_finite_entries_match_bytecode_reference() {
