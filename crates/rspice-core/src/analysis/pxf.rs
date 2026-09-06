@@ -264,10 +264,13 @@ impl std::error::Error for PxfError {}
 /// A single transfer function point in PXF analysis
 #[derive(Debug, Clone)]
 pub struct TransferPoint {
-    /// Input frequency (at input sideband)
+    /// Swept offset frequency, in hertz: the abscissa the card authored, and
+    /// the one every curve metric below is stated against. The absolute
+    /// frequency the drive is applied at is `freq_in + sideband_in * f0`.
     pub freq_in: Value,
 
-    /// Output frequency (at output sideband)
+    /// Absolute frequency the converted response appears at, in hertz:
+    /// `freq_in + sideband_out * f0`.
     pub freq_out: Value,
 
     /// Complex transfer function H(f_in → f_out)

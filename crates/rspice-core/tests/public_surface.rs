@@ -634,7 +634,18 @@ use rspice_core::analysis::harmonic_balance::{
 //   vocabulary. The CLI's export rows keep a `SignalKind`, not the whole
 //   descriptor, so without this the rawfile header and the HDF5 unit
 //   attribute of one run would be derived from two separate rules.
-const MAX_PUBLIC_ITEMS: usize = 5005;
+// 2026-09-06, +3 deliberate (5,005 -> 5,008): the `.PXF` card type and the two
+// engine entries that run it.
+//
+// `.PXF` had no engine route at all: the periodic transfer function was
+// computed inside rspice-ui, so a deck that authored the card ran nothing.
+// These three are the whole path from an authored card to a transfer, and the
+// CLI, python, WASM and engine-adapter routes all call them.
+//
+// - 1 in `netlist/ast.rs`: `PxfCard`, beside `PacCard` and `PnoiseCard`.
+// - 2 in `engine/hb/pac.rs`: `Engine::run_pxf_card_from_pss_with_abort` and
+//   `..._from_hb_with_abort`, beside the `.PAC` entries whose solve they read.
+const MAX_PUBLIC_ITEMS: usize = 5008;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

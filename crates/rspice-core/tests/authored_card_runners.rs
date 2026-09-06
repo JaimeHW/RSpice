@@ -1,5 +1,6 @@
-//! Authored `.SENS`, `.PZ` and `.SP` cards run through core entry points that
-//! take the card, and their results project into the shared result document.
+//! Authored `.SENS`, `.PZ`, `.SP` and `.PXF` cards run through core entry
+//! points that take the card, and their results project into the shared
+//! result document.
 
 use rspice_core::abort_signal::NoAbort;
 use rspice_core::engine::SensitivityCardResult;
@@ -239,4 +240,205 @@ fn a_stability_document_from_an_uncrossed_loop_records_the_absent_crossover() {
         ),
         "a margin is either a number or a typed determination"
     );
+}
+
+//=============================================================================
+// .PXF
+//=============================================================================
+
+const PXF_FUNDAMENTAL: f64 = 1.0e6;
+
+/// An RC low-pass whose corner sits exactly on the carrier fundamental, so
+/// `H(f) = 1 / (1 + j f / 1 MHz)` is a closed-form answer at every sideband.
+const PXF_LOW_PASS: &str = "PXF card runner\n\
+     vin in 0 dc 0 ac 1\n\
+     r1 in out 1k\n\
+     c1 out 0 159.154943091895p\n\
+     .end\n";
+
+fn pxf_card(input_sideband: i32, output_sideband: i32) -> rspice_core::netlist::PxfCard {
+    rspice_core::netlist::PxfCard {
+        sweep: rspice_core::netlist::PeriodicSweep {
+            variation: rspice_core::netlist::FreqVariation::Lin,
+            points: 3,
+            start_freq: 1.0e5,
+            stop_freq: 5.0e5,
+        },
+        input_source: "VIN".to_owned(),
+        input_sideband,
+        output_node: "OUT".to_owned(),
+        output_ref: None,
+        output_sideband,
+        max_sideband: 1,
+        reltol: 1.0e-3,
+        abstol: 1.0e-12,
+        source: rspice_core::netlist::PeriodicSourceSelector::Preceding,
+    }
+}
+
+fn pxf_carrier(engine: &Engine, netlist: &Netlist) -> rspice_core::engine::PssOperatingPoint {
+    engine
+        .run_pss_operating_point_with_abort(
+            netlist,
+            rspice_core::analysis::PssConfig::new(PXF_FUNDAMENTAL)
+                .with_harmonics(8)
+                .with_points_per_period(128)
+                .with_tstab_periods(0),
+            &NoAbort,
+        )
+        .expect("the linear carrier converges")
+}
+
+#[test]
+fn an_authored_pxf_card_reads_the_conversion_element_its_sideband_pair_names() {
+    // The engine entry is a PAC solve plus one conversion read. This pins that
+    // it reads that element and no other, bit for bit, which is what the
+    // Studio's own route produces for the same deck by way of a dense cube.
+    let netlist = Netlist::parse(PXF_LOW_PASS).expect("deck parses");
+    let engine = Engine::new(SimulationConfig::default());
+    let carrier = pxf_carrier(&engine, &netlist);
+    let card = pxf_card(1, 1);
+
+    let pxf = engine
+        .run_pxf_card_from_pss_with_abort(&netlist, &card, &carrier, &NoAbort)
+        .expect("the authored .PXF card runs against its carrier");
+    let pac = engine
+        .run_pac_from_pss_with_abort(
+            &netlist,
+            rspice_core::analysis::pac::PacConfig::from(&card),
+            &carrier,
+            &NoAbort,
+        )
+        .expect("the same card describes a runnable PAC solve");
+
+    assert_eq!(pxf.points.len(), pac.result.frequencies.len());
+    assert_eq!(pxf.fundamental_freq, PXF_FUNDAMENTAL);
+    for (index, point) in pxf.points.iter().enumerate() {
+        let element = pac
+            .result
+            .conversion_matrix
+            .get(index, card.output_sideband, card.input_sideband)
+            .expect("the conversion element exists");
+        assert_eq!(
+            point.transfer, element,
+            "point {index} must be the (out {}, in {}) conversion element itself",
+            card.output_sideband, card.input_sideband
+        );
+        assert_eq!(point.freq_in, pac.result.frequencies[index]);
+        // The output frequency is absolute: offset + output_sideband * f0,
+        // the same rule `PacSidebandDescriptor::absolute_frequencies` states.
+        assert!(
+            (point.freq_out - (point.freq_in + f64::from(card.output_sideband) * PXF_FUNDAMENTAL))
+                .abs()
+                <= 1.0e-9,
+            "point {index} published {} Hz as its converted output frequency",
+            point.freq_out
+        );
+        assert_eq!(point.sideband_in, card.input_sideband);
+        assert_eq!(point.sideband_out, card.output_sideband);
+    }
+}
+
+#[test]
+fn an_authored_pxf_card_on_a_linear_circuit_reproduces_the_closed_form_transfer() {
+    // A linear network cannot convert between sidebands, so the k -> k
+    // transfer is exactly the ordinary AC response at offset + k * f0.
+    let netlist = Netlist::parse(PXF_LOW_PASS).expect("deck parses");
+    let engine = Engine::new(SimulationConfig::default());
+    let carrier = pxf_carrier(&engine, &netlist);
+
+    for sideband in [0, 1] {
+        let card = pxf_card(sideband, sideband);
+        let pxf = engine
+            .run_pxf_card_from_pss_with_abort(&netlist, &card, &carrier, &NoAbort)
+            .expect(".PXF runs at every analyzed sideband");
+        for point in &pxf.points {
+            let absolute = point.freq_in + f64::from(sideband) * PXF_FUNDAMENTAL;
+            let expected = num_complex::Complex64::new(1.0, 0.0)
+                / num_complex::Complex64::new(1.0, absolute / PXF_FUNDAMENTAL);
+            assert!(
+                (point.transfer - expected).norm() <= 1.0e-6,
+                "sideband {sideband} at {absolute:.3e} Hz: got {}, expected {expected}",
+                point.transfer
+            );
+        }
+    }
+}
+
+#[test]
+fn an_authored_pxf_card_publishes_the_curve_metrics_core_computes() {
+    let netlist = Netlist::parse(PXF_LOW_PASS).expect("deck parses");
+    let engine = Engine::new(SimulationConfig::default());
+    let carrier = pxf_carrier(&engine, &netlist);
+    let card = pxf_card(1, 1);
+
+    let pxf = engine
+        .run_pxf_card_from_pss_with_abort(&netlist, &card, &carrier, &NoAbort)
+        .expect(".PXF runs");
+
+    let mut oracle = rspice_core::analysis::pxf::PxfResult::new(pxf.fundamental_freq, 1, 1);
+    for point in &pxf.points {
+        oracle.add_point(point.clone());
+    }
+    oracle.compute_metrics();
+    assert_eq!(pxf.peak_gain, oracle.peak_gain);
+    assert_eq!(pxf.bandwidth_3db, oracle.bandwidth_3db);
+    assert_eq!(pxf.unity_gain_freq, oracle.unity_gain_freq);
+    assert_eq!(pxf.dc_gain, oracle.dc_gain);
+    assert_eq!(
+        pxf.group_delay_curve().len(),
+        pxf.points.len() - 1,
+        "group delay lives on the midpoint grid"
+    );
+}
+
+#[test]
+fn an_authored_pxf_card_runs_against_a_harmonic_balance_carrier() {
+    // `.PAC` accepts either periodic carrier and `.PXF` is a reading of the
+    // conversion matrix that solve fills, so the harmonic-balance sibling must
+    // produce the same closed-form answer the shooting one does.
+    let netlist = Netlist::parse(PXF_LOW_PASS).expect("deck parses");
+    let engine = Engine::new(SimulationConfig::default());
+    let hb = engine
+        .run_hb_with_abort(
+            &netlist,
+            rspice_core::analysis::HbConfig::new(PXF_FUNDAMENTAL).with_harmonics(8),
+            &NoAbort,
+        )
+        .expect("the harmonic-balance carrier converges");
+    let card = pxf_card(1, 1);
+
+    let pxf = engine
+        .run_pxf_card_from_hb_with_abort(&netlist, &card, &hb.operating_point, &NoAbort)
+        .expect(".PXF runs against a harmonic-balance carrier");
+    assert_eq!(pxf.points.len(), 3);
+    for point in &pxf.points {
+        let absolute = point.freq_in + PXF_FUNDAMENTAL;
+        let expected = num_complex::Complex64::new(1.0, 0.0)
+            / num_complex::Complex64::new(1.0, absolute / PXF_FUNDAMENTAL);
+        assert!(
+            (point.transfer - expected).norm() <= 1.0e-6,
+            "HB-carried .PXF at {absolute:.3e} Hz: got {}",
+            point.transfer
+        );
+    }
+}
+
+#[test]
+fn an_authored_pxf_card_honours_cancellation() {
+    let netlist = Netlist::parse(PXF_LOW_PASS).expect("deck parses");
+    let engine = Engine::new(SimulationConfig::default());
+    let carrier = pxf_carrier(&engine, &netlist);
+    let error = engine
+        .run_pxf_card_from_pss_with_abort(
+            &netlist,
+            &pxf_card(1, 1),
+            &carrier,
+            &rspice_core::abort_signal::ImmediateAbort,
+        )
+        .expect_err("an aborted .PXF run must not publish a partial transfer");
+    assert!(matches!(
+        error,
+        rspice_core::engine::SimulationError::Aborted
+    ));
 }

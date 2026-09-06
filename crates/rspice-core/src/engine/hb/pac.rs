@@ -112,6 +112,55 @@ impl Engine {
         )
     }
 
+    /// Run one authored `.PXF` card against a retained shooting-`.PSS`
+    /// carrier.
+    ///
+    /// The card describes a periodic AC solve and one path through its
+    /// conversion matrix; this runs that solve and reads that path. The
+    /// element is taken straight from [`ConversionMatrix::get_transfer`],
+    /// which is the only code that knows how a sideband pair maps onto the
+    /// matrix's storage — reassembling the matrix into a dense cube first, as
+    /// a caller once did, both costs `O(F*S^2)` and re-states that mapping in
+    /// a second place where it can drift.
+    pub fn run_pxf_card_from_pss_with_abort(
+        &self,
+        netlist: &Netlist,
+        card: &crate::netlist::PxfCard,
+        operating_point: &super::super::PssOperatingPoint,
+        abort: &dyn AbortSignal,
+    ) -> Result<crate::analysis::pxf::PxfResult, SimulationError> {
+        let pac = self.run_pac_from_pss_with_abort(
+            netlist,
+            PacConfig::from(card),
+            operating_point,
+            abort,
+        )?;
+        pxf_transfer_from_pac(card, &pac, abort)
+    }
+
+    /// Run one authored `.PXF` card against a retained harmonic-balance
+    /// carrier.
+    ///
+    /// `.PAC` and `.PNOISE` both accept either periodic carrier, and the
+    /// conversion matrix a harmonic-balance operating point produces is the
+    /// same object with the same axes, so `.PXF FROM=HB` reads out of it the
+    /// same way.
+    pub fn run_pxf_card_from_hb_with_abort(
+        &self,
+        netlist: &Netlist,
+        card: &crate::netlist::PxfCard,
+        operating_point: &HbOperatingPoint,
+        abort: &dyn AbortSignal,
+    ) -> Result<crate::analysis::pxf::PxfResult, SimulationError> {
+        let pac = self.run_pac_from_hb_with_abort(
+            netlist,
+            PacConfig::from(card),
+            operating_point,
+            abort,
+        )?;
+        pxf_transfer_from_pac(card, &pac, abort)
+    }
+
     fn run_pac_impl(
         &self,
         netlist: &Netlist,
@@ -774,4 +823,104 @@ impl Engine {
             "PAC input source '{trimmed}' not found among independent sources"
         )))
     }
+}
+
+/// Read the one transfer an authored `.PXF` card names out of the periodic AC
+/// solve it described.
+///
+/// The card's sweep is an *offset* grid, so `TransferPoint::freq_in` is the
+/// offset the deck authored and `freq_out` is the absolute frequency the
+/// converted response appears at, `output_sideband * f0 + offset`, which is
+/// how `PacSidebandDescriptor::absolute_frequencies` already states an output
+/// frequency for the same solve.
+fn pxf_transfer_from_pac(
+    card: &crate::netlist::PxfCard,
+    pac: &PacAnalysisResult,
+    abort: &dyn AbortSignal,
+) -> Result<crate::analysis::pxf::PxfResult, SimulationError> {
+    use crate::analysis::pxf::{PxfResult, TransferPoint};
+
+    if abort.is_aborted() {
+        return Err(SimulationError::Aborted);
+    }
+    let fundamental = pac.fundamental_freq;
+    if !fundamental.is_finite() || fundamental <= 0.0 {
+        return Err(SimulationError::Circuit(
+            "PXF requires a positive fundamental frequency from its periodic carrier".to_string(),
+        ));
+    }
+    // `get_transfer` is also the range check: a sideband the solve did not
+    // span has no element, and it says so by coordinate. Asking the same
+    // question twice is how the two answers start to differ.
+    let transfers = pac
+        .result
+        .conversion_matrix
+        .get_transfer(card.input_sideband, card.output_sideband)
+        .map_err(|error| {
+            SimulationError::Circuit(format!(
+                "PXF transfer from sideband {} to sideband {} is unavailable: {error}",
+                card.input_sideband, card.output_sideband
+            ))
+        })?;
+    if transfers.is_empty() {
+        return Err(SimulationError::Circuit(
+            "PXF conversion matrix has no frequency points".to_string(),
+        ));
+    }
+
+    let mut result = PxfResult::new(fundamental, card.input_sideband, card.output_sideband);
+    result
+        .points
+        .try_reserve_exact(transfers.len())
+        .map_err(|error| {
+            SimulationError::Circuit(format!("PXF transfer-point allocation failed: {error}"))
+        })?;
+    let mut previous_offset: Option<Value> = None;
+    for (index, transfer) in transfers.iter().enumerate() {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        let offset = transfer.frequency_offset;
+        // A conversion element is indexed by its offset, so a grid that is not
+        // finite, positive and strictly increasing would make the curve
+        // metrics below — peak, bandwidth, unity-gain crossing, group delay —
+        // read a shape the sweep does not have.
+        if !offset.is_finite()
+            || offset <= 0.0
+            || previous_offset.is_some_and(|last| offset <= last)
+        {
+            return Err(SimulationError::Circuit(format!(
+                "PXF input-frequency grid is not strictly increasing and positive at point {}",
+                index + 1
+            )));
+        }
+        previous_offset = Some(offset);
+        if !transfer.transfer.re.is_finite() || !transfer.transfer.im.is_finite() {
+            return Err(SimulationError::Circuit(format!(
+                "PXF transfer is not finite at point {} ({:+.6e}{:+.6e}j)",
+                index + 1,
+                transfer.transfer.re,
+                transfer.transfer.im
+            )));
+        }
+        let freq_out = transfer.output_frequency(fundamental).map_err(|error| {
+            SimulationError::Circuit(format!(
+                "PXF output frequency is unavailable at point {}: {error}",
+                index + 1
+            ))
+        })?;
+        result.points.push(TransferPoint {
+            freq_in: offset,
+            freq_out,
+            transfer: transfer.transfer,
+            sideband_in: card.input_sideband,
+            sideband_out: card.output_sideband,
+        });
+    }
+
+    result.compute_metrics();
+    if abort.is_aborted() {
+        return Err(SimulationError::Aborted);
+    }
+    Ok(result)
 }

@@ -328,6 +328,55 @@ impl From<&crate::netlist::PacCard> for PacConfig {
     }
 }
 
+impl From<&crate::netlist::PxfCard> for PacConfig {
+    /// Convert an authored `.PXF` card into the periodic-AC configuration its
+    /// transfer is read out of.
+    ///
+    /// A `.PXF` run *is* a PAC solve: the transfer it reports is one element
+    /// of the conversion matrix that solve already fills. Only the sideband
+    /// span differs. `MAXSIDEBAND` states the conversion depth, but the two
+    /// ends of the measured path must be inside the solved span or the element
+    /// would not exist, so the span is widened to whichever of the three is
+    /// largest rather than refused — a card that asks for the transfer to
+    /// sideband 7 at depth 5 is asking for a depth-7 solve.
+    ///
+    /// `fundamental_freq` stays zero: the runner binds it from the upstream
+    /// `.PSS`/`.HB` operating point, exactly as the `.PAC` conversion does.
+    fn from(card: &crate::netlist::PxfCard) -> Self {
+        let depth = card
+            .input_sideband
+            .saturating_abs()
+            .max(card.output_sideband.saturating_abs())
+            .max(card.max_sideband);
+        Self {
+            sweep_start: card.sweep.start_freq,
+            sweep_stop: card.sweep.stop_freq,
+            num_points: card.sweep.points,
+            sweep_type: match card.sweep.variation {
+                crate::netlist::FreqVariation::Lin => PacSweepType::Linear,
+                crate::netlist::FreqVariation::Dec => PacSweepType::Decade,
+                crate::netlist::FreqVariation::Oct => PacSweepType::Octave,
+            },
+            sideband_min: depth.saturating_neg(),
+            sideband_max: depth,
+            input_source: Some(card.input_source.to_uppercase()),
+            output_node: Some(card.output_node.to_uppercase()),
+            output_ref: card.output_ref.as_ref().map(|node| node.to_uppercase()),
+            reltol: card.reltol,
+            abstol: card.abstol,
+            // Neither setting reaches a PXF reading. The conversion matrix is
+            // solved at a unit drive and published unscaled, and `include_dc`
+            // selects which *spectra* a publisher emits, not which sidebands
+            // the lifted system spans. They are stated rather than defaulted
+            // so a later change to either default cannot silently move a
+            // transfer.
+            include_dc: true,
+            pac_magnitude: 1.0,
+            fundamental_freq: 0.0,
+        }
+    }
+}
+
 #[cfg(test)]
 mod card_conversion_tests {
     use super::*;
@@ -509,5 +558,65 @@ mod tests {
                 .expect("equal PAC endpoints remain valid"),
             vec![1.0e3]
         );
+    }
+}
+
+#[cfg(test)]
+mod pxf_card_conversion_tests {
+    use super::*;
+    use crate::netlist::{FreqVariation, PeriodicSourceSelector, PeriodicSweep, PxfCard};
+
+    fn card(input_sideband: i32, output_sideband: i32, max_sideband: i32) -> PxfCard {
+        PxfCard {
+            sweep: PeriodicSweep {
+                variation: FreqVariation::Dec,
+                points: 10,
+                start_freq: 1.0e3,
+                stop_freq: 1.0e9,
+            },
+            input_source: "vrf".to_owned(),
+            input_sideband,
+            output_node: "out".to_owned(),
+            output_ref: Some("ref".to_owned()),
+            output_sideband,
+            max_sideband,
+            reltol: 1.0e-3,
+            abstol: 1.0e-12,
+            source: PeriodicSourceSelector::Preceding,
+        }
+    }
+
+    #[test]
+    fn a_pxf_card_converts_to_a_symmetric_span_that_holds_its_sideband_pair() {
+        let converted = PacConfig::from(&card(1, 1, 5));
+        assert_eq!(converted.sweep_start, 1.0e3);
+        assert_eq!(converted.sweep_stop, 1.0e9);
+        assert_eq!(converted.num_points, 10);
+        assert_eq!(converted.sweep_type, PacSweepType::Decade);
+        assert_eq!(converted.sideband_min, -5);
+        assert_eq!(converted.sideband_max, 5);
+        assert_eq!(converted.input_source.as_deref(), Some("VRF"));
+        assert_eq!(converted.output_node.as_deref(), Some("OUT"));
+        assert_eq!(converted.output_ref.as_deref(), Some("REF"));
+        // Bound from the upstream operating point, never from the card.
+        assert_eq!(converted.fundamental_freq, 0.0);
+        assert!(converted.validate().is_ok());
+    }
+
+    #[test]
+    fn a_sideband_beyond_the_authored_depth_widens_the_solve_rather_than_falling_outside_it() {
+        // The transfer the card names has to be an element the solve filled,
+        // so the span follows whichever of the three bounds is largest.
+        for (input, output, depth) in [(7, 1, 5), (1, -7, 5), (0, 0, 0)] {
+            let converted = PacConfig::from(&card(input, output, depth));
+            let expected = input.abs().max(output.abs()).max(depth);
+            assert_eq!(converted.sideband_min, -expected);
+            assert_eq!(converted.sideband_max, expected);
+            assert!(
+                converted.sideband_min <= input.min(output)
+                    && converted.sideband_max >= input.max(output),
+                "the span must contain both ends of the measured path"
+            );
+        }
     }
 }

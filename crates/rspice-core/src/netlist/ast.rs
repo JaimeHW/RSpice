@@ -2421,6 +2421,47 @@ impl PacCard {
     pub(crate) const DEFAULT_INCLUDE_DC: bool = true;
 }
 
+/// Authored `.PXF` card: the periodic transfer function from one small-signal
+/// source at one input sideband to one probe at one output sideband.
+///
+/// Like [`PacCard`], the large-signal fundamental is deliberately absent: it
+/// comes from the upstream `.PSS`/`.HB` instance when the analysis runs.
+///
+/// `.PXF` is `.PAC` read along a single conversion path. The run is the same
+/// periodic small-signal solve; what the card adds is the *pair* of sidebands
+/// the transfer is taken between, which is why the sideband depth the solve
+/// spans (`MAXSIDEBAND`) and the two ends of the path are separate fields.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PxfCard {
+    /// Input-frequency offset sweep, shared with `.PAC` and `.PNOISE`.
+    pub sweep: PeriodicSweep,
+    /// Small-signal source the transfer is measured from.
+    pub input_source: String,
+    /// Sideband the drive is applied at, relative to the fundamental.
+    pub input_sideband: i32,
+    /// Output probe node.
+    pub output_node: String,
+    /// Reference node of a differential `V(out,ref)` probe.
+    pub output_ref: Option<String>,
+    /// Sideband the response is read at, relative to the fundamental.
+    ///
+    /// A card that does not say means **1**, not the `0` that
+    /// `PxfConfig::default()` carries. The Studio's manual-deck reader and its
+    /// `.PXF` dialog writer have both defaulted this key to 1 since `.PXF`
+    /// became authorable, so 1 is what every `.pxf` line written without
+    /// `OUTSIDEBAND=` has always meant; taking core's 0 would silently
+    /// re-point every such deck at baseband and change the number it reports.
+    pub output_sideband: i32,
+    /// Conversion depth the solve spans: sidebands `-n..=n` participate.
+    pub max_sideband: i32,
+    /// Relative tolerance for the periodic operating point.
+    pub reltol: Value,
+    /// Absolute tolerance for small-signal currents, in amps.
+    pub abstol: Value,
+    /// Which upstream periodic analysis this card linearizes around.
+    pub source: PeriodicSourceSelector,
+}
+
 /// What a `.PNOISE` card measures the noise against.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PnoiseReference {
