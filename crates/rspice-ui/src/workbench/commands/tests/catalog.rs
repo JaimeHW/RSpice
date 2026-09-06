@@ -136,6 +136,14 @@ fn protected_commands_keep_the_exact_mockup_action_ids() {
         "Open Netlist & Script Editor"
     );
     assert_eq!(
+        Command::OpenWorkspace(Workspace::Stimulus).spec(),
+        CommandSpec {
+            id: "stimulus",
+            label: "Open Stimulus Library",
+            group: "Navigate",
+        }
+    );
+    assert_eq!(
         Command::ModelsPage(ModelsPage::Models).spec().label,
         "Model & library catalog"
     );

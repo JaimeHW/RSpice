@@ -21,6 +21,7 @@ pub(crate) enum ProjectDocumentId {
     VerificationSpecifications,
     ModelCatalog,
     NetlistSource,
+    StimulusLibrary,
 }
 
 impl ProjectDocumentId {
@@ -33,6 +34,7 @@ impl ProjectDocumentId {
             Self::VerificationSpecifications => "verification/specifications".to_owned(),
             Self::ModelCatalog => "models/catalog".to_owned(),
             Self::NetlistSource => "netlist/source".to_owned(),
+            Self::StimulusLibrary => "stimulus/library".to_owned(),
         }
     }
 }
@@ -97,6 +99,7 @@ pub(crate) fn active_document(
         Workspace::Project => ProjectDocumentId::ProjectConfiguration,
         Workspace::Design => ProjectDocumentId::CellView(active_view.clone()),
         Workspace::Simulate => ProjectDocumentId::SimulationPlan,
+        Workspace::Stimulus => ProjectDocumentId::StimulusLibrary,
         Workspace::Results => ProjectDocumentId::ResultHistory,
         // Specifications are owned by the active named simulation plan so a
         // clone can copy or omit them truthfully as one atomic payload.
@@ -165,6 +168,14 @@ fn document_digests(
             &project.workspace.report_documents,
             &project.workspace.visualization_documents,
         ))?,
+    );
+    // The stimulus definitions ride the project document rather than a
+    // sidecar, so without an identity here an edited library would move the
+    // saved file while every document in this registry still read clean —
+    // "no unsaved changes" over a library that had just been republished.
+    documents.insert(
+        ProjectDocumentId::StimulusLibrary,
+        digest(&project.workspace.stimulus_library)?,
     );
     documents.insert(
         ProjectDocumentId::VerificationSpecifications,

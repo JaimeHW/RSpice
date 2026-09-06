@@ -217,9 +217,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn compact_navigation_uses_the_mockup_five_and_seven_item_projections() {
+    fn compact_navigation_uses_the_mockup_five_item_and_whole_rail_projections() {
         assert_eq!(Workspace::PHONE_PRIMARY.len() + 1, 5);
-        assert_eq!(Workspace::ALL.len(), 7);
+        assert_eq!(Workspace::ALL.len(), 8);
     }
 
     #[test]

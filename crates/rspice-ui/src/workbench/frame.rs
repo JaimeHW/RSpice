@@ -663,9 +663,10 @@ mod tests {
 
     #[test]
     fn every_canonical_workspace_has_a_surface_owner() {
-        assert_eq!(Workspace::ALL.len(), 7);
+        assert_eq!(Workspace::ALL.len(), 8);
         assert_eq!(Workspace::PHONE_PRIMARY.len(), 4);
         assert!(Workspace::ALL.contains(&Workspace::Netlist));
+        assert!(Workspace::ALL.contains(&Workspace::Stimulus));
     }
 
     /// A completion is announced on the transition into a terminal lifecycle,

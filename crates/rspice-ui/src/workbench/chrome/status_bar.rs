@@ -557,6 +557,7 @@ fn engineering_context_summary(
         Workspace::Results => results_view_summary(app, results_view),
         Workspace::Project
         | Workspace::Simulate
+        | Workspace::Stimulus
         | Workspace::Verify
         | Workspace::Models
         | Workspace::Netlist => {

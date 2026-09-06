@@ -135,7 +135,7 @@ macro_rules! define_surface_catalog {
         impl SurfaceId {
             /// Every canonical surface in exact registry order.
             #[cfg(test)]
-            pub const ALL: [Self; 64] = [$(Self::$variant),+];
+            pub const ALL: [Self; 65] = [$(Self::$variant),+];
 
             #[must_use]
             pub const fn metadata(self) -> SurfaceMetadata {
@@ -198,6 +198,7 @@ macro_rules! define_surface_catalog {
                     Self::Project => Some(Workspace::Project),
                     Self::Design => Some(Workspace::Design),
                     Self::Simulate => Some(Workspace::Simulate),
+                    Self::Stimulus => Some(Workspace::Stimulus),
                     Self::Results => Some(Workspace::Results),
                     Self::Verify => Some(Workspace::Verify),
                     Self::Models => Some(Workspace::Models),
@@ -229,6 +230,7 @@ macro_rules! define_surface_catalog {
                     Workspace::Project => Self::Project,
                     Workspace::Design => Self::Design,
                     Workspace::Simulate => Self::Simulate,
+                    Workspace::Stimulus => Self::Stimulus,
                     Workspace::Results => Self::Results,
                     Workspace::Verify => Self::Verify,
                     Workspace::Models => Self::Models,
@@ -254,6 +256,7 @@ define_surface_catalog! {
     Project => { id: "project", label: "Project overview", archetype: PrimaryWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?view=project" },
     Design => { id: "design", label: "Design entry", archetype: PrimaryWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?view=design" },
     Simulate => { id: "simulate", label: "Simulation setup", archetype: PrimaryWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?view=simulate" },
+    Stimulus => { id: "stimulus", label: "Stimulus Library", archetype: PrimaryWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?view=stimulus" },
     Results => { id: "results", label: "Results", archetype: PrimaryWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?view=results" },
     Verify => { id: "verify", label: "Verification", archetype: PrimaryWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?view=verify" },
     Models => { id: "models", label: "Models and libraries", archetype: PrimaryWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?view=models" },
@@ -365,7 +368,7 @@ pub enum SurfaceIdParseError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("surface `{surface_id}` is not one of the seven primary workspaces")]
+#[error("surface `{surface_id}` is not one of the eight primary workspaces")]
 pub struct NonPrimarySurface {
     pub surface_id: SurfaceId,
 }
@@ -378,7 +381,7 @@ mod tests {
 
     #[test]
     fn catalog_has_exact_count_and_unique_contract_values() {
-        assert_eq!(SurfaceId::ALL.len(), 64);
+        assert_eq!(SurfaceId::ALL.len(), 65);
 
         let ids = SurfaceId::ALL
             .iter()
@@ -393,9 +396,9 @@ mod tests {
             .map(|surface| surface.deep_link())
             .collect::<HashSet<_>>();
 
-        assert_eq!(ids.len(), 64);
-        assert_eq!(labels.len(), 64);
-        assert_eq!(deep_links.len(), 64);
+        assert_eq!(ids.len(), 65);
+        assert_eq!(labels.len(), 65);
+        assert_eq!(deep_links.len(), 65);
     }
 
     #[test]
@@ -406,7 +409,7 @@ mod tests {
                 .filter(|surface| surface.release_status() == status)
                 .count()
         };
-        assert_eq!(count_status(ReleaseStatus::ReleaseScope), 21);
+        assert_eq!(count_status(ReleaseStatus::ReleaseScope), 22);
         assert_eq!(count_status(ReleaseStatus::Preview), 35);
         assert_eq!(count_status(ReleaseStatus::ExternalFirst), 6);
         assert_eq!(count_status(ReleaseStatus::InternalOnly), 2);
@@ -417,7 +420,7 @@ mod tests {
                 .filter(|surface| surface.archetype() == archetype)
                 .count()
         };
-        assert_eq!(count_archetype(SurfaceArchetype::PrimaryWorkspace), 7);
+        assert_eq!(count_archetype(SurfaceArchetype::PrimaryWorkspace), 8);
         assert_eq!(count_archetype(SurfaceArchetype::SpecialistWorkspace), 41);
         assert_eq!(count_archetype(SurfaceArchetype::Manager), 10);
         assert_eq!(count_archetype(SurfaceArchetype::Modal), 2);
@@ -504,6 +507,7 @@ mod tests {
             (Workspace::Project, SurfaceId::Project),
             (Workspace::Design, SurfaceId::Design),
             (Workspace::Simulate, SurfaceId::Simulate),
+            (Workspace::Stimulus, SurfaceId::Stimulus),
             (Workspace::Results, SurfaceId::Results),
             (Workspace::Verify, SurfaceId::Verify),
             (Workspace::Models, SurfaceId::Models),

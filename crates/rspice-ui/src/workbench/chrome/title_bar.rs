@@ -1254,6 +1254,7 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         | Command::ModelBrowser
         | Command::ModelEditor
         | Command::PdkSettings => WorkbenchIcon::Models,
+        Command::OpenWorkspace(Workspace::Stimulus) => WorkbenchIcon::Source,
         Command::OpenWorkspace(Workspace::Netlist) => WorkbenchIcon::Netlist,
         Command::AutomationConsole => WorkbenchIcon::Terminal,
         Command::NewProject => WorkbenchIcon::File,
@@ -1564,6 +1565,15 @@ fn simulate_menu(ui: &mut Ui, app: &mut RSpiceApp) {
         app,
         Command::OpenWorkspace(Workspace::Simulate),
         "Simulation Studio",
+        None,
+    );
+    // Beside the studio, because a definition is what the studio's
+    // excitations read: the mockup's Simulate menu lists the two together.
+    command_item_as(
+        ui,
+        app,
+        Command::OpenWorkspace(Workspace::Stimulus),
+        "Stimulus Library",
         None,
     );
     command_item(ui, app, Command::SimulationOptions);
@@ -1898,6 +1908,7 @@ fn active_title_cell(app: &RSpiceApp) -> String {
             app.state.workspace.active_view.cell, app.state.workspace.active_view.view
         ),
         Workspace::Simulate => "Simulation plan".to_owned(),
+        Workspace::Stimulus => "Stimulus Library".to_owned(),
         Workspace::Results => "Results".to_owned(),
         Workspace::Verify => "Verification".to_owned(),
         Workspace::Models => "Models & PDKs".to_owned(),

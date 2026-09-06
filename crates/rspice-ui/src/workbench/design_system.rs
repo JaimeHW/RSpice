@@ -30,6 +30,11 @@ pub enum WorkbenchIcon {
     Project,
     Design,
     Simulate,
+    /// The independent-source mark — a circle around one cycle of a wave.
+    /// It is the schematic symbol for a stimulus, so the rail entry, the
+    /// library rows and the workspace's empty state all wear the same thing
+    /// the sheet draws.
+    Source,
     Results,
     Verify,
     Models,
@@ -222,6 +227,28 @@ impl WorkbenchIcon {
                 (17.0, 11.0),
                 (21.0, 11.0),
             ]),
+            Self::Source => {
+                painter.circle_stroke(p(12.0, 12.0), 8.5 * scale, stroke);
+                line(&[
+                    (8.0, 12.0),
+                    (8.5, 11.0),
+                    (9.0, 10.16),
+                    (9.5, 9.6),
+                    (10.0, 9.4),
+                    (10.5, 9.6),
+                    (11.0, 10.16),
+                    (11.5, 11.0),
+                    (12.0, 12.0),
+                    (12.5, 13.0),
+                    (13.0, 13.84),
+                    (13.5, 14.4),
+                    (14.0, 14.6),
+                    (14.5, 14.4),
+                    (15.0, 13.84),
+                    (15.5, 13.0),
+                    (16.0, 12.0),
+                ]);
+            }
             Self::Results => {
                 line(&[
                     (4.0, 18.0),

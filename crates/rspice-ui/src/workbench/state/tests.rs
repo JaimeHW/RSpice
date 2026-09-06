@@ -9,7 +9,32 @@ use crate::workbench::CapabilityWorkflowId;
 
 #[test]
 fn canonical_workspace_order_is_stable() {
-    assert_eq!(Workspace::ALL.len(), 7);
+    assert_eq!(Workspace::ALL.len(), 8);
+    assert_eq!(
+        Workspace::ALL.map(Workspace::label),
+        [
+            "Project",
+            "Design",
+            "Simulate",
+            "Stimulus Library",
+            "Results",
+            "Verify",
+            "Models",
+            "Netlist & Script Editor",
+        ]
+    );
+}
+
+/// One workspace, one name. Each of the three names has a job — the rail and
+/// menus read `label`, a specialist row names its `owner_label`, and the
+/// context dock is headed by `inspector_title` — so they may differ, but a
+/// workspace whose product name already answers two of them must not coin a
+/// second spelling for the same thing.
+#[test]
+fn the_stimulus_library_is_named_once_across_its_three_registers() {
+    assert_eq!(Workspace::Stimulus.label(), "Stimulus Library");
+    assert_eq!(Workspace::Stimulus.owner_label(), "Stimulus Library");
+    assert_eq!(Workspace::Stimulus.inspector_title(), "Definition details");
 }
 
 #[test]

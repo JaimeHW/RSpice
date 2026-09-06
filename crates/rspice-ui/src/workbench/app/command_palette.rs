@@ -748,6 +748,11 @@ impl RSpiceApp {
                 crate::workbench::state::Workspace::Project => PaletteScope::Navigate,
                 crate::workbench::state::Workspace::Design => PaletteScope::Design,
                 crate::workbench::state::Workspace::Simulate => PaletteScope::Simulation,
+                // The library has no command group of its own — its verbs
+                // live where the definitions are consumed. A scope row that
+                // filtered to nothing would be a promise with no rows behind
+                // it, so the workspace shares the studio's.
+                crate::workbench::state::Workspace::Stimulus => PaletteScope::Simulation,
                 crate::workbench::state::Workspace::Results => PaletteScope::Results,
                 crate::workbench::state::Workspace::Verify => PaletteScope::Verification,
                 crate::workbench::state::Workspace::Models => PaletteScope::Models,

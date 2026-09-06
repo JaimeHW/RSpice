@@ -236,7 +236,7 @@ struct MobileNavigationAction {
     detail: &'static str,
 }
 
-const WORKSPACE_ACTIONS: [MobileNavigationAction; 7] = [
+const WORKSPACE_ACTIONS: [MobileNavigationAction; 8] = [
     MobileNavigationAction {
         command: Command::OpenWorkspace(Workspace::Project),
         icon: WorkbenchIcon::Project,
@@ -254,6 +254,12 @@ const WORKSPACE_ACTIONS: [MobileNavigationAction; 7] = [
         icon: WorkbenchIcon::Simulate,
         label: "Simulation",
         detail: "Setup, runs and resources",
+    },
+    MobileNavigationAction {
+        command: Command::OpenWorkspace(Workspace::Stimulus),
+        icon: WorkbenchIcon::Source,
+        label: "Stimulus Library",
+        detail: "Source waveform definitions this project owns",
     },
     MobileNavigationAction {
         command: Command::OpenWorkspace(Workspace::Results),
@@ -900,7 +906,7 @@ mod tests {
     #[test]
     fn mobile_navigation_grid_height_tracks_its_real_rows() {
         assert_eq!(mobile_navigation_natural_height(2), 757.0);
-        assert_eq!(mobile_navigation_natural_height(1), 1_157.0);
+        assert_eq!(mobile_navigation_natural_height(1), 1_237.0);
         assert_eq!(MOBILE_NAV_MAX_WIDTH, 700.0);
         assert_eq!(MOBILE_NAV_GUTTER, 9.0);
         assert_eq!(MOBILE_NAV_CARD_HEIGHT, 72.0);

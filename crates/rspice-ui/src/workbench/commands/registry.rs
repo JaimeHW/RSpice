@@ -364,6 +364,11 @@ const MODELS_WORKSPACE: &[ShortcutBinding] =
     &[primary(chord(Key::Num6, false, true, false, "Alt+6"), ALL)];
 const AUTOMATION_WORKSPACE: &[ShortcutBinding] =
     &[primary(chord(Key::Num7, false, true, false, "Alt+7"), ALL)];
+/// The library reads fourth on the rail and eighth on the keyboard. Alt+8 is
+/// the mockup's chord for it, and taking Alt+4 for rail order would have moved
+/// the four chords under it — a shortcut every reader has already learned.
+const STIMULUS_WORKSPACE: &[ShortcutBinding] =
+    &[primary(chord(Key::Num8, false, true, false, "Alt+8"), ALL)];
 const PLACE_INSTANCE: &[ShortcutBinding] =
     &[primary(chord(Key::I, false, false, true, "Shift+I"), ALL)];
 const PLACE_WIRE: &[ShortcutBinding] = &[primary(chord(Key::W, false, false, false, "W"), ALL)];
@@ -745,6 +750,7 @@ impl Command {
             Self::OpenWorkspace(Workspace::Results) => RESULTS_WORKSPACE,
             Self::OpenWorkspace(Workspace::Verify) => VERIFICATION_WORKSPACE,
             Self::OpenWorkspace(Workspace::Models) => MODELS_WORKSPACE,
+            Self::OpenWorkspace(Workspace::Stimulus) => STIMULUS_WORKSPACE,
             Self::OpenWorkspace(Workspace::Netlist) => AUTOMATION_WORKSPACE,
             Self::ProjectLauncher => PROJECT_LAUNCHER,
             Self::NewProject => NEW_PROJECT,
@@ -1291,6 +1297,17 @@ mod tests {
             assert_eq!(
                 Command::OpenWorkspace(Workspace::Verify).default_shortcut_label(platform),
                 "Alt+5"
+            );
+            // The eighth workspace reads fourth on the rail, so the chord it
+            // would have taken there belongs to Results. Alt+8 has to be
+            // unclaimed for that to hold.
+            assert_eq!(
+                binding_owners(STIMULUS_WORKSPACE[0].chord, platform),
+                vec![Command::OpenWorkspace(Workspace::Stimulus)]
+            );
+            assert_eq!(
+                Command::OpenWorkspace(Workspace::Stimulus).default_shortcut_label(platform),
+                "Alt+8"
             );
         }
 

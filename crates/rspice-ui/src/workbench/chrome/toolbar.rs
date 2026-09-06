@@ -457,6 +457,10 @@ fn workspace_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         }
         Workspace::Design => design_tools(ui, app, layout),
         Workspace::Simulate => simulation_tools(ui, app, layout),
+        // The library's own verbs — new, duplicate, place, validate — belong
+        // to the instrument that edits a definition, and that is not built.
+        // A toolbar of buttons that refuse would be worse than none.
+        Workspace::Stimulus => {}
         Workspace::Results => results_tools(ui, app, layout),
         Workspace::Verify => verification_tools(ui, app, layout),
         Workspace::Models => models_tools(ui, app, layout),

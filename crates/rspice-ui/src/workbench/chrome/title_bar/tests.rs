@@ -808,6 +808,7 @@ fn simulate_menu_puts_the_plan_manager_above_the_actions_on_the_active_plan() {
             "Jobs, targets and run history\u{2026}",
             "Preflight checks",
             "Simulation Studio",
+            "Stimulus Library",
             "Global solver & convergence",
             "Open generated netlist",
             "Edit specification matrix",

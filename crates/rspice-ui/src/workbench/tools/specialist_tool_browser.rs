@@ -992,6 +992,7 @@ fn owner_icon(owner: Workspace) -> WorkbenchIcon {
         Workspace::Project => WorkbenchIcon::Project,
         Workspace::Design => WorkbenchIcon::Design,
         Workspace::Simulate => WorkbenchIcon::Simulate,
+        Workspace::Stimulus => WorkbenchIcon::Source,
         Workspace::Results => WorkbenchIcon::Results,
         Workspace::Verify => WorkbenchIcon::Verify,
         Workspace::Models => WorkbenchIcon::Models,

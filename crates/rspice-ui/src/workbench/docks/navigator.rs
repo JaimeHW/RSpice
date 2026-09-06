@@ -6,6 +6,7 @@ mod symbol;
 mod netlist;
 mod rail;
 mod source_bundle;
+mod stimulus;
 
 use netlist::*;
 
@@ -171,6 +172,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             match workspace {
                 Workspace::Project => project(ui, app),
                 Workspace::Simulate => simulate(ui, app),
+                Workspace::Stimulus => stimulus::show(ui, &mut app.state),
                 Workspace::Verify => {
                     let scroll_bar_visibility =
                         if verification_navigator_requires_scroll(ui.available_height()) {
@@ -293,6 +295,7 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
         },
         Workspace::Design => "Design navigator",
         Workspace::Simulate => "Simulation Studio",
+        Workspace::Stimulus => "Library browser",
         Workspace::Results => "Data browser",
         Workspace::Verify => "Verification flows",
         Workspace::Models => "Library browser",
@@ -349,6 +352,7 @@ fn workspace_search(ui: &mut Ui, app: &mut RSpiceApp, workspace: Workspace) -> b
         },
         Workspace::Design => "Find instance, net or port…",
         Workspace::Simulate => "Filter setup…",
+        Workspace::Stimulus => "Search definitions…",
         Workspace::Results => "Find signal, expression or run…",
         Workspace::Verify => "Filter flows, specs or samples…",
         Workspace::Models => "Search model, device or library…",

@@ -1570,6 +1570,7 @@ impl RevertReviewToken {
             }
             ProjectDocumentId::ModelCatalog => "Model catalog".to_owned(),
             ProjectDocumentId::NetlistSource => "Netlist source".to_owned(),
+            ProjectDocumentId::StimulusLibrary => "Stimulus library".to_owned(),
         }
     }
 }
@@ -1705,6 +1706,13 @@ fn revert_document_in_place(
         }
         ProjectDocumentId::VerificationSpecifications => {
             state.workspace.specs = baseline.workspace.specs;
+        }
+        ProjectDocumentId::StimulusLibrary => {
+            state.workspace.stimulus_library = baseline.workspace.stimulus_library;
+            // The reverted definitions may no longer hold the one the library
+            // browser was reading, and a selection that resolves to nothing
+            // leaves the workspace on an empty stage with a name in the dock.
+            state.workbench.selected_stimulus_definition = None;
         }
         ProjectDocumentId::NetlistSource => {
             state.workspace.netlist_source = baseline.workspace.netlist_source;
@@ -1938,6 +1946,9 @@ fn overlay_document(
         }
         ProjectDocumentId::VerificationSpecifications => {
             target.workspace.specs = working.workspace.specs.clone();
+        }
+        ProjectDocumentId::StimulusLibrary => {
+            target.workspace.stimulus_library = working.workspace.stimulus_library.clone();
         }
         ProjectDocumentId::NetlistSource => {
             target.workspace.netlist_source = working.workspace.netlist_source.clone();

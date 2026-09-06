@@ -2,8 +2,10 @@
 
 mod design;
 mod executed_deck;
+mod models;
 mod result_authority;
 mod simulation;
+mod stimulus;
 mod symbol;
 
 use egui::{Align2, Color32, Pos2, Rect, Response, ScrollArea, Sense, Stroke, Ui, Vec2};
@@ -430,9 +432,10 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                 }
                 Workspace::Design => design::show(ui, app),
                 Workspace::Simulate => simulation::simulate(ui, app),
+                Workspace::Stimulus => stimulus::show(ui, &app.state),
                 Workspace::Results => results(ui, app),
                 Workspace::Verify => verify(ui, app),
-                Workspace::Models => models(ui, app),
+                Workspace::Models => models::show(ui, app),
                 Workspace::Netlist => code_workspace_inspector(ui, app),
             }
         }
@@ -2542,68 +2545,6 @@ fn wilson_interval_95(successes: usize, total: usize) -> Option<(f64, f64)> {
     let center = (p + z2 / (2.0 * n)) / denominator;
     let half = z * ((p * (1.0 - p) / n + z2 / (4.0 * n * n)).sqrt()) / denominator;
     Some(((center - half).max(0.0), (center + half).min(1.0)))
-}
-
-fn models(ui: &mut Ui, app: &mut RSpiceApp) {
-    section_header(ui, "Model binding", None);
-    property_row(
-        ui,
-        "Library",
-        app.state
-            .model_library_manager
-            .selected_library
-            .as_deref()
-            .unwrap_or("None"),
-    );
-    let selected_library = app.state.model_library_manager.current_library().cloned();
-    if let Some(library) = selected_library {
-        property_row(
-            ui,
-            "PDK",
-            if library.pdk_name.is_empty() {
-                "Unspecified"
-            } else {
-                &library.pdk_name
-            },
-        );
-        property_row(
-            ui,
-            "Technology",
-            if library.technology_node.is_empty() {
-                "Unspecified"
-            } else {
-                &library.technology_node
-            },
-        );
-        property_row(
-            ui,
-            "Version",
-            if library.version.is_empty() {
-                "Unspecified"
-            } else {
-                &library.version
-            },
-        );
-        property_row(ui, "Models", &library.model_count().to_string());
-        property_row(ui, "Corners", &library.corner_count().to_string());
-        property_row(
-            ui,
-            "Selected corner",
-            library.selected_corner.as_deref().unwrap_or("None"),
-        );
-        if let Some(model_name) = &app.state.workbench.selected_model
-            && let Some(model) = library.models.get(model_name)
-        {
-            section_header(ui, "Selected model", None);
-            property_row(ui, "Name", &model.name);
-            property_row(ui, "Type", &format!("{:?}", model.model_type));
-            property_row(ui, "Level", &format!("{:?}", model.level));
-            property_row(ui, "Parameters", &model.parameters.len().to_string());
-            if let Some(vdd) = model.vdd {
-                property_row(ui, "Nominal VDD", &format!("{vdd:.6} V"));
-            }
-        }
-    }
 }
 
 fn code_workspace_inspector(ui: &mut Ui, app: &mut RSpiceApp) {

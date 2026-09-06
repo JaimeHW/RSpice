@@ -197,6 +197,7 @@ fn workspace_owner_id(workspace: Workspace) -> &'static str {
         Workspace::Project => "project",
         Workspace::Design => "design",
         Workspace::Simulate => "simulate",
+        Workspace::Stimulus => "stimulus",
         Workspace::Results => "results",
         Workspace::Verify => "verify",
         Workspace::Models => "models",

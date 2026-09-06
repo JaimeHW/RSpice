@@ -880,6 +880,29 @@ define_messages! {
     NetlistHoverDefinedLine => "defined line {line}",
     NetlistHoverUndefinedParameter => "{name} has no definition visible here",
     NetlistHoverNotEvaluable => "not evaluable here: {reason}",
+    StimulusLibraryEmpty => "No stimulus definitions",
+    StimulusLibraryEmptyDetail => "This project has no stimulus definitions yet. Definitions are authored here or saved from a placed source's properties.",
+    StimulusNoSelection => "No definition selected",
+    StimulusNoSelectionDetail => "Choose a definition in the library browser to read what it holds.",
+    StimulusLibrarySection => "Stimulus library",
+    StimulusDefinitionSection => "Definition",
+    StimulusSavedRevision => "saved · r{revision}",
+    StimulusFieldDefinitions => "Definitions",
+    StimulusFieldSelection => "Selection",
+    StimulusFieldName => "Name",
+    StimulusFieldFamily => "Family",
+    StimulusFieldQuantity => "Quantity",
+    StimulusFieldValue => "Value",
+    StimulusFieldParameters => "Parameters",
+    StimulusFieldPurpose => "Purpose",
+    StimulusFieldRetainedFile => "Retained file",
+    StimulusNone => "none",
+    StimulusValueUnset => "not set",
+    StimulusPurposeUnstated => "not stated",
+    StimulusRetainedFile => "{name} · {bytes} B retained",
+    StimulusBrowserEmpty => "This project has no stimulus definitions",
+    StimulusBrowserNoMatch => "No definition matches this filter",
+    StimulusBrowserRowMeta => "{family} · r{revision}",
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1080,13 +1103,14 @@ mod tests {
     /// paints, quietly disagreeing with the screen.
     ///
     /// Families join this list as their surface is wired.
-    const WIRED_FAMILIES: [&str; 6] = [
+    const WIRED_FAMILIES: [&str; 7] = [
         "CodeNavigator",
         "CodeSearch",
         "CodeSource",
         "CodeSymbolKind",
         "CodeTools",
         "NetlistNavigator",
+        "Stimulus",
     ];
 
     #[test]

@@ -345,6 +345,9 @@ impl Command {
             Self::OpenWorkspace(Workspace::Simulate) => {
                 spec("simulate", "Open simulation workspace", "Navigate")
             }
+            Self::OpenWorkspace(Workspace::Stimulus) => {
+                spec("stimulus", "Open Stimulus Library", "Navigate")
+            }
             Self::OpenWorkspace(Workspace::Results) => {
                 spec("results", "Open results workspace", "Navigate")
             }
@@ -1090,6 +1093,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::OpenWorkspace(Workspace::Project),
     Command::OpenWorkspace(Workspace::Design),
     Command::OpenWorkspace(Workspace::Simulate),
+    Command::OpenWorkspace(Workspace::Stimulus),
     Command::OpenWorkspace(Workspace::Results),
     Command::OpenWorkspace(Workspace::Verify),
     Command::OpenWorkspace(Workspace::Models),

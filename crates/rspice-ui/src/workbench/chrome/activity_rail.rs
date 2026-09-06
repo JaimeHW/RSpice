@@ -178,6 +178,7 @@ const fn activity_workspace_label(workspace: Workspace) -> &'static str {
         // dock is titled "Simulation Studio", and every other entry here names
         // a whole workspace rather than one page inside it.
         Workspace::Simulate => "Simulation Studio",
+        Workspace::Stimulus => "Stimulus Library",
         Workspace::Results => "Results",
         Workspace::Verify => "Verification",
         Workspace::Models => "Models and PDKs",
@@ -192,6 +193,7 @@ pub const fn workspace_icon(workspace: Workspace) -> WorkbenchIcon {
         Workspace::Project => WorkbenchIcon::Project,
         Workspace::Design => WorkbenchIcon::Design,
         Workspace::Simulate => WorkbenchIcon::Simulate,
+        Workspace::Stimulus => WorkbenchIcon::Source,
         Workspace::Results => WorkbenchIcon::Results,
         Workspace::Verify => WorkbenchIcon::Verify,
         Workspace::Models => WorkbenchIcon::Models,
@@ -232,6 +234,10 @@ mod tests {
         assert_eq!(
             activity_workspace_label(Workspace::Simulate),
             "Simulation Studio"
+        );
+        assert_eq!(
+            activity_workspace_label(Workspace::Stimulus),
+            "Stimulus Library"
         );
         assert_eq!(activity_workspace_label(Workspace::Results), "Results");
         assert_eq!(activity_workspace_label(Workspace::Verify), "Verification");

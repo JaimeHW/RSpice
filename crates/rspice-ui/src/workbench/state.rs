@@ -43,13 +43,18 @@ const NAVIGATION_SCHEMA_VERSION: u8 = 1;
 /// those values must not distort the redesigned schematic workspace forever.
 const LAYOUT_SCHEMA_VERSION: u8 = 1;
 
-/// The seven canonical workspaces from the product contract.
+/// The eight canonical workspaces from the product contract.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub enum Workspace {
     Project,
     #[default]
     Design,
     Simulate,
+    /// The stimulus definitions this project owns. It reads beside the studio
+    /// that consumes them rather than at the end of the rail, which is where
+    /// its chord — kept at Alt+8 so the seven older chords do not move — would
+    /// otherwise put it.
+    Stimulus,
     Results,
     Verify,
     Models,
@@ -57,10 +62,11 @@ pub enum Workspace {
 }
 
 impl Workspace {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::Project,
         Self::Design,
         Self::Simulate,
+        Self::Stimulus,
         Self::Results,
         Self::Verify,
         Self::Models,
@@ -75,6 +81,7 @@ impl Workspace {
             Self::Project => "Project",
             Self::Design => "Design",
             Self::Simulate => "Simulate",
+            Self::Stimulus => "Stimulus Library",
             Self::Results => "Results",
             Self::Verify => "Verify",
             Self::Models => "Models",
@@ -87,6 +94,10 @@ impl Workspace {
             Self::Project => "Project",
             Self::Design => "Design",
             Self::Simulate => "Simulation Studio",
+            // The product name is already the owner's name, exactly as the
+            // Netlist & Script Editor's is. Coining a second spelling here
+            // would give one thing two names in one shell.
+            Self::Stimulus => "Stimulus Library",
             Self::Results => "Result document",
             Self::Verify => "Verification evidence",
             Self::Models => "Model binding",
@@ -99,6 +110,7 @@ impl Workspace {
             Self::Project => "Project details",
             Self::Design => "Inspector",
             Self::Simulate => "Analysis inspector",
+            Self::Stimulus => "Definition details",
             Self::Results => "Data inspector",
             Self::Verify => "Evidence inspector",
             Self::Models => "Model details",
@@ -156,7 +168,7 @@ impl WorkspaceLayoutState {
     }
 }
 
-/// Stable identity of one document presentation in the seven workspaces.
+/// Stable identity of one document presentation in the canonical workspaces.
 ///
 /// These IDs point only at authoritative project objects. Closing a tab
 /// removes its presentation from the local session; it never deletes the
@@ -1340,6 +1352,12 @@ pub struct WorkbenchState {
     /// Selected model name within the currently selected model library.
     #[serde(default)]
     pub selected_model: Option<String>,
+    /// Which stimulus definition the library workspace is reading, by exact
+    /// name. Runtime-only: a definition can be renamed or deleted by another
+    /// session of the same project, and restoring a name that no longer
+    /// resolves would open the workspace on a definition nobody can see.
+    #[serde(skip)]
+    pub selected_stimulus_definition: Option<String>,
     /// Where each workspace's navigator tree is unfolded, and what its filter
     /// box narrows the listing to. Runtime-only.
     #[serde(skip)]
@@ -1530,6 +1548,7 @@ impl Default for WorkbenchState {
             specification_filter: String::new(),
             specification_evidence_filter: SpecificationEvidenceFilter::default(),
             selected_model: None,
+            selected_stimulus_definition: None,
             navigator_trees: NavigatorTrees::default(),
             netlist_outline_collapsed: std::collections::BTreeSet::new(),
             command_query: String::new(),

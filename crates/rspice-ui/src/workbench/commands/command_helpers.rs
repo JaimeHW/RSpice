@@ -245,6 +245,11 @@ pub(crate) fn reset_active_view(app: &mut RSpiceApp) {
             app.state.workbench.specification_filter.clear();
             app.state.workbench.specification_evidence_filter = SpecificationEvidenceFilter::All;
         }
+        // Which definition the library is reading is the whole of this
+        // workspace's view state; the definitions themselves are the project.
+        Workspace::Stimulus => {
+            app.state.workbench.selected_stimulus_definition = None;
+        }
         Workspace::Results => {
             let viewer = app.state.ui.results.viewer;
             app.state

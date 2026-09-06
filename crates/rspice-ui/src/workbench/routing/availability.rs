@@ -90,6 +90,7 @@ pub const fn surface_availability(surface: SurfaceId) -> SurfaceExecutionAvailab
         SurfaceId::Project
         | SurfaceId::Design
         | SurfaceId::Simulate
+        | SurfaceId::Stimulus
         | SurfaceId::Results
         | SurfaceId::Verify
         | SurfaceId::Models
@@ -226,6 +227,7 @@ mod tests {
                 SurfaceId::Project,
                 SurfaceId::Design,
                 SurfaceId::Simulate,
+                SurfaceId::Stimulus,
                 SurfaceId::Results,
                 SurfaceId::Verify,
                 SurfaceId::Models,

@@ -302,6 +302,12 @@ fn available_documents_for_workspace(
             }
             documents
         }
+        // The library is one project-owned record, and the shell has no
+        // document identity for it yet — the instrument that edits a
+        // definition is what will open one. Naming a tab here before that
+        // exists would put a document in the window session that nothing can
+        // detach, close, or save.
+        Workspace::Stimulus => Vec::new(),
         Workspace::Results => state
             .simulation
             .runs
