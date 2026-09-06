@@ -292,6 +292,11 @@ impl WaveformReadouts {
 ///   seeded PWL sample series when the transient's circuit is built, so it is
 ///   not a function of time the spec can be asked for, which is the same reason
 ///   the operating point sees zero from it.
+/// - `TRRANDOM` is the same class and evaluates to exactly `PARAM2`
+///   (`core:circuit/storage/sources.rs:1385`). It is expanded by the same pass
+///   as TRNOISE (`core:engine/transient/noise.rs` `replace_transient_random`),
+///   and its sample count is a function of the transient's stop time, so the
+///   flat line the spec does return is the offset rather than the draw.
 pub(crate) fn preview_defect(spec: &SourceSpec) -> Option<String> {
     match transient_part(spec) {
         SourceSpec::PwlFile { path, .. } if !std::path::Path::new(path).is_file() => Some(format!(
@@ -301,6 +306,12 @@ pub(crate) fn preview_defect(spec: &SourceSpec) -> Option<String> {
             "A noise source has no waveform until a run builds it: the engine expands TRNOISE \
              into a seeded sample train when the transient starts, and the source contributes \
              exactly its DC level until then."
+                .to_owned(),
+        ),
+        SourceSpec::TrRandom { .. } => Some(
+            "A random source has no waveform until a run builds it: the engine draws TRRANDOM's \
+             sample train against the transient's own stop time and seed, and the spec alone \
+             evaluates to exactly PARAM2 at every time."
                 .to_owned(),
         ),
         _ => None,

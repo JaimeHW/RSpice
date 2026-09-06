@@ -306,6 +306,26 @@ fn a_random_source_writes_the_card_the_engine_parses_field_for_field() {
     assert_eq!(parameter2, 0.0);
 }
 
+/// The same class as TRNOISE, and for the same reason: the draw is expanded
+/// against the transient's own stop time and seed, so the spec alone evaluates
+/// to a flat PARAM2 that would read as a waveform if the card drew it.
+#[test]
+fn a_random_source_says_it_has_no_waveform_until_a_run_builds_one() {
+    let mut source = Component::new(1, ComponentType::CurrentSourceRandom, Point::origin());
+    source.name = "I1".to_owned();
+    source.params = "type=uniform ts=1u param1=1m param2=2m".to_owned();
+
+    let spec = source_spec(&source).expect("spec");
+    let defect = preview_defect(&spec).expect("a stated defect");
+    assert!(defect.contains("TRRANDOM"), "{defect}");
+
+    let samples = evaluate_waveform(&spec, timing(1e-3).window(16), 1e-6, 1e-3, PREVIEW_DIALECT);
+    assert!(
+        samples.iter().all(|(_, value)| *value == 2e-3),
+        "the defect is stated because the evaluator returns PARAM2: {samples:?}"
+    );
+}
+
 /// A missing file the generator *can* check is refused before there is a spec
 /// at all, in the generator's own words, which name the component and the path
 /// the user typed.

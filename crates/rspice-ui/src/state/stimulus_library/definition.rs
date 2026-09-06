@@ -8,13 +8,11 @@
 //! copied onto cannot describe different cards.
 //!
 //! The family is the component type. RSpice spells a waveform shape as a
-//! `ComponentType` (22 of them: 11 shapes × 2 quantities), and a definition
+//! `ComponentType` (24 of them: 12 shapes × 2 quantities), and a definition
 //! that named a shape the schematic cannot place would be a definition nothing
-//! could adopt, so [`StimulusDefinition::new`] refuses every other type.
-//! `TRRANDOM` is therefore absent from [`StimulusFamily`]: the engine has
-//! `SourceSpec::TrRandom`, the schematic has no component type for it, and a
-//! definition that can be authored but neither placed nor emitted is half a
-//! feature rather than a small one.
+//! could adopt, so [`StimulusDefinition::new`] refuses every other type. That
+//! is why [`StimulusFamily`] is exactly the engine's independent-source
+//! families and nothing more: each one is placeable, so each one is adoptable.
 
 use serde::{Deserialize, Serialize};
 
@@ -26,7 +24,7 @@ use crate::state::{ComponentType, format_params_string, parse_params_string};
 pub enum StimulusDefinitionError {
     /// The name is not a single SPICE identifier.
     Name(String),
-    /// The component type is not one of the 22 independent-source types.
+    /// The component type is not one of the 24 independent-source types.
     NotASource(ComponentType),
     /// The library already holds a definition under this name.
     DuplicateName(String),
@@ -88,7 +86,8 @@ impl StimulusKind {
             | ComponentType::VoltageSourceSffm
             | ComponentType::VoltageSourceAm
             | ComponentType::VoltageSourcePat
-            | ComponentType::VoltageSourceNoise => Self::Voltage,
+            | ComponentType::VoltageSourceNoise
+            | ComponentType::VoltageSourceRandom => Self::Voltage,
             _ => Self::Current,
         })
     }
@@ -140,11 +139,13 @@ pub enum StimulusFamily {
     Pat,
     /// `DC <offset> TRNOISE(NA NT NALPHA NAMP RTSAM RTSCAPT RTSEMT)`.
     Trnoise,
+    /// `TRRANDOM(TYPE TS TD PARAM1 PARAM2)`.
+    Trrandom,
 }
 
 impl StimulusFamily {
     /// Every family a definition may name, in the order the library lists them.
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::Dc,
         Self::Ac,
         Self::Pulse,
@@ -156,6 +157,7 @@ impl StimulusFamily {
         Self::Am,
         Self::Pat,
         Self::Trnoise,
+        Self::Trrandom,
     ];
 
     /// The family of an independent-source component type, or `None` for
@@ -176,6 +178,9 @@ impl StimulusFamily {
             ComponentType::VoltageSourceAm | ComponentType::CurrentSourceAm => Self::Am,
             ComponentType::VoltageSourcePat | ComponentType::CurrentSourcePat => Self::Pat,
             ComponentType::VoltageSourceNoise | ComponentType::CurrentSourceNoise => Self::Trnoise,
+            ComponentType::VoltageSourceRandom | ComponentType::CurrentSourceRandom => {
+                Self::Trrandom
+            }
             _ => return None,
         })
     }
@@ -206,6 +211,8 @@ impl StimulusFamily {
             (Self::Pat, StimulusKind::Current) => ComponentType::CurrentSourcePat,
             (Self::Trnoise, StimulusKind::Voltage) => ComponentType::VoltageSourceNoise,
             (Self::Trnoise, StimulusKind::Current) => ComponentType::CurrentSourceNoise,
+            (Self::Trrandom, StimulusKind::Voltage) => ComponentType::VoltageSourceRandom,
+            (Self::Trrandom, StimulusKind::Current) => ComponentType::CurrentSourceRandom,
         }
     }
 
@@ -224,6 +231,7 @@ impl StimulusFamily {
             Self::Am => "AM",
             Self::Pat => "PAT",
             Self::Trnoise => "TRNOISE",
+            Self::Trrandom => "TRRANDOM",
         }
     }
 
@@ -242,6 +250,7 @@ impl StimulusFamily {
             Self::Am => "am",
             Self::Pat => "pat",
             Self::Trnoise => "trnoise",
+            Self::Trrandom => "trrandom",
         }
     }
 }
@@ -318,7 +327,7 @@ impl StimulusDefinition {
     /// A fresh `r1` definition of one placeable family.
     ///
     /// Refuses a name that is not a single SPICE identifier and a component
-    /// type that is not one of the 22 independent sources; uniqueness is the
+    /// type that is not one of the 24 independent sources; uniqueness is the
     /// library's to enforce, because only the library knows what it holds.
     pub fn new(
         name: impl Into<String>,
@@ -414,8 +423,9 @@ impl StimulusDefinition {
     /// The same definition on the other quantity, keeping its shape.
     ///
     /// Every waveform field but the first positional keeps its spelling across
-    /// the two kinds — the netlister's `SFFM`, `AM`, `PAT` and `TRNOISE` lists
-    /// are shared outright — so a kind switch is a retype rather than a reset.
+    /// the two kinds — the netlister's `SFFM`, `AM`, `PAT`, `TRNOISE` and
+    /// `TRRANDOM` lists are shared outright — so a kind switch is a retype
+    /// rather than a reset.
     /// The primary value moves with the card because it is the same number in a
     /// different unit, and the author is the one who decides whether 5 V should
     /// have become 5 A.
@@ -520,7 +530,7 @@ mod tests {
         seen.dedup();
         assert_eq!(
             seen.len(),
-            22,
+            24,
             "the definition's family set is exactly the placeable source types"
         );
     }
@@ -569,6 +579,33 @@ mod tests {
         assert_eq!(sin.params, "");
         assert_eq!(sin.name(), "clk");
         assert_eq!(sin.revision(), pulse.revision());
+    }
+
+    /// TRRANDOM is a library family like any other: a definition can be
+    /// switched into it and back out, and the round trip leaves the kind and
+    /// the name where they were. It used to be the one engine source shape the
+    /// library could not name at all.
+    #[test]
+    fn a_definition_switches_into_trrandom_and_back_out_again() {
+        let mut noise =
+            StimulusDefinition::new("dither", ComponentType::CurrentSourceNoise).expect("ok");
+        noise.params = "na=1n nt=1u".to_owned();
+
+        let random = noise.with_family(StimulusFamily::Trrandom);
+        assert_eq!(random.component_type(), ComponentType::CurrentSourceRandom);
+        assert_eq!(random.family(), StimulusFamily::Trrandom);
+        assert_eq!(random.kind(), StimulusKind::Current);
+        assert_eq!(random.family().label(), "TRRANDOM");
+        assert_eq!(random.params, "");
+        assert_eq!(random.name(), "dither");
+
+        let voltage = random.with_kind(StimulusKind::Voltage);
+        assert_eq!(voltage.component_type(), ComponentType::VoltageSourceRandom);
+        assert_eq!(voltage.family(), StimulusFamily::Trrandom);
+
+        let back = random.with_family(StimulusFamily::Trnoise);
+        assert_eq!(back.component_type(), ComponentType::CurrentSourceNoise);
+        assert_eq!(back.kind(), StimulusKind::Current);
     }
 
     #[test]
