@@ -11505,36 +11505,101 @@ mod tests {
         assert!(restored.runtime_veriloga_instance_states.is_empty());
     }
 
+    /// Every checkpoint format that carries a runtime Verilog-A section
+    /// accepts exactly one state version, and refuses either neighbour.
+    ///
+    /// The second column is that version, written out per format rather than
+    /// read back from the parser's ladder: the ladder is the contract under
+    /// test, and a table derived from it would agree with a renumbering that
+    /// moved a shipped format's contract as readily as with a correct one.
+    /// The table is checked below for one row per format from the first that
+    /// carries the section through the current one, so a format bump that
+    /// leaves the new format unpinned fails here rather than going untested —
+    /// which is what happened to `31`, written when `31` was current and left
+    /// asserting current-format behaviour after two renumberings moved it into
+    /// the legacy ladder.
+    #[cfg(feature = "veriloga")]
+    const RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS: [(u32, u32); 18] = [
+        (17, 1),
+        (18, 1),
+        (19, 1),
+        (20, 1),
+        (21, 1),
+        (22, 1),
+        (23, 2),
+        (24, 3),
+        (25, 3),
+        (26, 3),
+        (27, 4),
+        (28, 4),
+        (29, 5),
+        (30, 6),
+        (31, 7),
+        (32, 7),
+        (33, 7),
+        (34, 8),
+    ];
+
     #[cfg(feature = "veriloga")]
     #[test]
     fn runtime_veriloga_checkpoint_versions_cannot_cross_history_contracts() {
-        let checkpoint = sample_without_generated_veriloga_state();
-        for (outer_version, inner_version, expected) in [
-            (23, 1, "expected legacy version 2"),
-            (23, 3, "expected legacy version 2"),
-            (24, 2, "expected legacy version 3"),
-            (26, 4, "expected legacy version 3"),
-            (27, 3, "expected legacy version 4"),
-            (27, 5, "expected legacy version 4"),
-            (28, 5, "expected legacy version 4"),
-            (29, 4, "expected legacy version 5"),
-            (29, 6, "expected legacy version 5"),
-            (30, 5, "expected legacy version 6"),
-            (30, 7, "expected legacy version 6"),
-            (31, 6, "unsupported runtime Verilog-A state version 6"),
-        ] {
-            let words = runtime_veriloga_idtmod_words(inner_version, checkpoint.time);
-            let fixture = replace_empty_runtime_veriloga_tail(
-                legacy_text(&checkpoint, outer_version),
-                inner_version,
-                &words,
+        let contracts = RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS;
+        for (index, (outer_version, required_version)) in contracts.iter().enumerate() {
+            assert_eq!(
+                *outer_version,
+                RUNTIME_VERILOGA_FORMAT_VERSION + index as u32,
+                "the table states one row per checkpoint format, in order"
             );
-            let error = TransientCheckpoint::from_text(&fixture)
-                .expect_err("outer and inner history contracts must agree");
             assert!(
-                error.contains(expected),
-                "outer={outer_version} inner={inner_version}: unexpected error: {error}"
+                *required_version >= 1
+                    && *required_version
+                        <= rspice_veriloga::device::RUNTIME_CHECKPOINT_STATE_VERSION,
+                "format {outer_version} cannot require a state version that never existed"
             );
+        }
+        let (last_format, last_version) = contracts[contracts.len() - 1];
+        assert_eq!(
+            last_format, FORMAT_VERSION,
+            "a checkpoint format was added without a row pinning the runtime Verilog-A \
+             state version it accepts"
+        );
+        assert_eq!(
+            last_version,
+            rspice_veriloga::device::RUNTIME_CHECKPOINT_STATE_VERSION,
+            "the current format accepts the current runtime Verilog-A state version"
+        );
+
+        let checkpoint = sample_without_generated_veriloga_state();
+        for (outer_version, required_version) in contracts {
+            for inner_version in [required_version - 1, required_version + 1] {
+                // The current format has no legacy contract to disagree with,
+                // so the refusal comes from the decoder's own version gate;
+                // every older format is refused by the ladder that maps it to
+                // the one legacy shape it can hold.
+                let expected = if outer_version == FORMAT_VERSION {
+                    format!(
+                        "unsupported runtime Verilog-A state version {inner_version}; \
+                         expected version {required_version}"
+                    )
+                } else {
+                    format!(
+                        "uses state version {inner_version}, \
+                         expected legacy version {required_version}"
+                    )
+                };
+                let words = runtime_veriloga_idtmod_words(inner_version, checkpoint.time);
+                let fixture = replace_empty_runtime_veriloga_tail(
+                    legacy_text(&checkpoint, outer_version),
+                    inner_version,
+                    &words,
+                );
+                let error = TransientCheckpoint::from_text(&fixture)
+                    .expect_err("outer and inner history contracts must agree");
+                assert!(
+                    error.contains(&expected),
+                    "outer={outer_version} inner={inner_version}: unexpected error: {error}"
+                );
+            }
         }
     }
 
