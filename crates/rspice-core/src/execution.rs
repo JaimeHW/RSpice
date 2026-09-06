@@ -45,8 +45,8 @@ pub use capability::{
     analysis_result_capability, analysis_result_kind, signal_capability,
 };
 pub use event_bus::{
-    BusMemberHistory, BusReassemblyTooLarge, MAX_BUS_EVENT_CELLS, bus_events, bus_value_at,
-    split_bus_notation,
+    BusEventTable, BusMemberHistory, BusReassemblyTooLarge, MAX_BUS_EVENT_CELLS, bus_events,
+    bus_value_at, split_bus_notation,
 };
 pub use event_export::{
     EventPlotError, RawEventTraces, decode_event_plots, transient_bus_plots, transient_event_plots,

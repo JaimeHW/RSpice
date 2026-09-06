@@ -32,7 +32,6 @@ use rspice_core::SimulationError;
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::engine::{DigitalBusDeclaration, DigitalTrace};
 use rspice_core::execution::{BusMemberHistory, bus_events, event_code_to_vcd_bit};
-use rspice_core::xspice::DigitalValue;
 
 /// One declared digital bus: the word, and the conductors that carry it.
 ///
@@ -317,7 +316,7 @@ mod tests {
     use super::*;
     use rspice_core::abort_signal::NoAbort;
     use rspice_core::engine::{DigitalBusSource, DigitalTracePoint};
-    use rspice_core::xspice::{DigitalState, DigitalStrength};
+    use rspice_core::xspice::{DigitalState, DigitalStrength, DigitalValue};
 
     /// The accessor without its interpreter: the same resolution, the same
     /// bound and the same reassembly, so a test exercises the shipped path.

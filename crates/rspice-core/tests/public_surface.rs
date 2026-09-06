@@ -589,7 +589,16 @@ use rspice_core::analysis::harmonic_balance::{
 // `data [7:0]` names the vector variable a dump declares, and the bare name is
 // not one of the variable's own spellings. A second parser in the CLI would be
 // a second grammar, and the two would agree until the day they did not.
-const MAX_PUBLIC_ITEMS: usize = 4983;
+// 2026-09-06, +1 deliberate (4,983 -> 4,984): `BusEventTable` in
+// `execution/event_bus.rs`, the reassembled timeline `bus_events` returns.
+//
+// It is named rather than spelled inline because `clippy::type_complexity`
+// refuses the spelling once the function became fallible, and a private alias
+// in a public signature would show every caller a name it cannot follow. Its
+// callers are `bus_events` itself and every consumer that binds the result:
+// the VCD projection, the rawfile bus plots, `rspice-python`'s accessor and
+// `rspice-wasm`'s handle.
+const MAX_PUBLIC_ITEMS: usize = 4984;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

@@ -74,6 +74,14 @@ pub struct BusReassemblyTooLarge {
     pub cells: usize,
 }
 
+/// One bus's whole timeline: every time a member changed, with the code each
+/// member held at it.
+///
+/// The rows are in ascending time order with no duplicate time, and every row
+/// has one entry per member in declaration order — declared MSB first. An
+/// entry is `None` for a member the run had not stated by that time.
+pub type BusEventTable = Vec<(Value, Vec<Option<u8>>)>;
+
 /// One bus member's history, as the times and event codes it was recorded at.
 ///
 /// The points must be in non-decreasing time order, which is the order every
@@ -126,7 +134,7 @@ impl<'a> BusMemberHistory<'a> {
 /// exact product, before the codes are.
 pub fn bus_events(
     members: &[BusMemberHistory<'_>],
-) -> Result<Vec<(Value, Vec<Option<u8>>)>, BusReassemblyTooLarge> {
+) -> Result<BusEventTable, BusReassemblyTooLarge> {
     let total = members
         .iter()
         .map(|member| member.points.len())
@@ -351,9 +359,12 @@ mod tests {
     #[test]
     fn a_bus_past_the_cell_ceiling_is_refused_by_number() {
         const WIDTH: usize = 4_096;
-        const OVER: usize = 31_251;
-        assert!(OVER * WIDTH > MAX_BUS_EVENT_CELLS);
-        assert!((OVER - 1) * WIDTH <= MAX_BUS_EVENT_CELLS);
+        // One event past what the ceiling allows at the widest declaration.
+        const OVER: usize = MAX_BUS_EVENT_CELLS / WIDTH + 1;
+        const {
+            assert!(OVER * WIDTH > MAX_BUS_EVENT_CELLS);
+            assert!((OVER - 1) * WIDTH <= MAX_BUS_EVENT_CELLS);
+        }
 
         // One member holds every time; the other 4,095 recorded nothing, so
         // the input is 31,251 points rather than 128 million.

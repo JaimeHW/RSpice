@@ -53,8 +53,7 @@ pub fn execute(
             config.resources.limits(),
             args.expand_buses,
         )?;
-        let notes =
-            vcd_io::select_and_clip(&mut document, &args.variables, args.start, args.stop)?;
+        let notes = vcd_io::select_and_clip(&mut document, &args.variables, args.start, args.stop)?;
         // Not gated on `--quiet`: the selection is wider than what was asked
         // for, and silently writing more than a caller requested is the thing
         // the note exists to prevent.

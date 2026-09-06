@@ -407,7 +407,7 @@ fn a_declared_bus_reaches_every_carrier_as_one_vector() {
         "the bus is one vector variable of its own width: {expected}"
     );
     assert!(
-        !expected.contains("COUNT#") ,
+        !expected.contains("COUNT#"),
         "a member's content is in the vector, so its scalar is not beside it: {expected}"
     );
     for word in ["b00 !", "b01 !", "b10 !", "b11 !"] {
@@ -468,7 +468,9 @@ fn a_bus_converts_to_a_table_as_its_member_columns_and_to_a_dump_as_a_word() {
     let (header, _) = read_csv(&grid);
     for member in ["D(COUNT#1)", "D(COUNT#0)"] {
         assert!(
-            header.iter().any(|column| column.eq_ignore_ascii_case(member)),
+            header
+                .iter()
+                .any(|column| column.eq_ignore_ascii_case(member)),
             "a table carries the members, one column each: {header:?}"
         );
     }
@@ -538,7 +540,10 @@ fn a_bus_is_selected_by_its_name_its_range_or_any_of_its_bits() {
         ])
         .output()
         .expect("run rspice");
-    assert!(output.status.success(), "a bit of a declared bus is a variable");
+    assert!(
+        output.status.success(),
+        "a bit of a declared bus is a variable"
+    );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("x1.count[0]") && stderr.contains("whole"),
@@ -565,7 +570,10 @@ fn a_bus_is_selected_by_its_name_its_range_or_any_of_its_bits() {
         ])
         .output()
         .expect("run rspice");
-    assert!(!output.status.success(), "bit 7 of a two-bit bus is nothing");
+    assert!(
+        !output.status.success(),
+        "bit 7 of a two-bit bus is nothing"
+    );
     assert!(
         String::from_utf8_lossy(&output.stderr).contains("available variables"),
         "the refusal should list what the dump has"
