@@ -1882,3 +1882,62 @@ endmodule
 
     let _ = std::fs::remove_file(&model);
 }
+
+#[test]
+fn locked_paired_schedule_resume_integrates_the_seam_interval() {
+    const STEP: f64 = 1.0e-9;
+    const SPLIT: f64 = 1.0e-6;
+    const STOP: f64 = 2.0e-6;
+
+    let netlist = Netlist::parse(DECK).expect("checkpoint bench parses");
+    // The documented use of the paired form: replay a reference run's accepted
+    // times *and* the intervals it chose to reach them.
+    let reference = Engine::default()
+        .run_tran(&netlist, STOP, STEP)
+        .expect("adaptive reference run completes");
+    assert!(
+        !reference
+            .time
+            .iter()
+            .any(|time| time.to_bits() == SPLIT.to_bits()),
+        "the premise: an adaptive run straddles the literal stop time"
+    );
+    let first_above_seam = reference
+        .time
+        .iter()
+        .copied()
+        .find(|&time| time > SPLIT)
+        .expect("the reference run continues past the seam");
+
+    let engine = Engine::new(SimulationConfig {
+        locked_time_grid: Some(Arc::new(reference.time.clone())),
+        locked_time_step_sizes: Some(Arc::new(reference.step_sizes.clone())),
+        ..Default::default()
+    });
+    let continuous = engine
+        .run_tran(&netlist, STOP, STEP)
+        .expect("unsegmented replay completes");
+    let (_, checkpoint) = engine
+        .run_tran_checkpointed(&netlist, SPLIT, STEP)
+        .expect("replayed first segment completes");
+    let (resumed, _) = engine
+        .run_tran_resume(&netlist, &checkpoint, STOP, STEP)
+        .expect("replayed resume completes");
+
+    // The recorded interval reached that target from the reference run's own
+    // previous point, which is not where this run stands. Using it anyway
+    // integrates over a wider interval than the gap and then relabels the
+    // result to the target's time: the recorded times look perfect and the
+    // solution is wrong by millivolts, for the rest of the segment.
+    let gap = first_above_seam - SPLIT;
+    assert!(
+        (resumed.step_sizes[1] - gap).abs() <= 1.0e-18,
+        "the first resumed interval must be the gap from the seam ({gap:.6e}), got {:.6e}",
+        resumed.step_sizes[1]
+    );
+    let worst = worst_resumed_deviation(&continuous, &resumed);
+    assert!(
+        worst < 1.0e-4,
+        "the resumed segment must stay on the unsegmented trajectory (worst |dv| = {worst:.6e})"
+    );
+}

@@ -5329,14 +5329,36 @@ impl Engine {
                 }
             }
             let mut locked_step_lands_on_grid = locked_grid.is_some();
+            // A recorded interval is the one the producing run used to reach
+            // `grid[cursor]` from its own previous accepted point, so replaying
+            // it is only sound while this run stands where that interval
+            // started. For an interior target that is `grid[cursor - 1] == t`.
+            // At cursor zero there is no previous target to compare against,
+            // and the run's start is not required to be the point the first
+            // recorded interval started from: a resume begins at the checkpoint
+            // time, which is the literal stop time of the first segment and
+            // need not be a grid point at all. Ask the geometric question
+            // instead — does the recorded interval land on the target from
+            // here — so an off-grid seam falls back to the real gap rather than
+            // integrating over the reference run's wider one and relabelling
+            // the result to the target's time.
             let locked_schedule_aligned = locked_grid
                 .as_ref()
                 .zip(locked_step_sizes.as_ref())
-                .is_some_and(|(grid, _)| {
-                    locked_cursor == 0
-                        || grid
-                            .get(locked_cursor.saturating_sub(1))
-                            .is_some_and(|&previous_target| previous_target == t)
+                .is_some_and(|(grid, steps)| match locked_cursor.checked_sub(1) {
+                    Some(previous) => grid
+                        .get(previous)
+                        .is_some_and(|&previous_target| previous_target == t),
+                    None => grid.first().zip(steps.first()).is_some_and(
+                        |(&first_target, &scheduled_dt)| {
+                            let reached = t + scheduled_dt;
+                            let scale = reached
+                                .abs()
+                                .max(first_target.abs())
+                                .max(Value::MIN_POSITIVE);
+                            (reached - first_target).abs() <= 64.0 * Value::EPSILON * scale
+                        },
+                    ),
                 });
             let (mut dt, mut at_breakpoint) = match locked_grid.as_ref() {
                 Some(grid) => {
