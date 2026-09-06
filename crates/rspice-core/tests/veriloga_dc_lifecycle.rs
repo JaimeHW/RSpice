@@ -314,3 +314,62 @@ fn nested_rebuilt_sweep_uses_flattened_public_point_boundaries() {
     assert_rebuilt_lifecycle_values(&points, &[1.0, 1.0, 1.0, 11.0]);
     let _ = std::fs::remove_file(model);
 }
+
+/// A hoisted inner-`if` snapshot does not leak across Newton evaluations.
+///
+/// The frontend snapshots every non-trivial `if` condition into an
+/// unconditional `__guardN` assignment; inside an untaken block the snapshot
+/// reads whatever the block did not write, which on the bytecode route is the
+/// previous evaluation's value of `t` (3.0, so `t > 0.1` reads true from the
+/// second evaluation on) and on the JIT route is zero. Its only consumer is
+/// ANDed with the block's own condition, so `g` stays 1.0 on both routes and
+/// the operating point is the same whichever route this build selects:
+/// `--features veriloga` evaluates the bytecode, `--features veriloga-native`
+/// the x64 JIT. The finite oracle in `rspice-veriloga` pins the snapshot
+/// itself; this pins that the engine never sees it.
+#[test]
+fn a_hoisted_condition_snapshot_does_not_leak_across_evaluations() {
+    let model = write_model(
+        "condition_snapshot",
+        r#"
+`include "disciplines.vams"
+module va_condition_snapshot(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real vth = 0.5;
+    real g, t;
+    analog begin
+        g = 1.0;
+        if (V(p, n) > vth) begin
+            t = V(p, n) - vth;
+            if (t > 0.1) g = 2.0;
+        end
+        t = 3.0;
+        I(p, n) <+ g * V(p, n);
+    end
+endmodule
+"#,
+    );
+    // V(in) = 0.3 keeps V(p, n) below vth on every iteration, so the block is
+    // never taken and the device is a 1 S conductance: V(out) = 0.3 / (1 + 1e-3).
+    let deck = format!(
+        "* hoisted condition snapshot across evaluations\n\
+         V1 in 0 0.3\n\
+         X1 in out va_condition_snapshot\n\
+         R1 out 0 1k\n\
+         .va \"{}\" va_condition_snapshot\n\
+         .end\n",
+        deck_path(&model)
+    );
+
+    let netlist = Netlist::parse(&deck).expect("parse snapshot deck");
+    let result = Engine::default().run_dc_op(&netlist).expect("DC OP runs");
+    let expected = 0.3 / (1.0 + 1.0e-3);
+    let actual = node_voltage(&result, "out");
+    assert!(
+        (actual - expected).abs() < 1.0e-9,
+        "V(out) = {actual}, expected {expected}: g must stay 1.0 on the second evaluation on"
+    );
+
+    let _ = std::fs::remove_file(model);
+}

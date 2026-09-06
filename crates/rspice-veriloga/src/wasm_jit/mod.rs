@@ -2051,6 +2051,66 @@ endmodule
         assert_eq!(value, 0.0);
     }
 
+    /// The wasm half of
+    /// `native::x64::tests::condition_snapshot_of_an_untaken_block_stays_out_of_the_physics`:
+    /// the plan is shared, so a hoisted inner-`if` snapshot that reads a slot
+    /// the untaken block did not write must not select the block's assignment
+    /// on a second pass either. `I(p, n) = g · V(p, n)` with `g = 1.0` below
+    /// `vth`; a leaking snapshot would make it `2.0 · V(p, n)`.
+    #[test]
+    fn a_condition_snapshot_of_an_untaken_block_stays_out_of_the_wasm_physics() {
+        use std::mem::size_of;
+
+        use super::abi::FRAME_RESULT_OFFSET;
+
+        const SOURCE: &str = r#"
+module wasm_condition_snapshot_untaken(p, n);
+  inout p, n;
+  electrical p, n;
+  parameter real vth = 0.5;
+  real g, t;
+  analog begin
+    g = 1.0;
+    if (V(p, n) > vth) begin
+      t = V(p, n) - vth;
+      if (t > 0.1) g = 2.0;
+    end
+    t = 3.0;
+    I(p, n) <+ g * V(p, n);
+  end
+endmodule
+"#;
+        const BIAS: f64 = 0.25;
+
+        let report = VerilogACompiler::new(CompilerOptions::default())
+            .compile_runtime(SOURCE, Some("wasm_condition_snapshot_untaken"))
+            .expect("compile fixture");
+        let mut harness = FusedKernelHarness::for_source(SOURCE, "wasm_condition_snapshot_untaken");
+        let export = harness.stamp_value_export(0);
+        harness.reset();
+        for (index, parameter) in report.model.parameters.iter().enumerate() {
+            harness.write_f64(
+                FusedKernelHarness::PARAMETERS as usize + index * size_of::<f64>(),
+                parameter.default,
+            );
+        }
+        harness.write_f64(FusedKernelHarness::VOLTAGES as usize, BIAS);
+        harness.write_f64(
+            FusedKernelHarness::VOLTAGES as usize + size_of::<f64>(),
+            0.0,
+        );
+        for pass in 0..2 {
+            harness.call_assignments();
+            harness.call_prelude();
+            assert_eq!(harness.call(&export), 0);
+            let value = harness.read_f64(FRAME_RESULT_OFFSET as usize);
+            assert_eq!(
+                value, BIAS,
+                "pass {pass}: I(p, n) = g · V(p, n) with g = 1.0 below vth; the snapshot of the untaken block's inner condition must not select g = 2.0"
+            );
+        }
+    }
+
     /// The fused stamp driver writes each derivative to the slot the device
     /// reads it back from.
     ///

@@ -4561,13 +4561,14 @@ endmodule
         )
         .map_err(|error| format!("{name}: finite native oracle failed: {error}"))?;
         eprintln!(
-            "native-x64-shipped-oracle model={name} variables={} higher_order_shadows={} stamps={} jacobians={} reactive_jacobians={} skipped_nonfinite={}",
+            "native-x64-shipped-oracle model={name} variables={} higher_order_shadows={} stamps={} jacobians={} reactive_jacobians={} skipped_nonfinite={} skipped_snapshots={}",
             stats.variables,
             stats.higher_order_shadows,
             stats.stamps,
             stats.jacobians,
             stats.reactive_jacobians,
             stats.skipped_nonfinite,
+            stats.skipped_snapshots,
         );
         Ok(())
     }
@@ -4815,6 +4816,141 @@ endmodule
             .expect("bytecode assignments");
         vm.execute(&stamp.jacobian_programs[entry].program)
             .expect("bytecode Jacobian entry")
+    }
+
+    /// A hoisted `if` snapshot on an untaken path — the shape of the
+    /// `__guardN` reds on diode_cmc (`__guard81`), bsimcmg (`__guard777`),
+    /// l_utsoi102 (`__guard532`) and hisimsoi (`__guard26`).
+    ///
+    /// `t` is assigned inside the block and re-assigned after it; the inner
+    /// `if (t > 0.1)` is snapshotted unconditionally by `snapshot_guard`
+    /// (`semantic.rs`), so when the block is not taken the snapshot reads `t`
+    /// from the slot: the previous pass's `3.0` on the bytecode route, which
+    /// never clears a slot, and `0.0` on an observation image that has run
+    /// once. Its only consumer is the guarded `g = 2.0`, ANDed with the
+    /// block's own condition, so the stamp is the same on both routes however
+    /// the snapshot reads.
+    const CONDITION_SNAPSHOT_SOURCE: &str = r#"
+module condition_snapshot_untaken(p, n);
+  inout p, n;
+  electrical p, n;
+  parameter real vth = 0.5;
+  real g, t;
+  analog begin
+    g = 1.0;
+    if (V(p, n) > vth) begin
+      t = V(p, n) - vth;
+      if (t > 0.1) g = 2.0;
+    end
+    t = 3.0;
+    I(p, n) <+ g * V(p, n);
+  end
+endmodule
+"#;
+
+    #[test]
+    fn condition_snapshot_of_an_untaken_block_stays_out_of_the_physics() {
+        let name = "condition_snapshot_untaken";
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let runtime = compiler
+            .compile_runtime(CONDITION_SNAPSHOT_SOURCE, Some(name))
+            .expect("compile fixture");
+        let native = compile_model_with_canonical_ir(&runtime.model, &runtime.canonical_ir)
+            .expect("native x64 compile fixture");
+        let model = &runtime.model;
+        assert!(
+            !native.publishes_observable_variables(),
+            "the fixture must take the CFG plan, whose evaluation publishes only its roots"
+        );
+        let t = model
+            .variable_names
+            .iter()
+            .position(|variable| variable == "t")
+            .expect("t");
+        let snapshot = model
+            .assignment_steps
+            .iter()
+            .find_map(|step| {
+                match step {
+                AssignmentStep::Assign(assignment)
+                    if model.variable_names[assignment.var_index].starts_with("__guard")
+                        && assignment.program.instructions.iter().any(|instruction| {
+                            matches!(instruction, Instruction::PushVariable(index) if *index == t)
+                        }) =>
+                {
+                    Some(assignment.var_index)
+                }
+                _ => None,
+            }
+            })
+            .expect("the inner condition reading t is snapshotted");
+        let g = model
+            .variable_names
+            .iter()
+            .position(|variable| variable == "g")
+            .expect("g");
+
+        // (a) The oracle's protocol — two passes, observation once — with the
+        //     snapshot left out of the variable comparison and every stamp,
+        //     Jacobian and static condition compared.
+        let mut context = native_model_benchmark_context(model, name);
+        resolve_native_parameter_defaults(model, &native, &mut context);
+        let stats = assert_native_matches_bytecode_finite_entries(
+            model,
+            &runtime.canonical_ir,
+            &native,
+            context,
+            name,
+        )
+        .expect("both routes agree on every compared entry");
+        assert!(
+            stats.skipped_snapshots >= 1,
+            "the fixture's inner condition must be a skipped snapshot"
+        );
+        assert!(stats.stamps >= 1, "the fixture must compare a stamp");
+
+        // (b) The mechanism, so the skip stays justified. After two passes the
+        //     bytecode's snapshot has read the previous pass's `t = 3.0` as
+        //     true; the observation image, run once, has read the slot's zero
+        //     as false; `g` is 1.0 on both because the consumer is ANDed with
+        //     the untaken block's condition.
+        let mut bytecode = native_model_benchmark_context(model, name);
+        resolve_native_parameter_defaults(model, &native, &mut bytecode);
+        let mut observed = bytecode.clone();
+        {
+            let mut vm = Vm::new(&mut bytecode);
+            for initial in [true, false] {
+                vm.context.analysis_initial_step = initial;
+                execute_bytecode_assignment_steps(&mut vm, &model.assignment_steps)
+                    .expect("bytecode assignments");
+            }
+        }
+        for initial in [true, false] {
+            observed.analysis_initial_step = initial;
+            let ctx = eval_context_from_vm_context(&mut observed);
+            ctx.clear_runtime_error();
+            run_assignment_and_prelude(&native, &ctx, observed.variables.as_mut_ptr());
+            require_clean_native_context(&ctx, "fixture assignments").expect("assignments");
+        }
+        let ctx = eval_context_from_vm_context(&mut observed);
+        ctx.clear_runtime_error();
+        run_observation(
+            model,
+            &runtime.canonical_ir,
+            &ctx,
+            observed.variables.as_mut_ptr(),
+        );
+        require_clean_native_context(&ctx, "fixture observation").expect("observation");
+        assert_eq!(
+            bytecode.variables[snapshot], 1.0,
+            "bytecode: the second pass reads the previous pass's t = 3.0, so t > 0.1"
+        );
+        assert_eq!(
+            observed.variables[snapshot], 0.0,
+            "observation image: its one run reads the slot's zero, so t > 0.1 is false"
+        );
+        assert_eq!(bytecode.variables[g], 1.0);
+        assert_eq!(observed.variables[g], 1.0);
     }
 
     fn run_shipped_model_device_probe(name: &str, path: &Path, module: Option<&str>) {
@@ -5087,10 +5223,31 @@ endmodule
         }
     }
 
+    /// Whether a compared variable is a frontend condition snapshot.
+    ///
+    /// `snapshot_guard` (`semantic.rs`) hoists every non-trivial `if` condition
+    /// into an unconditional `__guardN = condition` assignment so the guarded
+    /// statements read one evaluation of it. Hoisted means computed on every
+    /// path, including the paths where the block it came from is not taken,
+    /// and there its operands are whatever the block did not write: on the
+    /// bytecode route the slot holds the *previous* evaluation's value, on an
+    /// observation image, which runs once, it holds zero. The source gives that
+    /// value no meaning — every consumer of the snapshot is ANDed with the
+    /// enclosing guards — so it cannot reach a stamp, a Jacobian, a static
+    /// condition or an observable variable, all of which this oracle compares
+    /// directly. diode_cmc, bsimcmg, l_utsoi102 and hisimsoi were red on
+    /// exactly such a snapshot under the two-pass protocol with every entry
+    /// agreeing; `condition_snapshot_of_an_untaken_block_stays_out_of_the_physics`
+    /// pins the shape.
+    fn variable_is_condition_snapshot(name: &str) -> bool {
+        name.starts_with("__guard")
+    }
+
     #[derive(Default)]
     struct FiniteOracleStats {
         variables: usize,
         higher_order_shadows: usize,
+        skipped_snapshots: usize,
         stamps: usize,
         jacobians: usize,
         reactive_jacobians: usize,
@@ -5207,6 +5364,10 @@ endmodule
                 .get(index)
                 .map(|name| name.as_str())
                 .unwrap_or("<unnamed>");
+            if variable_is_condition_snapshot(variable_name) {
+                stats.skipped_snapshots += 1;
+                continue;
+            }
             assert_internal_variable_compatible(
                 name,
                 format!("variable {index} ({variable_name})"),
