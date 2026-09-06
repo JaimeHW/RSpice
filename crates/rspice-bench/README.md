@@ -162,13 +162,18 @@ not solver work.
 
 A random expander is measured as the pathological reference row and is never
 gated. Real circuit matrices are local; the expander is worst-case fill under
-*any* ordering, and at n=1000 it runs ~25x worse per nonzero than the circuit
-patterns.
+*any* ordering. At n=1000 it factors to 27x fill against the circuit patterns'
+1.04x to 1.36x, and refactors about 23x worse per nonzero.
 
 Budgets are normalized per `(L+U)` nonzero rather than absolute per iteration,
-because a sparse direct solve is proportional to factor nonzeros. That holds in
-practice: measured `refactor` cost is ~2.14, 2.13, 2.16 ns/nnz for the ladder
-at n=100, 1000, 10000, so one threshold covers the whole sweep.
+because a sparse direct solve is proportional to factor nonzeros. That is what
+the sweep shows: `refactor` costs 3.30, 3.28 and 3.42 ns/nnz for the ladder at
+n=100, 1000 and 10000, so one threshold covers a hundredfold range of sizes.
+
+Absolute nanoseconds are a property of the host, not of the solver, and the
+figures above are one machine's. The flatness across the sweep is the part the
+budget rests on; re-measure before quoting a number anywhere it will be
+compared against another machine's.
 
 | Flag | Default | Meaning |
 | :--- | :--- | :--- |
