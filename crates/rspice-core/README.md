@@ -1,10 +1,10 @@
-# RSpice Core
+# rspice-core
 
 The SPICE circuit simulation engine: netlist parsing, device models, sparse
 matrix assembly, Newton-Raphson solving, and the analysis algorithms. Every
-other crate in the workspace — the CLI, the GUI, the Python bindings, the
-WASM bindings, the benchmark rig — is a frontend over this one. It has no
-I/O conventions of its own beyond reading netlist text and `.include` files;
+other crate in the workspace (the CLI, the GUI, the Python bindings, the WASM
+bindings, the benchmark rig) is a frontend over this one. It has no I/O
+conventions of its own beyond reading netlist text and `.include` files;
 output formatting, exit codes, and configuration live in the frontends.
 
 ## Architecture
@@ -56,25 +56,32 @@ backs Ctrl-C in the CLI and `KeyboardInterrupt` in the Python bindings).
 | :--- | :--- |
 | `netlist/` | Lexer, parser (with submodules for element parsing, command parsing, conditionals, scoping, source specs, transmission lines, Laplace synthesis), AST, subcircuit flattener, hierarchical path handling, `.include` resolution, parameter scoping and expressions, multi-run cards, SPEF and XSPICE card parsing |
 | `circuit/` | `CircuitData` struct-of-arrays storage (one typed array per device kind in `storage/`), construction, linear stamping, nonlinear device hooks, magnetic coupling, introspection, external-model attachment |
-| `device/` | Device model implementations — see [Device models](#device-models) |
-| `solver/` | Sparse LU (`sparse.rs` on faer, plus a KLU-class refactorization backend in `klu.rs`), Newton-Raphson (`newton.rs`), convergence checking, damping strategies, arc-length continuation, parallel helpers (behind `parallel`) |
-| `engine/` | The orchestrator: DC, AC, transient, harmonic balance (`hb/`), PSS (`pss.rs`, `pss_noise.rs`), stability (`stb.rs`), transfer functions, matrix assembly and stamping, source value evaluation, behavioral-expression hooks, circuit builder, configuration and config resolution, convergence-aid drivers |
-| `analysis/` | Analysis algorithms and result types — see [Analyses](#analyses) — plus `.MEAS` evaluation (`measurements.rs`, `advanced/measure.rs`), post-processing, signal-integrity helpers, and result export (`output/`: rawfile export, waveforms, streaming waveforms) |
+| `device/` | Device model implementations; see [Device models](#device-models) |
+| `solver/` | Newton-Raphson (`newton.rs`), convergence checking, damping strategies, and arc-length continuation. Sparse LU itself lives in [`rspice-matrix`](../rspice-matrix) and is re-exported here |
+| `engine/` | The orchestrator: DC, AC, transient (`transient/`), harmonic balance (`hb/`), PSS (`pss.rs`, `pss_noise.rs`), stability (`stb.rs`), transfer functions, matrix assembly and stamping, source value evaluation, behavioral-expression hooks, circuit builder, configuration and config resolution, convergence-aid drivers |
+| `analysis/` | Analysis algorithms and result types (see [Analyses](#analyses)) plus `.MEAS` evaluation (`measure.rs`, `measure_signals.rs`, `measurements/`), post-processing, and signal-integrity helpers |
 | `expr/` | Expression engine for behavioral sources and parameters: parser, AST, bytecode compiler, and a small VM so expressions evaluate cheaply inside the Newton loop |
-| `library/` | `.lib` / model-library parsing, a library manager, and filesystem discovery of shipped Verilog-A model packs |
-| `xspice/` | XSPICE code-model subsystem: `CodeModel` trait, `CodeModelRegistry`, instance/context types, event and digital value types, bundled analog/digital/bridge models, plus an `ifspec.ifs` parser and conformance helpers that diff the registry against an ngspice checkout |
-| `compat/` | Compatibility readers (`ltspice_raw.rs`: LTspice RAW files) |
+| `io/` | Result export and ingestion: rawfile export, streaming waveforms, LTspice RAW reading |
+| `execution/` | The canonical analysis plan and the shared `rspice-analysis-result` document every frontend publishes |
+| `library/` | `.lib` and model-library parsing, a library manager, and filesystem discovery of shipped Verilog-A and SPICE model packs |
+| `xspice/` | XSPICE code-model subsystem: `CodeModel` trait, `CodeModelRegistry`, instance and context types, event and digital value types, bundled analog/digital/bridge models, plus an `ifspec.ifs` parser and conformance helpers that diff the registry against an ngspice checkout |
+| `numerics/` | Integration companion models, differentiation, and shared numerical kernels |
+| `config`, `resource` | `SimulationConfig` and the resource-budget policy every frontend applies |
+| `diagnostics`, `identity`, `naming`, `op_label` | Typed diagnostics, canonical analysis and coordinate identity, signal naming, operating-point labelling |
 | `constants` | Physical and simulation constants |
 | `abort_signal` | `AbortSignal` trait with `AtomicAbort`/`NoAbort` implementations for cancelling long runs |
 | `simd/` | SIMD math, reduction, and integration kernels (only with the `simd` feature) |
-| `testing/` | The ngspice and Xyce conformance harnesses — see [Testing](#testing) |
 | `time_compat` | Wall-clock shim: real `std::time::Instant` natively, a no-op stub on `wasm32` (bare WASM has no clock) |
+
+Conformance harnesses are deliberately *not* here. They live in
+[`rspice-conformance`](../rspice-conformance), which can see only this crate's
+public API, so every assertion travels the path a user's deck takes.
 
 ## Device models
 
 Verified against `src/device/`:
 
-**Passives** (`passive/`) — resistor, capacitor, inductor, coupled
+**Passives** (`passive/`): resistor, capacitor, inductor, coupled
 inductors (`K`), saturable inductor, and a Jiles-Atherton magnetic
 hysteresis model.
 
@@ -90,7 +97,7 @@ parameters at all; RSpice therefore requires the instance value and rejects
 instance `L` is present, rather than silently ignoring an authored geometry.
 Nonlinear `CORE` mutual-inductor geometry is a separate contract.
 
-**Semiconductors** (`semiconductor/`) — junction diode; BJT (legacy
+**Semiconductors** (`semiconductor/`): junction diode; BJT (legacy
 Gummel-Poon with no `LEVEL` or `LEVEL=1/2`, native VBIC at
 `LEVEL=4/9/11/12/13`). Other BJT levels are rejected with a typed error
 naming the supported set; advanced CMC bipolar models are reached through
@@ -98,9 +105,9 @@ generated Rust from Verilog-A rather than a hand-written path.
 
 ### Compact model routing and boundaries
 
-Advanced CMC compact models — HICUM/L0 and L2, MEXTRAM 505 and its
+Advanced CMC compact models (HICUM/L0 and L2, MEXTRAM 505 and its
 self-heating and diffusion-charge-split variants, PSP, BSIM-CMG, HiSIM, ASM
-HEMT and the rest — are delivered by the Verilog-A model program as generated
+HEMT and the rest) are delivered by the Verilog-A model program as generated
 Rust modules under `../rspice-veriloga-models/models/`, each behind its own
 `veriloga-model-*` feature. This crate owns three things for them and nothing
 else: routing a `.MODEL` card to the right module, the result identity the
@@ -111,8 +118,8 @@ A card naming one of those families therefore has exactly two outcomes. If the
 module is compiled in, the card routes to it and no native device is created
 alongside it. If it is not, the build is refused with a typed error naming the
 compact-model family, the generated module the routing layer would have
-selected, and the feature that supplies it — never a fall-back to the native
-Gummel-Poon or VBIC equations, which are a different model, and never a
+selected, and the feature that supplies it. There is never a fall-back to the
+native Gummel-Poon or VBIC equations, which are a different model, and never a
 name-only route that fails later inside the solver. Level selectors for those
 families (`Q LEVEL=8/23/230/234/504/505`) stay rejected in every build: a level
 names a *dialect's* device rather than a module, and routing one to a
@@ -124,22 +131,22 @@ it declares no exact periodic MNA descriptor and no captured period-map
 integration state, so harmonic balance, PAC, periodic noise and PSS
 continuation reject it by name (see `engine/periodic_capability.rs`).
 
-**MOSFETs and FET-family models** (`mosfet/`) —
+**MOSFETs and FET-family models** (`mosfet/`):
 
-- Classic Berkeley MOS1/MOS2/MOS3/MOS6 at `LEVEL=1/2/3/6` (`mosfet.rs`,
-  `mos_models.rs`)
+- Classic Berkeley MOS1/MOS2/MOS3/MOS6 at `LEVEL=1/2/3/6` (`classic.rs` and
+  `classic/`, with the shared parameter bundle in `mos_models.rs`)
 - Legacy BSIM1/BSIM2 at `LEVEL=4/5` (`legacy_bsim.rs`)
 - MOS9 at `LEVEL=9`, which is also where Xyce-style BSIM3 cards land: a
   decisive BSIM3 parameter signature routes to BSIM3v3, and an
   ngspice-shaped card stays MOS9
-- BSIM3v3 at `LEVEL=8/49/53` (`bsim3.rs`, `bsim3v3/` — params/temp/eval split)
-- BSIM4 v4.8 at `LEVEL=14/54` (`bsim4.rs`, `bsim4v8/`)
+- BSIM3v3 at `LEVEL=8/49` (`bsim3v3.rs`, `bsim3v3/`: params/temp/eval split)
+- BSIM4 v4.8 at `LEVEL=14/54` (`bsim4v8.rs`, `bsim4v8/`)
 - EKV 2.6 at `LEVEL=260` (`ekv.rs`), plus a narrow native EKV3 `LEVEL=301`
   slice (`ekv3.rs`) covering the VA-Models/Xyce 150 nm NMOS/PMOS cards;
   other EKV3 cards fail closed in the builder. The complete EKV3 302.00 model
   is the generated `ekv3_rf` device (`veriloga-model-ekv3-rf`), reached by
   module name on an `X` line rather than by a `LEVEL` selector
-- VDMOS power MOSFET at `LEVEL=18` (`vdmos/` — device, recovery, thermal
+- VDMOS power MOSFET at `LEVEL=18` (`vdmos/`: device, recovery, thermal
   submodules)
 - B3SOI silicon-on-insulator at `LEVEL=10/55/56/57`, in DD/FD/PD variants
   (`b3soi/dd`, `b3soi/fd`, `b3soi/pd`)
@@ -175,16 +182,15 @@ Selector values outside those ranges are typed errors rather than silent
 changes of physics. See `src/device/mosfet/bsim4v8/mod.rs` for the exact
 ported/not-ported inventory.
 
-**Sources and behavioral** — independent sources (`sources.rs`), the four
+**Sources and behavioral**: independent sources (`sources.rs`), the four
 controlled sources E/F/G/H (`controlled.rs`), behavioral B-sources whose
 expressions compile through `expr/` (`behavioral.rs`), and PWL-from-file
 sources (`pwl_file.rs`).
 
-**Transmission lines** — lossless and lossy lines (`transmission_line.rs`
-plus `transmission_line/` with delay, distributed, lossy, and TXL
-submodules; the LTRA path is checked by `tests/ltra_ac_oracle.rs`), and
-coupled multi-conductor lines (`coupled_transmission_line.rs`,
-`cpl_native.rs`).
+**Transmission lines**: lossless and lossy lines (`transmission_line.rs` plus
+`transmission_line/` with delay, distributed, line, response, and TXL
+submodules; the LTRA path is checked by `tests/ltra_ac_oracle.rs`), and coupled
+multi-conductor lines (`coupled_transmission_line.rs`, `cpl_native.rs`).
 
 *LTRA shunt conductance.* A scalar LTRA card is classified exactly from its
 per-unit-length `R`/`L`/`G`/`C`, because those are physical densities and no
@@ -201,34 +207,36 @@ neither ngspice-46 nor Xyce 7.10 implements a lossy line with both shunt
 conductance and reactance, so there is no reference semantics to match, and
 inventing one would produce numbers no oracle can qualify.
 
-**Memristors** — native Xyce `YMEMRISTOR` families: the TEAM model at
+**Memristors**: native Xyce `YMEMRISTOR` families: the TEAM model at
 `LEVEL=2` (`memristor_team.rs`) and the threshold-adaptive PEM model at
 `LEVEL=4` (`memristor_pem.rs`), both solving an internal state variable
 alongside the terminal equations.
 
-**Other** — switches (`switch.rs`) and thermal network elements
-(`thermal.rs`). GaN HEMT qualification is feature-gated work through
-generated Rust from Verilog-A (ASM-HEMT/MVSG CMC).
+**MESFETs and HFETs** (`mosfet/jfet/`): the legacy MESFET at `LEVEL=0/1`, MESA
+at `LEVEL=2/3/4`, HFET1 at `LEVEL=5`, and HFET2 at `LEVEL=6`.
 
-**Extension points** — external Verilog-A devices via the `rspice-veriloga` compiler
-(`veriloga.rs`, behind the `veriloga` feature, with blake3-keyed on-disk
-caching of compiled models), build-time generated Verilog-A built-ins
-(`veriloga-builtins`, materialized as reusable packages under
-`../rspice-veriloga-models/models/` and instantiated by model name when the
-feature is enabled), and SIMD batch evaluation for diodes, BJTs,
-JFETs, and MOSFET batches (`batch/`, behind `simd`).
+**Other**: switches (`switch.rs`) and thermal network elements (`thermal.rs`).
+GaN HEMT qualification is feature-gated work through generated Rust from
+Verilog-A (ASM-HEMT and MVSG CMC).
+
+**Extension points**: external Verilog-A devices via the `rspice-veriloga`
+compiler (`veriloga.rs`, behind the `veriloga` feature, with blake3-keyed
+on-disk caching of compiled models) and build-time generated Verilog-A built-ins
+(`veriloga_builtins.rs`, materialized as reusable packages under
+[`../rspice-veriloga-models/models/`](../rspice-veriloga-models) and
+instantiated by model name when the feature is enabled).
 
 ## Analyses
 
-Core analyses (`analysis/core/`, driven from `engine/`):
+Core analyses, driven from `engine/`:
 
 | Analysis | Module |
 | :--- | :--- |
-| DC operating point and DC sweep | `core/dc.rs`, `engine/dc.rs` |
-| AC small-signal sweep | `core/ac.rs`, `engine/ac.rs` |
-| Transient | `core/transient.rs`, `engine/transient/` |
-| Temperature handling | `core/temperature.rs` |
-| Laplace-defined sources/filters | `core/laplace.rs` |
+| DC operating point and DC sweep | `analysis/dc.rs`, `engine/dc.rs` |
+| AC small-signal sweep | `analysis/ac.rs`, `engine/ac.rs` |
+| Transient | `engine/transient/` |
+| Temperature handling | `analysis/temperature.rs` |
+| Laplace-defined sources/filters | `netlist/parser/laplace_synthesis.rs` |
 
 Transient integration methods: backward Euler, trapezoidal, Gear-2, and the
 hybrid trap/Gear default (selected via `SimulationConfig`; the CLI exposes
@@ -249,17 +257,17 @@ against an ngspice BSIM3 timing oracle. Higher-order Gear/BDF would need the
 full history, device-state, checkpoint, stability, and manufactured-solution
 qualification program, not a wider option range.
 
-Advanced analyses (`analysis/advanced/`):
+Advanced analyses, all flat under `analysis/`:
 
 | Analysis | Module |
 | :--- | :--- |
 | Fourier / THD (`.FOUR`) | `fourier.rs` |
 | Volterra distortion (`.DISTO`) | `distortion.rs`, `engine/distortion.rs` |
-| Noise | `noise.rs`, `engine/advanced/noise.rs` |
+| Noise | `noise.rs`, `engine/noise.rs` |
 | Pole-zero | `pole_zero.rs`, `pole_zero/` |
 | Sensitivity (DC and AC) | `sensitivity.rs` |
 | Transfer function (`.TF`) | `transfer.rs`, `transfer/` |
-| Parametric sweep (`.STEP`) | `parametric.rs`, `engine/advanced/step.rs` |
+| Parametric sweep (`.STEP`) | `parametric.rs`, `engine/step.rs` |
 | Monte Carlo | `monte_carlo.rs` |
 | Process corners | `corner.rs` |
 | Periodic steady state (shooting) | `pss/`, `engine/pss.rs` |
@@ -270,25 +278,23 @@ Advanced analyses (`analysis/advanced/`):
 | Stability (STB) loop-gain | `stb.rs`, `engine/stb.rs` |
 | Periodic stability (PSTB) | `pstb.rs` |
 | S-parameters | `s_param.rs`, `s_param/` |
-| `.MEAS` evaluation | `measure.rs`, `measure_signals.rs`, `measurements.rs` |
+| `.MEAS` evaluation | `measure.rs`, `measure_signals.rs`, `measurements/` |
 
 How each analysis is reached (netlist card, CLI flag, or engine API only)
-varies — the [CLI README](../rspice-cli/README.md) documents the
-netlist-card and flag surface; anything not listed there is engine-API
-only.
+varies. The [CLI README](../rspice-cli/README.md) documents the netlist-card
+and flag surface; anything not listed there is engine-API only.
 
 ### Periodic large-signal cards
 
 `.PSS`, `.PAC`, `.PNOISE` and `.ENVELOPE` are parsed into typed, fully
 validated cards in `netlist`. The analysis layer converts a card into the
 configuration its entry point takes (`PssConfig::from(&PssCard)`,
-`PacConfig::from(&PacCard)`) — a parsed deck sits below the analyses and
-never names them. Every card is
-case-insensitive and continues across `+` lines. A field another simulator
-accepts here that RSpice cannot honour is refused with a source-located
-error rather than parsed and dropped.
+`PacConfig::from(&PacCard)`). A parsed deck sits below the analyses and never
+names them. Every card is case-insensitive and continues across `+` lines. A
+field another simulator accepts here that RSpice cannot honour is refused with
+a source-located error rather than parsed and dropped.
 
-**`.PSS`** — shooting periodic steady state. Two disjoint forms; a token
+**`.PSS`**, shooting periodic steady state. Two disjoint forms; a token
 followed by `=` is always a keyword, a token that is not is always
 positional, so the two never overlap.
 
@@ -313,22 +319,22 @@ because the positional fields already bind them.
 | `HARMS` | `harms` | Harmonics retained in the result | 9 |
 | `POINTS` | `psspoints` | Samples per period (≥ 16, ≥ 2·`HARMS`) | 256 |
 | `TSTAB` | `tstab` | Stabilization time (s) | 0 |
-| `TSTABPERIODS` | — | Stabilization periods when `TSTAB` is 0 | 10 driven, 20 autonomous |
+| `TSTABPERIODS` | keyword only | Stabilization periods when `TSTAB` is 0 | 10 driven, 20 autonomous |
 | `MAXITER` | `sciter` | Maximum shooting iterations | 100 |
-| `TOL` | — | Relative periodicity tolerance | 1e-6 |
-| `ABSTOL` | — | Absolute tolerance | 1e-12 |
-| `DAMPING` | — | Newton damping in [0.1, 1.0] | 1.0 |
-| `MAXPERIODCHANGE` | — | Relative period change bound | 0.1 |
+| `TOL` | keyword only | Relative periodicity tolerance | 1e-6 |
+| `ABSTOL` | keyword only | Absolute tolerance | 1e-12 |
+| `DAMPING` | keyword only | Newton damping in [0.1, 1.0] | 1.0 |
+| `MAXPERIODCHANGE` | keyword only | Relative period change bound | 0.1 |
 | `AUTONOMOUS` | implied | Detect the period instead of taking `FUND` | FALSE |
 | `PERIODGUESS` | from `gfreq` | Autonomous period seed (s) | 1e-9 |
 | `OSCNODE` | `oscnode` | Node the period is detected on | none |
-| `METHOD` | — | `TRAP`, `GEAR`, `EULER` or `TRAPGEAR` | engine default |
-| `VERBOSE` | — | Log convergence progress | FALSE |
+| `METHOD` | keyword only | `TRAP`, `GEAR`, `EULER` or `TRAPGEAR` | engine default |
+| `VERBOSE` | keyword only | Log convergence progress | FALSE |
 
 `FUND` and `PERIODGUESS` set the same quantity and may not both appear;
 `OSCNODE` implies `AUTONOMOUS=TRUE` and conflicts with `AUTONOMOUS=FALSE`.
 
-**`.PAC`** — periodic small-signal AC around a periodic operating point.
+**`.PAC`**, periodic small-signal AC around a periodic operating point.
 The leading sweep is the input-frequency sweep.
 
 ```
@@ -339,7 +345,7 @@ The leading sweep is the input-frequency sweep.
 | :--- | :--- | :--- |
 | `INPUT` | Small-signal source swept across the sweep | required |
 | `OUT` | Output probe, `V(node)` or `V(node,ref)` | required |
-| `MAXSIDEBAND` | Symmetric sideband range `-n..=n` | — |
+| `MAXSIDEBAND` | Symmetric sideband range `-n..=n` | none |
 | `SIDEBANDMIN` / `SIDEBANDMAX` | Explicit asymmetric range | -5 / +5 |
 | `RELTOL` | Relative tolerance | 1e-3 |
 | `ABSTOL` | Absolute tolerance (A) | 1e-12 |
@@ -348,7 +354,7 @@ The leading sweep is the input-frequency sweep.
 `MAXSIDEBAND` and `SIDEBANDMIN`/`SIDEBANDMAX` are two spellings of one range
 and may not be combined.
 
-**`.PNOISE`** — periodic (cyclostationary) noise. The leading sweep is the
+**`.PNOISE`**, periodic (cyclostationary) noise. The leading sweep is the
 offset-frequency sweep.
 
 ```
@@ -362,7 +368,7 @@ offset-frequency sweep.
 | `MAXSIDEBAND` | Folded sideband bound `-n..=n` | 6 |
 | `FROM` | `PSS` or `HB` | nearest preceding |
 
-**`.ENVELOPE`** — harmonic-balance envelope continuation. It attaches to the
+**`.ENVELOPE`**, harmonic-balance envelope continuation. It attaches to the
 nearest preceding `.HB` and exposes only what the continuation executes.
 
 ```
@@ -381,11 +387,12 @@ the deck does not author before it.
 
 ## Solvers and convergence
 
-- **Sparse LU**: the real-valued path defaults to the KLU-class backend
-  (`solver/klu.rs` — stored pivots make refactorization on the frozen
-  sparsity pattern cheap); `RSPICE_SOLVER=faer` opts back into the faer
-  solver. faer also provides the complex solves for AC-family analyses,
-  with parallel factorization when the `faer-parallel` feature is on.
+- **Sparse LU**: the real-valued path defaults to
+  [`rspice-matrix`](../rspice-matrix)'s KLU-class backend, whose stored pivots
+  make refactorization on the frozen sparsity pattern cheap;
+  `RSPICE_SOLVER=faer` opts back into the faer solver. faer also provides the
+  complex solves for AC-family analyses, with parallel factorization when the
+  `faer-parallel` feature is on.
 - **Newton-Raphson** with voltage/residual/charge tolerance checks
   (`solver/newton.rs`, `solver/convergence.rs`).
 - **Convergence aids**, attempted when plain Newton fails: GMIN stepping,
@@ -401,15 +408,17 @@ the deck does not author before it.
 | Feature | Default | Effect |
 | :--- | :--- | :--- |
 | `faer-parallel` | yes | Adds faer's rayon feature for parallel sparse factorization |
-| `parallel` | yes | rayon + portable-atomic for parallel solver paths (`solver/parallel.rs`) |
-| `simd` | yes | `wide`-based SIMD kernels (`simd/` module, `device/batch/`) |
-| `veriloga` | no | Verilog-A device support via `rspice-veriloga`, plus serde_json/blake3/dirs for the compiled-model cache |
+| `parallel` | yes | rayon and portable-atomic for the parallel sweep, transient, and noise paths in `engine/` and `circuit/` |
+| `simd` | yes | `wide`-based SIMD kernels in `simd/`, consumed by the Newton loop |
+| `veriloga` | no | Verilog-A device support via `rspice-veriloga`, plus `dirs` for the compiled-model cache |
 | `veriloga-native` | no | RSpice-owned native JIT for Verilog-A devices; requested native mode is full JIT or typed construction error |
+| `veriloga-wasm-jit` | no | Browser JIT. The owning Web Worker compiles and instantiates the module; the core keeps the authenticated artifacts and the synchronous solver integration |
+| `veriloga-builtins-base` | no | The runtime integration every generated model shares, without selecting any model |
 | `veriloga-model-*` | no | Compiles one checked-in generated Verilog-A model and the shared runtime. Prefer these granular features in production to minimize compile time, peak rustc memory, and binary size |
 | `veriloga-builtins-noise` | no | Adds generated noise schedules to whichever `veriloga-model-*` features are selected |
 | `veriloga-builtins-models` | no | Enables every checked-in generated Verilog-A model without the optional noise schedules |
 | `veriloga-builtins` | no | Backwards-compatible umbrella that enables every generated model plus noise. Each model is a reusable artifact under `../rspice-veriloga-models/models/`; refresh with `cargo run -p rspice-veriloga --profile generator --bin rspice-veriloga-gen -- regenerate-builtins` and validate with `check-builtins` |
-| `wasm` | no | wasm-bindgen + `getrandom/js` so the crate builds on `wasm32-unknown-unknown`; used by `rspice-wasm` and the UI's wasm target, which also set `default-features = false` to drop rayon/SIMD |
+| `wasm` | no | wasm-bindgen, so the crate builds on `wasm32-unknown-unknown`; used by `rspice-wasm` and the UI's wasm target, which also set `default-features = false` to drop rayon and SIMD |
 
 The defaults mean the CLI, Python bindings, and the standard test run all
 exercise the parallel + SIMD paths.
@@ -420,7 +429,7 @@ exercise the parallel + SIMD paths.
 # Build (library only)
 cargo build -p rspice-core
 
-# Full test suite — 99 integration test files under tests/
+# Full test suite: 184 integration test files under tests/
 cargo test -p rspice-core
 
 # With Verilog-A device tests (veriloga_*.rs oracle tests need the JIT)
@@ -450,36 +459,20 @@ Library unit tests are excluded from the default package test target by
 --lib`. Doctests are off as well (`[lib] doctest = false`), so examples in
 rustdoc are checked by review rather than by `cargo test`.
 
-The integration suite in `tests/` includes oracle tests that pin
-device and analysis behavior to reference values (diode rectifier, VBIC
-excess phase, LTRA AC, native BSIM4, PSP103 via Verilog-A), RF-analysis tests
-(HB Jacobian/Krylov/varactor, PSS shooting, pnoise folding, PAC conversion,
-STB loop gain), parser robustness tests, and a determinism test.
+The integration suite in `tests/` includes oracle tests that pin device and
+analysis behavior to reference values (diode rectifier, VBIC excess phase, LTRA
+AC, native BSIM4), RF-analysis tests (HB Jacobian, Krylov and varactor, PSS
+shooting, pnoise folding, PAC conversion, STB loop gain), parser robustness
+tests, and a determinism test.
 
-### Conformance harnesses
+### Conformance and benchmarking live elsewhere
 
-`src/testing/ngspice_runner/` runs netlist decks through both ngspice (as
-reference) and this engine, comparing per-analysis results under explicit
-tolerances: suite discovery, execution, reference datasets, and validation
-live there, and `tests/ngspice_regression.rs` /
-`tests/ngspice_oracle_audit.rs` drive it.
-
-`src/testing/xyce_runner.rs` does the same for the vendored Xyce regression
-corpus, driven by `tests/xyce_regression.rs`. Every retained `.cir` deck is
-discovered and reported, but a deck is numerically executed only when its
-checked-in, relational, or explicitly qualified generated-oracle contract
-can be reproduced without the upstream platform harness, which is not
-vendored.
-
-The crate ships three binaries: `rspice-ngspice-case-runner` and
-`rspice-xyce-case-runner` orchestrate case runs for those two harnesses, and
-`xspice_ifspec_audit` diffs the XSPICE code-model registry against the
-`ifspec.ifs` files in an ngspice checkout.
+The ngspice, Xyce, GF180MCU, ISCAS85, Verilog-A, and digital-Verilog suites are
+[`rspice-conformance`](../rspice-conformance), along with the case-runner and
+oracle-capture binaries they drive. This crate declares no binaries at all, and
+`tools/ci/test_ci_configuration.py` asserts it holds no validation harness.
 
 For whole-process performance comparison against ngspice, see
-[rspice-bench](../rspice-bench/README.md) instead.
+[rspice-bench](../rspice-bench/README.md).
 
-## License
-
-RSpice Core is part of the RSpice project and is licensed under the
-[RSpice Personal Use License](../../LICENSE).
+Licensed under the [RSpice Personal Use License](../../LICENSE).
