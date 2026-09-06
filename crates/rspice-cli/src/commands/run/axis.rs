@@ -1,4 +1,4 @@
-﻿//! Execution of a `.STEP`/`.TEMP`/`.DATA` axis: one coordinate at a time, one
+//! Execution of a `.STEP`/`.TEMP`/`.DATA` axis: one coordinate at a time, one
 //! transaction for the set.
 //!
 //! Every coordinate is materialized from the canonical plan, preflighted for

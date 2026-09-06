@@ -362,6 +362,68 @@ mod tests {
         }
     }
 
+    /// Every authored `.rs` file in the workspace, sorted, with the floors the
+    /// whole-workspace scans rest on.
+    ///
+    /// The roots are the crate directories `crates/` actually holds, read at
+    /// run time rather than listed here, so a crate added to the workspace is
+    /// scanned without anyone remembering to add it. Each is asserted to have
+    /// contributed files — a root that stops resolving is a scan that has
+    /// stopped scanning, and a scan that reaches nothing passes forever.
+    ///
+    /// These are repository-hygiene scans rather than anything about a user
+    /// interface, so `rspice-ui` is not their natural owner; they live here
+    /// because the workspace has no crate whose subject is the repository, and
+    /// adding one would add a workspace member, which edits `Cargo.toml` and
+    /// `Cargo.lock` — both source-digest inputs of the Verilog-A built-ins
+    /// generator — and restamp the whole generated model tree. If such a crate
+    /// ever exists, this walk, [`rust_sources`] and both scans over them belong
+    /// in it.
+    fn workspace_rust_sources() -> Vec<PathBuf> {
+        let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let crates = manifest
+            .parent()
+            .expect("this crate sits in the workspace's crates/ directory");
+        // A crate is a directory here with a manifest in it. Nested members —
+        // the generated Verilog-A model crates — are reached by recursion from
+        // the directory that holds them, so only the top level is enumerated.
+        let mut roots: Vec<PathBuf> = std::fs::read_dir(crates)
+            .unwrap_or_else(|error| panic!("read {}: {error}", crates.display()))
+            .map(|entry| entry.expect("directory entry").path())
+            .filter(|path| path.join("Cargo.toml").is_file())
+            .collect();
+        roots.sort();
+        // A floor, not a tally: crates come and go, but a `crates/` that
+        // resolves to a handful of them is a scan that has lost its roots.
+        assert!(
+            roots.len() >= 20,
+            "the workspace scan found only {} crates under {}; a root list that stops \
+             resolving is a scan that has stopped scanning",
+            roots.len(),
+            crates.display()
+        );
+
+        let mut paths = Vec::new();
+        for root in &roots {
+            let before = paths.len();
+            rust_sources(root, &mut paths);
+            assert!(
+                paths.len() > before,
+                "the scan found no Rust source under {}; a root that stops resolving is a \
+                 scan that has stopped scanning",
+                root.display()
+            );
+        }
+        paths.sort();
+        assert!(
+            paths.len() > 2_000,
+            "the workspace scan found only {} files; a scan that reaches nothing passes \
+             forever",
+            paths.len()
+        );
+        paths
+    }
+
     /// Nothing this crate ships says an executed deck is a property of the
     /// session that ran it.
     ///
@@ -632,20 +694,6 @@ mod tests {
     /// whole Fourier results table, plus three em dashes in `rspice-veriloga`.
     /// Every one of them was outside the root list and every one of them
     /// reached a user's terminal as mojibake.
-    ///
-    /// The roots are the crate directories `crates/` actually holds, read at
-    /// run time rather than listed here, so a crate added to the workspace is
-    /// scanned without anyone remembering to add it. Each is asserted to have
-    /// contributed files — a root that stops resolving is a scan that has
-    /// stopped scanning.
-    ///
-    /// This is a repository-hygiene scan rather than anything about a user
-    /// interface, so `rspice-ui` is not its natural owner; it lives here
-    /// because the workspace has no crate whose subject is the repository, and
-    /// adding one would add a workspace member, which edits `Cargo.toml` and
-    /// `Cargo.lock` — both source-digest inputs of the Verilog-A built-ins
-    /// generator — and restamp the whole generated model tree. If such a crate
-    /// ever exists, this test and [`rust_sources`] belong in it.
     #[test]
     fn no_source_file_carries_double_encoded_utf8() {
         // The pairs the scan is looking for, written as escapes so this file
@@ -672,47 +720,7 @@ mod tests {
             "the scan does not flag correctly encoded text"
         );
 
-        let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let crates = manifest
-            .parent()
-            .expect("this crate sits in the workspace's crates/ directory");
-        // A crate is a directory here with a manifest in it. Nested members —
-        // the generated Verilog-A model crates — are reached by recursion from
-        // the directory that holds them, so only the top level is enumerated.
-        let mut roots: Vec<PathBuf> = std::fs::read_dir(crates)
-            .unwrap_or_else(|error| panic!("read {}: {error}", crates.display()))
-            .map(|entry| entry.expect("directory entry").path())
-            .filter(|path| path.join("Cargo.toml").is_file())
-            .collect();
-        roots.sort();
-        // A floor, not a tally: crates come and go, but a `crates/` that
-        // resolves to a handful of them is a scan that has lost its roots.
-        assert!(
-            roots.len() >= 20,
-            "the workspace scan found only {} crates under {}; a root list that stops \
-             resolving is a scan that has stopped scanning",
-            roots.len(),
-            crates.display()
-        );
-
-        let mut paths = Vec::new();
-        for root in &roots {
-            let before = paths.len();
-            rust_sources(root, &mut paths);
-            assert!(
-                paths.len() > before,
-                "the scan found no Rust source under {}; a root that stops resolving is a \
-                 scan that has stopped scanning",
-                root.display()
-            );
-        }
-        paths.sort();
-        assert!(
-            paths.len() > 2_000,
-            "the workspace scan found only {} files; a scan that reaches nothing passes \
-             forever",
-            paths.len()
-        );
+        let paths = workspace_rust_sources();
 
         let mut found = Vec::new();
         for path in &paths {
@@ -735,6 +743,42 @@ mod tests {
             found.is_empty(),
             "these lines carry UTF-8 that was read as Latin-1 and written out again \
              — re-encode them, and check every assertion over the same text:\n  {}",
+            found.join("\n  ")
+        );
+    }
+
+    /// No source file starts with a byte-order mark.
+    ///
+    /// The mark is the other half of what a tool that re-encodes a file leaves
+    /// behind, and it is quieter: `rustc` skips a leading U+FEFF, so the file
+    /// compiles, its tests pass, and nothing in the build says a word. Everyone
+    /// downstream of the compiler sees it — the first line of a diff hunk, a
+    /// module doc comment that no longer starts at column one, `include_str!`
+    /// of the file, and any scan of a source's first bytes — and it spreads,
+    /// because a tool that writes one file's mark writes the next one's too.
+    /// `rspice-cli` shipped three: `commands/run.rs` and two of its children.
+    ///
+    /// This is the same walk the double-encoding scan runs, for the same
+    /// reason: catching it needs the bytes, not the decoded text, and the
+    /// crates that carry marks are not the crates that ship an interface.
+    #[test]
+    fn no_source_file_starts_with_a_byte_order_mark() {
+        const BOM: [u8; 3] = [0xef, 0xbb, 0xbf];
+
+        let found: Vec<String> = workspace_rust_sources()
+            .iter()
+            .filter(|path| {
+                std::fs::read(path)
+                    .unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
+                    .starts_with(&BOM)
+            })
+            .map(|path| path.display().to_string())
+            .collect();
+
+        assert!(
+            found.is_empty(),
+            "these files start with a UTF-8 byte-order mark — strip the first three \
+             bytes; Rust sources are UTF-8 by definition and the mark only travels:\n  {}",
             found.join("\n  ")
         );
     }

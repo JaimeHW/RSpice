@@ -1,4 +1,4 @@
-﻿//! The `run` command: execute one deck and publish what it produced.
+//! The `run` command: execute one deck and publish what it produced.
 //!
 //! This file is the entry point and the whole-run orchestration -- argument
 //! handling, the multi-run `.ALTER`/`.DATA`/corner plan, the report files, and

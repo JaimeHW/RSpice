@@ -1,4 +1,4 @@
-﻿//! Turning command-line arguments and a deck source into something runnable.
+//! Turning command-line arguments and a deck source into something runnable.
 //!
 //! Everything here happens before any solver work: reading and preprocessing
 //! the source, refusing a command line that contradicts the deck, refusing an
