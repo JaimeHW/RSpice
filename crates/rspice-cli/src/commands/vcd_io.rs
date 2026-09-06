@@ -240,6 +240,10 @@ fn typed_transient_traces(
         .collect();
     Ok(Some(RawEventTraces {
         digital_traces,
+        // A typed document's buses reach the dump through its own route; this
+        // path recovers the traces a payload carries, which is what the VCD
+        // writer took before buses existed.
+        digital_buses: Vec::new(),
         real_traces,
     }))
 }
@@ -305,6 +309,9 @@ fn grid_event_traces(path: &Path, table: &ExportTable) -> Result<RawEventTraces,
     }
     Ok(RawEventTraces {
         digital_traces,
+        // A grid column is what a table kept of an event history; it never
+        // said which columns were one word, so this direction declares none.
+        digital_buses: Vec::new(),
         real_traces,
     })
 }

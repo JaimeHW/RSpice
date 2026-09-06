@@ -45,7 +45,9 @@ pub use capability::{
     analysis_result_capability, analysis_result_kind, signal_capability,
 };
 pub use event_bus::{BusMemberHistory, bus_events, bus_value_at};
-pub use event_export::{EventPlotError, RawEventTraces, decode_event_plots, transient_event_plots};
+pub use event_export::{
+    EventPlotError, RawEventTraces, decode_event_plots, transient_bus_plots, transient_event_plots,
+};
 pub use event_projection::{
     EventProjectionError, VcdEventHistories, digital_value_from_vcd_bit, digital_value_to_vcd_bit,
     event_vcd_document, vcd_event_histories,

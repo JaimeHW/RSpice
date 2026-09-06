@@ -416,16 +416,6 @@ impl DigitalBusDeclaration {
     pub(crate) fn width(&self) -> usize {
         self.members.len()
     }
-
-    /// `name[msb:lsb]`, the one rendering core produces.
-    ///
-    /// Two formats need a bus to be spelled in a single field — a VCD `$var`
-    /// reference and a rawfile bus plot title — and both take this spelling so
-    /// a reader of either has one grammar to parse. Frontends do not use it:
-    /// a drawn bus is rendered in the notation the drawing declared.
-    pub(crate) fn range_notation(&self) -> String {
-        format!("{}[{}:{}]", self.name, self.msb, self.lsb)
-    }
 }
 
 /// The spelling two event names are compared under.
@@ -1598,7 +1588,6 @@ mod bus_tests {
         .expect("a descending declaration is well formed");
         assert_eq!((descending.msb, descending.lsb), (3, 0));
         assert_eq!(descending.width(), 4);
-        assert_eq!(descending.range_notation(), "DATA[3:0]");
 
         let ascending = DigitalBusDeclaration::new(
             "DATA",
@@ -1609,7 +1598,6 @@ mod bus_tests {
         )
         .expect("an ascending declaration is well formed");
         assert_eq!((ascending.msb, ascending.lsb), (0, 3));
-        assert_eq!(ascending.range_notation(), "DATA[0:3]");
         assert_ne!(
             descending.members, ascending.members,
             "the two directions are different declarations, not one normalized pair"
@@ -1624,7 +1612,7 @@ mod bus_tests {
             DigitalBusSource::Import,
         )
         .expect("a negative range is well formed");
-        assert_eq!(negative.range_notation(), "SEL[-1:-3]");
+        assert_eq!((negative.msb, negative.lsb, negative.width()), (-1, -3, 3));
     }
 
     #[test]

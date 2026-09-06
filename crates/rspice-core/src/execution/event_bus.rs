@@ -106,6 +106,36 @@ pub fn bus_events(members: &[BusMemberHistory<'_>]) -> Vec<(Value, Vec<Option<u8
     events
 }
 
+/// Split `name[msb:lsb]` into its name and the range it declares.
+///
+/// Core spells a bus in exactly one place per format that needs a single
+/// field — a VCD `$var` reference and a rawfile bus plot's `Title:` — and both
+/// take this grammar, so there is one thing to parse on the way back in. The
+/// space form `name [msb:lsb]` is accepted too: it is what the reference field
+/// of a `$var` holds after the reader joins its tokens, and what the common
+/// Verilog dumpers write.
+///
+/// Only a bracketed pair separated by a colon is a range. `data[3]` is a
+/// bit-select — the name of one conductor — and comes back whole, which is
+/// what lets a member trace be named that way without being mistaken for a
+/// one-bit vector declaration.
+pub(crate) fn split_bus_notation(text: &str) -> (&str, Option<(i64, i64)>) {
+    let trimmed = text.trim_end();
+    let Some(open) = trimmed.rfind('[') else {
+        return (text, None);
+    };
+    let Some(body) = trimmed[open + 1..].strip_suffix(']') else {
+        return (text, None);
+    };
+    let Some((msb, lsb)) = body.split_once(':') else {
+        return (text, None);
+    };
+    let (Ok(msb), Ok(lsb)) = (msb.trim().parse::<i64>(), lsb.trim().parse::<i64>()) else {
+        return (text, None);
+    };
+    (trimmed[..open].trim_end(), Some((msb, lsb)))
+}
+
 /// The whole bus at one time, in the order the members were given.
 ///
 /// Each entry is the code its member held at `time` — the last point at or
@@ -226,5 +256,25 @@ mod tests {
             BusMemberHistory { points: &b },
         ]);
         assert_eq!(events, vec![(0.0, vec![Some(1), Some(2)])]);
+    }
+}
+
+#[cfg(test)]
+mod notation_tests {
+    use super::split_bus_notation;
+
+    #[test]
+    fn a_range_is_split_and_a_bit_select_is_not() {
+        assert_eq!(split_bus_notation("d[1:0]"), ("d", Some((1, 0))));
+        assert_eq!(split_bus_notation("d [1:0]"), ("d", Some((1, 0))));
+        assert_eq!(split_bus_notation("d[0:7]"), ("d", Some((0, 7))));
+        assert_eq!(split_bus_notation("d[-1:-3]"), ("d", Some((-1, -3))));
+        assert_eq!(split_bus_notation("d[3]"), ("d[3]", None));
+        assert_eq!(split_bus_notation("plain"), ("plain", None));
+        assert_eq!(split_bus_notation("d[a:b]"), ("d[a:b]", None));
+        assert_eq!(
+            split_bus_notation("x1.count[1:0]"),
+            ("x1.count", Some((1, 0)))
+        );
     }
 }

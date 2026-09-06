@@ -2423,6 +2423,7 @@ mod tests {
                 columns: Vec::new(),
             },
             events: Vec::new(),
+            buses: Vec::new(),
         };
         write_transient_fft_output_pair(
             &transient_path,

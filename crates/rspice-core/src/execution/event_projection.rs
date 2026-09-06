@@ -29,7 +29,7 @@ use crate::engine::{
     MAX_DIGITAL_BUS_WIDTH, RealTrace, RealTracePoint, canonical_event_name,
     validate_digital_bus_table,
 };
-use crate::execution::event_bus::{BusMemberHistory, bus_events};
+use crate::execution::event_bus::{BusMemberHistory, bus_events, split_bus_notation};
 use crate::io::vcd::{
     VCD_WRITER_VERSION, VcdBit, VcdChange, VcdDocument, VcdMagnitude, VcdSignal, VcdSignalKind,
     VcdTimeUnit, VcdTimescale, VcdValue, VcdVariable, is_writable_scope_name,
@@ -343,7 +343,7 @@ struct PendingSignal {
 ///
 /// The space form is what the reference field of a `$var` holds — the reader
 /// joins the fields after the identifier with a single space — and it is what
-/// the common Verilog dumpers write. [`split_vcd_reference`] accepts the
+/// the common Verilog dumpers write. [`split_bus_notation`] accepts the
 /// closed-up form too, so a foreign dump written either way reads back.
 fn bus_reference(bus: &DigitalBusDeclaration) -> String {
     format!("{} [{}:{}]", bus.name, bus.msb, bus.lsb)
@@ -409,29 +409,6 @@ fn bus_signal(
         width: bus.width() as u32,
         points,
     })
-}
-
-/// Split a `$var` reference into its name and any range it declares.
-///
-/// A reference is kept verbatim by the reader, and both `data [3:0]` and
-/// `data[3:0]` occur in the wild. Only a bracketed pair separated by a colon
-/// is a range: `data[3]` is a bit-select, which is a name for one conductor
-/// and not a declaration of a vector.
-fn split_vcd_reference(reference: &str) -> (&str, Option<(i64, i64)>) {
-    let trimmed = reference.trim_end();
-    let Some(open) = trimmed.rfind('[') else {
-        return (reference, None);
-    };
-    let Some(body) = trimmed[open + 1..].strip_suffix(']') else {
-        return (reference, None);
-    };
-    let Some((msb, lsb)) = body.split_once(':') else {
-        return (reference, None);
-    };
-    let (Ok(msb), Ok(lsb)) = (msb.trim().parse::<i64>(), lsb.trim().parse::<i64>()) else {
-        return (reference, None);
-    };
-    (trimmed[..open].trim_end(), Some((msb, lsb)))
 }
 
 /// The name one bit of a bus is recorded under when a dump is read back.
@@ -535,7 +512,7 @@ pub fn vcd_event_histories(
                 });
             }
             VcdSignalKind::Logic => {
-                let (base, declared) = split_vcd_reference(&reference);
+                let (base, declared) = split_bus_notation(&reference);
                 // The width bound is applied to the declared width before any
                 // member is materialized, so a hostile dump cannot make a
                 // reader build the list it is about to be refused for.
@@ -1406,12 +1383,12 @@ mod bus_tests {
     }
 
     #[test]
-    fn a_reference_is_split_at_a_range_and_never_at_a_bit_select() {
-        assert_eq!(split_vcd_reference("d [1:0]"), ("d", Some((1, 0))));
-        assert_eq!(split_vcd_reference("d[1:0]"), ("d", Some((1, 0))));
-        assert_eq!(split_vcd_reference("d[-1:-3]"), ("d", Some((-1, -3))));
-        assert_eq!(split_vcd_reference("d[3]"), ("d[3]", None));
-        assert_eq!(split_vcd_reference("plain"), ("plain", None));
-        assert_eq!(split_vcd_reference("d[a:b]"), ("d[a:b]", None));
+    fn a_vector_variable_is_named_in_the_space_form_the_dumpers_write() {
+        let declaration = bus("data", 1, 0, &["data[1]", "data[0]"]);
+        assert_eq!(bus_reference(&declaration), "data [1:0]");
+        assert!(
+            is_writable_variable_name(&bus_reference(&declaration)),
+            "the space form survives the $var grammar"
+        );
     }
 }

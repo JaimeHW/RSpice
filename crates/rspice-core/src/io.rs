@@ -31,8 +31,8 @@ pub use ltspice_raw::{
     parse_raw_plots_reader_with_limits, parse_raw_reader, parse_raw_reader_with_limits,
 };
 pub use raw_export::{
-    RawEventKind, RawEventTimeline, RawExporter, RawFormat, RawVariable, VariableType,
-    export_dc_sweep, export_transient, write_event_plots,
+    RawBusTimeline, RawEventKind, RawEventTimeline, RawExporter, RawFormat, RawVariable,
+    VariableType, export_dc_sweep, export_transient, write_event_plots,
 };
 pub use vcd::{
     VCD_WRITER_VERSION, VcdBit, VcdChange, VcdDocument, VcdError, VcdMagnitude, VcdSignal,

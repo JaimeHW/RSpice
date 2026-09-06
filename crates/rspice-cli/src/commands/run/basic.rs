@@ -1065,6 +1065,10 @@ pub(super) fn run_transient(
                             &result.digital_traces,
                             &result.real_traces,
                         ),
+                        buses: rspice_core::execution::transient_bus_plots(
+                            &result.digital_traces,
+                            &result.digital_buses,
+                        ),
                     },
                 };
                 ctx.record_published(super::PublishedResult {
@@ -1143,6 +1147,10 @@ pub(super) enum TransientOutputDocument {
     Table {
         table: super::export::ExportTable,
         events: Vec<rspice_core::io::RawEventTimeline>,
+        /// The declared buses, as their own plot family. The member plots are
+        /// in `events` and stay the authoritative copy; these carry the
+        /// grouping and the bit order, which nothing else in a rawfile does.
+        buses: Vec<rspice_core::io::RawBusTimeline>,
     },
     /// The shared typed result document, published for `-f json`.
     Typed(Box<rspice_core::execution::AnalysisResultDocument>),
@@ -1165,7 +1173,11 @@ impl TransientOutputDocument {
         match self {
             Self::Hdf5(data) => write_hdf5_to_writer(writer, data)
                 .map_err(|error| map_hdf5_output_error(path, error)),
-            Self::Table { table, events } => {
+            Self::Table {
+                table,
+                events,
+                buses,
+            } => {
                 table.write_to(writer, path, format)?;
                 // Appended inside the caller's staging closure, so a rawfile
                 // that carries event plots is still published whole or not at
@@ -1179,7 +1191,7 @@ impl TransientOutputDocument {
                     | OutputFormat::Hdf5
                     | OutputFormat::Vcd => return Ok(()),
                 };
-                rspice_core::io::write_event_plots(writer, events, raw_format)
+                rspice_core::io::write_event_plots(writer, events, buses, raw_format)
                     .map_err(|error| CliError::output_error(path, error))
             }
             Self::Vcd(document) => rspice_core::io::write_vcd(&mut *writer, document)

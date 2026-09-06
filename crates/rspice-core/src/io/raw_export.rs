@@ -95,6 +95,16 @@ pub enum RawEventKind {
     Digital,
     /// XSPICE real-valued events. Values are the event values themselves.
     Real,
+    /// One declared digital bus: the members of one word, in declaration
+    /// order, sharing the row grid of the times any of them changed at. The
+    /// values are digital event codes, as [`Self::Digital`]'s are; what
+    /// differs is that a plot carries N of them and its `Title:` names the
+    /// declaration the columns belong to.
+    ///
+    /// The member plots are written too, and they remain the authoritative
+    /// copy: this family adds the grouping a reader could not otherwise
+    /// recover, and adding it must not cost a reader that ignores it anything.
+    Bus,
 }
 
 impl RawEventKind {
@@ -108,13 +118,14 @@ impl RawEventKind {
         match self {
             Self::Digital => "Digital Events (rspice-digital-events/1)",
             Self::Real => "Real Events (rspice-real-events/1)",
+            Self::Bus => "Digital Bus (rspice-digital-bus/1)",
         }
     }
 
     /// The family a plot name declares, or `None` for an ordinary plot.
     pub(crate) fn from_plot_name(plot_name: &str) -> Option<Self> {
         let plot_name = plot_name.trim();
-        [Self::Digital, Self::Real]
+        [Self::Digital, Self::Real, Self::Bus]
             .into_iter()
             .find(|kind| kind.plot_name() == plot_name)
     }
@@ -122,7 +133,7 @@ impl RawEventKind {
     /// The rawfile variable type of this family's value column.
     pub(crate) const fn variable_type(self) -> VariableType {
         match self {
-            Self::Digital => VariableType::Digital,
+            Self::Digital | Self::Bus => VariableType::Digital,
             Self::Real => VariableType::Real,
         }
     }
@@ -134,7 +145,7 @@ impl RawEventKind {
     /// reader recognises rather than a second convention.
     pub(crate) fn variable_name(self, node_name: &str) -> String {
         match self {
-            Self::Digital => format!("D({node_name})"),
+            Self::Digital | Self::Bus => format!("D({node_name})"),
             Self::Real => format!("E({node_name})"),
         }
     }
@@ -142,7 +153,7 @@ impl RawEventKind {
     /// The node one variable name spells, when it is spelled for this family.
     pub(crate) fn node_name(self, variable_name: &str) -> Option<&str> {
         let prefix = match self {
-            Self::Digital => "D(",
+            Self::Digital | Self::Bus => "D(",
             Self::Real => "E(",
         };
         variable_name
@@ -166,6 +177,43 @@ pub struct RawEventTimeline {
     /// Value at each event time: an event code for
     /// [`RawEventKind::Digital`], the value itself for [`RawEventKind::Real`].
     pub values: Vec<Value>,
+}
+
+/// One declared bus's event plot: the declaration in its title, one column per
+/// member.
+///
+/// The rows are the union of the members' own change times and the columns are
+/// what each member held at those times, so a bus plot is a complete answer to
+/// "what did this word hold, and when did it change" without the reader
+/// joining anything. The member plots are written anyway and stay the
+/// authoritative copy; this plot exists for the grouping and the order, which
+/// nothing else in a rawfile could carry.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RawBusTimeline {
+    /// Bus name, without any range suffix.
+    pub name: String,
+    /// Declared most significant index.
+    pub msb: i64,
+    /// Declared least significant index.
+    pub lsb: i64,
+    /// Member node names in declaration order, declared MSB first.
+    pub members: Vec<String>,
+    /// Row times in seconds: every time at least one member changed.
+    pub times: Vec<Value>,
+    /// One column per member, in the order `members` lists them, each aligned
+    /// with `times`.
+    pub values: Vec<Vec<Value>>,
+}
+
+impl RawBusTimeline {
+    /// The `Title:` this plot is published under: `name[msb:lsb]`.
+    ///
+    /// `Title:` is an existing header key, free text to every reader of the
+    /// format, which is why the declaration rides there rather than in a new
+    /// header line an ngspice-compatible reader would abort on.
+    pub(crate) fn title(&self) -> String {
+        format!("{}[{}:{}]", self.name, self.msb, self.lsb)
+    }
 }
 
 /// A variable (signal) in the raw file
@@ -252,6 +300,27 @@ impl RawExporter {
             title: kind.plot_name().to_string(),
             plot_name: kind.plot_name().to_string(),
             variables: vec![RawVariable::time(), RawVariable::event(kind, node_name)],
+            data: Vec::new(),
+        }
+    }
+
+    /// Create an exporter for one bus's plot.
+    ///
+    /// Unlike a node plot, the title is not the plot name: it carries the
+    /// declaration, `name[msb:lsb]`, because the member order is in the
+    /// variable list and the range has nowhere else to go.
+    pub(crate) fn new_bus_plot(bus: &RawBusTimeline) -> Self {
+        let mut variables = Vec::with_capacity(bus.members.len() + 1);
+        variables.push(RawVariable::time());
+        variables.extend(
+            bus.members
+                .iter()
+                .map(|member| RawVariable::event(RawEventKind::Bus, member)),
+        );
+        Self {
+            title: bus.title(),
+            plot_name: RawEventKind::Bus.plot_name().to_string(),
+            variables,
             data: Vec::new(),
         }
     }
@@ -522,18 +591,26 @@ pub fn write_transient<W: Write + ?Sized>(
 /// mismatched time and value counts, no events at all — a plot declaring zero
 /// points has no boundary a reader can find — or a node name carrying
 /// whitespace, which rawfile variable declarations have no way to quote.
+///
+/// Bus plots are appended after the node plots, and the node plots of a bus's
+/// members are written too. A bus plot is the grouping and the order, which
+/// nothing else in a rawfile carries; the member plots are what a reader that
+/// has never heard of the family keeps reading, so adding the grouping costs
+/// such a reader nothing.
 pub fn write_event_plots<W: Write + ?Sized>(
     writer: &mut W,
     timelines: &[RawEventTimeline],
+    buses: &[RawBusTimeline],
     format: RawFormat,
 ) -> io::Result<()> {
     for timeline in timelines {
-        if timeline.node_name.chars().any(char::is_whitespace) {
+        if timeline.kind == RawEventKind::Bus {
             return Err(invalid_data(format!(
-                "event node name '{}' contains whitespace, which a rawfile variable declaration cannot carry",
+                "'{}' is declared as a bus but carries one column; a bus plot is written from a RawBusTimeline",
                 timeline.node_name
             )));
         }
+        checked_event_node_name(&timeline.node_name)?;
         if timeline.times.is_empty() {
             return Err(invalid_data(format!(
                 "event plot for '{}' carries no events; a plot declaring zero points has no boundary a reader can find",
@@ -543,6 +620,45 @@ pub fn write_event_plots<W: Write + ?Sized>(
         let mut exporter = RawExporter::new_event_plot(timeline.kind, &timeline.node_name);
         exporter.add_transient_data(&timeline.times, std::slice::from_ref(&timeline.values))?;
         exporter.write(writer, format)?;
+    }
+    for bus in buses {
+        if bus.members.len() != bus.values.len() {
+            return Err(invalid_data(format!(
+                "digital bus '{}' declares {} member(s) but carries {} column(s)",
+                bus.name,
+                bus.members.len(),
+                bus.values.len()
+            )));
+        }
+        if bus.members.is_empty() {
+            return Err(invalid_data(format!(
+                "digital bus '{}' declares no member, so its plot would carry only a time column",
+                bus.name
+            )));
+        }
+        checked_event_node_name(&bus.name)?;
+        for member in &bus.members {
+            checked_event_node_name(member)?;
+        }
+        if bus.times.is_empty() {
+            return Err(invalid_data(format!(
+                "bus plot for '{}' carries no events; a plot declaring zero points has no boundary a reader can find",
+                bus.name
+            )));
+        }
+        let mut exporter = RawExporter::new_bus_plot(bus);
+        exporter.add_transient_data(&bus.times, &bus.values)?;
+        exporter.write(writer, format)?;
+    }
+    Ok(())
+}
+
+/// Refuse a name a rawfile variable declaration has no way to quote.
+fn checked_event_node_name(name: &str) -> io::Result<()> {
+    if name.chars().any(char::is_whitespace) {
+        return Err(invalid_data(format!(
+            "event node name '{name}' contains whitespace, which a rawfile variable declaration cannot carry"
+        )));
     }
     Ok(())
 }
@@ -734,6 +850,7 @@ mod export_tests {
         write_event_plots(
             &mut bytes,
             std::slice::from_ref(&event_timelines()[0]),
+            &[],
             RawFormat::Ascii,
         )
         .expect("write one digital event plot");
@@ -766,11 +883,11 @@ mod export_tests {
         for format in [RawFormat::Binary, RawFormat::Ascii] {
             let alone = analysis_plot(format);
             let mut events = Vec::new();
-            write_event_plots(&mut events, &event_timelines(), format)
+            write_event_plots(&mut events, &event_timelines(), &[], format)
                 .expect("write the event plots on their own");
 
             let mut combined = analysis_plot(format);
-            write_event_plots(&mut combined, &event_timelines(), format)
+            write_event_plots(&mut combined, &event_timelines(), &[], format)
                 .expect("append the event plots");
 
             // The event writer contributes its own plots and nothing else: no
@@ -802,7 +919,7 @@ mod export_tests {
     fn event_plot_times_and_values_survive_both_encodings_exactly() {
         for format in [RawFormat::Binary, RawFormat::Ascii] {
             let mut bytes = analysis_plot(format);
-            write_event_plots(&mut bytes, &event_timelines(), format)
+            write_event_plots(&mut bytes, &event_timelines(), &[], format)
                 .expect("append the event plots");
 
             let file = crate::io::parse_raw_plots_reader_with_limits(
@@ -859,7 +976,7 @@ mod export_tests {
 
         for timeline in unwritable {
             let mut bytes = Vec::new();
-            let error = write_event_plots(&mut bytes, &[timeline], RawFormat::Ascii)
+            let error = write_event_plots(&mut bytes, &[timeline], &[], RawFormat::Ascii)
                 .expect_err("an unreadable event plot must not be written");
             assert_eq!(error.kind(), io::ErrorKind::InvalidData);
             assert!(bytes.is_empty(), "refusal must not leave a partial plot");
