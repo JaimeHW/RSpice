@@ -1,4 +1,4 @@
-# RSpice UI
+# rspice-ui
 
 The graphical front end for RSpice: schematic capture, netlist editing,
 simulation setup and control, and result viewing in one egui/eframe
@@ -15,26 +15,27 @@ application chrome: menu bar, contextual toolbar, activity rail, document
 strip, responsive docks and drawers, console, status bar, phone navigation,
 and the central engineering surface. Its seven canonical workspaces are:
 
-- **Project** — project identity, documents, run history, configuration,
+- **Project**: project identity, documents, run history, configuration,
   storage state, and project-level actions.
-- **Design** — the schematic editor: component placement from a palette,
+- **Design**: the schematic editor with component placement from a palette,
   orthogonal wire routing with grid and magnetic snap, net labels and
   junctions, selection with net highlighting, rotation/mirroring, copy/
   paste, and an undo/redo history. Symbols are SVG, embedded into the
   binary at build time from `assets/component_symbols/`.
-- **Simulate** — analysis setup forms.
-- **Results** — immutable run/dataset selection and precision result viewers.
-- **Verify** — checks, specifications, measurements, yield, and reliability
+- **Simulate**: analysis setup forms.
+- **Results**: immutable run/dataset selection and precision result viewers.
+- **Verify**: checks, specifications, measurements, yield, and reliability
   evidence owned by the project.
-- **Models** — model and library catalog, bindings, Verilog-A, and PDK setup.
-- **Netlist** — a syntax-highlighted SPICE netlist editor with completion
+- **Models**: model and library catalog, bindings, Verilog-A, and PDK setup.
+- **Netlist**: a syntax-highlighted SPICE netlist editor with completion
   and a parameter tuner panel.
 
 Desktop, browser, and tablet use the same workbench state and command
 registry. Layout composition adapts to available width and pointer capability;
 document engines never create a second application shell.
 
-Result viewers implemented in `src/workbench/result_document/`: waveform strips with
+Result viewers live in `src/workbench/documents/result_document/`: waveform
+strips with
 expression traces and A/B cursors (`waves.rs`, `strip.rs`), Bode
 (`bode.rs`), FFT spectrum (`fft.rs`), eye diagram (`eye.rs`), histogram
 (`hist.rs`), operating-point inspector (`op_inspector.rs`), noise
@@ -45,11 +46,11 @@ pole-zero (`pz.rs`). The data/state side of these viewers lives in
 
 Other user-facing machinery, all verified in source:
 
-- **Command palette** (`common/app/app_command_palette/`) with ranked fuzzy
+- **Command palette** (`workbench/app/command_palette.rs`) with ranked fuzzy
   matching, match-character highlighting, a recents section, and
   hierarchy verbs (descend/ascend) that are dimmed with a reason when
   unavailable.
-- **Checks**: a schematic rule checker (`services/drc/` — rule engine, net
+- **Checks**: a schematic rule checker (`services/drc/`: rule engine, net
   extraction and connectivity, violation types) surfaced through the Check
   menu and toolbar/docbar pills, plus safe-operating-area checking
   (`services/safety/`).
@@ -57,10 +58,11 @@ Other user-facing machinery, all verified in source:
   `build.rs` via `git rev-parse --short=9 HEAD`, `"unknown"` outside a git
   checkout), engine info, license status, and a copy-diagnostics button.
 - **License keys** (`services/license.rs`): offline verification of
-  `RSPICE-K1.*` keys — Ed25519 signature over a domain-separated payload,
+  `RSPICE-K1.*` keys, with an Ed25519 signature over a domain-separated
+  payload,
   Crockford base32 wire format, compiled-in public keys, a denylist, and
   perpetual-fallback semantics (the expiry is an updates-until date, not a
-  kill switch). Issuance — the signing half — lives in that file's test
+  kill switch). Issuance, the signing half, lives in that file's test
   module, not in the application; production issuance is the platform
   backend's cold-key flow.
 
@@ -68,19 +70,22 @@ Other user-facing machinery, all verified in source:
 
 | Module | Contents |
 | :--- | :--- |
-| `workbench/` | Contract-driven responsive application chrome, typed command registry, project launcher, preflight, workspace surfaces, docks/drawers, netlist document, and result-document viewers |
-| `common/` | The `RSpiceApp` application type (egui `App` impl) and its state/dialog plumbing: command palette, shortcuts, help/About dialogs, license dialog, file and project workflows, menu bar implementations, built-in examples |
+| `workbench/` | The `RSpiceApp` application type (the egui `App` impl) and everything around it: contract-driven responsive chrome, typed command registry and command palette, dialogs, project launcher, preflight, workspace surfaces, docks and drawers, `documents/` (netlist document and the result-document viewers) |
 | `schematic/` | Schematic rendering: canvas view (pan/zoom/interaction), SVG symbol library, component palette, source labels, SVG export |
 | `state/` | Application state: schematic state (components, wires, nets, selection, snap, clipboard, undo history, symbol generation), simulation state (runs, waveforms, cross-probing), workspace, library browser, model library, property registry, PDK config |
-| `simulation/` | Simulation control: the controller state machine, `engine_bridge/` (the rspice-core adapter — parsing, per-analysis dispatch, result conversion, abort handling), netlist generation from the schematic, multi-run batching, optimizer, options translation, automation, netlist viewer |
+| `simulation/` | Simulation control: the controller state machine, `engine_bridge/` (the rspice-core adapter: parsing, per-analysis dispatch, result conversion, abort handling), netlist generation from the schematic, multi-run batching, optimizer, options translation, automation, netlist viewer |
 | `services/` | Backend services: `drc/` rule checking, `license.rs`, `safety/` SOA checks, `simulation_runner/` per-analysis launchers (AC, DC, transient, HB, PSS, noise, pole-zero, sensitivity, Monte Carlo, sweeps, optimization, reliability, distortion, transfer function, pnoise sidebands, PAC/PXF), `yield_manager.rs` |
 | `analysis/` | Result-viewer data and state: Bode, FFT, histogram, Nyquist, pole-zero, Smith chart, eye diagram, phase noise, HB tones, waveform calculator |
 | `io/` | File formats: schematic JSON, project files, SPICE `.lib` parsing, netlist export, waveform I/O, Cadence PSF (including binary) |
-| `panels/` | Dialog-hosted components: properties panel, log panel, PDK settings, script console, Verilog-A compile dialog, calculator |
 | `properties/` | Property editing: engineering-notation value parsing/formatting, model browser, PWL editor, tabbed property dialog, property bridge |
-| `waveform/` | Waveform measurement utilities (min/max/RMS over sample slices) |
+| `results/` | Result-set ownership and the projection each viewer reads |
+| `hardcopy/` | The print and export pipeline: page geometry in integral micrometres, sheet composition, hand-off to the publication contract |
+| `automation_runtime`, `automation_workflow/` | The Automation worker host, native and browser, over [`rspice-automation-protocol`](../rspice-automation-protocol), and the workflows built on it |
+| `product/` | Edition, entitlement, and feature-availability gating |
+| `quantity/` | Typed physical quantities and their formatting |
+| `output_spec`, `diagnostics/` | Authored output selection, and the typed diagnostics surface |
 | `ui/` | The RSpice design system: mockup-governed semantic tokens and dark/light palettes, mode/density preferences, embedded IBM Plex fonts, vector icon set, the widget vocabulary (buttons, chips, dialogs, docbar, forms, pills, tables, toasts, trees…), and the strip-plot engine (axes, scales, traces, cursors, min/max decimation, SI formatting) |
-| `utils/` | Formatting, numeric, and layout helpers shared by UI surfaces |
+| `time_compat` | Wall-clock shim: real `Instant` natively, a browser-safe stub on `wasm32` |
 
 ## Engine integration
 
@@ -94,13 +99,15 @@ UI's waveform containers. Platform differences are set in `Cargo.toml`:
 
 - **Desktop** (`cfg(not(target_arch = "wasm32"))`): `rspice-core` with
   default features (parallel + SIMD solver paths) plus `veriloga-native`
-  (RSpice-owned native JIT contract for Verilog-A devices; full JIT or typed construction error); multi-threaded tokio runtime.
-- **wasm32**: `rspice-core` with `default-features = false` and the
-  `veriloga-wasm-jit` + `wasm` features — portable Verilog-A plus the
-  separately qualified browser JIT, no rayon/SIMD;
-  current-thread tokio runtime; `web-sys`/`wasm-bindgen` for the DOM. Runs
-  execute in a module worker, so cancellation terminates the worker and does
-  not leave detached computation.
+  (RSpice-owned native JIT for Verilog-A devices: full JIT or a typed
+  construction error); multi-threaded tokio runtime.
+- **wasm32**: `rspice-core` with `default-features = false` and the `veriloga`
+  and `wasm` features: portable Verilog-A, no rayon or SIMD; current-thread
+  tokio runtime; `web-sys`/`wasm-bindgen` for the DOM. Runs execute in a module
+  worker, so cancellation terminates the worker and does not leave detached
+  computation. The separately qualified browser JIT
+  (`rspice-core/veriloga-wasm-jit`) is added by the `browser-worker` feature,
+  not by the base wasm32 image.
 
 Native execution remains on a background thread and every analysis family now
 cooperatively polls the same typed abort signal through parsing, expansion,
@@ -117,7 +124,7 @@ std-only so license verification also works on wasm32.
 Painter-backed controls publish egui widget metadata and visible keyboard
 focus indicators. Native builds enable eframe's AccessKit bridge so the
 semantic tree is handed to supported platform assistive-technology APIs.
-The eframe 0.34 browser backend does not expose that AccessKit tree through
+The eframe 0.35 browser backend does not expose that AccessKit tree through
 the DOM; browser builds therefore offer an opt-in **Speak control changes**
 preference backed by eframe's Web Speech event feedback. That spoken-event
 fallback is not a substitute for a browser accessibility tree, so real
@@ -195,7 +202,7 @@ builds and size-gates the wasm images but does not deploy them.
 
 Issuance lives in `services/license.rs`'s test module rather than in a binary
 target. It needs the private payload layout, and reaching it from a separate
-target would mean `pub` re-exports from the crate root — the visibility hole
+target would mean `pub` re-exports from the crate root, the visibility hole
 `tests/module_layering.rs` exists to keep shut. `cfg(test)` also guarantees
 that no signing code is linked into a shipped binary, which a Cargo feature
 could not.
@@ -222,7 +229,4 @@ scope for this repository: it belongs to the platform backend's cold-key flow.
 The signing path itself is covered by `issued_key_round_trips`, which runs in
 CI, so a wire-format change cannot silently break issuance.
 
-## License
-
-RSpice UI is part of the RSpice project and is licensed under the
-[RSpice Personal Use License](../../LICENSE).
+Licensed under the [RSpice Personal Use License](../../LICENSE).
