@@ -448,17 +448,23 @@ fn a_declared_bus_reaches_every_carrier_as_one_vector() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// A table format keeps a bus as its members, and only a dump keeps the word.
+/// Whichever artifact of one run is read, a bus reaches a table as its bits.
 ///
 /// A `D(node)` column is one conductor per column and always was; converting a
 /// bus-declaring artifact to CSV therefore writes the flattened member columns
 /// the grid already holds, and the declaration is simply not a thing a table
-/// has a place for. The one column that does carry a whole word is the one
-/// `load_vcd_table` packs from a dump's own vector, and it is an unsigned
-/// number rather than a declaration. Both are documented in `convert --help`;
-/// this is what they mean.
+/// has a place for. A dump's own vector expands the same way, because the
+/// alternative — one packed unsigned column — made the CSV of a run depend on
+/// which of its artifacts had been kept.
+///
+/// The two artifacts do *not* agree on the member names, and cannot: a rawfile
+/// carries the deck's own node names, and a dump carries only the range its
+/// `$var` declares, so its members are that range's bit-selects. Nor do they
+/// agree on the rows: a rawfile holds the analysis grid and a dump holds the
+/// ticks something changed at. What they now agree on is the shape — one
+/// column per bit, holding the same flattened `0`/`1`/`0.5`.
 #[test]
-fn a_bus_converts_to_a_table_as_its_member_columns_and_to_a_dump_as_a_word() {
+fn a_bus_reaches_a_table_as_one_column_per_bit_from_either_artifact() {
     let dir = test_dir("vcd_bus_table");
     let deck = bus_deck(&dir);
     let raw = simulate(&dir, &deck, "raw", "run.raw");
@@ -479,19 +485,43 @@ fn a_bus_converts_to_a_table_as_its_member_columns_and_to_a_dump_as_a_word() {
         "a table has no place for a declaration: {header:?}"
     );
 
-    // Out through the dump, the word is one column holding its unsigned value.
+    // The same run's dump gives the same two-column shape, under the bit-select
+    // names a dump does carry, and no packed word anywhere.
     let dump = simulate(&dir, &deck, "vcd", "run.vcd");
-    let packed = dir.join("packed.csv");
-    convert(&dump, &packed, "csv", &[]);
-    let (header, rows) = read_csv(&packed);
-    let word = header
+    let from_dump = dir.join("from_dump.csv");
+    convert(&dump, &from_dump, "csv", &[]);
+    let (header, rows) = read_csv(&from_dump);
+    assert!(
+        !header.iter().any(|column| column.contains("[1:0]")),
+        "no packed word survives on this route either: {header:?}"
+    );
+    let digital: Vec<&String> = header
         .iter()
-        .position(|column| column.eq_ignore_ascii_case("D(x1.count [1:0])"))
-        .unwrap_or_else(|| panic!("the vector is one packed column: {header:?}"));
+        .filter(|column| column.starts_with("D("))
+        .collect();
     assert_eq!(
-        rows.iter().map(|row| row[word]).collect::<Vec<_>>(),
-        vec![0.0, 1.0, 2.0, 3.0],
-        "a two-bit counter counts 0, 1, 2, 3"
+        digital,
+        vec!["D(x1.count[1])", "D(x1.count[0])"],
+        "one column per bit, most significant first: {header:?}"
+    );
+
+    let msb = header
+        .iter()
+        .position(|column| column == "D(x1.count[1])")
+        .expect("the msb column");
+    let lsb = header
+        .iter()
+        .position(|column| column == "D(x1.count[0])")
+        .expect("the lsb column");
+    assert_eq!(
+        rows.iter().map(|row| row[msb]).collect::<Vec<_>>(),
+        vec![0.0, 0.0, 1.0, 1.0],
+        "a two-bit counter's high bit over 00, 01, 10, 11"
+    );
+    assert_eq!(
+        rows.iter().map(|row| row[lsb]).collect::<Vec<_>>(),
+        vec![0.0, 1.0, 0.0, 1.0],
+        "and its low bit"
     );
 
     let _ = std::fs::remove_dir_all(&dir);

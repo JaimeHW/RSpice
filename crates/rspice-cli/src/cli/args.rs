@@ -224,16 +224,17 @@ pub enum Commands {
     ///
     /// Converting from `vcd` builds a table whose rows are the dump's distinct
     /// ticks: time is tick times timescale, each signal holds its last value,
-    /// x and z become 0.5 in a `digital` column, and a logic signal wider than
-    /// one bit becomes its unsigned integer value.
+    /// and x and z become 0.5 in a `digital` column. A vector variable becomes
+    /// one D(bus[k]) column per bit, because a table has no place for a
+    /// declaration that says N of its columns are one word.
     ///
     /// A declared digital bus — a vector boundary port of a mixed Verilog-AMS
     /// module, or a wide `$var` in a dump being read — reaches `--to vcd` as
     /// one `$var wire N` named `bus [msb:lsb]`, with no member scalar beside
     /// it; every artifact of one run therefore converts to the same dump.
     /// Converting to a table format writes the members as the separate
-    /// flattened D(node) columns the grid already holds, and a dump's own
-    /// vector packs to one unsigned column.
+    /// flattened D(node) columns the grid already holds, whichever artifact of
+    /// the run is being read: a dump's vector expands the same way.
     Convert(ConvertArgs),
 
     /// Compare results against golden file (regression testing)

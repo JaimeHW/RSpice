@@ -31,7 +31,9 @@ use rspice_core::engine::{
 use rspice_core::execution::{
     EventProjectionError, RawEventTraces, ResultPayload, event_vcd_document, split_bus_notation,
 };
-use rspice_core::io::{VcdBit, VcdDocument, VcdSignal, VcdSignalKind, VcdValue, VcdVariable};
+use rspice_core::io::{
+    VcdBit, VcdChange, VcdDocument, VcdSignal, VcdSignalKind, VcdValue, VcdVariable,
+};
 use rspice_core::xspice::{DigitalState, DigitalStrength, DigitalValue};
 
 use crate::cli::{CliError, OutputFormat};
@@ -58,10 +60,6 @@ const DIGITAL_VARIABLE_TYPE: &str = "digital";
 
 /// Rawfile variable type of a real event column.
 const REAL_VARIABLE_TYPE: &str = "real";
-
-/// The widest logic signal whose unsigned value an `f64` column still holds
-/// exactly. A wider one would be written rounded, silently.
-const MAX_EXACT_LOGIC_WIDTH: u32 = 53;
 
 /// The level an unknown or high-impedance logic value reads as, matching the
 /// tabular projection's own `D(node)` column.
@@ -315,14 +313,12 @@ fn expand_one_vector(path: &Path, signal: &VcdSignal) -> Result<Vec<VcdSignal>, 
         for (member, bit) in members.iter_mut().zip(bits) {
             // A dump records changes, not samples: a bit that did not move
             // when its neighbour did has nothing to say at that tick.
-            if member
-                .changes
-                .last()
-                .is_some_and(|last| last.value == VcdValue::Logic(vec![*bit]))
-            {
+            if member.changes.last().is_some_and(
+                |last| matches!(&last.value, VcdValue::Logic(held) if held.as_slice() == [*bit]),
+            ) {
                 continue;
             }
-            member.changes.push(rspice_core::io::VcdChange {
+            member.changes.push(VcdChange {
                 tick: change.tick,
                 value: VcdValue::Logic(vec![*bit]),
             });
@@ -566,11 +562,18 @@ fn grid_digital_state(path: &Path, column: &str, value: f64) -> Result<DigitalSt
 ///
 /// Every distinct tick in the document becomes one row, at `tick` times the
 /// `$timescale` period, and each signal holds the last value it changed to.
-/// A logic signal becomes a `digital` column: its unsigned integer value when
-/// every bit is `0` or `1`, and `0.5` when any bit is `x` or `z` — the same
-/// unknown marker the tabular projection writes, which is also why the two
-/// cannot be told apart on the way back. A real signal becomes a `real`
-/// column.
+/// A logic signal becomes a `digital` column holding `0`, `1`, or `0.5` when
+/// the bit is `x` or `z` — the same unknown marker the tabular projection
+/// writes, which is also why the two cannot be told apart on the way back. A
+/// real signal becomes a `real` column.
+///
+/// **A vector variable becomes one column per bit**, named `D(bus[k])` and
+/// walking the declared range from its most significant end, exactly as
+/// [`expand_vector_variables`] declares them in a dump. A table has no place
+/// for a declaration, so it has no way to say that N of its columns are one
+/// word; writing the word instead would make this the only route in the
+/// product where a bus reaches a table as a number, and the same run's
+/// rawfile and its dump would convert to two different CSVs.
 ///
 /// Before its first change a logic signal reads `0.5`, because unknown is
 /// exactly what it is. A real signal has no unknown to read, so it holds its
@@ -580,7 +583,8 @@ pub(crate) fn load_vcd_table(
     path: &Path,
     resource_limits: ResourceLimits,
 ) -> Result<ExportTable, CliError> {
-    let document = parse_vcd(path, resource_limits)?;
+    let mut document = parse_vcd(path, resource_limits)?;
+    expand_vector_variables(path, &mut document)?;
     let names = column_names(&document);
 
     let mut ticks: BTreeSet<u64> = BTreeSet::new();
@@ -608,16 +612,6 @@ pub(crate) fn load_vcd_table(
 
     let mut columns = Vec::with_capacity(document.signals.len());
     for (signal, name) in document.signals.iter().zip(names) {
-        if signal.kind == VcdSignalKind::Logic && signal.width > MAX_EXACT_LOGIC_WIDTH {
-            return Err(conversion_error(
-                path,
-                format!(
-                    "signal '{name}' is {} bits wide; a table column holds at most {} bits \
-                     exactly",
-                    signal.width, MAX_EXACT_LOGIC_WIDTH
-                ),
-            ));
-        }
         let mut values = Vec::with_capacity(ticks.len());
         let mut change = signal.changes.iter().peekable();
         let mut held = leading_value(signal.changes.first().map(|change| &change.value));
@@ -660,20 +654,19 @@ fn leading_value(first: Option<&VcdValue>) -> f64 {
 }
 
 /// One value change, as a table cell.
+///
+/// Every logic change reaching here carries exactly one bit:
+/// [`load_vcd_table`] expands vector variables into member columns before it
+/// builds any. Anything wider reads unknown rather than being packed into a
+/// number, because a packed word is not something this route writes.
 fn sample_value(value: &VcdValue) -> f64 {
     match value {
         VcdValue::Real(real) => *real,
-        VcdValue::Logic(bits) => {
-            let mut number = 0_u64;
-            for bit in bits {
-                match bit {
-                    VcdBit::Zero => number <<= 1,
-                    VcdBit::One => number = (number << 1) | 1,
-                    VcdBit::Unknown | VcdBit::HighImpedance => return UNKNOWN_LEVEL,
-                }
-            }
-            number as f64
-        }
+        VcdValue::Logic(bits) => match bits.as_slice() {
+            [VcdBit::Zero] => 0.0,
+            [VcdBit::One] => 1.0,
+            _ => UNKNOWN_LEVEL,
+        },
     }
 }
 
@@ -924,7 +917,7 @@ fn inner_name<'a>(name: &'a str, prefix: &str) -> Option<&'a str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rspice_core::io::{VcdChange, VcdTimescale};
+    use rspice_core::io::VcdTimescale;
 
     fn logic(name: &str, scope: &[&str], changes: &[(u64, VcdBit)]) -> VcdSignal {
         VcdSignal {
@@ -1055,20 +1048,77 @@ mod tests {
         assert_eq!(column_names(&document), vec!["D(a.clk)", "D(b.clk)"]);
     }
 
+    /// A table cell is one bit's level, and nothing wider is packed into one.
+    ///
+    /// `load_vcd_table` expands vectors before it builds columns, so the wide
+    /// cases below cannot arise from a parsed dump; they read unknown rather
+    /// than as a number, so that a route that ever skipped the expansion
+    /// writes an honest `x` instead of a plausible word.
     #[test]
-    fn a_vector_reads_as_its_unsigned_value_until_a_bit_is_not_driven() {
+    fn a_table_cell_is_one_bit_and_a_wider_change_is_not_packed() {
         use VcdBit::{HighImpedance, One, Unknown, Zero};
-        assert_eq!(sample_value(&VcdValue::Logic(vec![One, Zero, One])), 5.0);
-        assert_eq!(sample_value(&VcdValue::Logic(vec![Zero, Zero])), 0.0);
-        assert_eq!(
-            sample_value(&VcdValue::Logic(vec![One, Unknown])),
-            UNKNOWN_LEVEL
-        );
+        assert_eq!(sample_value(&VcdValue::Logic(vec![Zero])), 0.0);
+        assert_eq!(sample_value(&VcdValue::Logic(vec![One])), 1.0);
+        assert_eq!(sample_value(&VcdValue::Logic(vec![Unknown])), UNKNOWN_LEVEL);
         assert_eq!(
             sample_value(&VcdValue::Logic(vec![HighImpedance])),
             UNKNOWN_LEVEL
         );
+        assert_eq!(
+            sample_value(&VcdValue::Logic(vec![One, Zero, One])),
+            UNKNOWN_LEVEL
+        );
         assert_eq!(sample_value(&VcdValue::Real(1.25)), 1.25);
+    }
+
+    /// Expanding is one function, so the dump route and the table route name
+    /// and order a bus's bits identically.
+    #[test]
+    fn a_vector_expands_to_the_same_members_for_a_dump_and_for_a_table() {
+        let mut document = VcdDocument::new(VcdTimescale::ALL[11]);
+        document.signals = vec![
+            logic("rst", &["top"], &[(0, VcdBit::Zero)]),
+            VcdSignal {
+                identifier: "#".to_string(),
+                variables: vec![VcdVariable {
+                    scope: vec!["top".to_string(), "core".to_string()],
+                    name: "data [1:0]".to_string(),
+                }],
+                width: 2,
+                kind: VcdSignalKind::Logic,
+                changes: vec![
+                    VcdChange {
+                        tick: 0,
+                        value: VcdValue::Logic(vec![VcdBit::Zero, VcdBit::Zero]),
+                    },
+                    VcdChange {
+                        tick: 1,
+                        value: VcdValue::Logic(vec![VcdBit::One, VcdBit::Zero]),
+                    },
+                ],
+            },
+        ];
+
+        expand_vector_variables(Path::new("fixture.vcd"), &mut document)
+            .expect("a well-formed vector expands");
+
+        assert_eq!(
+            document
+                .signals
+                .iter()
+                .map(|signal| signal.variables[0].scoped_name())
+                .collect::<Vec<_>>(),
+            vec!["top.rst", "top.core.data[1]", "top.core.data[0]"],
+            "the members stand where the vector stood, in its own scope"
+        );
+        assert_eq!(
+            column_names(&document),
+            vec!["D(rst)", "D(core.data[1])", "D(core.data[0])"],
+            "and the table names them the same way it names any other signal"
+        );
+        // Only the bit that moved records a change at tick 1.
+        assert_eq!(document.signals[1].changes.len(), 2);
+        assert_eq!(document.signals[2].changes.len(), 1);
     }
 
     #[test]
