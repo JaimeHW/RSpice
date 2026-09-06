@@ -2062,7 +2062,7 @@ mod tests {
         GeneratedVerilogAAcceptedStateShapeIdentity,
     };
 
-    #[cfg(feature = "veriloga-builtins-base")]
+    #[cfg(feature = "veriloga-model-vbic13")]
     use super::GeneratedEvaluationRequest;
     #[cfg(any(
         feature = "veriloga-model-diode-cmc",
