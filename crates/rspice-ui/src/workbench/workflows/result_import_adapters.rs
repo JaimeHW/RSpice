@@ -657,7 +657,10 @@ fn parse_generic_hdf5_root(
         select_coordinate_name(names.iter().map(String::as_str)).ok_or_else(|| {
             adapter_error(
                 format,
-                "no unambiguous root coordinate dataset named time, frequency, freq, sweep, or x",
+                format_args!(
+                    "no unambiguous root coordinate dataset named {}",
+                    stated_coordinate_names()
+                ),
             )
         })?;
     let coordinate = hdf_f64_dataset(&root, &coordinate_name, format)?;
@@ -843,7 +846,7 @@ fn hdf_i64_attr(
 
 fn select_coordinate_name<'a>(names: impl Iterator<Item = &'a str>) -> Option<String> {
     let names = names.collect::<Vec<_>>();
-    for candidate in ["time", "frequency", "freq", "sweep", "x"] {
+    for candidate in RESULT_COORDINATE_NAMES {
         if let Some(name) = names
             .iter()
             .find(|name| name.eq_ignore_ascii_case(candidate))
@@ -852,6 +855,22 @@ fn select_coordinate_name<'a>(names: impl Iterator<Item = &'a str>) -> Option<St
         }
     }
     None
+}
+
+/// Whether `name` is one of the coordinate names a headerless source may use.
+fn is_coordinate_name(name: &str) -> bool {
+    RESULT_COORDINATE_NAMES
+        .iter()
+        .any(|candidate| name.eq_ignore_ascii_case(candidate))
+}
+
+/// [`RESULT_COORDINATE_NAMES`] as a refusal spells them, so the sentence a
+/// reader is shown cannot drift from the list the reader actually accepts.
+fn stated_coordinate_names() -> String {
+    let (last, rest) = RESULT_COORDINATE_NAMES
+        .split_last()
+        .expect("the coordinate-name list is never empty");
+    format!("{}, or {last}", rest.join(", "))
 }
 
 fn ensure_table_value_limit(
@@ -1265,16 +1284,14 @@ pub(super) fn parse_npz(
     }
     let coordinate_index = arrays
         .iter()
-        .position(|(name, _)| {
-            matches!(
-                name.to_ascii_lowercase().as_str(),
-                "time" | "frequency" | "freq" | "sweep" | "x"
-            )
-        })
+        .position(|(name, _)| is_coordinate_name(name))
         .ok_or_else(|| {
             adapter_error(
                 format,
-                "NPZ requires one coordinate array named time, frequency, freq, sweep, or x",
+                format_args!(
+                    "NPZ requires one coordinate array named {}",
+                    stated_coordinate_names()
+                ),
             )
         })?;
     let (coordinate_name, coordinate_array) = arrays.remove(coordinate_index);
@@ -1523,12 +1540,10 @@ pub(super) fn parse_matlab_v5(
     if parsed.arrays().len() > MAX_RESULT_COLUMNS.saturating_mul(2) {
         return Err(adapter_error(format, "too many MATLAB variables"));
     }
-    let coordinate_index = parsed.arrays().iter().position(|array| {
-        matches!(
-            array.name().to_ascii_lowercase().as_str(),
-            "time" | "frequency" | "freq" | "sweep" | "x"
-        )
-    });
+    let coordinate_index = parsed
+        .arrays()
+        .iter()
+        .position(|array| is_coordinate_name(array.name()));
     if let Some(coordinate_index) = coordinate_index {
         let coordinate_array = &parsed.arrays()[coordinate_index];
         let (coordinate, coordinate_imag) = matlab_values(coordinate_array, format)?;
@@ -1569,7 +1584,10 @@ pub(super) fn parse_matlab_v5(
     if parsed.arrays().len() != 1 {
         return Err(adapter_error(
             format,
-            "MATLAB file requires a coordinate variable named time, frequency, freq, sweep, or x",
+            format_args!(
+                "MATLAB file requires a coordinate variable named {}",
+                stated_coordinate_names()
+            ),
         ));
     }
     let array = &parsed.arrays()[0];

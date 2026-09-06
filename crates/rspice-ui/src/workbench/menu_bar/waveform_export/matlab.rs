@@ -568,6 +568,43 @@ mod tests {
         assert_eq!(parsed.waveforms[0].y.as_slice(), [0.0, 1.0, 2.0]);
     }
 
+    /// Every name this writer publishes a coordinate under is one the reader
+    /// recognises as a coordinate.
+    ///
+    /// The reader's list was written out once per format and the writer held a
+    /// fourth copy of it in prose. A coordinate published under a name the
+    /// readers did not know would have come back as an anonymous signal on an
+    /// invented sweep, and nothing would have failed until someone reopened
+    /// the file — so the two sides now read the one constant, and this
+    /// iterates it.
+    #[test]
+    fn every_coordinate_this_writer_publishes_is_one_the_importer_reads() {
+        use crate::workbench::workflows::result_import_workflow::RESULT_COORDINATE_NAMES;
+
+        assert_eq!(
+            RESULT_COORDINATE_NAMES,
+            ["time", "frequency", "freq", "sweep", "x"],
+            "the shared list moved; every reader and this writer follow it"
+        );
+        let published = [
+            AnalysisType::Transient,
+            AnalysisType::DcSweep,
+            AnalysisType::Ac,
+        ]
+        .map(|analysis| {
+            coordinate_variable(analysis)
+                .unwrap_or_else(|| panic!("{analysis:?} is one of the three MAT carries"))
+                .0
+        });
+        for name in published {
+            assert!(
+                RESULT_COORDINATE_NAMES.contains(&name),
+                "'{name}' is published but not read back as a coordinate"
+            );
+        }
+        assert_eq!(published, ["time", "sweep", "frequency"]);
+    }
+
     /// A one-point result publishes and reopens. See the HDF5 case: the
     /// importer's floor was two rows, so the three table writers published
     /// files this product then refused to read.

@@ -55,6 +55,18 @@ pub(crate) const MAX_RESULT_DATASET_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_RESULT_COLUMNS: usize = 1_024;
 const MAX_RESULT_ROWS: usize = 1_000_000;
 const MAX_HEADER_BYTES: usize = 256;
+/// The names a source may give its coordinate, in the order a reader prefers
+/// them when a file offers more than one.
+///
+/// A format with no header of its own — a bare HDF5 root, an NPZ archive, a
+/// MATLAB workspace — states which of its arrays is the abscissa only by
+/// naming it, so this list is the whole of that contract. It was written out
+/// three times, once per reader, and the *writers* held a fourth copy: a
+/// coordinate published under a name the readers did not know would have come
+/// back as an anonymous sweep, and nothing would have failed until someone
+/// reopened the file.
+pub(crate) const RESULT_COORDINATE_NAMES: [&str; 5] = ["time", "frequency", "freq", "sweep", "x"];
+
 /// The fewest coordinate samples a source may carry and still be a result.
 ///
 /// **One.** A `.OP` is a single point by construction, and this product's own
