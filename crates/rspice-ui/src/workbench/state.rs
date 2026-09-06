@@ -285,6 +285,11 @@ pub struct ResultImportDialogState {
     /// beside the review summary and repeated in the console at commit,
     /// rather than filling `validation_error`.
     pub notes: Vec<String>,
+    /// The exact event history and bus declarations a digital source
+    /// carried, held across review so the commit does not have to parse the
+    /// file a second time. Committed whole: it is evidence about events, not
+    /// a projection of the sampled columns the reader is selecting among.
+    pub event_payload: Option<crate::state::AnalysisResultPayload>,
     pub selected_signals: Vec<bool>,
     pub validation_error: Option<String>,
 }
@@ -303,6 +308,7 @@ impl Default for ResultImportDialogState {
             waveforms: std::sync::Arc::new(Vec::new()),
             family_metadata: None,
             notes: Vec::new(),
+            event_payload: None,
             selected_signals: Vec::new(),
             validation_error: None,
         }

@@ -344,7 +344,14 @@ fn spice_raw_and_psf_ascii_import_real_waveforms() {
 fn vcd_imports_initialized_digital_events() {
     let vcd = b"$timescale 1 ns $end\n$scope module top $end\n$var wire 1 ! clk $end\n$var wire 2 \" bus $end\n$upscope $end\n$enddefinitions $end\n#0\n0!\nb00 \"\n#5\n1!\nb01 \"\n#10\n0!\nb10 \"\n";
     let parsed = parse_vcd(vcd, ResultImportFormat::Vcd).expect("VCD");
-    assert!(parsed.notes.is_empty(), "a two-state file decides nothing");
+    assert_eq!(
+        parsed.notes,
+        vec![
+            "1 vector variable is retained as a declared digital bus over its member traces."
+                .to_owned()
+        ],
+        "a two-state file decides nothing about its samples; it does state what it declared"
+    );
     assert_eq!(
         parsed
             .waveforms
@@ -367,17 +374,24 @@ fn vcd_imports_unknown_and_high_impedance_at_the_projection_level() {
         &[0.5, 1.0, 3.0],
         "a vector with any unknown bit denotes no integer"
     );
-    assert_eq!(parsed.notes.len(), 1, "the decision is stated once");
     let note = &parsed.notes[0];
     assert!(
-        note.starts_with("3 value changes were unknown (x) or high impedance (z)"),
+        note.starts_with("3 sampled values were unknown (x) or high impedance (z)"),
         "unexpected note: {note}"
     );
     assert!(note.contains("0.5"), "unexpected note: {note}");
+    assert!(
+        note.contains("keeps the four-state code the file recorded"),
+        "the level is the grid's decision, not a loss: {note}"
+    );
 }
 
+/// A vector no `f64` sample can hold used to be refused outright, taking the
+/// rest of the file with it. It imports: the word is retained whole as a
+/// declared bus, and the grid — which is where the f64 limit lives — carries
+/// one column per bit instead of one rounded integer.
 #[test]
-fn vcd_refuses_only_the_signal_no_f64_sample_can_hold() {
+fn a_vector_no_f64_sample_can_hold_reaches_the_grid_one_bit_at_a_time() {
     let mut vcd = String::from(
         "$timescale 1 ns $end\n$scope module top $end\n$var wire 96 ! wide $end\n$upscope $end\n$enddefinitions $end\n#0\nb",
     );
@@ -385,16 +399,18 @@ fn vcd_refuses_only_the_signal_no_f64_sample_can_hold() {
     vcd.push_str(" !\n#1\nb1");
     vcd.push_str(&"0".repeat(95));
     vcd.push_str(" !\n");
-    let error = parse_vcd(vcd.as_bytes(), ResultImportFormat::Vcd)
-        .expect_err("a 96-bit vector has no exact f64 integer");
-    assert!(error.contains("top.wide"), "unexpected message: {error}");
+    let parsed =
+        parse_vcd(vcd.as_bytes(), ResultImportFormat::Vcd).expect("a 96-bit vector imports");
+    assert_eq!(parsed.waveforms.len(), 96);
+    assert_eq!(parsed.waveforms[0].name, "top.wide[95]");
+    assert_eq!(parsed.waveforms[0].y.as_slice(), &[0.0, 1.0]);
     assert!(
-        error.contains("96 bits wide"),
-        "unexpected message: {error}"
-    );
-    assert!(
-        error.contains("f64 sample"),
-        "the limit is the dataset's, not the format's: {error}"
+        parsed.notes.iter().any(
+            |note| note.starts_with("1 vector variable is wider than 53 bits")
+                && note.contains("one column per bit")
+        ),
+        "unexpected notes: {:?}",
+        parsed.notes
     );
 }
 
@@ -708,4 +724,146 @@ fn fst_preflight_bounds_lz4_fastlz_and_zlib_signal_expansion() {
         assert!(error.contains(name), "{name}: {error}");
         assert!(error.contains("limit"), "{name}: {error}");
     }
+}
+
+/// The exact digital event evidence an import retained, for the tests that
+/// read it: `(node, [(time_s, value_code)])` and the declarations over them.
+fn imported_events(
+    parsed: &ParsedResultDataset,
+) -> (
+    Vec<(String, Vec<(f64, u8)>)>,
+    Vec<(String, i64, i64, Vec<String>)>,
+) {
+    let Some(crate::state::AnalysisResultPayload::TransientEvents {
+        digital_traces,
+        digital_buses,
+        ..
+    }) = parsed.event_payload.as_ref()
+    else {
+        panic!("a digital import retains its event history");
+    };
+    (
+        digital_traces
+            .iter()
+            .map(|trace| {
+                (
+                    trace.node_name.clone(),
+                    trace
+                        .points
+                        .iter()
+                        .map(|point| (point.time_s, point.value_code))
+                        .collect(),
+                )
+            })
+            .collect(),
+        digital_buses
+            .iter()
+            .map(|bus| (bus.name.clone(), bus.msb, bus.lsb, bus.members.clone()))
+            .collect(),
+    )
+}
+
+/// Two vector variables import as two `Import` declarations over their
+/// members, and every member keeps its own four-state history.
+#[test]
+fn a_two_bus_dump_imports_as_two_declarations_over_their_members() {
+    let vcd = b"$timescale 1 ns $end\n$scope module top $end\n$var wire 2 ! addr [1:0] $end\n$var wire 2 \" data [1:0] $end\n$upscope $end\n$enddefinitions $end\n#0\nb00 !\nb01 \"\n#5\nb01 !\nb10 \"\n#10\nb11 !\nb11 \"\n";
+    let parsed = parse_vcd(vcd, ResultImportFormat::Vcd).expect("a two-bus dump imports");
+    let (traces, buses) = imported_events(&parsed);
+    assert_eq!(
+        buses,
+        vec![
+            (
+                "addr".to_owned(),
+                1,
+                0,
+                vec!["addr[1]".to_owned(), "addr[0]".to_owned()]
+            ),
+            (
+                "data".to_owned(),
+                1,
+                0,
+                vec!["data[1]".to_owned(), "data[0]".to_owned()]
+            ),
+        ]
+    );
+    assert_eq!(
+        traces
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["addr[1]", "addr[0]", "data[1]", "data[0]"]
+    );
+    assert!(
+        parsed
+            .notes
+            .iter()
+            .any(|note| note == "2 vector variables are retained as declared digital buses over their member traces."),
+        "unexpected notes: {:?}",
+        parsed.notes
+    );
+}
+
+/// A 64-bit vector was refused outright — no f64 holds its integer. It now
+/// imports: the evidence carries the whole word as a declared bus, and the
+/// sampled grid spreads it over one column per bit rather than rounding it.
+#[test]
+fn a_vector_wider_than_an_exact_f64_integer_imports_as_a_bus() {
+    let zeros = "0".repeat(64);
+    let mut ones = "1".to_owned();
+    ones.push_str(&"0".repeat(63));
+    let vcd = format!(
+        "$timescale 1 ns $end\n$scope module top $end\n$var wire 64 ! wide [63:0] $end\n$upscope $end\n$enddefinitions $end\n#0\nb{zeros} !\n#1\nb{ones} !\n"
+    );
+    let parsed =
+        parse_vcd(vcd.as_bytes(), ResultImportFormat::Vcd).expect("a 64-bit vector imports");
+    let (traces, buses) = imported_events(&parsed);
+    assert_eq!(buses.len(), 1);
+    assert_eq!(
+        buses[0].0, "wide",
+        "reading a dump back drops the scope path every variable shares, which is what \
+         `rspice convert` and `--variables` see too"
+    );
+    assert_eq!(buses[0].3.len(), 64);
+    assert_eq!(traces.len(), 64);
+    assert_eq!(
+        parsed
+            .waveforms
+            .iter()
+            .map(|waveform| waveform.name.as_str())
+            .take(2)
+            .collect::<Vec<_>>(),
+        vec!["top.wide[63]", "top.wide[62]"],
+        "the grid spreads a word no f64 holds over one column per bit"
+    );
+    assert_eq!(parsed.waveforms.len(), 64);
+    assert!(
+        parsed.notes.iter().any(|note| note.starts_with(
+            "1 vector variable is wider than 53 bits, which no f64 sample holds exactly"
+        )),
+        "unexpected notes: {:?}",
+        parsed.notes
+    );
+}
+
+/// The grid's 0.5 is a property of the grid. The evidence keeps the code the
+/// file recorded, so an unknown bit stays unknown all the way to the sheet.
+#[test]
+fn an_unknown_or_high_impedance_change_is_retained_as_its_code() {
+    let vcd = b"$timescale 1 ns $end\n$scope module top $end\n$var wire 2 ! bus [1:0] $end\n$upscope $end\n$enddefinitions $end\n#0\nb0x !\n#1\nbz1 !\n";
+    let parsed = parse_vcd(vcd, ResultImportFormat::Vcd).expect("a four-state vector imports");
+    let (traces, _) = imported_events(&parsed);
+    // Codes: 0 is strong zero, 1 is strong one, 2 is unknown, 12 is high-Z.
+    assert_eq!(
+        traces,
+        vec![
+            ("bus[1]".to_owned(), vec![(0.0, 0), (1.0e-9, 12)]),
+            ("bus[0]".to_owned(), vec![(0.0, 2), (1.0e-9, 1)]),
+        ]
+    );
+    assert_eq!(
+        parsed.waveforms[0].y.as_slice(),
+        &[0.5, 0.5],
+        "the grid still projects an unresolved bit at its own level"
+    );
 }

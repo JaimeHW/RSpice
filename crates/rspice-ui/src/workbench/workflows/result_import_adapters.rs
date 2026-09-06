@@ -186,6 +186,7 @@ fn finish_dataset(
         family_metadata: None,
         delimiter: 0,
         notes: Vec::new(),
+        event_payload: None,
     })
 }
 

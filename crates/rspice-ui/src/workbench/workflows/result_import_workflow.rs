@@ -6,8 +6,8 @@
 
 use crate::diagnostics::ConsoleMessage;
 use crate::state::{
-    AnalysisResult, AnalysisResultFamilyMetadata, AnalysisType, SimulationRunLifecycle,
-    SimulationRunProvenance, WaveformData,
+    AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisType,
+    SimulationRunLifecycle, SimulationRunProvenance, WaveformData,
 };
 use crate::ui::tokens::Tokens;
 use crate::workbench::app_state::AppState;
@@ -102,6 +102,17 @@ pub(crate) struct ParsedResultDataset {
     /// four-state VCD landing on an analog grid, say — says so here rather
     /// than silently, and the review stage and the console both repeat it.
     pub(crate) notes: Vec<String>,
+    /// The exact event history and bus declarations the source carried, when
+    /// it carried any.
+    ///
+    /// A digital source states *events*, not samples: four-state codes at the
+    /// times a writer recorded them, and — for a vector variable — which
+    /// conductors are one word. `waveforms` above is the analog-grid
+    /// projection of that, which the table and waveform sheets read; this is
+    /// the evidence itself, which the Events sheet and the dump exporter
+    /// read. An imported result carries both, and neither is derived from the
+    /// other.
+    pub(crate) event_payload: Option<AnalysisResultPayload>,
 }
 
 /// Every import identifier declared by the neutral result-data contract.
@@ -306,6 +317,7 @@ pub(crate) fn stage_imported_result_dataset(
         waveforms: Arc::new(parsed.waveforms),
         family_metadata: parsed.family_metadata,
         notes: parsed.notes,
+        event_payload: parsed.event_payload,
         selected_signals: vec![true; signal_count],
         validation_error: None,
     };
@@ -398,6 +410,7 @@ fn parsed_result_from_draft(
         family_metadata: draft.family_metadata.clone(),
         delimiter: draft.delimiter,
         notes: draft.notes.clone(),
+        event_payload: draft.event_payload.clone(),
     })
 }
 
@@ -440,6 +453,18 @@ fn commit_parsed_result_dataset(
     if let Some(metadata) = parsed.family_metadata {
         metadata.validate_for(analysis_type)?;
         analysis = analysis.with_family_metadata(metadata);
+    }
+    // The exact event history goes in whole. It is not a projection of the
+    // columns above and is not narrowed by the signal selection: a bus
+    // declaration over a member the reader had unticked would name a trace
+    // that is not there, and the validator refuses exactly that.
+    let mut bus_count = 0;
+    if let Some(payload) = parsed.event_payload {
+        payload.validate_for(analysis_type)?;
+        if let AnalysisResultPayload::TransientEvents { digital_buses, .. } = &payload {
+            bus_count = digital_buses.len();
+        }
+        analysis = analysis.with_result_payload(payload);
     }
     analysis.validate_retained_evidence()?;
 
@@ -486,8 +511,13 @@ fn commit_parsed_result_dataset(
     };
     state.synchronize_specialized_viewer_cache_authority();
     state.push_user_message(ConsoleMessage::info(format!(
-        "Imported {source_name} as immutable dataset {dataset_id}: {signal_count} signals × {sample_count} samples ({})",
-        analysis_domain_label(analysis_type)
+        "Imported {source_name} as immutable dataset {dataset_id}: {signal_count} signals × {sample_count} samples ({}){}",
+        analysis_domain_label(analysis_type),
+        match bus_count {
+            0 => String::new(),
+            1 => ", with 1 declared digital bus".to_owned(),
+            count => format!(", with {count} declared digital buses"),
+        }
     )));
     state.push_user_message(ConsoleMessage::warning(format!(
         "Dataset {dataset_id} / run {run_id} (Run {run_sequence}) is external legacy-unattributed evidence, not native RSpice solver output"
@@ -1170,6 +1200,7 @@ fn parse_touchstone_result_dataset(
         family_metadata: Some(family_metadata),
         delimiter: 0,
         notes: Vec::new(),
+        event_payload: None,
     })
 }
 
@@ -1343,6 +1374,7 @@ fn parse_delimited_result_dataset(
         family_metadata: None,
         delimiter,
         notes: Vec::new(),
+        event_payload: None,
     })
 }
 
