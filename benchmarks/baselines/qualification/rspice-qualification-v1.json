@@ -1057,19 +1057,19 @@
           "signal": "Digital",
           "surfaces": {
             "CLI": {
-              "reason": "every table format writes the flattened D(node) column (0, 1 or 0.5 per analysis time point, drive strength dropped); the exact twelve-state histories ride beside it only in the rawfile event plots --format raw/ascii append and in the typed document --format json publishes, and --format vcd keeps the timeline and four bit states but not the strength",
+              "reason": "every table format writes the flattened D(node) column (0, 1 or 0.5 per analysis time point, drive strength dropped); the exact twelve-state histories ride beside it only in the rawfile event plots --format raw/ascii append and in the typed document --format json publishes, and --format vcd keeps the timeline and four bit states but not the strength; bus declarations are carried on all three of those routes, but no run declares one because the engine boundary that would is still refused",
               "status": "partial"
             },
             "Engine adapter": {
-              "reason": "the typed document the adapter publishes carries the event histories verbatim, state and strength included, but the adapter adds no digital-specific handling of its own: the descriptor columns beside them are the flattened projection, and the whole result travels as one size-bounded JSON artifact",
+              "reason": "the typed document the adapter publishes carries the event histories verbatim, state and strength included, and any bus declarations beside them, but the adapter adds no digital-specific handling of its own: the descriptor columns beside them are the flattened projection, and the whole result travels as one size-bounded JSON artifact",
               "status": "partial"
             },
             "Python": {
-              "reason": "the shared document's JSON view and the pickled result both carry the event histories with their state and strength labels, but no typed accessor exposes them: saved_signals, to_csv and the raw exporters all read the flattened D(node) projection",
+              "reason": "the shared document's JSON view and the pickled result both carry the event histories with their state and strength labels, but no typed accessor exposes them: saved_signals, to_csv and the raw exporters all read the flattened D(node) projection; the pickled structure carries no bus declarations at all, and the ones the document carries have no accessor either",
               "status": "partial"
             },
             "WASM": {
-              "reason": "the event histories cross the browser boundary with the shared document and are reachable losslessly through the handle's bounded JSON export, but the payload descriptor deliberately omits them and no typed digital accessor exists on the browser side",
+              "reason": "the event histories cross the browser boundary with the shared document and are reachable losslessly through the handle's bounded JSON export, but the payload descriptor deliberately omits them and no typed digital accessor exists on the browser side; the document's bus declarations cross with it and are likewise reachable only by reading the whole JSON",
               "status": "partial"
             }
           }

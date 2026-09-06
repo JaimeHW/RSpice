@@ -38,6 +38,13 @@
 //! ngspice executes any `Command:` line it does not recognise as its own and
 //! aborts the load on a header key it cannot resolve, while a plot name is
 //! free text to every reader of the format.
+//!
+//! A third family carries a *declared digital bus*: one plot per bus, its
+//! members as its variables in declaration order, and the declaration itself
+//! in `Title:` — an existing header key, and free text to every reader for the
+//! same reason a plot name is. The member plots are written beside it and stay
+//! the authoritative copy, so a reader that has never heard of the family
+//! passes the bus plot over and sees exactly the nodes it saw before.
 
 use crate::Value;
 use rspice_output::{AtomicArtifactError, write_atomic};

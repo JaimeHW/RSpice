@@ -92,13 +92,14 @@ pub fn bus_events(members: &[BusMemberHistory<'_>]) -> Vec<(Value, Vec<Option<u8
     let mut held: Vec<Option<u8>> = vec![None; members.len()];
     let mut events = Vec::with_capacity(times.len());
     for time in times {
-        for (index, member) in members.iter().enumerate() {
-            while let Some((point_time, code)) = member.points.get(cursors[index]) {
+        for ((member, cursor), slot) in members.iter().zip(cursors.iter_mut()).zip(held.iter_mut())
+        {
+            while let Some((point_time, code)) = member.points.get(*cursor) {
                 if *point_time > time {
                     break;
                 }
-                held[index] = Some(*code);
-                cursors[index] = cursors[index].saturating_add(1);
+                *slot = Some(*code);
+                *cursor = cursor.saturating_add(1);
             }
         }
         events.push((time, held.clone()));

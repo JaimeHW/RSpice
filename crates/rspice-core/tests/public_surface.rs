@@ -484,7 +484,54 @@ use rspice_core::analysis::harmonic_balance::{
 // own reading: `SourceSpec` is already public and `VoltageSources::
 // evaluate_source_spec_at_time_with_dialect` already takes one, but nothing
 // public could produce one from the text a card carries.
-const MAX_PUBLIC_ITEMS: usize = 4959;
+//
+// 2026-09-06, +18 deliberate (4,959 -> 4,977): the digital bus contract. An
+// XSPICE vector port reaches a result as one trace per element under its own
+// node name, and nothing in any result said those nodes were one word — the
+// GUI's events sheet, the CLI's dumps, the Python and browser bindings and the
+// rawfile importer each had to guess, and none of them could. Case 2: every
+// name below is on the path from a declared bus to a viewer, a dump or a
+// binding that can show it.
+//
+// - 7 in `engine/result.rs`. `DigitalBusDeclaration` is the declaration
+//   itself and `DigitalBusSource` is a public field of it, so
+//   `private_interfaces` makes the enum public by construction; `::new` is the
+//   checked constructor and `::validate` the same rules for a declaration that
+//   was decoded or assembled some other way, both of which the GUI's producer
+//   calls when it attaches a schematic's buses to a run's traces.
+//   `MAX_DIGITAL_BUS_WIDTH` is the width budget the schematic pins its own
+//   `MAX_BUS_MEMBER_INDEX + 1` against. `validate_digital_bus_table` is the
+//   half a single declaration cannot check — every member names a trace, no
+//   conductor is claimed twice — which every producer of a table calls.
+//   `DigitalBusError` is what all three return. The grouped `pub use` in
+//   `engine.rs` was widened in place, so it costs nothing.
+// - 1 in `abort_signal.rs`: `TransientDigitalBus`, the bus table the live
+//   accepted-sample hook lends out. It is public because `TransientSample` is
+//   — the GUI's runner both constructs and reads that struct — so the field's
+//   type cannot be narrower than the struct carrying it.
+// - 2 in `execution/result_document/payload.rs`: `DigitalEventBus`, the
+//   document's own spelling of a declaration, and `DigitalBusSourceTag`, a
+//   public field of it. Both are what a reader of a published document — the
+//   GUI, the adapter, the browser binding — decodes.
+// - 3 in `execution/event_bus.rs`: `bus_events` and `bus_value_at`, the one
+//   implementation of reassembling a bus from its members, and
+//   `BusMemberHistory`, their input. Every route that shows a bus calls them,
+//   including the GUI's events sheet and the Python and browser accessors, so
+//   that no two of them can disagree about what the run held.
+// - 2 in `execution/event_projection.rs`: `vcd_event_histories`, the inverse
+//   of the VCD projection, and `VcdEventHistories`, what it returns. The CLI's
+//   `convert` from a `.vcd` and the GUI's VCD import adapter are its callers;
+//   both flatten a dump themselves today and lose the vectors doing it.
+// - 1 in `execution/event_export.rs`: `transient_bus_plots`, which the CLI's
+//   transient publish calls beside `transient_event_plots` for
+//   `--format raw`/`--format ascii`.
+// - 1 in `io/raw_export.rs`: `RawBusTimeline`, that function's output and
+//   `write_event_plots`' second input, which the CLI names as a field of its
+//   transient output document.
+// - 1 grouped re-export statement, in `execution.rs`, for the new
+//   `event_bus` module. The `event_export`, `event_projection` and `io.rs`
+//   re-exports were widened in place.
+const MAX_PUBLIC_ITEMS: usize = 4977;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

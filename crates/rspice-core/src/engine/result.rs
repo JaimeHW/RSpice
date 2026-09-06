@@ -173,12 +173,13 @@ pub struct RealTrace {
 ///
 /// A bus is a *declaration over member nodes*, so its width is the number of
 /// conductors a consumer must hold at once to read one value of it. The budget
-/// is the same one the schematic applies to a drawn bus — `MAX_BUS_MEMBER_INDEX
-/// + 1` in `rspice-ui`'s `state/schematic/bus.rs` — so a bus a drawing can
-/// declare is a bus a result can carry and the reverse. It is a budget rather
-/// than a machine limit: a vector wider than this is a generated structure and
-/// not a drawing, and a corrupt or hostile document must not be able to make a
-/// reader materialize an unbounded number of bits from one width field.
+/// is the same one the schematic applies to a drawn bus, one past its
+/// `MAX_BUS_MEMBER_INDEX` in `rspice-ui`'s `state/schematic/bus.rs`, so a bus a
+/// drawing can declare is a bus a result can carry and the reverse. It is a
+/// budget rather than a machine limit: a vector wider than this is a generated
+/// structure and not a drawing, and a corrupt or hostile document must not be
+/// able to make a reader materialize an unbounded number of bits from one
+/// width field.
 pub const MAX_DIGITAL_BUS_WIDTH: u32 = 4_096;
 
 /// Who declared a digital bus.

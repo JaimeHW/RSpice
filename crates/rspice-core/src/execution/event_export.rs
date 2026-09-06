@@ -348,8 +348,8 @@ fn decode_bus_plot(plot: &RawWaveformData) -> Result<RawBusTimeline, EventPlotEr
         });
     }
     let expected = RawEventKind::Bus.variable_type().as_str();
-    let mut members = Vec::with_capacity(plot.variables.len() - 1);
-    for variable in &plot.variables[1..] {
+    let mut members = Vec::with_capacity(plot.variables.len().saturating_sub(1));
+    for variable in plot.variables.iter().skip(1) {
         let Some(member) = RawEventKind::Bus.node_name(&variable.name) else {
             return Err(EventPlotError::VariableName {
                 plot: plot.header.plotname.clone(),

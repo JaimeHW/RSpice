@@ -445,10 +445,18 @@ impl SignalCapability {
 // surface's descriptor inventory carries a digital signal in full. What
 // separates the four notes below is which lossless carrier each surface also
 // offers beside that column, and what that carrier costs.
-const CLI_DIGITAL_FLATTENED_PLUS_EVENTS: &str = "every table format writes the flattened D(node) column (0, 1 or 0.5 per analysis time point, drive strength dropped); the exact twelve-state histories ride beside it only in the rawfile event plots --format raw/ascii append and in the typed document --format json publishes, and --format vcd keeps the timeline and four bit states but not the strength";
-const PYTHON_DIGITAL_NO_TYPED_ACCESSOR: &str = "the shared document's JSON view and the pickled result both carry the event histories with their state and strength labels, but no typed accessor exposes them: saved_signals, to_csv and the raw exporters all read the flattened D(node) projection";
-const WASM_LOGIC_SAMPLES: &str = "the event histories cross the browser boundary with the shared document and are reachable losslessly through the handle's bounded JSON export, but the payload descriptor deliberately omits them and no typed digital accessor exists on the browser side";
-const ADAPTER_DIGITAL_DOCUMENT_ONLY: &str = "the typed document the adapter publishes carries the event histories verbatim, state and strength included, but the adapter adds no digital-specific handling of its own: the descriptor columns beside them are the flattened projection, and the whole result travels as one size-bounded JSON artifact";
+//
+// A second reason now applies to all four and is stated in each: the typed
+// document, the rawfile and a VCD dump all carry a *bus declaration* beside
+// the member traces, so a vector port's elements can be reassembled into the
+// word they came from — but no engine boundary declares one yet. The Verilog
+// module's vector discrete port is refused before a run starts, so every bus
+// a surface can see was declared by a frontend or read out of an imported
+// artifact, and none of these rows can claim more until that boundary opens.
+const CLI_DIGITAL_FLATTENED_PLUS_EVENTS: &str = "every table format writes the flattened D(node) column (0, 1 or 0.5 per analysis time point, drive strength dropped); the exact twelve-state histories ride beside it only in the rawfile event plots --format raw/ascii append and in the typed document --format json publishes, and --format vcd keeps the timeline and four bit states but not the strength; bus declarations are carried on all three of those routes, but no run declares one because the engine boundary that would is still refused";
+const PYTHON_DIGITAL_NO_TYPED_ACCESSOR: &str = "the shared document's JSON view and the pickled result both carry the event histories with their state and strength labels, but no typed accessor exposes them: saved_signals, to_csv and the raw exporters all read the flattened D(node) projection; the pickled structure carries no bus declarations at all, and the ones the document carries have no accessor either";
+const WASM_LOGIC_SAMPLES: &str = "the event histories cross the browser boundary with the shared document and are reachable losslessly through the handle's bounded JSON export, but the payload descriptor deliberately omits them and no typed digital accessor exists on the browser side; the document's bus declarations cross with it and are likewise reachable only by reading the whole JSON";
+const ADAPTER_DIGITAL_DOCUMENT_ONLY: &str = "the typed document the adapter publishes carries the event histories verbatim, state and strength included, and any bus declarations beside them, but the adapter adds no digital-specific handling of its own: the descriptor columns beside them are the flattened projection, and the whole result travels as one size-bounded JSON artifact";
 
 /// Signal-descriptor adapter coverage, kept beside result coverage so adding a
 /// `SignalKind` cannot silently inherit a frontend default.

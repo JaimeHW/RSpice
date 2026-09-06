@@ -497,13 +497,14 @@ pub fn vcd_event_histories(
             VcdSignalKind::Logic if signal.width == 1 => {
                 let mut points = Vec::with_capacity(signal.changes.len());
                 for change in &signal.changes {
-                    let [bit] = logic_bits(&reference, signal.width, change)? else {
-                        unreachable!("a width check already fixed the bit count at one");
-                    };
-                    points.push(DigitalTracePoint {
-                        time: change.tick as Value * period,
-                        value: digital_value_from_vcd_bit(*bit),
-                    });
+                    // The width check inside `logic_bits` fixes the count at
+                    // one, so this loop runs exactly once per change.
+                    for bit in logic_bits(&reference, signal.width, change)? {
+                        points.push(DigitalTracePoint {
+                            time: change.tick as Value * period,
+                            value: digital_value_from_vcd_bit(*bit),
+                        });
+                    }
                 }
                 claim_node(&mut seen, &reference)?;
                 histories.digital_traces.push(DigitalTrace {
