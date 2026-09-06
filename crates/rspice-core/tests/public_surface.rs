@@ -551,26 +551,22 @@ use rspice_core::analysis::harmonic_balance::{
 // decoder a frontend must otherwise restate is not internal machinery. A second
 // copy of the table is a second definition of what a code means, and the only
 // way to keep two definitions agreeing is to have one.
+// 2026-09-06, +2 deliberate (4,978 -> 4,980): the one spelling of a bus
+// member as a VCD bit, and the character a bit shows as.
 //
-// 2026-09-06, +19 deliberate (4,978 -> 4,997): the HDF5 writer, moved out of
-// `rspice-cli` into `io/hdf5.rs` so that the CLI, the GUI and the browser all
-// publish one layout instead of two encoders agreeing by hand. Every item is
-// named by both frontends:
-// - 2 constants, `HDF5_SCHEMA_VERSION` and `HDF5_SIMULATOR`, the two root
-//   attributes a reader identifies an RSpice document by.
-// - 6 for the document: `Hdf5Document`, `Hdf5Group`, `Hdf5Attribute`,
-//   `Hdf5Values`, and `Hdf5Document::{new, set_attr}`. The CLI builds its
-//   `.DISTO` and `.FFT` groups out of these, because those two families are
-//   its own semantics but must not be a second serializer.
-// - 4 for a group's contents: `Hdf5Group::{new, set_attr, set_real_dataset,
-//   set_integer_dataset}`.
-// - 5 for the layout itself: `Hdf5Table`, `Hdf5Coordinate`, `Hdf5Column`,
-//   `Hdf5Document::add_table`, and `Hdf5Error`. `Hdf5Table::to_group` stays
-//   private: `add_table` is the only way in, so the validation cannot be
-//   stepped around.
-// - 1 for `write_hdf5`, the one entry point that serializes.
-// - 1 grouped re-export statement in `io.rs`.
-const MAX_PUBLIC_ITEMS: usize = 4997;
+// - 1 in `execution/event_projection.rs`: `event_code_to_vcd_bit`, which turns
+//   what `bus_events` hands back for one member — a held `0..=12` code, or
+//   `None` for a member the run has not stated yet — into the bit a dump
+//   spells it with. Three callers: the core VCD projection's own `bus_signal`,
+//   `rspice-python`'s `results/transient/buses.rs`, and `rspice-wasm`'s
+//   `events.rs`. The two bindings each carried a copy of the decode-and-map
+//   before this, which is two more places for one bus word to read differently
+//   than the dump the command line writes.
+// - 1 in `io/vcd.rs`: `VcdBit::as_char`, raised from private. Both bindings
+//   assemble a whole word one character at a time, and the only public way to
+//   get that character was `Display`, which allocates a `String` per bit — on
+//   the exact path a wide bus makes hot.
+const MAX_PUBLIC_ITEMS: usize = 4980;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

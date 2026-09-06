@@ -288,7 +288,12 @@ pub enum VcdBit {
 }
 
 impl VcdBit {
-    const fn as_char(self) -> char {
+    /// The character a dump spells this bit with: `0`, `1`, `x` or `z`.
+    ///
+    /// Public because a caller assembling a whole word — a bus event, a
+    /// viewer's label — pushes one character per bit, and going through
+    /// [`fmt::Display`] to get it allocates a `String` per bit.
+    pub const fn as_char(self) -> char {
         match self {
             Self::Zero => '0',
             Self::One => '1',

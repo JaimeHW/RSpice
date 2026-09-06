@@ -180,6 +180,31 @@ pub fn digital_value_to_vcd_bit(value: DigitalValue) -> VcdBit {
     }
 }
 
+/// The VCD bit one bus member shows as at one bus event.
+///
+/// The argument is what [`crate::execution::bus_events`] hands back for a
+/// member: the `0..=12` event code it held, or `None` when the run had not
+/// stated its value yet. Those two cases spell differently for different
+/// reasons, and this is the one place either is decided:
+///
+/// - `None` — the member has no recorded point at or before the event, so the
+///   run has not said what the bit is. VCD spells that `x`.
+/// - `Some(code)` — the level of [`DigitalValue::from_event_code`], through
+///   [`digital_value_to_vcd_bit`], so the strength drops exactly as it does
+///   for a scalar.
+///
+/// The return is `None` only for a code that is not a digital event code at
+/// all. That cannot come from a history this crate recorded — every code is
+/// [`DigitalValue::event_code`] of a real value — so a caller reading a
+/// document or a pickle it did not write refuses it in its own words rather
+/// than spelling it as a value the run never held.
+pub fn event_code_to_vcd_bit(code: Option<u8>) -> Option<VcdBit> {
+    match code {
+        None => Some(VcdBit::Unknown),
+        Some(code) => DigitalValue::from_event_code(code).map(digital_value_to_vcd_bit),
+    }
+}
+
 /// The digital value a VCD bit reads back as.
 ///
 /// The inverse of [`digital_value_to_vcd_bit`] cannot recover a strength the
@@ -393,12 +418,11 @@ fn bus_signal(
         let femtoseconds = event_femtoseconds(&reference, time, &mut previous)?;
         let bits = codes
             .into_iter()
-            .map(|code| match code.and_then(DigitalValue::from_event_code) {
-                Some(value) => digital_value_to_vcd_bit(value),
-                // The member has no recorded point at or before this time, so
-                // the run has not stated the bit. `x` is what VCD spells that.
-                None => VcdBit::Unknown,
-            })
+            // Every code here is `event_code` of a value read two statements
+            // above, so `event_code_to_vcd_bit` cannot answer `None`; a member
+            // with no point yet is `Some(VcdBit::Unknown)`, which is what the
+            // run has said about it.
+            .map(|code| event_code_to_vcd_bit(code).unwrap_or(VcdBit::Unknown))
             .collect();
         points.push((femtoseconds, VcdValue::Logic(bits)));
     }
@@ -832,6 +856,40 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_member_code_spells_the_bit_the_dump_shows_and_an_absent_one_spells_unknown() {
+        // A held code spells its level, whatever the strength the level came
+        // from — the same table `digital_value_to_vcd_bit` applies to a scalar.
+        for state in [
+            DigitalState::Zero,
+            DigitalState::ZeroR,
+            DigitalState::One,
+            DigitalState::OneZ,
+            DigitalState::UnknownR,
+            DigitalState::HighZ,
+        ] {
+            for strength in STRENGTHS {
+                let value = DigitalValue::new(state, strength);
+                assert_eq!(
+                    event_code_to_vcd_bit(Some(value.event_code())),
+                    Some(digital_value_to_vcd_bit(value)),
+                    "{value:?} must spell as the scalar projection spells it"
+                );
+            }
+        }
+
+        // A member the run has not stated yet is unknown, which is a bit —
+        // it just is not a bit anything drove.
+        assert_eq!(event_code_to_vcd_bit(None), Some(VcdBit::Unknown));
+
+        // A code no value encodes is not a bit at all, so the caller decides
+        // what to say about it rather than being handed `x`.
+        let unencodable = (0..=u8::MAX)
+            .find(|code| DigitalValue::from_event_code(*code).is_none())
+            .expect("not every byte is an event code");
+        assert_eq!(event_code_to_vcd_bit(Some(unencodable)), None);
     }
 
     #[test]

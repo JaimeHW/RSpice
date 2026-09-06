@@ -23,16 +23,15 @@
 //! bit, which is not a bit that is zero. `value` is the same word in VCD's four
 //! states, which is what a logic viewer shows and what `to_vcd()` writes; both
 //! spellings come from core's own
-//! [`rspice_core::xspice::DigitalValue::from_event_code`] and
-//! [`rspice_core::execution::digital_value_to_vcd_bit`], so they cannot drift
-//! apart.
+//! [`rspice_core::execution::event_code_to_vcd_bit`] — the same call the VCD
+//! projection and the browser handle make — so they cannot drift apart.
 
 use super::*;
 
 use rspice_core::SimulationError;
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::engine::{DigitalBusDeclaration, DigitalTrace};
-use rspice_core::execution::{BusMemberHistory, bus_events, digital_value_to_vcd_bit};
+use rspice_core::execution::{BusMemberHistory, bus_events, event_code_to_vcd_bit};
 use rspice_core::xspice::DigitalValue;
 
 /// One declared digital bus: the word, and the conductors that carry it.
@@ -270,25 +269,24 @@ fn allocation_error(bus: &str) -> SimulationError {
 
 /// One bus event in VCD's four states, declared MSB first.
 ///
-/// A code that decodes to no value cannot come from an event history this build
-/// recorded — every code is `DigitalValue::event_code` of a real value — so it
-/// is refused by number rather than spelled as anything.
+/// Core spells a member — held code or not yet observed — in exactly one
+/// place, and this is the same call the VCD projection and the browser handle
+/// make, so one bus word cannot read three ways. A code that decodes to no bit
+/// cannot come from an event history this build recorded — every code is
+/// `DigitalValue::event_code` of a real value — so it is refused by number
+/// rather than spelled as anything.
 fn vcd_spelling(bus: &str, time: f64, bits: &[Option<u8>]) -> Result<String, SimulationError> {
     let mut spelled = String::with_capacity(bits.len());
     for bit in bits {
-        match bit {
-            // The run has not stated this member's value yet, which VCD spells
-            // the way it spells a value nothing knows.
-            None => spelled.push('x'),
-            Some(code) => {
-                let value = DigitalValue::from_event_code(*code).ok_or_else(|| {
-                    SimulationError::Circuit(format!(
-                        "digital bus '{bus}' holds the unrecognized event code {code} at {time} s"
-                    ))
-                })?;
-                spelled.push_str(&digital_value_to_vcd_bit(value).to_string());
-            }
-        }
+        let spelling = event_code_to_vcd_bit(*bit).ok_or_else(|| {
+            SimulationError::Circuit(format!(
+                "digital bus '{bus}' holds the unrecognized event code {} at {time} s",
+                // Only a recorded code can fail to spell; an unobserved member
+                // is `x`, so this branch is always reached with a `Some`.
+                bit.unwrap_or_default()
+            ))
+        })?;
+        spelled.push(spelling.as_char());
     }
     Ok(spelled)
 }

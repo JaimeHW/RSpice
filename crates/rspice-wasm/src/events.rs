@@ -29,7 +29,7 @@ use rspice_core::execution::result_document::{
 };
 use rspice_core::execution::{
     AnalysisResultDocument, BusMemberHistory, ResultPayload, bus_events as reassemble_bus,
-    digital_value_to_vcd_bit, event_vcd_document,
+    event_code_to_vcd_bit, event_vcd_document,
 };
 use rspice_core::xspice::DigitalValue;
 use serde::Serialize;
@@ -354,25 +354,24 @@ pub(crate) fn bus_events(
 
 /// One bus event in VCD's four states, declared MSB first.
 ///
-/// A code that decodes to no value cannot come from a document this build
-/// loaded — every point's state and strength are typed tags — so it is refused
-/// by number rather than spelled as anything.
+/// Core spells a member — held code or not yet observed — in exactly one
+/// place, and this is the same call the VCD projection and the Python
+/// accessor make, so one bus word cannot read three ways. A code that decodes
+/// to no bit cannot come from a document this build loaded — every point's
+/// state and strength are typed tags — so it is refused by number rather than
+/// spelled as anything.
 fn vcd_spelling(bus: &str, time: f64, bits: &[Option<u8>]) -> DetailedWasmResult<String> {
     let mut spelled = String::with_capacity(bits.len());
     for bit in bits {
-        match bit {
-            // The run has not stated this member's value yet, which VCD spells
-            // the way it spells a value nothing knows.
-            None => spelled.push('x'),
-            Some(code) => {
-                let value = DigitalValue::from_event_code(*code).ok_or_else(|| {
-                    projection_error(format!(
-                        "bus '{bus}' holds the unrecognized event code {code} at {time} s"
-                    ))
-                })?;
-                spelled.push_str(&digital_value_to_vcd_bit(value).to_string());
-            }
-        }
+        let spelling = event_code_to_vcd_bit(*bit).ok_or_else(|| {
+            projection_error(format!(
+                "bus '{bus}' holds the unrecognized event code {} at {time} s",
+                // Only a recorded code can fail to spell; an unobserved member
+                // is `x`, so this branch is always reached with a `Some`.
+                bit.unwrap_or_default()
+            ))
+        })?;
+        spelled.push(spelling.as_char());
     }
     Ok(spelled)
 }
