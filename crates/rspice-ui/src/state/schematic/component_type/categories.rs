@@ -60,6 +60,7 @@ impl ComponentType {
                 | ComponentType::VoltageSourceAm
                 | ComponentType::VoltageSourcePat
                 | ComponentType::VoltageSourceNoise
+                | ComponentType::VoltageSourceRandom
                 | ComponentType::CurrentSourceAc
                 | ComponentType::CurrentSourcePulse
                 | ComponentType::CurrentSourceSin
@@ -70,6 +71,7 @@ impl ComponentType {
                 | ComponentType::CurrentSourceAm
                 | ComponentType::CurrentSourcePat
                 | ComponentType::CurrentSourceNoise
+                | ComponentType::CurrentSourceRandom
                 | ComponentType::Vcvs
                 | ComponentType::Vccs
                 | ComponentType::Ccvs

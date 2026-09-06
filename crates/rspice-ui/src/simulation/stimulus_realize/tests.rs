@@ -268,6 +268,44 @@ fn a_noise_source_says_it_has_no_waveform_until_a_run_builds_one() {
     );
 }
 
+/// The TRRANDOM card, byte for byte, and the spec the engine's own parser makes
+/// of it.
+///
+/// This is the pin for the whole family: the sheet spells the distribution,
+/// the generator writes the integer the card carries, and every one of the five
+/// positional fields arrives in the engine holding what was authored. A `1.0`
+/// stays `1.0` — the emitter passes authored text through rather than
+/// re-formatting it, which is what keeps a definition's realization line and a
+/// placed adopter's deck line the same string.
+#[test]
+fn a_random_source_writes_the_card_the_engine_parses_field_for_field() {
+    let mut source = Component::new(1, ComponentType::VoltageSourceRandom, Point::origin());
+    source.name = "V1".to_owned();
+    source.params = "type=gaussian ts=1u td=0 param1=1.0 param2=0".to_owned();
+
+    assert_eq!(
+        source_card_text(&source, ["in", "0"]).expect("card"),
+        "V1 in 0 TRRANDOM(2 1u 0 1.0 0)"
+    );
+
+    let spec = source_spec(&source).expect("spec");
+    let SourceSpec::TrRandom {
+        distribution,
+        sample_interval,
+        delay,
+        parameter1,
+        parameter2,
+    } = spec
+    else {
+        panic!("a TRRANDOM card parses as a TRRANDOM spec: {spec:?}");
+    };
+    assert_eq!(distribution, 2);
+    assert_eq!(sample_interval, 1e-6);
+    assert_eq!(delay, 0.0);
+    assert_eq!(parameter1, 1.0);
+    assert_eq!(parameter2, 0.0);
+}
+
 /// A missing file the generator *can* check is refused before there is a spec
 /// at all, in the generator's own words, which name the component and the path
 /// the user typed.

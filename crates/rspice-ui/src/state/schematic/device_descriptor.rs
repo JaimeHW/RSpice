@@ -170,6 +170,14 @@ impl ComponentType {
                 Some("v_src_noise.svg"),
                 Native,
             ),
+            // TRRANDOM draws the same stochastic mark as TRNOISE: both are a
+            // source whose transient value is drawn rather than authored, and
+            // the schematic tells them apart by the card their label prints.
+            VoltageSourceRandom => (
+                "rspice.native.voltage_source.random",
+                Some("v_src_noise.svg"),
+                Native,
+            ),
             CurrentSourceAc => (
                 "rspice.native.current_source.ac",
                 Some("i_src_ac.svg"),
@@ -217,6 +225,11 @@ impl ComponentType {
             ),
             CurrentSourceNoise => (
                 "rspice.native.current_source.noise",
+                Some("i_src_noise.svg"),
+                Native,
+            ),
+            CurrentSourceRandom => (
+                "rspice.native.current_source.random",
                 Some("i_src_noise.svg"),
                 Native,
             ),

@@ -136,6 +136,7 @@ impl<'a> NetlistGenerator<'a> {
             | ComponentType::VoltageSourceAm
             | ComponentType::VoltageSourcePat
             | ComponentType::VoltageSourceNoise
+            | ComponentType::VoltageSourceRandom
             | ComponentType::CurrentSource
             | ComponentType::CurrentSourceAc
             | ComponentType::CurrentSourcePulse
@@ -146,7 +147,8 @@ impl<'a> NetlistGenerator<'a> {
             | ComponentType::CurrentSourceSffm
             | ComponentType::CurrentSourceAm
             | ComponentType::CurrentSourcePat
-            | ComponentType::CurrentSourceNoise => {
+            | ComponentType::CurrentSourceNoise
+            | ComponentType::CurrentSourceRandom => {
                 self.generate_independent_source(component, &node_names, &instance_name)
             }
 
@@ -1363,7 +1365,7 @@ fn common_source_parameter_names(is_voltage: bool) -> &'static [&'static str] {
 /// block every source carries.
 ///
 /// The two halves are returned separately rather than concatenated so the
-/// waveform lists stay one line each. SFFM, AM, PAT, and TRNOISE keep
+/// waveform lists stay one line each. SFFM, AM, PAT, TRNOISE and TRRANDOM keep
 /// ngspice's `V`-prefixed spellings on current sources too, so one list serves
 /// both quantities.
 fn independent_source_parameter_names(kind: ComponentType) -> (&'static [&'static str], bool) {
@@ -1382,6 +1384,7 @@ fn independent_source_parameter_names(kind: ComponentType) -> (&'static [&'stati
     const TRNOISE: &[&str] = &[
         "dc", "na", "nt", "nalpha", "namp", "rtsam", "rtscapt", "rtsemt",
     ];
+    const TRRANDOM: &[&str] = &["type", "ts", "td", "param1", "param2"];
     const PWL: &[&str] = &["pwl_data", "td", "repeat"];
     const PWL_FILE: &[&str] = &["file", "td", "r", "tscale", "vscale", "toffset", "voffset"];
     const BIAS_AC: &[&str] = &["dc", "phase"];
@@ -1403,6 +1406,7 @@ fn independent_source_parameter_names(kind: ComponentType) -> (&'static [&'stati
         ComponentType::VoltageSourceAm => (AM, true),
         ComponentType::VoltageSourcePat => (PAT, true),
         ComponentType::VoltageSourceNoise => (TRNOISE, true),
+        ComponentType::VoltageSourceRandom => (TRRANDOM, true),
         ComponentType::CurrentSource => (&[], false),
         ComponentType::CurrentSourceAc => (BIAS_AC, false),
         ComponentType::CurrentSourcePulse => (
@@ -1419,6 +1423,7 @@ fn independent_source_parameter_names(kind: ComponentType) -> (&'static [&'stati
         ComponentType::CurrentSourceAm => (AM, false),
         ComponentType::CurrentSourcePat => (PAT, false),
         ComponentType::CurrentSourceNoise => (TRNOISE, false),
+        ComponentType::CurrentSourceRandom => (TRRANDOM, false),
         _ => (&[], false),
     }
 }

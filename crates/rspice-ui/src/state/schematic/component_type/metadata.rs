@@ -41,7 +41,8 @@ impl ComponentType {
             | ComponentType::VoltageSourceSffm
             | ComponentType::VoltageSourceAm
             | ComponentType::VoltageSourcePat
-            | ComponentType::VoltageSourceNoise => "V",
+            | ComponentType::VoltageSourceNoise
+            | ComponentType::VoltageSourceRandom => "V",
             ComponentType::CurrentSource
             | ComponentType::CurrentSourceAc
             | ComponentType::CurrentSourcePulse
@@ -52,7 +53,8 @@ impl ComponentType {
             | ComponentType::CurrentSourceSffm
             | ComponentType::CurrentSourceAm
             | ComponentType::CurrentSourcePat
-            | ComponentType::CurrentSourceNoise => "I",
+            | ComponentType::CurrentSourceNoise
+            | ComponentType::CurrentSourceRandom => "I",
             ComponentType::Vcvs | ComponentType::OpAmp => "E",
             ComponentType::Vccs => "G",
             ComponentType::Ccvs => "H",
@@ -169,6 +171,7 @@ impl ComponentType {
             ComponentType::VoltageSourceAm => "V AM",
             ComponentType::VoltageSourcePat => "V Pattern",
             ComponentType::VoltageSourceNoise => "V Noise",
+            ComponentType::VoltageSourceRandom => "V Random",
             ComponentType::CurrentSourceAc => "I AC",
             ComponentType::CurrentSourcePulse => "I Pulse",
             ComponentType::CurrentSourceSin => "I Sin",
@@ -179,6 +182,7 @@ impl ComponentType {
             ComponentType::CurrentSourceAm => "I AM",
             ComponentType::CurrentSourcePat => "I Pattern",
             ComponentType::CurrentSourceNoise => "I Noise",
+            ComponentType::CurrentSourceRandom => "I Random",
             ComponentType::Vcvs => "VCVS (E)",
             ComponentType::OpAmp => "Op-Amp",
             ComponentType::Vccs => "VCCS (G)",

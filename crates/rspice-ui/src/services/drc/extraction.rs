@@ -91,6 +91,7 @@ fn extract_components(
                     | ComponentType::VoltageSourceAm
                     | ComponentType::VoltageSourcePat
                     | ComponentType::VoltageSourceNoise
+                    | ComponentType::VoltageSourceRandom
                     | ComponentType::VoltageSourcePwl
                     | ComponentType::VoltageSourcePwlFile
             ) && terminal.pin == "+"
@@ -116,6 +117,7 @@ fn extract_components(
                 | ComponentType::VoltageSourceAm
                 | ComponentType::VoltageSourcePat
                 | ComponentType::VoltageSourceNoise
+                | ComponentType::VoltageSourceRandom
                 | ComponentType::VoltageSourcePwl
         );
 
@@ -130,6 +132,7 @@ fn extract_components(
                 | ComponentType::CurrentSourceAm
                 | ComponentType::CurrentSourcePat
                 | ComponentType::CurrentSourceNoise
+                | ComponentType::CurrentSourceRandom
                 | ComponentType::CurrentSourcePwl
                 | ComponentType::CurrentSourcePwlFile
         );

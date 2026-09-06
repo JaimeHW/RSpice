@@ -1,12 +1,14 @@
 //! Waveform families whose voltage and current sheets differ only in unit and
 //! default instance name.
 //!
-//! SFFM, AM, PAT, and TRNOISE all take the same arguments whichever quantity
-//! they drive — ngspice even keeps the `V`-prefixed spellings (VO, VA, VHI) on
-//! current sources — so each family is built once here and stamped twice. That
-//! is the only way the two sheets cannot drift apart.
+//! SFFM, AM, PAT, TRNOISE and TRRANDOM all take the same arguments whichever
+//! quantity they drive — ngspice even keeps the `V`-prefixed spellings (VO, VA,
+//! VHI) on current sources — so each family is built once here and stamped
+//! twice. That is the only way the two sheets cannot drift apart.
 
 use super::*;
+
+use crate::state::property_types::TRRANDOM_DISTRIBUTIONS;
 
 /// The quantity a source drives. Only the unit, the default instance name, and
 /// the current-source amplitude defaults depend on it.
@@ -475,6 +477,88 @@ impl PropertyRegistry {
                 .with_order(200)
                 .with_category("Noise"),
         );
+        sheet
+    }
+
+    /// TRRANDOM(TYPE TS TD PARAM1 PARAM2).
+    ///
+    /// The parser requires TYPE and TS and defaults TD to 0, PARAM1 to 1.0 and
+    /// PARAM2 to 0 (`netlist/parser/source_specs.rs` `parse_trrandom_spec`,
+    /// lines 663-728). TYPE is the one field that changes what the other two
+    /// mean, so it leads the sheet and names its four distributions rather than
+    /// asking anyone to remember which integer the card carries; the emitter
+    /// writes the integer.
+    ///
+    /// PARAM1 carries no unit on purpose. It is an amplitude in the driven
+    /// quantity under three of the four distributions and a mean count under
+    /// Poisson, so a declared unit would be wrong a quarter of the time; the
+    /// description names all four meanings instead.
+    pub(super) fn create_trrandom_sheet(driven: Driven) -> PropertySheet {
+        let unit = driven.unit();
+        let mut sheet = PropertySheet::new();
+        sheet.add(instance_name(driven));
+
+        sheet.add(
+            PropertyDefinition::new("type")
+                .with_display_name("Distribution (TYPE)")
+                .with_description("Which distribution every sample is drawn from")
+                .with_type(PropertyType::Enum)
+                .with_default(PropertyValue::enumeration(
+                    TRRANDOM_DISTRIBUTIONS[0],
+                    TRRANDOM_DISTRIBUTIONS
+                        .iter()
+                        .map(|name| (*name).to_owned())
+                        .collect(),
+                ))
+                .with_order(10)
+                .with_category("Random")
+                .required(),
+        );
+        sheet.add(
+            PropertyDefinition::new("ts")
+                .with_display_name("Sample Interval (TS)")
+                .with_description("How long each drawn value is held; must be greater than zero")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::expression("1u"))
+                .with_unit("s")
+                .with_order(11)
+                .with_category("Random")
+                .required(),
+        );
+        sheet.add(
+            PropertyDefinition::new("td")
+                .with_display_name("Delay Time (TD)")
+                .with_description("Drawing starts here; the output holds PARAM2 until then")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::number(0.0))
+                .with_unit("s")
+                .with_order(12)
+                .with_category("Random"),
+        );
+        sheet.add(
+            PropertyDefinition::new("param1")
+                .with_display_name("Spread (PARAM1)")
+                .with_description(
+                    "Half-range (uniform), standard deviation (Gaussian), mean (exponential) or \
+                     the mean count lambda (Poisson)",
+                )
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::number(1.0))
+                .with_order(13)
+                .with_category("Random"),
+        );
+        sheet.add(
+            PropertyDefinition::new("param2")
+                .with_display_name("Offset (PARAM2)")
+                .with_description("The level every draw is measured from, and the output before TD")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::number(0.0))
+                .with_unit(unit)
+                .with_order(14)
+                .with_category("Random"),
+        );
+
+        Self::finish_source_sheet(&mut sheet, driven);
         sheet
     }
 

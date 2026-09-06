@@ -105,6 +105,10 @@ const SOURCES: &[ComponentPaletteEntry] = &[
         label: "Noise Voltage Source",
     },
     ComponentPaletteEntry {
+        kind: ComponentType::VoltageSourceRandom,
+        label: "Random Voltage Source",
+    },
+    ComponentPaletteEntry {
         kind: ComponentType::CurrentSource,
         label: "Current Source",
     },
@@ -147,6 +151,10 @@ const SOURCES: &[ComponentPaletteEntry] = &[
     ComponentPaletteEntry {
         kind: ComponentType::CurrentSourceNoise,
         label: "Noise Current Source",
+    },
+    ComponentPaletteEntry {
+        kind: ComponentType::CurrentSourceRandom,
+        label: "Random Current Source",
     },
     ComponentPaletteEntry {
         kind: ComponentType::BehavioralSource,

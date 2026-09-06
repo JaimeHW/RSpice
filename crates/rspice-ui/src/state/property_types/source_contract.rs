@@ -236,6 +236,36 @@ pub fn source_contract_findings(
     findings
 }
 
+/// The four TRRANDOM distributions, in the order the engine numbers them.
+///
+/// The card carries `TYPE` as an integer from 1 through 4
+/// (`netlist/parser/source_specs.rs` `parse_trrandom_spec`); this is the
+/// spelling the sheet offers and the generator translates. One table, so the
+/// editor's chips, the rules and the emitted card cannot disagree about which
+/// distribution number 3 is.
+pub const TRRANDOM_DISTRIBUTIONS: [&str; 4] = ["uniform", "gaussian", "exponential", "poisson"];
+
+/// The engine's `TYPE` for a distribution as the sheet spells it, or for a
+/// bare integer someone authored directly.
+///
+/// `None` is a value the netlist parser will refuse, and this module reports it
+/// as such rather than substituting one — a card that named `normal` and ran as
+/// `uniform` would be worse than a card that did not run.
+#[must_use]
+pub fn trrandom_distribution_number(authored: &str) -> Option<u8> {
+    let authored = authored.trim();
+    if let Some(index) = TRRANDOM_DISTRIBUTIONS
+        .iter()
+        .position(|name| authored.eq_ignore_ascii_case(name))
+    {
+        return u8::try_from(index + 1).ok();
+    }
+    match authored.parse::<u8>() {
+        Ok(number @ 1..=4) => Some(number),
+        _ => None,
+    }
+}
+
 /// The initial-level field, which is `V1`/`VO` on a voltage source and
 /// `I1`/`IO` on a current one.
 fn is_current(kind: ComponentType) -> bool {

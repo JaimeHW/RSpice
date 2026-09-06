@@ -89,6 +89,8 @@ fn format_source_label(component: &Component) -> String {
         ComponentType::CurrentSourcePat => format_pat_label(&params, primary, false),
         ComponentType::VoltageSourceNoise => format_noise_label(&params, primary, true),
         ComponentType::CurrentSourceNoise => format_noise_label(&params, primary, false),
+        ComponentType::VoltageSourceRandom => format_random_label(&params, primary, true),
+        ComponentType::CurrentSourceRandom => format_random_label(&params, primary, false),
         _ => primary_or_default(component.value.as_str(), "0").to_string(),
     }
 }
@@ -446,6 +448,38 @@ fn format_noise_label(params: &HashMap<String, String>, primary: &str, is_voltag
     }
     if !is_default_value(dc, "0") {
         lines.push(format!("DC: {} {}", dc, unit));
+    }
+
+    lines.join("\n")
+}
+
+/// `TRRANDOM(TYPE TS TD PARAM1 PARAM2)`, led by the distribution.
+///
+/// The distribution is the first thing to know about a random source, because
+/// it decides what PARAM1 and PARAM2 mean; the label prints its name rather
+/// than the integer the card carries, which is what the property sheet shows.
+/// TD is printed only when it delays the draw, and PARAM2 only when it moves
+/// the level — the same rule the other source labels follow for their tails.
+fn format_random_label(params: &HashMap<String, String>, primary: &str, is_voltage: bool) -> String {
+    let unit = if is_voltage { "V" } else { "A" };
+    let distribution = get_param_with_aliases(params, &["type"], "", "uniform");
+    let ts = get_param_with_aliases(params, &["ts"], primary, "1u");
+    let td = get_param_with_aliases(params, &["td"], "", "0");
+    let param1 = get_param_with_aliases(params, &["param1"], "", "1");
+    let param2 = get_param_with_aliases(params, &["param2"], "", "0");
+
+    let mut lines = vec![
+        "TRRANDOM".to_string(),
+        format!("Type: {}", distribution),
+        format!("TS: {}", ts),
+        format!("Param1: {}", param1),
+    ];
+
+    if !is_default_value(param2, "0") {
+        lines.push(format!("Param2: {} {}", param2, unit));
+    }
+    if !is_default_value(td, "0") {
+        lines.push(format!("TD: {}", td));
     }
 
     lines.join("\n")

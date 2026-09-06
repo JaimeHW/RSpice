@@ -1084,6 +1084,7 @@ const fn source_family(kind: ComponentType) -> Option<&'static str> {
         ComponentType::VoltageSourceAm | ComponentType::CurrentSourceAm => "AM",
         ComponentType::VoltageSourcePat | ComponentType::CurrentSourcePat => "PAT",
         ComponentType::VoltageSourceNoise | ComponentType::CurrentSourceNoise => "TRNOISE",
+        ComponentType::VoltageSourceRandom | ComponentType::CurrentSourceRandom => "TRRANDOM",
         _ => return None,
     })
 }
@@ -1102,6 +1103,7 @@ const fn is_voltage_source(kind: ComponentType) -> bool {
             | ComponentType::VoltageSourceAm
             | ComponentType::VoltageSourcePat
             | ComponentType::VoltageSourceNoise
+            | ComponentType::VoltageSourceRandom
     )
 }
 
@@ -1160,6 +1162,9 @@ fn key_figure(component: &Component, params: &HashMap<String, String>) -> String
         }
         ComponentType::VoltageSourceNoise | ComponentType::CurrentSourceNoise => {
             figure("nt", "NT", "s").unwrap_or_default()
+        }
+        ComponentType::VoltageSourceRandom | ComponentType::CurrentSourceRandom => {
+            figure("ts", "TS", "s").unwrap_or_default()
         }
         ComponentType::VoltageSourcePwl | ComponentType::CurrentSourcePwl => {
             let data = params

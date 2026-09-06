@@ -381,6 +381,36 @@ impl<'a> NetlistGenerator<'a> {
                     format!("DC {dc} TRNOISE({arguments})")
                 }
             }
+            ComponentType::VoltageSourceRandom | ComponentType::CurrentSourceRandom => {
+                // TRRANDOM(TYPE TS TD PARAM1 PARAM2). All five are written every
+                // time: the trailing three are positional, but what PARAM1 and
+                // PARAM2 mean changes with TYPE, so a card that named its
+                // distribution and then went quiet would be the harder one to
+                // read — and unlike the pulse and FM tails there is no fourth
+                // family of decks that would gain ` 0 0 0` from spelling them.
+                //
+                // TYPE is the distribution's name on the sheet and an integer on
+                // the card; a spelling the table does not know is passed through
+                // as authored so the parser refuses it in its own words, which
+                // is what `source_contract::trrandom_findings` already told the
+                // editor it would do.
+                let params = crate::state::parse_params_string(&component.params);
+                if !Self::has_any_source_parameter(
+                    &params,
+                    &["type", "ts", "td", "param1", "param2"],
+                ) && let Some(literal) = Self::legacy_waveform_literal(value, "TRRANDOM")
+                {
+                    return literal;
+                }
+                let authored_type = Self::get_param_owned(&params, "type", "", "uniform");
+                let distribution = crate::state::trrandom_distribution_number(&authored_type)
+                    .map_or_else(|| authored_type.trim().to_owned(), |number| number.to_string());
+                let ts = Self::get_param_owned(&params, "ts", value, "1u");
+                let td = Self::get_param_owned(&params, "td", "", "0");
+                let param1 = Self::get_param_owned(&params, "param1", "", "1");
+                let param2 = Self::get_param_owned(&params, "param2", "", "0");
+                format!("TRRANDOM({distribution} {ts} {td} {param1} {param2})")
+            }
             ComponentType::VoltageSourceSffm | ComponentType::CurrentSourceSffm => {
                 // SFFM(VO VA FC MDI FM TD PHASEM PHASEC)
                 let params = crate::state::parse_params_string(&component.params);

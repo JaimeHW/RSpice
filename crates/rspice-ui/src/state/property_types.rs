@@ -486,7 +486,8 @@ mod registry;
 mod source_contract;
 
 pub use source_contract::{
-    ContractStrength, SourceContractFinding, SourceFields, source_contract_findings,
+    ContractStrength, SourceContractFinding, SourceFields, TRRANDOM_DISTRIBUTIONS,
+    source_contract_findings, trrandom_distribution_number,
 };
 
 /// Registry of property sheets for all component types.

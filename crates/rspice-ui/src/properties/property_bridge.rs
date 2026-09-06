@@ -73,6 +73,12 @@ pub fn get_primary_property_name(kind: ComponentType) -> &'static str {
         ComponentType::CurrentSourcePat => "vhi",
         ComponentType::VoltageSourcePwl | ComponentType::CurrentSourcePwl => "pwl_data",
         ComponentType::VoltageSourcePwlFile | ComponentType::CurrentSourcePwlFile => "file",
+        // TRRANDOM leads its card with TYPE, which is a distribution name
+        // rather than a quantity; the sample interval is the number that tells
+        // two draws of the same distribution apart, so that is the field the
+        // canvas value carries. See `independent_source_parameter_names`, where
+        // `ts` is likewise the one field the primary value falls back to.
+        ComponentType::VoltageSourceRandom | ComponentType::CurrentSourceRandom => "ts",
         ComponentType::Diode
         | ComponentType::Nmos
         | ComponentType::Pmos

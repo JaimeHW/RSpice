@@ -157,6 +157,7 @@ fn dc_conduction(component: &Component) -> DcConduction {
         | ComponentType::CurrentSourceAm
         | ComponentType::CurrentSourcePat
         | ComponentType::CurrentSourceNoise
+        | ComponentType::CurrentSourceRandom
         | ComponentType::CurrentSourcePwl
         | ComponentType::CurrentSourcePwlFile => DcConduction::Open,
         ComponentType::Nmos
@@ -185,6 +186,7 @@ fn is_independent_voltage_source(kind: ComponentType) -> bool {
             | ComponentType::VoltageSourceAm
             | ComponentType::VoltageSourcePat
             | ComponentType::VoltageSourceNoise
+            | ComponentType::VoltageSourceRandom
             | ComponentType::VoltageSourcePwl
             | ComponentType::VoltageSourcePwlFile
     )

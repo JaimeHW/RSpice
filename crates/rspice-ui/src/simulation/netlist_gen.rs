@@ -1813,6 +1813,81 @@ mod tests {
         );
     }
 
+    /// A placed random source emits all five TRRANDOM fields, with TYPE as the
+    /// integer the parser reads and the rest as authored.
+    ///
+    /// The trailing three are positional and could be trimmed the way the pulse
+    /// and FM tails are, but what PARAM1 and PARAM2 *mean* changes with TYPE, so
+    /// the card states them rather than leaving a reader to recover them from
+    /// the parser's defaults.
+    #[test]
+    fn a_random_source_emits_every_trrandom_field_the_engine_reads_back() {
+        let mut random = Component::new(1, ComponentType::VoltageSourceRandom, Point::origin())
+            .with_name_value("V1", "");
+        random.params = "type=exponential ts=2u td=5u param1=3m param2=1".to_owned();
+        let netlist = netlist_for(vec![random]);
+        let card = netlist
+            .lines()
+            .find(|line| line.starts_with("V1 "))
+            .unwrap_or_else(|| panic!("{netlist}"));
+        assert!(card.ends_with("TRRANDOM(3 2u 5u 3m 1)"), "{card}");
+
+        let parsed =
+            rspice_core::netlist::parse_netlist(&netlist).expect("engine must accept the card");
+        let spec = parsed
+            .elements
+            .iter()
+            .find_map(|element| match &element.kind {
+                rspice_core::netlist::ElementKind::VoltageSource(spec) if element.name == "V1" => {
+                    Some(spec)
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{netlist}"));
+        let rspice_core::netlist::SourceSpec::TrRandom {
+            distribution,
+            sample_interval,
+            delay,
+            parameter1,
+            parameter2,
+        } = spec
+        else {
+            panic!("a TRRANDOM card parses as a TRRANDOM spec: {spec:?}");
+        };
+        assert_eq!(*distribution, 3);
+        // The engineering suffixes are read by the engine's own lexer, so the
+        // fields are compared to within its rounding rather than to the decimal
+        // literal the card happens to spell.
+        for (read, authored) in [
+            (*sample_interval, 2e-6),
+            (*delay, 5e-6),
+            (*parameter1, 3e-3),
+            (*parameter2, 1.0),
+        ] {
+            assert!(
+                (read - authored).abs() <= authored.abs() * 1e-12,
+                "{read} is not {authored}: {spec:?}"
+            );
+        }
+    }
+
+    /// The current form shares the card outright — ngspice gives TRRANDOM no
+    /// `I`-spelled aliases — and a source nobody has edited emits the sheet's
+    /// own defaults, which are the parser's.
+    #[test]
+    fn an_unedited_random_current_source_emits_the_sheets_defaults() {
+        let random = Component::new(1, ComponentType::CurrentSourceRandom, Point::origin())
+            .with_name_value("I1", "");
+        let netlist = netlist_for(vec![random]);
+        assert!(
+            netlist
+                .lines()
+                .any(|line| line.starts_with("I1 ") && line.ends_with("TRRANDOM(1 1u 0 1 0)")),
+            "{netlist}"
+        );
+        rspice_core::netlist::parse_netlist(&netlist).expect("engine must accept the card");
+    }
+
     /// The saturable inductor binds a generated Jiles-Atherton CORE card.
     #[test]
     fn saturable_inductor_emits_core_model_card() {

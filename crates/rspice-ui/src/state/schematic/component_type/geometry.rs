@@ -83,6 +83,7 @@ impl ComponentType {
             | ComponentType::VoltageSourceAm
             | ComponentType::VoltageSourcePat
             | ComponentType::VoltageSourceNoise
+            | ComponentType::VoltageSourceRandom
             | ComponentType::CurrentSource
             | ComponentType::CurrentSourceAc
             | ComponentType::CurrentSourcePulse
@@ -94,6 +95,7 @@ impl ComponentType {
             | ComponentType::CurrentSourceAm
             | ComponentType::CurrentSourcePat
             | ComponentType::CurrentSourceNoise
+            | ComponentType::CurrentSourceRandom
             | ComponentType::BehavioralSource => {
                 &[("+", Point { x: 0, y: -20 }), ("-", Point { x: 0, y: 20 })]
             }
@@ -312,6 +314,7 @@ impl ComponentType {
             | ComponentType::VoltageSourceAm
             | ComponentType::VoltageSourcePat
             | ComponentType::VoltageSourceNoise
+            | ComponentType::VoltageSourceRandom
             | ComponentType::CurrentSource
             | ComponentType::CurrentSourceAc
             | ComponentType::CurrentSourcePulse
@@ -323,6 +326,7 @@ impl ComponentType {
             | ComponentType::CurrentSourceAm
             | ComponentType::CurrentSourcePat
             | ComponentType::CurrentSourceNoise
+            | ComponentType::CurrentSourceRandom
             | ComponentType::BehavioralSource => (28, 40),
             ComponentType::Ground => (20, 20),
             ComponentType::Port => (20, 20),
@@ -403,6 +407,7 @@ mod tests {
         ComponentType::VoltageSourceAm,
         ComponentType::VoltageSourcePat,
         ComponentType::VoltageSourceNoise,
+        ComponentType::VoltageSourceRandom,
         ComponentType::CurrentSource,
         ComponentType::CurrentSourceAc,
         ComponentType::CurrentSourcePulse,
@@ -414,6 +419,7 @@ mod tests {
         ComponentType::CurrentSourceAm,
         ComponentType::CurrentSourcePat,
         ComponentType::CurrentSourceNoise,
+        ComponentType::CurrentSourceRandom,
         ComponentType::NpnBjt,
         ComponentType::PnpBjt,
         ComponentType::NpnBjt4,

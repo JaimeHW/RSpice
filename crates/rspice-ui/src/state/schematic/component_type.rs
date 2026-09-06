@@ -87,6 +87,9 @@ pub enum ComponentType {
     VoltageSourcePat,
     /// Noise Voltage Source (SPICE prefix: V)
     VoltageSourceNoise,
+    /// Random Voltage Source — TRRANDOM's piecewise-constant draw
+    /// (SPICE prefix: V)
+    VoltageSourceRandom,
     /// AC Current Source (SPICE prefix: I)
     CurrentSourceAc,
     /// Pulse Current Source (SPICE prefix: I)
@@ -107,6 +110,9 @@ pub enum ComponentType {
     CurrentSourcePat,
     /// Noise Current Source (SPICE prefix: I)
     CurrentSourceNoise,
+    /// Random Current Source — TRRANDOM's piecewise-constant draw
+    /// (SPICE prefix: I)
+    CurrentSourceRandom,
     /// Voltage-Controlled Voltage Source (SPICE prefix: E)
     Vcvs,
     /// Voltage-Controlled Current Source (SPICE prefix: G)
@@ -199,7 +205,7 @@ impl ComponentType {
     /// Exhaustive component-family inventory used by schema, editor, and
     /// netlist contract tests. Adding a new enum variant must update this
     /// list, making missing commercial editor coverage visible immediately.
-    pub const ALL: [Self; 83] = [
+    pub const ALL: [Self; 85] = [
         Self::Resistor,
         Self::Capacitor,
         Self::Inductor,
@@ -236,6 +242,7 @@ impl ComponentType {
         Self::VoltageSourceAm,
         Self::VoltageSourcePat,
         Self::VoltageSourceNoise,
+        Self::VoltageSourceRandom,
         Self::CurrentSourceAc,
         Self::CurrentSourcePulse,
         Self::CurrentSourceSin,
@@ -246,6 +253,7 @@ impl ComponentType {
         Self::CurrentSourceAm,
         Self::CurrentSourcePat,
         Self::CurrentSourceNoise,
+        Self::CurrentSourceRandom,
         Self::Vcvs,
         Self::Vccs,
         Self::Ccvs,
@@ -284,4 +292,35 @@ impl ComponentType {
         Self::XspiceAdcBridge,
         Self::XspiceDacBridge,
     ];
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ComponentType;
+
+    /// A placed component is stored by its variant name, so the two TRRANDOM
+    /// types have to write and read exactly the names a project file will carry
+    /// from here on — and they have to be in `ALL`, which is what every schema,
+    /// symbol and editor sweep in this crate iterates.
+    #[test]
+    fn the_two_trrandom_types_round_trip_under_their_own_names_and_are_in_all() {
+        for (kind, encoded_name) in [
+            (
+                ComponentType::VoltageSourceRandom,
+                "\"VoltageSourceRandom\"",
+            ),
+            (
+                ComponentType::CurrentSourceRandom,
+                "\"CurrentSourceRandom\"",
+            ),
+        ] {
+            let encoded = serde_json::to_string(&kind).expect("a component type serializes");
+            assert_eq!(encoded, encoded_name);
+            assert_eq!(
+                serde_json::from_str::<ComponentType>(&encoded).expect("it reads back"),
+                kind
+            );
+            assert!(ComponentType::ALL.contains(&kind), "{kind:?} is not in ALL");
+        }
+    }
 }
