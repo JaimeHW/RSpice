@@ -670,6 +670,104 @@ fn constant_selects_are_checked_against_declared_bounds() {
         message.contains("bit 1 of `scalar`, which is declared a scalar (1 bit)"),
         "expected a scalar-select diagnostic, got {message:?}"
     );
+
+    // A range that does not reach zero names its bits 7 down to 4 and nothing
+    // else, so bit 3 is out of bounds even though a four-bit value has one.
+    // IEEE 1364-2005 section 3.3.1 makes the declaration the authority on
+    // which indices exist, not the width it works out to.
+    let message = analyze_error(&digital_module(
+        "    wire clk;\n\
+         \x20   reg [7:4] high;\n\
+         \x20   always @(posedge clk) high[3] <= 1'b1;",
+    ));
+    assert!(
+        message.contains("bit 3 of `high`, which is declared [7:4]"),
+        "expected an out-of-bounds diagnostic, got {message:?}"
+    );
+
+    // And the same range written the other way round.
+    let message = analyze_error(&digital_module(
+        "    wire clk;\n\
+         \x20   reg [4:7] high;\n\
+         \x20   always @(posedge clk) high[8] <= 1'b1;",
+    ));
+    assert!(
+        message.contains("bit 8 of `high`, which is declared [4:7]"),
+        "expected an out-of-bounds diagnostic, got {message:?}"
+    );
+}
+
+/// IEEE 1364-2005 section 4.2.1: a part select runs in the direction the
+/// vector was declared in.
+///
+/// Both indices of `bus[0:3]` are inside a `reg [7:0]`, so the bounds check
+/// passes it; what it is not is a part select of that vector. It was silently
+/// read as `bus[3:0]` before this refusal, which is a wrong answer rather than
+/// a missing one.
+#[test]
+fn a_part_select_must_run_in_the_declarations_direction() {
+    let message = analyze_error(&digital_module(
+        "    wire clk;\n\
+         \x20   reg [7:0] bus;\n\
+         \x20   reg [3:0] low;\n\
+         \x20   always @(posedge clk) low <= bus[0:3];",
+    ));
+    assert!(
+        message.contains(
+            "part select `bus[0:3]` runs against the direction `bus` was declared \
+                          in, `[7:0]`"
+        ),
+        "expected a part-select direction diagnostic, got {message:?}"
+    );
+
+    // The mirror image: an ascending declaration refuses the descending form.
+    let message = analyze_error(&digital_module(
+        "    wire clk;\n\
+         \x20   reg [0:7] bus;\n\
+         \x20   reg [3:0] low;\n\
+         \x20   always @(posedge clk) bus[3:0] <= low;",
+    ));
+    assert!(
+        message.contains(
+            "part select `bus[3:0]` runs against the direction `bus` was declared \
+                          in, `[0:7]`"
+        ),
+        "expected a part-select direction diagnostic, got {message:?}"
+    );
+
+    // A range that is not anchored at zero is judged by position and not by
+    // which index is the larger number: `[4:7] q; q[5:6]` is in the declared
+    // direction, and `q[6:5]` is not.
+    let analyzed = analyze(&digital_module(
+        "    wire clk;\n\
+         \x20   reg [4:7] q;\n\
+         \x20   reg [1:0] middle;\n\
+         \x20   always @(posedge clk) middle <= q[5:6];",
+    ));
+    assert_eq!(only_module(&analyzed).digital.signals.len(), 3);
+
+    let message = analyze_error(&digital_module(
+        "    wire clk;\n\
+         \x20   reg [4:7] q;\n\
+         \x20   reg [1:0] middle;\n\
+         \x20   always @(posedge clk) middle <= q[6:5];",
+    ));
+    assert!(
+        message.contains(
+            "part select `q[6:5]` runs against the direction `q` was declared in, \
+                          `[4:7]`"
+        ),
+        "expected a part-select direction diagnostic, got {message:?}"
+    );
+
+    // One bit selected twice is not reversed, in either direction.
+    let analyzed = analyze(&digital_module(
+        "    wire clk;\n\
+         \x20   reg [4:7] q;\n\
+         \x20   reg one;\n\
+         \x20   always @(posedge clk) one <= q[6:6];",
+    ));
+    assert_eq!(only_module(&analyzed).digital.signals.len(), 3);
 }
 
 #[test]

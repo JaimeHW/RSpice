@@ -3570,3 +3570,210 @@ fn a_probe_with_no_analog_solution_is_refused_by_name() {
         "unexpected error: {error}"
     );
 }
+
+// ===========================================================================
+// A declared index is a name (IEEE 1364-2005 sections 3.3.1 and 4.2.1)
+// ===========================================================================
+
+/// Section 3.3.1: the *left* bound is the most significant bit, whatever the
+/// two bounds are, so a declared index names a bit rather than counting from
+/// the least significant end.
+///
+/// `reg [7:4] q` is four bits called 7, 6, 5 and 4. `q[7]` is its most
+/// significant and `q[4]` its least — not bit 7 and bit 4 of a four-bit value,
+/// which are respectively off the end and off the end. Every one of the four
+/// reads came back `x` before the position rule existed.
+#[test]
+fn a_bit_select_names_the_bit_the_declaration_names() {
+    let mut harness = Harness::new(
+        "    reg [7:4] q;\n\
+     \x20   reg [3:0] seen;\n\
+     \x20   initial seen = {q[7], q[6], q[5], q[4]};",
+    );
+    harness.set("q", "10xz");
+
+    expect_finished(harness.run());
+    assert_eq!(harness.get("seen"), "10xz");
+}
+
+/// The same declaration written the other way round. Section 3.3.1 permits an
+/// `lsb` greater than the `msb`, and the left bound is still the most
+/// significant bit — so `[4:7]` names its top bit 4, and reading it in
+/// declaration order gives back the value unchanged.
+#[test]
+fn an_ascending_declaration_still_names_its_leading_index_the_most_significant_bit() {
+    let mut harness = Harness::new(
+        "    reg [4:7] q;\n\
+     \x20   reg [3:0] seen;\n\
+     \x20   initial seen = {q[4], q[5], q[6], q[7]};",
+    );
+    harness.set("q", "10xz");
+
+    expect_finished(harness.run());
+    assert_eq!(harness.get("seen"), "10xz");
+}
+
+/// The ascending case that was already reachable before any of this, and was
+/// already wrong: `[0:7]` names its most significant bit 0 and its least 7.
+///
+/// A kernel that reads a declared index as a position answers this test with
+/// the value reversed, which is why it is written out bit by bit.
+#[test]
+fn a_zero_anchored_ascending_declaration_reads_msb_first() {
+    let mut harness = Harness::new(
+        "    reg [0:7] q;\n\
+     \x20   reg [7:0] seen;\n\
+     \x20   initial seen = {q[0], q[1], q[2], q[3], q[4], q[5], q[6], q[7]};",
+    );
+    harness.set("q", "10xz0011");
+
+    expect_finished(harness.run());
+    assert_eq!(harness.get("seen"), "10xz0011");
+}
+
+/// The declaration every design already used, unchanged: on `[7:0]` a declared
+/// index and a position are the same number, which is why the defect stayed
+/// invisible for as long as it did.
+#[test]
+fn a_descending_zero_anchored_declaration_is_the_identity() {
+    let mut harness = Harness::new(
+        "    reg [7:0] q;\n\
+     \x20   reg [7:0] seen;\n\
+     \x20   initial seen = {q[7], q[6], q[5], q[4], q[3], q[2], q[1], q[0]};",
+    );
+    harness.set("q", "10xz0011");
+
+    expect_finished(harness.run());
+    assert_eq!(harness.get("seen"), "10xz0011");
+}
+
+/// A one-bit vector is not a scalar: `reg [3:3] s` has one bit, and that bit is
+/// called 3.
+#[test]
+fn a_single_bit_vector_names_its_one_bit_by_its_bound() {
+    let mut harness = Harness::new(
+        "    reg [3:3] s;\n\
+     \x20   reg [1:0] seen;\n\
+     \x20   initial seen = {s[3], s[3]};",
+    );
+    harness.set("s", "1");
+
+    expect_finished(harness.run());
+    assert_eq!(harness.get("seen"), "11");
+}
+
+/// Section 4.2.1: a part select runs in the declaration's direction, and takes
+/// the bits it names.
+#[test]
+fn a_part_select_takes_the_bits_the_declaration_names() {
+    let mut harness = Harness::new(
+        "    reg [7:4] q;\n\
+     \x20   reg [1:0] middle;\n\
+     \x20   initial middle = q[6:5];",
+    );
+    harness.set("q", "10xz");
+
+    expect_finished(harness.run());
+    assert_eq!(harness.get("middle"), "0x");
+
+    let mut harness = Harness::new(
+        "    reg [4:7] q;\n\
+     \x20   reg [1:0] middle;\n\
+     \x20   initial middle = q[5:6];",
+    );
+    harness.set("q", "10xz");
+
+    expect_finished(harness.run());
+    assert_eq!(harness.get("middle"), "0x");
+
+    // The whole of a non-zero-anchored vector, named by its own bounds.
+    let mut harness = Harness::new(
+        "    reg [7:4] q;\n\
+     \x20   reg [3:0] all;\n\
+     \x20   initial all = q[7:4];",
+    );
+    harness.set("q", "10xz");
+
+    expect_finished(harness.run());
+    assert_eq!(harness.get("all"), "10xz");
+}
+
+/// The brief's own example: a concatenation of a part select of a
+/// non-zero-anchored vector and one of an ordinary vector.
+#[test]
+fn a_concatenation_of_two_declarations_takes_each_ones_named_bits() {
+    let mut harness = Harness::new(
+        "    reg [7:4] x;\n\
+     \x20   reg [3:0] y;\n\
+     \x20   reg [7:0] both;\n\
+     \x20   initial both = {x[7:4], y[3:0]};",
+    );
+    harness.set("x", "1010");
+    harness.set("y", "0011");
+
+    expect_finished(harness.run());
+    assert_eq!(harness.get("both"), "10100011");
+}
+
+/// A write names bits the same way a read does, and leaves the rest alone.
+#[test]
+fn a_partial_write_names_its_bits_the_way_the_declaration_does() {
+    let mut harness = Harness::new(
+        "    reg [7:4] q;\n\
+     \x20   initial begin\n\
+     \x20      q[7] = 1'b1;\n\
+     \x20      q[6:5] = 2'b01;\n\
+     \x20   end",
+    );
+    harness.set("q", "0000");
+
+    expect_finished(harness.run());
+    assert_eq!(harness.get("q"), "1010");
+
+    let mut harness = Harness::new(
+        "    reg [4:7] q;\n\
+     \x20   initial begin\n\
+     \x20      q[4] = 1'b1;\n\
+     \x20      q[5:6] = 2'b01;\n\
+     \x20   end",
+    );
+    harness.set("q", "0000");
+
+    expect_finished(harness.run());
+    assert_eq!(harness.get("q"), "1010");
+}
+
+/// An `integer`'s bits are numbered [31:0] by section 3.9, so its top bit is
+/// selectable by name and is the sign bit rather than a read off the end.
+#[test]
+fn an_integer_numbers_its_bits_thirty_one_down_to_zero() {
+    let mut harness = Harness::new(
+        "    reg [1:0] seen;\n\
+     \x20   initial begin: body\n\
+     \x20      integer i;\n\
+     \x20      i = 1;\n\
+     \x20      seen = {i[31], i[0]};\n\
+     \x20   end",
+    );
+
+    expect_finished(harness.run());
+    assert_eq!(harness.get("seen"), "01");
+}
+
+/// A process-local `reg` carries its own declaration, so a select on one is
+/// resolved against the bounds it was written with rather than against a bare
+/// width.
+#[test]
+fn a_process_local_reg_names_its_bits_by_its_own_declaration() {
+    let mut harness = Harness::new(
+        "    reg [3:0] seen;\n\
+     \x20   initial begin: body\n\
+     \x20      reg [7:4] t;\n\
+     \x20      t = 4'b1001;\n\
+     \x20      seen = {t[7], t[6], t[5], t[4]};\n\
+     \x20   end",
+    );
+
+    expect_finished(harness.run());
+    assert_eq!(harness.get("seen"), "1001");
+}
