@@ -1680,3 +1680,641 @@ impl ExprArena {
         }
     }
 }
+
+/// Hand every child slot of `node` that the generic walks descend into to `f`,
+/// in field order.
+///
+/// This is `autodiff::visit_expr`'s and `autodiff::map_expr`'s child set,
+/// including the slots they deliberately stop at: an event, noise or
+/// companion operand is compiled into a program of its own, so no generic walk
+/// enters it. [`operator_operands`] is where those operands are reached.
+pub fn for_each_child<F: FnMut(NodeId)>(arena: &ExprArena, node: &Node, f: &mut F) {
+    let optional = |slot: Option<NodeId>, f: &mut F| {
+        if let Some(child) = slot {
+            f(child);
+        }
+    };
+    match node {
+        Node::Binary(_, left, right) => {
+            f(*left);
+            f(*right);
+        }
+        Node::Unary(_, inner) => f(*inner),
+        Node::Call { a, b, .. } => {
+            optional(*a, f);
+            optional(*b, f);
+        }
+        Node::CallSpilled { args, .. } => {
+            for arg in arena.call_args(*args) {
+                f(*arg);
+            }
+        }
+        Node::Conditional(condition, then_expr, else_expr) => {
+            f(*condition);
+            f(*then_expr);
+            f(*else_expr);
+        }
+        Node::Ddt(inner)
+        | Node::Limexp(inner)
+        | Node::CanonicalLimit(inner)
+        | Node::Ddx { expr: inner, .. }
+        | Node::TableLookup { input: inner, .. }
+        | Node::VarIndexed { index: inner, .. } => f(*inner),
+        Node::Idt(inner, second) | Node::Limit(inner, second) => {
+            f(*inner);
+            optional(*second, f);
+        }
+        Node::IdtMod {
+            expr,
+            modulus,
+            payload,
+        } => {
+            let (ic, offset) = arena.optional_pair(*payload);
+            f(*expr);
+            optional(ic, f);
+            f(*modulus);
+            optional(offset, f);
+        }
+        Node::Heavy(_, id) => for_each_heavy_child(arena.heavy(*id), f),
+        // Leaves for the generic walks. The event, noise and companion nodes
+        // carry operands they never descend into; see `operator_operands`.
+        Node::Const(_)
+        | Node::Param(_)
+        | Node::ParamGiven(_)
+        | Node::Var(_)
+        | Node::Voltage(..)
+        | Node::Current(..)
+        | Node::BranchCurrent(_)
+        | Node::Time
+        | Node::Temperature
+        | Node::Vt
+        | Node::Mfactor
+        | Node::PortConnected(_)
+        | Node::Analysis(_)
+        | Node::LastCrossing { .. }
+        | Node::DdtCompanion(_)
+        | Node::IdtCompanion(_)
+        | Node::TableDerivative { .. } => {}
+    }
+}
+
+fn for_each_heavy_child<F: FnMut(NodeId)>(heavy: &Heavy, f: &mut F) {
+    let optional = |slot: Option<NodeId>, f: &mut F| {
+        if let Some(child) = slot {
+            f(child);
+        }
+    };
+    match heavy {
+        Heavy::AbsDelay {
+            expr,
+            delay_time,
+            max_delay,
+            ..
+        } => {
+            f(*expr);
+            f(*delay_time);
+            optional(*max_delay, f);
+        }
+        Heavy::AbsDelayDerivative {
+            input,
+            input_derivative,
+            delay_time,
+            delay_derivative,
+            max_delay,
+            ..
+        } => {
+            f(*input);
+            f(*input_derivative);
+            f(*delay_time);
+            f(*delay_derivative);
+            optional(*max_delay, f);
+        }
+        Heavy::Transition {
+            expr,
+            delay,
+            rise_time,
+            fall_time,
+            ..
+        } => {
+            f(*expr);
+            optional(*delay, f);
+            optional(*rise_time, f);
+            optional(*fall_time, f);
+        }
+        Heavy::TransitionDerivative {
+            input,
+            input_derivative,
+            delay,
+            rise_time,
+            fall_time,
+            ..
+        } => {
+            f(*input);
+            f(*input_derivative);
+            optional(*delay, f);
+            optional(*rise_time, f);
+            optional(*fall_time, f);
+        }
+        Heavy::Slew {
+            expr,
+            max_pos_slew,
+            max_neg_slew,
+            ..
+        } => {
+            f(*expr);
+            optional(*max_pos_slew, f);
+            optional(*max_neg_slew, f);
+        }
+        Heavy::SlewDerivative {
+            input,
+            input_derivative,
+            max_pos_slew,
+            max_pos_slew_derivative,
+            max_neg_slew,
+            max_neg_slew_derivative,
+            ..
+        } => {
+            f(*input);
+            f(*input_derivative);
+            optional(*max_pos_slew, f);
+            optional(*max_pos_slew_derivative, f);
+            optional(*max_neg_slew, f);
+            optional(*max_neg_slew_derivative, f);
+        }
+        Heavy::LaplaceZP { expr, .. }
+        | Heavy::LaplaceND { expr, .. }
+        | Heavy::LaplaceZPDerivative { expr, .. }
+        | Heavy::LaplaceNDDerivative { expr, .. } => f(*expr),
+        Heavy::ZiFilter {
+            expr,
+            period,
+            transition,
+            first_transition,
+            ..
+        }
+        | Heavy::ZiFilterDerivative {
+            expr,
+            period,
+            transition,
+            first_transition,
+            ..
+        } => {
+            f(*expr);
+            f(*period);
+            f(*transition);
+            f(*first_transition);
+        }
+        // The event and noise operators are leaves for the generic walks; the
+        // Zi polynomials are a slot the walks do not enter either.
+        Heavy::Cross { .. }
+        | Heavy::Above { .. }
+        | Heavy::Timer { .. }
+        | Heavy::WhiteNoise { .. }
+        | Heavy::FlickerNoise { .. }
+        | Heavy::NoiseTable { .. } => {}
+    }
+}
+
+/// The operand programs an operator owns, which [`for_each_child`] stops at.
+///
+/// The arena's spelling of `reaching_definition`'s walk of the same
+/// name: an operator's operands are compiled into programs of their own rather
+/// than into the expression holding it, but they are evaluated with that
+/// expression and read the same definitions, so a pass that resolves reads has
+/// to reach them. Nothing else the generic walks stop at owns a
+/// sub-expression — a Laplace or Zi coefficient list is numbers, a companion
+/// is a slot ordinal.
+pub fn operator_operands(arena: &ExprArena, node: &Node) -> Vec<NodeId> {
+    let mut operands = Vec::new();
+    let optional = |slot: Option<NodeId>, operands: &mut Vec<NodeId>| {
+        if let Some(operand) = slot {
+            operands.push(operand);
+        }
+    };
+    match node {
+        Node::LastCrossing { expr, .. } => operands.push(*expr),
+        Node::Heavy(_, id) => match arena.heavy(*id) {
+            Heavy::WhiteNoise { power, .. } => operands.push(*power),
+            Heavy::FlickerNoise {
+                power, exponent, ..
+            } => {
+                operands.push(*power);
+                operands.push(*exponent);
+            }
+            Heavy::Cross {
+                expr,
+                direction,
+                time_tol,
+                expr_tol,
+                enable,
+            } => {
+                operands.push(*expr);
+                optional(*direction, &mut operands);
+                optional(*time_tol, &mut operands);
+                optional(*expr_tol, &mut operands);
+                optional(*enable, &mut operands);
+            }
+            Heavy::Above {
+                expr,
+                time_tol,
+                expr_tol,
+                enable,
+            } => {
+                operands.push(*expr);
+                optional(*time_tol, &mut operands);
+                optional(*expr_tol, &mut operands);
+                optional(*enable, &mut operands);
+            }
+            Heavy::Timer {
+                start_time,
+                period,
+                time_tol,
+                enable,
+            } => {
+                operands.push(*start_time);
+                optional(*period, &mut operands);
+                optional(*time_tol, &mut operands);
+                optional(*enable, &mut operands);
+            }
+            _ => {}
+        },
+        _ => {}
+    }
+    operands
+}
+
+/// Walk the tree rooted at `id` in preorder, node before children.
+///
+/// The arena's `visit_expr`: the same child slots in the
+/// same order, so the variant-name sequence of an imported tree is the
+/// sequence the boxed tree produces. A shared subtree is visited once per
+/// path, which is what makes the site-ordinal walks correct over an arena.
+pub fn visit(arena: &ExprArena, id: NodeId, f: &mut impl FnMut(&Node)) {
+    let node = *arena.node(id);
+    f(&node);
+    for_each_child(arena, &node, &mut |child| visit(arena, child, f));
+}
+
+/// Rewrite the tree rooted at `id`, appending only what changed.
+///
+/// The arena's `map_expr`: `f` sees each node before its
+/// children and may replace it outright, in which case the replacement is
+/// pushed as written and its children are not walked. Otherwise the children
+/// are rewritten in the same slots `map_expr` rebuilds, and the node is pushed
+/// again only if one of them moved — an unchanged subtree keeps its id, so a
+/// rewrite that changes nothing allocates nothing.
+///
+/// Nothing is mutated in place. Every id handed out before the call still
+/// addresses the node it did.
+pub fn rewrite(
+    arena: &mut ExprArena,
+    id: NodeId,
+    f: &mut impl FnMut(&mut ExprArena, Node) -> Option<Node>,
+) -> NodeId {
+    let node = *arena.node(id);
+    if let Some(replacement) = f(arena, node) {
+        return arena.push(replacement);
+    }
+    match node {
+        Node::Binary(op, left, right) => {
+            let new_left = rewrite(arena, left, f);
+            let new_right = rewrite(arena, right, f);
+            if new_left == left && new_right == right {
+                return id;
+            }
+            arena.push(Node::Binary(op, new_left, new_right))
+        }
+        Node::Unary(op, inner) => {
+            let new_inner = rewrite(arena, inner, f);
+            if new_inner == inner {
+                return id;
+            }
+            arena.push(Node::Unary(op, new_inner))
+        }
+        Node::Call { func, argc, a, b } => {
+            let new_a = rewrite_optional(arena, a, f);
+            let new_b = rewrite_optional(arena, b, f);
+            if new_a == a && new_b == b {
+                return id;
+            }
+            arena.push(Node::Call {
+                func,
+                argc,
+                a: new_a,
+                b: new_b,
+            })
+        }
+        Node::CallSpilled { func, args } => {
+            let old = arena.call_args(args).to_vec();
+            let new = old
+                .iter()
+                .map(|arg| rewrite(arena, *arg, f))
+                .collect::<Vec<_>>();
+            if new == old {
+                return id;
+            }
+            arena.push_call(func, &new)
+        }
+        Node::Conditional(condition, then_expr, else_expr) => {
+            let new_condition = rewrite(arena, condition, f);
+            let new_then = rewrite(arena, then_expr, f);
+            let new_else = rewrite(arena, else_expr, f);
+            if new_condition == condition && new_then == then_expr && new_else == else_expr {
+                return id;
+            }
+            arena.push(Node::Conditional(new_condition, new_then, new_else))
+        }
+        Node::Ddt(inner) => rewrite_unary(arena, id, inner, Node::Ddt, f),
+        Node::Limexp(inner) => rewrite_unary(arena, id, inner, Node::Limexp, f),
+        Node::CanonicalLimit(inner) => rewrite_unary(arena, id, inner, Node::CanonicalLimit, f),
+        Node::Ddx { expr, axis } => {
+            rewrite_unary(arena, id, expr, |expr| Node::Ddx { expr, axis }, f)
+        }
+        Node::TableLookup { input, table } => rewrite_unary(
+            arena,
+            id,
+            input,
+            |input| Node::TableLookup { input, table },
+            f,
+        ),
+        Node::VarIndexed { payload, index } => rewrite_unary(
+            arena,
+            id,
+            index,
+            |index| Node::VarIndexed { payload, index },
+            f,
+        ),
+        Node::Idt(inner, second) => {
+            let new_inner = rewrite(arena, inner, f);
+            let new_second = rewrite_optional(arena, second, f);
+            if new_inner == inner && new_second == second {
+                return id;
+            }
+            arena.push(Node::Idt(new_inner, new_second))
+        }
+        Node::Limit(inner, second) => {
+            let new_inner = rewrite(arena, inner, f);
+            let new_second = rewrite_optional(arena, second, f);
+            if new_inner == inner && new_second == second {
+                return id;
+            }
+            arena.push(Node::Limit(new_inner, new_second))
+        }
+        Node::IdtMod {
+            expr,
+            modulus,
+            payload,
+        } => {
+            let (ic, offset) = arena.optional_pair(payload);
+            let new_expr = rewrite(arena, expr, f);
+            let new_ic = rewrite_optional(arena, ic, f);
+            let new_modulus = rewrite(arena, modulus, f);
+            let new_offset = rewrite_optional(arena, offset, f);
+            if new_expr == expr && new_ic == ic && new_modulus == modulus && new_offset == offset {
+                return id;
+            }
+            let payload = arena.push_optional_pair((new_ic, new_offset));
+            arena.push(Node::IdtMod {
+                expr: new_expr,
+                modulus: new_modulus,
+                payload,
+            })
+        }
+        Node::Heavy(_, heavy) => {
+            let old = arena.heavy(heavy).clone();
+            let new = rewrite_heavy(arena, &old, f);
+            if new == old {
+                return id;
+            }
+            arena.push_heavy(new)
+        }
+        // Leaves for the generic walks: an unchanged node keeps its id, which
+        // is the arena's spelling of `map_expr`'s `other => other.clone()`.
+        Node::Const(_)
+        | Node::Param(_)
+        | Node::ParamGiven(_)
+        | Node::Var(_)
+        | Node::Voltage(..)
+        | Node::Current(..)
+        | Node::BranchCurrent(_)
+        | Node::Time
+        | Node::Temperature
+        | Node::Vt
+        | Node::Mfactor
+        | Node::PortConnected(_)
+        | Node::Analysis(_)
+        | Node::LastCrossing { .. }
+        | Node::DdtCompanion(_)
+        | Node::IdtCompanion(_)
+        | Node::TableDerivative { .. } => id,
+    }
+}
+
+fn rewrite_unary(
+    arena: &mut ExprArena,
+    id: NodeId,
+    child: NodeId,
+    build: impl Fn(NodeId) -> Node,
+    f: &mut impl FnMut(&mut ExprArena, Node) -> Option<Node>,
+) -> NodeId {
+    let new_child = rewrite(arena, child, f);
+    if new_child == child {
+        return id;
+    }
+    arena.push(build(new_child))
+}
+
+fn rewrite_optional(
+    arena: &mut ExprArena,
+    child: Option<NodeId>,
+    f: &mut impl FnMut(&mut ExprArena, Node) -> Option<Node>,
+) -> Option<NodeId> {
+    child.map(|child| rewrite(arena, child, f))
+}
+
+fn rewrite_heavy(
+    arena: &mut ExprArena,
+    heavy: &Heavy,
+    f: &mut impl FnMut(&mut ExprArena, Node) -> Option<Node>,
+) -> Heavy {
+    match heavy {
+        Heavy::AbsDelay {
+            site,
+            expr,
+            delay_time,
+            max_delay,
+        } => Heavy::AbsDelay {
+            site: *site,
+            expr: rewrite(arena, *expr, f),
+            delay_time: rewrite(arena, *delay_time, f),
+            max_delay: rewrite_optional(arena, *max_delay, f),
+        },
+        Heavy::AbsDelayDerivative {
+            site,
+            input,
+            input_derivative,
+            delay_time,
+            delay_derivative,
+            max_delay,
+            derivative_order,
+        } => Heavy::AbsDelayDerivative {
+            site: *site,
+            input: rewrite(arena, *input, f),
+            input_derivative: rewrite(arena, *input_derivative, f),
+            delay_time: rewrite(arena, *delay_time, f),
+            delay_derivative: rewrite(arena, *delay_derivative, f),
+            max_delay: rewrite_optional(arena, *max_delay, f),
+            derivative_order: *derivative_order,
+        },
+        Heavy::Transition {
+            site,
+            expr,
+            delay,
+            rise_time,
+            fall_time,
+        } => Heavy::Transition {
+            site: *site,
+            expr: rewrite(arena, *expr, f),
+            delay: rewrite_optional(arena, *delay, f),
+            rise_time: rewrite_optional(arena, *rise_time, f),
+            fall_time: rewrite_optional(arena, *fall_time, f),
+        },
+        Heavy::TransitionDerivative {
+            site,
+            input,
+            input_derivative,
+            delay,
+            rise_time,
+            fall_time,
+        } => Heavy::TransitionDerivative {
+            site: *site,
+            input: rewrite(arena, *input, f),
+            input_derivative: rewrite(arena, *input_derivative, f),
+            delay: rewrite_optional(arena, *delay, f),
+            rise_time: rewrite_optional(arena, *rise_time, f),
+            fall_time: rewrite_optional(arena, *fall_time, f),
+        },
+        Heavy::Slew {
+            site,
+            expr,
+            max_pos_slew,
+            max_neg_slew,
+        } => Heavy::Slew {
+            site: *site,
+            expr: rewrite(arena, *expr, f),
+            max_pos_slew: rewrite_optional(arena, *max_pos_slew, f),
+            max_neg_slew: rewrite_optional(arena, *max_neg_slew, f),
+        },
+        Heavy::SlewDerivative {
+            site,
+            input,
+            input_derivative,
+            max_pos_slew,
+            max_pos_slew_derivative,
+            max_neg_slew,
+            max_neg_slew_derivative,
+        } => Heavy::SlewDerivative {
+            site: *site,
+            input: rewrite(arena, *input, f),
+            input_derivative: rewrite(arena, *input_derivative, f),
+            max_pos_slew: rewrite_optional(arena, *max_pos_slew, f),
+            max_pos_slew_derivative: rewrite_optional(arena, *max_pos_slew_derivative, f),
+            max_neg_slew: rewrite_optional(arena, *max_neg_slew, f),
+            max_neg_slew_derivative: rewrite_optional(arena, *max_neg_slew_derivative, f),
+        },
+        Heavy::LaplaceZP {
+            site,
+            expr,
+            zeros,
+            poles,
+            gain,
+        } => Heavy::LaplaceZP {
+            site: *site,
+            expr: rewrite(arena, *expr, f),
+            zeros: zeros.clone(),
+            poles: poles.clone(),
+            gain: *gain,
+        },
+        Heavy::LaplaceND {
+            site,
+            expr,
+            numerator,
+            denominator,
+        } => Heavy::LaplaceND {
+            site: *site,
+            expr: rewrite(arena, *expr, f),
+            numerator: numerator.clone(),
+            denominator: denominator.clone(),
+        },
+        Heavy::LaplaceZPDerivative {
+            site,
+            expr,
+            zeros,
+            poles,
+            gain,
+        } => Heavy::LaplaceZPDerivative {
+            site: *site,
+            expr: rewrite(arena, *expr, f),
+            zeros: zeros.clone(),
+            poles: poles.clone(),
+            gain: *gain,
+        },
+        Heavy::LaplaceNDDerivative {
+            site,
+            expr,
+            numerator,
+            denominator,
+        } => Heavy::LaplaceNDDerivative {
+            site: *site,
+            expr: rewrite(arena, *expr, f),
+            numerator: numerator.clone(),
+            denominator: denominator.clone(),
+        },
+        Heavy::ZiFilter {
+            site,
+            expr,
+            numerator,
+            denominator,
+            period,
+            transition,
+            first_transition,
+            direct_assignment,
+        } => Heavy::ZiFilter {
+            site: *site,
+            expr: rewrite(arena, *expr, f),
+            numerator: numerator.clone(),
+            denominator: denominator.clone(),
+            period: rewrite(arena, *period, f),
+            transition: rewrite(arena, *transition, f),
+            first_transition: rewrite(arena, *first_transition, f),
+            direct_assignment: *direct_assignment,
+        },
+        Heavy::ZiFilterDerivative {
+            site,
+            expr,
+            numerator,
+            denominator,
+            period,
+            transition,
+            first_transition,
+            direct_assignment,
+        } => Heavy::ZiFilterDerivative {
+            site: *site,
+            expr: rewrite(arena, *expr, f),
+            numerator: numerator.clone(),
+            denominator: denominator.clone(),
+            period: rewrite(arena, *period, f),
+            transition: rewrite(arena, *transition, f),
+            first_transition: rewrite(arena, *first_transition, f),
+            direct_assignment: *direct_assignment,
+        },
+        // Leaves for the generic walks, cloned unchanged the way `map_expr`
+        // clones them.
+        Heavy::Cross { .. }
+        | Heavy::Above { .. }
+        | Heavy::Timer { .. }
+        | Heavy::WhiteNoise { .. }
+        | Heavy::FlickerNoise { .. }
+        | Heavy::NoiseTable { .. } => heavy.clone(),
+    }
+}
