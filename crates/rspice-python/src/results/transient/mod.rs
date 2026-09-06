@@ -725,7 +725,7 @@ impl PyTransientResult {
         title: Option<&str>,
         timestamp: Option<&str>,
     ) -> PyResult<Bound<'py, pyo3::types::PyBytes>> {
-        let bytes = self.raw_bytes(format, title, timestamp)?;
+        let bytes = self.raw_file_bytes(format, title, timestamp)?;
         Ok(pyo3::types::PyBytes::new(py, &bytes))
     }
 
@@ -741,7 +741,7 @@ impl PyTransientResult {
         title: Option<&str>,
         timestamp: Option<&str>,
     ) -> PyResult<()> {
-        write_export_file(&path, &self.raw_bytes(format, title, timestamp)?)
+        write_export_file(&path, &self.raw_file_bytes(format, title, timestamp)?)
     }
 
     /// Get the number of time points

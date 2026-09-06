@@ -69,7 +69,7 @@ impl PyTransientResult {
     /// One body rather than two: the file and the in-memory bytes are the same
     /// export, and two copies of the title default, the timestamp assignment
     /// and the format parse are two chances for them to stop being.
-    pub(super) fn raw_bytes(
+    pub(super) fn raw_file_bytes(
         &self,
         format: &str,
         title: Option<&str>,
