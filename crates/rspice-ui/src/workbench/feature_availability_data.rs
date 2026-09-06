@@ -1336,6 +1336,14 @@ pub const INTEROPERABILITY_FORMAT_ROWS: [InteroperabilityFormatRow; 12] = [
         release_tone: ContractTone::Success,
         round_trip_loss_policy: "reference impedance, waves, units, causality, passivity",
     },
+    // The loss policy names the digital bus declaration because a VCD or FST
+    // vector variable is now carried as one: it is read back as a declaration
+    // over its member traces and written out as one `$var wire N`, so a word
+    // survives a round trip and a reader has to be told that the declaration
+    // is part of what has to agree. Every string in this table is a literal
+    // rather than a `MessageId`: the Results surfaces are not a wired
+    // localization family (`workbench/localization.rs` `WIRED_FAMILIES`), so
+    // a catalog entry here would be a string nothing paints.
     InteroperabilityFormatRow {
         domain: InteroperabilityDomain::ResultsAndReports,
         support_levels: NATIVE_CONNECTOR,
@@ -1344,7 +1352,7 @@ pub const INTEROPERABILITY_FORMAT_ROWS: [InteroperabilityFormatRow; 12] = [
         direction: "import all · export RSpice bundle, CSV, TSV, VCD, NumPy, HDF5, MATLAB",
         release_contract: "native or licensed connector",
         release_tone: ContractTone::Warning,
-        round_trip_loss_policy: "axes, units, precision, sample/event digest",
+        round_trip_loss_policy: "axes, units, precision, digital bus declaration, sample/event digest",
     },
     InteroperabilityFormatRow {
         domain: InteroperabilityDomain::ResultsAndReports,

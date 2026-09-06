@@ -335,6 +335,14 @@ fn the_result_format_row_names_the_formats_this_build_has() {
         row.direction,
         "import all · export RSpice bundle, CSV, TSV, VCD, NumPy, HDF5, MATLAB"
     );
+    // "import all" was not true of a VCD carrying a vector wider than an
+    // exact `f64` integer: that file was refused whole. It imports, and the
+    // vector is retained as a declared bus, so the loss policy has to name
+    // the declaration as something a round trip has to agree on.
+    assert_eq!(
+        row.round_trip_loss_policy,
+        "axes, units, precision, digital bus declaration, sample/event digest"
+    );
     assert!(
         !INTEROPERABILITY_FORMAT_ROWS
             .iter()
