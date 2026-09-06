@@ -30,6 +30,11 @@ pub(super) struct ViewPlans {
     pub(super) hist: Option<Arc<super::hist::HistPlan>>,
     /// The operating-point sheet's row plan; see [`super::op_inspector`].
     pub(super) op: Option<Arc<super::op_inspector::OpPlan>>,
+    /// The Monte-Carlo trial table both statistical sheets read; see
+    /// [`super::population`]. One memo for two sheets because it is one walk
+    /// over one population — the scatter and box/violin sheets differ in what
+    /// they draw from it, not in what they read.
+    pub(super) population: Option<Arc<super::population::PopulationPlan>>,
     /// Where the retained optimizer history is; see
     /// [`super::optimization`]. Behind a cell because the tab strip's
     /// availability gate holds only `&AppState` and asks every frame.
@@ -57,6 +62,7 @@ impl ViewPlans {
             envelopes,
             hist,
             op,
+            population,
             optimization,
             sensitivity,
             soa,
@@ -66,6 +72,7 @@ impl ViewPlans {
             && envelopes.is_empty()
             && hist.is_none()
             && op.is_none()
+            && population.is_none()
             && optimization.borrow().is_none()
             && sensitivity.is_none()
             && soa.is_none()

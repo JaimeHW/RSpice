@@ -46,5 +46,6 @@ pub use render::{
 };
 pub use scale::{MAX_AXIS_TICKS, XScale};
 pub use spec::{
-    Axis, Band, LimitLine, Marker, MarkerShape, PlotSpec, RefLine, Trace, trace_cache_key,
+    Axis, Band, LimitLine, Marker, MarkerShape, PlotMapper, PlotSpec, RefLine, Trace,
+    trace_cache_key,
 };

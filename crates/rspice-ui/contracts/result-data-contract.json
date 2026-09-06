@@ -5621,7 +5621,7 @@
       },
       "capability": {
         "viewerId": "viewer-scatter",
-        "classification": "release-planned",
+        "classification": "release-target",
         "creationFamilyIds": [
           "statistics-yield"
         ],
@@ -5757,7 +5757,7 @@
       },
       "capability": {
         "viewerId": "viewer-box-violin",
-        "classification": "release-planned",
+        "classification": "release-target",
         "creationFamilyIds": [
           "statistics-yield"
         ],

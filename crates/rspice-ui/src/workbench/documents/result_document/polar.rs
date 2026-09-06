@@ -1312,10 +1312,12 @@ mod tests {
 
     fn context<'a>(
         simulation: &'a crate::state::SimulationState,
+        workspace: &'a crate::state::ProjectWorkspace,
         results: &'a mut ResultsState,
     ) -> SheetContext<'a> {
         SheetContext {
             simulation,
+            workspace,
             results,
             policy: crate::quantity::QuantityPresentationPolicy::default(),
         }
@@ -1493,7 +1495,8 @@ mod tests {
     #[test]
     fn a_click_moves_the_nearer_cursor_and_leaves_the_other_alone() {
         let (simulation, mut results) = fixture(four_port_analysis());
-        let mut ctx = context(&simulation, &mut results);
+        let workspace = crate::state::ProjectWorkspace::default();
+        let mut ctx = context(&simulation, &workspace, &mut results);
         let locus = active_locus(&ctx).expect("the fixture retains a locus");
         ctx.results.cursors.a = Some(locus.x[0]);
         ctx.results.cursors.b = Some(locus.x[locus.len() - 1]);
@@ -1517,7 +1520,8 @@ mod tests {
     #[test]
     fn seeded_cursors_are_the_shared_pair_bound_to_the_active_analysis() {
         let (simulation, mut results) = fixture(four_port_analysis());
-        let mut ctx = context(&simulation, &mut results);
+        let workspace = crate::state::ProjectWorkspace::default();
+        let mut ctx = context(&simulation, &workspace, &mut results);
         let locus = active_locus(&ctx).expect("the fixture retains a locus");
         assert_eq!(ctx.results.cursors.a, None);
 

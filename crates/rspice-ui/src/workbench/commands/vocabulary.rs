@@ -815,6 +815,16 @@ impl Command {
             Self::ResultViewer(crate::workbench::ResultViewer::PoleZero) => {
                 spec("result-pole-zero", "Open pole-zero viewer", "Results")
             }
+            Self::ResultViewer(crate::workbench::ResultViewer::Scatter) => spec(
+                "result-scatter",
+                "Open correlation scatter viewer",
+                "Results",
+            ),
+            Self::ResultViewer(crate::workbench::ResultViewer::BoxViolin) => spec(
+                "result-distribution",
+                "Open box and violin distribution viewer",
+                "Results",
+            ),
             Self::ResultViewer(crate::workbench::ResultViewer::Events) => {
                 spec("result-events", "Open event history viewer", "Results")
             }
@@ -1271,6 +1281,8 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ResultViewer(crate::workbench::ResultViewer::Smith),
     Command::ResultViewer(crate::workbench::ResultViewer::Polar),
     Command::ResultViewer(crate::workbench::ResultViewer::PoleZero),
+    Command::ResultViewer(crate::workbench::ResultViewer::Scatter),
+    Command::ResultViewer(crate::workbench::ResultViewer::BoxViolin),
     Command::ResultViewer(crate::workbench::ResultViewer::Events),
     Command::ResultViewer(crate::workbench::ResultViewer::Soa),
     Command::ResultViewer(crate::workbench::ResultViewer::Reliability),

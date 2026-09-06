@@ -6,6 +6,7 @@
 //! Nyquist/Smith/pole-zero diagnostics), and a content-fit readout strip.
 
 mod bode;
+mod box_violin;
 mod create_document;
 mod events;
 mod eye;
@@ -22,8 +23,10 @@ mod optimization;
 mod persistent_document;
 mod phase_noise;
 mod polar;
+mod population;
 mod pz;
 mod reliability;
+mod scatter;
 mod sensitivity;
 mod smith;
 mod soa;
@@ -946,6 +949,10 @@ pub enum ResultViewer {
     Polar,
     /// Complex-plane pole-zero surface.
     PoleZero,
+    /// Two measured Monte-Carlo columns read as a correlation.
+    Scatter,
+    /// The shape of a retained population against its requirement.
+    BoxViolin,
     /// Committed XSPICE digital and real-valued event history.
     Events,
     /// Safe-operating-area rule evidence with per-rule stress history.
@@ -983,6 +990,8 @@ impl ResultViewer {
             ResultViewer::Smith => "SMITH",
             ResultViewer::Polar => "POLAR",
             ResultViewer::PoleZero => "PZ",
+            ResultViewer::Scatter => "SCATTER",
+            ResultViewer::BoxViolin => "DIST",
             ResultViewer::Events => "EVENTS",
             ResultViewer::Soa => "SOA",
             ResultViewer::Reliability => "AGEING",
@@ -991,7 +1000,7 @@ impl ResultViewer {
         }
     }
 
-    const PRIMARY: [ResultViewer; 22] = [
+    const PRIMARY: [ResultViewer; 24] = [
         ResultViewer::Waves,
         ResultViewer::DcSweep,
         ResultViewer::Bode,
@@ -1008,6 +1017,8 @@ impl ResultViewer {
         ResultViewer::Specs,
         ResultViewer::Table,
         ResultViewer::Hist,
+        ResultViewer::Scatter,
+        ResultViewer::BoxViolin,
         ResultViewer::Eye,
         ResultViewer::PoleZero,
         // Specialist sheets last: each needs evidence an ordinary run does not
@@ -1052,6 +1063,8 @@ impl ResultViewer {
             ResultViewer::Smith => "Smith",
             ResultViewer::Polar => "Polar",
             ResultViewer::PoleZero => "PZ",
+            ResultViewer::Scatter => "Scatter",
+            ResultViewer::BoxViolin => "Distribution",
             ResultViewer::Events => "Events",
             ResultViewer::Soa => "SOA",
             ResultViewer::Reliability => "Ageing",
@@ -1089,6 +1102,8 @@ impl ResultViewer {
             ResultViewer::Smith => "viewer-smith",
             ResultViewer::Polar => "viewer-polar",
             ResultViewer::PoleZero => "viewer-pz",
+            ResultViewer::Scatter => "viewer-scatter",
+            ResultViewer::BoxViolin => "viewer-box-violin",
             ResultViewer::Events => "viewer-digital-events",
             ResultViewer::Soa => "viewer-soa",
             ResultViewer::Reliability => "viewer-reliability",
@@ -1116,6 +1131,8 @@ impl ResultViewer {
             "viewer-polar" => ResultViewer::Polar,
             "viewer-table" => ResultViewer::Table,
             "viewer-histogram" => ResultViewer::Hist,
+            "viewer-scatter" => ResultViewer::Scatter,
+            "viewer-box-violin" => ResultViewer::BoxViolin,
             "eye-viewer" => ResultViewer::Eye,
             "viewer-pz" => ResultViewer::PoleZero,
             "viewer-contribution" => ResultViewer::Contribution,
@@ -1138,6 +1155,8 @@ impl ResultViewer {
             | ResultViewer::HarmonicBalance
             | ResultViewer::PhaseNoise
             | ResultViewer::Hist
+            | ResultViewer::Scatter
+            | ResultViewer::BoxViolin
             | ResultViewer::Contribution => WorkbenchIcon::Results,
             ResultViewer::Eye
             | ResultViewer::Nyquist
@@ -1343,6 +1362,7 @@ impl ViewerAvailability {
 /// would extend it by one more file for nothing.
 pub(super) struct SheetContext<'a> {
     pub(super) simulation: &'a crate::state::SimulationState,
+    pub(super) workspace: &'a crate::state::ProjectWorkspace,
     pub(super) results: &'a mut ResultsState,
     pub(super) policy: crate::quantity::QuantityPresentationPolicy,
 }
@@ -1352,6 +1372,7 @@ impl<'a> SheetContext<'a> {
         Self {
             policy: state.ui.preferences.quantity_presentation_policy(),
             simulation: &state.simulation,
+            workspace: &state.workspace,
             results: &mut state.ui.results,
         }
     }
@@ -2485,6 +2506,11 @@ pub struct ResultsState {
     /// Polar sheet controls: the network term, the radius ruling, the decade
     /// marks and the normalization.
     pub(crate) polar: polar::PolarSheetState,
+    /// Scatter sheet controls and the brushed trial selection.
+    pub(crate) scatter: scatter::ScatterSheetState,
+    /// Box/violin sheet controls: the grouping, the margin scale, the body
+    /// and the whisker rule.
+    pub(crate) box_violin: box_violin::BoxViolinSheetState,
     /// The marker tool.
     pub marker_tool: MarkerTool,
     /// Primary plot pointer tool shown in the 31 px instrument strip.
@@ -4975,6 +5001,8 @@ fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
         ResultViewer::Smith => smith::show(ui, &mut app.state),
         ResultViewer::Polar => polar::show(ui, &mut SheetContext::of(&mut app.state)),
         ResultViewer::PoleZero => pz::show(ui, &mut app.state),
+        ResultViewer::Scatter => scatter::show(ui, &mut SheetContext::of(&mut app.state)),
+        ResultViewer::BoxViolin => box_violin::show(ui, &mut SheetContext::of(&mut app.state)),
         ResultViewer::Events => events::show(ui, &mut app.state),
         ResultViewer::Soa => soa::show(ui, &mut app.state),
         ResultViewer::Reliability => reliability::show(ui, &mut app.state),
@@ -5370,6 +5398,8 @@ fn sheet_domain_controls(ui: &mut Ui, state: &mut AppState) -> bool {
     let mut context = SheetContext::of(state);
     match viewer {
         ResultViewer::Polar => polar::domain_bar(ui, &mut context),
+        ResultViewer::Scatter => scatter::domain_bar(ui, &mut context),
+        ResultViewer::BoxViolin => box_violin::domain_bar(ui, &mut context),
         _ => false,
     }
 }
@@ -6203,6 +6233,22 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
             }
         }
         ResultViewer::PoleZero => specialized_availability(state, ActiveViewer::PoleZero),
+        ResultViewer::Scatter | ResultViewer::BoxViolin => {
+            if active_run.is_some_and(|run| {
+                state.simulation.active_analysis().is_some_and(|analysis| {
+                    population::is_a_population(analysis)
+                        && analysis_evidence_is_valid(state, run.dataset_id, analysis)
+                })
+            }) {
+                ViewerAvailability::available(
+                    "A retained Monte Carlo population is available for the active analysis",
+                )
+            } else {
+                ViewerAvailability::unavailable(
+                    "Requires a Monte Carlo with retained per-trial evidence",
+                )
+            }
+        }
         ResultViewer::Events => {
             if events::active_analysis_is_renderable(state) {
                 ViewerAvailability::available(
@@ -6465,6 +6511,8 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         ResultViewer::Smith => smith::right_panel(ui, state),
         ResultViewer::Polar => polar::right_panel(ui, &mut SheetContext::of(state)),
         ResultViewer::PoleZero => pz::right_panel(ui, state),
+        ResultViewer::Scatter => scatter::right_panel(ui, &mut SheetContext::of(state)),
+        ResultViewer::BoxViolin => box_violin::right_panel(ui, &mut SheetContext::of(state)),
         ResultViewer::Events => events::right_panel(ui, state),
         ResultViewer::Soa => soa::right_panel(ui, state),
         ResultViewer::Reliability => reliability::right_panel(ui, state),

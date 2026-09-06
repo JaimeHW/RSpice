@@ -660,6 +660,8 @@ fn result_tabs_follow_the_upgraded_mockup_mode_order() {
             ResultViewer::Specs,
             ResultViewer::Table,
             ResultViewer::Hist,
+            ResultViewer::Scatter,
+            ResultViewer::BoxViolin,
             ResultViewer::Eye,
             ResultViewer::PoleZero,
             ResultViewer::Events,
@@ -708,6 +710,8 @@ fn structured_result_controls_have_a_reachable_40_px_strip() {
         ResultViewer::Smith,
         ResultViewer::Polar,
         ResultViewer::PoleZero,
+        ResultViewer::Scatter,
+        ResultViewer::BoxViolin,
     ] {
         assert!(!viewer_has_structured_strip(viewer), "{viewer:?}");
         assert!(viewer_has_sheet_bar(viewer), "{viewer:?}");
@@ -1225,6 +1229,20 @@ fn app_showing(viewer: ResultViewer) -> RSpiceApp {
             )]),
         ResultViewer::Bode | ResultViewer::Nyquist => ac_analysis(),
         ResultViewer::Smith | ResultViewer::Polar => sparameter_analysis(),
+        ResultViewer::Scatter | ResultViewer::BoxViolin => {
+            // The distribution sheets need a bounded measurement to normalize
+            // against, and the box's default grouping draws nothing without
+            // one.
+            app.state.workspace.specs.push(crate::state::SpecEntry {
+                measurement: "gain_dc".to_owned(),
+                expression: String::new(),
+                min: Some(39.5),
+                max: None,
+                unit: "dB".to_owned(),
+                scope: crate::state::SpecPointScope::AllPoints,
+            });
+            monte_carlo_population_analysis()
+        }
         ResultViewer::HarmonicBalance => {
             AnalysisResult::new(1, AnalysisType::HarmonicBalance, "HB").with_waveforms(vec![
                 WaveformData::new(
@@ -1420,6 +1438,70 @@ fn sparameter_analysis() -> AnalysisResult {
     })
 }
 
+/// A Monte Carlo that retained both halves of its evidence: the sampled
+/// variable and what every trial measured, indexed the same way.
+///
+/// The histogram fixture beside this one deliberately retains neither — it
+/// exercises the path where a distribution comes from the derived histogram
+/// cache — so the correlation and distribution sheets need their own.
+fn monte_carlo_population_analysis() -> AnalysisResult {
+    use crate::state::{
+        FamilyMeasurementEvidence, FamilyMemberId, FamilyMemberMeasurements,
+        MonteCarloVariableMetadata,
+    };
+
+    const TRIALS: usize = 101;
+    let samples: Vec<f64> = (0..TRIALS)
+        .map(|index| (index as f64 - 50.0) / 50.0)
+        .collect();
+    let members = samples
+        .iter()
+        .enumerate()
+        .map(|(index, sample)| {
+            FamilyMemberMeasurements::new(
+                FamilyMemberId::MonteCarloTrial {
+                    index,
+                    seed: 0x73a4 + index as u64,
+                },
+                vec![
+                    FamilyMeasurementEvidence {
+                        name: "gain_dc".to_owned(),
+                        value: Some(40.0 + 2.0 * sample),
+                        passed: true,
+                        error: None,
+                    },
+                    FamilyMeasurementEvidence {
+                        name: "vos".to_owned(),
+                        value: Some(60.0e-6 * sample),
+                        passed: true,
+                        error: None,
+                    },
+                ],
+            )
+        })
+        .collect::<Vec<_>>();
+    let mean = samples.iter().sum::<f64>() / TRIALS as f64;
+    let variance = samples.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / (TRIALS - 1) as f64;
+    AnalysisResult::new(1, AnalysisType::MonteCarlo, "MC").with_family_metadata(
+        crate::state::AnalysisResultFamilyMetadata::MonteCarlo {
+            seed: 0x73a4,
+            runs_requested: TRIALS,
+            runs_completed: TRIALS,
+            failures: 0,
+            all_converged: true,
+            variables: vec![MonteCarloVariableMetadata {
+                name: "XBRIDGE.dR".to_owned(),
+                mean,
+                std_dev: variance.sqrt(),
+                min: -1.0,
+                max: 1.0,
+                samples,
+            }],
+            member_measurements: members,
+        },
+    )
+}
+
 fn monte_carlo_analysis() -> AnalysisResult {
     AnalysisResult::new(1, AnalysisType::MonteCarlo, "MC").with_waveforms(vec![WaveformData::new(
         "V(out)",
@@ -1599,7 +1681,7 @@ fn draw_sheet_and_tessellate(app: &mut RSpiceApp, viewer: ResultViewer) {
 /// display scaling of a real workstation produces, and a wide one.
 const SHEET_FIT_GATES: [(f32, f32); 2] = [(1_024.0, 640.0), (1_680.0, 1_020.0)];
 
-/// Every control of the polar sheet is inside the window it is drawn
+/// Every control of the three catalog sheets is inside the window it is drawn
 /// in, at both gates.
 ///
 /// Measured through AccessKit rather than through painted shapes, for the
@@ -1609,13 +1691,17 @@ const SHEET_FIT_GATES: [(f32, f32); 2] = [(1_024.0, 640.0), (1_680.0, 1_020.0)];
 /// exists to avoid; one past the bottom is a register the reader cannot reach
 /// without scrolling a document well that does not scroll.
 #[test]
-fn the_polar_sheet_fits_its_window_at_both_gates() {
+fn the_catalog_sheets_fit_their_window_at_both_gates() {
     // Sub-pixel: a control resting exactly on the edge is inside it.
     const TOLERANCE: f64 = 0.5;
 
     let mut offenders = Vec::new();
     let mut measured = 0_usize;
-    for viewer in [ResultViewer::Polar] {
+    for viewer in [
+        ResultViewer::Polar,
+        ResultViewer::Scatter,
+        ResultViewer::BoxViolin,
+    ] {
         for (width, height) in SHEET_FIT_GATES {
             let mut app = app_showing(viewer);
             app.state.ui.results.viewer = viewer;
@@ -1665,7 +1751,7 @@ fn the_polar_sheet_fits_its_window_at_both_gates() {
     );
     assert!(
         measured >= 3 * SHEET_FIT_GATES.len(),
-        "the gate measured {measured} controls, so it is not looking at the sheet's bar"
+        "the gate measured {measured} controls, so it is not looking at the sheets' bars"
     );
 }
 

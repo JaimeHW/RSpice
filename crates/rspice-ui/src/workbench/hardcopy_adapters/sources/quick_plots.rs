@@ -68,6 +68,8 @@ pub(super) fn resolve_results_quick_view_parts(
         | ResultViewer::Reliability
         | ResultViewer::Optimization
         | ResultViewer::Events
+        | ResultViewer::Scatter
+        | ResultViewer::BoxViolin
         | ResultViewer::PoleZero => HardcopySemanticDocument::ResultSummary(Box::new(
             semantic_result_summary(viewer, active.analysis)?,
         )),

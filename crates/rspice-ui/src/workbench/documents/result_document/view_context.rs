@@ -341,6 +341,12 @@ fn viewer_can_render(
         // question is the same one Nyquist asks — the analysis kind decides
         // which quantities it can name, not whether it can draw at all.
         ResultViewer::Polar => !super::polar::quantities(analysis).is_empty(),
+        ResultViewer::Scatter | ResultViewer::BoxViolin => matches!(
+            analysis.family_metadata,
+            Some(AnalysisResultFamilyMetadata::MonteCarlo { ref variables, ref member_measurements, .. })
+                if variables.iter().any(|variable| variable.samples.len() >= 2)
+                    || member_measurements.len() >= 2
+        ),
         // The analysis kind is part of the question, exactly as it is in the
         // tab strip's own gate: `op_inspector` renders nothing for an
         // analysis that is not a DC operating point, so a transient that

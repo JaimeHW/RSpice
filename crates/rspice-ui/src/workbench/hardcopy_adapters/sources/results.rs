@@ -1484,6 +1484,104 @@ pub(super) fn semantic_result_summary(
                 rows,
             });
         }
+        // Both statistical sheets print the population itself rather than a
+        // re-derivation of it: the correlation, the quartiles and the yield
+        // the reader saw are functions of these rows, and a printed page that
+        // carries the rows can be checked, while one that carries only the
+        // summary can only be believed.
+        ResultViewer::Scatter | ResultViewer::BoxViolin => {
+            let Some(AnalysisResultFamilyMetadata::MonteCarlo {
+                seed,
+                runs_requested,
+                runs_completed,
+                failures,
+                variables,
+                member_measurements,
+                ..
+            }) = &analysis.family_metadata
+            else {
+                return Err(HardcopySourceError::MissingViewerEvidence(
+                    "Monte Carlo population",
+                ));
+            };
+            tables.push(SemanticTable {
+                title: "Monte Carlo execution".to_owned(),
+                columns: vec!["Quantity".to_owned(), "Value".to_owned()],
+                rows: vec![
+                    vec!["Seed".to_owned(), format!("0x{seed:X}")],
+                    vec!["Trials requested".to_owned(), runs_requested.to_string()],
+                    vec!["Trials completed".to_owned(), runs_completed.to_string()],
+                    vec!["Trials that failed".to_owned(), failures.to_string()],
+                ],
+            });
+            if !member_measurements.is_empty() {
+                let mut names: Vec<String> = Vec::new();
+                for member in member_measurements {
+                    for evidence in &member.measurements {
+                        if !names
+                            .iter()
+                            .any(|name| name.eq_ignore_ascii_case(&evidence.name))
+                        {
+                            names.push(evidence.name.clone());
+                        }
+                    }
+                }
+                let mut columns = vec!["Trial".to_owned()];
+                columns.extend(names.iter().cloned());
+                tables.push(SemanticTable {
+                    title: "Retained trial measurements".to_owned(),
+                    columns,
+                    rows: member_measurements
+                        .iter()
+                        .map(|member| {
+                            let mut row = vec![member.member.label()];
+                            row.extend(names.iter().map(|name| {
+                                member
+                                    .evidence_for(name)
+                                    .map_or_else(String::new, |evidence| {
+                                        evidence.value.map_or_else(
+                                            || {
+                                                evidence
+                                                    .error
+                                                    .clone()
+                                                    .unwrap_or_else(|| "not measured".to_owned())
+                                            },
+                                            exact_number,
+                                        )
+                                    })
+                            }));
+                            row
+                        })
+                        .collect(),
+                });
+            }
+            if !variables.is_empty() {
+                let mut columns = vec!["Sample".to_owned()];
+                columns.extend(variables.iter().map(|variable| variable.name.clone()));
+                let depth = variables
+                    .iter()
+                    .map(|variable| variable.samples.len())
+                    .max()
+                    .unwrap_or(0);
+                tables.push(SemanticTable {
+                    title: "Sampled variables".to_owned(),
+                    columns,
+                    rows: (0..depth)
+                        .map(|index| {
+                            let mut row = vec![index.to_string()];
+                            row.extend(variables.iter().map(|variable| {
+                                variable
+                                    .samples
+                                    .get(index)
+                                    .copied()
+                                    .map_or_else(String::new, exact_number)
+                            }));
+                            row
+                        })
+                        .collect(),
+                });
+            }
+        }
         ResultViewer::Manifest => {
             return Err(HardcopySourceError::UnsupportedVisualizationViewer(
                 "dataset-native Manifest cannot be derived from one analysis".to_owned(),

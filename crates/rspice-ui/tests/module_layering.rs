@@ -1588,17 +1588,19 @@ const OVERSIZED_FILES: &[(&str, usize)] = &[
     ("workbench/docks/inspector.rs", 3_221),
     ("workbench/docks/navigator.rs", 6_668),
     ("workbench/documents/model_editor.rs", 2_614),
-    // 2026-09-06, +52 (6_418 -> 6_470): the polar sheet joined the workspace.
-    // Every line is a single-owner table this file exists to own -- the
-    // `ResultViewer` variant and its tab order, the two directions of the
-    // viewer-document identity map, the sheet and inspector dispatch, the
+    // 2026-09-06, +100 (6_418 -> 6_518): three viewer sheets joined the
+    // workspace. Every line is a single-owner table this file exists to own —
+    // the `ResultViewer` variants and their tab order, the two directions of
+    // the viewer-document identity map, the sheet and inspector dispatch, the
     // availability gate, the hook that lets a custom sheet paint its own
-    // domain bar, and `SheetContext`, which is how the sheet takes the session
-    // slices it reads instead of `AppState` (see ALLOWED_WORKBENCH_VIOLATIONS:
-    // that edge holds at 34). The sheet's own model, painter, register and
-    // tests are in `polar.rs`; what is left here is exactly the registration
-    // that cannot be anywhere else.
-    ("workbench/documents/result_document.rs", 6_470),
+    // domain bar, and `SheetContext`, which is how the three new sheets take
+    // the session slices they read instead of `AppState` (see
+    // `ALLOWED_WORKBENCH_VIOLATIONS`: that edge holds at 34). Each sheet's own
+    // model, painter, register and tests are in its own file (`polar.rs`,
+    // `scatter.rs`, `box_violin.rs`) and the population walk the two
+    // statistical sheets share is in `population.rs`; what is left here is
+    // exactly the registration that cannot be anywhere else.
+    ("workbench/documents/result_document.rs", 6_518),
     ("workbench/documents/result_document/waves.rs", 4_229),
     ("workbench/documents/visualization_studio.rs", 4_695),
     ("workbench/documents/visualization_studio/dock.rs", 3_520),

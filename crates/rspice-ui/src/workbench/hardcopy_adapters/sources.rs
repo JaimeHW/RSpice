@@ -1199,6 +1199,14 @@ fn quick_result_availability(
                 !complex.real.is_empty() && complex.real.len() == complex.imag.len()
             })
         }),
+        // The population itself is the printable evidence, so either half of
+        // it — the sampled variables or what the trials measured — is enough.
+        ResultViewer::Scatter | ResultViewer::BoxViolin => matches!(
+            analysis.family_metadata.as_ref(),
+            Some(AnalysisResultFamilyMetadata::MonteCarlo { variables, member_measurements, .. })
+                if member_measurements.len() >= 2
+                    || variables.iter().any(|variable| variable.samples.len() >= 2)
+        ),
         ResultViewer::Op => {
             analysis.dc_op.is_some()
                 || analysis
