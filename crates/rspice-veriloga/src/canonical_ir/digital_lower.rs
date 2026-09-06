@@ -158,6 +158,7 @@ use crate::ast::{
 use crate::four_state::FourStateBit;
 use crate::semantic::{
     AnalyzedDigital, AnalyzedDigitalProcess, AnalyzedDigitalSignal, DigitalConstants,
+    INTEGER_BOUNDS, VectorBounds,
 };
 use crate::source::Span;
 use smol_str::SmolStr;
@@ -722,9 +723,19 @@ struct ProcessLocal {
     ///
     /// A `real` declared inside a process (IEEE 1364-2005 section 3.9.1), which
     /// is what the Verilog-AMS LRM 2.4 section 6.5.3 example reads a `wreal`
-    /// into. Its `width` is zero, the way every real quantity's is here.
+    /// into. Its `width` is zero, the way every real quantity's is here, and
+    /// its `bounds` mean nothing — a real has no bits to name.
     real: bool,
     width: u32,
+    /// The range its bits are named over, exactly as declared.
+    ///
+    /// Carried beside the width rather than folded into it, because a local is
+    /// bit-selected by the same rule a signal is: `reg [7:4] t; t[4]` names the
+    /// least significant bit of a four-bit variable, and only the bounds say
+    /// so. [`VectorBounds::SCALAR`] for a `reg` declared without a range, and
+    /// [`INTEGER_BOUNDS`] for an `integer`. The two cannot disagree: every
+    /// four-state local takes its width from `bounds.width()`.
+    bounds: VectorBounds,
     /// Whether reading it yields a signed value, IEEE 1364-2005 table 5-21.
     ///
     /// True for an `integer`, which the table makes signed without any
@@ -862,6 +873,23 @@ impl ProcessLowerer<'_> {
             .is_some_and(|signal| signal.kind.is_real())
     }
 
+    /// The range the name a select is written against numbers its bits over.
+    ///
+    /// A process-local shadows a module signal, the same order
+    /// [`Self::named_value`] resolves in, because the select and the read have
+    /// to be about one variable. A name that resolves to neither has already
+    /// been reported by [`Self::named_value`]; the scalar range keeps the
+    /// select's own lowering honest in the meantime.
+    fn declared_range_of(&self, name: &str) -> VectorBounds {
+        if let Some(local) = self.lookup_local(name) {
+            return self.locals[usize::from(local)].bounds;
+        }
+        match self.index.get(name) {
+            Some(signal) => self.signals[usize::from(*signal)].declared_range(),
+            None => VectorBounds::SCALAR,
+        }
+    }
+
     /// Declare a local and give it its initial value in `block`.
     ///
     /// The initial value is written at the declaration, which makes every
@@ -878,16 +906,18 @@ impl ProcessLowerer<'_> {
         &mut self,
         block: BlockId,
         name: Option<SmolStr>,
-        width: u32,
+        bounds: VectorBounds,
         signed: bool,
         span: Span,
         initial: Option<ValueId>,
     ) -> DigitalLocalId {
         let id = DigitalLocalId::from(self.locals.len());
+        let width = bounds.width();
         self.locals.push(ProcessLocal {
             name,
             real: false,
             width,
+            bounds,
             signed,
             span,
         });
@@ -934,6 +964,7 @@ impl ProcessLowerer<'_> {
             name,
             real: true,
             width: 0,
+            bounds: VectorBounds::SCALAR,
             signed: false,
             span,
         });
@@ -1093,10 +1124,13 @@ impl ProcessLowerer<'_> {
                 // IEEE 1364-2005 table 5-21 makes an `integer` signed, and
                 // gives it no qualifier with which to say otherwise. So a loop
                 // counter compares signed, and `i < 0` can be true.
+                //
+                // Section 3.9 also numbers its bits [31:0], which is what makes
+                // `i[31]` the sign bit rather than a read off the end.
                 self.declare_local(
                     block,
                     Some(item.name.clone()),
-                    width,
+                    INTEGER_BOUNDS,
                     true,
                     item.span,
                     initial,
@@ -1106,10 +1140,10 @@ impl ProcessLowerer<'_> {
 
         for declaration in &inner.digital_variables {
             let signed = declaration.signedness.is_signed();
-            let width = match &declaration.range {
-                None => Some(1),
+            let bounds = match &declaration.range {
+                None => Some(VectorBounds::SCALAR),
                 Some(range) => match (self.constant(&range.msb), self.constant(&range.lsb)) {
-                    (Some(msb), Some(lsb)) => Some(msb.abs_diff(lsb) as u32 + 1),
+                    (Some(msb), Some(lsb)) => Some(VectorBounds { msb, lsb }),
                     _ => {
                         self.error(
                             "the bounds of a process-local `reg` must be literal in this wave",
@@ -1119,7 +1153,8 @@ impl ProcessLowerer<'_> {
                     }
                 },
             };
-            let Some(width) = width else { continue };
+            let Some(bounds) = bounds else { continue };
+            let width = bounds.width();
             for item in &declaration.items {
                 if !item.dimensions.is_empty() {
                     self.error(
@@ -1138,7 +1173,7 @@ impl ProcessLowerer<'_> {
                 self.declare_local(
                     block,
                     Some(item.name.clone()),
-                    width,
+                    bounds,
                     signed,
                     item.span,
                     initial,
@@ -1279,8 +1314,17 @@ impl ProcessLowerer<'_> {
                 // a suspension inside the body like any other local, and so
                 // that nothing in the body can name it.
                 self.scopes.push(Vec::new());
-                let counter =
-                    self.declare_local(block, None, width, false, statement.span, Some(count));
+                let counter = self.declare_local(
+                    block,
+                    None,
+                    VectorBounds {
+                        msb: i64::from(width) - 1,
+                        lsb: 0,
+                    },
+                    false,
+                    statement.span,
+                    Some(count),
+                );
                 let exit = self.loop_statement(
                     block,
                     &statement.body,
@@ -2524,10 +2568,19 @@ impl ProcessLowerer<'_> {
                 let msb = self.constant_index(&select.msb).unwrap_or(0);
                 let lsb = self.constant_index(&select.lsb).unwrap_or(0);
                 let width = msb.abs_diff(lsb) as u32 + 1;
+                // The author wrote the *names* of two bits; the node selects
+                // positions. This is the one place a source-level select meets
+                // the declaration it was written against, so it is the one
+                // place the two are reconciled.
+                let range = self.declared_range_of(&select.name);
                 self.builder.push(
                     block,
                     CfgValueType::FourState { width },
-                    CfgValueKind::DigitalPartSelect { input, msb, lsb },
+                    CfgValueKind::DigitalPartSelect {
+                        input,
+                        msb: range.position_of(msb),
+                        lsb: range.position_of(lsb),
+                    },
                 )
             }
             Expression::Digital(crate::ast::DigitalExpr::Xnor(xnor)) => {
@@ -2619,13 +2672,16 @@ impl ProcessLowerer<'_> {
             Expression::ArrayAccess(access) => {
                 let input = self.named_value(block, &access.array, access.span);
                 let index = self.constant_index(&access.index).unwrap_or(0);
+                // `x[i]` on a vector: a bit *name*, resolved against the
+                // declaration exactly as a two-bound select is.
+                let position = self.declared_range_of(&access.array).position_of(index);
                 self.builder.push(
                     block,
                     CfgValueType::FourState { width: 1 },
                     CfgValueKind::DigitalPartSelect {
                         input,
-                        msb: index,
-                        lsb: index,
+                        msb: position,
+                        lsb: position,
                     },
                 )
             }

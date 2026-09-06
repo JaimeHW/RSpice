@@ -1032,10 +1032,21 @@ pub fn conditional(
     }
 }
 
-/// Select bits `[msb:lsb]` of a value, IEEE 1364-2005 section 4.2.1.
+/// Select the bits at positions `msb` down to `lsb` of a value, IEEE
+/// 1364-2005 section 4.2.1.
 ///
-/// Bits outside the value are `x`, which is the standard's rule for an
-/// out-of-bounds select rather than an error.
+/// **Positions, counting from the least significant end — not declared
+/// indices.** A value has no declaration; the bit a declaration names `i`
+/// lives at
+/// [`VectorBounds::position_of(i)`](crate::semantic::VectorBounds::position_of),
+/// and the lowering has already applied that by the time a select reaches
+/// here. Passing a declared index straight through is exact only for a range
+/// anchored at zero and wrong for every other one.
+///
+/// Positions outside the value are `x`, which is the standard's rule for an
+/// out-of-bounds select rather than an error. That is also what makes a
+/// declared index the range does not name come back `x`: it maps to a position
+/// off the end, and lands here.
 pub fn part_select(value: &FourStateValue, msb: i64, lsb: i64) -> FourStateValue {
     let (low, high) = if msb <= lsb { (msb, lsb) } else { (lsb, msb) };
     let width = (high - low + 1).max(0) as u32;

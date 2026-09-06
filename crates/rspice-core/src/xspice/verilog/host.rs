@@ -58,8 +58,10 @@
 
 use std::{fmt, sync::Arc};
 
+use rspice_veriloga::canonical_ir::VectorBounds;
 use rspice_veriloga::canonical_ir::digital::{
     CanonicalDigitalPlan, DigitalProcessKind, DigitalSchedulingRegion, DigitalSensitivityTerm,
+    DigitalSignal,
 };
 use rspice_veriloga::canonical_ir::digital_eval::{
     DEFAULT_PROCESS_STEP_LIMIT, DigitalEvalError, DigitalEvalScratch, DigitalProcessOutcome,
@@ -509,6 +511,17 @@ impl DigitalHost {
     /// The value a real net holds right now.
     pub(crate) fn read_real(&self, signal: DigitalSignalId) -> Option<f64> {
         self.store.real_value(signal)
+    }
+
+    /// The range a signal's bits are named over, from the plan.
+    ///
+    /// Asked when something has to *say* which bit it means. A bridge holds the
+    /// position it reads, and a `[7:4]` net's position 3 is the bit its module
+    /// calls 7; naming it 3 would name a bit the author cannot find.
+    pub(crate) fn declared_range(&self, signal: DigitalSignalId) -> VectorBounds {
+        self.plan
+            .signal(signal)
+            .map_or(VectorBounds::SCALAR, DigitalSignal::declared_range)
     }
 
     /// Whether the compiled design declares this signal real.

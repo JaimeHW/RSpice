@@ -715,14 +715,16 @@ pub fn apply_write<E: DigitalEnvironment + ?Sized>(
 
     let next = match &target.select {
         DigitalWriteSelect::Whole => value,
-        DigitalWriteSelect::Bit(index) => {
+        // A declared index is a name, so where the write lands is
+        // `DigitalWriteSelect::low_position`'s answer against the signal's own
+        // declaration rather than the index itself.
+        select => {
             let mut current = read_signal(environment, signal)?;
-            patch(&mut current, *index, &value);
-            current
-        }
-        DigitalWriteSelect::Part { msb, lsb } => {
-            let mut current = read_signal(environment, signal)?;
-            patch(&mut current, *msb.min(lsb), &value);
+            patch(
+                &mut current,
+                select.low_position(signal.declared_range()),
+                &value,
+            );
             current
         }
     };
@@ -756,12 +758,16 @@ pub fn apply_deferred<E: DigitalEnvironment + ?Sized>(
     }
 }
 
-/// Overwrite the bits of `current` starting at declared index `low`.
+/// Overwrite the bits of `current` starting at *position* `low`, counting from
+/// the least significant end.
 ///
-/// Indices are positions from the least significant bit, which is what the
-/// lowering emits and what [`digital_value::part_select`] reads back. A signal
-/// declared with ascending bounds is therefore written the same way it is read;
-/// see this module's note in the crate's digital documentation.
+/// A position and not a declared index: the caller has already resolved the
+/// select against the signal's declaration through
+/// [`DigitalWriteSelect::low_position`], the same rule
+/// [`digital_value::part_select`] reads back against. A position outside
+/// `current` writes nothing, IEEE 1364-2005 section 5.2.1's rule for an
+/// out-of-range left-hand side, and that is also how a declared index the
+/// signal does not name comes to write nothing.
 fn patch(current: &mut FourStateValue, low: i64, value: &FourStateValue) {
     for offset in 0..value.width() {
         let position = low + i64::from(offset);
@@ -1761,7 +1767,7 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
 mod tests {
     use super::super::cfg::{CfgBlock, CfgInstruction, CfgValue, CfgValueType};
     use super::super::diagnostic::SourceSpanRef;
-    use super::super::digital::DigitalProcessKind;
+    use super::super::digital::{DigitalProcessKind, DigitalSignalKind};
     use super::*;
     use crate::four_state::FourStateBit::{
         HighImpedance as Z, One as ONE, Unknown as X, Zero as ZERO,
@@ -2082,5 +2088,176 @@ mod tests {
             &value("0"),
             &value("1")
         ));
+    }
+
+    /// A plan with one four-state signal declared over `bounds`.
+    fn one_signal_plan(bounds: Option<(i64, i64)>, width: u32) -> CanonicalDigitalPlan {
+        CanonicalDigitalPlan {
+            signals: vec![DigitalSignal {
+                id: DigitalSignalId::from(0usize),
+                name: "q".into(),
+                kind: DigitalSignalKind::FourState,
+                width,
+                bounds,
+                signed: false,
+                procedurally_assignable: true,
+                span: SourceSpanRef {
+                    source_file_id: 0,
+                    start: 0,
+                    end: 0,
+                },
+            }],
+            ..CanonicalDigitalPlan::default()
+        }
+    }
+
+    /// One signal's value, the smallest environment `apply_write` needs.
+    struct OneSignal(FourStateValue);
+
+    impl DigitalEnvironment for OneSignal {
+        fn read_signal(&self, _signal: DigitalSignalId) -> Option<FourStateValue> {
+            Some(self.0.clone())
+        }
+
+        fn write_signal(&mut self, _signal: DigitalSignalId, value: FourStateValue) {
+            self.0 = value;
+        }
+
+        fn defer_update(&mut self, _update: DigitalDeferredUpdate) {}
+
+        fn write_real_signal(&mut self, _signal: DigitalSignalId, _value: f64) {}
+
+        fn read_real_signal(&self, _signal: DigitalSignalId) -> Option<f64> {
+            None
+        }
+
+        fn read_analog_potential(&self, _probe: DigitalAnalogProbeId) -> Option<f64> {
+            None
+        }
+
+        fn drive_real_signal(&mut self, _drive: DigitalRealDrive) {}
+
+        fn drive_signal(&mut self, _drive: DigitalDrive) {}
+    }
+
+    fn write(
+        plan: &CanonicalDigitalPlan,
+        start: &str,
+        select: DigitalWriteSelect,
+        written: &str,
+    ) -> String {
+        let mut environment = OneSignal(value(start));
+        apply_write(
+            plan,
+            &mut environment,
+            &DigitalWriteTarget {
+                signal: DigitalSignalId::from(0usize),
+                select,
+            },
+            &value(written),
+        )
+        .expect("the signal is declared");
+        environment.0.spelling()
+    }
+
+    /// A partial write lands on the bit the declaration *names*, IEEE
+    /// 1364-2005 section 3.3.1 read together with section 5.2.1.
+    ///
+    /// `reg [7:4] q` is four bits called 7, 6, 5 and 4. Before this rule
+    /// existed, `q[7] = 1` wrote position 7 of a four-bit value and did
+    /// nothing at all, and `q[4] = 1` wrote position 4 and did nothing
+    /// either — a whole declaration whose every bit was unwritable.
+    #[test]
+    fn a_partial_write_lands_on_the_bit_the_declaration_names() {
+        let high = one_signal_plan(Some((7, 4)), 4);
+        assert_eq!(
+            write(&high, "0000", DigitalWriteSelect::Bit(7), "1"),
+            "1000"
+        );
+        assert_eq!(
+            write(&high, "0000", DigitalWriteSelect::Bit(4), "1"),
+            "0001"
+        );
+        assert_eq!(
+            write(
+                &high,
+                "0000",
+                DigitalWriteSelect::Part { msb: 6, lsb: 5 },
+                "11"
+            ),
+            "0110"
+        );
+
+        // Ascending, where the *left* bound is still the most significant bit.
+        let ascending = one_signal_plan(Some((4, 7)), 4);
+        assert_eq!(
+            write(&ascending, "0000", DigitalWriteSelect::Bit(4), "1"),
+            "1000"
+        );
+        assert_eq!(
+            write(&ascending, "0000", DigitalWriteSelect::Bit(7), "1"),
+            "0001"
+        );
+        assert_eq!(
+            write(
+                &ascending,
+                "0000",
+                DigitalWriteSelect::Part { msb: 5, lsb: 6 },
+                "11"
+            ),
+            "0110"
+        );
+
+        // A range anchored at zero is the identity, in both directions.
+        let descending = one_signal_plan(Some((3, 0)), 4);
+        assert_eq!(
+            write(&descending, "0000", DigitalWriteSelect::Bit(3), "1"),
+            "1000"
+        );
+        let zero_ascending = one_signal_plan(Some((0, 3)), 4);
+        assert_eq!(
+            write(&zero_ascending, "0000", DigitalWriteSelect::Bit(0), "1"),
+            "1000"
+        );
+
+        // A one-bit vector, and a scalar with no range at all.
+        let single = one_signal_plan(Some((3, 3)), 1);
+        assert_eq!(write(&single, "0", DigitalWriteSelect::Bit(3), "1"), "1");
+        let scalar = one_signal_plan(None, 1);
+        assert_eq!(write(&scalar, "0", DigitalWriteSelect::Bit(0), "1"), "1");
+    }
+
+    /// A write to a bit the declaration does not name changes nothing, and a
+    /// part select that only partly overlaps writes only the bits it names.
+    ///
+    /// Section 5.2.1's rule for an out-of-range left-hand side. The front end
+    /// refuses a constant select outside the declared bounds before it ever
+    /// reaches here, so this is what the kernel does with a plan that was not
+    /// built by that front end — and it is the reason the position map is an
+    /// affine one rather than an absolute distance, which would have folded
+    /// `q[3]` of a `[7:4]` reg onto `q[5]`.
+    #[test]
+    fn a_write_outside_the_declared_range_changes_nothing() {
+        let high = one_signal_plan(Some((7, 4)), 4);
+        assert_eq!(
+            write(&high, "0000", DigitalWriteSelect::Bit(3), "1"),
+            "0000"
+        );
+        assert_eq!(
+            write(&high, "0000", DigitalWriteSelect::Bit(8), "1"),
+            "0000"
+        );
+
+        // `q[5:2]`: two named bits and two that are not, so the value's top
+        // half lands at positions 1 and 0 and its bottom half is dropped.
+        assert_eq!(
+            write(
+                &high,
+                "0000",
+                DigitalWriteSelect::Part { msb: 5, lsb: 2 },
+                "1100"
+            ),
+            "0011"
+        );
     }
 }

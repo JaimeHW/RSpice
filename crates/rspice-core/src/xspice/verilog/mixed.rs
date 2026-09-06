@@ -54,6 +54,7 @@
 use std::fmt;
 use std::sync::Arc;
 
+use rspice_veriloga::canonical_ir::VectorBounds;
 use rspice_veriloga::canonical_ir::digital_value::FourStateValue;
 use rspice_veriloga::canonical_ir::ids::DigitalSignalId;
 use rspice_veriloga::device::{VerilogADevice, VerilogADeviceCheckpoint};
@@ -359,8 +360,10 @@ impl<T> std::ops::Deref for MixedCell<T> {
 /// A bridge is per *bit* rather than per signal because a deck names one node
 /// per conductor: an `input [7:0]` boundary is eight nets, so it is eight
 /// bridges over one signal. `bit` is the position [`FourStateValue::bit`]
-/// counts from the least significant end, which is the position the discrete
-/// half's own bit selects are lowered to.
+/// counts from the least significant end, which is where the discrete half's
+/// own bit selects are resolved to — not the index the module names the bit
+/// by, which on a `[7:4]` net is a different number and is what
+/// [`AdcBridge::signal_name`] carries.
 #[derive(Clone)]
 struct AdcBridge {
     signal: DigitalSignalId,
@@ -995,11 +998,12 @@ impl MixedSignalHost {
             });
         }
         let (id, width) = self.signal_bit(signal, bit)?;
+        let range = self.state.digital.declared_range(id);
         self.max_circuit_node = self.max_circuit_node.max(positive).max(negative);
         self.state.bridges.make_mut().adc.push(AdcBridge {
             signal: id,
             bit,
-            signal_name: boundary_net_name(signal, bit, width),
+            signal_name: boundary_net_name(signal, bit, width, range),
             positive,
             negative,
             low: low_threshold,
@@ -1038,11 +1042,12 @@ impl MixedSignalHost {
             });
         }
         let (id, width) = self.signal_bit(signal, bit)?;
+        let range = self.state.digital.declared_range(id);
         self.max_circuit_node = self.max_circuit_node.max(positive).max(negative);
         self.state.bridges.make_mut().dac.push(DacBridge {
             signal: id,
             bit,
-            signal_name: boundary_net_name(signal, bit, width),
+            signal_name: boundary_net_name(signal, bit, width, range),
             positive,
             negative,
             low: low_level,
@@ -2087,11 +2092,14 @@ fn compose_bit_drives(
 /// same conductor. One bit of a vector is `name[bit]`, in the position
 /// numbering the discrete half's own bit selects use — so a reader can take
 /// the spelling straight back to the module's source.
-fn boundary_net_name(signal: &str, bit: u32, width: u32) -> String {
+fn boundary_net_name(signal: &str, bit: u32, width: u32, range: VectorBounds) -> String {
     if width <= 1 {
         signal.to_string()
     } else {
-        format!("{signal}[{bit}]")
+        // `bit` is the position the bridge reads; the module's name for that
+        // bit is the range's, and on a `[7:4]` net the two are not the same
+        // number.
+        format!("{signal}[{}]", range.index_at(i64::from(bit)))
     }
 }
 

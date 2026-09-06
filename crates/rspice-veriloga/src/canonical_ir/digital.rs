@@ -101,11 +101,37 @@
 //! contributions, exactly as it would for two `assign` statements written side
 //! by side.
 //!
+//! # Where a declared index is stored
+//!
+//! **A [`FourStateValue`](super::digital_value::FourStateValue) holds a
+//! signal's bits at positions counting up from the least significant end, and
+//! the bit a declaration names `index` sits at
+//! [`VectorBounds::position_of(index)`](VectorBounds::position_of) — its
+//! distance from the declaration's *right* bound.** That is the whole storage
+//! rule, and [`VectorBounds::position_of`] is the only place it is written
+//! down: the lowering calls it to turn a source-level select into a positional
+//! [`CfgValueKind::DigitalPartSelect`](super::cfg::CfgValueKind::DigitalPartSelect),
+//! [`apply_write`](super::digital_eval::apply_write) calls it to place a
+//! partial write, and the host's driver resolver calls it to place a partial
+//! contribution.
+//!
+//! The distinction only shows itself on a range that is not anchored at zero.
+//! IEEE 1364-2005 section 3.3.1 lets a vector be declared over any two bounds,
+//! and makes the left one the most significant bit whatever its value, so
+//! `reg [7:4] x` is a *four-bit* value whose bits are named 7, 6, 5 and 4 —
+//! `x[4]` is its least significant bit and `x[7]` its most, and `x[3]` is not
+//! one of its bits at all. A [`DigitalWriteSelect`] and the `msb`/`lsb` of a
+//! source-level part select are therefore names, and only a
+//! [`CfgValueKind::DigitalPartSelect`](super::cfg::CfgValueKind::DigitalPartSelect)
+//! — which slices values that were never declared, such as a concatenation's
+//! right-hand side — is positional.
+//!
 //! [`CfgValueKind::DigitalSignalRead`]: super::cfg::CfgValueKind::DigitalSignalRead
 
 use super::cfg::CfgFunction;
 use super::diagnostic::SourceSpanRef;
 use super::ids::{DigitalAnalogProbeId, DigitalProcessId, DigitalSignalId};
+use crate::semantic::VectorBounds;
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 
@@ -283,6 +309,22 @@ pub struct DigitalSignal {
     pub span: SourceSpanRef,
 }
 
+impl DigitalSignal {
+    /// The range this signal's bits are named over.
+    ///
+    /// [`VectorBounds::SCALAR`] for a signal declared without one, which has
+    /// the one bit every scalar has and numbers it zero. The bounds field
+    /// stays a bare pair on the wire; this is the view of it every consumer of
+    /// the storage rule asks for, so that "what does index `i` mean here" has
+    /// one answer for a vector and a scalar alike.
+    pub fn declared_range(&self) -> VectorBounds {
+        match self.bounds {
+            Some((msb, lsb)) => VectorBounds { msb, lsb },
+            None => VectorBounds::SCALAR,
+        }
+    }
+}
+
 /// Whether a signal kind is the default, for the wire format.
 fn is_four_state(kind: &DigitalSignalKind) -> bool {
     matches!(kind, DigitalSignalKind::FourState)
@@ -342,6 +384,10 @@ impl DigitalAnalogProbe {
 }
 
 /// Which bits of a signal an assignment drives.
+///
+/// The indices are the signal's own **names** for its bits, as written; where
+/// those bits are stored is [`VectorBounds::position_of`]'s answer and
+/// [`Self::low_position`] is how every consumer asks it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DigitalWriteSelect {
     /// The whole signal.
@@ -350,6 +396,28 @@ pub enum DigitalWriteSelect {
     Bit(i64),
     /// A constant part select, bounds as written.
     Part { msb: i64, lsb: i64 },
+}
+
+impl DigitalWriteSelect {
+    /// Where this select's least significant bit is stored on a signal
+    /// declared over `range`, counting from the least significant end.
+    ///
+    /// The one thing a partial write needs and the one thing a partial
+    /// contribution needs, so it is answered once: a value of the select's
+    /// width is laid down from here upwards, and whatever falls outside the
+    /// signal is dropped, which is IEEE 1364-2005 section 5.2.1's rule for an
+    /// out-of-range left-hand side.
+    ///
+    /// Signed, because a select the range does not wholly name starts below
+    /// the value — `x[5:2]` of a `reg [7:4]` starts at −2, and only its top
+    /// two bits land.
+    pub fn low_position(&self, range: VectorBounds) -> i64 {
+        match self {
+            Self::Whole => 0,
+            Self::Bit(index) => range.position_of(*index),
+            Self::Part { msb, lsb } => range.position_of(*msb).min(range.position_of(*lsb)),
+        }
+    }
 }
 
 /// The destination of one write.

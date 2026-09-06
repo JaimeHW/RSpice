@@ -79,9 +79,10 @@
 //! already holds produces no transition, which is what stops a level-sensitive
 //! `@*` process from re-triggering itself forever.
 
+use rspice_veriloga::canonical_ir::VectorBounds;
 use rspice_veriloga::canonical_ir::digital::{
     CanonicalDigitalPlan, DigitalDriverId, DigitalRealResolution, DigitalSchedulingRegion,
-    DigitalSignal, DigitalSignalKind, DigitalWriteSelect,
+    DigitalSignal, DigitalSignalKind,
 };
 use rspice_veriloga::canonical_ir::digital_eval::{
     DigitalDeferredUpdate, DigitalDrive, DigitalEnvironment, DigitalRealDrive,
@@ -249,10 +250,19 @@ struct DriverSpan {
 /// One driver's contribution, kept exactly as the driver evaluated it.
 #[derive(Debug, Clone)]
 struct Contribution {
-    /// Which bits of the net this driver covers, from the plan. Always
-    /// [`DigitalWriteSelect::Whole`] for a real net, which has no bits to
-    /// cover part of.
-    select: DigitalWriteSelect,
+    /// Where the least significant bit this driver covers is stored, counting
+    /// from the net's least significant end.
+    ///
+    /// Resolved once, when the store is built, through
+    /// [`DigitalWriteSelect::low_position`](rspice_veriloga::canonical_ir::digital::DigitalWriteSelect::low_position)
+    /// against the net's own declaration, because the plan names the bits a
+    /// driver covers by their *declared* indices and on a range that is not
+    /// anchored at zero — `wire [7:4] bus` — a declared index is not the
+    /// position it is stored at. Zero for a whole-net driver and for a real
+    /// net, which has no bits to cover part of. Signed, because a select the
+    /// declaration does not wholly name starts below the net and only its top
+    /// bits land.
+    low: i64,
     value: ContributionValue,
 }
 
@@ -355,12 +365,12 @@ impl DigitalSignalStore {
         for index in 0..count {
             let signal = DigitalSignalId::from(index);
             let start = contributions.len();
-            let real = plan
-                .signal(signal)
-                .is_some_and(|signal| signal.kind.is_real());
+            let declared = plan.signal(signal);
+            let real = declared.is_some_and(|signal| signal.kind.is_real());
+            let range = declared.map_or(VectorBounds::SCALAR, DigitalSignal::declared_range);
             for driver in plan.drivers_of(signal) {
                 contributions.push(Contribution {
-                    select: driver.target.select.clone(),
+                    low: driver.target.select.low_position(range),
                     value: if real {
                         ContributionValue::Real(None)
                     } else {
@@ -626,13 +636,8 @@ impl DigitalSignalStore {
             let ContributionValue::FourState(Some(value)) = &contribution.value else {
                 continue;
             };
-            let low = match contribution.select {
-                DigitalWriteSelect::Whole => 0,
-                DigitalWriteSelect::Bit(position) => position,
-                DigitalWriteSelect::Part { msb, lsb } => msb.min(lsb),
-            };
             for offset in 0..value.width() {
-                let position = low + i64::from(offset);
+                let position = contribution.low + i64::from(offset);
                 if position < 0 || position >= i64::from(width) {
                     continue;
                 }
@@ -817,7 +822,9 @@ mod tests {
     use super::*;
     use FourStateBit::{HighImpedance as Z, One as I, Unknown as X, Zero as O};
     use rspice_veriloga::canonical_ir::diagnostic::SourceSpanRef;
-    use rspice_veriloga::canonical_ir::digital::{DigitalDriver, DigitalWriteTarget};
+    use rspice_veriloga::canonical_ir::digital::{
+        DigitalDriver, DigitalWriteSelect, DigitalWriteTarget,
+    };
     use rspice_veriloga::canonical_ir::ids::DigitalProcessId;
 
     fn span() -> SourceSpanRef {
@@ -1069,6 +1076,53 @@ mod tests {
             value: value("0011"),
         });
         assert_eq!(store.value(net).unwrap().spelling(), "00111010");
+    }
+
+    /// The same composition on a net whose range does not reach bit zero.
+    ///
+    /// `wire [7:4] bus` is four bits called 7, 6, 5 and 4, and a driver of
+    /// `bus[7:6]` covers its top half. Reading the declared indices as
+    /// positions would have put that driver's contribution at positions 7 and
+    /// 6 — off a four-bit net — and left the whole declaration undrivable.
+    #[test]
+    fn a_partial_driver_of_a_net_declared_above_bit_zero_covers_the_bits_it_names() {
+        let net = DigitalSignalId::from(0usize);
+        let mut declared = signal(0, "bus", 4, false);
+        declared.bounds = Some((7, 4));
+        let plan = CanonicalDigitalPlan {
+            signals: vec![declared],
+            processes: Vec::new(),
+            drivers: vec![
+                driver(0, 0, DigitalWriteSelect::Part { msb: 7, lsb: 6 }),
+                driver(0, 1, DigitalWriteSelect::Bit(4)),
+            ],
+            analog_probes: Vec::new(),
+        };
+        let mut store = DigitalSignalStore::new(&plan);
+        store.drive_signal(DigitalDrive {
+            driver: DigitalDriverId {
+                signal: net,
+                index: 0,
+            },
+            target: DigitalWriteTarget {
+                signal: net,
+                select: DigitalWriteSelect::Part { msb: 7, lsb: 6 },
+            },
+            value: value("10"),
+        });
+        assert_eq!(store.value(net).unwrap().spelling(), "10zz");
+        store.drive_signal(DigitalDrive {
+            driver: DigitalDriverId {
+                signal: net,
+                index: 1,
+            },
+            target: DigitalWriteTarget {
+                signal: net,
+                select: DigitalWriteSelect::Bit(4),
+            },
+            value: value("1"),
+        });
+        assert_eq!(store.value(net).unwrap().spelling(), "10z1");
     }
 
     /// A rewrite of the value a signal already holds is not an event. Without

@@ -39,6 +39,7 @@ mod parameter_array;
 pub mod schedule;
 pub mod state;
 
+pub use crate::semantic::VectorBounds;
 pub use ad::{AdFunction, AdSeed, differentiate};
 pub use artifact::CanonicalIrArtifact;
 pub use cfg::{

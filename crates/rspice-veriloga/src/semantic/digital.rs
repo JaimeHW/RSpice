@@ -261,6 +261,13 @@ pub struct VectorBounds {
 }
 
 impl VectorBounds {
+    /// The scalar range: one bit, numbered zero.
+    ///
+    /// What a declaration with no range means, and the range every consumer of
+    /// [`Self::position_of`] should stand in for a scalar so that the rule has
+    /// one form rather than a special case at every call.
+    pub const SCALAR: Self = Self { msb: 0, lsb: 0 };
+
     pub const fn width(self) -> u32 {
         (self.msb.abs_diff(self.lsb) + 1) as u32
     }
@@ -274,11 +281,74 @@ impl VectorBounds {
         index >= low && index <= high
     }
 
+    /// Where the bit this range *names* `index` is stored, counting from the
+    /// least significant end.
+    ///
+    /// **This is the one statement of the rule.** IEEE 1364-2005 section 3.3.1
+    /// makes the *left* bound the most significant bit whatever its value, so a
+    /// declared index is a name and not an offset: the position of `index` is
+    /// its distance from the *right* bound, measured in the declared direction.
+    /// `[7:0]` and `[3:0]` come out as the identity, `[7:4]` puts `x[4]` at the
+    /// least significant end and `x[7]` at the most, and `[0:7]` puts `x[0]` at
+    /// the most significant end because 0 is the left bound there.
+    ///
+    /// The answer is signed, and deliberately not an `Option`. An index the
+    /// range does not name maps to a position outside the value — `x[3]` of a
+    /// `[7:4]` reg lands at −1, `x[8]` at 4 — and both consumers already have
+    /// the standard's answer for a position outside a value:
+    /// [`part_select`](crate::canonical_ir::digital_value::part_select) reads
+    /// `x` (section 4.2.1) and a partial write drops the bit (section 5.2.1's
+    /// out-of-range left-hand side). Folding the two cases into one affine map
+    /// is what keeps a *partially* out-of-range part select right as well: on a
+    /// `[7:4]` reg, `x[5:2]` reads two real bits and two `x`s rather than
+    /// failing whole.
+    pub const fn position_of(self, index: i64) -> i64 {
+        if self.msb >= self.lsb {
+            index - self.lsb
+        } else {
+            self.lsb - index
+        }
+    }
+
+    /// The index this range names the bit stored at `position`, which is
+    /// [`Self::position_of`] run backwards.
+    ///
+    /// Stated here beside its inverse rather than derived at a call site,
+    /// because a diagnostic that names a bit has to name it the way the module
+    /// does: the bit at position 3 of a `reg [7:4]` is `x[7]`, and calling it
+    /// `x[3]` names a bit the author cannot find.
+    pub const fn index_at(self, position: i64) -> i64 {
+        if self.msb >= self.lsb {
+            self.lsb + position
+        } else {
+            self.lsb - position
+        }
+    }
+
+    /// Every index this range names, most significant first.
+    ///
+    /// Declaration order — `[7:4]` yields 7, 6, 5, 4 and `[4:7]` yields 4, 5,
+    /// 6, 7 — which is the order a bus's members are written in and the order
+    /// a `b…` value change puts them in.
+    pub fn indices_msb_first(self) -> impl Iterator<Item = i64> {
+        let step = if self.msb >= self.lsb { -1 } else { 1 };
+        let msb = self.msb;
+        (0..i64::from(self.width())).map(move |offset| msb + step * offset)
+    }
+
     /// Bounds as `[msb:lsb]`, for diagnostics.
     pub fn spelling(self) -> String {
         format!("[{}:{}]", self.msb, self.lsb)
     }
 }
+
+/// How IEEE 1364-2005 section 3.9 numbers an `integer`'s bits.
+///
+/// An `integer` has no declared range of its own, and section 3.9 gives it one
+/// anyway: 32 bits, `[31:0]`. Named once because both the analyzer's bounds
+/// check and the lowering that gives the variable its declared range have to
+/// agree about which bit `i[31]` is.
+pub const INTEGER_BOUNDS: VectorBounds = VectorBounds { msb: 31, lsb: 0 };
 
 /// A declared discrete-domain net or variable.
 #[derive(Debug, Clone)]
@@ -1492,8 +1562,9 @@ impl SemanticAnalyzer {
                 span,
             } => {
                 if self.check_assignable(name, *span, signals, index, procedural) {
-                    self.check_bit_index(name, msb, signals, index);
-                    self.check_bit_index(name, lsb, signals, index);
+                    let high = self.check_bit_index(name, msb, signals, index);
+                    let low = self.check_bit_index(name, lsb, signals, index);
+                    self.check_part_select_direction(name, *span, high, low);
                 }
                 self.check_digital_expression(msb, signals, index);
                 self.check_digital_expression(lsb, signals, index);
@@ -1580,13 +1651,19 @@ impl SemanticAnalyzer {
     }
 
     /// Check a constant bit index against the signal's declared bounds.
+    ///
+    /// Answers the range it checked against and the index it checked, so that
+    /// a part select's two bounds do not have to be resolved a second time to
+    /// ask which of them is the more significant. `None` whenever there is
+    /// nothing to answer: a refusal was recorded, or the index is not constant
+    /// and belongs to a later wave.
     fn check_bit_index(
         &mut self,
         name: &SmolStr,
         expression: &Expression,
         signals: &[AnalyzedDigitalSignal],
         index: &HashMap<SmolStr, usize>,
-    ) {
+    ) -> Option<(VectorBounds, i64)> {
         let (range, kind) = match self.resolve_digital_name(name, index) {
             Resolution::Digital(position) if signals[position].class.is_real() => {
                 // Verilog-AMS LRM 2.4 section 3.7 makes a `wreal` a real-valued
@@ -1602,7 +1679,7 @@ impl SemanticAnalyzer {
                     )),
                     expression.span(),
                 );
-                return;
+                return None;
             }
             Resolution::Digital(position) => (signals[position].range, None),
             Resolution::ProcessLocal(local) => {
@@ -1614,23 +1691,21 @@ impl SemanticAnalyzer {
                         )),
                         expression.span(),
                     );
-                    return;
+                    return None;
                 }
                 // IEEE 1364-2005 section 3.9 numbers an `integer`'s bits
                 // [31:0]; a `reg` uses the range it was declared with.
                 let range = local.range.or(match local.kind {
-                    ProcessLocalKind::Integer => Some(VectorBounds { msb: 31, lsb: 0 }),
+                    ProcessLocalKind::Integer => Some(INTEGER_BOUNDS),
                     _ => None,
                 });
                 (range, Some(local.kind))
             }
-            Resolution::Analog(_) | Resolution::Undeclared => return,
+            Resolution::Analog(_) | Resolution::Undeclared => return None,
         };
         // A non-constant index is checked at run time by a later wave; only a
         // constant one can be refused here.
-        let Some(value) = self.eval_const_invariant(expression) else {
-            return;
-        };
+        let value = self.eval_const_invariant(expression)?;
         if value.fract() != 0.0 {
             self.record_error_at(
                 SemanticErrorKind::TypeMismatch {
@@ -1640,7 +1715,7 @@ impl SemanticAnalyzer {
                 },
                 expression.span(),
             );
-            return;
+            return None;
         }
         let selected = value as i64;
         let inside = match range {
@@ -1664,7 +1739,48 @@ impl SemanticAnalyzer {
                 )),
                 expression.span(),
             );
+            return None;
         }
+        // A scalar has one bit numbered zero, which is what `[0:0]` names.
+        Some((range.unwrap_or(VectorBounds::SCALAR), selected))
+    }
+
+    /// IEEE 1364-2005 section 4.2.1: a part select is written in the direction
+    /// its vector was declared in.
+    ///
+    /// `bus[0:3]` of a `reg [7:0]` is not a request for four bits in reverse;
+    /// it is not a part select at all. Refused rather than reinterpreted,
+    /// because the reinterpretation — silently reading `bus[3:0]` — is a wrong
+    /// answer to a question the standard does not let an author ask, and the
+    /// author who wrote it meant something the declaration cannot provide.
+    ///
+    /// Asked through [`VectorBounds::position_of`] rather than by comparing the
+    /// two indices with the two bounds, because "more significant" is exactly
+    /// what a position is: `[4:7] q; q[5:6]` is in the declared direction even
+    /// though 5 is the smaller number.
+    fn check_part_select_direction(
+        &mut self,
+        name: &SmolStr,
+        span: Span,
+        msb: Option<(VectorBounds, i64)>,
+        lsb: Option<(VectorBounds, i64)>,
+    ) {
+        let (Some((range, high)), Some((_, low))) = (msb, lsb) else {
+            return;
+        };
+        if range.position_of(high) >= range.position_of(low) {
+            return;
+        }
+        self.record_error_at(
+            SemanticErrorKind::InvalidExpression(format!(
+                "part select `{name}[{high}:{low}]` runs against the direction `{name}` was \
+                 declared in, `{}`; IEEE 1364-2005 section 4.2.1 makes the left index of a \
+                 part select the more significant of the two, so this names `{name}[{low}:{high}]` \
+                 or nothing",
+                range.spelling()
+            )),
+            span,
+        );
     }
 
     // ------------------------------------------------------------------
@@ -1729,8 +1845,9 @@ impl SemanticAnalyzer {
                             digital.span(),
                         );
                     } else if let DigitalExpr::PartSelect(select) = digital {
-                        self.check_bit_index(name, &select.msb, signals, index);
-                        self.check_bit_index(name, &select.lsb, signals, index);
+                        let high = self.check_bit_index(name, &select.msb, signals, index);
+                        let low = self.check_bit_index(name, &select.lsb, signals, index);
+                        self.check_part_select_direction(name, select.span, high, low);
                     }
                 }
                 for child in digital.children() {
@@ -2306,6 +2423,128 @@ fn collect_written_names(
             if let Some(statement) = &timing.statement {
                 collect_written_names(statement, written);
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The whole storage rule, at every shape of declaration IEEE 1364-2005
+    /// section 3.3.1 permits.
+    ///
+    /// The left bound is the most significant bit whatever its value, so a
+    /// declared index is a *name*: it is the distance from the right bound,
+    /// measured in the declared direction. `[7:0]` is the identity, which is
+    /// why the rule was invisible for as long as every range was anchored at
+    /// zero.
+    #[test]
+    fn a_declared_index_is_its_distance_from_the_right_bound() {
+        let descending = VectorBounds { msb: 7, lsb: 0 };
+        assert_eq!(descending.position_of(7), 7);
+        assert_eq!(descending.position_of(0), 0);
+
+        // Section 3.3.1: "The values may be positive, negative, or zero, and
+        // lsb value may be greater than, equal to, or less than msb value."
+        // `[0:7]` therefore names its *most* significant bit 0.
+        let ascending = VectorBounds { msb: 0, lsb: 7 };
+        assert_eq!(ascending.position_of(0), 7);
+        assert_eq!(ascending.position_of(7), 0);
+
+        // Neither of these reaches bit zero, and both are four bits wide.
+        let high = VectorBounds { msb: 7, lsb: 4 };
+        assert_eq!(high.width(), 4);
+        assert_eq!(high.position_of(7), 3);
+        assert_eq!(high.position_of(4), 0);
+
+        let high_ascending = VectorBounds { msb: 4, lsb: 7 };
+        assert_eq!(high_ascending.width(), 4);
+        assert_eq!(high_ascending.position_of(4), 3);
+        assert_eq!(high_ascending.position_of(7), 0);
+
+        // A one-bit vector is not the same declaration as a scalar, and its
+        // one bit is still named by the bound it was declared with.
+        let single = VectorBounds { msb: 3, lsb: 3 };
+        assert_eq!(single.width(), 1);
+        assert_eq!(single.position_of(3), 0);
+
+        assert_eq!(VectorBounds::SCALAR.width(), 1);
+        assert_eq!(VectorBounds::SCALAR.position_of(0), 0);
+
+        // Section 3.9 numbers an `integer`'s 32 bits [31:0].
+        assert_eq!(INTEGER_BOUNDS.width(), 32);
+        assert_eq!(INTEGER_BOUNDS.position_of(31), 31);
+
+        // And the inverse, which is what names a bit in a diagnostic.
+        for bounds in [
+            descending,
+            ascending,
+            high,
+            high_ascending,
+            single,
+            VectorBounds::SCALAR,
+        ] {
+            for index in bounds.indices_msb_first() {
+                assert_eq!(
+                    bounds.index_at(bounds.position_of(index)),
+                    index,
+                    "{} round trip at {index}",
+                    bounds.spelling()
+                );
+            }
+        }
+    }
+
+    /// An index the declaration does not name has no bit, and lands off the
+    /// value rather than folding onto one that is there.
+    ///
+    /// The map is affine and not an absolute distance for exactly this reason:
+    /// `|3 − 4|` would put `x[3]` of a `reg [7:4]` at position 1, which is
+    /// `x[5]`. Off the end is what IEEE 1364-2005 section 4.2.1's `x` and
+    /// section 5.2.1's dropped write are both built on.
+    #[test]
+    fn an_index_the_declaration_does_not_name_lands_outside_the_value() {
+        let high = VectorBounds { msb: 7, lsb: 4 };
+        assert!(!high.contains(3));
+        assert_eq!(high.position_of(3), -1);
+        assert!(!high.contains(8));
+        assert_eq!(high.position_of(8), 4);
+
+        let ascending = VectorBounds { msb: 4, lsb: 7 };
+        assert_eq!(ascending.position_of(8), -1);
+        assert_eq!(ascending.position_of(3), 4);
+
+        let descending = VectorBounds { msb: 7, lsb: 0 };
+        assert_eq!(descending.position_of(-1), -1);
+        assert_eq!(descending.position_of(8), 8);
+    }
+
+    /// Declaration order, which is the order a bus's members are written in.
+    #[test]
+    fn indices_come_back_most_significant_first() {
+        let collect = |bounds: VectorBounds| bounds.indices_msb_first().collect::<Vec<_>>();
+        assert_eq!(collect(VectorBounds { msb: 1, lsb: 0 }), vec![1, 0]);
+        assert_eq!(collect(VectorBounds { msb: 0, lsb: 1 }), vec![0, 1]);
+        assert_eq!(collect(VectorBounds { msb: 7, lsb: 4 }), vec![7, 6, 5, 4]);
+        assert_eq!(collect(VectorBounds { msb: 4, lsb: 7 }), vec![4, 5, 6, 7]);
+        assert_eq!(collect(VectorBounds { msb: 3, lsb: 3 }), vec![3]);
+
+        // Declaration order is always the same *positions*, high to low: the
+        // leading declared index is the most significant bit either way, which
+        // is what keeps a boundary's first net on a port's top bit.
+        for bounds in [
+            VectorBounds { msb: 1, lsb: 0 },
+            VectorBounds { msb: 0, lsb: 1 },
+            VectorBounds { msb: 7, lsb: 4 },
+            VectorBounds { msb: 4, lsb: 7 },
+        ] {
+            let positions: Vec<i64> = bounds
+                .indices_msb_first()
+                .map(|index| bounds.position_of(index))
+                .collect();
+            let expected: Vec<i64> = (0..i64::from(bounds.width())).rev().collect();
+            assert_eq!(positions, expected, "{}", bounds.spelling());
         }
     }
 }

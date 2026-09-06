@@ -992,8 +992,17 @@ pub enum CfgValueKind {
         value: ValueId,
         count: ValueId,
     },
-    /// A constant bit or part select. Bounds are as written, so `[0:7]` and
-    /// `[7:0]` select the same bits of differently declared signals.
+    /// A constant bit or part select, by **position** from the least
+    /// significant end of the input value.
+    ///
+    /// Not by declared index. Most of the values this slices were never
+    /// declared over a range at all — a concatenation's resized right-hand
+    /// side, a truncation, the bit a reduction is folding — and the ones that
+    /// were have already been resolved through
+    /// [`VectorBounds::position_of`](crate::semantic::VectorBounds::position_of)
+    /// by the lowering, which is the one place that knows what a source-level
+    /// `x[7:4]` was written against. A position outside the input reads `x`,
+    /// IEEE 1364-2005 section 4.2.1.
     DigitalPartSelect {
         input: ValueId,
         msb: i64,

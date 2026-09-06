@@ -349,9 +349,10 @@ fn declared_node_count(artifact: &rspice_veriloga::canonical_ir::CanonicalIrArti
 ///   "the *i*th port's nets, in order".
 /// * *Bits against nodes.* A vector port's nets are the deck's, declared MSB
 ///   first — the order `rspice-ui`'s netlister emits a vector pin's formals in,
-///   and the order `DigitalBusDeclaration` lists members in. Bit *k* of the
-///   value is `FourStateValue::bit(k)`, counted from the least significant end,
-///   which is where the discrete half's own bit selects land.
+///   and the order `DigitalBusDeclaration` lists members in. Which bit of the
+///   value each one is comes from `VectorBounds::position_of`, the discrete
+///   half's own rule for what a declared index names, so a `[7:4]` port's first
+///   net is its bit 7 and is stored at position 3.
 ///
 /// The continuous half still binds one node per port, because its terminal
 /// count is one per port: a vector discrete port hands it the net its declared
@@ -410,14 +411,15 @@ fn classify_boundary_ports(
         let bits = boundary_bit_order(signal).ok_or_else(|| {
             SimulationError::Circuit(format!(
                 "mixed Verilog-AMS instance '{}' of model '{}' declares discrete port '{}' as \
-                 `[{}:{}]`, a range that does not reach bit zero; the discrete half numbers a bit \
-                 select from the least significant end, so a boundary net for its declared \
-                 most-significant bit would carry a bit the module itself cannot read",
+                 `[{}:{}]`, a range naming {} bit(s), and carries a value {} bit(s) wide; the \
+                 plan the boundary was handed contradicts itself",
                 element.name,
                 subckt_name,
                 port.name,
                 signal.bounds.map_or(0, |(msb, _)| msb),
                 signal.bounds.map_or(0, |(_, lsb)| lsb),
+                signal.declared_range().width(),
+                signal.width,
             ))
         })?;
         for (offset, bit) in bits.iter().copied().enumerate() {
@@ -451,35 +453,39 @@ fn classify_boundary_ports(
     Ok(layout)
 }
 
-/// The bits of one boundary port, in the order the deck names its nets:
-/// declared MSB first.
+/// Where each of one boundary port's bits is stored, in the order the deck
+/// names its nets: declared MSB first.
 ///
-/// `None` when the declared range does not reach bit zero. The discrete half
-/// resolves a bit select by treating the declared index *as* the position from
-/// the least significant end — `digital_eval`'s `patch` and
-/// `digital_value::part_select` both say so in as many words — so `[7:4]` is a
-/// four-bit value whose own `x[7]` reads off the end of it. Bridging such a
-/// port would bind four deck nets to four bits the module cannot name, which is
-/// a wrong answer rather than a missing one, so the boundary refuses it.
+/// The deck's first net for a vector port is the port's most significant bit,
+/// which is the *left* declared bound whatever its value (IEEE 1364-2005
+/// section 3.3.1). Which bit of the stored value that is comes from
+/// `VectorBounds::position_of`, the discrete half's own rule, so the boundary
+/// and the kernel cannot disagree about which conductor is which bit: `[1:0]`
+/// yields positions 1, 0 and so does `[0:1]`, because the leading declared
+/// index is the most significant bit in both.
+///
+/// Where the range starts does not enter into it. `[7:4]` is a four-bit port
+/// whose deck nets are its bits 7, 6, 5 and 4, stored at positions 3, 2, 1 and
+/// 0 — the same four conductors a `[3:0]` port has, under the names the module
+/// uses for them. This function refused such a port for as long as the discrete
+/// half read a declared index as a position; now that it reads one as a name,
+/// there is nothing left to refuse but a plan whose width and bounds contradict
+/// each other, which no front end produces.
 ///
 /// A scalar port has no range and is bit zero, which is what it has always
 /// been.
 fn boundary_bit_order(signal: &rspice_veriloga::canonical_ir::DigitalSignal) -> Option<Vec<u32>> {
-    let Some((msb, lsb)) = signal.bounds else {
+    if signal.bounds.is_none() {
         return Some(vec![0]);
-    };
-    if msb.min(lsb) != 0 {
+    }
+    let range = signal.declared_range();
+    if range.width() != signal.width {
         return None;
     }
-    let high = u32::try_from(msb.max(lsb)).ok()?;
-    if high.checked_add(1)? != signal.width {
-        return None;
-    }
-    Some(if msb >= lsb {
-        (0..=high).rev().collect()
-    } else {
-        (0..=high).collect()
-    })
+    range
+        .indices_msb_first()
+        .map(|index| u32::try_from(range.position_of(index)).ok())
+        .collect()
 }
 
 fn parameter_or(
