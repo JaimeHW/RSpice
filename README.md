@@ -6,7 +6,7 @@
 
 **An analog and mixed-signal circuit simulator, written in Rust.**
 
-Run SPICE netlists from a command line, a desktop IDE, Python, or the browser —
+Run SPICE netlists from a command line, a desktop IDE, Python, or the browser:
 operating points and transient waveforms through harmonic balance and phase noise.
 
 [![License](https://img.shields.io/badge/license-source--available-informational?style=flat-square)](LICENSE)
@@ -36,7 +36,7 @@ RSpice has one engine behind every interface. The command line, the desktop IDE,
 the Python bindings, and the WebAssembly build are all the same `rspice-core`
 code, so a result is never a function of how the run was launched. Where a deck
 needs physics RSpice does not have, the answer is a typed error naming the
-parameter or model level responsible — never a silent approximation.
+parameter or model level responsible, never a silent approximation.
 
 ## Quick start
 
@@ -75,8 +75,8 @@ $ target/release/rspice run rc_lowpass.sp --meas
 Simulation complete in 0.003s.
 ```
 
-Write results to a file instead — SPICE raw, ASCII raw, CSV, TSV, JSON, HDF5, or
-VCD for digital and mixed-signal runs:
+Write results to a file instead, in SPICE raw, ASCII raw, CSV, TSV, JSON, HDF5,
+or VCD for digital and mixed-signal runs:
 
 ```bash
 target/release/rspice run rc_lowpass.sp -o rc.h5 --format hdf5
@@ -118,8 +118,8 @@ complete set of ways to reach it.
 
 ## Devices
 
-Every device has a single descriptor behind all of its surfaces — properties,
-persistence, hierarchy, DRC, netlisting, preview, export, and hardcopy — across
+Every device has a single descriptor behind all of its surfaces (properties,
+persistence, hierarchy, DRC, netlisting, preview, export, and hardcopy) across
 74 stable schematic kinds, 64 canonical XSPICE catalog entries under 115
 registered names, and 43 generated Verilog-A models. A device whose id, registry
 entry, terminal contract, parameter contract, or symbol cannot be resolved fails
@@ -136,7 +136,7 @@ unsupported parameters.
 | Sources | Independent V/I with `PULSE`, `SIN`, `EXP`, `PWL`, `PAT`, `SFFM`, `AM`, and `TRNOISE` white + 1/f waveforms; E/F/G/H controlled sources; B behavioral sources; PWL-from-file sources |
 | Switches & macromodels | Voltage- and current-controlled switches, op-amp macromodel |
 | Mixed-signal | Verilog-AMS digital and real-number (`wreal`) modules with automatic connect-module insertion; XSPICE-style analog and digital code models, tri-state drivers, A/D–D/A bridges |
-| Verilog-A | Generated CMC devices and externally compiled modules — [below](#generated-verilog-a-devices) |
+| Verilog-A | Generated CMC devices and externally compiled modules; see [below](#generated-verilog-a-devices) |
 
 Unlisted `M` levels fail closed rather than falling through to the simplified
 MOS approximation. HICUM/L0, HICUM/L2, MEXTRAM, and Xyce HBT_X `Q` levels are
@@ -167,7 +167,7 @@ JIT dependency, and Android or iOS ARM64 via
 `rspice-core --no-default-features --features veriloga-builtins`.
 
 Catalog and round-trip checks prove a device is reachable and consistently
-represented, not that it is numerically accurate — that needs golden comparisons
+represented, not that it is numerically accurate; that needs golden comparisons
 against independent references, per compact-model version. ASM-HEMT and MVSG-CMC
 are not yet oracle-qualified, and the in-tree `Z`-device GaN HEMT is a
 physics-style model, not a CMC one.
@@ -197,9 +197,9 @@ with unsupported semantics raised as errors rather than guessed. LTspice `.raw`
 files can be read back for comparison.
 
 Every product build ships the small, generic
-[foundation library](models/spice/foundation/) — the only SPICE pack in this
-repository, and like everything under `models/spice/`, authored by the RSpice
-project. Projects can import their own model sources. Further packs are
+[foundation library](models/spice/foundation/). It is the only SPICE pack in
+this repository, and like everything under `models/spice/`, authored by the
+RSpice project. Projects can import their own model sources. Further packs are
 published through the Model Hub as signed, immutable archives: a canonical
 manifest under ed25519 trust, a signed catalog snapshot, and hardened archive
 reading, so an installed pack's provenance is checkable rather than assumed.
@@ -225,9 +225,9 @@ Built for scripted runs and CI. The exit status is the verification contract.
 | Exit code | Meaning |
 | :--- | :--- |
 | `0` | Success |
-| `1` | Untyped failure — a Verilog-A compile or format-conversion error |
+| `1` | Untyped failure: a Verilog-A compile or format-conversion error |
 | `2` | Invalid arguments |
-| `3` | Verification failure — a `.MEAS` goal missed, or a golden mismatch |
+| `3` | Verification failure: a `.MEAS` goal missed, or a golden mismatch |
 | `65` / `66` | Malformed input / input not found |
 | `69` | The deck is well formed and this build does not execute it |
 | `70` / `73` / `74` | Internal error / artifact not published / I/O error |
@@ -256,8 +256,8 @@ diagnostics with `--error-format json`. Full option reference:
 
 ### Desktop IDE
 
-An egui application with a wgpu renderer, organized as seven workspaces —
-Project, Design, Simulate, Results, Verify, Models, and Netlist — covering
+An egui application with a wgpu renderer, organized as seven workspaces
+(Project, Design, Simulate, Results, Verify, Models, and Netlist) covering
 schematic and symbol editing, analysis-plan setup, waveform and RF result views,
 verification evidence, model and PDK binding, and direct netlist editing. Its
 simulation runner is the only surface that reaches PXF, PSTB, SOA, and
@@ -282,7 +282,7 @@ maturin develop --release
 ```python
 import rspice
 
-# Netlist.parse takes statements only — no title line, so nothing is swallowed.
+# Netlist.parse takes statements only: no title line, so nothing is swallowed.
 netlist = rspice.Netlist.parse("V1 1 0 10\nR1 1 0 1k\n.end")
 engine = rspice.Engine()
 result = engine.run_dc_op(netlist)
@@ -294,8 +294,8 @@ full API reference, the maturin/pytest workflow CI uses, and the Windows
 `PYO3_PYTHON` workaround for Microsoft Store interpreter aliases:
 [crates/rspice-python/README.md](crates/rspice-python/README.md).
 
-These bindings put RSpice inside your Python. The desktop IDE has the reverse —
-Python automation inside RSpice — and the two are separate: automation runs on a
+These bindings put RSpice inside your Python. The desktop IDE has the reverse,
+Python automation inside RSpice. The two are separate: automation runs on a
 signed, application-local CPython staged into the release, never an interpreter
 discovered from `PATH`, the registry, a virtualenv, or user site-packages.
 
@@ -331,7 +331,7 @@ sources going through the same pipeline and no mode selector between them.
 `rspice-veriloga` compiles behavioral modules through parser, semantic analysis,
 canonical IR, and either a bytecode VM or the RSpice-owned native JIT (x86-64
 hosts plus AArch64 on macOS, Linux, and Windows). When native mode is requested,
-construction is full JIT or a typed error — never a silent fall back to the
+construction is full JIT or a typed error, never a silent fall back to the
 interpreter. The same crate owns the Rust backend that produces the generated
 built-in devices above. External models compile standalone with
 `rspice compile-va`; examples live in [models/veriloga/](models/veriloga/).
@@ -340,9 +340,9 @@ The discrete half is the IEEE 1364-2005 digital subset: four-state (`0 1 x z`)
 logic, gate primitives, blocking and non-blocking assignment, vectors, and
 module hierarchy, driven by an event wheel alongside the analog solve.
 Real-number modeling has `wreal` nets and the four resolved forms.
-Mixed-discipline boundaries follow LRM 2.4 clause 7 — discipline resolution,
+Mixed-discipline boundaries follow LRM 2.4 clause 7 (discipline resolution,
 `connect_mode` auto-insertion, `resolveto` with `exclude`, and `merged`/`split`
-segmentation — with the detail resolution mode of Annex F.2.2 refused by name
+segmentation), with the detail resolution mode of Annex F.2.2 refused by name
 rather than approximated.
 
 Digital and mixed runs export to VCD with `rspice run --format vcd`, one wire
@@ -353,7 +353,7 @@ member scalars for readers that cannot take vectors).
 
 Correctness is measured at four levels: unit tests per crate, 184 integration
 test files in `rspice-core` alone, oracle-replay fixtures for history-coupled
-device runtimes, and the corpus harnesses under [tests/](tests/) — ngspice and
+device runtimes, and the corpus harnesses under [tests/](tests/): ngspice and
 Xyce alongside GF180MCU, ISCAS85, Verilog-AMS, and paranoia suites. The digital
 Verilog corpus is checked against Icarus Verilog and Verilator, two independent
 implementations sharing no code with RSpice or with each other.
@@ -369,7 +369,7 @@ instead of omitting the deck.
 
 Every executed analysis must be backed by a validation oracle, so no deck passes
 silently. Nightly release runs gate on the recorded failure watermark in
-[.github/workflows/nightly.yml](.github/workflows/nightly.yml), currently zero —
+[.github/workflows/nightly.yml](.github/workflows/nightly.yml), currently zero:
 any failing deck fails the run.
 
 ```bash
@@ -386,9 +386,9 @@ a before/after scoreboard.
 ## Under the hood
 
 The engine is a modified-nodal-analysis formulation with a damped Newton solver.
-It has a merit-based line search, four convergence aids for hard circuits — gmin
+It has a merit-based line search, four convergence aids for hard circuits (gmin
 stepping, source stepping, pseudo-transient continuation, and arc-length
-continuation — and local-truncation-error control over the transient timestep.
+continuation), and local-truncation-error control over the transient timestep.
 
 Real factorization is an in-tree KLU-class sparse solver whose stored pivots keep
 refactorization cheap while the sparsity pattern holds. Complex solves behind the
