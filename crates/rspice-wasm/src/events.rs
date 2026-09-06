@@ -341,7 +341,17 @@ pub(crate) fn bus_events(
         .map(|points| BusMemberHistory { points })
         .collect();
 
-    let events = reassemble_bus(&borrowed);
+    // Core's own width-aware ceiling on the reassembly, which every route that
+    // shows a bus refuses at. The transfer budget above is this crate's and
+    // usually the tighter of the two; this one is the product a document could
+    // ask any surface for, so it is reported as the budget refusal it is.
+    let events = reassemble_bus(&borrowed).map_err(|error| {
+        Box::new(WasmError::new(
+            format!("bus '{}': {error}", bus.name),
+            "invalid_result_window",
+            "result_transfer",
+        ))
+    })?;
     let mut rows = Vec::new();
     rows.try_reserve_exact(events.len())
         .map_err(|_| allocation_error("digital bus event rows"))?;

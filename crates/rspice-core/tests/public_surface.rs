@@ -566,7 +566,19 @@ use rspice_core::analysis::harmonic_balance::{
 //   assemble a whole word one character at a time, and the only public way to
 //   get that character was `Display`, which allocates a `String` per bit — on
 //   the exact path a wide bus makes hot.
-const MAX_PUBLIC_ITEMS: usize = 4980;
+// 2026-09-06, +2 deliberate (4,980 -> 4,982): the ceiling on how much of a
+// bus one reassembly materializes, and the refusal that names it.
+//
+// - 2 in `execution/event_bus.rs`: `MAX_BUS_EVENT_CELLS` and
+//   `BusReassemblyTooLarge`. A bus costs events times members, and neither
+//   number is unreasonable alone — 4,096 members is the declared maximum, two
+//   million events is what the bindings already allow one node — so nothing
+//   caught their product. The bound is enforced inside `bus_events` rather
+//   than at each caller precisely so that the VCD projection, the rawfile bus
+//   plots, the Python accessor and the browser handle refuse the same document
+//   for the same reason with the same numbers; that makes both items part of
+//   the signature every one of those callers already names.
+const MAX_PUBLIC_ITEMS: usize = 4982;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

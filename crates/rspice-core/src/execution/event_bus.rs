@@ -26,7 +26,53 @@
 //! not stated, which is not the same as a bit that is zero; a caller decides
 //! how to spell it, and a VCD dump spells it `x`.
 
+use thiserror::Error;
+
 use crate::Value;
+
+/// The most member values one bus reassembly materializes.
+///
+/// A bus costs the *product* of its two sizes, not either one: [`bus_events`]
+/// holds one code per member per event, so a 4,096-member declaration — the
+/// widest [`crate::engine::MAX_DIGITAL_BUS_WIDTH`] admits — over the two
+/// million events the bindings already cap a single node's history at would be
+/// eight billion entries, tens of gigabytes, from a document a few megabytes
+/// long. Neither existing bound catches that, because neither number is
+/// unreasonable on its own.
+///
+/// The ceiling is that same two-million-row scale at a sixty-four-bit word:
+/// the widest bus whose value still fits a machine register, and comfortably
+/// wider than the 53 bits a table column holds exactly. It costs about 256 MB
+/// of codes plus the per-event row headers, and it trades the two sizes off
+/// against each other rather than fixing either — a two-bit bus keeps 64
+/// million events, the widest bus keeps 31,250.
+///
+/// It is enforced inside [`bus_events`] so that every route that shows a bus —
+/// the VCD projection, the rawfile bus plots, the Python accessor, the browser
+/// handle — refuses the same document for the same reason and with the same
+/// numbers. The bindings' own per-node row bounds sit above this and still
+/// apply; this is the one bound that knows the width.
+pub const MAX_BUS_EVENT_CELLS: usize = 128_000_000;
+
+/// A digital bus whose reassembly would not fit [`MAX_BUS_EVENT_CELLS`].
+///
+/// This is a budget, not a defect in the data: the declaration is well formed
+/// and every member history is sound, there is simply more of it than one
+/// reassembly holds at once. A caller that needs such a bus reads its members
+/// individually, or narrows the run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+#[error(
+    "reassembling a digital bus of {width} member(s) would materialize at least {cells} member \
+     values, past the {MAX_BUS_EVENT_CELLS} this build holds at once"
+)]
+pub struct BusReassemblyTooLarge {
+    /// Members the bus declares.
+    pub width: usize,
+    /// Member values the reassembly needs — the exact product where the event
+    /// count is known, and the recorded-change total where the refusal came
+    /// before the event times were even collected. Never an overstatement.
+    pub cells: usize,
+}
 
 /// One bus member's history, as the times and event codes it was recorded at.
 ///
@@ -69,13 +115,34 @@ impl<'a> BusMemberHistory<'a> {
 /// accepted point, so co-timed member changes are one change of the bus.
 ///
 /// A bus with no members, or whose members recorded nothing, has no events.
-pub fn bus_events(members: &[BusMemberHistory<'_>]) -> Vec<(Value, Vec<Option<u8>>)> {
+///
+/// # Refusal
+///
+/// A bus needing more than [`MAX_BUS_EVENT_CELLS`] member values is refused
+/// rather than materialized. The check runs twice, and neither run overstates
+/// what the bus costs: once on the recorded-change total, which is a lower
+/// bound on the product because every recorded change lands in some event, and
+/// so refuses before even the event times are collected; then once on the
+/// exact product, before the codes are.
+pub fn bus_events(
+    members: &[BusMemberHistory<'_>],
+) -> Result<Vec<(Value, Vec<Option<u8>>)>, BusReassemblyTooLarge> {
     let total = members
         .iter()
         .map(|member| member.points.len())
         .fold(0usize, usize::saturating_add);
     if total == 0 {
-        return Vec::new();
+        return Ok(Vec::new());
+    }
+    // Every recorded change is one member value at one event, so the total is
+    // never more than the product — refusing on it cannot refuse a bus that
+    // would have fit, and it costs nothing to check before the first
+    // allocation.
+    if total > MAX_BUS_EVENT_CELLS {
+        return Err(BusReassemblyTooLarge {
+            width: members.len(),
+            cells: total,
+        });
     }
 
     let mut times: Vec<Value> = Vec::with_capacity(total);
@@ -87,6 +154,16 @@ pub fn bus_events(members: &[BusMemberHistory<'_>]) -> Vec<(Value, Vec<Option<u8
     // and it costs nothing.
     times.sort_unstable_by(Value::total_cmp);
     times.dedup_by(|left, right| left.total_cmp(right).is_eq());
+
+    // The event count is exact now, so this is the real cost, checked before
+    // the first row is built.
+    let cells = times.len().saturating_mul(members.len());
+    if cells > MAX_BUS_EVENT_CELLS {
+        return Err(BusReassemblyTooLarge {
+            width: members.len(),
+            cells,
+        });
+    }
 
     let mut cursors = vec![0usize; members.len()];
     let mut held: Vec<Option<u8>> = vec![None; members.len()];
@@ -104,7 +181,7 @@ pub fn bus_events(members: &[BusMemberHistory<'_>]) -> Vec<(Value, Vec<Option<u8
         }
         events.push((time, held.clone()));
     }
-    events
+    Ok(events)
 }
 
 /// Split `name[msb:lsb]` into its name and the range it declares.
@@ -155,11 +232,17 @@ mod tests {
         points.to_vec()
     }
 
+    /// Every bus in this module fits the cell ceiling by inspection, so the
+    /// refusal is not what these tests are about.
+    fn reassembled(members: &[BusMemberHistory<'_>]) -> Vec<(Value, Vec<Option<u8>>)> {
+        bus_events(members).expect("a bus of a handful of events fits the ceiling")
+    }
+
     #[test]
     fn a_time_where_one_member_changes_carries_the_others_held_values() {
         let high = history(&[(0.0, 0), (2e-9, 1)]);
         let low = history(&[(0.0, 1), (1e-9, 0), (3e-9, 1)]);
-        let events = bus_events(&[
+        let events = reassembled(&[
             BusMemberHistory { points: &high },
             BusMemberHistory { points: &low },
         ]);
@@ -180,7 +263,7 @@ mod tests {
         // eight bits that changed together changed at one time.
         let high = history(&[(0.0, 0), (5e-9, 1)]);
         let low = history(&[(0.0, 0), (5e-9, 1)]);
-        let events = bus_events(&[
+        let events = reassembled(&[
             BusMemberHistory { points: &high },
             BusMemberHistory { points: &low },
         ]);
@@ -197,7 +280,7 @@ mod tests {
     fn a_member_with_no_point_yet_is_missing_rather_than_zero() {
         let early = history(&[(0.0, 1)]);
         let late = history(&[(4e-9, 0)]);
-        let events = bus_events(&[
+        let events = reassembled(&[
             BusMemberHistory { points: &early },
             BusMemberHistory { points: &late },
         ]);
@@ -210,10 +293,10 @@ mod tests {
 
     #[test]
     fn a_bus_with_nothing_recorded_has_no_events() {
-        assert!(bus_events(&[]).is_empty());
+        assert!(reassembled(&[]).is_empty());
         let empty: Vec<(Value, u8)> = Vec::new();
         assert!(
-            bus_events(&[
+            reassembled(&[
                 BusMemberHistory { points: &empty },
                 BusMemberHistory { points: &empty }
             ])
@@ -242,9 +325,64 @@ mod tests {
             BusMemberHistory { points: &b },
             BusMemberHistory { points: &c },
         ];
-        for (time, codes) in bus_events(&members) {
+        for (time, codes) in reassembled(&members) {
             assert_eq!(bus_value_at(&members, time), codes, "at {time}");
         }
+    }
+
+    /// The ceiling is a *product*, so the cheapest bus that crosses it is the
+    /// widest one: 4,096 members need only 31,251 event times to want more
+    /// than [`MAX_BUS_EVENT_CELLS`] member values, and the refusal comes
+    /// before a single row is built — one member carrying every time is
+    /// enough to trip it.
+    ///
+    /// The accepted side of the boundary is stated as arithmetic rather than
+    /// materialized: one event fewer is 128,000,000 cells, a quarter of a
+    /// gigabyte, which is the whole reason the ceiling exists and not
+    /// something a unit test should allocate. What *is* exercised is that a
+    /// full-width bus is not refused for being wide — 4,096 members over a
+    /// thousand events pass — so the refusal is the product talking and not
+    /// the width.
+    #[test]
+    fn a_bus_past_the_cell_ceiling_is_refused_by_number() {
+        const WIDTH: usize = 4_096;
+        const OVER: usize = 31_251;
+        assert!(OVER * WIDTH > MAX_BUS_EVENT_CELLS);
+        assert!((OVER - 1) * WIDTH <= MAX_BUS_EVENT_CELLS);
+
+        // One member holds every time; the other 4,095 recorded nothing, so
+        // the input is 31,251 points rather than 128 million.
+        let carrier: Vec<(Value, u8)> = (0..OVER).map(|step| (step as Value * 1e-9, 1)).collect();
+        let empty: Vec<(Value, u8)> = Vec::new();
+        let mut members = vec![BusMemberHistory { points: &carrier }];
+        members.resize(WIDTH, BusMemberHistory { points: &empty });
+
+        let error = bus_events(&members).expect_err("31,251 events over 4,096 members is over");
+        assert_eq!(
+            error,
+            BusReassemblyTooLarge {
+                width: WIDTH,
+                cells: OVER * WIDTH,
+            }
+        );
+        let message = error.to_string();
+        assert!(
+            message.contains(&WIDTH.to_string())
+                && message.contains(&(OVER * WIDTH).to_string())
+                && message.contains(&MAX_BUS_EVENT_CELLS.to_string()),
+            "the refusal must name the width, the cost and the ceiling: {message}"
+        );
+
+        // The same width, well inside the ceiling, reassembles.
+        let short: Vec<(Value, u8)> = (0..1_000).map(|step| (step as Value * 1e-9, 1)).collect();
+        let mut members = vec![BusMemberHistory { points: &short }];
+        members.resize(WIDTH, BusMemberHistory { points: &empty });
+        assert_eq!(
+            bus_events(&members)
+                .expect("a full-width bus is not refused for its width")
+                .len(),
+            1_000
+        );
     }
 
     #[test]
@@ -252,7 +390,7 @@ mod tests {
         // Two histories may share a time exactly; the union keeps one row.
         let a = history(&[(0.0, 0), (0.0, 1)]);
         let b = history(&[(0.0, 2)]);
-        let events = bus_events(&[
+        let events = reassembled(&[
             BusMemberHistory { points: &a },
             BusMemberHistory { points: &b },
         ]);

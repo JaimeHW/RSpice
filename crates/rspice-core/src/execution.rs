@@ -44,7 +44,9 @@ pub use capability::{
     NonUiSurface, SIGNAL_CAPABILITY_MATRIX, SignalCapability, SurfaceCapability,
     analysis_result_capability, analysis_result_kind, signal_capability,
 };
-pub use event_bus::{BusMemberHistory, bus_events, bus_value_at};
+pub use event_bus::{
+    BusMemberHistory, BusReassemblyTooLarge, MAX_BUS_EVENT_CELLS, bus_events, bus_value_at,
+};
 pub use event_export::{
     EventPlotError, RawEventTraces, decode_event_plots, transient_bus_plots, transient_event_plots,
 };

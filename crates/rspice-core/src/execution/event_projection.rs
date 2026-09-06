@@ -29,7 +29,9 @@ use crate::engine::{
     MAX_DIGITAL_BUS_WIDTH, RealTrace, RealTracePoint, canonical_event_name,
     validate_digital_bus_table,
 };
-use crate::execution::event_bus::{BusMemberHistory, bus_events, split_bus_notation};
+use crate::execution::event_bus::{
+    BusMemberHistory, BusReassemblyTooLarge, bus_events, split_bus_notation,
+};
 use crate::io::vcd::{
     VCD_WRITER_VERSION, VcdBit, VcdChange, VcdDocument, VcdMagnitude, VcdSignal, VcdSignalKind,
     VcdTimeUnit, VcdTimescale, VcdValue, VcdVariable, is_writable_scope_name,
@@ -105,6 +107,15 @@ pub enum EventProjectionError {
     /// A bus declaration is not well formed against the traces it names.
     #[error(transparent)]
     Bus(#[from] DigitalBusError),
+
+    /// A bus is well formed but larger than one reassembly holds.
+    #[error("digital bus '{bus}': {source}")]
+    BusTooLarge {
+        /// The bus whose reassembly was refused.
+        bus: String,
+        /// The budget that refused it.
+        source: BusReassemblyTooLarge,
+    },
 
     /// A wide `$var` declares a range whose width is not the variable's.
     #[error(
@@ -414,7 +425,11 @@ fn bus_signal(
         .collect();
     let mut points = Vec::new();
     let mut previous: Option<Value> = None;
-    for (time, codes) in bus_events(&members) {
+    let events = bus_events(&members).map_err(|source| EventProjectionError::BusTooLarge {
+        bus: bus.name.clone(),
+        source,
+    })?;
+    for (time, codes) in events {
         let femtoseconds = event_femtoseconds(&reference, time, &mut previous)?;
         let bits = codes
             .into_iter()

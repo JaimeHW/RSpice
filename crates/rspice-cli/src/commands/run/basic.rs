@@ -1068,7 +1068,10 @@ pub(super) fn run_transient(
                         buses: rspice_core::execution::transient_bus_plots(
                             &result.digital_traces,
                             &result.digital_buses,
-                        ),
+                        )
+                        .map_err(|error| {
+                            crate::commands::waveform_io::conversion_error(&output_path, error)
+                        })?,
                     },
                 };
                 ctx.record_published(super::PublishedResult {

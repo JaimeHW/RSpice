@@ -243,7 +243,12 @@ fn reassemble(
         .map(|points| BusMemberHistory { points })
         .collect();
 
-    let events = bus_events(&borrowed);
+    // `resolve_bus` bounded the member changes, which bounds the events; this
+    // is core's own width-aware ceiling on the product, the one every route
+    // that shows a bus refuses at.
+    let events = bus_events(&borrowed).map_err(|error| {
+        SimulationError::Circuit(format!("digital bus '{}': {error}", bus.name))
+    })?;
     let mut rows: Vec<PyBusEvent> = Vec::new();
     rows.try_reserve_exact(events.len())
         .map_err(|_| allocation_error(bus.name))?;

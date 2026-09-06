@@ -50,7 +50,9 @@ use crate::engine::{
     DigitalBusDeclaration, DigitalBusError, DigitalBusSource, DigitalTrace, DigitalTracePoint,
     RealTrace, RealTracePoint, canonical_event_name, validate_digital_bus_table,
 };
-use crate::execution::event_bus::{BusMemberHistory, bus_events, split_bus_notation};
+use crate::execution::event_bus::{
+    BusMemberHistory, BusReassemblyTooLarge, bus_events, split_bus_notation,
+};
 use crate::io::raw_export::{RawBusTimeline, RawEventKind, RawEventTimeline};
 use crate::io::{RawFile, RawWaveformData};
 use crate::xspice::{DigitalState, DigitalStrength, DigitalValue};
@@ -140,6 +142,15 @@ pub enum EventPlotError {
     /// The decoded bus table is not well formed.
     #[error(transparent)]
     Bus(#[from] DigitalBusError),
+
+    /// A declared bus is well formed but larger than one reassembly holds.
+    #[error("digital bus '{bus}': {source}")]
+    BusTooLarge {
+        /// The bus whose reassembly was refused.
+        bus: String,
+        /// The budget that refused it.
+        source: BusReassemblyTooLarge,
+    },
 }
 
 /// The event histories one rawfile's appended plots carry.
@@ -207,10 +218,17 @@ pub fn transient_event_plots(
 /// A bus with no events at all is dropped rather than written, for the same
 /// reason an empty node timeline is: a plot declaring zero points has no
 /// boundary a reader can find.
+///
+/// # Refusal
+///
+/// A bus larger than one reassembly holds is refused by
+/// [`crate::execution::bus_events`] and named here, so a rawfile export and a
+/// VCD export of the same run refuse the same bus with the same numbers rather
+/// than one of them quietly writing tens of gigabytes.
 pub fn transient_bus_plots(
     digital_traces: &[DigitalTrace],
     digital_buses: &[DigitalBusDeclaration],
-) -> Vec<RawBusTimeline> {
+) -> Result<Vec<RawBusTimeline>, EventPlotError> {
     let mut plots = Vec::new();
     for bus in digital_buses {
         let histories: Vec<Vec<(Value, u8)>> = bus
@@ -235,7 +253,10 @@ pub fn transient_bus_plots(
             .iter()
             .map(|points| BusMemberHistory { points })
             .collect();
-        let events = bus_events(&members);
+        let events = bus_events(&members).map_err(|source| EventPlotError::BusTooLarge {
+            bus: bus.name.clone(),
+            source,
+        })?;
         if events.is_empty() {
             continue;
         }
@@ -256,7 +277,7 @@ pub fn transient_bus_plots(
             values: columns,
         });
     }
-    plots
+    Ok(plots)
 }
 
 /// The code a member with no recorded point yet is written as: unknown, at
@@ -726,7 +747,7 @@ mod bus_tests {
         write_event_plots(
             &mut bytes,
             &transient_event_plots(&traces, &[]),
-            &transient_bus_plots(&traces, &buses),
+            &transient_bus_plots(&traces, &buses).expect("a two-bit bus fits the ceiling"),
             format,
         )
         .expect("write event and bus plots");
@@ -809,7 +830,7 @@ mod bus_tests {
         write_event_plots(
             &mut bytes,
             &transient_event_plots(&traces[..1], &[]),
-            &transient_bus_plots(&traces, &buses),
+            &transient_bus_plots(&traces, &buses).expect("a two-bit bus fits the ceiling"),
             RawFormat::Ascii,
         )
         .expect("write a bus plot with only one member plot beside it");
@@ -846,7 +867,8 @@ mod bus_tests {
             trace("d1", &[(0.0, DigitalValue::one())]),
             trace("d0", &[(3.0e-9, DigitalValue::zero())]),
         ];
-        let plots = transient_bus_plots(&traces, &[bus("d", 1, 0, &["d1", "d0"])]);
+        let plots = transient_bus_plots(&traces, &[bus("d", 1, 0, &["d1", "d0"])])
+            .expect("a two-bit bus fits the ceiling");
         let plot = plots.first().expect("one bus plot");
         assert_eq!(plot.times, vec![0.0, 3.0e-9]);
         assert_eq!(
@@ -862,7 +884,11 @@ mod bus_tests {
     #[test]
     fn a_bus_with_no_events_is_dropped_rather_than_written_without_a_boundary() {
         let traces = vec![trace("d1", &[]), trace("d0", &[])];
-        assert!(transient_bus_plots(&traces, &[bus("d", 1, 0, &["d1", "d0"])]).is_empty());
+        assert!(
+            transient_bus_plots(&traces, &[bus("d", 1, 0, &["d1", "d0"])])
+                .expect("a two-bit bus fits the ceiling")
+                .is_empty()
+        );
     }
 
     #[test]
