@@ -31,8 +31,10 @@ pub(super) type TransientEventPersistenceState =
 /// Stable wire spelling of one digital logic state.
 ///
 /// The spellings are core's own `DigitalStateTag`, so the pickle and the
-/// shared result document name the same states.
-fn digital_state_label(state: rspice_core::xspice::DigitalState) -> &'static str {
+/// shared result document name the same states. The typed digital accessor in
+/// `transient::events` spells a row's `state` with this too, so a history
+/// reads the same however it reached the caller.
+pub(super) fn digital_state_label(state: rspice_core::xspice::DigitalState) -> &'static str {
     use rspice_core::execution::result_document::DigitalStateTag as Tag;
     match Tag::from(state) {
         Tag::Zero => "zero",
@@ -70,8 +72,11 @@ fn digital_state_from_label(label: &str) -> Result<rspice_core::xspice::DigitalS
     Ok(tag.into())
 }
 
-/// Stable wire spelling of one digital drive strength.
-fn digital_strength_label(strength: rspice_core::xspice::DigitalStrength) -> &'static str {
+/// Stable wire spelling of one digital drive strength, shared with the typed
+/// digital accessor for the same reason as the state label above.
+pub(super) fn digital_strength_label(
+    strength: rspice_core::xspice::DigitalStrength,
+) -> &'static str {
     use rspice_core::execution::result_document::DigitalStrengthTag as Tag;
     match Tag::from(strength) {
         Tag::Undetermined => "undetermined",

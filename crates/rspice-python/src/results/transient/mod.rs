@@ -6,11 +6,14 @@
 
 use super::*;
 
+/// Typed access to the XSPICE event histories, and the dump they project onto.
+mod events;
 /// Helper bodies the `#[pymethods]` block delegates to.
 mod internals;
 /// Structural proof that a transient result is a complete, aligned waveform set.
 mod structure;
 
+pub(crate) use events::PyDigitalEvent;
 pub(crate) use structure::{clip_transient_to_start, validate_transient_state};
 
 /// Authored spelling of a node a caller addressed by name or by index.
@@ -517,6 +520,85 @@ impl PyTransientResult {
             rspice_core::analysis::measure_signals::transient_signal_map(&self.inner),
             ordered,
         )
+    }
+
+    /// Node names with a recorded XSPICE digital event history
+    ///
+    /// These are the event nodes, not the analog ones: `node_names` lists the
+    /// solved analog nodes, and an event node appears in neither that list nor
+    /// the `D(node)` column of an export in the form it was committed in.
+    ///
+    /// Returns:
+    ///     list[str]: Event node names in the order the run first observed them
+    ///
+    /// Example:
+    ///     >>> for node in tran.digital_nodes():
+    ///     ...     print(node, len(tran.digital_events(node)))
+    fn digital_nodes(&self) -> Vec<String> {
+        events::digital_nodes(&self.inner)
+    }
+
+    /// The committed event history of one digital node
+    ///
+    /// Each row carries the accepted time, the resolved logic state, the drive
+    /// strength band, and the `0..=12` XSPICE event code that encodes the same
+    /// pair. Only changes are recorded, so a row is a value the run committed
+    /// and not a sample of a grid. The strength band is the part the flattened
+    /// `D(node)` column of `to_csv` and the raw exporters cannot carry.
+    ///
+    /// States and strengths are spelled as `document()` spells them.
+    /// `CompressedTransientResult.digital_trace` uses the other core spelling,
+    /// which hyphenates where this one underscores.
+    ///
+    /// The node name resolves ASCII-case-insensitively, as a deck node name
+    /// does.
+    ///
+    /// Args:
+    ///     node: Event node name
+    ///
+    /// Returns:
+    ///     list[DigitalEvent]: The whole history, in recording order
+    ///
+    /// Raises:
+    ///     KeyError: If the result recorded no event history for that node
+    ///     ValueError: If the history is past the row limit this accessor
+    ///         materializes; read it with `document()` or `to_vcd()`
+    ///
+    /// Example:
+    ///     >>> for event in tran.digital_events("clk"):
+    ///     ...     print(event.time_s, event.state, event.strength, event.code)
+    fn digital_events(&self, py: Python<'_>, node: &str) -> PyResult<Vec<PyDigitalEvent>> {
+        events::digital_events(py, &self.inner, node)
+    }
+
+    /// Render the event histories as a Value Change Dump
+    ///
+    /// The same bytes `rspice run -f vcd` publishes for the same run: one
+    /// `$scope module events`, the digital nodes as one-bit wires, the real
+    /// event nodes as `real` variables, each on its own event timeline rather
+    /// than resampled onto the analog grid.
+    ///
+    /// VCD has four bit states and no drive strength, so the twelve resolved
+    /// states collapse onto `0`, `1`, `x` and `z`. Use `digital_events` for
+    /// the band.
+    ///
+    /// Returns:
+    ///     str: The complete dump
+    ///
+    /// Raises:
+    ///     ValueError: If the transient captured no event node, or an event
+    ///         time is not a whole number of femtoseconds and no timescale
+    ///         carries it without moving an edge
+    fn to_vcd(&self, py: Python<'_>) -> PyResult<String> {
+        events::vcd_text(py, &self.inner)
+    }
+
+    /// Write `to_vcd()` to a file.
+    ///
+    /// Example:
+    ///     >>> tran.write_vcd("run.vcd")
+    fn write_vcd(&self, py: Python<'_>, path: PathBuf) -> PyResult<()> {
+        write_export_file(&path, &events::vcd_bytes(py, &self.inner)?)
     }
 
     /// Column headers used by `to_csv` and the raw exporters, in order.

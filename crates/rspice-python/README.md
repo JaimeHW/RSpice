@@ -374,6 +374,12 @@ tran.signal("V(out)"), tran.signal("V(outp,outn)"), tran.signal("I(V1)")
 tran.fourier("outp", 1e3, reference="outn")    # differential .FOUR
 tran.fourier_current("V1", 1e3)                # branch-current .FOUR
 
+# XSPICE digital event nodes carry their committed timeline, not the flattened
+# D(node) column the tables write: the drive strength survives here and there.
+tran.digital_nodes()                           # event node names, capture order
+for event in tran.digital_events("d"):
+    print(event.time_s, event.state, event.strength, event.code)
+
 # When the netlist contains .FFT, each directive executes with the transient
 # and retains source/configuration metadata and calibrated complex bins.
 fft = tran.fft(0)                               # same objects as tran.fft_results
@@ -561,6 +567,10 @@ text = sparams.to_touchstone(frequency_unit="ghz", comments=["nominal corner"])
 # ngspice-compatible raw files; AC is written with Flags: complex
 tran.write_raw("run.raw", format="binary")
 ac.write_raw("ac.raw")                          # or ac.to_raw() -> bytes
+
+# Value Change Dump of the event timelines, for a logic viewer. The same bytes
+# `rspice run -f vcd` publishes; VCD keeps four bit states and no strength.
+tran.write_vcd("run.vcd")                       # or tran.to_vcd() -> str
 
 # RFC 4180 CSV; AC splits each phasor into <name>_real / <name>_imag
 tran.write_csv("run.csv")

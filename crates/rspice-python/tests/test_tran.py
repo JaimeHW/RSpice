@@ -358,3 +358,131 @@ class TestFourier:
             tran.fourier("out", fundamental=1e3)
         with pytest.raises(KeyError):
             tran.fourier("nonexistent", fundamental=1e3)
+
+
+XSPICE_EVENTS = """* an ADC bridge, a DAC bridge back, and a real event observer
+v1 in 0 pulse(0 5 0 1n 1n 5n 10n)
+abridge1 [in] [d] adc
+adac [d] [out] dac
+aobs out rnode obs
+rout out 0 1k
+.model adc adc_bridge(in_low=1 in_high=4)
+.model dac dac_bridge(out_low=0 out_high=5 out_undef=2.5)
+.model obs v_to_real(gain=2)
+.end
+"""
+
+# Every spelling `DigitalEvent.state` and `.strength` may carry. These are the
+# shared result document's own tags, which is what makes a history read the
+# same through the accessor, through `document()` and through a pickle.
+DIGITAL_STATES = {
+    "zero",
+    "one",
+    "unknown",
+    "zero_resistive",
+    "one_resistive",
+    "unknown_resistive",
+    "zero_high_z",
+    "one_high_z",
+    "unknown_high_z",
+    "high_z",
+}
+DIGITAL_STRENGTHS = {"strong", "resistive", "high_z", "undetermined"}
+
+
+@pytest.fixture(scope="module")
+def event_transient():
+    netlist = rspice.Netlist.parse(XSPICE_EVENTS)
+    return rspice.Engine().run_tran(netlist, stop_time=20e-9, max_step=1e-9)
+
+
+class TestDigitalEvents:
+    def test_every_event_node_answers_with_typed_rows(self, event_transient):
+        nodes = event_transient.digital_nodes()
+        assert nodes, "the ADC bridge drives a digital event node"
+        for node in nodes:
+            events = event_transient.digital_events(node)
+            assert events, node
+            times = [event.time_s for event in events]
+            assert times == sorted(times), node
+            for event in events:
+                assert isinstance(event, rspice.DigitalEvent)
+                assert event.state in DIGITAL_STATES
+                assert event.strength in DIGITAL_STRENGTHS
+                assert 0 <= event.code <= 12
+                assert repr(event).startswith("DigitalEvent(")
+
+    def test_the_rows_are_the_documents_own_history(self, event_transient):
+        """The typed accessor and the JSON view are two views of one history."""
+        traces = event_transient.document()["payload"]["digitalTraces"]
+        assert [trace["nodeName"] for trace in traces] == event_transient.digital_nodes()
+        for trace in traces:
+            events = event_transient.digital_events(trace["nodeName"])
+            assert [event.time_s for event in events] == [
+                point["time"] for point in trace["points"]
+            ]
+            assert [event.state for event in events] == [
+                point["state"] for point in trace["points"]
+            ]
+            assert [event.strength for event in events] == [
+                point["strength"] for point in trace["points"]
+            ]
+
+    def test_a_node_name_resolves_the_way_a_deck_node_name_does(self, event_transient):
+        node = event_transient.digital_nodes()[0]
+        shouted = [
+            (event.time_s, event.state, event.strength, event.code)
+            for event in event_transient.digital_events(node.upper())
+        ]
+        exact = [
+            (event.time_s, event.state, event.strength, event.code)
+            for event in event_transient.digital_events(node)
+        ]
+        assert shouted == exact
+
+    def test_an_unknown_event_node_says_how_one_goes_missing(self, event_transient):
+        with pytest.raises(KeyError, match="ESAVE"):
+            event_transient.digital_events("not_a_node")
+
+    def test_the_history_survives_a_pickle_because_the_labels_are_its_own(
+        self, event_transient
+    ):
+        import pickle
+
+        restored = pickle.loads(pickle.dumps(event_transient))
+        assert restored.digital_nodes() == event_transient.digital_nodes()
+        for node in event_transient.digital_nodes():
+            assert [
+                (event.time_s, event.state, event.strength, event.code)
+                for event in restored.digital_events(node)
+            ] == [
+                (event.time_s, event.state, event.strength, event.code)
+                for event in event_transient.digital_events(node)
+            ]
+
+
+class TestValueChangeDump:
+    def test_the_dump_declares_every_event_node_under_one_scope(self, event_transient):
+        dump = event_transient.to_vcd()
+        assert "$scope module events $end" in dump
+        assert "$timescale" in dump
+        assert "$enddefinitions $end" in dump
+        for node in event_transient.digital_nodes():
+            assert f" {node} $end" in dump
+        # A real event node is a `real` variable, which no table format carries.
+        assert "$var real 64 " in dump
+
+    def test_write_vcd_publishes_exactly_what_to_vcd_returns(
+        self, event_transient, tmp_path
+    ):
+        path = tmp_path / "run.vcd"
+        event_transient.write_vcd(path)
+        assert path.read_text(encoding="ascii") == event_transient.to_vcd()
+
+    def test_a_run_with_no_event_history_is_refused_rather_than_dumped_empty(
+        self, engine, rc_lowpass
+    ):
+        tran = engine.run_tran(rc_lowpass, stop_time=1e-4)
+        assert tran.digital_nodes() == []
+        with pytest.raises(ValueError, match="declare no signal"):
+            tran.to_vcd()
