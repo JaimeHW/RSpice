@@ -23,26 +23,18 @@ operating points and transient waveforms through harmonic balance and phase nois
 
 ## Overview
 
-Give RSpice a SPICE netlist and it tells you what the circuit does: operating
-points, transient waveforms, frequency response, noise, distortion, and RF
-steady-state behaviour. It builds to a single binary with no runtime
-dependencies, and one engine sits behind every interface — the CLI, the desktop
-IDE, the Python package, and the WebAssembly build all run the same code.
+RSpice reads a SPICE netlist and computes what the circuit does — DC operating
+points, transient waveforms, small-signal frequency response, noise, and
+distortion, along with RF steady-state analyses like harmonic balance, periodic
+steady state, and phase noise. It covers the standard SPICE device set next to
+modern compact models: BSIM3, BSIM4, BSIM-SOI, VBIC, EKV, and 43 CMC models
+generated from their Verilog-A sources.
 
-Three commitments shape the project:
-
-**Accuracy is measured, not asserted.** Every analysis is checked against
-independent reference output on real decks, and the nightly failure watermark
-only ever tightens. [Validation](#validation) has the harnesses and the numbers.
-
-**Nothing degrades quietly.** When a deck asks for physics RSpice has not
-implemented, it stops and names the parameter or model level responsible,
-rather than substituting an approximation that would return plausible but wrong
-currents.
-
-**The tables below describe today.** Everything listed is implemented and
-exercised. Depth of validation still varies by subsystem — [Status](#status)
-says where.
+One engine sits behind every interface. The same `rspice-core` code runs under
+the command line, the desktop IDE, the Python bindings, and the WebAssembly
+build, so a result never depends on how the run was launched. Where a deck asks
+for physics RSpice has not implemented, it stops and names the parameter or
+model level responsible instead of approximating around it.
 
 ## Quick start
 
@@ -115,8 +107,8 @@ complete set of ways to reach it.
 | Periodic steady state | `--pss-freq` | shooting method |
 | S-parameters | `.SP`, `--sparam` | Touchstone export; `--sparam` drives two ports |
 | Stability (loop gain) | `.STB` | probes a 0 V source placed in the loop |
-| Periodic AC | `Engine::run_pac`, IDE | conversion matrix around the PSS/HB solution |
-| Phase noise | `Engine::run_pnoise`, IDE | Floquet projection; PPV for oscillators |
+| Periodic AC | `.PAC`, `Engine::run_pac` | conversion matrix around the PSS/HB solution |
+| Phase noise | `.PNOISE`, `Engine::run_pnoise` | Floquet projection; PPV for oscillators |
 | Periodic transfer function | IDE | composed on PSS |
 | Periodic stability | IDE | Floquet multipliers from the monodromy matrix |
 | Measurements | `.MEAS` | over TRAN/DC/AC/NOISE; `GOAL`/`TOL` gates the exit status |
@@ -125,7 +117,7 @@ complete set of ways to reach it.
 
 A single descriptor per device drives every surface it touches — properties,
 persistence, hierarchy, DRC, netlisting, preview, export, and hardcopy — across
-74 stable schematic kinds, 64 canonical XSPICE catalog entries under 113
+74 stable schematic kinds, 64 canonical XSPICE catalog entries under 115
 registered names, and 43 generated Verilog-A models. A device whose id, registry
 entry, terminal contract, parameter contract, or symbol cannot be resolved fails
 closed; nothing falls back to a generic two-terminal element or drops
@@ -209,6 +201,7 @@ Built for scripted runs and CI. The exit status is the verification contract.
 | `rspice run` | Execute the analyses a netlist requests |
 | `rspice check` | Validate syntax and connectivity |
 | `rspice info` | Print parsed netlist information |
+| `rspice models` | List the shipped SPICE model packs and look up parts in them |
 | `rspice compare` | Compare output against a golden result |
 | `rspice convert` | Convert between raw, ASCII raw, CSV, TSV, JSON, and HDF5 |
 | `rspice health` | Probe process liveness or parser-to-solver readiness |
@@ -218,11 +211,14 @@ Built for scripted runs and CI. The exit status is the verification contract.
 | Exit code | Meaning |
 | :--- | :--- |
 | `0` | Success |
-| `1` | General error, including non-finite results |
+| `1` | Untyped failure — a Verilog-A compile or format-conversion error |
 | `2` | Invalid arguments |
 | `3` | Verification failure — a `.MEAS` goal missed, or a golden mismatch |
 | `65` / `66` | Malformed input / input not found |
-| `70` / `74` / `78` | Internal, I/O, or configuration error |
+| `69` | The deck is well formed and this build does not execute it |
+| `70` / `73` / `74` | Internal error / artifact not published / I/O error |
+| `75` / `76` / `78` | Resource budget exceeded / incompatible artifact version / config error |
+| `80`–`85` | Engine failures: construction, solver, convergence, missing signal, schema mismatch, plan mismatch |
 | `124` | `--timeout` exceeded |
 | `130` | Interrupted |
 
@@ -315,9 +311,10 @@ built-in devices above. External models compile standalone with
 
 ## Validation
 
-Correctness is measured at four levels: unit tests per crate, 107 integration
+Correctness is measured at four levels: unit tests per crate, 184 integration
 test files in `rspice-core` alone, oracle-replay fixtures for history-coupled
-device runtimes, and two simulator corpus harnesses.
+device runtimes, and the corpus harnesses under [tests/](tests/) — ngspice and
+Xyce alongside GF180MCU, ISCAS85, Verilog-AMS, and paranoia suites.
 
 The **ngspice harness** runs the vendored `tests/ngspice/` suite deck by deck,
 comparing row by row against ngspice reference output at 2% relative tolerance
@@ -329,9 +326,9 @@ runs against the trimmed `tests/xyce/` runtime corpus, discovers every retained
 instead of omitting the deck.
 
 Every executed analysis must be backed by a validation oracle, so no deck passes
-silently. Nightly release runs ratchet against the recorded failure watermark in
-[.github/workflows/nightly.yml](.github/workflows/nightly.yml); that number only
-tightens as decks are fixed.
+silently. Nightly release runs gate on the recorded failure watermark in
+[.github/workflows/nightly.yml](.github/workflows/nightly.yml), currently zero —
+any failing deck fails the run.
 
 ```bash
 cargo test --release -p rspice-core                                   # unit + integration
@@ -367,6 +364,7 @@ AC-family analyses.
 | `rspice-veriloga` | Verilog-A parser, semantic pipeline, bytecode VM, native JIT, generated-Rust backend |
 | `rspice-python` | Python bindings built with PyO3 |
 | `rspice-wasm` | WebAssembly bindings for the engine |
+| `rspice-conformance` | Corpus harnesses and oracle audits for the reference suites |
 | `rspice-bench` | Whole-process benchmark rig against local ngspice |
 
 [models/](models/) holds the bundled Verilog-A sources including the
