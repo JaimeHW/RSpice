@@ -47,7 +47,8 @@ pub use capability::{
 pub use event_bus::{BusMemberHistory, bus_events, bus_value_at};
 pub use event_export::{EventPlotError, RawEventTraces, decode_event_plots, transient_event_plots};
 pub use event_projection::{
-    EventProjectionError, digital_value_from_vcd_bit, digital_value_to_vcd_bit, event_vcd_document,
+    EventProjectionError, VcdEventHistories, digital_value_from_vcd_bit, digital_value_to_vcd_bit,
+    event_vcd_document, vcd_event_histories,
 };
 pub use fingerprint::{topology_fingerprint, topology_fingerprint_with_abort};
 pub use materialized::{

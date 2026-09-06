@@ -149,7 +149,7 @@ pub(super) fn prepare_vcd(analysis: &crate::state::AnalysisResult) -> Result<Pre
         return Err(EMPTY_EVENT_EVIDENCE_MESSAGE.to_owned());
     }
     let (digital, real) = core_traces(digital_traces, real_traces)?;
-    let document = event_vcd_document(EVENT_SCOPE, &digital, &real)
+    let document = event_vcd_document(EVENT_SCOPE, &digital, &real, &[])
         .map_err(|error| format!("The event history cannot be dumped exactly: {error}"))?;
     let node_count = document.signals.len();
     let change_count = document
@@ -317,7 +317,7 @@ mod tests {
         // projects them. Anything but equality means the two exports of one
         // run disagree.
         let (digital, real) = core_traces(&digital_evidence, &real_evidence).expect("valid codes");
-        let document = event_vcd_document(EVENT_SCOPE, &digital, &real).expect("projects");
+        let document = event_vcd_document(EVENT_SCOPE, &digital, &real, &[]).expect("projects");
         let mut expected = Vec::new();
         write_vcd(&mut expected, &document).expect("writes");
         assert_eq!(prepared.bytes, expected);

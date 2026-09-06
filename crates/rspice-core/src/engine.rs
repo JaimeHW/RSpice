@@ -128,6 +128,9 @@ pub use pss::{
     PssOperatingPointIdentity,
 };
 pub use pss_noise::{OscPnoiseResult, PeriodicNoiseResult};
+/// The spelling two event names are compared under, shared with the routes
+/// that have to decide whether a trace is a member of a bus.
+pub(crate) use result::canonical_event_name;
 pub use result::{
     DigitalBusDeclaration, DigitalBusError, DigitalBusSource, DigitalTrace, DigitalTracePoint,
     MAX_DIGITAL_BUS_WIDTH, RealTrace, RealTracePoint, TransientDeviceOpTrace, TransientFftBin,

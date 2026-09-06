@@ -212,7 +212,7 @@ fn the_timescale_makes_every_event_time_an_exact_tick() {
         (&[0.0, 100e-15, 300e-15], "100 fs", &[0, 1, 3]),
     ];
     for (times, expected, expected_ticks) in cases {
-        let document = event_vcd_document("tran", &[digital_trace("clk", times)], &[])
+        let document = event_vcd_document("tran", &[digital_trace("clk", times)], &[], &[])
             .expect("every time is a whole femtosecond");
         assert_eq!(document.timescale.to_string(), expected, "{times:?}");
 
@@ -238,7 +238,7 @@ fn the_timescale_makes_every_event_time_an_exact_tick() {
 
 #[test]
 fn a_time_between_two_femtoseconds_is_refused_rather_than_quantised() {
-    let error = event_vcd_document("tran", &[digital_trace("clk", &[0.0, 1.5e-15])], &[])
+    let error = event_vcd_document("tran", &[digital_trace("clk", &[0.0, 1.5e-15])], &[], &[])
         .expect_err("half a femtosecond has no exact tick at any VCD timescale");
     assert_eq!(
         error,
@@ -250,7 +250,7 @@ fn a_time_between_two_femtoseconds_is_refused_rather_than_quantised() {
 
     // A tenth of a femtosecond is the same refusal, not a rounding.
     assert!(matches!(
-        event_vcd_document("tran", &[digital_trace("clk", &[0.0, 1.1e-15])], &[]),
+        event_vcd_document("tran", &[digital_trace("clk", &[0.0, 1.1e-15])], &[], &[]),
         Err(EventProjectionError::InexactTime { .. })
     ));
 }

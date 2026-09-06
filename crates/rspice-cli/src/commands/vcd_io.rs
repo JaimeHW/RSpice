@@ -94,7 +94,7 @@ pub(crate) fn event_document(
     digital_traces: &[DigitalTrace],
     real_traces: &[RealTrace],
 ) -> Result<VcdDocument, CliError> {
-    event_vcd_document(EVENT_SCOPE, digital_traces, real_traces)
+    event_vcd_document(EVENT_SCOPE, digital_traces, real_traces, &[])
         .map_err(|error| projection_error(path, &error))
 }
 
