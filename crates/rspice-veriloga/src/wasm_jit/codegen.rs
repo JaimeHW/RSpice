@@ -3329,6 +3329,110 @@ mod tests {
     /// Instantiate a single-entry value module with every capability bound.
     /// The frame-carrying helper evaluates the same shared pure contract used
     /// by the browser host runtime.
+    /// The wasmi half of
+    /// `native::x64::tests::second_derivative_power_rule_is_finite_at_a_zero_base`.
+    ///
+    /// The `@dN@dM` shadows of a `pow` are lowered once by `native::expr` and
+    /// encoded for both machines, so the guard on their `a^(b−2)` and
+    /// `a^(b−1)` factors is read back here off the value entry of the same
+    /// program. It lives beside the other single-program wasmi tests rather
+    /// than in `wasm_jit`'s fused-kernel ones because a model's stamp
+    /// Jacobians differentiate the `ddx` expansion with the first-order rule
+    /// and never reach the second-order one.
+    ///
+    /// The exponent is 1.5, and both spellings of it are here, for the reasons
+    /// given on the x64 fixture.
+    #[test]
+    fn the_second_derivative_power_rule_is_finite_at_a_zero_base_under_wasm() {
+        use crate::canonical_ir::{EquationId, NodeId};
+        use crate::jit::expr::{CanonicalDerivativeAxis, EntryKind, NativeLoweringLimits};
+
+        const SOURCE: &str = r#"
+module wasm_pow_second_zero_base(p, n, t);
+  inout p, n, t;
+  electrical p, n, t;
+  parameter real ex = 1.5;
+  analog I(p, n) <+ 1.0e-3 * (pow(V(p, n) + V(t) * V(t), 1.5)
+                            + pow(V(p, n) + V(t) * V(t), ex));
+endmodule
+"#;
+
+        let artifact = crate::VerilogACompiler::new(crate::CompilerOptions::default())
+            .compile_canonical_ir(SOURCE)
+            .expect("compile canonical IR");
+        let expression = artifact.mir.equations[0].expression.id;
+        let axis = CanonicalDerivativeAxis::Node(NodeId::from(2));
+        let program = NativeProgram::from_mir_expression_second_derivative(
+            "wasm_pow_second_zero_base",
+            EntryKind::Jacobian,
+            &artifact.mir,
+            EquationId::new(0),
+            expression,
+            axis,
+            axis,
+            NativeLoweringLimits::new(3, 0, 1, 0, 0),
+        )
+        .expect("lower the second derivative of a power at a zero base");
+        let bytes = emit_verified_value_program(&program).expect("encode the derivative module");
+
+        let engine = Engine::default();
+        let (mut store, memory, instance) = instantiate_value_module(&engine, &bytes);
+
+        const PARAMETERS_OFFSET: u32 = 256;
+        const VOLTAGES_OFFSET: u32 = 512;
+        let mut frame = vec![0_u8; WASM_JIT_EVAL_FRAME_BYTES as usize];
+        let mut write_u32 = |offset: u64, value: u32| {
+            let offset = offset as usize;
+            frame[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+        };
+        write_u32(FRAME_MAGIC_OFFSET, WASM_JIT_FRAME_MAGIC);
+        write_u32(FRAME_ABI_VERSION_OFFSET, WASM_JIT_ABI_VERSION);
+        write_u32(FRAME_BYTE_LEN_OFFSET, WASM_JIT_EVAL_FRAME_BYTES);
+        write_u32(FRAME_PARAMETERS_PTR_OFFSET, PARAMETERS_OFFSET);
+        write_u32(FRAME_PARAMETERS_LEN_OFFSET, 1);
+        write_u32(FRAME_TERMINAL_VOLTAGES_PTR_OFFSET, VOLTAGES_OFFSET);
+        write_u32(FRAME_TERMINAL_VOLTAGES_LEN_OFFSET, 3);
+        memory
+            .write(&mut store, 0, &frame)
+            .expect("write evaluation frame");
+        memory
+            .write(
+                &mut store,
+                PARAMETERS_OFFSET as usize,
+                &1.5_f64.to_le_bytes(),
+            )
+            .expect("write the runtime exponent");
+        memory
+            .write(
+                &mut store,
+                VOLTAGES_OFFSET as usize,
+                &[0_u8; 3 * size_of::<f64>()],
+            )
+            .expect("write the zero bias");
+
+        let entry = instance
+            .get_typed_func::<i32, i32>(&store, WASM_JIT_VALUE_EXPORT)
+            .expect("resolve the value export");
+        assert_eq!(
+            entry.call(&mut store, 0).expect("execute the derivative"),
+            WASM_JIT_STATUS_OK
+        );
+        let raw = memory
+            .data(&store)
+            .get(FRAME_RESULT_OFFSET as usize..FRAME_RESULT_OFFSET as usize + size_of::<f64>())
+            .expect("read result bytes");
+        let value = f64::from_le_bytes(raw.try_into().unwrap());
+        assert!(
+            value.is_finite(),
+            "d²(a^b)/dV(t)² at a = 0 under wasm is {value}; the base term is \
+             (2·V(t))² · b(b−1) · 0^(b−2), which is 0 · ∞ without the guard"
+        );
+        assert!(
+            value.abs() < 1.0e-150,
+            "the analytic second derivative is 0; {value} is larger than the nudge's own residue"
+        );
+    }
+
     fn instantiate_value_module(
         engine: &Engine,
         bytes: &[u8],

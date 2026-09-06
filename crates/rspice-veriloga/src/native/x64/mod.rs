@@ -5033,6 +5033,79 @@ endmodule
         );
     }
 
+    /// The same power rule one derivative higher: the `@dN@dM` shadows
+    /// `native::expr::lower_pow_second_derivative` emits, whose `a^(b−2)` and
+    /// `a^(b−1)` factors were raised from a bare base.
+    ///
+    /// The second derivative of `a^b` along one axis is
+    /// `(da)² · b(b−1) · a^(b−2) + d²a · b · a^(b−1)`. The base carries the
+    /// axis squared, so `da/dV(t) = 2·V(t)` is exactly 0 at `V(t) = 0` while
+    /// the axis stays structurally live, and `d²a/dV(t)² = 2` keeps the second
+    /// term emitted: at `a = 0` the first term is the first-order rule's own
+    /// `∞ · 0` one derivative up.
+    ///
+    /// The exponent is 1.5, not 0.5: the guard nudges the base to
+    /// `MIN_POSITIVE`, and `MIN_POSITIVE^(b−2)` is still finite at `b = 1.5`
+    /// but overflows to `∞` at `b = 0.5`. Both spellings are here, the literal
+    /// and a runtime parameter, because they take different arms of the rule —
+    /// and the parameter arm, which cannot read its exponent, nudges the
+    /// second term's base as well, which is where the answer's `1e-154` comes
+    /// from. The analytic value is 0; what the guard promises is a finite one.
+    const POW_SECOND_ZERO_BASE_SOURCE: &str = r#"
+module native_pow_second_zero_base(p, n, t);
+  inout p, n, t;
+  electrical p, n, t;
+  parameter real ex = 1.5;
+  analog I(p, n) <+ 1.0e-3 * (pow(V(p, n) + V(t) * V(t), 1.5)
+                            + pow(V(p, n) + V(t) * V(t), ex));
+endmodule
+"#;
+
+    /// The residue the nudge itself leaves in the answer above.
+    ///
+    /// `d²a · ex · MIN_POSITIVE^(ex−1)` with `ex = 1.5` is `1.5e-154`; nothing
+    /// else in this fixture is smaller than 1, so a bound here is a statement
+    /// that every singular term went to zero.
+    const POW_SECOND_ZERO_BASE_RESIDUE: f64 = 1.0e-150;
+
+    #[test]
+    fn second_derivative_power_rule_is_finite_at_a_zero_base() {
+        let artifact = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(POW_SECOND_ZERO_BASE_SOURCE)
+            .expect("compile canonical IR");
+        let expression = artifact.mir.equations[0].expression.id;
+        let axis = CanonicalDerivativeAxis::Node(NodeId::from(2));
+        let program = NativeProgram::from_mir_expression_second_derivative(
+            "native_pow_second_zero_base",
+            EntryKind::Jacobian,
+            &artifact.mir,
+            crate::canonical_ir::EquationId::new(0),
+            expression,
+            axis,
+            axis,
+            NativeLoweringLimits::new(3, 0, 1, 0, 0),
+        )
+        .expect("lower the second derivative of a power at a zero base");
+        let bytes =
+            super::codegen::compile_value_function(&program).expect("compile derivative leaf");
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate derivative leaf");
+        let entry = memory.ptr_at(0).expect("derivative entry");
+        let function: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let ctx = eval_context(&[1.5], &[0.0, 0.0, 0.0]);
+
+        let value = function(&ctx, std::ptr::null());
+        assert!(
+            value.is_finite(),
+            "d²(a^b)/dV(t)² at a = 0 is {value}; the base term is (2·V(t))² · b(b−1) · 0^(b−2), \
+             which is 0 · ∞ without the guard"
+        );
+        assert!(
+            value.abs() < POW_SECOND_ZERO_BASE_RESIDUE,
+            "the analytic second derivative is 0; {value} is larger than the nudge's own residue"
+        );
+    }
+
     fn run_shipped_model_device_probe(name: &str, path: &Path, module: Option<&str>) {
         shipped_probe_trace(name, "compile-runtime:start");
         let frontend_start = web_time::Instant::now();

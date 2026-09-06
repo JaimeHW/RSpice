@@ -4252,6 +4252,20 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         self.append_ifelse()
     }
 
+    /// The second-derivative power rule, guarded at a zero base like the
+    /// first-order one above.
+    ///
+    /// `@dN@dM` of `a^b` carries the same singular factors the first-order
+    /// rule does — `a^(b−1)` and, one power lower, `a^(b−2)` — multiplied by
+    /// derivative lanes that are numerically 0 exactly where the base is 0, so
+    /// the unguarded product is `∞ · 0 = NaN` there for the same reason and is
+    /// nudged off zero by the same [`Self::lower_power_rule_base`]. The nudge
+    /// is a denormal floor, so it rescues `a^(b−2)` while `b > 1`; a shadow
+    /// through a base raised below that stays non-finite, as it does on the
+    /// first-order rule for `b < 0`.
+    ///
+    /// No shipped model was found reaching this, unlike the first-order rule's
+    /// bsimcmg instance; it is guarded because the shape is the same one.
     fn lower_pow_second_derivative(
         &mut self,
         left: ExprId,
@@ -4277,7 +4291,10 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             self.lower_derivative(left, second)?;
             self.append_arithmetic("Mul")?;
             self.push(NativeOp::Const(first_coefficient))?;
-            self.lower(left)?;
+            // `a^(b−2)`: one power lower than the first-order rule's, so the
+            // guard is asked about `b − 1` and skips the nudge for `b ≥ 2`,
+            // which is where this factor stops being singular.
+            self.lower_power_rule_base(left, Some(exponent - 1.0))?;
             self.push(NativeOp::Const(exponent - 2.0))?;
             self.append_binary_math("Pow")?;
             self.append_arithmetic("Mul")?;
@@ -4288,7 +4305,8 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         if !left_ab_zero {
             self.lower_second_derivative(left, first, second)?;
             self.push(NativeOp::Const(exponent))?;
-            self.lower(left)?;
+            // The first-order rule's own factor, guarded the way it guards it.
+            self.lower_power_rule_base(left, Some(exponent))?;
             self.push(NativeOp::Const(exponent - 1.0))?;
             self.append_binary_math("Pow")?;
             self.append_arithmetic("Mul")?;
@@ -4334,7 +4352,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 self.push(NativeOp::Const(1.0))?;
                 self.append_arithmetic("Sub")?;
                 self.append_arithmetic("Mul")?;
-                self.lower(left)?;
+                // Nothing here can read the exponent as a constant, so both
+                // factors take the guard unconditionally.
+                self.lower_power_rule_base(left, None)?;
                 self.lower(right)?;
                 self.push(NativeOp::Const(2.0))?;
                 self.append_arithmetic("Sub")?;
@@ -4346,7 +4366,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             if !left_ab_zero {
                 self.lower_second_derivative(left, first, second)?;
                 self.lower(right)?;
-                self.lower(left)?;
+                self.lower_power_rule_base(left, None)?;
                 self.lower(right)?;
                 self.push(NativeOp::Const(1.0))?;
                 self.append_arithmetic("Sub")?;
@@ -4396,8 +4416,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         let mut qab_emitted = false;
         if !right_ab_zero {
             self.lower_second_derivative(right, first, second)?;
-            self.lower(left)?;
-            self.append_unary(NativeOp::UnaryMath(UnaryMathOp::Log))?;
+            self.lower_power_rule_guarded_log(left)?;
             self.append_arithmetic("Mul")?;
             qab_emitted = true;
         }
@@ -4468,8 +4487,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         let mut emitted = false;
         if !right_zero {
             self.lower_derivative(right, wrt)?;
-            self.lower(left)?;
-            self.append_unary(NativeOp::UnaryMath(UnaryMathOp::Log))?;
+            self.lower_power_rule_guarded_log(left)?;
             self.append_arithmetic("Mul")?;
             emitted = true;
         }
