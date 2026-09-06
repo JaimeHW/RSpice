@@ -274,7 +274,10 @@ pub struct RunArgs {
     #[arg(short, long, value_name = "FILE")]
     pub output: Option<PathBuf>,
 
-    /// Output format (default: config `output.format`, else `raw`)
+    /// Output format (default: config `output.format`, else `raw`).
+    /// `vcd` writes the transient's event timelines at the times they
+    /// happened: one wire per digital node, one real per real event node, and
+    /// one N-bit vector per declared digital bus
     #[arg(short, long, value_name = "FORMAT")]
     pub format: Option<OutputFormat>,
 

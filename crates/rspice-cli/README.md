@@ -209,6 +209,20 @@ time that is not a whole number of femtoseconds is refused by name rather than
 quantised. VCD has four bit states and no drive strength, so the level
 survives and the XSPICE strength band does not.
 
+A **declared digital bus** — today, a vector discrete boundary port of a mixed
+Verilog-AMS module — is written as one `$var wire N` named `bus [msb:lsb]`,
+with a `b…` change at every time one of its members changes, bits most
+significant first in declaration order and `x` for a member the run has not
+stated yet. The member scalars are *not* written beside it: their content is in
+the vector bit for bit, and a scalar `$var` carried no strength either. This is
+the same dump `TransientResult.to_vcd()` and `WasmResultHandle.toVcd()` write,
+byte for byte, and the same one `convert --to vcd` builds from that run's
+rawfile or typed document.
+
+`--expand-buses` writes the members as N one-bit `$var`s and no vector, for a
+reader that cannot take one; it applies to `-f vcd` only and every other format
+refuses it by name.
+
 Only a transient captures events. Every other analysis refuses `-f vcd` with a
 clear error; use `csv`, `json`, `raw`, or `hdf5`. A transient that captured no
 event node publishes a dump with no declarations and no changes, and says so on
@@ -289,6 +303,7 @@ Accepts `.sp`, `.cir`, `.net`, and `.spice` netlists, or `-` to read the netlist
 | `--meas` | Print `.MEAS` measurement results |
 | `--summary <FILE>` | Write a versioned JSON run summary — build/run identity, execution counts and timing, effective resource limits, typed failures, every measurement, result files, and overall verdict — to FILE, or stdout with `-` |
 | `--progress` | Show a live percentage bar during transient analysis (the engine reports its completed fraction; elapsed time, no ETA) |
+| `--expand-buses` | Write each digital bus member as its own one-bit `$var` instead of one vector (`-f vcd` only) |
 | `--compress` | Enable waveform compression for long simulations |
 | `--compress-tol <TOL>` | Compression tolerance (default: config `compression_tolerance`, else 1e-4; requires `--compress`) |
 
@@ -481,6 +496,8 @@ Convert between simulation output formats: `raw`, `ascii`, `csv`, `json`, `tsv`,
 
 `--to vcd` writes an event dump rather than a table. A rawfile carrying event plots and a typed JSON result document both hold the timelines themselves and convert exactly — the file is identical to what `run -f vcd` publishes. Any other source is converted from its grid `D(node)`/`E(node)` columns, which is lossy: `0`, `1` and `0.5` become `0`, `1` and `x`, one change per level held rather than one per grid point, and the drive strength those columns already dropped is not recovered. A source with neither event timelines nor such columns is refused.
 
+A **declared digital bus** reaches `--to vcd` as one `$var wire N`, read from a rawfile's `Digital Bus` plots or a typed document's `digitalBuses`, so every artifact of one run converts to the same dump and a dump carrying a vector is a fixed point of the conversion. Converting to a *table* format writes the members as the separate flattened `D(node)` columns the grid already holds — a `D(node)` column is one conductor and a table has no place for a declaration. `--expand-buses` writes the members as N one-bit `$var`s instead of the vector (`--to vcd` only; every other format refuses it by name), which is the shape the command line wrote before buses were declared at all; expanding a dump that already carries a vector splits it into VCD's own `name[k]` bit-selects, since that file never carried the deck's member node names.
+
 Converting **from** `vcd` builds a table whose rows are the dump's distinct ticks: time is tick × `$timescale`, each signal holds its last value, `x` and `z` become `0.5` in a `digital` column, and a logic signal wider than one bit becomes its unsigned integer value (at most 53 bits, which is what an `f64` column holds exactly). Columns are named `D(node)` and `E(node)`, dropping the scope levels every signal shares — so a dump RSpice wrote reads back under the same names its CSV uses, and a foreign dump keeps whatever path still tells its signals apart. Before its first change a logic signal reads `0.5`; a real signal, which has no unknown to show, holds its first value backwards. `compare` reads `.vcd` on either side through this same table.
 
 ```bash
@@ -491,15 +508,18 @@ rspice convert <INPUT> <OUTPUT> --to <FORMAT> [OPTIONS]
 | :--- | :--- |
 | `--to <FORMAT>` | Output format (required) |
 | `--from <FORMAT>` | Input format (auto-detected from the extension if omitted) |
-| `--variables <VAR>` | Variables to keep, by full (`V(out)`) or bare (`out`) name (repeatable; default: all) |
+| `--variables <VAR>` | Variables to keep, by full (`V(out)`) or bare (`out`) name (repeatable; default: all). Writing a dump, a declared bus answers to its name (`DATA`), its range (`DATA[7:0]` or `DATA [7:0]`) and any of its bits (`DATA[3]`) — naming one bit keeps the whole vector, and says so, because a VCD vector is written whole or not at all |
 | `--start <VALUE>` | Keep points with scale ≥ this time/frequency |
 | `--stop <VALUE>` | Keep points with scale ≤ this time/frequency |
+| `--expand-buses` | Write each digital bus member as its own one-bit `$var` instead of one vector (`--to vcd` only) |
 
 ```bash
 rspice convert results.raw results.csv --to csv
 rspice convert results.csv results.h5 --to hdf5
 rspice convert tran.raw window.csv --to csv --variables "V(out)" --start 1u --stop 5u
 rspice convert tran.raw events.vcd --to vcd
+rspice convert tran.raw bits.vcd --to vcd --expand-buses
+rspice convert tran.raw one_bus.vcd --to vcd --variables x1.count
 ```
 
 ### `rspice compile-va` — Compile Verilog-A
