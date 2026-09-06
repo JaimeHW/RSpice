@@ -3789,12 +3789,22 @@ endmodule
             ),
         ];
 
-        for (name, path, module) in cases {
-            if !shipped_model_filter_allows(name) {
-                continue;
-            }
-            assert_shipped_model_finite_entries_match_bytecode(name, &path, module);
-        }
+        // Every model is compared before anything is asserted, so one red
+        // model does not hide the next: the vbic13_4t red hid the bsimimg red
+        // behind it for as long as this loop stopped at the first failure.
+        let failures: Vec<String> = cases
+            .iter()
+            .filter(|(name, _, _)| shipped_model_filter_allows(name))
+            .filter_map(|(name, path, module)| {
+                assert_shipped_model_finite_entries_match_bytecode(name, path, *module).err()
+            })
+            .collect();
+        assert!(
+            failures.is_empty(),
+            "{} shipped model(s) failed the finite native oracle:\n{}",
+            failures.len(),
+            failures.join("\n")
+        );
     }
 
     #[test]
@@ -4497,11 +4507,14 @@ endmodule
         );
     }
 
+    /// One shipped model through the finite oracle. A compile failure is a
+    /// panic — the corpus is not in question — but an oracle failure is
+    /// returned, so the caller can run every model and report them all.
     fn assert_shipped_model_finite_entries_match_bytecode(
         name: &str,
         path: &Path,
         module: Option<&str>,
-    ) {
+    ) -> Result<(), String> {
         let compiler = VerilogACompiler::new(CompilerOptions::default());
         let runtime = compiler
             .compile_file_runtime_with_metadata(path, module)
@@ -4523,7 +4536,7 @@ endmodule
             context,
             name,
         )
-        .unwrap_or_else(|error| panic!("{name}: finite native oracle failed: {error}"));
+        .map_err(|error| format!("{name}: finite native oracle failed: {error}"))?;
         eprintln!(
             "native-x64-shipped-oracle model={name} variables={} higher_order_shadows={} stamps={} jacobians={} reactive_jacobians={} skipped_nonfinite={}",
             stats.variables,
@@ -4533,6 +4546,7 @@ endmodule
             stats.reactive_jacobians,
             stats.skipped_nonfinite,
         );
+        Ok(())
     }
 
     /// The exponent term of the power rule at a zero base, in the shape of the
@@ -4736,6 +4750,14 @@ endmodule
             .unwrap_or_else(|error| panic!("{name}: enter initial analysis step: {error}"));
         device.try_evaluate().unwrap_or_else(|error| {
             panic!("{name}: shipped device native initial-step evaluation failed: {error}")
+        });
+        // Accept the initial step before leaving it, as the engine does: every
+        // evaluation restores the *accepted* event-controlled variables first
+        // (`VmContext::begin_stateful_evaluation`), so an unaccepted
+        // `@(initial_step)` block leaves VBIC's `tiniK` at zero and `rT =
+        // tdevK / tiniK` poisons the next evaluation.
+        device.try_advance_state().unwrap_or_else(|error| {
+            panic!("{name}: shipped device initial-step acceptance failed: {error}")
         });
         device
             .try_set_analysis_step(false, false)
@@ -4979,6 +5001,17 @@ endmodule
                 &model.assignment_steps,
                 model.num_variables,
             );
+        // The engine's protocol rather than a bare evaluation: an
+        // `@(initial_step)` pass first, then the ordinary pass over the
+        // variables it left behind. A compact model does its once-only work
+        // under that event — VBIC writes `tiniK = TABS + tnom` there and the
+        // body divides by it — so a single pass with the flag clear evaluates
+        // a body production never runs, and both routes compute it with
+        // hundreds of non-finite variables that this oracle then has to skip.
+        vm.context.analysis_initial_step = true;
+        execute_bytecode_assignment_steps(&mut vm, &pre_current_assignment_steps)
+            .map_err(|error| error.to_string())?;
+        vm.context.analysis_initial_step = false;
         execute_bytecode_assignment_steps(&mut vm, &pre_current_assignment_steps)
             .map_err(|error| error.to_string())?;
 
@@ -4987,6 +5020,14 @@ endmodule
         native_context
             .currents
             .resize(model.stamp_programs.len(), 0.0);
+        native_context.analysis_initial_step = true;
+        {
+            let ctx = eval_context_from_vm_context(&mut native_context);
+            ctx.clear_runtime_error();
+            run_assignment_and_prelude(&native, &ctx, native_context.variables.as_mut_ptr());
+            require_clean_native_context(&ctx, "initial-step assignments")?;
+        }
+        native_context.analysis_initial_step = false;
         let mut ctx = eval_context_from_vm_context(&mut native_context);
         ctx.clear_runtime_error();
         run_assignment_and_prelude(&native, &ctx, native_context.variables.as_mut_ptr());

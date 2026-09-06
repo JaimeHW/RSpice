@@ -217,6 +217,15 @@ fn qualify_shipped_model(name: &str, path: &Path, module: Option<&str>) {
     device
         .try_evaluate()
         .unwrap_or_else(|error| panic!("{name}: initial evaluation: {error}"));
+    // Accept the initial step before leaving it, as the engine does
+    // (`rspice-core/src/device/veriloga_builtins.rs` initial-step protocol):
+    // every evaluation begins by restoring the *accepted* event-controlled
+    // variables, so an unaccepted `@(initial_step)` block leaves them at the
+    // zeros they were allocated with. VBIC's `tiniK` is one, and `rT =
+    // tdevK / tiniK` then poisons the whole body.
+    device
+        .try_advance_state()
+        .unwrap_or_else(|error| panic!("{name}: accept initial step: {error}"));
     device
         .try_set_analysis_step(false, false)
         .unwrap_or_else(|error| panic!("{name}: leave initial step: {error}"));
