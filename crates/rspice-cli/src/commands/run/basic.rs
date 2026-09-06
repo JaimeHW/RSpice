@@ -1046,6 +1046,7 @@ pub(super) fn run_transient(
                                 &output_path,
                                 &result.digital_traces,
                                 &result.real_traces,
+                                &result.digital_buses,
                             )?,
                         ))
                     }

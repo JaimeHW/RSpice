@@ -25,7 +25,9 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 use rspice_core::ResourceLimits;
-use rspice_core::engine::{DigitalTrace, DigitalTracePoint, RealTrace, RealTracePoint};
+use rspice_core::engine::{
+    DigitalBusDeclaration, DigitalTrace, DigitalTracePoint, RealTrace, RealTracePoint,
+};
 use rspice_core::execution::{
     EventProjectionError, RawEventTraces, ResultPayload, event_vcd_document,
 };
@@ -89,12 +91,19 @@ fn projection_error(path: &Path, error: &EventProjectionError) -> CliError {
 }
 
 /// Project event histories onto a dump under [`EVENT_SCOPE`].
+///
+/// A declared bus becomes one vector `$var` of its own width and its member
+/// scalars are not written beside it, which is the shape the Python and
+/// browser bindings' dumps have. Passing an empty table is not the same
+/// request: it writes every member as its own one-bit wire, which is what a
+/// source that never said which conductors were one word has to say.
 pub(crate) fn event_document(
     path: &Path,
     digital_traces: &[DigitalTrace],
     real_traces: &[RealTrace],
+    digital_buses: &[DigitalBusDeclaration],
 ) -> Result<VcdDocument, CliError> {
-    event_vcd_document(EVENT_SCOPE, digital_traces, real_traces, &[])
+    event_vcd_document(EVENT_SCOPE, digital_traces, real_traces, digital_buses)
         .map_err(|error| projection_error(path, &error))
 }
 
@@ -149,7 +158,12 @@ pub(crate) fn load_vcd_document(
 
     let table = load_table(path, format, resource_limits)?;
     let traces = grid_event_traces(path, &table)?;
-    event_document(path, &traces.digital_traces, &traces.real_traces)
+    event_document(
+        path,
+        &traces.digital_traces,
+        &traces.real_traces,
+        &traces.digital_buses,
+    )
 }
 
 /// The event timelines a source carries in full, when it carries any.
@@ -180,7 +194,13 @@ fn event_traces_of(
     if traces.digital_traces.is_empty() && traces.real_traces.is_empty() {
         return Ok(None);
     }
-    event_document(path, &traces.digital_traces, &traces.real_traces).map(Some)
+    event_document(
+        path,
+        &traces.digital_traces,
+        &traces.real_traces,
+        &traces.digital_buses,
+    )
+    .map(Some)
 }
 
 /// The event timelines a typed result document carries, when it is a transient.
@@ -240,10 +260,15 @@ fn typed_transient_traces(
         .collect();
     Ok(Some(RawEventTraces {
         digital_traces,
-        // A typed document's buses reach the dump through its own route; this
-        // path recovers the traces a payload carries, which is what the VCD
-        // writer took before buses existed.
-        digital_buses: Vec::new(),
+        // A version-2 document says which of those conductors are one word,
+        // and a version-1 document -- which had nowhere to say it -- carries
+        // an empty table, so this is the declaration the run published or
+        // nothing.
+        digital_buses: payload
+            .digital_buses
+            .iter()
+            .map(DigitalBusDeclaration::from)
+            .collect(),
         real_traces,
     }))
 }
@@ -771,7 +796,7 @@ mod tests {
                 value: DigitalValue::new(DigitalState::One, DigitalStrength::Strong),
             }],
         };
-        let error = event_document(Path::new("run.vcd"), &[trace], &[])
+        let error = event_document(Path::new("run.vcd"), &[trace], &[], &[])
             .expect_err("half a femtosecond has no exact tick at any timescale");
         let message = error.to_string();
         assert!(

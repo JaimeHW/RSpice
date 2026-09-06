@@ -40,6 +40,43 @@ rout out 0 1k
 .end
 ";
 
+/// A mixed Verilog-AMS module with a two-bit discrete output.
+///
+/// This is the one shape in the tree that makes a *run* declare a bus: the
+/// boundary binds one deck node per bit and publishes the range its author
+/// wrote, which nothing else on the command line's inputs can say.
+const VECTOR_PORT_MODEL: &str = r#"
+`include "disciplines.vams"
+module vector_mixed(p, n, count);
+    inout p, n;
+    electrical p, n;
+    output [1:0] count;
+    reg [1:0] count;
+    initial count = 2'b00;
+    always #5 count = count + 2'b01;
+    analog I(p, n) <+ V(p, n) / 1000.0;
+endmodule
+"#;
+
+/// The deck that instantiates it, with the model written beside it.
+///
+/// A vector boundary port is one deck node per bit, declared MSB first, so
+/// `x1.count [1:0]` is carried by `COUNT#1` and `COUNT#0`. Fifteen
+/// nanoseconds is four counter states: `00 01 10 11`, one every `#5`.
+fn bus_deck(dir: &Path) -> String {
+    let model = dir.join("vector_mixed.va");
+    std::fs::write(&model, VECTOR_PORT_MODEL).expect("write the model");
+    format!(
+        "* a two-bit discrete boundary, one deck node per bit\n\
+         x1 p 0 count#1 count#0 vector_mixed\n\
+         rp p 0 1meg\n\
+         .va \"{}\" vector_mixed\n\
+         .tran 1n 15n\n\
+         .end\n",
+        model.display().to_string().replace('\\', "/")
+    )
+}
+
 fn rspice(args: &[&str]) {
     let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
         .arg("--quiet")
@@ -343,6 +380,69 @@ fn every_carrier_of_the_event_history_converts_to_the_same_dump() {
     assert_eq!(
         std::fs::read(&normalised).expect("read the normalised dump"),
         expected
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A run that declares a bus publishes it as one vector, on every carrier.
+///
+/// The declaration is the only thing about a vector port that the member node
+/// names cannot state: `COUNT#1` and `COUNT#0` are two conductors until
+/// something says they are one two-bit word with bit one first. The rawfile
+/// and the typed document have carried that declaration since the contract
+/// landed; the dump used to drop it and write two scalar wires, which made one
+/// run's three exports disagree about what a word is — and made the command
+/// line disagree with `TransientResult.to_vcd()` and `WasmResultHandle.toVcd()`,
+/// which are the same core projection.
+#[test]
+fn a_declared_bus_reaches_every_carrier_as_one_vector() {
+    let dir = test_dir("vcd_bus_sources");
+    let deck = bus_deck(&dir);
+    let published = simulate(&dir, &deck, "vcd", "run.vcd");
+    let expected = std::fs::read_to_string(&published).expect("read the published dump");
+
+    assert!(
+        expected.contains("$var wire 2 ! x1.count [1:0] $end"),
+        "the bus is one vector variable of its own width: {expected}"
+    );
+    assert!(
+        !expected.contains("COUNT#") ,
+        "a member's content is in the vector, so its scalar is not beside it: {expected}"
+    );
+    for word in ["b00 !", "b01 !", "b10 !", "b11 !"] {
+        assert!(
+            expected.contains(word),
+            "the two-bit counter counts through {word}: {expected}"
+        );
+    }
+
+    // Every artifact of the same run converts to the same dump. Before this,
+    // only the dump differed — and it was the one a logic viewer reads.
+    for (format, name) in [
+        ("raw", "run.raw"),
+        ("ascii", "run.ascii.raw"),
+        ("json", "run.json"),
+    ] {
+        let source = simulate(&dir, &deck, format, name);
+        let converted = dir.join(format!("from_{format}.vcd"));
+        convert(&source, &converted, "vcd", &[]);
+        assert_eq!(
+            std::fs::read_to_string(&converted).expect("read the converted dump"),
+            expected,
+            "the {format} artifact's declaration reached the dump differently"
+        );
+    }
+
+    // Reading a vector back and writing it again is a fixed point: the `$var`
+    // becomes an imported declaration over synthesized `name[k]` members,
+    // which project back to the same vector.
+    let normalised = dir.join("normalised.vcd");
+    convert(&published, &normalised, "vcd", &[]);
+    assert_eq!(
+        std::fs::read_to_string(&normalised).expect("read the normalised dump"),
+        expected,
+        "a dump carrying a vector is not a fixed point of convert"
     );
 
     let _ = std::fs::remove_dir_all(&dir);
