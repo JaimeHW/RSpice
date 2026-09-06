@@ -1289,6 +1289,7 @@ mod tests {
     use crate::device::VerilogADevice;
     use crate::jit::plan_program::{BlockProgram, PlanProgram};
     use crate::native::EvalContext;
+    use crate::native::census_models::shipped_model_filter_allows;
     use crate::native::expr::{
         CanonicalDerivativeAxis, EntryKind, NativeLoweringLimits, NativeOp, NativeProgram,
         PriorCurrentProbe,
@@ -5232,16 +5233,6 @@ endmodule
         if std::env::var_os("RSPICE_NATIVE_SHIPPED_PROBE_TRACE").is_some() {
             eprintln!("native-x64-shipped-probe model={name} stage={stage}");
         }
-    }
-
-    fn shipped_model_filter_allows(name: &str) -> bool {
-        let Ok(filter) = std::env::var("RSPICE_NATIVE_SHIPPED_MODEL_FILTER") else {
-            return true;
-        };
-        filter
-            .split(',')
-            .map(str::trim)
-            .any(|candidate| candidate.eq_ignore_ascii_case(name))
     }
 
     fn shipped_device_terminal_bias(name: &str, terminal: usize) -> f64 {

@@ -105,7 +105,7 @@ pub(crate) struct CensusModel {
 
 /// Every shipped module, in the order the censuses have always seen them.
 pub(crate) fn shipped_census_models() -> impl Iterator<Item = CensusModel> {
-    shipped_census_models_matching(None)
+    shipped_census_models_admitting(|_| true)
 }
 
 /// The same sequence, narrowed to modules whose name contains `substring`.
@@ -115,12 +115,59 @@ pub(crate) fn shipped_census_models() -> impl Iterator<Item = CensusModel> {
 pub(crate) fn shipped_census_models_matching(
     substring: Option<&str>,
 ) -> impl Iterator<Item = CensusModel> {
+    let substring = substring.map(str::to_string);
+    shipped_census_models_admitting(move |module| {
+        substring
+            .as_deref()
+            .is_none_or(|substring| module.contains(substring))
+    })
+}
+
+/// The same sequence, narrowed by [`RSPICE_NATIVE_SHIPPED_MODEL_FILTER`].
+///
+/// A census whose per-model cost is too large for one process to hold the
+/// corpus runs one model per process and consumes this, so that the model it
+/// is pointed at is the only one compiled.
+///
+/// [`RSPICE_NATIVE_SHIPPED_MODEL_FILTER`]: shipped_model_filter
+pub(crate) fn shipped_census_models_for_env_filter() -> impl Iterator<Item = CensusModel> {
+    shipped_census_models_admitting(shipped_model_filter_allows)
+}
+
+/// The value of `RSPICE_NATIVE_SHIPPED_MODEL_FILTER`, if it is set.
+///
+/// This is the shipped-model oracle's own variable — a comma-separated list of
+/// module names — shared rather than duplicated: a runner that must point one
+/// process at one model should not have to learn a second spelling for it, and
+/// a second parser could drift from the one the oracle honours.
+pub(crate) fn shipped_model_filter() -> Option<String> {
+    std::env::var("RSPICE_NATIVE_SHIPPED_MODEL_FILTER").ok()
+}
+
+/// Whether that filter admits `name`. An unset filter admits everything.
+pub(crate) fn shipped_model_filter_allows(name: &str) -> bool {
+    let Some(filter) = shipped_model_filter() else {
+        return true;
+    };
+    filter
+        .split(',')
+        .map(str::trim)
+        .any(|candidate| candidate.eq_ignore_ascii_case(name))
+}
+
+/// The shared provider, narrowed by whatever its caller admits.
+///
+/// Narrowing happens here, before anything is compiled, rather than over the
+/// models this yields: a filtered run must not pay for the models it skips.
+fn shipped_census_models_admitting(
+    admits: impl Fn(&str) -> bool,
+) -> impl Iterator<Item = CensusModel> {
     let root = shipped_model_root();
     let candidates = discover_veriloga_sources(&root).expect("discover shipped Verilog-A sources");
     let mut pending = Vec::new();
     for candidate in candidates {
         for module in &candidate.modules {
-            if substring.is_some_and(|substring| !module.contains(substring)) {
+            if !admits(module) {
                 continue;
             }
             pending.push(PendingModel {

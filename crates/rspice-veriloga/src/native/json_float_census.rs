@@ -40,14 +40,16 @@
 //! acquires a non-finite float in a field nobody annotated, which is the day
 //! the corpus stops sealing byte-identically.
 //!
-//! Ignored by default and run in release. It front-end compiles all 43 shipped
-//! modules through [`shipped_census_models`], which is minutes of work, and it
-//! is a release-qualification statement rather than a per-commit one.
+//! Ignored by default and run in release, one model per process: it front-end
+//! compiles shipped modules, which is minutes of work per model and far more
+//! memory than one process on a workstation can hold for all of them at once.
+//! It is a release-qualification statement rather than a per-commit one; the
+//! protocol is on the census itself.
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-use super::census_models::shipped_census_models;
+use super::census_models::{shipped_census_models_for_env_filter, shipped_model_filter};
 use crate::json_float::non_finite_floats;
 
 /// How many field paths one model prints before the row is truncated.
@@ -148,9 +150,36 @@ fn window(text: &str, at: usize) -> String {
 
 /// The census. Prints one row per module, then refuses if any payload carries
 /// a bare non-finite float or fails to survive its own seal.
+///
+/// # Run it one model per process
+///
+/// ```text
+/// RSPICE_NATIVE_SHIPPED_MODEL_FILTER=juncap200 cargo test -p rspice-veriloga
+///     --release --features native --lib -- --ignored --nocapture
+///     every_shipped_model_survives_the_json_the_browser_worker_is_handed
+/// ```
+///
+/// The variable is the shipped-model oracle's own — a comma-separated list of
+/// module names — and it narrows the provider before anything is compiled, so
+/// the process holds one model. The summary line names the filter it ran under
+/// (`filter=all` when it is unset), and the corpus-wide assertions below apply
+/// only to an unfiltered run, so a filtered one cannot be mistaken for a
+/// statement about the estate. Cover the corpus by walking the names, one
+/// process each.
+///
+/// Unfiltered, this compiles all 43 shipped modules in a single process, and
+/// the front end is where the memory goes. The shipped-model oracle in
+/// [`crate::native::x64`] measured its peak working sets on this same corpus:
+/// 7.2 GB for bsimcmg, 8.8 GB for bsimbulk, and four more modules still
+/// climbing when a 12 GB watchdog killed them. An unfiltered runner therefore
+/// needs at least 28 GB free for this process alone; below that the host
+/// exhausts its commit charge, which presents as an access violation here or
+/// as a bugcheck on the box rather than as an allocation failure.
 #[test]
-#[ignore = "front-end compiles all 43 shipped models; run in release"]
+#[ignore = "front-end compiles shipped models; run in release, one model per \
+            process (RSPICE_NATIVE_SHIPPED_MODEL_FILTER)"]
 fn every_shipped_model_survives_the_json_the_browser_worker_is_handed() {
+    let filter = shipped_model_filter();
     let mut models = 0_usize;
     let mut carrying_non_finite = 0_usize;
     let mut bare_total = 0_usize;
@@ -158,7 +187,7 @@ fn every_shipped_model_survives_the_json_the_browser_worker_is_handed() {
     let mut failures = Vec::new();
     let mut compile_seconds = 0.0;
 
-    for shipped in shipped_census_models() {
+    for shipped in shipped_census_models_for_env_filter() {
         models += 1;
         compile_seconds += shipped.compile_seconds;
 
@@ -213,18 +242,36 @@ fn every_shipped_model_survives_the_json_the_browser_worker_is_handed() {
     }
 
     eprintln!(
-        "json-float-census models={models} carrying_non_finite={carrying_non_finite} \
+        "json-float-census filter={} models={models} carrying_non_finite={carrying_non_finite} \
          bare_total={bare_total} sealed_bytes={sealed_bytes} failures={} \
          compile_seconds={compile_seconds:.2}",
+        filter.as_deref().unwrap_or("all"),
         failures.len()
     );
 
-    assert_eq!(models, 43, "the shipped census is 43 modules");
-    assert!(
-        sealed_bytes > 1_000_000_000,
-        "the corpus sealed only {sealed_bytes} bytes, so the payloads being compared are not \
-         the shipped ones"
-    );
+    match filter.as_deref() {
+        // Only an unfiltered run is a statement about the whole estate.
+        None => {
+            assert_eq!(models, 43, "the shipped census is 43 modules");
+            assert!(
+                sealed_bytes > 1_000_000_000,
+                "the corpus sealed only {sealed_bytes} bytes, so the payloads being compared \
+                 are not the shipped ones"
+            );
+        }
+        // A filter naming nothing shipped would otherwise pass by comparing
+        // nothing at all, which is the one way a narrowed run can lie.
+        Some(filter) => {
+            assert!(
+                models > 0,
+                "RSPICE_NATIVE_SHIPPED_MODEL_FILTER={filter} matched no shipped module"
+            );
+            assert!(
+                sealed_bytes > 0,
+                "{filter} sealed no bytes, so nothing was compared"
+            );
+        }
+    }
     assert!(
         failures.is_empty(),
         "{} shipped payload(s) do not survive the seal:\n{}",
