@@ -2667,7 +2667,7 @@ impl Engine {
     /// horizon; run noise decks unsegmented when a single continuous
     /// sample path matters.
     ///
-    /// A resumed run under [`SimulationConfig::locked_time_grid`] starts at the
+    /// A resumed run under [`crate::config::SimulationConfig::locked_time_grid`] starts at the
     /// checkpoint time, which is its first sample whether or not the grid names
     /// it. See that field for what a seam off the grid costs a point-for-point
     /// comparison, and how to place the checkpoint so it does not.
