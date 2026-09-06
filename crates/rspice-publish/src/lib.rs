@@ -3,8 +3,9 @@
 //!
 //! The input is a validated [`PublicationSnapshot`]; the output is a
 //! [`BTreeMap`] from bundle-relative path to exact bytes: the document page
-//! (`index.html` with inline styles and inline SVG figures), raw data assets
-//! (`netlist.cir`, per-dataset CSV), and the figure-hydration handshake
+//! (`index.html` with inline SVG figures) and its external chrome under
+//! `assets/`, raw data assets (`netlist.cir`, per-dataset CSV), and the
+//! figure-hydration handshake
 //! (`figure-manifest.json` plus one payload per figure) for the viewer
 //! runtime. Identical snapshots always produce byte-identical bundles — the
 //! cloud pipeline digests and seals what this crate emits.
