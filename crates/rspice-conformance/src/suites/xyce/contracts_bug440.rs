@@ -1448,6 +1448,7 @@ mod tests {
             branch_names,
             branch_currents,
             digital_traces: Vec::new(),
+            digital_buses: Vec::new(),
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),

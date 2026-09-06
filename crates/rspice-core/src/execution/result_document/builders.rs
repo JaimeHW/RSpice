@@ -3642,6 +3642,7 @@ mod compressed_transient_tests {
                 ),
             ],
             digital_traces: Vec::new(),
+            digital_buses: Vec::new(),
             real_traces: Vec::new(),
             post_results: TransientPostResults::default(),
             identity: TransientResultIdentity {

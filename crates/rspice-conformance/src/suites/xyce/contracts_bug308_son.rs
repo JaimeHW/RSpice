@@ -1349,6 +1349,7 @@ mod tests {
             node_names: vec!["A".into(), "B".into(), "8".into(), "9".into()],
             branch_names: Vec::new(),
             digital_traces: Vec::new(),
+            digital_buses: Vec::new(),
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),

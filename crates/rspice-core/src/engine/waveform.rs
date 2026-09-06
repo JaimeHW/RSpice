@@ -42,7 +42,7 @@
 //! total and tested; it is not a second decision about what a volt is.
 
 use crate::Value;
-use crate::engine::result::{DigitalTrace, RealTrace, TransientPostResults};
+use crate::engine::result::{DigitalBusDeclaration, DigitalTrace, RealTrace, TransientPostResults};
 
 //=============================================================================
 // Configuration
@@ -829,6 +829,11 @@ pub struct TransientResultCompressed {
     /// decimated.
     pub digital_traces: Vec<DigitalTrace>,
 
+    /// Buses declared over `digital_traces`, carried exactly for the same
+    /// reason: a declaration is not a sample and there is nothing in it to
+    /// decimate.
+    pub digital_buses: Vec<DigitalBusDeclaration>,
+
     /// XSPICE real-valued event traces, carried exactly, for the same reason.
     pub real_traces: Vec<RealTrace>,
 
@@ -1531,6 +1536,7 @@ mod tests {
             step_sizes: vec![0.0, 1.0, 1.0],
             channels,
             digital_traces: Vec::new(),
+            digital_buses: Vec::new(),
             real_traces: Vec::new(),
             post_results: TransientPostResults::default(),
             identity: TransientResultIdentity::default(),

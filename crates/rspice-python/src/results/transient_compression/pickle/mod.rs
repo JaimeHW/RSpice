@@ -135,6 +135,10 @@ pub(crate) fn rebuild_compressed_transient(
             .into_iter()
             .map(rebuild_digital_trace)
             .collect::<PyResult<Vec<_>>>()?,
+        // The pickled transient structure is version 1, which carries no bus
+        // table; a rebuilt result therefore declares none rather than
+        // inventing one. Widening the pickle is the binding's own change.
+        digital_buses: Vec::new(),
         real_traces: real_traces.into_iter().map(rebuild_real_trace).collect(),
         post_results: rspice_core::engine::TransientPostResults {
             fft: rebuild_transient_fft_results(fft_state)?,

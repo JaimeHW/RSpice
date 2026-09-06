@@ -110,6 +110,7 @@ fn transient_result() -> TransientResult {
         node_names: vec!["out".to_owned(), "mid".to_owned()],
         branch_names: vec!["v1".to_owned()],
         digital_traces: Vec::new(),
+        digital_buses: Vec::new(),
         real_traces: Vec::new(),
         device_op_traces: vec![TransientDeviceOpTrace {
             device_name: "M1".to_owned(),

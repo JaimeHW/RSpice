@@ -129,11 +129,12 @@ pub use pss::{
 };
 pub use pss_noise::{OscPnoiseResult, PeriodicNoiseResult};
 pub use result::{
-    DigitalTrace, DigitalTracePoint, RealTrace, RealTracePoint, TransientDeviceOpTrace,
-    TransientFftBin, TransientFftHarmonic, TransientFftMetrics, TransientFftResult,
-    TransientFourierResult, TransientOutputProjection, TransientPostResults, TransientResult,
-    TransientStoreTrace, digital_state_from_tag, digital_state_tag, digital_strength_from_tag,
-    digital_strength_tag,
+    DigitalBusDeclaration, DigitalBusError, DigitalBusSource, DigitalTrace, DigitalTracePoint,
+    MAX_DIGITAL_BUS_WIDTH, RealTrace, RealTracePoint, TransientDeviceOpTrace, TransientFftBin,
+    TransientFftHarmonic, TransientFftMetrics, TransientFftResult, TransientFourierResult,
+    TransientOutputProjection, TransientPostResults, TransientResult, TransientStoreTrace,
+    digital_state_from_tag, digital_state_tag, digital_strength_from_tag, digital_strength_tag,
+    validate_digital_bus_table,
 };
 pub use stb::StbAnalysisResult;
 pub use step::{MaterializedStepRun, StepPlan, StepPlanLimits};

@@ -247,6 +247,7 @@ mod structural_tests {
             node_names: vec!["out".to_string()],
             branch_names: vec!["V1".to_string()],
             digital_traces: Vec::new(),
+            digital_buses: Vec::new(),
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),

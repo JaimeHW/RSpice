@@ -451,6 +451,7 @@ mod tests {
             node_names: vec!["out".to_string(), "sense".to_string()],
             branch_names: Vec::new(),
             digital_traces: Vec::new(),
+            digital_buses: Vec::new(),
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),

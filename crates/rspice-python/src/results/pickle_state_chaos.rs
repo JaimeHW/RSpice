@@ -307,6 +307,7 @@ fn valid_transient_result() -> TransientResult {
                 },
             }],
         }],
+        digital_buses: Vec::new(),
         real_traces: vec![RealTrace {
             node_name: "ctrl".to_string(),
             points: vec![RealTracePoint {

@@ -9,7 +9,7 @@ use crate::engine::waveform::{
 use crate::netlist::{FftFormat, FftOutput, FftWindow, XyceFftMode, XyceOutputIntervalSchedule};
 use crate::xspice::{DigitalState, DigitalStrength, DigitalValue};
 use crate::{NodeId, Value};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 /// Stable wire spelling of one XSPICE digital logic state.
 ///
@@ -163,6 +163,327 @@ pub struct RealTrace {
     pub node_name: String,
     /// Committed event samples for this node.
     pub points: Vec<RealTracePoint>,
+}
+
+//=============================================================================
+// Digital buses
+//=============================================================================
+
+/// Widest digital bus any route carries: 4,096 members.
+///
+/// A bus is a *declaration over member nodes*, so its width is the number of
+/// conductors a consumer must hold at once to read one value of it. The budget
+/// is the same one the schematic applies to a drawn bus — `MAX_BUS_MEMBER_INDEX
+/// + 1` in `rspice-ui`'s `state/schematic/bus.rs` — so a bus a drawing can
+/// declare is a bus a result can carry and the reverse. It is a budget rather
+/// than a machine limit: a vector wider than this is a generated structure and
+/// not a drawing, and a corrupt or hostile document must not be able to make a
+/// reader materialize an unbounded number of bits from one width field.
+pub const MAX_DIGITAL_BUS_WIDTH: u32 = 4_096;
+
+/// Who declared a digital bus.
+///
+/// The three are not interchangeable, which is why the declaration carries the
+/// answer rather than leaving a consumer to infer it. An engine declaration is
+/// a fact about the design that ran: the module declared the vector and the
+/// boundary bound it to those nodes. A schematic declaration is a fact about
+/// the drawing that produced the deck, attached to member traces the run knew
+/// only as separate nodes. An imported one is whatever a foreign artifact
+/// claimed. A viewer that shows all three has to be able to say which it is
+/// looking at, and only the producer knows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DigitalBusSource {
+    /// The running engine declared it from the design's own vector
+    /// declaration and the nodes the boundary bound its bits to.
+    Engine,
+    /// A schematic declared it over the member nodes its netlist generator
+    /// emitted, after the run that knew them only as separate nodes.
+    Schematic,
+    /// An imported artifact declared it: a VCD `$var` wider than one bit, or
+    /// a rawfile bus plot.
+    Import,
+}
+
+/// Why a digital bus declaration, or a table of them, is not well formed.
+///
+/// Every variant names the bus it refuses and, where there is one, the member:
+/// a bus is a claim about specific conductors, and a refusal a reader cannot
+/// trace back to a name is a refusal that cannot be fixed.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum DigitalBusError {
+    /// The declaration has no name.
+    #[error("a digital bus declaration has an empty name")]
+    EmptyName,
+
+    /// A member position carries no name.
+    #[error("digital bus '{bus}' has an empty member name at position {position}")]
+    EmptyMemberName {
+        /// Bus that declared the empty member.
+        bus: String,
+        /// Zero-based position in declaration order.
+        position: usize,
+    },
+
+    /// The declared range and the member list describe different widths.
+    #[error(
+        "digital bus '{bus}' declares [{msb}:{lsb}], which is {declared} member(s), but lists {listed}"
+    )]
+    WidthMismatch {
+        /// Bus whose range and member list disagree.
+        bus: String,
+        /// Declared most significant index.
+        msb: i64,
+        /// Declared least significant index.
+        lsb: i64,
+        /// Width the range describes.
+        declared: u64,
+        /// Number of member names listed.
+        listed: usize,
+    },
+
+    /// The declaration is wider than [`MAX_DIGITAL_BUS_WIDTH`].
+    #[error(
+        "digital bus '{bus}' is {width} members wide; at most {MAX_DIGITAL_BUS_WIDTH} are carried"
+    )]
+    WidthTooLarge {
+        /// Bus that exceeded the budget.
+        bus: String,
+        /// Width the declaration asked for.
+        width: u64,
+    },
+
+    /// One bus names the same member twice.
+    #[error("digital bus '{bus}' names member '{member}' more than once")]
+    DuplicateMember {
+        /// Bus that repeated a member.
+        bus: String,
+        /// Member name that appeared twice.
+        member: String,
+    },
+
+    /// A member has no digital trace to read it from.
+    #[error("digital bus '{bus}' names member '{member}', which has no digital event trace")]
+    UnknownMember {
+        /// Bus that named the missing member.
+        bus: String,
+        /// Member name with no trace.
+        member: String,
+    },
+
+    /// Two buses claim the same member node.
+    #[error(
+        "member '{member}' is claimed by both digital bus '{first}' and digital bus '{second}'"
+    )]
+    MemberInTwoBuses {
+        /// Member node both buses named.
+        member: String,
+        /// Bus that claimed it first.
+        first: String,
+        /// Bus that claimed it again.
+        second: String,
+    },
+
+    /// Two declarations carry one name.
+    #[error("digital bus '{bus}' is declared more than once")]
+    DuplicateBus {
+        /// Name that was declared twice.
+        bus: String,
+    },
+}
+
+/// One digital bus: a declaration over the scalar member nodes that carry it.
+///
+/// A bus is not a recorded value. The unit of recording stays the member node,
+/// because that is what the engine commits at every accepted point and what
+/// carries a per-member drive strength; this type says which nodes belong
+/// together, in which order, and under whose authority. A consumer reads the
+/// bus by reassembling the members —
+/// [`crate::execution::bus_events`] is the one implementation of that, so a
+/// viewer, a dump and a binding all agree on what the bus held.
+///
+/// # Order
+///
+/// `members` is in *declaration* order: the declared MSB first and the
+/// declared LSB last, whichever way the range runs. The bounds are kept as
+/// declared rather than normalized to an ascending pair, because an ascending
+/// `[0:7]` and a descending `[7:0]` are different declarations and the bit
+/// order is the author's.
+///
+/// # Bounds
+///
+/// `msb` and `lsb` are `i64` because Verilog permits negative and ascending
+/// ranges. A bus whose bounds do not fit the schematic's narrower `u32`
+/// grammar is still carried and still displayed; it simply cannot be bound to
+/// a drawn bus.
+///
+/// # What is not carried
+///
+/// No value, no width beyond the member count, no unit, and no rendering. Core
+/// spells `name[msb:lsb]` only where a format needs one — a VCD `$var`
+/// reference and a rawfile bus plot title; a frontend renders a bus in the
+/// notation its own drawing declared it in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DigitalBusDeclaration {
+    /// Bus name, without any range suffix.
+    pub name: String,
+    /// Declared most significant index, exactly as declared.
+    pub msb: i64,
+    /// Declared least significant index, exactly as declared.
+    pub lsb: i64,
+    /// Member node names in declaration order, declared MSB first.
+    pub members: Vec<String>,
+    /// Who declared this bus.
+    pub source: DigitalBusSource,
+}
+
+impl DigitalBusDeclaration {
+    /// Build a declaration, refusing one that is not well formed.
+    ///
+    /// This is the checked constructor; [`Self::validate`] is the same set of
+    /// rules applied to a declaration that was assembled or decoded some other
+    /// way. Neither can check membership against a run's traces — that needs
+    /// the traces, and is [`validate_digital_bus_table`].
+    pub fn new(
+        name: impl Into<String>,
+        msb: i64,
+        lsb: i64,
+        members: Vec<String>,
+        source: DigitalBusSource,
+    ) -> Result<Self, DigitalBusError> {
+        let declaration = Self {
+            name: name.into(),
+            msb,
+            lsb,
+            members,
+            source,
+        };
+        declaration.validate()?;
+        Ok(declaration)
+    }
+
+    /// Check everything a declaration can be judged on by itself.
+    ///
+    /// The name is non-empty, so is every member name; the range and the
+    /// member list describe one width; that width is within
+    /// [`MAX_DIGITAL_BUS_WIDTH`]; and no member is named twice. Member names
+    /// are compared the way [`TransientResult::digital_trace_named`] resolves
+    /// one — ASCII-case-insensitively — because a deck node name is.
+    pub fn validate(&self) -> Result<(), DigitalBusError> {
+        if self.name.trim().is_empty() {
+            return Err(DigitalBusError::EmptyName);
+        }
+        let declared = self.msb.abs_diff(self.lsb).checked_add(1).ok_or_else(|| {
+            DigitalBusError::WidthTooLarge {
+                bus: self.name.clone(),
+                width: u64::MAX,
+            }
+        })?;
+        if declared > u64::from(MAX_DIGITAL_BUS_WIDTH) {
+            return Err(DigitalBusError::WidthTooLarge {
+                bus: self.name.clone(),
+                width: declared,
+            });
+        }
+        if declared != self.members.len() as u64 {
+            return Err(DigitalBusError::WidthMismatch {
+                bus: self.name.clone(),
+                msb: self.msb,
+                lsb: self.lsb,
+                declared,
+                listed: self.members.len(),
+            });
+        }
+        let mut seen: BTreeSet<String> = BTreeSet::new();
+        for (position, member) in self.members.iter().enumerate() {
+            if member.trim().is_empty() {
+                return Err(DigitalBusError::EmptyMemberName {
+                    bus: self.name.clone(),
+                    position,
+                });
+            }
+            if !seen.insert(canonical_event_name(member)) {
+                return Err(DigitalBusError::DuplicateMember {
+                    bus: self.name.clone(),
+                    member: member.clone(),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// Number of members, which a validated declaration guarantees is the
+    /// width its range declares.
+    pub(crate) fn width(&self) -> usize {
+        self.members.len()
+    }
+
+    /// `name[msb:lsb]`, the one rendering core produces.
+    ///
+    /// Two formats need a bus to be spelled in a single field — a VCD `$var`
+    /// reference and a rawfile bus plot title — and both take this spelling so
+    /// a reader of either has one grammar to parse. Frontends do not use it:
+    /// a drawn bus is rendered in the notation the drawing declared.
+    pub(crate) fn range_notation(&self) -> String {
+        format!("{}[{}:{}]", self.name, self.msb, self.lsb)
+    }
+}
+
+/// The spelling two event names are compared under.
+///
+/// Deck node names are ASCII-case-insensitive, and
+/// [`TransientResult::digital_trace_named`] already resolves one that way, so
+/// a bus that names `DATA#3` matches a trace recorded as `data#3`. The same
+/// rule decides whether a bus names one member twice, so a table cannot use
+/// case to smuggle two claims on one conductor past the check.
+pub(crate) fn canonical_event_name(name: &str) -> String {
+    name.to_ascii_uppercase()
+}
+
+/// Check a whole bus table against the digital traces it declares over.
+///
+/// Each declaration is checked by itself first. Then, across the table: no two
+/// buses carry one name, every member names a trace the run recorded, and no
+/// member is claimed by two buses. The last two are what make a bus readable —
+/// a declaration whose member has no trace cannot say what the bus held, and a
+/// conductor that belongs to two buses has no single declaration order.
+///
+/// `trace_names` is the digital trace names the declarations are judged
+/// against, in any order.
+pub fn validate_digital_bus_table<'a>(
+    buses: &[DigitalBusDeclaration],
+    trace_names: impl IntoIterator<Item = &'a str>,
+) -> Result<(), DigitalBusError> {
+    if buses.is_empty() {
+        return Ok(());
+    }
+    let recorded: BTreeSet<String> = trace_names.into_iter().map(canonical_event_name).collect();
+    let mut names: BTreeSet<String> = BTreeSet::new();
+    let mut owners: BTreeMap<String, &str> = BTreeMap::new();
+    for bus in buses {
+        bus.validate()?;
+        if !names.insert(canonical_event_name(&bus.name)) {
+            return Err(DigitalBusError::DuplicateBus {
+                bus: bus.name.clone(),
+            });
+        }
+        for member in &bus.members {
+            let key = canonical_event_name(member);
+            if !recorded.contains(&key) {
+                return Err(DigitalBusError::UnknownMember {
+                    bus: bus.name.clone(),
+                    member: member.clone(),
+                });
+            }
+            if let Some(first) = owners.insert(key, bus.name.as_str()) {
+                return Err(DigitalBusError::MemberInTwoBuses {
+                    member: member.clone(),
+                    first: first.to_owned(),
+                    second: bus.name.clone(),
+                });
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Accepted operating-point parameter history for one device.
@@ -370,6 +691,14 @@ pub struct TransientResult {
     pub branch_names: Vec<String>,
     /// XSPICE digital node histories captured at accepted transient points.
     pub digital_traces: Vec<DigitalTrace>,
+    /// Buses declared over `digital_traces`, in declaration order.
+    ///
+    /// A bus groups member nodes; it records nothing of its own. The engine
+    /// leaves this empty: the only boundary that could declare one is a
+    /// Verilog-AMS module's vector discrete port, and that is refused today,
+    /// so every bus a consumer sees was declared by a frontend or read out of
+    /// an imported artifact.
+    pub digital_buses: Vec<DigitalBusDeclaration>,
     /// XSPICE real-valued event node histories captured at accepted transient points.
     pub real_traces: Vec<RealTrace>,
     /// Device operating-point values captured at accepted transient points.
@@ -394,9 +723,15 @@ impl TransientResult {
     /// column-major and so cannot be read back off the result — the traces
     /// keep only the changes. The caller therefore hands over the buffers it
     /// just recorded from, which is also what keeps the hook allocation-free.
+    ///
+    /// The bus table is borrowed rather than derived from `digital_buses` for
+    /// the same reason: the hook publishes node ids and the declaration
+    /// carries node names, so the run resolves the table once and lends it at
+    /// every point instead of resolving it at each.
     pub(crate) fn observable_sample<'a>(
         &'a self,
         digital_values: &'a [(NodeId, crate::abort_signal::DigitalEventCode)],
+        digital_buses: &'a [crate::abort_signal::TransientDigitalBus],
         real_values: &'a [(NodeId, Value)],
     ) -> crate::abort_signal::TransientSample<'a> {
         crate::abort_signal::TransientSample {
@@ -406,6 +741,7 @@ impl TransientResult {
             branch_names: &self.branch_names,
             branch_currents: &self.branch_currents,
             digital_values,
+            digital_buses,
             real_values,
         }
     }
@@ -972,6 +1308,7 @@ impl TransientResultCompressed {
             node_names,
             branch_names,
             digital_traces: self.digital_traces,
+            digital_buses: self.digital_buses,
             real_traces: self.real_traces,
             device_op_traces,
             store_traces,
@@ -1003,6 +1340,7 @@ mod tests {
             node_names: vec!["out".to_string()],
             branch_names: Vec::new(),
             digital_traces: Vec::new(),
+            digital_buses: Vec::new(),
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
@@ -1227,5 +1565,213 @@ mod tests {
             (2.0f64 * 0.95).to_bits()
         );
         assert_eq!(projected[projected.len() - 1].to_bits(), 2.0f64.to_bits());
+    }
+}
+
+#[cfg(test)]
+mod bus_tests {
+    use super::*;
+
+    fn members(names: &[&str]) -> Vec<String> {
+        names.iter().map(|name| (*name).to_string()).collect()
+    }
+
+    fn bus(name: &str, msb: i64, lsb: i64, names: &[&str]) -> DigitalBusDeclaration {
+        DigitalBusDeclaration {
+            name: name.to_string(),
+            msb,
+            lsb,
+            members: members(names),
+            source: DigitalBusSource::Schematic,
+        }
+    }
+
+    #[test]
+    fn a_declaration_keeps_the_range_it_was_given_in_the_direction_it_was_given() {
+        let descending = DigitalBusDeclaration::new(
+            "DATA",
+            3,
+            0,
+            members(&["d3", "d2", "d1", "d0"]),
+            DigitalBusSource::Engine,
+        )
+        .expect("a descending declaration is well formed");
+        assert_eq!((descending.msb, descending.lsb), (3, 0));
+        assert_eq!(descending.width(), 4);
+        assert_eq!(descending.range_notation(), "DATA[3:0]");
+
+        let ascending = DigitalBusDeclaration::new(
+            "DATA",
+            0,
+            3,
+            members(&["d0", "d1", "d2", "d3"]),
+            DigitalBusSource::Engine,
+        )
+        .expect("an ascending declaration is well formed");
+        assert_eq!((ascending.msb, ascending.lsb), (0, 3));
+        assert_eq!(ascending.range_notation(), "DATA[0:3]");
+        assert_ne!(
+            descending.members, ascending.members,
+            "the two directions are different declarations, not one normalized pair"
+        );
+
+        // Verilog admits a negative range, and the declaration carries it.
+        let negative = DigitalBusDeclaration::new(
+            "SEL",
+            -1,
+            -3,
+            members(&["s_1", "s_2", "s_3"]),
+            DigitalBusSource::Import,
+        )
+        .expect("a negative range is well formed");
+        assert_eq!(negative.range_notation(), "SEL[-1:-3]");
+    }
+
+    #[test]
+    fn a_declaration_is_refused_by_the_field_that_is_wrong() {
+        assert_eq!(
+            bus("", 1, 0, &["a", "b"]).validate(),
+            Err(DigitalBusError::EmptyName)
+        );
+        assert_eq!(
+            bus("DATA", 1, 0, &["a", ""]).validate(),
+            Err(DigitalBusError::EmptyMemberName {
+                bus: "DATA".to_string(),
+                position: 1,
+            })
+        );
+        assert_eq!(
+            bus("DATA", 3, 0, &["a", "b"]).validate(),
+            Err(DigitalBusError::WidthMismatch {
+                bus: "DATA".to_string(),
+                msb: 3,
+                lsb: 0,
+                declared: 4,
+                listed: 2,
+            })
+        );
+        assert_eq!(
+            bus("DATA", 1, 0, &["a", "A"]).validate(),
+            Err(DigitalBusError::DuplicateMember {
+                bus: "DATA".to_string(),
+                member: "A".to_string(),
+            }),
+            "a deck node name is case-insensitive, so case cannot smuggle one \
+             conductor in twice"
+        );
+    }
+
+    #[test]
+    fn the_width_budget_is_the_schematics_own_and_is_checked_before_the_member_list() {
+        let widest = MAX_DIGITAL_BUS_WIDTH as i64 - 1;
+        let names: Vec<String> = (0..MAX_DIGITAL_BUS_WIDTH)
+            .map(|index| format!("d{index}"))
+            .collect();
+        assert!(
+            DigitalBusDeclaration::new("D", widest, 0, names, DigitalBusSource::Engine).is_ok(),
+            "4,096 members is inside the budget"
+        );
+
+        // One member past the budget is refused by width, not by the member
+        // count, so a hostile document cannot make a reader materialize the
+        // list before the bound is applied.
+        assert_eq!(
+            bus("D", widest + 1, 0, &[]).validate(),
+            Err(DigitalBusError::WidthTooLarge {
+                bus: "D".to_string(),
+                width: u64::from(MAX_DIGITAL_BUS_WIDTH) + 1,
+            })
+        );
+        // A range so wide that its width does not fit a u64 is refused the
+        // same way rather than wrapping to a small one.
+        assert_eq!(
+            bus("D", i64::MIN, i64::MAX, &[]).validate(),
+            Err(DigitalBusError::WidthTooLarge {
+                bus: "D".to_string(),
+                width: u64::MAX,
+            })
+        );
+    }
+
+    #[test]
+    fn a_table_is_judged_against_the_traces_it_declares_over() {
+        let recorded = ["d1", "d0", "e1", "e0", "clk"];
+        let table = [bus("D", 1, 0, &["d1", "d0"]), bus("E", 1, 0, &["e1", "e0"])];
+        assert_eq!(
+            validate_digital_bus_table(&table, recorded),
+            Ok(()),
+            "two disjoint buses over recorded nodes are a valid table"
+        );
+
+        assert_eq!(
+            validate_digital_bus_table(&[bus("D", 1, 0, &["d1", "missing"])], recorded),
+            Err(DigitalBusError::UnknownMember {
+                bus: "D".to_string(),
+                member: "missing".to_string(),
+            }),
+            "a declaration whose member has no trace cannot say what the bus held"
+        );
+
+        assert_eq!(
+            validate_digital_bus_table(
+                &[bus("D", 1, 0, &["d1", "d0"]), bus("E", 1, 0, &["D0", "e0"])],
+                recorded
+            ),
+            Err(DigitalBusError::MemberInTwoBuses {
+                member: "D0".to_string(),
+                first: "D".to_string(),
+                second: "E".to_string(),
+            }),
+            "a conductor claimed twice has no single declaration order"
+        );
+
+        assert_eq!(
+            validate_digital_bus_table(
+                &[bus("D", 1, 0, &["d1", "d0"]), bus("d", 1, 0, &["e1", "e0"])],
+                recorded
+            ),
+            Err(DigitalBusError::DuplicateBus {
+                bus: "d".to_string(),
+            })
+        );
+
+        // A member trace matches under the same case rule the trace lookup uses.
+        assert_eq!(
+            validate_digital_bus_table(&[bus("D", 1, 0, &["D1", "D0"])], recorded),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn an_engine_transient_result_declares_no_bus() {
+        // The invariant this lane ships under: the contract exists, the
+        // producer does not. A test that asserts it here fails the day a
+        // boundary starts declaring buses without the rest of the chain.
+        let result = TransientResult {
+            time: vec![0.0],
+            step_sizes: vec![0.0],
+            voltages: vec![vec![0.0]],
+            branch_currents: Vec::new(),
+            num_nodes: 1,
+            node_names: vec!["out".to_string()],
+            branch_names: Vec::new(),
+            digital_traces: Vec::new(),
+            digital_buses: Vec::new(),
+            real_traces: Vec::new(),
+            device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
+            fft_results: Vec::new(),
+        };
+        assert!(result.digital_buses.is_empty());
+        assert_eq!(
+            validate_digital_bus_table(
+                &result.digital_buses,
+                result
+                    .digital_traces
+                    .iter()
+                    .map(|trace| trace.node_name.as_str())
+            ),
+            Ok(())
+        );
     }
 }

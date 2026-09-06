@@ -8,8 +8,12 @@
 
 mod fft;
 mod post_results;
-use super::{Engine, SimulationError, SpiceDialect, TransientPostResults, TransientResult};
-use crate::abort_signal::{AbortSignal, DigitalEventCode, NoAbort};
+use super::result::canonical_event_name;
+use super::{
+    DigitalBusDeclaration, Engine, SimulationError, SpiceDialect, TransientPostResults,
+    TransientResult,
+};
+use crate::abort_signal::{AbortSignal, DigitalEventCode, NoAbort, TransientDigitalBus};
 // Only the unit tests below construct these records directly; the
 // production paths in this module receive them already built.
 use crate::circuit::SolutionDependentCompanionStep;
@@ -541,6 +545,9 @@ struct TransientEventCapture<'a> {
     real_trace_indices: &'a mut HashMap<crate::NodeId, usize>,
     /// Which nodes output projection retains an event trace for.
     retained_event_nodes: &'a [bool],
+    /// The run's bus declarations resolved onto node ids, lent to the sample
+    /// hook. Run-constant: resolved once, published at every accepted point.
+    sample_buses: &'a [TransientDigitalBus],
 }
 
 /// Project a committed digital snapshot onto the codes the sample hook carries.
@@ -640,6 +647,52 @@ struct TransientCapturePlan {
     voltages: Vec<bool>,
     branch_currents: Vec<bool>,
     event_nodes: Vec<bool>,
+}
+
+/// Resolve a run's bus declarations onto the node ids the sample hook keys by.
+///
+/// The hook is a layer-0 leaf and publishes ids, while a declaration names
+/// nodes, so the table is resolved once per run and lent at every accepted
+/// point. A declaration naming a node this run does not have is refused rather
+/// than dropped: it would publish a bus the hook cannot key, and the producer
+/// that wrote it is inside this crate.
+fn transient_sample_buses(
+    buses: &[DigitalBusDeclaration],
+    node_names: &[String],
+) -> Result<Vec<TransientDigitalBus>, String> {
+    if buses.is_empty() {
+        return Ok(Vec::new());
+    }
+    let index_of = canonical_node_index(node_names);
+    let mut resolved = Vec::with_capacity(buses.len());
+    for bus in buses {
+        let mut members = Vec::with_capacity(bus.members.len());
+        for member in &bus.members {
+            let Some(&index) = index_of.get(&canonical_event_name(member)) else {
+                return Err(format!(
+                    "digital bus '{}' names member '{member}', which is not a node of this circuit",
+                    bus.name
+                ));
+            };
+            members.push(index + 1);
+        }
+        resolved.push(TransientDigitalBus {
+            name: bus.name.clone(),
+            msb: bus.msb,
+            lsb: bus.lsb,
+            members,
+        });
+    }
+    Ok(resolved)
+}
+
+/// Node name to zero-based node index, under the event-name spelling.
+fn canonical_node_index(node_names: &[String]) -> HashMap<String, usize> {
+    node_names
+        .iter()
+        .enumerate()
+        .map(|(index, name)| (canonical_event_name(name), index))
+        .collect()
 }
 
 /// Wall-clock timer used exclusively for transient diagnostics.
@@ -761,6 +814,7 @@ impl TransientCapturePlan {
         retain_xyce_voltage_source_currents: bool,
         voltage_source_names: &[String],
         external_wildcard_nodes: Option<&HashSet<String>>,
+        digital_buses: &[DigitalBusDeclaration],
     ) -> Self {
         // Measurement evaluation currently happens after integration. Until
         // measurements become online reducers, retain all analog operands for
@@ -847,14 +901,59 @@ impl TransientCapturePlan {
         // XSPICE event vectors occupy a distinct result namespace. Bare/raw
         // saves select them, while a typed V(node) request must not do so.
         // Measurements remain conservative until their reducers are online.
-        let event_nodes = node_names
+        let mut event_nodes: Vec<bool> = node_names
             .iter()
             .map(|name| retain_all || netlist.saves.selects_raw_name(name))
             .collect();
+        Self::retain_declared_buses(&mut event_nodes, node_names, digital_buses, |bus| {
+            netlist.saves.selects_raw_name(bus)
+        });
         Self {
             voltages,
             branch_currents,
             event_nodes,
+        }
+    }
+
+    /// Widen event retention so a selected bus is retained whole.
+    ///
+    /// A bus is a declaration over member nodes and the only way to read one
+    /// is to reassemble the members, so retaining some of them and not others
+    /// publishes a declaration no consumer can answer. Selecting any single
+    /// member therefore retains every member of that bus.
+    ///
+    /// `bus_selected` answers the other half. A deck whose bus members are
+    /// `DATA#3`..`DATA#0` has no node called `DATA`, so `.SAVE DATA` selects
+    /// nothing at all by name; only the declaration says what it meant, and
+    /// the whole point of carrying one is that a consumer may name the bus.
+    fn retain_declared_buses(
+        event_nodes: &mut [bool],
+        node_names: &[String],
+        buses: &[DigitalBusDeclaration],
+        bus_selected: impl Fn(&str) -> bool,
+    ) {
+        if buses.is_empty() {
+            return;
+        }
+        let index_of = canonical_node_index(node_names);
+        for bus in buses {
+            let members: Vec<usize> = bus
+                .members
+                .iter()
+                .filter_map(|member| index_of.get(&canonical_event_name(member)).copied())
+                .collect();
+            let selected = bus_selected(&bus.name)
+                || members
+                    .iter()
+                    .any(|&index| event_nodes.get(index).copied().unwrap_or(false));
+            if !selected {
+                continue;
+            }
+            for index in members {
+                if let Some(retained) = event_nodes.get_mut(index) {
+                    *retained = true;
+                }
+            }
         }
     }
 
@@ -1722,6 +1821,7 @@ impl Engine {
             digital_trace_indices,
             real_trace_indices,
             retained_event_nodes,
+            sample_buses,
         } = events;
         if record_traces {
             circuit.fill_xspice_digital_snapshot(digital_snapshot);
@@ -1743,8 +1843,11 @@ impl Engine {
                 ));
         }
         self.ensure_transient_result_limits(result, retained_result_values)?;
-        abort
-            .observe_transient_sample(result.observable_sample(digital_event_codes, real_snapshot));
+        abort.observe_transient_sample(result.observable_sample(
+            digital_event_codes,
+            sample_buses,
+            real_snapshot,
+        ));
         Ok(retained_result_values)
     }
 
@@ -3393,6 +3496,7 @@ impl Engine {
                 node_names: Vec::new(),
                 branch_names: Vec::new(),
                 digital_traces: Vec::new(),
+                digital_buses: Vec::new(),
                 real_traces: Vec::new(),
                 device_op_traces: Vec::new(),
                 store_traces: Vec::new(),
@@ -4171,6 +4275,17 @@ impl Engine {
         } else {
             None
         };
+        // The digital buses this run declares over its own event nodes. It is
+        // empty on every deck today: the one boundary that could declare a bus
+        // is a Verilog-AMS module's vector discrete port, and the builder
+        // refuses that port before a run starts. It is materialized here all
+        // the same because three things have to agree about it inside one run
+        // — the retention plan below, the result the run publishes, and the
+        // live sample hook — and one producer is what keeps them from drifting
+        // apart when that boundary opens.
+        let digital_buses: Vec<DigitalBusDeclaration> = Vec::new();
+        let sample_buses = transient_sample_buses(&digital_buses, &node_names)
+            .map_err(SimulationError::Circuit)?;
         let capture_plan = TransientCapturePlan::compile(
             netlist,
             &node_names,
@@ -4178,6 +4293,7 @@ impl Engine {
             retain_xyce_voltage_source_currents,
             &circuit.voltage_sources.names,
             external_wildcard_nodes.as_ref(),
+            &digital_buses,
         );
         let trace_capacity = self.transient_initial_trace_capacity(
             (tstop - resume_time).max(0.0),
@@ -4277,6 +4393,7 @@ impl Engine {
             node_names,
             branch_names,
             digital_traces: Vec::new(),
+            digital_buses,
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces,
@@ -4313,9 +4430,11 @@ impl Engine {
         }
         let mut retained_result_values = Self::transient_result_value_count(&result);
         self.ensure_transient_result_limits(&result, retained_result_values)?;
-        abort.observe_transient_sample(
-            result.observable_sample(&digital_event_codes, &real_snapshot),
-        );
+        abort.observe_transient_sample(result.observable_sample(
+            &digital_event_codes,
+            &sample_buses,
+            &real_snapshot,
+        ));
         let mut t = resume_time;
         let force_accept_protected_nodes = circuit.force_accept_protected_nodes();
         let mut voltage_lte_excluded_nodes = circuit.xspice_transient_voltage_lte_excluded_nodes();
@@ -8578,6 +8697,7 @@ impl Engine {
                             digital_trace_indices: &mut digital_trace_indices,
                             real_trace_indices: &mut real_trace_indices,
                             retained_event_nodes: &capture_plan.event_nodes,
+                            sample_buses: &sample_buses,
                         },
                         retained_result_values,
                         abort,
@@ -9102,6 +9222,7 @@ impl Engine {
                     digital_trace_indices: &mut digital_trace_indices,
                     real_trace_indices: &mut real_trace_indices,
                     retained_event_nodes: &capture_plan.event_nodes,
+                    sample_buses: &sample_buses,
                 },
                 retained_result_values,
                 abort,
@@ -9990,6 +10111,7 @@ fn compress_transient_result(
                 .map(|channel| channel.retained(&indices))
                 .collect(),
             digital_traces: result.digital_traces.clone(),
+            digital_buses: result.digital_buses.clone(),
             real_traces: result.real_traces.clone(),
             post_results,
             identity,
@@ -12597,6 +12719,7 @@ D1 D 0 DMOD
             node_names: vec!["out".to_string()],
             branch_names: vec!["VINPUT".to_string()],
             digital_traces: Vec::new(),
+            digital_buses: Vec::new(),
             real_traces: Vec::new(),
             device_op_traces: vec![crate::engine::TransientDeviceOpTrace {
                 device_name: "M1".to_string(),
@@ -12741,6 +12864,7 @@ D1 D 0 DMOD
             node_names: vec!["pulse".to_string()],
             branch_names: vec!["VRING".to_string()],
             digital_traces: Vec::new(),
+            digital_buses: Vec::new(),
             real_traces: Vec::new(),
             device_op_traces: vec![crate::engine::TransientDeviceOpTrace {
                 device_name: "MSTEP".to_string(),
@@ -12879,6 +13003,7 @@ D1 D 0 DMOD
             node_names: vec!["out".to_string()],
             branch_names: Vec::new(),
             digital_traces: Vec::new(),
+            digital_buses: Vec::new(),
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
@@ -12909,6 +13034,7 @@ D1 D 0 DMOD
             node_names: vec!["out".to_string()],
             branch_names: Vec::new(),
             digital_traces: Vec::new(),
+            digital_buses: Vec::new(),
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
@@ -12939,6 +13065,7 @@ D1 D 0 DMOD
             node_names: vec!["out".to_string()],
             branch_names: Vec::new(),
             digital_traces: Vec::new(),
+            digital_buses: Vec::new(),
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
@@ -12987,6 +13114,7 @@ D1 D 0 DMOD
             node_names: vec!["out".to_string()],
             branch_names: Vec::new(),
             digital_traces: Vec::new(),
+            digital_buses: Vec::new(),
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
@@ -13123,6 +13251,7 @@ D1 D 0 DMOD
             node_names: vec!["out".to_string()],
             branch_names: Vec::new(),
             digital_traces: Vec::new(),
+            digital_buses: Vec::new(),
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
@@ -13170,6 +13299,7 @@ D1 D 0 DMOD
             node_names: vec!["out".to_string()],
             branch_names: Vec::new(),
             digital_traces: Vec::new(),
+            digital_buses: Vec::new(),
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
@@ -14617,5 +14747,96 @@ D1 D 0 DMOD
         {
             assert_eq!(resumed, &uninterrupted[seam..]);
         }
+    }
+}
+
+#[cfg(test)]
+mod bus_retention_tests {
+    use super::*;
+    use crate::engine::DigitalBusSource;
+
+    fn node_names() -> Vec<String> {
+        ["DATA#3", "DATA#2", "DATA#1", "DATA#0", "clk"]
+            .iter()
+            .map(|name| (*name).to_string())
+            .collect()
+    }
+
+    fn data_bus() -> DigitalBusDeclaration {
+        DigitalBusDeclaration::new(
+            "DATA",
+            3,
+            0,
+            ["DATA#3", "DATA#2", "DATA#1", "DATA#0"]
+                .iter()
+                .map(|name| (*name).to_string())
+                .collect(),
+            DigitalBusSource::Schematic,
+        )
+        .expect("the fixture bus is well formed")
+    }
+
+    #[test]
+    fn selecting_one_member_retains_every_member_of_its_bus() {
+        let names = node_names();
+        // `.SAVE DATA#1` names one conductor; the declaration widens it.
+        let mut retained = vec![false, false, true, false, false];
+        TransientCapturePlan::retain_declared_buses(&mut retained, &names, &[data_bus()], |_| {
+            false
+        });
+        assert_eq!(retained, vec![true, true, true, true, false]);
+    }
+
+    #[test]
+    fn selecting_the_bus_name_retains_every_member_although_it_names_no_node() {
+        let names = node_names();
+        let mut retained = vec![false; names.len()];
+        TransientCapturePlan::retain_declared_buses(&mut retained, &names, &[data_bus()], |bus| {
+            bus == "DATA"
+        });
+        assert_eq!(
+            retained,
+            vec![true, true, true, true, false],
+            "no node is called DATA, so only the declaration can answer .SAVE DATA"
+        );
+    }
+
+    #[test]
+    fn an_unselected_bus_retains_nothing_and_a_non_member_is_untouched() {
+        let names = node_names();
+        // `.SAVE clk` selects a node that belongs to no bus.
+        let mut retained = vec![false, false, false, false, true];
+        TransientCapturePlan::retain_declared_buses(&mut retained, &names, &[data_bus()], |_| {
+            false
+        });
+        assert_eq!(retained, vec![false, false, false, false, true]);
+    }
+
+    #[test]
+    fn a_declaration_naming_a_node_the_circuit_does_not_have_is_refused_for_the_hook() {
+        let names = node_names();
+        assert_eq!(
+            transient_sample_buses(&[data_bus()], &names),
+            Ok(vec![TransientDigitalBus {
+                name: "DATA".to_string(),
+                msb: 3,
+                lsb: 0,
+                members: vec![1, 2, 3, 4],
+            }]),
+            "the hook keys by node id, one-based, in declaration order"
+        );
+
+        let ghost = DigitalBusDeclaration::new(
+            "GHOST",
+            1,
+            0,
+            vec!["nowhere#1".to_string(), "nowhere#0".to_string()],
+            DigitalBusSource::Engine,
+        )
+        .expect("the fixture is well formed as a declaration");
+        let error = transient_sample_buses(&[ghost], &names)
+            .expect_err("a bus the hook cannot key must not be published");
+        assert!(error.contains("GHOST"), "{error}");
+        assert!(error.contains("nowhere#1"), "{error}");
     }
 }

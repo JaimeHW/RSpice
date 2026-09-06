@@ -75,6 +75,34 @@ use std::sync::atomic::{AtomicBool, Ordering};
 #[repr(transparent)]
 pub struct DigitalEventCode(pub u8);
 
+/// One digital bus, as the live sample hook publishes it.
+///
+/// A bus records nothing of its own: it says which of the nodes in
+/// `digital_values` belong together, in which order. The members are
+/// [`crate::NodeId`]s rather than names for the same reason `digital_values`
+/// is keyed by one — this module is a layer-0 leaf, the ids are what the
+/// sample already carries, and `node_names[node_id - 1]` resolves either.
+///
+/// `members` is in *declaration* order: the declared MSB first, the declared
+/// LSB last, whichever way `msb`/`lsb` run. Reading the bus at the reported
+/// time means taking each member's value out of `digital_values` in that
+/// order; a member absent from `digital_values` has not been observed yet.
+///
+/// The bounds are `i64` because a declared range may run either way and may be
+/// negative. This type carries no rendering: a consumer that wants
+/// `name[msb:lsb]` builds it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransientDigitalBus {
+    /// Bus name, without any range suffix.
+    pub name: String,
+    /// Declared most significant index.
+    pub msb: i64,
+    /// Declared least significant index.
+    pub lsb: i64,
+    /// Member node ids in declaration order, declared MSB first.
+    pub members: Vec<crate::NodeId>,
+}
+
 /// One accepted transient sample, borrowed from the analysis result.
 ///
 /// A transient result is stored column-major: `time` gains one entry per
@@ -122,6 +150,20 @@ pub struct TransientSample<'a> {
     /// retention: a node that `.SAVE` excluded from `digital_traces` is still
     /// reported here. A consumer that wants trace parity filters by name.
     pub digital_values: &'a [(crate::NodeId, DigitalEventCode)],
+    /// Buses declared over the nodes in `digital_values`, in declaration
+    /// order.
+    ///
+    /// This is run-constant: a bus is a declaration, not a sample, so the same
+    /// table is reported at every accepted point of a run and a consumer that
+    /// reads it once need not read it again. It is not filtered by output
+    /// retention, for the same reason `digital_values` is not.
+    ///
+    /// Empty when the run declares no bus — which today is every run: the only
+    /// boundary that could declare one is a Verilog-AMS module's vector
+    /// discrete port, and the engine refuses that port before a run starts, so
+    /// a bus reaches a result only when a frontend or an imported artifact
+    /// declares it after the fact.
+    pub digital_buses: &'a [TransientDigitalBus],
     /// Committed real-valued event values at this accepted time, sorted by
     /// node id.
     ///
