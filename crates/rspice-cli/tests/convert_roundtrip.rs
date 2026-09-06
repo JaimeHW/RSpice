@@ -574,6 +574,131 @@ fn a_bus_is_selected_by_its_name_its_range_or_any_of_its_bits() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// `--expand-buses` writes the members as scalars and no vector beside them.
+///
+/// This is the shape the command line wrote before a bus could be declared at
+/// all, kept for a reader that cannot take a vector. Nothing about the values
+/// is lost by it — a scalar `$var` carried no strength either — and what it
+/// costs is the declaration, which a dump of N one-bit wires has no place for.
+#[test]
+fn expanding_a_bus_writes_its_members_as_the_scalars_a_dump_had_before() {
+    let dir = test_dir("vcd_bus_expanded");
+    let deck = bus_deck(&dir);
+
+    let expanded = dir.join("run.expanded.vcd");
+    let deck_path = dir.join("deck.sp");
+    std::fs::write(&deck_path, &deck).expect("write deck");
+    rspice(&[
+        "run",
+        deck_path.to_str().unwrap(),
+        "-o",
+        expanded.to_str().unwrap(),
+        "-f",
+        "vcd",
+        "--expand-buses",
+    ]);
+    let expected = std::fs::read_to_string(&expanded).expect("read the expanded dump");
+    assert!(
+        expected.contains("$var wire 1 ! COUNT#1 $end")
+            && expected.contains("$var wire 1 \" COUNT#0 $end"),
+        "each member is its own one-bit wire, under the node name the run recorded: {expected}"
+    );
+    assert!(
+        !expected.contains("wire 2"),
+        "and no vector is written beside them: {expected}"
+    );
+
+    // Every other carrier of the same run expands identically.
+    for (format, name) in [
+        ("raw", "run.raw"),
+        ("ascii", "run.ascii.raw"),
+        ("json", "run.json"),
+    ] {
+        let source = simulate(&dir, &deck, format, name);
+        let converted = dir.join(format!("expanded_{format}.vcd"));
+        convert(&source, &converted, "vcd", &["--expand-buses"]);
+        assert_eq!(
+            std::fs::read_to_string(&converted).expect("read the expanded dump"),
+            expected,
+            "the {format} artifact expanded differently"
+        );
+    }
+
+    // Expanding a dump that already carries the vector splits it into VCD's
+    // own bit-select names, because the dump never carried the deck's.
+    let published = simulate(&dir, &deck, "vcd", "run.vcd");
+    let split = dir.join("expanded_vcd.vcd");
+    convert(&published, &split, "vcd", &["--expand-buses"]);
+    let text = std::fs::read_to_string(&split).expect("read the split dump");
+    assert!(
+        text.contains("$var wire 1 ! x1.count[1] $end")
+            && text.contains("$var wire 1 \" x1.count[0] $end")
+            && !text.contains("wire 2"),
+        "a vector read back expands to its own bit-selects: {text}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `--expand-buses` is about the VCD grammar, so every other format refuses it.
+///
+/// A table already writes each member as its own `D(node)` column, so
+/// accepting the flag there would mean accepting it as a no-op — which is how
+/// a caller comes to believe a flag did something.
+#[test]
+fn expanding_buses_is_refused_by_name_for_any_output_that_is_not_a_dump() {
+    let dir = test_dir("vcd_bus_expand_refusal");
+    let deck = bus_deck(&dir);
+    let raw = simulate(&dir, &deck, "raw", "run.raw");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args([
+            "--quiet",
+            "convert",
+            raw.to_str().unwrap(),
+            dir.join("nope.csv").to_str().unwrap(),
+            "--to",
+            "csv",
+            "--expand-buses",
+        ])
+        .output()
+        .expect("run rspice");
+    assert!(!output.status.success(), "csv has no vector to expand");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--expand-buses") && stderr.contains("csv"),
+        "the refusal must name the flag and the format: {stderr}"
+    );
+
+    // And on the run side, before the deck is even simulated.
+    let deck_path = dir.join("deck.sp");
+    std::fs::write(&deck_path, &deck).expect("write deck");
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args([
+            "--quiet",
+            "run",
+            deck_path.to_str().unwrap(),
+            "-o",
+            dir.join("nope2.csv").to_str().unwrap(),
+            "-f",
+            "csv",
+            "--expand-buses",
+        ])
+        .output()
+        .expect("run rspice");
+    assert!(!output.status.success(), "csv has no vector to expand");
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("--expand-buses"),
+        "the run side refuses by name too"
+    );
+    assert!(
+        !dir.join("nope2.csv").exists(),
+        "a refused run leaves no artifact behind"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A rawfile's event plots survive the trip out through a dump and back into a
 /// table: the same nodes, the same times, the same levels.
 ///

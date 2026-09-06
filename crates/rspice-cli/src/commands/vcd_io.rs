@@ -82,6 +82,30 @@ pub(crate) fn unsupported_analysis(what: &str) -> CliError {
     }
 }
 
+/// `--expand-buses` asked of an output that is not a dump.
+///
+/// The flag names one thing about the VCD grammar — that a bus can be written
+/// as N one-bit `$var`s instead of one N-bit one — and no other format has a
+/// vector to expand. A table already writes each member as its own `D(node)`
+/// column, so accepting the flag there would have meant accepting it as a
+/// no-op, which is how a caller comes to believe a flag did something.
+pub(crate) fn expand_buses_needs_vcd(flag: &str, format: OutputFormat) -> Result<(), CliError> {
+    if format == OutputFormat::Vcd {
+        return Ok(());
+    }
+    Err(CliError::InvalidArgument {
+        message: format!(
+            "{flag} applies to VCD output only, not {}",
+            format!("{format:?}").to_lowercase()
+        ),
+        suggestion: Some(
+            "a bus is one vector variable only in a dump; every table format already writes each \
+             member as its own D(node) column"
+                .to_string(),
+        ),
+    })
+}
+
 /// An event history that cannot be written as VCD, named with the file it was
 /// being written to.
 fn projection_error(path: &Path, error: &EventProjectionError) -> CliError {
@@ -141,18 +165,37 @@ fn parse_vcd(path: &Path, resource_limits: ResourceLimits) -> Result<VcdDocument
 /// The event timelines are used when the source carries them; otherwise the
 /// grid columns are, and the conversion is lossy in the way
 /// [`grid_event_traces`] documents.
+///
+/// `expand_buses` writes every member of a declared bus as its own one-bit
+/// `$var` and no vector beside them — the shape a dump had before buses
+/// existed, for a reader that cannot take a vector. Nothing is lost by it: a
+/// scalar `$var` carries no strength either, so the members say exactly what
+/// the vector said. What it costs is the declaration itself, which no scalar
+/// dump has a place for.
 pub(crate) fn load_vcd_document(
     path: &Path,
     format: OutputFormat,
     resource_limits: ResourceLimits,
+    expand_buses: bool,
 ) -> Result<VcdDocument, CliError> {
     if format == OutputFormat::Vcd {
-        // Reading and rewriting normalises the file: canonical identifier
-        // codes, one declaration order, the writer's layout.
-        return parse_vcd(path, resource_limits);
+        let document = parse_vcd(path, resource_limits)?;
+        if !expand_buses {
+            // Reading and rewriting normalises the file: canonical identifier
+            // codes, one declaration order, the writer's layout.
+            return Ok(document);
+        }
+        // Expanding is a reshaping rather than a normalisation, so the source
+        // is read back into histories -- a wide `$var` becomes a declaration
+        // and one `name[k]` trace per bit -- and reprojected with no bus
+        // table. That re-declares every variable under this CLI's own scope,
+        // the way converting any other source does.
+        let histories = rspice_core::execution::vcd_event_histories(&document)
+            .map_err(|error| projection_error(path, &error))?;
+        return event_document(path, &histories.digital_traces, &histories.real_traces, &[]);
     }
 
-    if let Some(document) = event_traces_of(path, format, resource_limits)? {
+    if let Some(document) = event_traces_of(path, format, resource_limits, expand_buses)? {
         return Ok(document);
     }
 
@@ -174,6 +217,7 @@ fn event_traces_of(
     path: &Path,
     format: OutputFormat,
     resource_limits: ResourceLimits,
+    expand_buses: bool,
 ) -> Result<Option<VcdDocument>, CliError> {
     let traces = match format {
         OutputFormat::Raw | OutputFormat::RawAscii => {
@@ -194,13 +238,12 @@ fn event_traces_of(
     if traces.digital_traces.is_empty() && traces.real_traces.is_empty() {
         return Ok(None);
     }
-    event_document(
-        path,
-        &traces.digital_traces,
-        &traces.real_traces,
-        &traces.digital_buses,
-    )
-    .map(Some)
+    let declared: &[DigitalBusDeclaration] = if expand_buses {
+        &[]
+    } else {
+        &traces.digital_buses
+    };
+    event_document(path, &traces.digital_traces, &traces.real_traces, declared).map(Some)
 }
 
 /// The event timelines a typed result document carries, when it is a transient.

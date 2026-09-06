@@ -143,6 +143,17 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
 
     crate::abort::install_interrupt_handler();
     validate_run_numeric_args(&args)?;
+    if args.expand_buses {
+        // Refused before the deck is even read: a flag that names the VCD
+        // grammar and was given with `-f csv` is a mistake about what is
+        // being written, and finding that out after the simulation is not
+        // better than finding it out now.
+        let format = match args.format {
+            Some(format) => format,
+            None => parse_format_name(&config.output.format)?,
+        };
+        crate::commands::vcd_io::expand_buses_needs_vcd("--expand-buses", format)?;
+    }
     // Held for the whole cancellable region. Dropping it on any exit path
     // closes the completion latch, so a deadline that expires after the run
     // is already over cannot announce a cancellation that never happened.

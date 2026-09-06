@@ -42,9 +42,17 @@ pub fn execute(
 
     let from_format = args.from.unwrap_or_else(|| detect_format(&args.input));
 
+    if args.expand_buses {
+        vcd_io::expand_buses_needs_vcd("--expand-buses", args.to)?;
+    }
+
     if args.to == OutputFormat::Vcd {
-        let mut document =
-            vcd_io::load_vcd_document(&args.input, from_format, config.resources.limits())?;
+        let mut document = vcd_io::load_vcd_document(
+            &args.input,
+            from_format,
+            config.resources.limits(),
+            args.expand_buses,
+        )?;
         let notes =
             vcd_io::select_and_clip(&mut document, &args.variables, args.start, args.stop)?;
         // Not gated on `--quiet`: the selection is wider than what was asked

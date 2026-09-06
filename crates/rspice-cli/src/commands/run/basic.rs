@@ -1046,7 +1046,14 @@ pub(super) fn run_transient(
                                 &output_path,
                                 &result.digital_traces,
                                 &result.real_traces,
-                                &result.digital_buses,
+                                // `--expand-buses` asks for the members as
+                                // scalars and no vector, which is what an
+                                // empty table means to the projection.
+                                if ctx.args.expand_buses {
+                                    &[]
+                                } else {
+                                    &result.digital_buses
+                                },
                             )?,
                         ))
                     }

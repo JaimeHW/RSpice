@@ -310,6 +310,11 @@ pub struct RunArgs {
     #[arg(long, value_name = "TIME", value_parser = spice_value)]
     pub tran_stop: Option<f64>,
 
+    /// Write each digital bus member as its own one-bit $var instead of one
+    /// vector (--format vcd only), for readers that cannot take vectors
+    #[arg(long)]
+    pub expand_buses: bool,
+
     /// Save the transient integrator state to FILE when the run completes,
     /// for later --resume
     #[arg(long, value_name = "FILE")]
@@ -690,6 +695,11 @@ pub struct ConvertArgs {
     /// Time/frequency range end
     #[arg(long, value_name = "VALUE", value_parser = spice_value)]
     pub stop: Option<f64>,
+
+    /// Write each digital bus member as its own one-bit $var instead of one
+    /// vector (--to vcd only), for readers that cannot take vectors
+    #[arg(long)]
+    pub expand_buses: bool,
 }
 
 /// Arguments for the `compare` subcommand
