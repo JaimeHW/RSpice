@@ -273,7 +273,7 @@ impl CodeGenerator {
 
         // Build IR
         let phase_start = web_time::Instant::now();
-        let ir = if mixed_host_owns_digital {
+        let mut ir = if mixed_host_owns_digital {
             DeviceIR::from_analyzed_mixed_analog_half(module)?
         } else {
             DeviceIR::from_analyzed(module)?
@@ -292,7 +292,7 @@ impl CodeGenerator {
 
         // Generate code from IR
         let phase_start = web_time::Instant::now();
-        let mut model = self.generate_from_ir(&ir)?;
+        let mut model = self.generate_from_ir(&mut ir)?;
         model.source_digest = source_digest;
         if timings {
             eprintln!(
@@ -356,7 +356,19 @@ impl CodeGenerator {
     }
 
     /// Generate from IR
-    fn generate_from_ir(&self, ir: &DeviceIR) -> CompileResult<CompiledModel> {
+    ///
+    /// # Why the IR is taken by `&mut`
+    ///
+    /// The shadow-expanded assignment forest is the largest allocation of the
+    /// whole compile — 122 bytes per node, eighteen million nodes on
+    /// `bsimcmg` — and nothing after the assignment pass reads it. Emitting
+    /// that pass and then *dropping the forest before* the noise pass takes
+    /// the peak from "forest plus two bytecode passes" to "forest plus one",
+    /// which is what lets the largest shipped models compile inside a 32 GB
+    /// box. The generator's emission state ([`EmitContext`], the site maps,
+    /// the per-emission counters) is owned by `self` and by a context built
+    /// before the take, so nothing borrows the forest across the drop.
+    fn generate_from_ir(&self, ir: &mut DeviceIR) -> CompileResult<CompiledModel> {
         let timings = compile_timings_enabled();
         let emit_ctx = EmitContext::from_ir(ir);
         self.lookup_tables.borrow_mut().clear();
@@ -480,14 +492,31 @@ impl CodeGenerator {
         // Generate evaluation steps (executed in order before contributions)
         let phase_start = web_time::Instant::now();
         model.assignment_steps = self.compile_assignment_items(&ir.assignments, &emit_ctx)?;
-        // The noise pass is still a second *emission* of the statements, so its
-        // operators keep their own records exactly as before; an un-shadowed
-        // module just no longer carries a second copy of the forest to emit
-        // them from.
+        // Nothing after this reads the ordinary forest, and it is the compile's
+        // largest allocation: drop it here rather than at the end of the
+        // function so the noise pass never coexists with it.
+        drop(std::mem::take(&mut ir.assignments));
+        // A mirrored noise pass is the ordinary pass. Emitting it a second time
+        // produced the same instructions with a second set of per-emission slot
+        // numbers, which `state_renumbering` then rewrote back onto the first
+        // pass's sites — the two lists are identical in every model that leaves
+        // this compiler. Cloning the first pass's bytecode is that same list for
+        // a quarter of the memory and none of the emission time, and it leaves
+        // the site-keyed families (`laplace`, `zi`, `$table_model`, `absdelay`,
+        // `transition`, `slew`) exactly where they were, because those dedupe by
+        // site and a second emission never allocated from them either. What it
+        // does move is the *raw* per-emission numbering of everything compiled
+        // after this pass: equations and noise sources now start where the
+        // ordinary pass ended rather than where a second emission of it ended.
+        // That shift is uniform across every per-emission family, so the k-th
+        // emission is still the k-th site and the renumbered model — the only
+        // one any runtime addresses — is unchanged.
         model.noise_assignment_steps = if ir.noise_assignments_mirror_ordinary {
-            self.compile_assignment_items(&ir.assignments, &emit_ctx)?
+            model.assignment_steps.clone()
         } else {
-            self.compile_assignment_items(&ir.noise_assignments, &emit_ctx)?
+            let steps = self.compile_assignment_items(&ir.noise_assignments, &emit_ctx)?;
+            drop(std::mem::take(&mut ir.noise_assignments));
+            steps
         };
         if timings {
             eprintln!(
