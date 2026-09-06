@@ -90,6 +90,15 @@ pub struct DigitalConstants {
     /// what `q = WIDTH;` means. `parameter real K = 0.25;` says which domain it
     /// belongs in, and this table holds exactly the parameters that said so.
     pub reals: HashMap<SmolStr, f64>,
+    /// The same declarations whose default folds to an infinity or a NaN, as
+    /// that value.
+    ///
+    /// Kept apart from [`Self::reals`] rather than dropped, and never handed
+    /// to a lowering: the declaration is legal Verilog-AMS and the continuous
+    /// domain accepts it, so a process that names one has to be refused for
+    /// what is actually wrong with it — a real with no discrete-domain form —
+    /// and not told the name was never declared.
+    pub non_finite_reals: HashMap<SmolStr, f64>,
 }
 
 impl DigitalConstants {
@@ -101,6 +110,12 @@ impl DigitalConstants {
     /// The real a name denotes, if it was declared `parameter real`.
     pub fn real(&self, name: &str) -> Option<f64> {
         self.reals.get(name).copied()
+    }
+
+    /// The non-finite value a name folds to, if that is why it denotes no
+    /// discrete-domain real. For diagnostics only.
+    pub fn non_finite_real(&self, name: &str) -> Option<f64> {
+        self.non_finite_reals.get(name).copied()
     }
 }
 
@@ -866,16 +881,27 @@ impl SemanticAnalyzer {
             let Some(value) = self.eval_const_parameter_default(default) else {
                 continue;
             };
-            if !value.is_finite() {
-                continue;
-            }
             // A parameter array is a name with no scalar value at all; folding
             // its first element under the array's own name would answer a
             // question nobody asked.
             if !parameter.dimensions.is_empty() {
                 continue;
             }
-            if parameter.type_is_explicit && parameter.param_type == ParamType::Real {
+            let is_real = parameter.type_is_explicit && parameter.param_type == ParamType::Real;
+            if !value.is_finite() {
+                // Neither table takes it: the discrete domain has no spelling
+                // for an infinity or a NaN, and folding one into a process
+                // would put a value there that no discrete operation defines.
+                // It is remembered under its own name so a process that reads
+                // it is refused for the value rather than for the name.
+                if is_real {
+                    constants
+                        .non_finite_reals
+                        .insert(parameter.name.clone(), value);
+                }
+                continue;
+            }
+            if is_real {
                 constants.reals.insert(parameter.name.clone(), value);
             }
             if value.fract() == 0.0 {

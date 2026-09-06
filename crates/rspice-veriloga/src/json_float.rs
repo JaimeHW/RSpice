@@ -1107,9 +1107,11 @@ mod tests {
         }
 
         // 1. A `parameter real` whose default folds to an infinity never enters
-        //    the digital constant table at all: `digital_constants` keeps only
-        //    finite defaults, so the name is not a discrete-domain identifier
-        //    and the module is refused rather than lowered.
+        //    the digital constant table: `digital_constants` admits only
+        //    finite defaults, so the module is refused rather than lowered.
+        //    The declaration itself is legal — the continuous domain keeps it
+        //    — so the refusal names the parameter and the value it folded to
+        //    rather than claiming the name was never declared.
         let refused = compile(
             r#"
 module rspice_digital_parameter_probe(p, n, clk, q);
@@ -1123,10 +1125,18 @@ module rspice_digital_parameter_probe(p, n, clk, q);
 endmodule
 "#,
         )
-        .expect_err("an infinite real parameter is invisible to the discrete domain");
+        .expect_err("an infinite real parameter has no discrete-domain form");
         assert!(
-            refused.contains("`big` is not a discrete-domain signal"),
-            "{refused}"
+            refused.contains("`big` folds to inf"),
+            "the refusal must name the parameter and the value it folded to: {refused}"
+        );
+        assert!(
+            refused.contains("a non-finite real has no discrete-domain form"),
+            "the refusal must say what is wrong with the value: {refused}"
+        );
+        assert!(
+            !refused.contains("is not a discrete-domain signal"),
+            "the declaration is legal; the name is not what is wrong: {refused}"
         );
 
         // 2. A literal too large for a `f64` is refused by the number parser,

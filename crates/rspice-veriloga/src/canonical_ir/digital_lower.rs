@@ -2136,13 +2136,37 @@ impl ProcessLowerer<'_> {
                     // in the other value domain.
                     None => match self.constants.real(&identifier.name) {
                         Some(value) => self.real_constant(value),
-                        None => {
-                            self.error(
-                                format!("`{}` is not a discrete-domain signal", identifier.name),
-                                identifier.span,
-                            );
-                            self.real_constant(0.0)
-                        }
+                        // A `parameter real` whose default folds to an
+                        // infinity or a NaN is a legal declaration that the
+                        // continuous domain accepts, and it is only here that
+                        // it has nowhere to go. Saying it is not a signal
+                        // would point at the declaration, which is fine; the
+                        // refusal names the value instead.
+                        None => match self.constants.non_finite_real(&identifier.name) {
+                            Some(value) => {
+                                self.error(
+                                    format!(
+                                        "`{}` folds to {value}, and a non-finite real has no \
+                                         discrete-domain form; section 12.2 fixes a parameter's \
+                                         value at elaboration, and no discrete-domain operation \
+                                         defines one over an infinity or a NaN",
+                                        identifier.name
+                                    ),
+                                    identifier.span,
+                                );
+                                self.real_constant(0.0)
+                            }
+                            None => {
+                                self.error(
+                                    format!(
+                                        "`{}` is not a discrete-domain signal",
+                                        identifier.name
+                                    ),
+                                    identifier.span,
+                                );
+                                self.real_constant(0.0)
+                            }
+                        },
                     },
                 }
             }
