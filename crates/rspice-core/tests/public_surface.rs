@@ -551,7 +551,26 @@ use rspice_core::analysis::harmonic_balance::{
 // decoder a frontend must otherwise restate is not internal machinery. A second
 // copy of the table is a second definition of what a code means, and the only
 // way to keep two definitions agreeing is to have one.
-// 2026-09-06, +2 deliberate (4,978 -> 4,980): the one spelling of a bus
+//
+// 2026-09-06, +19 deliberate (4,978 -> 4,997): the HDF5 writer, moved out of
+// `rspice-cli` into `io/hdf5.rs` so that the CLI, the GUI and the browser all
+// publish one layout instead of two encoders agreeing by hand. Every item is
+// named by both frontends:
+// - 2 constants, `HDF5_SCHEMA_VERSION` and `HDF5_SIMULATOR`, the two root
+//   attributes a reader identifies an RSpice document by.
+// - 6 for the document: `Hdf5Document`, `Hdf5Group`, `Hdf5Attribute`,
+//   `Hdf5Values`, and `Hdf5Document::{new, set_attr}`. The CLI builds its
+//   `.DISTO` and `.FFT` groups out of these, because those two families are
+//   its own semantics but must not be a second serializer.
+// - 4 for a group's contents: `Hdf5Group::{new, set_attr, set_real_dataset,
+//   set_integer_dataset}`.
+// - 5 for the layout itself: `Hdf5Table`, `Hdf5Coordinate`, `Hdf5Column`,
+//   `Hdf5Document::add_table`, and `Hdf5Error`. `Hdf5Table::to_group` stays
+//   private: `add_table` is the only way in, so the validation cannot be
+//   stepped around.
+// - 1 for `write_hdf5`, the one entry point that serializes.
+// - 1 grouped re-export statement in `io.rs`.
+// 2026-09-06, +2 deliberate (4,997 -> 4,999): the one spelling of a bus
 // member as a VCD bit, and the character a bit shows as.
 //
 // - 1 in `execution/event_projection.rs`: `event_code_to_vcd_bit`, which turns
@@ -566,7 +585,7 @@ use rspice_core::analysis::harmonic_balance::{
 //   assemble a whole word one character at a time, and the only public way to
 //   get that character was `Display`, which allocates a `String` per bit — on
 //   the exact path a wide bus makes hot.
-// 2026-09-06, +2 deliberate (4,980 -> 4,982): the ceiling on how much of a
+// 2026-09-06, +2 deliberate (4,999 -> 5,001): the ceiling on how much of a
 // bus one reassembly materializes, and the refusal that names it.
 //
 // - 2 in `execution/event_bus.rs`: `MAX_BUS_EVENT_CELLS` and
@@ -578,7 +597,7 @@ use rspice_core::analysis::harmonic_balance::{
 //   plots, the Python accessor and the browser handle refuse the same document
 //   for the same reason with the same numbers; that makes both items part of
 //   the signature every one of those callers already names.
-// 2026-09-06, +1 deliberate (4,982 -> 4,983): `split_bus_notation` in
+// 2026-09-06, +1 deliberate (5,001 -> 5,002): `split_bus_notation` in
 // `execution/event_bus.rs`, raised from `pub(crate)`.
 //
 // Core writes a bus reference in exactly two places a single field has to hold
@@ -589,7 +608,7 @@ use rspice_core::analysis::harmonic_balance::{
 // `data [7:0]` names the vector variable a dump declares, and the bare name is
 // not one of the variable's own spellings. A second parser in the CLI would be
 // a second grammar, and the two would agree until the day they did not.
-// 2026-09-06, +1 deliberate (4,983 -> 4,984): `BusEventTable` in
+// 2026-09-06, +1 deliberate (5,002 -> 5,003): `BusEventTable` in
 // `execution/event_bus.rs`, the reassembled timeline `bus_events` returns.
 //
 // It is named rather than spelled inline because `clippy::type_complexity`
@@ -598,7 +617,7 @@ use rspice_core::analysis::harmonic_balance::{
 // callers are `bus_events` itself and every consumer that binds the result:
 // the VCD projection, the rawfile bus plots, `rspice-python`'s accessor and
 // `rspice-wasm`'s handle.
-const MAX_PUBLIC_ITEMS: usize = 4984;
+const MAX_PUBLIC_ITEMS: usize = 5003;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
