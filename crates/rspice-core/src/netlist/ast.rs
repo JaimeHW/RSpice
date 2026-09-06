@@ -2408,7 +2408,7 @@ pub struct PacCard {
 
 impl PacCard {
     /// Lowest sideband index when the card does not say.
-    pub const DEFAULT_SIDEBAND_MIN: i32 = -5;
+    pub(crate) const DEFAULT_SIDEBAND_MIN: i32 = -5;
     /// Highest sideband index when the card does not say.
     pub(crate) const DEFAULT_SIDEBAND_MAX: i32 = 5;
     /// Relative tolerance when the card does not say.

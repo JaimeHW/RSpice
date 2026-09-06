@@ -141,7 +141,7 @@ pub(super) fn pac_config(request: PacRequest<'_>) -> PyResult<PacConfig> {
     };
     let sideband_min = request
         .sideband_min
-        .unwrap_or(rspice_core::netlist::PacCard::DEFAULT_SIDEBAND_MIN);
+        .unwrap_or_else(|| PacConfig::default().sideband_min);
     let mut config = PacConfig::new()
         .with_fundamental(request.fundamental_frequency)
         .with_sweep(
