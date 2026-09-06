@@ -28,7 +28,9 @@ point, transient, small-signal AC, noise, and distortion analyses, plus RF
 steady-state coverage through harmonic balance, periodic steady state, and phase
 noise. Its device library spans the classic SPICE elements, native BSIM3, BSIM4,
 BSIM-SOI, VBIC, and EKV compact models, and 43 CMC models generated from their
-Verilog-A sources.
+Verilog-A sources. Mixed-signal decks are first-class: RSpice has both halves of
+Verilog-AMS, so digital and real-number modules simulate alongside the analog
+solve with connect modules inserted automatically at discipline boundaries.
 
 RSpice has one engine behind every interface. The command line, the desktop IDE,
 the Python bindings, and the WebAssembly build are all the same `rspice-core`
@@ -73,7 +75,8 @@ $ target/release/rspice run rc_lowpass.sp --meas
 Simulation complete in 0.003s.
 ```
 
-Write results to a file instead — SPICE raw, ASCII raw, CSV, TSV, JSON, or HDF5:
+Write results to a file instead — SPICE raw, ASCII raw, CSV, TSV, JSON, HDF5, or
+VCD for digital and mixed-signal runs:
 
 ```bash
 target/release/rspice run rc_lowpass.sp -o rc.h5 --format hdf5
@@ -132,7 +135,7 @@ unsupported parameters.
 | Transmission lines | Ideal, lossy (LTRA, TXL), coupled multi-conductor (CPL) |
 | Sources | Independent V/I with `PULSE`, `SIN`, `EXP`, `PWL`, `PAT`, `SFFM`, `AM`, and `TRNOISE` white + 1/f waveforms; E/F/G/H controlled sources; B behavioral sources; PWL-from-file sources |
 | Switches & macromodels | Voltage- and current-controlled switches, op-amp macromodel |
-| Mixed-signal | XSPICE-style analog and digital code models, tri-state drivers, A/D–D/A bridges |
+| Mixed-signal | Verilog-AMS digital and real-number (`wreal`) modules with automatic connect-module insertion; XSPICE-style analog and digital code models, tri-state drivers, A/D–D/A bridges |
 | Verilog-A | Generated CMC devices and externally compiled modules — [below](#generated-verilog-a-devices) |
 
 Unlisted `M` levels fail closed rather than falling through to the simplified
@@ -203,7 +206,7 @@ Built for scripted runs and CI. The exit status is the verification contract.
 | `rspice info` | Print parsed netlist information |
 | `rspice models` | List the shipped SPICE model packs and look up parts in them |
 | `rspice compare` | Compare output against a golden result |
-| `rspice convert` | Convert between raw, ASCII raw, CSV, TSV, JSON, and HDF5 |
+| `rspice convert` | Convert between raw, ASCII raw, CSV, TSV, JSON, HDF5, and VCD |
 | `rspice health` | Probe process liveness or parser-to-solver readiness |
 | `rspice compile-va` | Compile a Verilog-A model |
 | `rspice completions` | Generate shell completion scripts |
@@ -299,7 +302,7 @@ API details and the feature-flag matrix: [crates/rspice-core/README.md](crates/r
 runs to JavaScript through `wasm-bindgen`, returning JSON-serializable snapshots
 under configurable resource limits.
 
-### Verilog-A
+### Verilog-A and Verilog-AMS
 
 `rspice-veriloga` compiles behavioral modules through parser, semantic analysis,
 canonical IR, and either a bytecode VM or the RSpice-owned native JIT (x86-64
@@ -309,12 +312,28 @@ interpreter. The same crate owns the Rust backend that produces the generated
 built-in devices above. External models compile standalone with
 `rspice compile-va`; examples live in [models/veriloga/](models/veriloga/).
 
+Beyond the analog half, RSpice has the discrete half of Verilog-AMS: the IEEE
+1364-2005 digital subset with four-state (`0 1 x z`) logic, gate primitives,
+blocking and non-blocking assignment, vectors, and module hierarchy, driven by
+an event wheel alongside the analog solve. Real-number modeling has `wreal` nets
+and the four resolved forms. Mixed-discipline boundaries follow Verilog-AMS LRM
+2.4 clause 7 — discipline resolution, `connect_mode` auto-insertion, `resolveto`
+with `exclude`, and `merged`/`split` segmentation — with the detail resolution
+mode of Annex F.2.2 refused by name rather than approximated. `.vams` modules
+load through the same discovery path as `.va` ones.
+
+Digital and mixed runs export to VCD with `rspice run --format vcd`, one wire
+per digital node and one N-bit vector per declared bus (`--expand-buses` writes
+member scalars for readers that cannot take vectors).
+
 ## Validation
 
 Correctness is measured at four levels: unit tests per crate, 184 integration
 test files in `rspice-core` alone, oracle-replay fixtures for history-coupled
 device runtimes, and the corpus harnesses under [tests/](tests/) — ngspice and
-Xyce alongside GF180MCU, ISCAS85, Verilog-AMS, and paranoia suites.
+Xyce alongside GF180MCU, ISCAS85, Verilog-AMS, and paranoia suites. The digital
+Verilog corpus is checked against Icarus Verilog and Verilator, two independent
+implementations sharing no code with RSpice or with each other.
 
 The **ngspice harness** runs the vendored `tests/ngspice/` suite deck by deck,
 comparing row by row against ngspice reference output at 2% relative tolerance
