@@ -900,12 +900,32 @@ impl Engine {
             })
     }
 
+    /// Whether a grid point is far enough above the run's start to be a target
+    /// of its own.
+    ///
+    /// The scale-relative margin is the one the normalizer already applies
+    /// between two grid points: points this close describe the same instant,
+    /// and the caller supplied two spellings of it. A resume makes that
+    /// reachable without any duplicate in the grid, because the checkpoint is
+    /// cut at the literal stop time while a grid is built from an expression —
+    /// `1000.0 * 1e-9` is one ulp above `1.0e-6`. An absolute `1e-30` floor
+    /// cannot see that: at microsecond magnitudes it is eight orders below one
+    /// ulp, so `resume_time + 1e-30 == resume_time` and the neighbour survives
+    /// as the resumed run's first target, one ulp away.
+    #[inline]
+    fn locked_grid_point_is_after(point: Value, resume_time: Value) -> bool {
+        let scale = point.abs().max(resume_time.abs()).max(Value::MIN_POSITIVE);
+        point - resume_time > 64.0 * Value::EPSILON * scale
+    }
+
     #[cfg(test)]
     fn normalized_locked_time_grid(grid: &[Value], resume_time: Value) -> Vec<Value> {
         let mut points: Vec<Value> = grid
             .iter()
             .copied()
-            .filter(|&point| point.is_finite() && point > resume_time + 1e-30)
+            .filter(|&point| {
+                point.is_finite() && Self::locked_grid_point_is_after(point, resume_time)
+            })
             .collect();
         points.sort_by(|a, b| a.total_cmp(b));
         points.dedup_by(|a, b| {
@@ -925,7 +945,9 @@ impl Engine {
             .iter()
             .copied()
             .enumerate()
-            .filter(|(_, point)| point.is_finite() && *point > resume_time + 1e-30)
+            .filter(|(_, point)| {
+                point.is_finite() && Self::locked_grid_point_is_after(*point, resume_time)
+            })
             .collect::<Vec<_>>();
         points.sort_by(|(_, left), (_, right)| left.total_cmp(right));
 

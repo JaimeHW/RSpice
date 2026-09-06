@@ -1620,3 +1620,165 @@ endmodule
 
     let _ = std::fs::remove_file(&model);
 }
+
+// ---------------------------------------------------------------------------
+// A locked grid across a checkpoint seam.
+//
+// The checkpoint is cut at the literal stop time, and a grid is built from an
+// expression: `1000.0 * 1e-9` is one ulp above `1.0e-6`, and an adaptive run's
+// accepted times straddle it. The seam is therefore off the grid in both of the
+// constructions a caller reaches for, which is where the resumed run's first
+// interval stops being a step and starts being a rounding artifact.
+// ---------------------------------------------------------------------------
+
+/// The worst deviation of a resumed segment from the trajectory the
+/// unsegmented run of the same configuration followed.
+fn worst_resumed_deviation(
+    continuous: &rspice_core::engine::TransientResult,
+    resumed: &rspice_core::engine::TransientResult,
+) -> f64 {
+    let continuous_out = out_index(continuous);
+    let resumed_out = out_index(resumed);
+    resumed
+        .time
+        .iter()
+        .enumerate()
+        .map(|(index, &time)| {
+            let expected =
+                interpolate(&continuous.time, &continuous.voltages[continuous_out], time);
+            (resumed.voltages[resumed_out][index] - expected).abs()
+        })
+        .fold(0.0_f64, f64::max)
+}
+
+/// ngspice derives `delmin` from the maximum step as `1e-11 * max_step`, and
+/// that is the hard minimum the controller applies to every step it selects
+/// for itself. At this suite's nanosecond ceiling it is 1e-20 s.
+const NANOSECOND_CEILING_HARD_MIN_DT: f64 = 1.0e-9 * 1.0e-11;
+
+#[test]
+fn locked_grid_resume_folds_a_seam_adjacent_target_into_the_seam() {
+    const STEP: f64 = 1.0e-9;
+    const SPLIT: f64 = 1.0e-6;
+    const STOP: f64 = 2.0e-6;
+
+    let grid: Vec<f64> = (0..=2000).map(|index| index as f64 * STEP).collect();
+    assert_ne!(
+        grid[1000].to_bits(),
+        SPLIT.to_bits(),
+        "the premise: this grid's own 1 us point is one ulp above the literal stop time"
+    );
+
+    let netlist = Netlist::parse(DECK).expect("checkpoint bench parses");
+    let engine = Engine::new(SimulationConfig {
+        locked_time_grid: Some(Arc::new(grid.clone())),
+        ..Default::default()
+    });
+
+    let (_, checkpoint) = engine
+        .run_tran_checkpointed(&netlist, SPLIT, STEP)
+        .expect("locked first segment completes");
+    assert_eq!(
+        checkpoint.time.to_bits(),
+        SPLIT.to_bits(),
+        "the seam is the literal stop time, which is what puts it off this grid"
+    );
+    let (resumed, _) = engine
+        .run_tran_resume(&netlist, &checkpoint, STOP, STEP)
+        .expect("locked resume completes");
+
+    // The seam plus the thousand grid points above it -- not the thousand and
+    // one that counting a one-ulp neighbour as a target of its own produces.
+    assert_eq!(
+        resumed.time.len(),
+        1001,
+        "the resumed run is the seam plus every grid point above it"
+    );
+    assert_eq!(
+        resumed.time[1].to_bits(),
+        grid[1001].to_bits(),
+        "the first target after the seam is the next real grid point"
+    );
+    assert!(
+        resumed.step_sizes[1] > 0.5e-9,
+        "the first resumed interval is a step, not a rounding artifact: {}",
+        resumed.step_sizes[1]
+    );
+    for (index, &step) in resumed.step_sizes.iter().enumerate().skip(1) {
+        assert!(
+            step >= NANOSECOND_CEILING_HARD_MIN_DT,
+            "accepted step {index} of {step} is below the solver hard minimum {NANOSECOND_CEILING_HARD_MIN_DT}"
+        );
+    }
+}
+
+#[cfg(feature = "veriloga")]
+#[test]
+fn runtime_veriloga_locked_grid_resume_holds_the_unsegmented_trajectory() {
+    use std::io::Write;
+
+    const STEP: f64 = 1.0e-9;
+    const SPLIT: f64 = 1.0e-6;
+    const STOP: f64 = 2.0e-6;
+
+    let mut model = std::env::temp_dir();
+    model.push(format!("rspice_locked_grid_seam_{}.va", std::process::id()));
+    let mut file = std::fs::File::create(&model).expect("create model file");
+    file.write_all(
+        br#"
+`include "disciplines.vams"
+module va_partial_liveness(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real cap = 1.0e-9;
+    parameter real res = 1.0e3;
+    real stored, unread;
+    analog begin
+        stored = V(p, n) / res;
+        unread = stored * stored + 1.0;
+        I(p, n) <+ stored + ddt(cap * V(p, n));
+    end
+endmodule
+"#,
+    )
+    .expect("write model");
+
+    let deck = format!(
+        "* runtime Verilog-A under a locked grid across a checkpoint seam\n\
+         vin in 0 sin(0 1 1meg)\n\
+         rsrc in out 1k\n\
+         x1 out 0 va_partial_liveness\n\
+         .va \"{}\" va_partial_liveness\n\
+         .tran 1n 2u\n\
+         .end\n",
+        model.display().to_string().replace('\\', "/")
+    );
+    let netlist = Netlist::parse(&deck).expect("parse locked-grid seam deck");
+    let engine = Engine::new(SimulationConfig {
+        locked_time_grid: Some(Arc::new(
+            (0..=2000).map(|index| index as f64 * STEP).collect(),
+        )),
+        ..Default::default()
+    });
+
+    let continuous = engine
+        .run_tran(&netlist, STOP, STEP)
+        .expect("unsegmented locked run completes");
+    let (_, checkpoint) = engine
+        .run_tran_checkpointed(&netlist, SPLIT, STEP)
+        .expect("locked first segment completes");
+    let (resumed, _) = engine
+        .run_tran_resume(&netlist, &checkpoint, STOP, STEP)
+        .expect("locked resume completes");
+
+    // A `ddt` term dropped for one step is not a small error. The fixture is
+    // then a bare 1 kohm at a source zero crossing, so `v(out)` restarts from
+    // zero and the whole segment is displaced by an eighth of a volt.
+    let worst = worst_resumed_deviation(&continuous, &resumed);
+    assert!(
+        worst < 1.0e-5,
+        "the resumed segment must stay on the unsegmented trajectory (worst |dv| = {worst:.6e})"
+    );
+
+    let _ = std::fs::remove_file(&model);
+}
