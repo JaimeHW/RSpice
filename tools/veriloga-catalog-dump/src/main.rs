@@ -58,27 +58,69 @@ fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// Nouns the README counts when it says how large the catalog is.
+const COUNTED_NOUNS: &[&str] = &["model", "models", "device", "devices"];
+
+/// How many words may sit between the number and the noun it counts.
+///
+/// Three covers the longest phrasing the README uses today, "43 generated
+/// Verilog-A models"; the fourth is slack for a rewrite.
+const COUNTED_NOUN_LOOKAHEAD: usize = 4;
+
+/// Every number the README states as a count of shipped generated models.
+///
+/// This scans for counted-noun phrases rather than for fixed sentences. The
+/// audit's job is to catch a *stale number*, not to dictate how the release
+/// documentation is worded: an earlier version of this check pinned five
+/// exact sentence fragments, and a routine README rewrite that kept every
+/// count correct failed the release gate for weeks.
+fn documented_model_counts(readme: &str) -> Vec<usize> {
+    fn bare(word: &str) -> &str {
+        word.trim_matches(|character: char| !character.is_alphanumeric() && character != '-')
+    }
+
+    let words: Vec<&str> = readme.split_whitespace().collect();
+    let mut counts = Vec::new();
+    for (index, word) in words.iter().enumerate() {
+        let Ok(number) = bare(word).parse::<usize>() else {
+            continue;
+        };
+        for following in words.iter().skip(index + 1).take(COUNTED_NOUN_LOOKAHEAD) {
+            let candidate = bare(following).to_ascii_lowercase();
+            if COUNTED_NOUNS.contains(&candidate.as_str()) {
+                counts.push(number);
+                break;
+            }
+            // A count and its noun never straddle a sentence boundary, so
+            // "runs 4 analyses. Every device ..." is not a claim.
+            if following.ends_with('.') {
+                break;
+            }
+        }
+    }
+    counts
+}
+
 fn validate_release_documentation(descriptors: &[GeneratedVerilogAModelDescriptor]) -> Vec<String> {
     const README: &str = include_str!("../../../README.md");
 
-    let mut errors = Vec::new();
     let count = descriptors.len();
-    let required_claims = [
-        (format!("{count} generated Verilog-A models"), 1),
-        (format!("model, {count} devices today"), 1),
-        (format!("All {count} generated models compile"), 1),
-        (format!("All {count} generated models and"), 1),
-        (format!("All {count} generated model crates"), 2),
-    ];
-    for (claim, minimum_occurrences) in required_claims {
-        let occurrences = README.matches(&claim).count();
-        if occurrences < minimum_occurrences {
-            errors.push(format!(
-                "README.md contains {occurrences} occurrences of '{claim}', expected at least {minimum_occurrences}"
-            ));
-        }
+    let documented = documented_model_counts(README);
+
+    if documented.is_empty() {
+        return vec![format!(
+            "README.md states no generated-model count; a release ships {count} and the \
+             documentation must say so"
+        )];
     }
-    errors
+
+    documented
+        .iter()
+        .filter(|documented| **documented != count)
+        .map(|stale| {
+            format!("README.md states a catalog of {stale} models; this build ships {count}")
+        })
+        .collect()
 }
 
 fn parse_arguments() -> Result<bool, String> {
@@ -297,5 +339,42 @@ mod tests {
         let descriptors = generated_veriloga_model_descriptors();
         assert_eq!(descriptors.len(), EXPECTED_SHIPPED_MODEL_COUNT);
         assert_eq!(validate_catalog(descriptors), Vec::<String>::new());
+    }
+
+    #[test]
+    fn the_published_readme_states_the_shipped_count_and_nothing_else() {
+        assert_eq!(
+            validate_release_documentation(generated_veriloga_model_descriptors()),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn counted_nouns_are_recognized_however_the_claim_is_phrased() {
+        assert_eq!(documented_model_counts("43 models"), vec![43]);
+        assert_eq!(documented_model_counts("43 CMC models generated"), vec![43]);
+        assert_eq!(
+            documented_model_counts("and 43 generated Verilog-A models."),
+            vec![43]
+        );
+        assert_eq!(documented_model_counts("The 43 devices today"), vec![43]);
+        assert_eq!(documented_model_counts("| `43` | Device count |"), vec![43]);
+    }
+
+    #[test]
+    fn a_number_that_counts_something_else_is_not_a_catalog_claim() {
+        assert!(documented_model_counts("9 harmonics by default").is_empty());
+        assert!(documented_model_counts("exits 80 on failure").is_empty());
+        // A count and its noun never straddle a sentence boundary.
+        assert!(documented_model_counts("runs 4 analyses. Every device stamps").is_empty());
+    }
+
+    #[test]
+    fn a_stale_count_is_reported_against_the_compiled_catalog() {
+        // The failure this audit exists for: documentation left behind by a
+        // catalog that grew.
+        let counts = documented_model_counts("42 generated Verilog-A models");
+        assert_eq!(counts, vec![42]);
+        assert_ne!(counts[0], EXPECTED_SHIPPED_MODEL_COUNT);
     }
 }
