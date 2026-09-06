@@ -234,9 +234,41 @@ pub(crate) fn emit_netlist_diagnostics(netlist: &rspice_core::Netlist, quiet: bo
     }
 }
 
+/// `text` cut to at most `max_len` characters, ending in an ellipsis when
+/// anything was dropped.
+///
+/// Every framed summary this crate prints sizes its columns with a format
+/// width, and a format width pads but never truncates: one authored name
+/// longer than its column pushes that row's right border past the frame and
+/// nothing else on screen moves with it. Callers that print inside a frame
+/// pass the name through here first, so the column is the width it claims for
+/// any input.
+pub(crate) fn truncate(text: &str, max_len: usize) -> String {
+    if text.chars().count() <= max_len {
+        text.to_string()
+    } else {
+        let prefix: String = text.chars().take(max_len.saturating_sub(3)).collect();
+        format!("{prefix}...")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_truncated_name_never_exceeds_its_column() {
+        assert_eq!(truncate("short", 8), "short");
+        assert_eq!(truncate("exactly8", 8), "exactly8");
+        assert_eq!(truncate("twelve_chars", 8), "twelv...");
+        assert_eq!(truncate("twelve_chars", 8).chars().count(), 8);
+        // Characters, not bytes: a multi-byte name must not be cut mid-rune
+        // and must still occupy the column count it was given.
+        assert_eq!(
+            truncate("\u{3a9}\u{3a9}\u{3a9}\u{3a9}\u{3a9}", 4),
+            "\u{3a9}..."
+        );
+    }
 
     #[test]
     fn xyce_legacy_diode_warning_lines_match_the_historical_wrapper() {

@@ -119,16 +119,17 @@ pub(super) fn run_fourier(
     };
 
     if !ctx.quiet {
-        println!("\n┌────────────────────────────────────────────────────────────────┐");
-        println!("│                    FOURIER ANALYSIS RESULTS                    │");
-        println!("├────────────────────────────────────────────────────────────────┤");
+        let interior = FOURIER_FRAME_INTERIOR;
+        println!("\n{}", fourier_frame_rule('┌', '┐'));
+        println!("│{:^interior$}│", "FOURIER ANALYSIS RESULTS");
+        println!("{}", fourier_frame_rule('├', '┤'));
 
         for (output, physical_type, result) in &analyzed {
-            println!("│ Output: {:43} ({physical_type:8}) │", output);
+            println!("{}", fourier_output_row(output, physical_type));
             println!("│ DC component = {:<47.6e} │", result.dc_component);
-            println!("├────────────────────────────────────────────────────────────────┤");
+            println!("{}", fourier_frame_rule('├', '┤'));
             println!("│  Harmonic    Frequency (Hz)    Magnitude    Phase (deg)        │");
-            println!("├────────────────────────────────────────────────────────────────┤");
+            println!("{}", fourier_frame_rule('├', '┤'));
 
             for harmonic in result.harmonics.iter().filter(|h| h.harmonic_number > 0) {
                 println!(
@@ -140,7 +141,7 @@ pub(super) fn run_fourier(
                 );
             }
 
-            println!("├────────────────────────────────────────────────────────────────┤");
+            println!("{}", fourier_frame_rule('├', '┤'));
             if let Some(thd) = result.thd {
                 println!("│  THD:            {thd:10.4} %                                  │");
             } else {
@@ -149,7 +150,7 @@ pub(super) fn run_fourier(
                 // the numeric row prints, so it fell two short of the frame.
                 println!("│  THD:             undefined                                    │");
             }
-            println!("└────────────────────────────────────────────────────────────────┘");
+            println!("{}", fourier_frame_rule('└', '┘'));
         }
     }
 
@@ -218,6 +219,39 @@ pub(super) fn run_fourier(
     }
 
     Ok(())
+}
+
+/// Columns inside the Fourier results frame, between its two borders.
+const FOURIER_FRAME_INTERIOR: usize = 64;
+
+/// Columns the analyzed output's authored name is printed in.
+const FOURIER_OUTPUT_WIDTH: usize = 42;
+
+/// Columns the physical type is printed in.
+///
+/// `parameter` — what a braced `.FOUR` expression is — is nine characters, and
+/// the eight this field used to be is what pushed that row's border out.
+const FOURIER_PHYSICAL_TYPE_WIDTH: usize = 9;
+
+/// One horizontal rule of the frame, with the corners the caller needs.
+fn fourier_frame_rule(left: char, right: char) -> String {
+    format!("{left}{}{right}", "─".repeat(FOURIER_FRAME_INTERIOR))
+}
+
+/// The row naming one analyzed output and its physical type.
+///
+/// Output names are authored — a hierarchical node name is routinely longer
+/// than any column — and a format width pads but never truncates, so the name
+/// is cut to its column rather than allowed to carry this row's border past
+/// the frame.
+fn fourier_output_row(output: &str, physical_type: &str) -> String {
+    format!(
+        "│ Output: {:width$} ({:type_width$}) │",
+        crate::commands::truncate(output, FOURIER_OUTPUT_WIDTH),
+        physical_type,
+        width = FOURIER_OUTPUT_WIDTH,
+        type_width = FOURIER_PHYSICAL_TYPE_WIDTH
+    )
 }
 
 /// The physical unit one Fourier spectrum's magnitudes carry.
@@ -332,4 +366,41 @@ fn write_fourier_output(
         },
     )
     .map_err(|error| map_atomic_output_error(path, error))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_fourier_output_row_is_the_frame_wide() {
+        let width = fourier_frame_rule('┌', '┐').chars().count();
+        assert_eq!(width, FOURIER_FRAME_INTERIOR + 2);
+        for rule in [('├', '┤'), ('└', '┘')] {
+            assert_eq!(fourier_frame_rule(rule.0, rule.1).chars().count(), width);
+        }
+
+        // The three types `evaluate_tran_four_output_requests` can report,
+        // against both a short name and a hierarchical one no column fits.
+        let long = "x_top.x_bias.x_mirror.m_cascode_tail:drain_current_probe";
+        for physical_type in ["voltage", "current", "parameter"] {
+            for output in ["vout", long] {
+                let row = fourier_output_row(output, physical_type);
+                assert_eq!(
+                    row.chars().count(),
+                    width,
+                    "this row leaves the frame: {row}"
+                );
+            }
+        }
+        assert!(
+            fourier_output_row(long, "parameter")
+                .contains("x_top.x_bias.x_mirror.m_cascode_tail:dr..."),
+            "a name wider than its column is cut to it"
+        );
+        assert!(
+            fourier_output_row("vout", "voltage").contains("Output: vout   "),
+            "a name inside its column is printed whole and padded"
+        );
+    }
 }

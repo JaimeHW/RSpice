@@ -1,6 +1,7 @@
 //! Info Command - Display netlist information
 
 use crate::cli::{CliError, Config, InfoArgs};
+use crate::commands::truncate;
 use rspice_core::Netlist;
 
 /// Execute the info command
@@ -220,13 +221,4 @@ fn count_elements(netlist: &Netlist) -> ElementCounts {
     }
 
     counts
-}
-
-fn truncate(s: &str, max_len: usize) -> String {
-    if s.chars().count() <= max_len {
-        s.to_string()
-    } else {
-        let prefix: String = s.chars().take(max_len.saturating_sub(3)).collect();
-        format!("{}...", prefix)
-    }
 }

@@ -20,7 +20,7 @@ use rspice_core::analysis::s_param;
 use super::RunContext;
 use super::basic::run_dc_op;
 use crate::cli::{CliError, map_atomic_output_error};
-use crate::commands::publish;
+use crate::commands::{publish, truncate};
 
 fn ensure_not_cancelled(ctx: &RunContext<'_>) -> Result<(), CliError> {
     if crate::abort::reason().is_some() {
@@ -865,19 +865,10 @@ pub(super) fn run_corner_sweep(ctx: &RunContext<'_>, corners_str: &str) -> Resul
     ensure_not_cancelled(ctx)?;
 
     if !ctx.quiet {
-        println!("\n┌─────────────────────────────────────┐");
-        println!("│        Corner Sweep Summary         │");
-        println!("├─────────────────────────────────────┤");
-        for (name, simulation_passed, measurements_passed) in &results {
-            let passed = *simulation_passed && *measurements_passed;
-            let status = if passed { "✓ PASS" } else { "✗ FAIL" };
-            // The status field is one column wider than the frame's interior
-            // minus the four padding columns, because the frame is 37 columns
-            // wide: a 24-column field left this row one short of its own
-            // border, which nobody could see while every rune was mojibake.
-            println!("│  {:6}  {:>25}  │", name, status);
+        println!();
+        for line in corner_summary_lines(&results) {
+            println!("{line}");
         }
-        println!("└─────────────────────────────────────┘");
 
         let passed_count = results
             .iter()
@@ -905,6 +896,66 @@ pub(super) fn run_corner_sweep(ctx: &RunContext<'_>, corners_str: &str) -> Resul
             "Corners",
         ))
     }
+}
+
+/// Columns inside the corner-sweep summary frame, between its two borders.
+const CORNER_SUMMARY_INTERIOR: usize = 37;
+
+/// Columns the corner name is printed in.
+///
+/// Everything between the name and the status was padding: the name held six
+/// columns and the status field nineteen more than the six a status occupies.
+/// The name field is the whole span, which moves nothing on screen and shows
+/// the corner names decks actually carry. Names are authored, so they are not
+/// bounded by anything the frame knows about; one wider than this is cut to
+/// the column rather than allowed to carry its own row's border past the
+/// frame.
+const CORNER_SUMMARY_NAME_WIDTH: usize = 25;
+
+/// Columns the pass/fail status is printed in, right against the border.
+const CORNER_SUMMARY_STATUS_WIDTH: usize = 6;
+
+/// The whole corner-sweep summary frame, one line per element.
+///
+/// Rendered rather than printed so the widths are testable: every line is the
+/// frame's two borders plus its interior, and each rune here occupies one
+/// terminal column, so a row that outgrows the frame is a row whose character
+/// count no longer matches the border's.
+fn corner_summary_lines(results: &[(String, bool, bool)]) -> Vec<String> {
+    let rule = "─".repeat(CORNER_SUMMARY_INTERIOR);
+    let mut lines = vec![
+        format!("┌{rule}┐"),
+        format!(
+            "│{:^width$}│",
+            "Corner Sweep Summary",
+            width = CORNER_SUMMARY_INTERIOR
+        ),
+        format!("├{rule}┤"),
+    ];
+    for (name, simulation_passed, measurements_passed) in results {
+        lines.push(corner_summary_row(
+            name,
+            *simulation_passed && *measurements_passed,
+        ));
+    }
+    lines.push(format!("└{rule}┘"));
+    lines
+}
+
+/// One corner's row of the summary frame.
+///
+/// Two padding columns, the name, two more, the status, two more: the frame's
+/// interior exactly. A format width pads but never truncates, so the authored
+/// name goes through [`truncate`] first.
+fn corner_summary_row(name: &str, passed: bool) -> String {
+    let status = if passed { "✓ PASS" } else { "✗ FAIL" };
+    format!(
+        "│  {:name_width$}  {:>status_width$}  │",
+        truncate(name, CORNER_SUMMARY_NAME_WIDTH),
+        status,
+        name_width = CORNER_SUMMARY_NAME_WIDTH,
+        status_width = CORNER_SUMMARY_STATUS_WIDTH
+    )
 }
 
 /// The result of one corner run, returned from worker threads so the
@@ -1921,4 +1972,42 @@ fn write_touchstone_2port(
         Ok(())
     })
     .map_err(|error| map_atomic_output_error(path, error))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_corner_summary_line_is_the_frame_wide_for_any_corner_name() {
+        let results = vec![
+            ("tt".to_string(), true, true),
+            ("ss_hot_slow_max_vdd_low_rc_worst".to_string(), false, true),
+            ("ff".to_string(), true, false),
+        ];
+
+        let lines = corner_summary_lines(&results);
+        assert_eq!(lines.len(), results.len() + 4, "three borders and a title");
+        for line in &lines {
+            assert_eq!(
+                line.chars().count(),
+                CORNER_SUMMARY_INTERIOR + 2,
+                "this row leaves the frame: {line}"
+            );
+        }
+        assert!(
+            lines[4].contains("ss_hot_slow_max_vdd_lo..."),
+            "a corner name wider than its column is cut to it: {}",
+            lines[4]
+        );
+        // Byte for byte what this frame printed before the name field took the
+        // padding that sat between it and the status: a short name renders in
+        // the same columns it always did.
+        assert_eq!(lines[1], "│        Corner Sweep Summary         │");
+        assert_eq!(lines[3], "│  tt                         ✓ PASS  │");
+        assert!(
+            lines[3].contains("✓ PASS") && lines[4].contains("✗ FAIL"),
+            "a corner passes only when its measurements do"
+        );
+    }
 }
