@@ -29,6 +29,20 @@
 //!   driving. The host has A/D and D/A and no third kind, so this is refused by
 //!   name rather than approximated with one of them.
 //!
+//! # A vector boundary port
+//!
+//! A discrete port may be a vector, and a vector boundary is one net per bit:
+//! the deck names N nodes for an N-bit port, in the order the port declares its
+//! bits — MSB first — and each gets its own bridge. That is not a convention
+//! invented here. It is the only spelling a deck has, because a node list is
+//! flat; it is what `rspice-ui`'s netlister already emits for a vector pin; and
+//! it is what makes the port's bits recordable at all, since every value that
+//! reaches a result is keyed by circuit node.
+//!
+//! The discrete half never sees the split: its own transitions stay
+//! whole-vector, because the A/D settle composes a port's bit drives into one
+//! write.
+//!
 //! # Where the bridge's numbers come from
 //!
 //! From the same two places the XSPICE auto-bridge's do, and by the same rule.
@@ -81,11 +95,32 @@ impl BoundaryDirection {
     }
 }
 
-/// One boundary port, resolved to the deck node it landed on.
+/// One bit of one boundary port, resolved to the deck node it landed on.
+///
+/// A scalar port contributes one of these and a vector port contributes one
+/// per bit, because the deck names one node per conductor and a bridge carries
+/// one node.
 struct BoundaryPort {
+    /// The module's name for the whole signal, which is what the discrete
+    /// plan is keyed by — `count`, not `count[1]`.
     signal: String,
+    /// Which bit of that signal this net carries, counted from the least
+    /// significant end.
+    bit: u32,
     node: usize,
+    /// Position of this net in the X-card's own node list, so a diagnostic can
+    /// quote the node the deck wrote rather than searching for one that
+    /// matches.
+    deck_index: usize,
     direction: BoundaryDirection,
+}
+
+/// What one boundary port declared, once its bits are deck nodes.
+struct BoundaryLayout {
+    /// One node per HIR port, in port order — what the continuous half binds.
+    analog_terminals: Vec<usize>,
+    /// Every bridged net, in port order and declared MSB first within a port.
+    ports: Vec<BoundaryPort>,
 }
 
 /// Build a mixed module instance, or report that this model is not mixed.
@@ -113,15 +148,33 @@ pub(super) fn try_build_mixed_signal_instance(
     }
 
     let model = &entry.model;
-    if element.nodes.len() != model.num_terminals {
+    let declared_nodes = declared_node_count(artifact);
+    if element.nodes.len() != declared_nodes {
+        // `num_terminals` is one per module port and says nothing about how
+        // wide a port is (`rspice-veriloga`'s `canonical_compat` pins it equal
+        // to `hir.ports.len()`), so it is not the number the deck must match
+        // once a vector discrete port takes one node per bit. It is still what
+        // the sentence should say when nothing is a vector, because then the
+        // two numbers are the same and "ports" is what an author counted.
+        let shape = if declared_nodes == model.num_terminals {
+            format!(
+                "which declares {} ports; a mixed module's discrete ports are part of its \
+                 boundary, so every port must be connected",
+                model.num_terminals
+            )
+        } else {
+            format!(
+                "which declares {} ports needing {declared_nodes} nodes; a mixed module's \
+                 discrete ports are part of its boundary and a vector discrete port is one net \
+                 per bit, so every bit must be connected",
+                model.num_terminals
+            )
+        };
         return Err(SimulationError::Circuit(format!(
-            "mixed Verilog-AMS instance '{}' connects {} nodes to model '{}', which declares {} \
-             ports; a mixed module's discrete ports are part of its boundary, so every port must \
-             be connected",
+            "mixed Verilog-AMS instance '{}' connects {} nodes to model '{}', {shape}",
             element.name,
             element.nodes.len(),
             subckt_name,
-            model.num_terminals
         )));
     }
     if !params.is_empty() {
@@ -143,17 +196,16 @@ pub(super) fn try_build_mixed_signal_instance(
         });
     }
 
-    let boundary = classify_boundary_ports(artifact, element, subckt_name, &terminal_nodes)?;
-    for port in &boundary {
+    let layout = classify_boundary_ports(artifact, element, subckt_name, &terminal_nodes)?;
+    let boundary = &layout.ports;
+    for port in boundary {
         if circuit.is_discrete_net(port.node) {
             return Err(SimulationError::Circuit(format!(
                 "mixed Verilog-AMS instance '{}' connects its discrete port '{}' to node '{}', \
                  which is already an event-driven XSPICE net. A mixed module's discrete port is a \
                  discipline boundary onto an analog net; joining it to another device's event net \
                  needs the module to share the circuit event queue, which this route does not do",
-                element.name,
-                port.signal,
-                element.nodes[terminal_index_of(&terminal_nodes, port.node)]
+                element.name, port.signal, element.nodes[port.deck_index]
             )));
         }
     }
@@ -162,7 +214,7 @@ pub(super) fn try_build_mixed_signal_instance(
         &element.name,
         std::sync::Arc::clone(model),
         artifact,
-        &terminal_nodes,
+        &layout.analog_terminals,
         SchedulerLimits::default(),
     )
     .map_err(|error| {
@@ -174,7 +226,7 @@ pub(super) fn try_build_mixed_signal_instance(
 
     let vcc = super::xspice_auto_bridge_vcc(netlist);
     let node_names = circuit.node_names_sorted();
-    for port in &boundary {
+    for port in boundary {
         let node_label = super::xspice_auto_bridge_node_label(Some(&node_names), port.node);
         let kind = port.direction.auto_bridge_kind();
         let selected = connect_rules.select_for_boundary_node(
@@ -205,15 +257,15 @@ pub(super) fn try_build_mixed_signal_instance(
             BoundaryDirection::AnalogToDiscrete => {
                 let low = parameter_or(&parameters, "in_low", vcc / 2.0);
                 let high = parameter_or(&parameters, "in_high", vcc / 2.0);
-                host.add_adc_bridge(&port.signal, port.node, 0, low, high)
+                host.add_adc_bridge(&port.signal, port.bit, (port.node, 0), low, high)
             }
             BoundaryDirection::DiscreteToAnalog => {
                 let low = parameter_or(&parameters, "out_low", 0.0);
                 let high = parameter_or(&parameters, "out_high", vcc);
                 host.add_dac_bridge(
                     &port.signal,
-                    port.node,
-                    0,
+                    port.bit,
+                    (port.node, 0),
                     low,
                     high,
                     MIXED_DAC_SOURCE_RESISTANCE,
@@ -229,7 +281,7 @@ pub(super) fn try_build_mixed_signal_instance(
     }
 
     log::info!(
-        "Instantiated mixed Verilog-AMS module '{}' as '{}' with {} boundary port(s)",
+        "Instantiated mixed Verilog-AMS module '{}' as '{}' with {} boundary net(s)",
         subckt_name,
         element.name,
         boundary.len()
@@ -238,22 +290,84 @@ pub(super) fn try_build_mixed_signal_instance(
     Ok(true)
 }
 
+/// How many deck nodes an X-card must name for this module.
+///
+/// One per module port, except that a discrete port carries one net per bit —
+/// its own refusal used to say so ("a vector boundary needs one net per bit and
+/// the deck names one node"), and this is that sentence answered rather than
+/// refused.
+///
+/// A `wreal` port counts as one, not as its zero-bit width: it is refused by
+/// name in [`classify_boundary_ports`], and counting it as nothing here would
+/// make the node count disagree first and refuse it for the wrong reason.
+fn declared_node_count(artifact: &rspice_veriloga::canonical_ir::CanonicalIrArtifact) -> usize {
+    artifact
+        .hir
+        .ports
+        .iter()
+        .map(|port| {
+            artifact
+                .digital
+                .signals
+                .iter()
+                .find(|signal| signal.name == port.name)
+                .filter(|signal| !signal.kind.is_real())
+                .map_or(1, |signal| signal.width.max(1) as usize)
+        })
+        .sum()
+}
+
 /// Split the module's ports into the analog terminals the continuous half
 /// stamps and the boundary nets the bridges carry.
+///
+/// # Why a port is not a node any more
+///
+/// The X-card's node list is read with a cursor rather than by port index,
+/// because a discrete port of width N occupies N consecutive entries in it.
+/// The two orders that makes this work are both fixed elsewhere and are not
+/// choices taken here:
+///
+/// * *Ports against nodes.* `rspice-veriloga` pins `CompiledModel.num_terminals`
+///   and `terminal_names` to `hir.ports` name for name (`canonical_compat.rs`),
+///   and `VerilogADevice` binds terminal *i* to the *i*th node it is handed, so
+///   HIR port order **is** X-card node order. The cursor generalizes that to
+///   "the *i*th port's nets, in order".
+/// * *Bits against nodes.* A vector port's nets are the deck's, declared MSB
+///   first — the order `rspice-ui`'s netlister emits a vector pin's formals in,
+///   and the order `DigitalBusDeclaration` lists members in. Bit *k* of the
+///   value is `FourStateValue::bit(k)`, counted from the least significant end,
+///   which is where the discrete half's own bit selects land.
+///
+/// The continuous half still binds one node per port, because its terminal
+/// count is one per port: a vector discrete port hands it the net its declared
+/// MSB landed on. That is exactly what a scalar port handed it, generalized —
+/// the analog equations cannot contribute to a discrete port anyway, since the
+/// discrete plan is what makes it a boundary.
 fn classify_boundary_ports(
     artifact: &rspice_veriloga::canonical_ir::CanonicalIrArtifact,
     element: &crate::netlist::Element,
     subckt_name: &str,
     terminal_nodes: &[usize],
-) -> Result<Vec<BoundaryPort>, SimulationError> {
-    let mut boundary = Vec::new();
-    for (index, port) in artifact.hir.ports.iter().enumerate() {
-        let Some(signal) = artifact
+) -> Result<BoundaryLayout, SimulationError> {
+    let mut layout = BoundaryLayout {
+        analog_terminals: Vec::with_capacity(artifact.hir.ports.len()),
+        ports: Vec::new(),
+    };
+    let mut cursor = 0usize;
+    for port in &artifact.hir.ports {
+        let signal = artifact
             .digital
             .signals
             .iter()
-            .find(|signal| signal.name == port.name)
-        else {
+            .find(|signal| signal.name == port.name);
+        let width = match signal {
+            Some(signal) if !signal.kind.is_real() => signal.width.max(1) as usize,
+            _ => 1,
+        };
+        let first = cursor;
+        cursor += width;
+        layout.analog_terminals.push(terminal_nodes[first]);
+        let Some(signal) = signal else {
             continue;
         };
         if signal.kind.is_real() {
@@ -262,14 +376,6 @@ fn classify_boundary_ports(
                  `wreal` boundary carries a real number rather than a discipline's potential and \
                  flow, so it is not the A/D or D/A boundary this route bridges",
                 element.name, subckt_name, port.name
-            )));
-        }
-        if signal.width != 1 {
-            return Err(SimulationError::Circuit(format!(
-                "mixed Verilog-AMS instance '{}' of model '{}' declares discrete port '{}' {} bits \
-                 wide; only scalar boundary ports are bridged, because a vector boundary needs one \
-                 net per bit and the deck names one node",
-                element.name, subckt_name, port.name, signal.width
             )));
         }
         let direction = match port.direction.as_str() {
@@ -285,28 +391,71 @@ fn classify_boundary_ports(
                 )));
             }
         };
-        let node = terminal_nodes[index];
-        if node == 0 {
-            return Err(SimulationError::Circuit(format!(
-                "mixed Verilog-AMS instance '{}' connects discrete port '{}' to ground; a boundary \
-                 net carries a logic value and ground is the voltage reference, not a net",
-                element.name, port.name
-            )));
+        let bits = boundary_bit_order(signal).ok_or_else(|| {
+            SimulationError::Circuit(format!(
+                "mixed Verilog-AMS instance '{}' of model '{}' declares discrete port '{}' as \
+                 `[{}:{}]`, a range that does not reach bit zero; the discrete half numbers a bit \
+                 select from the least significant end, so a boundary net for its declared \
+                 most-significant bit would carry a bit the module itself cannot read",
+                element.name,
+                subckt_name,
+                port.name,
+                signal.bounds.map_or(0, |(msb, _)| msb),
+                signal.bounds.map_or(0, |(_, lsb)| lsb),
+            ))
+        })?;
+        for (offset, bit) in bits.iter().copied().enumerate() {
+            let deck_index = first + offset;
+            let node = terminal_nodes[deck_index];
+            if node == 0 {
+                return Err(SimulationError::Circuit(format!(
+                    "mixed Verilog-AMS instance '{}' connects discrete port '{}' to ground; a \
+                     boundary net carries a logic value and ground is the voltage reference, not \
+                     a net",
+                    element.name, port.name
+                )));
+            }
+            layout.ports.push(BoundaryPort {
+                signal: port.name.to_string(),
+                bit,
+                node,
+                deck_index,
+                direction,
+            });
         }
-        boundary.push(BoundaryPort {
-            signal: port.name.to_string(),
-            node,
-            direction,
-        });
     }
-    Ok(boundary)
+    Ok(layout)
 }
 
-fn terminal_index_of(terminal_nodes: &[usize], node: usize) -> usize {
-    terminal_nodes
-        .iter()
-        .position(|candidate| *candidate == node)
-        .unwrap_or(0)
+/// The bits of one boundary port, in the order the deck names its nets:
+/// declared MSB first.
+///
+/// `None` when the declared range does not reach bit zero. The discrete half
+/// resolves a bit select by treating the declared index *as* the position from
+/// the least significant end — `digital_eval`'s `patch` and
+/// `digital_value::part_select` both say so in as many words — so `[7:4]` is a
+/// four-bit value whose own `x[7]` reads off the end of it. Bridging such a
+/// port would bind four deck nets to four bits the module cannot name, which is
+/// a wrong answer rather than a missing one, so the boundary refuses it.
+///
+/// A scalar port has no range and is bit zero, which is what it has always
+/// been.
+fn boundary_bit_order(signal: &rspice_veriloga::canonical_ir::DigitalSignal) -> Option<Vec<u32>> {
+    let Some((msb, lsb)) = signal.bounds else {
+        return Some(vec![0]);
+    };
+    if msb.min(lsb) != 0 {
+        return None;
+    }
+    let high = u32::try_from(msb.max(lsb)).ok()?;
+    if high.checked_add(1)? != signal.width {
+        return None;
+    }
+    Some(if msb >= lsb {
+        (0..=high).rev().collect()
+    } else {
+        (0..=high).collect()
+    })
 }
 
 fn parameter_or(

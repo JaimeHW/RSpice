@@ -1055,9 +1055,9 @@ fn probe_host() -> MixedSignalHost {
         SchedulerLimits::default(),
     )
     .expect("the probe module compiles and starts");
-    host.add_adc_bridge("c", 2, 0, PROBE_THRESHOLD, PROBE_THRESHOLD)
+    host.add_adc_bridge("c", 0, (2, 0), PROBE_THRESHOLD, PROBE_THRESHOLD)
         .expect("the A/D bridge is declarable");
-    host.add_dac_bridge("y", 3, 0, 0.0, 3.3, 20.0)
+    host.add_dac_bridge("y", 0, (3, 0), 0.0, 3.3, 20.0)
         .expect("the D/A bridge is declarable");
     host
 }

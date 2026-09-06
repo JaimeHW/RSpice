@@ -32,10 +32,13 @@
 //!
 //! Mixed modules are executed through [`MixedSignalHost`], whose trial
 //! transaction aligns the digital event slot with each analog Newton solve.
-//! The boundary is explicit: scalar ADC bridges publish accepted analog
-//! samples with hysteresis, and scalar DAC bridges stamp Thevenin equivalents.
-//! Vector and bidirectional coercions remain fail-closed until their resolution
-//! semantics are represented directly.
+//! The boundary is explicit: an ADC bridge publishes accepted analog samples
+//! with hysteresis, and a DAC bridge stamps a Thevenin equivalent. Each bridge
+//! carries *one bit* of one discrete signal, so a vector port is one bridge per
+//! conductor — the deck names one node per bit — while the discrete half still
+//! sees whole-vector transitions, because the A/D settle composes a port's bit
+//! drives into one write. Bidirectional coercion remains fail-closed until its
+//! resolution semantics are represented directly.
 //!
 //! # Where a `wreal` meets an analog node
 //!

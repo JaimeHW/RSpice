@@ -316,9 +316,11 @@ impl CircuitData {
     ///
     /// Written into the same vector `fill_xspice_digital_snapshot` fills, and
     /// sorted with it, so `TransientResult::record_digital_snapshot` stays the
-    /// single writer of the digital trace channel. A four-state value wider
-    /// than one bit cannot reach here: `add_adc_bridge` and `add_dac_bridge`
-    /// both refuse a non-scalar signal.
+    /// single writer of the digital trace channel. One node carries one bit,
+    /// because a bridge carries one bit: a vector boundary port is bridged as
+    /// one net per conductor, so the deck node a bit landed on is what the
+    /// snapshot records, and the declaration that says which of them were one
+    /// word rides beside the traces rather than inside them.
     pub(crate) fn append_mixed_digital_snapshot(
         &self,
         snapshot: &mut Vec<(crate::circuit::NodeId, crate::xspice::DigitalValue)>,
@@ -326,11 +328,11 @@ impl CircuitData {
         use rspice_veriloga::four_state::FourStateBit;
 
         for host in &self.mixed_signal_hosts {
-            host.boundary_digital_values(|node, value| {
+            host.boundary_digital_values(|node, bit| {
                 if node == 0 {
                     return;
                 }
-                let state = match value.bit(0) {
+                let state = match bit {
                     FourStateBit::Zero => crate::xspice::DigitalState::Zero,
                     FourStateBit::One => crate::xspice::DigitalState::One,
                     FourStateBit::Unknown => crate::xspice::DigitalState::Unknown,

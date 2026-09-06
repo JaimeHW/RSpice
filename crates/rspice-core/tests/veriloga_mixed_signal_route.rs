@@ -35,7 +35,9 @@
 //!   no mixed module in it;
 //! * the accepted-sample hook a live consumer watches, whose view of a bridge
 //!   net has to be the history the finished result keeps — the deck-level
-//!   statement of D5 lockstep for anything reading the run as it goes.
+//!   statement of D5 lockstep for anything reading the run as it goes;
+//! * a vector discrete port, bridged one net per bit, whose bits are co-timed
+//!   because the discrete half publishes the whole vector at once.
 #![cfg(feature = "veriloga")]
 
 use rspice_core::abort_signal::{AbortSignal, DigitalEventCode, TransientSample};
@@ -596,9 +598,80 @@ module vector_mixed(p, n, count);
 endmodule
 "#;
 
+/// The deck a two-bit boundary port needs: one node per bit, declared MSB
+/// first, which is the order `rspice-ui`'s netlister emits a vector pin's
+/// formals in and the order the declaration lists its members in.
+fn vector_deck(model: &ModelFile, saves: &str) -> String {
+    format!(
+        "* a two-bit discrete boundary, one deck node per bit\n\
+         x1 p 0 count#1 count#0 vector_mixed\n\
+         rp p 0 1meg\n\
+         {saves}\
+         .va \"{}\" vector_mixed\n\
+         .tran 1n 40n\n\
+         .end\n",
+        model.deck_path()
+    )
+}
+
+/// The times a boundary net's recorded history changes at, excluding the
+/// opening point every trace carries.
+fn change_times(result: &TransientResult, net: &str) -> Vec<f64> {
+    result
+        .digital_trace_named(net)
+        .unwrap_or_else(|| panic!("net '{net}' has no digital trace"))
+        .iter()
+        .skip(1)
+        .map(|point| point.time)
+        .collect()
+}
+
+/// **A vector discrete port is one net per bit.**
+///
+/// The deck has no spelling for a vector: a node list is flat, so an N-bit
+/// boundary is N nodes and each is its own recordable conductor. Every bit is
+/// bridged and recorded, and the bits move together, because the discrete half
+/// publishes the whole vector at once.
 #[test]
-fn a_vector_discrete_port_is_refused_because_the_deck_names_one_node() {
+fn a_vector_discrete_port_bridges_one_net_per_bit() {
     let model = ModelFile::new("vector", VECTOR_PORT);
+    let result = run(&vector_deck(&model, ""), 40.0e-9, 1.0e-9);
+
+    // `always #5 count = count + 2'b01` steps the whole vector every five
+    // nanoseconds, and a whole-vector step is one bus event: bit zero moves at
+    // every step and bit one at every other one, so bit one's change times are
+    // a subset of bit zero's and both land on the five-nanosecond grid.
+    let low = change_times(&result, "count#0");
+    let high = change_times(&result, "count#1");
+    assert!(
+        low.len() >= 6,
+        "the counter must run for this to test anything, saw {low:?}"
+    );
+    for time in low.iter().chain(&high) {
+        let ticks = time * 1.0e9 / 5.0;
+        assert!(
+            (ticks - ticks.round()).abs() < 1.0e-6,
+            "a count transition landed at t={time:e}, off the #5 grid"
+        );
+    }
+    for time in &high {
+        assert!(
+            low.iter()
+                .any(|candidate| (candidate - time).abs() < 1.0e-15),
+            "bit one changed at t={time:e} with no co-timed change of bit zero; a vector port \
+             publishes as one transition, so every bit that moves moves at one instant"
+        );
+    }
+    assert_eq!(
+        high.len(),
+        low.len() / 2,
+        "bit one must carry every second step of the count: bit zero {low:?}, bit one {high:?}"
+    );
+}
+
+#[test]
+fn a_vector_discrete_port_refuses_a_deck_that_names_one_node_for_it() {
+    let model = ModelFile::new("vector_short", VECTOR_PORT);
     let deck = format!(
         "* a two-bit discrete boundary onto a single deck node\n\
          x1 p 0 count vector_mixed\n\
@@ -611,8 +684,8 @@ fn a_vector_discrete_port_is_refused_because_the_deck_names_one_node() {
     let error = error_for(&deck, 20.0e-9, 1.0e-9);
     let lowered = error.to_lowercase();
     assert!(
-        lowered.contains("bits wide") && lowered.contains("count"),
-        "the refusal must say the port is a vector and name it: {error}"
+        lowered.contains("needing 4 nodes") && lowered.contains("one net per bit"),
+        "the refusal must say how many nodes the boundary needs and why: {error}"
     );
 }
 

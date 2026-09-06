@@ -352,16 +352,26 @@ impl<T> std::ops::Deref for MixedCell<T> {
     }
 }
 
-/// One scalar analog-to-digital bridge.
+/// One analog-to-digital bridge, carrying one bit of one discrete signal.
 ///
 /// `positive` and `negative` are circuit-node ids; `0` is ground.
+///
+/// A bridge is per *bit* rather than per signal because a deck names one node
+/// per conductor: an `input [7:0]` boundary is eight nets, so it is eight
+/// bridges over one signal. `bit` is the position [`FourStateValue::bit`]
+/// counts from the least significant end, which is the position the discrete
+/// half's own bit selects are lowered to.
 #[derive(Clone)]
 struct AdcBridge {
     signal: DigitalSignalId,
-    /// The module's own name for the net, carried so a boundary diagnostic can
-    /// name it. `DacBridge` has carried one since it was written; this side
-    /// needed one for the first time when a boundary that would not settle had
-    /// to name its participants rather than only its instance.
+    bit: u32,
+    /// The boundary net's own spelling, carried so a boundary diagnostic can
+    /// name it: the module's name for a scalar, and `name[bit]` for one bit of
+    /// a vector, because two bits of one port are two nets and a diagnostic
+    /// that called both `count` would name neither. `DacBridge` has carried
+    /// one since it was written; this side needed one for the first time when
+    /// a boundary that would not settle had to name its participants rather
+    /// than only its instance.
     signal_name: String,
     positive: usize,
     negative: usize,
@@ -369,12 +379,15 @@ struct AdcBridge {
     high: f64,
 }
 
-/// One scalar digital-to-analog Thevenin bridge.
+/// One digital-to-analog Thevenin bridge, carrying one bit of one discrete
+/// signal.
 ///
-/// `positive` and `negative` are circuit-node ids; `0` is ground.
+/// `positive` and `negative` are circuit-node ids; `0` is ground. `bit` is
+/// read exactly as [`AdcBridge::bit`] is.
 #[derive(Clone)]
 struct DacBridge {
     signal: DigitalSignalId,
+    bit: u32,
     signal_name: String,
     positive: usize,
     negative: usize,
@@ -478,17 +491,21 @@ struct TrialScratch {
     /// Each D/A bridge's driven bit before and after one boundary settle.
     ///
     /// Bits rather than [`FourStateValue`]s, which are two heap planes each.
-    /// `scalar_signal` refuses a bridge on anything but a one-bit signal, so
-    /// bit zero *is* the value and comparing bits is comparing values.
+    /// A bridge carries one bit of its signal, so its bit *is* what it drives
+    /// and comparing bits is comparing what the analog side sees.
     dac_before: Vec<FourStateBit>,
     dac_after: Vec<FourStateBit>,
     /// Differential voltage each A/D bridge was sampled at.
     sampled: Vec<f64>,
     /// The continuous-net probe bank one settle sampled.
     probes: Vec<f64>,
-    /// The A/D transitions one settle publishes, and their interpolated
-    /// crossing times paired with the bridge index.
+    /// The bits one settle found moved, before they are composed into whole
+    /// signal values: `(A/D bridge index, new bit)`, in bridge order.
+    bit_drives: Vec<(usize, FourStateBit)>,
+    /// The A/D transitions one settle publishes — one entry per *signal*, not
+    /// per bit, because a vector boundary port publishes as one transition.
     drives: Vec<(DigitalSignalId, FourStateValue)>,
+    /// The interpolated crossing times, paired with the bridge index.
     crossings: Vec<(usize, f64)>,
     /// The boundary histories an acceptance would produce, computed before
     /// anything is committed so a chattering boundary can still be refused.
@@ -883,31 +900,37 @@ impl MixedSignalHost {
     /// been accepted has already been rolled back.
     pub(crate) fn boundary_digital_values<F>(&self, mut sink: F)
     where
-        F: FnMut(usize, &FourStateValue),
+        F: FnMut(usize, FourStateBit),
     {
         for bridge in &self.state.bridges.adc {
             if let Some(value) = self.state.digital.read(bridge.signal) {
-                sink(bridge.positive, value);
+                sink(bridge.positive, value.bit(bridge.bit));
             }
         }
         for bridge in &self.state.bridges.dac {
             if let Some(value) = self.state.digital.read(bridge.signal) {
-                sink(bridge.positive, value);
+                sink(bridge.positive, value.bit(bridge.bit));
             }
         }
     }
 
-    /// Add a scalar analog-to-digital bridge with hysteresis.
+    /// Add an analog-to-digital bridge with hysteresis onto one bit of
+    /// `signal`.
     ///
-    /// `positive` and `negative` are circuit-node ids; `0` is ground.
+    /// `bit` is `0` for a scalar net and the bit's own position for one
+    /// conductor of a vector. `nodes` is the `(positive, negative)` circuit-node
+    /// pair the boundary is sampled across, where `0` is ground — one argument
+    /// because it is one differential net, which is how every reader of the
+    /// bridge tables treats it.
     pub fn add_adc_bridge(
         &mut self,
         signal: &str,
-        positive: usize,
-        negative: usize,
+        bit: u32,
+        nodes: (usize, usize),
         low_threshold: f64,
         high_threshold: f64,
     ) -> Result<(), MixedSignalError> {
+        let (positive, negative) = nodes;
         self.require_idle("add a bridge")?;
         if !low_threshold.is_finite()
             || !high_threshold.is_finite()
@@ -917,11 +940,12 @@ impl MixedSignalHost {
                 detail: "A/D thresholds must be finite and low <= high".into(),
             });
         }
-        let id = self.scalar_signal(signal)?;
+        let (id, width) = self.signal_bit(signal, bit)?;
         self.max_circuit_node = self.max_circuit_node.max(positive).max(negative);
         self.state.bridges.make_mut().adc.push(AdcBridge {
             signal: id,
-            signal_name: signal.into(),
+            bit,
+            signal_name: boundary_net_name(signal, bit, width),
             positive,
             negative,
             low: low_threshold,
@@ -933,18 +957,20 @@ impl MixedSignalHost {
         Ok(())
     }
 
-    /// Add a scalar digital-to-analog Thevenin bridge.
+    /// Add a digital-to-analog Thevenin bridge driven by one bit of `signal`.
     ///
-    /// `positive` and `negative` are circuit-node ids; `0` is ground.
+    /// `bit` and `nodes` are read exactly as [`Self::add_adc_bridge`] reads
+    /// them.
     pub fn add_dac_bridge(
         &mut self,
         signal: &str,
-        positive: usize,
-        negative: usize,
+        bit: u32,
+        nodes: (usize, usize),
         low_level: f64,
         high_level: f64,
         output_resistance: f64,
     ) -> Result<(), MixedSignalError> {
+        let (positive, negative) = nodes;
         self.require_idle("add a bridge")?;
         if !low_level.is_finite()
             || !high_level.is_finite()
@@ -957,11 +983,12 @@ impl MixedSignalHost {
                         .into(),
             });
         }
-        let id = self.scalar_signal(signal)?;
+        let (id, width) = self.signal_bit(signal, bit)?;
         self.max_circuit_node = self.max_circuit_node.max(positive).max(negative);
         self.state.bridges.make_mut().dac.push(DacBridge {
             signal: id,
-            signal_name: signal.into(),
+            bit,
+            signal_name: boundary_net_name(signal, bit, width),
             positive,
             negative,
             low: low_level,
@@ -1271,7 +1298,7 @@ impl MixedSignalHost {
                     detail: format!("D/A signal `{}` disappeared", bridge.signal_name),
                 }
             })?;
-            let level = match value.bit(0) {
+            let level = match value.bit(bridge.bit) {
                 FourStateBit::Zero => bridge.low,
                 FourStateBit::One => bridge.high,
                 FourStateBit::Unknown | FourStateBit::HighImpedance => bridge.undefined_level(),
@@ -1388,6 +1415,7 @@ impl MixedSignalHost {
         circuit_voltages: &[f64],
     ) -> Result<bool, MixedSignalError> {
         read_dac_bits(&self.state, &mut scratch.dac_before)?;
+        scratch.bit_drives.clear();
         scratch.drives.clear();
         scratch.crossings.clear();
         scratch.sampled.clear();
@@ -1405,15 +1433,14 @@ impl MixedSignalHost {
             };
             let Some(bit) = bit else { continue };
             // Compared as a bit rather than by building the value the bridge
-            // would publish: `scalar_signal` makes every bridge signal one bit
-            // wide, and a `FourStateValue` is two heap planes, so building one
-            // to discover the boundary has not moved was an allocation for the
-            // common answer.
+            // would publish: a bridge carries one bit, and a `FourStateValue`
+            // is two heap planes, so building one to discover the boundary has
+            // not moved was an allocation for the common answer.
             if self
                 .state
                 .digital
                 .read(bridge.signal)
-                .map(|value| value.bit(0))
+                .map(|value| value.bit(bridge.bit))
                 == Some(bit)
             {
                 continue;
@@ -1436,11 +1463,18 @@ impl MixedSignalHost {
                 .seconds_to_ticks(crossing)
                 .map_err(DigitalRunError::from)?;
             publish_tick = publish_tick.max(crossing_tick);
-            scratch
-                .drives
-                .push((bridge.signal, FourStateValue::splat(1, bit)));
+            scratch.bit_drives.push((index, bit));
             scratch.crossings.push((index, crossing));
         }
+        // One drive per signal, not per bridge. A vector boundary port is N
+        // bridges over one discrete signal, and the store publishes a whole
+        // signal at a time (`store.rs`'s `force` refuses a value that is not
+        // the declared width), so the bits that moved are composed onto the
+        // value the signal holds now and the port publishes as one transition
+        // — which is what the discrete half's own vector assignment is. Bits
+        // whose bridge is inside its threshold window did not move and keep
+        // what they held.
+        compose_bit_drives(&self.state, &scratch.bit_drives, &mut scratch.drives)?;
         // Sampled from the same converged candidate the bridges were, and
         // published into the store *before* the transitions that wake the
         // processes reading it. That ordering is what makes the standard's own
@@ -1718,11 +1752,11 @@ impl MixedSignalHost {
         adc: &mut Vec<BoundaryNetHistory>,
         dac: &mut Vec<BoundaryNetHistory>,
     ) {
-        let read_bit = |signal| {
+        let read_bit = |signal, bit| {
             self.state
                 .digital
                 .read(signal)
-                .map_or(FourStateBit::HighImpedance, |value| value.bit(0))
+                .map_or(FourStateBit::HighImpedance, |value| value.bit(bit))
         };
         adc.clear();
         for (index, bridge) in self.state.bridges.adc.iter().enumerate() {
@@ -1733,7 +1767,7 @@ impl MixedSignalHost {
                 .copied()
                 .unwrap_or_default();
             entry.push(
-                read_bit(bridge.signal),
+                read_bit(bridge.signal, bridge.bit),
                 trial.vectors.adc_moved.get(index).copied().unwrap_or(false),
             );
             adc.push(entry);
@@ -1747,7 +1781,7 @@ impl MixedSignalHost {
                 .copied()
                 .unwrap_or_default();
             entry.push(
-                read_bit(bridge.signal),
+                read_bit(bridge.signal, bridge.bit),
                 trial.vectors.dac_moved.get(index).copied().unwrap_or(false),
             );
             dac.push(entry);
@@ -1823,11 +1857,11 @@ impl MixedSignalHost {
                 detail: "there is no active trial whose boundary could be unsettled".into(),
             };
         };
-        let read = |signal| {
+        let read = |signal, bit| {
             self.state
                 .digital
                 .read(signal)
-                .map_or(FourStateBit::HighImpedance, |value| value.bit(0))
+                .map_or(FourStateBit::HighImpedance, |value| value.bit(bit))
         };
         let spelling =
             |bit| BoundaryNetHistory::spelling(BoundaryNetHistory::code(bit)).to_string();
@@ -1842,7 +1876,7 @@ impl MixedSignalHost {
                 node: bridge.positive,
                 read_by_module: true,
                 moves: u32::from(*moved),
-                recent: vec![spelling(read(bridge.signal))],
+                recent: vec![spelling(read(bridge.signal, bridge.bit))],
             })
             .chain(
                 self.state
@@ -1855,7 +1889,7 @@ impl MixedSignalHost {
                         node: bridge.positive,
                         read_by_module: false,
                         moves: u32::from(*moved),
-                        recent: vec![spelling(read(bridge.signal))],
+                        recent: vec![spelling(read(bridge.signal, bridge.bit))],
                     }),
             )
             .filter(|net| net.moves > 0)
@@ -1887,7 +1921,22 @@ impl MixedSignalHost {
         Ok(())
     }
 
-    fn scalar_signal(&self, signal: &str) -> Result<DigitalSignalId, MixedSignalError> {
+    /// Resolve a bridge's signal and check the bit it claims exists.
+    ///
+    /// Returns the signal and its declared width, because the caller needs the
+    /// width to spell the net: one conductor of a vector is `name[bit]` and a
+    /// scalar is just `name`, and only the width separates them.
+    ///
+    /// A width of zero is a real net. It has no bits to bridge, so it is
+    /// refused here as well as at the builder, which is the same rule
+    /// `add_adc_bridge` and `add_dac_bridge` have always resolved a name
+    /// against — the plan is the authority, so the classification and the
+    /// lookup cannot disagree.
+    fn signal_bit(
+        &self,
+        signal: &str,
+        bit: u32,
+    ) -> Result<(DigitalSignalId, u32), MixedSignalError> {
         let id = self.state.digital.signal(signal)?;
         let width = self
             .state
@@ -1895,14 +1944,21 @@ impl MixedSignalHost {
             .read(id)
             .map(FourStateValue::width)
             .unwrap_or(0);
-        if width != 1 {
+        if width == 0 {
             return Err(MixedSignalError::InvalidBridge {
                 detail: format!(
-                    "bridge signal `{signal}` is {width} bits wide; only scalar bridges are supported"
+                    "bridge signal `{signal}` carries no bits; a real net is not a logic boundary"
                 ),
             });
         }
-        Ok(id)
+        if bit >= width {
+            return Err(MixedSignalError::InvalidBridge {
+                detail: format!(
+                    "bridge signal `{signal}` is {width} bits wide and has no bit {bit}"
+                ),
+            });
+        }
+        Ok((id, width))
     }
 
     /// Check a candidate solution covers every node this module reads.
@@ -1928,6 +1984,63 @@ impl MixedSignalHost {
     }
 }
 
+/// Fold one settle's moved bits into one whole-signal drive per signal.
+///
+/// `out` is cleared first and left holding the values [`DigitalHost::force_many`]
+/// will publish, in the order the first moved bit of each signal was found —
+/// which for a scalar-only boundary is bridge order, exactly what it was when
+/// every bridge published its own one-bit value.
+///
+/// Each signal starts from what it holds now rather than from `x`, because the
+/// bits this settle did not move have not changed and a whole-signal write
+/// would otherwise erase them. A signal the store cannot read is refused here
+/// rather than published as a guess: it is the same disappearance `stamp` and
+/// [`read_dac_bits`] refuse on.
+///
+/// [`DigitalHost::force_many`]: super::host::DigitalHost::force_many
+fn compose_bit_drives(
+    state: &MixedState,
+    bit_drives: &[(usize, FourStateBit)],
+    out: &mut Vec<(DigitalSignalId, FourStateValue)>,
+) -> Result<(), MixedSignalError> {
+    out.clear();
+    for &(index, value) in bit_drives {
+        let bridge = state
+            .bridges
+            .adc
+            .get(index)
+            .expect("a moved bit names the bridge it was sampled from");
+        let slot = match out.iter_mut().find(|(held, _)| *held == bridge.signal) {
+            Some(slot) => slot,
+            None => {
+                let current = state.digital.read(bridge.signal).cloned().ok_or_else(|| {
+                    MixedSignalError::InvalidBridge {
+                        detail: format!("A/D signal `{}` disappeared", bridge.signal_name),
+                    }
+                })?;
+                out.push((bridge.signal, current));
+                out.last_mut().expect("just pushed")
+            }
+        };
+        slot.1.set_bit(bridge.bit, value);
+    }
+    Ok(())
+}
+
+/// The boundary net one bridge carries, as a diagnostic should spell it.
+///
+/// A scalar boundary is the signal, because the net and the signal are the
+/// same conductor. One bit of a vector is `name[bit]`, in the position
+/// numbering the discrete half's own bit selects use — so a reader can take
+/// the spelling straight back to the module's source.
+fn boundary_net_name(signal: &str, bit: u32, width: u32) -> String {
+    if width <= 1 {
+        signal.to_string()
+    } else {
+        format!("{signal}[{bit}]")
+    }
+}
+
 /// Read every D/A bridge's driven bit into `out`.
 ///
 /// A free function, and taking the state rather than the host, so a caller can
@@ -1939,7 +2052,7 @@ fn read_dac_bits(state: &MixedState, out: &mut Vec<FourStateBit>) -> Result<(), 
         let bit = state
             .digital
             .read(bridge.signal)
-            .map(|value| value.bit(0))
+            .map(|value| value.bit(bridge.bit))
             .ok_or_else(|| MixedSignalError::InvalidBridge {
                 detail: format!("D/A signal `{}` disappeared", bridge.signal_name),
             })?;
@@ -2083,9 +2196,9 @@ endmodule
         let mut host =
             MixedSignalHost::compile(MIXED, None, "xmixed", &[1, 0], SchedulerLimits::default())
                 .expect("mixed source compiles and starts");
-        host.add_adc_bridge("adc", 3, 0, 0.4, 0.6)
+        host.add_adc_bridge("adc", 0, (3, 0), 0.4, 0.6)
             .expect("A/D bridge");
-        host.add_dac_bridge("dac", 4, 0, 0.0, 5.0, 100.0)
+        host.add_dac_bridge("dac", 0, (4, 0), 0.0, 5.0, 100.0)
             .expect("D/A bridge");
         host
     }
@@ -2507,7 +2620,8 @@ endmodule
             SchedulerLimits::default(),
         )
         .expect("compiles");
-        host.add_dac_bridge("dac", 2, 0, 1.0, 5.0, 100.0).unwrap();
+        host.add_dac_bridge("dac", 0, (2, 0), 1.0, 5.0, 100.0)
+            .unwrap();
         assert_eq!(host.read_digital("dac").unwrap(), "x");
 
         begin(&mut host, 0);
@@ -2637,7 +2751,7 @@ endmodule
             ..SchedulerLimits::default()
         };
         let mut host = MixedSignalHost::compile(source, None, "xosc", &[1, 0], limits).unwrap();
-        host.add_adc_bridge("seed", 3, 0, 0.4, 0.6).unwrap();
+        host.add_adc_bridge("seed", 0, (3, 0), 0.4, 0.6).unwrap();
         begin(&mut host, 0);
         let error = host
             .settle_analog_bridges(&[0.0, 0.0, 1.0])
