@@ -480,8 +480,15 @@ impl CodeGenerator {
         // Generate evaluation steps (executed in order before contributions)
         let phase_start = web_time::Instant::now();
         model.assignment_steps = self.compile_assignment_items(&ir.assignments, &emit_ctx)?;
-        model.noise_assignment_steps =
-            self.compile_assignment_items(&ir.noise_assignments, &emit_ctx)?;
+        // The noise pass is still a second *emission* of the statements, so its
+        // operators keep their own records exactly as before; an un-shadowed
+        // module just no longer carries a second copy of the forest to emit
+        // them from.
+        model.noise_assignment_steps = if ir.noise_assignments_mirror_ordinary {
+            self.compile_assignment_items(&ir.assignments, &emit_ctx)?
+        } else {
+            self.compile_assignment_items(&ir.noise_assignments, &emit_ctx)?
+        };
         if timings {
             eprintln!(
                 "timing codegen.assignments module={} elapsed={:.3}s steps={}",
@@ -843,6 +850,11 @@ impl CodeGenerator {
     ) -> CompileResult<BytecodeProgram> {
         let mut program = BytecodeProgram::default();
         self.emit_expr(expr, emit_ctx, &mut program)?;
+        // Grown by `push`, a program's vector carries up to half its length
+        // again in slack; over the eighteen million instructions of a large
+        // compact model that was 0.4 GB per assignment pass held for the
+        // model's whole lifetime.
+        program.instructions.shrink_to_fit();
         Ok(program)
     }
 

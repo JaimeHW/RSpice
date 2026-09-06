@@ -239,6 +239,15 @@ pub struct DeviceIR {
     /// Frequency-domain assignment replay including noise-process shadows.
     /// Kept separate so DC/transient evaluation pays no process-AD overhead.
     pub noise_assignments: Vec<IrAssignmentItem>,
+    /// `noise_assignments` is the ordinary pass and was not materialised.
+    ///
+    /// Set when the module has noise sources but no variable is noise-shadowed,
+    /// which is every shipped compact model: the noise pass then compiles
+    /// `assignments` a second time instead of a clone of the whole
+    /// shadow-expanded forest — 18 M nodes and 2.1 GB on bsimcmg, held only
+    /// to be handed back unchanged. `noise_assignments` is empty while this is
+    /// set; it is non-empty only when the two passes really differ.
+    pub noise_assignments_mirror_ordinary: bool,
     /// Array variables (elements are contiguous slots in `variables`)
     pub arrays: Vec<ArrayDef>,
     /// Branch equations
@@ -864,6 +873,7 @@ impl DeviceIR {
             event_state_variables: module.event_state_variables.clone(),
             assignments: Vec::new(),
             noise_assignments: Vec::new(),
+            noise_assignments_mirror_ordinary: false,
             arrays: Vec::new(),
             equations: Vec::new(),
             branch_unknowns: Vec::new(),
@@ -1236,14 +1246,19 @@ impl DeviceIR {
         let span = crate::metrics::FineSpan::new("ir.noise_shadow_assignments");
         if !ir.noise_sources.is_empty() {
             let noise_process_count = ir.noise_sources.len();
-            let ordinary_assignments = ir.assignments.clone();
-            autodiff::build_noise_shadow_assignments(
-                &mut ir,
-                noise_process_count,
-                &shadow_roots,
-                &mut shadows,
-            );
-            ir.noise_assignments = std::mem::replace(&mut ir.assignments, ordinary_assignments);
+            // Decide before cloning anything: the clone of the shadow-expanded
+            // forest is the single largest allocation of the whole compile, and
+            // on a module with nothing noise-shadowed it was made only to be
+            // handed back untouched.
+            let shadowed =
+                autodiff::noise_shadowed_dependencies(&ir, noise_process_count, &shadow_roots);
+            if shadowed.is_empty() {
+                ir.noise_assignments_mirror_ordinary = true;
+            } else {
+                let ordinary_assignments = ir.assignments.clone();
+                autodiff::build_noise_shadow_assignments(&mut ir, shadowed, &mut shadows);
+                ir.noise_assignments = std::mem::replace(&mut ir.assignments, ordinary_assignments);
+            }
         }
         span.finish(&format!(
             "module={} processes={}",
@@ -3392,20 +3407,23 @@ pub mod autodiff {
         rewritten
     }
 
-    /// Add assignment shadows for syntactic noise processes.  These are
-    /// separate from solver-axis shadows so process count never enlarges the
-    /// nonlinear Jacobian or its second-derivative layout.
-    pub fn build_noise_shadow_assignments(
-        ir: &mut DeviceIR,
+    /// The noise-shadowed variables of `ir`, each with the process axes it
+    /// carries, after the fixpoint over the assignments and the liveness cut
+    /// from `shadow_roots`.
+    ///
+    /// Empty means the noise pass *is* the ordinary pass. The caller then
+    /// records that on the IR instead of cloning the assignments for
+    /// [`build_noise_shadow_assignments`] to leave untouched.
+    pub fn noise_shadowed_dependencies(
+        ir: &DeviceIR,
         num_processes: usize,
         shadow_roots: &HashSet<SmolStr>,
-        ctx: &mut ShadowContext,
-    ) {
+    ) -> HashMap<SmolStr, BTreeSet<usize>> {
+        let mut deps = HashMap::new();
         if num_processes == 0 {
-            return;
+            return deps;
         }
         let span = crate::metrics::FineSpan::new("ir.noise_axis_fixpoint");
-        let mut deps = HashMap::new();
         let mut passes = 0_usize;
         loop {
             let mut changed = false;
@@ -3424,7 +3442,7 @@ pub mod autodiff {
         }
         span.finish(&format!("passes={passes} shadowed={}", deps.len()));
         if deps.is_empty() {
-            return;
+            return deps;
         }
         let span = crate::metrics::FineSpan::new("ir.noise_liveness");
         let liveness = LivenessGraph::build(&ir.assignments, &ir.variables, &ir.arrays);
@@ -3435,6 +3453,18 @@ pub mod autodiff {
             live.len()
         ));
         deps.retain(|name, _| live.contains(name));
+        deps
+    }
+
+    /// Add assignment shadows for the syntactic noise processes in `deps`
+    /// (from [`noise_shadowed_dependencies`]). These are separate from
+    /// solver-axis shadows so process count never enlarges the nonlinear
+    /// Jacobian or its second-derivative layout.
+    pub fn build_noise_shadow_assignments(
+        ir: &mut DeviceIR,
+        deps: HashMap<SmolStr, BTreeSet<usize>>,
+        ctx: &mut ShadowContext,
+    ) {
         if deps.is_empty() {
             return;
         }
