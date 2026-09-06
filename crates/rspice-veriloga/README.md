@@ -1,34 +1,41 @@
-# RSpice Verilog-A
+﻿# rspice-veriloga
 
-A Verilog-A compiler written in Rust: it takes Verilog-A source (the analog
-subset of the Verilog-AMS LRM 2.4), compiles it through parser, semantic,
-device-IR, canonical-IR, and backend stages, and provides the runtime
-(`VerilogADevice` + bytecode VM, plus the RSpice-owned native JIT contract) that lets the
-compiled model behave as a device inside the rspice-core simulator —
-evaluating currents and charges, producing an analytic Jacobian via automatic
-differentiation, and contributing noise sources. It is the backend of the
-engine's `veriloga`/`veriloga-native` features, the CLI's `rspice compile-va`,
-the GUI's Verilog-A dialog, and the generated-Rust built-in path used by
-`rspice-core`'s `veriloga-builtins` feature.
+A Verilog-AMS compiler written in Rust, covering both halves of LRM 2.4: the
+supported analog subset commonly called Verilog-A, and the supported discrete
+subset (IEEE 1364-2005 digital constructs carrying four-state values and
+real-valued nets), with connect modules inserted automatically at discipline
+boundaries.
+
+Source is compiled through parser, semantic, device-IR, canonical-IR, and
+backend stages, and the crate supplies the runtime that lets the result behave
+as a device inside the rspice-core simulator: evaluating currents and charges,
+producing an analytic Jacobian by automatic differentiation, and contributing
+noise sources. It backs the engine's `veriloga`, `veriloga-native`, and
+`veriloga-wasm-jit` features, the CLI's `rspice compile-va`, the GUI's
+Verilog-A dialog, and the generated-Rust built-in path behind
+`rspice-core`'s `veriloga-builtins`.
 
 ## Compilation pipeline and module map
 
 ```
 source text ─▶ preprocessor ─▶ lexer ─▶ parser ─▶ semantic ─▶ IR (+ autodiff) ─▶ canonical IR
-               `include/`define  tokens    AST     symbol/type  device equations      HIR/MIR
-                                                   resolution   + derivatives            │
-                        ┌──────────────────────────────────────────────────────┬─────────┤
-                        ▼                                                      ▼         ▼
-              codegen: bytecode CompiledModel                          native/ (JIT)  rust_backend
-                        │                                              feature        offline
-                        ├──▶ vm (interpreter)                          "native"       Rust emitter
-                        └──▶ device (VerilogADevice instance) ◀────────────┘
+               `include/`define  tokens    AST     symbol/type  device equations      │
+                                                   resolution   + derivatives         │
+┌────────────────────────┬─────────────────┬─────────────────────┬────────────────────┘
+▼                        ▼                 ▼                     ▼
+codegen                  native/           wasm_jit/             rust_backend
+bytecode CompiledModel   feature "native"  feature "wasm-jit"    offline Rust emitter
+run by vm                machine code      one wasm module       compiled into rspice-core
+│                        │                 │                     │
+└────────────────────────┴─────────────────┘                     ▼
+                         ▼                                       rspice-veriloga-models
+            device: VerilogADevice instance                      (this crate is not linked)
 ```
 
-The three backends are not interchangeable at run time. `vm` and `native/`
-are both driven through `VerilogADevice` in this process; `rust_backend`
-runs offline, ahead of the build, and its output is compiled into
-`rspice-core` as ordinary Rust with this crate absent from the link.
+The four backends are not interchangeable at run time. `vm`, `native/`, and
+`wasm_jit/` are all driven through `VerilogADevice` in this process;
+`rust_backend` runs offline, ahead of the build, and its output is compiled
+into `rspice-core` as ordinary Rust with this compiler absent from the link.
 
 | Module | Contents |
 | :--- | :--- |
@@ -43,8 +50,14 @@ runs offline, ahead of the build, and its output is compiled into
 | `rust_backend` | Deterministic Verilog-A-to-Rust backend for generated built-ins: lowers canonical IR to Rust source folders, registry/support modules, manifest data, and cleanup guards used by `rspice-core`'s `veriloga-builtins` feature |
 | `vm` | Bytecode interpreter and per-instance runtime context (state for `ddt`/`idt`, transition/slew filters, delay buffers, event detectors, lookup tables) |
 | `laplace` / `zfilter` | State-space runtime for the `laplace_*` (s-domain) and `zi_*` (sampled-data) filter operators |
-| `device` | `VerilogADevice`: the per-instance object the simulator drives — see below |
+| `device` | `VerilogADevice`: the per-instance object the simulator drives; see below |
 | `native/` | RSpice-owned native JIT backend (feature `native`): full native JIT or typed construction error, no bytecode fallback. Supports x86-64 and desktop AArch64 on macOS, Linux, and Windows, with platform-native executable-memory and unwind registration |
+| `wasm_jit/` | Browser JIT backend (feature `wasm-jit`): emits a WebAssembly module per model through `wasm-encoder`, validates it with `wasmparser`, and dispatches into it. The owning Web Worker compiles and instantiates the module |
+| `connect` | Connect-module insertion at discipline boundaries, for mixed Verilog-AMS decks |
+| `four_state` | The four-state logic values and their propagation, for the discrete half of Verilog-AMS |
+| `specialist` / `reaching_definition` / `timing_contract` | Structural specialization candidates, the reaching-definition analysis they rest on, and the digital timing contract |
+| `array_index` / `integer_runtime` / `numeric_literal` / `json_float` | Array indexing rules, integer semantics, literal parsing, and the exact float round-trip the artifact digests depend on |
+| `canonical_compat` | Compatibility between canonical-IR artifact versions |
 | `virtual_source` | Sealed, file-system-free source bundles: portable logical paths, include resolution restricted to the bundle plus the built-in headers, and BLAKE3 identities for the source, dependency closure, compiler contract, and runtime contract. The transport boundary for browser workers and retained run snapshots |
 | `runtime_report` | In-memory compilation reports: the simulator ABI a compiled artifact exposes, its user-facing diagnostics with source positions, and which runtime targets have actually qualified for it. Performs no file-system access |
 | `metrics` | Stable phase identifiers, structured timing/work-size reports, measured-result wrappers, and opt-in performance budgets shared by the compiler and offline Rust backend |
@@ -89,8 +102,8 @@ The `*_runtime` family is the one to reach for when a caller needs both
 artifacts: preprocessing, lexing, parsing, and semantic analysis run once
 and the bytecode model and canonical IR are emitted from the same analyzed
 module, then cross-validated. `compile_runtime` and the virtual-bundle
-APIs are sealed — they consult the built-in standard headers but never the
-configured `include_paths` or the disk — so a caller that needs includes
+APIs are sealed: they consult the built-in standard headers but never the
+configured `include_paths` or the disk, so a caller that needs includes
 resolves its own graph into a `VirtualSourceBundle` first.
 `compile_virtual_runtime_diagnosed` differs from `compile_virtual_runtime`
 only in failure: it keeps source-authentic diagnostics mapped back to
@@ -128,7 +141,7 @@ is excluded from compiler-contract identities.
 they are accepted and they participate in the compiler-contract identity
 hash, so changing one invalidates a cached compilation, but no compiler
 phase reads them yet. In particular `integration_order` does not pick the
-`ddt`/`idt` integration rule — the engine supplies companion coefficients
+`ddt`/`idt` integration rule; the engine supplies companion coefficients
 per timestep, so one compiled model serves backward Euler and Gear-2
 alike.
 
@@ -146,7 +159,7 @@ nodes)` and then drives it directly (no trait indirection): set parameters
 `stamp_reactive()` / `compute_jacobian()` inside the Newton loop, and
 `noise_sources()` for noise analysis. Transient control flows back through
 `transient_bound_step()` (`$bound_step`) and `discontinuity_pending()`
-(`$discontinuity`). The compiled model is shared — a thousand instances of
+(`$discontinuity`). The compiled model is shared: a thousand instances of
 one model compile (and JIT) once. `is_using_native()` reports whether the
 JIT is active for diagnostics.
 
@@ -158,7 +171,7 @@ exercised by the test suite:
 - **Analog operators**: `ddt`, `idt`, `idtmod`, `ddx`, `limexp`,
   `absdelay`, `transition`, `slew`, `laplace_zp/zd/np/nd`,
   `zi_nd/zp/zd/np`, `last_crossing`, `$limit`, `$table_model`. The
-  integration rule for `ddt`/`idt` is not a compile-time choice — the
+  integration rule for `ddt`/`idt` is not a compile-time choice; the
   engine supplies the companion coefficients per timestep, so the same
   compiled model runs under backward Euler or Gear-2/trapezoidal
 - **Noise**: `white_noise`, `flicker_noise`, `noise_table`,
@@ -195,8 +208,8 @@ context that must stay free of side effects.
 Two constructs are accepted but inert, so they are worth knowing about:
 noise sources are always mutually uncorrelated (the trailing name argument
 is a label carried into the results, not a correlation key), and the
-no-effect system tasks — `$display`, `$write`, `$strobe`, `$monitor`,
-`$info`, `$warning`, `$error`, `$fatal`, `$finish`, `$stop` — parse and
+no-effect system tasks (`$display`, `$write`, `$strobe`, `$monitor`,
+`$info`, `$warning`, `$error`, `$fatal`, `$finish`, `$stop`) parse and
 then do nothing, so a model cannot print from the analog block.
 
 ## Feature flags
@@ -204,7 +217,8 @@ then do nothing, so a model cannot print from the analog block.
 | Feature | Default | Effect |
 | :--- | :--- | :--- |
 | `native` | off | RSpice-owned native JIT for Verilog-A devices; requested native mode is full native JIT or typed construction error, with no bytecode fallback. Pulls in the platform APIs for executable memory (`windows-sys` / `libc`) |
-| `native-bytecode-contract-tests` | off | Internal. Implies `native` and exposes `compile_native`, which JITs straight from the bytecode model without a canonical IR artifact. Backend contract tests only — production native users must supply canonical IR and must not enable it |
+| `wasm-jit` | off | Browser JIT backend, adding `wasm-encoder` and `wasmparser`. Reached through `rspice-core/veriloga-wasm-jit` |
+| `native-bytecode-contract-tests` | off | Internal. Implies `native` and exposes `compile_native`, which JITs straight from the bytecode model without a canonical IR artifact. Backend contract tests only: production native users must supply canonical IR and must not enable it |
 
 `rspice-core` maps these as `veriloga` (interpreter) and `veriloga-native`
 (native JIT) and adds a blake3-keyed on-disk cache for compiled models on
@@ -235,8 +249,8 @@ device folder per module into
 `crates/rspice-veriloga-models/models/`, with one Cargo package per model plus
 a feature-selectable catalog, `registry.rs`, and `manifest.txt`. Cargo can
 compile those packages in parallel and reuse an unchanged model artifact
-without rebuilding it through `rspice-core`. That generated Rust — not this
-compiler — is what `rspice-core`'s `veriloga-builtins` feature builds.
+without rebuilding it through `rspice-core`. That generated Rust, not this
+compiler, is what `rspice-core`'s `veriloga-builtins` feature builds.
 
 The generated backend preserves the compact-model parameter convention in
 the source: unmarked parameters are model-card parameters, while
@@ -286,7 +300,7 @@ clamped to the number of modules being generated. `--filter` belongs to
 the subset command only: full
 regeneration rejects it, because a partial rewrite would leave the
 registry and manifest describing devices that are no longer there. The
-subset command says so in its output — it deliberately does not rewrite
+subset command says so in its output: it deliberately does not rewrite
 `registry.rs` or `manifest.txt`, so its output is for inspection, not for
 committing. The `generator` profile matters: it is release-optimized, and
 compiling the full model corpus under the dev profile is impractically
@@ -295,9 +309,9 @@ slow.
 Staleness is detected by two digests recorded in `manifest.txt`. The
 `source_tree_digest` covers the model sources under `--models`; the
 `generator_digest` is computed at generation time over the
-`GENERATOR_SOURCE_DIGEST_INPUTS` list in `src/rust_backend/builtins.rs` —
+`GENERATOR_SOURCE_DIGEST_INPUTS` list in `src/rust_backend/builtins.rs`,
 every compiler source a generator run compiles, `build.rs` and
-`Cargo.toml`, plus the workspace `Cargo.toml`/`Cargo.lock` — so that
+`Cargo.toml`, plus the workspace `Cargo.toml`/`Cargo.lock`, so that
 editing the compiler invalidates its output exactly like editing a model
 does. The in-process runtime backends are the deliberate omission, and the
 comment on that list says why they cannot move a generated byte.
@@ -323,7 +337,7 @@ cargo test  -p rspice-veriloga --features native    # + native JIT contract
 
 The integration tests under `tests/` group into five bands.
 
-**Compilation and language semantics** — end-to-end compilation
+**Compilation and language semantics**: end-to-end compilation
 (`compile_models.rs`), multi-module selection (`module_selection.rs`),
 parameter constraints and `aliasparam` (`parameter_validation.rs`,
 `aliasparam.rs`), array variables (`array_vars.rs`), expression truth and
@@ -331,27 +345,27 @@ equality rules (`expression_semantics.rs`), `analysis()` queries
 (`analysis_queries.rs`), and `syntax_integrity.rs`, which pins that
 unsupported constructs are rejected rather than silently dropped.
 
-**Runtime numerics** — evaluation and Jacobians against hand-derived
+**Runtime numerics**: evaluation and Jacobians against hand-derived
 companion-model values (`device_eval.rs`), indirect contributions
 (`indirect_contributions.rs`), `$mfactor` scaling (`mfactor.rs`), solver
 companion coefficients (`integration_methods.rs`), state installation
 (`runtime_configuration.rs`), and `numeric_integrity.rs`, which pins that
 non-finite values are reported rather than zeroed away.
 
-**Stateful operators** — `zi_*` filters (`zi_filters.rs`), events
+**Stateful operators**: `zi_*` filters (`zi_filters.rs`), events
 (`event_semantics.rs`), timers (`timer_semantics.rs`), `last_crossing`
 (`last_crossing_semantics.rs`), `$bound_step`/`$discontinuity`
 (`timestep_control.rs`), and `stateful_operator_idempotence.rs`, which
 pins that Newton re-evaluation never consumes accepted history.
 
-**Artifacts and backends** — canonical IR validation (`canonical_ir.rs`),
+**Artifacts and backends**: canonical IR validation (`canonical_ir.rs`),
 runtime reports and cross-artifact digest drift
 (`runtime_compile_report.rs`), sealed bundles (`virtual_source.rs`), the
 native no-fallback contract (`native_contract.rs`), and the Rust backend
 (`rust_backend.rs`, plus `generated_output_audit.rs` auditing the
 checked-in generated devices).
 
-**Production-model frontiers** — PSP 103.6 via the IHP SG13G2 open PDK
+**Production-model frontiers**: PSP 103.6 via the IHP SG13G2 open PDK
 (`psp103_frontier.rs`) and the shipped CMC r3_cmc and JUNCAP200 models
 (`cmc_frontier.rs`). `bsim4_frontier.rs` is optional and activates only
 when `RSPICE_BSIM4_VA` points at an externally supplied clean BSIM4.8
@@ -370,7 +384,4 @@ Engine-level oracle tests that compare compiled models against reference results
 [rspice-core's test suite](../rspice-core/README.md#building-and-testing)
 (`veriloga_*.rs`).
 
-## License
-
-RSpice Verilog-A is part of the RSpice project and is licensed under the
-[RSpice Personal Use License](../../LICENSE).
+Licensed under the [RSpice Personal Use License](../../LICENSE).

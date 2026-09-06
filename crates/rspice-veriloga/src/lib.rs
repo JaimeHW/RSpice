@@ -1,15 +1,15 @@
 //! # RSpice Verilog-A/AMS Compiler
 //!
-//! A compiler for the supported subset of the Verilog-AMS Language Reference
-//! Manual (LRM) 2.4, both halves of it: the analog subset commonly called
-//! Verilog-A, and the discrete subset — IEEE 1364-2005 digital constructs
-//! carrying four-state values ([`four_state`]) and real-valued nets — with the
+//! A compiler for the Verilog-AMS Language Reference Manual (LRM) 2.4, both
+//! halves of it: the supported analog subset commonly called Verilog-A, and
+//! the supported discrete subset (IEEE 1364-2005 digital constructs carrying
+//! four-state values ([`four_state`]) and real-valued nets), with the
 //! mixed-discipline net-boundary machinery of clause 7 in [`connect`].
 //!
 //! ## Architecture
 //!
 //! Source text is lowered through a fixed front end and then fans out to
-//! three independent backends:
+//! four independent backends:
 //!
 //! 1. **Preprocessing** ([`preprocessor`]) - `` `include ``/`` `define ``
 //!    expansion, with the standard VAMS headers built in ([`stdlib`])
@@ -23,10 +23,11 @@
 //!    HIR/MIR artifact that the backends consume
 //!
 //! The backends are [`codegen`], emitting a bytecode [`CompiledModel`] run by
-//! [`vm`]; `native`, a JIT behind the `native` feature; and [`rust_backend`],
-//! an offline emitter that turns canonical IR into Rust source compiled
-//! directly into `rspice-core`. The first two are driven in-process through
-//! [`device::VerilogADevice`]; the third runs ahead of the build.
+//! [`vm`]; `native`, a JIT behind the `native` feature; `wasm_jit`, a
+//! WebAssembly JIT behind the `wasm-jit` feature; and [`rust_backend`], an
+//! offline emitter that turns canonical IR into Rust source compiled directly
+//! into `rspice-core`. The first three are driven in-process through
+//! [`device::VerilogADevice`]; the last runs ahead of the build.
 //!
 //! ## Usage
 //!
