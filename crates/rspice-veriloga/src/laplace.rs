@@ -488,19 +488,19 @@ impl StateSpaceFilter {
         // Preserve the historical order-zero API contract: a purely static
         // transfer has no timestep to validate.
         if self.order == 0 {
-            return self.step_with_integration(input, IntegrationCoefficients::backward_euler(1.0));
+            let unit = IntegrationCoefficients::backward_euler(1.0)
+                .map_err(|error| LaplaceError::InvalidEvaluation(error.to_string()))?;
+            return self.step_with_integration(input, unit);
         }
         if !timestep.is_finite() || timestep <= 0.0 {
             return Err(LaplaceError::InvalidEvaluation(format!(
                 "transient timestep must be finite and positive, got {timestep}"
             )));
         }
-        let coefficients = IntegrationCoefficients::backward_euler(timestep);
-        if !coefficients.active {
-            return Err(LaplaceError::InvalidEvaluation(format!(
-                "transient timestep {timestep} does not produce an active Backward Euler rule"
-            )));
-        }
+        // A positive finite interval the rule can represent is always active,
+        // so the constructor's refusal is the only remaining way to fail.
+        let coefficients = IntegrationCoefficients::backward_euler(timestep)
+            .map_err(|error| LaplaceError::InvalidEvaluation(error.to_string()))?;
         self.step_with_integration(input, coefficients)
     }
 
@@ -570,12 +570,10 @@ impl StateSpaceFilter {
                 "transient timestep must be finite and positive, got {timestep}"
             )));
         }
-        let coefficients = IntegrationCoefficients::backward_euler(timestep);
-        if !coefficients.active {
-            return Err(LaplaceError::InvalidEvaluation(format!(
-                "transient timestep {timestep} does not produce an active Backward Euler rule"
-            )));
-        }
+        // As in `step`: past the positivity check the only remaining failure is
+        // an interval the companion rule refuses to represent.
+        let coefficients = IntegrationCoefficients::backward_euler(timestep)
+            .map_err(|error| LaplaceError::InvalidEvaluation(error.to_string()))?;
         self.transient_input_gain(coefficients)
     }
 
@@ -1601,7 +1599,8 @@ endmodule
     fn generalized_companion_rules_advance_exact_accepted_history() {
         let mut filter = StateSpaceFilter::integrator(1.0).expect("first-order low-pass");
 
-        let backward_euler = IntegrationCoefficients::backward_euler(0.5);
+        let backward_euler =
+            IntegrationCoefficients::backward_euler(0.5).expect("a representable interval");
         let first = filter
             .step_with_integration(1.0, backward_euler)
             .expect("Backward Euler candidate");
@@ -1649,7 +1648,10 @@ endmodule
             .expect("matching initial state");
 
         for (coefficients, expected) in [
-            (IntegrationCoefficients::backward_euler(0.5), 1.0 / 3.0),
+            (
+                IntegrationCoefficients::backward_euler(0.5).expect("a representable interval"),
+                1.0 / 3.0,
+            ),
             (trapezoidal(4.0), 1.0 / 5.0),
             (gear2(3.0, 4.0, -1.0), 1.0 / 4.0),
         ] {

@@ -1143,7 +1143,9 @@ mod tests {
         context.state_values_older[0] = 1.5;
         context.state_initialized[0] = true;
         context
-            .try_set_integration_coefficients(IntegrationCoefficients::backward_euler(0.1))
+            .try_set_integration_coefficients(
+                IntegrationCoefficients::backward_euler(0.1).expect("a representable interval"),
+            )
             .unwrap();
         let mut session = WasmJitRuntimeSession::new(context);
 
@@ -1442,7 +1444,9 @@ mod tests {
     fn stateful_integration_helper_does_not_accept_initialization_speculatively() {
         let mut context = VmContext::with_states(0, 1);
         context
-            .try_set_integration_coefficients(IntegrationCoefficients::backward_euler(1.0))
+            .try_set_integration_coefficients(
+                IntegrationCoefficients::backward_euler(1.0).expect("a representable interval"),
+            )
             .unwrap();
         let mut session = WasmJitRuntimeSession::new(context);
 
@@ -1482,7 +1486,9 @@ mod tests {
     fn integration_helpers_preserve_direct_start_history_for_gear2() {
         let mut context = VmContext::with_states(0, 3);
         context
-            .try_set_integration_coefficients(IntegrationCoefficients::backward_euler(0.5))
+            .try_set_integration_coefficients(
+                IntegrationCoefficients::backward_euler(0.5).expect("a representable interval"),
+            )
             .unwrap();
         let mut session = WasmJitRuntimeSession::new(context);
 
@@ -1577,7 +1583,9 @@ mod tests {
         context.state_derivatives_prev[0] = 1.0;
         context.state_initialized[0] = true;
         context
-            .try_set_integration_coefficients(IntegrationCoefficients::backward_euler(0.6))
+            .try_set_integration_coefficients(
+                IntegrationCoefficients::backward_euler(0.6).expect("a representable interval"),
+            )
             .unwrap();
         let mut session = WasmJitRuntimeSession::new(context);
 

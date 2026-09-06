@@ -114,18 +114,44 @@ impl IntegrationCoefficients {
         }
     }
 
-    pub fn backward_euler(timestep: f64) -> Self {
-        if !timestep.is_finite() || timestep.abs() <= 1.0e-20 {
-            return Self::inactive();
+    /// The Backward Euler companion rule for one transient interval.
+    ///
+    /// A zero interval is the static-evaluation convention and yields inactive
+    /// coefficients; the DC path spells a timepoint that way on purpose. Any
+    /// other interval the rule cannot represent is *refused* rather than
+    /// reduced to inactive coefficients, through the same floor and error the
+    /// generated route's constructor,
+    /// `CircuitData::prepare_veriloga_timepoint` and
+    /// `mixed_integration_coefficients` refuse with. A module evaluated with
+    /// its `ddt` contributions silently dropped is a different circuit: a
+    /// charge-storing device abruptly becomes a resistor, and the caller sees a
+    /// converged, plausible, wrong answer instead of a failure.
+    ///
+    /// Below the floor every coefficient is built from `1/dt`, so the
+    /// conductance leaves the model's numeric scale while the history term
+    /// meant to cancel it does not, and what reaches the matrix is roundoff.
+    pub fn backward_euler(
+        timestep: f64,
+    ) -> Result<Self, rspice_veriloga_runtime::GeneratedDdtTimestepError> {
+        if timestep == 0.0 {
+            return Ok(Self::inactive());
+        }
+        if !timestep.is_finite()
+            || timestep.abs() <= rspice_veriloga_runtime::GENERATED_DDT_TIMESTEP_FLOOR
+        {
+            return Err(rspice_veriloga_runtime::GeneratedDdtTimestepError {
+                timestep,
+                floor: rspice_veriloga_runtime::GENERATED_DDT_TIMESTEP_FLOOR,
+            });
         }
         let inverse_timestep = 1.0 / timestep;
-        Self {
+        Ok(Self {
             active: true,
             derivative_scale: inverse_timestep,
             previous_value_scale: inverse_timestep,
             older_value_scale: 0.0,
             previous_derivative_scale: 0.0,
-        }
+        })
     }
 
     /// Validate a solver-provided companion rule before it reaches an
@@ -1339,7 +1365,8 @@ impl VmContext {
                 "transient timestep must be finite and non-negative, got {dt}"
             )));
         }
-        let coefficients = IntegrationCoefficients::backward_euler(dt);
+        let coefficients = IntegrationCoefficients::backward_euler(dt)
+            .map_err(|error| VmError::InvalidRuntimeConfiguration(error.to_string()))?;
         coefficients.validate()?;
         self.timestep = dt;
         self.apply_integration_coefficients(coefficients);
@@ -1675,7 +1702,7 @@ mod tests {
     fn integration_coefficients_validate_supported_rules_and_tiny_scales() {
         let valid = [
             IntegrationCoefficients::inactive(),
-            IntegrationCoefficients::backward_euler(0.25),
+            IntegrationCoefficients::backward_euler(0.25).expect("a representable interval"),
             IntegrationCoefficients {
                 active: true,
                 derivative_scale: 2.0,
@@ -1785,13 +1812,60 @@ mod tests {
         assert_eq!(context.state_candidate_valid, before.state_candidate_valid);
         assert_eq!(context.state_older_candidate, before.state_older_candidate);
 
-        for invalid_timestep in [f64::NAN, f64::INFINITY, -1.0] {
+        // 1e-21 is not malformed: it is a positive finite interval a
+        // picosecond locked grid can genuinely prescribe, and the companion
+        // rule cannot build `1/dt` from it. It refuses here for the same reason
+        // the other three, and like the malformed ones it refuses before
+        // anything is mutated.
+        for invalid_timestep in [f64::NAN, f64::INFINITY, -1.0, 1.0e-21] {
             assert!(context.try_set_timestep(invalid_timestep).is_err());
             assert_eq!(context.timestep().to_bits(), before.timestep().to_bits());
             assert_eq!(context.integration, before.integration);
             assert_eq!(context.state_candidate_valid, before.state_candidate_valid);
             assert_eq!(context.state_older_candidate, before.state_older_candidate);
         }
+    }
+
+    /// The fourth copy of the `ddt` timestep floor, refusing like the other
+    /// three.
+    ///
+    /// A zero interval is the static-evaluation convention the DC path spells
+    /// on purpose, and stays inactive. Any other interval below the floor is a
+    /// caller asking to integrate over something the rule cannot represent. It
+    /// used to come back as inactive coefficients — the module evaluated with
+    /// no `ddt` contribution at all, which is a different circuit — and now
+    /// carries the shared `GeneratedDdtTimestepError` the generated route,
+    /// `CircuitData::prepare_veriloga_timepoint` and
+    /// `mixed_integration_coefficients` refuse with.
+    #[test]
+    fn a_zero_interval_is_static_and_a_sub_floor_one_is_refused() {
+        let floor = rspice_veriloga_runtime::GENERATED_DDT_TIMESTEP_FLOOR;
+
+        assert_eq!(
+            IntegrationCoefficients::backward_euler(0.0)
+                .expect("a zero interval is the static convention, not a refusal"),
+            IntegrationCoefficients::inactive()
+        );
+
+        let refusal = IntegrationCoefficients::backward_euler(1.0e-21)
+            .expect_err("a non-zero interval below the floor cannot be integrated");
+        assert_eq!(refusal.timestep, 1.0e-21);
+        assert_eq!(refusal.floor, floor);
+        let text = refusal.to_string();
+        assert!(
+            text.contains(&format!("{:.16e}s", 1.0e-21))
+                && text.contains(&format!("needs at least {floor:.16e}s")),
+            "the refusal names both the interval and the floor: {text}"
+        );
+
+        // The floor itself is out, one ulp above it is in — the same boundary
+        // the runtime constructor's own pin draws.
+        assert!(IntegrationCoefficients::backward_euler(floor).is_err());
+        assert!(
+            IntegrationCoefficients::backward_euler(floor.next_up())
+                .expect("one ulp above the floor is representable")
+                .active
+        );
     }
 
     #[test]

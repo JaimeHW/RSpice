@@ -1792,7 +1792,9 @@ mod tests {
         let mut context = VmContext::default();
         context.analysis_type = 2;
         context
-            .try_set_integration_coefficients(IntegrationCoefficients::backward_euler(0.5))
+            .try_set_integration_coefficients(
+                IntegrationCoefficients::backward_euler(0.5).expect("a representable interval"),
+            )
             .expect("valid Backward Euler rule");
         let mut filter = crate::laplace::StateSpaceFilter::integrator(1.0)
             .expect("first-order low-pass realization");
@@ -1918,7 +1920,9 @@ mod tests {
     fn integration_initialization_is_published_only_when_the_candidate_is_accepted() {
         let mut context = VmContext::with_states(0, 3);
         context
-            .try_set_integration_coefficients(IntegrationCoefficients::backward_euler(0.5))
+            .try_set_integration_coefficients(
+                IntegrationCoefficients::backward_euler(0.5).expect("a representable interval"),
+            )
             .unwrap();
 
         context.begin_stateful_evaluation();
@@ -2013,7 +2017,9 @@ mod tests {
     fn acceptance_leaves_unexecuted_integration_slots_unchanged() {
         let mut context = VmContext::with_states(0, 2);
         context
-            .try_set_integration_coefficients(IntegrationCoefficients::backward_euler(1.0))
+            .try_set_integration_coefficients(
+                IntegrationCoefficients::backward_euler(1.0).expect("a representable interval"),
+            )
             .unwrap();
         context.state_values_prev = vec![1.0, 2.0];
         context.state_values_older = vec![0.5, 1.5];
@@ -2038,7 +2044,9 @@ mod tests {
     fn skipped_retry_discards_a_failed_nonfinite_integration_candidate() {
         let mut context = VmContext::with_states(0, 1);
         context
-            .try_set_integration_coefficients(IntegrationCoefficients::backward_euler(1.0))
+            .try_set_integration_coefficients(
+                IntegrationCoefficients::backward_euler(1.0).expect("a representable interval"),
+            )
             .unwrap();
         context.state_values[0] = 4.0;
         context.state_values_prev[0] = 4.0;
@@ -2084,7 +2092,9 @@ mod tests {
         );
         assert!(!context.state_initialized[0]);
 
-        context.set_integration_coefficients(IntegrationCoefficients::backward_euler(1.0));
+        context.set_integration_coefficients(
+            IntegrationCoefficients::backward_euler(1.0).expect("a representable interval"),
+        );
 
         assert!(!context.state_initialized[0]);
         assert_eq!(context.state_values[0].to_bits(), 0.0_f64.to_bits());

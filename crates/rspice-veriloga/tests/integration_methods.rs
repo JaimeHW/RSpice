@@ -168,7 +168,9 @@ endmodule
     let mut device = model.device("A1", &[1, 0]);
     device.set_analysis_type(2);
     device.set_time(0.5);
-    device.set_integration_coefficients(IntegrationCoefficients::backward_euler(0.5));
+    device.set_integration_coefficients(
+        IntegrationCoefficients::backward_euler(0.5).expect("a representable interval"),
+    );
     device.update_voltages(&[2.0]);
 
     let first = device.try_evaluate().expect("direct first transient step");
@@ -221,7 +223,9 @@ endmodule
 
     for (time, expected) in [(0.6, 0.6), (1.2, 0.2)] {
         device.set_time(time);
-        device.set_integration_coefficients(IntegrationCoefficients::backward_euler(0.6));
+        device.set_integration_coefficients(
+            IntegrationCoefficients::backward_euler(0.6).expect("a representable interval"),
+        );
         let phase = device.try_evaluate().expect("backward-Euler phase")[0];
         assert_close(phase, expected, "backward-Euler wrapped phase");
         device.advance_state();
