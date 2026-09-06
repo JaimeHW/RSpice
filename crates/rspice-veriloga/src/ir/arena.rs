@@ -853,7 +853,14 @@ fn pack_index(value: usize) -> u32 {
 }
 
 /// Unpack a terminal or ordinal index from a node's `u32` slot.
-fn unpack_index(value: u32) -> usize {
+///
+/// The four payloads [`ExprArena::import`] packs — [`Node::Voltage`],
+/// [`Node::Current`], [`Node::BranchCurrent`] and [`Node::PortConnected`] —
+/// hold a `u32` where the source holds a `usize`, with `u32::MAX` standing for
+/// `expr_converter::GROUND_NODE`. Every consumer that reads one of them owes
+/// the bytecode and the canonical route the `usize` spelling, so it reads them
+/// through here rather than casting.
+pub fn unpack_index(value: u32) -> usize {
     if value == PACKED_GROUND {
         GROUND_INDEX
     } else {
