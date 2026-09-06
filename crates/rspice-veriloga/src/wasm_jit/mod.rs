@@ -2111,6 +2111,87 @@ endmodule
         }
     }
 
+    /// The wasm half of
+    /// `native::x64::tests::assignment_pass_power_rule_base_term_is_finite_at_a_zero_base`:
+    /// the assignment pass is lowered once by `native::expr` and emitted for
+    /// both machines, so its power rule's base term is read back here off the
+    /// variable array. `seen` is event state, which roots the pass on `c` and
+    /// through it on `q`'s shadow along `V(t)` — without a root the pass would
+    /// not compute `c` at all and the read would be a slot nobody wrote.
+    #[test]
+    fn the_wasm_assignment_pass_power_rule_base_term_is_finite_at_a_zero_base() {
+        use std::mem::size_of;
+
+        const SOURCE: &str = r#"
+module wasm_pow_shadow_zero_base(p, n, t);
+  inout p, n, t;
+  electrical p, n, t;
+  parameter integer sh = 0;
+  real a, q, c, seen;
+  analog begin
+    if (sh != 0)
+      a = V(p, n) + V(t);
+    else
+      a = V(p, n);
+    q = 1.0e-12 * pow(a, 0.5);
+    c = ddx(q, V(t));
+    @(initial_step) seen = c;
+    I(p, n) <+ ddt(q);
+    I(p, n) <+ 1.0e-3 * V(p, n);
+  end
+endmodule
+"#;
+
+        let report = VerilogACompiler::new(CompilerOptions::default())
+            .compile_runtime(SOURCE, Some("wasm_pow_shadow_zero_base"))
+            .expect("compile fixture");
+        assert!(
+            report.model.num_variables <= 32,
+            "the harness's variable region holds 32 slots"
+        );
+        let slot = |name: &str| {
+            report
+                .model
+                .variable_names
+                .iter()
+                .position(|variable| variable == name)
+                .unwrap_or_else(|| panic!("variable {name}"))
+        };
+        let (a, c) = (slot("a"), slot("c"));
+        let mut harness = FusedKernelHarness::for_source(SOURCE, "wasm_pow_shadow_zero_base");
+        harness.reset();
+        for (index, parameter) in report.model.parameters.iter().enumerate() {
+            harness.write_f64(
+                FusedKernelHarness::PARAMETERS as usize + index * size_of::<f64>(),
+                parameter.default,
+            );
+        }
+        let variable =
+            |index: usize| FusedKernelHarness::VARIABLES as usize + index * size_of::<f64>();
+
+        // Away from zero first, to prove the pass writes the slots this test
+        // reads: `a` is `V(p, n)` and `c` is 0 because `a` does not carry V(t).
+        for (index, value) in [0.09, 0.0, 0.0].into_iter().enumerate() {
+            harness.write_f64(
+                FusedKernelHarness::VOLTAGES as usize + index * size_of::<f64>(),
+                value,
+            );
+        }
+        harness.call_assignments();
+        assert_eq!(harness.read_f64(variable(a)), 0.09, "the pass publishes a");
+        assert_eq!(harness.read_f64(variable(c)), 0.0, "dq/dV(t) at a = 0.09");
+
+        // At the zero base the same term is `0.5 · 0^-0.5 · 0`.
+        harness.write_f64(FusedKernelHarness::VOLTAGES as usize, 0.0);
+        harness.call_assignments();
+        let value = harness.read_f64(variable(c));
+        assert!(
+            value.is_finite(),
+            "c = ddx(q, V(t)) at V(p, n) = 0 under wasm is {value}; the base term is 0.5 · 0^-0.5 · 0 and must be 0"
+        );
+        assert_eq!(value, 0.0);
+    }
+
     /// The fused stamp driver writes each derivative to the slot the device
     /// reads it back from.
     ///

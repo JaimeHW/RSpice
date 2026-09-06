@@ -4953,6 +4953,85 @@ endmodule
         assert_eq!(observed.variables[g], 1.0);
     }
 
+    /// The power rule at a zero base on the canonical assignment pass — the
+    /// third rule set after `canonical_ir/ad.rs` and `ir.rs`:
+    /// `native::expr::lower_pow_derivative`, which differentiates each HIR
+    /// assignment into its `@dN` shadows for the CFG plan's assignment pass
+    /// and for the observation image, and which `ddx()` reads through
+    /// `lower_identifier_derivative`. `c = ddx(q, V(t))` is the shape of
+    /// bsimcmg's `cggi = ddx(qgi, V(gi))`, NaN on this route where the
+    /// bytecode's guarded rule gives a finite value; `a` reaches `V(t)` only
+    /// through a merge whose taken arm does not carry it, so `da/dV(t)` is a
+    /// live lane that is exactly 0, and `0.5 · 0^-0.5 · 0` is `∞ · 0`.
+    const POW_SHADOW_ZERO_BASE_SOURCE: &str = r#"
+module pow_shadow_zero_base(p, n, t);
+  inout p, n, t;
+  electrical p, n, t;
+  parameter integer sh = 0;
+  real a, q, c;
+  analog begin
+    if (sh != 0)
+      a = V(p, n) + V(t);
+    else
+      a = V(p, n);
+    q = 1.0e-12 * pow(a, 0.5);
+    c = ddx(q, V(t));
+    I(p, n) <+ ddt(q);
+    I(p, n) <+ 1.0e-3 * V(p, n);
+  end
+endmodule
+"#;
+
+    #[test]
+    fn assignment_pass_power_rule_base_term_is_finite_at_a_zero_base() {
+        let name = "pow_shadow_zero_base";
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let runtime = compiler
+            .compile_runtime(POW_SHADOW_ZERO_BASE_SOURCE, Some(name))
+            .expect("compile fixture");
+        let native = compile_model_with_canonical_ir(&runtime.model, &runtime.canonical_ir)
+            .expect("native x64 compile fixture");
+        let model = &runtime.model;
+
+        // (a) Through the finite oracle, which compares `c` the way it compared
+        //     bsimcmg's `cggi`: bytecode finite, native must be too.
+        let mut context = native_model_benchmark_context(model, name);
+        resolve_native_parameter_defaults(model, &native, &mut context);
+        let stats = assert_native_matches_bytecode_finite_entries(
+            model,
+            &runtime.canonical_ir,
+            &native,
+            context,
+            name,
+        )
+        .expect("c = ddx(q, V(t)) at V(p, n) = 0 must be finite on the assignment pass where the bytecode's is");
+        assert!(stats.variables > 0, "the fixture must compare variables");
+
+        // (b) The value itself, off the observation image: the base term is
+        //     `0.5 · 0^-0.5 · 0` and the analytic derivative is 0.
+        let c = model
+            .variable_names
+            .iter()
+            .position(|variable| variable == "c")
+            .expect("c");
+        let mut observed = native_model_benchmark_context(model, name);
+        resolve_native_parameter_defaults(model, &native, &mut observed);
+        let ctx = eval_context_from_vm_context(&mut observed);
+        ctx.clear_runtime_error();
+        run_assignment_and_prelude(&native, &ctx, observed.variables.as_mut_ptr());
+        run_observation(
+            model,
+            &runtime.canonical_ir,
+            &ctx,
+            observed.variables.as_mut_ptr(),
+        );
+        require_clean_native_context(&ctx, "fixture observation").expect("observation");
+        assert_eq!(
+            observed.variables[c], 0.0,
+            "c = d(1e-12 · a^0.5)/dV(t) at a = 0 along an axis a does not carry must be 0"
+        );
+    }
+
     fn run_shipped_model_device_probe(name: &str, path: &Path, module: Option<&str>) {
         shipped_probe_trace(name, "compile-runtime:start");
         let frontend_start = web_time::Instant::now();

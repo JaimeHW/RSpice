@@ -4151,7 +4151,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     ) -> JitResult<()> {
         if let Some(exponent) = self.constant_number(right) {
             self.push(NativeOp::Const(exponent))?;
-            self.lower(left)?;
+            self.lower_power_rule_base(left, Some(exponent))?;
             self.push(NativeOp::Const(exponent - 1.0))?;
             self.append_binary_math("Pow")?;
             self.append_arithmetic("Mul")?;
@@ -4169,7 +4169,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         // d(a^b)/da * da = b * a^(b-1) * da
         if !left_zero {
             self.lower(right)?;
-            self.lower(left)?;
+            self.lower_power_rule_base(left, None)?;
             self.lower(right)?;
             self.push(NativeOp::Const(1.0))?;
             self.append_arithmetic("Sub")?;
@@ -4185,8 +4185,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             self.lower(left)?;
             self.lower(right)?;
             self.append_binary_math("Pow")?;
-            self.lower(left)?;
-            self.append_unary(NativeOp::UnaryMath(UnaryMathOp::Log))?;
+            self.lower_power_rule_guarded_log(left)?;
             self.append_arithmetic("Mul")?;
             self.lower_derivative(right, wrt)?;
             self.append_arithmetic("Mul")?;
@@ -4195,6 +4194,62 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             }
         }
         Ok(())
+    }
+
+    /// The base the power rule's `a^(b−1)` factor is raised from: `a` itself
+    /// wherever that factor is finite, and `a` nudged off exactly zero
+    /// wherever it is not — `canonical_ir/ad.rs`'s `power_rule_base_term_base`
+    /// and `ir.rs`'s, for the third rule set.
+    ///
+    /// `b · a^(b−1) · da` is `∞ · 0 = NaN` at `a = 0` for every `b < 1`, and
+    /// `da` is numerically 0 exactly where this matters: a shadow along an axis
+    /// a merge keeps live whose taken arm does not carry it. The nudge `a + (a == 0) · MIN_POSITIVE` adds nothing to any
+    /// other `a`, so the term stays bit-exact — including for a negative base
+    /// under an integral exponent, where a `max` clamp would return the wrong
+    /// derivative — and at `a = 0` the factor is a large finite number that a
+    /// zero lane multiplies to exactly zero.
+    ///
+    /// A constant exponent of 1 or more has no singularity to guard, and those
+    /// are almost all of them, so that case emits exactly what it emitted
+    /// before; the other two rule sets read the same constant and make the
+    /// same choice.
+    fn lower_power_rule_base(&mut self, base: ExprId, exponent: Option<f64>) -> JitResult<()> {
+        if exponent.is_some_and(|value| value >= 1.0) {
+            return self.lower(base);
+        }
+        self.lower(base)?;
+        self.push(NativeOp::Const(0.0))?;
+        self.append_compare("Eq")?;
+        self.lower(base)?;
+        self.push(NativeOp::Const(f64::MIN_POSITIVE))?;
+        self.append_arithmetic("Add")?;
+        self.lower(base)?;
+        self.append_ifelse()
+    }
+
+    /// `ln(a)` as the power rule's exponent term needs it: the logarithm where
+    /// it exists and exactly zero where it does not — `ir.rs`'s
+    /// `power_rule_guarded_log`, as a select. `a^b · ln(a) · db` at `a = 0` is
+    /// `0 · −∞ · db`, NaN however small `db` is — and `db` is exactly 0 for the
+    /// runtime-parameter exponents compact models use, which is what made it
+    /// invisible everywhere but here. bsimcmg's `T0 = pow(dqi / EsatCVL,
+    /// PSATCV_i)` (`bsimcmg_body.include:2376`) differentiated by this pass at
+    /// `dqi = 0` was that NaN; it reached `DvsatCV@dN` through the base term of
+    /// `pow(DELTAVSATCV_i + T0, T1)` (:2380) and `cggi = ddx(qgi, V(gi))` read
+    /// it, where the bytecode's guarded rule gave 3.3e-24.
+    fn lower_power_rule_guarded_log(&mut self, base: ExprId) -> JitResult<()> {
+        self.lower(base)?;
+        self.push(NativeOp::Const(0.0))?;
+        self.append_compare("Gt")?;
+        self.lower(base)?;
+        self.push(NativeOp::Const(f64::MIN_POSITIVE))?;
+        self.append_compare("Ge")?;
+        self.lower(base)?;
+        self.push(NativeOp::Const(f64::MIN_POSITIVE))?;
+        self.append_ifelse()?;
+        self.append_unary(NativeOp::UnaryMath(UnaryMathOp::Log))?;
+        self.push(NativeOp::Const(0.0))?;
+        self.append_ifelse()
     }
 
     fn lower_pow_second_derivative(
