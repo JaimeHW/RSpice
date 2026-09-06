@@ -1372,6 +1372,73 @@ d1 out 0 dcmc
     );
 }
 
+/// The generated route's sub-floor refusal, seen from a deck.
+///
+/// `runtime_veriloga_refuses_a_locked_step_below_the_integration_floor` pins
+/// the runtime-`.va` twin of this, and until now that was the only pin above
+/// the runtime crate's own unit test. Both refusals exist for the same reason:
+/// at picosecond times the solver hard minimum is `1e-11 * max_step`, so
+/// `1e-23 s` here, and a locked grid may legitimately prescribe a `1e-21 s`
+/// step the companion rule cannot build `1/dt` from. Answering that with
+/// inactive coefficients would evaluate the model with no `ddt` term at all --
+/// DIODE_CMC carries five accepted `ddt` histories, so what would come back is
+/// a charge-storing junction behaving as a resistor: converged, plausible and
+/// wrong.
+///
+/// Gated on the single model it needs rather than on `veriloga-builtins`, so
+/// running it compiles one generated device instead of all forty-three.
+/// `veriloga-builtins-models` lists `veriloga-model-diode-cmc`, so the umbrella
+/// build runs it too.
+#[cfg(feature = "veriloga-model-diode-cmc")]
+#[test]
+fn generated_veriloga_refuses_a_locked_step_below_the_integration_floor() {
+    const MAX_STEP: f64 = 1.0e-12;
+    const STOP: f64 = 3.0e-12;
+
+    let netlist = Netlist::parse(
+        "\
+* generated Verilog-A under a locked grid finer than the companion rule
+vin in 0 sin(0 1 1meg)
+rsrc in out 1k
+d1 out 0 dcmc
+.model dcmc d level=2002
+.tran 1p 3p
+.end
+",
+    )
+    .expect("generated CMC diode sub-floor deck parses");
+
+    // One ulp-scale gap past a grid point: the ulp at 1e-12 is about 2e-28, so
+    // `crowded` is a distinct representable time and the engine really does
+    // ask for the interval between them.
+    let crowded = 1.0e-12 + 1.0e-21;
+    let sub_floor_dt = crowded - 1.0e-12;
+    assert!(
+        sub_floor_dt > 0.0 && sub_floor_dt < 1.0e-20,
+        "the premise: the grid prescribes a positive interval below the floor, \
+         got {sub_floor_dt:e}"
+    );
+
+    let error = Engine::new(SimulationConfig {
+        locked_time_grid: Some(Arc::new(vec![1.0e-12, crowded, 2.0e-12, 3.0e-12])),
+        ..Default::default()
+    })
+    .run_tran(&netlist, STOP, MAX_STEP)
+    .expect_err("a step the companion rule cannot integrate must be refused, not solved");
+
+    assert!(
+        matches!(error, SimulationError::Circuit(_)),
+        "the refusal is a circuit-preparation failure: {error:?}"
+    );
+    let text = error.to_string();
+    assert!(
+        text.contains("Verilog-A generated devices cannot advance")
+            && text.contains(&format!("{sub_floor_dt:.16e}"))
+            && text.contains(&format!("needs at least {:.16e}s", 1.0e-20)),
+        "the refusal must name the timestep ({sub_floor_dt:.16e}) and the floor, got: {text}"
+    );
+}
+
 #[cfg(feature = "veriloga-model-vbic13")]
 #[test]
 fn generated_vbic_initial_step_state_is_accepted_at_origin_and_survives_resume() {
