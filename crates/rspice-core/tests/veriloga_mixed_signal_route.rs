@@ -1014,7 +1014,8 @@ fn a_boundary_bus_reaches_the_vcd_and_the_rawfile_as_one_vector() {
     write_event_plots(
         &mut raw,
         &transient_event_plots(&result.digital_traces, &result.real_traces),
-        &transient_bus_plots(&result.digital_traces, &result.digital_buses),
+        &transient_bus_plots(&result.digital_traces, &result.digital_buses)
+            .expect("a two-bit bus over nine events fits the reassembly ceiling"),
         RawFormat::Ascii,
     )
     .expect("the run's event histories write as rawfile plots");
