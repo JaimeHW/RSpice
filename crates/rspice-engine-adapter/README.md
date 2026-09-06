@@ -41,7 +41,7 @@ Refused kinds, each with the reason on the wire: `mixed_signal`, `port_noise`,
 `transient`. The other three are results a card produces beside its own rather
 than analyses of their own: the canonical plan mints no analysis slot for
 them, so no deck contains a directive such a request could select. They are
-published — see below — by requesting the parent family.
+published (see below) by requesting the parent family.
 
 The authoritative per-family declaration, including the exact reason for every
 gap, is `rspice_core::execution::capability`'s engine-adapter column.
@@ -64,15 +64,15 @@ publishes none of them. A child artifact's name is the parent's stem plus its
 own namespace component:
 
 * one `fft` document per authored `.FFT` card beside its parent transient,
-  under the `fft-NNN` identity the canonical plan minted for that card —
+  under the `fft-NNN` identity the canonical plan minted for that card, at
   `results/tran-001.fft-001.result.json`. The transient's own document lists
   every one of them by identity and probed column;
 * one Fourier document per authored `.FOUR` operand beside its parent
   transient, under the `four-NNN` identity the canonical plan minted for that
-  operand — `results/tran-001.four-001.result.json`;
+  operand, at `results/tran-001.four-001.result.json`;
 * the port-noise sweep beside the scattering sweep of a `.SP DONOISE` card.
   Port noise is that card's second result and carries the card's own analysis
-  identity, so its result family is the component that separates the two —
+  identity, so its result family is the component that separates the two, at
   `results/sp-001.port-noise.result.json`.
 
 A deck with a run axis also carries an `rspice-axis-execution` record inside
@@ -119,3 +119,5 @@ termination request produces `engine.cancelled`, and the exhausted solve budget
 produces `engine.time_limit`. The budget is a launch input
 (`RSPICE_ENGINE_SOLVE_BUDGET_SECONDS`); a malformed value is a launch-contract
 violation rather than a silent fall back to the default.
+
+Licensed under the [RSpice Personal Use License](../../LICENSE).

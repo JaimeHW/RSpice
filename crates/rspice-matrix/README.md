@@ -124,4 +124,4 @@ an ungated random-expander reference.
   consumers leave it disabled because Rayon is not available on the baseline
   `wasm32-unknown-unknown` target.
 
-The workspace MSRV and license are inherited from RSpice's root manifest.
+Licensed under the [RSpice Personal Use License](../../LICENSE).

@@ -1,4 +1,4 @@
-# RSpice WASM
+# rspice-wasm
 
 WebAssembly bindings for the RSpice simulation engine. The crate is
 deliberately thin, and it owns **no result schema of its own**: every analysis
@@ -34,12 +34,12 @@ Every analysis export returns a `WasmResultHandle`. Errors are thrown as an
 and caller-bounded numeric windows cross into JavaScript.
 
 - `resultCount()` / `coordinateCount()`.
-- `metadata()` — the executed plan: `schema` (`rspice-browser-result`),
+- `metadata()`: the executed plan: `schema` (`rspice-browser-result`),
   `schemaVersion`, ordered `axes` run-axis descriptors, `plannedAnalyses`
   (canonical identities such as `ac-001`/`ac-002`), the canonical
   `coordinates`, a compact `results` summary array, `maximumWindowValues`, and
   `maximumResultJsonBytes`.
-- `resultMetadata(resultIndex)` — one result's identity, provenance, and
+- `resultMetadata(resultIndex)`: one result's identity, provenance, and
   descriptors: `resultKind`, `analysis`, `parentAnalysis`, `coordinateId`, the
   full `coordinate`, `topologyFingerprint`, `namespaces`, `pointCount`, `axes`,
   `signals`, `scalars`, `deviceStates`, a `payload` descriptor carrying the
@@ -47,21 +47,21 @@ and caller-bounded numeric windows cross into JavaScript.
   counts (`digitalNodeCount`, `digitalEventCount`, `digitalBusCount`,
   `realNodeCount`, `realEventCount`), and the `valuesPerPoint` /
   `totalValueCount` / `maximumWindowValues` budget figures.
-- `readWindow(resultIndex, start, count)` — a half-open aligned slice. Axis and
+- `readWindow(resultIndex, start, count)`: a half-open aligned slice. Axis and
   real/complex sample columns are `Float64Array`; every signal carries a
   `Uint8Array` `validity` mask. **A zero validity entry is an explicitly
   unavailable sample, so the aligned numeric placeholder must not be
   interpreted.** Empty, out-of-range, and over-budget windows fail with
   `code: "invalid_result_window"`; an unknown result index fails with
   `code: "invalid_result_index"`.
-- `resultJson(resultIndex)` — the complete core document as JSON. This is the
+- `resultJson(resultIndex)`: the complete core document as JSON. This is the
   lossless export path: it is bounded by an explicit byte budget and fails
   closed rather than truncating.
-- `digitalNodes(resultIndex)` — every XSPICE digital event node the transient
+- `digitalNodes(resultIndex)`: every XSPICE digital event node the transient
   captured, each with its `eventCount` and the `bus` that claims it, or `null`.
   No points cross here. A family that captures no event timeline fails with
   `code: "unsupported_result_family"`.
-- `digitalEvents(resultIndex, nodeName)` — one node's whole committed history
+- `digitalEvents(resultIndex, nodeName)`: one node's whole committed history
   as `{time, state, strength, code}` rows: the accepted time in seconds, the
   document's own state and strength spellings, and the `0..=12` XSPICE event
   code encoding the same pair. Only changes are recorded. The name resolves
@@ -69,11 +69,11 @@ and caller-bounded numeric windows cross into JavaScript.
   ceiling a window is, two values per row, and fails with
   `code: "invalid_result_window"` when it does not fit; an unknown node fails
   with `code: "unknown_event_node"`.
-- `digitalBuses(resultIndex)` — every digital bus the result declares, as
+- `digitalBuses(resultIndex)`: every digital bus the result declares, as
   `{name, msb, lsb, members, source}`. The range is carried exactly as it was
   declared and `members` runs from the declared MSB to the declared LSB;
   `source` is `engine`, `schematic` or `import`. No points cross here.
-- `busEvents(resultIndex, busName)` — one bus's whole history as
+- `busEvents(resultIndex, busName)`: one bus's whole history as
   `{time, bits, value}` rows: the accepted time in seconds, one `0..=12` event
   code per member declared MSB first, and the same word in VCD's four states.
   `bits` keeps the drive strength; `value` does not. A member the run has not
@@ -82,7 +82,7 @@ and caller-bounded numeric windows cross into JavaScript.
   is charged `1 + width` values against the same transfer ceiling a window
   obeys and fails with `code: "invalid_result_window"` when it does not fit; an
   undeclared bus fails with `code: "unknown_event_bus"`.
-- `toVcd(resultIndex)` — the event histories as a Value Change Dump, byte for
+- `toVcd(resultIndex)`: the event histories as a Value Change Dump, byte for
   byte what `rspice run -f vcd` publishes for the same run. VCD has four bit
   states and no drive strength, so the twelve resolved states collapse onto
   `0`, `1`, `x` and `z`; `digitalEvents` carries the band. A result with no
@@ -275,6 +275,7 @@ through the JavaScript handle.
 - `hb_config`: the authored `.HB` tone list, resolved through the core constructors
 - `handles`: the retained handle that publishes bounded typed-array windows
 - `js_interop`: JavaScript value decoding and typed-array publication
+- `support`: shared helpers the runners and exports build on
 - `runners::{deck, direct}`: the authored-deck route and the direct entry points
 - `exports`: the `#[wasm_bindgen]` shims
 
@@ -304,7 +305,7 @@ The full application surface is the [CLI](../rspice-cli/README.md), the
 
 Build instructions, the wasm-bindgen CLI version requirement, serving
 notes, and a walkthrough of the demo page live in
-[`web/README.md`](web/README.md) — see that file rather than duplicating
+[`web/README.md`](web/README.md); see that file rather than duplicating
 the steps. In short, it is a two-stage build:
 
 ```bash
@@ -327,7 +328,7 @@ projection, and bounded window transfer.
 
 The central test drives the shared capability registry: for every core
 `AnalysisResultKind`, an exhaustive match supplies a deck, and the test asserts
-that the family behaves the way `rspice_core::execution::capability` declares —
+that the family behaves the way `rspice_core::execution::capability` declares:
 executing and round-tripping through the handle unchanged, or refusing by name
 with the missing core API quoted. Further tests cover `.STEP`/`.TEMP`
 coordinate products and collision-free artifact namespaces, `.ALTER` refusal
@@ -358,7 +359,4 @@ whole results, that AC controls are present, and that synchronous solve exports
 stay off the main page. Numerical engine behavior remains covered in
 `rspice-core`.
 
-## License
-
-RSpice WASM is part of the RSpice project and is licensed under the
-[RSpice Personal Use License](../../LICENSE).
+Licensed under the [RSpice Personal Use License](../../LICENSE).
