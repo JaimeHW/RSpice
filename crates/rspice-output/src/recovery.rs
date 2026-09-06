@@ -173,17 +173,54 @@ fn process_liveness(process_id: u32) -> Option<bool> {
     Some(exit_code == STILL_ACTIVE)
 }
 
-/// Linux exposes live process ids as `/proc` entries. Other Unix hosts have
-/// no dependency-free answer here, so recovery keeps their staging files.
-#[cfg(all(unix, target_os = "linux"))]
+/// Every Unix answers this with `kill(pid, 0)`: signal 0 is never delivered,
+/// and the call reports only whether a process with that id exists. `ESRCH` is
+/// the one answer that proves the owner gone; `EPERM` means it exists and
+/// belongs to somebody else.
+///
+/// This used to read `/proc`, which meant only Linux could answer: macOS has no
+/// `/proc`, so every host but Linux and Windows reported `None` and recovery
+/// kept a killed run's staging files forever. `kill` is POSIX and needs no
+/// dependency — the symbol is declared here rather than pulled in with `libc`
+/// because a new dependency edits `Cargo.lock`, which is a source-digest input
+/// of the Verilog-A built-ins generator and would force a restamp of the whole
+/// generated model tree for an unrelated fix.
+#[cfg(unix)]
 fn process_liveness(process_id: u32) -> Option<bool> {
-    if !Path::new("/proc/self").is_dir() {
-        return None;
+    /// `kill` failed because the caller may not signal that process, which
+    /// means the process exists.
+    const EPERM: i32 = 1;
+    /// `kill` failed because no such process exists.
+    const ESRCH: i32 = 3;
+
+    unsafe extern "C" {
+        /// `int kill(pid_t pid, int sig)`. `pid_t` is `i32` on every Unix
+        /// target Rust ships.
+        fn kill(pid: i32, sig: i32) -> i32;
     }
-    Some(Path::new(&format!("/proc/{process_id}")).is_dir())
+
+    // A recorded id that does not fit `pid_t`, or that is zero or negative (a
+    // process group rather than a process), was never handed out by this host,
+    // and asking `kill` about it would address the wrong thing. Answer `None`
+    // so recovery keeps the file instead.
+    let pid = i32::try_from(process_id).ok().filter(|pid| *pid > 0)?;
+    // SAFETY: `kill` takes two integers and no pointers, and signal 0 is
+    // delivered to nothing; the call only reports whether `pid` names an
+    // existing process.
+    if unsafe { kill(pid, 0) } == 0 {
+        return Some(true);
+    }
+    match io::Error::last_os_error().raw_os_error() {
+        Some(ESRCH) => Some(false),
+        Some(EPERM) => Some(true),
+        _ => None,
+    }
 }
 
-#[cfg(not(any(windows, all(unix, target_os = "linux"))))]
+/// A host that is neither Windows nor Unix — `wasm32-unknown-unknown` is the
+/// one this workspace builds — cannot be asked about process ids at all, so
+/// recovery keeps every staging file it finds.
+#[cfg(not(any(windows, unix)))]
 fn process_liveness(_process_id: u32) -> Option<bool> {
     None
 }
@@ -207,6 +244,46 @@ mod tests {
 
     fn write(path: &Path, contents: &str) {
         std::fs::write(path, contents).expect("write recovery fixture");
+    }
+
+    /// The property every removal in this module rests on: this host can tell
+    /// a live process from a reaped one.
+    ///
+    /// `recover_stale_artifacts` removes a staging file only on `Some(false)`,
+    /// so a host that answers `None` reclaims nothing — which is what macOS did
+    /// until the `kill(pid, 0)` arm existed, leaving a killed sweep's stages in
+    /// the user's result directory for every later run to skip. Stating it here
+    /// runs it wherever this crate's unit tests run, rather than only where an
+    /// end-to-end kill test does.
+    #[cfg(any(windows, unix))]
+    #[test]
+    fn this_host_proves_a_live_process_alive_and_a_reaped_one_dead() {
+        assert_eq!(
+            process_liveness(std::process::id()),
+            Some(true),
+            "this process is running"
+        );
+
+        // `--list` makes the test binary print its test names and exit, which
+        // is the cheapest child this crate can be sure exists.
+        let mut child =
+            std::process::Command::new(std::env::current_exe().expect("this test binary's path"))
+                .arg("--list")
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .expect("spawn the test binary");
+        let owner = child.id();
+        child.wait().expect("reap the child");
+
+        // `child` is deliberately still alive here: on Windows its open handle
+        // is what keeps the id from being recycled under the assertion.
+        assert_eq!(
+            process_liveness(owner),
+            Some(false),
+            "a reaped child is provably gone"
+        );
+        drop(child);
     }
 
     #[test]
