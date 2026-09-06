@@ -1413,10 +1413,27 @@ impl<'a> ScalarDdxBuilder<'a> {
                     let factor = self.push_binary(CfgBinaryOp::Mul, right, reduced);
                     self.push_binary(CfgBinaryOp::Mul, derivative, factor)
                 });
+                // `a^b · ln(a)` is defined only for `a > 0`. At `a = 0` the
+                // power is 0 and the logarithm −∞, and IEEE makes their
+                // product NaN even when `db` is 0 — which it numerically is
+                // wherever the exponent's dependence on the unknown is only
+                // structural (a merge whose other arm carries it; BSIM-IMG's
+                // `pow(vds / Vdsat, MEXP_t)` at `vds = 0` with `MEXP_t`
+                // reaching the thermal node through a self-heating branch
+                // that is off). Clamp the logarithm's argument away from 0
+                // and mask the term by `a > 0`, so the term is exactly the
+                // textbook one where it exists and exactly 0 where it does
+                // not, with no NaN at the boundary.
                 let from_exponent = d_right.map(|derivative| {
                     let power = self.push_binary(CfgBinaryOp::Pow, left, right);
-                    let logarithm = self.push_unary(CfgUnaryOp::Ln, left);
-                    let factor = self.push_binary(CfgBinaryOp::Mul, power, logarithm);
+                    let floor = self.constant(f64::MIN_POSITIVE);
+                    let clamped = self.push_binary(CfgBinaryOp::Max, left, floor);
+                    let logarithm = self.push_unary(CfgUnaryOp::Ln, clamped);
+                    let zero = self.constant(0.0);
+                    let positive =
+                        self.push_typed(CfgValueType::Boolean, CfgBinaryOp::Gt, left, zero);
+                    let masked = self.push_binary(CfgBinaryOp::Mul, logarithm, positive);
+                    let factor = self.push_binary(CfgBinaryOp::Mul, power, masked);
                     self.push_binary(CfgBinaryOp::Mul, derivative, factor)
                 });
                 match (from_base, from_exponent) {
@@ -2530,10 +2547,19 @@ impl<'a> AdBuilder<'a> {
                     let scaled = self.push_binary(CfgBinaryOp::Mul, right, reduced);
                     self.scale(d_left, scaled)
                 });
+                // Guarded like the scalar rule above: `a^b · ln(a)` exists
+                // only for `a > 0`, and at `a = 0` the unguarded product is
+                // `0 · −∞ = NaN` even for a lane whose `db` is 0.
                 let from_exponent = d_right.map(|d_right| {
                     let power = self.push_binary(CfgBinaryOp::Pow, left, right);
-                    let logarithm = self.push_unary(CfgUnaryOp::Ln, left);
-                    let scaled = self.push_binary(CfgBinaryOp::Mul, power, logarithm);
+                    let floor = self.constant(f64::MIN_POSITIVE);
+                    let clamped = self.push_binary(CfgBinaryOp::Max, left, floor);
+                    let logarithm = self.push_unary(CfgUnaryOp::Ln, clamped);
+                    let zero = self.constant(0.0);
+                    let positive =
+                        self.push_typed(CfgValueType::Boolean, CfgBinaryOp::Gt, left, zero);
+                    let masked = self.push_binary(CfgBinaryOp::Mul, logarithm, positive);
+                    let scaled = self.push_binary(CfgBinaryOp::Mul, power, masked);
                     self.scale(d_right, scaled)
                 });
                 match (from_base, from_exponent) {

@@ -1916,6 +1916,78 @@ endmodule
         }
     }
 
+    /// The power rule's exponent term at a zero base, under wasmi.
+    ///
+    /// The WebAssembly route lowers the same canonical plan as x64 and AArch64
+    /// (`compile_model_value_module` → `build_default_model_plan`), so the
+    /// derivative pass's unguarded `a^b · ln(a)` at `a = 0` reached it too.
+    /// The fixture is the x64 one
+    /// (`native::x64::tests::power_rule_exponent_term_is_finite_at_a_zero_base`),
+    /// resistive form: the exponent reaches `V(t)` only through a merge whose
+    /// taken arm does not depend on it, so the derivative is analytically 0.
+    #[test]
+    fn power_rule_exponent_term_is_finite_at_a_zero_base_under_wasm() {
+        use std::mem::size_of;
+
+        use super::abi::FRAME_RESULT_OFFSET;
+
+        const SOURCE: &str = r#"
+module wasm_pow_exponent_zero_base(p, n, t);
+  inout p, n, t;
+  electrical p, n, t;
+  parameter real vsat = 0.04;
+  parameter real m = 4.0;
+  parameter real tm = 0.0;
+  parameter integer sh = 0;
+  real temp, mt;
+  analog begin
+    if (sh != 0)
+      temp = $temperature + V(t);
+    else
+      temp = $temperature;
+    mt = m * (1.0 + tm * (temp - 300.15));
+    I(p, n) <+ 1.0e-3 * pow(V(p, n) / vsat, mt);
+  end
+endmodule
+"#;
+        let report = VerilogACompiler::new(CompilerOptions::default())
+            .compile_runtime(SOURCE, Some("wasm_pow_exponent_zero_base"))
+            .expect("compile fixture");
+        let entry = report.model.stamp_programs[0]
+            .jacobian_programs
+            .iter()
+            .position(|entry| matches!(entry.col_axis, crate::codegen::ColumnAxis::Node(2)))
+            .expect("a Jacobian column for V(t)");
+
+        let mut harness = FusedKernelHarness::for_source(SOURCE, "wasm_pow_exponent_zero_base");
+        harness.reset();
+        // The harness's default point is not this fixture's: the parameters
+        // keep their declared defaults and every terminal sits at 0 V, which
+        // puts the power's base at exactly zero.
+        for (index, parameter) in report.model.parameters.iter().enumerate() {
+            harness.write_f64(
+                FusedKernelHarness::PARAMETERS as usize + index * size_of::<f64>(),
+                parameter.default,
+            );
+        }
+        for index in 0..3 {
+            harness.write_f64(
+                FusedKernelHarness::VOLTAGES as usize + index * size_of::<f64>(),
+                0.0,
+            );
+        }
+        harness.call_assignments();
+        harness.call_prelude();
+        let export = harness.jacobian_export(0, entry);
+        assert_eq!(harness.call(&export), 0);
+        let value = harness.read_f64(FRAME_RESULT_OFFSET as usize);
+        assert!(
+            value.is_finite(),
+            "d I(p, n) / d V(t) at V(p, n) = 0 under wasm is {value}; the exponent term is 0 · ln(0) · 0 and must be 0"
+        );
+        assert_eq!(value, 0.0);
+    }
+
     /// The fused stamp driver writes each derivative to the slot the device
     /// reads it back from.
     ///

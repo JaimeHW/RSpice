@@ -4535,6 +4535,117 @@ endmodule
         );
     }
 
+    /// The exponent term of the power rule at a zero base, in the shape of the
+    /// shipped `bsimimg` red (`jacobian 12.2`): a charge `q = pow(V(p, n) /
+    /// vsat, mt)` whose exponent reaches the thermal node `t` only through a
+    /// merge whose taken arm does not depend on it, evaluated at `V(p, n) = 0`.
+    /// The term is `q · ln(V / vsat) · dmt/dV(t) = 0 · −∞ · 0`; unguarded, the
+    /// derivative pass made `d(ddt q)/dV(t)` NaN where the bytecode's
+    /// `DdtJacobian` short-circuits to 0 and the analytic value is 0.
+    ///
+    /// Two modules: the `ddt` form, which the finite oracle compares against
+    /// the bytecode the way the shipped census does, and the resistive form,
+    /// where the bytecode's own power rule (`ir.rs` `d(u^v)`) carries the same
+    /// `0 · −∞` and is therefore no reference — the truth there is the analytic
+    /// derivative, 0.
+    const FINITE_RED_POW_EXPONENT_SOURCE: &str = r#"
+module finite_red_pow_exponent_ddt(p, n, t);
+  inout p, n, t;
+  electrical p, n, t;
+  parameter real vsat = 0.04;
+  parameter real m = 4.0;
+  parameter real tm = 0.0;
+  parameter integer sh = 0;
+  real temp, mt, q;
+  analog begin
+    if (sh != 0)
+      temp = $temperature + V(t);
+    else
+      temp = $temperature;
+    mt = m * (1.0 + tm * (temp - 300.15));
+    q = 1.0e-12 * pow(V(p, n) / vsat, mt);
+    I(p, n) <+ ddt(q);
+    I(p, n) <+ 1.0e-3 * V(p, n);
+  end
+endmodule
+
+module finite_red_pow_exponent_resistive(p, n, t);
+  inout p, n, t;
+  electrical p, n, t;
+  parameter real vsat = 0.04;
+  parameter real m = 4.0;
+  parameter real tm = 0.0;
+  parameter integer sh = 0;
+  real temp, mt;
+  analog begin
+    if (sh != 0)
+      temp = $temperature + V(t);
+    else
+      temp = $temperature;
+    mt = m * (1.0 + tm * (temp - 300.15));
+    I(p, n) <+ 1.0e-3 * pow(V(p, n) / vsat, mt);
+  end
+endmodule
+"#;
+
+    #[test]
+    fn power_rule_exponent_term_is_finite_at_a_zero_base() {
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+
+        // (a) The shipped shape: a ddt'd charge, through the finite oracle at
+        //     its zero-bias point, bytecode as the reference.
+        let name = "finite_red_pow_exponent_ddt";
+        let runtime = compiler
+            .compile_runtime(FINITE_RED_POW_EXPONENT_SOURCE, Some(name))
+            .expect("compile ddt fixture");
+        let native = compile_model_with_canonical_ir(&runtime.model, &runtime.canonical_ir)
+            .expect("native x64 compile ddt fixture");
+        let mut context = native_model_benchmark_context(&runtime.model, name);
+        resolve_native_parameter_defaults(&runtime.model, &native, &mut context);
+        let stats = assert_native_matches_bytecode_finite_entries(
+            &runtime.model,
+            &runtime.canonical_ir,
+            &native,
+            context,
+            name,
+        )
+        .expect("d(ddt q)/dV(t) at V(p, n) = 0 must be finite on both routes");
+        assert!(
+            stats.jacobians > 0,
+            "the fixture must compare Jacobian entries"
+        );
+
+        // (b) The same term without the ddt, against the analytic derivative:
+        //     the taken arm does not depend on V(t), so d I(p, n) / d V(t) is 0.
+        let name = "finite_red_pow_exponent_resistive";
+        let runtime = compiler
+            .compile_runtime(FINITE_RED_POW_EXPONENT_SOURCE, Some(name))
+            .expect("compile resistive fixture");
+        let native = compile_model_with_canonical_ir(&runtime.model, &runtime.canonical_ir)
+            .expect("native x64 compile resistive fixture");
+        let mut context = native_model_benchmark_context(&runtime.model, name);
+        resolve_native_parameter_defaults(&runtime.model, &native, &mut context);
+        let ctx = eval_context_from_vm_context(&mut context);
+        ctx.clear_runtime_error();
+        run_assignment_and_prelude(&native, &ctx, context.variables.as_mut_ptr());
+        require_clean_native_context(&ctx, "fixture assignments").expect("assignments");
+        let stamp = &runtime.model.stamp_programs[0];
+        let (entry, _) = stamp
+            .jacobian_programs
+            .iter()
+            .enumerate()
+            .find(|(_, entry)| matches!(entry.col_axis, ColumnAxis::Node(2)))
+            .expect("the contribution's Jacobian row must carry a column for V(t)");
+        let value = native
+            .run_jacobian(0, entry, &ctx, context.variables.as_ptr())
+            .expect("jacobian entry");
+        require_clean_native_context(&ctx, "fixture jacobian").expect("jacobian");
+        assert_eq!(
+            value, 0.0,
+            "d I(p, n) / d V(t) at V(p, n) = 0: the exponent term is 0 · ln(0) · 0 and must be 0"
+        );
+    }
+
     fn run_shipped_model_device_probe(name: &str, path: &Path, module: Option<&str>) {
         shipped_probe_trace(name, "compile-runtime:start");
         let frontend_start = web_time::Instant::now();
