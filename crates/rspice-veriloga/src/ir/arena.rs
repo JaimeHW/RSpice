@@ -12,6 +12,11 @@
 //! site-bearing, event, noise and filter operators — none of which occurs in
 //! any shipped assignment forest — keep today's field shapes in a side
 //! [`Heavy`] table so their bulk never widens the node.
+//!
+//! Nothing here is on the production path yet. [`ExprArena::import`] and
+//! [`ExprArena::export`] bridge losslessly to and from [`IrExpr`] so the
+//! emitter, the AD core and the producers can each be ported against a type
+//! that already exists.
 
 use crate::ast::{BinaryOp, UnaryOp};
 use smol_str::SmolStr;
@@ -19,8 +24,8 @@ use std::collections::HashMap;
 use std::num::NonZeroU32;
 
 use super::{
-    AbsDelaySiteId, DdxAxis, IrFunction, LaplaceSiteId, NoiseSiteId, SlewSiteId, TransitionSiteId,
-    ZiSiteId,
+    AbsDelaySiteId, DdxAxis, IrExpr, IrFunction, LaplaceSiteId, NoiseSiteId, SlewSiteId,
+    TransitionSiteId, ZiPolynomialDefinition, ZiSiteId,
 };
 
 /// Nodes per chunk, as a shift. One chunk is 1 Mi nodes = 16 MiB.
@@ -789,5 +794,889 @@ impl ExprArena {
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.len == 0
+    }
+}
+
+/// The `usize` a terminal pair uses for ground (`expr_converter::GROUND_NODE`),
+/// packed into a node's `u32` slots as `PACKED_GROUND`.
+const GROUND_INDEX: usize = usize::MAX;
+/// Ground's packed spelling. No real index may take this value.
+const PACKED_GROUND: u32 = u32::MAX;
+
+/// Pack a terminal or ordinal index into a node's `u32` slot.
+fn pack_index(value: usize) -> u32 {
+    if value == GROUND_INDEX {
+        return PACKED_GROUND;
+    }
+    let packed = u32::try_from(value).expect("terminal index is below u32::MAX");
+    assert_ne!(
+        packed, PACKED_GROUND,
+        "terminal index collides with the packed ground sentinel"
+    );
+    packed
+}
+
+/// Unpack a terminal or ordinal index from a node's `u32` slot.
+fn unpack_index(value: u32) -> usize {
+    if value == PACKED_GROUND {
+        GROUND_INDEX
+    } else {
+        value as usize
+    }
+}
+
+impl ExprArena {
+    /// Copy an [`IrExpr`] tree into the arena and return its root.
+    ///
+    /// Children are pushed before their parent, so an imported tree occupies a
+    /// contiguous range of ids in post-order. Nothing is deduplicated: a
+    /// subtree the source cloned twice becomes two node ranges, exactly as it
+    /// is two subtrees today. Hash-consing is a separate, measured step and it
+    /// may never apply to a site-bearing or state-allocating node.
+    pub fn import(&mut self, expr: &IrExpr) -> NodeId {
+        let node = match expr {
+            IrExpr::Const(value) => Node::Const(*value),
+            IrExpr::Param(name) => {
+                let name = self.intern(name);
+                Node::Param(name)
+            }
+            IrExpr::ParamGiven(name) => {
+                let name = self.intern(name);
+                Node::ParamGiven(name)
+            }
+            IrExpr::Var(name) => {
+                let name = self.intern(name);
+                Node::Var(name)
+            }
+            IrExpr::VarIndexed {
+                array,
+                base,
+                len,
+                lower,
+                index,
+            } => {
+                let index = self.import(index);
+                let array = self.intern(array);
+                let payload = self.push_indexed(IndexedRead {
+                    array,
+                    base: *base,
+                    len: *len,
+                    lower: *lower,
+                });
+                Node::VarIndexed { payload, index }
+            }
+            IrExpr::Voltage(pos, neg) => Node::Voltage(pack_index(*pos), pack_index(*neg)),
+            IrExpr::Current(pos, neg) => Node::Current(pack_index(*pos), pack_index(*neg)),
+            IrExpr::BranchCurrent(ordinal) => Node::BranchCurrent(pack_index(*ordinal)),
+            IrExpr::Time => Node::Time,
+            IrExpr::Temperature => Node::Temperature,
+            IrExpr::Vt => Node::Vt,
+            IrExpr::Mfactor => Node::Mfactor,
+            IrExpr::PortConnected(port) => Node::PortConnected(pack_index(*port)),
+            IrExpr::Binary(op, left, right) => {
+                let left = self.import(left);
+                let right = self.import(right);
+                Node::Binary(*op, left, right)
+            }
+            IrExpr::Unary(op, inner) => {
+                let inner = self.import(inner);
+                Node::Unary(*op, inner)
+            }
+            IrExpr::Call(func, args) => {
+                let args = args.iter().map(|arg| self.import(arg)).collect::<Vec<_>>();
+                return self.push_call(*func, &args);
+            }
+            IrExpr::Ddt(inner) => {
+                let inner = self.import(inner);
+                Node::Ddt(inner)
+            }
+            IrExpr::Idt(inner, ic) => {
+                let inner = self.import(inner);
+                let ic = self.import_optional(ic);
+                Node::Idt(inner, ic)
+            }
+            IrExpr::IdtMod {
+                expr,
+                ic,
+                modulus,
+                offset,
+            } => {
+                let expr = self.import(expr);
+                let ic = self.import_optional(ic);
+                let modulus = self.import(modulus);
+                let offset = self.import_optional(offset);
+                let payload = self.push_optional_pair((ic, offset));
+                Node::IdtMod {
+                    expr,
+                    modulus,
+                    payload,
+                }
+            }
+            IrExpr::Limexp(inner) => {
+                let inner = self.import(inner);
+                Node::Limexp(inner)
+            }
+            IrExpr::Limit(inner, step) => {
+                let inner = self.import(inner);
+                let step = self.import_optional(step);
+                Node::Limit(inner, step)
+            }
+            IrExpr::CanonicalLimit(inner) => {
+                let inner = self.import(inner);
+                Node::CanonicalLimit(inner)
+            }
+            IrExpr::TableLookup {
+                input,
+                x_data,
+                y_data,
+            } => {
+                let input = self.import(input);
+                let table = self.push_table(x_data.clone(), y_data.clone());
+                Node::TableLookup { input, table }
+            }
+            IrExpr::TableDerivative {
+                input,
+                x_data,
+                y_data,
+            } => {
+                let input = self.import(input);
+                let table = self.push_table(x_data.clone(), y_data.clone());
+                Node::TableDerivative { input, table }
+            }
+            IrExpr::Ddx { expr, axis } => {
+                let expr = self.import(expr);
+                let axis = self.push_ddx_axis(*axis);
+                Node::Ddx { expr, axis }
+            }
+            IrExpr::DdtCompanion(inner) => {
+                let inner = self.import(inner);
+                Node::DdtCompanion(inner)
+            }
+            IrExpr::IdtCompanion(inner) => {
+                let inner = self.import(inner);
+                Node::IdtCompanion(inner)
+            }
+            IrExpr::Conditional(condition, then_expr, else_expr) => {
+                let condition = self.import(condition);
+                let then_expr = self.import(then_expr);
+                let else_expr = self.import(else_expr);
+                Node::Conditional(condition, then_expr, else_expr)
+            }
+            IrExpr::Analysis(name) => {
+                let name = self.intern(name);
+                Node::Analysis(name)
+            }
+            IrExpr::LastCrossing { expr, direction } => {
+                let expr = self.import(expr);
+                Node::LastCrossing {
+                    expr,
+                    direction: *direction,
+                }
+            }
+            IrExpr::AbsDelay {
+                site,
+                expr,
+                delay_time,
+                max_delay,
+            } => {
+                let expr = self.import(expr);
+                let delay_time = self.import(delay_time);
+                let max_delay = self.import_optional(max_delay);
+                return self.push_heavy(Heavy::AbsDelay {
+                    site: *site,
+                    expr,
+                    delay_time,
+                    max_delay,
+                });
+            }
+            IrExpr::AbsDelayDerivative {
+                site,
+                input,
+                input_derivative,
+                delay_time,
+                delay_derivative,
+                max_delay,
+                derivative_order,
+            } => {
+                let input = self.import(input);
+                let input_derivative = self.import(input_derivative);
+                let delay_time = self.import(delay_time);
+                let delay_derivative = self.import(delay_derivative);
+                let max_delay = self.import_optional(max_delay);
+                return self.push_heavy(Heavy::AbsDelayDerivative {
+                    site: *site,
+                    input,
+                    input_derivative,
+                    delay_time,
+                    delay_derivative,
+                    max_delay,
+                    derivative_order: *derivative_order,
+                });
+            }
+            IrExpr::Transition {
+                site,
+                expr,
+                delay,
+                rise_time,
+                fall_time,
+            } => {
+                let expr = self.import(expr);
+                let delay = self.import_optional(delay);
+                let rise_time = self.import_optional(rise_time);
+                let fall_time = self.import_optional(fall_time);
+                return self.push_heavy(Heavy::Transition {
+                    site: *site,
+                    expr,
+                    delay,
+                    rise_time,
+                    fall_time,
+                });
+            }
+            IrExpr::TransitionDerivative {
+                site,
+                input,
+                input_derivative,
+                delay,
+                rise_time,
+                fall_time,
+            } => {
+                let input = self.import(input);
+                let input_derivative = self.import(input_derivative);
+                let delay = self.import_optional(delay);
+                let rise_time = self.import_optional(rise_time);
+                let fall_time = self.import_optional(fall_time);
+                return self.push_heavy(Heavy::TransitionDerivative {
+                    site: *site,
+                    input,
+                    input_derivative,
+                    delay,
+                    rise_time,
+                    fall_time,
+                });
+            }
+            IrExpr::Slew {
+                site,
+                expr,
+                max_pos_slew,
+                max_neg_slew,
+            } => {
+                let expr = self.import(expr);
+                let max_pos_slew = self.import_optional(max_pos_slew);
+                let max_neg_slew = self.import_optional(max_neg_slew);
+                return self.push_heavy(Heavy::Slew {
+                    site: *site,
+                    expr,
+                    max_pos_slew,
+                    max_neg_slew,
+                });
+            }
+            IrExpr::SlewDerivative {
+                site,
+                input,
+                input_derivative,
+                max_pos_slew,
+                max_pos_slew_derivative,
+                max_neg_slew,
+                max_neg_slew_derivative,
+            } => {
+                let input = self.import(input);
+                let input_derivative = self.import(input_derivative);
+                let max_pos_slew = self.import_optional(max_pos_slew);
+                let max_pos_slew_derivative = self.import_optional(max_pos_slew_derivative);
+                let max_neg_slew = self.import_optional(max_neg_slew);
+                let max_neg_slew_derivative = self.import_optional(max_neg_slew_derivative);
+                return self.push_heavy(Heavy::SlewDerivative {
+                    site: *site,
+                    input,
+                    input_derivative,
+                    max_pos_slew,
+                    max_pos_slew_derivative,
+                    max_neg_slew,
+                    max_neg_slew_derivative,
+                });
+            }
+            IrExpr::Cross {
+                expr,
+                direction,
+                time_tol,
+                expr_tol,
+                enable,
+            } => {
+                let expr = self.import(expr);
+                let direction = self.import_optional(direction);
+                let time_tol = self.import_optional(time_tol);
+                let expr_tol = self.import_optional(expr_tol);
+                let enable = self.import_optional(enable);
+                return self.push_heavy(Heavy::Cross {
+                    expr,
+                    direction,
+                    time_tol,
+                    expr_tol,
+                    enable,
+                });
+            }
+            IrExpr::Above {
+                expr,
+                time_tol,
+                expr_tol,
+                enable,
+            } => {
+                let expr = self.import(expr);
+                let time_tol = self.import_optional(time_tol);
+                let expr_tol = self.import_optional(expr_tol);
+                let enable = self.import_optional(enable);
+                return self.push_heavy(Heavy::Above {
+                    expr,
+                    time_tol,
+                    expr_tol,
+                    enable,
+                });
+            }
+            IrExpr::Timer {
+                start_time,
+                period,
+                time_tol,
+                enable,
+            } => {
+                let start_time = self.import(start_time);
+                let period = self.import_optional(period);
+                let time_tol = self.import_optional(time_tol);
+                let enable = self.import_optional(enable);
+                return self.push_heavy(Heavy::Timer {
+                    start_time,
+                    period,
+                    time_tol,
+                    enable,
+                });
+            }
+            IrExpr::WhiteNoise { site, power, name } => {
+                let power = self.import(power);
+                return self.push_heavy(Heavy::WhiteNoise {
+                    site: *site,
+                    power,
+                    name: name.clone(),
+                });
+            }
+            IrExpr::FlickerNoise {
+                site,
+                power,
+                exponent,
+                name,
+            } => {
+                let power = self.import(power);
+                let exponent = self.import(exponent);
+                return self.push_heavy(Heavy::FlickerNoise {
+                    site: *site,
+                    power,
+                    exponent,
+                    name: name.clone(),
+                });
+            }
+            IrExpr::NoiseTable {
+                site,
+                points,
+                log_interp,
+                name,
+            } => {
+                return self.push_heavy(Heavy::NoiseTable {
+                    site: *site,
+                    points: points.clone(),
+                    log_interp: *log_interp,
+                    name: name.clone(),
+                });
+            }
+            IrExpr::LaplaceZP {
+                site,
+                expr,
+                zeros,
+                poles,
+                gain,
+            } => {
+                let expr = self.import(expr);
+                return self.push_heavy(Heavy::LaplaceZP {
+                    site: *site,
+                    expr,
+                    zeros: zeros.clone(),
+                    poles: poles.clone(),
+                    gain: *gain,
+                });
+            }
+            IrExpr::LaplaceND {
+                site,
+                expr,
+                numerator,
+                denominator,
+            } => {
+                let expr = self.import(expr);
+                return self.push_heavy(Heavy::LaplaceND {
+                    site: *site,
+                    expr,
+                    numerator: numerator.clone(),
+                    denominator: denominator.clone(),
+                });
+            }
+            IrExpr::LaplaceZPDerivative {
+                site,
+                expr,
+                zeros,
+                poles,
+                gain,
+            } => {
+                let expr = self.import(expr);
+                return self.push_heavy(Heavy::LaplaceZPDerivative {
+                    site: *site,
+                    expr,
+                    zeros: zeros.clone(),
+                    poles: poles.clone(),
+                    gain: *gain,
+                });
+            }
+            IrExpr::LaplaceNDDerivative {
+                site,
+                expr,
+                numerator,
+                denominator,
+            } => {
+                let expr = self.import(expr);
+                return self.push_heavy(Heavy::LaplaceNDDerivative {
+                    site: *site,
+                    expr,
+                    numerator: numerator.clone(),
+                    denominator: denominator.clone(),
+                });
+            }
+            IrExpr::ZiFilter {
+                site,
+                expr,
+                numerator,
+                denominator,
+                period,
+                transition,
+                first_transition,
+                direct_assignment,
+            } => {
+                let expr = self.import(expr);
+                let numerator = self.import_zi_polynomial(numerator);
+                let denominator = self.import_zi_polynomial(denominator);
+                let period = self.import(period);
+                let transition = self.import(transition);
+                let first_transition = self.import(first_transition);
+                return self.push_heavy(Heavy::ZiFilter {
+                    site: *site,
+                    expr,
+                    numerator,
+                    denominator,
+                    period,
+                    transition,
+                    first_transition,
+                    direct_assignment: *direct_assignment,
+                });
+            }
+            IrExpr::ZiFilterDerivative {
+                site,
+                expr,
+                numerator,
+                denominator,
+                period,
+                transition,
+                first_transition,
+                direct_assignment,
+            } => {
+                let expr = self.import(expr);
+                let numerator = self.import_zi_polynomial(numerator);
+                let denominator = self.import_zi_polynomial(denominator);
+                let period = self.import(period);
+                let transition = self.import(transition);
+                let first_transition = self.import(first_transition);
+                return self.push_heavy(Heavy::ZiFilterDerivative {
+                    site: *site,
+                    expr,
+                    numerator,
+                    denominator,
+                    period,
+                    transition,
+                    first_transition,
+                    direct_assignment: *direct_assignment,
+                });
+            }
+        };
+        self.push(node)
+    }
+
+    fn import_optional(&mut self, expr: &Option<Box<IrExpr>>) -> Option<NodeId> {
+        expr.as_ref().map(|expr| self.import(expr))
+    }
+
+    fn import_zi_polynomial(&mut self, polynomial: &ZiPolynomialDefinition) -> ZiPolynomial {
+        match polynomial {
+            ZiPolynomialDefinition::Coefficients(terms) => {
+                ZiPolynomial::Coefficients(terms.iter().map(|term| self.import(term)).collect())
+            }
+            ZiPolynomialDefinition::Roots(pairs) => ZiPolynomial::Roots(
+                pairs
+                    .iter()
+                    .map(|(real, imaginary)| (self.import(real), self.import(imaginary)))
+                    .collect(),
+            ),
+        }
+    }
+
+    /// Rebuild the [`IrExpr`] tree rooted at `id`.
+    ///
+    /// The inverse of [`ExprArena::import`] on every one of the 48 variants.
+    /// A shared subtree is written out once per path, so exporting a forest
+    /// the AD core shared is exactly as large as the same forest is today.
+    pub fn export(&self, id: NodeId) -> IrExpr {
+        match *self.node(id) {
+            Node::Const(value) => IrExpr::Const(value),
+            Node::Param(name) => IrExpr::Param(self.name(name).clone()),
+            Node::ParamGiven(name) => IrExpr::ParamGiven(self.name(name).clone()),
+            Node::Var(name) => IrExpr::Var(self.name(name).clone()),
+            Node::VarIndexed { payload, index } => {
+                let read = self.indexed(payload);
+                IrExpr::VarIndexed {
+                    array: self.name(read.array).clone(),
+                    base: read.base,
+                    len: read.len,
+                    lower: read.lower,
+                    index: self.export_boxed(index),
+                }
+            }
+            Node::Voltage(pos, neg) => IrExpr::Voltage(unpack_index(pos), unpack_index(neg)),
+            Node::Current(pos, neg) => IrExpr::Current(unpack_index(pos), unpack_index(neg)),
+            Node::BranchCurrent(ordinal) => IrExpr::BranchCurrent(unpack_index(ordinal)),
+            Node::Time => IrExpr::Time,
+            Node::Temperature => IrExpr::Temperature,
+            Node::Vt => IrExpr::Vt,
+            Node::Mfactor => IrExpr::Mfactor,
+            Node::PortConnected(port) => IrExpr::PortConnected(unpack_index(port)),
+            Node::Binary(op, left, right) => {
+                IrExpr::Binary(op, self.export_boxed(left), self.export_boxed(right))
+            }
+            Node::Unary(op, inner) => IrExpr::Unary(op, self.export_boxed(inner)),
+            Node::Call { func, a, b, .. } => IrExpr::Call(
+                func,
+                a.into_iter().chain(b).map(|arg| self.export(arg)).collect(),
+            ),
+            Node::CallSpilled { func, args } => IrExpr::Call(
+                func,
+                self.call_args(args)
+                    .iter()
+                    .map(|arg| self.export(*arg))
+                    .collect(),
+            ),
+            Node::Ddt(inner) => IrExpr::Ddt(self.export_boxed(inner)),
+            Node::Idt(inner, ic) => IrExpr::Idt(self.export_boxed(inner), self.export_optional(ic)),
+            Node::IdtMod {
+                expr,
+                modulus,
+                payload,
+            } => {
+                let (ic, offset) = self.optional_pair(payload);
+                IrExpr::IdtMod {
+                    expr: self.export_boxed(expr),
+                    ic: self.export_optional(ic),
+                    modulus: self.export_boxed(modulus),
+                    offset: self.export_optional(offset),
+                }
+            }
+            Node::Limexp(inner) => IrExpr::Limexp(self.export_boxed(inner)),
+            Node::Limit(inner, step) => {
+                IrExpr::Limit(self.export_boxed(inner), self.export_optional(step))
+            }
+            Node::CanonicalLimit(inner) => IrExpr::CanonicalLimit(self.export_boxed(inner)),
+            Node::TableLookup { input, table } => {
+                let (x_data, y_data) = self.table(table);
+                IrExpr::TableLookup {
+                    input: self.export_boxed(input),
+                    x_data: x_data.clone(),
+                    y_data: y_data.clone(),
+                }
+            }
+            Node::TableDerivative { input, table } => {
+                let (x_data, y_data) = self.table(table);
+                IrExpr::TableDerivative {
+                    input: self.export_boxed(input),
+                    x_data: x_data.clone(),
+                    y_data: y_data.clone(),
+                }
+            }
+            Node::Ddx { expr, axis } => IrExpr::Ddx {
+                expr: self.export_boxed(expr),
+                axis: self.ddx_axis(axis),
+            },
+            Node::DdtCompanion(inner) => IrExpr::DdtCompanion(self.export_boxed(inner)),
+            Node::IdtCompanion(inner) => IrExpr::IdtCompanion(self.export_boxed(inner)),
+            Node::Conditional(condition, then_expr, else_expr) => IrExpr::Conditional(
+                self.export_boxed(condition),
+                self.export_boxed(then_expr),
+                self.export_boxed(else_expr),
+            ),
+            Node::Analysis(name) => IrExpr::Analysis(self.name(name).to_string()),
+            Node::LastCrossing { expr, direction } => IrExpr::LastCrossing {
+                expr: self.export_boxed(expr),
+                direction,
+            },
+            Node::Heavy(_, id) => self.export_heavy(self.heavy(id)),
+        }
+    }
+
+    fn export_heavy(&self, heavy: &Heavy) -> IrExpr {
+        match heavy {
+            Heavy::AbsDelay {
+                site,
+                expr,
+                delay_time,
+                max_delay,
+            } => IrExpr::AbsDelay {
+                site: *site,
+                expr: self.export_boxed(*expr),
+                delay_time: self.export_boxed(*delay_time),
+                max_delay: self.export_optional(*max_delay),
+            },
+            Heavy::AbsDelayDerivative {
+                site,
+                input,
+                input_derivative,
+                delay_time,
+                delay_derivative,
+                max_delay,
+                derivative_order,
+            } => IrExpr::AbsDelayDerivative {
+                site: *site,
+                input: self.export_boxed(*input),
+                input_derivative: self.export_boxed(*input_derivative),
+                delay_time: self.export_boxed(*delay_time),
+                delay_derivative: self.export_boxed(*delay_derivative),
+                max_delay: self.export_optional(*max_delay),
+                derivative_order: *derivative_order,
+            },
+            Heavy::Transition {
+                site,
+                expr,
+                delay,
+                rise_time,
+                fall_time,
+            } => IrExpr::Transition {
+                site: *site,
+                expr: self.export_boxed(*expr),
+                delay: self.export_optional(*delay),
+                rise_time: self.export_optional(*rise_time),
+                fall_time: self.export_optional(*fall_time),
+            },
+            Heavy::TransitionDerivative {
+                site,
+                input,
+                input_derivative,
+                delay,
+                rise_time,
+                fall_time,
+            } => IrExpr::TransitionDerivative {
+                site: *site,
+                input: self.export_boxed(*input),
+                input_derivative: self.export_boxed(*input_derivative),
+                delay: self.export_optional(*delay),
+                rise_time: self.export_optional(*rise_time),
+                fall_time: self.export_optional(*fall_time),
+            },
+            Heavy::Slew {
+                site,
+                expr,
+                max_pos_slew,
+                max_neg_slew,
+            } => IrExpr::Slew {
+                site: *site,
+                expr: self.export_boxed(*expr),
+                max_pos_slew: self.export_optional(*max_pos_slew),
+                max_neg_slew: self.export_optional(*max_neg_slew),
+            },
+            Heavy::SlewDerivative {
+                site,
+                input,
+                input_derivative,
+                max_pos_slew,
+                max_pos_slew_derivative,
+                max_neg_slew,
+                max_neg_slew_derivative,
+            } => IrExpr::SlewDerivative {
+                site: *site,
+                input: self.export_boxed(*input),
+                input_derivative: self.export_boxed(*input_derivative),
+                max_pos_slew: self.export_optional(*max_pos_slew),
+                max_pos_slew_derivative: self.export_optional(*max_pos_slew_derivative),
+                max_neg_slew: self.export_optional(*max_neg_slew),
+                max_neg_slew_derivative: self.export_optional(*max_neg_slew_derivative),
+            },
+            Heavy::Cross {
+                expr,
+                direction,
+                time_tol,
+                expr_tol,
+                enable,
+            } => IrExpr::Cross {
+                expr: self.export_boxed(*expr),
+                direction: self.export_optional(*direction),
+                time_tol: self.export_optional(*time_tol),
+                expr_tol: self.export_optional(*expr_tol),
+                enable: self.export_optional(*enable),
+            },
+            Heavy::Above {
+                expr,
+                time_tol,
+                expr_tol,
+                enable,
+            } => IrExpr::Above {
+                expr: self.export_boxed(*expr),
+                time_tol: self.export_optional(*time_tol),
+                expr_tol: self.export_optional(*expr_tol),
+                enable: self.export_optional(*enable),
+            },
+            Heavy::Timer {
+                start_time,
+                period,
+                time_tol,
+                enable,
+            } => IrExpr::Timer {
+                start_time: self.export_boxed(*start_time),
+                period: self.export_optional(*period),
+                time_tol: self.export_optional(*time_tol),
+                enable: self.export_optional(*enable),
+            },
+            Heavy::WhiteNoise { site, power, name } => IrExpr::WhiteNoise {
+                site: *site,
+                power: self.export_boxed(*power),
+                name: name.clone(),
+            },
+            Heavy::FlickerNoise {
+                site,
+                power,
+                exponent,
+                name,
+            } => IrExpr::FlickerNoise {
+                site: *site,
+                power: self.export_boxed(*power),
+                exponent: self.export_boxed(*exponent),
+                name: name.clone(),
+            },
+            Heavy::NoiseTable {
+                site,
+                points,
+                log_interp,
+                name,
+            } => IrExpr::NoiseTable {
+                site: *site,
+                points: points.clone(),
+                log_interp: *log_interp,
+                name: name.clone(),
+            },
+            Heavy::LaplaceZP {
+                site,
+                expr,
+                zeros,
+                poles,
+                gain,
+            } => IrExpr::LaplaceZP {
+                site: *site,
+                expr: self.export_boxed(*expr),
+                zeros: zeros.clone(),
+                poles: poles.clone(),
+                gain: *gain,
+            },
+            Heavy::LaplaceND {
+                site,
+                expr,
+                numerator,
+                denominator,
+            } => IrExpr::LaplaceND {
+                site: *site,
+                expr: self.export_boxed(*expr),
+                numerator: numerator.clone(),
+                denominator: denominator.clone(),
+            },
+            Heavy::LaplaceZPDerivative {
+                site,
+                expr,
+                zeros,
+                poles,
+                gain,
+            } => IrExpr::LaplaceZPDerivative {
+                site: *site,
+                expr: self.export_boxed(*expr),
+                zeros: zeros.clone(),
+                poles: poles.clone(),
+                gain: *gain,
+            },
+            Heavy::LaplaceNDDerivative {
+                site,
+                expr,
+                numerator,
+                denominator,
+            } => IrExpr::LaplaceNDDerivative {
+                site: *site,
+                expr: self.export_boxed(*expr),
+                numerator: numerator.clone(),
+                denominator: denominator.clone(),
+            },
+            Heavy::ZiFilter {
+                site,
+                expr,
+                numerator,
+                denominator,
+                period,
+                transition,
+                first_transition,
+                direct_assignment,
+            } => IrExpr::ZiFilter {
+                site: *site,
+                expr: self.export_boxed(*expr),
+                numerator: self.export_zi_polynomial(numerator),
+                denominator: self.export_zi_polynomial(denominator),
+                period: self.export_boxed(*period),
+                transition: self.export_boxed(*transition),
+                first_transition: self.export_boxed(*first_transition),
+                direct_assignment: *direct_assignment,
+            },
+            Heavy::ZiFilterDerivative {
+                site,
+                expr,
+                numerator,
+                denominator,
+                period,
+                transition,
+                first_transition,
+                direct_assignment,
+            } => IrExpr::ZiFilterDerivative {
+                site: *site,
+                expr: self.export_boxed(*expr),
+                numerator: self.export_zi_polynomial(numerator),
+                denominator: self.export_zi_polynomial(denominator),
+                period: self.export_boxed(*period),
+                transition: self.export_boxed(*transition),
+                first_transition: self.export_boxed(*first_transition),
+                direct_assignment: *direct_assignment,
+            },
+        }
+    }
+
+    fn export_boxed(&self, id: NodeId) -> Box<IrExpr> {
+        Box::new(self.export(id))
+    }
+
+    fn export_optional(&self, id: Option<NodeId>) -> Option<Box<IrExpr>> {
+        id.map(|id| self.export_boxed(id))
+    }
+
+    fn export_zi_polynomial(&self, polynomial: &ZiPolynomial) -> ZiPolynomialDefinition {
+        match polynomial {
+            ZiPolynomial::Coefficients(terms) => ZiPolynomialDefinition::Coefficients(
+                terms.iter().map(|term| self.export(*term)).collect(),
+            ),
+            ZiPolynomial::Roots(pairs) => ZiPolynomialDefinition::Roots(
+                pairs
+                    .iter()
+                    .map(|(real, imaginary)| (self.export(*real), self.export(*imaginary)))
+                    .collect(),
+            ),
+        }
     }
 }
