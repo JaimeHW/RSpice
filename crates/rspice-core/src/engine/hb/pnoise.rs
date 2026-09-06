@@ -40,6 +40,13 @@ pub struct PnoiseAnalysisResult {
     pub fundamental_freq: Value,
     /// Whether the operating-point solve converged.
     pub converged: bool,
+    /// Total output noise over the swept band, in volts RMS, when the run was
+    /// asked to integrate. `None` means the question was not asked, never
+    /// that the total is zero.
+    pub integrated_output_noise: Option<Value>,
+    /// Total input-referred noise over the swept band, in volts RMS, when the
+    /// run was asked to integrate and named an input source.
+    pub integrated_input_noise: Option<Value>,
 }
 
 enum PnoiseOperatingPoint<'a> {
@@ -1026,6 +1033,10 @@ impl Engine {
             input_noise,
             fundamental_freq,
             converged: state.converged,
+            // Integration is a card-level request, so it is filled in by the
+            // `.PNOISE` entry point that read the card, not by every run.
+            integrated_output_noise: None,
+            integrated_input_noise: None,
         })
     }
 }

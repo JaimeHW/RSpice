@@ -2890,7 +2890,7 @@ impl AnalysisResultDocument {
             )?);
         }
 
-        let scalars = vec![
+        let mut scalars = vec![
             real_scalar(
                 LOCATION,
                 "carrier_frequency",
@@ -2900,6 +2900,26 @@ impl AnalysisResultDocument {
             )?,
             boolean_scalar("converged", "Converged", result.converged)?,
         ];
+        // Present only when the card asked to integrate; absent is "not
+        // asked", never "zero".
+        if let Some(total) = result.integrated_output_noise {
+            scalars.push(real_scalar(
+                LOCATION,
+                "integrated_output_noise",
+                "Integrated output noise",
+                SignalUnit::Volt,
+                total,
+            )?);
+        }
+        if let Some(total) = result.integrated_input_noise {
+            scalars.push(real_scalar(
+                LOCATION,
+                "integrated_input_referred_noise",
+                "Integrated input-referred noise",
+                SignalUnit::Volt,
+                total,
+            )?);
+        }
         let payload = PNoisePayload {
             output_node: output.to_owned(),
             jitter_bandwidth: None,
@@ -2973,7 +2993,7 @@ impl AnalysisResultDocument {
                 format!("the solved oscillation period is {}", result.period),
             ));
         };
-        let scalars = vec![
+        let mut scalars = vec![
             real_scalar(
                 LOCATION,
                 "carrier_frequency",
@@ -2983,6 +3003,17 @@ impl AnalysisResultDocument {
             )?,
             boolean_scalar("converged", "Converged", true)?,
         ];
+        // Present only when the card asked to integrate; absent is "not
+        // asked", never "zero".
+        if let Some(total) = result.integrated_phase_noise {
+            scalars.push(real_scalar(
+                LOCATION,
+                "integrated_phase_noise",
+                "Integrated phase noise",
+                SignalUnit::Radian,
+                total,
+            )?);
+        }
         for value in [result.diffusion_constant, result.period, result.corner_hz] {
             if !value.is_finite() {
                 return Err(source_error(

@@ -48,6 +48,10 @@ pub struct OscPnoiseResult {
     /// Lorentzian corner pi*f0^2*c (Hz); below it L flattens to the finite
     /// carrier-preserving value.
     pub corner_hz: Value,
+    /// RMS phase error over the swept offset band in radians,
+    /// `sqrt(2 * integral L(f) df)`, when the run was asked to integrate.
+    /// `None` means the question was not asked.
+    pub integrated_phase_noise: Option<Value>,
 }
 
 /// The offset-frequency grid one authored `.PNOISE` card sweeps.
@@ -69,6 +73,107 @@ fn pnoise_card_output(card: &crate::netlist::PnoiseCard) -> String {
     match &card.reference_node {
         Some(reference) => format!("V({},{})", card.output_node, reference),
         None => format!("V({})", card.output_node),
+    }
+}
+
+/// Trapezoidal integral of a spectral density over the offsets it was
+/// sampled on.
+///
+/// A single-point sweep spans no band, so there is nothing to integrate and
+/// the answer is `None` rather than zero — the same distinction the card's
+/// `INTEGRATEDNOISE=NO` makes.
+fn integrate_spectral_density(offsets: &[Value], density: &[Value]) -> Option<Value> {
+    if offsets.len() < 2 || offsets.len() != density.len() {
+        return None;
+    }
+    let mut total = 0.0;
+    for index in 1..offsets.len() {
+        let width = offsets[index] - offsets[index - 1];
+        if !width.is_finite() || width <= 0.0 {
+            continue;
+        }
+        let left = density[index - 1];
+        let right = density[index];
+        if !left.is_finite() || !right.is_finite() {
+            return None;
+        }
+        total += 0.5 * (left + right) * width;
+    }
+    (total.is_finite() && total >= 0.0).then(|| total.sqrt())
+}
+
+/// RMS phase error over a swept single-sideband spectrum, in radians.
+///
+/// `L(f)` is the single-sideband, carrier-normalized density in dBc/Hz, so
+/// both sidebands contribute and the mean-square phase is
+/// `2 * integral L(f) df`.
+fn integrate_phase_noise(offsets: &[Value], phase_noise_dbc: &[Value]) -> Option<Value> {
+    if offsets.len() != phase_noise_dbc.len() {
+        return None;
+    }
+    let mut linear = Vec::new();
+    linear.try_reserve_exact(phase_noise_dbc.len()).ok()?;
+    for &dbc in phase_noise_dbc {
+        // A floor of exactly zero density is representable; -inf dBc/Hz is
+        // the noiseless limit the Lorentzian reaches at infinite offset.
+        linear.push(if dbc.is_finite() {
+            10.0_f64.powf(dbc / 10.0)
+        } else if dbc == Value::NEG_INFINITY {
+            0.0
+        } else {
+            return None;
+        });
+    }
+    let rms = integrate_spectral_density(offsets, &linear)?;
+    let mean_square = 2.0 * rms * rms;
+    mean_square.is_finite().then(|| mean_square.sqrt())
+}
+
+/// Fill in whatever one authored `.PNOISE` card asked for beyond the
+/// spectrum itself: the contributor breakdown and the integrated total.
+fn apply_pnoise_card_reporting(
+    card: &crate::netlist::PnoiseCard,
+    result: &mut super::PnoiseAnalysisResult,
+) {
+    if !card.noise_summary {
+        result.contributors.clear();
+    }
+    if card.integrated_noise {
+        result.integrated_output_noise =
+            integrate_spectral_density(&result.frequencies, &result.output_noise);
+        result.integrated_input_noise = result
+            .input_noise
+            .as_ref()
+            .and_then(|density| integrate_spectral_density(&result.frequencies, density));
+    }
+}
+
+/// Whether one authored `.PNOISE` card may be measured around this carrier.
+///
+/// `OUTPUT` is the card's default and means "the noise at the probe". Around
+/// a free-running orbit that measurement *is* the carrier-normalized phase
+/// noise, so an autonomous carrier keeps selecting the oscillator driver —
+/// the rule that predates `NOISEREF=` and the only one a bare `.PNOISE`
+/// beneath `.PSS AUTONOMOUS=YES` can mean. The two combinations that would
+/// answer a different question from the one the card asked are refused.
+fn check_pnoise_card_carrier(
+    card: &crate::netlist::PnoiseCard,
+    autonomous: bool,
+) -> Result<(), SimulationError> {
+    use crate::netlist::PnoiseReference;
+
+    match (card.noise_reference, autonomous) {
+        (PnoiseReference::Phase, false) => Err(SimulationError::Circuit(
+            "`.PNOISE NOISEREF=PHASE` needs an autonomous carrier: a driven orbit has no free \
+             phase to diffuse, so author `.PSS AUTONOMOUS=YES` or ask for output-referred noise"
+                .to_string(),
+        )),
+        (PnoiseReference::Input, true) => Err(SimulationError::Circuit(
+            "`.PNOISE INPUT=` refers noise to a driving source, and an autonomous carrier has \
+             none; author `NOISEREF=PHASE` for an oscillator's phase noise"
+                .to_string(),
+        )),
+        _ => Ok(()),
     }
 }
 
@@ -155,17 +260,23 @@ impl Engine {
     ) -> Result<PeriodicNoiseResult, SimulationError> {
         let offsets = pnoise_card_offsets(card, abort)?;
         let output = pnoise_card_output(card);
-        if operating_point.config().is_autonomous() {
-            let result = self.run_pnoise_oscillator_from_pss_with_abort(
+        let autonomous = operating_point.config().is_autonomous();
+        check_pnoise_card_carrier(card, autonomous)?;
+        if autonomous {
+            let mut result = self.run_pnoise_oscillator_from_pss_with_abort(
                 netlist,
                 operating_point.config().clone(),
                 &offsets,
                 operating_point,
                 abort,
             )?;
+            if card.integrated_noise {
+                result.integrated_phase_noise =
+                    integrate_phase_noise(&result.frequencies, &result.phase_noise_dbc);
+            }
             return Ok(PeriodicNoiseResult::Oscillator { output, result });
         }
-        let result = self.run_pnoise_from_pss_with_abort(
+        let mut result = self.run_pnoise_from_pss_with_abort(
             netlist,
             &offsets,
             &card.output_node,
@@ -175,6 +286,7 @@ impl Engine {
             operating_point,
             abort,
         )?;
+        apply_pnoise_card_reporting(card, &mut result);
         Ok(PeriodicNoiseResult::Driven { output, result })
     }
 
@@ -188,7 +300,10 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<PeriodicNoiseResult, SimulationError> {
         let offsets = pnoise_card_offsets(card, abort)?;
-        let result = self.run_pnoise_from_hb_with_abort(
+        // A harmonic-balance carrier is driven by construction: its tones are
+        // the deck's own sources.
+        check_pnoise_card_carrier(card, false)?;
+        let mut result = self.run_pnoise_from_hb_with_abort(
             netlist,
             &offsets,
             &card.output_node,
@@ -198,6 +313,7 @@ impl Engine {
             operating_point,
             abort,
         )?;
+        apply_pnoise_card_reporting(card, &mut result);
         Ok(PeriodicNoiseResult::Driven {
             output: pnoise_card_output(card),
             result,
@@ -765,6 +881,9 @@ impl Engine {
             diffusion_constant: c,
             period,
             corner_hz,
+            // Integration is a card-level request; the `.PNOISE` entry point
+            // that read the card fills it in.
+            integrated_phase_noise: None,
         })
     }
 }

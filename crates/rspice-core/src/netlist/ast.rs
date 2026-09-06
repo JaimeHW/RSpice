@@ -2421,6 +2421,21 @@ impl PacCard {
     pub(crate) const DEFAULT_INCLUDE_DC: bool = true;
 }
 
+/// What a `.PNOISE` card measures the noise against.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PnoiseReference {
+    /// Absolute output noise density at the probe, in V^2/Hz.
+    #[default]
+    Output,
+    /// Output noise divided by the squared transfer from `input_source`, so
+    /// the density is stated at the input. Requires `INPUT=`.
+    Input,
+    /// Carrier-normalized single-sideband phase noise in dBc/Hz, from the
+    /// perturbation projection vector. Requires an autonomous carrier: a
+    /// driven orbit has no free phase to diffuse.
+    Phase,
+}
+
 /// Authored `.PNOISE` card.
 ///
 /// There is no single core configuration struct for periodic noise: the
@@ -2438,8 +2453,24 @@ pub struct PnoiseCard {
     pub input_source: Option<String>,
     /// Highest folded sideband index; sidebands `-n..=n` participate.
     pub max_sideband: i32,
+    /// What the noise is measured against. `INPUT=` alone implies
+    /// [`PnoiseReference::Input`], which is the spelling that predates this
+    /// field; `NOISEREF=` states it outright.
+    pub noise_reference: PnoiseReference,
+    /// Integrate the published density over the swept band and report the
+    /// total as an RMS scalar beside the spectrum.
+    pub integrated_noise: bool,
+    /// Publish each noise source's own contribution beside the total.
+    pub noise_summary: bool,
     /// Which upstream periodic analysis this card folds noise around.
     pub source: PeriodicSourceSelector,
+}
+
+impl PnoiseCard {
+    /// Whether a card that does not say publishes a contributor breakdown.
+    pub(crate) const DEFAULT_NOISE_SUMMARY: bool = true;
+    /// Whether a card that does not say reports an integrated total.
+    pub(crate) const DEFAULT_INTEGRATED_NOISE: bool = false;
 }
 
 /// Authored `.ENVELOPE` card: harmonic-balance envelope continuation.

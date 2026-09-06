@@ -280,6 +280,29 @@ fn card_sweep(
     })
 }
 
+/// Read `NOISEREF=OUTPUT|INPUT|PHASE`.
+fn card_noise_reference(
+    stream: &mut TokenStream,
+    line: usize,
+    card: AnalysisCard,
+) -> Result<PnoiseReference, ParseError> {
+    let spelling = card_name(stream, line, card, "NOISEREF")?;
+    match spelling.to_ascii_uppercase().as_str() {
+        "OUTPUT" | "OUT" => Ok(PnoiseReference::Output),
+        "INPUT" | "IN" => Ok(PnoiseReference::Input),
+        "PHASE" | "PM" => Ok(PnoiseReference::Phase),
+        _ => Err(card_error(
+            card,
+            line,
+            AnalysisCardIssue::InvalidChoice {
+                field: "NOISEREF",
+                value: spelling,
+                expected: "OUTPUT, INPUT or PHASE",
+            },
+        )),
+    }
+}
+
 /// Read `FROM=PSS|HB`.
 fn card_source_selector(
     stream: &mut TokenStream,
@@ -1018,6 +1041,9 @@ pub(super) fn parse_pnoise_command(
     let mut output = None;
     let mut input_source = None;
     let mut max_sideband = None;
+    let mut noise_reference = None;
+    let mut integrated_noise = None;
+    let mut noise_summary = None;
     let mut source = None;
 
     loop {
@@ -1049,12 +1075,35 @@ pub(super) fn parse_pnoise_command(
                 line_num,
                 "INPUT",
             )?,
+            // At least one folded sideband, unlike `.PAC`'s zero: see the note
+            // on the `.PAC MAXSIDEBAND` arm above.
             "MAXSIDEBAND" => bind_once(
                 &mut max_sideband,
                 card_signed(stream, line_num, params, CARD, "MAXSIDEBAND", 1)?,
                 CARD,
                 line_num,
                 "MAXSIDEBAND",
+            )?,
+            "NOISEREF" => bind_once(
+                &mut noise_reference,
+                card_noise_reference(stream, line_num, CARD)?,
+                CARD,
+                line_num,
+                "NOISEREF",
+            )?,
+            "INTEGRATEDNOISE" => bind_once(
+                &mut integrated_noise,
+                card_bool(stream, line_num, CARD, "INTEGRATEDNOISE")?,
+                CARD,
+                line_num,
+                "INTEGRATEDNOISE",
+            )?,
+            "NOISESUMMARY" => bind_once(
+                &mut noise_summary,
+                card_bool(stream, line_num, CARD, "NOISESUMMARY")?,
+                CARD,
+                line_num,
+                "NOISESUMMARY",
             )?,
             "FROM" => bind_once(
                 &mut source,
@@ -1081,12 +1130,42 @@ pub(super) fn parse_pnoise_command(
         ));
     };
 
+    // `INPUT=` on its own asked for input-referred noise before `NOISEREF=`
+    // existed, and still does; `NOISEREF=` states the same thing outright.
+    // The two must agree, so a card that names a source and then measures
+    // something else is refused rather than quietly dropping the source.
+    let noise_reference = match (noise_reference, input_source.is_some()) {
+        (Some(PnoiseReference::Input), false) => {
+            return Err(card_error(
+                CARD,
+                line_num,
+                AnalysisCardIssue::MissingField { field: "INPUT" },
+            ));
+        }
+        (Some(reference), true) if reference != PnoiseReference::Input => {
+            return Err(card_error(
+                CARD,
+                line_num,
+                AnalysisCardIssue::ConflictingFields {
+                    first: "NOISEREF",
+                    second: "INPUT",
+                },
+            ));
+        }
+        (Some(reference), _) => reference,
+        (None, true) => PnoiseReference::Input,
+        (None, false) => PnoiseReference::default(),
+    };
+
     Ok(AnalysisCommand::Pnoise(Box::new(PnoiseCard {
         sweep,
         output_node: output_node.to_ascii_uppercase(),
         reference_node: reference_node.map(|node| node.to_ascii_uppercase()),
         input_source: input_source.map(|name| name.to_ascii_uppercase()),
         max_sideband: max_sideband.unwrap_or(PNOISE_DEFAULT_MAX_SIDEBAND),
+        noise_reference,
+        integrated_noise: integrated_noise.unwrap_or(PnoiseCard::DEFAULT_INTEGRATED_NOISE),
+        noise_summary: noise_summary.unwrap_or(PnoiseCard::DEFAULT_NOISE_SUMMARY),
         source: source.unwrap_or_default(),
     })))
 }
@@ -1249,7 +1328,7 @@ fn card_source_list(
 mod tests {
     use crate::netlist::{
         AnalysisCard, AnalysisCardIssue, AnalysisCommand, EnvelopeCard, FreqVariation, Netlist,
-        PacCard, ParseError, PeriodicSourceSelector, PnoiseCard, PssCard,
+        PacCard, ParseError, PeriodicSourceSelector, PnoiseCard, PnoiseReference, PssCard,
     };
 
     const CIRCUIT: &str = "periodic card parser\n\
@@ -1765,6 +1844,9 @@ mod tests {
         assert_eq!(card.reference_node, None);
         assert_eq!(card.input_source, None);
         assert_eq!(card.max_sideband, 6);
+        assert_eq!(card.noise_reference, PnoiseReference::Output);
+        assert_eq!(card.integrated_noise, PnoiseCard::DEFAULT_INTEGRATED_NOISE);
+        assert_eq!(card.noise_summary, PnoiseCard::DEFAULT_NOISE_SUMMARY);
         assert_eq!(card.source, PeriodicSourceSelector::Preceding);
     }
 
@@ -1780,6 +1862,67 @@ mod tests {
         assert_eq!(card.input_source.as_deref(), Some("VRF"));
         assert_eq!(card.max_sideband, 9);
         assert_eq!(card.source, PeriodicSourceSelector::Pss);
+    }
+
+    #[test]
+    fn pnoise_naming_an_input_source_is_asking_for_input_referred_noise() {
+        // The spelling that predates NOISEREF=, and the spelling beside it,
+        // are the same card.
+        let implied = pnoise(".pss fund=1g\n.pnoise dec 10 1 1meg out=out input=vin");
+        assert_eq!(implied.noise_reference, PnoiseReference::Input);
+        let stated = pnoise(".pss fund=1g\n.pnoise dec 10 1 1meg out=out input=vin noiseref=input");
+        assert_eq!(implied, stated);
+    }
+
+    #[test]
+    fn pnoise_binds_phase_noise_and_the_reporting_switches() {
+        let card = pnoise(
+            ".pss fund=1g autonomous=yes oscnode=out\n\
+             .pnoise dec 10 1 1meg out=out noiseref=phase integratednoise=yes noisesummary=no",
+        );
+        assert_eq!(card.noise_reference, PnoiseReference::Phase);
+        assert!(card.integrated_noise);
+        assert!(!card.noise_summary);
+    }
+
+    #[test]
+    fn pnoise_refuses_a_noise_reference_that_disagrees_with_its_input_source() {
+        assert!(matches!(
+            card_failure(".pss fund=1g\n.PNOISE DEC 10 1 1meg OUT=out NOISEREF=input").2,
+            AnalysisCardIssue::MissingField { field: "INPUT" }
+        ));
+        assert!(matches!(
+            card_failure(".pss fund=1g\n.PNOISE DEC 10 1 1meg OUT=out INPUT=vin NOISEREF=output").2,
+            AnalysisCardIssue::ConflictingFields {
+                first: "NOISEREF",
+                second: "INPUT"
+            }
+        ));
+        assert!(matches!(
+            card_failure(".pss fund=1g\n.PNOISE DEC 10 1 1meg OUT=out INPUT=vin NOISEREF=phase").2,
+            AnalysisCardIssue::ConflictingFields {
+                first: "NOISEREF",
+                second: "INPUT"
+            }
+        ));
+    }
+
+    #[test]
+    fn pnoise_refuses_a_noise_reference_it_cannot_measure() {
+        assert!(matches!(
+            card_failure(".pss fund=1g\n.PNOISE DEC 10 1 1meg OUT=out NOISEREF=amplitude").2,
+            AnalysisCardIssue::InvalidChoice {
+                field: "NOISEREF",
+                ..
+            }
+        ));
+        assert!(matches!(
+            card_failure(".pss fund=1g\n.PNOISE DEC 10 1 1meg OUT=out NOISESUMMARY=maybe").2,
+            AnalysisCardIssue::InvalidChoice {
+                field: "NOISESUMMARY",
+                ..
+            }
+        ));
     }
 
     #[test]
