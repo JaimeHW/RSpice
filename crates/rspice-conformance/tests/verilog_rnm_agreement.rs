@@ -343,6 +343,83 @@ fn the_production_scale_converter_agrees_with_its_real_number_model() {
     );
 }
 
+// ===========================================================================
+// Reproducibility
+// ===========================================================================
+
+/// Comparing a block twice in one process gives bit-identical numbers.
+///
+/// Every bound above is a bound only if the number it bounds is the same on
+/// every run. Both sides are deterministic by construction — one integrates a
+/// matrix through time, the other evaluates real expressions on an event
+/// kernel — and neither reads a clock, a thread count, an environment
+/// variable, or a cache shared with anything else: these decks carry no
+/// `.model` card, so no model cache is on their path at all.
+///
+/// This is stated as a test because it is the first question to ask if this
+/// suite is ever seen to fail intermittently. Green here and red above means
+/// the disagreement is about the block, which is what the failure report says;
+/// red here means the harness has acquired an input nobody declared, and every
+/// margin above is a threshold on a number that wobbles.
+///
+/// The comparison is on the raw bits, not within an epsilon: "the same run
+/// twice" admits no tolerance.
+///
+/// Cost, stated rather than hidden: this runs the 7-bit converter twice more,
+/// which roughly doubles the file's wall time (5 s to 11 s in a debug build).
+/// The block is deliberately included even so — it is the largest and slowest
+/// thing here, so it is the one whose reproducibility is worth the least
+/// assuming.
+#[test]
+fn comparing_a_block_twice_in_one_process_gives_the_same_numbers() {
+    let mut all = blocks();
+    all.push(rnm::flash_adc_7bit());
+    for block in all {
+        let first = rnm::compare(&block)
+            .unwrap_or_else(|error| panic!("`{}` could not be compared: {error}", block.name));
+        let second = rnm::compare(&block).unwrap_or_else(|error| {
+            panic!("`{}` could not be compared twice: {error}", block.name)
+        });
+
+        assert_eq!(
+            first.pairs.len(),
+            second.pairs.len(),
+            "`{}` compared a different number of signals the second time",
+            block.name
+        );
+        for (once, twice) in first.pairs.iter().zip(&second.pairs) {
+            let node = once.pair.analog_node;
+            assert_eq!(
+                once.points.len(),
+                twice.points.len(),
+                "`{}`/`{node}` produced a different number of samples the second time",
+                block.name
+            );
+            for (step, (once, twice)) in once.points.iter().zip(&twice.points).enumerate() {
+                assert_eq!(
+                    (once.analog.to_bits(), once.rnm.to_bits()),
+                    (twice.analog.to_bits(), twice.rnm.to_bits()),
+                    "`{}`/`{node}` sample {step} differs between two runs of the same process: \
+                     analog {} then {}, rnm {} then {}",
+                    block.name,
+                    once.analog,
+                    twice.analog,
+                    once.rnm,
+                    twice.rnm
+                );
+            }
+            assert_eq!(
+                once.max_error().to_bits(),
+                twice.max_error().to_bits(),
+                "`{}`/`{node}` worst error differs between two runs: {:.17e} then {:.17e}",
+                block.name,
+                once.max_error(),
+                twice.max_error()
+            );
+        }
+    }
+}
+
 /// The production block has to actually be production-sized, or the measurement
 /// it exists for is measuring the same thing the reference blocks measure.
 ///
