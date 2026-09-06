@@ -1374,6 +1374,7 @@ mod tests {
                 branch_names: &result.branch_names,
                 branch_currents: &result.branch_currents,
                 digital_values: &[],
+                digital_buses: &[],
                 real_values: &[],
             },
         );
@@ -1418,6 +1419,7 @@ mod tests {
                 branch_names: &[],
                 branch_currents: &[],
                 digital_values: digital,
+                digital_buses: &[],
                 real_values: real,
             });
         };
