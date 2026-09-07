@@ -24,6 +24,30 @@ pub(crate) fn is_integral_cycle_count(cycles: Value) -> bool {
         && cycles.round() >= 1.0
 }
 
+/// Smallest PWL feature interval, discarding interior knots in constant runs.
+/// Keep both sides of ideal jumps and the complete width of a flat pulse;
+/// redundant flat knots must not force an arbitrarily fine integration grid.
+pub(crate) fn minimum_pwl_interval(
+    points: impl IntoIterator<Item = (Value, Value)>,
+) -> Option<Value> {
+    let mut points = points.into_iter().peekable();
+    let mut previous = points.next()?;
+    let mut minimum: Option<Value> = None;
+    let mut changes = false;
+    while let Some(point) = points.next() {
+        if point.1 == previous.1 && points.peek().is_some_and(|next| next.1 == point.1) {
+            continue;
+        }
+        changes |= point.1 != previous.1;
+        let interval = (point.0 - previous.0).abs();
+        if interval > 0.0 && interval.is_finite() {
+            minimum = Some(minimum.map_or(interval, |value| value.min(interval)));
+        }
+        previous = point;
+    }
+    if changes { minimum } else { None }
+}
+
 /// Map a PWL clock into its repeated tail. The authored endpoint is retained
 /// at exact repeat boundaries; the next representable instant belongs to the
 /// next cycle. A tolerance in seconds would flatten small waveforms and hold
@@ -94,6 +118,35 @@ pub fn xyce_hard_min_timestep(current_time: Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pwl_feature_width_ignores_redundant_holds_and_retains_ideal_pulses() {
+        assert_eq!(
+            minimum_pwl_interval([
+                (0.0, 0.0),
+                (1e-300, 0.0),
+                (0.25, 0.0),
+                (0.5, 1.0),
+                (1.0, 0.0)
+            ]),
+            Some(0.25)
+        );
+        assert_eq!(
+            minimum_pwl_interval([
+                (0.0, 0.0),
+                (0.5, 0.0),
+                (0.5, 1.0),
+                (0.6, 1.0),
+                (0.6, 0.0),
+                (1.0, 0.0)
+            ]),
+            Some(0.6 - 0.5)
+        );
+        assert_eq!(
+            minimum_pwl_interval([(0.0, 1.0), (1e-300, 1.0), (1.0, 1.0)]),
+            None
+        );
+    }
 
     #[test]
     fn xyce_hard_minimum_tracks_current_time_machine_precision() {

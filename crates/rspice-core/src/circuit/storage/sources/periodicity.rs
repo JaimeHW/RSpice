@@ -41,6 +41,92 @@ fn periodic_linear_points(
 }
 
 impl VoltageSources {
+    /// Shortest authored waveform interval after timing defaults and scaling.
+    /// A fixed grid must resolve these intervals before sampled convergence
+    /// can reveal a pulse that would otherwise fall between both trial meshes.
+    pub(super) fn minimum_pss_interval(
+        spec: &crate::netlist::SourceSpec,
+        context: Option<TransientSourceContext>,
+        pwl: Option<&crate::device::pwl_file::PwlWaveform>,
+    ) -> Option<Value> {
+        use crate::netlist::SourceSpec;
+        let minimum = |intervals: &[Value]| {
+            intervals
+                .iter()
+                .copied()
+                .filter(|value| *value > 0.0 && value.is_finite())
+                .reduce(Value::min)
+        };
+        match spec {
+            SourceSpec::Distortion { inner, .. }
+            | SourceSpec::DcTransient {
+                transient: inner, ..
+            }
+            | SourceSpec::DcAcTransient {
+                transient: inner, ..
+            }
+            | SourceSpec::RfPort { inner, .. } => Self::minimum_pss_interval(inner, context, pwl),
+            SourceSpec::Pulse {
+                v1,
+                v2,
+                delay,
+                rise,
+                fall,
+                width,
+                period,
+                width_defaults_to_zero,
+                ..
+            } if v1 != v2 => {
+                let (_, rise, fall, width, period) = Self::resolve_pulse_timing(
+                    *delay,
+                    *rise,
+                    *fall,
+                    *width,
+                    *period,
+                    *width_defaults_to_zero,
+                    context,
+                );
+                if rise <= 0.0 && fall <= 0.0 && width <= 0.0 {
+                    return None;
+                }
+                minimum(&[rise, fall, width, period - rise - width - fall])
+            }
+            SourceSpec::Pwl { points, .. } => {
+                crate::numerics::minimum_pwl_interval(points.iter().copied())
+            }
+            SourceSpec::PwlFile { .. } => {
+                pwl.and_then(crate::device::pwl_file::PwlWaveform::minimum_segment_duration)
+            }
+            SourceSpec::Pat {
+                vhi,
+                vlo,
+                rise,
+                fall,
+                sample,
+                data,
+                ..
+            } if vhi != vlo => {
+                let (first, _, _) = Self::pat_data_shape(data)?;
+                if data.as_bytes()[1..].iter().all(|&bit| bit == first) {
+                    return None;
+                }
+                let mut previous: Option<Value> = None;
+                let mut interval: Option<Value> = None;
+                Self::visit_pat_points(*vhi, *vlo, *rise, *fall, *sample, data, |time, _| {
+                    if let Some(last) = previous {
+                        let dt = time - last;
+                        if dt > 0.0 && dt.is_finite() {
+                            interval = Some(interval.map_or(dt, |value| value.min(dt)));
+                        }
+                    }
+                    previous = Some(time);
+                });
+                interval
+            }
+            _ => None,
+        }
+    }
+
     /// Fastest authored sinusoidal clock, measured in cycles per PSS period.
     /// This is a necessary sampling bound, not a bandwidth or integration-error
     /// certificate: modulation and nonlinear devices can generate more harmonics.

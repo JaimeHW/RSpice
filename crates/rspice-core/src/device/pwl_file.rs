@@ -305,6 +305,19 @@ impl PwlWaveform {
         self.times.last().copied().unwrap_or(0.0)
     }
 
+    /// Smallest physical knot interval without subtracting rounded offsets.
+    /// Preserve an underflowed scaled interval as zero so the caller cannot
+    /// silently certify a waveform whose features are unrepresentable.
+    pub(crate) fn minimum_segment_duration(&self) -> Option<Value> {
+        if self.value_scale == 0.0 {
+            return None;
+        }
+        crate::numerics::minimum_pwl_interval(
+            self.times.iter().copied().zip(self.values.iter().copied()),
+        )
+        .map(|interval| interval * self.time_scale.abs())
+    }
+
     /// A regular prescribed winding current needs finite physical slopes.
     /// Small but nonzero time intervals are valid; machine epsilon is a
     /// relative precision, not a duration below which a ramp becomes a hold.
@@ -799,6 +812,7 @@ mod tests {
                 .with_scaling(scale, 1.0, 0.0, 0.0);
             for waveform in [&raw, &scaled] {
                 assert!(waveform.has_finite_segment_slopes(), "scale={scale:e}");
+                assert_eq!(waveform.minimum_segment_duration(), Some(scale));
                 for phase in [0.25_f64, 0.75, 1.25, 1.75, 4.25, 4.75, 5.25, 5.75] {
                     let local = phase.rem_euclid(2.0);
                     let expected = if local < 1.0 { local } else { 2.0 - local };
@@ -820,6 +834,7 @@ mod tests {
                 .unwrap()
                 .with_scaling(-scale, 1.0, 0.0, 0.0);
             assert!((reversed.value_at(-0.5 * scale) - 0.5).abs() < 1e-14);
+            assert_eq!(reversed.minimum_segment_duration(), Some(scale));
             assert!(
                 (reversed.right_derivative_at_repeating(-0.5 * scale, None) * scale + 1.0).abs()
                     < 1e-14

@@ -391,7 +391,11 @@ require a continuous waveform with finite outgoing slopes.
 
 `POINTS` sets the minimum uniform integration grid. The solver first increases
 it beyond the Nyquist limit of recognized source clocks and finite behavioral
-trigonometric polynomials, including products and integer powers. It then
+trigonometric polynomials, including products and integer powers. Resolved
+PULSE/PAT widths and PWL/table knot intervals also constrain this first grid
+so narrow authored features cannot fall between both comparison meshes. Table
+coordinates require a known time rate; arbitrary circuit-dependent expressions
+do not supply that bound. It then
 solves successively doubled grids and compares the complete voltage and branch
 current waveforms at shared phases, using the engine voltage/current tolerances.
 Only a grid that agrees with its doubled grid is retained. The returned sample
@@ -400,10 +404,10 @@ defaults still use the original `POINTS`. `MAXITER` applies to each grid solve,
 while the result reports total Newton corrections across all grids. Point and
 memory limits also apply to refinement, and cancellation remains available.
 Retained PSS operating points from earlier producer versions must be regenerated
-before dependent numerical reuse; the current producer identity is version 15.
+before dependent numerical reuse; the current producer identity is version 16.
 This convergence check supplements the shooting residual, which measures closure
-of a discrete period map. It is not a proof of resolution for arbitrary narrow
-pulses or all nonlinear expressions and devices; independent waveform and
+of a discrete period map. It is not a proof of resolution for all nonlinear
+expressions and devices; independent waveform and
 spectrum qualification remains necessary for the circuit being simulated.
 
 Autonomous shooting repeats the quiet source window from zero to the trial
