@@ -82,7 +82,7 @@ impl PssAcceptedStepHistory {
 
 const PSS_KRYLOV_STATE_THRESHOLD: usize = 12;
 const PSS_KRYLOV_REL_TOL: Value = 1e-9;
-const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 4;
+const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 5;
 
 fn pss_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -2331,6 +2331,7 @@ impl Engine {
                 circuit.inductors.i_prev_prev_prev[l_idx] = i_dc;
             }
         }
+        circuit.reset_coupled_inductor_pair_state(dc_solution);
     }
 
     /// Extract state vector (capacitor voltages + inductor currents)
@@ -3607,6 +3608,7 @@ impl Engine {
                     circuit.inductors.v_prev[l_idx] = v_new;
                 }
             }
+            circuit.update_coupled_inductor_pair_state(&new_solution);
 
             {
                 let PssCircuit {

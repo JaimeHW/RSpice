@@ -35,6 +35,7 @@ impl PssCurrentBasis {
                         | F::Diode
                         | F::BehavioralSource
                         | F::TransmissionLine
+                        | F::InductorCoupling
                         | F::CoupledInductorPair
                 ) && family.instance_count(circuit) != 0
             })
@@ -207,6 +208,22 @@ impl PssCurrentBasis {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_mutual_group_does_not_disable_other_series_current_coordinates() {
+        let engine = Engine::default();
+        let netlist = Netlist::parse(
+            "mixed magnetic coordinates\nV1 in 0 1\nR1 in out 1k\nL1 out mid 40u\nL2 mid 0 60u\nR3 in a 50\nL3 a 0 100u\nL4 b 0 200u\nR4 b 0 100\nK1 L3 L4 0.6\n.end\n",
+        ).unwrap();
+        let mut circuit = PssCircuit::new(engine.build_circuit(&netlist).unwrap());
+        assert_eq!(circuit.state_dimension(), 3);
+        circuit.set_state(&[1e-4, 2e-3, -1e-3]).unwrap();
+        let solution = engine
+            .pss_initial_node_solution(&mut circuit, &NoAbort)
+            .unwrap();
+        let node = |name: &str| circuit.get_node_by_name(name).unwrap() - 1;
+        assert!((solution[node("mid")] - 0.6 * solution[node("out")]).abs() < 1e-12);
+    }
 
     #[test]
     fn a_loaded_junction_does_not_constrain_the_two_winding_currents() {

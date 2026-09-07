@@ -598,7 +598,10 @@ pub(crate) const fn periodic_capability_descriptor(
             dynamic_state: Complete,
             small_signal: Complete,
             noise: Inapplicable,
-            pss_state: Absent("coupled-inductor mutual history"),
+            pss_state: Restricted(
+                "positive-definite mutual inductance; singular flux constraints do not yet \
+                 have independent shooting coordinates",
+            ),
             envelope: Absent(ENVELOPE_LINEAR_SUBSET),
         },
         F::MultiWindingTransformer => PeriodicCapabilityDescriptor {
@@ -1208,6 +1211,14 @@ pub(in crate::engine) fn pss_state_gaps(circuit: &CircuitData) -> Vec<Capability
             Inapplicable | Complete => {}
             Absent(missing) => gaps.push(CapabilityGap::new(family, missing)),
             Restricted(_) => match family {
+                F::CoupledInductorPair => {
+                    if !circuit.has_positive_definite_mutual_inductance() {
+                        gaps.push(CapabilityGap::new(
+                            family,
+                            "coupled-inductor flux constraints: the inductance matrix must be positive definite for the current shooting basis",
+                        ));
+                    }
+                }
                 F::Resistor => {
                     if circuit.resistors.thermal.iter().any(Option::is_some) {
                         gaps.push(CapabilityGap::new(
@@ -1535,9 +1546,10 @@ mod tests {
             // history, so it is admitted where a linear resistor is.
             F::TransmissionLine => [I, R, R, I, R, A],
             F::CoupledTransmissionLine => [I, C, R, I, A, A],
-            F::InductorCoupling | F::CoupledInductorPair | F::MultiWindingTransformer => {
-                [I, C, C, I, A, A]
-            }
+            // Mutual history now advances and restarts with its physical
+            // winding currents. Singular flux still needs a reduced basis.
+            F::InductorCoupling | F::CoupledInductorPair => [I, C, C, I, R, A],
+            F::MultiWindingTransformer => [I, C, C, I, A, A],
             F::JilesAthertonInductor | F::XyceCoreGroup => [I, C, A, I, A, A],
             F::BehavioralSource => [I, C, A, I, R, A],
             F::XspiceInstance => [I, C, A, I, A, A],
@@ -1559,6 +1571,30 @@ mod tests {
                      a device may not gain or lose advanced-analysis support silently"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn coupled_current_admission_checks_the_entire_flux_matrix() {
+        for (couplings, expected) in [
+            ("K1 L1 L2 0", true),
+            ("K1 L1 L2 0.6", true),
+            ("K1 L1 L2 1", false),
+            ("K1 L1 L1 1", true),
+            ("K1 L1 L2 0.6\nK2 L2 L3 0.6\nK3 L1 L3 0.6", true),
+            // Every pair separately is admissible, but the combined
+            // inductance matrix has a negative eigenvalue.
+            ("K1 L1 L2 0.8\nK2 L2 L3 0.8", false),
+            ("K1 L1 L2 0.6\nK2 L2 L1 0.6", false),
+        ] {
+            let netlist = crate::Netlist::parse(&format!(
+                "mutual flux admission\nV1 in 0 SIN(0 1 1meg)\nR1 in a 50\nL1 a 0 100u\nL2 b 0 200u\nR2 b 0 100\nL3 c 0 400u\nR3 c 0 200\n{couplings}\n.end\n"
+            )).unwrap();
+            let circuit = crate::engine::Engine::default()
+                .build_circuit(&netlist)
+                .unwrap();
+            let gaps = pss_state_gaps(&circuit);
+            assert_eq!(gaps.is_empty(), expected, "{couplings}: {gaps:?}");
         }
     }
 

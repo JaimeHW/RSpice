@@ -269,23 +269,23 @@ fn continuation_fails_closed_for_unadvanced_dynamic_state_families() {
     let engine = Engine::new(SimulationConfig::default());
 
     let coupled = Netlist::parse(
-        "* coupled inductor mutual history is not an ordinary L state\n\
+        "* perfect coupling needs independent flux coordinates\n\
          V1 in 0 SIN(0 1 1meg)\n\
          R1 in p 10\n\
          L1 p 0 1u\n\
          L2 out 0 2u\n\
-         K1 L1 L2 0.5\n\
+         K1 L1 L2 1\n\
          R2 out 0 100\n\
          .end\n",
     )
     .expect("coupled-inductor deck parses");
     let coupled_error = engine
         .run_pss_with_continuation_state(&coupled, compact_pss_config())
-        .expect_err("mutual magnetic history must fail before the periodic solve");
+        .expect_err("singular magnetic flux must fail before the periodic solve");
     assert!(
         coupled_error
             .to_string()
-            .contains("coupled-inductor mutual history"),
+            .contains("coupled-inductor flux constraints"),
         "unexpected coupled-inductor diagnostic: {coupled_error}"
     );
 

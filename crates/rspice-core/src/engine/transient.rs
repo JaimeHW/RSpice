@@ -3130,11 +3130,6 @@ impl Engine {
         );
         block_if_present(
             &mut blockers,
-            !circuit.coupled_inductor_pairs.is_empty(),
-            "coupled-inductor accepted integration state is not checkpointed",
-        );
-        block_if_present(
-            &mut blockers,
             !circuit.multi_winding_transformers.is_empty(),
             "multi-winding transformer accepted integration state is not checkpointed",
         );

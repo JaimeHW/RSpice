@@ -206,7 +206,7 @@ r1 out 0 1k
 #[test]
 fn pss_continuation_state_follows_the_declared_period_map_capability() {
     let supported = "\
-* only ordinary R/L/C companion history crosses the period map
+* ordinary R/L/C companion history crosses the period map
 vin in 0 sin(0 1 1meg)
 r1 in mid 1k
 l1 mid out 1u

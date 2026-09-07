@@ -1606,6 +1606,59 @@ impl CircuitData {
         }
     }
 
+    /// Whether mutual flux leaves every winding current as a dynamic
+    /// coordinate. Perfect coupling and singular multi-pair groups require
+    /// algebraic flux constraints instead. Normalize by sqrt(L) so the rank
+    /// check does not depend on the inductance units or winding turns ratio.
+    pub(crate) fn has_positive_definite_mutual_inductance(&self) -> bool {
+        use faer::sparse::{SparseColMat, Triplet};
+
+        if self.coupled_inductor_pairs.is_empty() {
+            return true;
+        }
+        if self.coupled_inductor_pairs.iter().any(|binding| {
+            // A normalized M computed through square roots can round just
+            // below one for an authored perfect pair. Its physical flux rank
+            // is still singular, regardless of that roundoff.
+            binding.branch1_ordinal != binding.branch2_ordinal && binding.device.k >= 1.0
+        }) {
+            return false;
+        }
+        let mut indices = vec![usize::MAX; self.num_branches() + 1];
+        let mut count = 0;
+        for binding in &self.coupled_inductor_pairs {
+            for branch in [binding.branch1_ordinal, binding.branch2_ordinal] {
+                if indices[branch] == usize::MAX {
+                    indices[branch] = count;
+                    count += 1;
+                }
+            }
+        }
+        let mut entries = Vec::with_capacity(count + self.coupled_inductor_pairs.len());
+        for index in 0..count {
+            entries.push(Triplet::new(index, index, 1.0));
+        }
+        for binding in &self.coupled_inductor_pairs {
+            let first = indices[binding.branch1_ordinal];
+            let second = indices[binding.branch2_ordinal];
+            let pair = &binding.device;
+            let normalized = pair.m / pair.l1.sqrt() / pair.l2.sqrt();
+            if !normalized.is_finite() {
+                return false;
+            }
+            // Both symmetric overlay entries accumulate on the diagonal
+            // when a card references the same winding twice.
+            let weight = if first == second {
+                2.0 * normalized
+            } else {
+                normalized
+            };
+            entries.push(Triplet::new(first.max(second), first.min(second), weight));
+        }
+        SparseColMat::<usize, Value>::try_new_from_triplets(count, count, &entries)
+            .is_ok_and(|matrix| matrix.sp_cholesky(faer::Side::Lower).is_ok())
+    }
+
     /// Stamp coupled inductor mutual-coupling overlays for transient analysis.
     ///
     /// The standalone inductors stamp their own self-inductance rows; each
@@ -1699,6 +1752,50 @@ impl CircuitData {
             binding
                 .device
                 .overwrite_transient_correction_rhs(correction_rhs, iterate, dt, coeff);
+        }
+    }
+
+    /// Reset all mutual-current history at the start of a new trajectory.
+    pub(crate) fn reset_coupled_inductor_pair_state(&mut self, solution: &[Value]) {
+        let num_nodes = self.num_nodes;
+        for binding in &mut self.coupled_inductor_pairs {
+            binding.device.reset_state_with_branches(
+                solution,
+                num_nodes + binding.branch1_ordinal,
+                num_nodes + binding.branch2_ordinal,
+            );
+        }
+    }
+
+    /// Reconstruct mutual overlays after restoring the standalone winding
+    /// histories. The overlay owns no additional physical state: both current
+    /// generations are already part of the versioned inductor checkpoint.
+    pub(crate) fn restore_coupled_inductor_pair_state(&mut self, solution: &[Value]) {
+        if self.coupled_inductor_pairs.is_empty() {
+            return;
+        }
+        let mut winding_by_branch = vec![usize::MAX; self.num_branches() + 1];
+        for (index, &branch) in self.inductors.branch_indices.iter().enumerate() {
+            winding_by_branch[branch] = index;
+        }
+        for binding in &mut self.coupled_inductor_pairs {
+            let first = winding_by_branch[binding.branch1_ordinal];
+            let second = winding_by_branch[binding.branch2_ordinal];
+            binding.device.update_state_with_branches(
+                solution,
+                self.num_nodes + binding.branch1_ordinal,
+                self.num_nodes + binding.branch2_ordinal,
+            );
+            binding.device.restore_current_history(
+                [
+                    self.inductors.i_prev[first],
+                    self.inductors.i_prev_prev[first],
+                ],
+                [
+                    self.inductors.i_prev[second],
+                    self.inductors.i_prev_prev[second],
+                ],
+            );
         }
     }
 

@@ -46,6 +46,80 @@ rload out 0 1k
 ";
 
 #[test]
+fn coupled_winding_checkpoints_reproduce_every_accepted_voltage_and_current() {
+    let netlist = Netlist::parse(
+        "coupled checkpoint orbit\nV1 in 0 SIN(0 1 1meg)\nR1 in a 50\nL1 a 0 100u\nL2 0 out 200u\nR2 out 0 100\nL3 c 0 300u\nR3 c 0 150\nK1 L1 L2 0.6\nK2 L2 L3 0.3\nK3 L1 L3 0.2\n.end\n",
+    ).unwrap();
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+        for method in [
+            IntegrationMethod::BackwardEuler,
+            IntegrationMethod::Trapezoidal,
+            IntegrationMethod::Gear2,
+            IntegrationMethod::TrapGear,
+        ] {
+            let engine = Engine::new(SimulationConfig {
+                integration_method: method,
+                spice_dialect: dialect,
+                ..Default::default()
+            });
+            let stop = 2e-6;
+            let step = 1e-8;
+            let (baseline, scheduled) = engine
+                .run_tran_checkpoint_schedule_with_startup_mode(
+                    &netlist,
+                    stop,
+                    step,
+                    TransientStartupMode::OperatingPoint,
+                    &[0.73e-6],
+                )
+                .unwrap();
+            let source = &scheduled[0].checkpoint;
+            let seam = baseline
+                .time
+                .iter()
+                .position(|t| t.to_bits() == source.time.to_bits())
+                .unwrap();
+            for encoding in [
+                TransientCheckpointEncoding::Unpacked,
+                TransientCheckpointEncoding::Packed,
+            ] {
+                let checkpoint =
+                    TransientCheckpoint::from_bytes(&source.to_bytes(encoding).unwrap()).unwrap();
+                let (resumed, _) = engine
+                    .run_tran_resume(&netlist, &checkpoint, stop, step)
+                    .unwrap();
+                assert_eq!(resumed.node_names, baseline.node_names);
+                assert_eq!(resumed.branch_names, baseline.branch_names);
+                for (actual, expected) in std::iter::once((&resumed.time, &baseline.time))
+                    .chain(resumed.voltages.iter().zip(&baseline.voltages))
+                    .chain(
+                        resumed
+                            .branch_currents
+                            .iter()
+                            .zip(&baseline.branch_currents),
+                    )
+                {
+                    assert_eq!(
+                        actual.len(),
+                        expected.len() - seam,
+                        "{dialect:?} {method:?} {encoding:?}"
+                    );
+                    for (row, (&actual, &expected)) in
+                        actual.iter().zip(&expected[seam..]).enumerate()
+                    {
+                        assert_eq!(
+                            actual.to_bits(),
+                            expected.to_bits(),
+                            "{dialect:?} {method:?} {encoding:?} suffix row {row}: {actual:e} vs {expected:e}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn checkpoint_capability_preflight_honors_cancellation() {
     let netlist = Netlist::parse(DECK).expect("checkpoint fixture parses");
     let error = Engine::default()
@@ -1143,9 +1217,8 @@ a_dac [d] [out] dac
 .model src d_source (input_file=\"{uri}\")
 .model dac dac_bridge (out_low=0 out_high=5 out_undef=2.5 t_rise=1p t_fall=1p)
 rload out 0 1k
-l1 out mid 1u
-l2 mid 0 1u
-k1 l1 l2 0.5
+s1 out 0 out 0 switchmod
+.model switchmod sw (ron=1 roff=1meg vt=0.5 vh=0.1)
 .tran 100p 2n
 .end
 "
@@ -1181,9 +1254,9 @@ k1 l1 l2 0.5
         blockers.iter().any(|blocker| {
             blocker.source
                 == rspice_core::engine::TransientCheckpointBlockerSource::IntegrationRuntime
-                && blocker.message.contains("coupled-inductor")
+                && blocker.message.contains("voltage-controlled switch")
         }),
-        "a coupled inductor's accepted history is owned by the integration runtime: {blockers:?}"
+        "a switch's accepted hysteresis is owned by the integration runtime: {blockers:?}"
     );
 }
 

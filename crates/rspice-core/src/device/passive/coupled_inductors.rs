@@ -174,10 +174,14 @@ impl CoupledInductorPair {
 
     /// Set initial currents
     pub fn set_initial_currents(&mut self, i1: Value, i2: Value) {
-        self.current1_prev = i1;
-        self.current1_prev_prev = i1;
-        self.current2_prev = i2;
-        self.current2_prev_prev = i2;
+        self.restore_current_history([i1, i1], [i2, i2]);
+    }
+
+    /// Restore the mutual overlay from the already retained physical winding
+    /// histories: latest accepted current, then the previous accepted current.
+    pub(crate) fn restore_current_history(&mut self, first: [Value; 2], second: [Value; 2]) {
+        [self.current1_prev, self.current1_prev_prev] = first;
+        [self.current2_prev, self.current2_prev_prev] = second;
     }
 
     /// Get turns ratio (approximate, for ideal transformer)
@@ -280,6 +284,20 @@ impl CoupledInductorPair {
         self.branch1 = Some(branch1);
         self.branch2 = Some(branch2);
         self.update_state_from_solution(solution);
+    }
+
+    /// Start a new trajectory at a supplied bias, discarding the previous
+    /// trajectory's multistep history. Branch indices use the same one-based
+    /// MNA convention as accepted-step updates.
+    pub(crate) fn reset_state_with_branches(
+        &mut self,
+        solution: &[Value],
+        branch1: NodeId,
+        branch2: NodeId,
+    ) {
+        self.update_state_with_branches(solution, branch1, branch2);
+        self.current1_prev_prev = self.current1_prev;
+        self.current2_prev_prev = self.current2_prev;
     }
 
     /// Update history from an accepted solution vector.
