@@ -9,6 +9,8 @@ use super::*;
 use crate::simulation::plan::AnalysisKind;
 use crate::state::{ComponentType, Point};
 
+mod durable_content;
+
 #[cfg(not(target_arch = "wasm32"))]
 fn insert_ac_analysis(state: &mut AppState) -> crate::product::AnalysisInstanceId {
     state

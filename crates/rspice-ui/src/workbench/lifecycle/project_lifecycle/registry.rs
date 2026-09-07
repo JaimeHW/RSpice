@@ -167,6 +167,9 @@ fn document_digests(
             &project.simulation_results,
             &project.workspace.report_documents,
             &project.workspace.visualization_documents,
+            &project.result_markers,
+            &project.result_log_y_panes,
+            &project.result_expression_groups,
         ))?,
     );
     // The stimulus definitions ride the project document rather than a
@@ -256,6 +259,8 @@ fn document_digests(
 #[derive(Serialize)]
 struct SchematicDocumentContent<'a> {
     schema_version: u16,
+    grid_size: i32,
+    document_policy: crate::state::SchematicDocumentPolicy,
     components: &'a [crate::state::Component],
     wires: &'a [crate::state::Wire],
     buses: &'a [crate::state::Bus],
@@ -264,12 +269,15 @@ struct SchematicDocumentContent<'a> {
     design_notes: &'a [crate::state::DesignNote],
     documentation_shapes: &'a [crate::state::DocumentationShape],
     junctions: &'a [crate::state::Junction],
+    probes: &'a [crate::state::SchematicProbe],
 }
 
 impl<'a> From<&'a crate::state::SchematicState> for SchematicDocumentContent<'a> {
     fn from(schematic: &'a crate::state::SchematicState) -> Self {
         Self {
-            schema_version: 4,
+            schema_version: 5,
+            grid_size: schematic.grid_size,
+            document_policy: schematic.document_policy,
             components: &schematic.components,
             wires: &schematic.wires,
             buses: &schematic.buses,
@@ -278,6 +286,7 @@ impl<'a> From<&'a crate::state::SchematicState> for SchematicDocumentContent<'a>
             design_notes: &schematic.design_notes,
             documentation_shapes: &schematic.documentation_shapes,
             junctions: &schematic.junctions,
+            probes: &schematic.probes,
         }
     }
 }
@@ -470,7 +479,6 @@ mod tests {
         state.schematic.copy_selection();
         state.schematic.pan = (125.0, -40.0);
         state.schematic.zoom = 2.25;
-        state.schematic.grid_size = 25;
         state.schematic.current_file = Some(std::path::PathBuf::from("presentation.rsch"));
         state.workspace.open_views[0].dirty = true;
         state.library_manager.filter_text = "presentation filter".to_owned();
@@ -496,7 +504,7 @@ mod tests {
             .expect("rebuild registry");
         assert!(
             registry.records().iter().all(|record| !record.dirty),
-            "selection, clipboard, viewport, grid, open-state, and browser presentation are not engineering edits"
+            "selection, clipboard, viewport, open-state, and browser presentation are not engineering edits"
         );
 
         state

@@ -1702,6 +1702,18 @@ fn revert_document_in_place(
             state.workspace.report_documents_dirty = false;
             state.workspace.visualization_documents = baseline.workspace.visualization_documents;
             state.workspace.visualization_documents_dirty = false;
+            crate::workbench::documents::result_document::restore_markers(
+                state,
+                baseline.result_markers,
+            );
+            crate::workbench::documents::result_document::restore_log_y_panes(
+                state,
+                baseline.result_log_y_panes,
+            );
+            crate::workbench::documents::result_document::restore_expression_groups(
+                state,
+                baseline.result_expression_groups,
+            );
             state.clear_specialized_viewer_data();
         }
         ProjectDocumentId::VerificationSpecifications => {
@@ -1940,6 +1952,9 @@ fn overlay_document(
         }
         ProjectDocumentId::ResultHistory => {
             target.simulation_results = working.simulation_results.clone();
+            target.result_markers = working.result_markers.clone();
+            target.result_log_y_panes = working.result_log_y_panes.clone();
+            target.result_expression_groups = working.result_expression_groups.clone();
             target.workspace.report_documents = working.workspace.report_documents.clone();
             target.workspace.visualization_documents =
                 working.workspace.visualization_documents.clone();
