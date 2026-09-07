@@ -1292,7 +1292,7 @@ class CiConfigurationTests(unittest.TestCase):
         declared = set(re.findall(r"^([\w-]+)\s*=", features_block.group(1), re.MULTILINE))
         self.assertEqual(
             declared,
-            {"default", "generated-veriloga-catalog", "browser-worker"},
+            {"default", "generated-veriloga-catalog", "browser-worker", "browser-qualification"},
             "rspice-ui declares a Cargo feature the README does not describe; add "
             "the row, or drop the flag if no cfg reads it",
         )

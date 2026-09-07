@@ -85,7 +85,7 @@ Other user-facing machinery, all verified in source:
 | `quantity/` | Typed physical quantities and their formatting |
 | `output_spec`, `diagnostics/` | Authored output selection, and the typed diagnostics surface |
 | `ui/` | The RSpice design system: mockup-governed semantic tokens and dark/light palettes, mode/density preferences, embedded IBM Plex fonts, vector icon set, the widget vocabulary (buttons, chips, dialogs, docbar, forms, pills, tables, toasts, trees…), and the strip-plot engine (axes, scales, traces, cursors, min/max decimation, SI formatting) |
-| `time_compat` | Wall-clock shim: real `Instant` natively, a browser-safe stub on `wasm32` |
+| `time_compat` | Validated wall timestamps and monotonic elapsed time on native, browser, and worker targets |
 
 ## Engine integration
 
@@ -136,6 +136,7 @@ screen-reader and device qualification remains a release gate.
 | :--- | :--- | :--- |
 | `generated-veriloga-catalog` | off | Turns on `rspice-core/veriloga-builtins`, so a build ships the generated Verilog-A device catalog. Every release image sets it |
 | `browser-worker` | off | Builds the isolated browser simulation/compiler/hardcopy worker entry image; never enable this on the interactive UI image because it defeats code-size separation |
+| `browser-qualification` | off | Exposes the actual browser UI's rendered control tree for functional WebDriver tests; polls for observation requests every 100 ms while idle |
 
 `default = []`, and this crate declares no other flags. Nothing native is
 feature-selected: desktop-only behavior is chosen by target-specific
@@ -145,6 +146,8 @@ the **target-specific** `rspice-core` features above and, for the shipped
 device catalog, through `generated-veriloga-catalog`.
 
 ## Building, running, testing
+
+Run these commands from the workspace root:
 
 ```bash
 # Desktop application (binary name: rspice-ui)
@@ -157,15 +160,40 @@ cargo test -p rspice-ui
 # unification cannot pull worker execution paths back into the UI image.
 cargo build --locked --profile web-release -p rspice-ui --bin rspice-ui --target wasm32-unknown-unknown
 cargo build --locked --profile web-release -p rspice-ui --bin rspice-ui-worker --features browser-worker --target wasm32-unknown-unknown
-wasm-bindgen --target web --out-name rspice-ui --out-dir web/pkg target/wasm32-unknown-unknown/web-release/rspice-ui.wasm
-wasm-bindgen --target web --out-name rspice-ui-worker --out-dir web/pkg target/wasm32-unknown-unknown/web-release/rspice-ui-worker.wasm
-python3 ../../tools/ci/check_wasm_jit_browser.py --web-root web
+wasm-bindgen --target web --out-name rspice-ui --out-dir crates/rspice-ui/web/pkg target/wasm32-unknown-unknown/web-release/rspice-ui.wasm
+wasm-bindgen --target web --out-name rspice-ui-worker --out-dir crates/rspice-ui/web/pkg target/wasm32-unknown-unknown/web-release/rspice-ui-worker.wasm
+python3 tools/ci/check_wasm_jit_browser.py
 ```
 
 The browser qualification page starts only the optimized simulation worker
 and fails unless its secondary-module ABI probe and real Verilog-A transient
 solver/Jacobian/matrix/RHS probe both pass. CI also enforces 64 MiB raw / 16
 MiB gzip limits for the UI image and 24 MiB raw / 8 MiB gzip for the worker.
+
+For the real workbench qualification, build the worker as above, then replace
+the UI bindings with the instrumented image. A WebGPU-capable Chrome installation
+and a matching ChromeDriver are required; `--browser` and `--driver` select them
+when automatic discovery is unsuitable.
+
+```bash
+cargo build --locked --profile web-release -p rspice-ui --bin rspice-ui --features browser-qualification --target wasm32-unknown-unknown
+wasm-bindgen --target web --out-name rspice-ui --out-dir crates/rspice-ui/web/pkg target/wasm32-unknown-unknown/web-release/rspice-ui.wasm
+python3 tools/ci/check_browser_workbench.py --output target/workbench-qualification
+```
+
+Append `--software-webgpu` to use Chrome's SwiftShader WebGPU adapter for
+functional CI. This does not qualify physical GPU support or performance.
+
+Each run requires an empty output directory and creates a fresh browser profile
+and HTTP origin. It posts and resolves a review, creates an IndexedDB checkpoint,
+checks durable timestamps and content, exports an independent recovery copy, and
+opens revision history through real keyboard and pointer input. Screenshots,
+rendered control trees, browser errors, asset hashes, and saved bytes remain in
+the output directory. The observer adds no editor commands or authorization
+overrides. Its periodic repaint excludes this image from idle/performance budgets;
+it does not provide a production accessibility bridge. CI runs the harness's
+integrity regressions and the workbench sequence with software WebGPU, retaining
+the evidence on success or failure. Hardware and device qualification remain separate.
 
 The default test suite is self-contained. Parity checks against the separately
 governed `rspice-workbench-host` mockup sources are `#[ignore]`d, because that
@@ -174,7 +202,7 @@ explicitly, optionally pointing `RSPICE_MOCKUP_ROOT` at the checkout:
 
 ```bash
 RSPICE_MOCKUP_ROOT=/path/to/rspice-workbench-host \
-  cargo test -p rspice-ui --lib -- --ignored
+  cargo test -p rspice-ui --lib workbench::feature_availability_data::tests:: -- --ignored
 ```
 
 Capability-resolver security tests do not depend on that external tree. Their

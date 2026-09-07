@@ -34,6 +34,9 @@ browser-worker = [
     "rspice-core/veriloga-wasm-jit",
     "rspice-veriloga/wasm-jit",
 ]
+# Read-only rendered-control observation for the actual browser qualification
+# harness. Normal application and release builds do not enable this feature.
+browser-qualification = []
 
 [dependencies]
 # RSpice core simulation engine lives in the target sections below: native

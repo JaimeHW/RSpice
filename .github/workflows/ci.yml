@@ -80,6 +80,8 @@ jobs:
           "$GOBIN/actionlint" .github/workflows/*.yml
       - name: CI configuration tests
         run: python3 tools/ci/test_ci_configuration.py
+      - name: Browser workbench harness regressions
+        run: python3 tools/ci/test_browser_workbench.py
       - name: Vendored cloud client integrity
         run: python3 tools/ci/test_cloud_client_vendor.py
       - name: WASM playground worker tests
@@ -714,7 +716,9 @@ jobs:
   wasm-ui-size:
     name: Browser WASM image budgets
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
+    env:
+      CARGO_BUILD_JOBS: "2"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Rust toolchain
@@ -761,6 +765,28 @@ jobs:
           target/wasm32-unknown-unknown/web-release/rspice-ui-worker.wasm
       - name: Qualify browser WASM JIT solver bridge in Chromium
         run: python3 tools/ci/check_wasm_jit_browser.py
+      - name: Build instrumented browser workbench
+        run: >-
+          cargo build --locked --profile web-release -p rspice-ui
+          --bin rspice-ui --features browser-qualification
+          --target wasm32-unknown-unknown
+      - name: Generate browser workbench bindings
+        run: >-
+          wasm-bindgen --target web --out-name rspice-ui
+          --out-dir crates/rspice-ui/web/pkg
+          target/wasm32-unknown-unknown/web-release/rspice-ui.wasm
+      - name: Qualify browser review and recovery workflow
+        run: >-
+          python3 tools/ci/check_browser_workbench.py --software-webgpu
+          --output "${{ runner.temp }}/rspice-workbench-${{ github.run_id }}-${{ github.run_attempt }}"
+      - name: Retain browser workbench evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: browser-workbench
+          path: ${{ runner.temp }}/rspice-workbench-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 7
+          if-no-files-found: ignore
   veriloga-mobile:
     name: Check generated Verilog-A (${{ matrix.label }})
     runs-on: ${{ matrix.os }}

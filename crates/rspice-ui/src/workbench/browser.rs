@@ -13,3 +13,5 @@ pub(crate) mod download;
 #[cfg(any(test, target_arch = "wasm32"))]
 pub(crate) mod file_import;
 pub(crate) mod navigation;
+#[cfg(all(target_arch = "wasm32", feature = "browser-qualification"))]
+pub(crate) mod qualification;

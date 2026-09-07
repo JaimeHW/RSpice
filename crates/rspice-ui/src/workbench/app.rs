@@ -439,6 +439,9 @@ impl RSpiceApp {
         state.migrate_legacy_primitives();
 
         configure_platform_input_contract(&cc.egui_ctx);
+        #[cfg(all(target_arch = "wasm32", feature = "browser-qualification"))]
+        cc.egui_ctx
+            .add_plugin(crate::workbench::browser::qualification::ControlObserver::default());
         cc.egui_ctx.set_zoom_factor(1.0);
 
         // Restore global user Verilog-A library (commercial-style user library).
