@@ -1,11 +1,13 @@
 //! Bounded event scheduling in the behavioral evaluator's resolved environment.
 
-use super::periodicity::{affine_time_coordinate, constant_value};
+use super::periodicity::{affine_time_coordinate, constant_value, needs_time_features};
 use super::*;
 use crate::abort_signal::AbortSignal;
 use crate::numerics::integration::BreakpointManager;
 use crate::resource::{ResourceKind, ResourceLimitError};
 use std::collections::BTreeSet;
+
+mod features;
 
 #[derive(Debug, Error)]
 pub(crate) enum BehavioralBreakpointError {
@@ -132,41 +134,12 @@ impl TimeCoordinate {
         if target <= -modulus || target >= modulus {
             return Ok(());
         }
-        let end = self.offset + self.rate * schedule.tstop;
-        let mut first = ((self.offset.min(end) - target) / modulus).ceil() - 1.0;
-        let mut last = ((self.offset.max(end) - target) / modulus).floor() + 1.0;
-        if target > 0.0 {
-            first = first.max(0.0);
-        }
-        if target < 0.0 {
-            last = last.min(0.0);
-        }
-        if !first.is_finite()
-            || !last.is_finite()
-            || first.abs().max(last.abs()) >= (1_u64 << 53) as Value
-        {
-            return Err(BehavioralBreakpointError::Invalid(
-                "modulo cycle indices are not representable",
-            ));
-        }
-        let count = (last - first + 1.0).max(0.0);
-        if count > 1_000_004.0 {
-            return Err(BehavioralBreakpointError::Invalid(
-                "modulo schedule exceeds the exact enumeration limit of 1000000 cycles",
-            ));
-        }
-        for index in 0..count as usize {
-            schedule.poll()?;
-            let coordinate = modulus.mul_add(first + index as Value, target);
-            schedule.add(affine_preimage(coordinate, self.offset, self.rate))?;
-        }
-        Ok(())
+        schedule.periodic_coordinate(self.rate, self.offset, target, modulus, true, 0.0)
     }
 }
 
 struct EventSchedule<'a> {
     tstop: Value,
-    breakpoints: &'a mut BreakpointManager,
     abort: &'a dyn AbortSignal,
     max_points: usize,
     physical_corners: bool,
@@ -176,6 +149,52 @@ struct EventSchedule<'a> {
 }
 
 impl EventSchedule<'_> {
+    fn periodic_coordinate(
+        &mut self,
+        rate: Value,
+        offset: Value,
+        target: Value,
+        modulus: Value,
+        signed_remainder: bool,
+        time_start: Value,
+    ) -> Result<(), BehavioralBreakpointError> {
+        if rate == 0.0 || time_start > self.tstop {
+            return Ok(());
+        }
+        let end = rate.mul_add(self.tstop, offset);
+        let start = rate.mul_add(time_start, offset);
+        let mut first = ((start.min(end) - target) / modulus).ceil() - 1.0;
+        let mut last = ((start.max(end) - target) / modulus).floor() + 1.0;
+        if signed_remainder && target > 0.0 {
+            first = first.max(0.0);
+        }
+        if signed_remainder && target < 0.0 {
+            last = last.min(0.0);
+        }
+        if !first.is_finite()
+            || !last.is_finite()
+            || first.abs().max(last.abs()) >= (1_u64 << 53) as Value
+        {
+            return Err(BehavioralBreakpointError::Invalid(
+                "periodic clock cycle indices are not representable",
+            ));
+        }
+        let count = (last - first + 1.0).max(0.0);
+        if count > 1_000_004.0 {
+            return Err(BehavioralBreakpointError::Invalid(
+                "periodic clock schedule exceeds the exact enumeration limit of 1000000 cycles",
+            ));
+        }
+        for index in 0..count as usize {
+            self.poll()?;
+            let coordinate = modulus.mul_add(first + index as Value, target);
+            if coordinate < start.min(end) || coordinate > start.max(end) {
+                continue;
+            }
+            self.add(affine_preimage(coordinate, offset, rate))?;
+        }
+        Ok(())
+    }
     fn poll(&self) -> Result<(), BehavioralBreakpointError> {
         if self.abort.is_aborted() {
             Err(BehavioralBreakpointError::Aborted)
@@ -270,8 +289,12 @@ impl EventSchedule<'_> {
         &mut self,
         expr: &Expr,
         context: &Context<'_>,
+        features: bool,
     ) -> Result<(), BehavioralBreakpointError> {
         self.poll()?;
+        if features {
+            self.temporal_features(expr, context)?;
+        }
         match expr {
             Expr::Function { func, args } => {
                 match func {
@@ -324,19 +347,19 @@ impl EventSchedule<'_> {
                     _ => {}
                 }
                 for arg in args {
-                    self.expression(arg, context)?;
+                    self.expression(arg, context, features)?;
                 }
             }
-            Expr::Unary { operand, .. } => self.expression(operand, context)?,
+            Expr::Unary { operand, .. } => self.expression(operand, context, features)?,
             Expr::Binary { left, right, .. } => {
-                self.expression(left, context)?;
-                self.expression(right, context)?;
+                self.expression(left, context, features)?;
+                self.expression(right, context, features)?;
             }
             Expr::LookupTable { input, table } => {
                 if table.transient_breakpoints {
                     self.table(input, table.points.iter().copied(), context)?;
                 }
-                self.expression(input, context)?;
+                self.expression(input, context, features)?;
             }
             _ => {}
         }
@@ -369,39 +392,44 @@ impl BehavioralSources {
         let mut schedule = EventSchedule {
             tstop,
             events,
-            breakpoints,
             abort,
             max_points,
             physical_corners,
         };
         schedule.poll()?;
         for source in &self.voltage_sources {
-            schedule.expression(&source.ast, &source.periodicity_context())?;
+            let context = source.periodicity_context();
+            schedule.expression(
+                &source.ast,
+                &context,
+                needs_time_features(&source.ast, tstop, &context),
+            )?;
         }
         for source in &self.current_sources {
-            schedule.expression(&source.ast, &source.periodicity_context())?;
+            let context = source.periodicity_context();
+            schedule.expression(
+                &source.ast,
+                &context,
+                needs_time_features(&source.ast, tstop, &context),
+            )?;
         }
         schedule.poll()?;
-        schedule
-            .breakpoints
-            .extend(schedule.events.into_iter().map(Value::from_bits));
+        breakpoints.extend(schedule.events.into_iter().map(Value::from_bits));
         Ok(())
     }
 }
 
 #[cfg(test)]
 pub(super) fn expression_transient_breakpoints(expr: &Expr, tstop: Value) -> Vec<Value> {
-    let mut breakpoints = BreakpointManager::new_with_tolerance(Value::from_bits(1));
     let mut schedule = EventSchedule {
         tstop,
-        breakpoints: &mut breakpoints,
         abort: &crate::abort_signal::NoAbort,
         max_points: usize::MAX,
         physical_corners: false,
         events: BTreeSet::new(),
     };
     schedule
-        .expression(expr, &Context::transient(&[], &[], 0.0))
+        .expression(expr, &Context::transient(&[], &[], 0.0), false)
         .unwrap();
     schedule.events.into_iter().map(Value::from_bits).collect()
 }
@@ -455,6 +483,78 @@ mod tests {
                 assert_eq!(events.len(), 6, "{expression}: {events:?}");
             }
         }
+    }
+
+    #[test]
+    fn source_features_find_extrema_at_extreme_clock_scales() {
+        for period in [1e-30, 1.0, 1e308] {
+            for direction in [-1.0, 1.0] {
+                let rate = direction * std::f64::consts::TAU / period;
+                let expression = format!("exp(-10000*(1-cos({rate:e}*time+0.1)))");
+                let source = sources(&expression);
+                let events = collect(&source, period, 16, true).unwrap();
+                assert_eq!(events, collect(&source, period, 16, false).unwrap());
+                for cycle in -2..=2 {
+                    let peak = (f64::from(cycle) * std::f64::consts::TAU - 0.1) / rate;
+                    if (0.0..=period).contains(&peak) {
+                        assert!(
+                            contains(&events, peak),
+                            "{expression}: missing {peak:e}: {events:?}"
+                        );
+                    }
+                }
+                assert!(events.len() < 10);
+            }
+        }
+    }
+
+    #[test]
+    fn pss_switching_events_bracket_the_actual_vm_boundary() {
+        for (expression, transitions) in [
+            ("if(cos(6*pi*time+0.1)>0.9999,1,0)", 6),
+            ("if(spice_sin(0,1,3,0,0,90)>0.9999,1,0)", 6),
+            ("if(spice_sin(0,1,3,0.25,0,90)>0.9999,1,0)", 5),
+            ("eq0(cos(6*pi*time+0.1)-0.4)", 12),
+            ("if(2*cos(6*pi*time+0.1)+1>2.9998,1,0)", 6),
+            ("if(cos(-6*pi*time+0.1)^2>0.9999,1,0)", 12),
+        ] {
+            let mut source = sources(expression);
+            let events = collect(&source, 1.0, 128, true).unwrap();
+            let actual = events
+                .windows(2)
+                .filter(|pair| {
+                    pair[0].next_up() == pair[1]
+                        && source.voltage_sources[0].evaluate(&[], pair[0]).unwrap()
+                            != source.voltage_sources[0].evaluate(&[], pair[1]).unwrap()
+                })
+                .count();
+            assert_eq!(actual, transitions, "{expression}: {events:?}");
+        }
+    }
+
+    #[test]
+    fn pss_feature_enumeration_obeys_cancellation_and_resource_bounds() {
+        let source = sources("exp(-10000*(1-cos(6*pi*time+0.1)))");
+        assert!(matches!(
+            collect(&source, 1.0, 5, true),
+            Err(BehavioralBreakpointError::Resource(_))
+        ));
+        let mut manager = BreakpointManager::new();
+        assert!(matches!(
+            source.collect_transient_breakpoints(
+                1.0,
+                &mut manager,
+                &CountingAbort::new(20),
+                128,
+                true,
+            ),
+            Err(BehavioralBreakpointError::Aborted)
+        ));
+        assert!(manager.times().is_empty());
+        assert!(matches!(
+            collect(&sources("exp(cos(1e12*time))"), 1.0, usize::MAX, true),
+            Err(BehavioralBreakpointError::Invalid(_))
+        ));
     }
 
     #[test]

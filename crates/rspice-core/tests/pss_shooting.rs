@@ -201,6 +201,142 @@ fn unresolvable_source_intervals_cannot_pass_by_sharing_the_same_mesh() {
 }
 
 #[test]
+fn nonlinear_time_features_cannot_hide_between_shooting_grids() {
+    let omega = std::f64::consts::TAU * F0 * 64.0;
+    let source_period = 1.0 / (F0 * 64.0);
+    let tau = R * C;
+    let threshold: f64 = 0.9999;
+    let angle = threshold.acos();
+    let on = 2.0 * angle / omega;
+    let off = source_period - on;
+    let low = (-off / tau).exp() * -(-on / tau).exp_m1() / -(-source_period / tau).exp_m1();
+    let high = low * (-on / tau).exp() - (-on / tau).exp_m1();
+    let pulse = |time: f64| {
+        let elapsed = (omega * time + 0.1 + angle).rem_euclid(std::f64::consts::TAU) / omega;
+        if elapsed < on {
+            low * (-elapsed / tau).exp() - (-elapsed / tau).exp_m1()
+        } else {
+            high * (-(elapsed - on) / tau).exp()
+        }
+    };
+    for (expression, kind) in [
+        ("if(cos(2*pi*64meg*time+0.1)>0.9999,1,0)", 0),
+        ("exp(-10000*(1-cos(2*pi*64meg*time+0.1)))", 1),
+        ("exp(-10000*(cos(2*pi*64meg*time+0.1)-0.25)^2)", 2),
+    ] {
+        // Independent linear RC convolution on one source cycle. This uses
+        // exact integration of densely sampled linear forcing segments, not
+        // the shooting companion, period map or feature mesh under test.
+        let count = 131_072;
+        let dt = source_period / count as f64;
+        let decay = (-dt / tau).exp();
+        let decay_minus_one = (-dt / tau).exp_m1();
+        let linear_area = dt + tau * decay_minus_one;
+        let forcing = |time: f64| {
+            let cosine = (omega * time + 0.1).cos();
+            if kind == 1 {
+                (-10000.0 * (1.0 - cosine)).exp()
+            } else {
+                (-10000.0 * (cosine - 0.25).powi(2)).exp()
+            }
+        };
+        let mut reference = Vec::new();
+        let expected_dc = if kind == 0 {
+            angle / std::f64::consts::PI
+        } else {
+            reference.push(0.0);
+            let mut previous = forcing(0.0);
+            let mut mean = 0.0;
+            for index in 1..=count {
+                let next = forcing(index as f64 * dt);
+                let state = reference[index - 1] * decay - previous * decay_minus_one
+                    + (next - previous) / dt * linear_area;
+                reference.push(state);
+                mean += 0.5 * (previous + next) / count as f64;
+                previous = next;
+            }
+            let initial = reference[count] / -(-source_period / tau).exp_m1();
+            for (index, value) in reference.iter_mut().enumerate() {
+                *value += initial * (-(index as f64 * dt) / tau).exp();
+            }
+            mean
+        };
+        let expected = |time: f64| {
+            if kind == 0 {
+                pulse(time)
+            } else {
+                let position = (time / source_period).rem_euclid(1.0) * count as f64;
+                let left = (position as usize).min(count - 1);
+                let fraction = position - left as f64;
+                reference[left] + fraction * (reference[left + 1] - reference[left])
+            }
+        };
+        let netlist = Netlist::parse(&format!(
+            "nonlinear periodic feature\nB1 in 0 V={expression}\nR1 in out {R}\nC1 out 0 {C}\n.end\n"
+        ))
+        .unwrap();
+        let point = Engine::default()
+            .run_pss_operating_point_with_abort(
+                &netlist,
+                PssConfig::new(F0).with_tstab_periods(0),
+                &NoAbort,
+            )
+            .unwrap_or_else(|error| panic!("{expression}: {error}"));
+        let result = &point.analysis().result;
+        assert!(
+            result.time.len() <= 262_145,
+            "{expression}: {}",
+            result.time.len()
+        );
+        if kind == 0 {
+            assert!(
+                result.time.len() < 2_048,
+                "switching edges must resolve locally"
+            );
+        }
+        let output = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("out"))
+            .unwrap();
+        let mean = result.waveforms[output].dc(&result.time, result.period);
+        assert!(
+            (mean - expected_dc).abs() < 1e-5,
+            "{expression}: N={}, DC {mean:e} versus {expected_dc:e}",
+            result.time.len()
+        );
+        for (&time, &actual) in result.time.iter().zip(&result.waveforms[output].values) {
+            assert!(
+                (actual - expected(time)).abs() < 1e-5,
+                "{expression}, t={time:e}: {actual:e} versus {:e}",
+                expected(time)
+            );
+        }
+        if kind == 0 {
+            let engine = Engine::default();
+            let (_, state) = engine
+                .run_pss_with_continuation_state(&netlist, PssConfig::new(F0).with_tstab_periods(0))
+                .unwrap();
+            let (continued, _) = engine
+                .run_tran_from_pss_state(&netlist, &state, 1.0 / F0, 1.0 / (F0 * 256.0))
+                .unwrap();
+            let output = continued
+                .node_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("out"))
+                .unwrap();
+            for (&time, &actual) in continued.time.iter().zip(&continued.voltages[output]) {
+                assert!(
+                    (actual - pulse(time)).abs() < 1e-5,
+                    "continued t={time:e}: {actual:e} versus {:e}",
+                    pulse(time)
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn behavioral_polynomial_harmonics_drive_an_accurate_refined_rc_orbit() {
     for (power, dc, coefficients) in [
         (2, 0.5, vec![-0.5]),

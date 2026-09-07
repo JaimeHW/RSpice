@@ -309,6 +309,10 @@ fn finite_fourier_degree(expr: &Expr, period: Value, context: &Context<'_>) -> O
     }
 }
 
+pub(super) fn needs_time_features(expr: &Expr, period: Value, context: &Context<'_>) -> bool {
+    finite_fourier_degree(expr, period, context).is_none()
+}
+
 /// Shared affine clock geometry for source events and time-shift proofs.
 pub(super) fn affine_time_coordinate(expr: &Expr, context: &Context<'_>) -> Option<(Value, Value)> {
     let rate = affine_time_increment(expr, 1.0, context)?;
