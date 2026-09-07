@@ -438,7 +438,6 @@ pub(crate) fn save_schematic_as_with_io(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::histogram::HistogramBuilder;
     use crate::state::{CellViewRef, View, ViewType};
     use std::cell::RefCell;
     use std::rc::Rc;
@@ -599,11 +598,7 @@ mod tests {
         state.ui.netlist.pending_manual_run_id = Some(1);
         state.ui.netlist.rerun_queued = true;
         state.ui.netlist.edited_lines.insert(3);
-        let histogram = HistogramBuilder::new()
-            .name("old monte carlo")
-            .bin_count(4)
-            .build(&[1.0, 2.0, 3.0]);
-        state.analysis.histogram_state.load_histogram(histogram);
+        state.analysis.histogram_state.selected = 7;
     }
 
     fn assert_design_execution_context_cleared(state: &AppState) {
@@ -615,7 +610,7 @@ mod tests {
         assert!(state.ui.netlist.pending_manual_run_id.is_none());
         assert!(!state.ui.netlist.rerun_queued);
         assert!(state.ui.netlist.edited_lines.is_empty());
-        assert!(state.analysis.histogram_state.is_empty());
+        assert_eq!(state.analysis.histogram_state.selected, 0);
     }
 
     fn open_default_symbol_view(state: &mut AppState) -> CellViewRef {

@@ -2284,6 +2284,12 @@ pub(crate) fn active_histogram(
     hist::active_histogram(state)
 }
 
+pub(crate) fn active_histogram_display(
+    state: &AppState,
+) -> Option<std::sync::Arc<crate::analysis::histogram::display::HistogramDisplay>> {
+    hist::active_histogram_display(state)
+}
+
 /// Why one analysis' retained evidence is invalid, when it is.
 ///
 /// The verdict comes from the memo, so a sound dataset costs a map lookup; the

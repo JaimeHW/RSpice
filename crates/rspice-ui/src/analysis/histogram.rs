@@ -1,27 +1,8 @@
-//! Histogram Viewer
-//!
-//! Commercial-grade histogram visualization for statistical analysis.
-//!
-//! # Features
-//!
-//! - Binning with automatic or user-specified ranges
-//! - Normal/log scale vertical axis
-//! - PDF/CDF overlay modes
-//! - Statistical measurements (mean, std dev, percentiles)
-//! - Multi-histogram overlay comparison
-//! - Monte Carlo analysis integration
-//!
-//! # Architecture
-//!
-//! Follows Cadence-style statistical analysis workflow.
+//! Distribution binning and presentation of retained Monte Carlo samples.
 
 pub(crate) mod data;
+pub(crate) mod display;
 pub(crate) mod state;
-pub(crate) mod statistics;
 
 pub use data::HistogramBuilder;
 pub use state::{HistogramDisplayMode, HistogramState};
-
-// =============================================================================
-// Tests
-// =============================================================================

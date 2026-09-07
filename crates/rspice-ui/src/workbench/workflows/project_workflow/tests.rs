@@ -12,7 +12,6 @@ mod marker_history;
 use crate::analysis::bode::BodeData;
 use crate::analysis::eye_diagram::{EyeData, EyeTrace};
 use crate::analysis::fft::{FftData, window::WindowFunction};
-use crate::analysis::histogram::HistogramBuilder;
 use crate::analysis::nyquist::NyquistData;
 use crate::analysis::pole_zero::PoleZeroData;
 use crate::io::{ProjectExecutionContext, ProjectSimulationResults};
@@ -289,11 +288,7 @@ fn seed_specialized_viewer_caches(state: &mut AppState) {
     state.simulation.active_analysis_idx = Some(0);
     state.simulation.next_run_id = 2;
 
-    state
-        .analysis
-        .histogram_state
-        .load_histogram(HistogramBuilder::new().build(&[1.0, 2.0, 3.0]));
-
+    state.analysis.histogram_state.selected = 7;
     let mut bode = BodeData::new();
     bode.add_response();
     state.analysis.bode_plot_state.load_data(bode);
@@ -341,16 +336,12 @@ fn seed_specialized_viewer_caches(state: &mut AppState) {
         ActiveViewer::BodePlot,
         ActiveViewer::Nyquist,
         ActiveViewer::SmithChart,
-        ActiveViewer::Histogram,
         ActiveViewer::Fft,
         ActiveViewer::EyeDiagram,
     ] {
         state.bind_specialized_viewer_cache(viewer, provenance);
     }
 
-    // Cached bins are present for cleanup, but the transient fixture has no
-    // retained MC population and cannot authorize the distribution viewer.
-    assert!(!state.analysis.histogram_state.is_empty());
     assert!(!state.viewer_is_available(ActiveViewer::Histogram));
     for viewer in [
         ActiveViewer::SmithChart,
@@ -368,7 +359,7 @@ fn seed_specialized_viewer_caches(state: &mut AppState) {
 }
 
 fn assert_specialized_viewer_caches_cleared(state: &AppState) {
-    assert!(state.analysis.histogram_state.is_empty());
+    assert_eq!(state.analysis.histogram_state.selected, 0);
     assert!(
         state.analysis.pole_zero_state.is_empty(),
         "legacy pole-zero presentation cache should be cleared"

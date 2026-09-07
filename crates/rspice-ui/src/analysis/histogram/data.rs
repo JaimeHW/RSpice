@@ -50,14 +50,6 @@ impl HistogramBin {
         self.count += 1;
         self.weight += weight;
     }
-
-    /// Density (count / width) for PDF
-    pub fn density(&self, total: usize) -> f64 {
-        if total == 0 || self.width() == 0.0 {
-            return 0.0;
-        }
-        (self.count as f64) / (total as f64 * self.width())
-    }
 }
 
 // =============================================================================
@@ -198,60 +190,6 @@ impl Histogram {
             self.add(v);
         }
     }
-
-    /// Get normalized (PDF) values
-    pub fn pdf(&self) -> Vec<f64> {
-        self.bins
-            .iter()
-            .map(|b| b.density(self.total_count))
-            .collect()
-    }
-
-    /// Get cumulative distribution (CDF) values
-    pub fn cdf(&self) -> Vec<f64> {
-        if self.total_count == 0 {
-            return vec![0.0; self.bins.len()];
-        }
-
-        let mut cumulative = self.underflow as f64;
-        let total = self.total_count as f64;
-
-        self.bins
-            .iter()
-            .map(|b| {
-                cumulative += b.count as f64;
-                cumulative / total
-            })
-            .collect()
-    }
-
-    /// Get percentile value (0.0 to 1.0)
-    pub fn percentile(&self, p: f64) -> Option<f64> {
-        if self.total_count == 0 || !(0.0..=1.0).contains(&p) {
-            return None;
-        }
-
-        let target = p * self.total_count as f64;
-        let mut cumulative = 0.0;
-
-        for bin in &self.bins {
-            let prev_cumulative = cumulative;
-            cumulative += bin.count as f64;
-
-            if cumulative >= target {
-                // Interpolate within bin
-                let fraction = if bin.count > 0 {
-                    (target - prev_cumulative) / bin.count as f64
-                } else {
-                    0.5
-                };
-                return Some(bin.lower + fraction * bin.width());
-            }
-        }
-
-        // Return max if we reach here
-        Some(self.bins.last()?.upper)
-    }
 }
 
 // =============================================================================
@@ -373,7 +311,6 @@ mod tests {
             hist.bins.iter().map(|bin| bin.count).collect::<Vec<_>>(),
             vec![1, 2]
         );
-        assert_eq!(hist.cdf(), vec![0.4, 0.8]);
         assert_eq!(hist.total_count, 5);
     }
 
@@ -388,21 +325,19 @@ mod tests {
             assert!(hist.bins.iter().all(|bin| bin.lower.is_finite()
                 && bin.upper.is_finite()
                 && bin.upper > bin.lower));
-            assert_eq!(hist.cdf().last(), Some(&1.0));
         }
     }
 
     #[test]
-    fn empty_histogram_cdf_is_finite_zero_curve() {
+    fn nonfinite_samples_do_not_create_observations() {
         let hist = HistogramBuilder::new().name("empty").bin_count(4).build(&[
             f64::NAN,
             f64::INFINITY,
             f64::NEG_INFINITY,
         ]);
 
-        let cdf = hist.cdf();
-
-        assert_eq!(cdf, vec![0.0; 4]);
-        assert!(cdf.iter().all(|value| value.is_finite()));
+        assert_eq!(hist.total_count, 0);
+        assert_eq!(hist.bins.len(), 4);
+        assert!(hist.bins.iter().all(|bin| bin.count == 0));
     }
 }

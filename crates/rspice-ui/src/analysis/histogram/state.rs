@@ -1,14 +1,5 @@
-//! Histogram viewer state: the loaded distributions and how they are shown.
-//!
-//! Trimmed to what the Distribution viewer and the Monte-Carlo result path
-//! actually touch. The axis-scale and distribution-overlay enums, their
-//! toggles, and the per-mode display names lived here for a controls row that
-//! was never built; the fitting they would have driven
-//! (`NormalParams`/`LogNormalParams`) is gone from `statistics` for the same
-//! reason.
-
-use super::data::Histogram;
-use super::statistics::HistogramStats;
+//! Distribution presentation settings. Samples belong to retained results;
+//! derived bins and descriptive moments belong to the result view plan.
 
 /// Histogram display mode
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -18,23 +9,41 @@ pub enum HistogramDisplayMode {
     Count,
     /// Probability density function
     Pdf,
-    /// Cumulative distribution function
+    /// Empirical cumulative distribution from exact retained observations
     Cdf,
     /// Percent of total
     Percent,
 }
 
-/// Complete histogram viewer state
+impl HistogramDisplayMode {
+    pub const ALL: [Self; 4] = [Self::Count, Self::Pdf, Self::Cdf, Self::Percent];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Count => "Count",
+            Self::Pdf => "Probability density",
+            Self::Cdf => "Empirical CDF",
+            Self::Percent => "Percent",
+        }
+    }
+
+    pub fn unit(self) -> &'static str {
+        match self {
+            Self::Count => "n",
+            Self::Pdf => "1/x",
+            Self::Cdf => "P(X ≤ x)",
+            Self::Percent => "%",
+        }
+    }
+}
+
+/// Histogram presentation settings, independent of the active population.
 #[derive(Debug, Clone)]
 pub struct HistogramState {
     /// Display mode
     pub mode: HistogramDisplayMode,
-    /// Multiple histograms (for comparison)
-    pub histograms: Vec<Histogram>,
     /// Selected histogram index
     pub selected: usize,
-    /// Calculated statistics for each histogram
-    pub stats: Vec<HistogramStats>,
     /// Number of bins (for rebuilding)
     pub bin_count: usize,
     /// Custom range enabled
@@ -48,9 +57,7 @@ impl Default for HistogramState {
     fn default() -> Self {
         Self {
             mode: HistogramDisplayMode::Count,
-            histograms: Vec::new(),
             selected: 0,
-            stats: Vec::new(),
             bin_count: 50,
             custom_range: false,
             custom_min: 0.0,
@@ -60,39 +67,8 @@ impl Default for HistogramState {
 }
 
 impl HistogramState {
-    /// Replace the contents with a single histogram.
-    pub fn load_histogram(&mut self, hist: Histogram) {
-        self.histograms = vec![hist];
-        self.recalculate_stats();
+    /// Forget the selected measurement when the result context is cleared.
+    pub fn clear_selection(&mut self) {
         self.selected = 0;
-    }
-
-    /// Append a histogram for comparison against the ones already loaded.
-    pub fn add_histogram(&mut self, hist: Histogram) {
-        self.histograms.push(hist);
-        self.stats.push(HistogramStats::from_histogram(
-            self.histograms.last().unwrap(),
-        ));
-    }
-
-    /// Clear all histograms
-    pub fn clear(&mut self) {
-        self.histograms.clear();
-        self.stats.clear();
-        self.selected = 0;
-    }
-
-    /// Recalculate statistics for all histograms
-    fn recalculate_stats(&mut self) {
-        self.stats = self
-            .histograms
-            .iter()
-            .map(HistogramStats::from_histogram)
-            .collect();
-    }
-
-    /// Is empty?
-    pub fn is_empty(&self) -> bool {
-        self.histograms.is_empty()
     }
 }

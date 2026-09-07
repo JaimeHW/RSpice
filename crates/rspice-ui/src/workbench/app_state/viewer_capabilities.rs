@@ -99,7 +99,7 @@ impl AppState {
     /// cached analysis-specific visualizations.
     pub fn clear_specialized_viewer_data(&mut self) {
         self.clear_transient_specialized_viewer_data();
-        self.analysis.histogram_state.clear();
+        self.analysis.histogram_state.clear_selection();
         self.analysis
             .bode_plot_state
             .load_data(crate::analysis::bode::BodeData::new());
@@ -197,7 +197,6 @@ impl AppState {
             ActiveViewer::BodePlot,
             ActiveViewer::Nyquist,
             ActiveViewer::SmithChart,
-            ActiveViewer::Histogram,
             ActiveViewer::Fft,
             ActiveViewer::EyeDiagram,
         ] {
@@ -218,13 +217,12 @@ impl AppState {
                 .load_data(crate::analysis::bode::BodeData::new()),
             ActiveViewer::Nyquist => self.analysis.nyquist_state.clear(),
             ActiveViewer::SmithChart => self.analysis.smith_chart_state.clear_traces(),
-            ActiveViewer::Histogram => self.analysis.histogram_state.clear(),
             ActiveViewer::Fft => self.analysis.fft_state.clear(),
             ActiveViewer::EyeDiagram => self
                 .analysis
                 .eye_diagram_state
                 .load_data(crate::analysis::eye_diagram::EyeData::default()),
-            ActiveViewer::Waveform | ActiveViewer::PoleZero => return,
+            ActiveViewer::Waveform | ActiveViewer::PoleZero | ActiveViewer::Histogram => return,
         }
         self.clear_specialized_viewer_cache_authority(viewer);
     }
@@ -237,10 +235,9 @@ impl AppState {
             ActiveViewer::BodePlot => self.analysis.cache_authority.bode,
             ActiveViewer::Nyquist => self.analysis.cache_authority.nyquist,
             ActiveViewer::SmithChart => self.analysis.cache_authority.smith,
-            ActiveViewer::Histogram => self.analysis.cache_authority.histogram,
             ActiveViewer::Fft => self.analysis.cache_authority.fft,
             ActiveViewer::EyeDiagram => self.analysis.cache_authority.eye,
-            ActiveViewer::Waveform | ActiveViewer::PoleZero => None,
+            ActiveViewer::Waveform | ActiveViewer::PoleZero | ActiveViewer::Histogram => None,
         }
     }
 
@@ -252,11 +249,10 @@ impl AppState {
             ActiveViewer::BodePlot => &mut self.analysis.cache_authority.bode,
             ActiveViewer::Nyquist => &mut self.analysis.cache_authority.nyquist,
             ActiveViewer::SmithChart => &mut self.analysis.cache_authority.smith,
-            ActiveViewer::Histogram => &mut self.analysis.cache_authority.histogram,
             ActiveViewer::Fft => &mut self.analysis.cache_authority.fft,
             ActiveViewer::EyeDiagram => &mut self.analysis.cache_authority.eye,
-            ActiveViewer::Waveform | ActiveViewer::PoleZero => {
-                panic!("waveform and pole-zero viewers do not own mutable cache provenance")
+            ActiveViewer::Waveform | ActiveViewer::PoleZero | ActiveViewer::Histogram => {
+                panic!("this viewer does not own mutable cache provenance")
             }
         }
     }
@@ -271,10 +267,9 @@ impl AppState {
             ActiveViewer::BodePlot => !self.analysis.bode_plot_state.is_empty(),
             ActiveViewer::Nyquist => !self.analysis.nyquist_state.is_empty(),
             ActiveViewer::SmithChart => !self.analysis.smith_chart_state.traces.is_empty(),
-            ActiveViewer::Histogram => !self.analysis.histogram_state.is_empty(),
             ActiveViewer::Fft => self.analysis.fft_state.has_data(),
             ActiveViewer::EyeDiagram => self.analysis.eye_diagram_state.trace_count() > 0,
-            ActiveViewer::Waveform | ActiveViewer::PoleZero => false,
+            ActiveViewer::Waveform | ActiveViewer::PoleZero | ActiveViewer::Histogram => false,
         }
     }
 
@@ -425,8 +420,7 @@ fn eye_timebase_key(provenance: SpecializedViewerCacheProvenance) -> EyeTimebase
 mod tests {
     use super::*;
     use crate::analysis::{
-        BodeData, EyeData, EyeTrace, FftData, HistogramBuilder, NyquistData, PoleZeroData,
-        WindowFunction,
+        BodeData, EyeData, EyeTrace, FftData, NyquistData, PoleZeroData, WindowFunction,
     };
     use crate::diagnostics::{LogSeverity, LogSource};
     use crate::services::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
@@ -453,11 +447,6 @@ mod tests {
         run.add_analysis(retained_analysis(1, crate::state::AnalysisType::Ac, 0x11));
         state.simulation.runs.push(run);
         assert!(state.simulation.select_run(0));
-
-        state
-            .analysis
-            .histogram_state
-            .load_histogram(HistogramBuilder::new().build(&[1.0, 2.0, 3.0]));
 
         let mut bode = BodeData::new();
         bode.add_response();
@@ -507,7 +496,6 @@ mod tests {
             ActiveViewer::BodePlot,
             ActiveViewer::Nyquist,
             ActiveViewer::SmithChart,
-            ActiveViewer::Histogram,
             ActiveViewer::Fft,
             ActiveViewer::EyeDiagram,
         ] {
@@ -647,7 +635,6 @@ mod tests {
         assert!(state.analysis.bode_plot_state.is_empty());
         assert!(state.analysis.nyquist_state.is_empty());
         assert!(state.analysis.smith_chart_state.traces.is_empty());
-        assert!(state.analysis.histogram_state.is_empty());
         assert!(!state.analysis.fft_state.has_data());
         assert_eq!(state.analysis.eye_diagram_state.trace_count(), 0);
         assert_eq!(

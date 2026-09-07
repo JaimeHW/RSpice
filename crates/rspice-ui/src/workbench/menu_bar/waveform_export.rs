@@ -622,12 +622,15 @@ fn fft_spectrum_csv(
 
 fn histogram_bins_csv(state: &AppState) -> Option<PreparedTypedResultCsv> {
     let histogram = crate::workbench::documents::result_document::active_histogram(state)?;
+    let display = crate::workbench::documents::result_document::active_histogram_display(state)?;
     if histogram.bins.is_empty() {
         return None;
     }
     let mut contents = String::from("field,value,unit\n");
     for (field, value) in [
         ("measurement", csv_text(&histogram.name)),
+        ("display_mode", csv_text(display.mode.label())),
+        ("ordinate_unit", csv_text(display.mode.unit())),
         ("total_count", histogram.total_count.to_string()),
         ("total_weight", format!("{:.17e}", histogram.total_weight)),
         ("underflow", histogram.underflow.to_string()),
@@ -644,9 +647,20 @@ fn histogram_bins_csv(state: &AppState) -> Option<PreparedTypedResultCsv> {
             bin.lower, bin.upper, bin.count, bin.weight
         ));
     }
+    if display.cdf.is_some() {
+        contents.push_str("\nobservation,cumulative_probability\n");
+        for (x, y) in display.source_points(&histogram) {
+            contents.push_str(&format!("{x:.17e},{y:.17e}\n"));
+        }
+    } else {
+        contents.push_str("\nbin_center,display_ordinate\n");
+        for (x, y) in display.source_points(&histogram) {
+            contents.push_str(&format!("{x:.17e},{y:.17e}\n"));
+        }
+    }
     Some(PreparedTypedResultCsv {
         default_name: "rspice-distribution.csv",
-        detail: format!("{} distribution bins", histogram.bins.len()),
+        detail: format!("{} distribution ({})", histogram.name, display.mode.label()),
         contents,
     })
 }

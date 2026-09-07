@@ -7,8 +7,9 @@ mod source_tests;
 use egui::Ui;
 use std::sync::Arc;
 
-use crate::analysis::HistogramBuilder;
 use crate::analysis::histogram::data::Histogram;
+use crate::analysis::histogram::display::{HistogramDisplay, hist_axis};
+use crate::analysis::{HistogramBuilder, HistogramDisplayMode};
 use crate::product::DatasetId;
 use crate::services::yield_manager::{SpecLimitType, YieldResult};
 use crate::source_revision::SourceRevision;
@@ -318,6 +319,9 @@ pub(super) struct HistPlan {
     bin_count: usize,
     range: Option<(u64, u64)>,
     histogram: Option<Arc<Histogram>>,
+    mode: HistogramDisplayMode,
+    display: Result<Arc<HistogramDisplay>, &'static str>,
+    display_source: SourceRevision,
     moments: Option<ExactMoments>,
     yield_is_consistent: bool,
 }
@@ -344,6 +348,7 @@ fn hist_plan(state: &AppState, histogram: &str) -> Arc<HistPlan> {
         && plan.dataset == dataset
         && plan.analysis == analysis
         && plan.histogram_name == histogram
+        && plan.mode == settings.mode
         && plan.bin_count == bin_count
         && plan.range == range
     {
@@ -393,6 +398,12 @@ fn hist_plan(state: &AppState, histogram: &str) -> Arc<HistPlan> {
         frame_work::note(DatasetWalk::HistMoments);
         Some(Arc::new(builder.build(samples)))
     });
+    let display = derived
+        .as_deref()
+        .zip(samples)
+        .ok_or("The selected distribution is unavailable")
+        .and_then(|(histogram, samples)| HistogramDisplay::new(histogram, samples, settings.mode))
+        .map(Arc::new);
     let built = Arc::new(HistPlan {
         version,
         source,
@@ -403,6 +414,9 @@ fn hist_plan(state: &AppState, histogram: &str) -> Arc<HistPlan> {
         bin_count,
         range,
         histogram: derived,
+        mode: settings.mode,
+        display,
+        display_source: SourceRevision::default(),
         moments,
         yield_is_consistent,
     });
@@ -467,59 +481,13 @@ pub(super) fn active_histogram(state: &AppState) -> Option<Arc<Histogram>> {
     hist_plan(state, &name).histogram.clone()
 }
 
-/// How one distribution is laid out on its abscissa.
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct HistAxis {
-    /// The window the axis is ruled over.
-    x0: f64,
-    x1: f64,
-    /// The one value every retained sample landed on, when the distribution
-    /// has no width at all. The sheet draws a bar for it rather than the
-    /// zero-width rectangle its bin edges describe.
-    degenerate_at: Option<f64>,
-}
-
-/// A distribution's abscissa window, and whether it is a single point.
-///
-/// A Monte Carlo whose measurement did not move retains exactly one bin whose
-/// two edges are the same number — that is what the engine's histogram builder
-/// emits when the sample range is zero. Padding a zero span by six percent
-/// leaves a window narrower than the value's own floating-point resolution:
-/// every axis label prints the same number, and the one populated bin is a
-/// one-pixel line in the middle of an empty frame. A degenerate distribution
-/// is ruled around its value instead, so the reader sees a bar standing at a
-/// number rather than an empty plot.
-fn hist_axis(histogram: &crate::analysis::histogram::data::Histogram) -> HistAxis {
-    let (min, max) = histogram.range();
-    let span = max - min;
-    if min < max {
-        let pad = if span.is_finite() { span * 0.06 } else { 0.0 };
-        return HistAxis {
-            x0: (min - pad).max(-f64::MAX),
-            x1: (max + pad).min(f64::MAX),
-            degenerate_at: None,
-        };
-    }
-    let value = min;
-    if !value.is_finite() {
-        return HistAxis {
-            x0: -1.0,
-            x1: 1.0,
-            degenerate_at: None,
-        };
-    }
-    // A window a float can actually distinguish: one part in a thousand of
-    // the value, and a unit window when the value is zero.
-    let pad = if value == 0.0 {
-        1.0
-    } else {
-        value.abs() * 1.0e-3
-    };
-    HistAxis {
-        x0: (value - pad).min(value.next_down()).max(-f64::MAX),
-        x1: (value + pad).max(value.next_up()).min(f64::MAX),
-        degenerate_at: Some(value),
-    }
+pub(super) fn active_histogram_display(state: &AppState) -> Option<Arc<HistogramDisplay>> {
+    let name = selected_histogram_name(state)?;
+    hist_plan(state, &name)
+        .display
+        .as_ref()
+        .ok()
+        .map(Arc::clone)
 }
 
 /// The share of the frame the single bar of a degenerate distribution covers.
@@ -603,9 +571,22 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                                 .changed();
                         }
                     });
+                ui.label("Display");
+                egui::ComboBox::from_id_salt("hist_mode")
+                    .selected_text(settings.mode.label())
+                    .show_ui(ui, |ui| {
+                        for mode in HistogramDisplayMode::ALL {
+                            changed |= ui
+                                .selectable_value(&mut settings.mode, mode, mode.label())
+                                .changed();
+                        }
+                    });
                 ui.label("Bins");
                 changed |= ui
-                    .add(egui::DragValue::new(&mut settings.bin_count).range(1..=1000))
+                    .add_enabled(
+                        settings.mode != HistogramDisplayMode::Cdf,
+                        egui::DragValue::new(&mut settings.bin_count).range(1..=1000),
+                    )
                     .changed();
                 changed
             })
@@ -635,6 +616,14 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         well_hint(ui, "The selected distribution is empty");
         return;
     }
+    let display = match &plan.display {
+        Ok(display) => display.as_ref(),
+        Err(reason) => {
+            well_hint(ui, reason);
+            return;
+        }
+    };
+    let mode = display.mode;
     let moments = plan.moments;
     let spec_limits =
         selected_yield_result(&state.simulation, &histogram.name, plan.yield_is_consistent)
@@ -642,7 +631,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
     let subtitle = format!("{} · {} samples", histogram.name, histogram.total_count);
     let mut legend = vec![LegendChip {
-        name: "count",
+        name: mode.label(),
         color: c.accent,
         on: true,
     }];
@@ -680,14 +669,13 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         );
         return;
     }
-    let max_count = histogram.bins.iter().map(|b| b.count).max().unwrap_or(1) as f64;
-    let y1 = (max_count * 1.18).ceil().max(4.0);
+    let y1 = display.y_max();
     let (y0, y1) = view.y.unwrap_or((0.0, y1));
 
     let mut spec = PlotSpec::new(
         Axis::linear(x0, x1, ""),
         XScale::Linear,
-        Axis::linear_with(y0, y1, "n", 5),
+        Axis::linear_with(y0, y1, mode.unit(), 5),
     )
     .accessible_name("Statistical histogram");
     spec.left_margin = 48.0;
@@ -771,10 +759,15 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     // the error tint — the fail zone itself, not the data envelope.
     let bins = &histogram.bins;
     let degenerate_at = axis.degenerate_at;
-    let total_count = histogram.total_count;
+    let ordinates = &display.ordinates;
     let accent = c.accent;
     let accent_dim = c.accent_dim;
     let err = c.err;
+    state.ui.results.cache.ensure_source(&plan.display_source);
+    if let Some(cdf) = &display.cdf {
+        spec.traces
+            .push(plot::Trace::new(&cdf.x, &cdf.y, accent).cache_key(0x4849_5354_4344_4600));
+    }
     spec.underlay = Some(Box::new(move |painter, mapper| {
         if let Some((lsl, usl)) = spec_limits {
             let wash = err.gamma_multiply(0.09);
@@ -797,14 +790,30 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 painter.rect_filled(rect, 0.0, wash);
             }
         }
+        if let Some(cdf) = &display.cdf {
+            let first = cdf.x[0];
+            let last = *cdf.x.last().unwrap();
+            for (left, right, value) in [(x0, first.min(x1), 0.0), (last.max(x0), x1, 1.0)] {
+                if left < right {
+                    painter.line_segment(
+                        [
+                            egui::pos2(mapper.x(left), mapper.y(value)),
+                            egui::pos2(mapper.x(right), mapper.y(value)),
+                        ],
+                        egui::Stroke::new(1.8, accent),
+                    );
+                }
+            }
+            return;
+        }
         // One bar for a distribution whose bin edges coincide: the retained
         // rectangle has no width, so the frame supplies one.
         if let Some(value) = degenerate_at {
-            if total_count > 0 {
+            if let Some(&ordinate) = ordinates.first().filter(|value| **value > 0.0) {
                 let half = mapper.rect.width() * DEGENERATE_BAR_FRACTION * 0.5;
                 let centre = mapper.x(value);
                 let rect = egui::Rect::from_min_max(
-                    egui::pos2(centre - half, mapper.y(total_count as f64)),
+                    egui::pos2(centre - half, mapper.y(ordinate)),
                     egui::pos2(centre + half, mapper.y(0.0)),
                 );
                 painter.rect(
@@ -817,13 +826,13 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             }
             return;
         }
-        for bin in bins {
-            if bin.count == 0 {
+        for (bin, &ordinate) in bins.iter().zip(ordinates) {
+            if ordinate == 0.0 {
                 continue;
             }
             let left = mapper.x(bin.lower) + 1.0;
             let right = (mapper.x(bin.upper) - 1.0).max(left + 1.0);
-            let top = mapper.y(bin.count as f64);
+            let top = mapper.y(ordinate);
             let bottom = mapper.y(0.0);
             let rect = egui::Rect::from_min_max(egui::pos2(left, top), egui::pos2(right, bottom));
             painter.rect(
@@ -837,22 +846,17 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     }));
 
     let readout = |x: f64| -> Vec<(String, String)> {
-        // A zero-width bin can never contain the pointer, so a degenerate
-        // distribution reads out the population it collapsed onto instead of
-        // reporting an empty frame.
-        let count = degenerate_at.map_or_else(
-            || {
-                bins.iter()
-                    .find(|b| {
-                        x >= b.lower && (x < b.upper || x == histogram.range().1 && x == b.upper)
-                    })
-                    .map_or(0, |b| b.count)
-            },
-            |_| total_count,
-        );
+        let value = display.value_at(histogram, x);
         vec![
-            ("x".to_owned(), fmt_si(x, "", 2)),
-            ("count".to_owned(), count.to_string()),
+            ("x".to_owned(), fmt_si(x, "", 3)),
+            (
+                mode.label().to_owned(),
+                if mode == HistogramDisplayMode::Count {
+                    format!("{value:.0}")
+                } else {
+                    fmt_si(value, mode.unit(), 4)
+                },
+            ),
         ]
     };
 

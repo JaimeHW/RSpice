@@ -326,8 +326,6 @@ impl SimulationController {
                 variables,
                 ..
             } => {
-                self.populate_monte_carlo_histograms(state, variables);
-
                 state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
                     "Monte Carlo: {}/{} runs converged ({} failed), seed={}, all_converged={}",
                     runs_completed, runs_requested, num_failures, seed, all_converged
@@ -422,56 +420,6 @@ impl SimulationController {
                     "Analysis complete (scalar result evidence retained)".to_string(),
                 ));
             }
-        }
-    }
-
-    fn populate_monte_carlo_histograms(
-        &self,
-        state: &mut AppState,
-        variables: &[crate::simulation::results::MonteCarloVariableResult],
-    ) {
-        state.analysis.histogram_state.clear();
-        state.clear_specialized_viewer_cache_authority(ActiveViewer::Histogram);
-
-        for variable in variables {
-            if variable.histogram.is_empty()
-                || variable.bin_edges.len() != variable.histogram.len() + 1
-            {
-                continue;
-            }
-
-            let mut bins = Vec::with_capacity(variable.histogram.len());
-            for (idx, count) in variable.histogram.iter().enumerate() {
-                bins.push(crate::analysis::histogram::data::HistogramBin {
-                    lower: variable.bin_edges[idx],
-                    upper: variable.bin_edges[idx + 1],
-                    count: *count,
-                    weight: *count as f64,
-                });
-            }
-            let total_count: usize = variable.histogram.iter().sum();
-            let histogram = crate::analysis::histogram::data::Histogram {
-                name: variable.name.clone(),
-                bins,
-                total_count,
-                total_weight: total_count as f64,
-                underflow: 0,
-                overflow: 0,
-                data_min: *variable.bin_edges.first().unwrap_or(&0.0),
-                data_max: *variable.bin_edges.last().unwrap_or(&0.0),
-            };
-
-            if state.analysis.histogram_state.is_empty() {
-                state.analysis.histogram_state.load_histogram(histogram);
-            } else {
-                state.analysis.histogram_state.add_histogram(histogram);
-            }
-        }
-
-        if !state.analysis.histogram_state.is_empty()
-            && let Some(provenance) = self.in_flight_specialized_viewer_provenance(state)
-        {
-            state.bind_specialized_viewer_cache(ActiveViewer::Histogram, provenance);
         }
     }
 }

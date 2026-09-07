@@ -272,6 +272,10 @@ pub(super) struct PreparedResultsPresentation {
     fft_time_window_end: f64,
     fft_sample_count_auto: bool,
     fft_sample_count: usize,
+    #[serde(default)]
+    histogram_x: Option<(f64, f64)>,
+    #[serde(default)]
+    histogram_y: Option<(f64, f64)>,
     histogram_selected: usize,
     histogram_bin_count: usize,
     histogram_custom_range: bool,
@@ -323,6 +327,8 @@ impl PreparedResultsPresentation {
             fft_time_window_end: value.fft.time_window_end,
             fft_sample_count_auto: value.fft.sample_count_auto,
             fft_sample_count: value.fft.sample_count,
+            histogram_x: value.histogram_view.x,
+            histogram_y: value.histogram_view.y,
             histogram_selected: value.histogram_selected,
             histogram_bin_count: value.histogram_bin_count,
             histogram_custom_range: value.histogram_custom_range,
@@ -341,6 +347,13 @@ impl PreparedResultsPresentation {
 
     fn validate(&self) -> Result<(), HardcopySourceError> {
         self.overlay.validate()?;
+        for (low, high) in [self.histogram_x, self.histogram_y].into_iter().flatten() {
+            if !low.is_finite() || !high.is_finite() || low >= high || !(high - low).is_finite() {
+                return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
+                    "prepared histogram viewport is not a finite interval".to_owned(),
+                ));
+            }
+        }
         if self.specs.len() > 10_000 {
             return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
                 "prepared specification count exceeds the governed limit".to_owned(),
@@ -427,6 +440,10 @@ impl PreparedResultsPresentation {
             overlay: self.overlay,
             specs: self.specs,
             fft,
+            histogram_view: crate::workbench::documents::result_document::PlotView {
+                x: self.histogram_x,
+                y: self.histogram_y,
+            },
             histogram_selected: self.histogram_selected,
             histogram_bin_count: self.histogram_bin_count,
             histogram_custom_range: self.histogram_custom_range,
@@ -439,6 +456,52 @@ impl PreparedResultsPresentation {
                 PreparedHistogramMode::Percent => crate::analysis::HistogramDisplayMode::Percent,
             },
         })
+    }
+}
+
+#[cfg(test)]
+mod histogram_tests {
+    use super::*;
+
+    #[test]
+    fn histogram_worker_controls_round_trip_and_validate_the_viewport() {
+        let state = AppState::default();
+        for mode in crate::analysis::HistogramDisplayMode::ALL {
+            let mut presentation = ResultsQuickViewPresentation::from_state(&state);
+            presentation.histogram_mode = mode;
+            presentation.histogram_view.x = Some((1e-15, 2e-15));
+            presentation.histogram_view.y = Some((0.0, 100.0));
+            let prepared = PreparedResultsPresentation::capture(presentation).unwrap();
+            let bytes = serde_json::to_vec(&prepared).unwrap();
+            let restored = serde_json::from_slice::<PreparedResultsPresentation>(&bytes)
+                .unwrap()
+                .restore()
+                .unwrap();
+            assert_eq!(restored.histogram_mode, mode);
+            assert_eq!(restored.histogram_view.x, Some((1e-15, 2e-15)));
+            assert_eq!(restored.histogram_view.y, Some((0.0, 100.0)));
+
+            let mut legacy = serde_json::to_value(&prepared).unwrap();
+            legacy.as_object_mut().unwrap().remove("histogram_x");
+            legacy.as_object_mut().unwrap().remove("histogram_y");
+            let restored = serde_json::from_value::<PreparedResultsPresentation>(legacy)
+                .unwrap()
+                .restore()
+                .unwrap();
+            assert_eq!(restored.histogram_view.x, None);
+            assert_eq!(restored.histogram_view.y, None);
+
+            for range in [
+                (2.0, 1.0),
+                (1.0, 1.0),
+                (0.0, f64::INFINITY),
+                (-f64::MAX, f64::MAX),
+            ] {
+                let mut invalid = prepared.clone();
+                invalid.histogram_x = Some(range);
+                assert!(invalid.restore().is_err());
+            }
+        }
     }
 }
 

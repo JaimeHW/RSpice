@@ -300,12 +300,6 @@ fn histogram_quick_view_derives_only_from_active_monte_carlo_metadata() {
             }],
         });
     let mut state = quick_view_state(analysis, ResultViewer::Hist);
-    state.analysis.histogram_state.load_histogram(
-        crate::analysis::HistogramBuilder::new()
-            .name("stale")
-            .bin_count(3)
-            .build(&[9_999.0; 20]),
-    );
     state.analysis.histogram_state.bin_count = 5;
     state.analysis.histogram_state.selected = usize::MAX;
     let onscreen = crate::workbench::documents::result_document::active_histogram(&state).unwrap();
@@ -335,8 +329,8 @@ fn histogram_quick_view_derives_only_from_active_monte_carlo_metadata() {
             .iter()
             .all(|(center, _)| *center != 9_999.0f64.to_bits())
     );
-    // A point population keeps its exact coordinate/count and a path that
-    // the compiler can draw as a marker, even though it has no bin width.
+    // A point population keeps its exact coordinate/count and a visible bar
+    // with presentation width, even though its exact bin has zero width.
     let Some(AnalysisResultFamilyMetadata::MonteCarlo { variables, .. }) = state.simulation.runs[0]
         .analyses[0]
         .family_metadata
@@ -358,7 +352,39 @@ fn histogram_quick_view_derives_only_from_active_monte_carlo_metadata() {
         vec![(1.0f64.to_bits(), 5.0f64.to_bits())]
     );
     assert_eq!(plot.traces[0].paths.len(), 1);
-    assert_eq!(plot.traces[0].paths[0].len(), 1);
+    assert_eq!(plot.traces[0].paths[0].len(), 5);
+    assert_eq!(
+        plot.traces[0].paths[0].first(),
+        plot.traces[0].paths[0].last()
+    );
+
+    for mode in crate::analysis::HistogramDisplayMode::ALL {
+        state.analysis.histogram_state.mode = mode;
+        if mode == crate::analysis::HistogramDisplayMode::Pdf {
+            assert!(resolve_quick_view(&state).is_err());
+            state.analysis.histogram_state.custom_range = true;
+            state.analysis.histogram_state.custom_min = 0.0;
+            state.analysis.histogram_state.custom_max = 2.0;
+        }
+        let onscreen =
+            crate::workbench::documents::result_document::active_histogram(&state).unwrap();
+        let display =
+            crate::workbench::documents::result_document::active_histogram_display(&state).unwrap();
+        let resolved = resolve_quick_view(&state).unwrap();
+        let HardcopySemanticDocument::Plot(plot) = resolved.semantic_document() else {
+            unreachable!()
+        };
+        assert_eq!(
+            plot.traces[0].source_samples,
+            display
+                .source_points(&onscreen)
+                .iter()
+                .map(|(x, y)| (x.to_bits(), y.to_bits()))
+                .collect::<Vec<_>>()
+        );
+        assert!(plot.annotations[0].text.contains(mode.label()));
+        state.analysis.histogram_state.custom_range = false;
+    }
 }
 
 /// The page carries the reading, not only the samples.

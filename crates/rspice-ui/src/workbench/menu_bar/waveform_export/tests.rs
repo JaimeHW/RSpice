@@ -301,7 +301,6 @@ fn report_and_table_sheets_export_the_evidence_they_render() {
 #[test]
 fn csv_export_from_a_derived_sheet_publishes_what_that_sheet_draws() {
     use crate::analysis::fft::data::{FftData, SpectrumNormalization};
-    use crate::analysis::histogram::data::{Histogram, HistogramBin};
 
     let transient = AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
         .with_waveforms(vec![waveform("V(out)", vec![0.0, 1.0e-6], vec![0.0, 1.0])]);
@@ -371,21 +370,6 @@ fn csv_export_from_a_derived_sheet_publishes_what_that_sheet_draws() {
         crate::io::project_io::ProjectSimulationResults::from_state(&state.simulation)
             .into_simulation_state()
             .unwrap();
-    state.analysis.histogram_state.load_histogram(Histogram {
-        name: "V(out)".to_owned(),
-        bins: vec![HistogramBin {
-            lower: 0.9,
-            upper: 1.0,
-            count: 3,
-            weight: 3.0,
-        }],
-        total_count: 3,
-        total_weight: 3.0,
-        underflow: 0,
-        overflow: 0,
-        data_min: 0.9,
-        data_max: 1.0,
-    });
     state.ui.results.viewer = crate::workbench::ResultViewer::Hist;
     let io = MockExportWorkflowIo::default();
 
@@ -399,6 +383,30 @@ fn csv_export_from_a_derived_sheet_publishes_what_that_sheet_draws() {
         "{}",
         files[0].1
     );
+    drop(files);
+    for mode in crate::analysis::HistogramDisplayMode::ALL {
+        state.analysis.histogram_state.mode = mode;
+        let export = histogram_bins_csv(&state).unwrap();
+        assert!(
+            export
+                .contents
+                .contains(&format!("display_mode,{},", mode.label()))
+        );
+        if mode == crate::analysis::HistogramDisplayMode::Cdf {
+            assert!(
+                export
+                    .contents
+                    .contains("observation,cumulative_probability")
+            );
+            assert!(
+                export
+                    .contents
+                    .contains("3.00000000000000000e0,1.00000000000000000e0")
+            );
+        } else {
+            assert!(export.contents.contains("bin_center,display_ordinate"));
+        }
+    }
 }
 
 #[test]

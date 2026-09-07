@@ -596,45 +596,78 @@ pub(super) fn quick_histogram_plot(
         builder = builder.range(minimum, maximum);
     }
     let histogram = builder.build(&variable.samples);
-    let ordinates = match presentation.histogram_mode {
-        crate::analysis::HistogramDisplayMode::Count => histogram
-            .bins
-            .iter()
-            .map(|bin| bin.count as f64)
-            .collect::<Vec<_>>(),
-        crate::analysis::HistogramDisplayMode::Pdf => histogram.pdf(),
-        crate::analysis::HistogramDisplayMode::Cdf => histogram.cdf(),
-        crate::analysis::HistogramDisplayMode::Percent => histogram
-            .bins
-            .iter()
-            .map(|bin| {
-                if histogram.total_count == 0 {
-                    0.0
-                } else {
-                    bin.count as f64 * 100.0 / histogram.total_count as f64
-                }
-            })
-            .collect(),
-    };
-    quick_plot_from_series(
+    let display = crate::analysis::histogram::display::HistogramDisplay::new(
+        &histogram,
+        &variable.samples,
+        presentation.histogram_mode,
+    )
+    .map_err(HardcopySourceError::MissingViewerEvidence)?;
+    let axis = crate::analysis::histogram::display::hist_axis(&histogram);
+    let (x0, x1) = presentation.histogram_view.x.unwrap_or((axis.x0, axis.x1));
+    let (y0, y1) = presentation
+        .histogram_view
+        .y
+        .unwrap_or((0.0, display.y_max()));
+    if !x0.is_finite()
+        || !x1.is_finite()
+        || x0 >= x1
+        || !(x1 - x0).is_finite()
+        || !y0.is_finite()
+        || !y1.is_finite()
+        || y0 >= y1
+        || !(y1 - y0).is_finite()
+    {
+        return Err(HardcopySourceError::InvalidResultRange);
+    }
+    let width = PLOT_WIDTH_UM - 2 * PLOT_INSET_UM;
+    let height = PLOT_HEIGHT_UM - 2 * PLOT_INSET_UM;
+    let mut paths = Vec::new();
+    for outline in display.paths(&histogram, x0, x1) {
+        paths.extend(clipped_plot_paths(&outline, x0, x1, y0, y1, width, height)?);
+    }
+    let trace_id = stable_quick_trace_id(
         ResultViewer::Hist,
-        "Results",
         0,
-        vec![QuickResultSeries {
-            identity: format!(
-                "{}:{}:{}:monte-carlo:{}",
-                active.run.dataset_id, active.run.run_id, active.analysis.id, variable.name
-            ),
+        &format!(
+            "{}:{}:{}:monte-carlo:{}",
+            active.run.dataset_id, active.run.run_id, active.analysis.id, variable.name,
+        ),
+    );
+    Ok(SemanticPlot {
+        viewer: ResultViewer::Hist,
+        page_id: stable_page_id("Results"),
+        pane_id: 0,
+        x_scale: AxisScale::Linear,
+        y_scale: AxisScale::Linear,
+        axis_ticks: Vec::new(),
+        traces: vec![SemanticPlotTrace {
+            trace_id,
             label: histogram.name.clone(),
-            points: histogram
-                .bins
+            paths,
+            source_samples: display
+                .source_points(&histogram)
                 .iter()
-                .zip(ordinates)
-                .map(|(bin, ordinate)| (bin.center(), ordinate))
+                .map(|(x, y)| (x.to_bits(), y.to_bits()))
                 .collect(),
         }],
-        None,
-    )
+        cursors: Vec::new(),
+        markers: Vec::new(),
+        annotations: vec![SemanticPlotAnnotation {
+            annotation_id: 0,
+            text: format!(
+                "{} [{}]; {} samples; {} below and {} above the bin range",
+                display.mode.label(),
+                display.mode.unit(),
+                histogram.total_count,
+                histogram.underflow,
+                histogram.overflow
+            ),
+            trace_id: Some(trace_id),
+            source_x_bits: None,
+            source_y_bits: None,
+            position: None,
+        }],
+    })
 }
 
 pub(super) fn quick_complex_plot(

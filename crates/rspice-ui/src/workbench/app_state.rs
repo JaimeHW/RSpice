@@ -99,13 +99,12 @@ pub(crate) enum SpecializedViewerAnalysisIdentity {
     LegacyResultId(u64),
 }
 
-/// Provenance for the six mutable specialized result caches.
+/// Provenance for the mutable specialized result caches.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct SpecializedViewerCacheAuthority {
     pub(crate) bode: Option<SpecializedViewerCacheProvenance>,
     pub(crate) nyquist: Option<SpecializedViewerCacheProvenance>,
     pub(crate) smith: Option<SpecializedViewerCacheProvenance>,
-    pub(crate) histogram: Option<SpecializedViewerCacheProvenance>,
     pub(crate) fft: Option<SpecializedViewerCacheProvenance>,
     pub(crate) eye: Option<SpecializedViewerCacheProvenance>,
 }

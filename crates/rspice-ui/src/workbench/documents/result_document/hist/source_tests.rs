@@ -6,9 +6,6 @@ use crate::state::{AnalysisResult, AnalysisType, SimulationRunLifecycle, Simulat
 
 fn state_with(variable: MonteCarloVariableMetadata) -> AppState {
     let count = variable.samples.len();
-    let histogram = crate::analysis::HistogramBuilder::new()
-        .name(&variable.name)
-        .build(&variable.samples);
     let analysis = AnalysisResult::new(1, AnalysisType::MonteCarlo, "MC").with_family_metadata(
         AnalysisResultFamilyMetadata::MonteCarlo {
             seed: 7,
@@ -29,7 +26,6 @@ fn state_with(variable: MonteCarloVariableMetadata) -> AppState {
     run.finish_lifecycle(SimulationRunLifecycle::Completed)
         .unwrap();
     state.simulation.complete_run();
-    state.analysis.histogram_state.load_histogram(histogram);
     state
 }
 
@@ -91,14 +87,66 @@ fn hist_source_restoration_opens_the_current_population_without_cached_bins() {
     assert!(state.viewer_capability(ActiveViewer::Histogram).available);
     assert!(paint(&mut state, false).contains("gain"));
     assert!(paint(&mut state, true).contains("Exact samples"));
-    state.analysis.histogram_state.load_histogram(
-        crate::analysis::HistogramBuilder::new()
-            .name("stale")
-            .build(&[9999.0; 20]),
-    );
     let text = paint(&mut state, false);
     assert!(text.contains("gain"), "{text}");
-    assert!(!text.contains("stale"), "{text}");
+}
+
+#[test]
+fn hist_modes_refresh_projection_and_keep_point_density_unavailable() {
+    let mut state = state_with(super::tests::mc_variable("gain"));
+    let count = hist_plan(&state, "gain");
+    for mode in HistogramDisplayMode::ALL {
+        state.analysis.histogram_state.mode = mode;
+        let plan = hist_plan(&state, "gain");
+        assert_eq!(plan.display.as_ref().unwrap().mode, mode);
+        if mode != HistogramDisplayMode::Count {
+            assert_ne!(plan.display_source, count.display_source);
+        }
+        let text = paint(&mut state, false);
+        assert!(text.contains(mode.label()), "{text}");
+    }
+    let mut state = state_with(MonteCarloVariableMetadata {
+        name: "constant".to_owned(),
+        samples: vec![1.0; 3],
+        mean: 1.0,
+        std_dev: 0.0,
+        min: 1.0,
+        max: 1.0,
+    });
+    state.analysis.histogram_state.mode = HistogramDisplayMode::Pdf;
+    assert!(paint(&mut state, false).contains("no finite probability density"));
+    state.analysis.histogram_state.custom_range = true;
+    state.analysis.histogram_state.custom_min = 0.0;
+    state.analysis.histogram_state.custom_max = 2.0;
+    assert!(active_histogram_display(&state).is_some());
+}
+
+#[test]
+fn hist_empirical_cdf_reuses_a_large_sorted_population() {
+    use super::super::frame_work::WorkCounts;
+    let count = 100_000;
+    let mut state = state_with(MonteCarloVariableMetadata {
+        name: "gain".to_owned(),
+        samples: (0..count).map(f64::from).collect(),
+        mean: (f64::from(count) - 1.0) * 0.5,
+        std_dev: (f64::from(count) * f64::from(count + 1) / 12.0).sqrt(),
+        min: 0.0,
+        max: f64::from(count - 1),
+    });
+    state.analysis.histogram_state.mode = HistogramDisplayMode::Cdf;
+    paint(&mut state, false);
+    let display = active_histogram_display(&state).unwrap();
+    assert_eq!(display.cdf.as_ref().unwrap().x.len(), 200_000);
+    let work = WorkCounts::reset();
+    for _ in 0..3 {
+        paint(&mut state, false);
+        paint(&mut state, true);
+        assert!(Arc::ptr_eq(
+            &display,
+            &active_histogram_display(&state).unwrap()
+        ));
+    }
+    assert_eq!(work.since().total(), 0);
 }
 
 #[test]
