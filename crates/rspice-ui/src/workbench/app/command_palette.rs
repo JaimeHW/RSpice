@@ -240,6 +240,44 @@ struct PaletteFocusState {
     last_seen_pass: u64,
 }
 
+/// The workbench processes input preceding the shortcut. Only the palette
+/// receives its continuation, after it has claimed search-field focus.
+pub(super) fn route_opening_input(
+    ctx: &Context,
+    before: Vec<egui::Event>,
+    following: Vec<egui::Event>,
+) {
+    ctx.input_mut(|input| input.events = before);
+    ctx.data_mut(|data| data.insert_temp(palette_id().with("opening-input"), following));
+}
+
+struct OpeningInputScope {
+    ctx: Context,
+    previous: Option<Vec<egui::Event>>,
+}
+
+impl OpeningInputScope {
+    fn enter(ctx: &Context) -> Self {
+        let following = ctx.data_mut(|data| {
+            data.remove_temp::<Vec<egui::Event>>(palette_id().with("opening-input"))
+        });
+        Self {
+            ctx: ctx.clone(),
+            previous: following.map(|following| {
+                ctx.input_mut(|input| std::mem::replace(&mut input.events, following))
+            }),
+        }
+    }
+}
+
+impl Drop for OpeningInputScope {
+    fn drop(&mut self) {
+        if let Some(previous) = self.previous.take() {
+            self.ctx.input_mut(|input| input.events = previous);
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 struct PaletteKeys {
     previous: bool,
@@ -827,8 +865,12 @@ impl RSpiceApp {
 
     pub(in crate::workbench) fn render_command_palette(&mut self, ctx: &Context) {
         if !self.state.dialogs.command_palette.open {
+            ctx.data_mut(|data| {
+                data.remove_temp::<Vec<egui::Event>>(palette_id().with("opening-input"));
+            });
             return;
         }
+        let _opening_input = OpeningInputScope::enter(ctx);
 
         let viewport = ctx.content_rect();
         let layout = PaletteLayout::resolve(viewport, ctx.input(|input| input.has_touch_screen()));

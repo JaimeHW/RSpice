@@ -303,6 +303,130 @@ fn opening_shortcut_and_repeated_letters_in_one_frame_preserve_the_search() {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+fn primary_key_event(key: Key) -> egui::Event {
+    egui::Event::Key {
+        key,
+        physical_key: Some(key),
+        pressed: true,
+        repeat: false,
+        modifiers: Modifiers::CTRL | Modifiers::COMMAND,
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn opening_input_keeps_palette_editing_keys() {
+    let ctx = Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
+    let mut app = test_app();
+    let _ = ctx.run_ui(
+        raw_input(vec![
+            primary_key_event(Key::K),
+            egui::Event::Text("wrong".to_owned()),
+            primary_key_event(Key::A),
+            egui::Event::Paste("Review comments".to_owned()),
+        ]),
+        |ctx| {
+            app.handle_shortcuts(ctx);
+            app.render_command_palette(ctx);
+        },
+    );
+    assert_eq!(app.state.dialogs.command_palette.query, "Review comments");
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn opening_input_respects_custom_palette_bindings() {
+    use crate::workbench::{ShortcutBindingSlot, ShortcutSequence, ShortcutStroke};
+
+    for chord in [false, true] {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
+        let mut app = test_app();
+        let strokes = if chord {
+            vec![
+                ShortcutStroke::new(Key::K, true, false, false),
+                ShortcutStroke::new(Key::P, true, false, false),
+            ]
+        } else {
+            vec![ShortcutStroke::new(Key::K, false, false, false)]
+        };
+        app.state
+            .ui
+            .preferences
+            .shortcuts_mut()
+            .unwrap()
+            .set_binding(
+                Command::CommandPalette,
+                ShortcutBindingSlot::Primary,
+                vec![CommandPlatform::Desktop],
+                Some(ShortcutSequence::new(strokes).unwrap()),
+            )
+            .unwrap();
+        if chord {
+            let _ = ctx.run_ui(raw_input(vec![primary_key_event(Key::K)]), |ctx| {
+                app.handle_shortcuts(ctx)
+            });
+            assert!(!app.state.dialogs.command_palette.open);
+        }
+        let mut events = if chord {
+            vec![primary_key_event(Key::P)]
+        } else {
+            vec![key_event(Key::K), egui::Event::Text("k".to_owned())]
+        };
+        if chord {
+            events.extend([
+                egui::Event::Text("wrong".to_owned()),
+                primary_key_event(Key::A),
+            ]);
+        }
+        events.push(egui::Event::Paste("Review comments".to_owned()));
+        let _ = ctx.run_ui(raw_input(events), |ctx| {
+            app.handle_shortcuts(ctx);
+            app.render_command_palette(ctx);
+        });
+        assert_eq!(app.state.dialogs.command_palette.query, "Review comments");
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn opening_input_is_owned_before_background_text_edits() {
+    for before in ["", " before"] {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
+        let underlying_id = Id::new("palette-opening-background-editor");
+        let mut underlying = "unchanged".to_owned();
+        let _ = ctx.run_ui(raw_input(Vec::new()), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                ui.add(egui::TextEdit::singleline(&mut underlying).id(underlying_id))
+                    .request_focus();
+            });
+        });
+        let mut app = test_app();
+        let _ = ctx.run_ui(
+            raw_input(vec![
+                egui::Event::Text(before.to_owned()),
+                primary_key_event(Key::K),
+                egui::Event::Text("Review comments".to_owned()),
+            ]),
+            |ctx| {
+                app.handle_shortcuts(ctx);
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    ui.add(egui::TextEdit::singleline(&mut underlying).id(underlying_id));
+                });
+                app.render_command_palette(ctx);
+            },
+        );
+        assert_eq!(underlying, format!("unchanged{before}"));
+        assert_eq!(app.state.dialogs.command_palette.query, "Review comments");
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn empty_all_scope_uses_mockup_suggestions_and_explicit_scopes_remain_complete() {
     let mut app = test_app();

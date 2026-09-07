@@ -24,11 +24,9 @@ RESOLUTION = "Resolution verified in the browser."
 
 
 def create_and_resolve_review(browser):
-    choose_command(browser, "Review comments")
-    browser.click("New comment", "button")
-    # This dialog puts initial keyboard focus in the documentation text field.
-    browser.keys("a", modifiers=("\ue009",))
-    browser.keys(REVIEW_TITLE)
+    choose_command(browser, "Review comments", input_burst=True)
+    # The click and immediate editing input share one WebDriver request.
+    browser.click("New comment", "button", keyboard=(("a", ("\ue009",)), (REVIEW_TITLE, ())))
     browser.click("Arm text tool", "button")
     browser.click("Schematic canvas", "canvas")
     browser.keys("\ue00c")
@@ -139,13 +137,21 @@ def verify_recovery_copy(project, recovered, filename):
         raise AssertionError("Recovery changed content beyond the new identity and destination")
 
 
-def choose_command(browser, label):
-    browser.keys("k", modifiers=("\ue009",))
-    wait_for(lambda: any(control["label"] == "Command search" and control["role"] == "comboBox"
-                        for control in controls(browser.snapshot())), "the command palette search field")
-    browser.click("Command search", "comboBox")
-    browser.keys("a", modifiers=("\ue009",))
-    browser.keys(label)
+def choose_command(browser, label, *, input_burst=False):
+    if input_burst:
+        browser.key_sequence((("k", ("\ue009",)), ("wrong", ()), ("a", ("\ue009",)), (label, ())))
+        snapshot = browser.capture("palette-input-burst")
+        search = [control for control in controls(snapshot)
+                  if control["label"] == "Command search" and control["role"] == "comboBox"]
+        if len(search) != 1 or search[0]["value"] != label:
+            raise AssertionError(f"Opening palette input was lost or routed incorrectly: {search}")
+    else:
+        browser.keys("k", modifiers=("\ue009",))
+        wait_for(lambda: any(control["label"] == "Command search" and control["role"] == "comboBox"
+                            for control in controls(browser.snapshot())), "the command palette search field")
+        browser.click("Command search", "comboBox")
+        browser.keys("a", modifiers=("\ue009",))
+        browser.keys(label)
     wait_for(lambda: any(control["label"] == label and control["role"] == "listBoxOption"
                         for control in controls(browser.snapshot())), f"the {label!r} command")
     browser.click(label, "listBoxOption")

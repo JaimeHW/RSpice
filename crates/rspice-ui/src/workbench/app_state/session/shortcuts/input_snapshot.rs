@@ -50,33 +50,39 @@ impl ShortcutInputSnapshot {
         if keys.is_empty() {
             return true;
         }
-        let mut events = input.events.iter().enumerate();
-        let mut indices = Vec::with_capacity(keys.len());
-        for (key, modifiers) in keys {
-            let Some((index, _)) = events.find(|(_, event)| {
-                matches!(event, Event::Key {
-                    key: event_key,
-                    modifiers: event_modifiers,
-                    pressed: true,
-                    repeat: false,
-                    ..
-                } if event_key == key && event_modifiers == modifiers)
-            }) else {
-                return false;
-            };
-            indices.push(index);
-        }
-        let mut indices = indices.into_iter().peekable();
-        let mut index = 0;
-        input.events.retain(|_| {
-            let consume = indices.peek() == Some(&index);
-            if consume {
-                indices.next();
-            }
-            index += 1;
-            !consume
-        });
+        let Some(indices) = matching_key_indices(&input.events, keys) else {
+            return false;
+        };
+        remove_events_at_indices(&mut input.events, indices);
         true
+    }
+
+    /// Separate input for the old and new focus owners, excluding the command
+    /// strokes themselves. Text, paste, IME, and editing keys retain their order.
+    pub(crate) fn partition_after_keys(
+        input: &InputState,
+        keys: &[(Key, Modifiers)],
+    ) -> Option<(Vec<Event>, Vec<Event>)> {
+        let mut indices = matching_key_indices(&input.events, keys)?;
+        // Integrations emit a printable key's text immediately after its key
+        // event. A custom bare/Shift/Alt chord owns that text too; otherwise
+        // the opening character would become part of the new search query.
+        for (position, (key, modifiers)) in keys.iter().enumerate() {
+            let text_index = indices[position] + 1;
+            if !modifiers.command
+                && !modifiers.ctrl
+                && !modifiers.mac_cmd
+                && (key.name().chars().count() == 1 || *key == Key::Space)
+                && matches!(input.events.get(text_index), Some(Event::Text(_)))
+            {
+                indices.push(text_index);
+            }
+        }
+        indices.sort_unstable();
+        let end = indices.last().map_or(0, |index| index + 1);
+        let mut before = input.events[..end].to_vec();
+        remove_events_at_indices(&mut before, indices);
+        Some((before, input.events[end..].to_vec()))
     }
 
     pub(super) fn key_presses(&self) -> &[ShortcutKeyPress] {
@@ -102,6 +108,37 @@ impl ShortcutInputSnapshot {
             non_canvas_focus,
         }
     }
+}
+
+fn matching_key_indices(events: &[Event], keys: &[(Key, Modifiers)]) -> Option<Vec<usize>> {
+    let mut events = events.iter().enumerate();
+    let mut indices = Vec::with_capacity(keys.len());
+    for (key, modifiers) in keys {
+        let (index, _) = events.find(|(_, event)| {
+            matches!(event, Event::Key {
+                key: event_key,
+                modifiers: event_modifiers,
+                pressed: true,
+                repeat: false,
+                ..
+            } if event_key == key && event_modifiers == modifiers)
+        })?;
+        indices.push(index);
+    }
+    Some(indices)
+}
+
+fn remove_events_at_indices(events: &mut Vec<Event>, indices: Vec<usize>) {
+    let mut indices = indices.into_iter().peekable();
+    let mut index = 0;
+    events.retain(|_| {
+        let consume = indices.peek() == Some(&index);
+        if consume {
+            indices.next();
+        }
+        index += 1;
+        !consume
+    });
 }
 
 fn collect_key_presses(events: &[Event]) -> Vec<ShortcutKeyPress> {

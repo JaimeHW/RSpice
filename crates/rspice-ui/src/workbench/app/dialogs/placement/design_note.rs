@@ -29,6 +29,10 @@ const PANE_PADDING: i8 = 14;
 const DISCARD_TITLE: &str = "Unsaved dialog changes";
 const DISCARD_DETAIL: &str = "Choose Discard changes again to close, or continue editing. No schematic documentation has been changed.";
 
+fn text_id() -> egui::Id {
+    egui::Id::new(("rspice.design-note", "text"))
+}
+
 #[derive(Debug)]
 enum DraftValidation {
     Invalid(String),
@@ -67,7 +71,7 @@ impl RSpiceApp {
             })
             .primary_enabled(validation.can_commit())
             .primary_on_enter(false)
-            .initial_focus(DialogInitialFocus::BodyControl);
+            .initial_focus(DialogInitialFocus::Control(text_id()));
         if discard_confirm {
             dialog = dialog.transaction_state(
                 DialogTransactionTone::Error,
@@ -285,6 +289,7 @@ fn fields_pane(
                 ui.add_sized(
                     [ui.available_width(), 72.0],
                     TextEdit::multiline(&mut draft.text)
+                        .id(text_id())
                         .font(theme::mono(tokens::FS_1, FontWeight::Regular))
                         .hint_text("Bias network"),
                 )
@@ -529,6 +534,46 @@ fn paint_preview(ui: &mut Ui, draft: &DesignNoteDialogState, preview_text: &str,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn opening_input_reaches_design_note_text() {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
+        let mut app = RSpiceApp::test_instance();
+        app.state.dialogs.design_note.open(
+            app.state.design_execution_epoch,
+            app.state.active_schematic_epoch,
+            app.state.schematic.topology_version(),
+            app.state.workspace.active_view.display_path(),
+        );
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1280.0, 800.0),
+                )),
+                events: vec![
+                    egui::Event::Key {
+                        key: egui::Key::A,
+                        physical_key: Some(egui::Key::A),
+                        pressed: true,
+                        repeat: false,
+                        modifiers: egui::Modifiers::CTRL | egui::Modifiers::COMMAND,
+                    },
+                    egui::Event::Paste("Browser recovery qualification".to_owned()),
+                ],
+                ..Default::default()
+            },
+            |ctx| app.render_design_note_dialog(ctx),
+        );
+        assert_eq!(
+            app.state.dialogs.design_note.text,
+            "Browser recovery qualification"
+        );
+        assert!(app.state.dialogs.design_note.dirty);
+        assert!(app.state.schematic.design_notes.is_empty());
+    }
 
     #[test]
     fn mockup_contract_is_exact() {

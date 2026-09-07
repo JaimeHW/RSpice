@@ -109,10 +109,26 @@ impl RSpiceApp {
         if let Some(delay) = resolution.repaint_after {
             ctx.request_repaint_after(delay);
         }
+        let palette_input = if resolution.command == Some(ShortcutCommand::CommandPalette) {
+            ctx.input(|input| {
+                ShortcutInputSnapshot::partition_after_keys(
+                    input,
+                    &resolution.consume[..resolution.deferred_start],
+                )
+            })
+        } else {
+            None
+        };
         let consumed =
             ctx.input_mut(|input| ShortcutInputSnapshot::consume_keys(input, &resolution.consume));
         if consumed && let Some(command) = resolution.command {
             self.execute_shortcut_command(command);
+            if self.state.dialogs.command_palette.open
+                && let Some((before, following)) = palette_input
+            {
+                super::command_palette::route_opening_input(ctx, before, following);
+                self.state.shortcut_resolver.reset();
+            }
         }
     }
 

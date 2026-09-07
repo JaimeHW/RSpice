@@ -518,6 +518,7 @@ fn review_body(
                         .clicked()
                     {
                         action = ReviewAction::NewComment;
+                        ui.close();
                     }
                 });
             });
@@ -1030,6 +1031,93 @@ mod tests {
             "Confirm model",
         )
         .unwrap()
+    }
+
+    #[test]
+    fn opening_input_follows_new_comment_click_in_the_same_frame() {
+        fn render(
+            app: &mut RSpiceApp,
+            ctx: &Context,
+            events: Vec<egui::Event>,
+        ) -> egui::FullOutput {
+            ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1280.0, 800.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| app.render_frame_dialogs(ui),
+            )
+        }
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
+        let mut app = RSpiceApp::test_instance();
+        open_design_review_comments(&mut app.state);
+        let _ = render(&mut app, &ctx, Vec::new());
+        let output = render(&mut app, &ctx, Vec::new());
+        let tree = output
+            .platform_output
+            .accesskit_update
+            .expect("review controls");
+        let button = tree
+            .nodes
+            .iter()
+            .find(|(_, node)| {
+                node.role() == egui::accesskit::Role::Button && node.label() == Some("New comment")
+            })
+            .expect("New comment button")
+            .1
+            .bounds()
+            .unwrap();
+        let pos = egui::pos2(
+            ((button.x0 + button.x1) / 2.0) as f32,
+            ((button.y0 + button.y1) / 2.0) as f32,
+        );
+        let _ = render(
+            &mut app,
+            &ctx,
+            vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        let _ = render(
+            &mut app,
+            &ctx,
+            vec![
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                egui::Event::Key {
+                    key: egui::Key::A,
+                    physical_key: Some(egui::Key::A),
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::CTRL | egui::Modifiers::COMMAND,
+                },
+                egui::Event::Paste("Browser recovery qualification".to_owned()),
+            ],
+        );
+        assert!(!app.state.dialogs.design_review_comments.open);
+        assert!(app.state.dialogs.design_note.open);
+        assert_eq!(
+            app.state.dialogs.design_note.text,
+            "Browser recovery qualification"
+        );
+        assert!(app.state.schematic.design_notes.is_empty());
     }
 
     #[test]

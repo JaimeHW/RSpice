@@ -825,6 +825,8 @@ impl RSpiceApp {
         self.render_descend_hierarchy_dialog(ctx);
         self.render_engineering_table_dialog(ctx);
         self.render_pin_port_dialog(ctx);
+        // New comment hands input to the note editor in this same frame.
+        self.render_design_review_comments_dialog(ctx);
         self.render_design_note_dialog(ctx);
         self.render_documentation_shape_dialog(ctx);
         self.render_selection_workflow_dialog(ctx);
@@ -837,7 +839,6 @@ impl RSpiceApp {
         self.render_connectivity_manager_dialog(ctx);
         self.render_design_management_dialog(ctx);
         self.render_selection_bulk_edit_dialog(ctx);
-        self.render_design_review_comments_dialog(ctx);
         self.render_project_revision_history_dialog(ctx);
         self.render_source_document_dialog(ctx);
         self.render_source_find_dialog(ctx);

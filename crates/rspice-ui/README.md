@@ -189,7 +189,10 @@ and HTTP origin. It posts and resolves a review, creates an IndexedDB checkpoint
 checks durable timestamps and content, exports an independent recovery copy, and
 opens revision history through real keyboard and pointer input. Screenshots,
 rendered control trees, browser errors, asset hashes, and saved bytes remain in
-the output directory. The observer adds no editor commands or authorization
+the output directory. Opening input includes a palette shortcut followed immediately
+by text and Select All, plus a New comment click followed by immediate typing in
+the same WebDriver request. These steps have no intervening control-settling wait;
+native regressions additionally exercise a single egui pass. The observer adds no editor commands or authorization
 overrides. Its periodic repaint excludes this image from idle/performance budgets;
 it does not provide a production accessibility bridge. CI runs the harness's
 integrity regressions and the workbench sequence with software WebGPU, retaining

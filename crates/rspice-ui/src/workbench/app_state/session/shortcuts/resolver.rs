@@ -29,6 +29,9 @@ pub(crate) struct ShortcutEnvironment {
 pub(crate) struct ShortcutResolution {
     pub(crate) command: Option<Command>,
     pub(crate) consume: Vec<(egui::Key, egui::Modifiers)>,
+    /// Live presses before this index complete the command; later presses
+    /// belong to its continuation and may need a different input owner.
+    pub(crate) deferred_start: usize,
     pub(crate) repaint_after: Option<Duration>,
 }
 
@@ -124,6 +127,7 @@ impl ShortcutResolverState {
                     return ShortcutResolution {
                         command,
                         consume,
+                        deferred_start: 0,
                         repaint_after: None,
                     };
                 }
@@ -138,6 +142,7 @@ impl ShortcutResolverState {
                 return ShortcutResolution {
                     command: pending_analysis.best_exact(),
                     consume,
+                    deferred_start: 0,
                     repaint_after: None,
                 };
             }
@@ -180,10 +185,12 @@ impl ShortcutResolverState {
                     self.pending_since = Some(now);
                     continue;
                 }
+                let deferred_start = consume.len();
                 self.defer_remaining(&queued, event_index + 1, &mut consume);
                 return ShortcutResolution {
                     command: analysis.best_exact(),
                     consume,
+                    deferred_start,
                     repaint_after: None,
                 };
             }
@@ -217,10 +224,12 @@ impl ShortcutResolverState {
                     // resolver pass. Live egui events are consumed now so no
                     // legacy handler can execute a second product command in
                     // this frame.
+                    let deferred_start = consume.len();
                     self.defer_remaining(&queued, event_index, &mut consume);
                     return ShortcutResolution {
                         command: Some(command),
                         consume,
+                        deferred_start,
                         repaint_after: None,
                     };
                 }
@@ -248,10 +257,12 @@ impl ShortcutResolverState {
                     self.pending_since = Some(now);
                     continue;
                 }
+                let deferred_start = consume.len();
                 self.defer_remaining(&queued, event_index + 1, &mut consume);
                 return ShortcutResolution {
                     command: fresh.best_exact(),
                     consume,
+                    deferred_start,
                     repaint_after: None,
                 };
             }
@@ -265,10 +276,12 @@ impl ShortcutResolverState {
                 continue;
             }
             self.clear_pending();
+            let deferred_start = consume.len();
             self.defer_remaining(&queued, event_index + 1, &mut consume);
             return ShortcutResolution {
                 command: analysis.best_exact(),
                 consume,
+                deferred_start,
                 repaint_after: None,
             };
         }
@@ -278,6 +291,7 @@ impl ShortcutResolverState {
         });
         ShortcutResolution {
             command: None,
+            deferred_start: consume.len(),
             consume,
             repaint_after,
         }
@@ -601,6 +615,7 @@ mod tests {
         );
         assert_eq!(second.command, Some(Command::CommandPalette));
         assert_eq!(second.consume.len(), 2);
+        assert_eq!(second.deferred_start, 1);
         let deferred = state.resolve(
             &ShortcutInputSnapshot::empty_for_test(false),
             &profile,
@@ -706,6 +721,7 @@ mod tests {
         );
         assert_eq!(mismatch.command, Some(Command::Preferences));
         assert_eq!(mismatch.consume.len(), 1);
+        assert_eq!(mismatch.deferred_start, 0);
         let deferred = state.resolve(
             &ShortcutInputSnapshot::empty_for_test(false),
             &profile,

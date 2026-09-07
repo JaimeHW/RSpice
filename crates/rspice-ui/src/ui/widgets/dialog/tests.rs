@@ -650,6 +650,74 @@ fn requested_body_control_receives_initial_focus_once() {
 }
 
 #[test]
+fn known_body_control_processes_opening_input_and_preserves_later_focus() {
+    let ctx = Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
+    let first = Id::new("known-dialog-first-field");
+    let second = Id::new("known-dialog-second-field");
+    let mut first_text = "default".to_owned();
+    let mut second_text = String::new();
+    let mut render = |ui: &mut Ui| {
+        let ctx = ui.ctx();
+        Dialog::new("TEST", TEST_TITLE, "Accept")
+            .initial_focus(DialogInitialFocus::Control(first))
+            .show_with_initial_body_focus(ctx, |ui| {
+                let response = ui.add(egui::TextEdit::singleline(&mut first_text).id(first));
+                ui.add(egui::TextEdit::singleline(&mut second_text).id(second));
+                Some(response.id)
+            });
+    };
+    let _ = ctx.run_ui(
+        raw_input(vec![
+            key_event(Key::A, Modifiers::CTRL | Modifiers::COMMAND),
+            egui::Event::Paste("first".to_owned()),
+        ]),
+        &mut render,
+    );
+    ctx.memory_mut(|memory| memory.request_focus(second));
+    let _ = ctx.run_ui(
+        raw_input(vec![egui::Event::Paste("second".to_owned())]),
+        render,
+    );
+    assert_eq!(first_text, "first");
+    assert_eq!(second_text, "second");
+    assert_eq!(ctx.memory(|memory| memory.focused()), Some(second));
+}
+
+#[test]
+fn unavailable_known_body_control_falls_back_without_editing_another_field() {
+    for enabled in [false, true] {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
+        let declared = Id::new("unavailable-declared-field");
+        let mut text = "unchanged".to_owned();
+        let _ = ctx.run_ui(
+            raw_input(vec![egui::Event::Paste("wrong owner".to_owned())]),
+            |ctx| {
+                Dialog::new("TEST", TEST_TITLE, "Accept")
+                    .interaction_enabled(enabled)
+                    .initial_focus(DialogInitialFocus::Control(declared))
+                    .show_with_initial_body_focus(ctx, |ui| {
+                        let actual = if enabled {
+                            declared.with("other")
+                        } else {
+                            declared
+                        };
+                        Some(ui.add(egui::TextEdit::singleline(&mut text).id(actual)).id)
+                    });
+            },
+        );
+        assert_eq!(text, "unchanged");
+        assert_eq!(
+            ctx.memory(|memory| memory.focused()),
+            Some(dialog_focus_id())
+        );
+    }
+}
+
+#[test]
 fn unavailable_initial_focus_target_falls_back_to_modal_container() {
     let ctx = Context::default();
     crate::ui::Theme::default().apply(&ctx);

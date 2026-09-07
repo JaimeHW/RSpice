@@ -453,6 +453,9 @@ pub enum DialogInitialFocus {
     Container,
     /// Focus the body control returned by `show_with_initial_body_focus`.
     BodyControl,
+    /// Focus a known body control before it processes opening-frame input.
+    /// The body must return this id from `show_with_initial_body_focus`.
+    Control(Id),
     /// Focus the header close control.
     Close,
     /// Focus the primary footer action.
@@ -481,6 +484,7 @@ impl DialogRenderedFocus {
         match target {
             DialogInitialFocus::Container => None,
             DialogInitialFocus::BodyControl => self.body,
+            DialogInitialFocus::Control(id) => self.body.filter(|body| *body == id),
             DialogInitialFocus::Close => self.close,
             DialogInitialFocus::Primary => self.primary,
             DialogInitialFocus::Ghost => self.ghost,
@@ -794,10 +798,14 @@ impl<'a> Dialog<'a> {
 
         let opened_this_pass = begin_dialog_focus(ctx, focus_state_id);
         if opened_this_pass || !focus_is_within_modal(ctx, modal_layer) {
-            // Claim focus before any dialog fields are rendered. A body field
-            // may intentionally request focus later in this pass.
+            let initial_target = match self.initial_focus {
+                DialogInitialFocus::Control(id) if self.interaction_enabled => id,
+                _ => focus_id,
+            };
+            // A known control can process text and editing keys immediately;
+            // callbacks that discover their target retain the container fallback.
             ctx.memory_mut(|memory| {
-                memory.request_focus(focus_id);
+                memory.request_focus(initial_target);
                 if opened_this_pass {
                     // Do not let the Tab direction that triggered opening
                     // carry a stale target from the underlying focus chain.
@@ -1072,6 +1080,7 @@ impl<'a> Dialog<'a> {
         if opened_this_pass && self.initial_focus != DialogInitialFocus::Container {
             let target = rendered_focus
                 .requested(self.initial_focus)
+                .filter(|_| self.interaction_enabled)
                 .unwrap_or(focus_id);
             ctx.memory_mut(|memory| memory.request_focus(target));
         }

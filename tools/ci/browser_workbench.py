@@ -78,6 +78,18 @@ def controls(snapshot):
     return result
 
 
+def key_actions(sequence):
+    """Build one ordered WebDriver sequence, including modifier releases."""
+    actions = []
+    for text, modifiers in sequence:
+        actions.extend({"type": "keyDown", "value": modifier} for modifier in modifiers)
+        for character in text:
+            actions.extend([{"type": "keyDown", "value": character},
+                            {"type": "keyUp", "value": character}])
+        actions.extend({"type": "keyUp", "value": modifier} for modifier in reversed(modifiers))
+    return actions
+
+
 class WorkbenchBrowser:
     def __init__(self, web_root: Path, output: Path, driver: str | None = None,
                  browser: str | None = None, software_webgpu: bool = False):
@@ -216,7 +228,7 @@ class WorkbenchBrowser:
 
         return wait_for(current, "a fresh rendered-control snapshot", 90)
 
-    def click(self, label, role=None):
+    def click(self, label, role=None, *, keyboard=()):
         candidates = [control for control in controls(self.snapshot())
                       if control["label"] == label and (role is None or control["role"] == role)]
         if len(candidates) != 1:
@@ -228,23 +240,30 @@ class WorkbenchBrowser:
         """)
         x, y = (round(canvas[axis] + point[i] / canvas["ratio"])
                 for i, axis in enumerate(("x", "y")))
-        self.record_input("click", label=label, role=role, node=candidates[0]["id"], x=x, y=y)
-        self.call("POST", "/actions", {"actions": [{"type": "pointer", "id": "mouse",
-            "parameters": {"pointerType": "mouse"}, "actions": [
+        self.record_input("click", label=label, role=role, node=candidates[0]["id"], x=x, y=y,
+                          keyboard=keyboard)
+        pointer = [
                 {"type": "pointerMove", "duration": 0, "origin": "viewport", "x": x, "y": y},
                 {"type": "pointerDown", "button": 0}, {"type": "pause", "duration": 60},
                 {"type": "pointerUp", "button": 0},
-            ]}]})
-        self.snapshot()  # Process the click before subsequent typing or assertions.
+        ]
+        sources = [{"type": "pointer", "id": "mouse",
+                    "parameters": {"pointerType": "mouse"}, "actions": pointer}]
+        if keyboard:
+            # W3C sources advance together by tick: begin typing directly after
+            # release, without a rendered-control wait between click and text.
+            sources.append({"type": "key", "id": "keyboard", "actions":
+                            [{"type": "pause", "duration": 0} for _ in pointer] + key_actions(keyboard)})
+        self.call("POST", "/actions", {"actions": sources})
+        self.snapshot()
 
     def keys(self, text, modifiers=()):
-        self.record_input("keys", text=text, modifiers=modifiers)
-        actions = [{"type": "keyDown", "value": modifier} for modifier in modifiers]
-        for character in text:
-            actions.extend([{"type": "keyDown", "value": character},
-                            {"type": "keyUp", "value": character}])
-        actions.extend({"type": "keyUp", "value": modifier} for modifier in reversed(modifiers))
-        self.call("POST", "/actions", {"actions": [{"type": "key", "id": "keyboard", "actions": actions}]})
+        self.key_sequence(((text, modifiers),))
+
+    def key_sequence(self, sequence):
+        self.record_input("keys", sequence=sequence)
+        self.call("POST", "/actions", {"actions": [{"type": "key", "id": "keyboard",
+                                                   "actions": key_actions(sequence)}]})
 
     def capture(self, name):
         try:
