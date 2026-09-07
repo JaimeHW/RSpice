@@ -59,7 +59,8 @@ pub struct PssConfig {
     pub tolerance: Value,
 
     /// Absolute tolerance for small signals.
-    /// Used when ||x(0)|| is very small to prevent division issues.
+    /// The orbit also converges when ||x(T) - x(0)|| < abstol, including
+    /// when the initial state is zero and the relative error is undefined.
     /// Default: 1e-12
     pub abstol: Value,
 

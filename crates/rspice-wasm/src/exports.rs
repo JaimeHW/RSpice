@@ -201,6 +201,32 @@ mod wasm_tests {
     use crate::js_interop::{js_array_property, js_property};
 
     #[wasm_bindgen_test]
+    fn small_signal_shooting_closes_the_period_in_wasm() {
+        let netlist = rspice_core::Netlist::parse(
+            "WASM small-signal shooting\nV1 in 0 SIN(0 1u 1meg)\nR1 in out 1k\nC1 out 0 159.154943091895p\n.end\n",
+        )
+        .unwrap();
+        let result = rspice_core::Engine::default()
+            .run_pss(
+                &netlist,
+                rspice_core::analysis::PssConfig::new(1e6)
+                    .with_tstab_periods(0)
+                    .with_points_per_period(512),
+            )
+            .unwrap();
+        let node = result
+            .result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("out"))
+            .unwrap();
+        let voltage = &result.result.waveforms[node].values;
+        assert!(result.iterations > 0);
+        assert!((voltage[0] + 0.5e-6).abs() < 1e-12);
+        assert!((voltage.last().unwrap() - voltage[0]).abs() < 1e-14);
+    }
+
+    #[wasm_bindgen_test]
     fn monte_carlo_host_entropy_is_available_and_replayable_in_wasm() {
         use rspice_core::analysis::{MonteCarloConfig, MonteCarloRunner, Tolerance};
         let run = |config| {

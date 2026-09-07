@@ -76,17 +76,35 @@ impl ShootingState {
 
     /// Get residual norm (L2)
     pub fn residual_norm(&self) -> Value {
-        self.residual.iter().map(|r| r * r).sum::<Value>().sqrt()
+        self.residual.iter().fold(0.0, |norm, &r| norm.hypot(r))
     }
 
-    /// Get relative residual norm
+    /// Get the relative L2 residual. A zero initial state has zero relative
+    /// error only for an exact zero residual; otherwise the absolute
+    /// convergence criterion must decide whether the orbit has closed.
     pub fn relative_residual_norm(&self) -> Value {
-        let x0_norm = self.x0.iter().map(|x| x * x).sum::<Value>().sqrt();
-        if x0_norm > 1e-12 {
-            self.residual_norm() / x0_norm
-        } else {
-            self.residual_norm()
+        let Some(scale) = self
+            .x0
+            .iter()
+            .chain(&self.residual)
+            .try_fold(0.0_f64, |scale, &x| {
+                x.is_finite().then_some(scale.max(x.abs()))
+            })
+        else {
+            return Value::NAN;
+        };
+        if scale == 0.0 {
+            return 0.0;
         }
+        // Normalize both vectors by the same maximum component before
+        // taking either norm. Either L2 norm may exceed f64 while the ratio
+        // fits; every normalized component is bounded by one.
+        let norm = |values: &[Value]| {
+            values
+                .iter()
+                .fold(0.0_f64, |norm, &x| norm.hypot(x / scale))
+        };
+        norm(&self.residual) / norm(&self.x0)
     }
 
     /// Update initial state estimate
@@ -176,7 +194,20 @@ impl ShootingNewtonSolver {
         let rel_norm = state.relative_residual_norm();
         let abs_norm = state.residual_norm();
 
-        self.converged = rel_norm < self.tolerance || abs_norm < self.abstol;
+        self.converged = self.tolerance.is_finite()
+            && self.tolerance > 0.0
+            && self.abstol.is_finite()
+            && self.abstol > 0.0
+            && state.x0.len() == state.n_states
+            && state.x_t.len() == state.n_states
+            && state.residual.len() == state.n_states
+            && state
+                .x0
+                .iter()
+                .chain(&state.x_t)
+                .chain(&state.residual)
+                .all(|x| x.is_finite())
+            && (rel_norm < self.tolerance || abs_norm < self.abstol);
         self.iteration += 1;
 
         self.converged
@@ -362,6 +393,61 @@ impl Default for ShootingNewtonSolver {
 mod tests {
     use super::*;
     use crate::abort_signal::ImmediateAbort;
+
+    #[test]
+    fn shooting_relative_tolerance_never_becomes_an_absolute_small_signal_floor() {
+        let mut state = ShootingState::new(vec![0.0], 1.0);
+        state.x_t[0] = 5e-8;
+        state.compute_residual();
+        let mut solver = ShootingNewtonSolver::default();
+        assert!(!solver.check_convergence(&state));
+        state.x_t[0] = 5e-13;
+        state.compute_residual();
+        assert!(solver.check_convergence(&state));
+        state.x_t[0] = 0.0;
+        state.compute_residual();
+        assert_eq!(state.relative_residual_norm(), 0.0);
+    }
+
+    #[test]
+    fn shooting_norms_preserve_small_and_large_finite_residuals() {
+        for scale in [1e-250, 1e-100, 1.0, 1e100, 1e250] {
+            let mut state = ShootingState::new(vec![3.0 * scale, 4.0 * scale], 1.0);
+            state.residual = vec![3e-5 * scale, 4e-5 * scale];
+            let expected = 5e-5 * scale;
+            assert!((state.residual_norm() / expected - 1.0).abs() < 1e-14);
+            assert!((state.relative_residual_norm() / 1e-5 - 1.0).abs() < 1e-14);
+        }
+        // The initial norm itself exceeds f64, although the state entries,
+        // residual norm and relative error are all representable.
+        let mut state = ShootingState::new(vec![1e308; 4], 1.0);
+        state.residual = vec![1e298; 4];
+        assert!((state.relative_residual_norm() / 1e-10 - 1.0).abs() < 1e-14);
+        let mut state = ShootingState::new(vec![1.0; 4], 1.0);
+        state.residual = vec![1e308; 4];
+        assert!((state.relative_residual_norm() / 1e308 - 1.0).abs() < 1e-14);
+    }
+
+    #[test]
+    fn shooting_convergence_refuses_nonfinite_or_incomplete_state() {
+        let mut solver = ShootingNewtonSolver::default();
+        for value in [Value::NAN, Value::INFINITY, Value::NEG_INFINITY] {
+            for lane in 0..3 {
+                let mut state = ShootingState::new(vec![0.0], 1.0);
+                match lane {
+                    0 => state.x0[0] = value,
+                    1 => state.x_t[0] = value,
+                    _ => state.residual[0] = value,
+                }
+                assert!(!solver.check_convergence(&state), "lane={lane}, {value}");
+            }
+        }
+        let mut state = ShootingState::new(vec![0.0], 1.0);
+        state.residual.clear();
+        assert!(!solver.check_convergence(&state));
+        let state = ShootingState::new(vec![0.0], 1.0);
+        assert!(!ShootingNewtonSolver::new(Value::INFINITY, 10).check_convergence(&state));
+    }
 
     #[test]
     fn shooting_newton_linear_solve_fails_closed_on_singular_system() {

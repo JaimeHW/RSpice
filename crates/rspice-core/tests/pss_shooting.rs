@@ -15,6 +15,46 @@ const R: f64 = 1.0e3;
 const C: f64 = 159.154943091895e-12; // RC corner ~ 1 MHz (w*RC = 1)
 
 #[test]
+fn small_signal_shooting_closes_the_orbit_from_a_zero_initial_state() {
+    for amplitude in [1.0_f64, 1e-3, 1e-6, 1e-7, 1e-9] {
+        let netlist = Netlist::parse(&format!(
+            "small-signal shooting\nV1 in 0 SIN(0 {amplitude} 1meg)\nR1 in out {R}\nC1 out 0 {C}\n.end\n"
+        ))
+        .unwrap();
+        let result = Engine::default()
+            .run_pss(
+                &netlist,
+                PssConfig::new(F0)
+                    .with_tstab_periods(0)
+                    .with_points_per_period(512),
+            )
+            .unwrap();
+        let node = result
+            .result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("out"))
+            .unwrap();
+        let voltage = &result.result.waveforms[node].values;
+        assert!(result.iterations > 0, "amplitude={amplitude:e}");
+        assert!((voltage[0] / amplitude + 0.5).abs() < 1e-6);
+        assert!((voltage.last().unwrap() - voltage[0]).abs() < 1e-8 * amplitude);
+        // Bound the existing O(dt^2) grid error, including the first BE
+        // interval, independently of the stricter periodic seam check.
+        let grid_bound = 0.5 * (std::f64::consts::TAU / 512.0).powi(2);
+        for (&time, &actual) in result.result.time.iter().zip(voltage) {
+            let angle = std::f64::consts::TAU * F0 * time;
+            let expected = 0.5 * (angle.sin() - angle.cos());
+            assert!(
+                (actual / amplitude - expected).abs() < grid_bound,
+                "amplitude={amplitude:e}, t={time:e}, normalized={:e}, expected={expected:e}",
+                actual / amplitude,
+            );
+        }
+    }
+}
+
+#[test]
 fn pss_sources_use_the_configured_dialect_and_one_period_for_time_defaults() {
     use rspice_core::config::SpiceDialect;
     for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
