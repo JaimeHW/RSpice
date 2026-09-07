@@ -18,7 +18,13 @@
 // scalar arguments so generated call sites inline without temporary arrays.
 #![allow(clippy::too_many_arguments)]
 
+mod analog_effects;
 mod compatibility_catalog;
+
+pub use analog_effects::{
+    AnalogEffectError, AnalogEffectJournal, AnalogEffectLimits, AnalogTaskArgument,
+    AnalogTaskInvocation, AnalogTaskKind,
+};
 
 pub use compatibility_catalog::{
     GENERATED_VERILOGA_COMPATIBILITY_CATALOG, GENERATED_VERILOGA_V27_COMBINED_IDENTITY_ALIASES,

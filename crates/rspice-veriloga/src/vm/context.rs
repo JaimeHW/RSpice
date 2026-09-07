@@ -325,6 +325,9 @@ pub struct VmContext {
     /// [`Self::event_state_indices`]. Runtime-only: checkpoints retain the
     /// canonical full variable vector after overlaying this committed lane.
     accepted_event_variables: Vec<f64>,
+    /// Lazily allocated task delivery state. Pure numerical models pay only
+    /// for the optional pointer and allocate no effect storage.
+    analog_effects: Option<Box<rspice_veriloga_runtime::AnalogEffectJournal>>,
     /// Current simulation time
     pub time: f64,
     /// Temperature in Kelvin
@@ -443,6 +446,7 @@ impl Default for VmContext {
             variables: Vec::new(),
             event_state_indices: Vec::new(),
             accepted_event_variables: Vec::new(),
+            analog_effects: None,
             time: 0.0,
             temperature: 300.15, // 27C default
             state_values: Vec::new(),
@@ -475,6 +479,36 @@ impl Default for VmContext {
 }
 
 impl VmContext {
+    /// Capture one analog task without producing an externally visible effect.
+    /// Only circuit-wide acceptance publishes calls for host delivery.
+    pub fn record_analog_task(
+        &mut self,
+        kind: rspice_veriloga_runtime::AnalogTaskKind,
+        site: u32,
+        arguments: Box<[rspice_veriloga_runtime::AnalogTaskArgument]>,
+    ) -> Result<(), VmError> {
+        let invocation = rspice_veriloga_runtime::AnalogTaskInvocation {
+            kind,
+            site,
+            time: self.time,
+            arguments,
+        };
+        self.analog_effects
+            .get_or_insert_with(Default::default)
+            .record(invocation)
+            .map_err(|error| VmError::AnalogTask(error.to_string()))
+    }
+
+    /// Accepted calls in execution order. Delivery consumes the calls so a
+    /// checkpoint/resume cannot replay output already handled by the host.
+    pub fn drain_accepted_analog_tasks(
+        &mut self,
+    ) -> impl Iterator<Item = rspice_veriloga_runtime::AnalogTaskInvocation> + '_ {
+        self.analog_effects
+            .iter_mut()
+            .flat_map(|journal| journal.drain_accepted())
+    }
+
     pub(crate) fn accepted_event_variables(&self) -> &[f64] {
         &self.accepted_event_variables
     }
@@ -496,6 +530,7 @@ impl VmContext {
             variables: Vec::new(),
             event_state_indices: Vec::new(),
             accepted_event_variables: Vec::new(),
+            analog_effects: None,
             time: 0.0,
             temperature: 300.15,
             state_values: Vec::new(),
@@ -543,6 +578,7 @@ impl VmContext {
             variables: Vec::new(),
             event_state_indices: Vec::new(),
             accepted_event_variables: Vec::new(),
+            analog_effects: None,
             time: 0.0,
             temperature: 300.15,
             state_values: Vec::new(),
@@ -590,6 +626,7 @@ impl VmContext {
             variables: Vec::new(),
             event_state_indices: Vec::new(),
             accepted_event_variables: Vec::new(),
+            analog_effects: None,
             time: 0.0,
             temperature: 300.15,
             state_values: vec![0.0; num_states],
@@ -700,6 +737,11 @@ impl VmContext {
 
     /// Validate every fallible accepted-state action without mutating the VM.
     pub(crate) fn validate_advance_state(&self) -> Result<(), VmError> {
+        if let Some(journal) = &self.analog_effects {
+            journal
+                .validate_candidate()
+                .map_err(|error| VmError::AnalogTask(error.to_string()))?;
+        }
         // Validate every sampled-filter commit before mutating any accepted
         // state. The second pass is deliberately infallible, preserving the
         // all-or-nothing contract without cloning filter histories (and
@@ -804,6 +846,9 @@ impl VmContext {
     /// Apply an accepted-state action after the circuit has validated every
     /// runtime-compiled instance. This phase is deliberately infallible.
     pub(crate) fn apply_validated_advance_state(&mut self) {
+        if let Some(journal) = &mut self.analog_effects {
+            journal.apply_validated_acceptance();
+        }
         let time = self.time;
         for (&index, accepted) in self
             .event_state_indices
@@ -852,6 +897,24 @@ impl VmContext {
     }
 
     pub(crate) fn accepted_checkpoint(&self) -> Result<VmAcceptedCheckpoint, VmError> {
+        if self
+            .analog_effects
+            .as_ref()
+            .is_some_and(|journal| journal.has_candidate())
+        {
+            return Err(VmError::AnalogTask(
+                "analog task invocations belong to an in-flight candidate".into(),
+            ));
+        }
+        if self
+            .analog_effects
+            .as_ref()
+            .is_some_and(|journal| !journal.accepted().is_empty())
+        {
+            return Err(VmError::AnalogTask(
+                "deliver accepted analog tasks before capturing a checkpoint".into(),
+            ));
+        }
         let invalid = |message: String| VmError::InvalidNumericResult(message);
         self.validate_event_state_layout()?;
         if self.state_candidate_valid.len() != self.state_values.len()
@@ -1091,6 +1154,9 @@ impl VmContext {
     }
 
     pub(crate) fn restore_accepted_checkpoint(&mut self, checkpoint: &VmAcceptedCheckpoint) {
+        if let Some(journal) = &mut self.analog_effects {
+            journal.reset_analysis();
+        }
         self.time = checkpoint.time;
         self.variables.clone_from(&checkpoint.variables);
         for (&index, accepted) in self
@@ -1165,6 +1231,9 @@ impl VmContext {
     /// variables and every analog-operator history start from their
     /// language-defined zero state.
     pub(crate) fn reset_analysis_state(&mut self) {
+        if let Some(journal) = &mut self.analog_effects {
+            journal.reset_analysis();
+        }
         self.variables.fill(0.0);
         self.accepted_event_variables.fill(0.0);
         self.time = 0.0;
@@ -1213,6 +1282,9 @@ impl VmContext {
     /// device evaluation. Only candidates recreated by the final Newton pass
     /// may be committed when the point is accepted.
     pub(crate) fn begin_stateful_evaluation(&mut self) {
+        if let Some(journal) = &mut self.analog_effects {
+            journal.discard_candidate();
+        }
         for (&index, &accepted) in self
             .event_state_indices
             .iter()
@@ -1693,6 +1765,132 @@ mod tests {
     use crate::laplace::StateSpaceFilter;
     use crate::timing_contract::SlewRateMagnitudes;
     use crate::zfilter::ZiFilter;
+    use rspice_veriloga_runtime::{
+        AnalogEffectJournal, AnalogEffectLimits, AnalogTaskArgument, AnalogTaskInvocation,
+        AnalogTaskKind,
+    };
+
+    fn task_call(site: u32, value: i64) -> AnalogTaskInvocation {
+        AnalogTaskInvocation {
+            kind: AnalogTaskKind::Display,
+            site,
+            time: 0.0,
+            arguments: Box::new([AnalogTaskArgument::Integer(value)]),
+        }
+    }
+
+    fn stage_task(context: &mut VmContext, site: u32, value: i64) -> Result<(), VmError> {
+        context.record_analog_task(
+            AnalogTaskKind::Display,
+            site,
+            Box::new([AnalogTaskArgument::Integer(value)]),
+        )
+    }
+
+    #[test]
+    fn analog_task_delivery_retains_its_execution_time() {
+        let mut context = VmContext::new(2);
+        context.time = 1.0;
+        stage_task(&mut context, 0, 1).unwrap();
+        context.validate_advance_state().unwrap();
+        context.apply_validated_advance_state();
+        context.time = 2.0;
+        stage_task(&mut context, 0, 2).unwrap();
+        context.validate_advance_state().unwrap();
+        context.apply_validated_advance_state();
+        let delivered = context.drain_accepted_analog_tasks().collect::<Vec<_>>();
+        assert_eq!(
+            delivered.iter().map(|call| call.time).collect::<Vec<_>>(),
+            [1.0, 2.0]
+        );
+    }
+
+    #[test]
+    fn analog_tasks_follow_the_vm_candidate_and_acceptance_lifecycle() {
+        let mut context = VmContext::new(2);
+        context.begin_stateful_evaluation();
+        context.validate_advance_state().unwrap();
+        context.apply_validated_advance_state();
+        assert!(
+            context.analog_effects.is_none(),
+            "numerical models allocate no journal"
+        );
+
+        stage_task(&mut context, 0, 1).unwrap();
+        assert_eq!(context.drain_accepted_analog_tasks().count(), 0);
+        context.begin_stateful_evaluation();
+        stage_task(&mut context, 1, 2).unwrap();
+        stage_task(&mut context, 1, 3).unwrap();
+        context.validate_advance_state().unwrap();
+        context.apply_validated_advance_state();
+        assert_eq!(
+            context.drain_accepted_analog_tasks().collect::<Vec<_>>(),
+            [task_call(1, 2), task_call(1, 3)]
+        );
+        context.validate_advance_state().unwrap();
+        context.apply_validated_advance_state();
+        assert_eq!(context.drain_accepted_analog_tasks().count(), 0);
+    }
+
+    #[test]
+    fn analog_task_resource_failure_prevents_state_acceptance() {
+        let mut context = VmContext::new(2);
+        context.analog_effects = Some(Box::new(AnalogEffectJournal::with_limits(
+            AnalogEffectLimits {
+                calls: 1,
+                argument_bytes: 1024,
+            },
+        )));
+        stage_task(&mut context, 0, 1).unwrap();
+        assert!(matches!(
+            stage_task(&mut context, 0, 2),
+            Err(VmError::AnalogTask(_))
+        ));
+        assert!(matches!(
+            context.validate_advance_state(),
+            Err(VmError::AnalogTask(_))
+        ));
+        assert_eq!(context.drain_accepted_analog_tasks().count(), 0);
+        context.begin_stateful_evaluation();
+        stage_task(&mut context, 0, 3).unwrap();
+        context.validate_advance_state().unwrap();
+        context.apply_validated_advance_state();
+        assert_eq!(
+            context.drain_accepted_analog_tasks().collect::<Vec<_>>(),
+            [task_call(0, 3)]
+        );
+    }
+
+    #[test]
+    fn analog_task_checkpoints_require_delivery_and_never_replay_output() {
+        let mut context = VmContext::new(2);
+        stage_task(&mut context, 0, 1).unwrap();
+        assert!(matches!(
+            context.accepted_checkpoint(),
+            Err(VmError::AnalogTask(_))
+        ));
+        context.validate_advance_state().unwrap();
+        context.apply_validated_advance_state();
+        assert!(matches!(
+            context.accepted_checkpoint(),
+            Err(VmError::AnalogTask(_))
+        ));
+        assert_eq!(context.drain_accepted_analog_tasks().count(), 1);
+        let checkpoint = context.accepted_checkpoint().unwrap();
+        stage_task(&mut context, 1, 2).unwrap();
+        context.restore_accepted_checkpoint(&checkpoint);
+        context.validate_advance_state().unwrap();
+        context.apply_validated_advance_state();
+        assert_eq!(context.drain_accepted_analog_tasks().count(), 0);
+        stage_task(&mut context, 2, 3).unwrap();
+        context.validate_advance_state().unwrap();
+        context.apply_validated_advance_state();
+        stage_task(&mut context, 3, 4).unwrap();
+        context.reset_analysis_state();
+        context.validate_advance_state().unwrap();
+        context.apply_validated_advance_state();
+        assert_eq!(context.drain_accepted_analog_tasks().count(), 0);
+    }
 
     fn slew_rates(rise: f64, fall: f64) -> SlewRateMagnitudes {
         SlewRateMagnitudes { rise, fall }

@@ -3693,6 +3693,15 @@ impl VerilogADevice {
         self.prev_discontinuity = discontinuity;
     }
 
+    /// Consume the analog task calls published by accepted-state application.
+    /// The analysis host owns output delivery and simulation control; a JIT
+    /// helper never prints, suspends the engine, or exits the host process.
+    pub fn drain_accepted_analog_tasks(
+        &mut self,
+    ) -> impl Iterator<Item = rspice_veriloga_runtime::AnalogTaskInvocation> + '_ {
+        self.context.drain_accepted_analog_tasks()
+    }
+
     /// Capture the accepted state, and nothing derived from it.
     ///
     /// The payload carries the variable array as the last evaluation left it,

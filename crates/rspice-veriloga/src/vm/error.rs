@@ -24,6 +24,8 @@ pub enum VmError {
     InvalidNumericResult(String),
     /// Invalid simulator-to-device runtime configuration.
     InvalidRuntimeConfiguration(String),
+    /// An analog system task could not be staged or delivered.
+    AnalogTask(String),
     /// Runtime array index outside the declared bounds
     IndexOutOfBounds {
         index: i64,
@@ -46,6 +48,7 @@ impl std::fmt::Display for VmError {
             VmError::InvalidRuntimeConfiguration(msg) => {
                 write!(f, "invalid runtime configuration: {msg}")
             }
+            VmError::AnalogTask(msg) => write!(f, "analog system-task error: {msg}"),
             VmError::IndexOutOfBounds {
                 index,
                 lower,
