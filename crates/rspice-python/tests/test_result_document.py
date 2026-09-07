@@ -280,3 +280,22 @@ def test_a_convenience_call_publishes_the_single_analysis_identity():
     result = rspice.Engine().run_ac(parse(RC), [10.0, 100.0, 1000.0])
     assert result.document()["analysis"]["tag"] == "ac-001"
     assert [descriptor.kind for descriptor in result.signals()] != []
+
+
+def test_pss_local_source_mesh_survives_python_and_pickle():
+    result = rspice.Engine().run_pss(
+        parse("* Narrow periodic pulse\nV1 in 0 PULSE(0 1 400p 10p 10p 100p 1u)\n"
+              "R1 in out 1k\nC1 out 0 159.154943091895p\n"),
+        1e6, tstab_periods=0, points_per_period=256,
+    )
+    assert 256 < result.num_points < 1024
+    assert result.document()["pointCount"] == result.num_points
+    steps = np.diff(result.time)
+    assert np.all(steps > 0)
+    assert steps.min() < steps.max() / 100
+    restored = pickle.loads(pickle.dumps(result))
+    np.testing.assert_array_equal(restored.time, result.time)
+    np.testing.assert_array_equal(restored.voltage_waveform("out"), result.voltage_waveform("out"))
+    for waveform in (result, restored):
+        assert abs(waveform.dc("out") - 1.1e-4) < 1e-7
+        assert abs(waveform.voltage_at("in", 460e-12) - 1.0) < 1e-10

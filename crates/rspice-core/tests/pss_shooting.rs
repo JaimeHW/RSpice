@@ -78,14 +78,30 @@ fn source_intervals_reveal_pulses_between_both_initial_pss_grids() {
             .unwrap_or_else(|error| panic!("{source}: {error}"));
         let result = &analysis.result;
         let steps = result.time.len() - 1;
-        assert!(steps >= 20_000, "{source}: {steps}");
+        if source.starts_with('B') {
+            assert!(steps >= 20_000, "{source}: {steps}");
+        } else {
+            assert!(
+                steps < 2_048,
+                "source corners should resolve the pulse locally: {source}: {steps}"
+            );
+            for &(corner, _) in &knots {
+                assert!(
+                    result
+                        .time
+                        .iter()
+                        .any(|&time| (time - corner).abs() <= 4.0 * f64::EPSILON * corner),
+                    "missing source corner {corner:e}"
+                );
+            }
+        }
         let output = result
             .node_names
             .iter()
             .position(|name| name.eq_ignore_ascii_case("out"))
             .unwrap();
         let values = &result.waveforms[output].values;
-        let mean = values[..steps].iter().sum::<f64>() / steps as f64;
+        let mean = result.waveforms[output].dc(&result.time, result.period);
         assert!(
             (mean - 0.0011).abs() < 2e-6,
             "{source}, steps={steps}: DC {mean}"
@@ -140,13 +156,20 @@ fn behavioral_polynomial_harmonics_drive_an_accurate_refined_rc_orbit() {
         if power == 4 {
             let mut malformed = point.analysis().clone();
             malformed.result.time[1] *= 1.5;
-            let error = rspice_core::engine::PssOperatingPoint::try_from_parts(
+            let error = rspice_core::engine::PssOperatingPoint::try_from_authenticated_parts(
+                point.producer_identity().unwrap().clone(),
                 requested.clone(),
                 malformed,
+                point.shooting_state_basis().to_vec(),
                 point.shooting_state().to_vec(),
             )
             .unwrap_err();
-            assert!(error.to_string().contains("uniform"), "{error}");
+            assert!(
+                error
+                    .to_string()
+                    .contains("authenticated producer identity"),
+                "{error}"
+            );
         }
         let output = result
             .node_names

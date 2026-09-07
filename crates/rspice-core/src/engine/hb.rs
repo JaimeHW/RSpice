@@ -925,14 +925,19 @@ impl HbDriveTone {
 impl Engine {
     /// Project an authenticated shooting-PSS orbit into the HB spectral basis
     /// used by periodic small-signal kernels. This is a representation change,
-    /// not an operating-point solve: every coefficient is sampled from the
+    /// not an operating-point solve: every coefficient is integrated from the
     /// retained orbit and no Newton or linear large-signal solve is run.
     fn hb_state_from_pss_operating_point(
         &self,
         operating_point: &super::PssOperatingPoint,
         config: &HbConfig,
         node_names: &[String],
+        abort: &dyn AbortSignal,
     ) -> Result<HbSolverState, SimulationError> {
+        use crate::analysis::fourier::{FourierError, FourierQuadrature};
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
         config.validate().map_err(|error| {
             SimulationError::Circuit(format!("dependent HB configuration is invalid: {error}"))
         })?;
@@ -959,13 +964,18 @@ impl Engine {
             )));
         }
 
-        let fft_size = config.checked_fft_size().map_err(|error| {
-            SimulationError::Circuit(format!("dependent HB collocation grid is invalid: {error}"))
-        })?;
-        let mut fft = HbFft::try_with_size(config.num_harmonics, fft_size).map_err(|error| {
-            SimulationError::Circuit(format!("dependent HB FFT construction failed: {error}"))
-        })?;
-        let sample_count = fft.size();
+        let projection_error = |error| match error {
+            FourierError::Aborted => SimulationError::Aborted,
+            other => SimulationError::Circuit(format!(
+                "retained PSS spectral projection failed: {other}"
+            )),
+        };
+        self.ensure_result_values(
+            node_names
+                .len()
+                .saturating_mul(config.num_harmonics.saturating_add(1))
+                .saturating_mul(2),
+        )?;
         let mut state = HbSolverState::new(node_names.len(), config.num_harmonics);
         for (target_index, target_name) in node_names.iter().enumerate() {
             let source_index = result
@@ -978,13 +988,21 @@ impl Engine {
                     ))
                 })?;
             let waveform = &result.waveforms[source_index];
-            let samples = (0..sample_count)
-                .map(|sample_index| {
-                    let time = analysis.period * (sample_index as Value / sample_count as Value);
-                    waveform.interpolate(&result.time, time, analysis.period)
-                })
-                .collect::<Vec<_>>();
-            state.x[target_index] = fft.to_frequency_domain(&samples);
+            // Resampling onto the dependent collocation grid can miss an
+            // entire narrow source pulse present in the authenticated orbit.
+            let quadrature =
+                FourierQuadrature::new(&result.time, &waveform.values, analysis.period, abort)
+                    .map_err(projection_error)?;
+            for (harmonic, coefficient) in state.x[target_index].iter_mut().enumerate() {
+                let (magnitude, phase) = quadrature
+                    .component(harmonic as Value * result.frequency, harmonic, abort)
+                    .map_err(projection_error)?;
+                *coefficient = if harmonic == 0 {
+                    Complex64::new(magnitude, 0.0)
+                } else {
+                    Complex64::from_polar(0.5 * magnitude, phase.to_radians())
+                };
+            }
         }
         state.iteration = analysis.iterations.max(1);
         state.total_iterations = analysis.iterations;
@@ -1659,6 +1677,7 @@ mod tests {
                     &point,
                     &HbConfig::new(frequency).with_harmonics(3),
                     &["IN".to_owned(), "OUT".to_owned()],
+                    &NoAbort,
                 )
                 .unwrap();
             let expected = Complex64::new(0.5 * 0.37_f64.sin(), -0.5 * 0.37_f64.cos());
@@ -1667,6 +1686,56 @@ mod tests {
                 "{frequency:e}: {:?}",
                 state.x[0][1]
             );
+        }
+    }
+
+    #[test]
+    fn retained_pss_projection_keeps_narrow_source_area_across_collocation_sizes() {
+        let engine = Engine::default();
+        let netlist = Netlist::parse("PSS pulse projection\nV1 in 0 PULSE(0 1 400p 10p 10p 100p 1u)\nR1 in out 1k\nC1 out 0 159.154943091895p\n.end\n").unwrap();
+        let point = engine
+            .run_pss_operating_point_with_abort(
+                &netlist,
+                crate::analysis::PssConfig::new(1e6).with_tstab_periods(0),
+                &NoAbort,
+            )
+            .unwrap();
+        let names = vec!["IN".to_owned(), "OUT".to_owned()];
+        let sinc = |x: Value| if x == 0.0 { 1.0 } else { x.sin() / x };
+        for collocation in [9, 257] {
+            let config = HbConfig::new(1e6)
+                .with_harmonics(3)
+                .with_collocation_points(collocation);
+            let state = engine
+                .hb_state_from_pss_operating_point(&point, &config, &names, &NoAbort)
+                .unwrap();
+            for harmonic in 0..=3 {
+                let angle = std::f64::consts::PI * harmonic as Value;
+                let expected = Complex64::from_polar(
+                    1.1e-4 * sinc(angle * 1.1e-4) * sinc(angle * 1e-5),
+                    -2.0 * angle * 4.6e-4,
+                );
+                assert!(
+                    (state.x[0][harmonic] - expected).norm() < 1e-10,
+                    "N={collocation}, h={harmonic}: {:?} vs {expected:?}",
+                    state.x[0][harmonic]
+                );
+                let output = expected / Complex64::new(1.0, harmonic as Value);
+                assert!(
+                    (state.x[1][harmonic] - output).norm() < 1e-7,
+                    "N={collocation}, h={harmonic}: {:?} vs {output:?}",
+                    state.x[1][harmonic]
+                );
+            }
+            assert!(matches!(
+                engine.hb_state_from_pss_operating_point(
+                    &point,
+                    &config,
+                    &names,
+                    &crate::abort_signal::CountingAbort::new(2)
+                ),
+                Err(SimulationError::Aborted)
+            ));
         }
     }
 

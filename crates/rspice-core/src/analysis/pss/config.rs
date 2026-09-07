@@ -99,8 +99,9 @@ pub struct PssConfig {
     /// None uses the engine default (typically TrapGear).
     pub integration_method: Option<crate::numerics::integration::IntegrationMethod>,
 
-    /// Minimum uniform integration intervals per period (the endpoint is stored).
-    /// The solver increases this grid to resolve recognized source harmonics,
+    /// Minimum base integration intervals per period (the endpoint is stored).
+    /// The solver adds independent-source corners and increases the base grid
+    /// to resolve recognized source harmonics,
     /// then compares complete solved orbits on successively doubled grids using
     /// the engine voltage/current tolerances. Source defaults continue to use
     /// this authored count. The returned waveform may contain more intervals.

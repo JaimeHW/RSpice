@@ -85,7 +85,7 @@ fn pss_refinement_enforces_point_and_waveform_workspace_limits() {
                 .unwrap_err(),
         ] {
             assert!(
-                matches!(error, SimulationError::ResourceLimit(ResourceLimitError { resource: ResourceKind::AnalysisPoints, requested, limit: 256 }) if requested > 1024),
+                matches!(error, SimulationError::ResourceLimit(ResourceLimitError { resource: ResourceKind::AnalysisPoints, requested, limit: 256 }) if requested > 256),
                 "{error}"
             );
         }
@@ -121,6 +121,67 @@ fn redundant_flat_knots_do_not_consume_the_pss_source_mesh_budget() {
                 &NoAbort,
             )
             .unwrap_or_else(|error| panic!("{source}: {error}"));
+    }
+}
+
+#[test]
+fn narrow_independent_pulses_use_bounded_local_meshes_including_scaled_files() {
+    use rspice_core::abort_signal::NoAbort;
+    use rspice_core::analysis::PssConfig;
+    let directory = TestDirectory::new("pss-local-mesh");
+    let path = directory.0.join("pulse.csv");
+    std::fs::write(&path, "0 0\n400 0\n410 1\n510 1\n520 0\n1000000 0\n").unwrap();
+    let engine = Engine::new(SimulationConfig {
+        resource_limits: limits_with(|limits| limits.max_analysis_points = 1024),
+        ..Default::default()
+    });
+    for source in [
+        "V1 in 0 PULSE(0 1 400p 10p 10p 100p 1u)".to_owned(),
+        "V1 in 0 PWL(0 0 1e-300 0 400p 0 410p 1 510p 1 520p 0 1u 0) R=0".to_owned(),
+        format!(
+            "V1 in 0 PWL FILE=\"{}\" TSCALE=1p R=0",
+            path.to_string_lossy().replace('\\', "/")
+        ),
+    ] {
+        let netlist = Netlist::parse(&format!(
+            "local source mesh\n{source}\nR1 in out 1k\nC1 out 0 159.154943091895p\n.end\n"
+        ))
+        .unwrap();
+        let config = PssConfig::new(1e6).with_tstab_periods(0);
+        engine
+            .validate_pss_source_contract_with_abort(
+                &netlist,
+                &["V1".to_owned()],
+                &config,
+                &NoAbort,
+            )
+            .unwrap();
+        let point = engine
+            .run_pss_operating_point_with_abort(&netlist, config, &NoAbort)
+            .unwrap_or_else(|error| panic!("{source}: {error}"));
+        let result = &point.analysis().result;
+        let output = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("out"))
+            .unwrap();
+        let mean = result.waveforms[output].dc(&result.time, result.period);
+        assert!(
+            (mean - 1.1e-4).abs() < 1e-7,
+            "{source}: N={}, mean={mean:e}",
+            result.time.len() - 1
+        );
+        assert!(result.time.len() - 1 < 1024);
+        assert_eq!(point.spectral_harmonic_capacity(), 128);
+        let restored = rspice_core::engine::PssOperatingPoint::try_from_authenticated_parts(
+            point.producer_identity().unwrap().clone(),
+            point.config().clone(),
+            point.analysis().clone(),
+            point.shooting_state_basis().to_vec(),
+            point.shooting_state().to_vec(),
+        )
+        .unwrap();
+        assert_eq!(restored, point);
     }
 }
 
