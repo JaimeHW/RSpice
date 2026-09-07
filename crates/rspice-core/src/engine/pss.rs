@@ -82,7 +82,7 @@ impl PssAcceptedStepHistory {
 
 const PSS_KRYLOV_STATE_THRESHOLD: usize = 12;
 const PSS_KRYLOV_REL_TOL: Value = 1e-9;
-const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 12;
+const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 13;
 
 fn pss_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -1434,9 +1434,10 @@ impl PssContinuationState {
 }
 
 impl Engine {
-    pub(super) fn ensure_pss_source_periodicity(
+    pub(super) fn ensure_pss_source_contract(
         circuit: &CircuitData,
         period: Value,
+        points_per_period: usize,
         autonomous: bool,
         abort: &dyn AbortSignal,
     ) -> Result<(), SimulationError> {
@@ -1445,8 +1446,21 @@ impl Engine {
                 "PSS source period must be finite and positive".to_owned(),
             ));
         }
-        for (index, (name, periodic)) in circuit
-            .independent_source_periodicities(period, autonomous)
+        let ensure_sampling = |name: &str, cycles: Value| -> Result<(), SimulationError> {
+            // Periodicity was certified before this check, so a nonzero
+            // authored clock has an integral cycle count. Round within that
+            // certificate's tolerance to avoid admitting an exact Nyquist
+            // clock just because its phase arithmetic rounded downward.
+            let nyquist_points = 2.0 * cycles.round();
+            if !autonomous && nyquist_points >= points_per_period as Value {
+                return Err(PssError::InvalidConfig(format!(
+                    "PSS source '{name}' reaches or exceeds the grid Nyquist limit: POINTS={points_per_period} must be greater than {nyquist_points:.0} for its authored sinusoidal clocks; increase POINTS and check waveform convergence under further grid refinement"
+                )).into());
+            }
+            Ok(())
+        };
+        for (index, (name, periodic, cycles)) in circuit
+            .independent_source_pss_properties(period, autonomous)
             .enumerate()
         {
             if index & 0x1f == 0 && abort.is_aborted() {
@@ -1468,6 +1482,7 @@ impl Engine {
                     ),
                 ));
             }
+            ensure_sampling(name, cycles)?;
         }
         let behavioral = circuit
             .behavioral_sources
@@ -1477,6 +1492,7 @@ impl Engine {
                 (
                     source.name.as_str(),
                     source.has_periodic_time_dependence(period, autonomous),
+                    source.max_authored_tone_cycles(period),
                 )
             })
             .chain(
@@ -1488,10 +1504,11 @@ impl Engine {
                         (
                             source.name.as_str(),
                             source.has_periodic_time_dependence(period, autonomous),
+                            source.max_authored_tone_cycles(period),
                         )
                     }),
             );
-        for (index, (name, periodic)) in behavioral.enumerate() {
+        for (index, (name, periodic, cycles)) in behavioral.enumerate() {
             if index & 0x1f == 0 && abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
@@ -1512,6 +1529,7 @@ impl Engine {
                     ),
                 ));
             }
+            ensure_sampling(name, cycles)?;
         }
         Ok(())
     }
@@ -2075,9 +2093,10 @@ impl Engine {
         {
             return Err(PssError::NoReactiveElements.into());
         }
-        Self::ensure_pss_source_periodicity(
+        Self::ensure_pss_source_contract(
             &circuit,
             config.period(),
+            config.points_per_period,
             config.is_autonomous(),
             abort,
         )?;
@@ -2575,7 +2594,13 @@ impl Engine {
     ) -> Result<(Vec<Value>, TransientResult), SimulationError> {
         let max_step = period / config.points_per_period as f64;
         if config.is_autonomous() {
-            Self::ensure_pss_source_periodicity(circuit, period, true, abort)?;
+            Self::ensure_pss_source_contract(
+                circuit,
+                period,
+                config.points_per_period,
+                true,
+                abort,
+            )?;
             circuit.ensure_regular_prescribed_currents(period)?;
         }
 
