@@ -46,6 +46,47 @@ rload out 0 1k
 ";
 
 #[test]
+fn source_time_defaults_remain_attached_to_the_original_transient() {
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+        let engine = Engine::new(SimulationConfig {
+            spice_dialect: dialect,
+            ..Default::default()
+        });
+        for source in ["SIN(0 1 0)", "SFFM(0 1)"] {
+            let netlist = Netlist::parse(&format!(
+                "source default resume\nV1 in 0 {source}\nR1 in 0 1k\n.end\n"
+            ))
+            .unwrap();
+            let (_, checkpoint) = engine.run_tran_checkpointed(&netlist, 1e-6, 1e-9).unwrap();
+            let checkpoint = TransientCheckpoint::from_bytes(
+                &checkpoint
+                    .to_bytes(TransientCheckpointEncoding::Packed)
+                    .unwrap(),
+            )
+            .unwrap();
+            let (continued, _) = engine
+                .run_tran_resume(&netlist, &checkpoint, 2.37e-6, 7e-9)
+                .unwrap();
+            for (&time, &actual) in continued.time.iter().zip(&continued.voltages[0]) {
+                let expected = if source.starts_with("SIN") && dialect == SpiceDialect::Xyce {
+                    0.0
+                } else if source.starts_with("SIN") || dialect == SpiceDialect::Xyce {
+                    (std::f64::consts::TAU * 1e6 * time).sin()
+                } else {
+                    (std::f64::consts::TAU * 5e6 * time
+                        + 0.01 * (std::f64::consts::TAU * 500e6 * time).sin())
+                    .sin()
+                };
+                assert!(
+                    (actual - expected).abs() < 1e-11,
+                    "{dialect:?}, {source}, t={time:e}: {actual:e} vs {expected:e}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn coupled_winding_checkpoints_reproduce_every_accepted_voltage_and_current() {
     let netlist = Netlist::parse(
         "coupled checkpoint orbit\nV1 in 0 SIN(0 1 1meg)\nR1 in a 50\nL1 a 0 100u\nL2 0 out 200u\nR2 out 0 100\nL3 c 0 300u\nR3 c 0 150\nK1 L1 L2 0.6\nK2 L2 L3 0.3\nK3 L1 L3 0.2\n.end\n",

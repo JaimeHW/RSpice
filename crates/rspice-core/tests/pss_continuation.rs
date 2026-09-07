@@ -7,6 +7,80 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 const F0: f64 = 1.0e6;
 
+#[test]
+fn source_defaults_survive_pss_continuation_and_persisted_transient_segments() {
+    use rspice_core::engine::{TransientCheckpoint, TransientCheckpointEncoding};
+    for (dialect, nox) in [
+        (SpiceDialect::Ngspice, false),
+        (SpiceDialect::Xyce, false),
+        (SpiceDialect::Xyce, true),
+    ] {
+        let source = if dialect == SpiceDialect::Xyce {
+            "SFFM(0 1)"
+        } else {
+            "SIN(0 1 0)"
+        };
+        let netlist = Netlist::parse(&format!(
+            "PSS source default continuation\nV1 in 0 {source}\nC1 in 0 1p\n.tran 5n 7u\n.end\n",
+        ))
+        .unwrap();
+        for method in [
+            IntegrationMethod::BackwardEuler,
+            IntegrationMethod::Trapezoidal,
+            IntegrationMethod::Gear2,
+            IntegrationMethod::TrapGear,
+        ] {
+            let engine = Engine::new(SimulationConfig {
+                spice_dialect: dialect,
+                transient_nonlinear_nox: Some(nox),
+                integration_method: method,
+                ..Default::default()
+            });
+            let (_, state) = engine
+                .run_pss_with_continuation_state(
+                    &netlist,
+                    PssConfig::new(F0)
+                        .with_points_per_period(128)
+                        .with_tstab_periods(0),
+                )
+                .unwrap();
+            let (continued, checkpoint) = engine
+                .run_tran_from_pss_state(&netlist, &state, 1.31e-6, 3e-9)
+                .unwrap();
+            for encoding in [
+                TransientCheckpointEncoding::Unpacked,
+                TransientCheckpointEncoding::Packed,
+            ] {
+                let restored =
+                    TransientCheckpoint::from_bytes(&checkpoint.to_bytes(encoding).unwrap())
+                        .unwrap();
+                let (resumed, _) = engine
+                    .run_tran_resume(&netlist, &restored, 2.57e-6, 2e-9)
+                    .unwrap();
+                let (direct, _) = engine
+                    .run_tran_resume(&netlist, &checkpoint, 2.57e-6, 2e-9)
+                    .unwrap();
+                assert_eq!(resumed.time, direct.time);
+                assert_eq!(resumed.voltages, direct.voltages);
+                for result in [&continued, &resumed] {
+                    let node = result
+                        .node_names
+                        .iter()
+                        .position(|n| n.eq_ignore_ascii_case("in"))
+                        .unwrap();
+                    for (&time, &actual) in result.time.iter().zip(&result.voltages[node]) {
+                        let expected = (std::f64::consts::TAU * F0 * time).sin();
+                        assert!(
+                            (actual - expected).abs() < 1e-11,
+                            "{dialect:?}, {method:?}, {encoding:?}, t={time:e}: {actual:e} vs {expected:e}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn envelope_startup_deck() -> Netlist {
     Netlist::parse(
         "* carrier plus a slower modulation source\n\

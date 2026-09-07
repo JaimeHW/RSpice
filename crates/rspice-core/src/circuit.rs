@@ -24,7 +24,9 @@ pub use storage::{
     Capacitors, CurrentSources, Diodes, Inductors, ResistorBranches, Resistors,
     ThermalResistorState, VoltageSources,
 };
-pub(crate) use storage::{ResistorValues, SolutionDependentCompanionStep, SourceExcitation};
+pub(crate) use storage::{
+    ResistorValues, SolutionDependentCompanionStep, SourceExcitation, SourceTimeBasis,
+};
 // The nonlinear device arrays are stamping machinery that no frontend names,
 // so they stay reachable inside the crate only. `Diodes` is re-exported above
 // because the public `CircuitData::diode_storage` returns one.

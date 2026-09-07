@@ -3,6 +3,100 @@
 use super::*;
 
 impl VoltageSources {
+    /// Detect unresolved analysis defaults through the same parameter
+    /// resolvers used by evaluation. Compare parameters, never sampled
+    /// waveform values (which could alias at the chosen times).
+    pub(super) fn source_needs_time_basis(
+        spec: &crate::netlist::SourceSpec,
+        dialect: crate::config::SpiceDialect,
+    ) -> bool {
+        use crate::netlist::SourceSpec;
+        let contexts = [(1.0, 1.0), (2.0, 3.0)].map(|(tstep, tstop)| {
+            Some(TransientSourceContext {
+                tstep,
+                tstop,
+                dialect,
+                xyce_breakpoint_tolerance: Some(0.0),
+                resource_limits: crate::resource::ResourceLimits::default(),
+            })
+        });
+        match spec {
+            SourceSpec::Distortion { inner, .. }
+            | SourceSpec::RfPort { inner, .. }
+            | SourceSpec::DcTransient {
+                transient: inner, ..
+            }
+            | SourceSpec::DcAcTransient {
+                transient: inner, ..
+            } => Self::source_needs_time_basis(inner, dialect),
+            SourceSpec::Pulse {
+                delay,
+                rise,
+                fall,
+                width,
+                period,
+                width_defaults_to_zero,
+                ..
+            } => {
+                let resolved = contexts.map(|context| {
+                    Self::resolve_pulse_timing(
+                        *delay,
+                        *rise,
+                        *fall,
+                        *width,
+                        *period,
+                        *width_defaults_to_zero,
+                        context,
+                    )
+                });
+                resolved[0] != resolved[1]
+            }
+            SourceSpec::Sin { frequency, .. } => {
+                Self::resolve_sin_frequency(*frequency, contexts[0])
+                    != Self::resolve_sin_frequency(*frequency, contexts[1])
+            }
+            SourceSpec::Exp {
+                td1,
+                tau1,
+                td2,
+                tau2,
+                ..
+            } => {
+                let resolved = contexts
+                    .map(|context| Self::resolve_exp_timing(*td1, *tau1, *td2, *tau2, context));
+                resolved[0] != resolved[1]
+            }
+            SourceSpec::Sffm {
+                carrier_freq,
+                modulation_index,
+                signal_freq,
+                ..
+            } => {
+                let resolved = contexts.map(|context| {
+                    Self::sffm_parameters(*carrier_freq, *modulation_index, *signal_freq, context)
+                });
+                resolved[0] != resolved[1]
+            }
+            SourceSpec::Am {
+                modulating_freq,
+                carrier_freq,
+                ..
+            } => {
+                let resolved = contexts
+                    .map(|context| Self::am_frequencies(*modulating_freq, *carrier_freq, context));
+                resolved[0] != resolved[1]
+            }
+            SourceSpec::Dc(_)
+            | SourceSpec::Ac { .. }
+            | SourceSpec::DcAc { .. }
+            | SourceSpec::Pwl { .. }
+            | SourceSpec::PwlFile { .. }
+            | SourceSpec::Pat { .. }
+            | SourceSpec::TrNoise { .. }
+            | SourceSpec::TrRandom { .. } => false,
+        }
+    }
+
     pub(super) fn sffm_parameters(
         carrier_freq: Value,
         modulation_index: Value,

@@ -10,6 +10,8 @@
 //! and the accepted analysis/restart phase controls that govern the next
 //! interval; legacy continuation state fails closed rather than silently
 //! reconstructing different controls.
+//! Source timing defaults belong to the original analysis and remain fixed
+//! when a later segment changes its stop time or timestep ceiling.
 //!
 //! Scope, stated precisely: accepted linear-reactive histories and
 //! solution-dependent capacitor charge/linearization state; native diode and
@@ -157,7 +159,10 @@ fn checkpoint_operation_result<T>(
 /// Version 34 renumbers the runtime Verilog-A accepted-state arrays from the
 /// bytecode generator's per-emission slots to the canonical per-site ones,
 /// moving `RUNTIME_CHECKPOINT_STATE_VERSION` from 7 to 8.
-const FORMAT_VERSION: u32 = 34;
+/// Version 35 records the step/stop defaults used by independent source
+/// waveforms. Older images resume only when those defaults are irrelevant.
+const FORMAT_VERSION: u32 = 35;
+const SOURCE_TIME_BASIS_FORMAT_VERSION: u32 = 35;
 const XYCE_TEAM_RESISTANCE_NOISE_FORMAT_VERSION: u32 = 32;
 const SOLUTION_DEPENDENT_CAPACITOR_FORMAT_VERSION: u32 = 33;
 const RUNTIME_VERILOGA_FORMAT_VERSION: u32 = 17;
@@ -526,10 +531,14 @@ pub struct TransientCheckpoint {
     /// Per-call transient maximum-step bound the captured segment ran under.
     /// This is provenance, not resume state: like the stop horizon, the cap
     /// only bounds steps a segment is about to take, so a resumed segment
-    /// selects its own. It is recorded separately from the resolved
+    /// selects its own. Source defaults are retained separately below.
+    /// It is recorded separately from the resolved
     /// configuration identity precisely so that changing it cannot be
     /// mistaken for continuing a different simulation.
     integration_max_step: Option<Value>,
+    /// Defaults that resolved source timing at trajectory creation. Segment
+    /// endpoints and step ceilings must not silently redefine that waveform.
+    source_time_basis: Option<crate::circuit::SourceTimeBasis>,
     /// Typed continuation contract: an exact in-flight proposal, a deliberate
     /// endpoint breakpoint restart, an authenticated synthetic t=0 origin, or
     /// unavailable legacy state. These cases must never alias during format
@@ -4962,6 +4971,9 @@ impl TransientCheckpoint {
         if !self.time.is_finite() || self.time < 0.0 {
             return Err("checkpoint time must be finite and non-negative".to_string());
         }
+        if let Some(basis) = self.source_time_basis {
+            basis.validate()?;
+        }
         if self
             .integration_max_step
             .is_some_and(|max_step| !max_step.is_finite() || max_step <= 0.0)
@@ -5569,14 +5581,14 @@ impl TransientCheckpoint {
     pub(crate) fn capture(
         fingerprint: u64,
         netlist_identity: Option<String>,
-        simulation_identity: String,
+        config: &SimulationConfig,
         state: CheckpointState<'_>,
         lte_estimator: Option<&LteEstimator>,
     ) -> Result<Self, String> {
         Self::capture_with_diode_history(
             fingerprint,
             netlist_identity,
-            simulation_identity,
+            config,
             state,
             lte_estimator,
             None,
@@ -5589,7 +5601,7 @@ impl TransientCheckpoint {
     pub(crate) fn capture_with_diode_history(
         fingerprint: u64,
         netlist_identity: Option<String>,
-        simulation_identity: String,
+        config: &SimulationConfig,
         state: CheckpointState<'_>,
         lte_estimator: Option<&LteEstimator>,
         diode_history: Option<&crate::numerics::integration::TwoTerminalChargeHistory>,
@@ -5600,6 +5612,14 @@ impl TransientCheckpoint {
             circuit,
             startup_mode,
         } = state;
+        let damped_status = if Engine::uses_xyce_damped_transient_solver(config, circuit) {
+            if time.to_bits() != 0.0_f64.to_bits() {
+                return Err("synthetic checkpoint capture cannot reconstruct accepted DampedNewton state after time zero".to_owned());
+            }
+            Some(XyceDampedAcceptedBoundaryCheckpoint::default())
+        } else {
+            None
+        };
         let accepted_junction_history = if let Some(diode_history) = diode_history {
             if !circuit.bjts.is_empty() {
                 return Err(
@@ -5649,7 +5669,7 @@ impl TransientCheckpoint {
                 fingerprint,
                 netlist_identity,
                 restart_identity: None,
-                simulation_identity,
+                simulation_identity: simulation_checkpoint_identity(config),
             },
             CheckpointState {
                 time,
@@ -5675,7 +5695,7 @@ impl TransientCheckpoint {
                         livelock_last_restart_time: None,
                         accepted_interval_count: usize::from(time > 0.0),
                         damped_first_solver_call: true,
-                        damped_status: None,
+                        damped_status,
                     },
                 ),
             },
@@ -5808,6 +5828,7 @@ impl TransientCheckpoint {
             simulation_identity: Some(simulation_identity),
             startup_mode: Some(startup_mode),
             integration_max_step,
+            source_time_basis: circuit.independent_source_time_basis()?,
             integration_continuation: integration_continuation.map_or_else(
                 || {
                     if time.to_bits() == 0.0_f64.to_bits() {
@@ -6521,6 +6542,24 @@ impl TransientCheckpoint {
         Ok(())
     }
 
+    /// Legacy images can continue fully specified waveforms. They cannot
+    /// reconstruct omitted timing from a different segment's horizon.
+    pub(super) fn source_time_basis_for_resume(
+        &self,
+        circuit: &CircuitData,
+        fallback: crate::circuit::SourceTimeBasis,
+        dialect: crate::config::SpiceDialect,
+    ) -> Result<crate::circuit::SourceTimeBasis, String> {
+        if let Some(basis) = self.source_time_basis {
+            basis.validate()?;
+            Ok(basis)
+        } else if circuit.independent_sources_need_time_basis(dialect) {
+            Err("transient checkpoint does not record the analysis defaults needed by its source waveforms; refusing to change their timing on resume".to_owned())
+        } else {
+            Ok(fallback)
+        }
+    }
+
     /// Return the authenticated proposal for the first interval after this
     /// accepted point. Synthetic origins and deliberate endpoint breakpoint
     /// restarts legitimately request fresh startup sizing; incomplete legacy
@@ -6719,7 +6758,8 @@ impl TransientCheckpoint {
     /// multiply memory without bound even when every individual snapshot is
     /// valid.
     pub(crate) fn retained_value_count(&self) -> usize {
-        let mut count = 7_usize
+        let mut count = 8_usize
+            .saturating_add(2_usize.saturating_mul(usize::from(self.source_time_basis.is_some())))
             .saturating_add(4_usize.saturating_mul(usize::from(matches!(
                 self.integration_continuation,
                 IntegrationContinuation::Proposed { .. }
@@ -6958,6 +6998,13 @@ impl TransientCheckpoint {
             "integration_max_step {}\n",
             self.integration_max_step
                 .map_or_else(|| "none".to_string(), |value| value.to_string())
+        ));
+        out.push_str(&format!(
+            "source_time_basis {}\n",
+            self.source_time_basis.map_or_else(
+                || "none".to_owned(),
+                |basis| format!("{} {}", basis.tstep, basis.tstop),
+            )
         ));
         out.push_str(&format!(
             "integration_continuation {}\n",
@@ -7700,6 +7747,24 @@ impl TransientCheckpoint {
                 None
             };
 
+        let source_time_basis = if version >= SOURCE_TIME_BASIS_FORMAT_VERSION {
+            let line = lines.next().ok_or("missing source time basis line")?;
+            let field = line
+                .strip_prefix("source_time_basis ")
+                .ok_or_else(|| format!("malformed source time basis line: '{line}'"))?;
+            let fields = collect_checkpoint_fields(field, "source time basis fields", budget)?;
+            match fields.as_slice() {
+                ["none"] => None,
+                [tstep, tstop] => Some(crate::circuit::SourceTimeBasis {
+                    tstep: tstep.parse().map_err(|_| "malformed source step default")?,
+                    tstop: tstop.parse().map_err(|_| "malformed source stop default")?,
+                }),
+                _ => return Err(format!("malformed source time basis line: '{line}'")),
+            }
+        } else {
+            None
+        };
+
         let integration_continuation = if version >= CONTROLLER_PHASE_FORMAT_VERSION {
             let line = lines
                 .next()
@@ -8268,6 +8333,7 @@ impl TransientCheckpoint {
             simulation_identity,
             startup_mode,
             integration_max_step,
+            source_time_basis,
             integration_continuation,
             accepted_integration_runtime,
             pending_tline_arrivals,
@@ -9258,6 +9324,76 @@ mod tests {
         }
     }
 
+    #[test]
+    fn source_time_basis_round_trips_and_legacy_waveforms_require_known_defaults() {
+        let source = sample();
+        let restored = TransientCheckpoint::from_text(&source.to_text()).unwrap();
+        assert_eq!(restored.source_time_basis, source.source_time_basis);
+        let legacy = TransientCheckpoint::from_text(&legacy_text(&source, 34)).unwrap();
+        assert_eq!(legacy.source_time_basis, None);
+        let fallback = crate::circuit::SourceTimeBasis {
+            tstep: 2e-9,
+            tstop: 2e-6,
+        };
+        for dialect in [
+            crate::config::SpiceDialect::Ngspice,
+            crate::config::SpiceDialect::Xyce,
+        ] {
+            for (waveform, required) in [
+                (
+                    "SIN(0 1 0)",
+                    dialect == crate::config::SpiceDialect::Ngspice,
+                ),
+                ("SIN(0 1 1meg)", false),
+                ("SFFM(0 1)", true),
+                ("SFFM(0 1 1meg 0.2 100k)", false),
+                ("EXP(0 1)", true),
+                ("EXP(0 1 1n 2n 3n 4n)", false),
+                (
+                    "PULSE(0 1 0 0 0 0.25u 1u)",
+                    dialect == crate::config::SpiceDialect::Ngspice,
+                ),
+                (
+                    "PULSE(0 1 0 1n 1n 0.25u)",
+                    dialect == crate::config::SpiceDialect::Xyce,
+                ),
+            ] {
+                let netlist = Netlist::parse(&format!(
+                    "legacy source basis\nV1 out 0 {waveform}\nR1 out 0 1k\n.end\n"
+                ))
+                .unwrap();
+                let circuit = Engine::default().build_circuit(&netlist).unwrap();
+                let outcome = legacy.source_time_basis_for_resume(&circuit, fallback, dialect);
+                assert_eq!(
+                    outcome.is_err(),
+                    required,
+                    "{dialect:?}, {waveform}: {outcome:?}"
+                );
+                assert_eq!(
+                    restored
+                        .source_time_basis_for_resume(&circuit, fallback, dialect)
+                        .unwrap(),
+                    source.source_time_basis.unwrap()
+                );
+            }
+        }
+        for fields in ["NaN 1", "1 inf", "0 1", "1 -1", "1", "1 2 3"] {
+            let text = source
+                .to_text()
+                .lines()
+                .map(|line| {
+                    if line.starts_with("source_time_basis ") {
+                        format!("source_time_basis {fields}")
+                    } else {
+                        line.to_owned()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(TransientCheckpoint::from_text(&text).is_err(), "{fields}");
+        }
+    }
+
     fn sample() -> TransientCheckpoint {
         TransientCheckpoint {
             time: 1.2345678901234567e-6,
@@ -9268,6 +9404,10 @@ mod tests {
             simulation_identity: Some("abcdef0123456789".repeat(4)),
             startup_mode: Some(TransientStartupMode::Uic),
             integration_max_step: Some(2.5e-9),
+            source_time_basis: Some(crate::circuit::SourceTimeBasis {
+                tstep: 2.5e-9,
+                tstop: 1e-5,
+            }),
             integration_continuation: IntegrationContinuation::Proposed {
                 next_step: 1.25e-9,
                 breakpoint_span_ceiling: Some(6.25e-10),
@@ -9591,6 +9731,10 @@ mod tests {
                 continue;
             }
             if version < 14 && line.starts_with("restart_identity ") {
+                continue;
+            }
+            if version < SOURCE_TIME_BASIS_FORMAT_VERSION && line.starts_with("source_time_basis ")
+            {
                 continue;
             }
             if version < 14 && line.starts_with("integration_max_step ") {
@@ -10558,6 +10702,12 @@ mod tests {
     #[test]
     fn retained_value_count_includes_accepted_integration_controls_and_payloads() {
         let without_direct_q = sample();
+        let mut without_source_basis = without_direct_q.clone();
+        without_source_basis.source_time_basis = None;
+        assert_eq!(
+            without_source_basis.retained_value_count() + 2,
+            without_direct_q.retained_value_count()
+        );
         assert_eq!(
             accepted_integration_runtime_retained_value_count(
                 &without_direct_q.accepted_integration_runtime
@@ -10928,7 +11078,7 @@ mod tests {
         let mut checkpoint = TransientCheckpoint::capture(
             netlist_fingerprint(&netlist),
             netlist_checkpoint_identity(&netlist),
-            simulation_checkpoint_identity(engine.config()),
+            engine.config(),
             CheckpointState {
                 time: 0.0,
                 solution: &solution,
@@ -11103,7 +11253,7 @@ mod tests {
         let empty_checkpoint = TransientCheckpoint::capture(
             netlist_fingerprint(&empty_netlist),
             netlist_checkpoint_identity(&empty_netlist),
-            simulation_checkpoint_identity(engine.config()),
+            engine.config(),
             CheckpointState {
                 time: 0.0,
                 solution: &[],
@@ -11133,7 +11283,7 @@ mod tests {
         let diode_checkpoint = TransientCheckpoint::capture(
             netlist_fingerprint(&diode_netlist),
             netlist_checkpoint_identity(&diode_netlist),
-            simulation_checkpoint_identity(engine.config()),
+            engine.config(),
             CheckpointState {
                 time: 0.0,
                 solution: &vec![0.0; diode.matrix_size()],

@@ -82,7 +82,7 @@ impl PssAcceptedStepHistory {
 
 const PSS_KRYLOV_STATE_THRESHOLD: usize = 12;
 const PSS_KRYLOV_REL_TOL: Value = 1e-9;
-const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 9;
+const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 11;
 
 fn pss_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -1771,7 +1771,7 @@ impl Engine {
         let checkpoint = TransientCheckpoint::capture_with_diode_history(
             authenticated_fingerprint,
             Some(authenticated_netlist_identity),
-            super::transient::simulation_checkpoint_identity(&self.config),
+            &self.config,
             CheckpointState {
                 time: 0.0,
                 solution: endpoint,
@@ -1958,6 +1958,16 @@ impl Engine {
 
         // Build and prepare circuit
         let mut circuit = self.build_circuit_with_abort(netlist, abort)?;
+        let source_basis = crate::circuit::SourceTimeBasis {
+            tstep: config.period() / config.points_per_period as Value,
+            tstop: config.period(),
+        };
+        source_basis.validate().map_err(SimulationError::Circuit)?;
+        circuit.set_independent_source_context(
+            source_basis,
+            self.config.spice_dialect,
+            self.config.resource_limits,
+        );
         Self::freeze_pss_independent_sources(&mut circuit, frozen_sources)?;
         Self::ensure_no_mixed_signal_analysis(&circuit, "PSS analysis")?;
         Self::ensure_supported_xyce_memristor_small_signal(&circuit, "PSS")?;

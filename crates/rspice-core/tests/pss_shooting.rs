@@ -15,6 +15,133 @@ const R: f64 = 1.0e3;
 const C: f64 = 159.154943091895e-12; // RC corner ~ 1 MHz (w*RC = 1)
 
 #[test]
+fn small_signal_shooting_closes_the_orbit_from_a_zero_initial_state() {
+    for amplitude in [1.0_f64, 1e-3, 1e-6, 1e-7, 1e-9] {
+        let netlist = Netlist::parse(&format!(
+            "small-signal shooting\nV1 in 0 SIN(0 {amplitude} 1meg)\nR1 in out {R}\nC1 out 0 {C}\n.end\n"
+        ))
+        .unwrap();
+        let result = Engine::default()
+            .run_pss(
+                &netlist,
+                PssConfig::new(F0)
+                    .with_tstab_periods(0)
+                    .with_points_per_period(512),
+            )
+            .unwrap();
+        let node = result
+            .result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("out"))
+            .unwrap();
+        let voltage = &result.result.waveforms[node].values;
+        assert!(result.iterations > 0, "amplitude={amplitude:e}");
+        assert!((voltage[0] / amplitude + 0.5).abs() < 1e-6);
+        assert!((voltage.last().unwrap() - voltage[0]).abs() < 1e-8 * amplitude);
+        // Bound the existing O(dt^2) grid error, including the first BE
+        // interval, independently of the stricter periodic seam check.
+        let grid_bound = 0.5 * (std::f64::consts::TAU / 512.0).powi(2);
+        for (&time, &actual) in result.result.time.iter().zip(voltage) {
+            let angle = std::f64::consts::TAU * F0 * time;
+            let expected = 0.5 * (angle.sin() - angle.cos());
+            assert!(
+                (actual / amplitude - expected).abs() < grid_bound,
+                "amplitude={amplitude:e}, t={time:e}, normalized={:e}, expected={expected:e}",
+                actual / amplitude,
+            );
+        }
+    }
+}
+
+#[test]
+fn pss_sources_use_the_configured_dialect_and_one_period_for_time_defaults() {
+    use rspice_core::config::SpiceDialect;
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+        let engine = Engine::new(SimulationConfig::default().with_spice_dialect(dialect));
+        for current in [false, true] {
+            for modulated in [false, true] {
+                let source = match (current, modulated) {
+                    (false, false) if dialect == SpiceDialect::Xyce => "SFFM(0 1)",
+                    (true, false) if dialect == SpiceDialect::Xyce => "SFFM(0 1m)",
+                    (false, false) => "SIN(0 1 0)",
+                    (true, false) => "SIN(0 1m 0)",
+                    (false, true) => "SFFM(0 1 1meg 5 1meg)",
+                    (true, true) => "SFFM(0 1m 1meg 5 1meg)",
+                };
+                let deck = if current {
+                    format!(
+                        "PSS source context\nI1 0 a {source}\nL1 a out 100u\nR1 out 0 1k\n.end\n"
+                    )
+                } else {
+                    format!("PSS source context\nV1 out 0 {source}\nC1 out 0 1p\n.end\n")
+                };
+                let netlist = Netlist::parse(&deck).unwrap();
+                for stabilization in [0, 3] {
+                    let analysis = engine
+                        .run_pss(
+                            &netlist,
+                            PssConfig::new(F0)
+                                .with_points_per_period(256)
+                                .with_tstab_periods(stabilization),
+                        )
+                        .unwrap();
+                    let result = &analysis.result;
+                    let out = result
+                        .node_names
+                        .iter()
+                        .position(|n| n.eq_ignore_ascii_case("out"))
+                        .unwrap();
+                    let mdi = if !modulated {
+                        0.0
+                    } else if dialect == SpiceDialect::Xyce {
+                        5.0
+                    } else {
+                        1.0
+                    };
+                    for (&time, &actual) in result.time.iter().zip(&result.waveforms[out].values) {
+                        let angle = std::f64::consts::TAU * F0 * time;
+                        let expected = (angle + mdi * angle.sin()).sin();
+                        assert!(
+                            (actual - expected).abs() < 1e-11,
+                            "{dialect:?}, current={current}, {source}, stabilization={stabilization}, t={time:e}: {actual:e} vs {expected:e}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn xyce_sine_requires_a_frequency_and_preserves_an_authored_zero() {
+    use rspice_core::config::SpiceDialect;
+    let engine = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+    let netlist =
+        Netlist::parse("Xyce zero frequency\nV1 out 0 SIN(2 1 0 0 0 37)\nC1 out 0 1p\n.end\n")
+            .unwrap();
+    let pss = engine
+        .run_pss(&netlist, PssConfig::new(F0).with_tstab_periods(0))
+        .unwrap();
+    let expected = 2.0 + 37.0_f64.to_radians().sin();
+    for &actual in &pss.result.waveforms[0].values {
+        assert!((actual - expected).abs() < 1e-12);
+    }
+    let transient = engine.run_tran(&netlist, 1e-6, 1e-9).unwrap();
+    for &actual in &transient.voltages[0] {
+        assert!((actual - expected).abs() < 1e-12);
+    }
+    for source in ["V1 out 0 SIN(0 1)", "I1 0 out DC 0 SIN(0 1)"] {
+        let netlist = Netlist::parse(&format!(
+            "Xyce required frequency\n{source}\nR1 out 0 1k\nC1 out 0 1p\n.end\n"
+        ))
+        .unwrap();
+        let error = engine.build_circuit(&netlist).unwrap_err().to_string();
+        assert!(error.contains("requires an authored frequency"), "{error}");
+    }
+}
+
+#[test]
 fn prescribed_dc_current_voltages_do_not_depend_on_the_companion_scale() {
     use rspice_core::numerics::integration::IntegrationMethod;
     let engine = Engine::default();
