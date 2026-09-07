@@ -223,8 +223,8 @@ jobs:
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
       - name: Test Verilog-A native JIT units (Linux x64)
         run: |
-          cargo test --locked -p rspice-veriloga --features native native:: -- --test-threads=1
-          cargo test --locked -p rspice-veriloga --release --features native native:: -- --test-threads=1
+          cargo test --locked -p rspice-veriloga --features native --lib native:: -- --test-threads=1
+          cargo test --locked -p rspice-veriloga --release --features native --lib native:: -- --test-threads=1
       - name: Test Verilog-A core transient suite through the native JIT (Linux x64)
         run: cargo test --locked -p rspice-core --features veriloga-native --test veriloga_transient -- --test-threads=1
       - name: Test Verilog-A native JIT contracts (Linux x64)
@@ -279,8 +279,8 @@ jobs:
         run: cargo test --locked -p rspice-ui --lib
       - name: Verilog-A native JIT unit tests
         run: |
-          cargo test --locked -p rspice-veriloga --features native native:: -- --test-threads=1
-          cargo test --locked -p rspice-veriloga --release --features native native:: -- --test-threads=1
+          cargo test --locked -p rspice-veriloga --features native --lib native:: -- --test-threads=1
+          cargo test --locked -p rspice-veriloga --release --features native --lib native:: -- --test-threads=1
       - name: Verilog-A native JIT contract tests
         run: cargo test --locked -p rspice-veriloga --features native-bytecode-contract-tests --test native_contract -- --test-threads=1
       - name: Verilog-A native multiplicity tests
@@ -311,8 +311,8 @@ jobs:
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
       - name: Test Verilog-A native JIT units
         run: |
-          cargo test --locked -p rspice-veriloga --features native native:: -- --test-threads=1
-          cargo test --locked -p rspice-veriloga --release --features native native:: -- --test-threads=1
+          cargo test --locked -p rspice-veriloga --features native --lib native:: -- --test-threads=1
+          cargo test --locked -p rspice-veriloga --release --features native --lib native:: -- --test-threads=1
       - name: Test Intel macOS hardened-runtime JIT entitlements
         shell: bash
         run: |

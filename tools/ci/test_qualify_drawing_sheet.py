@@ -211,7 +211,11 @@ class DrawingSheetQualificationTests(unittest.TestCase):
         minimum = next(
             (
                 gate.minimum_passed_tests
-                for gate in command_gates(1, ("wasm32-unknown-unknown",))
+                for gate in command_gates(
+                    1,
+                    ("wasm32-unknown-unknown",),
+                    operating_system=str(self._environment()["operating_system"]),
+                )
                 if gate.command == tuple(command)
             ),
             None,
