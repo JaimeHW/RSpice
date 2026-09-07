@@ -3,6 +3,33 @@ use rspice_core::expr::parse_expression_strict;
 use rspice_core::netlist::expr::parse_expression;
 
 #[test]
+fn runtime_function_expansion_cannot_build_an_unbounded_boxed_tree() {
+    use rspice_core::netlist::expr::{ParamContext, prepare_behavioral_expression};
+    std::thread::Builder::new()
+        .stack_size(1024 * 1024)
+        .spawn(|| {
+            for expand_argument in [false, true] {
+                let mut context = ParamContext::new();
+                context.define_function("F0", vec!["X".to_owned()], "X+TIME");
+                for index in 1..1000 {
+                    let body = if expand_argument {
+                        format!("F{}(X+TIME)", index - 1)
+                    } else {
+                        format!("F{}(X)+TIME", index - 1)
+                    };
+                    context.define_function(&format!("F{index}"), vec!["X".to_owned()], &body);
+                }
+                let error = prepare_behavioral_expression("F999(1)", &context)
+                    .expect_err("runtime expansion must respect the retained tree bound");
+                assert!(error.contains("stack safety limit"), "{error}");
+            }
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+#[test]
 fn recursive_expression_forms_return_diagnostics_on_a_desktop_sized_stack() {
     // A separate thread exercises the Windows executable's usual 1 MiB stack,
     // independently of the test runner's larger stack.
