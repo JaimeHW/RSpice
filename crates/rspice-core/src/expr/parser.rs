@@ -404,6 +404,8 @@ pub struct Parser<'a> {
     lexer: Lexer<'a>,
     current: Token,
     errors: Vec<String>,
+    parse_depth: usize,
+    depth_exceeded: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -414,6 +416,8 @@ impl<'a> Parser<'a> {
             lexer,
             current,
             errors: Vec::new(),
+            parse_depth: 0,
+            depth_exceeded: false,
         }
     }
 
@@ -424,6 +428,8 @@ impl<'a> Parser<'a> {
             lexer,
             current,
             errors: Vec::new(),
+            parse_depth: 0,
+            depth_exceeded: false,
         }
     }
 
@@ -432,7 +438,56 @@ impl<'a> Parser<'a> {
     }
 
     fn advance(&mut self) {
-        self.current = self.lexer.next_token();
+        self.current = if self.depth_exceeded {
+            Token::Eof
+        } else {
+            self.lexer.next_token()
+        };
+    }
+
+    fn nested(&mut self, parse: fn(&mut Self) -> Expr) -> Expr {
+        if self.parse_depth >= crate::resource::MAX_EXPRESSION_PARSE_DEPTH {
+            self.errors.push(format!(
+                "Expression nesting exceeds the stack safety limit of {}",
+                crate::resource::MAX_EXPRESSION_PARSE_DEPTH
+            ));
+            self.depth_exceeded = true;
+            self.current = Token::Eof;
+            return Expr::Const(0.0);
+        }
+        self.parse_depth += 1;
+        let expression = parse(self);
+        let result = self.checked_expr(expression);
+        self.parse_depth -= 1;
+        result
+    }
+
+    fn checked_expr(&mut self, expression: Expr) -> Expr {
+        let mut pending = vec![(&expression, 1)];
+        while let Some((node, depth)) = pending.pop() {
+            if depth > crate::resource::MAX_EXPRESSION_TREE_DEPTH {
+                self.errors.push(format!(
+                    "Expression tree exceeds the stack safety limit of {}",
+                    crate::resource::MAX_EXPRESSION_TREE_DEPTH
+                ));
+                self.depth_exceeded = true;
+                self.current = Token::Eof;
+                return Expr::Const(0.0);
+            }
+            match node {
+                Expr::Binary { left, right, .. } => {
+                    pending.push((right, depth + 1));
+                    pending.push((left, depth + 1));
+                }
+                Expr::Unary { operand, .. } => pending.push((operand, depth + 1)),
+                Expr::Function { args, .. } => {
+                    pending.extend(args.iter().map(|arg| (arg, depth + 1)));
+                }
+                Expr::LookupTable { input, .. } => pending.push((input, depth + 1)),
+                _ => {}
+            }
+        }
+        expression
     }
 
     fn expect(&mut self, expected: Token) -> bool {
@@ -483,6 +538,10 @@ impl<'a> Parser<'a> {
     // 11. function calls, atoms
 
     fn parse_conditional(&mut self) -> Expr {
+        self.nested(Self::parse_conditional_inner)
+    }
+
+    fn parse_conditional_inner(&mut self) -> Expr {
         let condition = self.parse_or();
         if self.current != Token::Question {
             return condition;
@@ -508,6 +567,7 @@ impl<'a> Parser<'a> {
                 left: Box::new(left),
                 right: Box::new(right),
             };
+            left = self.checked_expr(left);
         }
         left
     }
@@ -522,6 +582,7 @@ impl<'a> Parser<'a> {
                 left: Box::new(left),
                 right: Box::new(right),
             };
+            left = self.checked_expr(left);
         }
         left
     }
@@ -541,6 +602,7 @@ impl<'a> Parser<'a> {
                 left: Box::new(left),
                 right: Box::new(right),
             };
+            left = self.checked_expr(left);
         }
         left
     }
@@ -562,6 +624,7 @@ impl<'a> Parser<'a> {
                 left: Box::new(left),
                 right: Box::new(right),
             };
+            left = self.checked_expr(left);
         }
         left
     }
@@ -581,6 +644,7 @@ impl<'a> Parser<'a> {
                 left: Box::new(left),
                 right: Box::new(right),
             };
+            left = self.checked_expr(left);
         }
         left
     }
@@ -595,6 +659,7 @@ impl<'a> Parser<'a> {
                 left: Box::new(left),
                 right: Box::new(right),
             };
+            left = self.checked_expr(left);
         }
         left
     }
@@ -614,6 +679,7 @@ impl<'a> Parser<'a> {
                 left: Box::new(left),
                 right: Box::new(right),
             };
+            left = self.checked_expr(left);
         }
         left
     }
@@ -634,11 +700,16 @@ impl<'a> Parser<'a> {
                 left: Box::new(left),
                 right: Box::new(right),
             };
+            left = self.checked_expr(left);
         }
         left
     }
 
     fn parse_unary(&mut self) -> Expr {
+        self.nested(Self::parse_unary_inner)
+    }
+
+    fn parse_unary_inner(&mut self) -> Expr {
         match &self.current {
             Token::Minus => {
                 self.advance();

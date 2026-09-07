@@ -8,6 +8,15 @@ use std::path::Path;
 
 use thiserror::Error;
 
+/// Hard ceiling for recursive expression grammar entry, independent of the
+/// caller's workload limits. Untrusted expressions must not exhaust the native
+/// or WebAssembly stack even when resource limits are disabled.
+pub(crate) const MAX_EXPRESSION_PARSE_DEPTH: usize = 64;
+
+/// Bound the depth of parsed trees as well as grammar recursion: a flat
+/// operator chain builds a deep tree whose cloning and destruction recurse.
+pub(crate) const MAX_EXPRESSION_TREE_DEPTH: usize = 128;
+
 /// A resource whose configured production limit can be enforced.
 ///
 /// This enum is non-exhaustive so new analysis and frontend resource classes

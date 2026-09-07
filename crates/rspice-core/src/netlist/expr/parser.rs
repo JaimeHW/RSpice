@@ -19,6 +19,7 @@ pub(in crate::netlist::expr) struct ExprParser<'a> {
     pos: usize,
     abort: Option<&'a dyn crate::abort_signal::AbortSignal>,
     aborted: bool,
+    parse_depth: usize,
 }
 
 impl<'a> ExprParser<'a> {
@@ -28,6 +29,7 @@ impl<'a> ExprParser<'a> {
             pos: 0,
             abort: None,
             aborted: false,
+            parse_depth: 0,
         }
     }
 
@@ -40,11 +42,52 @@ impl<'a> ExprParser<'a> {
             pos: 0,
             abort: Some(abort),
             aborted: false,
+            parse_depth: 0,
         }
     }
 
     pub(in crate::netlist::expr) fn was_aborted(&self) -> bool {
         self.aborted
+    }
+
+    fn nested(
+        &mut self,
+        parse: fn(&mut Self) -> Result<Expr, ExprError>,
+    ) -> Result<Expr, ExprError> {
+        if self.parse_depth >= crate::resource::MAX_EXPRESSION_PARSE_DEPTH {
+            return Err(ExprError::InvalidArgument(format!(
+                "Expression nesting exceeds the stack safety limit of {}",
+                crate::resource::MAX_EXPRESSION_PARSE_DEPTH
+            )));
+        }
+        self.parse_depth += 1;
+        let result = parse(self).and_then(Self::checked_expr);
+        self.parse_depth -= 1;
+        result
+    }
+
+    fn checked_expr(expression: Expr) -> Result<Expr, ExprError> {
+        let mut pending = vec![(&expression, 1)];
+        while let Some((node, depth)) = pending.pop() {
+            if depth > crate::resource::MAX_EXPRESSION_TREE_DEPTH {
+                return Err(ExprError::InvalidArgument(format!(
+                    "Expression tree exceeds the stack safety limit of {}",
+                    crate::resource::MAX_EXPRESSION_TREE_DEPTH
+                )));
+            }
+            match node {
+                Expr::BinOp { left, right, .. } => {
+                    pending.push((right, depth + 1));
+                    pending.push((left, depth + 1));
+                }
+                Expr::UnaryOp { operand, .. } => pending.push((operand, depth + 1)),
+                Expr::FnCall { args, .. } => {
+                    pending.extend(args.iter().map(|arg| (arg, depth + 1)));
+                }
+                _ => {}
+            }
+        }
+        Ok(expression)
     }
 
     fn poll_abort(&mut self) -> bool {
@@ -123,6 +166,10 @@ impl<'a> ExprParser<'a> {
 
     /// Parse ternary expressions (cond ? then : else) - lowest precedence
     fn parse_ternary(&mut self) -> Result<Expr, ExprError> {
+        self.nested(Self::parse_ternary_inner)
+    }
+
+    fn parse_ternary_inner(&mut self) -> Result<Expr, ExprError> {
         let cond = self.parse_or()?;
 
         self.skip_ws();
@@ -160,6 +207,7 @@ impl<'a> ExprParser<'a> {
                     left: Box::new(left),
                     right: Box::new(right),
                 };
+                left = Self::checked_expr(left)?;
             } else {
                 break;
             }
@@ -183,6 +231,7 @@ impl<'a> ExprParser<'a> {
                     left: Box::new(left),
                     right: Box::new(right),
                 };
+                left = Self::checked_expr(left)?;
             } else {
                 break;
             }
@@ -208,6 +257,7 @@ impl<'a> ExprParser<'a> {
                         left: Box::new(left),
                         right: Box::new(right),
                     };
+                    left = Self::checked_expr(left)?;
                 } else {
                     self.skip_ws();
                     let right = self.parse_additive()?;
@@ -216,6 +266,7 @@ impl<'a> ExprParser<'a> {
                         left: Box::new(left),
                         right: Box::new(right),
                     };
+                    left = Self::checked_expr(left)?;
                 }
             } else if self.consume('<') {
                 if self.consume('=') {
@@ -226,6 +277,7 @@ impl<'a> ExprParser<'a> {
                         left: Box::new(left),
                         right: Box::new(right),
                     };
+                    left = Self::checked_expr(left)?;
                 } else if self.consume('>') {
                     // ngspice numparam inequality spelling: `a <> b`.
                     self.skip_ws();
@@ -235,6 +287,7 @@ impl<'a> ExprParser<'a> {
                         left: Box::new(left),
                         right: Box::new(right),
                     };
+                    left = Self::checked_expr(left)?;
                 } else {
                     self.skip_ws();
                     let right = self.parse_additive()?;
@@ -243,6 +296,7 @@ impl<'a> ExprParser<'a> {
                         left: Box::new(left),
                         right: Box::new(right),
                     };
+                    left = Self::checked_expr(left)?;
                 }
             } else if self.consume('=') {
                 // Both `==` and the ngspice numparam single `=` compare for
@@ -255,6 +309,7 @@ impl<'a> ExprParser<'a> {
                     left: Box::new(left),
                     right: Box::new(right),
                 };
+                left = Self::checked_expr(left)?;
             } else if self.consume('!') {
                 if self.consume('=') {
                     self.skip_ws();
@@ -264,6 +319,7 @@ impl<'a> ExprParser<'a> {
                         left: Box::new(left),
                         right: Box::new(right),
                     };
+                    left = Self::checked_expr(left)?;
                 } else {
                     self.pos = start_pos;
                     break;
@@ -290,6 +346,7 @@ impl<'a> ExprParser<'a> {
                     left: Box::new(left),
                     right: Box::new(right),
                 };
+                left = Self::checked_expr(left)?;
             } else if self.consume('-') {
                 self.skip_ws();
                 let right = self.parse_modulo()?;
@@ -298,6 +355,7 @@ impl<'a> ExprParser<'a> {
                     left: Box::new(left),
                     right: Box::new(right),
                 };
+                left = Self::checked_expr(left)?;
             } else {
                 break;
             }
@@ -320,6 +378,7 @@ impl<'a> ExprParser<'a> {
                     left: Box::new(left),
                     right: Box::new(right),
                 };
+                left = Self::checked_expr(left)?;
             } else {
                 break;
             }
@@ -346,6 +405,7 @@ impl<'a> ExprParser<'a> {
                     left: Box::new(left),
                     right: Box::new(right),
                 };
+                left = Self::checked_expr(left)?;
             } else if self.consume('/') {
                 self.skip_ws();
                 let right = self.parse_unary()?;
@@ -354,6 +414,7 @@ impl<'a> ExprParser<'a> {
                     left: Box::new(left),
                     right: Box::new(right),
                 };
+                left = Self::checked_expr(left)?;
             } else {
                 break;
             }
@@ -396,6 +457,7 @@ impl<'a> ExprParser<'a> {
                 left: Box::new(base),
                 right: Box::new(exp),
             };
+            base = Self::checked_expr(base)?;
         }
 
         Ok(base)
@@ -403,6 +465,10 @@ impl<'a> ExprParser<'a> {
 
     /// Exponent operand: optional signs ahead of a primary, nothing more.
     fn parse_power_exponent(&mut self) -> Result<Expr, ExprError> {
+        self.nested(Self::parse_power_exponent_inner)
+    }
+
+    fn parse_power_exponent_inner(&mut self) -> Result<Expr, ExprError> {
         self.skip_ws();
         if self.consume('-') {
             let operand = self.parse_power_exponent()?;
@@ -419,6 +485,10 @@ impl<'a> ExprParser<'a> {
 
     /// Parse unary expressions (+, -, !)
     fn parse_unary(&mut self) -> Result<Expr, ExprError> {
+        self.nested(Self::parse_unary_inner)
+    }
+
+    fn parse_unary_inner(&mut self) -> Result<Expr, ExprError> {
         self.skip_ws();
 
         if self.consume('-') {
