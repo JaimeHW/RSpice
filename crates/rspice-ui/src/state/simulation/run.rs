@@ -239,8 +239,11 @@ pub struct SimulationRun {
     /// changes what the project's limit is allowed to discard, and that policy
     /// is applied by the state rather than by whoever holds the run.
     retention: RunRetention,
-    /// Total simulation time in seconds
+    /// Observed elapsed duration of this run in seconds, sealed at completion.
     pub elapsed_time: f64,
+    /// Live monotonic clock. Historical runs retain their recorded duration
+    /// without starting another clock when the project is opened.
+    elapsed_started_at: Option<crate::time_compat::Instant>,
     /// Whether all analyses in this run succeeded
     pub success: bool,
     /// Terminal judgments against the exact specification definitions sealed
@@ -270,6 +273,7 @@ impl SimulationRun {
             provenance: None,
             retention: RunRetention::Pruneable,
             elapsed_time: 0.0,
+            elapsed_started_at: Some(crate::time_compat::Instant::now()),
             success: true,
             specification_verdicts: None,
             campaign_membership: None,
@@ -343,7 +347,7 @@ impl SimulationRun {
         self.transition_lifecycle(SimulationRunLifecycle::Cancelling)
     }
 
-    /// Seal a terminal lifecycle and its wall-clock duration together.
+    /// Seal a terminal lifecycle and its monotonic elapsed duration together.
     pub(crate) fn finish_lifecycle(
         &mut self,
         terminal: SimulationRunLifecycle,
@@ -366,9 +370,46 @@ impl SimulationRun {
                 self.id
             ));
         }
+        // A repeated acknowledgement validates the immutable judgments but
+        // cannot rewrite elapsed time or upgrade a legacy verdict record.
+        if self.lifecycle.is_terminal() {
+            return self.transition_lifecycle(terminal);
+        }
+        let elapsed = self
+            .elapsed_started_at
+            .ok_or_else(|| format!("simulation run {} has no live timing evidence", self.id))?
+            .elapsed()
+            .as_secs_f64();
         self.transition_lifecycle(terminal)?;
         self.specification_verdicts = verdicts;
-        self.elapsed_time = (Self::current_timestamp() - self.timestamp).max(0.0);
+        self.elapsed_time = elapsed;
+        self.elapsed_started_at = None;
+        Ok(())
+    }
+
+    pub(crate) fn validate_elapsed_time(elapsed: f64) -> Result<(), String> {
+        if !elapsed.is_finite() || elapsed < 0.0 {
+            return Err("run elapsed time must be finite and nonnegative".to_owned());
+        }
+        Ok(())
+    }
+
+    /// Restore timing evidence without claiming ownership of the old executor.
+    /// Active records become interrupted; historical durations remain exact.
+    pub(crate) fn restore_lifecycle(
+        &mut self,
+        lifecycle: SimulationRunLifecycle,
+        elapsed: f64,
+    ) -> Result<(), String> {
+        Self::validate_elapsed_time(elapsed)?;
+        self.lifecycle = match lifecycle {
+            SimulationRunLifecycle::Preparing
+            | SimulationRunLifecycle::Running
+            | SimulationRunLifecycle::Cancelling => SimulationRunLifecycle::Interrupted,
+            lifecycle => lifecycle,
+        };
+        self.elapsed_time = elapsed;
+        self.elapsed_started_at = None;
         Ok(())
     }
 
@@ -806,9 +847,77 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn run_duration_is_independent_of_wall_clock_adjustments() {
+        for wall_shift in [-86_400.0, 86_400.0] {
+            let observed = crate::time_compat::Instant::now();
+            let mut run = SimulationRun::new(9);
+            run.timestamp += wall_shift;
+            run.mark_running().unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(2));
+            run.finish_lifecycle(SimulationRunLifecycle::Completed)
+                .unwrap();
+            assert!(
+                run.elapsed_time >= 0.001,
+                "wall clock jump erased elapsed time"
+            );
+            assert!(
+                run.elapsed_time <= observed.elapsed().as_secs_f64(),
+                "wall clock jump was counted as simulation time"
+            );
+        }
+    }
+
+    #[test]
+    fn terminal_run_duration_is_immutable_on_duplicate_completion() {
+        for terminal in [
+            SimulationRunLifecycle::Completed,
+            SimulationRunLifecycle::Failed,
+            SimulationRunLifecycle::Aborted,
+            SimulationRunLifecycle::Interrupted,
+        ] {
+            let mut run = SimulationRun::new(9);
+            run.mark_running().unwrap();
+            run.finish_lifecycle(terminal).unwrap();
+            let sealed = run.elapsed_time.to_bits();
+            run.timestamp -= 86_400.0;
+            run.finish_lifecycle(terminal).unwrap();
+            assert_eq!(run.elapsed_time.to_bits(), sealed, "{terminal:?}");
+            assert_eq!(run.lifecycle, terminal);
+            assert!(run.mark_running().is_err());
+            assert_eq!(run.elapsed_time.to_bits(), sealed);
+        }
+    }
+
+    #[test]
+    fn invalid_restored_timing_does_not_mutate_the_live_run() {
+        let mut run = SimulationRun::new(9);
+        run.mark_running().unwrap();
+        let started = run.elapsed_started_at;
+        for invalid in [-0.1, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(
+                run.restore_lifecycle(SimulationRunLifecycle::Completed, invalid)
+                    .is_err()
+            );
+            assert_eq!(run.lifecycle, SimulationRunLifecycle::Running);
+            assert_eq!(run.elapsed_time, 0.0);
+            assert_eq!(run.elapsed_started_at, started);
+        }
+        run.restore_lifecycle(SimulationRunLifecycle::Running, 12.5)
+            .unwrap();
+        assert_eq!(run.lifecycle, SimulationRunLifecycle::Interrupted);
+        assert_eq!(run.elapsed_time, 12.5);
+        assert!(run.elapsed_started_at.is_none());
+        run.finish_lifecycle(SimulationRunLifecycle::Interrupted)
+            .unwrap();
+        assert_eq!(run.elapsed_time, 12.5);
+    }
+
+    #[test]
     fn current_run_lifecycle_is_monotonic_and_seals_duration() {
         let mut run = SimulationRun::new(9);
-        run.timestamp -= 0.001;
+        run.elapsed_started_at =
+            Some(crate::time_compat::Instant::now() - std::time::Duration::from_millis(1));
 
         run.mark_running().expect("engine accepts the prepared run");
         run.mark_cancelling().expect("cancel request is retained");

@@ -1204,12 +1204,13 @@ impl ProjectSimulationRun {
         let restored_lifecycle = self
             .lifecycle
             .unwrap_or(SimulationRunLifecycle::LegacyUnknown);
-        if matches!(
+        let was_active = matches!(
             restored_lifecycle,
             SimulationRunLifecycle::Preparing
                 | SimulationRunLifecycle::Running
                 | SimulationRunLifecycle::Cancelling
-        ) {
+        );
+        if was_active {
             for analysis in &mut analyses {
                 if analysis.is_live_partial() {
                     analysis.error_message = Some(
@@ -1219,38 +1220,15 @@ impl ProjectSimulationRun {
                 }
             }
         }
-        run.lifecycle = match restored_lifecycle {
-            SimulationRunLifecycle::Preparing
-            | SimulationRunLifecycle::Running
-            | SimulationRunLifecycle::Cancelling => SimulationRunLifecycle::Interrupted,
-            lifecycle => lifecycle,
-        };
+        run.restore_lifecycle(restored_lifecycle, self.elapsed_time)?;
         run.label = self.label;
         run.timestamp = self.timestamp;
         run.analyses = analyses;
         run.set_retention(self.retention);
-        run.elapsed_time = self.elapsed_time;
-        run.success = if matches!(
-            restored_lifecycle,
-            SimulationRunLifecycle::Preparing
-                | SimulationRunLifecycle::Running
-                | SimulationRunLifecycle::Cancelling
-        ) {
-            false
-        } else {
-            self.success
-        };
+        run.success = !was_active && self.success;
         run.restore_campaign_membership(campaign_membership)?;
         run.restore_provenance(provenance)?;
-        if specification_verdicts.is_none()
-            && matches!(
-                restored_lifecycle,
-                SimulationRunLifecycle::Preparing
-                    | SimulationRunLifecycle::Running
-                    | SimulationRunLifecycle::Cancelling
-            )
-            && run.prepared_receipt().is_some()
-        {
+        if specification_verdicts.is_none() && was_active && run.prepared_receipt().is_some() {
             run.seal_interrupted_specification_verdicts()?;
         } else {
             run.restore_specification_verdicts(specification_verdicts)?;
@@ -1265,7 +1243,8 @@ impl ProjectSimulationRun {
                 .map_err(|error| format!("runs[{run_idx}].campaign_membership: {error}"))?;
         }
         require_finite(self.timestamp, &format!("runs[{run_idx}].timestamp"))?;
-        require_finite(self.elapsed_time, &format!("runs[{run_idx}].elapsed_time"))?;
+        SimulationRun::validate_elapsed_time(self.elapsed_time)
+            .map_err(|error| format!("runs[{run_idx}].elapsed_time: {error}"))?;
         let lifecycle = self.lifecycle.ok_or_else(|| {
             format!("runs[{run_idx}].lifecycle is required by simulation results schema v6")
         })?;
