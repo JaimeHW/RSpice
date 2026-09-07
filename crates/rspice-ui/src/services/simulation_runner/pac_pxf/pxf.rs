@@ -187,7 +187,9 @@ impl PxfRunConfig {
 pub struct PxfData {
     /// Input frequency sweep points (Hz).
     pub frequencies: Vec<Value>,
-    /// Converted output frequency for each input sweep point (Hz).
+    /// Absolute frequency the converted response appears at, in hertz:
+    /// `output_sideband * f0 + offset`, where the offset is the swept
+    /// abscissa beside it.
     pub output_frequencies: Vec<Value>,
     /// Complex transfer H(input sideband -> output sideband).
     pub transfer: Vec<Complex64>,
@@ -296,15 +298,7 @@ fn run_pxf_analysis_for_netlist_with_operating_point_abort(
     for (index, point) in result.points.iter().enumerate() {
         poll_periodically(abort, index)?;
         frequencies.push(point.freq_in);
-        // Derived here, for one more commit, exactly as this runner has always
-        // derived it. `point.freq_out` is core's own answer and is not the same
-        // number; publishing it is a deliberate correction, and it belongs in a
-        // commit a reviewer can read on its own rather than inside a deletion.
-        output_frequencies.push(
-            point.freq_in
-                + Value::from(config.output_sideband - config.input_sideband)
-                    * result.fundamental_freq,
-        );
+        output_frequencies.push(point.freq_out);
         transfer.push(point.transfer);
     }
 
@@ -329,7 +323,167 @@ fn run_pxf_analysis_for_netlist_with_operating_point_abort(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rspice_core::abort_signal::ImmediateAbort;
+    use rspice_core::abort_signal::{ImmediateAbort, NoAbort};
+
+    /// An RC low-pass whose corner sits exactly on the carrier fundamental, so
+    /// the transfer is a closed form at every sideband and the carrier is cheap
+    /// to solve. The deck carries no analysis cards: the configurations below
+    /// are what a Studio form or a `.PXF` line would have produced.
+    const FIXTURE_DECK: &str = "PXF converted output frequency fixture\n\
+         vin in 0 dc 0 ac 1\n\
+         r1 in out 1k\n\
+         c1 out 0 159.154943091895p\n\
+         .end\n";
+    const FIXTURE_FUNDAMENTAL: Value = 1.0e6;
+    const FIXTURE_OUTPUT_SIDEBAND: i32 = 1;
+    /// `LIN 3` over 100 kHz..500 kHz. These are baseband offsets, not the
+    /// absolute frequencies the drive is applied at.
+    const FIXTURE_OFFSETS: [Value; 3] = [1.0e5, 3.0e5, 5.0e5];
+
+    fn fixture_config(input_sideband: i32) -> PxfRunConfig {
+        PxfRunConfig {
+            pss_fundamental_freq: FIXTURE_FUNDAMENTAL,
+            pss_num_harmonics: 8,
+            pss_tolerance: 1.0e-3,
+            start_freq: FIXTURE_OFFSETS[0],
+            stop_freq: FIXTURE_OFFSETS[2],
+            points_per_unit: FIXTURE_OFFSETS.len(),
+            sweep: PxfFrequencySweep::Linear,
+            input_source: "VIN".to_owned(),
+            input_sideband,
+            output_node: "OUT".to_owned(),
+            output_ref: None,
+            output_sideband: FIXTURE_OUTPUT_SIDEBAND,
+            max_sideband: 1,
+            reltol: 1.0e-3,
+            abstol: 1.0e-12,
+        }
+    }
+
+    fn fixture_run(input_sideband: i32) -> PxfData {
+        // The carrier has to come out of the same elaboration the runner will
+        // perform: a retained operating point carries the semantic identity of
+        // the circuit it was solved on, and the entry refuses one that does not
+        // match the netlist it is handed.
+        let netlist = parse_runner_netlist_with_abort(FIXTURE_DECK, None, &NoAbort)
+            .expect("the fixture deck parses");
+        let engine = build_resolved_periodic_engine(&netlist, 1.0e-3, "fixture engine")
+            .expect("the fixture engine configuration resolves");
+        let carrier = engine
+            .run_pss_operating_point_with_abort(
+                &netlist,
+                rspice_core::analysis::PssConfig::new(FIXTURE_FUNDAMENTAL)
+                    .with_harmonics(8)
+                    .with_points_per_period(128)
+                    .with_tstab_periods(0),
+                &NoAbort,
+            )
+            .expect("the linear carrier converges");
+
+        run_pxf_analysis_from_pss_with_source_path_and_abort(
+            FIXTURE_DECK,
+            &fixture_config(input_sideband),
+            &carrier,
+            None,
+            &NoAbort,
+        )
+        .expect("the PXF run publishes a transfer")
+    }
+
+    /// The old value, the new value, and why the new one is right.
+    ///
+    /// Until the engine ran this analysis the Studio derived the published
+    /// "Converted Output Frequency" as
+    /// `offset + (output_sideband - input_sideband) * f0`, which reads the
+    /// swept variable as the absolute frequency the drive is applied at. It is
+    /// not one: `ConversionMatrix::get_transfer` hands each sweep point
+    /// straight through as `SidebandTransfer::frequency_offset`, so the swept
+    /// variable *is* the baseband offset, and the frequency the converted
+    /// response appears at is `output_sideband * f0 + offset`.
+    ///
+    /// At `INPUTSIDEBAND=1` -- the default, and until the step before this one
+    /// the only value the Studio could write -- the two disagree by exactly one
+    /// whole fundamental. With `f0 = 1 MHz` and `OUTSIDEBAND=1` this curve read
+    /// 100 kHz / 300 kHz / 500 kHz and now reads 1.1 MHz / 1.3 MHz / 1.5 MHz.
+    #[test]
+    fn the_converted_output_frequency_moves_by_one_fundamental_at_input_sideband_one() {
+        let published = fixture_run(1);
+
+        assert_eq!(
+            published.frequencies,
+            FIXTURE_OFFSETS.to_vec(),
+            "the swept abscissa is the authored baseband offset"
+        );
+        assert_eq!(published.input_sideband, 1);
+        assert_eq!(published.output_sideband, FIXTURE_OUTPUT_SIDEBAND);
+
+        for (offset, converted) in FIXTURE_OFFSETS
+            .iter()
+            .copied()
+            .zip(&published.output_frequencies)
+        {
+            let before = offset + Value::from(FIXTURE_OUTPUT_SIDEBAND - 1) * FIXTURE_FUNDAMENTAL;
+            let after = Value::from(FIXTURE_OUTPUT_SIDEBAND).mul_add(FIXTURE_FUNDAMENTAL, offset);
+            assert_eq!(
+                before, offset,
+                "the old formula published the offset itself"
+            );
+            assert_eq!(*converted, after);
+            assert_eq!(
+                *converted - before,
+                FIXTURE_FUNDAMENTAL,
+                "the correction is exactly one fundamental"
+            );
+        }
+        assert_eq!(
+            published.output_frequencies,
+            vec![1.1e6, 1.3e6, 1.5e6],
+            "the response appears one fundamental above each swept offset"
+        );
+    }
+
+    /// The other half of the same fixture: at `INPUTSIDEBAND=0` the old
+    /// formula's `(out - in)` happens to equal `out`, so it was accidentally
+    /// correct and this number does not move. `INPUTSIDEBAND` only became
+    /// authorable in the step before this one, which is why the error was
+    /// reachable for every PXF run the Studio had ever made and invisible in
+    /// this one case.
+    #[test]
+    fn the_converted_output_frequency_is_unchanged_at_input_sideband_zero() {
+        let published = fixture_run(0);
+
+        assert_eq!(published.frequencies, FIXTURE_OFFSETS.to_vec());
+        assert_eq!(published.input_sideband, 0);
+
+        for (offset, converted) in FIXTURE_OFFSETS
+            .iter()
+            .copied()
+            .zip(&published.output_frequencies)
+        {
+            let before = offset + Value::from(FIXTURE_OUTPUT_SIDEBAND) * FIXTURE_FUNDAMENTAL;
+            let after = Value::from(FIXTURE_OUTPUT_SIDEBAND).mul_add(FIXTURE_FUNDAMENTAL, offset);
+            assert_eq!(*converted, after);
+            assert_eq!(
+                before, *converted,
+                "at INPUTSIDEBAND=0 the old formula was accidentally correct"
+            );
+        }
+        assert_eq!(published.output_frequencies, vec![1.1e6, 1.3e6, 1.5e6]);
+    }
+
+    /// The group delay the sheet plots is core's own curve: one sample shorter
+    /// than the sweep, on the midpoints of the swept offsets.
+    #[test]
+    fn the_group_delay_curve_sits_on_the_swept_offsets_midpoints() {
+        let published = fixture_run(1);
+        let group_delay = published
+            .group_delay
+            .expect("three sweep points give two group-delay samples");
+
+        assert_eq!(group_delay.len(), FIXTURE_OFFSETS.len() - 1);
+        assert_eq!(group_delay[0].0, 2.0e5);
+        assert_eq!(group_delay[1].0, 4.0e5);
+    }
 
     #[test]
     fn pxf_service_preserves_typed_entry_abort() {
