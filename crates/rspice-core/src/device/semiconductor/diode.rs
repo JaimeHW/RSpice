@@ -1658,6 +1658,14 @@ impl Diode {
         };
     }
 
+    /// Whether this instance can store junction, diffusion, or overlap charge.
+    pub(crate) fn has_charge_storage(&self) -> bool {
+        self.cj0 != 0.0
+            || self.tt != 0.0
+            || self.sidewall_cj0 != 0.0
+            || self.overlap_capacitance != 0.0
+    }
+
     /// Junction charge and capacitance at `vd` for transient integration
     /// (dioload.c): depletion charge with the F1/F2/F3 polynomial
     /// continuation above `FC·VJ`, plus diffusion charge `TT·id` riding the

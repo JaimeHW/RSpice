@@ -1211,12 +1211,12 @@ pub(in crate::engine) fn pss_state_gaps(circuit: &CircuitData) -> Vec<Capability
             Absent(missing) => gaps.push(CapabilityGap::new(family, missing)),
             Restricted(_) => match family {
                 F::Diode => {
-                    if circuit.diodes.devices.iter().any(|diode| {
-                        diode.cj0 != 0.0
-                            || diode.tt != 0.0
-                            || diode.sidewall_cj0 != 0.0
-                            || diode.overlap_capacitance != 0.0
-                    }) {
+                    if circuit
+                        .diodes
+                        .devices
+                        .iter()
+                        .any(|diode| diode.has_charge_storage())
+                    {
                         gaps.push(CapabilityGap::new(
                             family,
                             "diode junction/diffusion charge history",
