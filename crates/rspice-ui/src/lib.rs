@@ -402,8 +402,11 @@ module rspice_wasm_solver_probe(p, n);
   integer task_index;
   analog begin
     bias = analysis("tran") ? ($param_given(gain) ? 100.0 : 1.0) : -1000.0;
-    for (task_index = 0; task_index < 2; task_index = task_index + 1)
+    task_index = 0;
+    while (task_index < 2) begin
       $finish(task_index);
+      task_index = task_index + 1;
+    end
     if (V(p, n) < 0.0) $finish(99);
     I(p, n) <+ bias + gain * V(p, n) + ddt(V(p, n));
   end
