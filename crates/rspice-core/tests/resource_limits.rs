@@ -125,7 +125,7 @@ fn redundant_flat_knots_do_not_consume_the_pss_source_mesh_budget() {
 }
 
 #[test]
-fn narrow_independent_pulses_use_bounded_local_meshes_including_scaled_files() {
+fn narrow_source_pulses_use_bounded_local_meshes_including_scaled_files() {
     use rspice_core::abort_signal::NoAbort;
     use rspice_core::analysis::PssConfig;
     let directory = TestDirectory::new("pss-local-mesh");
@@ -138,6 +138,9 @@ fn narrow_independent_pulses_use_bounded_local_meshes_including_scaled_files() {
     for source in [
         "V1 in 0 PULSE(0 1 400p 10p 10p 100p 1u)".to_owned(),
         "V1 in 0 PWL(0 0 1e-300 0 400p 0 410p 1 510p 1 520p 0 1u 0) R=0".to_owned(),
+        "B1 in 0 V=table(time%1u,0,0,400p,0,410p,1,510p,1,520p,0,1u,0)".to_owned(),
+        "B1 in 0 V=table(mod(time*1e12,1e6),0,0,400,0,410,1,510,1,520,0,1e6,0)".to_owned(),
+        "B1 in 0 V=spice_pulse(0,1,400p,10p,10p,100p,1u)".to_owned(),
         format!(
             "V1 in 0 PWL FILE=\"{}\" TSCALE=1p R=0",
             path.to_string_lossy().replace('\\', "/")
@@ -151,7 +154,11 @@ fn narrow_independent_pulses_use_bounded_local_meshes_including_scaled_files() {
         engine
             .validate_pss_source_contract_with_abort(
                 &netlist,
-                &["V1".to_owned()],
+                &if source.starts_with('V') {
+                    vec!["V1".to_owned()]
+                } else {
+                    Vec::new()
+                },
                 &config,
                 &NoAbort,
             )

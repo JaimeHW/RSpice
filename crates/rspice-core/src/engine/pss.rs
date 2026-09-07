@@ -53,6 +53,23 @@ struct PssGridSolution {
     jacobian: Option<Vec<Vec<Value>>>,
 }
 
+#[derive(Clone, Copy)]
+enum PssSampleMap<'a> {
+    Doubled,
+    Retained(&'a [usize]),
+    Identical,
+}
+
+impl PssSampleMap<'_> {
+    fn index(self, coarse_index: usize) -> usize {
+        match self {
+            Self::Doubled => 2 * coarse_index,
+            Self::Retained(indices) => indices[coarse_index],
+            Self::Identical => coarse_index,
+        }
+    }
+}
+
 /// Accepted-step timing state for the adaptive PSS trajectory.
 ///
 /// Coefficient construction is deliberately read-only: a rejected Newton
@@ -94,7 +111,7 @@ impl PssAcceptedStepHistory {
 const PSS_FD_STEP: Value = 1e-8;
 const PSS_KRYLOV_STATE_THRESHOLD: usize = 12;
 const PSS_KRYLOV_REL_TOL: Value = 1e-9;
-const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 17;
+const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 18;
 
 fn pss_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -1538,7 +1555,7 @@ impl Engine {
                     source.name.as_str(),
                     source.has_periodic_time_dependence(period, autonomous),
                     source.max_authored_tone_cycles(period),
-                    source.minimum_pss_interval(),
+                    source.minimum_pss_interval(true),
                 )
             })
             .chain(
@@ -1551,7 +1568,7 @@ impl Engine {
                             source.name.as_str(),
                             source.has_periodic_time_dependence(period, autonomous),
                             source.max_authored_tone_cycles(period),
-                            source.minimum_pss_interval(),
+                            source.minimum_pss_interval(true),
                         )
                     }),
             );
@@ -2214,7 +2231,7 @@ impl Engine {
             period
         };
 
-        // Qualify the discrete orbit against a fully solved doubled grid.
+        // Qualify the discrete orbit against a fully solved refined grid.
         // Source defaults remain authored by config, while the worker-owned
         // integration_steps is shared by every perturbation on a given mesh.
         let mut coarse = self.pss_solve_grid(
@@ -2227,16 +2244,35 @@ impl Engine {
         let mut iteration = coarse.iterations;
         loop {
             let steps = circuit.grid_steps(&config);
-            let finer_steps = steps.checked_mul(2).ok_or_else(|| {
-                PssError::InvalidConfig("PSS refinement grid size overflowed".to_owned())
-            })?;
-            self.ensure_pss_refinement_capacity(&circuit, steps, finer_steps)?;
             let coarse_mesh = circuit.integration_mesh.clone();
-            circuit.integration_mesh = coarse_mesh
+            let finer_steps = match &coarse_mesh {
+                Some(mesh) => mesh.refinement_steps(abort)?,
+                None => steps.checked_mul(2).ok_or_else(|| {
+                    PssError::InvalidConfig("PSS refinement grid size overflowed".to_owned())
+                })?,
+            };
+            self.ensure_pss_refinement_capacity(&circuit, steps, finer_steps, false)?;
+            let refinement = coarse_mesh
                 .as_ref()
                 .map(|mesh| mesh.refined(abort))
                 .transpose()?;
+            let retained = refinement.map(|(mesh, indices)| {
+                circuit.integration_mesh = Some(mesh);
+                indices
+            });
             circuit.integration_steps = finer_steps;
+            let has_precision_floor = circuit
+                .integration_mesh
+                .as_ref()
+                .map(|mesh| {
+                    mesh.refinement_steps(abort)
+                        .map(|count| count < 2 * finer_steps)
+                })
+                .transpose()?
+                .unwrap_or(false);
+            if has_precision_floor {
+                self.ensure_pss_refinement_capacity(&circuit, steps, finer_steps, true)?;
+            }
             let fine = self
                 .pss_solve_grid(
                     &mut circuit,
@@ -2252,7 +2288,39 @@ impl Engine {
                     other => other,
                 })?;
             iteration += fine.iterations;
-            let error = self.pss_grid_refinement_error(&coarse, &fine, abort)?;
+            if has_precision_floor {
+                // Adjacent floating-point times cannot be bisected. Preserve
+                // both clocks and qualify their effect with a separately
+                // solved orbit using BE versus trapezoidal on those intervals.
+                circuit.probe_precision_floor = true;
+                let probe = self.pss_solve_grid(
+                    &mut circuit,
+                    &mut matrix,
+                    &config,
+                    ShootingState::new(fine.state.x0.clone(), fine.state.period),
+                    abort,
+                );
+                circuit.probe_precision_floor = false;
+                let probe = probe.map_err(|error| match error {
+                    SimulationError::ConvergenceFailed(count) => {
+                        SimulationError::ConvergenceFailed(iteration.saturating_add(count))
+                    }
+                    other => other,
+                })?;
+                iteration += probe.iterations;
+                let floor_error =
+                    self.pss_grid_refinement_error(&fine, &probe, PssSampleMap::Identical, abort)?;
+                if floor_error > 1.0 {
+                    return Err(PssError::InvalidConfig(format!(
+                        "PSS integration reached floating-point time precision: alternate-method waveform error {floor_error:.6e} exceeds tolerance on an interval with no representable refinement point"
+                    ))
+                    .into());
+                }
+            }
+            let samples = retained
+                .as_deref()
+                .map_or(PssSampleMap::Doubled, PssSampleMap::Retained);
+            let error = self.pss_grid_refinement_error(&coarse, &fine, samples, abort)?;
             if config.verbose {
                 log::debug!(
                     "PSS grid {steps} -> {finer_steps}: normalized waveform error {error:.6e}"
@@ -2526,16 +2594,22 @@ impl Engine {
         circuit: &PssCircuit,
         coarse_steps: usize,
         fine_steps: usize,
+        precision_floor_probe: bool,
     ) -> Result<(), SimulationError> {
         self.ensure_analysis_points(fine_steps)?;
         // Retain the coarse orbit while solving the fine orbit, including a
-        // simultaneous derivative traversal and dense shooting workspace.
+        // simultaneous derivative traversal, mesh index map and dense shooting
+        // workspace. Floor qualification retains one additional solved orbit.
         let dimension = circuit.state_dimension();
         self.ensure_result_values(
             coarse_steps
-                .saturating_add(fine_steps.saturating_mul(2))
-                .saturating_add(3)
-                .saturating_mul(circuit.matrix_size().saturating_add(3))
+                .saturating_add(fine_steps.saturating_mul(if precision_floor_probe {
+                    3
+                } else {
+                    2
+                }))
+                .saturating_add(4)
+                .saturating_mul(circuit.matrix_size().saturating_add(4))
                 .saturating_add(dimension.saturating_mul(dimension).saturating_mul(4))
                 .saturating_add(dimension.saturating_mul(6)),
         )
@@ -2548,18 +2622,39 @@ impl Engine {
         &self,
         coarse: &PssGridSolution,
         fine: &PssGridSolution,
+        samples: PssSampleMap<'_>,
         abort: &dyn AbortSignal,
     ) -> Result<Value, SimulationError> {
         let coarse = &coarse.waveform;
         let fine = &fine.waveform;
+        let sample_count_matches = match samples {
+            PssSampleMap::Doubled => fine.time.len() == 2 * coarse.time.len().saturating_sub(1) + 1,
+            PssSampleMap::Retained(indices) => indices.len() == coarse.time.len(),
+            PssSampleMap::Identical => fine.time.len() == coarse.time.len(),
+        };
         if coarse.time.len() < 2
-            || fine.time.len() != 2 * (coarse.time.len() - 1) + 1
+            || !sample_count_matches
             || coarse.voltages.len() != fine.voltages.len()
             || coarse.branch_currents.len() != fine.branch_currents.len()
         {
             return Err(SimulationError::Circuit(
                 "PSS refinement trajectories have inconsistent dimensions".to_owned(),
             ));
+        }
+        for index in 0..coarse.time.len() {
+            if index & 0x3ff == 0 && abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            let mapped = samples.index(index);
+            if mapped >= fine.time.len()
+                || (index == 0 && mapped != 0)
+                || (index > 0 && mapped <= samples.index(index - 1))
+                || (index == coarse.time.len() - 1 && mapped != fine.time.len() - 1)
+            {
+                return Err(SimulationError::Circuit(
+                    "PSS refinement trajectories have an invalid sample map".to_owned(),
+                ));
+            }
         }
         let coarse_period = *coarse.time.last().unwrap();
         let fine_period = *fine.time.last().unwrap();
@@ -2598,14 +2693,11 @@ impl Engine {
             }
             let scale = peak.max(abstol);
             let tolerance = abstol / scale + reltol * (peak / scale);
-            for (index, (&a, &b)) in coarse_values
-                .iter()
-                .zip(fine_values.iter().step_by(2))
-                .enumerate()
-            {
+            for (index, &a) in coarse_values.iter().enumerate() {
                 if index & 0x3ff == 0 && abort.is_aborted() {
                     return Err(SimulationError::Aborted);
                 }
+                let b = fine_values[samples.index(index)];
                 error = error.max((a / scale - b / scale).abs() / tolerance);
             }
         }
@@ -3948,12 +4040,23 @@ impl Engine {
             // First step runs backward Euler: it reads no capacitor-current or
             // inductor-voltage history, so the trajectory depends only on the
             // shooting state that pss_set_reactive_state installed.
-            let current_method = pss_integration_method(
+            let mut current_method = pss_integration_method(
                 first_step,
                 fixed_grid,
                 integration_method,
                 trapgear.current_method(),
             );
+            if fixed_grid
+                && !first_step
+                && circuit.probe_precision_floor
+                && PssIntegrationMesh::refinement_midpoint(t, t_next).is_none()
+            {
+                current_method = if current_method == IntegrationMethod::BackwardEuler {
+                    IntegrationMethod::Trapezoidal
+                } else {
+                    IntegrationMethod::BackwardEuler
+                };
+            }
             let coeff = accepted_step_history.coefficients_for_trial(current_method, dt);
 
             let Some(new_solution) = self.pss_newton_trial(

@@ -78,22 +78,18 @@ fn source_intervals_reveal_pulses_between_both_initial_pss_grids() {
             .unwrap_or_else(|error| panic!("{source}: {error}"));
         let result = &analysis.result;
         let steps = result.time.len() - 1;
-        if source.starts_with('B') {
-            assert!(steps >= 20_000, "{source}: {steps}");
-        } else {
+        assert!(
+            steps < 2_048,
+            "source corners should resolve the pulse locally: {source}: {steps}"
+        );
+        for &(corner, _) in &knots {
             assert!(
-                steps < 2_048,
-                "source corners should resolve the pulse locally: {source}: {steps}"
+                result
+                    .time
+                    .iter()
+                    .any(|&time| (time - corner).abs() <= 4.0 * f64::EPSILON * corner),
+                "missing source corner {corner:e}"
             );
-            for &(corner, _) in &knots {
-                assert!(
-                    result
-                        .time
-                        .iter()
-                        .any(|&time| (time - corner).abs() <= 4.0 * f64::EPSILON * corner),
-                    "missing source corner {corner:e}"
-                );
-            }
         }
         let output = result
             .node_names
@@ -115,6 +111,93 @@ fn source_intervals_reveal_pulses_between_both_initial_pss_grids() {
             );
         }
     }
+}
+
+#[test]
+fn rounded_periods_preserve_and_qualify_adjacent_source_clocks() {
+    use rspice_core::numerics::integration::IntegrationMethod;
+
+    for (period_text, frequency, authored_period) in [
+        ("100u", 1e4, 100.0 * 1e-6_f64),
+        ("10u", 1e5, 10.0 * 1e-6_f64),
+    ] {
+        let period = 1.0 / frequency;
+        assert_eq!(authored_period.next_up(), period);
+        let width = 0.4 * period;
+        for (source, integration_method) in [
+            (
+                format!("V1 in 0 PULSE(0 1 0 1n 1n {width:e} {period_text})"),
+                None,
+            ),
+            (
+                format!("B1 in 0 V=spice_pulse(0,1,0,1n,1n,{width:e},{period_text})"),
+                Some(IntegrationMethod::BackwardEuler),
+            ),
+            (
+                format!(
+                    "B1 in 0 V=table(mod(time,{period_text}),0,0,1n,1,{:e},1,{:e},0,{period_text},0)",
+                    width + 1e-9,
+                    width + 2e-9,
+                ),
+                Some(IntegrationMethod::Gear2),
+            ),
+        ] {
+            let capacitance = 1.0 / (std::f64::consts::TAU * R * frequency);
+            let netlist = Netlist::parse(&format!(
+                "rounded clock\n{source}\nR1 in out {R}\nC1 out 0 {capacitance:e}\n.end\n"
+            ))
+            .unwrap();
+            let engine = Engine::default();
+            let mut config = PssConfig::new(frequency).with_tstab_periods(0);
+            config.integration_method = integration_method;
+            let point = engine
+                .run_pss_operating_point_with_abort(&netlist, config, &NoAbort)
+                .unwrap_or_else(|error| panic!("{source}: {error}"));
+            let result = &point.analysis().result;
+            assert_eq!(*result.time.last().unwrap(), period);
+            assert_eq!(result.time[result.time.len() - 2], authored_period);
+            assert!(result.time.windows(2).all(|pair| pair[0] < pair[1]));
+            assert!(result.time.len() < 4_096, "{source}: {}", result.time.len());
+            let output = result
+                .node_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("out"))
+                .unwrap();
+            let mean = result.waveforms[output].dc(&result.time, period);
+            let expected = (width + 1e-9) / authored_period;
+            assert!(
+                (mean - expected).abs() < 1e-4,
+                "{source}: {mean} vs {expected}"
+            );
+            let restored = rspice_core::engine::PssOperatingPoint::try_from_authenticated_parts(
+                point.producer_identity().unwrap().clone(),
+                point.config().clone(),
+                point.analysis().clone(),
+                point.shooting_state_basis().to_vec(),
+                point.shooting_state().to_vec(),
+            )
+            .unwrap();
+            assert_eq!(restored, point);
+        }
+    }
+}
+
+#[test]
+fn unresolvable_source_intervals_cannot_pass_by_sharing_the_same_mesh() {
+    let interval = 0.5_f64.next_up() - 0.5;
+    let netlist = Netlist::parse(&format!(
+        "physical response at the time precision floor\nV1 in 0 PULSE(0 1 0.5 {interval:e} {interval:e} {interval:e} 1)\nR1 in out 1\nC1 out 0 {interval:e}\n.end\n"
+    ))
+    .unwrap();
+    let error = Engine::default()
+        .run_pss(&netlist, PssConfig::new(1.0).with_tstab_periods(0))
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("alternate-method waveform error"),
+        "{error}"
+    );
 }
 
 #[test]

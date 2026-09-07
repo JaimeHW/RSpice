@@ -276,8 +276,9 @@ Checkpoint format 35 retains the step and stop defaults that determine
 independent-source waveforms. Extending a run or changing its step ceiling
 preserves those source parameters. Older checkpoints remain readable; resume
 requires fully specified source timing when the original defaults are absent.
-Resume also requires the current resolved simulation identity (v5); states
-captured under the previous PWL evaluation semantics must be regenerated.
+Resume also requires the current resolved simulation identity (v6); states
+captured under previous source evaluation or behavioral event timing semantics
+must be regenerated.
 
 PWL interpolation and repeat timing preserve finite nonzero knot intervals
 and positive `TSCALE` values without an absolute machine-epsilon cutoff.
@@ -392,15 +393,19 @@ require a continuous waveform with finite outgoing slopes.
 `POINTS` sets the minimum base integration grid. The solver first increases
 it beyond the Nyquist limit of recognized source clocks and finite behavioral
 trigonometric polynomials, including products and integer powers. Resolved
-Independent PULSE/PAT edges and physical PWL/file corners are inserted directly
+independent PULSE/PAT edges and physical PWL/file corners are inserted directly
 into an immutable, nonuniform integration mesh shared by all shooting and
-derivative evaluations. Refinement preserves those times exactly. Behavioral
-PULSE widths and table knot intervals still constrain the base grid. Table
-coordinates require a known time rate; arbitrary circuit-dependent expressions
-do not supply that bound. It then
-solves successively doubled grids and compares the complete voltage and branch
+derivative evaluations. Behavioral PULSE and piecewise-linear table corners use
+the same mesh, including affine clocks, signed modulo, and resolved temperature
+parameters. Smooth tables and other coordinates with a known time rate retain
+their base-grid interval bounds; arbitrary circuit-dependent expressions do not
+supply that bound. Refinement preserves source times exactly. It then
+solves successively refined grids and compares the complete voltage and branch
 current waveforms at shared phases, using the engine voltage/current tolerances.
-Only a grid that agrees with its doubled grid is retained. The returned sample
+Only a grid that agrees with its refined grid is retained. Adjacent representable
+source times remain distinct. Where bisection is impossible, a separately solved
+orbit with an alternate integration method must also agree; otherwise the run
+reports a time-precision error. The returned sample
 count reflects the complete mesh; harmonic capacity is limited by its largest
 time interval. Dependent spectral analyses integrate the retained samples without
 resampling away local source features. Authored source timing
@@ -408,7 +413,7 @@ defaults still use the original `POINTS`. `MAXITER` applies to each grid solve,
 while the result reports total Newton corrections across all grids. Point and
 memory limits also apply to refinement, and cancellation remains available.
 Retained PSS operating points from earlier producer versions must be regenerated
-before dependent numerical reuse; the current producer identity is version 17.
+before dependent numerical reuse; the current producer identity is version 18.
 This convergence check supplements the shooting residual, which measures closure
 of a discrete period map. It is not a proof of resolution for all nonlinear
 expressions and devices; independent waveform and

@@ -180,6 +180,9 @@ pub(in crate::engine) struct PssCircuit {
     /// SourceTimeBasis and must not change when this grid is refined.
     pub(in crate::engine) integration_steps: usize,
     pub(in crate::engine) integration_mesh: Option<PssIntegrationMesh>,
+    /// Qualification-only traversal; published and replayed orbits always
+    /// use the configured method. Derivative workers clone this choice.
+    pub(super) probe_precision_floor: bool,
     basis: PssStateBasis,
     solution_scratch: Vec<Value>,
     current_balance: Vec<Value>,
@@ -225,6 +228,7 @@ impl PssCircuit {
             diode_history,
             integration_steps: 0,
             integration_mesh: None,
+            probe_precision_floor: false,
             basis,
             solution_scratch,
             current_balance,

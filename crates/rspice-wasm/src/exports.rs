@@ -296,6 +296,11 @@ mod wasm_tests {
             ("V1 in 0 SIN(0 1 128meg)", 0.0),
             ("B1 in 0 V=sin(2*pi*64meg*time)^4", 0.375),
             ("V1 in 0 PULSE(0 1 400p 10p 10p 100p 1u)", 0.00011),
+            ("B1 in 0 V=spice_pulse(0,1,400p,10p,10p,100p,1u)", 0.00011),
+            (
+                "B1 in 0 V=table(mod(time*1e12,1e6),0,0,400,0,410,1,510,1,520,0,1e6,0)",
+                0.00011,
+            ),
             (
                 "V1 in 0 PWL(0 0 400p 0 410p 1 510p 1 520p 0 1u 0) R=0",
                 0.00011,
@@ -325,7 +330,7 @@ mod wasm_tests {
                 .position(|name| name.eq_ignore_ascii_case("out"))
                 .unwrap();
             let mean = result.waveforms[output].dc(&result.time, result.period);
-            let tolerance = if dc == 0.00011 {
+            let tolerance = if dc == 0.00011 || dc == 0.0011 {
                 assert!(steps < 1024, "the local source mesh must stay bounded");
                 1e-7
             } else {
@@ -333,6 +338,32 @@ mod wasm_tests {
             };
             assert!((mean - dc).abs() < tolerance, "{source}: DC {mean}");
         }
+    }
+
+    #[wasm_bindgen_test]
+    fn pss_preserves_rounded_period_boundaries_in_wasm() {
+        let netlist = rspice_core::Netlist::parse(
+            "WASM rounded clock\nB1 in 0 V=spice_pulse(0,1,0,1n,1n,40u,100u)\nR1 in out 1k\nC1 out 0 15.9154943091895n\n.end\n",
+        )
+        .unwrap();
+        let analysis = rspice_core::Engine::default()
+            .run_pss_with_abort(
+                &netlist,
+                rspice_core::analysis::PssConfig::new(1e4).with_tstab_periods(0),
+                &rspice_core::abort_signal::NoAbort,
+            )
+            .unwrap();
+        let result = &analysis.result;
+        let seam = &result.time[result.time.len() - 2..];
+        assert_eq!(seam[0], 100.0 * 1e-6);
+        assert_eq!(seam[1], 1.0 / 1e4);
+        assert_eq!(seam[0].next_up(), seam[1]);
+        let output = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("out"))
+            .unwrap();
+        assert!((result.waveforms[output].dc(&result.time, result.period) - 0.40001).abs() < 1e-4);
     }
 
     #[wasm_bindgen_test]

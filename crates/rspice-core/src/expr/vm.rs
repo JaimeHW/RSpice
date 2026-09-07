@@ -976,11 +976,11 @@ fn interpolate_segment(x: Value, x1: Value, y1: Value, x2: Value, y2: Value, fla
     y1 + t * (y2 - y1)
 }
 
-fn spice_waveform_parameters<const N: usize>(args: &[Value]) -> [Value; N] {
+pub(crate) fn spice_waveform_parameters<const N: usize>(args: &[Value]) -> [Value; N] {
     std::array::from_fn(|index| args.get(index).copied().unwrap_or(0.0))
 }
 
-fn spice_exp_parameters(args: &[Value]) -> [Value; 6] {
+pub(crate) fn spice_exp_parameters(args: &[Value]) -> [Value; 6] {
     let mut parameters = spice_waveform_parameters(args);
     parameters[4] = args.get(4).copied().unwrap_or(parameters[2]);
     parameters

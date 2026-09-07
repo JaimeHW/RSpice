@@ -886,12 +886,13 @@ impl Engine {
             }
         }
 
-        for time in circuit
-            .behavioral_sources
-            .transient_breakpoints(tstop, tstep_hint)
-        {
-            Self::add_breakpoint_if_in_range(breakpoints, time, tstop);
-        }
+        circuit.behavioral_sources.collect_transient_breakpoints(
+            tstop,
+            breakpoints,
+            abort,
+            max_points,
+            false,
+        )?;
 
         for instance in &circuit.xspice_instances {
             match instance.transient_breakpoints() {
