@@ -6518,19 +6518,6 @@ impl SemanticAnalyzer {
         Self::eval_const_value_with(expr, &self.param_consts)
     }
 
-    /// Fold an expression against the *declared defaults* of the module's
-    /// parameters.
-    ///
-    /// Distinct from [`Self::eval_const_invariant`], which folds only what
-    /// cannot vary between instances. The one construct that legitimately wants
-    /// the default is a discrete-domain packed range: IEEE 1364-2005 section
-    /// 12.2 fixes it at elaboration, so it is not a per-instance quantity at
-    /// all. See `digital::SemanticAnalyzer::resolve_vector_range`, which is the
-    /// only caller.
-    fn eval_const_parameter_default(&self, expr: &Expression) -> Option<f64> {
-        self.eval_const_value(expr).map(ConstantValue::as_f64)
-    }
-
     /// Whether an expression is fixed for the duration of an analysis.
     /// Model parameters may differ between instances, but each resolved
     /// parameter value is constant while that instance is evaluated, so it is
@@ -6591,7 +6578,7 @@ impl SemanticAnalyzer {
         Self::eval_const_value_with(expr, &self.invariant_consts)
     }
 
-    fn exact_const_i64(value: f64) -> Option<i64> {
+    pub(crate) fn exact_const_i64(value: f64) -> Option<i64> {
         (value.is_finite()
             && value.fract() == 0.0
             && value >= i64::MIN as f64

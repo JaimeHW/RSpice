@@ -28,10 +28,10 @@ use std::collections::HashMap;
 
 /// Discrete-domain content of an analyzed module.
 ///
-/// Empty for every continuous-domain model, which is every model this compiler
-/// can currently execute. When it is not empty, the module is refused by each
-/// executable backend, naming the construct — see
-/// [`AnalyzedDigital::first_construct`].
+/// Empty for purely continuous-domain models. Mixed and digital runtime models
+/// lower this content into a canonical process plan for the event host. Analog
+/// backends that cannot execute the plan use [`AnalyzedDigital::first_construct`]
+/// to report the unsupported construct.
 #[derive(Debug, Clone, Default)]
 pub struct AnalyzedDigital {
     /// Declared nets and variables, in declaration order.
@@ -956,7 +956,7 @@ impl SemanticAnalyzer {
             let Some(default) = &parameter.default else {
                 continue;
             };
-            let Some(value) = self.eval_const_parameter_default(default) else {
+            let Some(value) = self.eval_const(default) else {
                 continue;
             };
             // A parameter array is a name with no scalar value at all; folding
@@ -982,10 +982,8 @@ impl SemanticAnalyzer {
             if is_real {
                 constants.reals.insert(parameter.name.clone(), value);
             }
-            if value.fract() == 0.0 {
-                constants
-                    .integers
-                    .insert(parameter.name.clone(), value as i64);
+            if let Some(value) = Self::exact_const_i64(value) {
+                constants.integers.insert(parameter.name.clone(), value);
             }
         }
         constants

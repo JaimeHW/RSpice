@@ -3803,6 +3803,65 @@ fn a_single_bit_vector_names_its_one_bit_by_its_bound() {
 }
 
 #[test]
+fn a_local_shadowing_a_parameter_is_not_folded_into_a_select_or_delay() {
+    for statement in ["q[index] = 1'b1;", "#index q = 2'b10;"] {
+        let section = format!(
+            "parameter integer index = 0; reg [1:0] q;
+             initial begin : work integer index; index = 1; {statement} end"
+        );
+        VerilogACompiler::default()
+            .compile_canonical_ir(&digital_module(&section))
+            .expect_err("a runtime local must not be replaced by the shadowed parameter");
+    }
+}
+
+#[test]
+fn overflowing_digital_indices_report_errors_without_panicking_or_clamping() {
+    for section in [
+        "reg q; initial q[-64'sh8000000000000000] = 1'b1;",
+        "reg q, seen; initial seen = q[-64'sh8000000000000000];",
+        "parameter real idx = 1e30; reg q; initial q[idx] = 1'b1;",
+        "parameter real idx = -1e30; reg q, seen; initial seen = q[idx];",
+    ] {
+        let error = VerilogACompiler::default()
+            .compile_canonical_ir(&digital_module(section))
+            .expect_err("an unrepresentable constant index must be refused");
+        assert!(error.to_string().contains("select"), "{section}: {error}");
+    }
+}
+
+#[test]
+fn digital_index_and_delay_boundary_values_execute_exactly() {
+    let mut harness = Harness::new(
+        "parameter real DELAY = 2147483647;
+         reg [64'sh8000000000000000:64'sh8000000000000000] q;
+         reg seen;
+         initial begin
+             q[64'sh8000000000000000] = 1'b1;
+             seen = q[64'sh8000000000000000];
+             #DELAY seen = 1'b0;
+         end",
+    );
+    let DigitalProcessOutcome::Suspended(suspension) = harness.run() else {
+        panic!("the boundary delay must suspend");
+    };
+    assert_eq!(harness.get("q"), "1");
+    assert_eq!(harness.get("seen"), "1");
+    assert_eq!(*suspension.wait(), DigitalWaitRequest::Delay(2147483647));
+}
+
+#[test]
+fn parameter_delays_outside_the_executable_range_are_never_clamped() {
+    for delay in ["2147483648", "1e30", "-2147483649", "-1"] {
+        let section = format!("parameter real DELAY = {delay}; reg q; initial #DELAY q = 1'b1;");
+        let error = VerilogACompiler::default()
+            .compile_canonical_ir(&digital_module(&section))
+            .expect_err("an unrepresentable delay must be refused");
+        assert!(error.to_string().contains("delay"), "{delay}: {error}");
+    }
+}
+
+#[test]
 fn large_integer_index_expressions_select_the_exact_declared_bit() {
     let mut harness = Harness::new(
         "reg [9007199254740992+1:9007199254740992+1] q;

@@ -19,14 +19,13 @@
 //! A variable declared *inside* the process is the opposite case, and the two
 //! must not be confused. It belongs to the process, nothing else can observe
 //! it, and it is an ordinary SSA variable: merged at joins by a block
-//! parameter, carried across a suspension by a resume argument. IEEE 1364-2005
-//! section 9.8.1 makes such a variable static; the reading frozen here is
-//! automatic — it starts at `x` each time control enters the block that
-//! declares it — because the difference is observable only by reading one
-//! before writing it, and the case that matters is a loop counter.
+//! parameter, carried across a suspension by a resume argument. Static locals
+//! initialize once at process startup and survive both suspension and process
+//! re-entry. Lexical scope controls visibility independently of that lifetime.
 //!
-//! Everything crossing a `Wait` crosses as a resume argument: every in-scope
-//! local, plus the right-hand side of an intra-assignment timing control
+//! Everything crossing a `Wait` crosses as a resume argument: every static
+//! local, any additional in-scope temporary, and the right-hand side of an
+//! intra-assignment timing control
 //! (`q <= #5 d`, section 9.2.2), whose value is read before the suspension and
 //! written after it. Nothing else survives — the interpreter starts a
 //! resumption with an empty value table, which is what proves the lowering
@@ -1960,11 +1959,15 @@ impl ProcessLowerer<'_> {
     /// the `Wait` that consumes it is the terminator of a block it would
     /// otherwise have to be placed in.
     fn delay(&mut self, expression: &Expression) -> ValueId {
-        let value = match self.constant(expression) {
-            Some(value) => i32::try_from(value).unwrap_or(i32::MAX),
+        let value = match self
+            .constant(expression)
+            .and_then(|value| i32::try_from(value).ok())
+            .filter(|value| *value >= 0)
+        {
+            Some(value) => value,
             None => {
                 self.error(
-                    "a delay must be a constant number of time units in this wave",
+                    "a delay must be a constant integer number of time units in 0..=2147483647",
                     expression.span(),
                 );
                 0
@@ -3503,14 +3506,16 @@ impl ProcessLowerer<'_> {
     /// behaviour with one number.
     fn constant(&self, expression: &Expression) -> Option<i64> {
         if let Expression::Identifier(identifier) = expression {
-            if self.index.contains_key(identifier.name.as_str()) {
+            if self.lookup_local(&identifier.name).is_some()
+                || self.index.contains_key(identifier.name.as_str())
+            {
                 return None;
             }
             return self.constants.integer(&identifier.name);
         }
         if let Expression::Unary(unary) = expression {
             return match unary.op {
-                UnaryOp::Neg => self.constant(&unary.operand).map(|value| -value),
+                UnaryOp::Neg => self.constant(&unary.operand).and_then(i64::checked_neg),
                 UnaryOp::Pos => self.constant(&unary.operand),
                 _ => None,
             };
@@ -3526,7 +3531,12 @@ impl ProcessLowerer<'_> {
                 _ => None,
             };
         }
-        constant_of(expression)
+        match expression {
+            Expression::Number(number) => {
+                crate::semantic::SemanticAnalyzer::exact_const_i64(number.value)
+            }
+            _ => None,
+        }
     }
 
     fn constant_index(&mut self, expression: &Expression) -> Option<i64> {
@@ -3534,7 +3544,7 @@ impl ProcessLowerer<'_> {
             Some(index) => Some(index),
             None => {
                 self.error(
-                    "a bit or part select must have constant bounds in this wave",
+                    "a bit or part select must have constant bounds representable as signed 64-bit integers",
                     expression.span(),
                 );
                 None
@@ -3571,18 +3581,6 @@ const fn real_compare_op(op: BinaryOp) -> Option<RealCompareOp> {
         BinaryOp::Ne => RealCompareOp::Ne,
         _ => return None,
     })
-}
-
-/// The constant value of an expression, when it has one.
-fn constant_of(expression: &Expression) -> Option<i64> {
-    match expression {
-        Expression::Number(number) if number.value.fract() == 0.0 => Some(number.value as i64),
-        Expression::Unary(unary) if matches!(unary.op, UnaryOp::Neg) => {
-            constant_of(&unary.operand).map(|value| -value)
-        }
-        Expression::Unary(unary) if matches!(unary.op, UnaryOp::Pos) => constant_of(&unary.operand),
-        _ => None,
-    }
 }
 
 /// The signal an event term names, if it names one directly.
