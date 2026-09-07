@@ -590,6 +590,99 @@ mod tests {
     }
 
     #[test]
+    fn regular_quotient_domains_are_subdivided_before_isolating_features() {
+        for scale in [1e-30, 1.0, 1e300] {
+            let phase = format!("6*pi*(time/{scale:e})+0.1");
+            let denominator = format!("sqr(sin({phase}))+sqr(cos({phase}))");
+            let coordinate = format!("(cos({phase})+0.5*cos(2*({phase})))/({denominator})-0.25");
+            let events = collect(
+                &sources(&format!("exp(-1000000*({coordinate})^2)")),
+                scale,
+                512,
+                true,
+            )
+            .unwrap();
+            for cycle in 0..=3 {
+                for angle in [-std::f64::consts::FRAC_PI_3, std::f64::consts::FRAC_PI_3] {
+                    let time = (std::f64::consts::TAU * cycle as Value + angle - 0.1)
+                        / (6.0 * std::f64::consts::PI)
+                        * scale;
+                    if (0.0..=scale).contains(&time) {
+                        assert!(contains(&events, time), "missing quotient root {time:e}");
+                    }
+                }
+            }
+            let mut switching = sources(&format!("abs({coordinate})<0.001"));
+            let events = collect(&switching, scale, 512, true).unwrap();
+            let transitions = events
+                .windows(2)
+                .filter(|pair| {
+                    pair[0].next_up() == pair[1]
+                        && switching.voltage_sources[0].evaluate(&[], pair[0]).unwrap()
+                            != switching.voltage_sources[0].evaluate(&[], pair[1]).unwrap()
+                })
+                .count();
+            assert_eq!(transitions, 12, "scale={scale:e}: {events:?}");
+
+            let events = collect(
+                &sources(&format!("cos(({phase})/({denominator}))")),
+                scale,
+                512,
+                true,
+            )
+            .unwrap();
+            for index in 1..=6 {
+                let time = (index as Value * std::f64::consts::PI - 0.1)
+                    / (6.0 * std::f64::consts::PI)
+                    * scale;
+                assert!(
+                    events
+                        .iter()
+                        .any(|event| ((event - time) / scale).abs() < 1e-6),
+                    "missing quotient phase extremum {time:e}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn uncertain_domains_keep_work_limits_and_vm_zero_division() {
+        let coordinate = "sin(time)/(sqr(sin(time))+sqr(cos(time)))";
+        assert!(
+            collect(
+                &sources(&format!("({coordinate})-({coordinate})")),
+                8.0,
+                256,
+                true
+            )
+            .is_ok()
+        );
+        assert!(collect(&sources("sin(time)/0"), 8.0, 256, true).is_ok());
+        for expression in ["sin(time)/(time-0.5)", "sin(time)/(1e-300*time)"] {
+            assert!(
+                matches!(
+                    collect(&sources(expression), 1.0, 256, true),
+                    Err(BehavioralBreakpointError::Invalid(_))
+                ),
+                "{expression}"
+            );
+        }
+        let source = sources(&format!("cos(time/({coordinate}))"));
+        let mut manager = BreakpointManager::new();
+        assert!(matches!(
+            source.collect_transient_breakpoints(
+                1.0,
+                &mut manager,
+                &CountingAbort::new(10),
+                256,
+                true
+            ),
+            Err(BehavioralBreakpointError::Aborted)
+        ));
+        assert!(manager.times().is_empty());
+    }
+
+    #[test]
     fn combined_feature_isolation_is_bounded_and_does_not_enumerate_constant_zeros() {
         let source = sources("exp(-10000*(cos(6*pi*time)+0.5*cos(12*pi*time)-0.25)^2)");
         let mut manager = BreakpointManager::new();

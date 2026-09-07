@@ -18,33 +18,23 @@ impl EventSchedule<'_> {
             lower: 0.0,
             upper: self.tstop,
         };
-        // A finite identical subtraction is a constant zero, not an
-        // uncountable sequence of isolated roots. Preserve nonfinite refusals.
-        if let Expr::Binary {
+        // Authenticate finite identical operands on each resolved domain;
+        // an initially uncertain quotient need not invalidate the identity.
+        let identical_difference = if let Expr::Binary {
             op: BinaryOp::Sub,
             left,
             right,
         } = expr
             && left == right
         {
-            let program = compile_time_expression(left, context);
-            if TimeEnclosure::new(&program, self.tstop)
-                .and_then(|mut bounds| bounds.evaluate(window, context))
-                .is_some_and(|(value, _)| value.is_finite())
-            {
-                return Ok(());
-            }
-        }
-        let program = compile_time_expression(expr, context);
+            Some(left.as_ref())
+        } else {
+            None
+        };
+        let program = compile_time_expression(identical_difference.unwrap_or(expr), context);
         let Some(mut bounds) = TimeEnclosure::new(&program, self.tstop) else {
             return Ok(());
         };
-        let Some((value, slope)) = bounds.evaluate(window, context) else {
-            return Ok(());
-        };
-        if !value.contains(target) || (slope.lower == 0.0 && slope.upper == 0.0) {
-            return Ok(());
-        }
         let mut vm = Vm::new();
         let mut evaluate = |time| {
             let value = vm.execute(&program, &Context { time, ..*context });
@@ -57,7 +47,7 @@ impl EventSchedule<'_> {
             }
         };
         let mut pending = vec![window];
-        let mut operations = program.instructions.len();
+        let mut operations: usize = 0;
         let mut charge = || {
             self.poll()?;
             operations = operations.saturating_add(program.instructions.len());
@@ -74,13 +64,20 @@ impl EventSchedule<'_> {
         let mut roots = BTreeSet::new();
         while let Some(interval) = pending.pop() {
             charge()?;
-            let (value, slope) =
-                bounds
-                    .evaluate(interval, context)
-                    .ok_or(BehavioralBreakpointError::Invalid(
-                        "a continuous time-coordinate bound is unavailable",
-                    ))?;
-            if !value.contains(target) {
+            let Some((value, slope)) = bounds
+                .evaluate(interval, context)
+                .filter(|(value, _)| value.is_finite())
+            else {
+                // A denominator enclosure containing zero is uncertainty,
+                // not evidence of an absent feature or an actual pole.
+                // Resolve its domain with the same bounded subdivision.
+                subdivide_time_domain(interval, &mut pending)?;
+                continue;
+            };
+            if identical_difference.is_some()
+                || !value.contains(target)
+                || (slope.lower == 0.0 && slope.upper == 0.0)
+            {
                 continue;
             }
             if !slope.contains(0.0) {
@@ -171,19 +168,7 @@ impl EventSchedule<'_> {
                     continue;
                 }
             }
-            if midpoint == interval.lower || midpoint == interval.upper {
-                return Err(BehavioralBreakpointError::Invalid(
-                    "a grazing time feature cannot be isolated at the available time precision",
-                ));
-            }
-            pending.push(TimeInterval {
-                lower: midpoint,
-                upper: interval.upper,
-            });
-            pending.push(TimeInterval {
-                lower: interval.lower,
-                upper: midpoint,
-            });
+            subdivide_time_domain(interval, &mut pending)?;
         }
         for time in roots {
             self.add(Value::from_bits(time))?;
@@ -208,7 +193,16 @@ impl EventSchedule<'_> {
                 context,
             )
         }) else {
-            return Ok(());
+            // Direct sine/cosine isolation can resolve a regular phase's
+            // denominator locally when its whole-window range is unknown.
+            return self.isolated_levels(
+                &Expr::Function {
+                    func: function,
+                    args: vec![phase.clone()],
+                },
+                target,
+                context,
+            );
         };
         if !range.is_finite() {
             return Err(BehavioralBreakpointError::Invalid(
@@ -591,4 +585,25 @@ impl EventSchedule<'_> {
         }
         Ok(())
     }
+}
+
+fn subdivide_time_domain(
+    interval: TimeInterval,
+    pending: &mut Vec<TimeInterval>,
+) -> Result<(), BehavioralBreakpointError> {
+    let midpoint = interval.lower + 0.5 * (interval.upper - interval.lower);
+    if midpoint == interval.lower || midpoint == interval.upper {
+        return Err(BehavioralBreakpointError::Invalid(
+            "a time feature or its continuous domain cannot be isolated at the available time precision",
+        ));
+    }
+    pending.push(TimeInterval {
+        lower: midpoint,
+        upper: interval.upper,
+    });
+    pending.push(TimeInterval {
+        lower: interval.lower,
+        upper: midpoint,
+    });
+    Ok(())
 }

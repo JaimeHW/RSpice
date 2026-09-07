@@ -232,7 +232,8 @@ impl Dual {
 }
 
 /// Reusable scratch for continuous expressions whose bounds are implemented.
-/// Unsupported or singular operators yield `None`, never a zero range.
+/// Construction refuses unsupported operators. An unavailable evaluation
+/// means the current domain is unresolved and may require subdivision.
 pub(crate) struct TimeEnclosure<'a> {
     program: &'a CompiledExpr,
     stack: Vec<Dual>,
@@ -306,9 +307,15 @@ impl<'a> TimeEnclosure<'a> {
                         Instruction::Add => left.add(right),
                         Instruction::Sub => left.add(right.neg()),
                         Instruction::Mul => left.mul(right),
+                        // The ordinary VM defines division by zero as zero.
+                        // Preserve that rule when the denominator is exactly
+                        // known, without hiding uncertain zero crossings.
                         Instruction::Div
-                            if left.constant && right.constant && right.value.lower != 0.0 =>
+                            if right.value.lower == 0.0 && right.value.upper == 0.0 =>
                         {
+                            Dual::constant(0.0)
+                        }
+                        Instruction::Div if left.constant && right.constant => {
                             Dual::constant(left.value.lower / right.value.lower)
                         }
                         Instruction::Div => left.mul(right.reciprocal()?),
@@ -435,6 +442,55 @@ mod tests {
             !value.is_finite(),
             "zero cannot conceal a potentially nonfinite intermediate"
         );
+    }
+
+    #[test]
+    fn quotient_domain_uncertainty_can_resolve_on_smaller_intervals() {
+        let program =
+            compile(&parse_expression_strict("sin(time)/(sqr(sin(time))+sqr(cos(time)))").unwrap());
+        let stop = std::f64::consts::TAU;
+        let context = Context::transient(&[], &[], 0.0);
+        let mut bounds = TimeEnclosure::new(&program, stop).unwrap();
+        assert!(
+            bounds
+                .evaluate(
+                    TimeInterval {
+                        lower: 0.0,
+                        upper: stop
+                    },
+                    &context
+                )
+                .is_none()
+        );
+        for index in 0..32 {
+            let lower = index as Value / 32.0 * stop;
+            let upper = (index + 1) as Value / 32.0 * stop;
+            let (value, slope) = bounds
+                .evaluate(TimeInterval { lower, upper }, &context)
+                .unwrap();
+            for sample in 0..=8 {
+                let time = lower + (upper - lower) * (sample as Value / 8.0);
+                assert!(value.contains(Vm::new().execute(&program, &Context { time, ..context })));
+                assert!(slope.contains(stop * time.cos()));
+            }
+        }
+        for expression in ["sin(time)/0", "sin(time)/(0*time)"] {
+            let program = compile(&parse_expression_strict(expression).unwrap());
+            let (value, slope) = TimeEnclosure::new(&program, stop)
+                .unwrap()
+                .evaluate(
+                    TimeInterval {
+                        lower: 0.0,
+                        upper: stop,
+                    },
+                    &context,
+                )
+                .unwrap();
+            assert_eq!(
+                (value.lower, value.upper, slope.lower, slope.upper),
+                (0.0, 0.0, 0.0, 0.0)
+            );
+        }
     }
 
     #[test]

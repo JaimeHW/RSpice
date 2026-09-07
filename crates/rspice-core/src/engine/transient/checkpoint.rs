@@ -1161,10 +1161,10 @@ pub(crate) fn restart_checkpoint_identity(netlist: &Netlist) -> Option<String> {
 
 pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> String {
     let mut hasher = blake3::Hasher::new();
-    // v8 adds bounded continuous-expression level and nonlinear-phase
-    // isolation, including tangential clusters and two-sided comparisons.
+    // v9 resolves uncertain continuous-expression domains by subdivision,
+    // preserving regular quotient features that earlier schedules skipped.
     // Earlier schedules can produce different accepted integration histories.
-    hasher.update(b"rspice-transient-resolved-config-v8\0");
+    hasher.update(b"rspice-transient-resolved-config-v9\0");
     hash_field(&mut hasher, "temperature", config.temperature.to_bits());
     hash_field(&mut hasher, "ramptime", config.ramptime.to_bits());
     hash_field(&mut hasher, "digital_delay_type", config.digital_delay_type);

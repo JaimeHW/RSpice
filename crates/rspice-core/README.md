@@ -276,7 +276,7 @@ Checkpoint format 35 retains the step and stop defaults that determine
 independent-source waveforms. Extending a run or changing its step ceiling
 preserves those source parameters. Older checkpoints remain readable; resume
 requires fully specified source timing when the original defaults are absent.
-Resume also requires the current resolved simulation identity (v8); states
+Resume also requires the current resolved simulation identity (v9); states
 captured under previous source evaluation or behavioral event timing semantics
 must be regenerated.
 
@@ -404,8 +404,10 @@ compositions expose features that could vanish on both initial grids. For
 continuous sums, products, regular quotients, SQR and sine/cosine compositions,
 value and normalized-time derivative enclosures of the compiled expression
 isolate levels. Nonlinear phase inversion uses those same bounds. Tangential roots are
-retained as small feature clusters at expression rounding precision. A quotient
-currently requires a nonzero denominator bound across the analysis window. The
+retained as small feature clusters at expression rounding precision. Uncertain
+quotient domains are subdivided until their denominator bounds exclude zero;
+unresolved domains report a precision or work-limit error. The VM's exact
+zero-denominator rule is preserved for known zero denominators. The
 collector limits the number of evaluated instructions as well as its events.
 Constants use the shared compiler and VM in the resolved environment.
 Comparison and step boundaries are located through the actual behavioral
@@ -427,7 +429,7 @@ defaults still use the original `POINTS`. `MAXITER` applies to each grid solve,
 while the result reports total Newton corrections across all grids. Point and
 memory limits also apply to refinement, and cancellation remains available.
 Retained PSS operating points from earlier producer versions must be regenerated
-before dependent numerical reuse; the current producer identity is version 20.
+before dependent numerical reuse; the current producer identity is version 21.
 This convergence check supplements the shooting residual, which measures closure
 of a discrete period map. It is not a proof of resolution for all nonlinear
 expressions and devices; independent waveform and

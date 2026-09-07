@@ -227,6 +227,10 @@ fn nonlinear_time_features_cannot_hide_between_shooting_grids() {
             "exp(-1000000*(cos(2*pi*64meg*time+0.1)+0.5*cos(2*pi*128meg*time+0.2)-0.25)^2)",
             3,
         ),
+        (
+            "exp(-1000000*((cos(2*pi*64meg*time+0.1)+0.5*cos(2*(2*pi*64meg*time+0.1)))/(sqr(sin(2*pi*64meg*time+0.1))+sqr(cos(2*pi*64meg*time+0.1)))-0.25)^2)",
+            3,
+        ),
     ] {
         // Independent linear RC convolution on one source cycle. This uses
         // exact integration of densely sampled linear forcing segments, not
