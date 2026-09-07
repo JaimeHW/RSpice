@@ -3855,6 +3855,16 @@ impl VerilogADevice {
         self.prev_discontinuity = discontinuity;
     }
 
+    /// The compiled module's identity, available before analysis initialization.
+    pub fn model_name(&self) -> &str {
+        &self.model.name
+    }
+
+    /// Source identity used to match an instance across circuit reconstruction.
+    pub fn source_digest(&self) -> &str {
+        &self.model.source_digest
+    }
+
     /// Consume the analog task calls published by accepted-state application.
     /// The analysis host owns output delivery and simulation control; a JIT
     /// helper never prints, suspends the engine, or exits the host process.
@@ -3976,13 +3986,41 @@ impl VerilogADevice {
     /// Continue one analysis in a rebuilt instance whose configuration is
     /// already resolved. Keep its physical analysis identity: the transient
     /// checkpoint default must not make the next DC preparation reinitialize it.
-    pub fn apply_validated_analysis_continuation_state(
+    fn apply_validated_analysis_continuation_state(
         &mut self,
         checkpoint: &VerilogADeviceCheckpoint,
     ) {
         let analysis = self.context.analysis_type;
+        let evaluation_mode = self.context.evaluation_mode;
         self.apply_validated_checkpoint_state(checkpoint);
         self.context.analysis_type = analysis;
+        self.context.evaluation_mode = evaluation_mode;
+    }
+
+    /// Prepare a rebuilt instance without executing its initializers or changing
+    /// the live target. The outer host verifies semantic terminal mapping; this
+    /// device validates provenance and shape and refreshes static activation
+    /// using the accepted state and the target's resolved configuration.
+    pub fn prepare_analysis_continuation(
+        &self,
+        source: &VerilogADeviceCheckpoint,
+    ) -> Result<Self, VmError> {
+        if !source.instance_name.eq_ignore_ascii_case(&self.name)
+            || source.model_name != self.model.name
+            || source.source_digest != self.model.source_digest
+        {
+            return Err(VmError::InvalidNumericResult(
+                "analysis continuation device identity does not match".into(),
+            ));
+        }
+        let mut checkpoint = source.clone();
+        checkpoint.instance_name = self.name.clone();
+        checkpoint.shape_identity = self.checkpoint_shape_identity();
+        self.validate_checkpoint_state(&checkpoint)?;
+        let mut target = self.clone();
+        target.apply_validated_analysis_continuation_state(&checkpoint);
+        target.try_refresh_static_conditions()?;
+        Ok(target)
     }
 
     fn checkpoint_shape_identity(&self) -> SmolStr {

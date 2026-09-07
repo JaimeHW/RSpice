@@ -227,15 +227,11 @@ impl VerilogADevices {
         Ok(())
     }
 
-    pub(crate) fn restore_analysis_continuation_states(
-        &mut self,
-        states: &[VerilogADeviceCheckpoint],
-    ) -> Result<(), String> {
-        self.validate_checkpoint_states(states)?;
-        for (device, state) in self.devices.iter_mut().zip(states) {
-            device.apply_validated_analysis_continuation_state(state);
-        }
-        Ok(())
+    /// Publish devices whose continuation state and static activation were
+    /// prepared without mutating this live collection.
+    pub(crate) fn install_prepared_analysis_continuation(&mut self, devices: Vec<VerilogADevice>) {
+        debug_assert_eq!(devices.len(), self.devices.len());
+        self.devices = devices;
     }
 
     pub(crate) fn apply_validated_timestep_acceptance(&mut self) {

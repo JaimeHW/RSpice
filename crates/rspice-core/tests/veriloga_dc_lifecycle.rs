@@ -205,6 +205,54 @@ endmodule"#,
 }
 
 #[test]
+fn rebuilt_sweep_points_refresh_static_guards_from_the_continued_state() {
+    let model = write_model(
+        "continued_static_guard",
+        r#"module continued_static_guard(p,n);
+inout p,n; electrical p,n;
+real initial_voltage;
+analog initial initial_voltage=2.0;
+analog if ($temperature<301.0) V(p,n)<+initial_voltage;
+endmodule"#,
+    );
+    let netlist = Netlist::parse(&format!("* reconstructed static branch activation\nX1 out 0 continued_static_guard\nR1 out 0 1k\n.va \"{}\" continued_static_guard\n.end\n", deck_path(&model))).unwrap();
+    let points = Engine::default()
+        .run_dc_sweep(&netlist, "TEMP", 27.0, 29.0, 1.0)
+        .expect("continued static guards must reflect the resolved temperature");
+    assert_eq!(points.len(), 3);
+    for ((temperature, point), expected) in points.into_iter().zip([2.0, 0.0, 0.0]) {
+        assert!(
+            (node_voltage(&point, "out") - expected).abs() < 1e-10,
+            "temperature {temperature}: expected {expected}, got {}",
+            node_voltage(&point, "out")
+        );
+    }
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
+fn rebuilding_a_sweep_point_does_not_execute_an_initializer_again() {
+    let model = write_model(
+        "initializer_failure_rebuild",
+        r#"module initializer_failure_rebuild(p,n);
+inout p,n; electrical p,n;
+real initial_voltage;
+analog initial initial_voltage=sqrt(301.0-$temperature);
+analog V(p,n)<+initial_voltage;
+endmodule"#,
+    );
+    let netlist = Netlist::parse(&format!("* initialization executes once for the analysis\nX1 out 0 initializer_failure_rebuild\n.va \"{}\" initializer_failure_rebuild\n.end\n", deck_path(&model))).unwrap();
+    let points = Engine::default()
+        .run_dc_sweep(&netlist, "TEMP", 27.0, 29.0, 1.0)
+        .expect("later sweep points must not execute the now-invalid initializer");
+    assert_eq!(points.len(), 3);
+    for (_, point) in points {
+        assert!((node_voltage(&point, "out") - 0.85f64.sqrt()).abs() < 1e-10);
+    }
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
 fn rebuilding_a_sweep_point_does_not_replay_analog_initial_control() {
     use rspice_core::SimulationOutcome;
     let source = EARLY_SWEEP_FINISH_MODEL

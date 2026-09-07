@@ -1002,8 +1002,9 @@ pub fn transient_event_refinement_time(&self) -> Option<f64> { None }
 pub fn transient_timer_event_time(&self) -> Option<f64> { None }
 #[inline]
 pub fn transient_timer_step_bound(&self) -> Option<f64> { None }
-	/// Continue a rebuilt analysis with its resolved initialization inputs.
-	pub fn restore_analysis_continuation_state(&mut self, state: &GeneratedVerilogAPersistentState) -> Result<(), String> {
+	/// Restore a trajectory under resolved context without executing initializers.
+	pub fn restore_analysis_continuation_state(&mut self, state: &GeneratedVerilogAPersistentState, ctx: &GeneratedEvalContext<'_>) -> Result<(), String> {
+		if ctx.evaluation_failed() { return Err("analysis continuation context has a pending evaluation error".into()); }
 		self.restore_persistent_state(state)?;
 		Ok(())
 	}

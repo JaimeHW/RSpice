@@ -68,18 +68,51 @@ assert_eq!(calls[0].time,0.0);
 let accepted = instance.capture_persistent_state();
 let mut uninitialized = device::state::Instance::new(&[0,1]);
 let uninitialized_state = uninitialized.capture_rollback_state();
-assert!(uninitialized.restore_analysis_continuation_state(&accepted).is_err());
+assert!(uninitialized.restore_analysis_continuation_state(&accepted, &invalid).is_err());
 assert_eq!(uninitialized.capture_rollback_state(),uninitialized_state);
 let hot = runtime::GeneratedEvalContext { voltages: &[1.0,0.0], temperature: 320.0 };
 let mut rebuilt = device::state::Instance::new(&[0,1]);
 rebuilt.set_parameter("gain",4.0).unwrap();
-rebuilt.begin_analysis(&hot);
-assert_eq!(&*rebuilt.event_state_accepted, &[1.0,1280.0]);
-rebuilt.restore_analysis_continuation_state(&accepted).unwrap();
+rebuilt.restore_analysis_continuation_state(&accepted, &hot).unwrap();
 rebuilt.stamp(&hot, &mut runtime::GeneratedStamper::default());
 assert_eq!(&*rebuilt.event_state_accepted, &[1.0,1200.0]);
 assert_eq!(rebuilt.drain_analog_tasks().count(),0,"rebuilding must not replay the initializer when temperature changes");
 "#).unwrap();
+}
+
+#[test]
+fn generated_continuation_does_not_execute_a_now_invalid_initializer() {
+    let (state, stamp, noise) = generated_parts(
+        r#"module continued_initial(p,n);
+inout p,n; electrical p,n;
+real scale;
+analog initial scale=sqrt(301.0-$temperature);
+analog I(p,n)<+scale*V(p,n);
+endmodule"#,
+        "continuation initializer",
+    );
+    run_generated_main(
+        "continuation initializer",
+        &state,
+        &stamp,
+        &noise,
+        r#"
+let cold = runtime::GeneratedEvalContext { voltages: &[1.0,0.0], temperature: 300.0 };
+let hot = runtime::GeneratedEvalContext { voltages: &[1.0,0.0], temperature: 302.0 };
+let mut initial = device::state::Instance::new(&[0,1]);
+initial.begin_analysis(&cold);
+assert!(!cold.evaluation_failed());
+let accepted = initial.capture_persistent_state();
+let mut rebuilt = device::state::Instance::new(&[0,1]);
+rebuilt.restore_analysis_continuation_state(&accepted, &hot).unwrap();
+let mut values = [0.0; 10];
+rebuilt.stamp(&hot, &mut runtime::GeneratedStamper { sink: Some(&mut values) });
+assert!(!hot.evaluation_failed(), "the initializer must not run again at the new temperature");
+assert_eq!(values[9], 1.0);
+assert_eq!(&*rebuilt.event_state_accepted, &[1.0]);
+"#,
+    )
+    .unwrap();
 }
 
 #[test]

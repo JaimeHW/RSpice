@@ -534,25 +534,30 @@ impl BuiltinVerilogADevices {
         &mut self,
         states: &[GeneratedVerilogAInstanceCheckpoint],
     ) -> Result<(), String> {
-        self.restore_checkpoint_states_impl(states, false)
+        self.restore_checkpoint_states_impl(states, None)
     }
 
     pub(crate) fn restore_analysis_continuation_states(
         &mut self,
         states: &[GeneratedVerilogAInstanceCheckpoint],
+        simparams: GeneratedSimulationParameters,
+        num_nodes: usize,
     ) -> Result<(), String> {
-        self.restore_checkpoint_states_impl(states, true)
+        let analysis = self
+            .operating_point_analysis_override
+            .unwrap_or(GeneratedAnalysisKind::Dc);
+        self.restore_checkpoint_states_impl(states, Some((simparams, num_nodes, analysis)))
     }
 
     fn restore_checkpoint_states_impl(
         &mut self,
         states: &[GeneratedVerilogAInstanceCheckpoint],
-        continue_analysis: bool,
+        continuation: Option<(GeneratedSimulationParameters, usize, GeneratedAnalysisKind)>,
     ) -> Result<(), String> {
         self.validate_checkpoint_states(states)?;
         let rollback = self.capture_rollback_state();
         for (index, (device, state)) in self.devices.iter_mut().zip(states).enumerate() {
-            if let Err(error) = device.restore_checkpoint_state(state, continue_analysis) {
+            if let Err(error) = device.restore_checkpoint_state(state, continuation) {
                 self.restore_rollback_state(rollback);
                 return Err(format!(
                     "generated Verilog-A checkpoint instance {index} restore failed: {error}"
@@ -973,12 +978,24 @@ impl BuiltinVerilogAInstance {
     fn restore_checkpoint_state(
         &mut self,
         checkpoint: &GeneratedVerilogAInstanceCheckpoint,
-        continue_analysis: bool,
+        continuation: Option<(GeneratedSimulationParameters, usize, GeneratedAnalysisKind)>,
     ) -> Result<(), String> {
         self.validate_checkpoint_state(checkpoint)?;
-        if continue_analysis {
+        if let Some((simparams, num_nodes, analysis)) = continuation {
+            // Initialization keys use temperature, analysis, and simulator
+            // parameters; no solved voltage or initializer execution is needed.
+            let ctx = GeneratedEvalContext::with_analysis_step_simparams_and_mode(
+                &[],
+                self.temperature,
+                num_nodes,
+                analysis,
+                false,
+                false,
+                simparams,
+                GeneratedEvaluationMode::StaticProbe,
+            );
             self.kind
-                .restore_analysis_continuation_state(&checkpoint.state)?;
+                .restore_analysis_continuation_state(&checkpoint.state, &ctx)?;
         } else {
             self.kind.restore_persistent_state(&checkpoint.state)?;
         }

@@ -112,13 +112,6 @@ impl DcSweepLifecycle {
     ) -> Result<(), SimulationError> {
         if self.next_public_point == 0 {
             Engine::deliver_initial_analog_tasks(circuit, abort)?;
-        } else {
-            // Rebuilding a parameter/temperature point is an implementation
-            // detail within the same analysis. Retire construction's initial
-            // effects before installing the previous accepted trajectory.
-            circuit
-                .visit_accepted_analog_tasks(&mut |_| {})
-                .map_err(SimulationError::Circuit)?;
         }
         self.restore_accepted_state(circuit)
     }
@@ -916,9 +909,15 @@ impl Engine {
         let mut circuit = engine.build_circuit_with_abort(netlist, abort)?;
 
         let veriloga_analysis = if force_initial_conditions { 4 } else { 0 };
-        circuit
-            .begin_veriloga_equilibrium_analysis(veriloga_analysis)
-            .map_err(SimulationError::Circuit)?;
+        if lifecycle
+            .as_ref()
+            .is_some_and(|state| state.next_public_point != 0)
+        {
+            circuit.prepare_veriloga_analysis_continuation(veriloga_analysis)
+        } else {
+            circuit.begin_veriloga_equilibrium_analysis(veriloga_analysis)
+        }
+        .map_err(SimulationError::Circuit)?;
         let (analysis_initial_step, analysis_final_step) = if let Some(state) = &lifecycle {
             state.restore_rebuilt_point_start(&mut circuit, abort)?;
             state.flags()?
@@ -1408,9 +1407,12 @@ impl Engine {
         // Build circuit once
         let mut circuit = engine.build_circuit_with_abort(netlist, abort)?;
 
-        circuit
-            .begin_veriloga_dc_analysis()
-            .map_err(SimulationError::Circuit)?;
+        if lifecycle.next_public_point == 0 {
+            circuit.begin_veriloga_dc_analysis()
+        } else {
+            circuit.prepare_veriloga_analysis_continuation(0)
+        }
+        .map_err(SimulationError::Circuit)?;
         lifecycle.restore_rebuilt_point_start(&mut circuit, abort)?;
 
         Self::ensure_no_mixed_signal_analysis(&circuit, "DC sweep")?;

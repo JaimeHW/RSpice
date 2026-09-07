@@ -18,6 +18,47 @@ fn compile(source: &str) -> DeviceFixture {
 }
 
 #[test]
+fn analysis_continuation_retargets_only_matching_devices_without_initialization() {
+    let fixture = compile(
+        r#"module continued(p,n);
+inout p,n; electrical p,n;
+real scale;
+analog initial scale=sqrt(301.0-$temperature);
+analog I(p,n)<+scale*V(p,n);
+endmodule"#,
+    );
+    let mut initial = fixture.device("X1", &[1, 0]);
+    initial.try_set_temperature(300.0).unwrap();
+    initial.try_begin_analysis(0).unwrap();
+    let accepted = initial.checkpoint_state().unwrap();
+    let mut rebuilt = fixture.device("x1", &[2, 0]);
+    rebuilt.try_set_temperature(302.0).unwrap();
+    rebuilt.try_set_analysis_type(0).unwrap();
+    for bad_source in [
+        {
+            let mut state = accepted.clone();
+            state.instance_name = "X2".into();
+            state
+        },
+        {
+            let mut state = accepted.clone();
+            state.source_digest = "different source".into();
+            state
+        },
+        {
+            let mut state = accepted.clone();
+            state.accepted.variables.clear();
+            state
+        },
+    ] {
+        assert!(rebuilt.prepare_analysis_continuation(&bad_source).is_err());
+    }
+    let mut rebuilt = rebuilt.prepare_analysis_continuation(&accepted).unwrap();
+    rebuilt.update_voltages(&[0.0, 3.0]);
+    assert_eq!(rebuilt.try_evaluate().unwrap(), vec![3.0]);
+}
+
+#[test]
 fn cached_device_construction_still_validates_the_supplied_artifact() {
     let fixture = compile(
         r#"`include "disciplines.vams"

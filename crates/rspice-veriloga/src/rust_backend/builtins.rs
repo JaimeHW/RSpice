@@ -2845,15 +2845,19 @@ fn write_registry(
         out.push_str("        }\n");
     }
     out.push_str("    }\n\n");
-    for method in [
-        "restore_persistent_state",
-        "restore_analysis_continuation_state",
+    for (method, context_parameter, arguments) in [
+        ("restore_persistent_state", "", "state"),
+        (
+            "restore_analysis_continuation_state",
+            ", ctx: &super::GeneratedEvalContext<'_>",
+            "state, ctx",
+        ),
     ] {
         writeln!(
             out,
-            "    pub fn {method}(&mut self, state: &super::GeneratedVerilogAPersistentState) -> Result<(), String> {{"
+            "    pub fn {method}(&mut self, state: &super::GeneratedVerilogAPersistentState{context_parameter}) -> Result<(), String> {{"
         )?;
-        out.push_str("        let _ = state;\n");
+        writeln!(out, "        let _ = (&self, {arguments});")?;
         if devices.is_empty() {
             out.push_str("        let _ = (self, state);\n");
             out.push_str("        Err(\"empty generated Verilog-A registry has no persistent state\".to_string())\n");
@@ -2862,7 +2866,7 @@ fn write_registry(
             for (index, feature) in feature_names.iter().enumerate() {
                 writeln!(
                     out,
-                    "            #[cfg(feature = {feature:?})]\n            Self::Device{index}(device) => device.{method}(state),"
+                    "            #[cfg(feature = {feature:?})]\n            Self::Device{index}(device) => device.{method}({arguments}),"
                 )?;
             }
             out.push_str("            Self::__NonExhaustive(value) => match *value {},\n");

@@ -2157,15 +2157,14 @@ impl CircuitData {
     fn runtime_veriloga_dc_state_key(
         &self,
         device: &crate::device::veriloga::VerilogADevice,
-        checkpoint: &crate::device::veriloga::VerilogADeviceCheckpoint,
     ) -> Result<RuntimeVerilogADcStateKey, String> {
         let terminals = (0..device.num_terminals())
             .map(|terminal| self.veriloga_dc_terminal_identity(device.node_for_terminal(terminal)))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(RuntimeVerilogADcStateKey {
-            instance_name: checkpoint.instance_name.to_ascii_lowercase(),
-            model_name: checkpoint.model_name.to_string(),
-            source_digest: checkpoint.source_digest.to_string(),
+            instance_name: device.name.to_ascii_lowercase(),
+            model_name: device.model_name().to_string(),
+            source_digest: device.source_digest().to_string(),
             terminals,
         })
     }
@@ -2230,7 +2229,7 @@ impl CircuitData {
                 .zip(checkpoints)
                 .map(|(device, checkpoint)| {
                     Ok(RuntimeVerilogADcAcceptedState {
-                        key: self.runtime_veriloga_dc_state_key(device, &checkpoint)?,
+                        key: self.runtime_veriloga_dc_state_key(device)?,
                         checkpoint,
                     })
                 })
@@ -2299,7 +2298,6 @@ impl CircuitData {
     ) -> Result<(), String> {
         #[cfg(feature = "veriloga")]
         let runtime = {
-            let target_templates = self.veriloga_devices.checkpoint_states()?;
             let mut captured = _carrier
                 .runtime
                 .iter()
@@ -2311,21 +2309,18 @@ impl CircuitData {
                         .to_string(),
                 );
             }
-            let mut normalized = Vec::with_capacity(target_templates.len());
-            for (device, mut target) in self
-                .veriloga_devices
-                .iter()
-                .zip(target_templates.into_iter())
-            {
-                let key = self.runtime_veriloga_dc_state_key(device, &target)?;
+            let mut normalized = Vec::with_capacity(self.veriloga_devices.len());
+            for device in self.veriloga_devices.iter() {
+                let key = self.runtime_veriloga_dc_state_key(device)?;
                 let source = captured.remove(&key).ok_or_else(|| {
                     format!(
                         "runtime Verilog-A DC state has no matching accepted instance '{}'",
-                        target.instance_name
+                        device.name
                     )
                 })?;
-                target.accepted.clone_from(&source.accepted);
-                target.prev_discontinuity = source.prev_discontinuity;
+                let target = device
+                    .prepare_analysis_continuation(source)
+                    .map_err(|error| error.to_string())?;
                 normalized.push(target);
             }
             if let Some((key, _)) = captured.first_key_value() {
@@ -2334,8 +2329,6 @@ impl CircuitData {
                     key.instance_name
                 ));
             }
-            self.veriloga_devices
-                .validate_checkpoint_states(&normalized)?;
             normalized
         };
 
@@ -2383,12 +2376,20 @@ impl CircuitData {
             normalized
         };
 
-        #[cfg(feature = "veriloga")]
-        self.veriloga_devices
-            .restore_analysis_continuation_states(&runtime)?;
+        // Generated context validation can still fail. Its collection restores
+        // its own rollback image on error; install the prepared runtime devices
+        // only after the generated restore succeeds. Runtime static activation
+        // was refreshed on the staged devices and cannot fail during install.
         #[cfg(feature = "veriloga-builtins-base")]
         self.generated_veriloga_devices
-            .restore_analysis_continuation_states(&generated)?;
+            .restore_analysis_continuation_states(
+                &generated,
+                self.generated_simulation_parameters,
+                self.num_nodes,
+            )?;
+        #[cfg(feature = "veriloga")]
+        self.veriloga_devices
+            .install_prepared_analysis_continuation(runtime);
         Ok(())
     }
 
@@ -2577,6 +2578,22 @@ impl CircuitData {
             ));
         }
         self.begin_veriloga_analysis(analysis)?;
+        self.set_veriloga_equilibrium_analysis_override(analysis);
+        Ok(())
+    }
+
+    /// Configure a rebuilt analysis point without running declaration or
+    /// analog initial programs. Accepted state is installed immediately after.
+    pub(crate) fn prepare_veriloga_analysis_continuation(
+        &mut self,
+        analysis: u8,
+    ) -> Result<(), String> {
+        self.prepare_veriloga_equilibrium_analysis_point(analysis, false, false)?;
+        self.set_veriloga_equilibrium_analysis_override(analysis);
+        Ok(())
+    }
+
+    fn set_veriloga_equilibrium_analysis_override(&mut self, analysis: u8) {
         #[cfg(feature = "veriloga-builtins-base")]
         {
             let generated_analysis = match analysis {
@@ -2589,7 +2606,7 @@ impl CircuitData {
             self.generated_veriloga_devices
                 .set_operating_point_analysis_override(Some(generated_analysis));
         }
-        Ok(())
+        let _ = analysis;
     }
 
     /// Prepare one public DC operating point. DC sweeps keep time fixed at
@@ -3080,6 +3097,64 @@ endmodule"#;
         for device in circuit.veriloga_devices.iter_mut() {
             assert_eq!(device.try_evaluate().unwrap()[0], 6.0);
         }
+    }
+
+    #[cfg(feature = "veriloga")]
+    #[test]
+    fn failed_continuation_static_guard_preserves_all_runtime_instances() {
+        use crate::device::veriloga::{Compiler, VerilogADevice};
+        let source = r#"module continued_guard(p,n);
+inout p,n; electrical p,n;
+real scale;
+analog initial scale=2;
+analog if (sqrt(302.0-$temperature)) I(p,n)<+scale*V(p,n);
+endmodule"#;
+        let compiler = Compiler::default();
+        let model = compiler.compile(source).unwrap();
+        let canonical = compiler.compile_canonical_ir(source).unwrap();
+        let build = |temperatures: [f64; 2]| {
+            let mut circuit = CircuitData::new();
+            let node = circuit.get_or_create_node("p");
+            for (name, temperature) in ["first", "second"].into_iter().zip(temperatures) {
+                let mut device = VerilogADevice::try_new_with_canonical_ir(
+                    name,
+                    model.clone(),
+                    &canonical,
+                    &[node, 0],
+                )
+                .unwrap();
+                device.try_set_temperature(temperature).unwrap();
+                circuit.add_veriloga_device(device);
+            }
+            circuit
+        };
+        let mut original = build([300.0; 2]);
+        original.begin_veriloga_equilibrium_analysis(0).unwrap();
+        let accepted = original.capture_veriloga_dc_accepted_state().unwrap();
+        let mut rebuilt = build([301.0, 303.0]);
+        rebuilt.prepare_veriloga_analysis_continuation(0).unwrap();
+        let values = |circuit: &CircuitData| {
+            circuit
+                .veriloga_devices
+                .iter()
+                .map(|device| {
+                    device
+                        .variables()
+                        .map(|(_, value)| value)
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>()
+        };
+        let before = values(&rebuilt);
+        let error = rebuilt
+            .restore_veriloga_dc_accepted_state(&accepted)
+            .unwrap_err();
+        assert!(error.contains("static condition"), "{error}");
+        assert_eq!(
+            values(&rebuilt),
+            before,
+            "a failing later instance must not install the earlier one"
+        );
     }
 
     #[cfg(feature = "veriloga-model-vbic13")]

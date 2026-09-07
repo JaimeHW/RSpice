@@ -3874,19 +3874,27 @@ impl ModelPlan {
                 "        self.canonical_initialization_context.copy_from_slice(&state.event_variables[{start}..{end}]);"
             );
         }
-        extensions.impl_methods.push_str("    /// Continue a rebuilt analysis with its resolved initialization inputs.\n    pub fn restore_analysis_continuation_state(&mut self, state: &GeneratedVerilogAPersistentState) -> Result<(), String> {\n");
-        if input_count != 0 {
-            extensions.impl_methods.push_str("        if !self.canonical_initialization_valid { return Err(\"analysis continuation requires initialized target context\".into()); }\n");
-            extensions
-                .impl_methods
-                .push_str("        let context = *self.canonical_initialization_context;\n");
+        extensions.impl_methods.push_str("    /// Restore a trajectory under resolved context without executing initializers.\n    pub fn restore_analysis_continuation_state(&mut self, state: &GeneratedVerilogAPersistentState, ctx: &GeneratedEvalContext<'_>) -> Result<(), String> {\n        if ctx.evaluation_failed() { return Err(\"analysis continuation context has a pending evaluation error\".into()); }\n");
+        for (slot, input) in self.initialization_inputs.iter().enumerate() {
+            let name = format!("initialization_input_{slot}");
+            let _ = writeln!(
+                extensions.impl_methods,
+                "        let {name} = {};",
+                input.expression()
+            );
+            let invalid = input.invalid(&name);
+            let _ = writeln!(
+                extensions.impl_methods,
+                "        if {invalid} {{ return Err(\"invalid initialization context for analysis continuation\".into()); }}"
+            );
         }
         extensions
             .impl_methods
             .push_str("        self.restore_persistent_state(state)?;\n");
-        if input_count != 0 {
-            extensions.impl_methods.push_str(
-                "        self.canonical_initialization_context.copy_from_slice(&context);\n",
+        for slot in 0..input_count {
+            let _ = writeln!(
+                extensions.impl_methods,
+                "        self.canonical_initialization_context[{slot}] = initialization_input_{slot};"
             );
         }
         extensions
