@@ -416,11 +416,27 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("shell: bash", step)  # GitHub's explicit bash shell enables pipefail.
         self.assertIn("--test ngspice_regression", step)
 
+    def test_nightly_requires_independent_verilog_oracles(self) -> None:
+        workflow = read_text(".github/workflows/nightly.yml")
+        self.assertIn("apt-get install --no-install-recommends -y iverilog verilator", workflow)
+        step = workflow.split("- name: Conformance suite unit tests (release)", 1)[1].split("- name:", 1)[0]
+        self.assertIn('RSPICE_VERILOG_ORACLES_REQUIRED: "1"', step)
+        self.assertIn("--test verilog_oracles", step)
+
     def test_all_ci_and_release_python_harnesses_are_gated(self) -> None:
         workflow = read_text(".github/workflows/ci.yml")
         for directory in ("tools/ci", "tools/release"):
             for path in (ROOT / directory).glob("test_*.py"):
                 self.assertIn(path.relative_to(ROOT).as_posix(), workflow)
+
+    def test_browser_only_rust_tests_have_an_executing_lane(self) -> None:
+        workflow = read_text(".github/workflows/ci.yml")
+        job = workflow.split("  wasm-tests:", 1)[1].split("  wasm-ui-size:", 1)[0]
+        self.assertIn("CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: wasm-bindgen-test-runner", job)
+        self.assertIn("WASM_BINDGEN_USE_BROWSER: '1'", job)
+        self.assertIn("WASM_BINDGEN_USE_DEDICATED_WORKER: '1'", job)
+        self.assertIn("cargo test --locked -p rspice-wasm -p rspice-cloud-client --lib --target wasm32-unknown-unknown", job)
+        self.assertEqual(job.count("--test browser_clock"), 2)
 
     def test_format_gate_covers_every_hand_written_workspace_member(self) -> None:
         """rustfmt runs over the workspace as the manifest defines it.

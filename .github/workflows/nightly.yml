@@ -12,6 +12,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
@@ -23,6 +27,8 @@ jobs:
     name: Conformance & full suite (Linux, release)
     runs-on: ubuntu-latest
     timeout-minutes: 150
+    env:
+      CARGO_BUILD_JOBS: "2"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Rust toolchain
@@ -30,6 +36,12 @@ jobs:
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
           key: nightly
+      - name: Install independent Verilog reference simulators
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y iverilog verilator
+          iverilog -V
+          verilator --version
       - name: Full test suite (release)
         # rspice-conformance is excluded by crate, not by test name: the
         # dedicated ngspice step below runs that suite properly (serial
@@ -47,10 +59,10 @@ jobs:
           cargo test --locked -p rspice-conformance --release
           --test xyce_regression --test y_device_policy
       - name: Conformance suite unit tests (release)
-        # `verilog_oracles` runs with --nocapture because most of what it has
-        # to say when the oracles are absent is printed rather than asserted:
-        # which programs were probed, and what to install. Captured, a skip is
-        # indistinguishable from a pass.
+        # Missing reference tools must fail, rather than silently skipping
+        # the independent comparison as the routine tier intentionally does.
+        env:
+          RSPICE_VERILOG_ORACLES_REQUIRED: "1"
         run: >-
           cargo test --locked -p rspice-conformance --lib
           --test ngspice_oracle_audit --test verilog_oracles --release

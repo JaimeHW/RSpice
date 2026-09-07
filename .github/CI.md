@@ -26,6 +26,8 @@ has its own host tests and lint lane.
 Nightly adds release-mode tests, ngspice/Xyce/GF180 corpora, full execution depth,
 panic checks, generated-model freshness, golden fingerprints, complex-step
 Jacobians, native device qualification, performance and shipping desktop builds.
+It installs Icarus Verilog and Verilator and requires both for independent
+digital conformance; a missing reference simulator fails the qualification.
 A failed test process fails the job even if it printed a successful subtotal.
 Performance thresholds remain enforced alongside numerical checks.
 
