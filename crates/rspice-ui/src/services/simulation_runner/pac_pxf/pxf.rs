@@ -185,8 +185,15 @@ impl PxfRunConfig {
 /// PXF analysis data.
 #[derive(Debug, Clone)]
 pub struct PxfData {
-    /// Input frequency sweep points (Hz).
-    pub frequencies: Vec<Value>,
+    /// Swept baseband offsets, in hertz.
+    ///
+    /// This is the abscissa the card authored and the one every curve below is
+    /// stated against. It is **not** the frequency the drive is applied at:
+    /// that is `offset + input_sideband * f0`, and the two differ for every
+    /// sideband but zero. Core's `TransferPoint::freq_in` -- whose name says
+    /// otherwise and whose documentation says this -- is where the value comes
+    /// from; the field is named for what it holds on the way to the sheet.
+    pub offset_frequencies: Vec<Value>,
     /// Absolute frequency the converted response appears at, in hertz:
     /// `output_sideband * f0 + offset`, where the offset is the swept
     /// abscissa beside it.
@@ -292,12 +299,12 @@ fn run_pxf_analysis_for_netlist_with_operating_point_abort(
     // not finite, positive and strictly increasing; and it derives `freq_out`
     // through `SidebandTransfer::output_frequency`, which refuses a
     // non-representable absolute frequency by coordinate.
-    let mut frequencies = Vec::with_capacity(result.points.len());
+    let mut offset_frequencies = Vec::with_capacity(result.points.len());
     let mut output_frequencies = Vec::with_capacity(result.points.len());
     let mut transfer = Vec::with_capacity(result.points.len());
     for (index, point) in result.points.iter().enumerate() {
         poll_periodically(abort, index)?;
-        frequencies.push(point.freq_in);
+        offset_frequencies.push(point.freq_in);
         output_frequencies.push(point.freq_out);
         transfer.push(point.transfer);
     }
@@ -310,7 +317,7 @@ fn run_pxf_analysis_for_netlist_with_operating_point_abort(
 
     ensure_not_aborted(abort)?;
     Ok(PxfData {
-        frequencies,
+        offset_frequencies,
         output_frequencies,
         transfer,
         group_delay,
@@ -410,7 +417,7 @@ mod tests {
         let published = fixture_run(1);
 
         assert_eq!(
-            published.frequencies,
+            published.offset_frequencies,
             FIXTURE_OFFSETS.to_vec(),
             "the swept abscissa is the authored baseband offset"
         );
@@ -452,7 +459,7 @@ mod tests {
     fn the_converted_output_frequency_is_unchanged_at_input_sideband_zero() {
         let published = fixture_run(0);
 
-        assert_eq!(published.frequencies, FIXTURE_OFFSETS.to_vec());
+        assert_eq!(published.offset_frequencies, FIXTURE_OFFSETS.to_vec());
         assert_eq!(published.input_sideband, 0);
 
         for (offset, converted) in FIXTURE_OFFSETS

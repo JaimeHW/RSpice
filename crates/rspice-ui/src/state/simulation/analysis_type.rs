@@ -243,11 +243,18 @@ impl AnalysisType {
             | AnalysisType::Disto
             | AnalysisType::Tf
             | AnalysisType::Pac
-            | AnalysisType::Pxf
             | AnalysisType::Stb
             | AnalysisType::SParameter
             | AnalysisType::HarmonicBalance
             | AnalysisType::Fourier => ("Frequency", "Hz", "Magnitude", "V"),
+            // A `.PXF` sweep is not a frequency the circuit is driven at. Its
+            // abscissa is the baseband offset the conversion matrix is indexed
+            // by; the drive sits at `offset + INPUTSIDEBAND * f0` and the
+            // response at `OUTSIDEBAND * f0 + offset`, which the run publishes
+            // as its own curve. Calling the axis "Frequency" invited a reader
+            // to take it for the first of those three. `.PNOISE` already
+            // spells the same quantity "offset frequency".
+            AnalysisType::Pxf => ("Offset Frequency", "Hz", "Magnitude", "V"),
             AnalysisType::Qpss
             | AnalysisType::Hbsp
             | AnalysisType::Psp
@@ -275,5 +282,28 @@ impl AnalysisType {
 impl std::fmt::Display for AnalysisType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.display_name())
+    }
+}
+
+#[cfg(test)]
+mod axis_tests {
+    use super::AnalysisType;
+
+    /// A `.PXF` abscissa is the swept baseband offset, and the navigator's
+    /// sweep label and the waveform export's first column header both read it
+    /// from here. An absolute frequency is a different number: the drive sits
+    /// at `offset + INPUTSIDEBAND * f0`, and the converted response, which the
+    /// run publishes as its own curve, at `OUTSIDEBAND * f0 + offset`.
+    #[test]
+    fn the_pxf_sweep_axis_is_named_the_offset_it_holds() {
+        assert_eq!(
+            AnalysisType::Pxf.axis_info(),
+            ("Offset Frequency", "Hz", "Magnitude", "V")
+        );
+        assert_eq!(
+            AnalysisType::Ac.axis_info(),
+            ("Frequency", "Hz", "Magnitude", "V"),
+            "an .AC sweep really is the frequency the circuit is driven at"
+        );
     }
 }

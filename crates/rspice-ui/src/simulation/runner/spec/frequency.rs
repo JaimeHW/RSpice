@@ -357,7 +357,7 @@ fn run_pxf(
     );
     let transfer = complex_waveform(
         transfer_name.clone(),
-        &data.frequencies,
+        &data.offset_frequencies,
         &data.transfer,
         abort,
     )?;
@@ -365,15 +365,17 @@ fn run_pxf(
     insert_scalar_waveform(
         &mut waveforms,
         "Converted Output Frequency".to_owned(),
-        data.frequencies.clone(),
+        data.offset_frequencies.clone(),
         data.output_frequencies,
         "Hz",
         "Hz",
     );
     insert_group_delay(&mut waveforms, data.group_delay, abort)?;
 
+    // The document's own abscissa is the swept baseband offset, which is what
+    // every curve above is stated against and what `AnalysisType::Pxf` names.
     Ok(SimulationResult::Ac {
-        frequencies: data.frequencies,
+        frequencies: data.offset_frequencies,
         waveforms,
         measurements: Vec::new(),
     })
