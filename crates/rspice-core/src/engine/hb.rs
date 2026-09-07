@@ -980,7 +980,7 @@ impl Engine {
             let waveform = &result.waveforms[source_index];
             let samples = (0..sample_count)
                 .map(|sample_index| {
-                    let time = analysis.period * sample_index as Value / sample_count as Value;
+                    let time = analysis.period * (sample_index as Value / sample_count as Value);
                     waveform.interpolate(&result.time, time, analysis.period)
                 })
                 .collect::<Vec<_>>();
@@ -1271,7 +1271,7 @@ impl Engine {
         let hb_period = config.fundamental_freq.recip();
         let sample_times = (0..collocation_points)
             .map(|sample| {
-                (hb_period * sample as Value / collocation_points as Value)
+                (hb_period * (sample as Value / collocation_points as Value))
                     .rem_euclid(transient_period)
             })
             .collect::<Vec<_>>();
@@ -1636,6 +1636,39 @@ impl Engine {
 mod tests {
     use super::*;
     use crate::{SimulationConfig, SpiceDialect};
+
+    #[test]
+    fn retained_pss_projection_preserves_phase_at_extreme_periods() {
+        let engine = Engine::new(SimulationConfig::default());
+        for frequency in [1e-308, 1e3, 1e18] {
+            let capacitance = 1.0 / (std::f64::consts::TAU * 1e3 * frequency);
+            let netlist = Netlist::parse(&format!(
+                "PSS projection phase\nB1 in 0 V=sin(2*pi*{frequency:e}*time+0.37)\nR1 in out 1k\nC1 out 0 {capacitance:e}\n.end\n"
+            )).unwrap();
+            let point = engine
+                .run_pss_operating_point_with_abort(
+                    &netlist,
+                    crate::analysis::PssConfig::new(frequency)
+                        .with_points_per_period(300)
+                        .with_tstab_periods(0),
+                    &NoAbort,
+                )
+                .unwrap();
+            let state = engine
+                .hb_state_from_pss_operating_point(
+                    &point,
+                    &HbConfig::new(frequency).with_harmonics(3),
+                    &["IN".to_owned(), "OUT".to_owned()],
+                )
+                .unwrap();
+            let expected = Complex64::new(0.5 * 0.37_f64.sin(), -0.5 * 0.37_f64.cos());
+            assert!(
+                (state.x[0][1] - expected).norm() < 3e-5,
+                "{frequency:e}: {:?}",
+                state.x[0][1]
+            );
+        }
+    }
 
     #[test]
     fn authored_nonlin_hb_budget_changes_only_the_derived_hb_config() {
