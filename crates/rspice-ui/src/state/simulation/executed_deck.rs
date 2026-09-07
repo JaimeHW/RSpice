@@ -150,7 +150,7 @@ impl ExecutedDeck {
 /// The executed decks this session still holds, oldest first.
 #[derive(Debug, Clone, Default)]
 pub struct ExecutedDeckArchive {
-    runs: VecDeque<ExecutedDeck>,
+    runs: Arc<VecDeque<ExecutedDeck>>,
 }
 
 impl ExecutedDeckArchive {
@@ -163,19 +163,20 @@ impl ExecutedDeckArchive {
         if deck.points.is_empty() {
             return;
         }
-        self.runs.retain(|held| held.run_id != deck.run_id);
-        self.runs.push_back(deck);
-        while self.runs.len() > MAX_RETAINED_RUNS {
-            self.runs.pop_front();
+        let runs = Arc::make_mut(&mut self.runs);
+        runs.retain(|held| held.run_id != deck.run_id);
+        runs.push_back(deck);
+        while runs.len() > MAX_RETAINED_RUNS {
+            runs.pop_front();
         }
         // The newest run is never evicted for size: a single deck larger than
         // the whole budget is still the answer to the question being asked,
         // and dropping it would leave the archive empty at exactly the moment
         // a reader looked.
-        while self.runs.len() > 1
-            && self.runs.iter().map(ExecutedDeck::bytes).sum::<usize>() > MAX_RETAINED_BYTES
+        while runs.len() > 1
+            && runs.iter().map(ExecutedDeck::bytes).sum::<usize>() > MAX_RETAINED_BYTES
         {
-            self.runs.pop_front();
+            runs.pop_front();
         }
     }
 
@@ -205,7 +206,13 @@ impl ExecutedDeckArchive {
     /// still be counted against both this archive's ceiling and the project's
     /// storage.
     pub fn retain_runs(&mut self, keep: impl Fn(u64) -> bool) {
-        self.runs.retain(|deck| keep(deck.run_id));
+        Arc::make_mut(&mut self.runs).retain(|deck| keep(deck.run_id));
+    }
+
+    /// Snapshot identity stays valid because every archive mutation detaches
+    /// storage shared with another archive or a retained cache key.
+    pub(crate) fn shares_content_with(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.runs, &other.runs)
     }
 
     /// Install a project's retained decks, oldest first.
@@ -250,7 +257,7 @@ impl ExecutedDeckArchive {
             ));
         }
         Ok(Self {
-            runs: records.into(),
+            runs: Arc::new(records.into()),
         })
     }
 }

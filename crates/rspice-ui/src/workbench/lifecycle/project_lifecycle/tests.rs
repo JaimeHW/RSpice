@@ -11,6 +11,7 @@ use crate::state::{ComponentType, Point};
 
 mod durable_content;
 mod fingerprint_cache;
+mod result_cache;
 #[cfg(not(target_arch = "wasm32"))]
 mod save_acceptance;
 

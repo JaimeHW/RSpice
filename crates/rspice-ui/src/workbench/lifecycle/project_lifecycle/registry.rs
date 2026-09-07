@@ -1,5 +1,8 @@
 //! Stable project-document registry and content fingerprints.
 
+mod result_fingerprint;
+pub(super) use result_fingerprint::ResultFingerprintCache;
+
 use std::collections::{HashMap, HashSet};
 
 use serde::Serialize;
@@ -15,6 +18,7 @@ use crate::workbench::state::Workspace;
 thread_local! {
     /// Full document fingerprint passes, including retained sample scans.
     pub(super) static FINGERPRINT_PASSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    pub(super) static RESULT_FINGERPRINT_PASSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// Stable identity of every project-owned document that participates in
@@ -90,7 +94,17 @@ impl DocumentRegistry {
         current: &ProjectFile,
         accepted: Option<&DocumentFingerprints>,
     ) -> Result<(), String> {
-        let current = document_digests(current)?;
+        let current = DocumentFingerprints::new(current)?;
+        self.rebuild_from_fingerprints(&current, accepted);
+        Ok(())
+    }
+
+    pub(super) fn rebuild_from_fingerprints(
+        &mut self,
+        current: &DocumentFingerprints,
+        accepted: Option<&DocumentFingerprints>,
+    ) {
+        let current = &current.documents;
         let empty = HashMap::new();
         let accepted = accepted.map_or(&empty, |fingerprints| &fingerprints.documents);
         let mut ids = current
@@ -109,7 +123,6 @@ impl DocumentRegistry {
             })
             .collect();
         self.comparison_failed = false;
-        Ok(())
     }
 }
 
@@ -140,7 +153,20 @@ pub(super) struct DocumentFingerprints {
 
 impl DocumentFingerprints {
     pub(super) fn new(project: &ProjectFile) -> Result<Self, String> {
-        let documents = document_digests(project)?;
+        Ok(Self::from_documents(document_digests(project)?))
+    }
+
+    pub(super) fn with_results_cache(
+        project: &ProjectFile,
+        cache: &ResultFingerprintCache,
+    ) -> Result<Self, String> {
+        Ok(Self::from_documents(document_digests_with_results_cache(
+            project,
+            Some(cache),
+        )?))
+    }
+
+    fn from_documents(documents: HashMap<ProjectDocumentId, ContentDigest>) -> Self {
         let mut ordered = documents.iter().collect::<Vec<_>>();
         ordered.sort_by_key(|(id, _)| id.stable_key());
         let mut hasher = Sha256::new();
@@ -153,7 +179,7 @@ impl DocumentFingerprints {
             hasher.update(digest.as_bytes());
         }
         let content = ContentDigest::from_bytes(hasher.finalize().into());
-        Ok(Self { documents, content })
+        Self { documents, content }
     }
 
     pub(super) fn content_digest(&self) -> ContentDigest {
@@ -167,6 +193,13 @@ pub(crate) fn content_digest(project: &ProjectFile) -> Result<ContentDigest, Str
 
 fn document_digests(
     project: &ProjectFile,
+) -> Result<HashMap<ProjectDocumentId, ContentDigest>, String> {
+    document_digests_with_results_cache(project, None)
+}
+
+fn document_digests_with_results_cache(
+    project: &ProjectFile,
+    results_cache: Option<&ResultFingerprintCache>,
 ) -> Result<HashMap<ProjectDocumentId, ContentDigest>, String> {
     #[cfg(test)]
     FINGERPRINT_PASSES.with(|passes| passes.set(passes.get() + 1));
@@ -203,25 +236,11 @@ fn document_digests(
                 .map(|context| &context.model_libraries),
         )?,
     );
-    let ResultFingerprintFields {
-        markers,
-        log_y_panes,
-        expression_groups,
-        marker_history,
-    } = project.result_presentation.fingerprint_fields()?;
-    let result_fields = (
-        &project.simulation_results,
-        &project.workspace.report_documents,
-        &project.workspace.visualization_documents,
-        markers,
-        log_y_panes,
-        expression_groups,
-    );
     documents.insert(
         ProjectDocumentId::ResultHistory,
-        match marker_history {
-            Some(highest) => digest(&("result-marker-allocation-v1", result_fields, highest))?,
-            None => digest(&result_fields)?,
+        match results_cache {
+            Some(cache) => cache.digest(project)?,
+            None => result_fingerprint::digest(project)?,
         },
     );
     // The stimulus definitions ride the project document rather than a

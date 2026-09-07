@@ -431,7 +431,7 @@ impl From<&PreparedRunReceipt> for ProjectPreparedRunReceipt {
 /// policy it is given is the one those runs already evaluated under; a receipt
 /// that carries either field early is a rewritten file, not an old one.
 pub(super) fn migrate_legacy_specification_receipts(
-    results: &mut ProjectSimulationResults,
+    results: &mut ProjectSimulationResultsData,
     source_schema: u32,
 ) -> Result<(), String> {
     if source_schema >= GOVERNED_SPECIFICATION_RESULTS_SCHEMA_VERSION {
@@ -469,7 +469,7 @@ pub(super) fn migrate_legacy_specification_receipts(
 /// file claiming an older schema while carrying a derivation record is a
 /// rewritten file, and is refused rather than trusted.
 pub(super) fn reject_derived_task_identities_before_schema_v15(
-    results: &ProjectSimulationResults,
+    results: &ProjectSimulationResultsData,
     source_schema: u32,
 ) -> Result<(), String> {
     if source_schema >= EXECUTED_DECK_RESULTS_SCHEMA_VERSION {
@@ -493,7 +493,7 @@ pub(super) fn reject_derived_task_identities_before_schema_v15(
 }
 
 pub(super) fn reject_hierarchy_maps_before_schema_v15(
-    results: &ProjectSimulationResults,
+    results: &ProjectSimulationResultsData,
     source_schema: u32,
 ) -> Result<(), String> {
     if source_schema >= EXECUTED_DECK_RESULTS_SCHEMA_VERSION {

@@ -2,7 +2,7 @@
 
 use super::*;
 
-fn complex_history() -> SimulationState {
+pub(super) fn complex_history() -> SimulationState {
     let mut run = SimulationRun::new(1);
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::Ac, "AC").with_waveforms(vec![

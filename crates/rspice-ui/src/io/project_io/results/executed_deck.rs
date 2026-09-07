@@ -207,7 +207,7 @@ impl ProjectExecutedDecks {
 /// read it. A file claiming an older schema while carrying decks is refused
 /// rather than trusted.
 pub(super) fn reject_executed_decks_before_schema_v15(
-    results: &ProjectSimulationResults,
+    results: &ProjectSimulationResultsData,
     source_schema: u32,
 ) -> Result<(), String> {
     if source_schema >= EXECUTED_DECK_RESULTS_SCHEMA_VERSION {

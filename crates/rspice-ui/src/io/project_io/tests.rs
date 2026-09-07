@@ -2453,5 +2453,6 @@ mod hierarchy_reference;
 mod instance_masters;
 mod migration;
 mod model_source_receipt;
+mod result_storage;
 mod run_timing;
 mod waveform_storage;

@@ -328,7 +328,7 @@ fn project_results_restore_rejects_invalid_overlay_references() {
     let mut run_two = SimulationRun::new(2);
     seal_legacy_unattributed(&mut run_one);
     seal_legacy_unattributed(&mut run_two);
-    let results = ProjectSimulationResults {
+    let results: ProjectSimulationResults = ProjectSimulationResultsData {
         retained_dataset_limit: None,
         schema_version: PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION,
         runs: vec![
@@ -345,8 +345,9 @@ fn project_results_restore_rejects_invalid_overlay_references() {
             run_one.dataset_id,
             DatasetId::new(),
         ],
-        ..ProjectSimulationResults::default()
-    };
+        ..ProjectSimulationResultsData::default()
+    }
+    .into();
 
     let error = results
         .into_simulation_state()
@@ -361,7 +362,7 @@ fn project_results_validation_rejects_duplicate_run_ids() {
     let mut run_duplicate = SimulationRun::new(1);
     seal_legacy_unattributed(&mut run_one);
     seal_legacy_unattributed(&mut run_duplicate);
-    let results = ProjectSimulationResults {
+    let results: ProjectSimulationResults = ProjectSimulationResultsData {
         retained_dataset_limit: None,
         schema_version: PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION,
         runs: vec![
@@ -373,8 +374,9 @@ fn project_results_validation_rejects_duplicate_run_ids() {
         active_dataset_id: Some(run_one.dataset_id),
         active_analysis_sequence: None,
         overlay_dataset_ids: Vec::new(),
-        ..ProjectSimulationResults::default()
-    };
+        ..ProjectSimulationResultsData::default()
+    }
+    .into();
 
     let error = results.validate().expect_err("duplicate run ids fail");
 
@@ -664,7 +666,7 @@ fn project_text_migrates_v1_result_sequences_once_to_stable_identities() {
 fn project_results_validation_rejects_duplicate_waveform_names_in_analysis() {
     let run_id = RunId::new();
     let dataset_id = DatasetId::new();
-    let results = ProjectSimulationResults {
+    let results: ProjectSimulationResults = ProjectSimulationResultsData {
         retained_dataset_limit: None,
         schema_version: PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION,
         runs: vec![ProjectSimulationRun {
@@ -728,8 +730,9 @@ fn project_results_validation_rejects_duplicate_waveform_names_in_analysis() {
         active_dataset_id: Some(dataset_id),
         active_analysis_sequence: Some(1),
         overlay_dataset_ids: Vec::new(),
-        ..ProjectSimulationResults::default()
-    };
+        ..ProjectSimulationResultsData::default()
+    }
+    .into();
 
     let error = results
         .validate()
@@ -743,7 +746,7 @@ fn project_results_validation_rejects_duplicate_waveform_names_in_analysis() {
 fn project_results_validation_rejects_non_monotonic_waveform_x() {
     let run_id = RunId::new();
     let dataset_id = DatasetId::new();
-    let results = ProjectSimulationResults {
+    let results: ProjectSimulationResults = ProjectSimulationResultsData {
         retained_dataset_limit: None,
         schema_version: PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION,
         runs: vec![ProjectSimulationRun {
@@ -796,8 +799,9 @@ fn project_results_validation_rejects_non_monotonic_waveform_x() {
         active_dataset_id: Some(dataset_id),
         active_analysis_sequence: Some(1),
         overlay_dataset_ids: Vec::new(),
-        ..ProjectSimulationResults::default()
-    };
+        ..ProjectSimulationResultsData::default()
+    }
+    .into();
 
     let error = results
         .validate()
@@ -821,7 +825,7 @@ fn legacy_noise_total_rms_migrates_losslessly_to_optional_evidence() {
 fn project_results_preserve_core_noise_mechanism_labels() {
     let run_id = RunId::new();
     let dataset_id = DatasetId::new();
-    let mut results = ProjectSimulationResults {
+    let mut results: ProjectSimulationResults = ProjectSimulationResultsData {
         retained_dataset_limit: None,
         schema_version: PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION,
         runs: vec![ProjectSimulationRun {
@@ -884,8 +888,9 @@ fn project_results_preserve_core_noise_mechanism_labels() {
         active_dataset_id: Some(dataset_id),
         active_analysis_sequence: Some(1),
         overlay_dataset_ids: Vec::new(),
-        ..ProjectSimulationResults::default()
-    };
+        ..ProjectSimulationResultsData::default()
+    }
+    .into();
 
     seal_project_result_digests(&mut results.runs[0]).expect("fixture digests seal");
 

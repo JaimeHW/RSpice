@@ -7,6 +7,7 @@
 
 mod accepted_project;
 mod persistence;
+mod result_cache;
 
 use accepted_project::AcceptedProject;
 #[cfg(target_arch = "wasm32")]
@@ -77,6 +78,8 @@ pub(crate) struct ProjectLifecycleState {
     transaction: Option<LifecycleTransaction>,
     unreadable_native_binding: Option<persistence::UnreadableNativeBinding>,
     accepted_generation: u64,
+    result_cache: result_cache::ResultCache,
+    result_fingerprints: registry::ResultFingerprintCache,
     /// Monotonic authority for browser promises. Explicit cancellation bumps
     /// this value so a promise that JavaScript cannot abort is harmless when
     /// it eventually resolves.
@@ -102,6 +105,8 @@ impl Default for ProjectLifecycleState {
             transaction: None,
             unreadable_native_binding: None,
             accepted_generation: 0,
+            result_cache: result_cache::ResultCache::default(),
+            result_fingerprints: registry::ResultFingerprintCache::default(),
             #[cfg(target_arch = "wasm32")]
             browser_operation_generation: 1,
             #[cfg(target_arch = "wasm32")]
@@ -270,7 +275,10 @@ pub(crate) fn snapshot(state: &AppState) -> Result<ProjectFile, ProjectLifecycle
 
     let mut libraries = state.library_manager.clone();
     sanitize_library_view_runtime_state(&mut libraries);
-    let simulation_results = ProjectSimulationResults::from_state(&state.simulation);
+    let simulation_results = state
+        .project_lifecycle
+        .result_cache
+        .capture(&state.simulation);
     let execution_context = ProjectExecutionContext::from_state(
         workspace.project.id(),
         &state.sim_setup,
@@ -324,9 +332,7 @@ pub(crate) fn has_unsaved_changes(state: &AppState) -> bool {
     let Some(accepted) = state.project_lifecycle.accepted.as_ref() else {
         return true;
     };
-    match snapshot(state).and_then(|current| {
-        registry::content_digest(&current).map_err(ProjectLifecycleError::InvalidState)
-    }) {
+    match working_fingerprints(state).map(|current| current.content_digest()) {
         Ok(current) => accepted
             .fingerprints()
             .map(|baseline| current != baseline.content_digest())
@@ -381,8 +387,19 @@ pub(crate) fn refresh_registry(state: &mut AppState) -> Result<(), ProjectLifecy
     Ok(())
 }
 
-fn current_registry(state: &AppState) -> Result<registry::DocumentRegistry, ProjectLifecycleError> {
+fn working_fingerprints(
+    state: &AppState,
+) -> Result<registry::DocumentFingerprints, ProjectLifecycleError> {
     let current = snapshot(state)?;
+    registry::DocumentFingerprints::with_results_cache(
+        &current,
+        &state.project_lifecycle.result_fingerprints,
+    )
+    .map_err(ProjectLifecycleError::InvalidState)
+}
+
+fn current_registry(state: &AppState) -> Result<registry::DocumentRegistry, ProjectLifecycleError> {
+    let current = working_fingerprints(state)?;
     let accepted = state
         .project_lifecycle
         .accepted
@@ -391,9 +408,7 @@ fn current_registry(state: &AppState) -> Result<registry::DocumentRegistry, Proj
         .transpose()
         .map_err(ProjectLifecycleError::InvalidState)?;
     let mut registry = registry::DocumentRegistry::default();
-    registry
-        .rebuild(&current, accepted)
-        .map_err(ProjectLifecycleError::InvalidState)?;
+    registry.rebuild_from_fingerprints(&current, accepted);
     Ok(registry)
 }
 
