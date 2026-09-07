@@ -391,7 +391,8 @@ fn schema_v12_rejects_a_waveform_unit_its_own_digest_never_covered() {
 #[test]
 fn schema_v12_rejects_samples_that_do_not_match_its_retained_digest() {
     let mut persisted = persisted_at_schema_v12(&run_with_waveform_unit(33, None));
-    persisted.runs[0].analyses[0].waveforms[0].y[1] = 1.000_000_000_000_000_2e-3;
+    std::sync::Arc::make_mut(&mut persisted.runs[0].analyses[0].waveforms[0].y)[1] =
+        1.000_000_000_000_000_2e-3;
 
     let error = persisted
         .migrate_to_current(ProjectId::new())

@@ -1749,7 +1749,8 @@ fn schema_v8_digests_are_authenticated_before_v9_resealing() {
     );
 
     let mut tampered = v8.clone();
-    tampered.runs[0].analyses[0].waveforms[0].y[1] = 1.000_000_000_000_000_2;
+    std::sync::Arc::make_mut(&mut tampered.runs[0].analyses[0].waveforms[0].y)[1] =
+        1.000_000_000_000_000_2;
     assert!(
         tampered
             .migrate_to_current(ProjectId::new())
@@ -2453,3 +2454,4 @@ mod instance_masters;
 mod migration;
 mod model_source_receipt;
 mod run_timing;
+mod waveform_storage;

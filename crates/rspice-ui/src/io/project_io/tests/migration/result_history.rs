@@ -685,8 +685,8 @@ fn project_results_validation_rejects_duplicate_waveform_names_in_analysis() {
                 waveforms: vec![
                     ProjectWaveformData {
                         name: "V(out)".to_string(),
-                        x: vec![0.0],
-                        y: vec![1.0],
+                        x: vec![0.0].into(),
+                        y: vec![1.0].into(),
                         color: "#00aaff".to_string(),
                         visible: true,
                         unit: None,
@@ -694,8 +694,8 @@ fn project_results_validation_rejects_duplicate_waveform_names_in_analysis() {
                     },
                     ProjectWaveformData {
                         name: "V(out)".to_string(),
-                        x: vec![0.0],
-                        y: vec![2.0],
+                        x: vec![0.0].into(),
+                        y: vec![2.0].into(),
                         color: "#ffaa00".to_string(),
                         visible: true,
                         unit: None,
@@ -763,8 +763,8 @@ fn project_results_validation_rejects_non_monotonic_waveform_x() {
                 result_data_digest: PersistedField::Missing,
                 waveforms: vec![ProjectWaveformData {
                     name: "V(out)".to_string(),
-                    x: vec![0.0, 2.0, 1.0, 3.0],
-                    y: vec![0.0, 1.0, 2.0, 3.0],
+                    x: vec![0.0, 2.0, 1.0, 3.0].into(),
+                    y: vec![0.0, 1.0, 2.0, 3.0].into(),
                     color: "#00aaff".to_string(),
                     visible: true,
                     unit: None,

@@ -2015,8 +2015,10 @@ impl From<&AnalysisResult> for ProjectAnalysisResult {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProjectWaveformData {
     pub name: String,
-    pub x: Vec<f64>,
-    pub y: Vec<f64>,
+    /// Exact samples share storage with immutable snapshots. A writer must
+    /// detach through copy-on-write before changing a draft's samples.
+    pub x: crate::state::SharedWaveformValues,
+    pub y: crate::state::SharedWaveformValues,
     pub color: String,
     #[serde(default = "default_true")]
     pub visible: bool,
@@ -2064,8 +2066,8 @@ impl From<&WaveformData> for ProjectWaveformData {
     fn from(waveform: &WaveformData) -> Self {
         Self {
             name: waveform.name.clone(),
-            x: waveform.x.iter().copied().collect(),
-            y: waveform.y.iter().copied().collect(),
+            x: waveform.x.clone(),
+            y: waveform.y.clone(),
             color: waveform.color.clone(),
             visible: waveform.visible,
             unit: waveform.unit.clone(),
@@ -2074,8 +2076,8 @@ impl From<&WaveformData> for ProjectWaveformData {
                 .as_ref()
                 .map(|complex| ProjectComplexWaveformComponents {
                     source_name: complex.source_name.clone(),
-                    real: complex.real.iter().copied().collect(),
-                    imag: complex.imag.iter().copied().collect(),
+                    real: complex.real.clone(),
+                    imag: complex.imag.clone(),
                 }),
         }
     }
@@ -2084,8 +2086,8 @@ impl From<&WaveformData> for ProjectWaveformData {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProjectComplexWaveformComponents {
     pub source_name: String,
-    pub real: Vec<f64>,
-    pub imag: Vec<f64>,
+    pub real: crate::state::SharedWaveformValues,
+    pub imag: crate::state::SharedWaveformValues,
 }
 
 impl ProjectComplexWaveformComponents {
