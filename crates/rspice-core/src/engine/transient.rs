@@ -2319,7 +2319,11 @@ impl Engine {
                 hinted_max_step
             };
         let source_step_hint = Self::transient_source_step_hint(netlist, hinted_max_step);
-        let mut breakpoints = BreakpointManager::new();
+        // This API enumerates authored events, not the integrator's merged
+        // landing windows. Its strict comparison with the smallest positive
+        // float deduplicates equal times while retaining every distinct
+        // representable clock, even below the manager's default 1 fs tolerance.
+        let mut breakpoints = BreakpointManager::new_with_tolerance(Value::from_bits(1));
         Self::collect_independent_source_breakpoints(
             &circuit,
             BreakpointWindow {

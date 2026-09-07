@@ -24,6 +24,37 @@ pub(crate) fn is_integral_cycle_count(cycles: Value) -> bool {
         && cycles.round() >= 1.0
 }
 
+/// Map a PWL clock into its repeated tail. The authored endpoint is retained
+/// at exact repeat boundaries; the next representable instant belongs to the
+/// next cycle. A tolerance in seconds would flatten small waveforms and hold
+/// discontinuous endpoints past their seam.
+pub(crate) fn pwl_repeated_time(
+    time: Value,
+    first: Value,
+    last: Value,
+    repeat_from: Option<Value>,
+) -> Value {
+    let Some(start) = repeat_from.filter(|start| start.is_finite()) else {
+        return time;
+    };
+    let start = start.max(first);
+    let period = last - start;
+    if !time.is_finite() || time <= last || !period.is_finite() || period <= 0.0 {
+        return time;
+    }
+    let elapsed = time - last;
+    let remainder = elapsed.rem_euclid(period);
+    // Multiplication can round an authored boundary differently from modulo.
+    // Authenticate its represented clock instead of widening the seam into
+    // an interval, which would include an actual point after the boundary.
+    let cycle = (elapsed / period).round();
+    if remainder == 0.0 || (cycle.is_finite() && time == last + cycle * period) {
+        last
+    } else {
+        start + remainder
+    }
+}
+
 /// Neumaier compensated accumulation. Callers scale their operands when an
 /// unscaled sum could overflow; compensation recovers low-order terms lost
 /// when finite contributions of opposite sign nearly cancel.

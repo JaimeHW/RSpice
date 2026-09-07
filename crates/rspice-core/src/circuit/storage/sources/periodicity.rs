@@ -36,7 +36,7 @@ fn periodic_linear_points(
                 let dt = pair[1].0 - pair[0].0;
                 dt >= 0.0
                     && (pair[0].1 == pair[1].1
-                        || (dt > Value::EPSILON && ((pair[1].1 - pair[0].1) / dt).is_finite()))
+                        || (dt > 0.0 && ((pair[1].1 - pair[0].1) / dt).is_finite()))
             }))
 }
 
@@ -317,7 +317,7 @@ impl VoltageSources {
                 ..
             } => {
                 let Some(pwl) = pwl else { return false };
-                if *time_scale <= Value::EPSILON || !pwl.has_finite_segment_slopes() {
+                if *time_scale <= 0.0 || !pwl.has_finite_segment_slopes() {
                     return false;
                 }
                 let points: Vec<_> = pwl
@@ -406,6 +406,117 @@ impl VoltageSources {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn inline_pwl_time_scaling_preserves_periodicity_values_and_slopes() {
+        for scale in [1e-30, 1e-18, 1e-12, 1.0, 1e12, 1e30] {
+            let points = vec![(0.0, 0.0), (scale, 1.0), (2.0 * scale, 0.0)];
+            assert!(
+                periodic_linear_points(&points, 2.0 * scale, 0.0, Some(0.0), true),
+                "scale={scale:e}"
+            );
+            let file_waveform =
+                crate::device::pwl_file::PwlWaveform::new(vec![(0.0, 0.0), (1.0, 1.0), (2.0, 0.0)])
+                    .unwrap()
+                    .with_scaling(scale, 1.0, 0.0, 0.0);
+            let file_spec = crate::netlist::SourceSpec::PwlFile {
+                path: "owned-pwl-snapshot.csv".to_owned(),
+                time_scale: scale,
+                value_scale: 1.0,
+                time_offset: 0.0,
+                value_offset: 0.0,
+                delay: 0.0,
+                repeat_from: Some(0.0),
+            };
+            assert!(
+                VoltageSources::periodic_waveform(
+                    &file_spec,
+                    2.0 * scale,
+                    None,
+                    Some(&file_waveform),
+                    true,
+                ),
+                "scaled PWLFILE at scale={scale:e}"
+            );
+            for phase in [0.25_f64, 0.75, 1.25, 1.75, 4.25, 4.75, 5.25, 5.75] {
+                let local = phase.rem_euclid(2.0);
+                let expected = if local < 1.0 { local } else { 2.0 - local };
+                let slope = if local < 1.0 { 1.0 } else { -1.0 };
+                assert!(
+                    (VoltageSources::pwl_time_component::<false>(
+                        &points,
+                        phase * scale,
+                        0.0,
+                        Some(0.0)
+                    ) - expected)
+                        .abs()
+                        < 1e-14
+                );
+                assert!(
+                    (VoltageSources::pwl_time_component::<true>(
+                        &points,
+                        phase * scale,
+                        0.0,
+                        Some(0.0)
+                    ) * scale
+                        - slope)
+                        .abs()
+                        < 1e-14
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn pwl_interpolation_normalizes_time_before_scaling_voltage() {
+        for (duration, amplitude) in [(1e-30, 1e-300), (1e30, 1e300)] {
+            let points = [(0.0, 0.0), (duration, amplitude)];
+            let actual =
+                VoltageSources::pwl_time_component::<false>(&points, duration * 0.5, 0.0, None);
+            assert!(
+                (actual / amplitude - 0.5).abs() < 1e-14,
+                "duration={duration:e}, amplitude={amplitude:e}, value={actual:e}"
+            );
+        }
+    }
+
+    #[test]
+    fn inline_pwl_repeat_boundary_has_no_artificial_endpoint_hold() {
+        for scale in [1e-30, 1e-18, 1e-12, 1.0, 1e12, 1e30] {
+            let points = [(0.0, 1.0), (scale, 2.0)];
+            let seam = 2.0 * scale;
+            assert_eq!(
+                VoltageSources::pwl_time_component::<false>(&points, seam, 0.0, Some(0.0)),
+                2.0
+            );
+            assert!(
+                VoltageSources::pwl_time_component::<true>(&points, seam, 0.0, Some(0.0)).is_nan()
+            );
+            let after = VoltageSources::pwl_time_component::<false>(
+                &points,
+                seam.next_up(),
+                0.0,
+                Some(0.0),
+            );
+            assert!(
+                (after - 1.0).abs() < 1e-14,
+                "scale={scale:e}, after={after}"
+            );
+            assert!(
+                (VoltageSources::pwl_time_component::<true>(
+                    &points,
+                    seam.next_up(),
+                    0.0,
+                    Some(0.0)
+                ) * scale
+                    - 1.0)
+                    .abs()
+                    < 1e-14
+            );
+        }
+    }
+
     #[test]
     fn regular_waveform_admission_covers_phase_corners_modulation_and_startup_prefixes() {
         let period = 1e-6;

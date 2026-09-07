@@ -578,7 +578,7 @@ impl Engine {
             return Self::check_source_breakpoint_collection(breakpoints, abort, max_points);
         }
         let period = last - repeat_start;
-        if !period.is_finite() || period <= Value::EPSILON {
+        if !period.is_finite() || period <= 0.0 {
             return Self::check_source_breakpoint_collection(breakpoints, abort, max_points);
         }
 

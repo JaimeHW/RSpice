@@ -1792,14 +1792,19 @@ impl VoltageSources {
         if shifted_time < points[0].0 || (!DERIVATIVE && shifted_time == points[0].0) {
             return if DERIVATIVE { 0.0 } else { points[0].1 };
         }
-        let mut time = Self::repeat_pwl_time(points, shifted_time, repeat_from);
+        let mut time = crate::numerics::pwl_repeated_time(
+            shifted_time,
+            points[0].0,
+            points[points.len() - 1].0,
+            repeat_from,
+        );
         if DERIVATIVE
             && time == points[points.len() - 1].0
             && let Some(start) = repeat_from.filter(|start| start.is_finite())
         {
             let start = start.max(points[0].0);
             let period = time - start;
-            if period.is_finite() && period > Value::EPSILON {
+            if period.is_finite() && period > 0.0 {
                 if Self::pwl_time_component::<false>(points, start, 0.0, None)
                     != points[points.len() - 1].1
                 {
@@ -1820,7 +1825,7 @@ impl VoltageSources {
             let (t2, v2) = window[1];
             if time >= t1 && time < t2 {
                 let dt = t2 - t1;
-                if !dt.is_finite() || dt.abs() <= Value::EPSILON {
+                if !dt.is_finite() || dt == 0.0 {
                     return if DERIVATIVE { 0.0 } else { v1 };
                 }
                 return if DERIVATIVE {
@@ -1830,7 +1835,7 @@ impl VoltageSources {
                         (v2 - v1) / dt
                     }
                 } else {
-                    v1 + (v2 - v1) * (time - t1) / dt
+                    v1 + (v2 - v1) * ((time - t1) / dt)
                 };
             }
         }
@@ -1839,40 +1844,6 @@ impl VoltageSources {
         } else {
             points.last().map(|(_, value)| *value).unwrap_or(0.0)
         }
-    }
-
-    fn repeat_pwl_time(
-        points: &[(Value, Value)],
-        time: Value,
-        repeat_from: Option<Value>,
-    ) -> Value {
-        let Some(repeat_from) = repeat_from else {
-            return time;
-        };
-        let Some(&(first, _)) = points.first() else {
-            return time;
-        };
-        let Some(&(last, _)) = points.last() else {
-            return time;
-        };
-        if !time.is_finite() || !repeat_from.is_finite() || time <= last {
-            return time;
-        }
-        let repeat_start = repeat_from.max(first);
-        if repeat_start >= last {
-            return time;
-        }
-        let period = last - repeat_start;
-        if !period.is_finite() || period <= Value::EPSILON {
-            return time;
-        }
-        let elapsed = time - repeat_start;
-        let remainder = elapsed.rem_euclid(period);
-        let boundary_tolerance = Value::EPSILON * elapsed.abs().max(period).max(1.0);
-        if remainder <= boundary_tolerance {
-            return last;
-        }
-        repeat_start + remainder
     }
 }
 

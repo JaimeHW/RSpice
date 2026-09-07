@@ -25,6 +25,27 @@ fn event_deck() -> Netlist {
 }
 
 #[test]
+fn repeating_pwl_events_preserve_distinct_authored_times_at_small_scales() {
+    for scale in [1e-6, 1e-18, 1e-30] {
+        let netlist = Netlist::parse(&format!(
+            "scaled PWL events\nI1 0 out PWL(0 0 {scale:e} 1 {:e} 0) R=0\nR1 out 0 1\n.end\n",
+            2.0 * scale,
+        ))
+        .unwrap();
+        let events = Engine::default()
+            .transient_source_event_times(&netlist, 6.5 * scale, scale / 16.0, &[])
+            .unwrap();
+        for knot in 0..=6 {
+            assert!(
+                contains_time(&events, f64::from(knot) * scale),
+                "scale={scale:e}, knot={knot}: {events:?}"
+            );
+        }
+        assert!(events.windows(2).all(|pair| pair[0] < pair[1]));
+    }
+}
+
+#[test]
 fn selected_source_events_use_the_transient_breakpoint_contract() {
     let engine = Engine::new(SimulationConfig::default());
     let events = engine

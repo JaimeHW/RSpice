@@ -282,6 +282,41 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn pwl_waveform_time_scaling_and_event_enumeration_work_in_wasm() {
+        for scale in [1e-18, 1e-30] {
+            let waveform = rspice_core::device::pwl_file::PwlWaveform::new(vec![
+                (0.0, 0.0),
+                (1.0, 1.0),
+                (2.0, 0.0),
+            ])
+            .unwrap()
+            .with_scaling(scale, 1.0, 0.0, 0.0);
+            assert!((waveform.value_at_repeating(4.5 * scale, Some(0.0)) - 0.5).abs() < 1e-14);
+            let netlist = rspice_core::Netlist::parse(&format!(
+                "WASM PWL events\nI1 0 out PWL(0 0 {scale:e} 1 {:e} 0) R=0\nR1 out 0 1\n.end\n",
+                2.0 * scale,
+            ))
+            .unwrap();
+            let events = rspice_core::Engine::default()
+                .transient_source_event_times_with_abort(
+                    &netlist,
+                    6.5 * scale,
+                    scale / 16.0,
+                    &[],
+                    &rspice_core::abort_signal::NoAbort,
+                )
+                .unwrap();
+            for knot in 0..=6 {
+                assert!(
+                    events
+                        .iter()
+                        .any(|time| (time / scale - f64::from(knot)).abs() < 1e-14)
+                );
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn monte_carlo_host_entropy_is_available_and_replayable_in_wasm() {
         use rspice_core::analysis::{MonteCarloConfig, MonteCarloRunner, Tolerance};
         let run = |config| {
