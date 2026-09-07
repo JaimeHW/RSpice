@@ -24,9 +24,11 @@ use crate::simulation::execution::{
 
 mod dependency_expansion;
 pub(crate) mod occurrence_outputs;
+mod periodic_sources;
 
 use dependency_expansion::expand_manual_dependencies;
 use occurrence_outputs::{effective_plan_capture, projection_occurrence_nets};
+use periodic_sources::validate_prepared_periodic_sources;
 
 pub(super) struct PendingPreparedRun {
     snapshot: PreparedRunSnapshot,
@@ -1737,62 +1739,6 @@ pub(crate) fn design_inspection_input_digest(state: &AppState) -> crate::product
         "rspice.analysis-independent-design-inspection/v2",
         material.as_bytes(),
     )
-}
-
-fn validate_prepared_periodic_sources(
-    tasks: &[PreparedTask],
-    executable_netlist: &str,
-) -> Result<(), PreparationError> {
-    if !tasks
-        .iter()
-        .any(|task| matches!(task.queued_analysis().spec, AnalysisSpec::Pss { .. }))
-    {
-        return Ok(());
-    }
-
-    let parsed = rspice_core::Netlist::parse(executable_netlist).map_err(|error| {
-        PreparationError::new(
-            PreparationStage::Netlist,
-            format!("Could not authenticate periodic sources in the executable netlist: {error}"),
-        )
-    })?;
-    let engine = rspice_core::Engine::new(rspice_core::SimulationConfig::default());
-
-    for task in tasks {
-        let AnalysisSpec::Pss {
-            fundamental_freq,
-            tone_sources,
-            points_per_period,
-            num_harmonics,
-            oscillator_mode,
-            ..
-        } = &task.queued_analysis().spec
-        else {
-            continue;
-        };
-        if *oscillator_mode {
-            continue;
-        }
-        engine
-            .validate_pss_source_contract_with_abort(
-                &parsed,
-                tone_sources,
-                &rspice_core::analysis::PssConfig::new(*fundamental_freq)
-                    .with_points_per_period(*points_per_period)
-                    .with_harmonics((*num_harmonics).max(1)),
-                &rspice_core::abort_signal::NoAbort,
-            )
-            .map_err(|error| {
-                PreparationError::new(
-                    PreparationStage::AnalysisPlan,
-                    format!(
-                        "PSS instance {} does not match the prepared circuit: {error}",
-                        task.instance_id()
-                    ),
-                )
-            })?;
-    }
-    Ok(())
 }
 
 /// Refuse a prepared source whose instantiated devices name models nothing
