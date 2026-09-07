@@ -3,12 +3,12 @@
 //! Data structures for storing and accessing PSS analysis results.
 
 use crate::Value;
-use crate::analysis::fourier::HarmonicComponent;
+use crate::abort_signal::NoAbort;
+use crate::analysis::fourier::{FourierQuadrature, HarmonicComponent};
 use crate::analysis::{
     FLOQUET_UNIT_CIRCLE_BAND, FloquetOrbitKind, FloquetSpectrumEvidence, FloquetStabilityVerdict,
     classify_floquet_stability, select_autonomous_phase_mode,
 };
-use std::f64::consts::PI;
 
 /// Compatibility alias for the shared Floquet stability verdict.
 pub type PssStabilityVerdict = FloquetStabilityVerdict;
@@ -156,6 +156,8 @@ impl PssResult {
     /// Compute harmonics for a specific node
     ///
     /// Returns DC, fundamental, and harmonics up to max_harmonic.
+    /// Invalid waveform evidence, nonrepresentable coefficients, or an
+    /// unallocatable harmonic count yield an empty spectrum.
     pub fn harmonics(&self, node: usize, max_harmonic: usize) -> Vec<HarmonicComponent> {
         match self.waveform(node) {
             Some(wf) => wf.compute_harmonics(&self.time, self.frequency, max_harmonic),
@@ -215,6 +217,142 @@ mod tests {
     use super::*;
     use crate::analysis::FloquetSpectrumCertificate;
     use num_complex::Complex64;
+
+    #[test]
+    fn periodic_interpolation_preserves_phase_across_time_scales() {
+        let waveform = PeriodicWaveform::from_values(vec![0.0, 1.0, 0.0, -1.0, 0.0]);
+        for period in [1e-300, 1e-18, 1e-9, 1.0, 1e300] {
+            let time = [0.0, period * 0.25, period * 0.5, period * 0.75, period];
+            for (phase, expected) in [
+                (0.125, 0.5),
+                (0.375, 0.5),
+                (0.625, -0.5),
+                (0.875, -0.5),
+                (-0.125, -0.5),
+                (1.125, 0.5),
+            ] {
+                let actual = waveform.interpolate(&time, phase * period, period);
+                assert!(
+                    (actual - expected).abs() < 2e-15,
+                    "{period:e}, {phase}: {actual}"
+                );
+            }
+            for (&t, &value) in time.iter().zip(&waveform.values) {
+                assert_eq!(waveform.interpolate(&time, t, period), value);
+            }
+        }
+    }
+
+    #[test]
+    fn periodic_interpolation_keeps_representable_phases_at_the_seam() {
+        let before_end = 1.0_f64.next_down();
+        let time = [0.0, 1e-20, 0.5, before_end, 1.0];
+        let waveform = PeriodicWaveform::from_values(vec![0.0, 1.0, 0.0, 1.0, 0.0]);
+        assert_eq!(waveform.interpolate(&time, 1e-20, 1.0), 1.0);
+        assert_eq!(waveform.interpolate(&time, before_end, 1.0), 1.0);
+        assert_eq!(waveform.interpolate(&time, before_end - 1.0, 1.0), 1.0);
+        assert_eq!(waveform.interpolate(&time, 1.0, 1.0), 0.0);
+    }
+
+    #[test]
+    fn periodic_interpolation_avoids_overflow_between_finite_samples() {
+        let waveform = PeriodicWaveform::from_values(vec![Value::MAX, -Value::MAX, Value::MAX]);
+        let time = [0.0, 0.5, 1.0];
+        assert_eq!(waveform.interpolate(&time, 0.25, 1.0), 0.0);
+        assert_eq!(waveform.interpolate(&time, 0.5, 1.0), -Value::MAX);
+        assert_eq!(waveform.interpolate(&time, 0.75, 1.0), 0.0);
+        let quarter = waveform.interpolate(&time, 0.125, 1.0);
+        assert!((quarter / Value::MAX - 0.5).abs() <= Value::EPSILON);
+    }
+
+    #[test]
+    fn periodic_interpolation_reports_invalid_inputs_without_panicking() {
+        let waveform = PeriodicWaveform::from_values(vec![0.0, 1.0]);
+        for (time, query, period) in [
+            (vec![], 0.75, 1.0),
+            (vec![0.0, 0.5, 1.0], 0.75, 1.0),
+            (vec![0.0, 1.0], Value::NAN, 1.0),
+            (vec![0.0, 1.0], Value::INFINITY, 1.0),
+            (vec![0.0, 1.0], 0.5, 0.0),
+            (vec![0.0, 1.0], 0.5, -1.0),
+            (vec![0.0, 1.0], 0.5, Value::INFINITY),
+        ] {
+            assert!(waveform.interpolate(&time, query, period).is_nan());
+        }
+    }
+
+    #[test]
+    fn periodic_dc_normalizes_before_multiplying_physical_scales() {
+        for period in [1e-300, 1.0, 1e300] {
+            for amplitude in [1e-300, 1.0, Value::MAX] {
+                let waveform = PeriodicWaveform::from_values(vec![amplitude; 3]);
+                let dc = waveform.dc(&[0.0, period * 0.5, period], period);
+                assert!(
+                    (dc / amplitude - 1.0).abs() < 2e-15,
+                    "{period:e}, {amplitude:e}: {dc}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn periodic_dc_keeps_finite_area_when_a_fractional_interval_underflows() {
+        let waveform = PeriodicWaveform::from_values(vec![0.0, 1e300, 0.0, 0.0]);
+        let dc = waveform.dc(&[0.0, 1e-300, 2e-300, 1e300], 1e300);
+        assert!((dc / 1e-300 - 1.0).abs() < 2e-15, "{dc:e}");
+    }
+
+    #[test]
+    fn periodic_harmonics_preserve_small_and_large_finite_coefficients() {
+        for frequency in [1e-300, 1.0, 1e300, 1e308] {
+            let period = 1.0 / frequency;
+            let time: Vec<_> = (0..=128)
+                .map(|index| (index as Value / 128.0) * period)
+                .collect();
+            for amplitude in [1e-300, 1.0, 1e300] {
+                let waveform = PeriodicWaveform::from_values(
+                    (0..=128)
+                        .map(|index| {
+                            amplitude
+                                * (0.25 + (std::f64::consts::TAU * index as Value / 128.0).sin())
+                        })
+                        .collect(),
+                );
+                let harmonics = waveform.compute_harmonics(&time, frequency, 1);
+                assert_eq!(harmonics.len(), 2, "{frequency:e}, {amplitude:e}");
+                assert!(
+                    (harmonics[0].magnitude / amplitude - 0.25).abs() < 2e-14,
+                    "DC: {frequency:e}, {amplitude:e}: {:?}",
+                    harmonics[0]
+                );
+                assert!(
+                    (harmonics[1].magnitude / amplitude - 1.0).abs() < 2e-14,
+                    "AC: {frequency:e}, {amplitude:e}: {:?}",
+                    harmonics[1]
+                );
+                assert!(
+                    (harmonics[1].phase + 90.0).abs() < 2e-12,
+                    "phase: {frequency:e}, {amplitude:e}: {:?}",
+                    harmonics[1]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn periodic_spectrum_rejects_invalid_evidence_and_unrepresentable_capacity() {
+        let waveform = PeriodicWaveform::from_values(vec![0.0, 1.0, 0.0]);
+        let time = [0.0, 0.5, 1.0];
+        assert!(
+            waveform
+                .compute_harmonics(&time, 1.0, usize::MAX)
+                .is_empty()
+        );
+        assert!(waveform.compute_harmonics(&time, 0.0, 1).is_empty());
+        assert!(waveform.compute_harmonics(&[0.0, 1.0], 1.0, 1).is_empty());
+        assert!(waveform.dc(&[0.0, 1.0], 1.0).is_nan());
+        assert!(waveform.dc(&time, 0.0).is_nan());
+    }
 
     fn retain_qualified(
         result: &mut PssResult,
@@ -392,9 +530,10 @@ impl PeriodicWaveform {
         max - min
     }
 
-    /// Get DC (average) value
+    /// Get DC (average) value. Empty data yields zero and a single sample
+    /// yields its value. Invalid time/value evidence yields NaN.
     pub fn dc(&self, time: &[Value], period: Value) -> Value {
-        if self.values.len() < 2 || time.len() != self.values.len() {
+        if self.values.len() < 2 && time.len() == self.values.len() {
             return if self.values.is_empty() {
                 0.0
             } else {
@@ -402,26 +541,31 @@ impl PeriodicWaveform {
             };
         }
 
-        // Trapezoidal integration normalized by period
-        let mut integral = 0.0;
-        for i in 1..self.values.len() {
-            let dt = time[i] - time[i - 1];
-            integral += 0.5 * (self.values[i] + self.values[i - 1]) * dt;
-        }
-        integral / period
+        FourierQuadrature::new(time, &self.values, period, &NoAbort)
+            .and_then(|quadrature| quadrature.component(0.0, 0, &NoAbort))
+            .map_or(Value::NAN, |(dc, _)| dc)
     }
 
     /// Interpolate value at arbitrary time within period
     ///
     /// Handles wraparound: time values outside [0, period] are mapped
     /// to the equivalent point within the period.
+    /// The time grid must be finite and strictly increasing. Empty data
+    /// yields zero; mismatched lengths or invalid query/period values yield NaN.
     pub fn interpolate(&self, time_grid: &[Value], t: Value, period: Value) -> Value {
-        if self.values.is_empty() || time_grid.is_empty() {
+        if self.values.len() != time_grid.len() {
+            return Value::NAN;
+        }
+        if self.values.is_empty() {
             return 0.0;
         }
+        if !t.is_finite() || !period.is_finite() || period <= 0.0 {
+            return Value::NAN;
+        }
 
-        // Wrap time to [0, period)
-        let t_wrapped = ((t % period) + period) % period;
+        // Adding a period to an already positive remainder can erase an
+        // early phase or round the last instant before the seam to zero.
+        let t_wrapped = t.rem_euclid(period);
 
         // Binary search for bracketing indices
         let idx = time_grid.partition_point(|&x| x < t_wrapped);
@@ -432,6 +576,9 @@ impl PeriodicWaveform {
         if idx >= time_grid.len() {
             return self.values[self.values.len() - 1];
         }
+        if time_grid[idx] == t_wrapped {
+            return self.values[idx];
+        }
 
         // Linear interpolation
         let t0 = time_grid[idx - 1];
@@ -439,79 +586,55 @@ impl PeriodicWaveform {
         let v0 = self.values[idx - 1];
         let v1 = self.values[idx];
 
-        if (t1 - t0).abs() < 1e-15 {
-            return v0;
+        let interval = t1 - t0;
+        if !interval.is_finite() || interval <= 0.0 || !v0.is_finite() || !v1.is_finite() {
+            return Value::NAN;
         }
 
-        let alpha = (t_wrapped - t0) / (t1 - t0);
-        v0 + alpha * (v1 - v0)
+        let alpha = (t_wrapped - t0) / interval;
+        // Opposite finite endpoints can have an infinite difference even
+        // though every interpolated value lies within their finite range.
+        if v0.is_sign_positive() != v1.is_sign_positive() {
+            (1.0 - alpha) * v0 + alpha * v1
+        } else {
+            v0 + alpha * (v1 - v0)
+        }
     }
 
-    /// Compute harmonic components using DFT
+    /// Compute harmonic components by normalized trapezoidal quadrature.
+    /// Invalid evidence, frequency, or allocation yields an empty spectrum.
     pub(crate) fn compute_harmonics(
         &self,
         time: &[Value],
         fundamental_freq: Value,
         max_harmonic: usize,
     ) -> Vec<HarmonicComponent> {
-        if self.values.len() < 2 || time.len() != self.values.len() {
+        if !fundamental_freq.is_finite() || fundamental_freq <= 0.0 {
             return Vec::new();
         }
-
-        let period = if fundamental_freq > 0.0 {
-            1.0 / fundamental_freq
-        } else {
-            time.last().copied().unwrap_or(1.0) - time.first().copied().unwrap_or(0.0)
+        let Ok(quadrature) =
+            FourierQuadrature::new(time, &self.values, 1.0 / fundamental_freq, &NoAbort)
+        else {
+            return Vec::new();
         };
-
-        let t_start = time.first().copied().unwrap_or(0.0);
-
-        let mut harmonics = Vec::with_capacity(max_harmonic + 1);
-
+        let Some(count) = max_harmonic.checked_add(1) else {
+            return Vec::new();
+        };
+        let mut harmonics = Vec::new();
+        if harmonics.try_reserve_exact(count).is_err() {
+            return harmonics;
+        }
         for n in 0..=max_harmonic {
             let freq = n as f64 * fundamental_freq;
-
-            if n == 0 {
-                // DC component
-                let dc = self.dc(time, period);
-                harmonics.push(HarmonicComponent {
-                    harmonic_number: 0,
-                    frequency: 0.0,
-                    magnitude: dc,
-                    phase: 0.0,
-                });
-            } else {
-                // AC components via trapezoidal integration
-                let omega = 2.0 * PI * freq;
-
-                let mut a_n = 0.0;
-                let mut b_n = 0.0;
-
-                for i in 1..time.len() {
-                    let t0 = time[i - 1] - t_start;
-                    let t1 = time[i] - t_start;
-                    let v0 = self.values[i - 1];
-                    let v1 = self.values[i];
-                    let dt = t1 - t0;
-
-                    // Trapezoidal integration for cos and sin integrals
-                    a_n += 0.5 * dt * (v0 * (omega * t0).cos() + v1 * (omega * t1).cos());
-                    b_n += 0.5 * dt * (v0 * (omega * t0).sin() + v1 * (omega * t1).sin());
-                }
-
-                a_n *= 2.0 / period;
-                b_n *= 2.0 / period;
-
-                let magnitude = (a_n * a_n + b_n * b_n).sqrt();
-                let phase = (-b_n).atan2(a_n) * 180.0 / PI;
-
-                harmonics.push(HarmonicComponent {
-                    harmonic_number: n,
-                    frequency: freq,
-                    magnitude,
-                    phase,
-                });
-            }
+            let Ok((magnitude, phase)) = quadrature.component(freq, n, &NoAbort) else {
+                return Vec::new();
+            };
+            harmonics.push(HarmonicComponent {
+                harmonic_number: n,
+                frequency: freq,
+                magnitude,
+                phase,
+            });
         }
 
         harmonics

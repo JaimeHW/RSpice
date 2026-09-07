@@ -19,6 +19,52 @@ fn full_period_fixture() -> (Vec<f64>, Vec<f64>) {
 }
 
 #[test]
+fn fourier_and_pss_share_finite_scale_invariant_quadrature() {
+    for frequency in [1e-300, 1.0, 1e300, 1e308] {
+        let period = 1.0 / frequency;
+        let time = (0..=128)
+            .map(|index| (index as f64 / 128.0) * period)
+            .collect::<Vec<_>>();
+        for amplitude in [1e-300, 1.0, 1e300] {
+            let values = (0..=128)
+                .map(|index| amplitude * (0.25 + (2.0 * PI * index as f64 / 128.0).sin()))
+                .collect::<Vec<_>>();
+            let fourier = analyzer(frequency, 1).analyze(&time, &values).unwrap();
+            let mut pss = rspice_core::analysis::PssResult::new(period, 1, time.len());
+            pss.time = time.clone();
+            pss.waveforms[0] = rspice_core::analysis::PeriodicWaveform::from_values(values);
+            let periodic = pss.harmonics(1, 1);
+            for harmonics in [&fourier.harmonics, &periodic] {
+                assert!((harmonics[0].magnitude / amplitude - 0.25).abs() < 2e-14);
+                assert!((harmonics[1].magnitude / amplitude - 1.0).abs() < 2e-14);
+                assert!((harmonics[1].phase + 90.0).abs() < 2e-12);
+            }
+        }
+    }
+}
+
+#[test]
+fn fourier_dc_retains_small_terms_between_canceling_large_contributions() {
+    let time = (0..=128)
+        .map(|index| index as f64 / 128.0)
+        .collect::<Vec<_>>();
+    for (large, small) in [(1e16, 1.0), (1e300, 1e-300)] {
+        let mut values = vec![small; time.len()];
+        values[0] = 0.0;
+        values[1] = large;
+        values[127] = -large;
+        values[128] = 0.0;
+        let result = analyzer(1.0, 1).analyze(&time, &values).unwrap();
+        // Each of the 125 remaining interior knots has trapezoidal weight 1/128.
+        assert!(
+            (result.dc_component / small - 125.0 / 128.0).abs() < 2e-15,
+            "{}",
+            result.dc_component
+        );
+    }
+}
+
+#[test]
 fn cooperative_abort_stops_fourier_qualification_before_completion() {
     let samples = 8_193usize;
     let time = (0..samples)

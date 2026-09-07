@@ -20,6 +20,7 @@
 
 use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::numerics::compensated_add;
 use std::f64::consts::PI;
 
 //=============================================================================
@@ -255,7 +256,7 @@ impl FourierAnalysis {
                 frequency: highest_frequency,
             });
         }
-        let maximum_interval = 1.0 / (8.0 * highest_frequency);
+        let maximum_interval = 0.125 / highest_frequency;
         let largest_interval = window_time
             .windows(2)
             .map(|pair| pair[1] - pair[0])
@@ -287,6 +288,12 @@ impl FourierAnalysis {
             }
         })?;
 
+        let quadrature = FourierQuadrature::new(
+            &window_time,
+            &window_values,
+            window_time[window_time.len() - 1] - window_time[0],
+            abort,
+        )?;
         for n in 0..=self.config.num_harmonics {
             if abort.is_aborted() {
                 return Err(FourierError::Aborted);
@@ -298,8 +305,7 @@ impl FourierAnalysis {
                     frequency: freq,
                 });
             }
-            let (mag, phase) =
-                self.compute_harmonic(&window_time, &window_values, freq, n, abort)?;
+            let (mag, phase) = quadrature.component(freq, n, abort)?;
 
             harmonics.push(HarmonicComponent {
                 harmonic_number: n,
@@ -359,91 +365,139 @@ impl FourierAnalysis {
         }
         Ok(())
     }
+}
 
-    /// Compute single harmonic component using numerical integration
-    fn compute_harmonic(
+/// One qualified waveform and normalization window shared by transient FOUR
+/// and retained PSS spectra. Scaling precedes integration, so finite results
+/// do not depend on the physical units of time or voltage.
+pub(crate) struct FourierQuadrature<'a> {
+    time: &'a [Value],
+    values: &'a [Value],
+    duration: Value,
+    scale: Value,
+}
+
+impl<'a> FourierQuadrature<'a> {
+    pub(crate) fn new(
+        time: &'a [Value],
+        values: &'a [Value],
+        duration: Value,
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, FourierError> {
+        let scale = validate_waveform(time, values, abort)?;
+        if !duration.is_finite() || duration <= 0.0 {
+            return Err(FourierError::InvalidWindowDuration { duration });
+        }
+        let span = time[time.len() - 1] - time[0];
+        if !span.is_finite() || span <= 0.0 {
+            return Err(FourierError::InvalidTimeSpan {
+                start: time[0],
+                end: time[time.len() - 1],
+            });
+        }
+        Ok(Self {
+            time,
+            values,
+            duration,
+            // Normalized trapezoidal weights already bound the sum of
+            // physical contributions over a complete period. Scale small
+            // signals up to preserve subnormal coefficients, but do not
+            // divide large signals down: that could erase a tiny DC term
+            // between exactly canceling large samples.
+            scale: scale.min(1.0),
+        })
+    }
+
+    /// Signed DC or physical peak magnitude and cosine-referenced phase.
+    pub(crate) fn component(
         &self,
-        time: &[Value],
-        values: &[Value],
-        freq: Value,
+        frequency: Value,
         harmonic: usize,
         abort: &dyn AbortSignal,
     ) -> Result<(Value, Value), FourierError> {
-        let t_start = time[0];
-        let t_end = time[time.len() - 1];
-        let duration = t_end - t_start;
-
-        if !duration.is_finite() || duration <= 0.0 {
-            return Err(FourierError::InvalidTimeSpan {
-                start: t_start,
-                end: t_end,
-            });
+        if abort.is_aborted() {
+            return Err(FourierError::Aborted);
         }
-
-        // For DC (n=0), just compute average
-        if harmonic == 0 {
-            let mut integral = 0.0;
-            for index in 1..time.len() {
-                if index.is_multiple_of(256) && abort.is_aborted() {
-                    return Err(FourierError::Aborted);
-                }
-                let dt = time[index] - time[index - 1];
-                let normalized_dt = dt / duration;
-                let average = 0.5 * values[index - 1] + 0.5 * values[index];
-                integral += average * normalized_dt;
-            }
-            let avg = integral;
-            ensure_finite_coefficient(avg, harmonic, "DC component")?;
-            return Ok((avg, 0.0));
-        }
-
-        // Compute a_n and b_n using trapezoidal integration
-        // a_n = (2/T) * integral(f(t) * cos(2*pi*n*f*t) dt)
-        // b_n = (2/T) * integral(f(t) * sin(2*pi*n*f*t) dt)
-
-        let omega = 2.0 * PI * freq;
-        if !omega.is_finite() {
+        let cycles = frequency * self.duration;
+        if !frequency.is_finite() || !cycles.is_finite() {
             return Err(FourierError::NonFiniteHarmonicFrequency {
                 harmonic,
-                frequency: freq,
+                frequency,
             });
+        }
+        if self.scale == 0.0 {
+            return Ok((0.0, 0.0));
         }
 
         let mut cosine_integral = 0.0;
+        let mut cosine_correction = 0.0;
         let mut sine_integral = 0.0;
-        for index in 1..time.len() {
+        let mut sine_correction = 0.0;
+        let phase = |time: Value| {
+            // Form dimensionless cycles before radians. `TAU * frequency`
+            // can overflow even when the frequency and phase are finite.
+            let turns = ((time - self.time[0]) / self.duration) * cycles;
+            std::f64::consts::TAU * turns.fract()
+        };
+        for index in 0..self.time.len() {
             if index.is_multiple_of(256) && abort.is_aborted() {
                 return Err(FourierError::Aborted);
             }
-            let dt = time[index] - time[index - 1];
-            let normalized_dt = dt / duration;
-            let phase0 = omega * (time[index - 1] - t_start);
-            let phase1 = omega * (time[index] - t_start);
-            if !phase0.is_finite() || !phase1.is_finite() {
-                return Err(FourierError::NonFiniteCoefficient {
-                    harmonic,
-                    quantity: "phase argument",
-                });
+            let before = index.saturating_sub(1);
+            let after = (index + 1).min(self.time.len() - 1);
+            let span = self.time[after] - self.time[before];
+            let value = self.values[index] / self.scale;
+            let sample = self.weighted_sample(0.5 * value, span);
+            let (cosine, sine) = if harmonic == 0 {
+                (1.0, 0.0)
+            } else {
+                let (sine, cosine) = phase(self.time[index]).sin_cos();
+                (cosine, sine)
+            };
+            // Accumulate each knot's contribution separately. Averaging a
+            // tiny sample with its large neighbor would discard it before
+            // compensation ever sees the term.
+            compensated_add(
+                &mut cosine_integral,
+                &mut cosine_correction,
+                sample * cosine,
+            );
+            if harmonic != 0 {
+                compensated_add(&mut sine_integral, &mut sine_correction, sample * sine);
             }
-            let cosine_average =
-                0.5 * values[index - 1] * phase0.cos() + 0.5 * values[index] * phase1.cos();
-            let sine_average =
-                0.5 * values[index - 1] * phase0.sin() + 0.5 * values[index] * phase1.sin();
-            cosine_integral += cosine_average * normalized_dt;
-            sine_integral += sine_average * normalized_dt;
         }
-
-        let a_n = 2.0 * cosine_integral;
-        let b_n = 2.0 * sine_integral;
-        ensure_finite_coefficient(a_n, harmonic, "cosine coefficient")?;
-        ensure_finite_coefficient(b_n, harmonic, "sine coefficient")?;
-
-        let magnitude = a_n.hypot(b_n);
-        let phase = (-b_n).atan2(a_n) * 180.0 / PI; // Convert to degrees
+        if harmonic == 0 {
+            let dc = (cosine_integral + cosine_correction) * self.scale;
+            ensure_finite_coefficient(dc, harmonic, "DC component")?;
+            return Ok((dc, 0.0));
+        }
+        let a_n = 2.0 * (cosine_integral + cosine_correction);
+        let b_n = 2.0 * (sine_integral + sine_correction);
+        let magnitude = a_n.hypot(b_n) * self.scale;
+        let phase = (-b_n).atan2(a_n) * 180.0 / PI;
         ensure_finite_coefficient(magnitude, harmonic, "magnitude")?;
         ensure_finite_coefficient(phase, harmonic, "phase")?;
 
         Ok((magnitude, phase))
+    }
+
+    fn weighted_sample(&self, value: Value, span: Value) -> Value {
+        let weight = span / self.duration;
+        if weight.is_normal() {
+            return value * weight;
+        }
+        // A subnormal (or zero) duration ratio may lose significant bits
+        // even when the final physical contribution is normal. Reorder the
+        // same product/quotient using a normal intermediate when available.
+        let area = value * span;
+        if area.is_normal() {
+            return area / self.duration;
+        }
+        let normalized = value / self.duration;
+        if normalized.is_normal() {
+            return normalized * span;
+        }
+        value * weight
     }
 }
 
@@ -451,7 +505,7 @@ fn validate_waveform(
     time: &[Value],
     values: &[Value],
     abort: &dyn AbortSignal,
-) -> Result<(), FourierError> {
+) -> Result<Value, FourierError> {
     if time.len() != values.len() {
         return Err(FourierError::LengthMismatch {
             time_points: time.len(),
@@ -466,6 +520,7 @@ fn validate_waveform(
             samples: time.len(),
         });
     }
+    let mut scale: Value = 0.0;
     for (index, (&sample_time, &sample_value)) in time.iter().zip(values).enumerate() {
         if index.is_multiple_of(256) && abort.is_aborted() {
             return Err(FourierError::Aborted);
@@ -482,6 +537,7 @@ fn validate_waveform(
                 value: sample_value,
             });
         }
+        scale = scale.max(sample_value.abs());
         if index > 0 && sample_time <= time[index - 1] {
             return Err(FourierError::NonIncreasingTime {
                 index,
@@ -490,7 +546,7 @@ fn validate_waveform(
             });
         }
     }
-    Ok(())
+    Ok(scale)
 }
 
 fn ensure_finite_coefficient(

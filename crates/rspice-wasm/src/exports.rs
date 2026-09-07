@@ -209,6 +209,33 @@ mod wasm_tests {
     use crate::js_interop::{js_array_property, js_property};
 
     #[wasm_bindgen_test]
+    fn periodic_waveform_precision_survives_wasm_time_and_amplitude_scales() {
+        for frequency in [1e-300, 1e300, 1e308] {
+            let period = 1.0 / frequency;
+            for amplitude in [1e-300, 1e300] {
+                let mut result = rspice_core::analysis::PssResult::new(period, 1, 129);
+                result.time = (0..=128)
+                    .map(|index| (index as f64 / 128.0) * period)
+                    .collect();
+                result.waveforms[0].values = (0..=128)
+                    .map(|index| {
+                        amplitude * (0.25 + (std::f64::consts::TAU * index as f64 / 128.0).sin())
+                    })
+                    .collect();
+                let expected = 0.25 + 0.5 * (std::f64::consts::TAU / 128.0).sin();
+                assert!(
+                    (result.voltage_at(1, period / 256.0) / amplitude - expected).abs() < 2e-14
+                );
+                let harmonics = result.harmonics(1, 1);
+                assert_eq!(harmonics.len(), 2);
+                assert!((harmonics[0].magnitude / amplitude - 0.25).abs() < 2e-14);
+                assert!((harmonics[1].magnitude / amplitude - 1.0).abs() < 2e-14);
+                assert!((harmonics[1].phase + 90.0).abs() < 2e-12);
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn small_signal_shooting_closes_the_period_in_wasm() {
         let netlist = rspice_core::Netlist::parse(
             "WASM small-signal shooting\nV1 in 0 SIN(0 1u 1meg)\nR1 in out 1k\nC1 out 0 159.154943091895p\n.end\n",
