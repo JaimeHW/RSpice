@@ -184,6 +184,52 @@ fn resolved_high_harmonic_rc_orbits_converge_toward_the_analytic_waveform() {
 }
 
 #[test]
+fn prescribed_pwl_current_preserves_its_physical_voltage_under_time_scaling() {
+    for period in [1e-6, 1e-18, 1e-30] {
+        let netlist = Netlist::parse(&format!(
+            "scaled PWL winding current\nI1 0 a PWL(0 0 {:e} 1m {period:e} 0) R=0\nL1 a out {:e}\nR1 out 0 1k\n.end\n",
+            period / 2.0, 1000.0 * period,
+        )).unwrap();
+        let result = Engine::default()
+            .run_pss(
+                &netlist,
+                PssConfig::new(1.0 / period)
+                    .with_tstab_periods(0)
+                    .with_points_per_period(128),
+            )
+            .unwrap_or_else(|error| panic!("period={period:e}: {error}"));
+        let result = &result.result;
+        let node = |name: &str| {
+            result
+                .node_names
+                .iter()
+                .position(|n| n.eq_ignore_ascii_case(name))
+                .unwrap()
+        };
+        for (index, &time) in result.time.iter().enumerate() {
+            let phase = if index == 128 { 0.0 } else { time / period };
+            let current_voltage = if phase < 0.5 {
+                2.0 * phase
+            } else {
+                2.0 * (1.0 - phase)
+            };
+            let winding_voltage = if phase < 0.5 { 2.0 } else { -2.0 };
+            let output = result.waveforms[node("out")].values[index];
+            let input = result.waveforms[node("a")].values[index];
+            assert!(
+                (output - current_voltage).abs() < 1e-12,
+                "period={period:e}, phase={phase}: OUT={output}"
+            );
+            assert!(
+                (input - output - winding_voltage).abs() < 1e-12,
+                "period={period:e}, phase={phase}: winding={}",
+                input - output
+            );
+        }
+    }
+}
+
+#[test]
 fn every_pss_entry_point_rejects_nonperiodic_forcing_even_when_endpoints_alias() {
     use rspice_core::engine::PssDcOperatingPointSeed;
     for source in [

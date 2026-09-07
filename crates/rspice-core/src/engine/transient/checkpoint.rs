@@ -1154,7 +1154,10 @@ pub(crate) fn restart_checkpoint_identity(netlist: &Netlist) -> Option<String> {
 
 pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> String {
     let mut hasher = blake3::Hasher::new();
-    hasher.update(b"rspice-transient-resolved-config-v4\0");
+    // v5 invalidates histories captured under the old PWL time/scale zero
+    // thresholds and widened repeat seams. The circuit text can be identical
+    // while those stored states represent a different physical excitation.
+    hasher.update(b"rspice-transient-resolved-config-v5\0");
     hash_field(&mut hasher, "temperature", config.temperature.to_bits());
     hash_field(&mut hasher, "ramptime", config.ramptime.to_bits());
     hash_field(&mut hasher, "digital_delay_type", config.digital_delay_type);

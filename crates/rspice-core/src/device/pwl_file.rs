@@ -159,14 +159,14 @@ impl PwlWaveform {
     ) -> Value {
         let mut mapped = self.repeated_time(time, repeat_from);
         if self.time_scale.is_finite()
-            && self.time_scale > Value::EPSILON
+            && self.time_scale > 0.0
             && let Some(start) = repeat_from.filter(|start| start.is_finite())
         {
             let last = self.times[self.times.len() - 1];
             let start = start.max(self.times[0]);
             let period = last - start;
             if period.is_finite()
-                && period > Value::EPSILON
+                && period > 0.0
                 && (mapped - self.time_offset) / self.time_scale == last
             {
                 let next = self.time_offset + start * self.time_scale;
@@ -180,39 +180,21 @@ impl PwlWaveform {
     }
 
     fn repeated_time(&self, time: Value, repeat_from: Option<Value>) -> Value {
-        let Some(repeat_from) = repeat_from else {
-            return time;
-        };
-        if !repeat_from.is_finite()
-            || !self.time_scale.is_finite()
-            || self.time_scale.abs() <= Value::EPSILON
-        {
+        if repeat_from.is_none() || !self.time_scale.is_finite() || self.time_scale == 0.0 {
             return time;
         }
-        let Some(&last) = self.times.last() else {
-            return time;
-        };
         let t = (time - self.time_offset) / self.time_scale;
-        if !t.is_finite() || t <= last {
-            return time;
+        let repeated = crate::numerics::pwl_repeated_time(
+            t,
+            self.times[0],
+            self.times[self.times.len() - 1],
+            repeat_from,
+        );
+        if repeated == t {
+            time
+        } else {
+            self.time_offset + repeated * self.time_scale
         }
-        let first = self.times[0];
-        let repeat_start = repeat_from.max(first);
-        if repeat_start >= last {
-            return time;
-        }
-        let period = last - repeat_start;
-        if !period.is_finite() || period <= Value::EPSILON {
-            return time;
-        }
-        let elapsed = t - repeat_start;
-        let remainder = elapsed.rem_euclid(period);
-        let boundary_tolerance = Value::EPSILON * elapsed.abs().max(period).max(1.0);
-        if remainder <= boundary_tolerance {
-            return self.time_offset + last * self.time_scale;
-        }
-        let repeated = repeat_start + remainder;
-        self.time_offset + repeated * self.time_scale
     }
 
     fn time_component<const DERIVATIVE: bool>(&self, time: Value) -> Value {
@@ -229,7 +211,7 @@ impl PwlWaveform {
                 scaled_start
             };
         }
-        if !self.time_scale.is_finite() || self.time_scale.abs() <= Value::EPSILON {
+        if !self.time_scale.is_finite() || self.time_scale == 0.0 {
             return if DERIVATIVE { 0.0 } else { scaled_start };
         }
 
@@ -266,7 +248,7 @@ impl PwlWaveform {
                 return 0.0;
             }
             let dt = self.times[upper] - self.times[upper - 1];
-            return if !dt.is_finite() || dt.abs() <= Value::EPSILON {
+            return if !dt.is_finite() || dt == 0.0 {
                 0.0
             } else {
                 ((self.values[upper] - self.values[upper - 1]) / dt) * self.value_scale
@@ -286,7 +268,7 @@ impl PwlWaveform {
                 let v1 = self.values[idx];
 
                 let dt = t1 - t0;
-                if !dt.is_finite() || dt.abs() <= Value::EPSILON {
+                if !dt.is_finite() || dt == 0.0 {
                     return v0 * self.value_scale + self.value_offset;
                 }
                 let frac = (t - t0) / dt;
@@ -323,9 +305,9 @@ impl PwlWaveform {
         self.times.last().copied().unwrap_or(0.0)
     }
 
-    /// The interpolation's constant fallback for a sub-epsilon interval can
-    /// create a jump at its next knot. Such a waveform cannot prescribe a
-    /// regular winding current even if its scaled knot spacing looks large.
+    /// A regular prescribed winding current needs finite physical slopes.
+    /// Small but nonzero time intervals are valid; machine epsilon is a
+    /// relative precision, not a duration below which a ramp becomes a hold.
     pub(crate) fn has_finite_segment_slopes(&self) -> bool {
         self.times
             .windows(2)
@@ -334,7 +316,7 @@ impl PwlWaveform {
                 let dt = times[1] - times[0];
                 values[0] == values[1]
                     || self.value_scale == 0.0
-                    || (dt > Value::EPSILON
+                    || (dt > 0.0
                         && (((values[1] - values[0]) / dt) * self.value_scale / self.time_scale)
                             .is_finite())
             })
@@ -807,6 +789,67 @@ pub fn load_pwl_file_with_limits<P: AsRef<Path>>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pwl_time_scaling_preserves_ramps_and_outgoing_slopes() {
+        for scale in [1e-30, 1e-18, 1e-12, 1.0, 1e12, 1e30] {
+            let raw = PwlWaveform::new(vec![(0.0, 0.0), (scale, 1.0), (2.0 * scale, 0.0)]).unwrap();
+            let scaled = PwlWaveform::new(vec![(0.0, 0.0), (1.0, 1.0), (2.0, 0.0)])
+                .unwrap()
+                .with_scaling(scale, 1.0, 0.0, 0.0);
+            for waveform in [&raw, &scaled] {
+                assert!(waveform.has_finite_segment_slopes(), "scale={scale:e}");
+                for phase in [0.25_f64, 0.75, 1.25, 1.75, 4.25, 4.75, 5.25, 5.75] {
+                    let local = phase.rem_euclid(2.0);
+                    let expected = if local < 1.0 { local } else { 2.0 - local };
+                    let slope = if local < 1.0 { 1.0 } else { -1.0 };
+                    let time = phase * scale;
+                    assert!(
+                        (waveform.value_at_repeating(time, Some(0.0)) - expected).abs() < 1e-14,
+                        "scale={scale:e}, phase={phase}"
+                    );
+                    assert!(
+                        (waveform.right_derivative_at_repeating(time, Some(0.0)) * scale - slope)
+                            .abs()
+                            < 1e-14,
+                        "slope at scale={scale:e}, phase={phase}"
+                    );
+                }
+            }
+            let reversed = PwlWaveform::new(vec![(0.0, 0.0), (1.0, 1.0)])
+                .unwrap()
+                .with_scaling(-scale, 1.0, 0.0, 0.0);
+            assert!((reversed.value_at(-0.5 * scale) - 0.5).abs() < 1e-14);
+            assert!(
+                (reversed.right_derivative_at_repeating(-0.5 * scale, None) * scale + 1.0).abs()
+                    < 1e-14
+            );
+        }
+    }
+
+    #[test]
+    fn pwl_repeat_boundary_does_not_hold_the_previous_endpoint_after_the_seam() {
+        for scale in [1e-30, 1e-18, 1e-12, 1.0, 1e12, 1e30] {
+            let waveform = PwlWaveform::new(vec![(0.0, 1.0), (scale, 2.0)]).unwrap();
+            let seam = 2.0 * scale;
+            assert_eq!(waveform.value_at_repeating(seam, Some(0.0)), 2.0);
+            assert!(
+                waveform
+                    .right_derivative_at_repeating(seam, Some(0.0))
+                    .is_nan()
+            );
+            let after = waveform.value_at_repeating(seam.next_up(), Some(0.0));
+            assert!(
+                (after - 1.0).abs() < 1e-14,
+                "scale={scale:e}, after={after}"
+            );
+            assert!(
+                (waveform.right_derivative_at_repeating(seam.next_up(), Some(0.0)) * scale - 1.0)
+                    .abs()
+                    < 1e-14
+            );
+        }
+    }
 
     #[test]
     fn outgoing_pwl_slopes_preserve_scaling_orientation_and_repeat_seams() {

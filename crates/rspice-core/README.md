@@ -276,6 +276,14 @@ Checkpoint format 35 retains the step and stop defaults that determine
 independent-source waveforms. Extending a run or changing its step ceiling
 preserves those source parameters. Older checkpoints remain readable; resume
 requires fully specified source timing when the original defaults are absent.
+Resume also requires the current resolved simulation identity (v5); states
+captured under the previous PWL evaluation semantics must be regenerated.
+
+PWL interpolation and repeat timing preserve finite nonzero knot intervals
+and positive `TSCALE` values without an absolute machine-epsilon cutoff.
+An exact repeat boundary retains the authored endpoint; the next representable
+instant evaluates the next cycle. The source-event enumeration API preserves
+distinct authored times instead of applying an integrator landing tolerance.
 
 Integration order is deliberately bounded to 1 and 2. Xyce's documented
 `TIMEINT` contract defines its variable-order trapezoidal and Gear methods over
