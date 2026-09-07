@@ -82,39 +82,6 @@ fn fixture_deviation(model: &str) -> Option<&'static FixtureDeviation> {
         .find(|deviation| deviation.model == model)
 }
 
-/// Models whose default card is known to produce non-finite values at exact
-/// equilibrium.
-///
-/// A matching `NaN` is not ordinary numerical agreement and is never accepted
-/// by [`relative`]. These entries make the exception explicit and fail closed:
-/// finite/non-finite changes still fail, and an entry whose fixture no longer
-/// contains a matching non-finite value must be removed.
-struct NonFiniteFixtureDeviation {
-    model: &'static str,
-    why: &'static str,
-}
-
-const NON_FINITE_FIXTURE_DEVIATIONS: &[NonFiniteFixtureDeviation] = &[
-    NonFiniteFixtureDeviation {
-        model: "asmesd",
-        why: "the independently checked default-card equilibrium stamp is non-finite",
-    },
-    NonFiniteFixtureDeviation {
-        model: "asmesd_dio",
-        why: "the independently checked default-card equilibrium stamp is non-finite",
-    },
-    NonFiniteFixtureDeviation {
-        model: "bsimimg",
-        why: "the independently checked default-card equilibrium stamp is non-finite",
-    },
-];
-
-fn non_finite_fixture_deviation(model: &str) -> Option<&'static NonFiniteFixtureDeviation> {
-    NON_FINITE_FIXTURE_DEVIATIONS
-        .iter()
-        .find(|deviation| deviation.model == model)
-}
-
 /// A second card captured for a model whose default card leaves part of it
 /// unwritten.
 ///
@@ -583,15 +550,14 @@ struct Deviation {
     capacitance: Worst,
     noise: Worst,
     structural: Vec<String>,
-    matching_known_non_finite: usize,
 }
 
 fn relative(left: f64, right: f64) -> f64 {
-    if left == right {
-        return 0.0;
-    }
     if !left.is_finite() || !right.is_finite() {
         return f64::INFINITY;
+    }
+    if left == right {
+        return 0.0;
     }
     let scale = left.abs().max(right.abs());
     if scale == 0.0 {
@@ -599,11 +565,6 @@ fn relative(left: f64, right: f64) -> f64 {
     } else {
         (left - right).abs() / scale
     }
-}
-
-fn matching_non_finite(left: f64, right: f64) -> bool {
-    (left.is_nan() && right.is_nan())
-        || (left.is_infinite() && right.is_infinite() && left == right)
 }
 
 /// Below this, an entry carries no information and comparing it measures
@@ -688,14 +649,15 @@ fn record_scale(expected: &[f64], actual: &[f64]) -> f64 {
 const FLOOR_SLACK: f64 = 1.0 + 1.0e-9;
 
 fn negligible(left: f64, right: f64, scale: f64, floor: f64) -> bool {
-    left.abs().max(right.abs()) <= (scale * SIGNIFICANCE).max(floor) * FLOOR_SLACK
+    left.is_finite()
+        && right.is_finite()
+        && left.abs().max(right.abs()) <= (scale * SIGNIFICANCE).max(floor) * FLOOR_SLACK
 }
 
 fn compare_point(
     label: &str,
     expected: &GoldenPoint,
     actual: &GoldenPoint,
-    allow_matching_non_finite: bool,
     deviation: &mut Deviation,
 ) {
     if expected.unknowns.len() != actual.unknowns.len() {
@@ -744,10 +706,6 @@ fn compare_point(
         .zip(actual.record.rhs.iter())
         .enumerate()
     {
-        if allow_matching_non_finite && matching_non_finite(*want, *got) {
-            deviation.matching_known_non_finite += 1;
-            continue;
-        }
         // A value that used to be finite and now is not never shows up as a
         // large relative error, so it is checked separately rather than being
         // folded into the maximum.
@@ -770,10 +728,6 @@ fn compare_point(
         .zip(actual.record.jacobian.iter())
         .enumerate()
     {
-        if allow_matching_non_finite && matching_non_finite(*want, *got) {
-            deviation.matching_known_non_finite += 1;
-            continue;
-        }
         if negligible(*want, *got, jacobian_scale, CONDUCTANCE_FLOOR) {
             continue;
         }
@@ -795,10 +749,6 @@ fn compare_point(
         .zip(actual.record.capacitance.iter())
         .enumerate()
     {
-        if allow_matching_non_finite && matching_non_finite(*want, *got) {
-            deviation.matching_known_non_finite += 1;
-            continue;
-        }
         if negligible(*want, *got, capacitance_scale, CHARGE_FLOOR) {
             continue;
         }
@@ -841,6 +791,18 @@ fn compare_point(
         deviation
             .noise
             .observe(label, "noise psd", index, want.psd, got.psd);
+        match (want.exponent, got.exponent) {
+            (Some(want), Some(got)) => {
+                deviation
+                    .noise
+                    .observe(label, "noise exponent", index, want, got);
+            }
+            (None, None) => {}
+            _ => deviation.structural.push(format!(
+                "{label}: noise '{0}' exponent appeared or vanished",
+                want.mechanism
+            )),
+        }
     }
 }
 
@@ -897,7 +859,6 @@ fn run_verify(args: &VerifyArgs) -> Result<ExitCode, GoldenError> {
         }
 
         let mut deviation = Deviation::default();
-        let known_non_finite = non_finite_fixture_deviation(model_name);
         if expected.cases.len() != actual.cases.len() {
             deviation.structural.push(format!(
                 "case count {} -> {}",
@@ -931,7 +892,6 @@ fn run_verify(args: &VerifyArgs) -> Result<ExitCode, GoldenError> {
                     &format!("case {case_index} point {point_index}"),
                     want,
                     got,
-                    known_non_finite.is_some(),
                     &mut deviation,
                 );
             }
@@ -964,14 +924,6 @@ fn run_verify(args: &VerifyArgs) -> Result<ExitCode, GoldenError> {
                 .map(|finding| format!("replay: {finding}")),
         );
         model_failures.extend(deviation.structural.iter().cloned());
-        if let Some(known) = known_non_finite
-            && deviation.matching_known_non_finite == 0
-        {
-            model_failures.push(format!(
-                "listed as a non-finite fixture deviation but no matching non-finite value remains; drop the entry ({})",
-                known.why
-            ));
-        }
         // The other direction: a fixture that stops recording its defect means
         // it has been re-captured, or the backend has changed under it, and
         // either way the entry is now describing nothing.
@@ -1224,10 +1176,8 @@ mod tests {
     }
 
     #[test]
-    fn identical_infinities_do_not_report_a_deviation() {
-        // `inf - inf` is NaN, which would compare false against every
-        // tolerance and silently pass. Equality short-circuits it instead.
-        assert_eq!(relative(f64::INFINITY, f64::INFINITY), 0.0);
+    fn identical_infinities_are_not_valid_numerical_agreement() {
+        assert_eq!(relative(f64::INFINITY, f64::INFINITY), f64::INFINITY);
     }
 
     #[test]
@@ -1238,13 +1188,76 @@ mod tests {
     }
 
     #[test]
-    fn known_non_finite_replay_requires_the_same_non_finite_class() {
-        assert!(matching_non_finite(f64::NAN, f64::NAN));
-        assert!(matching_non_finite(f64::INFINITY, f64::INFINITY));
-        assert!(matching_non_finite(f64::NEG_INFINITY, f64::NEG_INFINITY));
-        assert!(!matching_non_finite(f64::INFINITY, f64::NEG_INFINITY));
-        assert!(!matching_non_finite(f64::NAN, 0.0));
-        assert!(!matching_non_finite(0.0, 0.0));
+    fn a_nan_cannot_be_hidden_by_the_other_operands_small_magnitude() {
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(!negligible(value, 0.0, 1.0, CURRENT_FLOOR));
+            assert!(!negligible(0.0, value, 1.0, CURRENT_FLOOR));
+            assert!(!negligible(value, value, 1.0, CURRENT_FLOOR));
+        }
+    }
+
+    fn empty_point() -> GoldenPoint {
+        use rspice_conformance::suites::veriloga::golden::GoldenRecord;
+        GoldenPoint {
+            unknowns: vec![0.0],
+            record: GoldenRecord {
+                rhs: vec![0.0],
+                jacobian: vec![0.0],
+                capacitance: vec![0.0],
+                noise: vec![],
+            },
+        }
+    }
+
+    #[test]
+    fn replay_rejects_non_finite_entries_in_every_stamp_array() {
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for array in 0..3 {
+                let expected = empty_point();
+                let mut actual = expected.clone();
+                match array {
+                    0 => actual.record.rhs[0] = value,
+                    1 => actual.record.jacobian[0] = value,
+                    _ => actual.record.capacitance[0] = value,
+                }
+                for baseline in [&expected, &actual] {
+                    let mut deviation = Deviation::default();
+                    compare_point("probe", baseline, &actual, &mut deviation);
+                    let worst = match array {
+                        0 => deviation.primal,
+                        1 => deviation.jacobian,
+                        _ => deviation.capacitance,
+                    };
+                    assert!(worst.relative.is_infinite(), "array {array}: {value}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn replay_checks_noise_exponents_as_well_as_power() {
+        use rspice_conformance::suites::veriloga::golden::GoldenNoiseSample;
+        let mut expected = empty_point();
+        expected.record.noise.push(GoldenNoiseSample {
+            mechanism: "flicker",
+            active: true,
+            psd: 1.0e-12,
+            exponent: Some(1.0),
+        });
+        let mut actual = expected.clone();
+        actual.record.noise[0].exponent = Some(2.0);
+        let mut deviation = Deviation::default();
+        compare_point("probe", &expected, &actual, &mut deviation);
+        assert_eq!(deviation.noise.relative, 0.5);
+        actual.record.noise[0].exponent = None;
+        let mut deviation = Deviation::default();
+        compare_point("probe", &expected, &actual, &mut deviation);
+        assert!(
+            deviation
+                .structural
+                .iter()
+                .any(|message| message.contains("exponent"))
+        );
     }
 
     #[test]
