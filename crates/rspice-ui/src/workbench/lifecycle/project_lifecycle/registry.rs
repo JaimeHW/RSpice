@@ -54,6 +54,7 @@ pub(crate) struct DocumentRecord {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct DocumentRegistry {
     records: Vec<DocumentRecord>,
+    comparison_failed: bool,
 }
 
 impl DocumentRegistry {
@@ -62,10 +63,25 @@ impl DocumentRegistry {
     }
 
     pub(crate) fn is_dirty(&self, id: &ProjectDocumentId) -> bool {
-        self.records
-            .iter()
-            .find(|record| &record.id == id)
-            .is_some_and(|record| record.dirty)
+        self.comparison_failed
+            || self
+                .records
+                .iter()
+                .find(|record| &record.id == id)
+                .is_some_and(|record| record.dirty)
+    }
+
+    pub(super) fn comparison_failed(&self) -> bool {
+        self.comparison_failed
+    }
+
+    /// A failed comparison cannot provide evidence that any document is clean,
+    /// including documents created since the previous successful comparison.
+    pub(super) fn invalidate(&mut self) {
+        self.comparison_failed = true;
+        for record in &mut self.records {
+            record.dirty = true;
+        }
     }
 
     pub(crate) fn rebuild(
@@ -91,6 +107,7 @@ impl DocumentRegistry {
                 id,
             })
             .collect();
+        self.comparison_failed = false;
         Ok(())
     }
 }

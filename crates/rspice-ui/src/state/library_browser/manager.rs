@@ -221,10 +221,16 @@ impl LibraryManager {
     /// mutation. Save acceptance must not advance the persisted content
     /// revision merely because editor presentation state became clean.
     pub(crate) fn mark_all_views_clean_runtime(&mut self) {
+        self.set_all_views_modified_runtime(false);
+    }
+
+    /// Project a known-clean or unverified registry into runtime markers
+    /// without changing the engineering catalog revision.
+    pub(crate) fn set_all_views_modified_runtime(&mut self, modified: bool) {
         for library in self.libraries.values_mut() {
             for cell in library.cells.values_mut() {
                 for view in cell.views.values_mut() {
-                    view.modified = false;
+                    view.modified = modified;
                 }
             }
         }

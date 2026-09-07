@@ -11,6 +11,8 @@ use crate::state::{ComponentType, Point};
 
 mod durable_content;
 mod fingerprint_cache;
+#[cfg(not(target_arch = "wasm32"))]
+mod save_acceptance;
 
 #[cfg(not(target_arch = "wasm32"))]
 fn insert_ac_analysis(state: &mut AppState) -> crate::product::AnalysisInstanceId {

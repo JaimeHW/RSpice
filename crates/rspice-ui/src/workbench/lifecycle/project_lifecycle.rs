@@ -369,7 +369,14 @@ pub(crate) fn refresh_registry(state: &mut AppState) -> Result<(), ProjectLifecy
         state.project_lifecycle.registry = registry::DocumentRegistry::default();
         return Ok(());
     }
-    state.project_lifecycle.registry = current_registry(state)?;
+    match current_registry(state) {
+        Ok(registry) => state.project_lifecycle.registry = registry,
+        Err(error) => {
+            state.project_lifecycle.registry.invalidate();
+            apply_registry_dirty_flags(state);
+            return Err(error);
+        }
+    }
     apply_registry_dirty_flags(state);
     Ok(())
 }
@@ -391,6 +398,23 @@ fn current_registry(state: &AppState) -> Result<registry::DocumentRegistry, Proj
 }
 
 fn apply_registry_dirty_flags(state: &mut AppState) {
+    if state.project_lifecycle.registry.comparison_failed() {
+        // The working draft could not be compared with accepted content.
+        // Preserve its authorship and show pending changes until a successful
+        // refresh can establish which documents are actually clean.
+        state.schematic.is_dirty = true;
+        state.workspace.project_metadata_dirty = true;
+        state.workspace.netlist_source_dirty = true;
+        state.workspace.project_sources_dirty = true;
+        for schematic in state.workspace.schematic_buffers.values_mut() {
+            schematic.is_dirty = true;
+        }
+        for view in &mut state.workspace.open_views {
+            view.dirty = true;
+        }
+        state.library_manager.set_all_views_modified_runtime(true);
+        return;
+    }
     let cell_dirty = state
         .project_lifecycle
         .registry
@@ -1247,21 +1271,34 @@ pub(crate) fn complete_browser_save(
             prepared.target.persisted_generation,
         ),
     };
-    let result = finish_successful_save(state, prepared.candidate, binding, prepared.scope);
+    finish_successful_save(state, prepared.candidate, binding, prepared.scope);
     state.project_lifecycle.transaction = None;
-    result
+    Ok(())
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(test, target_arch = "wasm32"))]
 fn finish_successful_save(
     state: &mut AppState,
     candidate: ProjectFile,
     binding: PersistenceBinding,
     scope: SaveScope,
-) -> Result<(), ProjectLifecycleError> {
-    let post_save_registry = prepare_post_save_registry(state, &candidate, scope)?;
+) {
+    // The browser has already verified publication of this exact candidate.
+    // A newer working draft can be invalid without revoking that publication.
+    // Adopt its binding even when comparison fails, so the next save expects
+    // the bytes actually on disk and recovery retains the written baseline.
+    let post_save_registry = match prepare_post_save_registry(state, &candidate, scope) {
+        Ok(registry) => registry,
+        Err(error) => {
+            let mut registry = state.project_lifecycle.registry.clone();
+            registry.invalidate();
+            state.push_user_message(ConsoleMessage::warning(format!(
+                "The saved snapshot was accepted, but the current draft could not be compared with it: {error}. Current edits remain pending; resolve the draft error before saving or closing."
+            )));
+            registry
+        }
+    };
     adopt_successful_save(state, candidate, binding, scope, post_save_registry);
-    Ok(())
 }
 
 fn prepare_post_save_registry(
@@ -1346,9 +1383,9 @@ fn adopt_successful_save(
     }
     #[cfg(target_arch = "wasm32")]
     let _ = scope;
-    // This registry was fully built before native publication and before any
-    // browser adoption mutation. Installing it cannot fail and preserves
-    // edits made while an asynchronous browser write was pending.
+    // Native publication requires a fully built comparison. A browser write
+    // may finish while the newer draft is invalid; its registry then marks
+    // comparisons unverified. Neither case can erase pending authored edits.
     state.project_lifecycle.registry = post_save_registry;
     apply_registry_dirty_flags(state);
     report_design_checks_after_save(state);
