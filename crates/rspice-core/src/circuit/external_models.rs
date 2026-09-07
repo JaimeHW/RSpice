@@ -358,7 +358,7 @@ impl CircuitData {
     #[inline]
     pub(crate) fn has_any_veriloga_devices(&self) -> bool {
         #[cfg(feature = "veriloga")]
-        if !self.veriloga_devices.is_empty() {
+        if !self.veriloga_devices.is_empty() || !self.mixed_signal_hosts.is_empty() {
             return true;
         }
         #[cfg(feature = "veriloga-builtins-base")]
@@ -2810,11 +2810,7 @@ impl CircuitData {
     /// runtime-compiled and build-time generated Verilog-A instances.
     /// Validation completes for every instance before the first mutation.
     pub(crate) fn accept_veriloga_analysis_point(&mut self) -> Result<(), String> {
-        #[cfg(feature = "veriloga")]
-        self.veriloga_devices.validate_timestep_acceptance()?;
-        #[cfg(feature = "veriloga-builtins-base")]
-        self.generated_veriloga_devices
-            .validate_state_acceptance()?;
+        self.validate_nonmixed_model_acceptance()?;
 
         #[cfg(feature = "veriloga")]
         self.veriloga_devices.apply_validated_timestep_acceptance();
@@ -2910,6 +2906,15 @@ impl CircuitData {
                     )
                 })?;
         }
+        for host in &mut self.mixed_signal_hosts {
+            host.set_analysis_step(initial_step, final_step)
+                .map_err(|error| {
+                    format!(
+                        "mixed Verilog-AMS instance '{}' analysis-step setup failed: {error}",
+                        host.instance_name()
+                    )
+                })?;
+        }
         Ok(())
     }
 
@@ -2921,11 +2926,7 @@ impl CircuitData {
     /// stepper can place a fine restart without a level-true region
     /// pinning tiny steps forever.
     pub(crate) fn accept_all_veriloga_timestep(&mut self) -> Result<bool, String> {
-        #[cfg(feature = "veriloga")]
-        self.veriloga_devices.validate_timestep_acceptance()?;
-        #[cfg(feature = "veriloga-builtins-base")]
-        self.generated_veriloga_devices
-            .validate_state_acceptance()?;
+        self.validate_nonmixed_model_acceptance()?;
 
         #[cfg(feature = "veriloga")]
         let discontinuity = self
@@ -2948,8 +2949,8 @@ impl CircuitData {
     #[cfg(feature = "veriloga")]
     pub(crate) fn veriloga_timestep_bound(&self) -> Result<Option<Value>, String> {
         let mut tightest: Option<Value> = None;
-        for device in self.veriloga_devices.iter() {
-            let instance = device.name.clone();
+        for device in self.veriloga_analog_devices() {
+            let instance = &device.name;
             let Some(bound) = device.try_transient_bound_step().map_err(|error| {
                 format!("Verilog-A device '{instance}' timestep bound failed: {error}")
             })?
@@ -2959,6 +2960,17 @@ impl CircuitData {
             tightest = Some(tightest.map_or(bound, |current| current.min(bound)));
         }
         Ok(tightest)
+    }
+
+    #[cfg(feature = "veriloga")]
+    fn veriloga_analog_devices(
+        &self,
+    ) -> impl Iterator<Item = &rspice_veriloga::device::VerilogADevice> {
+        self.veriloga_devices.iter().chain(
+            self.mixed_signal_hosts
+                .iter()
+                .map(|host| host.analog_device()),
+        )
     }
 
     /// Earliest interior `cross`/`above` root requested by the latest final
@@ -2973,7 +2985,7 @@ impl CircuitData {
             let mut earliest: Option<Value> = None;
             #[cfg(feature = "veriloga")]
             for device in self.veriloga_devices.iter() {
-                let instance = device.name.clone();
+                let instance = &device.name;
                 let Some(target) =
                     device
                         .try_transient_event_refinement_time()
@@ -3018,8 +3030,8 @@ impl CircuitData {
         #[cfg(not(any(feature = "veriloga", feature = "veriloga-builtins-base")))]
         let earliest: Option<Value> = None;
         #[cfg(feature = "veriloga")]
-        for device in self.veriloga_devices.iter() {
-            let instance = device.name.clone();
+        for device in self.veriloga_analog_devices() {
+            let instance = &device.name;
             let Some(target) = device.try_transient_event_time().map_err(|error| {
                 format!("Verilog-A device '{instance}' event scheduling failed: {error}")
             })?

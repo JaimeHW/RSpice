@@ -221,13 +221,14 @@ pub(super) fn try_build_mixed_signal_instance(
         }
     }
 
-    let mut host = MixedSignalHost::from_compiled(
+    let mut host = MixedSignalHost::from_compiled_with_analog_setup(
         &element.name,
         std::sync::Arc::clone(model),
         artifact,
         &layout.analog_terminals,
         SchedulerLimits::default(),
         &super::veriloga_cache::VerilogACompileControl { abort },
+        &mut |device| super::bind_veriloga_solver_unknowns(circuit, &element.name, device),
     )
     .map_err(|error| {
         if abort.is_aborted() {

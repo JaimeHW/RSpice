@@ -4,36 +4,19 @@ use super::CircuitData;
 use rspice_veriloga_runtime::{AnalogTaskEvent, AnalogTaskKind};
 
 impl CircuitData {
-    /// Inspect a solved equilibrium point before advancing any model history.
+    /// Inspect a solved non-mixed candidate before advancing model history.
     /// Mixed transient candidates belong to the host's committable trial and
     /// must not be inferred from its last rejected numerical probe.
-    pub(crate) fn first_equilibrium_candidate_analog_task(
+    pub(crate) fn first_nonmixed_candidate_analog_task(
         &self,
         kind: AnalogTaskKind,
     ) -> Result<Option<AnalogTaskEvent<'_>>, String> {
-        #[cfg(feature = "veriloga")]
-        {
-            self.ensure_no_mixed_signal_hosts("equilibrium task acceptance")
-                .map_err(|error| error.to_string())?;
-        }
-        // Ordinary points are validated by acceptance itself. Validate early
-        // only when a control request would cause another finalization solve.
-        #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
-        let validate = || -> Result<(), String> {
-            #[cfg(feature = "veriloga")]
-            self.veriloga_devices.validate_timestep_acceptance()?;
-            #[cfg(feature = "veriloga-builtins-base")]
-            self.generated_veriloga_devices
-                .validate_state_acceptance()?;
-            Ok(())
-        };
         #[cfg(feature = "veriloga")]
         for device in self.veriloga_devices.iter() {
             if let Some(event) = device
                 .first_candidate_analog_task(kind)
                 .map_err(|error| error.to_string())?
             {
-                validate()?;
                 return Ok(Some(event));
             }
         }
@@ -42,11 +25,21 @@ impl CircuitData {
             .generated_veriloga_devices
             .first_candidate_analog_task(kind)?
         {
-            validate()?;
             return Ok(Some(event));
         }
         let _ = kind;
         Ok(None)
+    }
+
+    /// Validate all runtime and generated candidates before a control request
+    /// replaces their equations with a final-step evaluation.
+    pub(crate) fn validate_nonmixed_model_acceptance(&self) -> Result<(), String> {
+        #[cfg(feature = "veriloga")]
+        self.veriloga_devices.validate_timestep_acceptance()?;
+        #[cfg(feature = "veriloga-builtins-base")]
+        self.generated_veriloga_devices
+            .validate_state_acceptance()?;
+        Ok(())
     }
 
     /// Deliver accepted analog calls exactly once, in runtime, generated, then

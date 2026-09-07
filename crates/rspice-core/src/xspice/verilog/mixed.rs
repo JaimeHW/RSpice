@@ -838,6 +838,34 @@ impl MixedSignalHost {
         scheduler_limits: SchedulerLimits,
         control: &dyn rspice_veriloga::PipelineControl,
     ) -> Result<Self, MixedSignalError> {
+        Self::from_compiled_with_analog_setup(
+            instance,
+            model,
+            canonical_ir,
+            terminal_nodes,
+            scheduler_limits,
+            control,
+            &mut |device| {
+                if device.num_internal_nodes() != 0 || device.num_branch_unknowns() != 0 {
+                    Err("mixed model requires an owning circuit to allocate internal-node or branch-current solver indices".into())
+                } else {
+                    Ok(())
+                }
+            },
+        )
+    }
+
+    /// Bind internal-node and branch-current indices before cross-domain
+    /// probes are resolved. The owning solver allocates these unknowns.
+    pub(crate) fn from_compiled_with_analog_setup(
+        instance: &str,
+        model: Arc<rspice_veriloga::CompiledModel>,
+        canonical_ir: &rspice_veriloga::canonical_ir::CanonicalIrArtifact,
+        terminal_nodes: &[usize],
+        scheduler_limits: SchedulerLimits,
+        control: &dyn rspice_veriloga::PipelineControl,
+        setup: &mut dyn FnMut(&mut VerilogADevice) -> Result<(), String>,
+    ) -> Result<Self, MixedSignalError> {
         if canonical_ir.digital.is_empty() {
             return Err(MixedSignalError::Compile {
                 detail: format!(
@@ -858,11 +886,28 @@ impl MixedSignalHost {
             terminal_nodes,
             control,
         );
-        let analog = analog.map_err(|error| MixedSignalError::Compile {
+        let mut analog = analog.map_err(|error| MixedSignalError::Compile {
             detail: format!("analog device construction failed: {error}"),
         })?;
+        setup(&mut analog).map_err(|detail| MixedSignalError::Compile { detail })?;
+        if (0..analog.num_internal_nodes()).any(|index| {
+            analog
+                .internal_node_index(index)
+                .is_none_or(|node| node == 0)
+        }) || (0..analog.num_branch_unknowns()).any(|index| {
+            analog
+                .branch_current_index(index)
+                .is_none_or(|node| node == 0)
+        }) {
+            return Err(MixedSignalError::Compile {
+                detail:
+                    "mixed model topology contains unbound internal-node or branch-current indices"
+                        .into(),
+            });
+        }
 
         let analog_probes = wire_analog_probes(canonical_ir, &analog)?;
+        let max_circuit_node = analog_solver_nodes(&analog).max().unwrap_or(0);
 
         let resolution = TimeResolution::new(TIME_UNIT_EXPONENT).map_err(DigitalRunError::from)?;
         let max_bridge_iterations = scheduler_limits.max_delta_cycles_per_tick.max(1);
@@ -899,7 +944,7 @@ impl MixedSignalHost {
             trial: None,
             analog_probes,
             boundary_buses: Vec::new(),
-            max_circuit_node: terminal_nodes.iter().copied().max().unwrap_or(0),
+            max_circuit_node,
             max_bridge_iterations,
         })
     }
@@ -987,6 +1032,34 @@ impl MixedSignalHost {
         &self.instance
     }
 
+    pub(crate) fn analog_device(&self) -> &VerilogADevice {
+        &self.analog
+    }
+
+    pub(crate) fn analysis_step(&self) -> (bool, bool) {
+        (
+            self.analog_inputs.initial_step,
+            self.analog_inputs.final_step,
+        )
+    }
+
+    pub(crate) fn set_analysis_step(
+        &mut self,
+        initial: bool,
+        final_step: bool,
+    ) -> Result<(), MixedSignalError> {
+        self.require_idle("configure analysis step")?;
+        if self.analysis_step() != (initial, final_step) {
+            self.analog
+                .make_mut()
+                .try_set_analysis_step(initial, final_step)
+                .map_err(analog_error)?;
+            self.analog_inputs.initial_step = initial;
+            self.analog_inputs.final_step = final_step;
+        }
+        Ok(())
+    }
+
     pub(crate) fn validate_analog_task_delivery(&self) -> Result<(), MixedSignalError> {
         if self.trial.is_some() {
             return Err(MixedSignalError::TrialProtocol {
@@ -1018,8 +1091,7 @@ impl MixedSignalHost {
     /// what a conservative dense block must span — the same answer, and for the
     /// same reason, that `engine::matrix` computes for a `VerilogADevice`.
     pub(crate) fn coupled_nodes(&self) -> Vec<usize> {
-        let mut nodes: Vec<usize> = (0..self.analog.num_terminals())
-            .map(|terminal| self.analog.node_for_terminal(terminal))
+        let mut nodes: Vec<usize> = analog_solver_nodes(&self.analog)
             .chain(
                 self.state
                     .bridges
@@ -2262,24 +2334,20 @@ fn fill_analog_probes(probes: &[AnalogProbeWiring], circuit_voltages: &[f64], ou
     }));
 }
 
-/// Resolve every continuous-net probe the discrete half declares to a pair of
-/// circuit nodes.
-///
-/// Verilog-AMS LRM 2.4 section 7.3.3 lets a process probe any continuous net of
-/// its module. What this host can *reach* is narrower, and the narrowing is the
-/// deck's rather than the standard's: a module terminal is attached to a
-/// circuit node the deck named, so its potential is an entry of the solution
-/// vector this host is handed on every Newton evaluation. A net declared
-/// `ground` is the reference, and reads zero for the same reason ground has no
-/// matrix row.
-///
-/// An internal analog net is refused by name. Its solver index is assigned
-/// after the module is built — `try_set_internal_node_indices` is the
-/// builder's, not this constructor's — so wiring one here would either capture
-/// a stale index or need a second wiring pass that runs later and could
-/// disagree with this one. A terminal is the shape every published connect
-/// module and every sampler in the standard's own examples probes, so the
-/// refusal names the gap rather than guessing across it.
+fn analog_solver_nodes(analog: &VerilogADevice) -> impl Iterator<Item = usize> + '_ {
+    (0..analog.num_terminals())
+        .map(|terminal| analog.node_for_terminal(terminal))
+        .chain(
+            (0..analog.num_internal_nodes()).filter_map(|index| analog.internal_node_index(index)),
+        )
+        .chain(
+            (0..analog.num_branch_unknowns())
+                .filter_map(|index| analog.branch_current_index(index)),
+        )
+}
+
+/// Resolve continuous-net probes to circuit nodes, using the internal-node
+/// mapping installed by the owning solver. Ground uses the reference index.
 fn wire_analog_probes(
     canonical_ir: &rspice_veriloga::canonical_ir::CanonicalIrArtifact,
     analog: &VerilogADevice,
@@ -2305,12 +2373,18 @@ fn wire_analog_probes(
         if let Some(terminal) = terminals.iter().position(|name| *name == net) {
             return Ok(analog.node_for_terminal(terminal));
         }
+        if let Some(index) = canonical_ir
+            .hir
+            .internal_nodes
+            .iter()
+            .position(|node| node.name == net)
+            && let Some(node) = analog.internal_node_index(index).filter(|node| *node != 0)
+        {
+            return Ok(node);
+        }
         Err(MixedSignalError::InvalidBridge {
             detail: format!(
-                "`{net}` is probed from a discrete-domain expression but is not a terminal of \
-                 module `{}`; Verilog-AMS LRM 2.4 section 7.3.3 allows a process to probe any \
-                 continuous net, and this boundary reaches only the ones the deck attached to a \
-                 circuit node",
+                "`{net}` is probed from a discrete-domain expression but has no solver-node mapping in module `{}`",
                 canonical_ir.mir.module_name
             ),
         })

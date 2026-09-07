@@ -2355,6 +2355,9 @@ impl Engine {
     /// # Returns
     ///
     /// Returns simulation results up to the point of abort, or an error if aborted.
+    /// An accepted model `$finish` completes at its retained transient point.
+    /// Wrap the call in [`Engine::run_with_outcome`] to receive that completion
+    /// reason alongside the result.
     ///
     /// # Example
     ///
@@ -3552,7 +3555,10 @@ impl Engine {
                     )
                 })?;
         }
-        if circuit.num_nodes() == 0 && circuit.num_branches() == 0 {
+        if circuit.num_nodes() == 0
+            && circuit.num_branches() == 0
+            && !circuit.has_any_veriloga_devices()
+        {
             let mut result = TransientResult {
                 time: vec![0.0],
                 step_sizes: vec![0.0],
@@ -3687,7 +3693,11 @@ impl Engine {
         } else {
             hinted_max_step
         };
-        let mut matrix = self.build_matrix(&circuit)?;
+        let mut matrix = if circuit.matrix_size() == 0 {
+            Self::model_observation_matrix()?
+        } else {
+            self.build_matrix(&circuit)?
+        };
         circuit.link_indices(&matrix);
 
         let source_step_hint = Self::transient_source_step_hint(netlist, hinted_max_step);
@@ -3714,9 +3724,8 @@ impl Engine {
         // reactive-history seeding), matching ngspice's MODEUIC semantics.
         let uic_requested = startup_mode.is_uic();
 
-        // Establish transient lifecycle state before the t=0 operating point.
-        // UIC has no t=0 solve, so its first candidate carries the initial flag
-        // below instead.
+        // The origin is the first accepted model point, including UIC's
+        // authored initial state. Positive timesteps must not replay it.
         #[cfg(feature = "veriloga")]
         if resume.is_none() {
             circuit
@@ -3724,7 +3733,7 @@ impl Engine {
                     0.0,
                     0.0,
                     &CompanionCoefficients::backward_euler(),
-                    !uic_requested,
+                    true,
                     false,
                 )
                 .map_err(SimulationError::Circuit)?;
@@ -3733,7 +3742,7 @@ impl Engine {
         if resume.is_none() {
             circuit
                 .generated_veriloga_devices_mut()
-                .set_analysis_step(!uic_requested, false);
+                .set_analysis_step(true, false);
         }
 
         // Get the startup state. Ordinary transient validates the exact t=0
@@ -3741,7 +3750,7 @@ impl Engine {
         // differ from the source's separate DC value. UIC skips an operating
         // point altogether. Resume uses its accepted solution and original
         // recovery policy without evaluating startup equations again.
-        let (mut solution, initial_solution_mode, accepted_transient_op) =
+        let (mut solution, initial_solution_mode, mut accepted_transient_op) =
             if let Some(checkpoint) = resume {
                 if checkpoint.solution.len() != circuit.matrix_size() {
                     return Err(SimulationError::Circuit(format!(
@@ -3765,9 +3774,58 @@ impl Engine {
                     startup::InitialSolutionMode::LinearizedSeed,
                     None,
                 )
+            } else if circuit.matrix_size() == 0 {
+                (
+                    Vec::new(),
+                    startup::InitialSolutionMode::TransientOperatingPoint,
+                    None,
+                )
             } else {
                 self.solve_transient_initial_solution(netlist, &mut circuit, &mut matrix, abort)?
             };
+        let mut origin_model_finish = None;
+        if resume.is_none() && !uic_requested && circuit.has_any_veriloga_devices() {
+            Self::evaluate_analog_candidate(&mut circuit, &mut matrix, &solution)?;
+            origin_model_finish = Self::inspect_transient_model_candidate(
+                &mut circuit,
+                0.0,
+                0.0,
+                &solution,
+                &CompanionCoefficients::backward_euler(),
+                true,
+                false,
+            )?
+            .finish;
+            if origin_model_finish.is_some() {
+                #[cfg(feature = "veriloga")]
+                circuit
+                    .prepare_veriloga_timepoint(
+                        0.0,
+                        0.0,
+                        &CompanionCoefficients::backward_euler(),
+                        true,
+                        true,
+                    )
+                    .map_err(SimulationError::Circuit)?;
+                #[cfg(feature = "veriloga-builtins-base")]
+                circuit
+                    .generated_veriloga_devices_mut()
+                    .set_analysis_step(true, true);
+                if !solution.is_empty() {
+                    let constraints = self.collect_initial_condition_hints(netlist, &circuit);
+                    let finalized = self.solve_nonlinear_transient_op_with_node_hints_and_abort(
+                        &mut circuit,
+                        &mut matrix,
+                        0.0,
+                        &Default::default(),
+                        &constraints,
+                        abort,
+                    )?;
+                    solution = finalized.values;
+                    accepted_transient_op = finalized.accepted_contract;
+                }
+            }
+        }
         if let Some(contract) = accepted_transient_op {
             self.ensure_solved_transient_operating_point_paths_to_ground(
                 &mut circuit,
@@ -3829,6 +3887,35 @@ impl Engine {
                 if let Some(slot) = solution.get_mut(num_nodes + branch - 1) {
                     *slot = *ic;
                 }
+            }
+        }
+        if resume.is_none() && uic_requested && circuit.has_any_veriloga_devices() {
+            Self::evaluate_analog_candidate(&mut circuit, &mut matrix, &solution)?;
+            origin_model_finish = Self::inspect_transient_model_candidate(
+                &mut circuit,
+                0.0,
+                0.0,
+                &solution,
+                &CompanionCoefficients::backward_euler(),
+                true,
+                false,
+            )?
+            .finish;
+            if origin_model_finish.is_some() {
+                #[cfg(feature = "veriloga")]
+                circuit
+                    .prepare_veriloga_timepoint(
+                        0.0,
+                        0.0,
+                        &CompanionCoefficients::backward_euler(),
+                        true,
+                        true,
+                    )
+                    .map_err(SimulationError::Circuit)?;
+                #[cfg(feature = "veriloga-builtins-base")]
+                circuit
+                    .generated_veriloga_devices_mut()
+                    .set_analysis_step(true, true);
             }
         }
         // UIC skips the analog operating point, but it does not skip the
@@ -4384,17 +4471,22 @@ impl Engine {
         if resume.is_none() && circuit.has_any_veriloga_devices() {
             let origin_state = circuit.nonlinear_state_snapshot();
             let origin_result = (|| -> Result<(), SimulationError> {
+                Self::evaluate_analog_candidate(&mut circuit, &mut matrix, &solution)?;
                 #[cfg(feature = "veriloga")]
-                if circuit.has_veriloga_devices() {
-                    circuit
-                        .evaluate_veriloga_timepoint(&solution)
-                        .map_err(SimulationError::Circuit)?;
-                }
-                #[cfg(feature = "veriloga-builtins-base")]
-                if circuit.has_generated_veriloga_devices() {
-                    circuit
-                        .evaluate_generated_veriloga_timepoint(&mut matrix, &solution)
-                        .map_err(SimulationError::Circuit)?;
+                if circuit.has_mixed_signal_hosts() {
+                    circuit.accept_mixed_transient_timestep(
+                        0.0,
+                        0.0,
+                        &solution,
+                        &CompanionCoefficients::backward_euler(),
+                        true,
+                        origin_model_finish.is_some(),
+                    )?;
+                    Self::collect_xspice_runtime_breakpoints(
+                        &mut circuit,
+                        &mut breakpoints,
+                        tstop,
+                    )?;
                 }
                 circuit
                     .accept_all_veriloga_timestep()
@@ -4402,7 +4494,7 @@ impl Engine {
                 pending_veriloga_event_time =
                     accepted_veriloga_event_time(&circuit, resume_time, timestep.hard_min_dt())?;
                 #[cfg(feature = "veriloga")]
-                if circuit.has_veriloga_devices()
+                if circuit.has_any_veriloga_devices()
                     && let Some(bound) = circuit
                         .veriloga_timestep_bound()
                         .map_err(SimulationError::Circuit)?
@@ -4421,6 +4513,12 @@ impl Engine {
             circuit
                 .set_veriloga_analysis_phase(rspice_veriloga_runtime::AnalogAnalysisPhase::Point)
                 .map_err(SimulationError::Circuit)?;
+            Self::publish_pending_model_finish(abort, origin_model_finish.take())?;
+            Self::deliver_accepted_analog_tasks(
+                &mut circuit,
+                abort,
+                crate::ModelFinishPoint::Transient { time: 0.0 },
+            )?;
         }
         for (trace, &retain) in branch_currents
             .iter_mut()
@@ -4802,7 +4900,7 @@ impl Engine {
             pending_veriloga_event_time =
                 accepted_veriloga_event_time(&circuit, resume_time, timestep.hard_min_dt())?;
             #[cfg(feature = "veriloga")]
-            if circuit.has_veriloga_devices()
+            if circuit.has_any_veriloga_devices()
                 && let Some(bound) = circuit
                     .veriloga_timestep_bound()
                     .map_err(SimulationError::Circuit)?
@@ -5275,6 +5373,15 @@ impl Engine {
         let mut failed_device_conv: usize = 0;
         let mut failed_residual_only: usize = 0;
         let mut rejected_attempt_nonlinear_state_scratch = None;
+        let mut tstop = if abort
+            .model_control()
+            .is_some_and(|control| control.is_finished())
+        {
+            resume_time
+        } else {
+            tstop
+        };
+        let mut pending_model_finish = None;
 
         // Xyce makes the interval after every accepted, non-final breakpoint a
         // new OneStep integration epoch.  Its restart dump is written before
@@ -5713,7 +5820,7 @@ impl Engine {
                 exact_veriloga_event_time,
             );
             let landed_veriloga_event = exact_veriloga_event_time.is_some();
-            let analysis_initial_step = uic_requested && accepted_interval_count == 0;
+            let analysis_initial_step = false;
             let analysis_final_step = step_time == tstop;
             let retry_floor_source_activity_delta =
                 Self::startup_source_activity_delta_for_retry_floor(
@@ -5914,28 +6021,16 @@ impl Engine {
                     }
                 }};
             }
+            let mut candidate_model_finish = None;
             macro_rules! reject_for_veriloga_event_refinement {
                 ($candidate_solution:expr, $candidate_time:expr, $phase_start:expr) => {{
                     if circuit.has_any_veriloga_devices() {
-                        #[cfg(feature = "veriloga")]
-                        if circuit.has_veriloga_devices() {
-                        circuit
-                            .evaluate_veriloga_timepoint($candidate_solution)
-                            .map_err(SimulationError::Circuit)?;
-                        }
-                        #[cfg(feature = "veriloga-builtins-base")]
-                        if circuit.has_generated_veriloga_devices() {
-                            circuit
-                                .evaluate_generated_veriloga_timepoint(
-                                    &mut matrix,
-                                    $candidate_solution,
-                                )
-                                .map_err(SimulationError::Circuit)?;
-                        }
-                        if let Some(target) = circuit
-                            .veriloga_event_refinement_time()
-                            .map_err(SimulationError::Circuit)?
-                        {
+                        Self::evaluate_analog_candidate(&mut circuit, &mut matrix, $candidate_solution)?;
+                        let model_candidate = Self::inspect_transient_model_candidate(
+                            &mut circuit, $candidate_time, dt, $candidate_solution,
+                            &coeff, analysis_initial_step, analysis_final_step,
+                        )?;
+                        if let Some(target) = model_candidate.refinement_time {
                             let accepted_time = t;
                             let candidate_time = $candidate_time;
                             let refinement_dt = target - accepted_time;
@@ -5980,6 +6075,23 @@ impl Engine {
                         // secant target with the next accepted timer target (or
                         // `None`) after it commits the Verilog-A state.
                         veriloga_event_refinement_count = 0;
+                        candidate_model_finish = model_candidate.finish;
+                    }
+                }};
+            }
+            macro_rules! finalize_model_finish_candidate {
+                () => {{
+                    if !analysis_final_step && let Some(finish) = candidate_model_finish.take() {
+                        // Repeat the accepted numerical candidate with
+                        // final_step before publishing its equations or state.
+                        tstop = step_time;
+                        pending_model_finish = Some(finish);
+                        lte_estimator.reject_xyce_attempt(true);
+                        if let Some(snapshot) = rejected_attempt_nonlinear_state.take() {
+                            circuit.restore_nonlinear_state(snapshot);
+                        }
+                        timestep.force_step(dt);
+                        continue;
                     }
                 }};
             }
@@ -6136,7 +6248,32 @@ impl Engine {
             let mut xyce_nox_status = uses_xyce_nox_status
                 .then(|| nox_status::XyceTransientNoxStatus::new(tran_max_iterations));
             let mut xyce_weighted_update_norm = None;
-            let mut converged = false;
+            // Portless models still execute the candidate/acceptance lifecycle
+            // below, but there are no circuit equations to solve.
+            if size == 0 {
+                #[cfg(feature = "veriloga")]
+                circuit
+                    .prepare_veriloga_timepoint(
+                        step_time,
+                        dt,
+                        &coeff,
+                        analysis_initial_step,
+                        analysis_final_step,
+                    )
+                    .map_err(SimulationError::Circuit)?;
+                #[cfg(feature = "veriloga-builtins-base")]
+                circuit
+                    .prepare_generated_veriloga_timepoint(
+                        step_time,
+                        dt,
+                        &coeff,
+                        if xyce_one_step_order2 { 2.0 } else { 1.0 },
+                        analysis_initial_step,
+                        analysis_final_step,
+                    )
+                    .map_err(SimulationError::Circuit)?;
+            }
+            let mut converged = size == 0;
             // Solver-owned count for this attempted timepoint. DampedNewton's
             // `nlStep_` is one-based; NOX iteration zero is the predictor
             // before any linear solve. The outer transient attempt counter is
@@ -8209,15 +8346,6 @@ impl Engine {
                         num_nodes,
                         force_accept_delta_limit,
                     );
-                    if clipped_force_candidate {
-                        if fixed_method.is_none() {
-                            trapgear.force_method(IntegrationMethod::Gear2);
-                        }
-                        timestep.force_step((dt * 0.5).min(max_step));
-                    }
-                    stale_accept_count = 0;
-                    force_accepted_rejected_lte_step = true;
-
                     new_solution = bounded_force_candidate;
 
                     if circuit.has_nonlinear_devices() {
@@ -8228,10 +8356,19 @@ impl Engine {
                         step_time,
                         middle_phase_start
                     );
+                    finalize_model_finish_candidate!();
+                    if clipped_force_candidate {
+                        if fixed_method.is_none() {
+                            trapgear.force_method(IntegrationMethod::Gear2);
+                        }
+                        timestep.force_step((dt * 0.5).min(max_step));
+                    }
+                    stale_accept_count = 0;
+                    force_accepted_rejected_lte_step = true;
 
                     t = step_time;
                     let scheduled_breakpoint = breakpoints.at_breakpoint(t);
-                    let hit_breakpoint = accepted_step_hits_breakpoint(
+                    let mut hit_breakpoint = accepted_step_hits_breakpoint(
                         landed_veriloga_event,
                         at_breakpoint,
                         scheduled_breakpoint,
@@ -8502,8 +8639,8 @@ impl Engine {
                             force_accept_bsim4_truncation_limit,
                         ),
                     );
-                    let capture_xyce_static_history = self.config.spice_dialect
-                        == SpiceDialect::Xyce
+                    let capture_xyce_static_history = size > 0
+                        && self.config.spice_dialect == SpiceDialect::Xyce
                         && !uses_direct_xyce_dae
                         && (xyce_one_step_order2 || xyce_promotes_order_two);
                     let mut xyce_static_history_candidate = None;
@@ -8628,29 +8765,47 @@ impl Engine {
                             .evaluate_generated_veriloga_timepoint(&mut matrix, &new_solution)
                             .map_err(SimulationError::Circuit)?;
                     }
-                    if circuit.has_any_veriloga_devices() {
+                    let veriloga_discontinuity = if circuit.has_any_veriloga_devices() {
                         circuit
                             .accept_all_veriloga_timestep()
-                            .map_err(SimulationError::Circuit)?;
-                    }
+                            .map_err(SimulationError::Circuit)?
+                    } else {
+                        false
+                    };
                     #[cfg(feature = "veriloga")]
-                    if circuit.has_mixed_signal_hosts() {
-                        circuit.accept_mixed_transient_timestep(
+                    let veriloga_discontinuity = if circuit.has_mixed_signal_hosts() {
+                        let mixed_discontinuity = circuit.accept_mixed_transient_timestep(
                             t,
                             dt,
                             &new_solution,
                             &coeff,
-                            analysis_first_step_pending,
-                            false,
+                            analysis_initial_step,
+                            analysis_final_step,
                         )?;
                         Self::collect_xspice_runtime_breakpoints(
                             &mut circuit,
                             &mut breakpoints,
                             tstop,
                         )?;
-                    }
+                        veriloga_discontinuity || mixed_discontinuity
+                    } else {
+                        veriloga_discontinuity
+                    };
+                    let model_restart_dt = (veriloga_discontinuity && !hit_breakpoint)
+                        .then(|| breakpoints.mark_external_breakpoint_solved(t, dt));
+                    hit_breakpoint |= veriloga_discontinuity;
                     pending_veriloga_event_time =
                         accepted_veriloga_event_time(&circuit, t, timestep.hard_min_dt())?;
+                    if analysis_final_step {
+                        Self::publish_pending_model_finish(abort, pending_model_finish.take())?;
+                    }
+                    if Self::deliver_accepted_analog_tasks(
+                        &mut circuit,
+                        abort,
+                        crate::ModelFinishPoint::Transient { time: t },
+                    )? {
+                        tstop = t;
+                    }
 
                     // XSPICE voltage outputs are projected only when their
                     // model state is accepted. Commit controller histories
@@ -8771,7 +8926,8 @@ impl Engine {
                         quality.record_force_accept(result.time.len().saturating_sub(1))
                     });
                     force_accept_cooldown = FORCE_ACCEPT_COOLDOWN_RETRIES;
-                    timestep.force_step(next_force_dt);
+                    timestep
+                        .force_step(next_force_dt.min(model_restart_dt.unwrap_or(Value::INFINITY)));
                     if matches!(
                         current_method,
                         IntegrationMethod::Trapezoidal | IntegrationMethod::TrapGear
@@ -8910,6 +9066,7 @@ impl Engine {
             }
             stale_accept_count = 0;
             reject_for_veriloga_event_refinement!(&new_solution, step_time, middle_phase_start);
+            finalize_model_finish_candidate!();
 
             // Success - reset retry counter only after event-root refinement
             // has had the opportunity to reject this candidate endpoint.
@@ -9018,7 +9175,8 @@ impl Engine {
             };
             total_trap_trial_nanos += trap_trial_phase_start.elapsed().as_nanos();
 
-            let capture_xyce_static_history = self.config.spice_dialect == SpiceDialect::Xyce
+            let capture_xyce_static_history = size > 0
+                && self.config.spice_dialect == SpiceDialect::Xyce
                 && !uses_direct_xyce_dae
                 && (xyce_one_step_order2 || xyce_promotes_order_two);
             let mut xyce_static_history_candidate = None;
@@ -9154,19 +9312,32 @@ impl Engine {
                 false
             };
             #[cfg(feature = "veriloga")]
-            if circuit.has_mixed_signal_hosts() {
-                circuit.accept_mixed_transient_timestep(
+            let veriloga_discontinuity = if circuit.has_mixed_signal_hosts() {
+                let mixed_discontinuity = circuit.accept_mixed_transient_timestep(
                     t,
                     dt,
                     &new_solution,
                     &coeff,
-                    analysis_first_step_pending,
-                    false,
+                    analysis_initial_step,
+                    analysis_final_step,
                 )?;
                 Self::collect_xspice_runtime_breakpoints(&mut circuit, &mut breakpoints, tstop)?;
-            }
+                veriloga_discontinuity || mixed_discontinuity
+            } else {
+                veriloga_discontinuity
+            };
             pending_veriloga_event_time =
                 accepted_veriloga_event_time(&circuit, t, timestep.hard_min_dt())?;
+            if analysis_final_step {
+                Self::publish_pending_model_finish(abort, pending_model_finish.take())?;
+            }
+            if Self::deliver_accepted_analog_tasks(
+                &mut circuit,
+                abort,
+                crate::ModelFinishPoint::Transient { time: t },
+            )? {
+                tstop = t;
+            }
             // `$discontinuity` is an accepted boundary event. Fold it into
             // the same restart contract as source and operator breakpoints so
             // Trap/Gear and LTE history are reset, not merely the next `dt`.
@@ -9375,7 +9546,7 @@ impl Engine {
             // supported step. Invalid negative/non-finite requests fail in
             // the device API rather than disappearing here.
             #[cfg(feature = "veriloga")]
-            if circuit.has_veriloga_devices()
+            if circuit.has_any_veriloga_devices()
                 && let Some(bound) = circuit
                     .veriloga_timestep_bound()
                     .map_err(SimulationError::Circuit)?
@@ -9605,7 +9776,11 @@ impl Engine {
         debug_assert_eq!(xyce_step_failure_count, 0);
         debug_assert_eq!(stale_accept_count, 0);
         debug_assert!(!circuit.xyce_core_trial_invalid());
-        if scheduled_checkpoint_cursor != scheduled_checkpoint_times.len() {
+        if scheduled_checkpoint_cursor != scheduled_checkpoint_times.len()
+            && !abort
+                .model_control()
+                .is_some_and(|control| control.is_finished())
+        {
             return Err(SimulationError::Circuit(format!(
                 "transient ended at {t:.17e}s before scheduled checkpoint {:.17e}s was captured",
                 scheduled_checkpoint_times[scheduled_checkpoint_cursor]

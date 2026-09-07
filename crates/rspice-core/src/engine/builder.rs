@@ -103,6 +103,31 @@ fn check_build_abort(abort: &dyn AbortSignal) -> Result<(), SimulationError> {
     }
 }
 
+#[cfg(feature = "veriloga")]
+fn bind_veriloga_solver_unknowns(
+    circuit: &mut CircuitData,
+    instance: &str,
+    device: &mut rspice_veriloga::device::VerilogADevice,
+) -> Result<(), String> {
+    let internal_nodes: Vec<_> = (0..device.num_internal_nodes())
+        .map(|index| circuit.get_or_create_node(&format!("{instance}.__int{}", index + 1)))
+        .collect();
+    if !internal_nodes.is_empty() {
+        device
+            .try_set_internal_node_indices(&internal_nodes)
+            .map_err(|error| error.to_string())?;
+    }
+    let branch_nodes: Vec<_> = (0..device.num_branch_unknowns())
+        .map(|index| circuit.get_or_create_node(&format!("{instance}.__br{}", index + 1)))
+        .collect();
+    if !branch_nodes.is_empty() {
+        device
+            .try_set_branch_current_indices(&branch_nodes)
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
 fn map_build_parse_error(context: &str, error: ParseWithAbortError) -> SimulationError {
     match error {
         ParseWithAbortError::Aborted => SimulationError::Aborted,
@@ -7431,27 +7456,8 @@ impl Engine {
                             })?;
 
                             // Allocate global circuit node indices for internal Verilog-A nodes.
-                            if device.num_internal_nodes() > 0 {
-                                let mut internal_nodes =
-                                    Vec::with_capacity(device.num_internal_nodes());
-                                for idx in 0..device.num_internal_nodes() {
-                                    let node_name = format!("{}.__int{}", element.name, idx + 1);
-                                    internal_nodes.push(circuit.get_or_create_node(&node_name));
-                                }
-                                device.set_internal_node_indices(&internal_nodes);
-                            }
-
-                            // Allocate system unknowns for branch currents of
-                            // potential (voltage) contributions.
-                            if device.num_branch_unknowns() > 0 {
-                                let mut branch_nodes =
-                                    Vec::with_capacity(device.num_branch_unknowns());
-                                for idx in 0..device.num_branch_unknowns() {
-                                    let node_name = format!("{}.__br{}", element.name, idx + 1);
-                                    branch_nodes.push(circuit.get_or_create_node(&node_name));
-                                }
-                                device.set_branch_current_indices(&branch_nodes);
-                            }
+                            bind_veriloga_solver_unknowns(&mut circuit, &element.name, &mut device)
+                                .map_err(SimulationError::Circuit)?;
 
                             for (name, value) in params {
                                 let resolved = match value {

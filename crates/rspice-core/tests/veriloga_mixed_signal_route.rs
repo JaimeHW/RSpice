@@ -89,6 +89,53 @@ impl Drop for ModelFile {
 }
 
 #[test]
+fn mixed_internal_potentials_and_voltage_branch_unknowns_reach_both_domains() {
+    let model = ModelFile::new(
+        "internal_probe",
+        r#"
+module internal_probe(out, sampled);
+    inout out; electrical out, inner;
+    output sampled; reg sampled;
+    initial begin sampled=0; #1 sampled=(V(inner)>1.5); end
+    analog begin
+        V(inner)<+2;
+        V(out)<+3*V(inner);
+    end
+endmodule
+"#,
+    );
+    let netlist = Netlist::parse(&format!(
+        "* internal potential and voltage contributions\n.param vcc=3.3\nX1 out sampled internal_probe\n.va \"{}\" internal_probe\n.end\n",
+        model.deck_path()
+    )).unwrap();
+    let result = Engine::default().run_tran(&netlist, 3e-9, 0.2e-9).unwrap();
+    let out = result
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("out"))
+        .unwrap();
+    assert!(
+        result.voltages[out]
+            .iter()
+            .all(|value| (*value - 6.0).abs() < 1e-10)
+    );
+    let sampled = result
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("sampled"))
+        .unwrap();
+    assert!(result.voltages[sampled][0].abs() < 1e-10);
+    assert!((result.voltages[sampled].last().unwrap() - 3.3).abs() < 1e-6);
+    let trace = result
+        .digital_traces
+        .iter()
+        .find(|trace| trace.node_name.eq_ignore_ascii_case("sampled"))
+        .unwrap();
+    assert_eq!(trace.points.len(), 2);
+    assert_eq!(trace.points[1].time, 1e-9);
+}
+
+#[test]
 fn analog_initialization_finish_precedes_all_digital_process_execution() {
     use rspice_core::{ModelFinishPoint, NoAbort, SimulationOutcome};
     // This design is valid but never settles its first digital time slot.

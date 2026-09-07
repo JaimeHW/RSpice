@@ -124,14 +124,7 @@ impl DcSweepLifecycle {
         circuit
             .accept_veriloga_analysis_point()
             .map_err(SimulationError::Circuit)?;
-        if let Some(finish) = self.pending_finish.take() {
-            abort
-                .model_control()
-                .ok_or_else(|| {
-                    SimulationError::Circuit("DC finish has no simulation run scope".into())
-                })?
-                .request_finish(finish);
-        }
+        Engine::publish_pending_model_finish(abort, self.pending_finish.take())?;
         self.finished = Engine::deliver_accepted_analog_tasks(
             circuit,
             abort,
@@ -401,30 +394,6 @@ struct DcSubstepPolicy {
 }
 
 impl Engine {
-    fn dc_model_observation_matrix() -> Result<StaticMatrix, SimulationError> {
-        // The generated stamp adapter requires a nonempty sparse workspace.
-        // A circuit with no unknowns uses one unused row only to execute model
-        // bodies; it is never solved or included in the returned result.
-        StaticMatrix::from_triplets(1, 1, &[]).map_err(SimulationError::Solver)
-    }
-
-    fn evaluate_dc_task_candidate(
-        circuit: &mut CircuitData,
-        matrix: &mut StaticMatrix,
-        solution: &[Value],
-    ) -> Result<(), SimulationError> {
-        #[cfg(feature = "veriloga")]
-        circuit
-            .evaluate_veriloga_timepoint(solution)
-            .map_err(SimulationError::Circuit)?;
-        #[cfg(feature = "veriloga-builtins-base")]
-        circuit
-            .evaluate_generated_veriloga_timepoint(matrix, solution)
-            .map_err(SimulationError::Circuit)?;
-        let _ = (circuit, matrix, solution);
-        Ok(())
-    }
-
     /// Finalize the retained endpoint before advancing model state. Re-solving
     /// from the same accepted predecessor lets final_step change the equations
     /// without running event assignments or stateful operators twice.
@@ -440,7 +409,7 @@ impl Engine {
         // Nonempty circuits have just been observed at this exact solution.
         // Portless models still need an evaluation to execute their tasks.
         if solution.is_empty() {
-            Self::evaluate_dc_task_candidate(circuit, matrix, &solution)?;
+            Self::evaluate_analog_candidate(circuit, matrix, &solution)?;
         }
         let was_final = lifecycle.flags()?.1;
         lifecycle.pending_finish = Self::candidate_equilibrium_finish(
@@ -467,7 +436,7 @@ impl Engine {
                 }
             }
             if solution.is_empty() {
-                Self::evaluate_dc_task_candidate(circuit, matrix, &solution)?;
+                Self::evaluate_analog_candidate(circuit, matrix, &solution)?;
             }
             // Validate the final candidate even when final_step removes the
             // expression that requested the original accepted-point finish.
@@ -949,7 +918,7 @@ impl Engine {
             let report = crate::circuit::DeviceOpReport::default();
             engine.ensure_result_values(dc_result_value_count(&result, &report))?;
             if circuit.has_any_veriloga_devices() {
-                let mut matrix = Self::dc_model_observation_matrix()?;
+                let mut matrix = Self::model_observation_matrix()?;
                 circuit.link_indices(&matrix);
                 if let Some(state) = lifecycle.as_mut() {
                     engine.finalize_dc_sweep_candidate(
@@ -961,7 +930,7 @@ impl Engine {
                         abort,
                     )?;
                 } else {
-                    Self::evaluate_dc_task_candidate(&mut circuit, &mut matrix, &[])?;
+                    Self::evaluate_analog_candidate(&mut circuit, &mut matrix, &[])?;
                 }
             }
             if let Some(state) = lifecycle.as_mut() {
@@ -1425,7 +1394,7 @@ impl Engine {
         if circuit.matrix_size() == 0 {
             engine.ensure_result_shape(sweep_points.len(), 2)?;
             let mut results = Vec::with_capacity(sweep_points.len());
-            let mut matrix = Self::dc_model_observation_matrix()?;
+            let mut matrix = Self::model_observation_matrix()?;
             circuit.link_indices(&matrix);
             for &value in sweep_points {
                 lifecycle.sweep_value = value;

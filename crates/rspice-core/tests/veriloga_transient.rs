@@ -603,6 +603,359 @@ endmodule
 }
 
 #[test]
+fn transient_finish_retains_the_accepted_endpoint_and_solves_final_step() {
+    use rspice_core::{ModelFinishPoint, NoAbort, SimulationOutcome};
+    for mixed in [false, true] {
+        let source = r#"
+module transient_finish(out);
+    inout out; electrical out;
+    real count;
+    analog begin
+        @(initial_step("tran")) count=1;
+        @(final_step("tran")) begin count=count+10; $finish(2); end
+        @(timer(2e-6)) if (count<10) $finish(1);
+        V(out)<+count;
+    end
+endmodule
+"#;
+        let source = if mixed {
+            source.replace(
+                "real count;",
+                "real count; reg marker; initial marker=1'b1;",
+            )
+        } else {
+            source.to_owned()
+        };
+        let model = write_model(&format!("transient_finish_{mixed}"), &source);
+        let deck = format!(
+            "* finish at an accepted timer event\nX1 out transient_finish\n.va \"{}\" transient_finish\n.end\n",
+            deck_path(&model)
+        );
+        let netlist = Netlist::parse(&deck).unwrap();
+        let outcome = Engine::default()
+            .run_with_outcome(&NoAbort, |engine, signal| {
+                engine.run_tran_with_abort(&netlist, 10e-6, 0.2e-6, signal)
+            })
+            .unwrap();
+        let SimulationOutcome::Finished {
+            result: Some(result),
+            finish,
+        } = outcome
+        else {
+            panic!("accepted transient finish must return its partial waveform");
+        };
+        assert_eq!(finish.point, ModelFinishPoint::Transient { time: 2e-6 });
+        assert_eq!(finish.diagnostic_level, 1);
+        assert_eq!(result.time.last(), Some(&2e-6));
+        let output = node_series(&result.node_names, &result.voltages, "out");
+        assert_eq!(output.last(), Some(&11.0), "mixed={mixed}: {output:?}");
+        assert!(output[..output.len() - 1].iter().all(|value| *value == 1.0));
+        let _ = std::fs::remove_file(model);
+    }
+}
+
+#[test]
+fn transient_finish_at_origin_preserves_startup_constraints() {
+    use rspice_core::{ModelFinishPoint, NoAbort, SimulationOutcome};
+    for mixed in [false, true] {
+        for startup in ["", ".ic V(out)=3\n", ".ic V(out)=3\n.tran 0.2u 10u UIC\n"] {
+            let source = format!(
+                r#"
+module origin_finish(out);
+    inout out; electrical out;
+    real count;
+    {}
+    analog begin
+        @(initial_step("tran")) begin count=count+1; $finish(1); end
+        @(final_step("tran")) begin count=count+10; $finish(2); end
+        I(out)<+V(out)-count;
+    end
+endmodule
+"#,
+                if mixed {
+                    "reg marker; initial marker=1'b1;"
+                } else {
+                    ""
+                }
+            );
+            let model = write_model(&format!("origin_finish_{mixed}"), &source);
+            let netlist = Netlist::parse(&format!(
+                "* finish at the accepted origin\nX1 out origin_finish\n.va \"{}\" origin_finish\n{startup}.end\n",
+                deck_path(&model)
+            )).unwrap();
+            let outcome = Engine::default()
+                .run_with_outcome(&NoAbort, |engine, signal| {
+                    engine.run_tran_with_abort(&netlist, 10e-6, 0.2e-6, signal)
+                })
+                .unwrap();
+            let SimulationOutcome::Finished {
+                result: Some(result),
+                finish,
+            } = outcome
+            else {
+                panic!("origin finish must retain its accepted point");
+            };
+            assert_eq!(finish.point, ModelFinishPoint::Transient { time: 0.0 });
+            assert_eq!(finish.diagnostic_level, 1);
+            assert_eq!(result.time, [0.0]);
+            let expected = if startup.is_empty() { 11.0 } else { 3.0 };
+            let output = node_series(&result.node_names, &result.voltages, "out");
+            assert!(
+                (output[0] - expected).abs() < 1e-10,
+                "mixed={mixed} startup={startup:?}: {output:?}"
+            );
+            let _ = std::fs::remove_file(model);
+        }
+    }
+}
+
+#[test]
+fn transient_finish_refines_crossing_before_acceptance() {
+    use rspice_core::{ModelFinishPoint, NoAbort, SimulationOutcome};
+    for mixed in [false, true] {
+        let source = format!(
+            r#"
+module crossing_finish(out, sense);
+    inout out, sense; electrical out, sense;
+    real count;
+    {}
+    analog begin
+        @(initial_step("tran")) count=count+1;
+        @(final_step("tran")) count=count+10;
+        @(cross(V(sense)-0.5, 1)) if (count<10) $finish(1);
+        V(out)<+count;
+    end
+endmodule
+"#,
+            if mixed {
+                "reg marker; initial marker=1'b1;"
+            } else {
+                ""
+            }
+        );
+        let model = write_model(&format!("crossing_finish_{mixed}"), &source);
+        let netlist = Netlist::parse(&format!(
+            "* refine a finish event\nV1 sense 0 PWL(0 0 1u 1)\nX1 out sense crossing_finish\n.va \"{}\" crossing_finish\n.end\n",
+            deck_path(&model)
+        )).unwrap();
+        let outcome = Engine::default()
+            .run_with_outcome(&NoAbort, |engine, signal| {
+                engine.run_tran_with_abort(&netlist, 2e-6, 0.3e-6, signal)
+            })
+            .unwrap();
+        let SimulationOutcome::Finished {
+            result: Some(result),
+            finish,
+        } = outcome
+        else {
+            panic!("crossing finish must retain its accepted point");
+        };
+        let ModelFinishPoint::Transient { time } = finish.point else {
+            panic!("wrong finish point")
+        };
+        assert!((time - 0.5e-6).abs() < 1e-15, "mixed={mixed}: {time}");
+        assert_eq!(result.time.last(), Some(&time));
+        let output = node_series(&result.node_names, &result.voltages, "out");
+        assert_eq!(output.last(), Some(&11.0));
+        assert!(output[..output.len() - 1].iter().all(|value| *value == 1.0));
+        let _ = std::fs::remove_file(model);
+    }
+}
+
+#[test]
+fn mixed_analog_timestep_controls_and_uic_lifecycle_match_the_runtime_device() {
+    for uic in [false, true] {
+        let mut reference: Option<rspice_core::engine::TransientResult> = None;
+        for mixed in [false, true] {
+            let source = format!(
+                r#"
+module timestep_controls(out);
+    inout out; electrical out;
+    real count;
+    {}
+    analog begin
+        @(initial_step("tran")) count=count+1;
+        @(final_step("tran")) count=count+10;
+        $bound_step(0.1e-6);
+        if ($abstime>=0.25e-6) $discontinuity(0);
+        I(out)<+V(out)-count;
+    end
+endmodule
+"#,
+                if mixed {
+                    "reg marker; initial marker=1'b1;"
+                } else {
+                    ""
+                }
+            );
+            let model = write_model(&format!("timestep_controls_{mixed}_{uic}"), &source);
+            let netlist = Netlist::parse(&format!(
+                "* timestep controls\nX1 out timestep_controls\n.va \"{}\" timestep_controls\n.tran 0.5u 1u {}\n.end\n",
+                deck_path(&model), if uic { "UIC" } else { "" }
+            )).unwrap();
+            let result = Engine::default().run_tran(&netlist, 1e-6, 0.5e-6).unwrap();
+            assert!(
+                result
+                    .step_sizes
+                    .iter()
+                    .all(|dt| *dt <= 0.1e-6 * (1.0 + 1e-12))
+            );
+            let output = node_series(&result.node_names, &result.voltages, "out");
+            assert!((output[0] - if uic { 0.0 } else { 1.0 }).abs() < 1e-10);
+            assert!((output.last().unwrap() - 11.0).abs() < 1e-10);
+            assert!(
+                output[1..output.len() - 1]
+                    .iter()
+                    .all(|value| (*value - 1.0).abs() < 1e-10)
+            );
+            if let Some(reference) = &reference {
+                assert_eq!(result.time, reference.time);
+                assert_eq!(result.step_sizes, reference.step_sizes);
+            } else {
+                reference = Some(result);
+            }
+            let _ = std::fs::remove_file(model);
+        }
+    }
+}
+
+#[test]
+fn transient_finish_keeps_checkpoint_state_and_stops_future_captures() {
+    use rspice_core::engine::TransientStartupMode;
+    use rspice_core::{NoAbort, SimulationOutcome};
+    let model = write_model(
+        "checkpoint_finish",
+        r#"
+module checkpoint_finish(out);
+    inout out; electrical out;
+    real count;
+    analog begin
+        @(initial_step("tran")) count=1;
+        @(timer(2e-6)) $finish(1);
+        @(final_step("tran")) count=count+10;
+        V(out)<+count;
+    end
+endmodule
+"#,
+    );
+    let netlist = Netlist::parse(&format!(
+        "* finish checkpoint state\nX1 out checkpoint_finish\n.va \"{}\" checkpoint_finish\n.end\n",
+        deck_path(&model)
+    ))
+    .unwrap();
+    let engine = Engine::default();
+    let final_capture = engine
+        .run_with_outcome(&NoAbort, |engine, signal| {
+            engine.run_tran_checkpointed_with_abort(&netlist, 10e-6, 0.2e-6, signal)
+        })
+        .unwrap();
+    let SimulationOutcome::Finished {
+        result: Some((result, checkpoint)),
+        ..
+    } = final_capture
+    else {
+        panic!("finish must retain the final checkpoint");
+    };
+    assert_eq!(checkpoint.time, 2e-6);
+    assert_eq!(
+        TransientCheckpoint::from_text(&checkpoint.to_text())
+            .unwrap()
+            .time,
+        2e-6
+    );
+    let out = node_series(&result.node_names, &result.voltages, "out");
+    assert_eq!(out.last(), Some(&11.0));
+    let scheduled = engine
+        .run_with_outcome(&NoAbort, |engine, signal| {
+            engine.run_tran_checkpoint_schedule_with_startup_mode_and_abort(
+                &netlist,
+                10e-6,
+                0.2e-6,
+                TransientStartupMode::OperatingPoint,
+                &[1e-6, 3e-6],
+                signal,
+            )
+        })
+        .unwrap();
+    let SimulationOutcome::Finished {
+        result: Some((result, checkpoints)),
+        ..
+    } = scheduled
+    else {
+        panic!("finish must retain earlier scheduled checkpoints");
+    };
+    assert_eq!(result.time.last(), Some(&2e-6));
+    assert_eq!(checkpoints.len(), 1);
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
+fn portless_transient_models_execute_time_events_and_finish() {
+    use rspice_core::engine::SpiceDialect;
+    use rspice_core::{ModelFinishPoint, NoAbort, SimulationOutcome};
+    for mixed in [false, true] {
+        for (event, endpoint) in [
+            ("timer(2e-6)", 2e-6),
+            ("initial_step(\"tran\")", 0.0),
+            ("final_step(\"tran\")", 10e-6),
+        ] {
+            let source = format!(
+                r#"
+module portless_finish;
+    {}
+    analog @({event}) $finish(1);
+endmodule
+"#,
+                if mixed {
+                    "reg marker; initial marker=1'b1;"
+                } else {
+                    ""
+                }
+            );
+            let model = write_model(&format!("portless_finish_{mixed}"), &source);
+            let netlist = Netlist::parse(&format!(
+            "* a model does not need terminals to execute\nX1 portless_finish\n.va \"{}\" portless_finish\n.end\n",
+            deck_path(&model)
+        )).unwrap();
+            for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+                let engine = Engine::new(SimulationConfig {
+                    spice_dialect: dialect,
+                    ..SimulationConfig::default()
+                });
+                let outcome = engine
+                    .run_with_outcome(&NoAbort, |engine, signal| {
+                        engine.run_tran_with_abort(&netlist, 10e-6, 0.2e-6, signal)
+                    })
+                    .unwrap();
+                let SimulationOutcome::Finished {
+                    result: Some(result),
+                    finish,
+                } = outcome
+                else {
+                    panic!("portless model must finish at {event}");
+                };
+                assert_eq!(finish.point, ModelFinishPoint::Transient { time: endpoint });
+                assert_eq!(result.time.last(), Some(&endpoint));
+                assert!(result.node_names.is_empty());
+                assert!(result.voltages.is_empty());
+                if !mixed {
+                    let (_, checkpoint) = engine
+                        .run_tran_checkpointed(&netlist, 10e-6, 0.2e-6)
+                        .unwrap();
+                    assert_eq!(
+                        TransientCheckpoint::from_text(&checkpoint.to_text())
+                            .unwrap()
+                            .time,
+                        endpoint
+                    );
+                }
+            }
+            let _ = std::fs::remove_file(model);
+        }
+    }
+}
+
+#[test]
 fn checkpoint_resume_does_not_repeat_model_nodeset_startup() {
     let model = write_model(
         "resume_nodeset",

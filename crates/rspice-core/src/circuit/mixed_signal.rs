@@ -223,8 +223,31 @@ impl CircuitData {
         initial_step: bool,
         final_step: bool,
     ) -> Result<(), SimulationError> {
+        self.stamp_mixed_trial(
+            matrix,
+            rhs,
+            time,
+            dt,
+            voltages,
+            coefficients,
+            Some((initial_step, final_step)),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn stamp_mixed_trial(
+        &mut self,
+        matrix: &mut crate::solver::StaticMatrix,
+        rhs: &mut [Value],
+        time: Value,
+        dt: Value,
+        voltages: &[Value],
+        coefficients: &crate::numerics::integration::CompanionCoefficients,
+        analysis_step: Option<(bool, bool)>,
+    ) -> Result<(), SimulationError> {
         let integration = mixed_integration_coefficients(time, dt, coefficients)?;
         for host in &mut self.mixed_signal_hosts {
+            let (initial_step, final_step) = analysis_step.unwrap_or_else(|| host.analysis_step());
             let started = host.begin_probe_trial(time, dt, integration, initial_step, final_step);
             named(host, started)?;
             let stamped = settle_to_quiet(host, voltages).and_then(|()| {
@@ -272,15 +295,14 @@ impl CircuitData {
         solution: &[Value],
         time: Value,
     ) -> Result<(), SimulationError> {
-        self.stamp_mixed_transient_trial(
+        self.stamp_mixed_trial(
             matrix,
             rhs,
             time,
             0.0,
             solution,
             &crate::numerics::integration::CompanionCoefficients::backward_euler(),
-            true,
-            false,
+            None,
         )
     }
 
@@ -291,6 +313,7 @@ impl CircuitData {
     /// instance, and for the same reason: the integrator commits the state of
     /// the last evaluation, so that evaluation has to be the accepted one. The
     /// boundary is then settled to quiet and both domains commit together.
+    /// Returns whether an analog half newly raised `$discontinuity`.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn accept_mixed_transient_timestep(
         &mut self,
@@ -300,22 +323,81 @@ impl CircuitData {
         coefficients: &crate::numerics::integration::CompanionCoefficients,
         initial_step: bool,
         final_step: bool,
-    ) -> Result<(), SimulationError> {
+    ) -> Result<bool, SimulationError> {
         let integration = mixed_integration_coefficients(time, dt, coefficients)?;
+        let mut discontinuity = false;
         for host in &mut self.mixed_signal_hosts {
             let started = host.begin_trial(time, dt, integration, initial_step, final_step);
             named(host, started)?;
             let committed = host
                 .stamp(voltages, |_, _, _| {}, |_, _| {})
                 .and_then(|()| settle_to_quiet(host, voltages))
-                .and_then(|()| host.accept_trial());
+                .and_then(|()| {
+                    let rising = host.analog_device().discontinuity_rising();
+                    host.accept_trial()?;
+                    Ok(rising)
+                });
             if committed.is_err() && host.trial_active() {
                 let rolled_back = host.reject_trial();
                 named(host, rolled_back)?;
             }
-            named(host, committed)?;
+            discontinuity |= named(host, committed)?;
         }
-        Ok(())
+        Ok(discontinuity)
+    }
+
+    /// Inspect control calls at the actual candidate solution. Numerical
+    /// probes may have used other voltages, and their journals are speculative.
+    /// After all roots are resolved, `validate_acceptance` checks every host
+    /// on a copy before final-step equations replace a finishing candidate.
+    /// Ordinary numerical candidates require no copies here.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn visit_mixed_transient_candidate_task(
+        &mut self,
+        time: Value,
+        dt: Value,
+        voltages: &[Value],
+        coefficients: &crate::numerics::integration::CompanionCoefficients,
+        initial_step: bool,
+        final_step: bool,
+        kind: rspice_veriloga_runtime::AnalogTaskKind,
+        validate_acceptance: bool,
+        consume: &mut dyn FnMut(rspice_veriloga_runtime::AnalogTaskEvent<'_>),
+    ) -> Result<Option<Value>, SimulationError> {
+        let integration = mixed_integration_coefficients(time, dt, coefficients)?;
+        let mut refinement: Option<Value> = None;
+        for host in &mut self.mixed_signal_hosts {
+            let started = host.begin_trial(time, dt, integration, initial_step, final_step);
+            named(host, started)?;
+            let inspected = (|| {
+                host.stamp(voltages, |_, _, _| {}, |_, _| {})?;
+                settle_to_quiet(host, voltages)?;
+                let target = host
+                    .analog_device()
+                    .try_transient_event_refinement_time()
+                    .map_err(|error| MixedSignalError::Analog {
+                        detail: error.to_string(),
+                    })?;
+                if let Some(target) = target {
+                    refinement = Some(refinement.map_or(target, |current| current.min(target)));
+                } else if validate_acceptance {
+                    let mut accepted = host.clone();
+                    accepted.accept_trial()?;
+                } else if let Some(event) = host
+                    .analog_device()
+                    .first_candidate_analog_task(kind)
+                    .map_err(|error| MixedSignalError::Analog {
+                    detail: error.to_string(),
+                })? {
+                    consume(event);
+                }
+                Ok(())
+            })();
+            let rolled_back = host.reject_trial();
+            named(host, inspected)?;
+            named(host, rolled_back)?;
+        }
+        Ok(refinement)
     }
 
     /// Earliest scheduled digital activation across every mixed module.
