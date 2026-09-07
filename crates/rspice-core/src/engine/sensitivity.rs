@@ -745,15 +745,36 @@ impl Engine {
                 "Sensitivity param_value must be finite, got {param_value}"
             )));
         }
-        if let Some(delta) = delta {
-            if !delta.is_finite() || delta <= 0.0 {
-                return Err(SimulationError::Circuit(format!(
-                    "Sensitivity delta must be a positive finite number, got {delta}"
-                )));
-            }
-            return Ok(delta);
+        // A dimensionful floor can exceed the entire nominal value (for
+        // example a 100 fF capacitance) and cross its physical domain.
+        let h = delta.unwrap_or_else(|| Self::relative_sensitivity_step(param_value, 1e-12));
+        if !h.is_finite() || h <= 0.0 {
+            return Err(SimulationError::Circuit(format!(
+                "Sensitivity delta must be a positive finite number, got {h}"
+            )));
         }
-        Ok((param_value.abs() * 0.01).max(1e-12))
+        let lower = param_value - h;
+        let upper = param_value + h;
+        if !lower.is_finite()
+            || !upper.is_finite()
+            || lower >= param_value
+            || upper <= param_value
+            || !(upper - lower).is_finite()
+        {
+            return Err(SimulationError::Circuit(
+                "Sensitivity perturbations must be distinct, finite, representable values around the nominal parameter".to_owned(),
+            ));
+        }
+        Ok(h)
+    }
+
+    fn relative_sensitivity_step(nominal: Value, zero_scale: Value) -> Value {
+        if nominal == 0.0 {
+            zero_scale
+        } else {
+            // Retain at least one ULP for subnormal nonzero parameters.
+            (nominal.abs() * 1e-3).max(nominal.abs().next_up() - nominal.abs())
+        }
     }
 
     fn sensitivity_ac_voltage_magnitude(
@@ -852,7 +873,7 @@ impl Engine {
             ))
         })?;
 
-        Ok((v_plus - v_minus) / (2.0 * h))
+        Ok((v_plus - v_minus) / ((param_value + h) - (param_value - h)))
     }
 
     /// Run AC sensitivity analysis for a parameter across frequencies.
@@ -931,7 +952,7 @@ impl Engine {
             .map(|(p, m)| {
                 let p_mag = Self::sensitivity_ac_voltage_magnitude(p, output_node)?;
                 let m_mag = Self::sensitivity_ac_voltage_magnitude(m, output_node)?;
-                Ok((p_mag - m_mag) / (2.0 * h))
+                Ok((p_mag - m_mag) / ((param_value + h) - (param_value - h)))
             })
             .collect()
     }
@@ -2197,7 +2218,7 @@ impl Engine {
         } else {
             1.0e-12
         };
-        (target.nominal_value.abs() * 1.0e-3).max(absolute_floor)
+        Self::relative_sensitivity_step(target.nominal_value, absolute_floor)
     }
 
     fn ac_sensitivity_output_value(
@@ -2799,6 +2820,39 @@ mod tests {
     use crate::analysis::AcSensitivityOutput;
     use crate::netlist::AnalysisCommand;
     use crate::netlist::{StepCommand, StepSweep, StepTarget};
+
+    #[test]
+    fn default_ac_sensitivity_resolves_femtofarad_capacitances() {
+        let capacitance = 100e-15;
+        let resistance = 1e3;
+        let frequency = 1.0 / (std::f64::consts::TAU * resistance * capacitance);
+        let netlist = Netlist::parse(
+            "small capacitance\n.param cv=100f\nV1 in 0 AC 1\nR1 in out 1k\nC1 out 0 {cv}\n.end\n",
+        )
+        .unwrap();
+        let engine = Engine::default();
+        let derivative = engine
+            .run_sensitivity_ac(&netlist, 2, "cv", capacitance, &[frequency], None)
+            .unwrap()[0];
+        // |H| = 1 / sqrt(1 + (wRC)^2), evaluated at wRC = 1.
+        let expected = -1.0 / (2.0_f64.sqrt().powi(3) * capacitance);
+        assert!(
+            (derivative / expected - 1.0).abs() < 2e-6,
+            "{derivative} vs {expected}"
+        );
+    }
+
+    #[test]
+    fn sensitivity_refuses_unrepresentable_perturbations() {
+        for (nominal, step) in [
+            (1.0, Some(f64::MIN_POSITIVE)),
+            (f64::MAX, None),
+            (0.0, Some(f64::MAX)),
+        ] {
+            assert!(Engine::sensitivity_step(nominal, step).is_err());
+        }
+        assert!(Engine::sensitivity_step(f64::from_bits(2), None).unwrap() > 0.0);
+    }
 
     #[test]
     fn source_override_construction_honors_mid_build_cancellation() {
