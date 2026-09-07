@@ -45,16 +45,20 @@ pub(in crate::engine::builder) fn resolve_resistor_flicker_noise(
     let short = resolve_model_param(model_def, &["SHORT"], &eval_ctx)?.unwrap_or(0.0);
     let narrow = resolve_model_param(model_def, &["NARROW"], &eval_ctx)?.unwrap_or(0.0);
 
-    let length = instance_param(instance_params, &["L", "LENGTH"]).or_else(|| {
-        resolve_model_param(model_def, &["L", "LENGTH"], &eval_ctx)
-            .ok()
-            .flatten()
-    });
-    let width = instance_param(instance_params, &["W", "WIDTH"]).or_else(|| {
-        resolve_model_param(model_def, &["W", "WIDTH", "DEFW"], &eval_ctx)
-            .ok()
-            .flatten()
-    });
+    let length = resolve_instance_or_model_param(
+        instance_params,
+        &["L", "LENGTH"],
+        Some(model_def),
+        &["L", "LENGTH"],
+        &eval_ctx,
+    )?;
+    let width = resolve_instance_or_model_param(
+        instance_params,
+        &["W", "WIDTH"],
+        Some(model_def),
+        &["W", "WIDTH", "DEFW"],
+        &eval_ctx,
+    )?;
     let eff_noise_area = if length.is_some() || width.is_some() {
         let l_eff = (length.unwrap_or(0.0) - 2.0 * short).max(0.0);
         let w_eff = (width.unwrap_or(0.0) - 2.0 * narrow).max(0.0);
@@ -179,11 +183,13 @@ fn resolve_level2_thermal_resistor_static_value(
     instance_params: &[(String, f64)],
     eval_ctx: &crate::netlist::ParamContext,
 ) -> Result<f64, SimulationError> {
-    let resistivity = instance_param(instance_params, &["RESISTIVITY"]).or_else(|| {
-        resolve_model_param(model_def, &["RESISTIVITY"], eval_ctx)
-            .ok()
-            .flatten()
-    });
+    let resistivity = resolve_instance_or_model_param(
+        instance_params,
+        &["RESISTIVITY"],
+        Some(model_def),
+        &["RESISTIVITY"],
+        eval_ctx,
+    )?;
     let Some(resistivity) = resistivity else {
         return Err(SimulationError::Circuit(format!(
             "Resistor '{}' model '{}' thermal DC value requires RESISTIVITY",
@@ -415,11 +421,13 @@ fn resolve_level2_resistor_electrical_subset(
             )));
         }
 
-        let l = instance_param(instance_params, &["L", "LENGTH"]).or_else(|| {
-            resolve_model_param(model_def, &["L", "LENGTH"], eval_ctx)
-                .ok()
-                .flatten()
-        });
+        let l = resolve_instance_or_model_param(
+            instance_params,
+            &["L", "LENGTH"],
+            Some(model_def),
+            &["L", "LENGTH"],
+            eval_ctx,
+        )?;
         if uses_xyce_default && l.is_none() {
             return Ok(ResolvedResistorBaseValue {
                 electrical_resistance: 1000.0,
@@ -432,13 +440,14 @@ fn resolve_level2_resistor_electrical_subset(
                 element_name, model_name
             ))
         })?;
-        let w = instance_param(instance_params, &["W", "WIDTH"])
-            .or_else(|| {
-                resolve_model_param(model_def, &["W", "WIDTH", "DEFW"], eval_ctx)
-                    .ok()
-                    .flatten()
-            })
-            .unwrap_or(10.0e-6);
+        let w = resolve_instance_or_model_param(
+            instance_params,
+            &["W", "WIDTH"],
+            Some(model_def),
+            &["W", "WIDTH", "DEFW"],
+            eval_ctx,
+        )?
+        .unwrap_or(10.0e-6);
         let narrow = resolve_model_param(model_def, &["NARROW"], eval_ctx)?.unwrap_or(0.0);
         let l_eff = l - narrow;
         let w_eff = w - narrow;
@@ -542,22 +551,24 @@ fn resolve_level1_model_geometry_resistance(
         resolve_model_param(model_def, &["NRS", "NRSQ", "NSQ", "SQUARES"], eval_ctx)?
     {
         nsq
-    } else if let Some(l) = instance_param(instance_params, &["L", "LENGTH"])
-        .or_else(|| {
-            resolve_model_param(model_def, &["L", "LENGTH"], eval_ctx)
-                .ok()
-                .flatten()
-        })
-        .or_else(|| (spice_dialect == SpiceDialect::Ngspice).then_some(10.0e-6))
-        .filter(|value| value.is_finite() && *value != 0.0)
+    } else if let Some(l) = resolve_instance_or_model_param(
+        instance_params,
+        &["L", "LENGTH"],
+        Some(model_def),
+        &["L", "LENGTH"],
+        eval_ctx,
+    )?
+    .or_else(|| (spice_dialect == SpiceDialect::Ngspice).then_some(10.0e-6))
+    .filter(|value| value.is_finite() && *value != 0.0)
     {
-        let w = instance_param(instance_params, &["W", "WIDTH"])
-            .or_else(|| {
-                resolve_model_param(model_def, &["W", "WIDTH", "DEFW"], eval_ctx)
-                    .ok()
-                    .flatten()
-            })
-            .unwrap_or(10.0e-6);
+        let w = resolve_instance_or_model_param(
+            instance_params,
+            &["W", "WIDTH"],
+            Some(model_def),
+            &["W", "WIDTH", "DEFW"],
+            eval_ctx,
+        )?
+        .unwrap_or(10.0e-6);
         let narrow = resolve_model_param(model_def, &["NARROW"], eval_ctx)?.unwrap_or(0.0);
         let short = if expression_dialect == crate::config::ExpressionDialect::Xyce {
             0.0
