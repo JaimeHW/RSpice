@@ -288,7 +288,7 @@ fn seed_specialized_viewer_caches(state: &mut AppState) {
     state.simulation.active_analysis_idx = Some(0);
     state.simulation.next_run_id = 2;
 
-    state.analysis.histogram_state.selected = 7;
+    state.analysis.histogram_state.selected = Some("old measurement".to_owned());
     let mut bode = BodeData::new();
     bode.add_response();
     state.analysis.bode_plot_state.load_data(bode);
@@ -359,7 +359,7 @@ fn seed_specialized_viewer_caches(state: &mut AppState) {
 }
 
 fn assert_specialized_viewer_caches_cleared(state: &AppState) {
-    assert_eq!(state.analysis.histogram_state.selected, 0);
+    assert_eq!(state.analysis.histogram_state.selected, None);
     assert!(
         state.analysis.pole_zero_state.is_empty(),
         "legacy pole-zero presentation cache should be cleared"

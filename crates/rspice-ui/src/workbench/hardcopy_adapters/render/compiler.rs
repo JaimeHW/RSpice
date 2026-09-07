@@ -1832,6 +1832,15 @@ impl<'a> SemanticSceneCompiler<'a> {
             )?;
             self.add_mapping_legend(PrintObjectKind::Marker, &stable_id, stroke)?;
         }
+        for caption in &plot.captions {
+            self.add_text(
+                self.semantic_point(caption.position)?,
+                &caption.text,
+                SceneFont::Sans,
+                2_300,
+                SemanticColor::Secondary,
+            )?;
+        }
         for annotation in &plot.annotations {
             let position = annotation.position.ok_or_else(|| {
                 conversion_error(format!(

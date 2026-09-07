@@ -210,6 +210,15 @@ pub struct SemanticPlotAnnotation {
     pub position: Option<SemanticPoint>,
 }
 
+/// Plot metadata or axis context placed by the source's page layout.
+/// Captions have no leader or implied association with a data observation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SemanticPlotCaption {
+    pub text: String,
+    pub position: SemanticPoint,
+}
+
 /// Exact active Cartesian pane. Source samples are mapped to integer physical
 /// coordinates only after the retained scene has validated its document,
 /// revision, digest, axes, bindings, and supported viewer semantics.
@@ -242,6 +251,8 @@ pub struct SemanticPlot {
     pub cursors: Vec<SemanticPlotCursor>,
     pub markers: Vec<SemanticPlotMarker>,
     pub annotations: Vec<SemanticPlotAnnotation>,
+    #[serde(default)]
+    pub captions: Vec<SemanticPlotCaption>,
 }
 
 const fn linear_axis() -> AxisScale {

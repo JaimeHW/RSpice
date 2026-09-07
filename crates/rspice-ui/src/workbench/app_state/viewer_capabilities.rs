@@ -4,6 +4,9 @@
 //! the toolbar for a viewer is derived from the viewer rather than
 //! maintained alongside it.
 
+#[cfg(test)]
+mod histogram_publication;
+
 use crate::analysis::eye_diagram::{EyeTimebase, EyeTimebaseKey};
 use crate::workbench::app_state::{
     ActiveViewer, AppState, SpecializedViewerAnalysisIdentity, SpecializedViewerCacheProvenance,

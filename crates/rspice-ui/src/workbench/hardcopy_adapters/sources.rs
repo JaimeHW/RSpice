@@ -205,6 +205,7 @@ struct ResultsQuickViewPresentation {
     fft: crate::analysis::FftState,
     histogram_view: crate::workbench::documents::result_document::PlotView,
     histogram_selected: usize,
+    histogram_measurement: Option<String>,
     histogram_bin_count: usize,
     histogram_custom_range: bool,
     histogram_custom_min: f64,
@@ -250,7 +251,8 @@ impl ResultsQuickViewPresentation {
             specs: crate::workbench::documents::result_document::run_specifications(state),
             fft,
             histogram_view: state.ui.results.plot_view(ResultViewer::Hist, 0),
-            histogram_selected: state.analysis.histogram_state.selected,
+            histogram_selected: 0,
+            histogram_measurement: state.analysis.histogram_state.selected.clone(),
             histogram_bin_count: state.analysis.histogram_state.bin_count,
             histogram_custom_range: state.analysis.histogram_state.custom_range,
             histogram_custom_min: state.analysis.histogram_state.custom_min,
@@ -1184,8 +1186,10 @@ fn quick_result_availability(
         ResultViewer::Hist => matches!(
             analysis.family_metadata.as_ref(),
             Some(AnalysisResultFamilyMetadata::MonteCarlo { variables, .. })
-                if variables
-                    .get(state.analysis.histogram_state.selected.min(variables.len().saturating_sub(1)))
+                if crate::analysis::histogram::state::measurement_index(
+                    state.analysis.histogram_state.selected.as_deref(), 0,
+                    &variables.iter().map(|variable| variable.name.as_str()).collect::<Vec<_>>(),
+                ).and_then(|index| variables.get(index))
                     .is_some_and(|variable| !variable.samples.is_empty())
         ),
         ResultViewer::Nyquist => visible_waveforms().any(|waveform| {

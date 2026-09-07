@@ -660,6 +660,7 @@ pub fn resolve_plot_source(
             .collect(),
         markers: Vec::new(),
         annotations: Vec::new(),
+        captions: Vec::new(),
     };
     let identity = HardcopySourceIdentity::try_new(
         source.source_key,

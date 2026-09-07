@@ -598,7 +598,7 @@ mod tests {
         state.ui.netlist.pending_manual_run_id = Some(1);
         state.ui.netlist.rerun_queued = true;
         state.ui.netlist.edited_lines.insert(3);
-        state.analysis.histogram_state.selected = 7;
+        state.analysis.histogram_state.selected = Some("old measurement".to_owned());
     }
 
     fn assert_design_execution_context_cleared(state: &AppState) {
@@ -610,7 +610,7 @@ mod tests {
         assert!(state.ui.netlist.pending_manual_run_id.is_none());
         assert!(!state.ui.netlist.rerun_queued);
         assert!(state.ui.netlist.edited_lines.is_empty());
-        assert_eq!(state.analysis.histogram_state.selected, 0);
+        assert_eq!(state.analysis.histogram_state.selected, None);
     }
 
     fn open_default_symbol_view(state: &mut AppState) -> CellViewRef {

@@ -277,6 +277,8 @@ pub(super) struct PreparedResultsPresentation {
     #[serde(default)]
     histogram_y: Option<(f64, f64)>,
     histogram_selected: usize,
+    #[serde(default)]
+    histogram_measurement: Option<String>,
     histogram_bin_count: usize,
     histogram_custom_range: bool,
     histogram_custom_min: f64,
@@ -330,6 +332,7 @@ impl PreparedResultsPresentation {
             histogram_x: value.histogram_view.x,
             histogram_y: value.histogram_view.y,
             histogram_selected: value.histogram_selected,
+            histogram_measurement: value.histogram_measurement,
             histogram_bin_count: value.histogram_bin_count,
             histogram_custom_range: value.histogram_custom_range,
             histogram_custom_min: value.histogram_custom_min,
@@ -347,6 +350,11 @@ impl PreparedResultsPresentation {
 
     fn validate(&self) -> Result<(), HardcopySourceError> {
         self.overlay.validate()?;
+        validate_optional_label(
+            "prepared histogram measurement",
+            self.histogram_measurement.as_deref(),
+            DISPLAY_NAME_LIMIT,
+        )?;
         for (low, high) in [self.histogram_x, self.histogram_y].into_iter().flatten() {
             if !low.is_finite() || !high.is_finite() || low >= high || !(high - low).is_finite() {
                 return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
@@ -445,6 +453,7 @@ impl PreparedResultsPresentation {
                 y: self.histogram_y,
             },
             histogram_selected: self.histogram_selected,
+            histogram_measurement: self.histogram_measurement,
             histogram_bin_count: self.histogram_bin_count,
             histogram_custom_range: self.histogram_custom_range,
             histogram_custom_min: self.histogram_custom_min,
@@ -469,6 +478,7 @@ mod histogram_tests {
         for mode in crate::analysis::HistogramDisplayMode::ALL {
             let mut presentation = ResultsQuickViewPresentation::from_state(&state);
             presentation.histogram_mode = mode;
+            presentation.histogram_measurement = Some("gain".to_owned());
             presentation.histogram_view.x = Some((1e-15, 2e-15));
             presentation.histogram_view.y = Some((0.0, 100.0));
             let prepared = PreparedResultsPresentation::capture(presentation).unwrap();
@@ -478,16 +488,22 @@ mod histogram_tests {
                 .restore()
                 .unwrap();
             assert_eq!(restored.histogram_mode, mode);
+            assert_eq!(restored.histogram_measurement.as_deref(), Some("gain"));
             assert_eq!(restored.histogram_view.x, Some((1e-15, 2e-15)));
             assert_eq!(restored.histogram_view.y, Some((0.0, 100.0)));
 
             let mut legacy = serde_json::to_value(&prepared).unwrap();
+            legacy
+                .as_object_mut()
+                .unwrap()
+                .remove("histogram_measurement");
             legacy.as_object_mut().unwrap().remove("histogram_x");
             legacy.as_object_mut().unwrap().remove("histogram_y");
             let restored = serde_json::from_value::<PreparedResultsPresentation>(legacy)
                 .unwrap()
                 .restore()
                 .unwrap();
+            assert_eq!(restored.histogram_measurement, None);
             assert_eq!(restored.histogram_view.x, None);
             assert_eq!(restored.histogram_view.y, None);
 

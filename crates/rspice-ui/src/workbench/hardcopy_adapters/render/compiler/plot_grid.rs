@@ -57,14 +57,34 @@ impl SemanticSceneCompiler<'_> {
             if tick.label.is_empty() {
                 continue;
             }
-            let foot = if from.y.micrometres() > to.y.micrometres() {
-                from
-            } else {
-                to
+            let (caption, anchor) = match tick.axis {
+                crate::workbench::hardcopy_adapters::sources::SemanticAxisKind::Horizontal => {
+                    let foot = if from.y.micrometres() > to.y.micrometres() {
+                        from
+                    } else {
+                        to
+                    };
+                    (self.offset_scene_point(foot, 0, 2_600)?, TextAnchor::Middle)
+                }
+                crate::workbench::hardcopy_adapters::sources::SemanticAxisKind::Vertical => {
+                    let foot = if from.x.micrometres() < to.x.micrometres() {
+                        from
+                    } else {
+                        to
+                    };
+                    (self.offset_scene_point(foot, -1_000, 700)?, TextAnchor::End)
+                }
             };
-            let caption = self.offset_scene_point(foot, 600, 2_600)?;
             let color = SemanticColor::Secondary;
-            self.add_text(caption, &tick.label, SceneFont::Monospace, 2_300, color)?;
+            self.add_text_placed(
+                caption,
+                &tick.label,
+                SceneFont::Monospace,
+                2_300,
+                color,
+                anchor,
+                SceneTextRotation::Upright,
+            )?;
         }
         Ok(())
     }

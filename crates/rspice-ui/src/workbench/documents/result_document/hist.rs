@@ -531,15 +531,12 @@ fn binning_label(histogram: &crate::analysis::histogram::data::Histogram) -> Str
 /// The distribution the reader has selected, by name.
 fn selected_histogram_name(state: &AppState) -> Option<String> {
     let names = histogram_names(state);
-    names
-        .get(
-            state
-                .analysis
-                .histogram_state
-                .selected
-                .min(names.len().saturating_sub(1)),
-        )
-        .map(|name| (*name).to_owned())
+    let index = crate::analysis::histogram::state::measurement_index(
+        state.analysis.histogram_state.selected.as_deref(),
+        0,
+        &names,
+    )?;
+    Some(names[index].to_owned())
 }
 
 // ---------------------------------------------------------------------------
@@ -557,17 +554,20 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         .collect();
     if !names.is_empty() {
         let settings = &mut state.analysis.histogram_state;
-        settings.selected = settings.selected.min(names.len() - 1);
+        if settings.selected.is_none() {
+            settings.selected = names.first().cloned();
+        }
+        let selected_text = settings.selected.as_deref().unwrap_or_default().to_owned();
         let changed = ui
             .horizontal_wrapped(|ui| {
                 let mut changed = false;
                 ui.label("Measure");
                 egui::ComboBox::from_id_salt("hist_measurement")
-                    .selected_text(&names[settings.selected])
+                    .selected_text(&selected_text)
                     .show_ui(ui, |ui| {
-                        for (index, name) in names.iter().enumerate() {
+                        for name in &names {
                             changed |= ui
-                                .selectable_value(&mut settings.selected, index, name)
+                                .selectable_value(&mut settings.selected, Some(name.clone()), name)
                                 .changed();
                         }
                     });
@@ -599,7 +599,14 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         }
     }
     let Some(name) = selected_histogram_name(state) else {
-        well_hint(ui, "No distribution yet — run a Monte Carlo analysis");
+        well_hint(
+            ui,
+            if names.is_empty() {
+                "No distribution yet — run a Monte Carlo analysis"
+            } else {
+                "The selected measurement is unavailable. Choose a measurement above."
+            },
+        );
         return;
     };
     // Resolved before the distribution is borrowed, so the population is

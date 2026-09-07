@@ -513,6 +513,7 @@ pub(crate) fn resolve_active_studio_pane_source(
         cursors: Vec::new(),
         markers,
         annotations,
+        captions: Vec::new(),
     };
     let digest = studio_pane_digest(
         source.studio,

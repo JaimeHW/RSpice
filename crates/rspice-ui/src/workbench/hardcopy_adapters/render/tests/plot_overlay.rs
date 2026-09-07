@@ -62,6 +62,7 @@ fn overlay_plot() -> SemanticPlot {
             position: Some(point(127_000, 71_437)),
         }],
         annotations: Vec::new(),
+        captions: Vec::new(),
     }
 }
 

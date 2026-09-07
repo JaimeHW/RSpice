@@ -92,6 +92,42 @@ fn hist_source_restoration_opens_the_current_population_without_cached_bins() {
 }
 
 #[test]
+fn hist_selection_preserves_the_measurement_name_across_reordering_and_removal() {
+    let mut state = state_with(super::tests::mc_variable("gain"));
+    state.analysis.histogram_state.selected = Some("gain".to_owned());
+    let Some(AnalysisResultFamilyMetadata::MonteCarlo { variables, .. }) = state.simulation.runs[0]
+        .analyses[0]
+        .family_metadata
+        .as_mut()
+    else {
+        unreachable!()
+    };
+    let mut other = variables[0].clone();
+    other.name = "offset".to_owned();
+    other.samples.fill(99.0);
+    other.mean = 99.0;
+    other.std_dev = 0.0;
+    other.min = 99.0;
+    other.max = 99.0;
+    variables.insert(0, other);
+    let histogram = active_histogram(&state).unwrap();
+    assert_eq!(histogram.name, "gain");
+    assert_eq!(histogram.data_max, 3.0);
+    let Some(AnalysisResultFamilyMetadata::MonteCarlo { variables, .. }) = state.simulation.runs[0]
+        .analyses[0]
+        .family_metadata
+        .as_mut()
+    else {
+        unreachable!()
+    };
+    variables.remove(1);
+    assert!(active_histogram(&state).is_none());
+    assert!(paint(&mut state, false).contains("selected measurement is unavailable"));
+    state.analysis.histogram_state.selected = Some("offset".to_owned());
+    assert_eq!(active_histogram(&state).unwrap().data_max, 99.0);
+}
+
+#[test]
 fn hist_modes_refresh_projection_and_keep_point_density_unavailable() {
     let mut state = state_with(super::tests::mc_variable("gain"));
     let count = hist_plan(&state, "gain");
@@ -254,7 +290,7 @@ fn hist_source_unchanged_large_histories_do_not_repeat_population_walks() {
 fn hist_source_bins_follow_display_settings_and_repaired_evidence() {
     let mut state = state_with(super::tests::mc_variable("gain"));
     state.analysis.histogram_state.bin_count = 2;
-    state.analysis.histogram_state.selected = usize::MAX;
+    state.analysis.histogram_state.selected = Some("gain".to_owned());
     let first = active_histogram(&state).unwrap();
     assert_eq!(first.bins.len(), 2);
     assert_eq!(first.total_count, 3);

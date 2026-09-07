@@ -570,15 +570,18 @@ pub(super) fn quick_histogram_plot(
             "Monte Carlo family metadata",
         ));
     };
-    let variable = variables
-        .get(
-            presentation
-                .histogram_selected
-                .min(variables.len().saturating_sub(1)),
-        )
-        .ok_or(HardcopySourceError::MissingViewerEvidence(
-            "selected Monte Carlo variable",
-        ))?;
+    let variable = crate::analysis::histogram::state::measurement_index(
+        presentation.histogram_measurement.as_deref(),
+        presentation.histogram_selected,
+        &variables
+            .iter()
+            .map(|variable| variable.name.as_str())
+            .collect::<Vec<_>>(),
+    )
+    .and_then(|index| variables.get(index))
+    .ok_or(HardcopySourceError::MissingViewerEvidence(
+        "selected Monte Carlo variable",
+    ))?;
     if variable.samples.is_empty() {
         return Err(HardcopySourceError::MissingViewerEvidence(
             "Monte Carlo samples",
@@ -621,6 +624,31 @@ pub(super) fn quick_histogram_plot(
     }
     let width = PLOT_WIDTH_UM - 2 * PLOT_INSET_UM;
     let height = PLOT_HEIGHT_UM - 2 * PLOT_INSET_UM;
+    let (axis_ticks, mut captions) = plot_axes(
+        AxisScale::Linear,
+        AxisScale::Linear,
+        &PlotFrame {
+            x_minimum: x0,
+            x_maximum: x1,
+            y_minimum: y0,
+            y_maximum: y1,
+            x_span: x1 - x0,
+            y_span: y1 - y0,
+            plot_width: width,
+            plot_height: height,
+        },
+    )?;
+    captions.push(SemanticPlotCaption {
+        text: format!(
+            "{} [{}]; {} samples; {} below and {} above the bin range",
+            display.mode.label(),
+            display.mode.unit(),
+            histogram.total_count,
+            histogram.underflow,
+            histogram.overflow
+        ),
+        position: SemanticPoint::new(PLOT_INSET_UM, 5_000),
+    });
     let mut paths = Vec::new();
     for outline in display.paths(&histogram, x0, x1) {
         paths.extend(clipped_plot_paths(&outline, x0, x1, y0, y1, width, height)?);
@@ -639,7 +667,7 @@ pub(super) fn quick_histogram_plot(
         pane_id: 0,
         x_scale: AxisScale::Linear,
         y_scale: AxisScale::Linear,
-        axis_ticks: Vec::new(),
+        axis_ticks,
         traces: vec![SemanticPlotTrace {
             trace_id,
             label: histogram.name.clone(),
@@ -652,21 +680,8 @@ pub(super) fn quick_histogram_plot(
         }],
         cursors: Vec::new(),
         markers: Vec::new(),
-        annotations: vec![SemanticPlotAnnotation {
-            annotation_id: 0,
-            text: format!(
-                "{} [{}]; {} samples; {} below and {} above the bin range",
-                display.mode.label(),
-                display.mode.unit(),
-                histogram.total_count,
-                histogram.underflow,
-                histogram.overflow
-            ),
-            trace_id: Some(trace_id),
-            source_x_bits: None,
-            source_y_bits: None,
-            position: None,
-        }],
+        annotations: Vec::new(),
+        captions,
     })
 }
 
@@ -949,7 +964,7 @@ pub(super) fn quick_plot_from_scaled_series(
         plot_width,
         plot_height,
     };
-    let axis_ticks = plot_axis_ticks(x_scale, &frame)?;
+    let (axis_ticks, captions) = plot_axes(x_scale, y_scale, &frame)?;
     let (cursors, markers) = overlay.map_or_else(
         || Ok((Vec::new(), Vec::new())),
         |overlay| resolved_overlay_geometry(viewer, overlay, &series, x_scale, y_scale, &frame),
@@ -995,6 +1010,7 @@ pub(super) fn quick_plot_from_scaled_series(
         cursors,
         markers,
         annotations: Vec::new(),
+        captions,
     })
 }
 

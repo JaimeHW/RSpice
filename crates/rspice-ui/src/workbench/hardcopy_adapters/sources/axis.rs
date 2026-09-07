@@ -39,116 +39,174 @@ pub(super) fn project(scale: AxisScale, value: f64) -> Option<f64> {
     }
 }
 
-/// The gridlines one plot rules, in page coordinates.
-///
-/// A linear axis keeps the frame's own even divisions, which is what it has
-/// always drawn and what a linear sweep deserves. A logarithmic axis rules
-/// every decade boundary it contains, and the eight interior mantissas — 2
-/// through 9 — of every decade it touches, while the span is narrow enough
-/// for them to read as a grid rather than as ink.
-///
-/// The mantissas are ruled per decade *touched*, not per decade *contained*.
-/// A 2 kHz to 8 kHz sweep contains no whole decade at all, and ruling only
-/// contained ones left it with no logarithmic ruling whatever — the page fell
-/// back on the frame's even divisions, which is ten equal slices of a span
-/// that has no equal slices.
-///
-/// A window with no decade boundary inside it has nothing else to caption, so
-/// there the mantissas are the majors and carry the labels. That is what the
-/// sheet does: `ui::plot::scale::decade_ticks` degrades its ladder to
-/// captioned mantissas inside a decade rather than leaving a log axis with no
-/// numbers on it, and `plot_grid` prints no caption for an empty label — so a
-/// page that ruled the mantissas as minors ruled a frequency axis with no
-/// frequencies stated anywhere on it.
-pub(super) fn plot_axis_ticks(
+/// Resolve both axes in source space before mapping ticks to the page.
+/// Offset labels retain their anchor as a caption, as on the interactive plot.
+pub(super) fn plot_axes(
     x_scale: AxisScale,
+    y_scale: AxisScale,
     frame: &PlotFrame,
-) -> Result<Vec<SemanticAxisTick>, HardcopySourceError> {
-    if x_scale != AxisScale::Logarithmic {
-        return Ok(Vec::new());
-    }
-    if !frame.x_minimum.is_finite() || !frame.x_maximum.is_finite() {
-        return Ok(Vec::new());
-    }
-    // The frame's bounds are already in log space, so a decade is an integer.
-    let first = frame.x_minimum.ceil() as i64;
-    let last = frame.x_maximum.floor() as i64;
+) -> Result<(Vec<SemanticAxisTick>, Vec<SemanticPlotCaption>), HardcopySourceError> {
     let mut ticks = Vec::new();
-    for decade in first..=last {
-        push_vertical_rule(
-            &mut ticks,
-            frame,
-            decade as f64,
-            fmt_si_significant(10.0_f64.powi(decade as i32), "", 3),
-            true,
-        )?;
-    }
-    if frame.x_maximum - frame.x_minimum > MINOR_DECADE_LIMIT {
-        return Ok(ticks);
-    }
-    // No decade boundary fell inside the window, so nothing above carries a
-    // caption and the mantissas are all the axis has left to state itself
-    // with. They are promoted rather than added to: the window is narrower
-    // than a decade, so there is no coarser rule for them to subdivide.
-    let mantissas_are_the_ladder = first > last;
-    // Every decade the window touches, including the partial ones at its ends.
-    let touched_first = frame.x_minimum.floor() as i64;
-    let touched_last = frame.x_maximum.floor() as i64;
-    for decade in touched_first..=touched_last {
-        let exponent = decade as f64;
-        for mantissa in 2..10 {
-            let position = exponent + f64::from(mantissa).log10();
-            // Strictly inside: a mantissa sitting on the frame's own edge is
-            // the axis boundary, not a subdivision of it.
-            if position <= frame.x_minimum || position >= frame.x_maximum {
+    let mut captions = Vec::new();
+    for (kind, scale, min, max) in [
+        (
+            SemanticAxisKind::Horizontal,
+            x_scale,
+            frame.x_minimum,
+            frame.x_maximum,
+        ),
+        (
+            SemanticAxisKind::Vertical,
+            y_scale,
+            frame.y_minimum,
+            frame.y_maximum,
+        ),
+    ] {
+        if !min.is_finite() || !max.is_finite() || min >= max || !(max - min).is_finite() {
+            return Err(HardcopySourceError::InvalidResultRange);
+        }
+        let rules = if scale == AxisScale::Logarithmic {
+            logarithmic_rules(min, max)
+        } else {
+            let axis = crate::ui::plot::Axis::linear(min, max, "");
+            if let Some(anchor) = axis.offset_anchor() {
+                let (label, y) = match kind {
+                    SemanticAxisKind::Horizontal => ("x", PLOT_HEIGHT_UM - 1_500),
+                    SemanticAxisKind::Vertical => ("y", 9_000),
+                };
+                captions.push(SemanticPlotCaption {
+                    text: format!("{label}: {anchor}"),
+                    position: SemanticPoint::new(PLOT_INSET_UM, y),
+                });
+            }
+            axis.ticks
+                .into_iter()
+                .map(|(value, label)| (value, label, true))
+                .collect()
+        };
+        for (value, label, major) in rules {
+            if value < min || value > max {
                 continue;
             }
-            let label = if mantissas_are_the_ladder {
-                fmt_si_significant(10.0_f64.powi(decade as i32) * f64::from(mantissa), "", 3)
+            let (start, end) = match kind {
+                SemanticAxisKind::Horizontal => {
+                    ((value, frame.y_minimum), (value, frame.y_maximum))
+                }
+                SemanticAxisKind::Vertical => ((frame.x_minimum, value), (frame.x_maximum, value)),
+            };
+            let point = |(x, y)| {
+                map_plot_point(
+                    x,
+                    y,
+                    frame.x_minimum,
+                    frame.y_minimum,
+                    frame.x_span,
+                    frame.y_span,
+                    frame.plot_width,
+                    frame.plot_height,
+                )
+            };
+            ticks.push(SemanticAxisTick {
+                axis: kind,
+                start: point(start)?,
+                end: point(end)?,
+                label,
+                major,
+            });
+        }
+    }
+    Ok((ticks, captions))
+}
+
+fn logarithmic_rules(min: f64, max: f64) -> Vec<(f64, String, bool)> {
+    let first = min.ceil() as i32;
+    let last = max.floor() as i32;
+    let mut rules = Vec::new();
+    for decade in first..=last {
+        let value = 10.0_f64.powi(decade);
+        if value.is_finite() && value > 0.0 {
+            rules.push((f64::from(decade), fmt_si_significant(value, "", 3), true));
+        }
+    }
+    if max - min > MINOR_DECADE_LIMIT {
+        return rules;
+    }
+    let promote = rules.is_empty();
+    for decade in min.floor() as i32..=max.floor() as i32 {
+        for mantissa in 2..10 {
+            let position = f64::from(decade) + f64::from(mantissa).log10();
+            if position <= min || position >= max {
+                continue;
+            }
+            let value = 10.0_f64.powf(position);
+            if !value.is_finite() || value <= 0.0 {
+                continue;
+            }
+            let label = if promote {
+                fmt_si_significant(value, "", 3)
             } else {
                 String::new()
             };
-            push_vertical_rule(&mut ticks, frame, position, label, mantissas_are_the_ladder)?;
+            rules.push((position, label, promote));
         }
     }
-    Ok(ticks)
-}
-
-fn push_vertical_rule(
-    ticks: &mut Vec<SemanticAxisTick>,
-    frame: &PlotFrame,
-    position: f64,
-    label: String,
-    major: bool,
-) -> Result<(), HardcopySourceError> {
-    if position < frame.x_minimum || position > frame.x_maximum {
-        return Ok(());
-    }
-    let point = |y| {
-        map_plot_point(
-            position,
-            y,
-            frame.x_minimum,
-            frame.y_minimum,
-            frame.x_span,
-            frame.y_span,
-            frame.plot_width,
-            frame.plot_height,
-        )
-    };
-    ticks.push(SemanticAxisTick {
-        axis: SemanticAxisKind::Horizontal,
-        start: point(frame.y_minimum)?,
-        end: point(frame.y_maximum)?,
-        label,
-        major,
-    });
-    Ok(())
+    rules
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn linear_axes_are_captioned_on_both_dimensions_and_keep_offset_anchors() {
+        let frame = log_frame(1e9, 1e9 + 0.001);
+        let (ticks, captions) = plot_axes(AxisScale::Linear, AxisScale::Linear, &frame).unwrap();
+        let screen = crate::ui::plot::Axis::linear(frame.x_minimum, frame.x_maximum, "");
+        let anchor = screen
+            .offset_anchor()
+            .expect("this span requires an offset anchor");
+        assert!(
+            captions
+                .iter()
+                .any(|caption| caption.text == format!("x: {anchor}"))
+        );
+        for kind in [SemanticAxisKind::Horizontal, SemanticAxisKind::Vertical] {
+            let axis: Vec<_> = ticks.iter().filter(|tick| tick.axis == kind).collect();
+            assert!(!axis.is_empty());
+            assert!(axis.iter().all(|tick| tick.major && !tick.label.is_empty()));
+            for tick in axis {
+                match kind {
+                    SemanticAxisKind::Horizontal => assert_eq!(tick.start.x_um, tick.end.x_um),
+                    SemanticAxisKind::Vertical => assert_eq!(tick.start.y_um, tick.end.y_um),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn logarithmic_ordinates_are_mapped_as_decades() {
+        let mut frame = log_frame(0.0, 2.0);
+        frame.y_maximum = 2.0;
+        frame.y_span = 2.0;
+        let (ticks, _) = plot_axes(AxisScale::Linear, AxisScale::Logarithmic, &frame).unwrap();
+        let major: Vec<_> = ticks
+            .iter()
+            .filter(|tick| tick.axis == SemanticAxisKind::Vertical && tick.major)
+            .collect();
+        assert_eq!(
+            major
+                .iter()
+                .map(|tick| tick.label.as_str())
+                .collect::<Vec<_>>(),
+            vec!["1.00", "10.0", "100"]
+        );
+        let first = major[0].start.y_um - major[1].start.y_um;
+        let second = major[1].start.y_um - major[2].start.y_um;
+        assert!(
+            first.abs_diff(second) <= 1,
+            "equal decades may differ only by micrometre rounding"
+        );
+    }
 
     /// A frame over `[10^x_minimum, 10^x_maximum]`, already in log space.
     fn log_frame(x_minimum: f64, x_maximum: f64) -> PlotFrame {
@@ -165,8 +223,16 @@ mod tests {
     }
 
     fn ticks(x_minimum: f64, x_maximum: f64) -> Vec<SemanticAxisTick> {
-        plot_axis_ticks(AxisScale::Logarithmic, &log_frame(x_minimum, x_maximum))
-            .expect("the frame is inside the page")
+        plot_axes(
+            AxisScale::Logarithmic,
+            AxisScale::Linear,
+            &log_frame(x_minimum, x_maximum),
+        )
+        .expect("the frame is inside the page")
+        .0
+        .into_iter()
+        .filter(|tick| tick.axis == SemanticAxisKind::Horizontal)
+        .collect()
     }
 
     /// The screen rules its minor lines by the span the axis covers; the page

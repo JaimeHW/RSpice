@@ -301,7 +301,7 @@ fn histogram_quick_view_derives_only_from_active_monte_carlo_metadata() {
         });
     let mut state = quick_view_state(analysis, ResultViewer::Hist);
     state.analysis.histogram_state.bin_count = 5;
-    state.analysis.histogram_state.selected = usize::MAX;
+    state.analysis.histogram_state.selected = Some("gain".to_owned());
     let onscreen = crate::workbench::documents::result_document::active_histogram(&state).unwrap();
 
     let resolved = resolve_quick_view(&state).unwrap();
@@ -382,7 +382,11 @@ fn histogram_quick_view_derives_only_from_active_monte_carlo_metadata() {
                 .map(|(x, y)| (x.to_bits(), y.to_bits()))
                 .collect::<Vec<_>>()
         );
-        assert!(plot.annotations[0].text.contains(mode.label()));
+        assert!(
+            plot.captions
+                .iter()
+                .any(|caption| caption.text.contains(mode.label()))
+        );
         state.analysis.histogram_state.custom_range = false;
     }
 }
@@ -598,7 +602,7 @@ fn a_frequency_sweep_is_printed_in_decades_and_ruled_at_them() {
     let major = plot
         .axis_ticks
         .iter()
-        .filter(|tick| tick.major)
+        .filter(|tick| tick.major && tick.axis == SemanticAxisKind::Horizontal)
         .collect::<Vec<_>>();
     assert_eq!(major.len(), 7, "{:?}", plot.axis_ticks);
     assert_eq!(
@@ -643,7 +647,13 @@ fn a_frequency_sweep_is_printed_in_decades_and_ruled_at_them() {
     let HardcopySemanticDocument::Plot(plot) = resolved.semantic_document() else {
         panic!("expected a semantic frequency plot")
     };
-    assert_eq!(plot.axis_ticks.iter().filter(|tick| tick.major).count(), 3);
+    assert_eq!(
+        plot.axis_ticks
+            .iter()
+            .filter(|tick| tick.major && tick.axis == SemanticAxisKind::Horizontal)
+            .count(),
+        3
+    );
     assert_eq!(
         plot.axis_ticks.iter().filter(|tick| !tick.major).count(),
         16,
@@ -684,7 +694,16 @@ fn the_printed_spectrum_is_in_decibels() {
     assert_eq!(plot.y_scale, AxisScale::Decibels);
     // The sheet's frequency axis is linear, so the page's is too.
     assert_eq!(plot.x_scale, AxisScale::Linear);
-    assert!(plot.axis_ticks.is_empty());
+    assert!(
+        plot.axis_ticks
+            .iter()
+            .any(|tick| tick.axis == SemanticAxisKind::Horizontal && !tick.label.is_empty())
+    );
+    assert!(
+        plot.axis_ticks
+            .iter()
+            .any(|tick| tick.axis == SemanticAxisKind::Vertical && !tick.label.is_empty())
+    );
 
     let levels = plot.traces[0]
         .source_samples
