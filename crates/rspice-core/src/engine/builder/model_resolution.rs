@@ -180,6 +180,23 @@ fn resolve_model_param(
     Ok(None)
 }
 
+/// Evaluate a model fallback only when the instance does not override it.
+/// Invalid expressions are errors, not omitted parameters.
+fn resolve_instance_or_model_param(
+    instance_params: &[(String, f64)],
+    instance_names: &[&str],
+    model_def: Option<&crate::netlist::ModelDef>,
+    model_names: &[&str],
+    ctx: &crate::netlist::ParamContext,
+) -> Result<Option<f64>, SimulationError> {
+    if let Some(value) = instance_param(instance_params, instance_names) {
+        return Ok(Some(value));
+    }
+    model_def.map_or(Ok(None), |model| {
+        resolve_model_param(model, model_names, ctx)
+    })
+}
+
 fn canonical_supported_model_param<'a>(name: &str, supported: &'a [&'a str]) -> Option<&'a str> {
     supported
         .iter()

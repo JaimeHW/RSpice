@@ -73,13 +73,14 @@ pub(in crate::engine::builder) fn resolve_capacitor_instance_value(
                         model_name.unwrap_or_default()
                     ))
                 })?;
-                let width = instance_param(instance_params, &["W"])
-                    .or_else(|| {
-                        resolve_model_param(model_def, &["DEFW"], &eval_ctx)
-                            .ok()
-                            .flatten()
-                    })
-                    .unwrap_or(1.0e-6);
+                let width = resolve_instance_or_model_param(
+                    instance_params,
+                    &["W"],
+                    Some(model_def),
+                    &["DEFW"],
+                    &eval_ctx,
+                )?
+                .unwrap_or(1.0e-6);
                 let narrow = resolve_model_param(model_def, &["NARROW"], &eval_ctx)?.unwrap_or(0.0);
 
                 let w_eff = width - narrow;
@@ -115,32 +116,34 @@ pub(in crate::engine::builder) fn resolve_capacitor_instance_value(
                 let cjsw =
                     resolve_model_param(model_def, &["CJSW", "CJP"], &eval_ctx)?.unwrap_or(0.0);
 
-                let width = instance_param(instance_params, &["W", "WIDTH"])
-                    .or_else(|| {
-                        resolve_model_param(model_def, &["W", "WIDTH", "DEFW"], &eval_ctx)
-                            .ok()
-                            .flatten()
-                    })
-                    .ok_or_else(|| {
-                        SimulationError::Circuit(format!(
-                            "Capacitor '{}' model '{}' requires W/WIDTH (or DEFW) when using CJ",
-                            element_name,
-                            model_name.unwrap_or_default()
-                        ))
-                    })?;
-                let length = instance_param(instance_params, &["L", "LENGTH"])
-                    .or_else(|| {
-                        resolve_model_param(model_def, &["L", "LENGTH", "DEFL"], &eval_ctx)
-                            .ok()
-                            .flatten()
-                    })
-                    .ok_or_else(|| {
-                        SimulationError::Circuit(format!(
-                            "Capacitor '{}' model '{}' requires L/LENGTH (or DEFL) when using CJ",
-                            element_name,
-                            model_name.unwrap_or_default()
-                        ))
-                    })?;
+                let width = resolve_instance_or_model_param(
+                    instance_params,
+                    &["W", "WIDTH"],
+                    Some(model_def),
+                    &["W", "WIDTH", "DEFW"],
+                    &eval_ctx,
+                )?
+                .ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "Capacitor '{}' model '{}' requires W/WIDTH (or DEFW) when using CJ",
+                        element_name,
+                        model_name.unwrap_or_default()
+                    ))
+                })?;
+                let length = resolve_instance_or_model_param(
+                    instance_params,
+                    &["L", "LENGTH"],
+                    Some(model_def),
+                    &["L", "LENGTH", "DEFL"],
+                    &eval_ctx,
+                )?
+                .ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "Capacitor '{}' model '{}' requires L/LENGTH (or DEFL) when using CJ",
+                        element_name,
+                        model_name.unwrap_or_default()
+                    ))
+                })?;
                 let narrow = resolve_model_param(model_def, &["NARROW"], &eval_ctx)?.unwrap_or(0.0);
                 let short = resolve_model_param(model_def, &["SHORT"], &eval_ctx)?.unwrap_or(0.0);
 
@@ -203,24 +206,12 @@ pub(in crate::engine::builder) fn resolve_capacitor_instance_value(
 
     resolved *= xyce_model_multiplier;
 
-    let tc1 = instance_param(instance_params, &["TC1"])
-        .or_else(|| {
-            model_def.and_then(|model_def| {
-                resolve_model_param(model_def, &["TC1"], &eval_ctx)
-                    .ok()
-                    .flatten()
-            })
-        })
-        .unwrap_or(0.0);
-    let tc2 = instance_param(instance_params, &["TC2"])
-        .or_else(|| {
-            model_def.and_then(|model_def| {
-                resolve_model_param(model_def, &["TC2"], &eval_ctx)
-                    .ok()
-                    .flatten()
-            })
-        })
-        .unwrap_or(0.0);
+    let tc1 =
+        resolve_instance_or_model_param(instance_params, &["TC1"], model_def, &["TC1"], &eval_ctx)?
+            .unwrap_or(0.0);
+    let tc2 =
+        resolve_instance_or_model_param(instance_params, &["TC2"], model_def, &["TC2"], &eval_ctx)?
+            .unwrap_or(0.0);
     if tc1 != 0.0 || tc2 != 0.0 {
         let temp_ctx = crate::analysis::TemperatureContext::from_celsius(current_temp_c, tnom_c);
         let coeffs = crate::analysis::temperature::CapacitorTempCoeffs {
