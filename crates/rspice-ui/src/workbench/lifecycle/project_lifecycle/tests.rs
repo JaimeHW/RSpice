@@ -10,6 +10,7 @@ use crate::simulation::plan::AnalysisKind;
 use crate::state::{ComponentType, Point};
 
 mod durable_content;
+mod fingerprint_cache;
 
 #[cfg(not(target_arch = "wasm32"))]
 fn insert_ac_analysis(state: &mut AppState) -> crate::product::AnalysisInstanceId {
@@ -110,10 +111,7 @@ fn browser_save_active_and_revert_preserve_exact_configuration_catalog() {
         .activate(crate::workbench::state::Workspace::Project);
     let baseline = snapshot(&state).expect("baseline");
     state.project_lifecycle.project_open = true;
-    state.project_lifecycle.accepted = Some(AcceptedProject {
-        baseline: baseline.clone(),
-        binding: None,
-    });
+    state.project_lifecycle.accepted = Some(AcceptedProject::new(baseline.clone(), None));
     insert_configuration_root(
         &mut state,
         "Browser release",
@@ -240,10 +238,7 @@ fn project_configuration_overlay_and_revert_own_exact_configuration_catalog() {
     state.provision_test_project_technology_contract();
     let baseline = snapshot(&state).expect("baseline");
     state.project_lifecycle.project_open = true;
-    state.project_lifecycle.accepted = Some(AcceptedProject {
-        baseline: baseline.clone(),
-        binding: None,
-    });
+    state.project_lifecycle.accepted = Some(AcceptedProject::new(baseline.clone(), None));
     let id = insert_configuration_root(
         &mut state,
         "Release",
@@ -333,10 +328,7 @@ fn cell_veriloga_view_and_source_are_one_lifecycle_document() {
     state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
     let baseline = snapshot(&state).expect("baseline");
     state.project_lifecycle.project_open = true;
-    state.project_lifecycle.accepted = Some(AcceptedProject {
-        baseline: baseline.clone(),
-        binding: None,
-    });
+    state.project_lifecycle.accepted = Some(AcceptedProject::new(baseline.clone(), None));
 
     assert_eq!(
         active_document(&state),
@@ -419,10 +411,7 @@ fn project_configuration_never_accepts_or_discards_unsaved_cell_views() {
     );
 
     working_state.project_lifecycle.project_open = true;
-    working_state.project_lifecycle.accepted = Some(AcceptedProject {
-        baseline,
-        binding: None,
-    });
+    working_state.project_lifecycle.accepted = Some(AcceptedProject::new(baseline, None));
     revert_document(&mut working_state, ProjectDocumentId::ProjectConfiguration)
         .expect("revert configuration");
     assert!(
@@ -491,10 +480,7 @@ fn reverting_new_cell_configuration_removes_orphan_sources_and_restores_focus() 
             crate::state::ViewType::VerilogA,
         ));
     state.project_lifecycle.project_open = true;
-    state.project_lifecycle.accepted = Some(AcceptedProject {
-        baseline,
-        binding: None,
-    });
+    state.project_lifecycle.accepted = Some(AcceptedProject::new(baseline, None));
 
     revert_document(&mut state, ProjectDocumentId::ProjectConfiguration)
         .expect("revert new cell configuration");
@@ -544,10 +530,7 @@ fn reverting_new_cell_view_removes_its_source_without_touching_code_workspace() 
         "module behavior(p, n); inout p, n; endmodule",
     );
     state.project_lifecycle.project_open = true;
-    state.project_lifecycle.accepted = Some(AcceptedProject {
-        baseline,
-        binding: None,
-    });
+    state.project_lifecycle.accepted = Some(AcceptedProject::new(baseline, None));
 
     revert_document(&mut state, ProjectDocumentId::CellView(reference.clone()))
         .expect("revert new view");
@@ -625,10 +608,7 @@ fn reverting_the_code_document_restores_sources_and_clears_dirty_state() {
     ensure_veriloga_source(&mut state, "module sensor_bridge; endmodule");
     let baseline = snapshot(&state).unwrap();
     state.project_lifecycle.project_open = true;
-    state.project_lifecycle.accepted = Some(AcceptedProject {
-        baseline: baseline.clone(),
-        binding: None,
-    });
+    state.project_lifecycle.accepted = Some(AcceptedProject::new(baseline.clone(), None));
     state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
     state
         .workspace
@@ -1093,7 +1073,7 @@ fn native_save_active_and_revert_preserve_exact_configuration_catalog() {
             .accepted
             .as_ref()
             .expect("accepted save")
-            .baseline
+            .baseline()
             .workspace
             .configuration_sets,
         state.workspace.configuration_sets
@@ -1104,7 +1084,7 @@ fn native_save_active_and_revert_preserve_exact_configuration_catalog() {
             .accepted
             .as_ref()
             .expect("accepted save")
-            .baseline
+            .baseline()
             .workspace
             .design_management,
         state.workspace.design_management
@@ -1582,7 +1562,7 @@ fn saving_active_cell_never_dirties_project_configuration() {
             .accepted
             .as_ref()
             .expect("accepted save")
-            .baseline
+            .baseline()
             .libraries
             .revision(),
         governed_revision,

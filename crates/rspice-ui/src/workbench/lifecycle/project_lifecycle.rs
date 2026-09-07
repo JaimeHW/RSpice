@@ -5,7 +5,10 @@
 //! `Save all` replaces it with the complete working set. This prevents saving
 //! one tab from accidentally committing unrelated drafts.
 
+mod accepted_project;
 mod persistence;
+
+use accepted_project::AcceptedProject;
 #[cfg(target_arch = "wasm32")]
 pub(crate) use persistence::{
     start_browser_checkpoint_list, start_browser_checkpoint_publish, start_browser_checkpoint_read,
@@ -60,12 +63,6 @@ struct BrowserRestoreCompletion {
 struct BrowserConflict {
     binding: PersistenceBinding,
     observed_digest: ContentDigest,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct AcceptedProject {
-    pub(crate) baseline: ProjectFile,
-    pub(crate) binding: Option<PersistenceBinding>,
 }
 
 #[derive(Debug, Clone)]
@@ -180,7 +177,7 @@ pub(crate) fn accepted_active_schematic(state: &AppState) -> Option<crate::state
     let accepted = state.project_lifecycle.accepted.as_ref()?;
     accepted.binding.as_ref()?;
     accepted
-        .baseline
+        .baseline()
         .workspace
         .schematic_buffers
         .get(&state.workspace.active_view.key())
@@ -328,12 +325,11 @@ pub(crate) fn has_unsaved_changes(state: &AppState) -> bool {
         return true;
     };
     match snapshot(state).and_then(|current| {
-        registry::content_digest(&current)
-            .map_err(ProjectLifecycleError::InvalidState)
-            .map(|digest| (digest, current))
+        registry::content_digest(&current).map_err(ProjectLifecycleError::InvalidState)
     }) {
-        Ok((current, _)) => registry::content_digest(&accepted.baseline)
-            .map(|baseline| current != baseline)
+        Ok(current) => accepted
+            .fingerprints()
+            .map(|baseline| current != baseline.content_digest())
             .unwrap_or(true),
         Err(_) => true,
     }
@@ -360,20 +356,12 @@ pub(crate) fn active_document(state: &AppState) -> ProjectDocumentId {
 }
 
 pub(crate) fn active_document_is_dirty(state: &AppState) -> bool {
-    let Some(accepted) = state.project_lifecycle.accepted.as_ref() else {
+    if state.project_lifecycle.accepted.is_none() {
         return state.project_lifecycle.project_open;
-    };
-    let Ok(current) = snapshot(state) else {
-        return true;
-    };
-    let mut registry = registry::DocumentRegistry::default();
-    if registry
-        .rebuild(&current, Some(&accepted.baseline))
-        .is_err()
-    {
-        return true;
     }
-    registry.is_dirty(&active_document(state))
+    current_registry(state)
+        .map(|registry| registry.is_dirty(&active_document(state)))
+        .unwrap_or(true)
 }
 
 pub(crate) fn refresh_registry(state: &mut AppState) -> Result<(), ProjectLifecycleError> {
@@ -381,19 +369,25 @@ pub(crate) fn refresh_registry(state: &mut AppState) -> Result<(), ProjectLifecy
         state.project_lifecycle.registry = registry::DocumentRegistry::default();
         return Ok(());
     }
+    state.project_lifecycle.registry = current_registry(state)?;
+    apply_registry_dirty_flags(state);
+    Ok(())
+}
+
+fn current_registry(state: &AppState) -> Result<registry::DocumentRegistry, ProjectLifecycleError> {
     let current = snapshot(state)?;
     let accepted = state
         .project_lifecycle
         .accepted
         .as_ref()
-        .map(|accepted| accepted.baseline.clone());
+        .map(AcceptedProject::fingerprints)
+        .transpose()
+        .map_err(ProjectLifecycleError::InvalidState)?;
     let mut registry = registry::DocumentRegistry::default();
     registry
-        .rebuild(&current, accepted.as_ref())
+        .rebuild(&current, accepted)
         .map_err(ProjectLifecycleError::InvalidState)?;
-    state.project_lifecycle.registry = registry;
-    apply_registry_dirty_flags(state);
-    Ok(())
+    Ok(registry)
 }
 
 fn apply_registry_dirty_flags(state: &mut AppState) {
@@ -441,7 +435,7 @@ fn apply_registry_dirty_flags(state: &mut AppState) {
         .registry
         .is_dirty(&ProjectDocumentId::ProjectConfiguration);
     if let Some(accepted) = state.project_lifecycle.accepted.as_ref() {
-        let baseline = &accepted.baseline.workspace;
+        let baseline = &accepted.baseline().workspace;
         state.workspace.netlist_source_dirty = state.workspace.netlist_source
             != baseline.netlist_source
             || state.workspace.netlist_source_path != baseline.netlist_source_path
@@ -464,10 +458,8 @@ pub(crate) fn initialize_from_session(state: &mut AppState) {
                 let session_project_id = state.workspace.project.id().to_string();
                 match persistence::restore_native_binding(&path, &session_project_id, &receipt) {
                     Ok((baseline, binding)) => {
-                        state.project_lifecycle.accepted = Some(AcceptedProject {
-                            baseline,
-                            binding: Some(binding),
-                        });
+                        state.project_lifecycle.accepted =
+                            Some(AcceptedProject::new(baseline, Some(binding)));
                         state.project_lifecycle.accepted_generation = 1;
                         state.browser_project_binding_receipt = None;
                     }
@@ -563,10 +555,7 @@ pub(crate) fn poll_browser_binding_restore(state: &mut AppState) {
                 ));
                 return;
             }
-            state.project_lifecycle.accepted = Some(AcceptedProject {
-                baseline: *baseline,
-                binding: Some(binding),
-            });
+            state.project_lifecycle.accepted = Some(AcceptedProject::new(*baseline, Some(binding)));
             state.native_project_binding_receipt = None;
             advance_accepted_generation(&mut state.project_lifecycle);
             let _ = refresh_registry(state);
@@ -624,7 +613,7 @@ pub(crate) fn accept_loaded_project(
     #[cfg(target_arch = "wasm32")]
     release_replaced_browser_bindings(&state.project_lifecycle, binding.as_ref());
     state.project_lifecycle.project_open = true;
-    state.project_lifecycle.accepted = Some(AcceptedProject { baseline, binding });
+    state.project_lifecycle.accepted = Some(AcceptedProject::new(baseline, binding));
     advance_accepted_generation(&mut state.project_lifecycle);
     state.project_lifecycle.unreadable_native_binding = None;
     #[cfg(not(target_arch = "wasm32"))]
@@ -883,7 +872,7 @@ pub(crate) fn save_native(
                     .accepted
                     .as_ref()
                     .ok_or(ProjectLifecycleError::NoAcceptedBaseline)?
-                    .baseline
+                    .baseline()
                     .clone();
                 overlay_document(&mut baseline, &working, &active_document(state))?;
                 baseline
@@ -1012,7 +1001,7 @@ pub(crate) fn prepare_browser_save(
                 .accepted
                 .as_ref()
                 .ok_or(ProjectLifecycleError::NoAcceptedBaseline)?
-                .baseline
+                .baseline()
                 .clone();
             overlay_document(&mut baseline, &working, &saved_document)?;
             baseline
@@ -1297,8 +1286,10 @@ fn prepare_post_save_registry(
     #[cfg(target_arch = "wasm32")]
     let _ = scope;
     let mut post_save_registry = registry::DocumentRegistry::default();
+    let candidate_fingerprints = registry::DocumentFingerprints::new(candidate)
+        .map_err(ProjectLifecycleError::InvalidState)?;
     post_save_registry
-        .rebuild(&current, Some(candidate))
+        .rebuild(&current, Some(&candidate_fingerprints))
         .map_err(ProjectLifecycleError::InvalidState)?;
     Ok(post_save_registry)
 }
@@ -1330,10 +1321,7 @@ fn adopt_successful_save(
             state.workspace.project.path = candidate.workspace.project.path.clone();
         }
     }
-    state.project_lifecycle.accepted = Some(AcceptedProject {
-        baseline: candidate,
-        binding: Some(binding),
-    });
+    state.project_lifecycle.accepted = Some(AcceptedProject::new(candidate, Some(binding)));
     #[cfg(not(target_arch = "wasm32"))]
     {
         state.native_project_binding_receipt = Some(native_receipt);
@@ -1633,7 +1621,7 @@ fn revert_document_in_place(
         .accepted
         .as_ref()
         .ok_or(ProjectLifecycleError::NoAcceptedBaseline)?
-        .baseline
+        .baseline()
         .clone();
     let baseline_project_id = baseline.workspace.project.id();
 
@@ -1735,23 +1723,16 @@ fn revert_document_in_place(
 }
 
 pub(crate) fn dirty_document_count(state: &AppState) -> usize {
-    let Some(accepted) = state.project_lifecycle.accepted.as_ref() else {
+    if state.project_lifecycle.accepted.is_none() {
         return if state.project_lifecycle.project_open {
             1
         } else {
             0
         };
-    };
-    let Ok(current) = snapshot(state) else {
-        return 1;
-    };
-    let mut registry = registry::DocumentRegistry::default();
-    if registry
-        .rebuild(&current, Some(&accepted.baseline))
-        .is_err()
-    {
-        return 1;
     }
+    let Ok(registry) = current_registry(state) else {
+        return 1;
+    };
     registry
         .records()
         .iter()

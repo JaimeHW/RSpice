@@ -5,7 +5,7 @@ use crate::workbench::documents::result_document::{
     AnalysisPresentationKey, ResultsState, WavePanePresentationKey, marker_anchor_for,
 };
 
-fn retained_results() -> (AppState, AnalysisPresentationKey) {
+pub(super) fn retained_results() -> (AppState, AnalysisPresentationKey) {
     let mut state = AppState::default();
     let mut run = crate::state::SimulationRun::new(1);
     run.add_analysis(
@@ -145,10 +145,7 @@ fn every_result_annotation_is_dirty_revertible_and_independent_of_solver_inputs(
         let (mut state, key) = retained_results();
         let baseline = snapshot(&state).unwrap();
         let solver_input = generated_netlist_input_digest(&state).unwrap();
-        state.project_lifecycle.accepted = Some(AcceptedProject {
-            baseline: baseline.clone(),
-            binding: None,
-        });
+        state.project_lifecycle.accepted = Some(AcceptedProject::new(baseline.clone(), None));
         annotation.add(&mut state.ui.results, &state.simulation, key);
         assert!(has_unsaved_changes(&state), "{annotation:?}");
         assert!(active_document_is_dirty(&state), "{annotation:?}");
@@ -177,10 +174,7 @@ fn every_result_annotation_is_dirty_revertible_and_independent_of_solver_inputs(
         assert!(!has_unsaved_changes(&state));
 
         // Revert also restores accepted annotations after they are removed.
-        state.project_lifecycle.accepted = Some(AcceptedProject {
-            baseline: edited.clone(),
-            binding: None,
-        });
+        state.project_lifecycle.accepted = Some(AcceptedProject::new(edited.clone(), None));
         revert_document(&mut state, ProjectDocumentId::ResultHistory).unwrap();
         assert_eq!(
             annotations(&snapshot(&state).unwrap()),
@@ -269,10 +263,7 @@ fn result_annotation_save_publishes_only_results_and_retains_later_edits() {
 fn unbound_probe_edits_participate_in_dirty_undo_redo_and_revert() {
     let mut state = AppState::default();
     let baseline = snapshot(&state).unwrap();
-    state.project_lifecycle.accepted = Some(AcceptedProject {
-        baseline,
-        binding: None,
-    });
+    state.project_lifecycle.accepted = Some(AcceptedProject::new(baseline, None));
     state.schematic.with_undo("Place probe", |schematic| {
         schematic
             .probes
@@ -299,10 +290,7 @@ fn grid_and_document_policy_are_owned_by_the_schematic_document() {
     for edit_policy in [false, true] {
         let mut state = AppState::default();
         let baseline = snapshot(&state).unwrap();
-        state.project_lifecycle.accepted = Some(AcceptedProject {
-            baseline,
-            binding: None,
-        });
+        state.project_lifecycle.accepted = Some(AcceptedProject::new(baseline, None));
         if edit_policy {
             state.schematic.document_policy.net_naming =
                 crate::state::NetNamingPolicy::SpiceCompatibleRelaxed;

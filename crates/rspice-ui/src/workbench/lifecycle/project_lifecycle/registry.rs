@@ -10,6 +10,12 @@ use crate::product::ContentDigest;
 use crate::state::CellViewRef;
 use crate::workbench::state::Workspace;
 
+#[cfg(test)]
+thread_local! {
+    /// Full document fingerprint passes, including retained sample scans.
+    pub(super) static FINGERPRINT_PASSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Stable identity of every project-owned document that participates in
 /// Save, Save all, Revert, and dirty-state decisions.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -65,13 +71,11 @@ impl DocumentRegistry {
     pub(crate) fn rebuild(
         &mut self,
         current: &ProjectFile,
-        accepted: Option<&ProjectFile>,
+        accepted: Option<&DocumentFingerprints>,
     ) -> Result<(), String> {
         let current = document_digests(current)?;
-        let accepted = match accepted {
-            Some(project) => document_digests(project)?,
-            None => HashMap::new(),
-        };
+        let empty = HashMap::new();
+        let accepted = accepted.map_or(&empty, |fingerprints| &fingerprints.documents);
         let mut ids = current
             .keys()
             .chain(accepted.keys())
@@ -109,25 +113,45 @@ pub(crate) fn active_document(
     }
 }
 
-pub(crate) fn content_digest(project: &ProjectFile) -> Result<ContentDigest, String> {
-    let digests = document_digests(project)?;
-    let mut ordered = digests.into_iter().collect::<Vec<_>>();
-    ordered.sort_by_key(|(id, _)| id.stable_key());
-    let mut hasher = Sha256::new();
-    hasher.update(b"rspice-project-content-digest\0v1\0");
-    hasher.update((ordered.len() as u64).to_be_bytes());
-    for (id, digest) in ordered {
-        let key = id.stable_key();
-        hasher.update((key.len() as u64).to_be_bytes());
-        hasher.update(key.as_bytes());
-        hasher.update(digest.as_bytes());
+/// Cached identities of one complete, immutable project snapshot.
+#[derive(Debug)]
+pub(super) struct DocumentFingerprints {
+    documents: HashMap<ProjectDocumentId, ContentDigest>,
+    content: ContentDigest,
+}
+
+impl DocumentFingerprints {
+    pub(super) fn new(project: &ProjectFile) -> Result<Self, String> {
+        let documents = document_digests(project)?;
+        let mut ordered = documents.iter().collect::<Vec<_>>();
+        ordered.sort_by_key(|(id, _)| id.stable_key());
+        let mut hasher = Sha256::new();
+        hasher.update(b"rspice-project-content-digest\0v1\0");
+        hasher.update((ordered.len() as u64).to_be_bytes());
+        for (id, digest) in ordered {
+            let key = id.stable_key();
+            hasher.update((key.len() as u64).to_be_bytes());
+            hasher.update(key.as_bytes());
+            hasher.update(digest.as_bytes());
+        }
+        let content = ContentDigest::from_bytes(hasher.finalize().into());
+        Ok(Self { documents, content })
     }
-    Ok(ContentDigest::from_bytes(hasher.finalize().into()))
+
+    pub(super) fn content_digest(&self) -> ContentDigest {
+        self.content
+    }
+}
+
+pub(crate) fn content_digest(project: &ProjectFile) -> Result<ContentDigest, String> {
+    DocumentFingerprints::new(project).map(|fingerprints| fingerprints.content_digest())
 }
 
 fn document_digests(
     project: &ProjectFile,
 ) -> Result<HashMap<ProjectDocumentId, ContentDigest>, String> {
+    #[cfg(test)]
+    FINGERPRINT_PASSES.with(|passes| passes.set(passes.get() + 1));
     let mut documents = HashMap::new();
     let mut plan_payloads = project
         .workspace
@@ -502,7 +526,10 @@ mod tests {
         let current = super::super::snapshot(&state).expect("current snapshot");
         let mut registry = DocumentRegistry::default();
         registry
-            .rebuild(&current, Some(&baseline))
+            .rebuild(
+                &current,
+                Some(&DocumentFingerprints::new(&baseline).unwrap()),
+            )
             .expect("rebuild registry");
         assert!(
             registry.records().iter().all(|record| !record.dirty),
@@ -514,7 +541,10 @@ mod tests {
             .add_component(ComponentType::Capacitor, Point::new(12, 9));
         let edited = super::super::snapshot(&state).expect("edited snapshot");
         registry
-            .rebuild(&edited, Some(&baseline))
+            .rebuild(
+                &edited,
+                Some(&DocumentFingerprints::new(&baseline).unwrap()),
+            )
             .expect("rebuild edited registry");
         assert!(registry.is_dirty(&ProjectDocumentId::CellView(active)));
         assert!(!registry.is_dirty(&ProjectDocumentId::ProjectConfiguration));
@@ -533,7 +563,9 @@ mod tests {
 
         let with_bus = super::super::snapshot(&state).expect("bus snapshot");
         let mut registry = DocumentRegistry::default();
-        registry.rebuild(&with_bus, Some(&empty)).unwrap();
+        registry
+            .rebuild(&with_bus, Some(&DocumentFingerprints::new(&empty).unwrap()))
+            .unwrap();
         assert!(registry.is_dirty(&ProjectDocumentId::CellView(active.clone())));
 
         state
@@ -547,7 +579,12 @@ mod tests {
             )
             .expect("place tap");
         let with_tap = super::super::snapshot(&state).expect("tap snapshot");
-        registry.rebuild(&with_tap, Some(&with_bus)).unwrap();
+        registry
+            .rebuild(
+                &with_tap,
+                Some(&DocumentFingerprints::new(&with_bus).unwrap()),
+            )
+            .unwrap();
         assert!(registry.is_dirty(&ProjectDocumentId::CellView(active)));
     }
 
@@ -568,7 +605,12 @@ mod tests {
 
         let current = super::super::snapshot(&state).expect("design-note snapshot");
         let mut registry = DocumentRegistry::default();
-        registry.rebuild(&current, Some(&baseline)).unwrap();
+        registry
+            .rebuild(
+                &current,
+                Some(&DocumentFingerprints::new(&baseline).unwrap()),
+            )
+            .unwrap();
         assert!(registry.is_dirty(&ProjectDocumentId::CellView(active.clone())));
 
         let mut edited_state = state;
@@ -576,7 +618,9 @@ mod tests {
             .update(DesignNoteKind::PlainText, "Updated bias network")
             .unwrap();
         let edited = super::super::snapshot(&edited_state).expect("edited snapshot");
-        registry.rebuild(&edited, Some(&current)).unwrap();
+        registry
+            .rebuild(&edited, Some(&DocumentFingerprints::new(&current).unwrap()))
+            .unwrap();
         assert!(registry.is_dirty(&ProjectDocumentId::CellView(active)));
     }
 
@@ -609,7 +653,12 @@ mod tests {
 
         assert_ne!(baseline_digest, edited_digest);
         let mut registry = DocumentRegistry::default();
-        registry.rebuild(&edited, Some(&baseline)).unwrap();
+        registry
+            .rebuild(
+                &edited,
+                Some(&DocumentFingerprints::new(&baseline).unwrap()),
+            )
+            .unwrap();
         assert!(registry.is_dirty(&ProjectDocumentId::CellView(active)));
     }
 
@@ -742,7 +791,12 @@ mod tests {
 
         let current = super::super::snapshot(&state).expect("current snapshot");
         let mut registry = DocumentRegistry::default();
-        registry.rebuild(&current, Some(&baseline)).unwrap();
+        registry
+            .rebuild(
+                &current,
+                Some(&DocumentFingerprints::new(&baseline).unwrap()),
+            )
+            .unwrap();
         assert!(registry.is_dirty(&ProjectDocumentId::SimulationPlan));
         assert!(!registry.is_dirty(&ProjectDocumentId::VerificationSpecifications));
     }
@@ -780,7 +834,12 @@ mod tests {
             .unwrap();
         let current = super::super::snapshot(&state).expect("edited snapshot");
         let mut registry = DocumentRegistry::default();
-        registry.rebuild(&current, Some(&baseline)).unwrap();
+        registry
+            .rebuild(
+                &current,
+                Some(&DocumentFingerprints::new(&baseline).unwrap()),
+            )
+            .unwrap();
 
         assert!(registry.is_dirty(&ProjectDocumentId::NetlistSource));
         assert!(!registry.is_dirty(&ProjectDocumentId::ProjectConfiguration));
@@ -822,7 +881,12 @@ mod tests {
 
         let current = super::super::snapshot(&state).expect("current snapshot");
         let mut registry = DocumentRegistry::default();
-        registry.rebuild(&current, Some(&baseline)).unwrap();
+        registry
+            .rebuild(
+                &current,
+                Some(&DocumentFingerprints::new(&baseline).unwrap()),
+            )
+            .unwrap();
 
         assert!(registry.is_dirty(&ProjectDocumentId::CellView(reference)));
         assert!(!registry.is_dirty(&ProjectDocumentId::ProjectConfiguration));
