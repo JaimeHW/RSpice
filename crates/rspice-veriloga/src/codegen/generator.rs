@@ -1177,263 +1177,281 @@ impl CodeGenerator {
         emit_ctx: &EmitContext,
         program: &mut BytecodeProgram,
     ) -> CompileResult<()> {
-        match *arena.node(id) {
-            Node::Const(v) => {
-                program.instructions.push(Instruction::PushConst(v));
-            }
-            Node::Param(name) => {
-                let idx = Self::parameter_index(arena.name(name), emit_ctx)?;
-                program.instructions.push(Instruction::PushParam(idx));
-            }
-            Node::ParamGiven(name) => {
-                let idx = Self::parameter_index(arena.name(name), emit_ctx)?;
-                program.instructions.push(Instruction::PushParamGiven(idx));
-            }
-            Node::Var(name) => {
-                let name = arena.name(name);
-                let idx = emit_ctx
-                    .variable_indices
-                    .get(name)
-                    .copied()
-                    .ok_or_else(|| {
-                        CodeGenError::new(CodeGenErrorKind::Internal(format!(
-                            "Unknown variable: {}",
-                            name
-                        )))
-                    })?;
-                program.instructions.push(Instruction::PushVariable(idx));
-            }
-            Node::VarIndexed { payload, index } => {
-                self.emit_expr(arena, index, emit_ctx, program)?;
-                let read = arena.indexed(payload);
-                program.instructions.push(Instruction::PushVariableDyn {
-                    base: read.base,
-                    len: read.len,
-                    lower: read.lower,
-                });
-            }
-            Node::Voltage(p, n) => {
-                program
-                    .instructions
-                    .push(Instruction::PushVoltage(unpack_index(p), unpack_index(n)));
-            }
-            Node::Current(p, n) => {
-                program
-                    .instructions
-                    .push(Instruction::PushCurrent(unpack_index(p), unpack_index(n)));
-            }
-            Node::BranchCurrent(k) => {
-                program
-                    .instructions
-                    .push(Instruction::PushBranchCurrent(unpack_index(k)));
-            }
-            Node::Temperature => {
-                program.instructions.push(Instruction::PushTemperature);
-            }
-            Node::Vt => {
-                program.instructions.push(Instruction::PushVt);
-            }
-            Node::Time => {
-                program.instructions.push(Instruction::PushTime);
-            }
-            Node::Mfactor => {
-                program.instructions.push(Instruction::PushMfactor);
-            }
-            Node::PortConnected(index) => {
-                program
-                    .instructions
-                    .push(Instruction::PushPortConnected(unpack_index(index)));
-            }
-            Node::Binary(op, left, right) => {
-                self.emit_expr(arena, left, emit_ctx, program)?;
-                self.emit_expr(arena, right, emit_ctx, program)?;
-                program.instructions.push(match op {
-                    // Arithmetic
-                    BinaryOp::Add => Instruction::Add,
-                    BinaryOp::Sub => Instruction::Sub,
-                    BinaryOp::Mul => Instruction::Mul,
-                    BinaryOp::Div => Instruction::Div,
-                    BinaryOp::Pow => Instruction::Pow,
-                    BinaryOp::Mod => Instruction::Mod,
-                    // Comparisons
-                    BinaryOp::Gt => Instruction::Gt,
-                    BinaryOp::Lt => Instruction::Lt,
-                    BinaryOp::Ge => Instruction::Ge,
-                    BinaryOp::Le => Instruction::Le,
-                    BinaryOp::Eq => Instruction::Eq,
-                    BinaryOp::Ne => Instruction::Ne,
-                    // Logical
-                    BinaryOp::And => Instruction::And,
-                    BinaryOp::Or => Instruction::Or,
-                    // Bitwise/shift
-                    BinaryOp::Shl => Instruction::Shl,
-                    BinaryOp::Shr => Instruction::Shr,
-                    BinaryOp::BitAnd => Instruction::BitAnd,
-                    BinaryOp::BitOr => Instruction::BitOr,
-                    BinaryOp::BitXor => Instruction::BitXor,
-                });
-            }
-            Node::Unary(op, inner) => {
-                self.emit_expr(arena, inner, emit_ctx, program)?;
-                match op {
-                    crate::ast::UnaryOp::Neg => program.instructions.push(Instruction::Neg),
-                    // Unary plus is the identity
-                    crate::ast::UnaryOp::Pos => {}
-                    crate::ast::UnaryOp::Not => program.instructions.push(Instruction::Not),
-                    // Bitwise complement is represented through the shared
-                    // integer conversion and 32-bit XOR contract: ~x == x ^ -1.
-                    crate::ast::UnaryOp::BitNot => {
-                        program.instructions.push(Instruction::PushConst(-1.0));
-                        program.instructions.push(Instruction::BitXor);
+        // Walk arithmetic chains without reserving this emitter's full frame
+        // per operand. A node is still emitted once per path, left before right;
+        // no DAG deduplication may change state-slot allocation or evaluation.
+        let mut pending = Vec::new();
+        let mut next = Some((id, false));
+        while let Some((id, children_emitted)) = next {
+            match *arena.node(id) {
+                Node::Const(v) => {
+                    program.instructions.push(Instruction::PushConst(v));
+                }
+                Node::Param(name) => {
+                    let idx = Self::parameter_index(arena.name(name), emit_ctx)?;
+                    program.instructions.push(Instruction::PushParam(idx));
+                }
+                Node::ParamGiven(name) => {
+                    let idx = Self::parameter_index(arena.name(name), emit_ctx)?;
+                    program.instructions.push(Instruction::PushParamGiven(idx));
+                }
+                Node::Var(name) => {
+                    let name = arena.name(name);
+                    let idx = emit_ctx
+                        .variable_indices
+                        .get(name)
+                        .copied()
+                        .ok_or_else(|| {
+                            CodeGenError::new(CodeGenErrorKind::Internal(format!(
+                                "Unknown variable: {}",
+                                name
+                            )))
+                        })?;
+                    program.instructions.push(Instruction::PushVariable(idx));
+                }
+                Node::VarIndexed { payload, index } => {
+                    self.emit_expr(arena, index, emit_ctx, program)?;
+                    let read = arena.indexed(payload);
+                    program.instructions.push(Instruction::PushVariableDyn {
+                        base: read.base,
+                        len: read.len,
+                        lower: read.lower,
+                    });
+                }
+                Node::Voltage(p, n) => {
+                    program
+                        .instructions
+                        .push(Instruction::PushVoltage(unpack_index(p), unpack_index(n)));
+                }
+                Node::Current(p, n) => {
+                    program
+                        .instructions
+                        .push(Instruction::PushCurrent(unpack_index(p), unpack_index(n)));
+                }
+                Node::BranchCurrent(k) => {
+                    program
+                        .instructions
+                        .push(Instruction::PushBranchCurrent(unpack_index(k)));
+                }
+                Node::Temperature => {
+                    program.instructions.push(Instruction::PushTemperature);
+                }
+                Node::Vt => {
+                    program.instructions.push(Instruction::PushVt);
+                }
+                Node::Time => {
+                    program.instructions.push(Instruction::PushTime);
+                }
+                Node::Mfactor => {
+                    program.instructions.push(Instruction::PushMfactor);
+                }
+                Node::PortConnected(index) => {
+                    program
+                        .instructions
+                        .push(Instruction::PushPortConnected(unpack_index(index)));
+                }
+                Node::Binary(_, left, right) if !children_emitted => {
+                    pending.push((id, true));
+                    pending.push((right, false));
+                    next = Some((left, false));
+                    continue;
+                }
+                Node::Binary(op, _, _) => {
+                    program.instructions.push(match op {
+                        // Arithmetic
+                        BinaryOp::Add => Instruction::Add,
+                        BinaryOp::Sub => Instruction::Sub,
+                        BinaryOp::Mul => Instruction::Mul,
+                        BinaryOp::Div => Instruction::Div,
+                        BinaryOp::Pow => Instruction::Pow,
+                        BinaryOp::Mod => Instruction::Mod,
+                        // Comparisons
+                        BinaryOp::Gt => Instruction::Gt,
+                        BinaryOp::Lt => Instruction::Lt,
+                        BinaryOp::Ge => Instruction::Ge,
+                        BinaryOp::Le => Instruction::Le,
+                        BinaryOp::Eq => Instruction::Eq,
+                        BinaryOp::Ne => Instruction::Ne,
+                        // Logical
+                        BinaryOp::And => Instruction::And,
+                        BinaryOp::Or => Instruction::Or,
+                        // Bitwise/shift
+                        BinaryOp::Shl => Instruction::Shl,
+                        BinaryOp::Shr => Instruction::Shr,
+                        BinaryOp::BitAnd => Instruction::BitAnd,
+                        BinaryOp::BitOr => Instruction::BitOr,
+                        BinaryOp::BitXor => Instruction::BitXor,
+                    });
+                }
+                Node::Unary(_, inner) if !children_emitted => {
+                    pending.push((id, true));
+                    next = Some((inner, false));
+                    continue;
+                }
+                Node::Unary(op, _) => {
+                    match op {
+                        crate::ast::UnaryOp::Neg => program.instructions.push(Instruction::Neg),
+                        // Unary plus is the identity
+                        crate::ast::UnaryOp::Pos => {}
+                        crate::ast::UnaryOp::Not => program.instructions.push(Instruction::Not),
+                        // Bitwise complement is represented through the shared
+                        // integer conversion and 32-bit XOR contract: ~x == x ^ -1.
+                        crate::ast::UnaryOp::BitNot => {
+                            program.instructions.push(Instruction::PushConst(-1.0));
+                            program.instructions.push(Instruction::BitXor);
+                        }
                     }
                 }
-            }
-            Node::Call { func, a, b, .. } => {
-                if let Some(a) = a {
-                    self.emit_expr(arena, a, emit_ctx, program)?;
+                Node::Call { func, a, b, .. } => {
+                    if let Some(a) = a {
+                        self.emit_expr(arena, a, emit_ctx, program)?;
+                    }
+                    if let Some(b) = b {
+                        self.emit_expr(arena, b, emit_ctx, program)?;
+                    }
+                    program.instructions.push(Self::call_instruction(func));
                 }
-                if let Some(b) = b {
-                    self.emit_expr(arena, b, emit_ctx, program)?;
+                // No `IrFunction` takes a third argument; this encoding exists
+                // only because the converter never checked a source call's
+                // argument list against an arity, and it emits like the pair.
+                Node::CallSpilled { func, args } => {
+                    for arg in arena.call_args(args) {
+                        self.emit_expr(arena, *arg, emit_ctx, program)?;
+                    }
+                    program.instructions.push(Self::call_instruction(func));
                 }
-                program.instructions.push(Self::call_instruction(func));
-            }
-            // No `IrFunction` takes a third argument; this encoding exists
-            // only because the converter never checked a source call's
-            // argument list against an arity, and it emits like the pair.
-            Node::CallSpilled { func, args } => {
-                for arg in arena.call_args(args) {
-                    self.emit_expr(arena, *arg, emit_ctx, program)?;
+                Node::Limexp(inner) => {
+                    self.emit_expr(arena, inner, emit_ctx, program)?;
+                    program.instructions.push(Instruction::Limexp);
                 }
-                program.instructions.push(Self::call_instruction(func));
-            }
-            Node::Limexp(inner) => {
-                self.emit_expr(arena, inner, emit_ctx, program)?;
-                program.instructions.push(Instruction::Limexp);
-            }
-            Node::Conditional(cond, then_expr, else_expr) => {
-                self.emit_expr(arena, cond, emit_ctx, program)?;
-                self.emit_expr(arena, then_expr, emit_ctx, program)?;
-                self.emit_expr(arena, else_expr, emit_ctx, program)?;
-                program.instructions.push(Instruction::IfElse);
-            }
-            Node::Ddt(inner) => {
-                // Backward-Euler time derivative with a dedicated state slot:
-                // (value - prev_value) / dt in transient, 0 at DC. The state
-                // slot records the operand so the next step has its history.
-                self.emit_expr(arena, inner, emit_ctx, program)?;
-                let state_id = Self::allocate_slot(&self.limit_state_count);
-                program.instructions.push(Instruction::DdtState(state_id));
-            }
-            Node::Idt(inner, ic) => {
-                // Time integral: state + value*dt in transient; the initial
-                // condition (default 0) seeds the integral at DC/IC.
-                self.emit_expr(arena, inner, emit_ctx, program)?;
-                if let Some(ic_expr) = ic {
-                    self.emit_expr(arena, ic_expr, emit_ctx, program)?;
-                } else {
-                    program.instructions.push(Instruction::PushConst(0.0));
+                Node::Conditional(cond, then_expr, else_expr) => {
+                    self.emit_expr(arena, cond, emit_ctx, program)?;
+                    self.emit_expr(arena, then_expr, emit_ctx, program)?;
+                    self.emit_expr(arena, else_expr, emit_ctx, program)?;
+                    program.instructions.push(Instruction::IfElse);
                 }
-                let state_id = Self::allocate_slot(&self.limit_state_count);
-                program.instructions.push(Instruction::IdtState(state_id));
-            }
-            Node::IdtMod {
-                expr,
-                modulus,
-                payload,
-            } => {
-                let (ic, offset) = arena.optional_pair(payload);
-                self.emit_expr(arena, expr, emit_ctx, program)?;
-                match ic {
-                    Some(ic) => self.emit_expr(arena, ic, emit_ctx, program)?,
-                    None => program.instructions.push(Instruction::PushConst(0.0)),
+                Node::Ddt(inner) => {
+                    // Backward-Euler time derivative with a dedicated state slot:
+                    // (value - prev_value) / dt in transient, 0 at DC. The state
+                    // slot records the operand so the next step has its history.
+                    self.emit_expr(arena, inner, emit_ctx, program)?;
+                    let state_id = Self::allocate_slot(&self.limit_state_count);
+                    program.instructions.push(Instruction::DdtState(state_id));
                 }
-                self.emit_expr(arena, modulus, emit_ctx, program)?;
-                match offset {
-                    Some(offset) => self.emit_expr(arena, offset, emit_ctx, program)?,
-                    None => program.instructions.push(Instruction::PushConst(0.0)),
+                Node::Idt(inner, ic) => {
+                    // Time integral: state + value*dt in transient; the initial
+                    // condition (default 0) seeds the integral at DC/IC.
+                    self.emit_expr(arena, inner, emit_ctx, program)?;
+                    if let Some(ic_expr) = ic {
+                        self.emit_expr(arena, ic_expr, emit_ctx, program)?;
+                    } else {
+                        program.instructions.push(Instruction::PushConst(0.0));
+                    }
+                    let state_id = Self::allocate_slot(&self.limit_state_count);
+                    program.instructions.push(Instruction::IdtState(state_id));
                 }
-                let state_id = Self::allocate_slot(&self.limit_state_count);
-                program
-                    .instructions
-                    .push(Instruction::IdtModState(state_id));
-            }
-            Node::DdtCompanion(inner) => {
-                // Jacobian companion factor: operand / dt (0 at DC)
-                self.emit_expr(arena, inner, emit_ctx, program)?;
-                program.instructions.push(Instruction::DdtJacobian);
-            }
-            Node::IdtCompanion(inner) => {
-                // Jacobian companion factor: operand * dt (0 at DC)
-                self.emit_expr(arena, inner, emit_ctx, program)?;
-                program.instructions.push(Instruction::IdtJacobian);
-            }
-            Node::TableDerivative { input, table } => {
-                self.emit_expr(arena, input, emit_ctx, program)?;
-                let (x_data, y_data) = arena.table(table);
-                let table_id = self.register_lookup_table(x_data, y_data)?;
-                program
-                    .instructions
-                    .push(Instruction::TableDerivative(table_id));
-            }
-            Node::Ddx { .. } => {
-                return Err(CompileError::CodeGen(CodeGenError::new(
-                    CodeGenErrorKind::Internal("unresolved ddx() reached code generation".into()),
-                )));
-            }
-            Node::Limit(inner, step) => {
-                // $limit(expr, step) - bounds value change per Newton iteration
-                // For DC, we track previous value and limit the step
-                self.emit_expr(arena, inner, emit_ctx, program)?;
-                if let Some(step_expr) = step {
-                    self.emit_expr(arena, step_expr, emit_ctx, program)?;
-                } else {
-                    // Default step limit for pn-junction type limiting
-                    program.instructions.push(Instruction::PushConst(0.7)); // ~2*Vt
+                Node::IdtMod {
+                    expr,
+                    modulus,
+                    payload,
+                } => {
+                    let (ic, offset) = arena.optional_pair(payload);
+                    self.emit_expr(arena, expr, emit_ctx, program)?;
+                    match ic {
+                        Some(ic) => self.emit_expr(arena, ic, emit_ctx, program)?,
+                        None => program.instructions.push(Instruction::PushConst(0.0)),
+                    }
+                    self.emit_expr(arena, modulus, emit_ctx, program)?;
+                    match offset {
+                        Some(offset) => self.emit_expr(arena, offset, emit_ctx, program)?,
+                        None => program.instructions.push(Instruction::PushConst(0.0)),
+                    }
+                    let state_id = Self::allocate_slot(&self.limit_state_count);
+                    program
+                        .instructions
+                        .push(Instruction::IdtModState(state_id));
                 }
-                let state_id = Self::allocate_slot(&self.limit_state_count);
-                program.instructions.push(Instruction::LimitState(state_id));
-            }
-            Node::CanonicalLimit(inner) => {
-                self.emit_expr(arena, inner, emit_ctx, program)?;
-                let state_id = Self::allocate_slot(&self.limit_state_count);
-                program
-                    .instructions
-                    .push(Instruction::CanonicalLimitState(state_id));
-            }
-            Node::TableLookup { input, table } => {
-                // $table_model lookup with linear interpolation
-                // Emit input expression, then TableLookup instruction referencing the table
-                self.emit_expr(arena, input, emit_ctx, program)?;
-                let (x_data, y_data) = arena.table(table);
-                let table_id = self.register_lookup_table(x_data, y_data)?;
-                program
-                    .instructions
-                    .push(Instruction::TableLookup(table_id));
-            }
-            Node::LastCrossing { expr, direction } => {
-                self.emit_expr(arena, expr, emit_ctx, program)?;
-                program
-                    .instructions
-                    .push(Instruction::PushConst(direction.unwrap_or(0) as f64));
-                let detector_id = Self::allocate_slot(&self.cross_detector_count);
-                program
-                    .instructions
-                    .push(Instruction::LastCrossingState(detector_id));
-            }
-            Node::Analysis(name) => {
-                // analysis(name) - check current analysis type
-                let name = arena.name(name);
-                if name.eq_ignore_ascii_case("nodeset") {
-                    self.requires_nodeset_phase.set(true);
+                Node::DdtCompanion(inner) => {
+                    // Jacobian companion factor: operand / dt (0 at DC)
+                    self.emit_expr(arena, inner, emit_ctx, program)?;
+                    program.instructions.push(Instruction::DdtJacobian);
                 }
-                let instruction = rspice_veriloga_runtime::analysis_query_id(name)
-                    .map(Instruction::Analysis)
-                    .unwrap_or(Instruction::PushConst(0.0));
-                program.instructions.push(instruction);
+                Node::IdtCompanion(inner) => {
+                    // Jacobian companion factor: operand * dt (0 at DC)
+                    self.emit_expr(arena, inner, emit_ctx, program)?;
+                    program.instructions.push(Instruction::IdtJacobian);
+                }
+                Node::TableDerivative { input, table } => {
+                    self.emit_expr(arena, input, emit_ctx, program)?;
+                    let (x_data, y_data) = arena.table(table);
+                    let table_id = self.register_lookup_table(x_data, y_data)?;
+                    program
+                        .instructions
+                        .push(Instruction::TableDerivative(table_id));
+                }
+                Node::Ddx { .. } => {
+                    return Err(CompileError::CodeGen(CodeGenError::new(
+                        CodeGenErrorKind::Internal(
+                            "unresolved ddx() reached code generation".into(),
+                        ),
+                    )));
+                }
+                Node::Limit(inner, step) => {
+                    // $limit(expr, step) - bounds value change per Newton iteration
+                    // For DC, we track previous value and limit the step
+                    self.emit_expr(arena, inner, emit_ctx, program)?;
+                    if let Some(step_expr) = step {
+                        self.emit_expr(arena, step_expr, emit_ctx, program)?;
+                    } else {
+                        // Default step limit for pn-junction type limiting
+                        program.instructions.push(Instruction::PushConst(0.7)); // ~2*Vt
+                    }
+                    let state_id = Self::allocate_slot(&self.limit_state_count);
+                    program.instructions.push(Instruction::LimitState(state_id));
+                }
+                Node::CanonicalLimit(inner) => {
+                    self.emit_expr(arena, inner, emit_ctx, program)?;
+                    let state_id = Self::allocate_slot(&self.limit_state_count);
+                    program
+                        .instructions
+                        .push(Instruction::CanonicalLimitState(state_id));
+                }
+                Node::TableLookup { input, table } => {
+                    // $table_model lookup with linear interpolation
+                    // Emit input expression, then TableLookup instruction referencing the table
+                    self.emit_expr(arena, input, emit_ctx, program)?;
+                    let (x_data, y_data) = arena.table(table);
+                    let table_id = self.register_lookup_table(x_data, y_data)?;
+                    program
+                        .instructions
+                        .push(Instruction::TableLookup(table_id));
+                }
+                Node::LastCrossing { expr, direction } => {
+                    self.emit_expr(arena, expr, emit_ctx, program)?;
+                    program
+                        .instructions
+                        .push(Instruction::PushConst(direction.unwrap_or(0) as f64));
+                    let detector_id = Self::allocate_slot(&self.cross_detector_count);
+                    program
+                        .instructions
+                        .push(Instruction::LastCrossingState(detector_id));
+                }
+                Node::Analysis(name) => {
+                    // analysis(name) - check current analysis type
+                    let name = arena.name(name);
+                    if name.eq_ignore_ascii_case("nodeset") {
+                        self.requires_nodeset_phase.set(true);
+                    }
+                    let instruction = rspice_veriloga_runtime::analysis_query_id(name)
+                        .map(Instruction::Analysis)
+                        .unwrap_or(Instruction::PushConst(0.0));
+                    program.instructions.push(instruction);
+                }
+                Node::Heavy(_, heavy) => {
+                    self.emit_heavy(arena, arena.heavy(heavy), emit_ctx, program)?
+                }
             }
-            Node::Heavy(_, heavy) => {
-                self.emit_heavy(arena, arena.heavy(heavy), emit_ctx, program)?
-            }
+            next = pending.pop();
         }
         Ok(())
     }

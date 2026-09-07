@@ -22,6 +22,39 @@ use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 #[test]
+fn generated_operator_chains_preserve_association_and_function_effects() {
+    let chain = " + 1.0e16 + 1.0 - 1.0e16".repeat(16);
+    let source = format!(
+        "module operator_effects(p,n);\n\
+         inout p,n; electrical p,n; integer count;\n\
+         analog function integer bump;\n\
+         inout counter; integer counter;\n\
+         begin counter=counter+1; bump=counter; end\n\
+         endfunction\n\
+         analog begin count=0; I(p,n)<+(V(p,n){chain})+bump(count)-bump(count); end\n\
+         endmodule\n"
+    );
+    let (state, stamp, noise) = generated_parts(&source, "operator traversal");
+    run_generated_main(
+        "operator traversal",
+        &state,
+        &stamp,
+        &noise,
+        r#"
+let mut instance = device::state::Instance::new(&[0,1]);
+let ctx = runtime::GeneratedEvalContext { voltages: &[0.0,0.0], temperature: 300.0 };
+for _ in 0..2 {
+    let mut sink = [0.0];
+    instance.stamp(&ctx, &mut runtime::GeneratedStamper { sink: Some(&mut sink) });
+    assert_eq!(sink[0],-1.0);
+    assert!(!ctx.evaluation_failed());
+}
+"#,
+    )
+    .expect("generated operators preserve association and left-to-right effects");
+}
+
+#[test]
 fn nodeset_capability_tracks_simulation_code_across_runtime_and_generated_models() {
     for (body, expected) in [
         ("analog I(p,n)<+V(p,n);", false),

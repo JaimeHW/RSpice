@@ -26,6 +26,58 @@ const MAX_REPLICATION_MATERIALIZATION_WORK: usize = 4_194_304;
 const MAX_ANALOG_FILTER_VECTOR_ELEMENTS: usize =
     crate::zfilter::MAX_ZI_RUNTIME_OPERANDS - crate::zfilter::ZI_FIXED_RUNTIME_OPERANDS;
 
+/// The leaf is still authored syntax; operator operands have already been
+/// rewritten. Keeping these cases distinct prevents a second operand walk.
+enum OperatorRewrite<'a> {
+    Leaf(&'a Expression),
+    Binary(BinaryExpr),
+    Unary(UnaryExpr),
+}
+
+/// Share the postorder traversal between function materialization and ordinary
+/// lowering. Both preserve association and visit the left operand first.
+fn rewrite_operator_tree(
+    expr: &Expression,
+    mut rewrite: impl FnMut(OperatorRewrite<'_>) -> CompileResult<Expression>,
+) -> CompileResult<Expression> {
+    let mut pending = vec![(expr, false)];
+    let mut values = Vec::new();
+    while let Some((expression, children_rewritten)) = pending.pop() {
+        let node = match expression {
+            Expression::Binary(binary) if !children_rewritten => {
+                pending.push((expression, true));
+                pending.push((&binary.right, false));
+                pending.push((&binary.left, false));
+                continue;
+            }
+            Expression::Unary(unary) if !children_rewritten => {
+                pending.push((expression, true));
+                pending.push((&unary.operand, false));
+                continue;
+            }
+            Expression::Binary(binary) => {
+                let right = values.pop().expect("right operand was rewritten");
+                let left = values.pop().expect("left operand was rewritten");
+                OperatorRewrite::Binary(BinaryExpr {
+                    op: binary.op,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                    span: binary.span,
+                })
+            }
+            Expression::Unary(unary) => OperatorRewrite::Unary(UnaryExpr {
+                op: unary.op,
+                operand: Box::new(values.pop().expect("unary operand was rewritten")),
+                span: unary.span,
+            }),
+            expression => OperatorRewrite::Leaf(expression),
+        };
+        values.push(rewrite(node)?);
+    }
+    debug_assert_eq!(values.len(), 1);
+    Ok(values.pop().expect("root expression was rewritten"))
+}
+
 /// Numeric value retained by compile-time evaluation.
 ///
 /// Verilog-AMS arithmetic is type-sensitive: notably, `1 / 2` is integer
@@ -3546,115 +3598,97 @@ impl SemanticAnalyzer {
         expression: &Expression,
         span: Span,
     ) -> CompileResult<()> {
-        match expression {
-            Expression::Digital(digital) => {
-                for child in digital.children() {
-                    self.validate_direct_zi_contribution(child, span)?;
-                }
-            }
-            Expression::Call(call) => {
-                if is_zi_operator_name(&call.name) {
-                    self.validate_direct_zi_site(call.name.as_str(), call.args.get(4), span)?;
-                }
-                for argument in &call.args {
-                    self.validate_direct_zi_contribution(argument, span)?;
-                }
-            }
-            Expression::AnalogOperator(_) => {
-                self.validate_direct_zi_analog_children(expression, span)?;
-            }
-            Expression::Binary(binary) => {
-                self.validate_direct_zi_contribution(&binary.left, span)?;
-                self.validate_direct_zi_contribution(&binary.right, span)?;
-            }
-            Expression::Unary(unary) => {
-                self.validate_direct_zi_contribution(&unary.operand, span)?;
-            }
-            Expression::Conditional(conditional) => {
-                self.validate_direct_zi_contribution(&conditional.condition, span)?;
-                self.validate_direct_zi_contribution(&conditional.then_expr, span)?;
-                self.validate_direct_zi_contribution(&conditional.else_expr, span)?;
-            }
-            Expression::SystemFunction(function) => {
-                for argument in &function.args {
-                    self.validate_direct_zi_contribution(argument, span)?;
-                }
-            }
-            Expression::ArrayAccess(access) => {
-                self.validate_direct_zi_contribution(&access.index, span)?;
-            }
-            Expression::ArrayLiteral(array) => {
-                for element in &array.elements {
-                    self.validate_direct_zi_array_element(element, span)?;
-                }
-            }
-            Expression::Number(_)
-            | Expression::StringLit(_)
-            | Expression::NullArgument(_)
-            | Expression::Identifier(_)
-            | Expression::BranchAccess(_) => {}
-            Expression::NoiseSource(noise) => match noise {
-                NoiseSource::White { power, .. } => {
-                    self.validate_direct_zi_contribution(power, span)?;
-                }
-                NoiseSource::Flicker {
-                    power, exponent, ..
-                } => {
-                    self.validate_direct_zi_contribution(power, span)?;
-                    self.validate_direct_zi_contribution(exponent, span)?;
-                }
-                NoiseSource::Table { data, .. } => {
-                    for value in data {
-                        self.validate_direct_zi_contribution(value, span)?;
+        enum Pending<'a> {
+            Expression(&'a Expression),
+            Element(&'a ArrayLiteralElement),
+        }
+        let mut pending = Vec::new();
+        let mut next = Some(Pending::Expression(expression));
+        while let Some(node) = next {
+            match node {
+                Pending::Expression(expression) => match expression {
+                    Expression::Digital(digital) => {
+                        pending.extend(
+                            digital
+                                .children()
+                                .into_iter()
+                                .rev()
+                                .map(Pending::Expression),
+                        );
                     }
+                    Expression::Call(call) => {
+                        if is_zi_operator_name(&call.name) {
+                            self.validate_direct_zi_site(
+                                call.name.as_str(),
+                                call.args.get(4),
+                                span,
+                            )?;
+                        }
+                        pending.extend(call.args.iter().rev().map(Pending::Expression));
+                    }
+                    Expression::AnalogOperator(AnalogOperator::Limit {
+                        proposed,
+                        candidate,
+                        type_metadata,
+                        ..
+                    }) => {
+                        if let Some(value) = type_metadata {
+                            pending.push(Pending::Expression(value));
+                        }
+                        pending.push(Pending::Expression(candidate));
+                        pending.push(Pending::Expression(proposed));
+                    }
+                    Expression::Binary(binary) => {
+                        pending.push(Pending::Expression(&binary.right));
+                        pending.push(Pending::Expression(&binary.left));
+                    }
+                    Expression::Unary(unary) => {
+                        pending.push(Pending::Expression(&unary.operand));
+                    }
+                    Expression::Conditional(conditional) => {
+                        pending.push(Pending::Expression(&conditional.else_expr));
+                        pending.push(Pending::Expression(&conditional.then_expr));
+                        pending.push(Pending::Expression(&conditional.condition));
+                    }
+                    Expression::SystemFunction(function) => {
+                        pending.extend(function.args.iter().rev().map(Pending::Expression));
+                    }
+                    Expression::ArrayAccess(access) => {
+                        pending.push(Pending::Expression(&access.index));
+                    }
+                    Expression::ArrayLiteral(array) => {
+                        pending.extend(array.elements.iter().rev().map(Pending::Element));
+                    }
+                    Expression::Number(_)
+                    | Expression::StringLit(_)
+                    | Expression::NullArgument(_)
+                    | Expression::Identifier(_)
+                    | Expression::BranchAccess(_)
+                    | Expression::AnalogOperator(AnalogOperator::LimiterArgument { .. }) => {}
+                    Expression::NoiseSource(noise) => match noise {
+                        NoiseSource::White { power, .. } => {
+                            pending.push(Pending::Expression(power));
+                        }
+                        NoiseSource::Flicker {
+                            power, exponent, ..
+                        } => {
+                            pending.push(Pending::Expression(exponent));
+                            pending.push(Pending::Expression(power));
+                        }
+                        NoiseSource::Table { data, .. } => {
+                            pending.extend(data.iter().rev().map(Pending::Expression));
+                        }
+                    },
+                },
+                Pending::Element(ArrayLiteralElement::Value(expression)) => {
+                    pending.push(Pending::Expression(expression));
                 }
-            },
-        }
-        Ok(())
-    }
-
-    fn validate_direct_zi_array_element(
-        &self,
-        element: &ArrayLiteralElement,
-        span: Span,
-    ) -> CompileResult<()> {
-        match element {
-            ArrayLiteralElement::Value(expression) => {
-                self.validate_direct_zi_contribution(expression, span)
-            }
-            ArrayLiteralElement::Replication(replication) => {
-                self.validate_direct_zi_contribution(&replication.count, span)?;
-                for element in &replication.elements {
-                    self.validate_direct_zi_array_element(element, span)?;
-                }
-                Ok(())
-            }
-        }
-    }
-
-    fn validate_direct_zi_analog_children(
-        &self,
-        expression: &Expression,
-        span: Span,
-    ) -> CompileResult<()> {
-        let Expression::AnalogOperator(operator) = expression else {
-            return Ok(());
-        };
-        let visit = |child: &Expression| self.validate_direct_zi_contribution(child, span);
-        match operator {
-            AnalogOperator::Limit {
-                proposed,
-                candidate,
-                type_metadata,
-                ..
-            } => {
-                visit(proposed)?;
-                visit(candidate)?;
-                if let Some(value) = type_metadata {
-                    visit(value)?;
+                Pending::Element(ArrayLiteralElement::Replication(replication)) => {
+                    pending.extend(replication.elements.iter().rev().map(Pending::Element));
+                    pending.push(Pending::Expression(&replication.count));
                 }
             }
-            AnalogOperator::LimiterArgument { .. } => {}
+            next = pending.pop();
         }
         Ok(())
     }
@@ -4484,9 +4518,16 @@ impl SemanticAnalyzer {
         module: &mut AnalyzedModule,
         sink: &mut Vec<AnalyzedStatement>,
     ) -> CompileResult<Expression> {
-        let expr = self.materialize_output_function_calls(expr, module, sink)?;
+        // Without user functions this pass can only copy the input tree. Borrow
+        // it instead, avoiding an allocation and recursive walk per AST node.
+        let materialized = if self.user_functions.is_empty() {
+            None
+        } else {
+            Some(self.materialize_output_function_calls(expr, module, sink)?)
+        };
+        let expr = materialized.as_ref().unwrap_or(expr);
         let side_effect_start = self.function_side_effects.len();
-        let lowered = self.lower_expression(&expr)?;
+        let lowered = self.lower_expression(expr)?;
         let side_effects = self.function_side_effects.split_off(side_effect_start);
         for assignment in side_effects {
             self.analyze_assignment(&assignment, module, sink)?;
@@ -4495,6 +4536,25 @@ impl SemanticAnalyzer {
     }
 
     fn materialize_output_function_calls(
+        &mut self,
+        expr: &Expression,
+        module: &mut AnalyzedModule,
+        sink: &mut Vec<AnalyzedStatement>,
+    ) -> CompileResult<Expression> {
+        if matches!(expr, Expression::Binary(_) | Expression::Unary(_)) {
+            rewrite_operator_tree(expr, |node| match node {
+                OperatorRewrite::Leaf(expression) => {
+                    self.materialize_non_operator_function_calls(expression, module, sink)
+                }
+                OperatorRewrite::Binary(binary) => Ok(Expression::Binary(binary)),
+                OperatorRewrite::Unary(unary) => Ok(Expression::Unary(unary)),
+            })
+        } else {
+            self.materialize_non_operator_function_calls(expr, module, sink)
+        }
+    }
+
+    fn materialize_non_operator_function_calls(
         &mut self,
         expr: &Expression,
         module: &mut AnalyzedModule,
@@ -4518,29 +4578,9 @@ impl SemanticAnalyzer {
                     .collect::<CompileResult<Vec<_>>>()?,
                 span: function.span,
             }),
-            Expression::Binary(binary) => Expression::Binary(BinaryExpr {
-                op: binary.op,
-                left: Box::new(self.materialize_output_function_calls(
-                    &binary.left,
-                    module,
-                    sink,
-                )?),
-                right: Box::new(self.materialize_output_function_calls(
-                    &binary.right,
-                    module,
-                    sink,
-                )?),
-                span: binary.span,
-            }),
-            Expression::Unary(unary) => Expression::Unary(UnaryExpr {
-                op: unary.op,
-                operand: Box::new(self.materialize_output_function_calls(
-                    &unary.operand,
-                    module,
-                    sink,
-                )?),
-                span: unary.span,
-            }),
+            Expression::Binary(_) | Expression::Unary(_) => {
+                unreachable!("operator expressions use the iterative materialization path")
+            }
             Expression::Conditional(conditional) => {
                 if self.expression_contains_output_function_call(expr) {
                     let value_type = self.infer_type(expr)?;
@@ -4972,6 +5012,54 @@ impl SemanticAnalyzer {
     /// Rewrite an expression: apply substitutions (block locals, loop
     /// variables) and inline calls to user-defined analog functions.
     fn lower_expression(&mut self, expr: &Expression) -> CompileResult<Expression> {
+        if matches!(expr, Expression::Binary(_) | Expression::Unary(_)) {
+            self.lower_operator_expression(expr)
+        } else {
+            self.lower_non_operator_expression(expr)
+        }
+    }
+
+    /// Operator chains retain their authored association and left-to-right
+    /// lowering order without reserving a semantic-analysis frame per operand.
+    fn lower_operator_expression(&mut self, expr: &Expression) -> CompileResult<Expression> {
+        rewrite_operator_tree(expr, |node| match node {
+            OperatorRewrite::Leaf(expression) => self.lower_non_operator_expression(expression),
+            OperatorRewrite::Binary(binary) => {
+                if matches!(
+                    binary.op,
+                    BinaryOp::BitAnd
+                        | BinaryOp::BitOr
+                        | BinaryOp::BitXor
+                        | BinaryOp::Shl
+                        | BinaryOp::Shr
+                ) {
+                    Self::validate_integer_operator_operand(
+                        self.infer_type(&binary.left)?,
+                        "left operand of bitwise or shift operator",
+                        binary.left.span(),
+                    )?;
+                    Self::validate_integer_operator_operand(
+                        self.infer_type(&binary.right)?,
+                        "right operand of bitwise or shift operator",
+                        binary.right.span(),
+                    )?;
+                }
+                Ok(Expression::Binary(binary))
+            }
+            OperatorRewrite::Unary(unary) => {
+                if unary.op == UnaryOp::BitNot {
+                    Self::validate_integer_operator_operand(
+                        self.infer_type(&unary.operand)?,
+                        "operand of bitwise complement",
+                        unary.operand.span(),
+                    )?;
+                }
+                Ok(Expression::Unary(unary))
+            }
+        })
+    }
+
+    fn lower_non_operator_expression(&mut self, expr: &Expression) -> CompileResult<Expression> {
         Ok(match expr {
             // The refusal that keeps four-state literals and part-selects out
             // of the continuous domain. Every analog expression is lowered
@@ -5011,49 +5099,8 @@ impl SemanticAnalyzer {
                 let kind = self.resolve_branch_access_kind(access, access.span())?;
                 Expression::BranchAccess(access.with_kind(kind))
             }
-            Expression::Binary(b) => {
-                let left = self.lower_expression(&b.left)?;
-                let right = self.lower_expression(&b.right)?;
-                if matches!(
-                    b.op,
-                    BinaryOp::BitAnd
-                        | BinaryOp::BitOr
-                        | BinaryOp::BitXor
-                        | BinaryOp::Shl
-                        | BinaryOp::Shr
-                ) {
-                    Self::validate_integer_operator_operand(
-                        self.infer_type(&left)?,
-                        "left operand of bitwise or shift operator",
-                        left.span(),
-                    )?;
-                    Self::validate_integer_operator_operand(
-                        self.infer_type(&right)?,
-                        "right operand of bitwise or shift operator",
-                        right.span(),
-                    )?;
-                }
-                Expression::Binary(BinaryExpr {
-                    op: b.op,
-                    left: Box::new(left),
-                    right: Box::new(right),
-                    span: b.span,
-                })
-            }
-            Expression::Unary(u) => {
-                let operand = self.lower_expression(&u.operand)?;
-                if u.op == UnaryOp::BitNot {
-                    Self::validate_integer_operator_operand(
-                        self.infer_type(&operand)?,
-                        "operand of bitwise complement",
-                        operand.span(),
-                    )?;
-                }
-                Expression::Unary(UnaryExpr {
-                    op: u.op,
-                    operand: Box::new(operand),
-                    span: u.span,
-                })
+            Expression::Binary(_) | Expression::Unary(_) => {
+                unreachable!("operator expressions use the iterative lowering path")
             }
             Expression::Conditional(c) => {
                 let condition = self.lower_expression(&c.condition)?;
@@ -6456,6 +6503,99 @@ impl SemanticAnalyzer {
     }
 
     fn infer_type(&self, expr: &Expression) -> CompileResult<ValueType> {
+        if !matches!(
+            expr,
+            Expression::Binary(_) | Expression::Unary(_) | Expression::Conditional(_)
+        ) {
+            return self.infer_non_operator_type(expr);
+        }
+        let mut pending = vec![(expr, false)];
+        let mut types = Vec::new();
+        while let Some((expression, children_typed)) = pending.pop() {
+            let value_type = match expression {
+                Expression::Binary(binary) if !children_typed => {
+                    pending.push((expression, true));
+                    pending.push((&binary.right, false));
+                    pending.push((&binary.left, false));
+                    continue;
+                }
+                Expression::Unary(unary) if !children_typed => {
+                    pending.push((expression, true));
+                    pending.push((&unary.operand, false));
+                    continue;
+                }
+                Expression::Conditional(conditional) if !children_typed => {
+                    pending.push((expression, true));
+                    pending.push((&conditional.else_expr, false));
+                    pending.push((&conditional.then_expr, false));
+                    continue;
+                }
+                Expression::Binary(binary) => {
+                    let right = types.pop().expect("right operand type was inferred");
+                    let left: ValueType = types.pop().expect("left operand type was inferred");
+                    match binary.op {
+                        BinaryOp::Eq
+                        | BinaryOp::Ne
+                        | BinaryOp::Lt
+                        | BinaryOp::Le
+                        | BinaryOp::Gt
+                        | BinaryOp::Ge
+                        | BinaryOp::And
+                        | BinaryOp::Or => ValueType::Boolean,
+                        BinaryOp::Add
+                        | BinaryOp::Sub
+                        | BinaryOp::Mul
+                        | BinaryOp::Div
+                        | BinaryOp::Pow
+                        | BinaryOp::Mod => left.common_type(right),
+                        BinaryOp::BitAnd
+                        | BinaryOp::BitOr
+                        | BinaryOp::BitXor
+                        | BinaryOp::Shl
+                        | BinaryOp::Shr => {
+                            Self::validate_integer_operator_operand(
+                                left,
+                                "left operand of bitwise or shift operator",
+                                binary.left.span(),
+                            )?;
+                            Self::validate_integer_operator_operand(
+                                right,
+                                "right operand of bitwise or shift operator",
+                                binary.right.span(),
+                            )?;
+                            ValueType::Integer
+                        }
+                    }
+                }
+                Expression::Unary(unary) => {
+                    let operand_type = types.pop().expect("unary operand type was inferred");
+                    match unary.op {
+                        UnaryOp::Pos | UnaryOp::Neg => operand_type,
+                        UnaryOp::Not => ValueType::Boolean,
+                        UnaryOp::BitNot => {
+                            Self::validate_integer_operator_operand(
+                                operand_type,
+                                "operand of bitwise complement",
+                                unary.operand.span(),
+                            )?;
+                            ValueType::Integer
+                        }
+                    }
+                }
+                Expression::Conditional(_) => {
+                    let else_type = types.pop().expect("else branch type was inferred");
+                    let then_type: ValueType = types.pop().expect("then branch type was inferred");
+                    then_type.common_type(else_type)
+                }
+                expression => self.infer_non_operator_type(expression)?,
+            };
+            types.push(value_type);
+        }
+        debug_assert_eq!(types.len(), 1);
+        Ok(types.pop().expect("root expression type was inferred"))
+    }
+
+    fn infer_non_operator_type(&self, expr: &Expression) -> CompileResult<ValueType> {
         match expr {
             Expression::Digital(digital) => Err(CompileError::Semantic(SemanticError::new(
                 SemanticErrorKind::UnsupportedFeature(format!(
@@ -6512,62 +6652,8 @@ impl SemanticAnalyzer {
                     Ok(ValueType::Unknown)
                 }
             }
-            Expression::Unary(unary) => {
-                let operand_type = self.infer_type(&unary.operand)?;
-                match unary.op {
-                    UnaryOp::Pos | UnaryOp::Neg => Ok(operand_type),
-                    UnaryOp::Not => Ok(ValueType::Boolean),
-                    UnaryOp::BitNot => {
-                        Self::validate_integer_operator_operand(
-                            operand_type,
-                            "operand of bitwise complement",
-                            unary.operand.span(),
-                        )?;
-                        Ok(ValueType::Integer)
-                    }
-                }
-            }
-            Expression::Binary(binary) => {
-                let left = self.infer_type(&binary.left)?;
-                let right = self.infer_type(&binary.right)?;
-
-                match binary.op {
-                    BinaryOp::Eq
-                    | BinaryOp::Ne
-                    | BinaryOp::Lt
-                    | BinaryOp::Le
-                    | BinaryOp::Gt
-                    | BinaryOp::Ge => Ok(ValueType::Boolean),
-                    BinaryOp::And | BinaryOp::Or => Ok(ValueType::Boolean),
-                    BinaryOp::Add
-                    | BinaryOp::Sub
-                    | BinaryOp::Mul
-                    | BinaryOp::Div
-                    | BinaryOp::Pow
-                    | BinaryOp::Mod => Ok(left.common_type(right)),
-                    BinaryOp::BitAnd
-                    | BinaryOp::BitOr
-                    | BinaryOp::BitXor
-                    | BinaryOp::Shl
-                    | BinaryOp::Shr => {
-                        Self::validate_integer_operator_operand(
-                            left,
-                            "left operand of bitwise or shift operator",
-                            binary.left.span(),
-                        )?;
-                        Self::validate_integer_operator_operand(
-                            right,
-                            "right operand of bitwise or shift operator",
-                            binary.right.span(),
-                        )?;
-                        Ok(ValueType::Integer)
-                    }
-                }
-            }
-            Expression::Conditional(cond) => {
-                let then_type = self.infer_type(&cond.then_expr)?;
-                let else_type = self.infer_type(&cond.else_expr)?;
-                Ok(then_type.common_type(else_type))
+            Expression::Unary(_) | Expression::Binary(_) | Expression::Conditional(_) => {
+                unreachable!("operator types use the iterative inference path")
             }
             Expression::ArrayAccess(a) => {
                 if let Some(sym) = self.symbols.lookup(&a.array) {
