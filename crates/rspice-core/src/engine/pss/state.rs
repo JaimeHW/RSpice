@@ -439,6 +439,28 @@ impl PssCircuit {
         self.current_source_times = [time, self.current_source_times[0]];
     }
 
+    /// Evaluate winding equations from flux differences, sharing TRAN's
+    /// cancellation-resistant residual and the affine forcing stamped by PSS.
+    /// The caller has just stamped this same trial, so the forcing workspace
+    /// contains its current analytic source correction.
+    pub(super) fn stabilize_inductor_correction_rhs(
+        &self,
+        rhs: &mut [Value],
+        iterate: &[Value],
+        step: PssCompanionStep<'_>,
+    ) -> Result<(), SimulationError> {
+        self.circuit
+            .stabilize_inductor_transient_correction_rhs(rhs, iterate, step.dt, step.coeff);
+        if !self.current_source_correction.is_empty() {
+            self.basis.currents.add_flux_rhs(
+                &self.circuit,
+                &self.current_source_correction,
+                rhs,
+            )?;
+        }
+        Ok(())
+    }
+
     /// A physical winding current may be a signed sum of independent states.
     pub(in crate::engine) fn inductor_probe_projection(
         &self,
