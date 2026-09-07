@@ -42,6 +42,43 @@ impl ShortcutInputSnapshot {
         }
     }
 
+    /// Remove the exact non-repeating presses reported by the resolver in
+    /// event order. `InputState::consume_key` removes every logical match, so
+    /// calling it once per press loses repeated strokes and can also consume
+    /// a different Shift/Alt binding. Validate the whole batch before removal.
+    pub(crate) fn consume_keys(input: &mut InputState, keys: &[(Key, Modifiers)]) -> bool {
+        if keys.is_empty() {
+            return true;
+        }
+        let mut events = input.events.iter().enumerate();
+        let mut indices = Vec::with_capacity(keys.len());
+        for (key, modifiers) in keys {
+            let Some((index, _)) = events.find(|(_, event)| {
+                matches!(event, Event::Key {
+                    key: event_key,
+                    modifiers: event_modifiers,
+                    pressed: true,
+                    repeat: false,
+                    ..
+                } if event_key == key && event_modifiers == modifiers)
+            }) else {
+                return false;
+            };
+            indices.push(index);
+        }
+        let mut indices = indices.into_iter().peekable();
+        let mut index = 0;
+        input.events.retain(|_| {
+            let consume = indices.peek() == Some(&index);
+            if consume {
+                indices.next();
+            }
+            index += 1;
+            !consume
+        });
+        true
+    }
+
     pub(super) fn key_presses(&self) -> &[ShortcutKeyPress] {
         &self.key_presses
     }
@@ -132,6 +169,46 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![Key::K, Key::S]
         );
+    }
+
+    #[test]
+    fn consumption_preserves_text_releases_repeats_and_other_bindings() {
+        let plain = key_event(Key::S, Modifiers::COMMAND, true, false);
+        let shifted = key_event(Key::S, Modifiers::COMMAND | Modifiers::SHIFT, true, false);
+        let release = key_event(Key::S, Modifiers::COMMAND, false, false);
+        let repeat = key_event(Key::S, Modifiers::COMMAND, true, true);
+        let text = Event::Text("s".to_owned());
+        let mut input = InputState::default();
+        input.events = vec![
+            plain.clone(),
+            text.clone(),
+            release.clone(),
+            shifted.clone(),
+            repeat.clone(),
+            plain,
+        ];
+
+        assert!(ShortcutInputSnapshot::consume_keys(
+            &mut input,
+            &[(Key::S, Modifiers::COMMAND), (Key::S, Modifiers::COMMAND)],
+        ));
+        assert_eq!(input.events, vec![text, release, shifted, repeat]);
+    }
+
+    #[test]
+    fn incomplete_consumption_preserves_the_entire_input_queue() {
+        let events = vec![
+            key_event(Key::K, Modifiers::COMMAND, true, false),
+            Event::Text("query".to_owned()),
+        ];
+        let mut input = InputState::default();
+        input.events = events.clone();
+
+        assert!(!ShortcutInputSnapshot::consume_keys(
+            &mut input,
+            &[(Key::K, Modifiers::COMMAND), (Key::S, Modifiers::COMMAND)],
+        ));
+        assert_eq!(input.events, events);
     }
 
     #[test]

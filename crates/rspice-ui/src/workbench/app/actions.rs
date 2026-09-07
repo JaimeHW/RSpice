@@ -109,10 +109,8 @@ impl RSpiceApp {
         if let Some(delay) = resolution.repaint_after {
             ctx.request_repaint_after(delay);
         }
-        let consumed = resolution
-            .consume
-            .iter()
-            .all(|(key, modifiers)| ctx.input_mut(|input| input.consume_key(*modifiers, *key)));
+        let consumed =
+            ctx.input_mut(|input| ShortcutInputSnapshot::consume_keys(input, &resolution.consume));
         if consumed && let Some(command) = resolution.command {
             self.execute_shortcut_command(command);
         }
