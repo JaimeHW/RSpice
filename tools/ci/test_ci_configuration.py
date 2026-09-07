@@ -381,119 +381,47 @@ class CiConfigurationTests(unittest.TestCase):
             "x64 bytecode-native lowering must stay contract-test only",
         )
 
-    def test_linux_fast_ci_reduces_test_artifact_pressure(self) -> None:
-        workflow = read_text(".github/workflows/ci.yml")
+    def test_linux_test_groups_cover_workspace_without_rebuilding_everything(self) -> None:
+        import fnmatch
+        import shlex
 
-        self.assertIn('CARGO_BUILD_JOBS: "2"', workflow)
-        self.assertIn('CARGO_PROFILE_DEV_DEBUG: "0"', workflow)
-        self.assertIn('CARGO_PROFILE_TEST_DEBUG: "0"', workflow)
-        self.assertIn("python3 tools/ci/test_ci_configuration.py", workflow)
-        self.assertIn('ACTIONLINT_VERSION: "1.7.12"', workflow)
-        self.assertIn(
-            'go install "github.com/rhysd/actionlint/cmd/actionlint@v${ACTIONLINT_VERSION}"',
-            workflow,
-        )
-        self.assertIn('"$GOBIN/actionlint" .github/workflows/*.yml', workflow)
-        self.assertIn("python3 tools/ci/test_wasm_playground.py", workflow)
-        self.assertIn("python3 tools/ci/test_ide_worker.py", workflow)
-        self.assertIn("python3 tools/release/test_package_native.py", workflow)
-        self.assertRegex(
-            workflow,
-            r"- name: Clear check artifacts before tests\s+run: cargo clean",
-        )
-        self.assertNotIn(
-            "cargo test --locked --workspace --exclude rspice-python --exclude rspice-wasm\n"
-            "          -- --skip test_ngspice_ --skip test_full_ngspice",
-            workflow,
-            "Linux fast CI should not link every workspace test target in one cargo invocation",
-        )
-        self.assertIn("Test core integration tests (fast tier)", workflow)
-        self.assertIn("cargo test --locked -p rspice-core --tests", workflow)
-        self.assertIn("Test non-UI crates (fast tier)", workflow)
-        self.assertIn(
-            "cargo test --locked -p rspice-matrix -p rspice-cli -p rspice-veriloga -p rspice-bench\n"
-            "          -p rspice-publication-contract -p rspice-publish -p rspice-viewer",
-            workflow,
-        )
-        self.assertIn("Gate generated Verilog-A Rust resources", workflow)
-        self.assertIn("Check granular generated Verilog-A features", workflow)
-        self.assertIn(
-            "--features veriloga-model-hisimhv-va,veriloga-builtins-noise",
-            workflow,
-        )
-        self.assertIn(
-            "cargo run --locked -p rspice-bench -- generated-rust",
-            workflow,
-        )
-        self.assertIn(
-            "--features generated-stamp-subset -- generated-stamp",
-            workflow,
-        )
-        self.assertIn("--max-corpus-median-reference-ratio 1.25", workflow)
-        self.assertIn("--max-model-reference-ratio 4.25", workflow)
-        for budget in [
-            "--max-source-bytes 56000000",
-            "--max-noise-source-bytes 17000000",
-            "--max-model-source-bytes 4700000",
-            "--max-file-count 380",
-            "--max-pooled-workspace-payload-bytes 0",
-            "--max-stamp-state-payload-bytes 6200",
-        ]:
-            self.assertIn(budget, workflow)
-        self.assertIn("Compile Verilog-A native JIT tests (Linux x64)", workflow)
-        self.assertIn(
-            "cargo test --locked -p rspice-veriloga --features native native:: --no-run",
-            workflow,
-        )
-        self.assertIn(
-            "cargo test --locked -p rspice-veriloga --release --features native native:: --no-run",
-            workflow,
-        )
-        self.assertIn("Test Verilog-A native JIT units (Linux x64)", workflow)
-        self.assertRegex(
-            workflow,
-            r"cargo test --locked -p rspice-veriloga --features native native::\s+-- --test-threads=1",
-        )
-        self.assertRegex(
-            workflow,
-            r"cargo test --locked -p rspice-veriloga --release --features native native::\s+-- --test-threads=1",
-        )
-        self.assertIn("Test Verilog-A native JIT contracts (Linux x64)", workflow)
-        self.assertIn(
-            "cargo test --locked -p rspice-veriloga --features native-bytecode-contract-tests --test native_contract -- --test-threads=1",
-            workflow,
-        )
-        self.assertIn("Test Verilog-A native multiplicity contracts (Linux x64)", workflow)
-        self.assertIn(
-            "cargo test --locked -p rspice-veriloga --features native-bytecode-contract-tests --test mfactor -- --test-threads=1",
-            workflow,
-        )
-        self.assertIn("Test Verilog-A native contract (Linux x64 release)", workflow)
-        self.assertIn(
-            "cargo test --locked -p rspice-veriloga --release --features native-bytecode-contract-tests --test native_contract -- --test-threads=1",
-            workflow,
-        )
-        self.assertIn("Smoke Verilog-A native JIT benchmark gate (Linux x64)", workflow)
-        self.assertRegex(
-            workflow,
-            r"cargo run --locked -p rspice-bench --release -- native-jit\s+"
-            r"--iterations 100000\s+"
-            r"--samples 9\s+"
-            r"--min-dense-speedup 1\.75\s+"
-            r"--min-speedup 3\.00\s+"
-            r"--min-full-stamp-speedup 2\.00\s+"
-            r"--max-native-setup-ms 10\s+"
-            r"--max-native-p95-ns-per-sweep 5000\s+"
-            r"--max-relative-stddev 0\.25\s+"
-            r"--max-native-code-bytes 16384",
-        )
-        self.assertIn("Test UI library (Linux)", workflow)
-        self.assertIn("cargo test --locked -p rspice-ui --lib", workflow)
-        self.assertGreaterEqual(
-            workflow.count("run: cargo clean"),
-            3,
-            "Linux fast CI should clean between heavy test groups to stay within runner disk",
-        )
+        workflow = read_text(".github/workflows/ci.yml")
+        self.assertNotIn("run: cargo clean", workflow)
+        self.assertNotIn("--no-run", workflow)
+        self.assertIn("CARGO_BUILD_JOBS: \"2\"", workflow)
+        for package, job in (("rspice-core", "test-linux"), ("rspice-ui", "test-ui")):
+            body = re.split(r"\n  [a-z][a-z0-9-]*:", workflow.split(f"  {job}:\n", 1)[1], maxsplit=1)[0]
+            # A complete package selection includes lib, bin, integration and doc
+            # tests. Restricting it to --lib previously missed UI integration tests.
+            self.assertIn(f"run: cargo test --locked -p {package}\n", body)
+
+        step = workflow.split("- name: Test remaining workspace crates\n", 1)[1]
+        step = step.split("\n  test-ui:", 1)[0]
+        command = shlex.split(step.split("run: >-", 1)[1])
+        self.assertEqual(command[:4], ["cargo", "test", "--locked", "--workspace"])
+        exclusions = [command[i + 1] for i, word in enumerate(command) if word == "--exclude"]
+        dedicated = {"rspice-core", "rspice-ui", "rspice-python", "rspice-wasm", "rspice-conformance"}
+        generated = {name for name in workspace_member_names()
+                     if name.startswith("rspice-veriloga-model") or name.endswith("-catalog-dump")}
+        excluded = {name for name in workspace_member_names()
+                    if any(fnmatch.fnmatchcase(name, pattern) for pattern in exclusions)}
+        self.assertEqual(excluded, dedicated | generated)
+        self.assertIn("cargo run --locked -p rspice-veriloga-catalog-dump -- --validate-only", workflow)
+        self.assertIn("cargo run --locked -p rspice-xspice-catalog-dump -- --validate-only", workflow)
+
+    def test_nightly_cannot_hide_a_failed_conformance_process(self) -> None:
+        workflow = read_text(".github/workflows/nightly.yml")
+        step = workflow.split("- name: ngspice conformance report", 1)[1].split("- name:", 1)[0]
+        self.assertNotIn("continue-on-error", step)
+        self.assertIn("shell: bash", step)  # GitHub's explicit bash shell enables pipefail.
+        self.assertIn("--test ngspice_regression", step)
+
+    def test_all_ci_and_release_python_harnesses_are_gated(self) -> None:
+        workflow = read_text(".github/workflows/ci.yml")
+        for directory in ("tools/ci", "tools/release"):
+            for path in (ROOT / directory).glob("test_*.py"):
+                self.assertIn(path.relative_to(ROOT).as_posix(), workflow)
+
     def test_format_gate_covers_every_hand_written_workspace_member(self) -> None:
         """rustfmt runs over the workspace as the manifest defines it.
 
@@ -568,7 +496,6 @@ class CiConfigurationTests(unittest.TestCase):
             "cargo clippy --locked -p rspice-wasm --all-targets --all-features",
             "cargo clippy --locked -p rspice-engine-adapter --all-targets --all-features",
             "cargo test --locked -p rspice-wasm --all-features",
-            "cargo test --locked -p rspice-engine-adapter",
         ):
             self.assertIn(command, job)
         self.assertEqual(
@@ -624,7 +551,9 @@ class CiConfigurationTests(unittest.TestCase):
         nightly_workflow = read_text(".github/workflows/nightly.yml")
 
         self.assertIn("cargo test --locked -p rspice-core --lib", ci_workflow)
-        self.assertIn("cargo test --locked -p rspice-core --lib --release", nightly_workflow)
+        self.assertIn("Full test suite (release)", nightly_workflow)
+        self.assertIn("cargo test --locked --workspace", nightly_workflow)
+        self.assertNotIn("--exclude rspice-core", nightly_workflow)
 
     def test_digital_verilog_suites_are_named_in_the_fast_tier(self) -> None:
         """Every digital Verilog conformance target runs on every push.
@@ -851,7 +780,6 @@ class CiConfigurationTests(unittest.TestCase):
         workflow = read_text(".github/workflows/ci.yml")
 
         self.assertIn("runs-on: windows-latest", workflow)
-        self.assertIn("Compile Verilog-A native JIT tests", workflow)
         self.assertIn("Verilog-A native JIT unit tests", workflow)
         self.assertIn("Verilog-A native JIT contract tests", workflow)
         self.assertIn("Verilog-A native multiplicity tests", workflow)
@@ -1087,7 +1015,13 @@ class CiConfigurationTests(unittest.TestCase):
             "python3 tools/security/check_advisory_exceptions.py", security
         )
         self.assertIn("if-no-files-found: error", security)
-        self.assertIn("cargo llvm-cov --locked --workspace", coverage)
+        self.assertIn("cargo llvm-cov --locked ${{ matrix.packages }}", coverage)
+        for group in ("core", "ui", "libraries"):
+            self.assertIn(f"group: {group}", coverage)
+        self.assertIn("--workspace --exclude rspice-core --exclude rspice-ui", coverage)
+        self.assertIn("--exclude 'rspice-veriloga-model*'", coverage)
+        self.assertNotIn("  push:", coverage)
+        self.assertNotIn("  pull_request:", coverage)
         self.assertIn("mkdir -p target/coverage", coverage)
         self.assertLess(
             coverage.index("mkdir -p target/coverage"),

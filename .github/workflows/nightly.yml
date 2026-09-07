@@ -39,19 +39,6 @@ jobs:
         run: >-
           cargo test --locked --workspace --exclude rspice-python --exclude rspice-wasm
           --exclude rspice-conformance --release
-      - name: Core library unit tests (release)
-        run: cargo test --locked -p rspice-core --lib --release
-      - name: Qualification baseline (release)
-        # The workspace run above already executes these targets. Naming them
-        # again buys two things a nightly needs: the counts are printed into
-        # the log rather than captured, and a drift that only appears under
-        # optimization is attributed to this step instead of to a workspace
-        # run with several hundred other tests in it. The baseline gates
-        # counts, never wall-clock, so a release profile must produce the same
-        # numbers the debug CI run does.
-        run: >-
-          cargo test --locked -p rspice-core --release
-          --test qualification_baseline --test no_panic_corpus -- --nocapture
       - name: Xyce conformance suite (release)
         # The workspace run above excludes rspice-conformance wholesale, so
         # the Xyce corpus needs its own step or it would silently vanish from
@@ -150,9 +137,9 @@ jobs:
       - name: ngspice conformance report
         # Serial test threads: each deck spawns a case-runner subprocess with
         # a hard per-case timeout; parallel threads oversubscribe the runner
-        # and trip the caps. The command's own exit status is advisory; the
-        # ratchet step below is the gate.
-        continue-on-error: true
+        # and trip the caps. Explicit bash enables pipefail so tee cannot hide
+        # a crashed test process behind a successful aggregate row.
+        shell: bash
         run: >-
           cargo test --locked -p rspice-conformance --release --test ngspice_regression
           -- --nocapture --test-threads 1 | tee conformance.log
