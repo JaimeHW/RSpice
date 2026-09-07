@@ -44,6 +44,14 @@ impl EngineBridge {
 
     fn translate_unattributed(&self, err: rspice_core::SimulationError) -> SimulationError {
         match err {
+            // Result-only entry points cannot represent completion before a
+            // numerical result exists. Keep the model diagnostic and identify
+            // the runner limitation rather than blaming the circuit or solver.
+            rspice_core::SimulationError::ModelFinished(finish) => {
+                SimulationError::UnsupportedOutcome(format!(
+                    "the UI result runner cannot represent model-requested completion: {finish}"
+                ))
+            }
             rspice_core::SimulationError::Configuration(
                 rspice_core::SimulationConfigError::ResourceLimit(error),
             )
@@ -129,6 +137,27 @@ mod tests {
          c1 out 0 1u\n\
          .op\n\
          .end\n";
+
+    #[test]
+    fn model_finish_reports_the_runner_limitation_across_the_worker_boundary() {
+        use crate::simulation::runner::worker_contract::WorkerSimulationError;
+        let finish = rspice_core::ModelFinish {
+            instance: "X1".to_owned(),
+            model: "startup".to_owned(),
+            site: 7,
+            point: rspice_core::ModelFinishPoint::Initialization,
+            diagnostic_level: 1,
+        };
+        let detail = finish.to_string();
+        let translated = EngineBridge::new().translate_error(
+            rspice_core::SimulationError::ModelFinished(Box::new(finish)),
+        );
+        assert!(matches!(translated, SimulationError::UnsupportedOutcome(_)));
+        assert!(translated.to_string().contains(&detail));
+        let wire = serde_json::to_string(&WorkerSimulationError::from(translated.clone())).unwrap();
+        let decoded: WorkerSimulationError = serde_json::from_str(&wire).unwrap();
+        assert_eq!(SimulationError::from(decoded), translated);
+    }
 
     #[test]
     fn behavioral_reference_error_preserves_typed_fields() {

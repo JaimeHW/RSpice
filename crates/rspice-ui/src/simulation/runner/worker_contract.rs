@@ -668,6 +668,7 @@ pub(crate) enum WorkerSimulationError {
     AlreadyRunning,
     ThreadPanic,
     InvalidConfig(String),
+    UnsupportedOutcome(String),
     ResourceLimit {
         resource: String,
         requested: usize,
@@ -722,6 +723,7 @@ impl From<SimulationError> for WorkerSimulationError {
             SimulationError::AlreadyRunning => Self::AlreadyRunning,
             SimulationError::ThreadPanic => Self::ThreadPanic,
             SimulationError::InvalidConfig(message) => Self::InvalidConfig(message),
+            SimulationError::UnsupportedOutcome(message) => Self::UnsupportedOutcome(message),
             SimulationError::ResourceLimit {
                 resource,
                 requested,
@@ -784,6 +786,7 @@ impl From<WorkerSimulationError> for SimulationError {
             WorkerSimulationError::AlreadyRunning => Self::AlreadyRunning,
             WorkerSimulationError::ThreadPanic => Self::ThreadPanic,
             WorkerSimulationError::InvalidConfig(message) => Self::InvalidConfig(message),
+            WorkerSimulationError::UnsupportedOutcome(message) => Self::UnsupportedOutcome(message),
             WorkerSimulationError::ResourceLimit {
                 resource,
                 requested,

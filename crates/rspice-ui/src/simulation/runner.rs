@@ -1179,6 +1179,9 @@ pub enum SimulationError {
     /// Invalid configuration
     InvalidConfig(String),
 
+    /// An engine outcome the result-only runner cannot represent.
+    UnsupportedOutcome(String),
+
     /// A configurable production resource budget was exceeded.
     ResourceLimit {
         resource: String,
@@ -1233,6 +1236,9 @@ impl std::fmt::Display for SimulationError {
             SimulationError::AlreadyRunning => write!(f, "A simulation is already running"),
             SimulationError::ThreadPanic => write!(f, "Simulation thread panicked"),
             SimulationError::InvalidConfig(msg) => write!(f, "Invalid configuration: {}", msg),
+            SimulationError::UnsupportedOutcome(msg) => {
+                write!(f, "Unsupported simulation outcome: {msg}")
+            }
             SimulationError::ResourceLimit {
                 resource,
                 requested,
