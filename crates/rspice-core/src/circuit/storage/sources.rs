@@ -115,6 +115,83 @@ struct TransientSourceContext {
     resource_limits: crate::resource::ResourceLimits,
 }
 
+/// Analysis defaults that determine the authored waveform independently of
+/// the current integration segment's endpoint and timestep ceiling.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct SourceTimeBasis {
+    pub tstep: Value,
+    pub tstop: Value,
+}
+
+impl SourceTimeBasis {
+    pub(crate) fn validate(self) -> Result<(), String> {
+        if !self.tstep.is_finite()
+            || self.tstep <= 0.0
+            || !self.tstop.is_finite()
+            || self.tstop <= 0.0
+        {
+            return Err(
+                "source time basis requires finite positive step and stop defaults".to_owned(),
+            );
+        }
+        Ok(())
+    }
+}
+
+impl crate::circuit::CircuitData {
+    pub(crate) fn set_independent_source_context(
+        &mut self,
+        basis: SourceTimeBasis,
+        dialect: crate::config::SpiceDialect,
+        limits: crate::resource::ResourceLimits,
+    ) {
+        self.voltage_sources
+            .set_transient_context_with_dialect_and_limits(
+                basis.tstep,
+                basis.tstop,
+                dialect,
+                limits,
+            );
+        self.current_sources
+            .set_transient_context_with_dialect_and_limits(
+                basis.tstep,
+                basis.tstop,
+                dialect,
+                limits,
+            );
+    }
+
+    pub(crate) fn independent_source_time_basis(&self) -> Result<Option<SourceTimeBasis>, String> {
+        let basis = |context: Option<TransientSourceContext>| {
+            context.map(|context| SourceTimeBasis {
+                tstep: context.tstep,
+                tstop: context.tstop,
+            })
+        };
+        let voltage = basis(self.voltage_sources.transient_context);
+        let current = basis(self.current_sources.transient_context);
+        if voltage == current || self.current_sources.is_empty() {
+            Ok(voltage)
+        } else if self.voltage_sources.is_empty() {
+            Ok(current)
+        } else {
+            Err("voltage and current sources have inconsistent analysis time defaults".to_owned())
+        }
+    }
+
+    pub(crate) fn independent_sources_need_time_basis(
+        &self,
+        dialect: crate::config::SpiceDialect,
+    ) -> bool {
+        self.voltage_sources
+            .source_specs
+            .iter()
+            .chain(&self.current_sources.source_specs)
+            .flatten()
+            .any(|spec| VoltageSources::source_needs_time_basis(spec, dialect))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct PwlCacheKey {
     path: String,
@@ -1135,7 +1212,12 @@ impl VoltageSources {
 
     #[inline]
     fn resolve_sin_frequency(frequency: Value, context: Option<TransientSourceContext>) -> Value {
-        if frequency.is_finite() && frequency != 0.0 {
+        // Xyce SinData defaults only an omitted frequency and preserves an
+        // authored zero. ngspice vsrcload also defaults an explicit zero.
+        if frequency.is_finite()
+            && (frequency != 0.0
+                || Self::pulse_dialect(context) == crate::config::SpiceDialect::Xyce)
+        {
             frequency
         } else {
             Self::sin_frequency_default(context)
@@ -2740,12 +2822,9 @@ mod tests {
             damping: 0.0,
             phase: 0.0,
         });
-        assert_close(
-            sources
-                .xyce_max_timestep_at(0.0)
-                .expect("zero-frequency sine cap"),
-            10.0e-9,
-        );
+        // Xyce SinData::getMaxTimeStepSize returns 0.1 / FREQ. An
+        // authored zero is a constant waveform with no finite device cap.
+        assert_eq!(sources.xyce_max_timestep_at(0.0), None);
     }
 
     #[test]

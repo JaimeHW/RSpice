@@ -897,16 +897,24 @@ fn check_netlist_source_resource_limits(
     check_build_abort(abort)
 }
 
-fn validate_source_file_inputs(
+fn validate_source_inputs(
     source_name: &str,
     spec: &crate::netlist::SourceSpec,
+    dialect: crate::config::SpiceDialect,
     resource_limits: ResourceLimits,
 ) -> Result<Option<std::sync::Arc<crate::device::pwl_file::PwlWaveform>>, SimulationError> {
     use crate::netlist::SourceSpec;
 
     match spec {
-        SourceSpec::RfPort { inner, .. } => {
-            validate_source_file_inputs(source_name, inner, resource_limits)
+        SourceSpec::RfPort { inner, .. } | SourceSpec::Distortion { inner, .. } => {
+            validate_source_inputs(source_name, inner, dialect, resource_limits)
+        }
+        SourceSpec::Sin { frequency, .. }
+            if dialect == crate::config::SpiceDialect::Xyce && frequency.is_nan() =>
+        {
+            Err(SimulationError::Circuit(format!(
+                "Xyce SIN source '{source_name}' requires an authored frequency; zero is a valid explicit frequency"
+            )))
         }
         SourceSpec::PwlFile {
             path,
@@ -943,7 +951,7 @@ fn validate_source_file_inputs(
             Ok(Some(waveform))
         }
         SourceSpec::DcTransient { transient, .. } | SourceSpec::DcAcTransient { transient, .. } => {
-            validate_source_file_inputs(source_name, transient, resource_limits)
+            validate_source_inputs(source_name, transient, dialect, resource_limits)
         }
         _ => Ok(None),
     }
@@ -5308,9 +5316,10 @@ impl Engine {
                     )?;
                 }
                 ElementKind::VoltageSource(spec) => {
-                    let pwl_waveform = validate_source_file_inputs(
+                    let pwl_waveform = validate_source_inputs(
                         &element.name,
                         spec,
+                        self.config.spice_dialect,
                         self.config.resource_limits,
                     )?;
                     let np = circuit.get_or_create_node(&element.nodes[0]);
@@ -5366,9 +5375,10 @@ impl Engine {
                     }
                 }
                 ElementKind::CurrentSource(spec) => {
-                    let pwl_waveform = validate_source_file_inputs(
+                    let pwl_waveform = validate_source_inputs(
                         &element.name,
                         spec,
+                        self.config.spice_dialect,
                         self.config.resource_limits,
                     )?;
                     let np = circuit.get_or_create_node(&element.nodes[0]);

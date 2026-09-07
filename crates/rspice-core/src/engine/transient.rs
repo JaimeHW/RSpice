@@ -1055,6 +1055,19 @@ impl TransientCapturePlan {
 }
 
 impl Engine {
+    pub(super) fn uses_xyce_damped_transient_solver(
+        config: &super::SimulationConfig,
+        circuit: &crate::circuit::CircuitData,
+    ) -> bool {
+        config.spice_dialect == SpiceDialect::Xyce
+            && !config.transient_nonlinear_nox.unwrap_or(false)
+            // Shared LEVEL=2 magnetic residuals require coupled correction
+            // equations. A tiny LEVEL=1 vacuum coefficient likewise needs
+            // correction-form Newton for its ill-conditioned Schur system.
+            && !circuit.has_xyce_core_shared_level2()
+            && !circuit.has_xyce_core_shared_level1_ill_conditioned()
+    }
+
     /// Apply Xyce's dynamic voltage-source timestep contract without changing
     /// native or ngspice stepping. Xyce 7.10 enables `TIMEINT USEDEVICEMAX`
     /// by default and asks each VSRC waveform for its current ceiling.
@@ -3702,22 +3715,21 @@ impl Engine {
         circuit.link_indices(&matrix);
 
         let source_step_hint = Self::transient_source_step_hint(netlist, hinted_max_step);
-        circuit
-            .voltage_sources
-            .set_transient_context_with_dialect_and_limits(
-                source_step_hint,
-                tstop,
-                self.config.spice_dialect,
-                self.config.resource_limits,
-            );
-        circuit
-            .current_sources
-            .set_transient_context_with_dialect_and_limits(
-                source_step_hint,
-                tstop,
-                self.config.spice_dialect,
-                self.config.resource_limits,
-            );
+        let mut source_basis = crate::circuit::SourceTimeBasis {
+            tstep: source_step_hint,
+            tstop,
+        };
+        if let Some(checkpoint) = resume {
+            source_basis = checkpoint
+                .source_time_basis_for_resume(&circuit, source_basis, self.config.spice_dialect)
+                .map_err(SimulationError::Circuit)?;
+        }
+        source_basis.validate().map_err(SimulationError::Circuit)?;
+        circuit.set_independent_source_context(
+            source_basis,
+            self.config.spice_dialect,
+            self.config.resource_limits,
+        );
         circuit.set_xspice_transient_context(source_step_hint, tstop);
 
         // `.TRAN ... UIC` skips the operating point: integration starts
@@ -3940,23 +3952,9 @@ impl Engine {
                 requires_conservative_nonlinear_limiting,
             );
         let enforce_device_convergence = self.transient_enforce_device_convergence();
-        let xyce_nox_requested = self.config.spice_dialect == SpiceDialect::Xyce
-            && self.config.transient_nonlinear_nox.unwrap_or(false);
-        let has_shared_xyce_core_level1_ill_conditioned =
-            circuit.has_xyce_core_shared_level1_ill_conditioned();
         let has_shared_xyce_core_level2 = circuit.has_xyce_core_shared_level2();
-        let uses_xyce_damped_solver = self.config.spice_dialect == SpiceDialect::Xyce
-            && !xyce_nox_requested
-            // MutIndNonLin2's shared LEVEL=2 residual is a coupled charge
-            // system; its correction-form Jacobian must be solved together
-            // with the winding branches rather than accepted by the scalar
-            // DampedNewton status test.
-            && !has_shared_xyce_core_level2
-            // A very small shared LEVEL=1 vacuum coefficient makes the
-            // electrical Schur complement effectively rank deficient. Keep
-            // that topology on correction-form Newton while retaining
-            // DampedNewton for well-conditioned shared cores.
-            && !has_shared_xyce_core_level1_ill_conditioned;
+        let uses_xyce_damped_solver =
+            Self::uses_xyce_damped_transient_solver(&self.config, &circuit);
         // The direct physical DAE loader is narrower than the DampedNewton
         // solver itself.  Keep it behind the exact Xyce dialect and solver
         // gates so NOX/rescue paths never mix matrix-reconstructed and direct

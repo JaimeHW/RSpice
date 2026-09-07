@@ -161,6 +161,7 @@ impl Engine {
                 tstep_hint,
                 dialect,
             },
+            None,
             &crate::abort_signal::NoAbort,
             usize::MAX,
         )
@@ -172,6 +173,7 @@ impl Engine {
         spec: &crate::netlist::SourceSpec,
         pwl_waveform: Option<&crate::device::pwl_file::PwlWaveform>,
         window: BreakpointWindow,
+        source_basis: Option<crate::circuit::SourceTimeBasis>,
         abort: &dyn crate::abort_signal::AbortSignal,
         max_points: usize,
     ) -> Result<(), crate::engine::SimulationError> {
@@ -180,6 +182,10 @@ impl Engine {
             tstep_hint,
             dialect,
         } = window;
+        let defaults = source_basis.unwrap_or(crate::circuit::SourceTimeBasis {
+            tstep: tstep_hint,
+            tstop,
+        });
         use crate::netlist::SourceSpec;
 
         match spec {
@@ -193,6 +199,7 @@ impl Engine {
                         tstep_hint,
                         dialect,
                     },
+                    source_basis,
                     abort,
                     max_points,
                 )?;
@@ -207,6 +214,7 @@ impl Engine {
                         tstep_hint,
                         dialect,
                     },
+                    source_basis,
                     abort,
                     max_points,
                 )?;
@@ -229,6 +237,7 @@ impl Engine {
                         tstep_hint,
                         dialect,
                     },
+                    source_basis,
                     abort,
                     max_points,
                 )?;
@@ -253,8 +262,8 @@ impl Engine {
                         *width,
                         *period,
                         *width_defaults_to_zero,
-                        tstep_hint.max(1e-18),
-                        tstop.max(1e-18),
+                        defaults.tstep.max(1e-18),
+                        defaults.tstop.max(1e-18),
                         dialect,
                     );
 
@@ -502,7 +511,7 @@ impl Engine {
                 }
                 // Match the waveform runtime: omitted or zero delays
                 // resolve to tstep-based defaults (ngspice vsrcload.c).
-                let step_default = tstep_hint.max(1e-18);
+                let step_default = defaults.tstep.max(1e-18);
                 let td1 = if td1.is_finite() && *td1 != 0.0 {
                     *td1
                 } else {
@@ -896,6 +905,9 @@ impl Engine {
             tstep_hint,
             dialect,
         } = window;
+        let source_basis = circuit
+            .independent_source_time_basis()
+            .map_err(crate::engine::SimulationError::Circuit)?;
         for (index, (name, spec, pwl_waveform)) in circuit
             .voltage_sources
             .transient_specs_named_with_pwl()
@@ -919,6 +931,7 @@ impl Engine {
                     tstep_hint,
                     dialect,
                 },
+                source_basis,
                 abort,
                 max_points,
             )?;
@@ -1125,6 +1138,64 @@ impl Engine {
 mod tests {
     use super::*;
 
+    #[test]
+    fn source_breakpoints_keep_the_waveform_defaults_when_the_window_changes() {
+        let netlist = Netlist::parse(
+            "source event defaults\nV1 out 0 PULSE(0 1 0.1 0 0 0.2)\nR1 out 0 1k\n.end\n",
+        )
+        .unwrap();
+        for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+            let engine = Engine::new(crate::engine::SimulationConfig {
+                spice_dialect: dialect,
+                ..Default::default()
+            });
+            let mut circuit = engine.build_circuit(&netlist).unwrap();
+            circuit.set_independent_source_context(
+                crate::circuit::SourceTimeBasis {
+                    tstep: 0.01,
+                    tstop: 1.0,
+                },
+                dialect,
+                Default::default(),
+            );
+            let mut events = BreakpointManager::new_with_tolerance(1e-12);
+            Engine::collect_independent_source_breakpoints(
+                &circuit,
+                BreakpointWindow {
+                    tstop: 2.5,
+                    tstep_hint: 0.25,
+                    dialect,
+                },
+                None,
+                &mut events,
+                &crate::abort_signal::NoAbort,
+                1000,
+            )
+            .unwrap();
+            let expected = if dialect == SpiceDialect::Xyce {
+                &[0.1, 0.3, 1.1, 1.3, 2.1, 2.3][..]
+            } else {
+                &[0.1, 0.11, 0.31, 0.32, 0.33, 0.53, 0.54][..]
+            };
+            for &time in expected {
+                assert!(
+                    events
+                        .times()
+                        .iter()
+                        .any(|&actual| (actual - time).abs() < 1e-12),
+                    "{dialect:?}: missing {time}, got {:?}",
+                    events.times()
+                );
+            }
+            assert!(
+                !events
+                    .times()
+                    .iter()
+                    .any(|&time| (time - 0.35).abs() < 1e-12)
+            );
+        }
+    }
+
     fn assert_delays_close(actual: &[Value], expected: &[Value]) {
         assert_eq!(
             actual.len(),
@@ -1256,6 +1327,7 @@ mod tests {
                 tstep_hint: 0.1,
                 dialect: crate::engine::SpiceDialect::Xyce,
             },
+            None,
             &crate::abort_signal::NoAbort,
             usize::MAX,
         )
@@ -1460,6 +1532,7 @@ mod tests {
                 tstep_hint: 0.1,
                 dialect: crate::engine::SpiceDialect::Xyce,
             },
+            None,
             &crate::abort_signal::NoAbort,
             64,
         )

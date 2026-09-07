@@ -272,6 +272,11 @@ is LTE-based with breakpoint handling; a transient checkpoint/resume path
 exists (`engine/transient/`, exercised by `tests/transient_checkpoint.rs`
 and the CLI's `--checkpoint`/`--resume`).
 
+Checkpoint format 35 retains the step and stop defaults that determine
+independent-source waveforms. Extending a run or changing its step ceiling
+preserves those source parameters. Older checkpoints remain readable; resume
+requires fully specified source timing when the original defaults are absent.
+
 Integration order is deliberately bounded to 1 and 2. Xyce's documented
 `TIMEINT` contract defines its variable-order trapezoidal and Gear methods over
 orders 1 and 2 only (Users' Guide 7.10, section 7.3.4), so `.OPTIONS TIMEINT
@@ -360,6 +365,14 @@ because the positional fields already bind them.
 
 `FUND` and `PERIODGUESS` set the same quantity and may not both appear;
 `OSCNODE` implies `AUTONOMOUS=TRUE` and conflicts with `AUTONOMOUS=FALSE`.
+
+PSS evaluates independent sources under the selected SPICE dialect. Omitted
+source timing uses one configured carrier period as the stop default and
+`period / POINTS` as the step default. These defaults remain fixed during
+stabilization, shooting and PSS-to-transient continuation; an unrelated `.TRAN`
+card does not redefine the PSS drive. Autonomous runs use the configured
+period guess for these defaults. Xyce SIN requires an authored frequency and
+preserves zero as zero; ngspice SIN resolves zero to the inverse stop default.
 
 **`.PAC`**, periodic small-signal AC around a periodic operating point.
 The leading sweep is the input-frequency sweep.

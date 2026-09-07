@@ -426,7 +426,7 @@ impl Engine {
         let checkpoint = TransientCheckpoint::capture(
             netlist_fingerprint(netlist),
             Some(authenticated_netlist_identity.to_string()),
-            simulation_checkpoint_identity(&self.config),
+            &self.config,
             CheckpointState {
                 time: 0.0,
                 solution: solutions.last().expect("latest HB solution exists"),
