@@ -1136,6 +1136,26 @@ mod tests {
         assert_eq!(columns[0].unit, "sigma");
     }
 
+    #[test]
+    fn population_cache_refreshes_the_normalized_columns_after_a_requirement_rename() {
+        let (simulation, mut workspace, mut results) = fixture(101);
+        let original =
+            population::plan(&mut context(&simulation, &workspace, &mut results)).unwrap();
+        let columns = drawn_columns(&original, &results.box_violin).unwrap();
+        assert_eq!(columns.len(), 2);
+        workspace.specs[0].measurement = "gain_ac".to_owned();
+
+        let plan = population::plan(&mut context(&simulation, &workspace, &mut results)).unwrap();
+        let columns = drawn_columns(&plan, &results.box_violin).unwrap();
+        assert_eq!(
+            columns
+                .iter()
+                .map(|column| column.name.as_str())
+                .collect::<Vec<_>>(),
+            ["vos"]
+        );
+    }
+
     /// The σ normalization is the signed margin over the sample σ, so three
     /// of them is exactly a capability of one — the property the scale is
     /// chosen for.

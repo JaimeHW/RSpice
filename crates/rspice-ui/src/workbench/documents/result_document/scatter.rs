@@ -1084,6 +1084,27 @@ mod tests {
         );
     }
 
+    #[test]
+    fn population_cache_refreshes_the_scatter_register_after_a_requirement_rename() {
+        let (simulation, mut workspace, mut results) = fixture(101, Some(39.5));
+        let original =
+            population::plan(&mut context(&simulation, &workspace, &mut results)).unwrap();
+        assert_eq!(original.failing_count(), 38);
+        workspace.specs[0].measurement = "gain_ac".to_owned();
+
+        let plan = population::plan(&mut context(&simulation, &workspace, &mut results)).unwrap();
+        let pair = active_pair(&plan, &results.scatter).unwrap();
+        let points = paired_points(&plan, &pair);
+        let rows = register_rows(&plan, &points, &plan.columns[pair.x], &plan.columns[pair.y]);
+        assert!(
+            rows.iter()
+                .any(|row| row.0 == "Trials" && row.1 == "101 measured \u{b7} 0 failing")
+        );
+        assert!(rows.iter().any(
+            |row| row.0 == "Y requirement" && row.1 == "No requirement bounds this measurement"
+        ));
+    }
+
     /// The absent state names the analysis that would fill the sheet.
     #[test]
     fn the_absent_state_names_the_analysis_that_would_fill_it() {

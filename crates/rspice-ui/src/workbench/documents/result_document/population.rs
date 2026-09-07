@@ -19,7 +19,8 @@ use std::sync::Arc;
 
 use super::{AnalysisPresentationKey, SheetContext};
 use crate::state::{
-    AnalysisResult, AnalysisResultFamilyMetadata, FamilyMemberId, ProjectWorkspace, SpecEntry,
+    AnalysisResult, AnalysisResultFamilyMetadata, FamilyMemberId, ProjectWorkspace,
+    RunHistoryRevision, SpecEntry,
 };
 
 /// Where one column of the population came from.
@@ -129,9 +130,9 @@ pub(super) struct TrialIdentity {
 /// The population projection, built once per dataset generation.
 #[derive(Debug, Clone)]
 pub(super) struct PopulationPlan {
-    version: u64,
+    source: (RunHistoryRevision, u64),
     analysis: AnalysisPresentationKey,
-    specs_revision: u64,
+    requirements: Vec<PopulationRequirement>,
     pub(super) trials: Vec<TrialIdentity>,
     pub(super) columns: Vec<PopulationColumn>,
     pub(super) status: Vec<TrialStatus>,
@@ -183,39 +184,80 @@ impl PopulationPlan {
 pub(super) const UNPAIRED_REASON: &str = "This run dropped trials, so its sampled variables and its measurements are indexed \
      differently — no per-trial correspondence between them is retained.";
 
-/// Resolve the population once per (dataset generation, analysis, requirement
-/// revision) and hand back a shared handle.
+/// Resolve the population from the retained source, selected analysis, and
+/// exact requirement inputs, then hand back a shared handle.
 pub(super) fn plan(context: &mut SheetContext<'_>) -> Option<Arc<PopulationPlan>> {
     let run = context.simulation.active_run()?;
     let dataset_id = run.dataset_id;
     let analysis = context.simulation.active_analysis()?;
     let key = AnalysisPresentationKey::new(dataset_id, analysis);
-    let version = context.simulation.data_version;
-    let specs_revision = specs_revision(context.workspace);
+    let source = (
+        context.simulation.runs.revision(),
+        context.simulation.data_version,
+    );
     if let Some(plan) = context.results.plans.population.as_ref()
-        && plan.version == version
+        && plan.source == source
         && plan.analysis == key
-        && plan.specs_revision == specs_revision
+        && plan.requirements.len() == context.workspace.specs.len()
+        && plan
+            .requirements
+            .iter()
+            .zip(&context.workspace.specs)
+            .all(|(retained, spec)| retained.matches(spec))
     {
         return Some(Arc::clone(plan));
     }
-    let built = Arc::new(build(analysis, key, version, context.workspace)?);
+    context.results.plans.population = None;
+    let built = Arc::new(build(analysis, key, source, context.workspace)?);
     context.results.plans.population = Some(Arc::clone(&built));
     Some(built)
 }
 
-/// A cheap fingerprint of the authored requirements, so an edited bound
-/// rebuilds the pass/fail column without a re-run.
-fn specs_revision(workspace: &ProjectWorkspace) -> u64 {
-    let mut revision = workspace.specs.len() as u64;
-    for spec in &workspace.specs {
-        revision = revision
-            .wrapping_mul(0x100_0000_01b3)
-            .wrapping_add(spec.measurement.len() as u64)
-            .wrapping_add(spec.min.map_or(0, f64::to_bits))
-            .wrapping_add(spec.max.map_or(0, f64::to_bits));
+/// Exactly the authored fields this projection reads, in requirement order.
+/// Comparing the small requirement list allocates nothing on a cache hit and
+/// avoids hash collisions. Bound bits preserve both optionality and NaN
+/// identity while a requirement is being edited. Expressions and point scopes
+/// are not inputs to this per-trial projection.
+#[derive(Debug, Clone)]
+struct PopulationRequirement {
+    measurement: String,
+    min: Option<u64>,
+    max: Option<u64>,
+    unit: String,
+}
+
+impl PopulationRequirement {
+    fn capture(spec: &SpecEntry) -> Self {
+        let SpecEntry {
+            measurement,
+            expression: _,
+            min,
+            max,
+            unit,
+            scope: _,
+        } = spec;
+        Self {
+            measurement: measurement.clone(),
+            min: min.map(f64::to_bits),
+            max: max.map(f64::to_bits),
+            unit: unit.clone(),
+        }
     }
-    revision
+
+    fn matches(&self, spec: &SpecEntry) -> bool {
+        let SpecEntry {
+            measurement,
+            expression: _,
+            min,
+            max,
+            unit,
+            scope: _,
+        } = spec;
+        self.measurement == *measurement
+            && self.min == min.map(f64::to_bits)
+            && self.max == max.map(f64::to_bits)
+            && self.unit == *unit
+    }
 }
 
 /// Whether one retained analysis carries a population worth a distribution.
@@ -240,7 +282,7 @@ pub(super) fn is_a_population(analysis: &AnalysisResult) -> bool {
 fn build(
     analysis: &AnalysisResult,
     key: AnalysisPresentationKey,
-    version: u64,
+    source: (RunHistoryRevision, u64),
     workspace: &ProjectWorkspace,
 ) -> Option<PopulationPlan> {
     if !analysis.success {
@@ -384,9 +426,13 @@ fn build(
         .collect();
 
     Some(PopulationPlan {
-        version,
+        source,
         analysis: key,
-        specs_revision: specs_revision(workspace),
+        requirements: workspace
+            .specs
+            .iter()
+            .map(PopulationRequirement::capture)
+            .collect(),
         trials,
         columns,
         status,
@@ -724,6 +770,209 @@ mod tests {
         )
     }
 
+    fn retained_population(count: usize) -> crate::state::SimulationState {
+        use crate::io::project_io::ProjectSimulationResults;
+        use crate::state::{SimulationRunLifecycle, SimulationRunProvenance, SimulationState};
+
+        let mut simulation = SimulationState::default();
+        let run = simulation.start_run();
+        run.add_analysis(monte_carlo(
+            (0..count).map(|index| trial(index, index as f64)).collect(),
+            (0..count).map(|index| index as f64).collect(),
+        ));
+        run.restore_provenance(SimulationRunProvenance::LegacyUnattributed)
+            .unwrap();
+        run.mark_running().unwrap();
+        run.finish_lifecycle(SimulationRunLifecycle::Completed)
+            .unwrap();
+        simulation.complete_run();
+        ProjectSimulationResults::from_state(&simulation)
+            .into_simulation_state()
+            .unwrap()
+    }
+
+    fn cached_population(
+        simulation: &crate::state::SimulationState,
+        workspace: &ProjectWorkspace,
+        results: &mut super::super::ResultsState,
+    ) -> Option<Arc<PopulationPlan>> {
+        plan(&mut SheetContext {
+            simulation,
+            workspace,
+            results,
+            policy: crate::quantity::QuantityPresentationPolicy::default(),
+        })
+    }
+
+    #[test]
+    fn population_cache_refreshes_a_same_length_measurement_rename() {
+        let simulation = retained_population(3);
+        let mut workspace = workspace_with_limit(Some(1.0), None);
+        let mut results = super::super::ResultsState::default();
+        let original = cached_population(&simulation, &workspace, &mut results).unwrap();
+        assert_eq!(original.failing_count(), 1);
+
+        workspace.specs[0].measurement = "gain_ac".to_owned();
+        let renamed = cached_population(&simulation, &workspace, &mut results).unwrap();
+        let column = &renamed.columns[renamed.column_index("gain_dc").unwrap()];
+        assert!(
+            column.limit.is_none(),
+            "the requirement now names another measurement"
+        );
+        assert!(column.unit.is_empty());
+        assert_eq!(renamed.failing_count(), 0);
+
+        workspace.specs[0].measurement = "gain_dc".to_owned();
+        assert_eq!(
+            cached_population(&simulation, &workspace, &mut results)
+                .unwrap()
+                .failing_count(),
+            1
+        );
+    }
+
+    #[test]
+    fn population_cache_refreshes_requirement_units_and_limit_text() {
+        let simulation = retained_population(3);
+        let mut workspace = workspace_with_limit(Some(1.0), None);
+        let mut results = super::super::ResultsState::default();
+        let original = cached_population(&simulation, &workspace, &mut results).unwrap();
+        workspace.specs[0].unit = "V".to_owned();
+        let changed = cached_population(&simulation, &workspace, &mut results).unwrap();
+        let column = &changed.columns[changed.column_index("gain_dc").unwrap()];
+        assert_eq!(column.unit, "V");
+        assert_eq!(
+            column.limit.as_ref().unwrap().text,
+            workspace.specs[0].limit_text()
+        );
+        assert_eq!(changed.status, original.status);
+    }
+
+    #[test]
+    fn population_cache_distinguishes_an_absent_bound_from_zero() {
+        let simulation = retained_population(3);
+        let mut workspace = workspace_with_limit(None, None);
+        let mut results = super::super::ResultsState::default();
+        let original = cached_population(&simulation, &workspace, &mut results).unwrap();
+        assert_eq!(original.failing_count(), 0);
+
+        workspace.specs[0].max = Some(0.0);
+        let bounded = cached_population(&simulation, &workspace, &mut results).unwrap();
+        assert_eq!(bounded.failing_count(), 2);
+        assert_eq!(
+            bounded.columns[bounded.column_index("gain_dc").unwrap()]
+                .limit
+                .as_ref()
+                .unwrap()
+                .max,
+            Some(0.0)
+        );
+
+        workspace.specs[0].max = None;
+        let unbounded = cached_population(&simulation, &workspace, &mut results).unwrap();
+        assert!(
+            unbounded.columns[unbounded.column_index("gain_dc").unwrap()]
+                .limit
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn population_cache_refreshes_restored_same_identity_content() {
+        use crate::io::project_io::ProjectSimulationResults;
+
+        let mut simulation = retained_population(3);
+        let workspace = workspace_with_limit(Some(1.0), None);
+        let mut results = super::super::ResultsState::default();
+        let original = cached_population(&simulation, &workspace, &mut results).unwrap();
+        let version = simulation.data_version;
+        let mut replacement = simulation.clone();
+        replacement.runs[0].analyses[0] =
+            monte_carlo(vec![trial(0, 10.0), trial(1, 20.0)], vec![10.0, 20.0]);
+        simulation = ProjectSimulationResults::from_state(&replacement)
+            .into_simulation_state()
+            .unwrap();
+        assert_eq!(simulation.data_version, version);
+        let restored = cached_population(&simulation, &workspace, &mut results).unwrap();
+        assert_eq!(restored.analysis, original.analysis);
+        assert_eq!(restored.trial_count(), 2);
+        assert_eq!(
+            restored.columns[restored.column_index("gain_dc").unwrap()].values,
+            [Some(10.0), Some(20.0)]
+        );
+        assert_eq!(restored.failing_count(), 0);
+        assert_eq!(
+            original.trial_count(),
+            3,
+            "an older shared plan stays immutable"
+        );
+    }
+
+    #[test]
+    fn population_cache_rejects_corrupted_evidence_and_accepts_repair_without_a_frame() {
+        let mut simulation = retained_population(3);
+        let workspace = workspace_with_limit(Some(1.0), None);
+        let mut results = super::super::ResultsState::default();
+        let original = cached_population(&simulation, &workspace, &mut results).unwrap();
+        let version = simulation.data_version;
+        let retained = simulation.runs[0].analyses[0].clone();
+        if let Some(AnalysisResultFamilyMetadata::MonteCarlo { variables, .. }) =
+            simulation.runs[0].analyses[0].family_metadata.as_mut()
+        {
+            variables[0].samples[0] = f64::NAN;
+        } else {
+            panic!("Monte Carlo fixture");
+        }
+        assert!(cached_population(&simulation, &workspace, &mut results).is_none());
+
+        simulation.runs[0].analyses[0] = retained;
+        let repaired = cached_population(&simulation, &workspace, &mut results).unwrap();
+        assert_eq!(repaired.status, original.status);
+        assert_eq!(simulation.data_version, version);
+    }
+
+    #[test]
+    fn population_cache_reuses_unchanged_clones_and_isolates_nested_edits() {
+        for count in [3, 100_000] {
+            let simulation = retained_population(count);
+            let workspace = workspace_with_limit(Some(1.0), None);
+            let mut results = super::super::ResultsState::default();
+            let original = cached_population(&simulation, &workspace, &mut results).unwrap();
+            let mut cloned_simulation = simulation.clone();
+            let mut cloned_results = results.clone();
+            for _ in 0..12 {
+                assert!(Arc::ptr_eq(
+                    &original,
+                    &cached_population(&simulation, &workspace, &mut results).unwrap()
+                ));
+                assert!(Arc::ptr_eq(
+                    &original,
+                    &cached_population(&cloned_simulation, &workspace, &mut cloned_results)
+                        .unwrap()
+                ));
+            }
+            if let Some(AnalysisResultFamilyMetadata::MonteCarlo {
+                member_measurements,
+                ..
+            }) = cloned_simulation.runs[0].analyses[0]
+                .family_metadata
+                .as_mut()
+            {
+                member_measurements[0].measurements[0].value = Some(10.0);
+            } else {
+                panic!("Monte Carlo fixture");
+            }
+            let changed =
+                cached_population(&cloned_simulation, &workspace, &mut cloned_results).unwrap();
+            assert_eq!(changed.failing_count(), 0);
+            assert_eq!(original.failing_count(), 1);
+            assert!(Arc::ptr_eq(
+                &original,
+                &cached_population(&simulation, &workspace, &mut results).unwrap()
+            ));
+        }
+    }
+
     /// A complete run pairs its sampled variables with its measurements, and
     /// the requirement decides which trials failed.
     #[test]
@@ -732,8 +981,13 @@ mod tests {
             vec![trial(0, 40.0), trial(1, 39.0), trial(2, 41.0)],
             vec![1.0, 2.0, 3.0],
         );
-        let plan = build(&analysis, key(), 1, &workspace_with_limit(Some(39.5), None))
-            .expect("the fixture retains a population");
+        let plan = build(
+            &analysis,
+            key(),
+            (crate::state::RunHistory::default().revision(), 1),
+            &workspace_with_limit(Some(39.5), None),
+        )
+        .expect("the fixture retains a population");
 
         assert!(plan.variables_paired);
         assert_eq!(plan.trial_count(), 3);
@@ -766,8 +1020,13 @@ mod tests {
             vec![trial(0, 40.0), trial(1, 40.5), trial(3, 41.0)],
             vec![1.0, 2.0, 3.0],
         );
-        let plan = build(&analysis, key(), 1, &ProjectWorkspace::default())
-            .expect("a population is built");
+        let plan = build(
+            &analysis,
+            key(),
+            (crate::state::RunHistory::default().revision(), 1),
+            &ProjectWorkspace::default(),
+        )
+        .expect("a population is built");
 
         assert!(
             !plan.variables_paired,
@@ -796,8 +1055,13 @@ mod tests {
         members[1].measurements[0].value = None;
         members[1].measurements[0].passed = false;
         let analysis = monte_carlo(members, vec![1.0, 2.0]);
-        let plan = build(&analysis, key(), 1, &workspace_with_limit(Some(39.5), None))
-            .expect("a population is built");
+        let plan = build(
+            &analysis,
+            key(),
+            (crate::state::RunHistory::default().revision(), 1),
+            &workspace_with_limit(Some(39.5), None),
+        )
+        .expect("a population is built");
 
         assert_eq!(plan.status, [TrialStatus::Passing, TrialStatus::Unmeasured]);
         assert_eq!(plan.failing_count(), 0);
