@@ -70,6 +70,7 @@ pub const fn projection_analysis_kind(kind: AnalysisResultKind) -> Option<Output
         | AnalysisResultKind::Pac
         | AnalysisResultKind::Pxf
         | AnalysisResultKind::PNoise
+        | AnalysisResultKind::Pstb
         | AnalysisResultKind::Envelope => None,
     }
 }

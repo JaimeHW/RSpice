@@ -716,6 +716,31 @@ fn execute_analysis(
             ])
         }
 
+        AnalysisCommand::Pstb(card) => {
+            // No sweep to preflight: the study's axis is the mode index of the
+            // carrier's own monodromy, whose order the circuit fixes.
+            let Some(upstream) = upstream else {
+                return Err(unsupported_deck_analysis(
+                    "authored .PSTB card was bound to no upstream analysis by the canonical plan"
+                        .to_owned(),
+                ));
+            };
+            let Some(operating_point) = periodic.pss(upstream) else {
+                return Err(unsupported_deck_analysis(format!(
+                    "authored .PSTB card names upstream {upstream}, which retained no shooting operating point and therefore no monodromy matrix"
+                )));
+            };
+            let result = engine
+                .run_pstb_card_from_pss_with_abort(netlist, card, operating_point, abort)
+                .map_err(simulation_error)?;
+            ensure_not_aborted(abort)?;
+            Ok(vec![
+                AnalysisResultDocument::from_pstb(id, card, &result)
+                    .map_err(document_projection_error)?
+                    .parent_analysis(upstream),
+            ])
+        }
+
         AnalysisCommand::Pnoise(card) => {
             preflight_periodic_sweep(&card.sweep, resource_limits)?;
             let upstream = upstream_or_refuse(upstream, ".PNOISE", card.source)?;
@@ -962,6 +987,7 @@ fn unroutable_reason(command: &AnalysisCommand) -> Option<&'static str> {
         | AnalysisCommand::Pss(_)
         | AnalysisCommand::Pac(_)
         | AnalysisCommand::Pxf(_)
+        | AnalysisCommand::Pstb(_)
         | AnalysisCommand::Pnoise(_)
         | AnalysisCommand::Envelope(_) => None,
     }
@@ -989,6 +1015,7 @@ fn card_spelling(command: &AnalysisCommand) -> &'static str {
         AnalysisCommand::Pss(_) => ".PSS",
         AnalysisCommand::Pac(_) => ".PAC",
         AnalysisCommand::Pxf(_) => ".PXF",
+        AnalysisCommand::Pstb(_) => ".PSTB",
         AnalysisCommand::Pnoise(_) => ".PNOISE",
         AnalysisCommand::Envelope(_) => ".ENVELOPE",
     }
@@ -1238,6 +1265,14 @@ V1 in 0 SIN(0 0.1 1G) AC 1\n\
 R1 in out 1k\n\
 C1 out 0 1p\n";
 
+    /// A driven series-RLC. `.PSTB` reads the loop at an inductor current, so
+    /// its deck needs an inductor the shared linear network does not have.
+    const RESONATOR: &str = "browser periodic stability deck\n\
+VIN in 0 SIN(0 1 1meg)\n\
+R1 in a 50\n\
+L1 a out 10u\n\
+C1 out 0 1n\n";
+
     /// The same network with the first-tone distortion excitation `.DISTO`
     /// requires.
     const DISTORTION: &str = "browser distortion deck\n\
@@ -1368,6 +1403,13 @@ C4 a 0 160p\n";
                     LINEAR,
                     ".PSS FUND=1G HARMS=3 POINTS=32 TSTABPERIODS=2\n\
 .PXF LIN 2 1meg 10meg INPUT=V1 OUT=V(out) MAXSIDEBAND=1\n",
+                ),
+            },
+            AnalysisResultKind::Pstb => Expectation::Routed {
+                deck: deck(
+                    RESONATOR,
+                    ".PSS FUND=1meg HARMS=8 POINTS=64 TSTABPERIODS=2\n\
+.PSTB PROBE=L1 MAXHARM=4\n",
                 ),
             },
             AnalysisResultKind::PNoise => Expectation::Routed {

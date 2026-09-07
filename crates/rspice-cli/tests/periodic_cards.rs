@@ -1,10 +1,10 @@
 //! End-to-end contracts for the authored periodic large-signal family.
 //!
-//! `.PSS` and `.HB` are carriers; `.PAC`, `.PXF`, `.PNOISE` and `.ENVELOPE`
-//! linearize or continue around the carrier the canonical plan bound them to.
-//! These tests drive the real binary against circuits whose answers are known
-//! analytically, so a route that runs but computes the wrong thing fails here
-//! rather than merely producing a well-shaped artifact.
+//! `.PSS` and `.HB` are carriers; `.PAC`, `.PXF`, `.PNOISE`, `.PSTB` and
+//! `.ENVELOPE` linearize, judge or continue the carrier the canonical plan
+//! bound them to. These tests drive the real binary against circuits whose
+//! answers are known analytically, so a route that runs but computes the wrong
+//! thing fails here rather than merely producing a well-shaped artifact.
 
 mod common;
 
@@ -709,6 +709,121 @@ fn the_pss_flag_and_an_authored_pss_card_are_an_explicit_conflict() {
         "unexpected conflict message: {message}"
     );
     assert!(!requested.exists(), "a refused deck publishes no artifact");
+}
+
+/// A driven series-RLC. `.PSTB` reads the loop at an inductor current, and the
+/// network is strictly dissipative, so every Floquet multiplier of its
+/// monodromy is inside the unit circle and the orbit is stable — an answer the
+/// circuit's own physics fixes, not a fitted number.
+const RLC_CARRIER: &str = "* series RLC under a periodic carrier\n\
+                           VIN in 0 SIN(0 1 1meg)\n\
+                           R1 in a 50\n\
+                           L1 a out 10u\n\
+                           C1 out 0 1n\n";
+
+/// The `.PSTB` line the Studio's own dialog writes today parses, runs on the
+/// command line, and publishes the complete Floquet spectrum on a mode axis.
+#[test]
+fn the_pstb_line_the_studio_writes_runs_and_judges_the_orbit_stable() {
+    let dir = test_dir("pstb_studio_line");
+    let (output, requested) = run_deck(
+        &dir,
+        RLC_CARRIER,
+        // Byte-for-byte the shape of `PstbConfig::to_spice`, whose `maxharm=`
+        // is written on every line it emits.
+        ".PSS FUND=1meg HARMS=8 POINTS=64 TSTABPERIODS=2\n.pstb probe=L1 maxharm=4\n",
+        &[],
+    );
+    assert_ran(&output);
+
+    let document = read_json(&artifact(&requested, "pstb-001"));
+    assert_eq!(document["resultKind"], "pstb");
+    assert_eq!(document["analysis"]["tag"], "pstb-001");
+    assert_eq!(
+        document["parentAnalysis"]["tag"], "pss-001",
+        "a stability spectrum names the orbit it judged"
+    );
+    assert_eq!(document["payload"]["probeInstance"], "L1");
+    assert_eq!(document["payload"]["stabilityClassification"], "stable");
+    assert_eq!(document["payload"]["numUnstable"], 0);
+    // The card asked for the default ten multipliers and the network has two
+    // reactive states: the document publishes the whole spectrum and records
+    // the display limit rather than padding or truncating to it.
+    assert_eq!(document["payload"]["numMultipliers"], 10);
+    let modes = document["payload"]["modes"]
+        .as_array()
+        .expect("the payload carries every retained mode");
+    assert_eq!(modes.len(), 2, "one capacitor and one inductor");
+    assert_eq!(document["pointCount"], 2);
+
+    let axis = &document["axes"][0];
+    assert_eq!(axis["name"], "mode");
+    assert_eq!(axis["kind"], "index");
+    assert_eq!(
+        axis["values"]["values"].as_array().expect("mode indices"),
+        &vec![serde_json::json!(1.0), serde_json::json!(2.0)]
+    );
+
+    // A dissipative network contracts every perturbation over a period, so
+    // every multiplier is inside the unit circle and every margin is positive.
+    let magnitudes = real_series(&document, "multiplier_magnitude");
+    let margins = real_series(&document, "stability_margin_db");
+    assert_eq!(magnitudes.len(), 2);
+    for (magnitude, margin) in magnitudes.iter().zip(&margins) {
+        assert!(
+            *magnitude < 1.0 && *margin > 0.0,
+            "a lossy orbit has |lambda| < 1 and a positive margin, got {magnitude} / {margin} dB"
+        );
+    }
+    // And the probe's participation is a share of a mode shape.
+    for participation in real_series(&document, "probe_mode_participation") {
+        assert!(
+            (0.0..=1.0).contains(&participation),
+            "participation {participation} is not a normalized share"
+        );
+    }
+}
+
+/// A `.PSTB` whose only carrier is a harmonic balance is refused when the deck
+/// is planned, before any solver work: `.HB` retains no monodromy matrix.
+#[test]
+fn a_pstb_card_without_a_shooting_carrier_is_refused_at_plan_time() {
+    let dir = test_dir("pstb_from_hb");
+    let (output, requested) = run_deck(&dir, RLC_CARRIER, ".HB 1meg\n.pstb probe=L1\n", &[]);
+
+    assert!(
+        !output.status.success(),
+        "a stability card with no shooting carrier must not run"
+    );
+    let message = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        message.contains(".PSTB") && message.contains(".PSS"),
+        "the refusal must name the card and the carrier it needs: {message}"
+    );
+    assert!(
+        !artifact(&requested, "pstb-001").exists(),
+        "a refused PSTB card publishes no artifact"
+    );
+}
+
+/// A probe the deck does not carry is refused by name, with the branches the
+/// deck does offer.
+#[test]
+fn a_pstb_probe_the_deck_does_not_author_is_refused_by_name() {
+    let dir = test_dir("pstb_missing_probe");
+    let (output, _requested) = run_deck(
+        &dir,
+        RLC_CARRIER,
+        ".PSS FUND=1meg HARMS=8 POINTS=64 TSTABPERIODS=2\n.pstb probe=LNOPE\n",
+        &[],
+    );
+
+    assert!(!output.status.success(), "an absent probe must fail closed");
+    let message = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        message.contains("LNOPE") && message.contains("L1"),
+        "the refusal must name the probe and what the deck does offer: {message}"
+    );
 }
 
 /// The `--pss-freq` route is unchanged by the authored-card route: it still

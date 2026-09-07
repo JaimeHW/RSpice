@@ -490,6 +490,28 @@ pub(super) fn execute(
                 describe_analysis(analysis),
             ));
         }
+        AnalysisCommand::Pstb(card) => {
+            let engine = py_engine.engine_for_netlist(net);
+            // One carrier only: a monodromy matrix exists on a shooting `.PSS`
+            // result and nowhere else, and the canonical plan refuses a card
+            // bound to anything but one.
+            let PeriodicOperatingPoint::Shooting(point) =
+                upstream_operating_point(out, context, ".PSTB")?
+            else {
+                return Err(crate::errors::SimulationError::new_err(
+                    ".PSTB reads a monodromy matrix, which only a shooting .PSS retains".to_owned(),
+                ));
+            };
+            let result = run_interruptible(py, &py_engine.active_runs, |abort| {
+                engine.run_pstb_card_from_pss_with_abort(net, card, point, abort)
+            })?;
+            out.pstb
+                .push(identified(PyPstbResult::from_core(card, &result), context));
+            out.records.push(PyAnalysisRecord::executed(
+                "pstb",
+                describe_analysis(analysis),
+            ));
+        }
         AnalysisCommand::Pnoise(card) => {
             // The offset grid is preflighted against this binding's own
             // analysis-point limit before the card runs; core reads the same

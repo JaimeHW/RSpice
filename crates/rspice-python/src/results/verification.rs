@@ -517,6 +517,9 @@ pub struct PyRunReport {
     /// Periodic transfer-function result (last .pxf)
     #[pyo3(get)]
     pub pxf: Option<PyPxfResult>,
+    /// Periodic-stability result (last .pstb)
+    #[pyo3(get)]
+    pub pstb: Option<PyPstbResult>,
     /// Driven periodic-noise result (last .pnoise)
     #[pyo3(get)]
     pub pnoise: Option<PyPeriodicNoiseResult>,
@@ -604,6 +607,9 @@ pub struct PyRunReport {
     /// Every `.pxf` result, in deck/coordinate order. `pxf` is the last.
     #[pyo3(get)]
     pub all_pxf: Vec<PyPxfResult>,
+    /// Every `.pstb` result, in deck/coordinate order. `pstb` is the last.
+    #[pyo3(get)]
+    pub all_pstb: Vec<PyPstbResult>,
     /// Every driven `.pnoise` result, in deck/coordinate order. `pnoise` is
     /// the last.
     #[pyo3(get)]

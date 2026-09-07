@@ -935,6 +935,55 @@
           }
         },
         {
+          "result": "pstb",
+          "surfaces": {
+            "CLI": {
+              "scalar": {
+                "status": "mapped"
+              },
+              "stepped": {
+                "status": "mapped"
+              },
+              "temperature": {
+                "status": "mapped"
+              }
+            },
+            "Engine adapter": {
+              "scalar": {
+                "status": "mapped"
+              },
+              "stepped": {
+                "status": "mapped"
+              },
+              "temperature": {
+                "status": "mapped"
+              }
+            },
+            "Python": {
+              "scalar": {
+                "status": "mapped"
+              },
+              "stepped": {
+                "status": "mapped"
+              },
+              "temperature": {
+                "status": "mapped"
+              }
+            },
+            "WASM": {
+              "scalar": {
+                "status": "mapped"
+              },
+              "stepped": {
+                "status": "mapped"
+              },
+              "temperature": {
+                "status": "mapped"
+              }
+            }
+          }
+        },
+        {
           "result": "hb",
           "surfaces": {
             "CLI": {

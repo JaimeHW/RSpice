@@ -540,6 +540,7 @@ fn axis_analysis_kind(kind: PlannedAnalysisKind) -> Option<AxisAnalysisKind> {
         PlannedAnalysisKind::Pss => AxisAnalysisKind::Pss,
         PlannedAnalysisKind::Pac => AxisAnalysisKind::Pac,
         PlannedAnalysisKind::Pxf => AxisAnalysisKind::Pxf,
+        PlannedAnalysisKind::Pstb => AxisAnalysisKind::Pstb,
         PlannedAnalysisKind::PNoise => AxisAnalysisKind::PNoise,
         PlannedAnalysisKind::Sp => AxisAnalysisKind::SParameters,
         PlannedAnalysisKind::Envelope => AxisAnalysisKind::Envelope,

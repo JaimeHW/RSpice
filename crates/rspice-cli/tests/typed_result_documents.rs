@@ -268,6 +268,26 @@ fn coverage(kind: AnalysisResultKind) -> FamilyCoverage {
             series: Some(("output_frequency", "hertz")),
             scalar: Some("peak_gain_db"),
         }),
+        // Floquet stability needs a loop probe to read the orbit at, and a
+        // probe is an inductor current: the shared divider has no inductor, so
+        // this family is driven against a series-RLC. The carrier is a
+        // shooting `.PSS` because a monodromy matrix exists nowhere else.
+        AnalysisResultKind::Pstb => FamilyCoverage::Document(FamilyRun {
+            circuit: Some(
+                "* periodic stability coverage\n\
+                 VIN in 0 SIN(0 1 1meg)\n\
+                 R1 in a 50\n\
+                 L1 a out 10u\n\
+                 C1 out 0 1n\n",
+            ),
+            cards: ".PSS FUND=1meg HARMS=8 POINTS=64 TSTABPERIODS=2\n\
+                    .PSTB PROBE=L1 MAXHARM=4\n",
+            flags: &[],
+            artifact: "pstb-001",
+            analysis_tag: "pstb-001",
+            series: Some(("multiplier_magnitude", "dimensionless")),
+            scalar: Some("max_multiplier_magnitude"),
+        }),
         AnalysisResultKind::PNoise => FamilyCoverage::Document(FamilyRun {
             circuit: None,
             cards: ".HB 1k\n.PNOISE DEC 2 1k 10k OUT=V(out) INPUT=V1 MAXSIDEBAND=1\n",

@@ -18,6 +18,7 @@ use crate::analysis::floquet::{FloquetOrbitKind, FloquetSpectrumEvidence};
 use crate::analysis::harmonic_balance::{HbContinuationLimitation, HbReactiveKind};
 use crate::analysis::noise::NoiseSourceType;
 use crate::analysis::pole_zero::{RootSetEvidence, SpectrumCertificate};
+use crate::analysis::pstb::StabilityType;
 use crate::analysis::sensitivity::ElementType;
 use crate::engine::waveform::{
     TransientCompressionAlgorithm, TransientCompressionErrorObservation,
@@ -61,6 +62,7 @@ pub enum ResultPayload {
     Pac(PacPayload),
     Pxf(PxfPayload),
     PNoise(PNoisePayload),
+    Pstb(PstbPayload),
     Hb(HarmonicBalancePayload),
     /// Boxed because an envelope payload embeds a whole transient payload
     /// beside its carrier and continuation evidence, which made this one
@@ -92,6 +94,7 @@ impl ResultPayload {
             Self::Pac(_) => AnalysisResultKind::Pac,
             Self::Pxf(_) => AnalysisResultKind::Pxf,
             Self::PNoise(_) => AnalysisResultKind::PNoise,
+            Self::Pstb(_) => AnalysisResultKind::Pstb,
             Self::Hb(_) => AnalysisResultKind::HarmonicBalance,
             Self::Envelope(_) => AnalysisResultKind::Envelope,
         }
@@ -140,6 +143,7 @@ impl ResultPayload {
             Self::Pss(payload) => payload.floquet_multipliers.len().saturating_mul(2),
             Self::Pac(payload) => payload.value_count(),
             Self::Pxf(payload) => payload.value_count(),
+            Self::Pstb(payload) => payload.value_count(),
             Self::PNoise(payload) => payload
                 .contributors
                 .iter()
@@ -177,6 +181,7 @@ impl ResultPayload {
             Self::Pss(payload) => payload.validate(),
             Self::Pac(payload) => payload.validate(),
             Self::Pxf(payload) => payload.validate(),
+            Self::Pstb(payload) => payload.validate(),
             Self::PNoise(payload) => payload.validate(),
             Self::Hb(payload) => payload.validate(),
             Self::Envelope(payload) => payload.validate(),
@@ -2444,6 +2449,208 @@ impl PxfPayload {
         if let Some(gain) = self.dc_gain {
             finite("PXF DC gain real part", gain.real)?;
             finite("PXF DC gain imaginary part", gain.imaginary)?;
+        }
+        Ok(())
+    }
+}
+
+/// What a `.PSTB` run measured, beside the per-mode curves it publishes.
+///
+/// Everything here is either the run's own statement of what it did — the loop
+/// probe, the classification boundary, the subharmonic policy, the display
+/// limit the card asked for — or a conclusion the mode curves cannot carry:
+/// the evidence backing the spectrum, the orbit policy it was judged under,
+/// the phase mode that was exempted, and the verdict.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PstbPayload {
+    /// Period of the analyzed orbit, in seconds.
+    pub period: f64,
+    /// Fundamental frequency of the analyzed orbit, in hertz.
+    pub fundamental_frequency: f64,
+    /// Canonical circuit spelling of the loop probe.
+    pub probe_instance: String,
+    /// The probe's coordinate in the carrier's shooting-state basis, which is
+    /// the coordinate the monodromy — and therefore every mode shape — is
+    /// indexed by.
+    pub probe_state_index: usize,
+    /// Exact outer magnitude boundary the modes were classified against.
+    pub stability_threshold: f64,
+    /// Whether subharmonic orders were looked for. An empty
+    /// [`Self::subharmonics`] means "none found" only when this is true.
+    pub detect_subharmonics: bool,
+    /// Multipliers the card asked a viewer to show.
+    ///
+    /// The document publishes the **complete** spectrum regardless: a
+    /// truncated spectrum cannot prove stability, and a display limit is
+    /// presentation. It is recorded so a viewer can honour what the deck asked
+    /// for without re-reading the deck.
+    pub num_multipliers: usize,
+    /// Completeness and residual qualification for the retained spectrum.
+    pub floquet_evidence: FloquetEvidenceDocument,
+    /// Driven/autonomous policy the classification was made under.
+    pub floquet_orbit_kind: FloquetOrbitTag,
+    /// The one autonomous phase mode exempted from the verdict, when one was
+    /// qualified. Indexes [`Self::modes`].
+    pub trivial_multiplier_index: Option<usize>,
+    /// The stability determination.
+    ///
+    /// This is the refined label; the shared four-state verdict is its own
+    /// coarse partition, so publishing one publishes the other:
+    /// `Stable` is stable, `UnstableReal`/`UnstableComplex` are unstable,
+    /// `PeriodDoubling`/`NeimarkSacker`/`SaddleNode`/`Marginal` are marginal,
+    /// and `Indeterminate` is indeterminate. Core establishes that the two
+    /// agree before the result leaves the analyzer, so carrying both would be
+    /// carrying one fact twice.
+    pub stability_classification: PstbStabilityTag,
+    /// The complete spectrum, in the analyzer's canonical order.
+    pub modes: Vec<PstbModeDocument>,
+    /// Modes outside the outer boundary, excluding any exempted phase mode.
+    pub num_unstable: usize,
+    /// Subharmonic orders over the complete spectrum.
+    pub subharmonics: Vec<usize>,
+    /// Iterations the eigensolver reported. Zero means it is atomic and
+    /// exposes no count.
+    pub iterations: usize,
+}
+
+/// One retained Floquet mode.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PstbModeDocument {
+    /// The Floquet multiplier itself.
+    pub multiplier: ComplexSample,
+    /// Its exponent, `ln(lambda) / T`.
+    pub exponent: ComplexSample,
+    /// The loop probe's normalized share of this mode's shape.
+    pub probe_participation: f64,
+    /// Whether the mode sits outside the outer boundary.
+    pub is_unstable: bool,
+    /// Whether this is the exempted autonomous phase mode.
+    pub is_trivial: bool,
+    /// Root-of-unity order when the mode is a subharmonic and detection was on.
+    pub subharmonic_order: Option<usize>,
+}
+
+/// Wire spelling of the refined periodic-stability determination.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PstbStabilityTag {
+    /// Every applicable multiplier is strictly inside the inner band.
+    Stable,
+    /// A real multiplier lies outside the outer boundary.
+    UnstableReal,
+    /// A complex pair lies outside the outer boundary.
+    UnstableComplex,
+    /// A multiplier sits at `lambda = -1`: period doubling.
+    PeriodDoubling,
+    /// A complex pair sits on the unit circle: Neimark-Sacker (torus).
+    NeimarkSacker,
+    /// A multiplier sits at `lambda = +1`, and it is not the phase mode.
+    SaddleNode,
+    /// On the boundary, with no recognized bifurcation shape.
+    Marginal,
+    /// Stability could not be established from consistent qualified evidence.
+    Indeterminate,
+}
+
+impl From<StabilityType> for PstbStabilityTag {
+    fn from(stability: StabilityType) -> Self {
+        match stability {
+            StabilityType::Stable => Self::Stable,
+            StabilityType::UnstableReal => Self::UnstableReal,
+            StabilityType::UnstableComplex => Self::UnstableComplex,
+            StabilityType::PeriodDoubling => Self::PeriodDoubling,
+            StabilityType::NeimarkSacker => Self::NeimarkSacker,
+            StabilityType::SaddleNode => Self::SaddleNode,
+            StabilityType::Marginal => Self::Marginal,
+            // `StabilityType` is `#[non_exhaustive]`, so a label added later
+            // arrives here rather than failing to compile. "We could not
+            // establish it" is the only honest reading of a determination this
+            // build has no word for.
+            _ => Self::Indeterminate,
+        }
+    }
+}
+
+impl PstbPayload {
+    fn value_count(&self) -> usize {
+        self.modes
+            .len()
+            .saturating_mul(5)
+            .saturating_add(self.subharmonics.len())
+    }
+
+    fn validate(&self) -> Result<(), ResultDocumentError> {
+        finite("PSTB period", self.period)?;
+        finite("PSTB fundamental frequency", self.fundamental_frequency)?;
+        finite("PSTB stability threshold", self.stability_threshold)?;
+        super::require_name("PSTB probe instance", &self.probe_instance)?;
+        if self.period <= 0.0 || self.fundamental_frequency <= 0.0 {
+            return Err(ResultDocumentError::Malformed {
+                location: "PSTB orbit",
+                detail: "a periodic orbit has a positive period and frequency".to_owned(),
+            });
+        }
+        if self.stability_threshold < 1.0 {
+            return Err(ResultDocumentError::Malformed {
+                location: "PSTB stability boundary",
+                detail: "a boundary inside the unit circle would call a mode on it unstable"
+                    .to_owned(),
+            });
+        }
+        if let FloquetEvidenceDocument::Qualified { certificate } = &self.floquet_evidence {
+            finite(
+                "PSTB Floquet backward error",
+                certificate.max_backward_error,
+            )?;
+            finite(
+                "PSTB Floquet qualification tolerance",
+                certificate.qualification_tolerance,
+            )?;
+        }
+        if self
+            .trivial_multiplier_index
+            .is_some_and(|index| index >= self.modes.len())
+        {
+            return Err(ResultDocumentError::Malformed {
+                location: "PSTB Floquet spectrum",
+                detail: "the exempted phase mode is outside the retained spectrum".to_owned(),
+            });
+        }
+        if self.num_unstable > self.modes.len() {
+            return Err(ResultDocumentError::Malformed {
+                location: "PSTB Floquet spectrum",
+                detail: "more modes are called unstable than the spectrum holds".to_owned(),
+            });
+        }
+        for (index, mode) in self.modes.iter().enumerate() {
+            finite("PSTB multiplier real part", mode.multiplier.real)?;
+            finite("PSTB multiplier imaginary part", mode.multiplier.imaginary)?;
+            finite("PSTB exponent real part", mode.exponent.real)?;
+            finite("PSTB exponent imaginary part", mode.exponent.imaginary)?;
+            finite("PSTB probe participation", mode.probe_participation)?;
+            // A normalized share of one mode shape. Outside [0, 1] it is not a
+            // share of anything.
+            if !(0.0..=1.0).contains(&mode.probe_participation) {
+                return Err(ResultDocumentError::Malformed {
+                    location: "PSTB probe participation",
+                    detail: format!(
+                        "mode {} reports a normalized participation of {}",
+                        index + 1,
+                        mode.probe_participation
+                    ),
+                });
+            }
+            if !self.detect_subharmonics && mode.subharmonic_order.is_some() {
+                return Err(ResultDocumentError::Malformed {
+                    location: "PSTB subharmonics",
+                    detail: format!(
+                        "mode {} reports a subharmonic order although detection was off",
+                        index + 1
+                    ),
+                });
+            }
         }
         Ok(())
     }

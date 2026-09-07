@@ -21,16 +21,17 @@ use super::payload::{
     DigitalEventBus, DigitalEventPoint, DigitalEventTrace, DistortionPayload,
     DistortionProductSeries, DistortionProductTag, DistortionTone, EnvelopeCarrierDocument,
     EnvelopeContinuationDocument, EnvelopeNodeSpectrum, EnvelopePayload, FftMetricsDocument,
-    FftPayload, FftSourceDocument, FloquetEvidenceDocument, FourierPayload, HarmonicBalancePayload,
-    HbReactiveSpectrumDocument, MonteCarloPayload, MonteCarloVariableStatistics, NamedObservable,
-    NamedObservableSeries, NoiseContributionSeries, NoisePayload, NoiseSourceIdentityDocument,
-    NyquistSample, OperatingPointPayload, OscillatorPhaseNoiseDocument, PNoiseBandwidth,
-    PNoiseContribution, PNoiseContributor, PNoisePayload, PacConversionEntry,
-    PacConversionMatrixDocument, PacPayload, PacSidebandDescriptor, PoleZeroPayload, PortDocument,
-    PortNoiseCovarianceNormalization, PortNoisePayload, PxfGroupDelaySample, PxfPayload,
-    RealEventPoint, RealEventTrace, ResultPayload, RootSetEvidenceDocument, SParameterPayload,
-    SensitivityElementTag, SensitivityEntry, SensitivityPayload, StabilityPayload,
-    TransferFunctionPayload, TransientPayload, TwoPortNoiseEntry,
+    FftPayload, FftSourceDocument, FloquetEvidenceDocument, FloquetOrbitTag, FourierPayload,
+    HarmonicBalancePayload, HbReactiveSpectrumDocument, MonteCarloPayload,
+    MonteCarloVariableStatistics, NamedObservable, NamedObservableSeries, NoiseContributionSeries,
+    NoisePayload, NoiseSourceIdentityDocument, NyquistSample, OperatingPointPayload,
+    OscillatorPhaseNoiseDocument, PNoiseBandwidth, PNoiseContribution, PNoiseContributor,
+    PNoisePayload, PacConversionEntry, PacConversionMatrixDocument, PacPayload,
+    PacSidebandDescriptor, PoleZeroPayload, PortDocument, PortNoiseCovarianceNormalization,
+    PortNoisePayload, PstbModeDocument, PstbPayload, PstbStabilityTag, PxfGroupDelaySample,
+    PxfPayload, RealEventPoint, RealEventTrace, ResultPayload, RootSetEvidenceDocument,
+    SParameterPayload, SensitivityElementTag, SensitivityEntry, SensitivityPayload,
+    StabilityPayload, TransferFunctionPayload, TransientPayload, TwoPortNoiseEntry,
 };
 use super::{
     AnalysisResultDocument, AnalysisResultDocumentBuilder, AxisValues, ComplexSample,
@@ -63,7 +64,7 @@ use crate::engine::{
     DcSweepPointResult, DigitalBusDeclaration, DigitalTrace, TransientFftResult, TransientResult,
     validate_digital_bus_table,
 };
-use crate::engine::{EnvelopeResult, PeriodicNoiseResult};
+use crate::engine::{EnvelopeResult, PeriodicNoiseResult, PeriodicStabilityResult};
 use crate::execution::plan::AnalysisInstanceId;
 use crate::execution::schema::{
     SignalDescriptor, SignalKind, SignalOwner, SignalShape, SignalUnit, SignalValueType,
@@ -2981,6 +2982,225 @@ impl AnalysisResultDocument {
 
         Ok(
             Self::builder(analysis, ResultPayload::Pxf(payload), point_count)
+                .axis(axis)
+                .signals(signals)
+                .scalars(scalars),
+        )
+    }
+
+    /// Project one periodic-stability run: the complete Floquet spectrum of
+    /// the carrier's monodromy, on the mode-index axis it lives on.
+    ///
+    /// The card travels beside the result for the reason `from_pxf`'s does: a
+    /// `PeriodicStabilityResult` is the numbers, and how many of them the deck
+    /// asked a viewer to draw is the card's own statement. The projection
+    /// refuses a card that states a different classification boundary or
+    /// subharmonic policy than the spectrum was produced under, because then
+    /// the two are not the same run.
+    ///
+    /// The six per-mode curves are published at the **complete** spectrum, not
+    /// at the card's `NMULTS`. A truncated spectrum cannot prove stability,
+    /// and a display limit is presentation rather than payload; the limit
+    /// itself is recorded so a viewer can honour it.
+    pub fn from_pstb(
+        analysis: AnalysisInstanceId,
+        card: &crate::netlist::PstbCard,
+        stability: &PeriodicStabilityResult,
+    ) -> Result<AnalysisResultDocumentBuilder, ResultDocumentError> {
+        const LOCATION: &str = "PSTB result";
+        let result = &stability.result;
+        let mode_count = result.multipliers.len();
+        if mode_count == 0 {
+            return Err(source_error(
+                LOCATION,
+                "a PSTB spectrum needs at least one Floquet mode",
+            ));
+        }
+        if card.stability_threshold != result.stability_threshold
+            || card.detect_subharmonics != result.detect_subharmonics
+        {
+            return Err(source_error(
+                LOCATION,
+                format!(
+                    "the card asks for boundary {} with subharmonic detection {} but the spectrum \
+                     was produced under boundary {} with detection {}",
+                    card.stability_threshold,
+                    card.detect_subharmonics,
+                    result.stability_threshold,
+                    result.detect_subharmonics
+                ),
+            ));
+        }
+        if stability.probe_participation.len() != mode_count {
+            return Err(source_error(
+                LOCATION,
+                "the probe's participation is stated for every retained mode or for none",
+            ));
+        }
+
+        let axis = ResultAxis::new(
+            "mode",
+            "Mode",
+            ResultAxisKind::Index,
+            SignalUnit::Dimensionless,
+            AxisValues::Real {
+                values: (1..=mode_count).map(|index| index as Value).collect(),
+            },
+        )?;
+
+        let mut magnitude = Vec::with_capacity(mode_count);
+        let mut phase_degrees = Vec::with_capacity(mode_count);
+        let mut margin_db = Vec::with_capacity(mode_count);
+        let mut damping = Vec::with_capacity(mode_count);
+        let mut natural_frequency = Vec::with_capacity(mode_count);
+        let mut modes = Vec::with_capacity(mode_count);
+        for (multiplier, participation) in result
+            .multipliers
+            .iter()
+            .zip(stability.probe_participation.iter().copied())
+        {
+            magnitude.push(multiplier.magnitude());
+            phase_degrees.push(multiplier.phase_degrees());
+            margin_db.push(multiplier.stability_margin_db());
+            damping.push(multiplier.damping());
+            natural_frequency.push(multiplier.natural_frequency());
+            modes.push(PstbModeDocument {
+                multiplier: ComplexSample::new(multiplier.value.re, multiplier.value.im),
+                exponent: ComplexSample::new(multiplier.exponent.re, multiplier.exponent.im),
+                probe_participation: participation,
+                is_unstable: multiplier.is_unstable,
+                is_trivial: multiplier.is_trivial,
+                subharmonic_order: multiplier.subharmonic_order,
+            });
+        }
+
+        let curve = |name: &'static str,
+                     display: &'static str,
+                     unit: SignalUnit,
+                     values: &[Value]|
+         -> Result<ResultSignal, ResultDocumentError> {
+            ResultSignal::new(
+                analysis_descriptor(
+                    LOCATION,
+                    name,
+                    display,
+                    unit,
+                    SignalValueType::Real,
+                    mode_count,
+                )?,
+                None,
+                SeriesAvailability::Available,
+                SeriesValues::Real {
+                    samples: finite_samples(LOCATION, name, values)?,
+                },
+            )
+        };
+        let signals = vec![
+            curve(
+                "multiplier_magnitude",
+                "Floquet |lambda|",
+                SignalUnit::Dimensionless,
+                &magnitude,
+            )?,
+            curve(
+                "multiplier_phase_deg",
+                "Floquet phase",
+                SignalUnit::Degree,
+                &phase_degrees,
+            )?,
+            curve(
+                "stability_margin_db",
+                "Stability margin",
+                decibel(),
+                &margin_db,
+            )?,
+            curve(
+                "mode_damping",
+                "Mode damping",
+                SignalUnit::Custom("1/s".to_owned()),
+                &damping,
+            )?,
+            curve(
+                "mode_frequency_hz",
+                "Mode frequency",
+                SignalUnit::Hertz,
+                &natural_frequency,
+            )?,
+            curve(
+                "probe_mode_participation",
+                "Probe mode participation",
+                SignalUnit::Dimensionless,
+                &stability.probe_participation,
+            )?,
+        ];
+
+        let scalars = vec![
+            real_scalar(
+                LOCATION,
+                "period",
+                "Orbit period",
+                SignalUnit::Second,
+                result.period,
+            )?,
+            real_scalar(
+                LOCATION,
+                "fundamental_frequency",
+                "Fundamental frequency",
+                SignalUnit::Hertz,
+                result.fundamental_frequency,
+            )?,
+            boolean_scalar("converged", "Converged", result.converged)?,
+            count_scalar("num_unstable", "Unstable modes", result.num_unstable)?,
+            real_scalar(
+                LOCATION,
+                "max_multiplier_magnitude",
+                "Largest |lambda|",
+                SignalUnit::Dimensionless,
+                result.max_multiplier_magnitude,
+            )?,
+            match result.min_stability_margin_db {
+                Some(margin) => real_scalar(
+                    LOCATION,
+                    "min_stability_margin_db",
+                    "Smallest stability margin",
+                    decibel(),
+                    margin,
+                )?,
+                // There is no applicable mode to take a margin over -- an
+                // autonomous spectrum holding only its phase mode. That is a
+                // determination about the orbit, and `-inf` would report a
+                // margin the orbit does not have.
+                None => ResultScalar::new(
+                    "min_stability_margin_db",
+                    "Smallest stability margin",
+                    Some(decibel()),
+                    ScalarValue::Unavailable {
+                        reason: ScalarUnavailability::NoCrossover,
+                    },
+                )?,
+            },
+        ];
+
+        let payload = PstbPayload {
+            period: result.period,
+            fundamental_frequency: result.fundamental_frequency,
+            probe_instance: stability.probe_instance.clone(),
+            probe_state_index: stability.probe_state_index,
+            stability_threshold: result.stability_threshold,
+            detect_subharmonics: result.detect_subharmonics,
+            num_multipliers: card.num_multipliers,
+            floquet_evidence: FloquetEvidenceDocument::from(&result.floquet_evidence),
+            floquet_orbit_kind: FloquetOrbitTag::from(result.orbit_kind),
+            trivial_multiplier_index: result.trivial_multiplier_index,
+            stability_classification: PstbStabilityTag::from(result.stability),
+            modes,
+            num_unstable: result.num_unstable,
+            subharmonics: result.subharmonics.clone(),
+            iterations: result.iterations,
+        };
+
+        Ok(
+            Self::builder(analysis, ResultPayload::Pstb(payload), mode_count)
                 .axis(axis)
                 .signals(signals)
                 .scalars(scalars),

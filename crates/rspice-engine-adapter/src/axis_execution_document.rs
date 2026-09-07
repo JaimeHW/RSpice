@@ -383,6 +383,7 @@ pub enum AxisAnalysisKind {
     Pac,
     Pxf,
     PNoise,
+    Pstb,
     SParameters,
     Envelope,
 }
@@ -408,6 +409,7 @@ impl AxisAnalysisKind {
             Self::Pac => "pac",
             Self::Pxf => "pxf",
             Self::PNoise => "pnoise",
+            Self::Pstb => "pstb",
             Self::SParameters => "sp",
             Self::Envelope => "env",
         }

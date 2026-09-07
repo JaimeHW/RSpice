@@ -1,9 +1,9 @@
 //! Authored periodic large-signal cards on the browser deck route.
 //!
-//! `.PSS`, `.PAC`, `.PXF`, `.HB`, `.ENVELOPE` and `.PNOISE` all execute and
-//! publish shared result documents, each named by the identity the canonical plan
-//! assigned it and — for the small-signal cards — bound to the carrier they
-//! linearized around.
+//! `.PSS`, `.PAC`, `.PXF`, `.PSTB`, `.HB`, `.ENVELOPE` and `.PNOISE` all
+//! execute and publish shared result documents, each named by the identity the
+//! canonical plan assigned it and — for the dependent cards — bound to the
+//! carrier they linearized, judged or continued.
 
 use rspice_wasm::run_authored_deck_document_detailed;
 
@@ -12,8 +12,20 @@ V1 in 0 SIN(0 0.1 1G)\n\
 R1 in out 1k\n\
 C1 out 0 1p\n";
 
+/// A driven series-RLC: `.PSTB` reads the loop at an inductor current, which
+/// the shared RC deck does not have.
+const RESONATOR: &str = "periodic stability browser deck\n\
+VIN in 0 SIN(0 1 1meg)\n\
+R1 in a 50\n\
+L1 a out 10u\n\
+C1 out 0 1n\n";
+
 fn deck(cards: &str) -> String {
     format!("{CIRCUIT}{cards}.END\n")
+}
+
+fn resonator_deck(cards: &str) -> String {
+    format!("{RESONATOR}{cards}.END\n")
 }
 
 #[test]
@@ -120,5 +132,52 @@ fn an_authored_pxf_card_publishes_a_document_bound_to_its_carrier() {
     assert!(
         document.point_count() > 0,
         "a transfer-function sweep retains its offset grid"
+    );
+}
+
+#[test]
+fn an_authored_pstb_card_publishes_a_document_bound_to_its_shooting_carrier() {
+    let execution = run_authored_deck_document_detailed(&resonator_deck(
+        ".PSS FUND=1meg HARMS=8 POINTS=64 TSTABPERIODS=2\n\
+         .PSTB PROBE=L1 MAXHARM=4\n",
+    ))
+    .expect("an authored .PSTB executes on the browser deck route");
+    let document = execution
+        .results
+        .iter()
+        .find(|document| document.analysis().tag() == "pstb-001")
+        .expect("the PSTB result keeps its canonical identity");
+    assert_eq!(
+        document.result_kind(),
+        rspice_core::execution::AnalysisResultKind::Pstb
+    );
+    assert_eq!(
+        document.parent_analysis().map(|parent| parent.tag()),
+        Some("pss-001".to_owned()),
+        "a stability spectrum must name the orbit it judged"
+    );
+    let rspice_core::execution::ResultPayload::Pstb(payload) = document.payload() else {
+        panic!("a .PSTB card publishes a PSTB payload");
+    };
+    assert_eq!(payload.probe_instance, "L1");
+    assert_eq!(payload.modes.len(), document.point_count());
+    assert!(
+        document.point_count() > 0,
+        "a monodromy with reactive state has at least one Floquet mode"
+    );
+}
+
+/// A `.PSTB` whose only carrier is a harmonic balance is refused when the deck
+/// is planned, before any solve: `.HB` retains no monodromy matrix.
+#[test]
+fn a_pstb_card_over_a_harmonic_balance_carrier_is_refused_at_plan_time() {
+    let error = run_authored_deck_document_detailed(&resonator_deck(
+        ".HB 1meg\n.PSTB PROBE=L1 MAXHARM=4\n",
+    ))
+    .expect_err("a harmonic-balance carrier cannot answer a stability card");
+    let message = format!("{error:?}");
+    assert!(
+        message.contains(".PSTB") && message.contains(".PSS"),
+        "the refusal must name the card and the carrier it needs: {message}"
     );
 }

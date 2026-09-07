@@ -2244,6 +2244,10 @@ pub enum AnalysisCommand {
     /// point: `.PNOISE`.
     Pnoise(Box<PnoiseCard>),
 
+    /// Floquet stability of a periodic orbit, read at one loop probe:
+    /// `.PSTB`.
+    Pstb(Box<PstbCard>),
+
     /// Harmonic-balance envelope continuation: `.ENVELOPE`.
     Envelope(Box<EnvelopeCard>),
 }
@@ -2572,6 +2576,24 @@ pub struct PstbCard {
     pub eigenvalue_tolerance: Value,
 }
 
+impl PstbCard {
+    /// Carrier harmonics the study is stated over when the card does not say.
+    /// The Studio's `.PSTB` dialog writes this key on every line it emits and
+    /// its manual-deck reader defaults it to the same 10.
+    pub(crate) const DEFAULT_MAX_HARMONICS: usize = 10;
+    /// Multipliers a viewer shows when the card does not say; the Studio's
+    /// reader and dialog have both meant 10 since `.PSTB` became authorable.
+    pub(crate) const DEFAULT_NUM_MULTIPLIERS: usize = 10;
+    /// Outer classification boundary when the card does not say. Slightly
+    /// above unity so a marginally stable mode is not called a failure on
+    /// rounding alone; the Studio's reader and dialog use the same number.
+    pub(crate) const DEFAULT_STABILITY_THRESHOLD: Value = 1.0 + 1e-6;
+    /// Whether a card that does not say reports subharmonic orders.
+    pub(crate) const DEFAULT_DETECT_SUBHARMONICS: bool = true;
+    /// Eigen-decomposition tolerance when the card does not say.
+    pub(crate) const DEFAULT_EIGENVALUE_TOLERANCE: Value = 1e-10;
+}
+
 /// Authored `.ENVELOPE` card: harmonic-balance envelope continuation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EnvelopeCard {
@@ -2614,6 +2636,7 @@ pub enum AnalysisCard {
     Pac,
     Pxf,
     Pnoise,
+    Pstb,
     Envelope,
 }
 
@@ -2625,6 +2648,7 @@ impl AnalysisCard {
             Self::Pac => ".PAC",
             Self::Pxf => ".PXF",
             Self::Pnoise => ".PNOISE",
+            Self::Pstb => ".PSTB",
             Self::Envelope => ".ENVELOPE",
         }
     }

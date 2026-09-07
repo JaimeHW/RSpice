@@ -429,6 +429,17 @@ fn family_expectation(kind: AnalysisResultKind) -> FamilyExpectation {
                    C1 out 0 1p\n\
                    .pss fund=1g\n.pxf dec 2 1k 10k input=v1 out=v(out) maxsideband=1\n.end\n",
         },
+        // A loop probe is an inductor current, so this family needs a deck
+        // with an inductor, and its carrier must be a shooting `.PSS`.
+        AnalysisResultKind::Pstb => FamilyExpectation::Runs {
+            request_kind: "pstb",
+            analysis_tag: "pstb-001",
+            declared: DeclaredStatus::Mapped,
+            deck: "rf periodic stability\nVIN in 0 SIN(0 1 1meg)\nR1 in a 50\n\
+                   L1 a out 10u\nC1 out 0 1n\n\
+                   .pss fund=1meg harms=8 points=64 tstabperiods=2\n\
+                   .pstb probe=L1 maxharm=4\n.end\n",
+        },
         AnalysisResultKind::Envelope => FamilyExpectation::Runs {
             request_kind: "envelope",
             analysis_tag: "env-001",

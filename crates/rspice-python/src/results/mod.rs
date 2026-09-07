@@ -18,6 +18,7 @@
 //! | [`noise`]                | `NoiseResult`, `NoiseContribution`, `PeriodicNoiseResult`, `PeriodicNoiseContribution`, `OscillatorNoiseResult` |
 //! | [`pss`] / [`hb`] / [`pac`] | `PssResult`, `HbResult`, `PacResult`                          |
 //! | [`pxf`]                  | `PxfResult`                                                     |
+//! | [`pstb`]                 | `PstbResult`                                                    |
 //! | [`sensitivity`]          | `SensitivityResult`, `ElementSensitivity`, `AcSensitivityResult`, `AcSensitivity` |
 //! | [`monte_carlo`]          | `MonteCarloResult`, `VariableStatistics`                        |
 //! | [`verification`]         | `Measurement`, `AnalysisRecord`, `RunReport`                    |
@@ -72,6 +73,7 @@ mod pac;
 mod pickle_state_chaos;
 mod projection;
 mod pss;
+mod pstb;
 mod pxf;
 mod s_parameters;
 mod sensitivity;
@@ -111,6 +113,7 @@ pub(crate) use noise::{
 pub(crate) use pac::PyPacResult;
 pub(crate) use projection::PyProjectedSignal;
 pub(crate) use pss::{PyFloquetSpectrumCertificate, PyFloquetSpectrumEvidence, PyPssResult};
+pub(crate) use pstb::PyPstbResult;
 pub(crate) use pxf::PyPxfResult;
 pub(crate) use s_parameters::PySParameterResult;
 pub(crate) use sensitivity::{

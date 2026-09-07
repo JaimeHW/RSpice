@@ -766,6 +766,18 @@ impl DeckPlan {
                                 last_periodic,
                             )?)
                         }
+                        // `.PSTB` reads a monodromy matrix, and only a
+                        // shooting `.PSS` produces one. A deck whose nearest
+                        // carrier is `.HB` is refused here rather than bound
+                        // to a carrier that cannot answer the card -- the
+                        // mirror of `.ENVELOPE` below, which needs the `.HB`.
+                        AnalysisCommand::Pstb(_) => AnalysisRequest::new(kind).with_upstream(
+                            last_pss.ok_or(DeckPlanError::MissingUpstreamAnalysis {
+                                card: ".PSTB",
+                                required: "a preceding .PSS; a harmonic-balance carrier has no \
+                                           monodromy matrix",
+                            })?,
+                        ),
                         AnalysisCommand::Envelope(_) => AnalysisRequest::new(kind).with_upstream(
                             last_hb.ok_or(DeckPlanError::MissingUpstreamAnalysis {
                                 card: ".ENVELOPE",
@@ -1543,6 +1555,7 @@ pub(super) fn analysis_kind(command: &crate::netlist::AnalysisCommand) -> Analys
         AnalysisCommand::Pac(_) => AnalysisKind::Pac,
         AnalysisCommand::Pxf(_) => AnalysisKind::Pxf,
         AnalysisCommand::Pnoise(_) => AnalysisKind::PNoise,
+        AnalysisCommand::Pstb(_) => AnalysisKind::Pstb,
         AnalysisCommand::Envelope(_) => AnalysisKind::Envelope,
         AnalysisCommand::Step(_) | AnalysisCommand::Temp { .. } => AnalysisKind::ImplicitOp,
     }
@@ -2609,6 +2622,20 @@ mod tests {
                 ".pac dec 5 1k 1meg input=v1 out=v(out)\n.hb 1g\n",
                 ".PAC",
                 "a preceding .PSS or .HB",
+            ),
+            // A harmonic-balance carrier retains no monodromy matrix, so a
+            // `.PSTB` cannot be bound to one. The card has no `FROM=` key to
+            // ask for it either, which makes this the only way to reach the
+            // refusal: author a deck whose only carrier is `.HB`.
+            (
+                ".hb 1g\n.pstb probe=l1\n",
+                ".PSTB",
+                "a preceding .PSS; a harmonic-balance carrier has no monodromy matrix",
+            ),
+            (
+                ".pstb probe=l1\n",
+                ".PSTB",
+                "a preceding .PSS; a harmonic-balance carrier has no monodromy matrix",
             ),
         ] {
             let netlist = crate::Netlist::parse(&format!("{PERIODIC_CIRCUIT}{cards}.end\n"))

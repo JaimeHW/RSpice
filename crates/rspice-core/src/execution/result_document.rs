@@ -182,10 +182,11 @@ pub use payload::{
     OscillatorPhaseNoiseDocument, PNoiseBandwidth, PNoiseContribution, PNoiseContributor,
     PNoisePayload, PacConversionEntry, PacConversionMatrixDocument, PacPayload,
     PacSidebandDescriptor, PoleZeroPayload, PortDocument, PortNoiseCovarianceNormalization,
-    PortNoisePayload, PssPayload, PxfGroupDelaySample, PxfPayload, RealEventPoint, RealEventTrace,
-    ResultPayload, RootSetEvidenceDocument, SParameterPayload, SensitivityElementTag,
-    SensitivityEntry, SensitivityPayload, SpectrumCertificateDocument, StabilityPayload,
-    TransferFunctionPayload, TransientPayload, TwoPortNoiseEntry,
+    PortNoisePayload, PssPayload, PstbModeDocument, PstbPayload, PstbStabilityTag,
+    PxfGroupDelaySample, PxfPayload, RealEventPoint, RealEventTrace, ResultPayload,
+    RootSetEvidenceDocument, SParameterPayload, SensitivityElementTag, SensitivityEntry,
+    SensitivityPayload, SpectrumCertificateDocument, StabilityPayload, TransferFunctionPayload,
+    TransientPayload, TwoPortNoiseEntry,
 };
 
 use crate::abort_signal::{AbortSignal, NoAbort};
@@ -511,6 +512,9 @@ impl AnalysisResultDocument {
             AnalysisResultKind::Pac | AnalysisResultKind::Pxf | AnalysisResultKind::PNoise => {
                 Some((false, &[AnalysisKind::Pss, AnalysisKind::HarmonicBalance]))
             }
+            // Only a shooting `.PSS` retains a monodromy matrix, so a stability
+            // spectrum can name no other parent.
+            AnalysisResultKind::Pstb => Some((false, &[AnalysisKind::Pss])),
             AnalysisResultKind::Envelope => Some((false, &[AnalysisKind::HarmonicBalance])),
             _ => None,
         };

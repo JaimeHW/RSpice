@@ -214,6 +214,16 @@ pub(crate) fn describe_analysis(analysis: &AnalysisCommand) -> String {
                 card.max_sideband
             )
         }
+        AnalysisCommand::Pstb(card) => {
+            format!(
+                ".pstb probe={} maxharm={} nmults={} stabilitythreshold={} eigentol={}",
+                card.probe_instance,
+                card.max_harmonics,
+                card.num_multipliers,
+                card.stability_threshold,
+                card.eigenvalue_tolerance
+            )
+        }
         AnalysisCommand::Pnoise(card) => {
             let probe = match &card.reference_node {
                 Some(reference) => format!("v({},{reference})", card.output_node),

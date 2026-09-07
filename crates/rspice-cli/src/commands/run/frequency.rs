@@ -176,7 +176,7 @@ pub(super) fn run_tf_from_command(
 
 /// The report-shaped analyses (TF, PZ, sensitivity) have no natural HDF5
 /// section; fail with a clear message instead of writing a misleading file.
-fn reject_hdf5(format: OutputFormat, what: &str) -> Result<(), CliError> {
+pub(super) fn reject_hdf5(format: OutputFormat, what: &str) -> Result<(), CliError> {
     if matches!(format, OutputFormat::Hdf5) {
         return Err(CliError::InvalidArgument {
             message: format!("HDF5 output is not supported for {what} results"),

@@ -103,6 +103,7 @@ pub(super) fn build_manual_deck_queue(
             AnalysisCommand::Pss(_)
                 | AnalysisCommand::Pac(_)
                 | AnalysisCommand::Pxf(_)
+                | AnalysisCommand::Pstb(_)
                 | AnalysisCommand::Pnoise(_)
         ) {
             continue;
@@ -552,6 +553,7 @@ fn command_name(command: &AnalysisCommand) -> &'static str {
         AnalysisCommand::Pss(_) => ".pss",
         AnalysisCommand::Pac(_) => ".pac",
         AnalysisCommand::Pxf(_) => ".pxf",
+        AnalysisCommand::Pstb(_) => ".pstb",
         AnalysisCommand::Pnoise(_) => ".pnoise",
         AnalysisCommand::Envelope(_) => ".envelope",
     }
@@ -1169,6 +1171,7 @@ fn command_to_queue_item(
         AnalysisCommand::Pss(_)
         | AnalysisCommand::Pac(_)
         | AnalysisCommand::Pxf(_)
+        | AnalysisCommand::Pstb(_)
         | AnalysisCommand::Pnoise(_) => Err(format!(
             "{} is queued from the deck's own card by the periodic reader, which binds it to \
                  the PSS operating point; reaching this route means the deck walk did not skip it",

@@ -1024,6 +1024,7 @@ impl<'a> RunContext<'a> {
             AnalysisCommand::Pss(card) => periodic::run_pss_card(self, card)?,
             AnalysisCommand::Pac(card) => periodic::run_pac_card(self, card)?,
             AnalysisCommand::Pxf(card) => periodic::run_pxf_card(self, card)?,
+            AnalysisCommand::Pstb(card) => periodic::run_pstb_card(self, card)?,
             AnalysisCommand::Pnoise(card) => periodic::run_pnoise_card(self, card)?,
             AnalysisCommand::Envelope(card) => periodic::run_envelope_card(self, card)?,
         }

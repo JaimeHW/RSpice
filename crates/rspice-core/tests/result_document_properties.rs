@@ -34,11 +34,12 @@ use rspice_core::execution::result_document::{
     NoiseMechanismTag, NoisePayload, NoiseSourceIdentityDocument, NyquistSample,
     OperatingPointPayload, PNoiseBandwidth, PNoiseContribution, PNoiseContributor, PNoisePayload,
     PacPayload, PacSidebandDescriptor, PoleZeroPayload, PortDocument,
-    PortNoiseCovarianceNormalization, PortNoisePayload, PssPayload, PxfGroupDelaySample,
-    PxfPayload, ResultAxis, ResultAxisKind, ResultDocumentError, ResultNamespaces, ResultPayload,
-    ResultScalar, ResultSignal, RootSetEvidenceDocument, SParameterPayload, ScalarValue,
-    SensitivityElementTag, SensitivityEntry, SensitivityPayload, SeriesAvailability, SeriesValues,
-    StabilityPayload, TransferFunctionPayload, TransientPayload,
+    PortNoiseCovarianceNormalization, PortNoisePayload, PssPayload, PstbModeDocument, PstbPayload,
+    PstbStabilityTag, PxfGroupDelaySample, PxfPayload, ResultAxis, ResultAxisKind,
+    ResultDocumentError, ResultNamespaces, ResultPayload, ResultScalar, ResultSignal,
+    RootSetEvidenceDocument, SParameterPayload, ScalarValue, SensitivityElementTag,
+    SensitivityEntry, SensitivityPayload, SeriesAvailability, SeriesValues, StabilityPayload,
+    TransferFunctionPayload, TransientPayload,
 };
 use rspice_core::execution::{
     AnalysisInstanceId, AnalysisKind, AnalysisRequest, DeckPlan, SignalDescriptor, SignalKind,
@@ -669,6 +670,40 @@ fn document(family: usize, shape: &Shape) -> AnalysisResultDocument {
             }),
         ),
         19 => (
+            AnalysisKind::Pstb,
+            Some(analysis_id(AnalysisKind::Pss)),
+            ResultAxisKind::Index,
+            axis_values.clone(),
+            ResultPayload::Pstb(PstbPayload {
+                period: 1e-9,
+                fundamental_frequency: 1e9,
+                probe_instance: "l1".to_owned(),
+                probe_state_index: 1,
+                stability_threshold: 1.0 + 1e-6,
+                detect_subharmonics: true,
+                num_multipliers: 10,
+                floquet_evidence: FloquetEvidenceDocument::NotComputed,
+                floquet_orbit_kind: FloquetOrbitTag::Driven,
+                trivial_multiplier_index: None,
+                stability_classification: PstbStabilityTag::Stable,
+                modes: shape
+                    .complex_vector()
+                    .into_iter()
+                    .map(|multiplier| PstbModeDocument {
+                        multiplier,
+                        exponent: ComplexSample::new(-1.0, 0.5),
+                        probe_participation: 0.25,
+                        is_unstable: false,
+                        is_trivial: false,
+                        subharmonic_order: Some(2),
+                    })
+                    .collect(),
+                num_unstable: 0,
+                subharmonics: vec![2],
+                iterations: 3,
+            }),
+        ),
+        20 => (
             AnalysisKind::HarmonicBalance,
             None,
             ResultAxisKind::HarmonicIndex,
@@ -744,7 +779,7 @@ fn document(family: usize, shape: &Shape) -> AnalysisResultDocument {
 }
 
 /// Number of families the fixture covers; one per [`ResultPayload`] variant.
-const FAMILY_COUNT: usize = 21;
+const FAMILY_COUNT: usize = 22;
 
 #[test]
 fn law_every_result_family_round_trips_through_json_exactly() {

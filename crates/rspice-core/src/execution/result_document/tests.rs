@@ -463,6 +463,10 @@ fn document_for(kind: AnalysisResultKind) -> AnalysisResultDocument {
             instance(AnalysisKind::PNoise),
             &PeriodicNoiseResult::Spectral(pnoise_result()),
         ),
+        AnalysisResultKind::Pstb => {
+            let (card, stability) = pstb_measurement();
+            AnalysisResultDocument::from_pstb(instance(AnalysisKind::Pstb), &card, &stability)
+        }
         AnalysisResultKind::HarmonicBalance => AnalysisResultDocument::from_harmonic_balance(
             instance(AnalysisKind::HarmonicBalance),
             &harmonic_balance_result(),
@@ -606,6 +610,47 @@ fn pxf_measurement() -> (crate::netlist::PxfCard, crate::analysis::pxf::PxfResul
     }
     result.compute_metrics();
     (card, result)
+}
+
+/// One authored `.PSTB` measurement and the spectrum it produced.
+///
+/// A diagonal monodromy with two contracting modes, so the spectrum is stable,
+/// the mode order is unambiguous and both mode shapes are unit vectors — which
+/// makes the probe's participation exactly one on its own coordinate and zero
+/// on the other.
+fn pstb_measurement() -> (
+    crate::netlist::PstbCard,
+    crate::engine::PeriodicStabilityResult,
+) {
+    use crate::analysis::pstb::{PstbAnalyzer, PstbConfig};
+
+    let card = crate::netlist::PstbCard {
+        probe_instance: "L1".to_owned(),
+        max_harmonics: 4,
+        num_multipliers: 1,
+        stability_threshold: 1.0 + 1e-6,
+        detect_subharmonics: true,
+        eigenvalue_tolerance: 1e-10,
+    };
+    let result = PstbAnalyzer::new(
+        PstbConfig::new()
+            .with_eigenvectors(true)
+            .with_stability_threshold(card.stability_threshold)
+            .with_subharmonic_detection(card.detect_subharmonics),
+    )
+    .analyze_monodromy_with_abort(&[vec![0.5, 0.0], vec![0.0, 0.25]], 1.0e-6, &NoAbort)
+    .expect("a contracting diagonal map has a qualified spectrum");
+    // The mode shapes are the coordinate axes, so the probe on coordinate 1
+    // participates entirely in the second mode and not at all in the first.
+    (
+        card,
+        crate::engine::PeriodicStabilityResult {
+            probe_instance: "L1".to_owned(),
+            probe_state_index: 1,
+            probe_participation: vec![0.0, 1.0],
+            result,
+        },
+    )
 }
 
 fn envelope_result() -> crate::engine::EnvelopeResult {
@@ -1137,6 +1182,47 @@ fn monte_carlo_pss_pac_and_pnoise_documents_keep_their_typed_payloads() {
             "{name} resolves to a number on a curve that has the feature"
         );
     }
+
+    let pstb = document_for(AnalysisResultKind::Pstb);
+    let ResultPayload::Pstb(payload) = pstb.payload() else {
+        panic!("PSTB payload");
+    };
+    assert_eq!(payload.probe_instance, "L1");
+    assert_eq!(payload.probe_state_index, 1);
+    assert_eq!(payload.stability_classification, PstbStabilityTag::Stable);
+    assert_eq!(payload.num_unstable, 0);
+    // The card asked for one multiplier; the document publishes the whole
+    // spectrum anyway and records the limit rather than applying it.
+    assert_eq!(payload.num_multipliers, 1);
+    assert_eq!(payload.modes.len(), 2);
+    assert_eq!(pstb.point_count(), payload.modes.len());
+    assert_eq!(pstb.axes()[0].unit(), &SignalUnit::Dimensionless);
+    assert_eq!(
+        pstb.axes()[0].values(),
+        &AxisValues::Real {
+            values: vec![1.0, 2.0]
+        }
+    );
+    assert_eq!(
+        samples_of(&pstb, "multiplier_magnitude"),
+        SeriesValues::Real {
+            samples: vec![Some(0.5), Some(0.25)]
+        }
+    );
+    assert_eq!(
+        samples_of(&pstb, "probe_mode_participation"),
+        SeriesValues::Real {
+            samples: vec![Some(0.0), Some(1.0)]
+        }
+    );
+    assert_eq!(
+        scalar_of(&pstb, "converged").value(),
+        &ScalarValue::Boolean { value: true }
+    );
+    assert_eq!(
+        scalar_of(&pstb, "num_unstable").value(),
+        &ScalarValue::Count { value: 0 }
+    );
 
     let pnoise = document_for(AnalysisResultKind::PNoise);
     let ResultPayload::PNoise(payload) = pnoise.payload() else {

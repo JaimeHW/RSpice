@@ -1,5 +1,5 @@
 //! Authored cards for the periodic large-signal analysis family:
-//! `.PSS`, `.PAC`, `.PXF`, `.PNOISE` and `.ENVELOPE`.
+//! `.PSS`, `.PAC`, `.PXF`, `.PNOISE`, `.PSTB` and `.ENVELOPE`.
 //!
 //! Every card is fully validated here, so the analysis layer converts the AST
 //! rather than re-deriving what the deck asked for. A field another simulator
@@ -1367,6 +1367,139 @@ pub(super) fn parse_pnoise_command(
 }
 
 //=============================================================================
+// .PSTB
+//=============================================================================
+
+/// Parse `.PSTB PROBE=<instance> KEY=VALUE ...`.
+///
+/// There is no sweep and no `FROM=`. The study is the Floquet spectrum of one
+/// monodromy matrix, and only a shooting `.PSS` produces one, so the carrier is
+/// not a choice the card gets to make; a deck whose only carrier is `.HB` is
+/// refused when it is planned.
+///
+/// The key set and every default is what the Studio's `.PSTB` dialog writes
+/// and its manual-deck reader already applies, so a line authored in the GUI
+/// parses here unchanged.
+pub(super) fn parse_pstb_command(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+) -> Result<AnalysisCommand, ParseError> {
+    const CARD: AnalysisCard = AnalysisCard::Pstb;
+
+    let mut probe_instance = None;
+    let mut max_harmonics = None;
+    let mut num_multipliers = None;
+    let mut stability_threshold = None;
+    let mut detect_subharmonics = None;
+    let mut eigenvalue_tolerance = None;
+
+    loop {
+        skip_commas(stream);
+        if at_card_end(stream) {
+            break;
+        }
+        let Some(keyword) = take_keyword(stream) else {
+            return Err(card_error(
+                CARD,
+                line_num,
+                AnalysisCardIssue::TrailingToken {
+                    token: stream.peek().lexeme.clone(),
+                },
+            ));
+        };
+        match keyword.as_str() {
+            "PROBE" => bind_once(
+                &mut probe_instance,
+                card_name(stream, line_num, CARD, "PROBE")?,
+                CARD,
+                line_num,
+                "PROBE",
+            )?,
+            "MAXHARM" => bind_once(
+                &mut max_harmonics,
+                card_count(stream, line_num, params, CARD, "MAXHARM", 1)?,
+                CARD,
+                line_num,
+                "MAXHARM",
+            )?,
+            "NMULTS" => bind_once(
+                &mut num_multipliers,
+                card_count(stream, line_num, params, CARD, "NMULTS", 1)?,
+                CARD,
+                line_num,
+                "NMULTS",
+            )?,
+            // At least one. The physical boundary is `|lambda| = 1`, and a
+            // threshold below it would call a mode that sits exactly on the
+            // unit circle unstable while the analyzer refuses the run outright.
+            "STABILITYTHRESHOLD" => bind_once(
+                &mut stability_threshold,
+                card_number(
+                    stream,
+                    line_num,
+                    params,
+                    CARD,
+                    "STABILITYTHRESHOLD",
+                    "a magnitude of at least one",
+                    |value| value >= 1.0,
+                )?,
+                CARD,
+                line_num,
+                "STABILITYTHRESHOLD",
+            )?,
+            "DETECTSUBHARMONICS" => bind_once(
+                &mut detect_subharmonics,
+                card_bool(stream, line_num, CARD, "DETECTSUBHARMONICS")?,
+                CARD,
+                line_num,
+                "DETECTSUBHARMONICS",
+            )?,
+            "EIGENTOL" => bind_once(
+                &mut eigenvalue_tolerance,
+                card_number(
+                    stream,
+                    line_num,
+                    params,
+                    CARD,
+                    "EIGENTOL",
+                    "a positive tolerance",
+                    |value| value > 0.0,
+                )?,
+                CARD,
+                line_num,
+                "EIGENTOL",
+            )?,
+            _ => {
+                return Err(card_error(
+                    CARD,
+                    line_num,
+                    AnalysisCardIssue::UnknownKeyword { keyword },
+                ));
+            }
+        }
+    }
+
+    let Some(probe_instance) = probe_instance else {
+        return Err(card_error(
+            CARD,
+            line_num,
+            AnalysisCardIssue::MissingField { field: "PROBE" },
+        ));
+    };
+
+    Ok(AnalysisCommand::Pstb(Box::new(PstbCard {
+        probe_instance: probe_instance.to_ascii_uppercase(),
+        max_harmonics: max_harmonics.unwrap_or(PstbCard::DEFAULT_MAX_HARMONICS),
+        num_multipliers: num_multipliers.unwrap_or(PstbCard::DEFAULT_NUM_MULTIPLIERS),
+        stability_threshold: stability_threshold.unwrap_or(PstbCard::DEFAULT_STABILITY_THRESHOLD),
+        detect_subharmonics: detect_subharmonics.unwrap_or(PstbCard::DEFAULT_DETECT_SUBHARMONICS),
+        eigenvalue_tolerance: eigenvalue_tolerance
+            .unwrap_or(PstbCard::DEFAULT_EIGENVALUE_TOLERANCE),
+    })))
+}
+
+//=============================================================================
 // .ENVELOPE
 //=============================================================================
 
@@ -1524,7 +1657,8 @@ fn card_source_list(
 mod tests {
     use crate::netlist::{
         AnalysisCard, AnalysisCardIssue, AnalysisCommand, EnvelopeCard, FreqVariation, Netlist,
-        PacCard, ParseError, PeriodicSourceSelector, PnoiseCard, PnoiseReference, PssCard, PxfCard,
+        PacCard, ParseError, PeriodicSourceSelector, PnoiseCard, PnoiseReference, PssCard,
+        PstbCard, PxfCard,
     };
 
     const CIRCUIT: &str = "periodic card parser\n\
@@ -1579,6 +1713,14 @@ mod tests {
         match netlist.analyses.into_iter().next_back() {
             Some(AnalysisCommand::Pnoise(card)) => card,
             other => panic!("expected .PNOISE, got {other:?}"),
+        }
+    }
+
+    fn pstb(card: &str) -> Box<PstbCard> {
+        let netlist = Netlist::parse(&deck(card)).expect("card parses");
+        match netlist.analyses.into_iter().next_back() {
+            Some(AnalysisCommand::Pstb(card)) => card,
+            other => panic!("expected .PSTB, got {other:?}"),
         }
     }
 
@@ -2290,6 +2432,118 @@ mod tests {
         assert!(matches!(
             card_failure(".HB 1G\n.PNOISE DEC 10 1 1meg OUT=out NOISETYPE=pm").2,
             AnalysisCardIssue::UnknownKeyword { ref keyword } if keyword == "NOISETYPE"
+        ));
+    }
+
+    //-------------------------------------------------------------------------
+    // .PSTB
+    //-------------------------------------------------------------------------
+
+    #[test]
+    fn pstb_defaults_every_optional_field() {
+        let card = pstb(".PSS FUND=1G\n.PSTB PROBE=lprobe");
+        assert_eq!(card.probe_instance, "LPROBE");
+        assert_eq!(card.max_harmonics, 10);
+        assert_eq!(card.num_multipliers, 10);
+        assert_eq!(card.stability_threshold, 1.0 + 1e-6);
+        assert!(card.detect_subharmonics);
+        assert_eq!(card.eigenvalue_tolerance, 1e-10);
+    }
+
+    #[test]
+    fn pstb_accepts_the_line_the_studios_dialog_writes_today() {
+        // `PstbConfig::to_spice` emits `.pstb probe=<p> maxharm=<k>` always,
+        // and `nmults=` only when it is not the default.
+        let card = pstb(".PSS FUND=1G\n.pstb probe=LPROBE maxharm=10");
+        assert_eq!(card.probe_instance, "LPROBE");
+        assert_eq!(card.max_harmonics, 10);
+        assert_eq!(card.num_multipliers, 10);
+
+        let explicit = pstb(".PSS FUND=1G\n.pstb probe=LPROBE maxharm=12 nmults=4");
+        assert_eq!(explicit.max_harmonics, 12);
+        assert_eq!(explicit.num_multipliers, 4);
+    }
+
+    #[test]
+    fn pstb_binds_every_authored_field() {
+        let card = pstb(
+            ".PSS FUND=1G\n.PSTB PROBE=l1 MAXHARM=6 NMULTS=3 STABILITYTHRESHOLD=1.5 \
+             DETECTSUBHARMONICS=no EIGENTOL=1e-12",
+        );
+        assert_eq!(card.probe_instance, "L1");
+        assert_eq!(card.max_harmonics, 6);
+        assert_eq!(card.num_multipliers, 3);
+        assert_eq!(card.stability_threshold, 1.5);
+        assert!(!card.detect_subharmonics);
+        assert_eq!(card.eigenvalue_tolerance, 1e-12);
+    }
+
+    #[test]
+    fn pstb_requires_the_probe_it_reads_the_loop_at() {
+        assert!(matches!(
+            card_failure(".PSS FUND=1G\n.PSTB MAXHARM=6").2,
+            AnalysisCardIssue::MissingField { field: "PROBE" }
+        ));
+    }
+
+    #[test]
+    fn pstb_refuses_a_boundary_inside_the_unit_circle() {
+        // The physical boundary is |lambda| = 1. A threshold below it would
+        // call a mode sitting exactly on the unit circle unstable, and the
+        // analyzer refuses such a configuration outright -- so the card that
+        // states it is refused where it is written.
+        assert!(matches!(
+            card_failure(".PSS FUND=1G\n.PSTB PROBE=l1 STABILITYTHRESHOLD=0.5").2,
+            AnalysisCardIssue::InvalidNumber {
+                field: "STABILITYTHRESHOLD",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn pstb_refuses_unknown_duplicate_and_malformed_fields() {
+        assert!(matches!(
+            card_failure(".PSS FUND=1G\n.PSTB PROBE=l1 SWEEPTYPE=dec").2,
+            AnalysisCardIssue::UnknownKeyword { ref keyword } if keyword == "SWEEPTYPE"
+        ));
+        assert!(matches!(
+            card_failure(".PSS FUND=1G\n.PSTB PROBE=l1 PROBE=l2").2,
+            AnalysisCardIssue::DuplicateKeyword { keyword: "PROBE" }
+        ));
+        for card in [
+            ".PSS FUND=1G\n.PSTB PROBE=l1 MAXHARM=0",
+            ".PSS FUND=1G\n.PSTB PROBE=l1 NMULTS=0",
+        ] {
+            assert!(matches!(
+                card_failure(card).2,
+                AnalysisCardIssue::InvalidNumber { .. }
+            ));
+        }
+        assert!(matches!(
+            card_failure(".PSS FUND=1G\n.PSTB PROBE=l1 EIGENTOL=0").2,
+            AnalysisCardIssue::InvalidNumber {
+                field: "EIGENTOL",
+                ..
+            }
+        ));
+        assert!(matches!(
+            card_failure(".PSS FUND=1G\n.PSTB PROBE=l1 DETECTSUBHARMONICS=sometimes").2,
+            AnalysisCardIssue::InvalidChoice {
+                field: "DETECTSUBHARMONICS",
+                ..
+            }
+        ));
+        // There is no carrier selector: only a shooting PSS produces the
+        // monodromy this card reads, so `FROM=` names a choice that does not
+        // exist rather than one the parser silently ignores.
+        assert!(matches!(
+            card_failure(".PSS FUND=1G\n.PSTB PROBE=l1 FROM=HB").2,
+            AnalysisCardIssue::UnknownKeyword { ref keyword } if keyword == "FROM"
+        ));
+        assert!(matches!(
+            card_failure(".PSS FUND=1G\n.PSTB l1").2,
+            AnalysisCardIssue::TrailingToken { .. }
         ));
     }
 

@@ -1,9 +1,9 @@
 //! Execution of the periodic large-signal family: `.PSS`, `.PAC`, `.PXF`,
-//! `.PNOISE` and `.ENVELOPE`.
+//! `.PNOISE`, `.PSTB` and `.ENVELOPE`.
 //!
 //! `.PSS` is the carrier: it solves a periodic steady state and retains the
 //! exact numerical operating point core exposes beside the result. `.PAC`,
-//! `.PXF`, `.PNOISE` and `.ENVELOPE` linearize or continue around a carrier,
+//! `.PXF`, `.PNOISE`, `.PSTB` and `.ENVELOPE` linearize, judge or continue a carrier,
 //! and the canonical plan — not source proximity guessed here — says which
 //! instance each one belongs to. That binding is read off the plan and the retained
 //! state is consumed directly, so a deck with two carriers cannot attach a
@@ -15,7 +15,9 @@
 //! do.
 
 use rspice_core::execution::{AnalysisInstanceId, AnalysisResultDocument, AnalysisResultKind};
-use rspice_core::netlist::{EnvelopeCard, PacCard, PeriodicSweep, PnoiseCard, PssCard, PxfCard};
+use rspice_core::netlist::{
+    EnvelopeCard, PacCard, PeriodicSweep, PnoiseCard, PssCard, PstbCard, PxfCard,
+};
 
 use super::RunContext;
 use super::context::PeriodicArtifact;
@@ -141,6 +143,53 @@ pub(super) fn run_pxf_card(ctx: &RunContext<'_>, card: &PxfCard) -> Result<(), C
     };
     export_pxf(ctx, &artifact, path, upstream, card, &result)
 }
+
+/// Run one authored `.PSTB` card against the shooting carrier the plan bound
+/// it to.
+///
+/// There is no harmonic-balance branch here, and none is missing: a `.PSTB`
+/// reads a monodromy matrix, only a shooting `.PSS` retains one, and the plan
+/// refuses the card outright when no `.PSS` precedes it.
+pub(super) fn run_pstb_card(ctx: &RunContext<'_>, card: &PstbCard) -> Result<(), CliError> {
+    let artifact = ctx.resolve_periodic_analysis("pstb")?;
+    let upstream = ctx.planned_upstream(artifact.analysis, "PSTB")?;
+    if !ctx.quiet {
+        println!(
+            "Running PSTB analysis around {upstream}: loop probe {}",
+            card.probe_instance
+        );
+    }
+
+    let result = {
+        let periodic = ctx.periodic();
+        if let Some(operating_point) = periodic.pss(upstream) {
+            ctx.engine.run_pstb_card_from_pss_with_abort(
+                ctx.netlist,
+                card,
+                operating_point,
+                &crate::abort::ProcessAbort,
+            )
+        } else {
+            return Err(missing_carrier(".PSTB", artifact.analysis, upstream));
+        }
+    }
+    .map_err(|error| map_periodic_error(ctx, "PSTB", error))?;
+    ensure_not_cancelled(ctx)?;
+
+    if !ctx.quiet {
+        println!(
+            "✓ PSTB complete: {} Floquet modes at {}, {} unstable",
+            result.result.multipliers.len(),
+            result.probe_instance,
+            result.result.num_unstable
+        );
+    }
+    let Some(path) = &artifact.path else {
+        return Ok(());
+    };
+    export_pstb(ctx, &artifact, path, upstream, card, &result)
+}
+
 /// Run one authored `.PNOISE` card against the carrier the plan bound it to.
 pub(super) fn run_pnoise_card(ctx: &RunContext<'_>, card: &PnoiseCard) -> Result<(), CliError> {
     let artifact = ctx.resolve_periodic_analysis("pnoise")?;
@@ -532,6 +581,90 @@ fn export_pxf(
     ctx.record_output(path.to_path_buf());
     if !ctx.quiet {
         println!("  PXF transfer exported to: {}", path.display());
+    }
+    Ok(())
+}
+
+/// Publish one Floquet spectrum over its mode-index axis.
+///
+/// Six real columns, one per curve the spectrum has: the multiplier's
+/// magnitude and phase, the margin it implies, the damping and natural
+/// frequency of the exponent behind it, and the loop probe's share of its mode
+/// shape. The complete spectrum is published; the card's `NMULTS` is a display
+/// limit and lives in the typed document's payload.
+///
+/// HDF5 is refused by name, as `.PZ` and `.SENS` refuse it: the file's section
+/// vocabulary is time, frequency and DC sweeps, and a mode index is none of
+/// those. The RAW renderings keep it as an `index` scale, which is the same
+/// spelling `.PZ` and `.SENS` already publish.
+fn export_pstb(
+    ctx: &RunContext<'_>,
+    artifact: &PeriodicArtifact,
+    path: &std::path::Path,
+    upstream: AnalysisInstanceId,
+    card: &PstbCard,
+    stability: &rspice_core::engine::PeriodicStabilityResult,
+) -> Result<(), CliError> {
+    super::frequency::reject_hdf5(ctx.format, "periodic stability")?;
+    let analysis_id = artifact.analysis;
+    let modes = &stability.result.multipliers;
+    let column = |name: &str, values: Vec<f64>| ExportColumn {
+        name: name.to_string(),
+        var_type: "stability".to_string(),
+        data: ColumnData::Real(values),
+    };
+    let table = ExportTable {
+        analysis: "pstb".to_string(),
+        plot_name: "Periodic Stability".to_string(),
+        scale_name: "mode".to_string(),
+        scale_type: "index".to_string(),
+        scale: (1..=modes.len()).map(|index| index as f64).collect(),
+        columns: vec![
+            column(
+                "multiplier_magnitude",
+                modes.iter().map(|mode| mode.magnitude()).collect(),
+            ),
+            column(
+                "multiplier_phase_deg",
+                modes.iter().map(|mode| mode.phase_degrees()).collect(),
+            ),
+            column(
+                "stability_margin_db",
+                modes
+                    .iter()
+                    .map(|mode| mode.stability_margin_db())
+                    .collect(),
+            ),
+            column(
+                "mode_damping",
+                modes.iter().map(|mode| mode.damping()).collect(),
+            ),
+            column(
+                "mode_frequency_hz",
+                modes.iter().map(|mode| mode.natural_frequency()).collect(),
+            ),
+            column(
+                "probe_mode_participation",
+                stability.probe_participation.clone(),
+            ),
+        ],
+    };
+    let schema = super::document::distinct_schema(table.columns.iter().map(|column| {
+        rspice_core::execution::signal_descriptor(
+            &column.name,
+            &column.name,
+            rspice_core::execution::SignalKind::Scalar,
+            rspice_core::execution::SignalValueType::Real,
+        )
+    }))?;
+
+    super::document::publish_table_result(ctx, path, analysis_id, schema, &table, || {
+        AnalysisResultDocument::from_pstb(analysis_id, card, stability)
+            .map(|builder| builder.parent_analysis(upstream))
+    })?;
+    ctx.record_output(path.to_path_buf());
+    if !ctx.quiet {
+        println!("  PSTB spectrum exported to: {}", path.display());
     }
     Ok(())
 }

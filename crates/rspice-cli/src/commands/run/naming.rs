@@ -29,6 +29,7 @@ pub(super) fn analysis_output_tag(analysis: &AnalysisCommand) -> Option<&'static
         AnalysisCommand::Pss(_) => Some("pss"),
         AnalysisCommand::Pac(_) => Some("pac"),
         AnalysisCommand::Pxf(_) => Some("pxf"),
+        AnalysisCommand::Pstb(_) => Some("pstb"),
         AnalysisCommand::Pnoise(_) => Some("pnoise"),
         AnalysisCommand::Envelope(_) => Some("env"),
         // `.STEP` and `.TEMP` are run axes whose coordinates own the artifact
@@ -76,6 +77,7 @@ pub(super) fn output_tag_analysis_kind(tag: &str) -> Option<rspice_core::executi
         "pss" => Some(AnalysisKind::Pss),
         "pac" => Some(AnalysisKind::Pac),
         "pxf" => Some(AnalysisKind::Pxf),
+        "pstb" => Some(AnalysisKind::Pstb),
         "pnoise" => Some(AnalysisKind::PNoise),
         "env" => Some(AnalysisKind::Envelope),
         // The aggregated axis sweep table spans coordinates, so it is not one

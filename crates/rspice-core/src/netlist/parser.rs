@@ -31,7 +31,7 @@ use super::{
     ParameterRedefinitionError, ParameterRedefinitionPolicy, ParametricValue, ParseDiagnostic,
     ParseError, ParseWithAbortError, PeriodicSourceSelector, PeriodicSweep, PnoiseCard,
     PnoiseReference, PoleZeroAnalysisType, PoleZeroTransferType, PrintDelimiter,
-    PspiceChebyshevKind, PspiceUTiming, PspiceUTimingMode, PssCard, PxfCard,
+    PspiceChebyshevKind, PspiceUTiming, PspiceUTimingMode, PssCard, PstbCard, PxfCard,
     RemoveUnusedDeviceType, RemoveUnusedPolicy, SaveSet, SaveSignal, SensitivityAcSweep,
     SimulationOptions, SourceMultiplicity, SourceRfPort, SourceSpec, SpectreStatisticsPlan,
     StartupDiagnosticCode, StartupDirectiveDisposition, StartupDirectiveEntry,

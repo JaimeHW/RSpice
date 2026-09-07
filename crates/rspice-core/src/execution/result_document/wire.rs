@@ -79,6 +79,7 @@ tagged_enum_adapter!(analysis_kind, AnalysisKind, {
     Pac => "pac",
     Pxf => "pxf",
     PNoise => "pnoise",
+    Pstb => "pstb",
     HarmonicBalance => "hb",
     Envelope => "env",
     MonteCarlo => "mc",
@@ -109,6 +110,7 @@ tagged_enum_adapter!(
         Pac => "pac",
         Pxf => "pxf",
         PNoise => "pnoise",
+        Pstb => "pstb",
         HarmonicBalance => "hb",
         Envelope => "envelope",
     }

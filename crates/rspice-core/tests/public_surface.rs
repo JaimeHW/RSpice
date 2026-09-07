@@ -690,7 +690,27 @@ use rspice_core::analysis::harmonic_balance::{
 // Free, and deliberately so: `PstbResult::validate_contract` is `pub(crate)`,
 // called by the analyzer, so every route inherits the invariants instead of
 // re-checking them.
-const MAX_PUBLIC_ITEMS: usize = 5015;
+// 2026-09-06, +4 deliberate (5,015 -> 5,019): the `.PSTB` result family, so a
+// deck that authors the card publishes a document on all four non-UI surfaces.
+//
+// A projection was not an option here either: payload variant to result kind
+// is a bijection enforced at construction, and `from_pss` -- the family PSTB
+// most resembles -- requires a time grid and one periodic waveform per node,
+// neither of which a Floquet spectrum has.
+//
+// - 3 in `execution/result_document/payload.rs`: `PstbPayload`,
+//   `PstbModeDocument` and `PstbStabilityTag`. The mode is its own type
+//   because a mode carries a complex pair, two flags and an optional order
+//   that no `ResultSignal` can hold; the tag is its own type because the wire
+//   spelling of a stability determination must not move when core's enum does.
+// - 1 in `.../builders.rs`: `AnalysisResultDocument::from_pstb`, which the
+//   CLI, the engine adapter, the WASM deck route and `rspice-python` all call.
+//
+// Free, and deliberately so: `AnalysisCommand::Pstb`, `AnalysisKind::Pstb`,
+// `AnalysisResultKind::Pstb`, `ResultPayload::Pstb` and `AnalysisCard::Pstb`
+// are enum variants; `PstbCard::DEFAULT_*` are `pub(crate)` as `PacCard`'s
+// are; the payload re-export joins the existing grouped `pub use`.
+const MAX_PUBLIC_ITEMS: usize = 5019;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

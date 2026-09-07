@@ -184,6 +184,7 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<results::PyHbResult>()?;
     m.add_class::<results::PyPacResult>()?;
     m.add_class::<results::PyPxfResult>()?;
+    m.add_class::<results::PyPstbResult>()?;
     m.add_class::<results::PyEnvelopeResult>()?;
     m.add_class::<results::PyPeriodicNoiseContribution>()?;
     m.add_class::<results::PyPeriodicNoiseResult>()?;
@@ -287,6 +288,7 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
             "HbResult",
             "PacResult",
             "PxfResult",
+            "PstbResult",
             "EnvelopeResult",
             "PeriodicNoiseContribution",
             "PeriodicNoiseResult",

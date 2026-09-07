@@ -165,6 +165,11 @@ pub(super) fn parse_command(
                 stream, line_num, params,
             )?);
         }
+        ".PSTB" => {
+            analyses.push(periodic_cards::parse_pstb_command(
+                stream, line_num, params,
+            )?);
+        }
         ".ENVELOPE" => {
             analyses.push(periodic_cards::parse_envelope_command(
                 stream, line_num, params,

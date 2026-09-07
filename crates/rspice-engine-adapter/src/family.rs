@@ -63,6 +63,7 @@ pub const REQUEST_KINDS: &[(&str, PlannedAnalysisKind)] = &[
     ("pss", PlannedAnalysisKind::Pss),
     ("pac", PlannedAnalysisKind::Pac),
     ("pxf", PlannedAnalysisKind::Pxf),
+    ("pstb", PlannedAnalysisKind::Pstb),
     ("pnoise", PlannedAnalysisKind::PNoise),
     ("s_parameters", PlannedAnalysisKind::Sp),
     ("envelope", PlannedAnalysisKind::Envelope),
@@ -653,6 +654,27 @@ pub(crate) fn run_directive(
                 .map(|builder| builder.parent_analysis(upstream_id))
                 .map_err(map_result_document_error)
         }
+        AnalysisCommand::Pstb(card) => {
+            let (upstream_id, upstream) = upstream_card(analysis, peers)?;
+            // Only a shooting `.PSS` retains a monodromy matrix, and the plan
+            // refuses a `.PSTB` bound to anything else, so there is one arm
+            // here rather than the two `.PAC` and `.PXF` carry.
+            let AnalysisCommand::Pss(pss) = upstream else {
+                return Err(DirectiveFailure::ResultDocument(format!(
+                    "the canonical plan bound {id} to {upstream_id}, which retains no monodromy matrix"
+                )));
+            };
+            let operating_point = engine.run_pss_operating_point_with_abort(
+                netlist,
+                PssConfig::from(pss.as_ref()),
+                abort,
+            )?;
+            let result =
+                engine.run_pstb_card_from_pss_with_abort(netlist, card, &operating_point, abort)?;
+            AnalysisResultDocument::from_pstb(id, card, &result)
+                .map(|builder| builder.parent_analysis(upstream_id))
+                .map_err(map_result_document_error)
+        }
         AnalysisCommand::Pnoise(card) => {
             let (upstream_id, upstream) = upstream_card(analysis, peers)?;
             let result = match upstream {
@@ -921,6 +943,7 @@ mod tests {
                 | AnalysisResultKind::Pss
                 | AnalysisResultKind::Pac
                 | AnalysisResultKind::Pxf
+                | AnalysisResultKind::Pstb
                 | AnalysisResultKind::Envelope => false,
             };
             assert!(
