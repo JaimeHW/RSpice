@@ -1296,6 +1296,12 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
                     for (arg_name, arg_value) in func_def.args.iter().zip(expanded_args) {
                         bindings.insert(arg_name.to_ascii_uppercase(), arg_value);
                     }
+                    ensure_function_substitution_fits(
+                        &body_ast,
+                        &bindings,
+                        MAX_EXPANDED_EXPRESSION_NODES - expanded_nodes,
+                        self.abort,
+                    )?;
                     let substituted = substitute_function_args(&body_ast, &bindings);
                     substituted
                         .ensure_stack_safe_depth()
@@ -1655,7 +1661,7 @@ fn expand_spice_poly_expression(expression: &str) -> Result<String, String> {
     };
 
     let items = split_spice_poly_tail(tail);
-    if items.len() < dimension + 1 {
+    if items.len() <= dimension {
         return Err(format!(
             "POLY({dimension}) requires {dimension} controlling expression(s) and at least one coefficient"
         ));
@@ -1812,6 +1818,66 @@ fn is_ident_start(c: char) -> bool {
 
 fn is_ident_continue(c: char) -> bool {
     c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | ':' | '`' | '@' | '#' | '$')
+}
+
+/// Check the resulting tree before substitution clones repeated arguments.
+/// A small function body can otherwise multiply an already-expanded argument
+/// past the node budget before the expansion loop has a chance to count it.
+fn ensure_function_substitution_fits(
+    expr: &NetExpr,
+    args: &HashMap<String, NetExpr>,
+    remaining_nodes: usize,
+    abort: &dyn AbortSignal,
+) -> Result<(), String> {
+    let mut pending = vec![(expr, 1, true)];
+    let mut visited = 0usize;
+    while let Some((node, depth, substitute)) = pending.pop() {
+        if visited.is_multiple_of(64) && abort.is_aborted() {
+            return Err("behavioral expression preparation was cancelled".to_owned());
+        }
+        if depth > crate::resource::MAX_EXPRESSION_TREE_DEPTH {
+            return Err(format!(
+                "Expression tree exceeds the stack safety limit of {}",
+                crate::resource::MAX_EXPRESSION_TREE_DEPTH,
+            ));
+        }
+        if substitute
+            && let NetExpr::Param(name) = node
+            && let Some(argument) = args.get(&name.to_ascii_uppercase())
+        {
+            // Formal bindings apply once; names within the actual argument
+            // remain in the caller's scope, including probe operands.
+            pending.push((argument, depth, false));
+            continue;
+        }
+        if visited == remaining_nodes {
+            return Err(format!(
+                "Behavioral expression expansion exceeded {} nodes",
+                MAX_EXPANDED_EXPRESSION_NODES,
+            ));
+        }
+        visited += 1;
+        match node {
+            NetExpr::UnaryOp { operand, .. } => pending.push((operand, depth + 1, substitute)),
+            NetExpr::BinOp { left, right, .. } => {
+                pending.push((right, depth + 1, substitute));
+                pending.push((left, depth + 1, substitute));
+            }
+            NetExpr::FnCall { name, args } => {
+                let substitute = substitute && !is_circuit_probe(name);
+                // Every pending child needs at least one retained node.
+                if args.len() > remaining_nodes - visited {
+                    return Err(format!(
+                        "Behavioral expression expansion exceeded {} nodes",
+                        MAX_EXPANDED_EXPRESSION_NODES,
+                    ));
+                }
+                pending.extend(args.iter().map(|arg| (arg, depth + 1, substitute)));
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 fn substitute_function_args(expr: &NetExpr, args: &HashMap<String, NetExpr>) -> NetExpr {

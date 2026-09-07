@@ -3,6 +3,40 @@ use rspice_core::expr::parse_expression_strict;
 use rspice_core::netlist::expr::parse_expression;
 
 #[test]
+fn oversized_poly_dimension_returns_a_diagnostic() {
+    use rspice_core::netlist::expr::{ParamContext, prepare_behavioral_expression};
+    let expression = format!("POLY({}) TIME 1", usize::MAX);
+    let error = prepare_behavioral_expression(&expression, &ParamContext::new())
+        .expect_err("impossible polynomial dimension must be rejected");
+    assert!(error.contains("POLY"), "{error}");
+}
+
+#[test]
+fn function_argument_duplication_respects_the_expansion_budget() {
+    use rspice_core::netlist::expr::{ParamContext, prepare_behavioral_expression};
+    std::thread::Builder::new()
+        .stack_size(1024 * 1024)
+        .spawn(|| {
+            let mut context = ParamContext::new();
+            let repeated = vec!["X"; 32].join(",");
+            context.define_function("F0", vec!["X".to_owned()], "X");
+            for index in 1..8 {
+                context.define_function(
+                    &format!("F{index}"),
+                    vec!["X".to_owned()],
+                    &format!("F{}(max({repeated}))", index - 1),
+                );
+            }
+            let error = prepare_behavioral_expression("F7(TIME)", &context)
+                .expect_err("repeated arguments must not outgrow the expression budget");
+            assert!(error.contains("expansion exceeded"), "{error}");
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+#[test]
 fn runtime_function_expansion_cannot_build_an_unbounded_boxed_tree() {
     use rspice_core::netlist::expr::{ParamContext, prepare_behavioral_expression};
     std::thread::Builder::new()
