@@ -88,10 +88,7 @@ impl PstbConfig {
             // The same spelling the dialog shows in its own box, so the line
             // and the form say one thing rather than two.
             format_tolerance(self.stability_threshold),
-            // `yes`/`no` is what `.PSS` already writes for `autonomous=`, and
-            // one of the four spellings the engine's `card_bool` and this
-            // crate's manual-deck reader both read back.
-            if self.detect_subharmonics { "yes" } else { "no" },
+            format_switch(self.detect_subharmonics),
             format_tolerance(self.eigenvalue_tolerance),
         )
     }
@@ -263,6 +260,12 @@ impl PstbDialogState {
     }
 }
 
+/// The `yes`/`no` spelling `.PSS` already writes for `autonomous=`, and one of
+/// the four the engine's `card_bool` and the manual-deck reader both read back.
+fn format_switch(value: bool) -> &'static str {
+    if value { "yes" } else { "no" }
+}
+
 /// Round-trippable spelling for the two numeric contracts, which sit far
 /// enough from unity that a plain `{}` would print a long decimal tail.
 fn format_tolerance(value: f64) -> String {
@@ -353,7 +356,10 @@ mod tests {
         }
         .validate()
         .expect_err("|lambda| = 1 is the boundary; a threshold under it is not a contract");
-        assert!(error.contains("at least one"), "unexpected refusal: {error}");
+        assert!(
+            error.contains("at least one"),
+            "unexpected refusal: {error}"
+        );
 
         // Unity itself is admissible: it is the boundary, not a value beyond
         // it, and the engine's own bound is `>= 1.0`.

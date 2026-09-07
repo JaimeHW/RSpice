@@ -1420,8 +1420,16 @@ mod tests {
             .iter()
             .find_map(|task| task.spec_options.pxf.as_ref())
             .expect("the .PXF card is queued");
-        assert!((pxf.reltol - 1.0e-4).abs() <= 1.0e-19, "reltol was {}", pxf.reltol);
-        assert!((pxf.abstol - 1.0e-14).abs() <= 1.0e-29, "abstol was {}", pxf.abstol);
+        assert!(
+            (pxf.reltol - 1.0e-4).abs() <= 1.0e-19,
+            "reltol was {}",
+            pxf.reltol
+        );
+        assert!(
+            (pxf.abstol - 1.0e-14).abs() <= 1.0e-29,
+            "abstol was {}",
+            pxf.abstol
+        );
         assert_eq!(pxf.input_sideband, -1);
         assert_eq!(pxf.output_sideband, 2);
         assert_eq!(pxf.max_sideband, 4);
