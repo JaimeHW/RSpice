@@ -2056,6 +2056,75 @@ fn a_spectrum_with_no_applicable_mode_reports_an_empty_domain_not_a_missing_cros
     );
 }
 
+/// A `.PXF` curve can lack a metric two different ways, and the document says
+/// which. A response that was measured but never reached the level asked
+/// about is a missing crossover; a response with no finite magnitude anywhere
+/// has no set to take a peak over at all.
+#[test]
+fn a_pxf_curve_separates_a_missing_crossing_from_an_empty_domain() {
+    use crate::analysis::pxf::{PxfResult, TransferPoint};
+
+    let (card, _) = pxf_measurement();
+    let curve = |magnitude: f64| {
+        let mut result = PxfResult::new(1.0e6, card.input_sideband, card.output_sideband);
+        for index in 0..3 {
+            let freq_in = 1.0e3 + 1.0e3 * index as f64;
+            result.add_point(TransferPoint {
+                freq_in,
+                freq_out: freq_in + f64::from(card.output_sideband) * 1.0e6,
+                transfer: Complex64::new(magnitude, 0.0),
+                sideband_in: card.input_sideband,
+                sideband_out: card.output_sideband,
+            });
+        }
+        result.compute_metrics();
+        AnalysisResultDocument::from_pxf(instance(AnalysisKind::Pxf), &card, &result)
+            .expect("a curve missing a feature is a determination, not a projection failure")
+            .build()
+            .expect("document builds")
+    };
+
+    // Flat and well above unity: measured everywhere, but it never falls 3 dB
+    // below its own peak and never reaches 0 dB.
+    let flat = curve(4.0);
+    assert!(
+        matches!(
+            scalar_value_of(&flat, "peak_gain_db"),
+            ScalarValue::Real { value: Some(_) }
+        ),
+        "a flat finite curve has a peak"
+    );
+    for name in ["bandwidth_3db", "unity_gain_frequency"] {
+        assert_eq!(
+            scalar_value_of(&flat, name),
+            ScalarValue::Unavailable {
+                reason: ScalarUnavailability::NoCrossover
+            },
+            "{name} is a crossing this measured curve never makes"
+        );
+    }
+
+    // Identically zero: -inf dB at every point, so the set the peak is taken
+    // over is empty, and the bandwidth has no peak to be measured against.
+    let zero = curve(0.0);
+    for name in ["peak_gain_db", "peak_gain_frequency", "bandwidth_3db"] {
+        assert_eq!(
+            scalar_value_of(&zero, name),
+            ScalarValue::Unavailable {
+                reason: ScalarUnavailability::EmptyDomain
+            },
+            "{name} has no finite magnitude anywhere to measure over"
+        );
+    }
+    assert_eq!(
+        scalar_value_of(&zero, "unity_gain_frequency"),
+        ScalarValue::Unavailable {
+            reason: ScalarUnavailability::NoCrossover
+        },
+        "a zero transfer spans intervals it simply never crosses unity in"
+    );
+}
+
 #[test]
 fn a_loop_that_never_leaves_unity_gain_records_a_negative_divergence() {
     let mut result = stability_result();

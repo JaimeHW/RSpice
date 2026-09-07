@@ -342,18 +342,22 @@ fn crossover_frequency_scalar(
 }
 
 /// One `.PXF` curve metric, which exists only where the curve has the feature
-/// it measures.
+/// it measures — and the two ways it can be missing are different findings.
 ///
-/// A transfer that never falls 3 dB below its peak has no -3 dB bandwidth, one
-/// that never reaches unity has no 0 dB crossing, and a transfer that is
-/// identically zero has no finite magnitude anywhere to peak at. Those are
-/// determinations about the response, so they are recorded as such rather than
-/// reported as a zero the sweep would read as DC.
+/// A transfer that never falls 3 dB below its peak has no -3 dB bandwidth, and
+/// one that never reaches unity has no 0 dB crossing: both are crossings a
+/// measured response did not make. A transfer with no finite magnitude
+/// anywhere has nothing to take a peak *over*, which is an empty domain and
+/// not a crossing at all. The caller states which of the two it found, because
+/// only the caller knows: the `None` arriving here is the same `None` either
+/// way. Both are determinations about the response, so both are recorded as
+/// such rather than reported as a zero the sweep would read as DC.
 fn pxf_metric_scalar(
     location: &'static str,
     name: &str,
     display: &str,
     unit: SignalUnit,
+    absent: ScalarUnavailability,
     value: Option<Value>,
 ) -> Result<ResultScalar, ResultDocumentError> {
     match value {
@@ -362,9 +366,7 @@ fn pxf_metric_scalar(
             name,
             display,
             Some(unit),
-            ScalarValue::Unavailable {
-                reason: ScalarUnavailability::NoCrossover,
-            },
+            ScalarValue::Unavailable { reason: absent },
         ),
     }
 }
@@ -3074,12 +3076,33 @@ impl AnalysisResultDocument {
             )?,
         ];
 
+        // The peak is a maximum over the sweep points whose magnitude is
+        // finite. It is absent exactly when that set is empty -- an
+        // identically zero transfer has `-inf` dB everywhere -- so there is no
+        // crossing involved in either direction.
+        let peak_absent = ScalarUnavailability::EmptyDomain;
+        // The -3 dB bandwidth is measured relative to the peak, so without a
+        // peak there is no level to fall below and the metric inherits the
+        // empty domain rather than reporting a crossing that never happened.
+        let bandwidth_absent = if result.peak_gain.is_some() {
+            ScalarUnavailability::NoCrossover
+        } else {
+            ScalarUnavailability::EmptyDomain
+        };
+        // A 0 dB crossing is looked for between adjacent points, so a
+        // single-point sweep holds no interval to cross in.
+        let unity_absent = if point_count >= 2 {
+            ScalarUnavailability::NoCrossover
+        } else {
+            ScalarUnavailability::EmptyDomain
+        };
         let scalars = vec![
             pxf_metric_scalar(
                 LOCATION,
                 "peak_gain_db",
                 "Peak gain",
                 decibel(),
+                peak_absent,
                 result.peak_gain.map(|(_, gain_db)| gain_db),
             )?,
             pxf_metric_scalar(
@@ -3087,6 +3110,7 @@ impl AnalysisResultDocument {
                 "peak_gain_frequency",
                 "Peak gain frequency",
                 SignalUnit::Hertz,
+                peak_absent,
                 result.peak_gain.map(|(frequency, _)| frequency),
             )?,
             pxf_metric_scalar(
@@ -3094,6 +3118,7 @@ impl AnalysisResultDocument {
                 "bandwidth_3db",
                 "-3 dB bandwidth",
                 SignalUnit::Hertz,
+                bandwidth_absent,
                 result.bandwidth_3db,
             )?,
             pxf_metric_scalar(
@@ -3101,6 +3126,7 @@ impl AnalysisResultDocument {
                 "unity_gain_frequency",
                 "Unity gain frequency",
                 SignalUnit::Hertz,
+                unity_absent,
                 result.unity_gain_freq,
             )?,
         ];
