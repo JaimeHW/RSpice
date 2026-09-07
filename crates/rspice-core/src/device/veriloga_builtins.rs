@@ -1858,8 +1858,12 @@ impl BuiltinVerilogAInstance {
         self.kind.set_timepoint(time, timestep, ddt_coefficients);
     }
 
+    /// Select the analysis boundary events for the next evaluation.
+    ///
+    /// Standalone callers must mark the initial operating point so models can
+    /// initialize values in `@(initial_step)`, just as the circuit driver does.
     #[inline]
-    pub(crate) fn set_analysis_step(&mut self, initial: bool, final_step: bool) {
+    pub fn set_analysis_step(&mut self, initial: bool, final_step: bool) {
         self.analysis_initial_step = initial;
         self.analysis_final_step = final_step;
     }

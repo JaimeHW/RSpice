@@ -12,7 +12,7 @@ pinned. Actionlint checks workflow syntax. Configuration tests guard coverage.
 | Remaining workspace, Linux | Every other member's default tests, including output, design, automation, cloud, engine adapter, publishers and viewers; new members are selected automatically |
 | Generated models | Portable feature shards, full catalog validation, XSPICE registry, resource and numerical checks, representative performance qualification |
 | Desktop | Windows/macOS UI and CLI tests; OS-specific output and managed-runtime tests; native JIT execution on six OS/architecture combinations; macOS hardened-runtime checks |
-| Browser | wasm32 compilation, optimized UI/worker size budgets, Firefox Rust binding/cloud/clock tests, Chromium solver/JIT execution and workbench review/recovery |
+| Browser | wasm32 compilation, production UI/worker size reports, Firefox Rust binding/cloud/clock tests, Chromium solver/JIT execution and workbench review/recovery |
 | Mobile | ARM64 Android and iOS portable solver/catalog compilation |
 | Feature shards | Clippy and host tests for configurations hidden by workspace feature unification, including emitted WebAssembly execution in wasmi |
 | Python | Supported CPython versions including free threading; Rust binding invariants, stub validation, wheels on six native platforms, offline source-distribution installation |
@@ -26,9 +26,17 @@ Generated bundle freshness runs through `generated_output_audit` in the
 workspace tests; a second generator build solely to repeat that audit is omitted.
 Broad test commands finish the remaining test binaries after a failure so one
 broken suite does not hide independent findings.
-Browser download budgets measure the production `_bg.wasm` modules emitted by
+Browser size reports measure the production `_bg.wasm` modules emitted by
 wasm-bindgen, before rebuilding the UI with qualification instrumentation.
 The Cargo linker output includes binding metadata removed before delivery.
+Raw and gzip sizes are reported without arbitrary blocking caps. Hosting upload
+limits belong in the deployment pipeline for the actual packaged assets; this
+repository does not deploy the browser application.
+
+The project infrastructure budget is **$0**. Use standard GitHub-hosted runners
+while the repository is public. Do not introduce paid runners, paid storage, or
+usage-based services with billable overages as CI or deployment dependencies.
+A service's free allowance alone does not guarantee a zero bill.
 
 Nightly adds release-mode tests, ngspice/Xyce/GF180 corpora, full execution depth,
 panic checks, generated-model freshness, golden fingerprints, complex-step

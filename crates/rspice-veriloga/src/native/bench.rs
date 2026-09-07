@@ -941,29 +941,32 @@ fn run_native_sweep(
     context.clear_currents();
     context.currents.resize(model.stamp_programs.len(), 0.0);
 
+    // The sweep only updates values in these preallocated buffers. Reuse the
+    // pointer view as the public device path does; rebuilding it for every
+    // entrypoint measures repeated host context assembly instead of JIT work.
     let mut ctx = eval_context_from_vm_context(context);
     native.run_assignments(&ctx, context.variables.as_mut_ptr());
     take_native_error(&mut ctx, "assignments")?;
 
     let mut checksum = 0.0;
     for (stamp_index, stamp) in model.stamp_programs.iter().enumerate() {
-        ctx = eval_context_from_vm_context(context);
         let active = native.run_static_condition(stamp_index, &ctx, context.variables.as_ptr());
         take_native_error(&mut ctx, "static condition")?;
         if active.is_some_and(|active| active == 0.0) {
             continue;
         }
 
-        ctx = eval_context_from_vm_context(context);
         let value = native
             .run_stamp_value(stamp_index, &ctx, context.variables.as_ptr())
             .ok_or_else(|| format!("native sweep missing stamp-value entry {stamp_index}"))?;
         take_native_error(&mut ctx, "stamp value")?;
         checksum += value;
         context.currents[stamp_index] = value;
+        // Mutable Vec indexing can invalidate an earlier raw element pointer.
+        // Refresh this one view without rebuilding the entire context.
+        ctx.currents = context.currents.as_ptr();
 
         for entry_index in 0..stamp.jacobian_programs.len() {
-            ctx = eval_context_from_vm_context(context);
             let value = native
                 .run_jacobian(stamp_index, entry_index, &ctx, context.variables.as_ptr())
                 .ok_or_else(|| {
@@ -973,7 +976,6 @@ fn run_native_sweep(
             checksum += value;
         }
         for entry_index in 0..stamp.reactive_jacobians.len() {
-            ctx = eval_context_from_vm_context(context);
             let value = native
                 .run_reactive_jacobian(stamp_index, entry_index, &ctx, context.variables.as_ptr())
                 .ok_or_else(|| {
@@ -987,7 +989,6 @@ fn run_native_sweep(
     }
 
     for source_index in 0..model.noise_sources.len() {
-        ctx = eval_context_from_vm_context(context);
         let psd = native
             .run_noise_psd(source_index, &ctx, context.variables.as_ptr())
             .ok_or_else(|| format!("native sweep missing noise PSD entry {source_index}"))?;

@@ -29,7 +29,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 150
     env:
-      CARGO_BUILD_JOBS: "2"
+      # Keep memory-heavy UI and solver release codegen from competing on the
+      # same hosted runner.
+      CARGO_BUILD_JOBS: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Rust toolchain
@@ -197,7 +199,7 @@ jobs:
         with:
           key: veriloga-corpus
       - name: Corpus golden gates (43 models)
-        # The four correctness gates: finite evaluation away from known defects,
+        # The four correctness gates: finite evaluation at every probe point,
         # gmin reaching the devices that read it, stamped Jacobians against a
         # numerical derivative of the stamped currents, and stamped reactive
         # blocks against a numerical derivative of the recovered charge.

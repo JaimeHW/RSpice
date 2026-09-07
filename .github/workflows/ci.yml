@@ -57,6 +57,8 @@ jobs:
           "$GOBIN/actionlint" .github/workflows/*.yml
       - name: CI configuration tests
         run: python3 tools/ci/test_ci_configuration.py
+      - name: Browser artifact reporting regression tests
+        run: python3 tools/ci/test_wasm_artifact_size.py
       - name: Browser workbench harness regressions
         run: python3 tools/ci/test_browser_workbench.py
       - name: Vendored cloud client integrity
@@ -520,7 +522,7 @@ jobs:
         run: cargo test --locked -p rspice-ui --target wasm32-unknown-unknown --test browser_clock
 
   wasm-ui-size:
-    name: Browser WASM image budgets
+    name: Browser build & qualification
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
@@ -530,7 +532,7 @@ jobs:
       - name: Install Rust toolchain
         run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal --target wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
-      - name: Build size-qualified browser UI image
+      - name: Build production browser UI image
         run: cargo build --locked --profile web-release -p rspice-ui --bin rspice-ui --target wasm32-unknown-unknown
       - name: Install pinned wasm-bindgen CLI
         run: cargo install wasm-bindgen-cli --version 0.2.126 --locked
@@ -539,31 +541,27 @@ jobs:
           wasm-bindgen --target web --out-name rspice-ui
           --out-dir crates/rspice-ui/web/pkg
           target/wasm32-unknown-unknown/web-release/rspice-ui.wasm
-      - name: Enforce browser UI image budget
+      - name: Report browser UI image size
         run: >-
           python3 tools/ci/check_wasm_artifact_size.py
           crates/rspice-ui/web/pkg/rspice-ui_bg.wasm
           --label rspice-ui
-          --max-raw 67108864
-          --max-gzip 16777216
-      - name: Build size-qualified browser worker image
+      - name: Build production browser worker image
         run: >-
           cargo build --locked --profile web-release -p rspice-ui
           --bin rspice-ui-worker --features browser-worker
           --target wasm32-unknown-unknown
-      - name: Generate optimized browser worker bindings
+      - name: Generate production browser worker bindings
         run: >-
           wasm-bindgen --target web
           --out-name rspice-ui-worker
           --out-dir crates/rspice-ui/web/pkg
           target/wasm32-unknown-unknown/web-release/rspice-ui-worker.wasm
-      - name: Enforce browser worker image budget
+      - name: Report browser worker image size
         run: >-
           python3 tools/ci/check_wasm_artifact_size.py
           crates/rspice-ui/web/pkg/rspice-ui-worker_bg.wasm
           --label rspice-ui-worker
-          --max-raw 25165824
-          --max-gzip 8388608
       - name: Qualify browser WASM JIT solver bridge in Chromium
         run: python3 tools/ci/check_wasm_jit_browser.py
       - name: Build instrumented browser workbench

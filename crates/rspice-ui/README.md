@@ -227,7 +227,9 @@ by `tools/ci/test_ide_worker.py`. The narrower
 [rspice-wasm](../rspice-wasm/README.md) `/play/` playground remains the
 lightweight OP/AC/TRAN engine demo. Both routes are assembled and published by
 the separate RSpice-Site repository (`tools/build_simulator.py`); this repo
-builds and size-gates the wasm images but does not deploy them.
+builds and reports raw/gzip sizes of the wasm images without arbitrary size
+caps, and runs browser qualification. It does not deploy them; hosting upload
+limits must be checked against the assets packaged by the deployment repository.
 
 ### License issuance
 

@@ -55,12 +55,6 @@ const PROBE_POINTS: usize = 4;
 /// Relative agreement required of an entry the difference resolved tightly.
 const JACOBIAN_TOLERANCE: f64 = 1.0e-5;
 
-/// Models whose stamp is not finite at zero bias.
-///
-/// A DC solve starts near equilibrium, so this is a real defect rather than an
-/// artificial probe. Recorded for the rewrite to clear.
-const NON_FINITE_AT_EQUILIBRIUM: &[&str] = &["asmesd", "asmesd_dio", "bsimimg"];
-
 /// A model whose stamped Jacobian is known to disagree with the difference.
 struct KnownDeviation {
     model: &'static str,
@@ -73,24 +67,10 @@ struct KnownDeviation {
 
 const KNOWN_DEVIATIONS: &[KnownDeviation] = &[
     KnownDeviation {
-        model: "asmesd",
-        relative_error: 2.0e-5,
-        unverified_significant: 12,
-        why: "was a whole missing thermal column on the old backend, at a full \
-              unit of disagreement; the canonical backend stamps it and what \
-              remains is ordinary difference precision",
-    },
-    KnownDeviation {
-        model: "asmesd_dio",
-        relative_error: 2.0e-5,
-        unverified_significant: 8,
-        why: "same missing thermal column as asmesd, and fixed with it",
-    },
-    KnownDeviation {
         model: "bsimimg",
         relative_error: 2.0e-4,
         unverified_significant: 5,
-        why: "non-finite at equilibrium; small disagreements away from it",
+        why: "small disagreements where the numerical difference converges",
     },
     KnownDeviation {
         model: "hisimsotb_va",
@@ -224,23 +204,10 @@ const KNOWN_CAPACITANCE_DEVIATIONS: &[KnownCapacitanceDeviation] = &[
         why: "coverage gaps only; every comparable entry agrees",
     },
     KnownCapacitanceDeviation {
-        model: "asmesd",
-        relative_error: CAPACITANCE_TOLERANCE,
-        unverified_significant: 1,
-        why: "coverage gaps only",
-    },
-    KnownCapacitanceDeviation {
-        model: "asmesd_dio",
-        relative_error: CAPACITANCE_TOLERANCE,
-        unverified_significant: 1,
-        why: "coverage gaps only",
-    },
-    KnownCapacitanceDeviation {
         model: "bsimimg",
         relative_error: CAPACITANCE_TOLERANCE,
         unverified_significant: 32,
-        why: "coverage gaps only, and the most of any model; it is also the one \
-              that is non-finite at equilibrium",
+        why: "coverage gaps only",
     },
     KnownCapacitanceDeviation {
         model: "hicumL0va",
@@ -283,9 +250,8 @@ fn known_capacitance(model: &str) -> Option<&'static KnownCapacitanceDeviation> 
 }
 
 #[test]
-fn every_builtin_evaluates_finitely_away_from_its_known_defects() {
+fn every_builtin_evaluates_finitely_at_its_probe_points() {
     let mut failures = Vec::new();
-    let mut observed_non_finite = Vec::new();
 
     for model_name in builtins::builtin_names() {
         let mut harness = match GoldenHarness::new(model_name, &[]) {
@@ -296,7 +262,6 @@ fn every_builtin_evaluates_finitely_away_from_its_known_defects() {
             }
         };
 
-        let mut model_non_finite = false;
         for (index, point) in harness.probe_points(PROBE_POINTS).into_iter().enumerate() {
             match harness.evaluate(&point) {
                 Ok(record) => {
@@ -307,34 +272,12 @@ fn every_builtin_evaluates_finitely_away_from_its_known_defects() {
                         .chain(record.capacitance.iter())
                         .any(|value| !value.is_finite());
                     if non_finite {
-                        model_non_finite = true;
-                        if !NON_FINITE_AT_EQUILIBRIUM.contains(model_name) {
-                            failures
-                                .push(format!("{model_name}: point {index}: stamp is not finite"));
-                        }
+                        failures.push(format!("{model_name}: point {index}: stamp is not finite"));
                     }
                 }
                 Err(error) => failures.push(format!("{model_name}: point {index}: {error}")),
             }
         }
-        if model_non_finite {
-            observed_non_finite.push(*model_name);
-        }
-    }
-
-    // The allowlist must describe reality in both directions — but only about
-    // models this build actually contains. Every model is independently
-    // selectable, so a build carrying one device would otherwise fail for all
-    // the ones it left out.
-    for model_name in NON_FINITE_AT_EQUILIBRIUM {
-        if !builtins::builtin_names().contains(model_name) {
-            continue;
-        }
-        assert!(
-            observed_non_finite.contains(model_name),
-            "{model_name} is listed as non-finite at equilibrium but now evaluates \
-             finitely; remove it from NON_FINITE_AT_EQUILIBRIUM"
-        );
     }
 
     assert!(
