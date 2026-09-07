@@ -23,7 +23,7 @@ use std::path::Path;
 /// Constant-fold an IR expression (used for filter coefficients and
 /// constant direction arguments)
 fn autodiff_fold(expr: IrExpr) -> IrExpr {
-    crate::ir::autodiff::simplify(expr)
+    crate::ir::autodiff::simplify_source(expr)
 }
 
 fn zi_polynomial_is_wholly_constant(definition: &crate::ir::ZiPolynomialDefinition) -> bool {
@@ -2652,8 +2652,10 @@ mod tests {
             .expect("a transition call must convert to its dynamic operator");
         let mut next = 0;
         crate::ir::autodiff::assign_transition_site_ordinals(&mut primal, &mut next);
-        let derivative =
-            crate::ir::autodiff::differentiate(&primal, &crate::ir::DerivativeWrt::Voltage(0));
+        let derivative = crate::ir::autodiff::differentiate_source(
+            &primal,
+            &crate::ir::DerivativeWrt::Voltage(0),
+        );
 
         let IrExpr::Transition {
             site: primal_site, ..

@@ -58,8 +58,8 @@
 
 use crate::error::{CodeGenError, CodeGenErrorKind, CompileResult};
 use crate::ir::{
-    ArrayDef, EquationSnapshotReads, IrAssignmentItem, IrExpr, ReachingSnapshotCopy,
-    ReachingSnapshotPlan, VarAssignment, VarDef,
+    ArrayDef, EquationSnapshotReads, IrExpr, ReachingSnapshotCopy, ReachingSnapshotPlan,
+    SourceAssignmentItem, SourceVarAssignment, VarDef,
 };
 use crate::semantic::AnalogSiteId;
 use smol_str::SmolStr;
@@ -93,7 +93,7 @@ pub(crate) const SNAPSHOT_MARKER: &str = "@snap";
 /// Called between contribution conversion and `build_shadow_assignments`; see
 /// the module comment for why that window and no other.
 pub(crate) fn insert_equation_snapshots(
-    assignments: &mut Vec<IrAssignmentItem>,
+    assignments: &mut Vec<SourceAssignmentItem>,
     variables: &mut Vec<VarDef>,
     arrays: &[ArrayDef],
     statement_sites: &[AnalogSiteId],
@@ -147,7 +147,7 @@ pub(crate) fn insert_equation_snapshots(
     // share a slot, so a model with many equations over one scratch variable
     // pays for the values it snapshots rather than the reads it makes.
     let mut snapshots: HashMap<(usize, Option<usize>), SmolStr> = HashMap::new();
-    let mut splices: Vec<(usize, VarAssignment)> = Vec::new();
+    let mut splices: Vec<(usize, SourceVarAssignment)> = Vec::new();
     let mut plan = ReachingSnapshotPlan::default();
 
     for (equation, expr) in equations.iter_mut().enumerate() {
@@ -204,7 +204,7 @@ pub(crate) fn insert_equation_snapshots(
                     // definition can read.
                     splices.push((
                         reaching.map_or(0, |index| index + 1),
-                        VarAssignment {
+                        SourceVarAssignment {
                             var_index: variables.len() - 1,
                             index: None,
                             expr: IrExpr::Var(name.clone()),
@@ -238,7 +238,7 @@ pub(crate) fn insert_equation_snapshots(
     // which is the order their reading equations appear.
     splices.sort_by_key(|(point, _)| *point);
     for (point, assignment) in splices.into_iter().rev() {
-        assignments.insert(point, IrAssignmentItem::Assign(assignment));
+        assignments.insert(point, SourceAssignmentItem::Assign(assignment));
     }
     Ok(plan)
 }
@@ -262,9 +262,9 @@ fn reaching_write(writes: &HashMap<usize, Vec<usize>>, slot: usize, point: usize
 ///
 /// A runtime-indexed write names an element only at runtime, so it counts as a
 /// write to the whole declared run.
-fn record_writes(item: &IrAssignmentItem, index: usize, out: &mut HashMap<usize, Vec<usize>>) {
+fn record_writes(item: &SourceAssignmentItem, index: usize, out: &mut HashMap<usize, Vec<usize>>) {
     match item {
-        IrAssignmentItem::Assign(assignment) => {
+        SourceAssignmentItem::Assign(assignment) => {
             let span = match &assignment.index {
                 Some(target) => target.len,
                 None => 1,
@@ -276,7 +276,7 @@ fn record_writes(item: &IrAssignmentItem, index: usize, out: &mut HashMap<usize,
                 }
             }
         }
-        IrAssignmentItem::Loop { body, .. } => {
+        SourceAssignmentItem::Loop { body, .. } => {
             for nested in body {
                 record_writes(nested, index, out);
             }
@@ -646,12 +646,12 @@ endmodule
     #[test]
     fn statement_sites_out_of_execution_order_fail_closed() {
         let mut assignments = vec![
-            IrAssignmentItem::Assign(VarAssignment {
+            SourceAssignmentItem::Assign(SourceVarAssignment {
                 var_index: 0,
                 index: None,
                 expr: IrExpr::Const(1.0),
             }),
-            IrAssignmentItem::Assign(VarAssignment {
+            SourceAssignmentItem::Assign(SourceVarAssignment {
                 var_index: 0,
                 index: None,
                 expr: IrExpr::Const(2.0),

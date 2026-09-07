@@ -2012,7 +2012,7 @@ endmodule
                 numerator,
                 denominator,
             };
-            autodiff::simplify(autodiff::differentiate(
+            autodiff::simplify_source(autodiff::differentiate_source(
                 &expression,
                 &DerivativeWrt::Voltage(0),
             ))
@@ -2046,7 +2046,7 @@ endmodule
                 poles,
                 gain: 2.0,
             };
-            autodiff::simplify(autodiff::differentiate(
+            autodiff::simplify_source(autodiff::differentiate_source(
                 &expression,
                 &DerivativeWrt::Voltage(0),
             ))

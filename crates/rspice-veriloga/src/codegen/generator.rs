@@ -38,7 +38,7 @@ mod absdelay_derivative_tests {
         };
         let site = AbsDelaySiteId::from_span(crate::source::Span::dummy());
         let primal = primal(site, true);
-        let derivative = autodiff::differentiate(&primal, &DerivativeWrt::Voltage(0));
+        let derivative = autodiff::differentiate_source(&primal, &DerivativeWrt::Voltage(0));
         let derivative_program = compile_fixture(&generator, &derivative, &emit_context)
             .expect("compile absdelay derivative first");
         let primal_program = compile_fixture(&generator, &primal, &emit_context)
@@ -58,8 +58,9 @@ mod absdelay_derivative_tests {
     #[test]
     fn absdelay_second_derivative_fails_closed() {
         let site = AbsDelaySiteId::from_span(crate::source::Span::dummy());
-        let first = autodiff::differentiate(&primal(site, false), &DerivativeWrt::Voltage(0));
-        let second = autodiff::differentiate(&first, &DerivativeWrt::Voltage(0));
+        let first =
+            autodiff::differentiate_source(&primal(site, false), &DerivativeWrt::Voltage(0));
+        let second = autodiff::differentiate_source(&first, &DerivativeWrt::Voltage(0));
         let error = compile_fixture(
             &CodeGenerator::new(),
             &second,
@@ -400,9 +401,10 @@ impl CodeGenerator {
         self.cross_detector_count.set(0);
         self.timer_state_count.set(0);
 
-        // Every tree this module emits is imported into this one arena, at the
-        // point it is compiled, and the arena dies with the call.
-        let mut arena = ExprArena::new();
+        // Every expression this module emits already lives in the IR's arena.
+        // It is taken out rather than borrowed so the IR's own lists can be
+        // consumed while the emitter reads it, and it dies with this call.
+        let arena = std::mem::take(&mut ir.exprs);
 
         let phase_start = web_time::Instant::now();
         let parameters = std::mem::take(&mut ir.parameters)
@@ -425,7 +427,7 @@ impl CodeGenerator {
                 };
                 let default_program = p
                     .default_expr
-                    .map(|expr| self.compile_owned_expr(&mut arena, expr, &emit_ctx))
+                    .map(|expr| self.compile_expr(&arena, expr, &emit_ctx))
                     .transpose()?;
                 Ok(CompiledParameter {
                     name: p.name,
@@ -440,11 +442,11 @@ impl CodeGenerator {
                     max_parameter: p.max_parameter.as_ref().map(resolve_bound).transpose()?,
                     min_program: p
                         .min_expr
-                        .map(|expr| self.compile_owned_expr(&mut arena, expr, &emit_ctx))
+                        .map(|expr| self.compile_expr(&arena, expr, &emit_ctx))
                         .transpose()?,
                     max_program: p
                         .max_expr
-                        .map(|expr| self.compile_owned_expr(&mut arena, expr, &emit_ctx))
+                        .map(|expr| self.compile_expr(&arena, expr, &emit_ctx))
                         .transpose()?,
                     min_exclusive: p.min_exclusive,
                     max_exclusive: p.max_exclusive,
@@ -457,7 +459,7 @@ impl CodeGenerator {
                     exclude_programs: p
                         .exclude_exprs
                         .into_iter()
-                        .map(|expr| self.compile_owned_expr(&mut arena, expr, &emit_ctx))
+                        .map(|expr| self.compile_expr(&arena, expr, &emit_ctx))
                         .collect::<CompileResult<Vec<_>>>()?,
                 })
             })
@@ -509,11 +511,8 @@ impl CodeGenerator {
         // each item's boxed trees are freed the moment they are in the arena,
         // and the list itself is gone when the call returns. That is what lets
         // the largest shipped models compile inside a 32 GB box.
-        model.assignment_steps = self.compile_assignment_items(
-            std::mem::take(&mut ir.assignments),
-            &mut arena,
-            &emit_ctx,
-        )?;
+        model.assignment_steps =
+            self.compile_assignment_items(std::mem::take(&mut ir.assignments), &arena, &emit_ctx)?;
         // A mirrored noise pass *is* the ordinary pass, so say so by leaving the
         // list empty rather than by carrying a copy of it
         // ([`CompiledModel::noise_assignment_steps`] documents the convention;
@@ -535,7 +534,7 @@ impl CodeGenerator {
         } else {
             self.compile_assignment_items(
                 std::mem::take(&mut ir.noise_assignments),
-                &mut arena,
+                &arena,
                 &emit_ctx,
             )?
         };
@@ -567,7 +566,7 @@ impl CodeGenerator {
         let equations = std::mem::take(&mut ir.equations);
         let equation_count = equations.len();
         for eq in equations {
-            let program = self.compile_equation(eq, num_terminals, &mut arena, &emit_ctx)?;
+            let program = self.compile_equation(eq, num_terminals, &arena, &emit_ctx)?;
             model.stamp_programs.push(program);
         }
         if timings {
@@ -584,10 +583,10 @@ impl CodeGenerator {
         // point during noise analysis)
         let phase_start = web_time::Instant::now();
         for source in std::mem::take(&mut ir.noise_sources) {
-            let psd_program = self.compile_owned_expr(&mut arena, source.psd, &emit_ctx)?;
+            let psd_program = self.compile_expr(&arena, source.psd, &emit_ctx)?;
             let exponent_program = source
                 .exponent
-                .map(|e| self.compile_owned_expr(&mut arena, e, &emit_ctx))
+                .map(|e| self.compile_expr(&arena, e, &emit_ctx))
                 .transpose()?;
             let injections = source
                 .injections
@@ -601,11 +600,7 @@ impl CodeGenerator {
                         branch_ordinal: injection.branch_ordinal,
                         program_idx: injection.equation_index,
                         rhs_sign,
-                        gain_program: self.compile_owned_expr(
-                            &mut arena,
-                            injection.gain,
-                            &emit_ctx,
-                        )?,
+                        gain_program: self.compile_expr(&arena, injection.gain, &emit_ctx)?,
                     })
                 })
                 .collect::<CompileResult<Vec<_>>>()?;
@@ -642,27 +637,26 @@ impl CodeGenerator {
 
     /// Compile assignment items (assignments and runtime loops) to steps
     ///
-    /// The list is taken by value and consumed item by item: each item's
-    /// expression trees are imported into the arena and their boxes freed
-    /// there and then, so the compile never holds a whole shadow-expanded
-    /// `Box` forest and a whole arena at once.
+    /// The list is taken by value and consumed item by item, so its spine is
+    /// freed with the call; the expressions themselves are node ids into the
+    /// IR's arena and are only read.
     fn compile_assignment_items(
         &self,
         items: Vec<crate::ir::IrAssignmentItem>,
-        arena: &mut ExprArena,
+        arena: &ExprArena,
         emit_ctx: &EmitContext,
     ) -> CompileResult<Vec<AssignmentStep>> {
         let mut steps = Vec::with_capacity(items.len());
         for item in items {
             steps.push(match item {
                 crate::ir::IrAssignmentItem::Assign(assign) => {
-                    let program = self.compile_owned_expr(arena, assign.expr, emit_ctx)?;
+                    let program = self.compile_expr(arena, assign.expr, emit_ctx)?;
                     match assign.index {
                         Some(target) => AssignmentStep::AssignIndexed {
                             base: assign.var_index,
                             len: target.len,
                             lower: target.lower,
-                            index: self.compile_owned_expr(arena, target.index, emit_ctx)?,
+                            index: self.compile_expr(arena, target.index, emit_ctx)?,
                             value: program,
                         },
                         None => AssignmentStep::Assign(AssignmentProgram {
@@ -672,7 +666,7 @@ impl CodeGenerator {
                     }
                 }
                 crate::ir::IrAssignmentItem::Loop { condition, body } => {
-                    let condition = self.compile_owned_expr(arena, condition, emit_ctx)?;
+                    let condition = self.compile_expr(arena, condition, emit_ctx)?;
                     let body = self.compile_assignment_items(body, arena, emit_ctx)?;
                     AssignmentStep::Loop { condition, body }
                 }
@@ -713,9 +707,8 @@ impl CodeGenerator {
 
     /// Compile a branch equation to a stamp program
     ///
-    /// The equation is taken by value: its trees go into the arena and its
-    /// boxes are freed one program at a time, so a module's equations never
-    /// sit in memory as a whole forest behind the one being compiled.
+    /// The equation is taken by value so its derivative list is freed one
+    /// program at a time; the expressions are node ids into the IR's arena.
     ///
     /// Current contributions use the standard SPICE companion form: the
     /// Jacobian G stamps both KCL rows and the RHS receives -/+ Ieq where
@@ -731,13 +724,13 @@ impl CodeGenerator {
         &self,
         eq: BranchEquation,
         num_terminals: usize,
-        arena: &mut ExprArena,
+        arena: &ExprArena,
         emit_ctx: &EmitContext,
     ) -> CompileResult<StampProgram> {
-        let value_program = self.compile_owned_expr(arena, eq.expr, emit_ctx)?;
+        let value_program = self.compile_expr(arena, eq.expr, emit_ctx)?;
         let static_condition = eq
             .static_condition
-            .map(|cond| self.compile_owned_expr(arena, cond, emit_ctx))
+            .map(|cond| self.compile_expr(arena, cond, emit_ctx))
             .transpose()?;
 
         let pos = Self::node_stamp_index(num_terminals, eq.branch.pos_terminal);
@@ -758,7 +751,7 @@ impl CodeGenerator {
             let branch_row = StampIndex::Branch(ordinal);
             for deriv in eq.derivatives {
                 let (col, col_axis) = Self::axis_stamp_column(num_terminals, &deriv.wrt);
-                let program = self.compile_owned_expr(arena, deriv.expr, emit_ctx)?;
+                let program = self.compile_expr(arena, deriv.expr, emit_ctx)?;
                 jacobian_programs.push(JacobianEntry {
                     row: branch_row.clone(),
                     col,
@@ -771,7 +764,7 @@ impl CodeGenerator {
             let mut reactive_jacobians = Vec::new();
             for deriv in eq.reactive_derivatives {
                 let (col, col_axis) = Self::axis_stamp_column(num_terminals, &deriv.wrt);
-                let program = self.compile_owned_expr(arena, deriv.expr, emit_ctx)?;
+                let program = self.compile_expr(arena, deriv.expr, emit_ctx)?;
                 reactive_jacobians.push(JacobianEntry {
                     row: branch_row.clone(),
                     col,
@@ -804,7 +797,7 @@ impl CodeGenerator {
             let branch_row = StampIndex::Branch(ordinal);
             for deriv in eq.derivatives {
                 let (col, col_axis) = Self::axis_stamp_column(num_terminals, &deriv.wrt);
-                let program = self.compile_owned_expr(arena, deriv.expr, emit_ctx)?;
+                let program = self.compile_expr(arena, deriv.expr, emit_ctx)?;
                 jacobian_programs.push(JacobianEntry {
                     row: branch_row.clone(),
                     col,
@@ -819,7 +812,7 @@ impl CodeGenerator {
             let mut reactive_jacobians = Vec::new();
             for deriv in eq.reactive_derivatives {
                 let (col, col_axis) = Self::axis_stamp_column(num_terminals, &deriv.wrt);
-                let program = self.compile_owned_expr(arena, deriv.expr, emit_ctx)?;
+                let program = self.compile_expr(arena, deriv.expr, emit_ctx)?;
                 reactive_jacobians.push(JacobianEntry {
                     row: branch_row.clone(),
                     col,
@@ -850,7 +843,7 @@ impl CodeGenerator {
         // Current contribution
         for deriv in eq.derivatives {
             let (col, col_axis) = Self::axis_stamp_column(num_terminals, &deriv.wrt);
-            let program = self.compile_owned_expr(arena, deriv.expr, emit_ctx)?;
+            let program = self.compile_expr(arena, deriv.expr, emit_ctx)?;
 
             // KCL row of the positive node gains +dI/dx, the negative node
             // row gains -dI/dx
@@ -875,7 +868,7 @@ impl CodeGenerator {
         let mut reactive_jacobians = Vec::new();
         for deriv in eq.reactive_derivatives {
             let (col, col_axis) = Self::axis_stamp_column(num_terminals, &deriv.wrt);
-            let program = self.compile_owned_expr(arena, deriv.expr, emit_ctx)?;
+            let program = self.compile_expr(arena, deriv.expr, emit_ctx)?;
             reactive_jacobians.push(JacobianEntry {
                 row: pos.clone(),
                 col: col.clone(),
@@ -934,24 +927,6 @@ impl CodeGenerator {
         // model's whole lifetime.
         program.instructions.shrink_to_fit();
         Ok(program)
-    }
-
-    /// Import one owned `IrExpr` tree at the seam and compile it from the arena
-    ///
-    /// This is the only door between the two representations on the emission
-    /// path, and it swings one way: the boxed tree is dropped the moment its
-    /// nodes are in the arena, so a forest is freed tree by tree as the
-    /// emission consumes it rather than all at once when the pass ends.
-    /// Nothing here ever calls [`ExprArena::export`].
-    fn compile_owned_expr(
-        &self,
-        arena: &mut ExprArena,
-        expr: IrExpr,
-        emit_ctx: &EmitContext,
-    ) -> CompileResult<BytecodeProgram> {
-        let id = arena.import(&expr);
-        drop(expr);
-        self.compile_expr(arena, id, emit_ctx)
     }
 
     #[inline]
@@ -2007,16 +1982,16 @@ fn count_ir_assignment_items(items: &[crate::ir::IrAssignmentItem]) -> usize {
         .sum()
 }
 
-/// Compile one hand-built `IrExpr` fixture through the emitter's seam
+/// Compile one hand-built `IrExpr` fixture
 ///
-/// The fixtures below still build `IrExpr` trees, because that is what
-/// `autodiff::differentiate` and the converter produce; they cross into the
-/// arena exactly where the production path crosses. A fixture is one tree, so
-/// it gets one arena.
+/// The fixtures below still build `IrExpr` trees, because that is what the
+/// converter produces; the production path no longer crosses here at all —
+/// [`crate::ir::DeviceIR`] hands the emitter node ids. A fixture is one tree,
+/// so it gets one arena.
 #[cfg(test)]
 fn compile_fixture(
     generator: &CodeGenerator,
-    expr: &IrExpr,
+    expr: &crate::ir::IrExpr,
     emit_ctx: &EmitContext,
 ) -> CompileResult<BytecodeProgram> {
     let mut arena = ExprArena::new();
@@ -2305,8 +2280,8 @@ mod slew_derivative_tests {
             max_pos_slew: Some(Box::new(nonlinear_rate)),
             max_neg_slew: None,
         };
-        let first = autodiff::differentiate(&primal, &DerivativeWrt::Voltage(0));
-        let second = autodiff::differentiate(&first, &DerivativeWrt::Voltage(0));
+        let first = autodiff::differentiate_source(&primal, &DerivativeWrt::Voltage(0));
+        let second = autodiff::differentiate_source(&first, &DerivativeWrt::Voltage(0));
 
         let IrExpr::SlewDerivative {
             input_derivative,
