@@ -88,15 +88,22 @@ impl Engine {
         let ports = collect_ports(netlist).map_err(|error| {
             SimulationError::Netlist(format!(".SP port declarations are unusable: {error}"))
         })?;
+        // The complete complex port cube can be larger than any individual
+        // AC result. Bound it before extraction allocates its storage.
+        self.ensure_result_shape(
+            frequencies.len(),
+            ports
+                .len()
+                .saturating_mul(ports.len())
+                .saturating_mul(2)
+                .saturating_add(1),
+        )?;
 
         let cube = extract_s_matrix_with_abort(
             netlist,
             &ports,
             frequencies,
-            |driven| {
-                self.run_ac_with_abort(driven, frequencies, abort)
-                    .map_err(|error| error.to_string())
-            },
+            |driven| self.run_ac_with_abort(driven, frequencies, abort),
             abort,
         )
         .map_err(map_extract_error)?;
@@ -211,8 +218,9 @@ fn map_port_noise_error(error: PortNoiseAssemblyError) -> SimulationError {
     }
 }
 
-fn map_extract_error(error: ExtractError) -> SimulationError {
+fn map_extract_error(error: ExtractError<SimulationError>) -> SimulationError {
     match error {
+        ExtractError::AcSolve(error) => error,
         ExtractError::Aborted => SimulationError::Aborted,
         other => SimulationError::Circuit(format!(".SP extraction failed: {other}")),
     }

@@ -10,7 +10,7 @@
 use rspice_core::Complex64;
 use rspice_core::analysis::ac::AcResult;
 use rspice_core::analysis::s_param::{ExtractError, collect_ports, extract_s_matrix};
-use rspice_core::engine::{Engine, SimulationConfig};
+use rspice_core::engine::{Engine, SimulationConfig, SimulationError};
 use rspice_core::netlist::Netlist;
 
 fn s_at_dc(deck: &str) -> Vec<Vec<Complex64>> {
@@ -96,4 +96,68 @@ fn missing_declared_port_node_fails_instead_of_becoming_zero_volts() {
         error,
         ExtractError::MissingNodeVoltage { ref node, .. } if node.eq_ignore_ascii_case("p1")
     ));
+}
+
+#[test]
+fn sp_preserves_resource_limits_reached_inside_the_ac_solve() {
+    let netlist =
+        Netlist::parse("* SP resource contract\nV1 p1 0 AC 1 portnum=1\nR1 p1 0 50\n.end\n")
+            .unwrap();
+    let mut config = SimulationConfig::default();
+    config.resource_limits.max_matrix_unknowns = 1;
+    let error = Engine::new(config)
+        .run_sp_over_grid_with_abort(&netlist, &[1.0], false, &rspice_core::NoAbort)
+        .expect_err("port normalization exceeds the configured equation budget");
+    assert!(
+        matches!(error, SimulationError::ResourceLimit(_)),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn sp_bounds_the_full_port_cube_before_allocating_it() {
+    let mut deck = String::from("* Five independently matched ports\n");
+    for port in 1..=5 {
+        deck.push_str(&format!(
+            "P{port} p{port} 0 PORT={port} Z0=50\nR{port} p{port} 0 50\n",
+        ));
+    }
+    deck.push_str(".end\n");
+    let netlist = Netlist::parse(&deck).unwrap();
+    let mut config = SimulationConfig::default();
+    // Each AC solve fits (15 complex unknowns plus frequency), but the
+    // assembled 5-by-5 complex S-matrix and its frequency need 51 values.
+    config.resource_limits.max_result_values = 40;
+    let outcome = Engine::new(config).run_sp_over_grid_with_abort(
+        &netlist,
+        &[1.0],
+        false,
+        &rspice_core::NoAbort,
+    );
+    let Err(SimulationError::ResourceLimit(limit)) = outcome else {
+        panic!("the assembled S-matrix must respect the result budget: {outcome:?}");
+    };
+    assert_eq!(limit.resource, rspice_core::ResourceKind::ResultValues);
+    assert_eq!(limit.requested, 51);
+    assert_eq!(limit.limit, 40);
+}
+
+#[test]
+fn xyce_named_gnd_port_is_an_ordinary_measured_node() {
+    let netlist = Netlist::parse_with_options(
+        "* GND is a real Xyce node\nP1 GND 0 PORT=1 Z0=50\nR1 GND 0 100\n.end\n",
+        rspice_core::netlist::NetlistParseOptions {
+            expression_dialect: rspice_core::config::ExpressionDialect::Xyce,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let result = Engine::default()
+        .run_sp_over_grid_with_abort(&netlist, &[1.0], false, &rspice_core::NoAbort)
+        .expect("an ordinary node named GND can be a port reference plane");
+    let reflection = result.scattering.data[0].s11();
+    assert!(
+        (reflection - Complex64::new(1.0 / 3.0, 0.0)).norm() < 1e-12,
+        "a 100-ohm load on a 50-ohm port must reflect one third, got {reflection}",
+    );
 }

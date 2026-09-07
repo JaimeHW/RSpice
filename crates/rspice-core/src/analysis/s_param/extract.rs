@@ -28,15 +28,17 @@ use super::ports::{PortError, SParameterPort, normalize_ports, set_excitations};
 /// same order of work everywhere.
 const ABORT_CHECK_INTERVAL: usize = 16;
 
-/// Why an S-matrix could not be extracted.
+/// Why an S-matrix could not be extracted. The caller's solve error is kept
+/// intact so normal model completion, resource limits and cancellation retain
+/// their structured identity at the execution boundary.
 #[derive(Debug, Clone, PartialEq)]
-pub enum ExtractError {
+pub enum ExtractError<E = String> {
     /// The deck's port declarations could not be used.
     Port(PortError),
     /// The wave-to-scattering conversion rejected its inputs.
     Network(NetworkError),
     /// The caller's AC solve failed or was cancelled.
-    AcSolve(String),
+    AcSolve(E),
     /// Extraction observed a cancellation request of its own.
     ///
     /// Distinct from [`Self::AcSolve`]: this is the extraction's own port and
@@ -58,7 +60,7 @@ pub enum ExtractError {
     },
 }
 
-impl std::fmt::Display for ExtractError {
+impl<E: std::fmt::Display> std::fmt::Display for ExtractError<E> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Port(error) => error.fmt(f),
@@ -86,15 +88,15 @@ impl std::fmt::Display for ExtractError {
     }
 }
 
-impl std::error::Error for ExtractError {}
+impl<E: std::fmt::Debug + std::fmt::Display> std::error::Error for ExtractError<E> {}
 
-impl From<PortError> for ExtractError {
+impl<E> From<PortError> for ExtractError<E> {
     fn from(error: PortError) -> Self {
         Self::Port(error)
     }
 }
 
-impl From<NetworkError> for ExtractError {
+impl<E> From<NetworkError> for ExtractError<E> {
     fn from(error: NetworkError) -> Self {
         Self::Network(error)
     }
@@ -106,8 +108,8 @@ impl From<NetworkError> for ExtractError {
 /// it up has to succeed at zero. A declared non-ground port node, however, is
 /// part of the measurement basis; treating a missing coordinate as zero would
 /// manufacture a reflection or transmission result.
-fn node_voltage(point: &AcResult, node: &str) -> Result<Complex64, ExtractError> {
-    if node == "0" || node.eq_ignore_ascii_case("gnd") {
+fn node_voltage<E>(point: &AcResult, node: &str) -> Result<Complex64, ExtractError<E>> {
+    if node == "0" {
         return Ok(Complex64::new(0.0, 0.0));
     }
     let value = point
@@ -153,15 +155,15 @@ where
 /// cannot sit uncancellable between two AC solves. It is the extraction's own
 /// bound; the caller's `run_ac` closure remains responsible for cancelling the
 /// solve it runs.
-pub fn extract_s_matrix_with_abort<F>(
+pub fn extract_s_matrix_with_abort<F, E>(
     netlist: &Netlist,
     ports: &[SParameterPort],
     frequencies: &[Value],
     mut run_ac: F,
     abort: &dyn AbortSignal,
-) -> Result<Vec<Vec<Vec<Complex64>>>, ExtractError>
+) -> Result<Vec<Vec<Vec<Complex64>>>, ExtractError<E>>
 where
-    F: FnMut(&Netlist) -> Result<Vec<AcResult>, String>,
+    F: FnMut(&Netlist) -> Result<Vec<AcResult>, E>,
 {
     let count = ports.len();
     let points = frequencies.len();
@@ -174,6 +176,19 @@ where
     let mut base = netlist.clone();
     let ports = normalize_ports(&mut base, ports)?;
     let reference_impedances = ports.iter().map(|port| port.z0).collect::<Vec<_>>();
+    // Resolve aliases once, under the same policy as the actual solve. In
+    // Xyce a node named GND remains a real measurement coordinate unless
+    // REPLACEGROUND was enabled.
+    let ground_policy = base.ground_policy();
+    let port_nodes = ports
+        .iter()
+        .map(|port| {
+            (
+                ground_policy.canonical_node(&port.node_pos),
+                ground_policy.canonical_node(&port.node_neg),
+            )
+        })
+        .collect::<Vec<_>>();
 
     let zero = Complex64::new(0.0, 0.0);
     let mut s = vec![vec![vec![zero; points]; count]; count];
@@ -198,12 +213,12 @@ where
             if index.is_multiple_of(ABORT_CHECK_INTERVAL) {
                 check_abort(abort)?;
             }
-            let voltages = ports
+            let voltages = port_nodes
                 .iter()
-                .map(|port| {
-                    Ok(node_voltage(point, &port.node_pos)? - node_voltage(point, &port.node_neg)?)
+                .map(|(positive, negative)| {
+                    Ok(node_voltage(point, positive)? - node_voltage(point, negative)?)
                 })
-                .collect::<Result<Vec<_>, ExtractError>>()?;
+                .collect::<Result<Vec<_>, ExtractError<E>>>()?;
             let column = s_column_from_port_voltages(&voltages, excited, &reference_impedances)?;
             for (row, value) in column.into_iter().enumerate() {
                 s[row][excited][index] = value;
@@ -214,7 +229,7 @@ where
     Ok(s)
 }
 
-fn check_abort(abort: &dyn AbortSignal) -> Result<(), ExtractError> {
+fn check_abort<E>(abort: &dyn AbortSignal) -> Result<(), ExtractError<E>> {
     if abort.is_aborted() {
         Err(ExtractError::Aborted)
     } else {

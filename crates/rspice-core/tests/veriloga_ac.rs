@@ -24,6 +24,49 @@ fn deck_path(path: &std::path::Path) -> String {
 }
 
 #[test]
+fn sp_finish_before_frequency_results_preserves_completion_metadata() {
+    let model = write_model(
+        "sp_finish_before_frequency",
+        r#"module sp_finish_before_frequency(p,n);
+inout p,n; electrical p,n;
+parameter integer finish_initial=0;
+analog initial if (finish_initial) $finish(1);
+analog begin
+    @(initial_step("ac")) if (!finish_initial) $finish(2);
+    I(p,n)<+1e-3*V(p,n);
+end
+endmodule"#,
+    );
+    for finish_initial in [false, true] {
+        let netlist = Netlist::parse(&format!(
+            "* SP normal completion\nV1 in 0 AC 1 portnum=1 z0=50\nX1 in 0 sp_finish_before_frequency finish_initial={}\n.va \"{}\" sp_finish_before_frequency\n.end\n",
+            usize::from(finish_initial), deck_path(&model),
+        )).unwrap();
+        let outcome = Engine::default()
+            .run_with_outcome(&NoAbort, |engine, signal| {
+                engine.run_sp_over_grid_with_abort(&netlist, &[10.0, 20.0], false, signal)
+            })
+            .expect("an accepted model finish is normal SP completion");
+        let SimulationOutcome::Finished { result, finish } = outcome else {
+            panic!("SP must retain model completion from its AC bias solve");
+        };
+        assert!(result.is_none());
+        assert_eq!(finish.model, "sp_finish_before_frequency");
+        assert!(finish.instance.eq_ignore_ascii_case("X1"));
+        assert_eq!(finish.diagnostic_level, if finish_initial { 1 } else { 2 });
+        assert_eq!(
+            finish.point,
+            if finish_initial {
+                ModelFinishPoint::Initialization
+            } else {
+                ModelFinishPoint::OperatingPoint
+            },
+        );
+    }
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
 fn ac_portless_finish_runs_the_analysis_lifecycle() {
     let model = write_model(
         "portless_finish",

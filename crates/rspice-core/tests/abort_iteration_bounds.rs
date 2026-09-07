@@ -305,6 +305,15 @@ fn s_parameter_extraction_stops_inside_its_port_and_projection_loops() {
         0,
         "S-parameter extraction kept working after observing cancellation"
     );
+
+    // The public runner must preserve that identity when cancellation is
+    // first observed by the nested AC solve, not just by extraction itself.
+    let total = poll_count("S-parameter runner", |abort| {
+        engine.run_sp_over_grid_with_abort(&netlist, &frequencies, false, abort)
+    });
+    assert_stops_exactly_at("S-parameter runner", interior(total), |abort| {
+        aborted(engine.run_sp_over_grid_with_abort(&netlist, &frequencies, false, abort))
+    });
 }
 
 #[test]
