@@ -70,12 +70,14 @@ fn assert_no_staging_file(directory: &Path) {
 fn model_finish_preserves_the_waveform_and_each_authored_fft_identity() {
     let directory = test_dir("model_finish");
     let model = directory.join("finish.va");
-    std::fs::write(&model, "module fft_finish(out);\ninout out; electrical out;\nanalog begin\n@(timer(2e-6)) $finish(1);\nV(out)<+1;\nend\nendmodule\n").unwrap();
+    // The product chain used to overflow the Windows CLI's default stack
+    // during semantic analysis when compilation shared the integration frame.
+    std::fs::write(&model, "module fft_finish(out);\ninout out; electrical out;\nanalog begin\n@(timer(2e-6)) $finish(1);\nV(out)<+sin(2*3.141592653589793*1e6*$abstime);\nend\nendmodule\n").unwrap();
     let deck = write_deck(
         &directory,
         "finish.cir",
         &format!(
-            "* FFT after accepted model finish\n.va \"{}\" fft_finish\nX1 marker fft_finish\nV1 out 0 SIN(0 1 1MEG)\nR1 out 0 1k\n.tran 0.2u 10u\n.options fft fftout=1\n.fft V(out) NP=8 STOP=10u WINDOW=RECT FORMAT=UNORM\n.fft V(out) NP=8 STOP=1u WINDOW=RECT FORMAT=UNORM\n.fft V(out) NP=8 WINDOW=RECT FORMAT=UNORM\n.end\n",
+            "* FFT after accepted model finish\n.va \"{}\" fft_finish\nX1 out fft_finish\nR1 out 0 1k\n.tran 0.2u 10u\n.options fft fftout=1\n.fft V(out) NP=8 STOP=10u WINDOW=RECT FORMAT=UNORM\n.fft V(out) NP=8 STOP=1u WINDOW=RECT FORMAT=UNORM\n.fft V(out) NP=8 WINDOW=RECT FORMAT=UNORM\n.end\n",
             model.to_string_lossy().replace('\\', "/")
         ),
     );
@@ -113,6 +115,11 @@ fn model_finish_preserves_the_waveform_and_each_authored_fft_identity() {
                     assert_eq!(result["status"]["availableStop"], 2e-6);
                     assert!(result["spectrum"]["bins"].as_array().unwrap().is_empty());
                     assert!(result["metrics"].is_null());
+                } else {
+                    let bins = result["spectrum"]["bins"].as_array().unwrap();
+                    assert_eq!(bins.len(), 5);
+                    assert!(bins[1]["value"]["real"].as_f64().unwrap().abs() < 1e-12);
+                    assert!((bins[1]["value"]["imaginary"].as_f64().unwrap() + 1.0).abs() < 1e-12);
                 }
             }
         } else {

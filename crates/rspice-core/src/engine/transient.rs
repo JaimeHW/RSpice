@@ -643,6 +643,15 @@ struct TransientResumePlan<'a> {
     scheduled_checkpoint_times: &'a [Value],
 }
 
+/// Circuit construction and resume validation finish before the integration
+/// frame is entered. In particular, model compilation must not share that
+/// frame's stack reservation with the circuit builder and semantic analyzer.
+struct PreparedTransientCircuit {
+    circuit: crate::circuit::CircuitData,
+    modified_trapezoidal_coefficients: CompanionCoefficients,
+    resume_continuation: Option<ProposedIntegrationContinuation>,
+}
+
 struct TransientCapturePlan {
     voltages: Vec<bool>,
     branch_currents: Vec<bool>,
@@ -3450,7 +3459,8 @@ impl Engine {
         Ok(())
     }
 
-    /// The transient integration body. `resume` injects a checkpointed
+    /// Prepare transient construction before entering the integration frame.
+    /// `resume` injects a checkpointed
     /// state (time, solution, reactive histories) instead of the fresh
     /// initial solution — numerically a breakpoint restart at the
     /// checkpoint time. The final checkpoint is captured only when the public
@@ -3474,25 +3484,13 @@ impl Engine {
         let run_scope = crate::abort_signal::ModelRunSignal::if_needed(abort);
         let abort: &dyn AbortSignal = run_scope.as_ref().map_or(abort, |scope| scope);
         Self::ensure_model_run_active(abort)?;
-        let TransientRunWindow {
-            tstop,
-            max_step,
-            startup_mode,
-        } = window;
-        let requested_stop = tstop;
-        let TransientResumePlan {
-            resume,
-            resume_validation,
-            final_checkpoint_retention,
-            scheduled_checkpoint_times,
-        } = plan;
         // `.IC`/`.NODESET` validation and the scoped-directive flatten are the
         // same work for every hint collector this run reaches: the t=0 startup
         // solve and each of its stepping retries, the UIC override pass, and
         // the hint-active probe. Doing it once here is the difference between
         // one elaboration and one per collector.
         let _startup_directives = self.startup_directive_scope(netlist);
-        fft::preflight(self, netlist, tstop, abort)?;
+        fft::preflight(self, netlist, window.tstop, abort)?;
         let trapezoidal_xmu = if self.config.spice_dialect == SpiceDialect::Xyce {
             0.5
         } else {
@@ -3504,15 +3502,8 @@ impl Engine {
                     "XMU must be finite and within [0, 0.5], found {trapezoidal_xmu}"
                 ))
             })?;
-        let fingerprint = netlist_fingerprint(checkpoint_netlist);
-        let netlist_identity = netlist_checkpoint_identity(checkpoint_netlist);
-        let restart_identity = restart_checkpoint_identity(checkpoint_netlist);
-        let simulation_identity = simulation_checkpoint_identity(&self.config);
-        let mut scheduled_checkpoints = Vec::with_capacity(scheduled_checkpoint_times.len());
-        let mut scheduled_checkpoint_cursor = 0_usize;
-        let mut retained_scheduled_checkpoint_values = 0_usize;
-        let resume_continuation = if let Some(checkpoint) = resume {
-            match resume_validation {
+        let resume_continuation = if let Some(checkpoint) = plan.resume {
+            match plan.resume_validation {
                 ResumeValidation::ExactNetlist => {
                     checkpoint.validate_for_with_config(checkpoint_netlist, &self.config)
                 }
@@ -3530,9 +3521,66 @@ impl Engine {
         } else {
             None
         };
+        let circuit = self.build_circuit_with_abort(netlist, abort)?;
+        self.run_tran_prepared(
+            netlist,
+            checkpoint_netlist,
+            window,
+            abort,
+            plan,
+            PreparedTransientCircuit {
+                circuit,
+                modified_trapezoidal_coefficients,
+                resume_continuation,
+            },
+        )
+    }
+
+    // Keep the large integration frame separate from model compilation even
+    // when an optimizer would otherwise inline across this preparation boundary.
+    #[inline(never)]
+    fn run_tran_prepared(
+        &self,
+        netlist: &Netlist,
+        checkpoint_netlist: &Netlist,
+        window: TransientRunWindow,
+        abort: &dyn AbortSignal,
+        plan: TransientResumePlan<'_>,
+        prepared: PreparedTransientCircuit,
+    ) -> Result<
+        (
+            TransientResult,
+            Option<TransientCheckpoint>,
+            Vec<ScheduledTransientCheckpoint>,
+        ),
+        SimulationError,
+    > {
+        let PreparedTransientCircuit {
+            mut circuit,
+            modified_trapezoidal_coefficients,
+            resume_continuation,
+        } = prepared;
+        let TransientRunWindow {
+            tstop,
+            max_step,
+            startup_mode,
+        } = window;
+        let requested_stop = tstop;
+        let TransientResumePlan {
+            resume,
+            resume_validation: _,
+            final_checkpoint_retention,
+            scheduled_checkpoint_times,
+        } = plan;
+        let fingerprint = netlist_fingerprint(checkpoint_netlist);
+        let netlist_identity = netlist_checkpoint_identity(checkpoint_netlist);
+        let restart_identity = restart_checkpoint_identity(checkpoint_netlist);
+        let simulation_identity = simulation_checkpoint_identity(&self.config);
+        let mut scheduled_checkpoints = Vec::with_capacity(scheduled_checkpoint_times.len());
+        let mut scheduled_checkpoint_cursor = 0_usize;
+        let mut retained_scheduled_checkpoint_values = 0_usize;
         let record_xspice_event_traces = netlist.options.xspice_event_trace_save.unwrap_or(true);
         let record_device_op_traces = Self::should_record_transient_device_op_traces(netlist);
-        let mut circuit = self.build_circuit_with_abort(netlist, abort)?;
         // Pre-simulation effects also belong to models with no matrix unknowns.
         // Run them before the empty-circuit shortcut can manufacture a trace.
         if resume.is_none() {
