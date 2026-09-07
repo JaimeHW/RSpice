@@ -199,7 +199,7 @@ jobs:
         with:
           key: veriloga-corpus
       - name: Corpus golden gates (43 models)
-        # The four correctness gates: finite evaluation away from known defects,
+        # The four correctness gates: finite evaluation at every probe point,
         # gmin reaching the devices that read it, stamped Jacobians against a
         # numerical derivative of the stamped currents, and stamped reactive
         # blocks against a numerical derivative of the recovered charge.

@@ -581,6 +581,12 @@ impl GoldenHarness {
         )
         .map_err(setup_error)?;
         instance.link_static_stamps(&matrix, node_count);
+        // Each oracle sample is an independent initial DC observation. Models
+        // such as VBIC derive temperature and parameter state in initial_step;
+        // probing their zero-initialized event slots tests an unstarted model.
+        // Keep the event active for perturbed samples and gmin changes too, so
+        // the relation being differentiated has identical initialization rules.
+        instance.set_analysis_step(true, false);
 
         Ok(Self {
             model_name,
@@ -1176,6 +1182,22 @@ fn next_unit(state: &mut u64) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(feature = "veriloga-builtins")]
+    fn initial_dc_probe_is_finite_and_independent_of_previous_bias() {
+        for model in ["vbic13_3t_et", "vbic13_4t", "vbic_4T_et_cf"] {
+            let mut harness = GoldenHarness::new(model, &[]).unwrap();
+            let points = harness.probe_points(3);
+            let expected = harness.evaluate(&points[1]).unwrap();
+            harness.evaluate(&points[2]).unwrap();
+            let repeated = harness.evaluate(&points[1]).unwrap();
+            for values in [&expected.rhs, &expected.jacobian, &expected.capacitance] {
+                assert!(values.iter().all(|value| value.is_finite()), "{model}");
+            }
+            assert_eq!(expected, repeated, "{model}: probe retained previous bias");
+        }
+    }
 
     /// A record over `size` unknowns whose conduction block is `jacobian` and
     /// whose other blocks are empty.
