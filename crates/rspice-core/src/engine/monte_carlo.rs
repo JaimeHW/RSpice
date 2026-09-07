@@ -560,10 +560,16 @@ impl Engine {
                 "Monte Carlo requires at least one requested trial".to_owned(),
             ));
         }
-        let mut results = Vec::with_capacity(requested_runs);
+        self.ensure_batch_runs(requested_runs)?;
+        let mut results = Vec::new();
         let mut first_node_names: Option<Vec<String>> = None;
         let mut retained_values = 0usize;
         for (trial_index, (node_voltages, node_names)) in trials.into_iter().enumerate() {
+            if trial_index >= requested_runs {
+                return Err(SimulationError::Circuit(
+                    "Monte Carlo returned more converged trials than requested".to_owned(),
+                ));
+            }
             if node_names.is_empty() || node_names.len() != node_voltages.len() {
                 return Err(SimulationError::Circuit(format!(
                     "Monte Carlo trial {} returned {} node names for {} voltages",
@@ -607,12 +613,6 @@ impl Engine {
             self.ensure_result_values(retained_values)?;
             results.push(node_voltages);
         }
-        if results.is_empty() {
-            return Err(SimulationError::Circuit(
-                "Monte Carlo produced no converged trials".to_owned(),
-            ));
-        }
-
         // Compute statistics for each non-ground node.
         // node_voltages[0] is always ground.
         let max_node_id = results
@@ -631,37 +631,39 @@ impl Engine {
                 .saturating_add(4)
         };
 
+        // Authored identities own their labels, including numeric node names.
+        // An internal node index is only a compatibility alias when no actual
+        // node has that name.
+        let node_names = first_node_names.as_deref().unwrap_or_default();
+        let authored_names: HashSet<_> = node_names
+            .iter()
+            .map(|name| format!("V({})", name.to_ascii_uppercase()))
+            .collect();
         for node_id in 1..=max_node_id {
             let samples: Vec<Value> = results.iter().map(|result| result[node_id]).collect();
 
             if !samples.is_empty() {
-                let numeric_name = format!("V({})", node_id);
-                let numeric_label = numeric_name.clone();
-                let stats = VariableStatistics::from_samples(&numeric_name, samples.clone(), 20);
+                let named_key = format!("V({})", node_names[node_id]);
+                let stats = VariableStatistics::from_samples(&named_key, samples, 20);
                 output_values = output_values.saturating_add(variable_value_count(&stats));
                 self.ensure_result_values(retained_values.saturating_add(output_values))?;
-                variables.insert(numeric_name, stats);
-
-                if let Some(node_names) = &first_node_names
-                    && let Some(node_name) = node_names.get(node_id)
-                {
-                    let named_key = format!("V({})", node_name);
-                    if named_key != numeric_label {
-                        let alias_stats = VariableStatistics::from_samples(&named_key, samples, 20);
-                        output_values =
-                            output_values.saturating_add(variable_value_count(&alias_stats));
-                        self.ensure_result_values(retained_values.saturating_add(output_values))?;
-                        variables.insert(named_key, alias_stats);
-                    }
+                let numeric_name = format!("V({node_id})");
+                if !authored_names.contains(&numeric_name) {
+                    output_values = output_values.saturating_add(variable_value_count(&stats));
+                    self.ensure_result_values(retained_values.saturating_add(output_values))?;
+                    let mut alias_stats = stats.clone();
+                    alias_stats.name.clone_from(&numeric_name);
+                    variables.insert(numeric_name, alias_stats);
                 }
+                variables.insert(named_key, stats);
             }
         }
 
         Ok(MonteCarloResult {
-            num_runs: results.len(),
+            num_runs: requested_runs,
             variables,
             all_converged: results.len() == requested_runs,
-            num_failures: requested_runs.saturating_sub(results.len()),
+            num_failures: requested_runs - results.len(),
         })
     }
 

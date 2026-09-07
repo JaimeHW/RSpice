@@ -19,7 +19,7 @@
 //! ```
 
 use crate::Value;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 //=============================================================================
 // Distribution Types
@@ -308,7 +308,8 @@ impl VariableStatistics {
 /// Results from a complete Monte Carlo analysis
 #[derive(Debug, Clone)]
 pub struct MonteCarloResult {
-    /// Number of runs completed
+    /// Total number of attempted runs, including failed runs.
+    /// Every variable contains `num_runs - num_failures` successful samples.
     pub num_runs: usize,
     /// Statistics for each output variable
     pub variables: HashMap<String, VariableStatistics>,
@@ -399,7 +400,14 @@ impl Xorshift128Plus {
 
     /// Generate standard normal using Box-Muller transform
     pub fn next_gaussian(&mut self) -> f64 {
-        let u1 = self.next_f64();
+        // Box-Muller requires an open lower endpoint: ln(0) would turn a
+        // valid random draw into an infinite parameter perturbation.
+        let u1 = loop {
+            let value = self.next_f64();
+            if value > 0.0 {
+                break value;
+            }
+        };
         let u2 = self.next_f64();
         (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos()
     }
@@ -447,7 +455,7 @@ impl Default for VariationSet {
 /// Runner for Monte Carlo analysis
 pub struct MonteCarloRunner {
     config: MonteCarloConfig,
-    tolerances: HashMap<String, (Value, Tolerance)>, // name -> (nominal, tolerance)
+    tolerances: BTreeMap<String, (Value, Tolerance)>, // stable name -> (nominal, tolerance)
 }
 
 impl MonteCarloRunner {
@@ -455,7 +463,7 @@ impl MonteCarloRunner {
     pub fn new(config: MonteCarloConfig) -> Self {
         Self {
             config,
-            tolerances: HashMap::new(),
+            tolerances: BTreeMap::new(),
         }
     }
 
@@ -596,6 +604,15 @@ impl MonteCarloRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gaussian_redraws_a_zero_uniform_sample() {
+        let mut rng = Xorshift128Plus {
+            s0: 1,
+            s1: u64::MAX,
+        };
+        assert!(rng.next_gaussian().is_finite());
+    }
 
     #[test]
     fn variable_statistics_preserve_invalid_evidence_as_invalid() {
