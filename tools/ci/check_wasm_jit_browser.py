@@ -144,7 +144,9 @@ def main() -> None:
                 url,
             ],
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
+            # Nothing reads browser stderr while waiting for the verdict. An
+            # unread pipe can fill and block Chromium before it sends one.
+            stderr=subprocess.DEVNULL,
             text=True,
         )
         try:
@@ -155,6 +157,7 @@ def main() -> None:
                 browser.wait(timeout=15)
             except subprocess.TimeoutExpired:
                 browser.kill()
+                browser.wait()
             server.shutdown()
             server.server_close()
             thread.join(timeout=5)
