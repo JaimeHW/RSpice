@@ -351,6 +351,9 @@ impl Engine {
                         .sweep
                         .values_bounded_with_abort(remaining_values, abort)
                         .map_err(|error| match error {
+                            crate::netlist::SweepPointGenerationError::UnrepresentableSpacing => {
+                                SimulationError::Circuit(format!(".STEP dimension {}: {error}", dimension_index + 1))
+                            }
                             crate::netlist::SweepPointGenerationError::Aborted => {
                                 SimulationError::Aborted
                             }

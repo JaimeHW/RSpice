@@ -1358,6 +1358,11 @@ pub enum SweepPointGenerationError {
     /// The requested grid does not fit the caller's explicit resource limit.
     #[error("sweep requires at least {requested} points, exceeding the {limit}-point limit")]
     LimitExceeded { requested: usize, limit: usize },
+    /// Generated points would repeat or leave the finite authored range.
+    #[error(
+        "sweep spacing cannot be represented as distinct finite values within the requested range"
+    )]
+    UnrepresentableSpacing,
 }
 
 fn poll_sweep_abort(
@@ -1435,11 +1440,30 @@ fn linear_sweep_points_controlled(
     loop {
         poll_sweep_abort(abort, point_index)?;
         let value = start + step * point_index as Value;
+        // A finite point can survive cancellation even when step * index
+        // alone overflows, as in -MAX, 0, MAX. Fuse only that recovery path
+        // to preserve ordinary grids' established rounding behavior.
+        let value = if value.is_finite() {
+            value
+        } else {
+            step.mul_add(point_index as Value, start)
+        };
         if done(value) {
             break;
         }
 
-        let snapped_to_stop = (value - stop).abs() <= eps;
+        // Never replace the authored start with a nearby stop. Test progress
+        // before snapping so sub-ULP increments cannot manufacture a grid.
+        if points.last().is_some_and(|previous| {
+            if step > 0.0 {
+                value <= *previous
+            } else {
+                value >= *previous
+            }
+        }) {
+            return Err(SweepPointGenerationError::UnrepresentableSpacing);
+        }
+        let snapped_to_stop = value == stop || (point_index != 0 && (value - stop).abs() <= eps);
         if point_index >= max_points {
             if reject_limit {
                 return Err(SweepPointGenerationError::LimitExceeded {
@@ -1518,11 +1542,23 @@ fn logarithmic_sweep_points_controlled(
         let value = start * factor;
         // The ratio can overflow even though both endpoints and the final
         // point are representable (for example 1e-300 through 1e300).
-        points.push(if value.is_finite() && value > 0.0 {
+        let value = if index == 0 {
+            start
+        } else if (index as Value - (raw_count - 1.0)).abs() <= boundary_epsilon {
+            stop
+        } else if value.is_finite() && value > 0.0 {
             value
         } else {
             base.powf(start.log(base) + index as Value / points_per_interval as Value)
-        });
+        };
+        if !value.is_finite()
+            || value < start
+            || value > stop
+            || points.last().is_some_and(|previous| value <= *previous)
+        {
+            return Err(SweepPointGenerationError::UnrepresentableSpacing);
+        }
+        points.push(value);
     }
     Ok(points)
 }
@@ -2936,6 +2972,56 @@ impl StepSweep {
 #[cfg(test)]
 mod controlled_step_sweep_tests {
     use super::*;
+
+    #[test]
+    fn adjacent_linear_endpoints_preserve_the_authored_start() {
+        for (start, stop) in [(1.0, 1.0_f64.next_up()), (1.0_f64.next_up(), 1.0)] {
+            let sweep = StepSweep::Linear {
+                start,
+                stop,
+                step: stop - start,
+            };
+            assert_eq!(sweep.values_bounded(2).unwrap(), vec![start, stop]);
+        }
+    }
+
+    #[test]
+    fn linear_grids_reject_sub_ulp_increments() {
+        for (start, stop, step) in [(1.0, 2.0, 1e-50), (2.0, 1.0, -1e-50)] {
+            assert_eq!(
+                StepSweep::Linear { start, stop, step }.values_bounded(100),
+                Err(SweepPointGenerationError::UnrepresentableSpacing)
+            );
+        }
+    }
+
+    #[test]
+    fn finite_linear_points_survive_an_overflowing_intermediate_product() {
+        for sign in [-1.0, 1.0] {
+            let start = -sign * Value::MAX;
+            let stop = sign * Value::MAX;
+            assert_eq!(
+                DcSweepSpec::linear(start, stop, stop)
+                    .points_bounded_with_abort(3, &NoAbort)
+                    .unwrap(),
+                vec![start, 0.0, stop]
+            );
+        }
+    }
+
+    #[test]
+    fn logarithmic_grids_preserve_extreme_authored_endpoints() {
+        for sweep in [
+            DcSweepSpec::decade(Value::MAX / 1000.0, Value::MAX, 32),
+            DcSweepSpec::octave(Value::MAX / 1024.0, Value::MAX, 32),
+        ] {
+            let values = sweep.points_bounded_with_abort(400, &NoAbort).unwrap();
+            assert_eq!(values[0], sweep.start);
+            assert_eq!(values.last(), Some(&sweep.stop));
+            assert!(values.iter().all(|value| value.is_finite()));
+            assert!(values.windows(2).all(|pair| pair[0] < pair[1]));
+        }
+    }
 
     #[test]
     fn logarithmic_sweeps_do_not_overflow_the_intermediate_ratio() {
