@@ -21,6 +21,7 @@ use super::filters::{
 use crate::codegen::LookupTable;
 use crate::laplace::{LaplaceCheckpoint, StateSpaceFilter};
 use crate::zfilter::ZiCheckpoint;
+use rspice_veriloga_runtime::AnalogAnalysisPhase;
 
 pub(crate) const INTEGRATION_CANDIDATE_NONE: u8 = 0;
 pub(crate) const INTEGRATION_CANDIDATE_VALID: u8 = 1;
@@ -398,8 +399,9 @@ pub struct VmContext {
     pub slew_filters: Vec<SlewFilter>,
     /// Cross detectors for `cross(...)` state
     pub cross_detectors: Vec<CrossDetector>,
-    /// Current analysis type (0=dc, 1=ac, 2=tran, 3=noise)
+    /// Physical analysis (0=dc, 1=ac, 2=tran, 3=noise, 4=explicit IC).
     pub analysis_type: u8,
+    pub analysis_phase: AnalogAnalysisPhase,
     /// Limiter behavior for the current device evaluation.
     pub evaluation_mode: VerilogAEvaluationMode,
     /// Set when any named limiter changed its proposal during the latest
@@ -476,6 +478,7 @@ impl Default for VmContext {
             slew_filters: Vec::new(),
             cross_detectors: Vec::new(),
             analysis_type: 0, // DC by default
+            analysis_phase: AnalogAnalysisPhase::Point,
             evaluation_mode: VerilogAEvaluationMode::NewtonLimited,
             limiter_active: 0,
             analysis_initial_step: false,
@@ -489,6 +492,16 @@ impl Default for VmContext {
 }
 
 impl VmContext {
+    #[inline]
+    pub fn analysis_query_mask(&self) -> u32 {
+        rspice_veriloga_runtime::analysis_query_mask(
+            self.analysis_type,
+            self.analysis_phase,
+            self.analysis_initial_step,
+            self.analysis_final_step,
+        )
+    }
+
     pub(crate) fn analog_effect_journal(
         &mut self,
     ) -> &mut rspice_veriloga_runtime::AnalogEffectJournal {
@@ -606,6 +619,7 @@ impl VmContext {
             slew_filters: Vec::new(),
             cross_detectors: Vec::new(),
             analysis_type: 0,
+            analysis_phase: AnalogAnalysisPhase::Point,
             evaluation_mode: VerilogAEvaluationMode::NewtonLimited,
             limiter_active: 0,
             analysis_initial_step: false,
@@ -657,6 +671,7 @@ impl VmContext {
             slew_filters: Vec::new(),
             cross_detectors: Vec::new(),
             analysis_type: 0,
+            analysis_phase: AnalogAnalysisPhase::Point,
             evaluation_mode: VerilogAEvaluationMode::NewtonLimited,
             limiter_active: 0,
             analysis_initial_step: false,
@@ -708,6 +723,7 @@ impl VmContext {
             slew_filters: Vec::new(),
             cross_detectors: Vec::new(),
             analysis_type: 0,
+            analysis_phase: AnalogAnalysisPhase::Point,
             evaluation_mode: VerilogAEvaluationMode::NewtonLimited,
             limiter_active: 0,
             analysis_initial_step: false,
@@ -1309,6 +1325,7 @@ impl VmContext {
         self.timestep = 0.0;
         self.integration = IntegrationCoefficients::inactive();
         self.analysis_type = 2;
+        self.analysis_phase = AnalogAnalysisPhase::Point;
         self.evaluation_mode = VerilogAEvaluationMode::NewtonLimited;
         self.limiter_active = 0;
         self.analysis_initial_step = false;

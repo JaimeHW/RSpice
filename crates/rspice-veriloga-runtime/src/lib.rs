@@ -26,7 +26,10 @@ pub use analog_effects::{
     AnalogEffectError, AnalogEffectJournal, AnalogEffectLimits, AnalogTaskArgument,
     AnalogTaskEvent, AnalogTaskInvocation, AnalogTaskKind,
 };
-pub use analog_lifecycle::AnalogEvaluationPhase;
+pub use analog_lifecycle::{
+    ANALYSIS_QUERY_COUNT, AnalogAnalysisPhase, AnalogEvaluationPhase, active_analysis_query_names,
+    analysis_query_id, analysis_query_mask, analysis_query_name,
+};
 
 pub use compatibility_catalog::{
     GENERATED_VERILOGA_COMPATIBILITY_CATALOG, GENERATED_VERILOGA_V27_COMBINED_IDENTITY_ALIASES,
@@ -2559,16 +2562,13 @@ impl Default for GeneratedSimulationParameters {
 
 impl GeneratedAnalysisKind {
     #[inline]
-    fn matches_query(self, query: &str) -> bool {
-        match query {
-            "dc" | "op" => matches!(self, Self::Dc),
-            "ac" => matches!(self, Self::Ac),
-            "tran" => matches!(self, Self::Tran),
-            "noise" => matches!(self, Self::Noise),
-            "ic" => matches!(self, Self::Ic),
-            "static" => matches!(self, Self::Dc | Self::Ic),
-            "smallsig" => matches!(self, Self::Ac | Self::Noise),
-            _ => false,
+    pub const fn code(self) -> u8 {
+        match self {
+            Self::Dc => 0,
+            Self::Ac => 1,
+            Self::Tran => 2,
+            Self::Noise => 3,
+            Self::Ic => 4,
         }
     }
 }
@@ -2579,6 +2579,7 @@ pub struct GeneratedEvalContext<'a> {
     temperature: Value,
     num_nodes: usize,
     analysis: GeneratedAnalysisKind,
+    analysis_phase: AnalogAnalysisPhase,
     analysis_initial_step: bool,
     analysis_final_step: bool,
     simparams: GeneratedSimulationParameters,
@@ -2662,11 +2663,24 @@ impl<'a> GeneratedEvalContext<'a> {
             num_nodes,
             analysis,
             analysis_initial_step: initial,
+            analysis_phase: AnalogAnalysisPhase::Point,
             analysis_final_step: final_step,
             simparams,
             evaluation_mode,
             evaluation_error: std::cell::Cell::new(None),
         }
+    }
+
+    /// Set the solver phase without starting a new physical analysis.
+    #[inline]
+    pub fn with_analysis_phase(mut self, phase: AnalogAnalysisPhase) -> Self {
+        self.analysis_phase = phase;
+        self
+    }
+
+    #[inline]
+    pub fn analysis_code(&self) -> u8 {
+        self.analysis.code()
     }
 
     #[inline]
@@ -2809,7 +2823,15 @@ impl<'a> GeneratedEvalContext<'a> {
 
     #[inline]
     pub fn analysis(&self, query: &str) -> bool {
-        self.analysis.matches_query(query)
+        analysis_query_id(query).is_some_and(|id| {
+            analysis_query_mask(
+                self.analysis.code(),
+                self.analysis_phase,
+                self.analysis_initial_step,
+                self.analysis_final_step,
+            ) & (1 << id)
+                != 0
+        })
     }
 
     #[inline]
@@ -2835,6 +2857,7 @@ impl<'a> GeneratedEvalContext<'a> {
     #[inline]
     pub fn analysis_ic(&self) -> bool {
         matches!(self.analysis, GeneratedAnalysisKind::Ic)
+            || (self.analysis_tran() && self.analysis_phase.is_equilibrium())
     }
 
     #[inline]
@@ -2842,7 +2865,12 @@ impl<'a> GeneratedEvalContext<'a> {
         matches!(
             self.analysis,
             GeneratedAnalysisKind::Dc | GeneratedAnalysisKind::Ic
-        )
+        ) || self.analysis_phase.is_equilibrium()
+    }
+
+    #[inline]
+    pub fn analysis_nodeset(&self) -> bool {
+        matches!(self.analysis_phase, AnalogAnalysisPhase::Nodeset)
     }
 
     #[inline]

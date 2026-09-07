@@ -162,6 +162,33 @@ endmodule
 }
 
 #[test]
+fn transient_operating_point_has_ic_and_static_queries_without_reinitialization() {
+    let model = write_model(
+        "analysis_phase",
+        r#"module analysis_phase(p,n);
+inout p,n; electrical p,n; real saved, initial_g;
+analog initial saved=analysis("static") && analysis("ic") && analysis("tran") ? 1e-3 : 9e-3;
+analog begin
+    @(initial_step("tran")) initial_g=analysis("static") && analysis("ic") ? 1e-3 : 9e-3;
+    @(initial_step("ic")) initial_g=20e-3;
+    I(p,n)<+(saved+initial_g+(analysis("static") ? 1e-3 : 0))*V(p,n);
+end
+endmodule"#,
+    );
+    let netlist = Netlist::parse(&format!("* transient analysis phases\nV1 in 0 1\nR1 in out 1k\nX1 out 0 analysis_phase\n.va \"{}\" analysis_phase\n.end\n", deck_path(&model))).unwrap();
+    let result = Engine::default().run_tran(&netlist, 2e-6, 1e-6).unwrap();
+    let out = node_series(&result.node_names, &result.voltages, "out");
+    assert!((out[0] - 0.25).abs() < 1e-9, "operating point: {out:?}");
+    for value in &out[1..] {
+        assert!(
+            (*value - 1.0 / 3.0).abs() < 1e-9,
+            "transient phase or initialization lifetime: {out:?}"
+        );
+    }
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
 fn veriloga_cross_refines_the_candidate_before_accepting_event_state() {
     let model = write_model(
         "cross_refinement",

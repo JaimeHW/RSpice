@@ -984,49 +984,9 @@ impl<'a> Vm<'a> {
             // Stack: [] -> [0 or 1]
             // analysis_type encoding: 0=dc, 1=ac, 2=tran, 3=noise, 4=ic
             Instruction::Analysis(analysis_str_id) => {
-                let current_type = self.context.analysis_type;
-                let result = match analysis_str_id {
-                    0 => {
-                        // "dc" check
-                        if current_type == 0 { 1.0 } else { 0.0 }
-                    }
-                    1 => {
-                        // "ac" check
-                        if current_type == 1 { 1.0 } else { 0.0 }
-                    }
-                    2 => {
-                        // "tran" check
-                        if current_type == 2 { 1.0 } else { 0.0 }
-                    }
-                    3 => {
-                        // "noise" check
-                        if current_type == 3 { 1.0 } else { 0.0 }
-                    }
-                    4 => {
-                        // "ic" check
-                        if current_type == 4 { 1.0 } else { 0.0 }
-                    }
-                    5 => {
-                        // "static": any equilibrium analysis (DC or IC)
-                        if current_type == 0 || current_type == 4 {
-                            1.0
-                        } else {
-                            0.0
-                        }
-                    }
-                    6 => {
-                        // "smallsig": frequency-domain small-signal analyses
-                        if current_type == 1 || current_type == 3 {
-                            1.0
-                        } else {
-                            0.0
-                        }
-                    }
-                    7 => f64::from(self.context.analysis_initial_step),
-                    8 => f64::from(self.context.analysis_final_step),
-                    _ => 0.0, // Unknown analysis type
-                };
-                self.stack.push(result);
+                let bit = 1_u32.checked_shl(u32::from(*analysis_str_id)).unwrap_or(0);
+                self.stack
+                    .push(f64::from(self.context.analysis_query_mask() & bit != 0));
             }
 
             // AboveState: initial-positive and rising crossing event detection
@@ -1041,9 +1001,10 @@ impl<'a> Vm<'a> {
                         .cross_detectors
                         .resize_with(*detector_id + 1, Default::default);
                 }
+                let is_static = self.context.analysis_query_mask() & (1 << 5) != 0;
                 let detector = &mut self.context.cross_detectors[*detector_id];
                 let enabled = event_integer_operand("above enable", enable)? != 0;
-                let result = if matches!(self.context.analysis_type, 0 | 4) {
+                let result = if is_static {
                     detector.eval_above_static(
                         value,
                         self.context.time,

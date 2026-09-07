@@ -1341,7 +1341,7 @@ fn metadata_digest_is_stable_and_hex_encoded() {
     assert_ne!(digest, StableDigest::from_text("module other; endmodule"));
 
     let metadata = CanonicalMetadata::for_source("fixture", "module tiny; endmodule");
-    assert_eq!(metadata.schema_version, 22);
+    assert_eq!(metadata.schema_version, 23);
     assert_eq!(metadata.source_package.as_str(), "fixture");
     assert_eq!(metadata.source_digest.as_str(), digest.as_hex());
 }
@@ -2181,7 +2181,7 @@ fn artifact_dump_is_deterministic_and_contains_phase_summaries() {
 
     assert_eq!(first, second);
     assert!(first.contains("canonical-veriloga-ir"));
-    assert!(first.contains("schema_version=22"));
+    assert!(first.contains("schema_version=23"));
     assert!(first.contains("source_package=fixture"));
     assert!(first.contains("source_digest="));
     assert!(first.contains("source_identity="));

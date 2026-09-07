@@ -1158,18 +1158,7 @@ fn binary_op(op: CfgBinaryOp) -> NativeOp {
 }
 
 fn analysis_code(name: &str) -> Option<u8> {
-    match name.to_ascii_lowercase().as_str() {
-        "dc" | "op" => Some(0),
-        "ac" => Some(1),
-        "tran" | "transient" => Some(2),
-        "noise" => Some(3),
-        "ic" => Some(4),
-        "static" => Some(5),
-        "smallsig" | "smallsignal" | "small_signal" => Some(6),
-        "__rspice_initial_step" => Some(7),
-        "__rspice_final_step" => Some(8),
-        _ => None,
-    }
+    rspice_veriloga_runtime::analysis_query_id(name)
 }
 
 /// What [`layout_order`] settles about one CFG: the order its blocks are laid

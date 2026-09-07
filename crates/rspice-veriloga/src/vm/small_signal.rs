@@ -681,19 +681,8 @@ impl<'a> SmallSignalVm<'a> {
                 self.stack.push(Complex64::new(0.0, 0.0));
             }
             Instruction::Analysis(kind) => {
-                let current = self.context.analysis_type;
-                let active = match kind {
-                    0 => current == 0,
-                    1 => current == 1,
-                    2 => current == 2,
-                    3 => current == 3,
-                    4 => current == 4,
-                    5 => matches!(current, 0 | 4),
-                    6 => matches!(current, 1 | 3),
-                    7 => self.context.analysis_initial_step,
-                    8 => self.context.analysis_final_step,
-                    _ => false,
-                };
+                let bit = 1_u32.checked_shl(u32::from(*kind)).unwrap_or(0);
+                let active = self.context.analysis_query_mask() & bit != 0;
                 self.stack.push(Complex64::new(f64::from(active), 0.0));
             }
             Instruction::AboveState(_) => {

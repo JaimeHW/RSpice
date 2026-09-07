@@ -81,6 +81,42 @@ assert_eq!(rebuilt.drain_analog_tasks().count(),0,"rebuilding must not replay th
 }
 
 #[test]
+fn generated_phase_changes_preserve_initialization_and_refresh_analysis_queries() {
+    let (state, stamp, noise) = generated_parts(
+        r#"module initialized_phase(p,n);
+inout p,n; electrical p,n; real saved;
+analog initial saved=analysis("static") ? 100 : 200;
+analog I(p,n)<+saved+analysis("static");
+endmodule"#,
+        "analysis phase lifetime",
+    );
+    run_generated_main(
+        "analysis phase lifetime",
+        &state,
+        &stamp,
+        &noise,
+        r#"
+let ctx = runtime::GeneratedEvalContext { voltages: &[0.0,0.0], temperature: 123.0 };
+let mut instance = device::state::Instance::new(&[0,1]);
+runtime::set_event_analysis(false, true);
+instance.begin_analysis(&ctx);
+let mut sink = [0.0];
+instance.stamp(&ctx, &mut runtime::GeneratedStamper { sink: Some(&mut sink) });
+assert_eq!(sink[0], 101.0);
+runtime::set_event_analysis(false, false);
+sink[0] = 0.0;
+instance.stamp(&ctx, &mut runtime::GeneratedStamper { sink: Some(&mut sink) });
+assert_eq!(sink[0], 100.0, "frequency transition replayed analog initial or cached the phase");
+instance.begin_analysis(&ctx);
+sink[0] = 0.0;
+instance.stamp(&ctx, &mut runtime::GeneratedStamper { sink: Some(&mut sink) });
+assert_eq!(sink[0], 200.0, "fresh analysis did not initialize");
+"#,
+    )
+    .expect("generated phase contract executes");
+}
+
+#[test]
 fn generated_continuation_does_not_execute_a_now_invalid_initializer() {
     let (state, stamp, noise) = generated_parts(
         r#"module continued_initial(p,n);
@@ -146,7 +182,8 @@ instance.initialize_analysis(&ctx);
 assert_eq!(&*instance.event_state_accepted, &[2.0,4.0]);
 let checkpoint = instance.capture_persistent_state();
 assert_eq!(checkpoint.event_variables.len(), 5);
-for (slot, value) in [(2, 2.0), (3, -1.0), (4, f64::NAN)] {
+assert_eq!(checkpoint.event_variables[2], 2.0, "physical transient analysis key");
+for (slot, value) in [(2, 5.0), (2, -1.0), (2, 0.5), (2, f64::NAN), (3, -1.0), (4, f64::NAN)] {
     let mut invalid = checkpoint.clone();
     invalid.event_variables[slot] = value;
     let before = instance.capture_rollback_state();
@@ -4542,9 +4579,13 @@ pub mod runtime {
             self.temperature * 8.617_333_262e-5
         }
         pub fn analysis(&self, query: &str) -> bool {
-            (query.eq_ignore_ascii_case("ac") && self.temperature == 123.0)
-                || (query.eq_ignore_ascii_case("tran")
+            ((query.eq_ignore_ascii_case("ac") || query == "__rspice_scope_ac") && self.temperature == 123.0)
+                || ((query.eq_ignore_ascii_case("tran") || query == "__rspice_scope_tran")
                     && ANALYSIS_TRAN.load(std::sync::atomic::Ordering::SeqCst))
+                || (query.eq_ignore_ascii_case("static") && self.analysis_static())
+        }
+        pub fn analysis_code(&self) -> u8 {
+            if self.analysis("ac") { 1 } else if self.analysis("tran") { 2 } else { 0 }
         }
         pub fn analysis_initial_step(&self) -> bool {
             ANALYSIS_INITIAL_STEP.load(std::sync::atomic::Ordering::SeqCst)

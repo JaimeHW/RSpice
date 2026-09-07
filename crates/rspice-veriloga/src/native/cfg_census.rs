@@ -342,12 +342,12 @@ impl OperatingPoint {
             temperature: self.temperature,
             time: self.time,
             multiplicity: self.multiplicity,
-            analysis: self.analysis,
-            initial_step: self.initial_step,
-            // `EvalContext::analysis_final_step` is never set by `context`, so
-            // a walk that read it as anything else would stand at a different
-            // point from the compiled plans.
-            final_step: false,
+            analysis_mask: rspice_veriloga_runtime::analysis_query_mask(
+                self.analysis,
+                rspice_veriloga_runtime::AnalogAnalysisPhase::Point,
+                self.initial_step,
+                false,
+            ),
         }
     }
 
@@ -420,20 +420,15 @@ fn analysis_names(
     analysis: u8,
     initial_step: bool,
 ) -> std::collections::HashSet<smol_str::SmolStr> {
-    let names: &[&str] = match analysis {
-        0 => &["dc", "op", "static"],
-        1 => &["ac", "smallsig", "smallsignal", "small_signal"],
-        2 => &["tran", "transient"],
-        3 => &["noise", "smallsig", "smallsignal", "small_signal"],
-        4 => &["ic", "static"],
-        _ => &[],
-    };
-    let mut active: std::collections::HashSet<smol_str::SmolStr> =
-        names.iter().map(|name| (*name).into()).collect();
-    if initial_step {
-        active.insert(smol_str::SmolStr::new("__rspice_initial_step"));
-    }
-    active
+    let mask = rspice_veriloga_runtime::analysis_query_mask(
+        analysis,
+        rspice_veriloga_runtime::AnalogAnalysisPhase::Point,
+        initial_step,
+        false,
+    );
+    rspice_veriloga_runtime::active_analysis_query_names(mask)
+        .map(smol_str::SmolStr::new)
+        .collect()
 }
 
 #[derive(Default)]

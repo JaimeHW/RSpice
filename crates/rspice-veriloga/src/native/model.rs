@@ -1983,6 +1983,7 @@ mod tests {
             param_given_len: 0,
             branch_unknowns: std::ptr::null(),
             analysis_type: 0,
+            analysis_phase: rspice_veriloga_runtime::AnalogAnalysisPhase::Point,
             multiplicity: 1.0,
             zi_filters: std::ptr::null_mut(),
             zi_filters_len: 0,

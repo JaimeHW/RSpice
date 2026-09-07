@@ -155,6 +155,7 @@ pub struct BuiltinVerilogAInstance {
     pub branches: Vec<usize>,
     temperature: Value,
     analysis_initial_step: bool,
+    analysis_phase: rspice_veriloga_runtime::AnalogAnalysisPhase,
     analysis_final_step: bool,
     static_stamp_cache: Arc<GeneratedStaticStampCache>,
     /// Exact current entering each external terminal during the most recent
@@ -708,6 +709,15 @@ impl BuiltinVerilogADevices {
         }
     }
 
+    pub(crate) fn set_analysis_phase(
+        &mut self,
+        phase: rspice_veriloga_runtime::AnalogAnalysisPhase,
+    ) {
+        for device in &mut self.devices {
+            device.analysis_phase = phase;
+        }
+    }
+
     /// Initialize a staged collection before the circuit publishes any new
     /// analysis state. The caller retains the original collection on failure.
     pub(crate) fn begin_analysis(
@@ -993,7 +1003,8 @@ impl BuiltinVerilogAInstance {
                 false,
                 simparams,
                 GeneratedEvaluationMode::StaticProbe,
-            );
+            )
+            .with_analysis_phase(self.analysis_phase);
             self.kind
                 .restore_analysis_continuation_state(&checkpoint.state, &ctx)?;
         } else {
@@ -1064,6 +1075,7 @@ impl BuiltinVerilogAInstance {
             branches,
             temperature,
             analysis_initial_step: false,
+            analysis_phase: rspice_veriloga_runtime::AnalogAnalysisPhase::Point,
             analysis_final_step: false,
             static_stamp_cache: Arc::new(GeneratedStaticStampCache::default()),
             terminal_currents: vec![0.0; external_terminals.len()],
@@ -1333,7 +1345,8 @@ impl BuiltinVerilogAInstance {
             self.analysis_initial_step,
             self.analysis_final_step,
             simparams,
-        );
+        )
+        .with_analysis_phase(self.analysis_phase);
         let descriptors = self.kind.noise_descriptors();
         let mut evaluated = Vec::with_capacity(descriptors.len());
         let mut visitor_error = None;
@@ -1453,7 +1466,8 @@ impl BuiltinVerilogAInstance {
             self.analysis_initial_step,
             self.analysis_final_step,
             simparams,
-        );
+        )
+        .with_analysis_phase(self.analysis_phase);
         let processes = self.kind.grouped_noise_process_descriptors();
         let injections = self.kind.grouped_noise_injection_descriptors();
         Self::validate_grouped_noise_catalog(processes, injections).map_err(|source| {
@@ -1701,7 +1715,8 @@ impl BuiltinVerilogAInstance {
             self.analysis_final_step,
             simparams,
             evaluation_mode,
-        );
+        )
+        .with_analysis_phase(self.analysis_phase);
         // A StaticDaeProbe is a discarded F(x)-B(t) observation used by the
         // OneStep history path. It must not replace any candidate produced by
         // the preceding complete transient evaluation, including ordinary
@@ -1777,7 +1792,8 @@ impl BuiltinVerilogAInstance {
             false,
             false,
             simparams,
-        );
+        )
+        .with_analysis_phase(self.analysis_phase);
         self.kind.begin_analysis(&ctx);
         if let Some(error) = ctx.take_evaluation_error() {
             return Err(error);
@@ -1916,7 +1932,8 @@ impl BuiltinVerilogAInstance {
             self.analysis_initial_step,
             self.analysis_final_step,
             simparams,
-        );
+        )
+        .with_analysis_phase(self.analysis_phase);
         if !self
             .static_stamp_cache
             .axis_indices_match(&self.nodes, &self.branches, num_nodes)
@@ -1978,7 +1995,8 @@ impl BuiltinVerilogAInstance {
             self.analysis_initial_step,
             self.analysis_final_step,
             simparams,
-        );
+        )
+        .with_analysis_phase(self.analysis_phase);
         if !self
             .static_stamp_cache
             .axis_indices_match(&self.nodes, &self.branches, num_nodes)
@@ -2170,6 +2188,7 @@ pub(crate) fn instantiate_builtin_scoped(
         branches,
         temperature: crate::constants::TEMP_REFERENCE,
         analysis_initial_step: false,
+        analysis_phase: rspice_veriloga_runtime::AnalogAnalysisPhase::Point,
         analysis_final_step: false,
         static_stamp_cache: Arc::new(GeneratedStaticStampCache::default()),
         terminal_currents: vec![0.0; expected_nodes],

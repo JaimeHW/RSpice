@@ -24,6 +24,40 @@ fn deck_path(path: &std::path::Path) -> String {
 }
 
 #[test]
+fn ac_equilibrium_reports_static_analysis_to_initial_step() {
+    let model = write_model(
+        "static_operating_point",
+        r#"module static_operating_point(p,n);
+inout p,n; electrical p,n;
+real conductance;
+analog begin
+    @(initial_step("ac")) conductance=analysis("static") ? 1e-3 : 3e-3;
+    I(p,n)<+(conductance+(analysis("static") ? 2e-3 : 0))*V(p,n);
+end
+endmodule"#,
+    );
+    let netlist = Netlist::parse(&format!(
+        "* AC operating-point analysis query\nV1 in 0 DC 0 AC 1\nR1 in out 1k\nX1 out 0 static_operating_point\n.va \"{}\" static_operating_point\n.end\n",
+        deck_path(&model),
+    )).unwrap();
+    let results = Engine::default().run_ac(&netlist, &[1e3, 1e4]).unwrap();
+    assert_eq!(results.len(), 2);
+    for result in results {
+        let output = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("out"))
+            .unwrap();
+        let voltage = result.voltages[output];
+        assert!(
+            (voltage.re - 0.5).abs() < 1e-12 && voltage.im.abs() < 1e-12,
+            "expected a 1 mS conductance initialized during the static operating point, got {voltage}"
+        );
+    }
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
 fn ac_initial_step_initializes_every_frequency_from_the_committed_operating_point() {
     let model = write_model(
         "initial_step",

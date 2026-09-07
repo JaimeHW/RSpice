@@ -25,4 +25,5 @@ pub(crate) use filters::{
     SlewCheckpoint, TransitionCheckpoint, TransitionSegmentCheckpoint, timer_event_evaluation,
 };
 pub use filters::{CrossDetector, DelayBuffer, SlewFilter, TransitionFilter};
+pub use rspice_veriloga_runtime::AnalogAnalysisPhase;
 pub(crate) use small_signal::SmallSignalVm;

@@ -478,6 +478,7 @@ pub(crate) struct BoundaryBus {
 #[derive(Clone, Copy)]
 struct AnalogSolverInputs {
     analysis: u8,
+    phase: rspice_veriloga_runtime::AnalogAnalysisPhase,
     initial_step: bool,
     final_step: bool,
     time_seconds: f64,
@@ -493,6 +494,7 @@ impl AnalogSolverInputs {
     const fn analysis_start(analysis: u8) -> Self {
         Self {
             analysis,
+            phase: rspice_veriloga_runtime::AnalogAnalysisPhase::Point,
             initial_step: false,
             final_step: false,
             time_seconds: 0.0,
@@ -905,12 +907,24 @@ impl MixedSignalHost {
     /// Reset both domains for a fresh analysis, retaining compiled code and
     /// bridge wiring. CircuitData stages hosts before publishing this reset.
     pub(crate) fn begin_analog_analysis(&mut self, analysis: u8) -> Result<(), MixedSignalError> {
+        self.begin_analog_analysis_in_phase(
+            analysis,
+            rspice_veriloga_runtime::AnalogAnalysisPhase::Point,
+        )
+    }
+
+    pub(crate) fn begin_analog_analysis_in_phase(
+        &mut self,
+        analysis: u8,
+        phase: rspice_veriloga_runtime::AnalogAnalysisPhase,
+    ) -> Result<(), MixedSignalError> {
         self.require_idle("begin an analysis")?;
         self.analog
             .make_mut()
-            .try_begin_analysis(analysis)
+            .try_begin_analysis_in_phase(analysis, phase)
             .map_err(analog_error)?;
         self.analog_inputs = AnalogSolverInputs::analysis_start(analysis);
+        self.analog_inputs.phase = phase;
         self.state.digital = MixedCell::new(self.state.digital.fresh());
         self.state.accepted_adc_voltages.fill(0.0);
         self.state.accepted_adc_transition_times.fill(None);
@@ -930,6 +944,19 @@ impl MixedSignalHost {
             .make_mut()
             .try_set_temperature(temperature)
             .map_err(analog_error)
+    }
+
+    pub(crate) fn set_analog_analysis_phase(
+        &mut self,
+        phase: rspice_veriloga_runtime::AnalogAnalysisPhase,
+    ) -> Result<(), MixedSignalError> {
+        self.require_idle("configure analysis phase")?;
+        self.analog
+            .make_mut()
+            .try_set_analysis_phase(phase)
+            .map_err(analog_error)?;
+        self.analog_inputs.phase = phase;
+        Ok(())
     }
 
     /// Start digital processes after every analog initializer has completed and
@@ -1268,6 +1295,7 @@ impl MixedSignalHost {
         let previous_inputs = self.analog_inputs;
         let inputs = AnalogSolverInputs {
             analysis: 2,
+            phase: self.analog_inputs.phase,
             initial_step,
             final_step,
             time_seconds,
@@ -1365,6 +1393,9 @@ impl MixedSignalHost {
         let analog = self.analog.make_mut();
         analog
             .try_set_analysis_type(inputs.analysis)
+            .map_err(analog_error)?;
+        analog
+            .try_set_analysis_phase(inputs.phase)
             .map_err(analog_error)?;
         analog
             .try_set_analysis_step(inputs.initial_step, inputs.final_step)

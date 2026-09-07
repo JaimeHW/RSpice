@@ -92,7 +92,10 @@ pub const WASM_JIT_ABI_VERSION: u32 = 9;
 /// landed there and no module reached it — so this is the version where the
 /// export actually starts going missing, and a worker holding an 11 would both
 /// compute variables a 12 does not and call an export a 12 no longer emits.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 12;
+/// 12 to 13 separates physical-analysis global-event filters from
+/// phase-sensitive analysis queries. Old modules must be rebuilt even though
+/// their frame layout and helper signatures remain compatible.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 13;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;

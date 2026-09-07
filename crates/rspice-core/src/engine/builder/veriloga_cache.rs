@@ -243,7 +243,9 @@ use super::*;
 // initialization $error could be discarded. Their calls cannot be recovered
 // from a cached CompiledModel. This also covers portable entries without a
 // canonical artifact, which cannot rely on the canonical schema check.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 44;
+// Version 45 gives global-event filters distinct physical-analysis query IDs;
+// old bytecode uses phase-sensitive predicates and must be rebuilt from source.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 45;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

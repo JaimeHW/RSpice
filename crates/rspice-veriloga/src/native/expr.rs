@@ -7245,18 +7245,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         }
         for (index, argument) in args.iter().copied().enumerate() {
             let analysis_name = self.string_literal_argument(name, argument)?;
-            let analysis_id = match analysis_name.to_ascii_lowercase().as_str() {
-                "dc" | "op" => Some(0),
-                "ac" => Some(1),
-                "tran" | "transient" => Some(2),
-                "noise" => Some(3),
-                "ic" => Some(4),
-                "static" => Some(5),
-                "smallsig" | "smallsignal" | "small_signal" => Some(6),
-                "__rspice_initial_step" => Some(7),
-                "__rspice_final_step" => Some(8),
-                _ => None,
-            };
+            let analysis_id = rspice_veriloga_runtime::analysis_query_id(&analysis_name);
             if let Some(analysis_id) = analysis_id {
                 self.push(NativeOp::Analysis(analysis_id))?;
             } else {

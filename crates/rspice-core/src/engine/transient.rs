@@ -3518,9 +3518,15 @@ impl Engine {
         // Pre-simulation effects also belong to models with no matrix unknowns.
         // Run them before the empty-circuit shortcut can manufacture a trace.
         if resume.is_none() {
-            circuit
-                .begin_veriloga_analysis(2)
-                .map_err(SimulationError::Circuit)?;
+            if startup_mode.is_uic() {
+                circuit.begin_veriloga_analysis(2)
+            } else {
+                circuit.begin_veriloga_analysis_in_phase(
+                    2,
+                    rspice_veriloga_runtime::AnalogAnalysisPhase::Equilibrium,
+                )
+            }
+            .map_err(SimulationError::Circuit)?;
             Self::deliver_initial_analog_tasks(&mut circuit, abort)?;
             #[cfg(feature = "veriloga")]
             circuit.start_mixed_digital_execution()?;
@@ -4404,6 +4410,9 @@ impl Engine {
                 return Err(error);
             }
         }
+        circuit
+            .set_veriloga_analysis_phase(rspice_veriloga_runtime::AnalogAnalysisPhase::Point)
+            .map_err(SimulationError::Circuit)?;
         for (trace, &retain) in branch_currents
             .iter_mut()
             .zip(&capture_plan.branch_currents)

@@ -480,7 +480,7 @@ fn evaluation_frame(context: &crate::vm::VmContext) -> Result<super::WasmJitEval
         variables_len,
         prelude_slots_ptr,
         prelude_slots_len,
-        analysis_mask: analysis_mask(context),
+        analysis_mask: context.analysis_query_mask(),
         temperature: context.temperature,
         thermal_voltage: context.vt(),
         time: context.time,
@@ -503,24 +503,4 @@ fn slice_capability<T>(slice: &[T]) -> Result<(u32, u32), String> {
 fn pointer_offset(pointer: *const u8) -> Result<u32, String> {
     u32::try_from(pointer as usize)
         .map_err(|_| "WASM JIT memory capability is outside wasm32".to_owned())
-}
-
-#[cfg(target_arch = "wasm32")]
-fn analysis_mask(context: &crate::vm::VmContext) -> u32 {
-    let mut mask = 1_u32
-        .checked_shl(u32::from(context.analysis_type))
-        .unwrap_or(0);
-    if matches!(context.analysis_type, 0 | 4) {
-        mask |= 1 << 5;
-    }
-    if matches!(context.analysis_type, 1 | 3) {
-        mask |= 1 << 6;
-    }
-    if context.analysis_initial_step {
-        mask |= 1 << 7;
-    }
-    if context.analysis_final_step {
-        mask |= 1 << 8;
-    }
-    mask
 }

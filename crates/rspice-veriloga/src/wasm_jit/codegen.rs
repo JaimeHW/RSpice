@@ -3149,7 +3149,7 @@ mod tests {
 
     #[test]
     fn independent_wasm_engine_executes_analysis_masks_by_id() {
-        let programs = (0_u8..=8)
+        let programs = (0_u8..rspice_veriloga_runtime::ANALYSIS_QUERY_COUNT)
             .map(|analysis_id| program(vec![NativeOp::Analysis(analysis_id)], 1))
             .collect::<Vec<_>>();
         let program_refs = programs
@@ -3202,6 +3202,15 @@ mod tests {
             ((1 << 0) | (1 << 5) | (1 << 7), [0_u8, 5, 7].as_slice()),
             ((1 << 2) | (1 << 8), [2_u8, 8].as_slice()),
             ((1 << 1) | (1 << 6), [1_u8, 6].as_slice()),
+            (
+                (1 << 1) | (1 << 5) | (1 << 6) | (1 << 11),
+                [1_u8, 5, 6, 11].as_slice(),
+            ),
+            (
+                (1 << 2) | (1 << 4) | (1 << 5) | (1 << 9) | (1 << 12),
+                [2_u8, 4, 5, 9, 12].as_slice(),
+            ),
+            ((1 << 4) | (1 << 5) | (1 << 14), [4_u8, 5, 14].as_slice()),
         ] {
             frame[FRAME_ANALYSIS_MASK_OFFSET as usize..FRAME_ANALYSIS_MASK_OFFSET as usize + 4]
                 .copy_from_slice(&(mask as u32).to_le_bytes());
@@ -3209,7 +3218,7 @@ mod tests {
                 .write(&mut store, 0, &frame)
                 .expect("write evaluation frame");
 
-            for analysis_id in 0_u8..=8 {
+            for analysis_id in 0_u8..rspice_veriloga_runtime::ANALYSIS_QUERY_COUNT {
                 let export = format!("rspice_wasm_jit_value_{analysis_id:08x}");
                 let entry = instance
                     .get_typed_func::<i32, i32>(&store, &export)

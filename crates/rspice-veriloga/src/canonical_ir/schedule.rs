@@ -1816,9 +1816,8 @@ fn leaf_class(kind: &CfgValueKind, parameter_scopes: &[ParameterScope]) -> Inval
         | CfgValueKind::Timer { .. }
         | CfgValueKind::Limit { .. }
         | CfgValueKind::LimitPrevious { .. }
-        // Both of these are constant within an analysis, and both are put here
-        // rather than lower on purpose: `$simparam("gmin")` moves during gmin
-        // stepping, and a cache keyed on anything coarser would hand back a
+        // Solver-phase analysis queries and `$simparam("gmin")` can change
+        // within one analysis. A cache keyed on anything coarser would hand back a
         // value from the previous step. The cost is small — they appear a
         // handful of times per model — and the failure they avoid is a
         // convergence bug that looks like a model problem.

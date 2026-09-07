@@ -2504,10 +2504,22 @@ impl CircuitData {
         }
     }
 
+    pub(crate) fn begin_veriloga_analysis(&mut self, analysis: u8) -> Result<(), String> {
+        self.begin_veriloga_analysis_in_phase(
+            analysis,
+            rspice_veriloga_runtime::AnalogAnalysisPhase::Point,
+        )
+    }
+
     /// Start a fresh analysis across runtime, generated, and mixed models. Publish
     /// the staged collections only after every instance initializes, keeping
     /// the previous trajectory intact if any initializer fails.
-    pub(crate) fn begin_veriloga_analysis(&mut self, analysis: u8) -> Result<(), String> {
+    pub(crate) fn begin_veriloga_analysis_in_phase(
+        &mut self,
+        analysis: u8,
+        phase: rspice_veriloga_runtime::AnalogAnalysisPhase,
+    ) -> Result<(), String> {
+        let _ = phase;
         if analysis > 4 {
             return Err(format!(
                 "Verilog-A analysis must be 0=dc, 1=ac, 2=tran, 3=noise, or 4=ic, got {analysis}"
@@ -2518,9 +2530,11 @@ impl CircuitData {
         #[cfg(feature = "veriloga")]
         for device in runtime.iter_mut() {
             let instance = device.name.clone();
-            device.try_begin_analysis(analysis).map_err(|error| {
-                format!("Verilog-A device '{instance}' analysis begin failed: {error}")
-            })?;
+            device
+                .try_begin_analysis_in_phase(analysis, phase)
+                .map_err(|error| {
+                    format!("Verilog-A device '{instance}' analysis begin failed: {error}")
+                })?;
         }
         #[cfg(feature = "veriloga-builtins-base")]
         let generated = {
@@ -2534,6 +2548,7 @@ impl CircuitData {
                 _ => unreachable!("validated Verilog-A analysis"),
             };
             let mut generated = self.generated_veriloga_devices.clone();
+            generated.set_analysis_phase(phase);
             generated
                 .begin_analysis(kind, self.generated_simulation_parameters, self.num_nodes)
                 .map_err(|error| format!("generated Verilog-A analysis begin failed: {error}"))?;
@@ -2543,12 +2558,13 @@ impl CircuitData {
         {
             let mut mixed = self.mixed_signal_hosts.clone();
             for host in &mut mixed {
-                host.begin_analog_analysis(analysis).map_err(|error| {
-                    format!(
-                        "mixed Verilog-AMS instance '{}' analysis begin failed: {error}",
-                        host.instance_name()
-                    )
-                })?;
+                host.begin_analog_analysis_in_phase(analysis, phase)
+                    .map_err(|error| {
+                        format!(
+                            "mixed Verilog-AMS instance '{}' analysis begin failed: {error}",
+                            host.instance_name()
+                        )
+                    })?;
             }
             self.veriloga_devices = runtime;
             self.mixed_signal_hosts = mixed;
@@ -2565,6 +2581,36 @@ impl CircuitData {
         self.begin_veriloga_equilibrium_analysis(0)
     }
 
+    /// Change a solver phase without starting a new analysis or resetting state.
+    pub(crate) fn set_veriloga_analysis_phase(
+        &mut self,
+        phase: rspice_veriloga_runtime::AnalogAnalysisPhase,
+    ) -> Result<(), String> {
+        let _ = phase;
+        #[cfg(feature = "veriloga")]
+        {
+            for device in self.veriloga_devices.iter_mut() {
+                device.try_set_analysis_phase(phase).map_err(|error| {
+                    format!(
+                        "Verilog-A device '{}' analysis phase setup failed: {error}",
+                        device.name
+                    )
+                })?;
+            }
+            for host in &mut self.mixed_signal_hosts {
+                host.set_analog_analysis_phase(phase).map_err(|error| {
+                    format!(
+                        "mixed Verilog-AMS instance '{}' analysis phase setup failed: {error}",
+                        host.instance_name()
+                    )
+                })?;
+            }
+        }
+        #[cfg(feature = "veriloga-builtins-base")]
+        self.generated_veriloga_devices.set_analysis_phase(phase);
+        Ok(())
+    }
+
     /// Begin an equilibrium analysis whose equations are solved by the DC
     /// operating-point machinery but whose physical Verilog-A analysis is
     /// DC, AC, noise, or forced initial-condition evaluation.
@@ -2577,7 +2623,10 @@ impl CircuitData {
                 "equilibrium Verilog-A analysis must be 0=dc, 1=ac, 3=noise, or 4=ic, got {analysis}"
             ));
         }
-        self.begin_veriloga_analysis(analysis)?;
+        self.begin_veriloga_analysis_in_phase(
+            analysis,
+            rspice_veriloga_runtime::AnalogAnalysisPhase::Equilibrium,
+        )?;
         self.set_veriloga_equilibrium_analysis_override(analysis);
         Ok(())
     }
@@ -2628,6 +2677,21 @@ impl CircuitData {
         initial_step: bool,
         final_step: bool,
     ) -> Result<(), String> {
+        self.prepare_veriloga_analysis_point(
+            analysis,
+            rspice_veriloga_runtime::AnalogAnalysisPhase::Equilibrium,
+            initial_step,
+            final_step,
+        )
+    }
+
+    fn prepare_veriloga_analysis_point(
+        &mut self,
+        analysis: u8,
+        phase: rspice_veriloga_runtime::AnalogAnalysisPhase,
+        initial_step: bool,
+        final_step: bool,
+    ) -> Result<(), String> {
         if !matches!(analysis, 0 | 1 | 3 | 4) {
             return Err(format!(
                 "equilibrium Verilog-A analysis must be 0=dc, 1=ac, 3=noise, or 4=ic, got {analysis}"
@@ -2635,12 +2699,15 @@ impl CircuitData {
         }
         // Both arguments remain part of the lifecycle contract even in a
         // feature-minimal build where neither Verilog-A backend is compiled.
-        let _ = (initial_step, final_step);
+        let _ = (phase, initial_step, final_step);
         #[cfg(feature = "veriloga")]
         for device in self.veriloga_devices.iter_mut() {
             let instance = device.name.clone();
             device.try_set_analysis_type(analysis).map_err(|error| {
                 format!("Verilog-A device '{instance}' equilibrium analysis setup failed: {error}")
+            })?;
+            device.try_set_analysis_phase(phase).map_err(|error| {
+                format!("Verilog-A device '{instance}' analysis phase setup failed: {error}")
             })?;
             device.try_set_time(0.0).map_err(|error| {
                 format!("Verilog-A device '{instance}' equilibrium time setup failed: {error}")
@@ -2659,6 +2726,7 @@ impl CircuitData {
 
         #[cfg(feature = "veriloga-builtins-base")]
         {
+            self.generated_veriloga_devices.set_analysis_phase(phase);
             self.generated_veriloga_devices.set_timepoint(
                 0.0,
                 0.0,
@@ -2677,7 +2745,12 @@ impl CircuitData {
         &mut self,
         analysis: u8,
     ) -> Result<(), String> {
-        self.prepare_veriloga_equilibrium_analysis_point(analysis, false, false)?;
+        self.prepare_veriloga_analysis_point(
+            analysis,
+            rspice_veriloga_runtime::AnalogAnalysisPhase::Point,
+            false,
+            false,
+        )?;
         #[cfg(feature = "veriloga-builtins-base")]
         self.generated_veriloga_devices
             .set_operating_point_analysis_override(None);
@@ -2697,7 +2770,12 @@ impl CircuitData {
                 "frequency-domain Verilog-A analysis must be 1=ac or 3=noise, got {analysis}"
             ));
         }
-        self.prepare_veriloga_equilibrium_analysis_point(analysis, false, final_step)
+        self.prepare_veriloga_analysis_point(
+            analysis,
+            rspice_veriloga_runtime::AnalogAnalysisPhase::Point,
+            false,
+            final_step,
+        )
     }
 
     /// Atomically accept the exact public analysis point across both

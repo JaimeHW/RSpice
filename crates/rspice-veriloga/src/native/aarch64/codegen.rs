@@ -89,6 +89,7 @@ const STATE_INITIALIZED_LEN_OFFSET: usize =
     std::mem::offset_of!(EvalContext, state_initialized_len);
 const BRANCH_UNKNOWNS_OFFSET: usize = std::mem::offset_of!(EvalContext, branch_unknowns);
 const ANALYSIS_TYPE_OFFSET: usize = std::mem::offset_of!(EvalContext, analysis_type);
+const ANALYSIS_PHASE_OFFSET: usize = std::mem::offset_of!(EvalContext, analysis_phase);
 const ANALYSIS_INITIAL_STEP_OFFSET: usize =
     std::mem::offset_of!(EvalContext, analysis_initial_step);
 const ANALYSIS_FINAL_STEP_OFFSET: usize = std::mem::offset_of!(EvalContext, analysis_final_step);
@@ -2722,7 +2723,7 @@ impl FunctionCompiler {
                 .ldrb_w_unsigned(XReg::X16, self.context_register(), offset)?;
             return self.encoder.scvtf_d_x(result, XReg::X16);
         }
-        if analysis_id > 8 {
+        if analysis_id >= rspice_veriloga_runtime::ANALYSIS_QUERY_COUNT {
             return self.emit_literal(result, 0.0);
         }
 
@@ -2731,13 +2732,58 @@ impl FunctionCompiler {
         self.emit_literal(DReg::D30, 0.0)?;
         self.emit_literal(DReg::D31, 1.0)?;
         match analysis_id {
-            0..=4 => {
-                self.encoder.cmp_x_imm(XReg::X15, u16::from(analysis_id))?;
+            0..=3 | 10..=14 => {
+                let physical = if analysis_id >= 10 {
+                    analysis_id - 10
+                } else {
+                    analysis_id
+                };
+                self.encoder.cmp_x_imm(XReg::X15, u16::from(physical))?;
                 self.encoder
                     .fcsel_d(result, DReg::D31, DReg::D30, Condition::Equal);
             }
-            5 | 6 => {
-                let (first, second) = if analysis_id == 5 { (0, 4) } else { (1, 3) };
+            4 | 5 => {
+                self.encoder.cmp_x_imm(XReg::X15, 4)?;
+                let explicit_ic = self.encoder.b_cond_placeholder(Condition::Equal);
+                let direct_dc = if analysis_id == 5 {
+                    self.encoder.cmp_x_imm(XReg::X15, 0)?;
+                    Some(self.encoder.b_cond_placeholder(Condition::Equal))
+                } else {
+                    None
+                };
+                let not_transient = if analysis_id == 4 {
+                    self.encoder.cmp_x_imm(XReg::X15, 2)?;
+                    Some(self.encoder.b_cond_placeholder(Condition::NotEqual))
+                } else {
+                    None
+                };
+                self.encoder.ldrb_w_unsigned(
+                    XReg::X15,
+                    self.context_register(),
+                    ANALYSIS_PHASE_OFFSET,
+                )?;
+                self.encoder.cmp_x_imm(XReg::X15, 0)?;
+                self.encoder
+                    .fcsel_d(result, DReg::D31, DReg::D30, Condition::NotEqual);
+                let phase_done = self.encoder.b_placeholder();
+                let true_target = self.encoder.position();
+                self.encoder.patch_branch(explicit_ic, true_target)?;
+                if let Some(jump) = direct_dc {
+                    self.encoder.patch_branch(jump, true_target)?;
+                }
+                self.encoder.fmov_d(result, DReg::D31);
+                let true_done = self.encoder.b_placeholder();
+                if let Some(jump) = not_transient {
+                    let false_target = self.encoder.position();
+                    self.encoder.patch_branch(jump, false_target)?;
+                    self.encoder.fmov_d(result, DReg::D30);
+                }
+                let done = self.encoder.position();
+                self.encoder.patch_branch(phase_done, done)?;
+                self.encoder.patch_branch(true_done, done)?;
+            }
+            6 => {
+                let (first, second) = (1, 3);
                 self.encoder.cmp_x_imm(XReg::X15, first)?;
                 let first_matches = self.encoder.b_cond_placeholder(Condition::Equal);
                 self.encoder.cmp_x_imm(XReg::X15, second)?;
@@ -2750,8 +2796,21 @@ impl FunctionCompiler {
                 let done_target = self.encoder.position();
                 self.encoder.patch_branch(done, done_target)?;
             }
+            9 => {
+                self.encoder.ldrb_w_unsigned(
+                    XReg::X15,
+                    self.context_register(),
+                    ANALYSIS_PHASE_OFFSET,
+                )?;
+                self.encoder.cmp_x_imm(
+                    XReg::X15,
+                    rspice_veriloga_runtime::AnalogAnalysisPhase::Nodeset as u16,
+                )?;
+                self.encoder
+                    .fcsel_d(result, DReg::D31, DReg::D30, Condition::Equal);
+            }
             7 | 8 => unreachable!("step flags handled above"),
-            _ => unreachable!("analysis IDs above eight handled above"),
+            _ => unreachable!("unknown analysis IDs handled above"),
         }
         Ok(())
     }
@@ -4765,6 +4824,43 @@ mod tests {
             0.0
         );
         assert!(context.take_runtime_error().is_none());
+    }
+
+    #[test]
+    fn analysis_queries_match_the_shared_solver_phase_contract() {
+        use rspice_veriloga_runtime::{
+            ANALYSIS_QUERY_COUNT, AnalogAnalysisPhase, analysis_query_mask,
+        };
+        let mut context = EvalContext::empty_for_test();
+        for query in 0..ANALYSIS_QUERY_COUNT {
+            let analysis_program = program(vec![NativeOp::Analysis(query)], 1);
+            for analysis in 0..=4 {
+                for phase in [
+                    AnalogAnalysisPhase::Point,
+                    AnalogAnalysisPhase::Equilibrium,
+                    AnalogAnalysisPhase::Nodeset,
+                ] {
+                    for (initial, final_step) in
+                        [(false, false), (true, false), (false, true), (true, true)]
+                    {
+                        context.analysis_type = analysis;
+                        context.analysis_phase = phase;
+                        context.analysis_initial_step = u8::from(initial);
+                        context.analysis_final_step = u8::from(final_step);
+                        let expected = f64::from(
+                            analysis_query_mask(analysis, phase, initial, final_step)
+                                & (1 << query)
+                                != 0,
+                        );
+                        assert_eq!(
+                            execute_with_context(&analysis_program, &context, &[]),
+                            expected,
+                            "query {query}, analysis {analysis}, phase {phase:?}"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[cfg(target_arch = "aarch64")]

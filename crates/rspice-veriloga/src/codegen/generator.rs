@@ -1419,28 +1419,10 @@ impl CodeGenerator {
             Node::Analysis(name) => {
                 // analysis(name) - check current analysis type
                 let name = arena.name(name);
-                let analysis_id = match name.to_lowercase().as_str() {
-                    "dc" | "op" => 0,
-                    "ac" => 1,
-                    "tran" | "transient" => 2,
-                    "noise" => 3,
-                    "ic" => 4,
-                    // "static" matches any equilibrium (DC or IC) analysis
-                    "static" => 5,
-                    // "smallsig" matches small-signal frequency-domain analyses.
-                    "smallsig" | "smallsignal" | "small_signal" => 6,
-                    "__rspice_initial_step" => 7,
-                    "__rspice_final_step" => 8,
-                    _ => {
-                        return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
-                            format!("analysis() unknown analysis name '{name}'"),
-                        ))
-                        .into());
-                    }
-                };
-                program
-                    .instructions
-                    .push(Instruction::Analysis(analysis_id));
+                let instruction = rspice_veriloga_runtime::analysis_query_id(name)
+                    .map(Instruction::Analysis)
+                    .unwrap_or(Instruction::PushConst(0.0));
+                program.instructions.push(instruction);
             }
             Node::Heavy(_, heavy) => {
                 self.emit_heavy(arena, arena.heavy(heavy), emit_ctx, program)?

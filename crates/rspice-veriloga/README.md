@@ -199,7 +199,10 @@ exercised by the test suite:
 - **System functions**: `$temperature`, `$vt`, `$thermal_vt`, `$abstime`,
   `$realtime`, `$simparam`, `$param_given`, `$port_connected`, `$mfactor`
   (with automatic multiplicity scaling), `$bound_step`, `$discontinuity`,
-  and the `analysis()` analysis-name query
+  and the `analysis()` analysis-name query. AC/noise operating points expose
+  `static`; transient operating points expose `tran`, `ic`, and `static`.
+  Phase changes retain analog initialization state. Global-event analysis
+  lists match physical analysis names; unknown query names evaluate false.
 - **Data**: 1-D array variables (compile-time and runtime indexing, with
   shadowed derivatives), runtime-bounded loops, parameters with dependent
   defaults/ranges/exclusions, localparams, `aliasparam`, attribute

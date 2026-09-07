@@ -3464,6 +3464,10 @@ impl SemanticAnalyzer {
             args: analyses
                 .iter()
                 .cloned()
+                .map(|mut analysis| {
+                    analysis.value = format!("__rspice_scope_{}", analysis.value).into();
+                    analysis
+                })
                 .map(Expression::StringLit)
                 .collect(),
             span,

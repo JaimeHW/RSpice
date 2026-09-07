@@ -80,6 +80,7 @@ const PARAM_GIVEN_OFFSET: i32 = std::mem::offset_of!(EvalContext, param_given) a
 const PARAM_GIVEN_LEN_OFFSET: i32 = std::mem::offset_of!(EvalContext, param_given_len) as i32;
 const BRANCH_UNKNOWNS_OFFSET: i32 = std::mem::offset_of!(EvalContext, branch_unknowns) as i32;
 const ANALYSIS_TYPE_OFFSET: i32 = std::mem::offset_of!(EvalContext, analysis_type) as i32;
+const ANALYSIS_PHASE_OFFSET: i32 = std::mem::offset_of!(EvalContext, analysis_phase) as i32;
 const MFACTOR_OFFSET: i32 = std::mem::offset_of!(EvalContext, multiplicity) as i32;
 const KERNEL_ACTIVE_OFFSET: i32 = std::mem::offset_of!(NativeStampKernelIo, program_active) as i32;
 const KERNEL_JACOBIANS_OFFSET: i32 = std::mem::offset_of!(NativeStampKernelIo, jacobians) as i32;
@@ -4483,7 +4484,7 @@ impl FunctionCompiler {
             self.encoder.cvtsi2sd_xmm_r32(dst, Gpr::R10);
             return Ok(());
         }
-        if analysis_id > 8 {
+        if analysis_id >= rspice_veriloga_runtime::ANALYSIS_QUERY_COUNT {
             self.encoder.xorpd_xmm_xmm(dst, dst);
             return Ok(());
         }
@@ -4491,12 +4492,41 @@ impl FunctionCompiler {
         self.encoder
             .movzx_r32_m8_base_disp32(Gpr::R10, self.ctx_arg_reg(), ANALYSIS_TYPE_OFFSET);
         match analysis_id {
-            5 => {
-                self.encoder.cmp_r32_imm8(Gpr::R10, 0);
-                self.encoder.setcc_r8(ConditionCode::Equal, Gpr::R11);
+            4 | 5 => {
                 self.encoder.cmp_r32_imm8(Gpr::R10, 4);
-                self.encoder.setcc_r8(ConditionCode::Equal, Gpr::R10);
-                self.encoder.or_r8_r8(Gpr::R10, Gpr::R11);
+                let explicit_ic = self.encoder.jcc_rel32_placeholder(ConditionCode::Equal);
+                let direct_dc = if analysis_id == 5 {
+                    self.encoder.cmp_r32_imm8(Gpr::R10, 0);
+                    Some(self.encoder.jcc_rel32_placeholder(ConditionCode::Equal))
+                } else {
+                    None
+                };
+                let not_transient = if analysis_id == 4 {
+                    self.encoder.cmp_r32_imm8(Gpr::R10, 2);
+                    Some(self.encoder.jcc_rel32_placeholder(ConditionCode::NotEqual))
+                } else {
+                    None
+                };
+                self.encoder.movzx_r32_m8_base_disp32(
+                    Gpr::R10,
+                    self.ctx_arg_reg(),
+                    ANALYSIS_PHASE_OFFSET,
+                );
+                self.encoder.cmp_r32_imm8(Gpr::R10, 0);
+                self.encoder.setcc_r8(ConditionCode::NotEqual, Gpr::R10);
+                let phase_done = self.encoder.jmp_rel32_placeholder();
+                self.patch_rel32_to_current(explicit_ic)?;
+                if let Some(jump) = direct_dc {
+                    self.patch_rel32_to_current(jump)?;
+                }
+                self.encoder.mov_r32_imm32(Gpr::R10, 1);
+                let true_done = self.encoder.jmp_rel32_placeholder();
+                if let Some(jump) = not_transient {
+                    self.patch_rel32_to_current(jump)?;
+                    self.encoder.xor_r64_r64(Gpr::R10, Gpr::R10);
+                }
+                self.patch_rel32_to_current(phase_done)?;
+                self.patch_rel32_to_current(true_done)?;
             }
             6 => {
                 self.encoder.cmp_r32_imm8(Gpr::R10, 1);
@@ -4504,6 +4534,22 @@ impl FunctionCompiler {
                 self.encoder.cmp_r32_imm8(Gpr::R10, 3);
                 self.encoder.setcc_r8(ConditionCode::Equal, Gpr::R10);
                 self.encoder.or_r8_r8(Gpr::R10, Gpr::R11);
+            }
+            9 => {
+                self.encoder.movzx_r32_m8_base_disp32(
+                    Gpr::R10,
+                    self.ctx_arg_reg(),
+                    ANALYSIS_PHASE_OFFSET,
+                );
+                self.encoder.cmp_r32_imm8(
+                    Gpr::R10,
+                    rspice_veriloga_runtime::AnalogAnalysisPhase::Nodeset as u8,
+                );
+                self.encoder.setcc_r8(ConditionCode::Equal, Gpr::R10);
+            }
+            10..=14 => {
+                self.encoder.cmp_r32_imm8(Gpr::R10, analysis_id - 10);
+                self.encoder.setcc_r8(ConditionCode::Equal, Gpr::R10);
             }
             _ => {
                 self.encoder.cmp_r32_imm8(Gpr::R10, analysis_id);
@@ -12122,6 +12168,48 @@ mod tests {
     }
 
     #[test]
+    fn analysis_queries_match_the_shared_solver_phase_contract() {
+        use rspice_veriloga_runtime::{
+            ANALYSIS_QUERY_COUNT, AnalogAnalysisPhase, analysis_query_mask,
+        };
+        for query in 0..ANALYSIS_QUERY_COUNT {
+            let program =
+                native_program(EntryKind::StampValue, vec![Instruction::Analysis(query)], 0);
+            let bytes = compile_value_function(&program).unwrap();
+            let memory = ExecutableMemory::allocate(&bytes).unwrap();
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(memory.ptr_at(0).unwrap()) };
+            let mut context = eval_context(&[], &[], &[], &[]);
+            for analysis in 0..=4 {
+                for phase in [
+                    AnalogAnalysisPhase::Point,
+                    AnalogAnalysisPhase::Equilibrium,
+                    AnalogAnalysisPhase::Nodeset,
+                ] {
+                    for (initial, final_step) in
+                        [(false, false), (true, false), (false, true), (true, true)]
+                    {
+                        context.analysis_type = analysis;
+                        context.analysis_phase = phase;
+                        context.analysis_initial_step = u8::from(initial);
+                        context.analysis_final_step = u8::from(final_step);
+                        let expected = f64::from(
+                            analysis_query_mask(analysis, phase, initial, final_step)
+                                & (1 << query)
+                                != 0,
+                        );
+                        assert_eq!(
+                            f(&context, std::ptr::null()),
+                            expected,
+                            "query {query}, analysis {analysis}, phase {phase:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn generated_value_leaf_executes_timer_state_and_preserves_stack() {
         let program = native_program(
             EntryKind::StampValue,
@@ -13908,6 +13996,7 @@ mod tests {
             param_given_len: 0,
             branch_unknowns: branch_unknowns.as_ptr(),
             analysis_type: 0,
+            analysis_phase: rspice_veriloga_runtime::AnalogAnalysisPhase::Point,
             multiplicity: 1.0,
             zi_filters: std::ptr::null_mut(),
             zi_filters_len: 0,

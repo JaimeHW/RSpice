@@ -1004,6 +1004,70 @@ endmodule
 }
 
 #[test]
+fn analysis_queries_and_event_filters_preserve_physical_identity_across_phases() {
+    use rspice_veriloga_runtime::{AnalogAnalysisPhase, analysis_query_mask};
+    let model = compile(
+        r#"module phases(p,n);
+inout p,n; electrical p,n;
+real event_scope;
+analog begin
+    @(initial_step("tran")) event_scope=1;
+    @(initial_step("ic")) event_scope=2;
+    @(initial_step("static")) event_scope=4;
+    I(p,n)<+analysis("dc") + 2*analysis("ac") + 4*analysis("tran")
+        + 8*analysis("noise") + 16*analysis("ic") + 32*analysis("static")
+        + 64*analysis("smallsig") + 512*analysis("nodeset")
+        + 1024*event_scope + 8192*analysis("unknown_analysis");
+end
+endmodule"#,
+    );
+    for analysis in 0..=4 {
+        let mut device = model.device("X1", &[1, 0]);
+        device.try_begin_analysis(analysis).unwrap();
+        for phase in [
+            AnalogAnalysisPhase::Point,
+            AnalogAnalysisPhase::Equilibrium,
+            AnalogAnalysisPhase::Nodeset,
+        ] {
+            device.try_set_analysis_phase(phase).unwrap();
+            device.try_set_analysis_step(true, false).unwrap();
+            device.update_voltages(&[0.0]);
+            let expected = (analysis_query_mask(analysis, phase, false, false) & 0x3ff)
+                + match analysis {
+                    2 => 1024,
+                    4 => 2048,
+                    _ => 0,
+                };
+            assert_eq!(
+                device.evaluate()[0],
+                f64::from(expected),
+                "analysis {analysis}, phase {phase:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn phase_change_does_not_replay_analog_initial() {
+    use rspice_veriloga_runtime::AnalogAnalysisPhase::{Equilibrium, Point};
+    let model = compile(
+        r#"module initialize_phase(p,n);
+inout p,n; electrical p,n; real saved;
+analog initial saved=analysis("static") ? 100 : 200;
+analog I(p,n)<+saved+analysis("static");
+endmodule"#,
+    );
+    let mut device = model.device("X1", &[1, 0]);
+    device.try_begin_analysis_in_phase(1, Equilibrium).unwrap();
+    device.update_voltages(&[0.0]);
+    assert_eq!(device.evaluate()[0], 101.0);
+    device.try_set_analysis_phase(Point).unwrap();
+    assert_eq!(device.evaluate()[0], 100.0);
+    device.try_begin_analysis_in_phase(1, Point).unwrap();
+    assert_eq!(device.evaluate()[0], 200.0);
+}
+
+#[test]
 fn try_noise_sources_preserves_flicker_and_table_metadata() {
     let model = compile(
         r#"

@@ -1304,6 +1304,7 @@ fn eval_context_from_vm_context(context: &mut VmContext) -> EvalContext {
             context.branch_current_values.as_ptr()
         },
         analysis_type: context.analysis_type,
+        analysis_phase: context.analysis_phase,
         multiplicity: context.multiplicity,
         zi_filters: if context.zi_filters.is_empty() {
             std::ptr::null_mut()

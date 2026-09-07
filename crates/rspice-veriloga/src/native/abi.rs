@@ -220,6 +220,8 @@ pub struct EvalContext {
     /// Analysis type code (0=dc, 1=ac, 2=tran, 3=noise, 4=ic), matching
     /// `VmContext::analysis_type`
     pub analysis_type: u8,
+    /// Solver phase, independent of the physical analysis and step flags.
+    pub analysis_phase: rspice_veriloga_runtime::AnalogAnalysisPhase,
     /// Instance multiplicity ($mfactor)
     pub multiplicity: f64,
     /// Z-domain sampled-data filters (mutable for candidate eval())
@@ -338,6 +340,7 @@ impl EvalContext {
             param_given_len: 0,
             branch_unknowns: std::ptr::null(),
             analysis_type: 0,
+            analysis_phase: rspice_veriloga_runtime::AnalogAnalysisPhase::Point,
             multiplicity: 1.0,
             zi_filters: std::ptr::null_mut(),
             zi_filters_len: 0,
@@ -2325,7 +2328,14 @@ pub unsafe extern "C" fn rspice_above_state_native(
 
     let detectors =
         unsafe { std::slice::from_raw_parts_mut(ctx.cross_detectors, ctx.cross_detectors_len) };
-    let result = if matches!(ctx.analysis_type, 0 | 4) {
+    let result = if rspice_veriloga_runtime::analysis_query_mask(
+        ctx.analysis_type,
+        ctx.analysis_phase,
+        false,
+        false,
+    ) & (1 << 5)
+        != 0
+    {
         detectors[detector_id].eval_above_static(
             operands[0],
             ctx.time,
@@ -2540,6 +2550,7 @@ mod tests {
         assert_eq!(offset_of!(EvalContext, param_given_len), 176);
         assert_eq!(offset_of!(EvalContext, branch_unknowns), 184);
         assert_eq!(offset_of!(EvalContext, analysis_type), 192);
+        assert_eq!(offset_of!(EvalContext, analysis_phase), 193);
         assert_eq!(offset_of!(EvalContext, multiplicity), 200);
         assert_eq!(offset_of!(EvalContext, zi_filters), 208);
         assert_eq!(offset_of!(EvalContext, zi_filters_len), 216);
@@ -2987,6 +2998,7 @@ mod tests {
             param_given_len: 0,
             branch_unknowns: std::ptr::null(),
             analysis_type: 2,
+            analysis_phase: rspice_veriloga_runtime::AnalogAnalysisPhase::Point,
             multiplicity: 1.0,
             zi_filters: std::ptr::null_mut(),
             zi_filters_len: 0,

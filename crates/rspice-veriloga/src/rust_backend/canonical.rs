@@ -794,7 +794,8 @@ struct InitializationPlan {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum InitializationInput {
     Temperature,
-    Analysis(smol_str::SmolStr),
+    // Phase changes within this analysis must not replay analog initial.
+    Analysis,
     SimParamPresent(smol_str::SmolStr),
     SimParamValue(smol_str::SmolStr),
 }
@@ -803,10 +804,7 @@ impl InitializationInput {
     fn expression(&self) -> String {
         match self {
             Self::Temperature => "ctx.temperature()".into(),
-            Self::Analysis(name) => format!(
-                "({}) as u8 as f64",
-                super::emit::analysis_expression("ctx.analysis", name)
-            ),
+            Self::Analysis => "f64::from(ctx.analysis_code())".into(),
             Self::SimParamPresent(name) => format!("ctx.has_simparam({name:?}) as u8 as f64"),
             Self::SimParamValue(name) => format!("ctx.simparam_or({name:?}, 0.0)"),
         }
@@ -815,7 +813,10 @@ impl InitializationInput {
     fn invalid(&self, value: &str) -> String {
         match self {
             Self::Temperature => format!("!({value}).is_finite() || ({value}) <= 0.0"),
-            Self::Analysis(_) | Self::SimParamPresent(_) => {
+            Self::Analysis => format!(
+                "!({value}).is_finite() || !(0.0..=4.0).contains(&({value})) || ({value}).fract() != 0.0"
+            ),
+            Self::SimParamPresent(_) => {
                 format!("({value}) != 0.0 && ({value}) != 1.0")
             }
             Self::SimParamValue(_) => format!("!({value}).is_finite()"),
@@ -1397,8 +1398,8 @@ impl ModelPlan {
                     CfgValueKind::Temperature | CfgValueKind::ThermalVoltage => {
                         initialization_inputs.insert(InitializationInput::Temperature);
                     }
-                    CfgValueKind::Analysis(name) => {
-                        initialization_inputs.insert(InitializationInput::Analysis(name.clone()));
+                    CfgValueKind::Analysis(_) => {
+                        initialization_inputs.insert(InitializationInput::Analysis);
                     }
                     CfgValueKind::SimParam { name, .. } => {
                         initialization_inputs

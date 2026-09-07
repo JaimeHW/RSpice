@@ -245,19 +245,9 @@ fn validate_event_argument_dependencies(name: &str, args: &[Expression]) -> Comp
 }
 
 fn normalize_analysis_name(name: &str) -> Option<String> {
-    let normalized = name.to_ascii_lowercase();
-    match normalized.as_str() {
-        "dc" | "op" => Some("dc".to_string()),
-        "ac" => Some("ac".to_string()),
-        "tran" | "transient" => Some("tran".to_string()),
-        "noise" => Some("noise".to_string()),
-        "ic" => Some("ic".to_string()),
-        "static" => Some("static".to_string()),
-        "smallsig" | "smallsignal" | "small_signal" => Some("smallsig".to_string()),
-        "__rspice_initial_step" => Some("__rspice_initial_step".to_string()),
-        "__rspice_final_step" => Some("__rspice_final_step".to_string()),
-        _ => None,
-    }
+    rspice_veriloga_runtime::analysis_query_id(name)
+        .and_then(rspice_veriloga_runtime::analysis_query_name)
+        .map(str::to_string)
 }
 
 fn analysis_expression(

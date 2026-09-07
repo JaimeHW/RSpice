@@ -132,24 +132,15 @@ pub(super) struct MirPoint<'a> {
     pub(super) temperature: f64,
     pub(super) time: f64,
     pub(super) multiplicity: f64,
-    pub(super) analysis: u8,
-    pub(super) initial_step: bool,
-    pub(super) final_step: bool,
+    pub(super) analysis_mask: u32,
 }
 
 impl MirPoint<'_> {
     /// The value `Analysis(id)` yields, from
     /// [`x64::codegen`](crate::native::x64)'s `emit_analysis_check`.
     fn analysis_value(&self, id: u8) -> f64 {
-        let active = match id {
-            7 => self.initial_step,
-            8 => self.final_step,
-            5 => matches!(self.analysis, 0 | 4),
-            6 => matches!(self.analysis, 1 | 3),
-            0..=4 => self.analysis == id,
-            _ => false,
-        };
-        f64::from(u8::from(active))
+        let bit = 1_u32.checked_shl(u32::from(id)).unwrap_or(0);
+        f64::from(self.analysis_mask & bit != 0)
     }
 
     fn node_voltage(&self, node: VoltageNode) -> Result<f64, PostfixRefusal> {
@@ -775,9 +766,12 @@ mod tests {
             temperature: 300.15,
             time: 1.0e-9,
             multiplicity: 1.0,
-            analysis: 2,
-            initial_step: true,
-            final_step: false,
+            analysis_mask: rspice_veriloga_runtime::analysis_query_mask(
+                2,
+                rspice_veriloga_runtime::AnalogAnalysisPhase::Point,
+                true,
+                false,
+            ),
         }
     }
 

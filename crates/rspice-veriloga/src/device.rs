@@ -2203,16 +2203,10 @@ impl CanonicalNoiseRuntimePlan {
             };
             branch_flows[branch] = context.try_current(endpoint(pos)?, endpoint(neg)?)?;
         }
-        let mut analyses = std::collections::HashSet::new();
-        for analysis in ["noise", "smallsig", "smallsignal", "small_signal"] {
-            analyses.insert(SmolStr::new(analysis));
-        }
-        if context.analysis_initial_step {
-            analyses.insert(SmolStr::new("__rspice_initial_step"));
-        }
-        if context.analysis_final_step {
-            analyses.insert(SmolStr::new("__rspice_final_step"));
-        }
+        let analyses =
+            rspice_veriloga_runtime::active_analysis_query_names(context.analysis_query_mask())
+                .map(SmolStr::new)
+                .collect();
         let inputs = crate::canonical_ir::CfgEvalInputs {
             parameters: context.parameters.clone(),
             parameter_given: context
@@ -3686,17 +3680,55 @@ impl VerilogADevice {
         Ok(())
     }
 
+    /// Update the solver phase within an analysis without replaying initializers.
+    pub fn try_set_analysis_phase(
+        &mut self,
+        phase: rspice_veriloga_runtime::AnalogAnalysisPhase,
+    ) -> Result<(), VmError> {
+        if self.context.analysis_phase == phase {
+            return Ok(());
+        }
+        let previous = self.context.clone();
+        self.context.analysis_phase = phase;
+        self.context.numerical_evaluation_valid = false;
+        if let Err(error) = self.try_refresh_static_conditions() {
+            self.context = previous;
+            return Err(error);
+        }
+        Ok(())
+    }
+
     /// Explicitly begin a fresh analysis on a reusable device instance.
     /// All device-owned dynamic state is reset even when the analysis code is
     /// unchanged from the preceding run. Instance configuration and compiled
     /// filter realizations survive, while each logical Zi site freezes its
     /// analysis-specific constant arguments lazily on first ordered execution.
     pub fn try_begin_analysis(&mut self, analysis: u8) -> Result<(), VmError> {
+        self.try_begin_analysis_in_phase(
+            analysis,
+            rspice_veriloga_runtime::AnalogAnalysisPhase::Point,
+        )
+    }
+
+    /// Begin a fresh analysis with its solver phase already visible to analog initial.
+    pub fn try_begin_analysis_in_phase(
+        &mut self,
+        analysis: u8,
+        phase: rspice_veriloga_runtime::AnalogAnalysisPhase,
+    ) -> Result<(), VmError> {
+        if analysis > 4 {
+            return Err(VmError::InvalidRuntimeConfiguration(format!(
+                "analysis type must be one of 0=dc, 1=ac, 2=tran, 3=noise, or 4=ic, got {analysis}"
+            )));
+        }
         let previous = self.context.clone();
         let previous_program_active = self.program_active.clone();
         let previous_branch_active = self.branch_active.clone();
         let result = (|| {
-            self.try_set_analysis_type(analysis)?;
+            self.context.analysis_type = analysis;
+            self.context.analysis_phase = phase;
+            self.context.evaluation_mode =
+                crate::vm::VerilogAEvaluationMode::default_for_analysis(analysis);
             self.context.reset_analysis_state();
             self.try_initialize_analysis()?;
             self.try_refresh_static_conditions()
@@ -3991,9 +4023,11 @@ impl VerilogADevice {
         checkpoint: &VerilogADeviceCheckpoint,
     ) {
         let analysis = self.context.analysis_type;
+        let analysis_phase = self.context.analysis_phase;
         let evaluation_mode = self.context.evaluation_mode;
         self.apply_validated_checkpoint_state(checkpoint);
         self.context.analysis_type = analysis;
+        self.context.analysis_phase = analysis_phase;
         self.context.evaluation_mode = evaluation_mode;
     }
 
@@ -5335,6 +5369,7 @@ impl VerilogADevice {
                 context.branch_current_values.as_ptr()
             },
             analysis_type: context.analysis_type,
+            analysis_phase: context.analysis_phase,
             multiplicity: context.multiplicity,
             zi_filters: if context.zi_filters.is_empty() {
                 std::ptr::null_mut()

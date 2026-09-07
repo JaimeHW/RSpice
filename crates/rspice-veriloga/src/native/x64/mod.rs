@@ -6522,6 +6522,7 @@ endmodule
                 context.branch_current_values.as_ptr()
             },
             analysis_type: context.analysis_type,
+            analysis_phase: context.analysis_phase,
             multiplicity: context.multiplicity,
             zi_filters: if context.zi_filters.is_empty() {
                 std::ptr::null_mut()
@@ -6976,6 +6977,7 @@ endmodule
             param_given_len: 0,
             branch_unknowns: std::ptr::null(),
             analysis_type: 0,
+            analysis_phase: rspice_veriloga_runtime::AnalogAnalysisPhase::Point,
             multiplicity: 1.0,
             zi_filters: std::ptr::null_mut(),
             zi_filters_len: 0,
