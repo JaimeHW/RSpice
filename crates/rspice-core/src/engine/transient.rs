@@ -3352,6 +3352,7 @@ impl Engine {
         } else {
             accepted_junction_history
         };
+        let linearized_startup = accepted_integration_runtime_capture.linearized_startup;
         let lte_estimator = accepted_integration_runtime_capture.lte_estimator;
         let accepted_integration_runtime = if restart_normalized {
             AcceptedIntegrationRuntime::RestartNormalized(
@@ -3410,6 +3411,7 @@ impl Engine {
                 dynamic_tline_breakpoints_added,
             },
             AcceptedTransientRuntime {
+                linearized_startup,
                 accepted_junction_history,
                 accepted_integration_runtime,
             },
@@ -3597,6 +3599,7 @@ impl Engine {
                         dynamic_tline_breakpoints_added: 0,
                     },
                     AcceptedTransientRuntime {
+                        linearized_startup: startup_mode.is_uic(),
                         accepted_junction_history: AcceptedJunctionTransientHistoryCheckpoint {
                             available: true,
                             ..AcceptedJunctionTransientHistoryCheckpoint::default()
@@ -3715,46 +3718,56 @@ impl Engine {
         // UIC has no t=0 solve, so its first candidate carries the initial flag
         // below instead.
         #[cfg(feature = "veriloga")]
-        circuit
-            .prepare_veriloga_timepoint(
-                0.0,
-                0.0,
-                &CompanionCoefficients::backward_euler(),
-                resume.is_none() && !uic_requested,
-                false,
-            )
-            .map_err(SimulationError::Circuit)?;
-        #[cfg(feature = "veriloga-builtins-base")]
-        circuit
-            .generated_veriloga_devices_mut()
-            .set_analysis_step(resume.is_none() && !uic_requested, false);
-
-        // A resume rebuilds the circuit before the checkpoint's full engine
-        // state can be injected. Prime accepted Verilog-A state now so the
-        // intervening startup solve never evaluates an initial-step-derived
-        // compact model against a zeroed procedural state. Full injection
-        // below remains authoritative and restores any candidates touched by
-        // this priming solve.
-        if let Some(checkpoint) = resume {
-            checkpoint
-                .prime_veriloga_resume_startup(&mut circuit)
+        if resume.is_none() {
+            circuit
+                .prepare_veriloga_timepoint(
+                    0.0,
+                    0.0,
+                    &CompanionCoefficients::backward_euler(),
+                    !uic_requested,
+                    false,
+                )
                 .map_err(SimulationError::Circuit)?;
+        }
+        #[cfg(feature = "veriloga-builtins-base")]
+        if resume.is_none() {
+            circuit
+                .generated_veriloga_devices_mut()
+                .set_analysis_step(!uic_requested, false);
         }
 
         // Get the startup state. Ordinary transient validates the exact t=0
         // accepted equation contract below; its waveform can intentionally
         // differ from the source's separate DC value. UIC skips an operating
-        // point altogether.
-        let (mut solution, initial_solution_mode, accepted_transient_op) = if uic_requested {
-            log::info!("Transient UIC startup: skipping the operating point");
-            (
-                vec![0.0; circuit.matrix_size()],
-                startup::InitialSolutionMode::LinearizedSeed,
-                None,
-            )
-        } else {
-            self.solve_transient_initial_solution(netlist, &mut circuit, &mut matrix, abort)?
-        };
+        // point altogether. Resume uses its accepted solution and original
+        // recovery policy without evaluating startup equations again.
+        let (mut solution, initial_solution_mode, accepted_transient_op) =
+            if let Some(checkpoint) = resume {
+                if checkpoint.solution.len() != circuit.matrix_size() {
+                    return Err(SimulationError::Circuit(format!(
+                        "checkpoint solution has {} unknowns, circuit has {}; \
+                     the checkpoint belongs to a different elaboration",
+                        checkpoint.solution.len(),
+                        circuit.matrix_size()
+                    )));
+                }
+                (
+                    checkpoint.solution.clone(),
+                    checkpoint
+                        .initial_solution_mode()
+                        .map_err(SimulationError::Circuit)?,
+                    None,
+                )
+            } else if uic_requested {
+                log::info!("Transient UIC startup: skipping the operating point");
+                (
+                    vec![0.0; circuit.matrix_size()],
+                    startup::InitialSolutionMode::LinearizedSeed,
+                    None,
+                )
+            } else {
+                self.solve_transient_initial_solution(netlist, &mut circuit, &mut matrix, abort)?
+            };
         if let Some(contract) = accepted_transient_op {
             self.ensure_solved_transient_operating_point_paths_to_ground(
                 &mut circuit,
@@ -3770,9 +3783,8 @@ impl Engine {
             )));
         }
 
-        // Resume: the standard initial-solution machinery above still ran
-        // (its device-state priming is wanted), but time, solution, and the
-        // reactive histories come from the checkpoint.
+        // Resume primes derived device caches from the accepted solution;
+        // complete checkpoint histories are injected below after setup.
         let resume_time = resume.map_or(0.0, |checkpoint| checkpoint.time);
         if self.config.spice_dialect == SpiceDialect::Xyce {
             // A resumed source must observe the tolerance belonging to the
@@ -3785,17 +3797,6 @@ impl Engine {
             circuit
                 .current_sources
                 .set_xyce_breakpoint_tolerance(breakpoint_tolerance);
-        }
-        if let Some(checkpoint) = resume {
-            if checkpoint.solution.len() != circuit.matrix_size() {
-                return Err(SimulationError::Circuit(format!(
-                    "checkpoint solution has {} unknowns, circuit has {}; \
-                     the checkpoint belongs to a different elaboration",
-                    checkpoint.solution.len(),
-                    circuit.matrix_size()
-                )));
-            }
-            solution.clone_from(&checkpoint.solution);
         }
         // .IC overrides describe the t=0 state; a resumed run is already
         // mid-trajectory, so they must not re-apply. Only UIC sets that state
@@ -4416,9 +4417,11 @@ impl Engine {
                 return Err(error);
             }
         }
-        circuit
-            .set_veriloga_analysis_phase(rspice_veriloga_runtime::AnalogAnalysisPhase::Point)
-            .map_err(SimulationError::Circuit)?;
+        if resume.is_none() {
+            circuit
+                .set_veriloga_analysis_phase(rspice_veriloga_runtime::AnalogAnalysisPhase::Point)
+                .map_err(SimulationError::Circuit)?;
+        }
         for (trace, &retain) in branch_currents
             .iter_mut()
             .zip(&capture_plan.branch_currents)
@@ -5189,6 +5192,8 @@ impl Engine {
                 diode_history: &diode_history,
                 vbic_snapshot_cache: &vbic_snapshot_cache,
                 accepted_integration_runtime_capture: AcceptedIntegrationRuntimeCapture {
+                    linearized_startup: initial_solution_mode
+                        == startup::InitialSolutionMode::LinearizedSeed,
                     lte_estimator: &lte_estimator,
                     next_trap_order: trap_order,
                     trapgear: fixed_method.is_none().then(|| trapgear.capture_snapshot()),
@@ -8828,6 +8833,8 @@ impl Engine {
                             vbic_snapshot_cache: &vbic_snapshot_cache,
                             accepted_integration_runtime_capture:
                                 AcceptedIntegrationRuntimeCapture {
+                                    linearized_startup: initial_solution_mode
+                                        == startup::InitialSolutionMode::LinearizedSeed,
                                     lte_estimator: &lte_estimator,
                                     next_trap_order: trap_order,
                                     trapgear: fixed_method
@@ -9476,6 +9483,8 @@ impl Engine {
                     diode_history: &diode_history,
                     vbic_snapshot_cache: &vbic_snapshot_cache,
                     accepted_integration_runtime_capture: AcceptedIntegrationRuntimeCapture {
+                        linearized_startup: initial_solution_mode
+                            == startup::InitialSolutionMode::LinearizedSeed,
                         lte_estimator: &lte_estimator,
                         next_trap_order: trap_order,
                         trapgear: fixed_method.is_none().then(|| trapgear.capture_snapshot()),
@@ -9670,6 +9679,8 @@ impl Engine {
                         dynamic_tline_breakpoints_added,
                     },
                     AcceptedTransientRuntime {
+                        linearized_startup: initial_solution_mode
+                            == startup::InitialSolutionMode::LinearizedSeed,
                         accepted_junction_history: final_accepted_junction_history,
                         accepted_integration_runtime: final_accepted_integration_runtime,
                     },

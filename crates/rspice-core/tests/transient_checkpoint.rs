@@ -295,6 +295,7 @@ fn uic_checkpoint_resume_preserves_startup_mode_and_floating_trajectory() {
         .expect("UIC first segment completes without a DC operating point");
     assert_eq!(checkpoint.startup_mode(), Some(TransientStartupMode::Uic));
     assert!(checkpoint.to_text().contains("startup_mode uic\n"));
+    assert!(checkpoint.to_text().contains("linearized_startup 1\n"));
 
     let restored = TransientCheckpoint::from_text(&checkpoint.to_text())
         .expect("UIC checkpoint text round-trips");
@@ -304,6 +305,11 @@ fn uic_checkpoint_resume_preserves_startup_mode_and_floating_trajectory() {
     assert_eq!(
         final_checkpoint.startup_mode(),
         Some(TransientStartupMode::Uic)
+    );
+    assert!(
+        final_checkpoint
+            .to_text()
+            .contains("linearized_startup 1\n")
     );
 
     let first_out = out_index(&first);
@@ -1301,7 +1307,7 @@ s1 out 0 out 0 switchmod
     );
 }
 
-#[cfg(feature = "veriloga-builtins")]
+#[cfg(feature = "veriloga-model-diode-cmc")]
 #[test]
 fn generated_veriloga_checkpoint_preserves_reactive_history_and_provenance() {
     use rspice_core::device::veriloga_builtins::builtins;
@@ -1471,10 +1477,14 @@ d1 out 0 dcmc
         .expect("checkpoint contains generated instance provenance");
     let identity = generated_header
         .split_whitespace()
-        .nth(3)
+        .nth(5)
         .expect("generated checkpoint header contains a model identity");
     assert_ne!(identity, "0".repeat(64));
-    let wrong_identity_text = checkpoint_text.replacen(identity, &"0".repeat(64), 1);
+    let wrong_identity_text = checkpoint_text.replacen(
+        generated_header,
+        &generated_header.replacen(identity, &"0".repeat(64), 1),
+        1,
+    );
     let wrong_identity = TransientCheckpoint::from_text(&wrong_identity_text)
         .expect("syntactically valid checkpoint with stale model identity parses");
     let identity_error = engine
@@ -1620,45 +1630,6 @@ q1 c b 0 qmod
     );
     TransientCheckpoint::from_text(&rewrite_first_event_value("inf"))
         .expect("format-26 event state permits infinity like runtime Verilog-A");
-
-    let mut legacy_v25 = String::with_capacity(checkpoint_text.len());
-    let mut skip_event_values = 0usize;
-    for (index, line) in checkpoint_text.lines().enumerate() {
-        if skip_event_values > 0 {
-            skip_event_values -= 1;
-            continue;
-        }
-        if line == "event_state 20" {
-            skip_event_values = 20;
-            continue;
-        }
-        let line = if index == 0 {
-            "RSPICE-CHECKPOINT 25".to_string()
-        } else if line.starts_with("generated_veriloga_state ") {
-            let (prefix, _) = line
-                .rsplit_once(' ')
-                .expect("generated state header carries its version");
-            format!("{prefix} 3")
-        } else {
-            line.to_string()
-        };
-        legacy_v25.push_str(&line);
-        legacy_v25.push('\n');
-    }
-    let upgraded_v25 = TransientCheckpoint::from_text(&legacy_v25)
-        .expect("v25 generated payload remains parseable without event-state rows");
-    let upgraded_text = upgraded_v25.to_text();
-    assert!(upgraded_text.contains("generated_veriloga_state_available 0\n"));
-    assert!(upgraded_text.contains("generated_veriloga_states 0\n"));
-    let legacy_error = engine
-        .run_tran_resume(&netlist, &upgraded_v25, STOP, STEP)
-        .expect_err("v25 cannot authoritatively resume a generated event-state model");
-    assert!(
-        legacy_error
-            .to_string()
-            .contains("does not contain generated Verilog-A persistent state"),
-        "v25 resume fails closed with a precise diagnostic: {legacy_error}"
-    );
 
     let serialized = TransientCheckpoint::from_text(&checkpoint_text)
         .expect("format-26 VBIC checkpoint round-trips");

@@ -603,6 +603,48 @@ endmodule
 }
 
 #[test]
+fn checkpoint_resume_does_not_repeat_model_nodeset_startup() {
+    let model = write_model(
+        "resume_nodeset",
+        r#"
+module resume_nodeset(out);
+    inout out; electrical out;
+    real started;
+    analog begin
+        @(timer(1e-6)) started=1;
+        if ((analysis("nodeset") || $abstime<1e-6) && started>0)
+            I(out)<+sqrt(-1-abs(V(out)));
+        else I(out)<+V(out)-(1+started);
+    end
+endmodule
+"#,
+    );
+    let deck = format!(
+        "* accepted event state must not enter startup again\nX1 out resume_nodeset\n.va \"{}\" resume_nodeset\n.end\n",
+        deck_path(&model)
+    );
+    let netlist = Netlist::parse(&deck).unwrap();
+    let engine = Engine::default();
+    let continuous = engine.run_tran(&netlist, 4e-6, 0.2e-6).unwrap();
+    let (_, checkpoint) = engine
+        .run_tran_checkpointed(&netlist, 2e-6, 0.2e-6)
+        .unwrap();
+    assert!(checkpoint.to_text().contains("linearized_startup 0\n"));
+    let checkpoint = TransientCheckpoint::from_text(&checkpoint.to_text()).unwrap();
+    let (resumed, _) = engine
+        .run_tran_resume(&netlist, &checkpoint, 4e-6, 0.2e-6)
+        .expect("accepted model state must resume without a nodeset solve");
+    let expected = node_series(&continuous.node_names, &continuous.voltages, "out");
+    let actual = node_series(&resumed.node_names, &resumed.voltages, "out");
+    assert_eq!(
+        actual.last().unwrap().to_bits(),
+        expected.last().unwrap().to_bits()
+    );
+    assert!(actual.iter().all(|value| (*value - 2.0).abs() < 1e-10));
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
 fn veriloga_zi_iir_checkpoint_resume_is_bit_identical_on_and_between_edges() {
     let model = write_model(
         "zi_checkpoint",

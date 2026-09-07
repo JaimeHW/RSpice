@@ -161,7 +161,9 @@ fn checkpoint_operation_result<T>(
 /// moving `RUNTIME_CHECKPOINT_STATE_VERSION` from 7 to 8.
 /// Version 35 records the step/stop defaults used by independent source
 /// waveforms. Older images resume only when those defaults are irrelevant.
-const FORMAT_VERSION: u32 = 35;
+/// Version 36 retains the numerical startup-recovery policy so resume never
+/// needs to repeat the operating point to select its transient controls.
+const FORMAT_VERSION: u32 = 36;
 const SOURCE_TIME_BASIS_FORMAT_VERSION: u32 = 35;
 const XYCE_TEAM_RESISTANCE_NOISE_FORMAT_VERSION: u32 = 32;
 const SOLUTION_DEPENDENT_CAPACITOR_FORMAT_VERSION: u32 = 33;
@@ -280,6 +282,7 @@ pub(super) struct CheckpointIntegrationState<'a> {
 
 /// The accepted-step runtime a resumed run reseeds from.
 pub(super) struct AcceptedTransientRuntime {
+    pub linearized_startup: bool,
     pub accepted_junction_history: AcceptedJunctionTransientHistoryCheckpoint,
     pub accepted_integration_runtime: AcceptedIntegrationRuntime,
 }
@@ -462,6 +465,7 @@ pub(super) struct RestartNormalizedIntegrationRuntimeCapture<'a> {
 /// prove that the caller reached a canonical accepted boundary; nonzero
 /// values become deterministic resume blockers rather than persistent state.
 pub(super) struct AcceptedIntegrationRuntimeCapture<'a> {
+    pub linearized_startup: bool,
     pub lte_estimator: &'a LteEstimator,
     pub next_trap_order: u8,
     pub trapgear: Option<TrapGearControllerSnapshot>,
@@ -528,6 +532,9 @@ pub struct TransientCheckpoint {
     /// Startup contract of the selected `.TRAN` analysis. Optional only so
     /// older files can be parsed and rejected with a precise resume error.
     startup_mode: Option<TransientStartupMode>,
+    /// Whether the original startup selected relaxed transient recovery.
+    /// Legacy files cannot reconstruct this from the authored UIC flag alone.
+    linearized_startup: Option<bool>,
     /// Per-call transient maximum-step bound the captured segment ran under.
     /// This is provenance, not resume state: like the stop horizon, the cap
     /// only bounds steps a segment is about to take, so a resumed segment
@@ -4908,6 +4915,10 @@ impl TransientCheckpoint {
                 "transient startup mode is unavailable",
             ),
             (
+                self.linearized_startup.is_none(),
+                "transient startup recovery policy is unavailable",
+            ),
+            (
                 self.integration_max_step.is_none(),
                 "captured segment maximum step is unavailable",
             ),
@@ -5062,6 +5073,13 @@ impl TransientCheckpoint {
         }
         if self.solution.iter().any(|value| !value.is_finite()) {
             return Err("checkpoint solution values must be finite".to_string());
+        }
+        if self.startup_mode == Some(TransientStartupMode::Uic)
+            && self.linearized_startup == Some(false)
+        {
+            return Err(
+                "checkpoint UIC startup requires the linearized startup recovery policy".to_owned(),
+            );
         }
         match (
             &self.integration_continuation,
@@ -5687,6 +5705,7 @@ impl TransientCheckpoint {
                 dynamic_tline_breakpoints_added: 0,
             },
             AcceptedTransientRuntime {
+                linearized_startup: startup_mode.is_uic(),
                 accepted_junction_history,
                 accepted_integration_runtime: AcceptedIntegrationRuntime::RestartNormalized(
                     RestartNormalizedIntegrationRuntimeCheckpoint {
@@ -5715,6 +5734,7 @@ impl TransientCheckpoint {
         lte_estimator: Option<&LteEstimator>,
     ) -> Result<Self, String> {
         let AcceptedTransientRuntime {
+            linearized_startup,
             accepted_junction_history,
             accepted_integration_runtime,
         } = runtime;
@@ -5830,6 +5850,7 @@ impl TransientCheckpoint {
             restart_identity,
             simulation_identity: Some(simulation_identity),
             startup_mode: Some(startup_mode),
+            linearized_startup: Some(linearized_startup),
             integration_max_step,
             source_time_basis: circuit.independent_source_time_basis()?,
             integration_continuation: integration_continuation.map_or_else(
@@ -5909,6 +5930,7 @@ impl TransientCheckpoint {
         lte_estimator: Option<&LteEstimator>,
     ) -> Result<Self, String> {
         let AcceptedTransientRuntime {
+            linearized_startup,
             accepted_junction_history,
             accepted_integration_runtime,
         } = runtime;
@@ -5950,6 +5972,7 @@ impl TransientCheckpoint {
                 dynamic_tline_breakpoints_added,
             },
             AcceptedTransientRuntime {
+                linearized_startup,
                 accepted_junction_history,
                 accepted_integration_runtime,
             },
@@ -6022,25 +6045,14 @@ impl TransientCheckpoint {
         )
     }
 
-    /// Prime external Verilog-A accepted state before the resume-time startup
-    /// solve. Some generated models derive all usable equations from
-    /// `initial_step`; a rebuilt instance cannot safely evaluate with those
-    /// accepted variables reset to zero while waiting for full injection.
-    pub(crate) fn prime_veriloga_resume_startup(
+    pub(super) fn initial_solution_mode(
         &self,
-        circuit: &mut CircuitData,
-    ) -> Result<(), String> {
-        self.validate_numeric_state()?;
-        circuit.restore_generated_veriloga_checkpoint_states(
-            &self.generated_veriloga_instance_states,
-            self.generated_veriloga_state_available,
-        )?;
-        #[cfg(feature = "veriloga")]
-        circuit.restore_runtime_veriloga_checkpoint_states(
-            &self.runtime_veriloga_instance_states,
-            self.runtime_veriloga_state_available,
-        )?;
-        Ok(())
+    ) -> Result<super::startup::InitialSolutionMode, String> {
+        match self.linearized_startup {
+            Some(true) => Ok(super::startup::InitialSolutionMode::LinearizedSeed),
+            Some(false) => Ok(super::startup::InitialSolutionMode::TransientOperatingPoint),
+            None => Err("legacy transient checkpoint does not record the startup recovery policy; re-run the transient from t=0".to_owned()),
+        }
     }
 
     /// Inject the captured reactive-state histories into a freshly built
@@ -6513,6 +6525,7 @@ impl TransientCheckpoint {
                     .to_string(),
             );
         }
+        self.initial_solution_mode()?;
         Ok(())
     }
 
@@ -6996,6 +7009,11 @@ impl TransientCheckpoint {
             None => "unknown",
         };
         out.push_str(&format!("startup_mode {startup_mode}\n"));
+        out.push_str(&format!(
+            "linearized_startup {}\n",
+            self.linearized_startup
+                .map_or("unknown", |value| if value { "1" } else { "0" })
+        ));
         out.push_str(&format!("time {}\n", self.time));
         out.push_str(&format!(
             "integration_max_step {}\n",
@@ -7724,6 +7742,17 @@ impl TransientCheckpoint {
             None
         };
 
+        let linearized_startup = if version >= 36 {
+            let line = lines.next().ok_or("missing startup recovery policy line")?;
+            match line.strip_prefix("linearized_startup ").map(str::trim) {
+                Some("unknown") => None,
+                Some(field) => Some(parse_checkpoint_bool(field, "startup recovery policy")?),
+                None => return Err(format!("malformed startup recovery policy line: '{line}'")),
+            }
+        } else {
+            None
+        };
+
         let time_line = lines.next().ok_or("missing time line")?;
         let time: Value = time_line
             .strip_prefix("time ")
@@ -8337,6 +8366,7 @@ impl TransientCheckpoint {
             startup_mode,
             integration_max_step,
             source_time_basis,
+            linearized_startup,
             integration_continuation,
             accepted_integration_runtime,
             pending_tline_arrivals,
@@ -9406,6 +9436,7 @@ mod tests {
             restart_identity: Some("1234567890abcdef".repeat(4)),
             simulation_identity: Some("abcdef0123456789".repeat(4)),
             startup_mode: Some(TransientStartupMode::Uic),
+            linearized_startup: Some(true),
             integration_max_step: Some(2.5e-9),
             source_time_basis: Some(crate::circuit::SourceTimeBasis {
                 tstep: 2.5e-9,
@@ -9574,6 +9605,41 @@ mod tests {
             runtime_veriloga_state_available: true,
             #[cfg(feature = "veriloga")]
             runtime_veriloga_instance_states: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn checkpoint_retains_startup_recovery_policy_without_resolving_equilibrium() {
+        use super::super::startup::InitialSolutionMode;
+        for (linearized, expected) in [
+            (false, InitialSolutionMode::TransientOperatingPoint),
+            (true, InitialSolutionMode::LinearizedSeed),
+        ] {
+            let mut checkpoint = sample();
+            checkpoint.startup_mode = Some(TransientStartupMode::OperatingPoint);
+            checkpoint.linearized_startup = Some(linearized);
+            let restored = TransientCheckpoint::from_text(&checkpoint.to_text()).unwrap();
+            assert_eq!(restored.initial_solution_mode().unwrap(), expected);
+
+            let legacy = TransientCheckpoint::from_text(&legacy_text(&checkpoint, 35)).unwrap();
+            assert!(
+                legacy
+                    .initial_solution_mode()
+                    .unwrap_err()
+                    .contains("startup recovery policy")
+            );
+            assert!(legacy.capability().require_resumable().is_err());
+        }
+        let text = sample().to_text();
+        for field in ["0", "2", "true", "NaN", "", "1 0"] {
+            assert!(
+                TransientCheckpoint::from_text(&text.replace(
+                    "linearized_startup 1\n",
+                    &format!("linearized_startup {field}\n")
+                ))
+                .is_err(),
+                "{field}"
+            );
         }
     }
 
@@ -9779,6 +9845,9 @@ mod tests {
                 continue;
             }
             if version < 12 && line.starts_with("startup_mode ") {
+                continue;
+            }
+            if version < 36 && line.starts_with("linearized_startup ") {
                 continue;
             }
             if version < 10 && line.starts_with("xyce_memristor_resistance_stores ") {
@@ -11731,7 +11800,7 @@ mod tests {
     /// asserting current-format behaviour after two renumberings moved it into
     /// the legacy ladder.
     #[cfg(feature = "veriloga")]
-    const RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS: [(u32, u32); 19] = [
+    const RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS: [(u32, u32); 20] = [
         (17, 1),
         (18, 1),
         (19, 1),
@@ -11751,6 +11820,7 @@ mod tests {
         (33, 7),
         (34, 8),
         (35, 8),
+        (36, 8),
     ];
 
     #[cfg(feature = "veriloga")]
@@ -12089,6 +12159,7 @@ mod tests {
                 dynamic_tline_breakpoints_added: 0,
             },
             AcceptedTransientRuntime {
+                linearized_startup: false,
                 accepted_junction_history: AcceptedJunctionTransientHistoryCheckpoint {
                     available: true,
                     ..AcceptedJunctionTransientHistoryCheckpoint::default()
