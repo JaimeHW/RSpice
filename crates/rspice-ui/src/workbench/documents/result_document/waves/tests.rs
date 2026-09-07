@@ -675,7 +675,8 @@ fn markers_alone_keep_a_compact_readout_strip_on_screen() {
     state
         .ui
         .results
-        .add_marker(analysis, waveform, "V(out)".to_owned(), 0.5);
+        .add_marker(analysis, waveform, "V(out)".to_owned(), 0.5)
+        .unwrap();
     assert_eq!(
         readout_strip_height(&mut state),
         READOUT_HEADER_H + MARKER_ROW_H,
@@ -699,7 +700,8 @@ fn the_strip_carries_cursors_and_markers_together() {
     state
         .ui
         .results
-        .add_marker(analysis, waveform, "V(out)".to_owned(), 0.5);
+        .add_marker(analysis, waveform, "V(out)".to_owned(), 0.5)
+        .unwrap();
     assert_eq!(
         readout_strip_height(&mut state),
         cursors_only,
@@ -714,7 +716,8 @@ fn collapse_keeps_one_header_and_no_content_still_removes_the_strip() {
     state
         .ui
         .results
-        .add_marker(analysis, waveform, "V(out)".to_owned(), 0.5);
+        .add_marker(analysis, waveform, "V(out)".to_owned(), 0.5)
+        .unwrap();
     state.ui.results.readout_collapsed = true;
 
     assert_eq!(readout_strip_height(&mut state), READOUT_HEADER_H);
@@ -728,12 +731,16 @@ fn every_visible_marker_remains_in_the_scroll_owned_body() {
     let mut state = marker_fixture();
     let (analysis, waveform) = marker_identity(&state);
     for index in 0..12 {
-        state.ui.results.add_marker(
-            analysis,
-            waveform.clone(),
-            "V(out)".to_owned(),
-            index as f64 / 12.0,
-        );
+        state
+            .ui
+            .results
+            .add_marker(
+                analysis,
+                waveform.clone(),
+                "V(out)".to_owned(),
+                index as f64 / 12.0,
+            )
+            .unwrap();
     }
 
     assert_eq!(visible_markers(&state).len(), 12);
@@ -761,7 +768,8 @@ fn markers_outlive_the_tool_that_placed_them() {
     let id = state
         .ui
         .results
-        .add_marker(analysis, waveform, "V(out)".to_owned(), 0.5);
+        .add_marker(analysis, waveform, "V(out)".to_owned(), 0.5)
+        .unwrap();
     state.ui.results.toggle_marker_tool();
 
     assert!(!state.ui.results.marker_tool.is_armed());
@@ -780,7 +788,8 @@ fn removing_a_marker_takes_its_open_edit_with_it() {
     let first = state
         .ui
         .results
-        .add_marker(analysis, waveform.clone(), "V(out)".to_owned(), 0.5);
+        .add_marker(analysis, waveform.clone(), "V(out)".to_owned(), 0.5)
+        .unwrap();
     marker_dialog::open(&mut state, MarkerSelector::Quick(first));
     assert!(state.ui.results.marker_edit.is_some());
 
@@ -796,7 +805,8 @@ fn removing_a_marker_takes_its_open_edit_with_it() {
     let second = state
         .ui
         .results
-        .add_marker(analysis, waveform, "V(out)".to_owned(), 0.9);
+        .add_marker(analysis, waveform, "V(out)".to_owned(), 0.9)
+        .unwrap();
     assert_ne!(first, second);
 }
 
@@ -809,7 +819,8 @@ fn opening_a_marker_edit_seeds_the_draft_from_the_marker() {
     let id = state
         .ui
         .results
-        .add_marker(analysis, waveform, "V(out)".to_owned(), 0.5);
+        .add_marker(analysis, waveform, "V(out)".to_owned(), 0.5)
+        .unwrap();
     if let Some(marker) = state.ui.results.marker_mut(id) {
         marker.note = "overshoot".to_owned();
         marker.kind = MarkerKind::Peak;

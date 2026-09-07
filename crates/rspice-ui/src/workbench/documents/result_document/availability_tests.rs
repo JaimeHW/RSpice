@@ -9,6 +9,7 @@ use crate::state::{
 };
 
 mod fixtures;
+mod markers;
 use fixtures::*;
 
 fn state_with_analysis(analysis: AnalysisResult) -> AppState {
@@ -177,7 +178,8 @@ fn table_and_marker_waveform_identity_survive_waveform_reorder() {
     state
         .ui
         .results
-        .add_marker(analysis_key, waveform.clone(), "V(a)".to_owned(), 0.5);
+        .add_marker(analysis_key, waveform.clone(), "V(a)".to_owned(), 0.5)
+        .unwrap();
 
     state.simulation.runs[0].analyses[0].waveforms.swap(0, 1);
     assert_eq!(
@@ -1672,12 +1674,16 @@ fn pruning_a_run_drops_the_presentation_state_that_named_its_dataset() {
         .reconcile_retained_datasets(&state.simulation);
 
     for (analysis, name) in [(kept, "V(out)"), (discarded, "V(gone)")] {
-        state.ui.results.add_marker(
-            analysis,
-            marker_anchor_for(analysis, name),
-            name.to_owned(),
-            0.5,
-        );
+        state
+            .ui
+            .results
+            .add_marker(
+                analysis,
+                marker_anchor_for(analysis, name),
+                name.to_owned(),
+                0.5,
+            )
+            .unwrap();
         state
             .ui
             .results
@@ -1852,12 +1858,16 @@ fn restored_markers_keep_their_labels_and_advance_the_id_allocator() {
 
     assert_eq!(state.ui.results.markers.len(), 1);
     assert_eq!(state.ui.results.markers[0].note, "settling");
-    let next = state.ui.results.add_marker(
-        key,
-        state.ui.results.markers[0].anchor.clone(),
-        "V(out)".to_owned(),
-        0.75,
-    );
+    let next = state
+        .ui
+        .results
+        .add_marker(
+            key,
+            state.ui.results.markers[0].anchor.clone(),
+            "V(out)".to_owned(),
+            0.75,
+        )
+        .unwrap();
     assert!(
         next > 7,
         "a restored label must not be handed out a second time"

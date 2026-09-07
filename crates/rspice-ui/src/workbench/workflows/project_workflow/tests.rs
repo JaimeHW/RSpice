@@ -1089,6 +1089,7 @@ fn save_project_to_path_round_trips_result_markers() {
             .ui
             .results
             .add_marker(analysis, waveform_anchor, "V(out)".to_owned(), 1.0)
+            .unwrap()
     };
     if let Some(marker) = state.ui.results.marker_mut(id) {
         marker.note = "settling point".to_owned();

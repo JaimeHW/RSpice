@@ -301,11 +301,12 @@ fn a_trace_the_document_does_not_retain_falls_back_to_a_quick_marker() {
 fn quick_markers_are_untouched_by_opening_and_leaving_a_persistent_document() {
     let (mut app, document_id) = persistent_transient_fixture();
     let (analysis, anchor) = active_analysis_anchor(&mut app.state);
-    let quick =
-        app.state
-            .ui
-            .results
-            .add_marker(analysis, anchor.clone(), "V(out)".to_owned(), 0.75);
+    let quick = app
+        .state
+        .ui
+        .results
+        .add_marker(analysis, anchor.clone(), "V(out)".to_owned(), 0.75)
+        .unwrap();
     if let Some(marker) = app.state.ui.results.marker_mut(quick) {
         marker.note = "dataset note".to_owned();
     }
@@ -374,7 +375,8 @@ fn document_marker_serials_never_reach_the_project_save_or_the_quick_allocator()
         .state
         .ui
         .results
-        .add_marker(analysis, anchor, "V(out)".to_owned(), 0.9);
+        .add_marker(analysis, anchor, "V(out)".to_owned(), 0.9)
+        .unwrap();
 
     assert_eq!(
         quick,
@@ -476,7 +478,8 @@ fn removing_a_marker_row_reaches_only_the_store_that_owns_it() {
         .state
         .ui
         .results
-        .add_marker(analysis, anchor, "V(out)".to_owned(), 0.9);
+        .add_marker(analysis, anchor, "V(out)".to_owned(), 0.9)
+        .unwrap();
     let revision_before = app
         .state
         .workspace

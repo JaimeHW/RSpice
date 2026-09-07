@@ -373,6 +373,9 @@ impl ProjectFile {
             .validate_simulation_configuration()
             .map_err(|error| ProjectIoError::InvalidData(error.to_string()))?;
         self.validate_result_expression_groups()?;
+        self.result_presentation
+            .validate_markers()
+            .map_err(ProjectIoError::InvalidData)?;
         let view_index = self.validate_library_tree()?;
         self.validate_project_source_owners(&view_index)?;
         self.validate_workspace_references(&view_index)?;
@@ -1930,6 +1933,15 @@ pub(crate) fn load_project_text(
     let project_id = project.workspace.project.id();
     project.workspace.migrate_owned_netlist_deck_ids();
     let mut load_repairs = Vec::new();
+    let repaired_markers = project
+        .result_presentation
+        .repair_duplicate_marker_ids()
+        .map_err(ProjectIoError::InvalidData)?;
+    if repaired_markers > 0 {
+        load_repairs.push(format!(
+            "Assigned distinct IDs to {repaired_markers} result marker(s) with duplicate IDs; all annotation positions, labels, and dataset bindings were preserved."
+        ));
+    }
     load_repairs.extend(project.workspace.migrate_document_occurrences());
     let mut migrated_generated_bindings = 0usize;
     let mut unresolved_generated_bindings = 0usize;

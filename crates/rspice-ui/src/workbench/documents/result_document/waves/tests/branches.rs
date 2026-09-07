@@ -378,7 +378,8 @@ fn a_marker_row_states_a_value_the_marked_branch_takes() {
     state
         .ui
         .results
-        .add_marker(analysis, anchor, "V(out)".to_owned(), 0.25);
+        .add_marker(analysis, anchor, "V(out)".to_owned(), 0.25)
+        .unwrap();
 
     let painted = super::interaction::painted_texts(&mut state, marker_section);
 

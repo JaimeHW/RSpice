@@ -49,12 +49,14 @@ impl Annotation {
     ) {
         match self {
             Self::Marker => {
-                results.add_marker(
-                    key,
-                    marker_anchor_for(key, "V(out)"),
-                    "V(out)".to_owned(),
-                    0.5,
-                );
+                results
+                    .add_marker(
+                        key,
+                        marker_anchor_for(key, "V(out)"),
+                        "V(out)".to_owned(),
+                        0.5,
+                    )
+                    .unwrap();
             }
             Self::LogAxis => {
                 results.log_y_panes.insert(WavePanePresentationKey {
@@ -226,12 +228,16 @@ fn result_annotation_save_publishes_only_results_and_retains_later_edits() {
         // A later annotation must remain dirty even if an earlier write finishes.
         annotation.add(&mut state.ui.results, &state.simulation, key);
         state.ui.results.log_y_panes.clear();
-        state.ui.results.add_marker(
-            key,
-            marker_anchor_for(key, "V(out)"),
-            "V(out)".to_owned(),
-            0.75,
-        );
+        state
+            .ui
+            .results
+            .add_marker(
+                key,
+                marker_anchor_for(key, "V(out)"),
+                "V(out)".to_owned(),
+                0.75,
+            )
+            .unwrap();
         let post_save =
             prepare_post_save_registry(&state, &saved, SaveScope::ActiveDocument).unwrap();
         assert!(post_save.is_dirty(&ProjectDocumentId::ResultHistory));

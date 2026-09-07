@@ -350,12 +350,16 @@ fn a_printed_quick_view_carries_the_markers_and_cursors_the_reader_placed() {
         let run = state.simulation.active_run().expect("active run");
         AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0])
     };
-    let marker_id = state.ui.results.add_marker(
-        analysis_key,
-        marker_anchor_for(analysis_key, "V(out)"),
-        "V(out)".to_owned(),
-        1.0,
-    );
+    let marker_id = state
+        .ui
+        .results
+        .add_marker(
+            analysis_key,
+            marker_anchor_for(analysis_key, "V(out)"),
+            "V(out)".to_owned(),
+            1.0,
+        )
+        .unwrap();
     state.ui.results.cursors.a = Some(0.0);
     state.ui.results.cursors.b = Some(2.0);
 

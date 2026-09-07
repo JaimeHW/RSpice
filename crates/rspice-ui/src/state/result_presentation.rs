@@ -3,6 +3,8 @@
 //! Shared by project I/O and the workbench. Rendering, session caches, and
 //! editor state remain in the workbench; none can redefine this wire contract.
 
+use std::collections::HashSet;
+
 use serde::{Deserialize, Serialize};
 
 use super::{AnalysisResult, SimulationRun};
@@ -141,6 +143,22 @@ pub struct ResultMarker {
     pub note: String,
 }
 
+impl ResultMarker {
+    pub(crate) fn validate_placement(
+        analysis: AnalysisPresentationKey,
+        anchor: &WaveformPresentationKey,
+        x: f64,
+    ) -> Result<(), String> {
+        if !x.is_finite() {
+            return Err("marker position must be finite".to_owned());
+        }
+        if anchor.analysis != analysis {
+            return Err("marker anchor belongs to a different analysis or dataset".to_owned());
+        }
+        Ok(())
+    }
+}
+
 /// Stable identity of one unit-scoped waveform pane.
 ///
 /// The analysis key retains the exact dataset identity; the unit is the pane
@@ -218,6 +236,53 @@ fn deserialize_log_y_panes<'de, D: serde::Deserializer<'de>>(
 }
 
 impl ResultPresentation {
+    pub(crate) fn validate_markers(&self) -> Result<(), String> {
+        let mut ids = HashSet::new();
+        for marker in &self.markers {
+            ResultMarker::validate_placement(marker.analysis, &marker.anchor, marker.x)?;
+            if !ids.insert(marker.id) {
+                return Err(format!(
+                    "result markers contain duplicate marker ID {}",
+                    marker.id
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Older project writers could mix document projections and quick markers
+    /// in one list. Keep the first occurrence of each identity and every
+    /// annotation's exact payload, assigning unused IDs only to duplicates.
+    /// No persisted object refers to quick IDs; their edit selectors are runtime
+    /// state. The loader reports this deterministic repair to the reader.
+    pub(crate) fn repair_duplicate_marker_ids(&mut self) -> Result<usize, String> {
+        let mut reserved = self
+            .markers
+            .iter()
+            .map(|marker| marker.id)
+            .collect::<HashSet<_>>();
+        if reserved.len() == self.markers.len() {
+            return Ok(0);
+        }
+        let mut seen = HashSet::new();
+        let mut next = 1_u32;
+        let mut repaired = 0;
+        for marker in &mut self.markers {
+            if seen.insert(marker.id) {
+                continue;
+            }
+            while reserved.contains(&next) {
+                next = next
+                    .checked_add(1)
+                    .ok_or("result marker identity space is exhausted")?;
+            }
+            marker.id = next;
+            reserved.insert(next);
+            repaired += 1;
+        }
+        Ok(repaired)
+    }
+
     /// Existing lifecycle fingerprints encode these as three tuple elements.
     /// Preserve that encoding: generated-input identities also use the registry.
     /// Exhaustive destructuring makes a new durable field require an explicit

@@ -1493,6 +1493,14 @@ pub(super) fn place_marker(
     state: &mut AppState,
     placement: MarkerPlacement<'_>,
 ) -> Option<MarkerSelector> {
+    if let Err(error) =
+        ResultMarker::validate_placement(placement.analysis, &placement.anchor, placement.x)
+    {
+        state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
+            "Could not place marker: {error}"
+        )));
+        return None;
+    }
     let retained_x = placement.retained_x();
     let MarkerPlacement {
         analysis,
@@ -1515,15 +1523,23 @@ pub(super) fn place_marker(
                 .find(|trace| trace.pane_id == context.pane_id && trace.label == trace_name)?;
             Some((context, document.revision(), trace.id))
         });
-    let quick_fallback = |state: &mut AppState, reason: Option<String>| {
-        if let Some(reason) = reason {
-            state.push_user_message(crate::diagnostics::ConsoleMessage::info(reason));
+    let quick_fallback = |state: &mut AppState, reason: Option<String>| match state
+        .ui
+        .results
+        .add_marker(analysis, anchor.clone(), trace_name.clone(), x)
+    {
+        Ok(id) => {
+            if let Some(reason) = reason {
+                state.push_user_message(crate::diagnostics::ConsoleMessage::info(reason));
+            }
+            Some(MarkerSelector::Quick(id))
         }
-        let id = state
-            .ui
-            .results
-            .add_marker(analysis, anchor.clone(), trace_name.clone(), x);
-        Some(MarkerSelector::Quick(id))
+        Err(error) => {
+            state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
+                "Could not place marker: {error}"
+            )));
+            None
+        }
     };
 
     let Some((context, revision, trace_id)) = retained else {
@@ -1648,10 +1664,12 @@ pub(super) fn commit_marker_edit(
 ) -> Result<(), String> {
     match selector {
         MarkerSelector::Quick(id) => {
-            if let Some(marker) = state.ui.results.marker_mut(id) {
-                marker.note = note.to_owned();
-                marker.kind = kind;
-            }
+            let marker =
+                state.ui.results.marker_mut(id).ok_or_else(|| {
+                    "The quick marker is no longer part of this project.".to_owned()
+                })?;
+            marker.note = note.to_owned();
+            marker.kind = kind;
             Ok(())
         }
         MarkerSelector::Document {
@@ -2412,8 +2430,8 @@ pub struct ResultsState {
     /// current deterministic row order, so filtering never leaves an ordinal
     /// pointing at a different quantity.
     pub(crate) browser_range_anchor: Option<ResultBrowserSelectionKey>,
-    /// Id allocator for `markers`. Monotonic within a project so a marker
-    /// label never silently changes meaning after a deletion or a reload.
+    /// Highest allocated or restored quick-marker ID in this live project.
+    /// Restoring markers can raise it; deleting markers never lowers it.
     next_marker_id: u32,
     /// The open marker-purpose dialog's uncommitted edit, if any.
     ///
@@ -2758,16 +2776,24 @@ impl ResultsState {
         self.marker_tool = MarkerTool(!self.marker_tool.is_armed());
     }
 
-    /// Place a marker and return its id.
+    /// Place a valid marker without reusing an identity in this live project.
     pub fn add_marker(
         &mut self,
         analysis: AnalysisPresentationKey,
         anchor: WaveformPresentationKey,
         trace_name: String,
         x: f64,
-    ) -> u32 {
-        self.next_marker_id += 1;
-        let id = self.next_marker_id;
+    ) -> Result<u32, String> {
+        ResultMarker::validate_placement(analysis, &anchor, x)?;
+        let last_retained_id = self
+            .markers
+            .iter()
+            .map(|marker| marker.id)
+            .max()
+            .unwrap_or(0);
+        let id = last_retained_id.max(self.next_marker_id).checked_add(1)
+            .ok_or("result marker identity space is exhausted; existing markers can still be edited or removed")?;
+        self.next_marker_id = id;
         self.markers.push(ResultMarker {
             id,
             analysis,
@@ -2777,7 +2803,7 @@ impl ResultsState {
             kind: MarkerKind::default(),
             note: String::new(),
         });
-        id
+        Ok(id)
     }
 
     pub fn marker_mut(&mut self, id: u32) -> Option<&mut ResultMarker> {
