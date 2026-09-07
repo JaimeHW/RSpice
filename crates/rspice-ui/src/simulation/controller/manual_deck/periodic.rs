@@ -699,16 +699,35 @@ fn parse_pstb(
         detect_subharmonics: optional_bool(card, "detectsubharmonics", true)?,
         eigenvalue_tolerance: optional_value(card, "eigentol", 1.0e-10, params)?,
     };
-    if config.max_harmonics == 0
-        || config.num_multipliers == 0
-        || !config.stability_threshold.is_finite()
-        || config.stability_threshold <= 0.0
-        || !config.eigenvalue_tolerance.is_finite()
-        || config.eigenvalue_tolerance <= 0.0
-    {
+    // `rspice_core::Engine::run_pstb_card_from_pss_with_abort` validates its
+    // card before it resolves a probe, and these are its three refusals in its
+    // own words. One refusal per field, and the field's value in the sentence:
+    // the single combined message this replaced named four keys and told the
+    // operator nothing about which of them the card got wrong.
+    //
+    // The threshold bound is the one that mattered. It admitted anything above
+    // zero, while the engine, and both copies of the check in
+    // `services::simulation_runner::pstb`, require a finite magnitude of at
+    // least one — the physical boundary is |lambda| = 1, so a threshold below
+    // it would call a mode sitting exactly on the unit circle unstable. So the
+    // Studio queued a run its own engine rejects, and the operator found out
+    // after the solve had started rather than when the deck was read.
+    if config.max_harmonics == 0 || config.num_multipliers == 0 {
         return Err(
-            ".PSTB requires positive maxharm, nmults, stabilitythreshold, and eigentol".to_owned(),
+            ".PSTB requires at least one carrier harmonic and one reported multiplier".to_owned(),
         );
+    }
+    if !config.stability_threshold.is_finite() || config.stability_threshold < 1.0 {
+        return Err(format!(
+            ".PSTB requires a finite stability threshold of at least one, got {}",
+            config.stability_threshold
+        ));
+    }
+    if !config.eigenvalue_tolerance.is_finite() || config.eigenvalue_tolerance <= 0.0 {
+        return Err(format!(
+            ".PSTB requires a positive eigenvalue tolerance, got {}",
+            config.eigenvalue_tolerance
+        ));
     }
     Ok(config)
 }
@@ -1272,5 +1291,52 @@ mod tests {
                 "the studio accepted `{card}`, which the engine refuses: {studio:?}"
             );
         }
+    }
+
+    /// A `.PSTB` card the engine's `validate_card` refuses is refused here, in
+    /// the engine's own sentence, before anything is queued.
+    ///
+    /// This reader admitted any threshold above zero. The engine entry
+    /// requires a finite magnitude of at least one, and so do both copies of
+    /// the check in `services::simulation_runner::pstb` — the physical
+    /// boundary is |lambda| = 1, and a threshold below it would call a mode
+    /// sitting exactly on the unit circle unstable. So the Studio queued a run
+    /// its own engine rejects, and the operator learned of it after the solve
+    /// had started rather than when the deck was read.
+    #[test]
+    fn a_sub_unit_stability_threshold_is_refused_before_the_run_is_queued() {
+        const CIRCUIT: &str = "periodic\nV1 in 0 SIN(0 1 1Meg)\nR1 in out 1k\nC1 out 0 1n\n";
+
+        // The engine's parser refuses the card outright, so the reader is
+        // exercised against the deck the engine could not read — which is what
+        // makes it a second line of defence rather than the only one.
+        let refused =
+            format!("{CIRCUIT}.pss fund=1Meg\n.pstb probe=l1 stabilitythreshold=0.5\n.end\n");
+        assert!(
+            Netlist::parse(&refused).is_err(),
+            "the premise of this test is that the engine refuses the card"
+        );
+        let seeded = Netlist::parse(&format!("{CIRCUIT}.pss fund=1Meg\n.end\n"))
+            .expect("the fixture circuit parses");
+        let errors = parse_periodic_tasks(&seeded, &refused)
+            .expect_err("a threshold inside the unit circle is not a stability contract");
+        assert!(
+            errors.iter().any(|error| {
+                error.contains("requires a finite stability threshold of at least one, got 0.5")
+            }),
+            "the refusal must be the engine's own sentence, with the value: {errors:?}"
+        );
+
+        // Unity itself is admissible, at both ends: it is the boundary, not a
+        // value inside it.
+        let boundary =
+            format!("{CIRCUIT}.pss fund=1Meg\n.pstb probe=l1 stabilitythreshold=1\n.end\n");
+        let netlist = Netlist::parse(&boundary).expect("the engine accepts the boundary itself");
+        let tasks = parse_periodic_tasks(&netlist, &boundary).expect("and so does the studio");
+        let pstb = tasks
+            .iter()
+            .find_map(|task| task.spec_options.pstb.as_ref())
+            .expect("the .PSTB card is queued");
+        assert_eq!(pstb.stability_threshold, 1.0);
     }
 }
