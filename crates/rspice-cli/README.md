@@ -243,9 +243,16 @@ to any one device, and the entry carries the parameter's nominal value together
 with the normalized derivative against the operating point the same deck
 settles at.
 
-`.FFT` keeps its own versioned bundle (`schema_version: 2`), which already
-carries instance and coordinate identity plus the complete transform contract,
-and which must publish atomically alongside its parent transient.
+`.FFT` keeps its own versioned bundle (`schema_version: 3`) with instance and
+coordinate identity, the transform configuration, and completion status. It
+publishes atomically alongside its parent transient. If a model finishes before
+all requested samples are available, the waveform and every FFT request remain
+present. A request with `status.kind: "incomplete-history"` records the available
+time range and has no bins or metrics; `"complete"` identifies a computed
+spectrum. The requested FFT window is preserved, including an implicit stop.
+CSV/TSV retain incomplete requests as `unavailable` records. RAW metadata and
+the HDF5 FFT section use the same version 3 status contract and permit zero
+spectral rows when all requests lack history.
 
 ### `csv`, `tsv`, `raw`, `ascii`: the flat authored projection
 

@@ -132,9 +132,17 @@ impl ResultPayload {
                 .saturating_add(payload.zeros.len())
                 .saturating_mul(2),
             Self::Fourier(_) => 0,
-            Self::Fft(payload) => payload.metrics.as_ref().map_or(0, |metrics| {
-                metrics.largest_harmonics.len().saturating_mul(4)
-            }),
+            Self::Fft(payload) => payload
+                .metrics
+                .as_ref()
+                .map_or(0, |metrics| {
+                    metrics.largest_harmonics.len().saturating_mul(4)
+                })
+                .saturating_add(if payload.status.unwrap_or_default().is_complete() {
+                    0
+                } else {
+                    2
+                }),
             Self::MonteCarlo(payload) => payload
                 .statistics
                 .iter()
@@ -1817,6 +1825,10 @@ impl FourierPayload {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FftPayload {
+    /// Present from document version 4. Older documents describe completed
+    /// spectra and omit this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<crate::engine::TransientFftStatus>,
     /// Authored probe or braced expression.
     pub source: FftSourceDocument,
     /// Display spelling of the resolved scalar column.
@@ -1829,9 +1841,9 @@ pub struct FftPayload {
     pub stop_time: f64,
     /// Uniform sample spacing in seconds.
     pub sample_interval: f64,
-    /// Number of uniformly resampled real input points.
+    /// Requested transform length, retained even when history is incomplete.
     pub sample_count: usize,
-    /// Whether the solver was forced onto every sample time.
+    /// Whether the solver was configured to land on each requested sample time.
     pub accurate_sampling: bool,
     pub coefficient_format: FftCoefficientFormatTag,
     pub compatibility_mode: FftCompatibilityModeTag,
@@ -1853,6 +1865,20 @@ pub struct FftPayload {
 
 impl FftPayload {
     fn validate(&self) -> Result<(), ResultDocumentError> {
+        if let Some(status) = self.status {
+            status
+                .validate_history(self.start_time, self.stop_time, self.sample_count)
+                .map_err(|detail| ResultDocumentError::Malformed {
+                    location: "FFT status",
+                    detail,
+                })?;
+            if !status.is_complete() && self.metrics.is_some() {
+                return Err(ResultDocumentError::Malformed {
+                    location: "FFT status",
+                    detail: "an incomplete spectrum cannot carry computed metrics".into(),
+                });
+            }
+        }
         super::require_name("FFT output name", &self.output_name)?;
         super::require_name("FFT physical type", &self.physical_type)?;
         super::require_name("FFT window name", &self.window_name)?;

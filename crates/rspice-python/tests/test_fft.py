@@ -40,6 +40,8 @@ def assert_harmonic_equal(actual, expected):
 
 def assert_fft_equal(actual, expected):
     for name in (
+        "status",
+        "incomplete_history",
         "source_kind",
         "source",
         "output_name",
@@ -140,6 +142,51 @@ def test_full_and_compressed_results_expose_identical_typed_fft(engine, fft_netl
         assert_fft_equal(compressed_fft, full_fft)
 
 
+def test_resumed_fft_without_earlier_history_preserves_waveform_and_status(engine):
+    netlist = rspice.Netlist.parse(
+        "V1 out 0 1\nR1 out 0 1k\n.options fft fftout=0\n"
+        ".fft V(out) np=8 window=rect format=unorm\n.end\n"
+    )
+    first, checkpoint = engine.run_tran_checkpointed(
+        netlist, stop_time=2e-6, max_step=0.2e-6
+    )
+    assert first.fft(0).status == "complete"
+    assert first.fft(0).incomplete_history is None
+    resumed, _ = engine.resume_tran(
+        netlist, checkpoint, stop_time=10e-6, max_step=0.2e-6
+    )
+    assert resumed.time[0] == 2e-6
+    assert resumed.time[-1] == 10e-6
+    fft = resumed.fft(0)
+    assert fft.status == "incomplete-history"
+    assert fft.incomplete_history == (2e-6, 10e-6)
+    assert fft.start_time == 0.0
+    assert fft.stop_time == 10e-6
+    assert fft.point_count == 8
+    assert len(fft.bins) == len(fft.frequencies) == len(fft.complex_bins) == 0
+    assert fft.metrics is None
+    assert_fft_equal(round_trip(fft), fft)
+    assert_fft_equal(round_trip(resumed).fft(0), fft)
+    document = fft.document()
+    assert document["schemaVersion"] == 4
+    assert document["pointCount"] == 0
+    assert document["axes"] == document["signals"] == []
+    assert document["payload"]["status"] == {
+        "kind": "incomplete-history",
+        "availableStart": 2e-6,
+        "availableStop": 10e-6,
+    }
+    unpickler, args = fft.__reduce__()
+    bad_state = list(args[0])
+    bad_state[4] = [(0, 0.0, 0.0, 0.0, 0.0, 0.0)]
+    with pytest.raises(ValueError, match="expected 0"):
+        unpickler(tuple(bad_state))
+    bad_state = list(args[0])
+    bad_state[6] = (0.0, 10e-6)
+    with pytest.raises(ValueError, match="entire requested sample record available"):
+        unpickler(tuple(bad_state))
+
+
 @pytest.mark.parametrize("compressed", [False, True])
 def test_transient_pickle_round_trip_preserves_complete_fft_exactly(
     engine, fft_netlist, compressed
@@ -201,7 +248,7 @@ def test_fft_pickle_rejects_malformed_enum_and_bin_shape(engine, fft_netlist):
     unpickler, args = fft.__reduce__()
     state = args[0]
 
-    source, sampling, configuration, axes, bins, metrics = state
+    source, sampling, configuration, axes, bins, metrics, history = state
     bad_configuration = (
         "invented-format",
         configuration[1],
@@ -211,10 +258,10 @@ def test_fft_pickle_rejects_malformed_enum_and_bin_shape(engine, fft_netlist):
         configuration[5],
     )
     with pytest.raises(ValueError, match="unknown transient FFT format"):
-        unpickler((source, sampling, bad_configuration, axes, bins, metrics))
+        unpickler((source, sampling, bad_configuration, axes, bins, metrics, history))
 
     with pytest.raises(ValueError, match="has 64 bins, expected 65"):
-        unpickler((source, sampling, configuration, axes, bins[:-1], metrics))
+        unpickler((source, sampling, configuration, axes, bins[:-1], metrics, history))
 
 
 def test_fft_value_units_cover_normalized_and_unnormalized_quantities(engine):

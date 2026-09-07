@@ -11,13 +11,14 @@ use super::transient_fft_labels::*;
 use super::*;
 
 /// Pickle schema version shared by full and compressed transient FFT state.
+/// Version 2 retains incomplete-history status beside each requested spectrum.
 ///
 /// Version zero never carried FFT evidence.  It cannot be migrated honestly:
 /// an empty list could mean either that no `.FFT` was authored or that an old
 /// Python binding silently discarded computed spectra.  The transient
 /// unpicklers therefore reject an absent contract instead of fabricating an
 /// empty result set.
-pub(crate) const TRANSIENT_FFT_STATE_VERSION: usize = 1;
+pub(crate) const TRANSIENT_FFT_STATE_VERSION: usize = 2;
 
 /// Stable tagged source descriptor: `(probe|expression, authored spelling)`.
 pub(crate) type TransientFftSourceState = (String, String);
@@ -53,6 +54,7 @@ pub(crate) type TransientFftResultState = (
     (f64, usize, usize, usize),
     Vec<TransientFftBinState>,
     Option<TransientFftMetricsState>,
+    Option<(f64, f64)>,
 );
 
 /// Version and ordered spectra attached to either transient container.
@@ -109,6 +111,9 @@ pub(crate) fn transient_fft_result_state(
     // `physical_type` is a core string for forward-extensibility.  Fail closed
     // if core grows a quantity Python has not classified yet.
     fft_physical_type_from_label(result.physical_type)?;
+    result
+        .validate_status()
+        .map_err(crate::errors::value_error)?;
     Ok((
         (
             fft_output_state(&result.output),
@@ -138,6 +143,13 @@ pub(crate) fn transient_fft_result_state(
         ),
         result.bins.iter().map(fft_bin_state).collect(),
         result.metrics.as_ref().map(fft_metrics_state),
+        match result.status {
+            rspice_core::engine::TransientFftStatus::Complete => None,
+            rspice_core::engine::TransientFftStatus::IncompleteHistory {
+                available_start,
+                available_stop,
+            } => Some((available_start, available_stop)),
+        },
     ))
 }
 
@@ -219,7 +231,16 @@ fn rebuild_fft_metrics(
 pub(crate) fn rebuild_transient_fft_result(
     state: TransientFftResultState,
 ) -> PyResult<rspice_core::engine::TransientFftResult> {
-    let (source, sampling, configuration, axes, bins, metrics) = state;
+    let (source, sampling, configuration, axes, bins, metrics, incomplete_history) = state;
+    let status = incomplete_history.map_or(
+        rspice_core::engine::TransientFftStatus::Complete,
+        |(available_start, available_stop)| {
+            rspice_core::engine::TransientFftStatus::IncompleteHistory {
+                available_start,
+                available_stop,
+            }
+        },
+    );
     let (output, output_name, physical_type) = source;
     let (start_time, stop_time, sample_interval, point_count, accurate_sampling) = sampling;
     let (format, mode, window, window_name, alpha, coherent_gain) = configuration;
@@ -235,9 +256,14 @@ pub(crate) fn rebuild_transient_fft_result(
         )));
     }
     let expected_bins = point_count / 2 + 1;
-    if bins.len() != expected_bins {
+    let retained_bins = if status.is_complete() {
+        expected_bins
+    } else {
+        0
+    };
+    if bins.len() != retained_bins {
         return Err(crate::errors::value_error(format!(
-            "pickled transient FFT has {} bins, expected {expected_bins} for {point_count} points",
+            "pickled transient FFT has {} bins, expected {retained_bins} for its completion status",
             bins.len()
         )));
     }
@@ -288,7 +314,8 @@ pub(crate) fn rebuild_transient_fft_result(
     let metrics = metrics
         .map(|state| rebuild_fft_metrics(state, expected_bins))
         .transpose()?;
-    Ok(rspice_core::engine::TransientFftResult {
+    let result = rspice_core::engine::TransientFftResult {
+        status,
         output: fft_output_from_state(output)?,
         output_name,
         physical_type: fft_physical_type_from_label(&physical_type)?,
@@ -309,7 +336,11 @@ pub(crate) fn rebuild_transient_fft_result(
         maximum_metric_bin,
         bins: rebuilt_bins,
         metrics,
-    })
+    };
+    result
+        .validate_status()
+        .map_err(crate::errors::value_error)?;
+    Ok(result)
 }
 
 pub(crate) fn rebuild_transient_fft_results(
@@ -341,6 +372,7 @@ mod fft_pickle_tests {
 
     fn spectrum() -> TransientFftResult {
         TransientFftResult {
+            status: rspice_core::engine::TransientFftStatus::Complete,
             output: FftOutput::Expression("2*V(out)".to_string()),
             output_name: "{2*V(out)}".to_string(),
             physical_type: "parameter",
@@ -415,6 +447,23 @@ mod fft_pickle_tests {
                 ],
             }),
         }
+    }
+
+    #[test]
+    fn incomplete_fft_state_round_trips() {
+        use rspice_core::engine::TransientFftStatus;
+        let mut original = spectrum();
+        original.status = TransientFftStatus::IncompleteHistory {
+            available_start: original.start_time,
+            available_stop: original.start_time,
+        };
+        original.bins.clear();
+        original.metrics = None;
+        let state = transient_fft_persistence_state(std::slice::from_ref(&original)).unwrap();
+        assert_eq!(
+            rebuild_transient_fft_results(Some(state.clone())).unwrap(),
+            [original]
+        );
     }
 
     #[test]

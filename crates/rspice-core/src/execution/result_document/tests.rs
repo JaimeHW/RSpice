@@ -584,13 +584,14 @@ fn transient_fft_result() -> crate::engine::TransientFftResult {
     use crate::netlist::{FftFormat, FftOutput, FftWindow, XyceFftMode};
 
     crate::engine::TransientFftResult {
+        status: crate::engine::TransientFftStatus::Complete,
         output: FftOutput::Probe("V(out)".to_owned()),
         output_name: "V(out)".to_owned(),
         physical_type: "voltage",
         start_time: 0.0,
         stop_time: 1.0e-3,
-        sample_interval: 1.0e-6,
-        point_count: 1000,
+        sample_interval: 0.25e-3,
+        point_count: 4,
         accurate_sampling: true,
         format: FftFormat::Unnormalized,
         mode: XyceFftMode::HspiceCompatible,
@@ -601,7 +602,7 @@ fn transient_fft_result() -> crate::engine::TransientFftResult {
         frequency_resolution: 1.0e3,
         fundamental_bin: 1,
         minimum_metric_bin: 1,
-        maximum_metric_bin: 3,
+        maximum_metric_bin: 2,
         bins: vec![
             TransientFftBin {
                 index: 0,
@@ -618,6 +619,14 @@ fn transient_fft_result() -> crate::engine::TransientFftResult {
                 imaginary: -1.0,
                 magnitude: 1.0,
                 phase_degrees: -90.0,
+            },
+            TransientFftBin {
+                index: 2,
+                frequency: 2.0e3,
+                real: 0.0,
+                imaginary: 0.0,
+                magnitude: 0.0,
+                phase_degrees: 0.0,
             },
         ],
         metrics: Some(TransientFftMetrics {
@@ -1154,6 +1163,67 @@ fn sensitivity_transfer_and_pole_zero_documents_have_no_series() {
 }
 
 #[test]
+fn incomplete_fft_documents_preserve_status_without_spectral_data() {
+    use crate::engine::TransientFftStatus;
+    let mut result = transient_fft_result();
+    result.status = TransientFftStatus::IncompleteHistory {
+        available_start: 0.0,
+        available_stop: 1e-4,
+    };
+    result.bins.clear();
+    result.metrics = None;
+    let document = AnalysisResultDocument::from_transient_fft(
+        instance(AnalysisKind::Fft),
+        instance(AnalysisKind::Tran),
+        SignalUnit::Volt,
+        &result,
+    )
+    .unwrap()
+    .build()
+    .unwrap();
+    assert_eq!(document.point_count(), 0);
+    assert!(document.axes().is_empty());
+    assert!(document.signals().is_empty());
+    let json = document.to_json().unwrap();
+    assert_eq!(AnalysisResultDocument::from_json(&json).unwrap(), document);
+    let mut value: serde_json::Value = serde_json::from_str(&json).unwrap();
+    value["schemaVersion"] = serde_json::json!(3);
+    assert!(AnalysisResultDocument::from_json(&value.to_string()).is_err());
+    value["schemaVersion"] = serde_json::json!(4);
+    value["payload"].as_object_mut().unwrap().remove("status");
+    assert!(AnalysisResultDocument::from_json(&value.to_string()).is_err());
+    result.status = TransientFftStatus::IncompleteHistory {
+        available_start: 0.0,
+        available_stop: 1e-3,
+    };
+    assert!(
+        AnalysisResultDocument::from_transient_fft(
+            instance(AnalysisKind::Fft),
+            instance(AnalysisKind::Tran),
+            SignalUnit::Volt,
+            &result,
+        )
+        .is_err(),
+        "an available record must not be labeled incomplete"
+    );
+}
+
+#[test]
+fn legacy_fft_documents_keep_their_complete_spectrum_without_new_status_fields() {
+    let document = document_for(AnalysisResultKind::Fft);
+    let mut value: serde_json::Value = serde_json::from_str(&document.to_json().unwrap()).unwrap();
+    value["schemaVersion"] = serde_json::json!(3);
+    value["payload"].as_object_mut().unwrap().remove("status");
+    let restored = AnalysisResultDocument::from_json(&value.to_string()).unwrap();
+    assert_eq!(restored.point_count(), document.point_count());
+    assert_eq!(restored.signals(), document.signals());
+    assert_eq!(
+        AnalysisResultDocument::from_json(&restored.to_json().unwrap()).unwrap(),
+        restored
+    );
+}
+
+#[test]
 fn fourier_and_fft_documents_name_their_parent_transient() {
     let fourier = document_for(AnalysisResultKind::Fourier);
     assert_eq!(
@@ -1184,7 +1254,7 @@ fn fourier_and_fft_documents_name_their_parent_transient() {
         payload.coefficient_format,
         FftCoefficientFormatTag::Unnormalized
     );
-    assert_eq!(payload.sample_count, 1000);
+    assert_eq!(payload.sample_count, 4);
     let metrics = payload.metrics.as_ref().expect("FFT metrics");
     assert_eq!(metrics.sfdr_spur_bin, Some(1));
     assert_eq!(metrics.largest_harmonics.len(), 1);
@@ -1194,6 +1264,7 @@ fn fourier_and_fft_documents_name_their_parent_transient() {
             samples: vec![
                 Some(ComplexSample::new(0.01, 0.0)),
                 Some(ComplexSample::new(0.0, -1.0)),
+                Some(ComplexSample::new(0.0, 0.0)),
             ]
         }
     );

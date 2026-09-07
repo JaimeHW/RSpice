@@ -12,6 +12,10 @@
 //! command block, and the HDF5 section are four renderings of one contract, so
 //! they live together with the validation every one of them is checked
 //! against before a byte is written.
+//!
+//! Version 3 retains incomplete sample-history requests with explicit status
+//! and no bins or metrics. Delimited formats emit an `unavailable` row; RAW
+//! and HDF5 retain the request metadata even when the bundle has no numeric rows.
 
 use super::shared::map_hdf5_output_error;
 use crate::cli::{CliError, OutputFormat, map_atomic_output_error};
@@ -74,7 +78,7 @@ pub(super) fn write_transient_fft_output_pair(
     .map_err(|error| map_atomic_output_error(fft_path, error))
 }
 
-pub(super) const FFT_ARTIFACT_SCHEMA_VERSION: u32 = 2;
+pub(super) const FFT_ARTIFACT_SCHEMA_VERSION: u32 = 3;
 
 #[derive(serde::Serialize)]
 struct FftJsonCoordinate<'a> {
@@ -296,6 +300,7 @@ struct FftJsonHarmonic {
 
 #[derive(serde::Serialize)]
 struct FftJsonResult<'a> {
+    status: rspice_core::engine::TransientFftStatus,
     analysis_id: String,
     parent_analysis_id: &'a str,
     ordinal: usize,
@@ -318,6 +323,7 @@ impl<'a> FftJsonResult<'a> {
         let (source_kind, source_text, authored_output) = fft_output_identity(&result.output);
         let unit = fft_value_unit(result.physical_type, result.format).unwrap_or(None);
         Self {
+            status: result.status,
             analysis_id: analysis_id.to_string(),
             parent_analysis_id,
             ordinal,
@@ -589,7 +595,7 @@ fn validate_fft_publication(
         }
         if result.mode != expected_mode
             || result.accurate_sampling != expected_accurate_sampling
-            || result.metrics.is_some() != expected_metrics
+            || result.metrics.is_some() != (expected_metrics && result.status.is_complete())
         {
             return Err(fft_validation_error(
                 analysis,
@@ -702,13 +708,9 @@ fn validate_fft_publication(
             ));
         }
 
-        let bin_count = result.point_count / 2 + 1;
-        if result.bins.len() != bin_count {
-            return Err(fft_validation_error(
-                analysis,
-                "one-sided bin count does not match NP",
-            ));
-        }
+        result
+            .validate_status()
+            .map_err(|message| fft_validation_error(analysis, message))?;
         let nyquist_bin = result.point_count / 2;
         let expected_fundamental = fft_expected_frequency_bin(
             analysis,
@@ -896,7 +898,7 @@ fn fft_json_document<'a>(
     }
 }
 
-const FFT_DELIMITED_HEADER: [&str; 54] = [
+const FFT_DELIMITED_HEADER: [&str; 57] = [
     "schema_version",
     "analysis",
     "artifact_format",
@@ -938,6 +940,9 @@ const FFT_DELIMITED_HEADER: [&str; 54] = [
     "sfdr_db",
     "sfdr_spur_bin",
     "sfdr_spur_frequency_hz",
+    "status",
+    "available_start_s",
+    "available_stop_s",
     "record_kind",
     "bin_index",
     "frequency_hz",
@@ -976,6 +981,17 @@ fn fft_delimited_common_fields(
 ) -> Vec<String> {
     let (source_kind, source_text, authored_output) = fft_output_identity(&result.output);
     let metrics = result.metrics.as_ref();
+    let (status, available_start, available_stop) = match result.status {
+        rspice_core::engine::TransientFftStatus::Complete => ("complete", None, None),
+        rspice_core::engine::TransientFftStatus::IncompleteHistory {
+            available_start,
+            available_stop,
+        } => (
+            "incomplete-history",
+            Some(available_start),
+            Some(available_stop),
+        ),
+    };
     vec![
         FFT_ARTIFACT_SCHEMA_VERSION.to_string(),
         "fft".to_string(),
@@ -1046,6 +1062,9 @@ fn fft_delimited_common_fields(
             .unwrap_or_default(),
         delimited_optional_usize(metrics.and_then(|value| value.sfdr_spur_bin)),
         delimited_optional_float(metrics.and_then(|value| value.sfdr_spur_frequency)),
+        status.to_owned(),
+        delimited_optional_float(available_start),
+        delimited_optional_float(available_stop),
     ]
 }
 
@@ -1106,6 +1125,20 @@ fn write_fft_delimited(
             result,
             request,
         );
+        if !result.status.is_complete() {
+            let mut record: [String; 13] = std::array::from_fn(|_| String::new());
+            record[0] = "unavailable".into();
+            write_delimited_fields(
+                writer,
+                path,
+                delimiter,
+                common
+                    .iter()
+                    .map(String::as_str)
+                    .chain(record.iter().map(String::as_str)),
+            )?;
+            continue;
+        }
         for bin in &result.bins {
             if bin.index.is_multiple_of(256) && crate::abort::reason().is_some() {
                 return Err(super::cancellation_cli_error(timeout_seconds));
@@ -1270,6 +1303,7 @@ pub(crate) struct FftRawMetrics {
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct FftRawMetadataResult {
+    status: rspice_core::engine::TransientFftStatus,
     analysis_id: String,
     parent_analysis_id: String,
     ordinal: usize,
@@ -1293,6 +1327,7 @@ impl FftRawMetadataResult {
             .unwrap_or(None)
             .map(str::to_string);
         Self {
+            status: result.status,
             analysis_id: analysis_id.to_string(),
             parent_analysis_id: parent_analysis_id.to_string(),
             ordinal,
@@ -1474,6 +1509,14 @@ fn validate_fft_raw_metadata(metadata: &FftRawMetadata) -> Result<(), String> {
     )
     .map_err(|error| format!("cannot mint canonical FFT identities: {error}"))?;
     for (index, result) in metadata.results.iter().enumerate() {
+        result.status.validate_history(
+            result.sampling.start_time_s,
+            result.sampling.stop_time_s,
+            result.sampling.point_count,
+        )?;
+        if !result.status.is_complete() && result.metrics.is_some() {
+            return Err("incomplete FFT RAW result contains computed metrics".into());
+        }
         let ordinal = index + 1;
         let analysis = canonical_ids
             .get(index)
@@ -1799,7 +1842,11 @@ pub(crate) fn read_fft_raw_artifact(path: &Path) -> Result<DecodedFftRawArtifact
         ));
     }
     let expected_points = metadata.results.iter().try_fold(0usize, |count, result| {
-        count.checked_add(result.sampling.point_count / 2 + 1)
+        count.checked_add(if result.status.is_complete() {
+            result.sampling.point_count / 2 + 1
+        } else {
+            0
+        })
     });
     let expected_points =
         expected_points.ok_or_else(|| "FFT RAW point count overflow".to_string())?;
@@ -1817,7 +1864,11 @@ pub(crate) fn read_fft_raw_artifact(path: &Path) -> Result<DecodedFftRawArtifact
     let mut row = 0usize;
     for result in &metadata.results {
         let result_start = row;
-        let bin_count = result.sampling.point_count / 2 + 1;
+        let bin_count = if result.status.is_complete() {
+            result.sampling.point_count / 2 + 1
+        } else {
+            0
+        };
         for bin_index in 0..bin_count {
             let ordinal = columns[5].y[row];
             let stored_index = columns[6].y[row];
@@ -2070,6 +2121,7 @@ fn hdf5_fft_section(
                 .collect(),
         });
         hdf5_results.push(Hdf5FftResult {
+            status: result.status,
             analysis_id: analysis_ids
                 .get(index)
                 .cloned()
@@ -2491,6 +2543,94 @@ mod tests {
             &stale_metrics,
             &netlist,
         );
+    }
+
+    #[test]
+    fn incomplete_fft_requests_remain_visible_in_every_publication_format() {
+        use rspice_core::engine::TransientFftStatus;
+        let (netlist, reference) = fft_publication_fixture();
+        let directory = FftTestDirectory::new();
+        let incomplete = TransientFftStatus::IncompleteHistory {
+            available_start: 0.0,
+            available_stop: 0.1e-3,
+        };
+        for all_incomplete in [false, true] {
+            let mut results = reference.clone();
+            for (index, result) in results.iter_mut().enumerate() {
+                if index == 0 || all_incomplete {
+                    result.status = incomplete;
+                    result.bins.clear();
+                    result.metrics = None;
+                }
+            }
+            for (index, format) in [
+                OutputFormat::Json,
+                OutputFormat::Csv,
+                OutputFormat::Tsv,
+                OutputFormat::Raw,
+                OutputFormat::RawAscii,
+                OutputFormat::Hdf5,
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let path = directory
+                    .0
+                    .join(format!("incomplete_{all_incomplete}_{index}"));
+                write_fft_output(
+                    &path,
+                    format,
+                    "tran-001",
+                    &fft_test_identities(results.len()),
+                    None,
+                    &results,
+                    &netlist,
+                    None,
+                )
+                .unwrap();
+                match format {
+                    OutputFormat::Json => {
+                        let document: serde_json::Value =
+                            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+                        assert_eq!(document["schema_version"], FFT_ARTIFACT_SCHEMA_VERSION);
+                        assert_eq!(
+                            document["results"][0]["status"]["kind"],
+                            "incomplete-history"
+                        );
+                        assert!(
+                            document["results"][0]["spectrum"]["bins"]
+                                .as_array()
+                                .unwrap()
+                                .is_empty()
+                        );
+                    }
+                    OutputFormat::Csv | OutputFormat::Tsv => {
+                        let text = std::fs::read_to_string(&path).unwrap();
+                        assert_eq!(
+                            text.lines()
+                                .filter(|line| line.contains("unavailable"))
+                                .count(),
+                            if all_incomplete { 2 } else { 1 }
+                        );
+                        assert!(text.contains("incomplete-history"));
+                    }
+                    OutputFormat::Raw | OutputFormat::RawAscii => {
+                        let decoded = read_fft_raw_artifact(&path).unwrap();
+                        assert_eq!(decoded.metadata.results[0].status, incomplete);
+                        assert_eq!(decoded.metadata.results[1].status, results[1].status);
+                        assert_eq!(decoded.bins.len(), results[1].bins.len());
+                    }
+                    OutputFormat::Hdf5 => {
+                        let document = crate::hdf5::read_hdf5(&path).unwrap();
+                        let fft = document.fft.unwrap();
+                        assert_eq!(fft.results[0].status, incomplete);
+                        assert_eq!(fft.results[1].status, results[1].status);
+                        assert!(fft.results[0].real.is_empty());
+                    }
+                    OutputFormat::Vcd => unreachable!(),
+                }
+            }
+        }
     }
 
     #[test]

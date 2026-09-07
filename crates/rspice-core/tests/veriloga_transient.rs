@@ -956,6 +956,134 @@ endmodule
 }
 
 #[test]
+fn transient_finish_retains_authored_fft_windows_and_partial_waveforms() {
+    use rspice_core::{NoAbort, SimulationOutcome};
+    let model = write_model(
+        "fft_finish",
+        r#"
+module fft_finish(out);
+    inout out; electrical out;
+    analog begin
+        @(timer(2e-6)) $finish(1);
+        V(out)<+1;
+    end
+endmodule
+"#,
+    );
+    let netlist = Netlist::parse(&format!(
+        "* partial FFT history\nX1 out fft_finish\n.va \"{}\" fft_finish\n.fft V(out) NP=8 STOP=10u WINDOW=RECT FORMAT=UNORM\n.fft V(out) NP=8 STOP=1u WINDOW=RECT FORMAT=UNORM\n.fft V(out) NP=8 WINDOW=RECT FORMAT=UNORM\n.end\n",
+        deck_path(&model)
+    )).unwrap();
+    let outcome = Engine::default()
+        .run_with_outcome(&NoAbort, |engine, signal| {
+            engine.run_tran_with_abort(&netlist, 10e-6, 0.2e-6, signal)
+        })
+        .expect("an unavailable FFT must not discard the accepted waveform");
+    let SimulationOutcome::Finished {
+        result: Some(result),
+        ..
+    } = outcome
+    else {
+        panic!("finish must retain its partial waveform");
+    };
+    assert_eq!(result.time.last(), Some(&2e-6));
+    assert_eq!(result.fft_results.len(), 3);
+    assert_eq!(
+        Some(result.fft_results[0].stop_time),
+        netlist.fft_analyses[0].stop
+    );
+    assert_eq!(
+        Some(result.fft_results[1].stop_time),
+        netlist.fft_analyses[1].stop
+    );
+    assert_eq!(result.fft_results[2].stop_time, 10e-6);
+    for (index, fft) in result.fft_results.iter().enumerate() {
+        fft.validate_status().unwrap();
+        if index == 1 {
+            assert!(fft.status.is_complete());
+            assert!((fft.bins[0].real - 1.0).abs() < 1e-12);
+            assert!(fft.bins[1..].iter().all(|bin| bin.magnitude < 1e-12));
+        } else {
+            assert_eq!(
+                fft.status,
+                rspice_core::engine::TransientFftStatus::IncompleteHistory {
+                    available_start: 0.0,
+                    available_stop: 2e-6
+                }
+            );
+            assert!(fft.bins.is_empty());
+            assert!(fft.metrics.is_none());
+        }
+    }
+    let compressed = Engine::default()
+        .run_tran_compressed(
+            &netlist,
+            10e-6,
+            0.2e-6,
+            rspice_core::engine::CompressionConfig::default(),
+        )
+        .expect("partial FFT status survives waveform compression");
+    assert_eq!(compressed.post_results.fft, result.fft_results);
+    let expanded = compressed.try_into_transient().unwrap();
+    assert_eq!(expanded.time.last(), result.time.last());
+    assert_eq!(expanded.fft_results, result.fft_results);
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
+fn transient_finish_fft_uses_the_last_required_sample_not_the_exclusive_stop() {
+    for (name, event, endpoint, complete) in [
+        ("fft_origin_finish", "initial_step", 0.0, false),
+        ("fft_last_sample_finish", "timer(7.0)", 7.0, true),
+    ] {
+        let model = write_model(
+            name,
+            &format!(
+                "module {name}(out);\ninout out; electrical out;\nanalog begin\n@({event}) $finish(1);\nV(out)<+1;\nend\nendmodule\n"
+            ),
+        );
+        let netlist = Netlist::parse(&format!(
+            "* stop-exclusive FFT boundary\nX1 out {name}\n.va \"{}\" {name}\n.fft V(out) NP=8 WINDOW=RECT FORMAT=UNORM\n.end\n",
+            deck_path(&model)
+        )).unwrap();
+        let result = Engine::default().run_tran(&netlist, 8.0, 1.0).unwrap();
+        assert_eq!(result.time.last(), Some(&endpoint));
+        let fft = &result.fft_results[0];
+        assert_eq!(fft.start_time, 0.0);
+        assert_eq!(fft.stop_time, 8.0);
+        assert_eq!(fft.sample_interval, 1.0);
+        assert_eq!(fft.status.is_complete(), complete);
+        fft.validate_status().unwrap();
+        if complete {
+            assert!((fft.bins[0].real - 1.0).abs() < 1e-12);
+            assert!(fft.bins[1..].iter().all(|bin| bin.magnitude < 1e-12));
+        } else {
+            assert_eq!(
+                fft.status,
+                rspice_core::engine::TransientFftStatus::IncompleteHistory {
+                    available_start: 0.0,
+                    available_stop: 0.0,
+                }
+            );
+        }
+        let compressed = Engine::default()
+            .run_tran_compressed(
+                &netlist,
+                8.0,
+                1.0,
+                rspice_core::engine::CompressionConfig::default(),
+            )
+            .unwrap();
+        assert_eq!(compressed.post_results.fft, result.fft_results);
+        assert_eq!(
+            compressed.try_into_transient().unwrap().time.last(),
+            Some(&endpoint)
+        );
+        let _ = std::fs::remove_file(model);
+    }
+}
+
+#[test]
 fn checkpoint_resume_does_not_repeat_model_nodeset_startup() {
     let model = write_model(
         "resume_nodeset",

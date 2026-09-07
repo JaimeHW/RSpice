@@ -67,6 +67,89 @@ fn assert_no_staging_file(directory: &Path) {
 }
 
 #[test]
+fn model_finish_preserves_the_waveform_and_each_authored_fft_identity() {
+    let directory = test_dir("model_finish");
+    let model = directory.join("finish.va");
+    std::fs::write(&model, "module fft_finish(out);\ninout out; electrical out;\nanalog begin\n@(timer(2e-6)) $finish(1);\nV(out)<+1;\nend\nendmodule\n").unwrap();
+    let deck = write_deck(
+        &directory,
+        "finish.cir",
+        &format!(
+            "* FFT after accepted model finish\n.va \"{}\" fft_finish\nX1 marker fft_finish\nV1 out 0 SIN(0 1 1MEG)\nR1 out 0 1k\n.tran 0.2u 10u\n.options fft fftout=1\n.fft V(out) NP=8 STOP=10u WINDOW=RECT FORMAT=UNORM\n.fft V(out) NP=8 STOP=1u WINDOW=RECT FORMAT=UNORM\n.fft V(out) NP=8 WINDOW=RECT FORMAT=UNORM\n.end\n",
+            model.to_string_lossy().replace('\\', "/")
+        ),
+    );
+    for format in ["json", "csv"] {
+        let requested = directory.join(format!("results.{format}"));
+        let output = run(&deck, &requested, format, &[]);
+        assert!(
+            output.status.success(),
+            "{format}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let waveform = directory.join(format!("results.tran-001.{format}"));
+        assert!(
+            waveform.exists(),
+            "the accepted partial waveform must be published"
+        );
+        let artifact = directory.join(format!("results.fft.{format}"));
+        if format == "json" {
+            let document = read_json(&artifact);
+            let results = document["results"].as_array().unwrap();
+            assert_eq!(results.len(), 3);
+            for (index, result) in results.iter().enumerate() {
+                assert_eq!(result["analysis_id"], format!("fft-{:03}", index + 1));
+                assert_eq!(result["parent_analysis_id"], "tran-001");
+                assert_eq!(
+                    result["status"]["kind"],
+                    if index == 1 {
+                        "complete"
+                    } else {
+                        "incomplete-history"
+                    }
+                );
+                if index != 1 {
+                    assert_eq!(result["status"]["availableStart"], 0.0);
+                    assert_eq!(result["status"]["availableStop"], 2e-6);
+                    assert!(result["spectrum"]["bins"].as_array().unwrap().is_empty());
+                    assert!(result["metrics"].is_null());
+                }
+            }
+        } else {
+            let text = std::fs::read_to_string(&waveform).unwrap();
+            let endpoint: f64 = text
+                .lines()
+                .last()
+                .unwrap()
+                .split(',')
+                .next()
+                .unwrap()
+                .parse()
+                .unwrap();
+            assert!((endpoint - 2e-6).abs() < 1e-18, "{text}");
+            let text = std::fs::read_to_string(&artifact).unwrap();
+            let mut lines = text.lines();
+            let header = lines.next().unwrap().split(',').collect::<Vec<_>>();
+            let status = header
+                .iter()
+                .position(|column| *column == "status")
+                .unwrap();
+            let identity = header
+                .iter()
+                .position(|column| *column == "analysis_id")
+                .unwrap();
+            let unavailable = lines
+                .map(|line| line.split(',').collect::<Vec<_>>())
+                .filter(|row| row[status] == "incomplete-history")
+                .map(|row| row[identity].to_owned())
+                .collect::<Vec<_>>();
+            assert_eq!(unavailable, ["fft-001", "fft-003"]);
+        }
+        assert_no_staging_file(&directory);
+    }
+}
+
+#[test]
 fn json_bundle_preserves_ordered_complex_spectra_metrics_units_and_parent_identity() {
     let directory = test_dir("json");
     let deck = write_deck(
@@ -92,7 +175,7 @@ fn json_bundle_preserves_ordered_complex_spectra_metrics_units_and_parent_identi
     assert!(directory.join("results.tran-001.json").exists());
     let artifact = directory.join("results.fft.json");
     let document = read_json(&artifact);
-    assert_eq!(document["schema_version"], 2);
+    assert_eq!(document["schema_version"], 3);
     assert_eq!(document["analysis"], "fft");
     assert_eq!(document["parent_analysis_id"], "tran-001");
     assert!(document["coordinate"].is_null());
@@ -168,7 +251,7 @@ fn csv_and_tsv_are_lossless_flattened_bin_and_metric_record_tables() {
         let text = std::fs::read_to_string(&artifact).expect("read FFT delimited artifact");
         let mut lines = text.lines();
         let header = lines.next().expect("FFT delimited header");
-        assert_eq!(header.split(separator).count(), 54);
+        assert_eq!(header.split(separator).count(), 57);
         let columns = header.split(separator).collect::<Vec<_>>();
         for required in [
             "analysis_id",
@@ -204,7 +287,7 @@ fn csv_and_tsv_are_lossless_flattened_bin_and_metric_record_tables() {
         assert!(
             records
                 .iter()
-                .all(|line| line.split(separator).count() == 54)
+                .all(|line| line.split(separator).count() == 57)
         );
     }
     assert_no_staging_file(&directory);

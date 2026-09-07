@@ -15,7 +15,7 @@
 //! ```text
 //! {
 //!   "schema":        "rspice-analysis-result"   fixed identifier
-//!   "schemaVersion": 3                          this build's exact version
+//!   "schemaVersion": 4                          this build's exact version
 //!   "resultKind":    "op" | "dc" | "ac" | "tran" | "noise" | "sp" |
 //!                    "port-noise" | "distortion" | "tf" | "stb" |
 //!                    "sensitivity" | "pole-zero" | "fourier" | "fft" |
@@ -118,7 +118,7 @@
 //!             poleEvidence, zeroEvidence,
 //!             dcGain|null, highFrequencyGain|null
 //! fourier     output
-//! fft         source, outputName, physicalType,
+//! fft         status, source, outputName, physicalType,
 //!             startTime, stopTime, sampleInterval,
 //!             sampleCount, accurateSampling,
 //!             coefficientFormat, compatibilityMode,
@@ -206,7 +206,7 @@ use crate::execution::topology::TopologyFingerprint;
 pub const ANALYSIS_RESULT_DOCUMENT_SCHEMA: &str = "rspice-analysis-result";
 
 /// Schema version this build produces.
-pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 3;
+pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 4;
 
 /// Every schema version this build decodes, oldest first.
 ///
@@ -217,13 +217,22 @@ pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 3;
 /// independent coordinates. Older documents retain their single index and
 /// decode with an empty projection, without inventing an unrecorded polarity.
 /// Older readers reject newer versions before decoding their fields.
-const DECODABLE_ANALYSIS_RESULT_DOCUMENT_VERSIONS: [u32; 3] = [1, 2, 3];
+/// Version 4 requires FFT `status`: `{"kind":"complete"}` or
+/// `{"kind":"incomplete-history","availableStart":f64,"availableStop":f64}`.
+/// Incomplete requests retain their requested window and transform configuration
+/// but have zero document points, no axes or signals, and null metrics. This
+/// includes early model finish and resume without the earlier sample history.
+/// A stop-exclusive FFT is complete once its last required sample is available.
+/// Versions 1–3 omit `status` and retain their completed spectral data unchanged.
+const DECODABLE_ANALYSIS_RESULT_DOCUMENT_VERSIONS: [u32; 4] = [1, 2, 3, 4];
 
 /// First version whose transient payload may declare a digital bus.
 const FIRST_DIGITAL_BUS_DOCUMENT_VERSION: u32 = 2;
 
 /// First version whose PSTB payload may declare a physical-current projection.
 const FIRST_PSTB_PROJECTION_DOCUMENT_VERSION: u32 = 3;
+
+const FIRST_FFT_STATUS_DOCUMENT_VERSION: u32 = 4;
 
 /// How often long validation and serialization loops poll the abort source.
 const ABORT_POLL_STRIDE: usize = 256;
@@ -482,6 +491,24 @@ impl AnalysisResultDocument {
                     self.schema_version,
                 ),
             });
+        }
+        if let ResultPayload::Fft(payload) = &self.payload {
+            if payload.status.is_some()
+                != (self.schema_version >= FIRST_FFT_STATUS_DOCUMENT_VERSION)
+            {
+                return Err(ResultDocumentError::Malformed {
+                    location: "FFT status",
+                    detail: format!(
+                        "FFT status must be present from document version {FIRST_FFT_STATUS_DOCUMENT_VERSION} and absent in earlier versions"
+                    ),
+                });
+            }
+            if payload.status.unwrap_or_default().is_complete() == (self.point_count == 0) {
+                return Err(ResultDocumentError::Malformed {
+                    location: "FFT status",
+                    detail: "FFT point count does not match its completion status".into(),
+                });
+            }
         }
         if self.payload.result_kind() != self.result_kind {
             return Err(ResultDocumentError::PayloadFamilyMismatch {

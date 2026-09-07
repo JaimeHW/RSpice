@@ -891,11 +891,6 @@ fn parse_ascii_data(
             lines.len() / num_vars
         }
     };
-    if point_count == 0 {
-        return Err(RawParseError::DataError(
-            "ASCII raw data contains no points".to_string(),
-        ));
-    }
     ensure_waveform_dimensions(header, point_count, resource_limits)?;
     let mut data = data_columns(num_vars, point_count)?;
 
@@ -1050,6 +1045,29 @@ mod tests {
     fn parse_raw(input: &str) -> Result<RawWaveformData, RawParseError> {
         let mut reader = Cursor::new(input.as_bytes().to_vec());
         parse_raw_reader(&mut reader)
+    }
+
+    #[test]
+    fn empty_raw_plots_preserve_columns_in_both_encodings() {
+        for encoding in ["Values", "Binary"] {
+            let parsed = parse_raw(&format!(
+                "Title: empty FFT\nPlotname: Transient FFT\nFlags: real double\nNo. Variables: 2\nNo. Points: 0\nVariables:\n0 frequency frequency\n1 fft_real value\n{encoding}:\n"
+            ))
+            .expect("a zero-point plot retains its schema without invented samples");
+            assert_eq!(parsed.header.no_points, 0, "{encoding}");
+            assert_eq!(parsed.variables.len(), 2, "{encoding}");
+            assert_eq!(parsed.waveforms.len(), 2, "{encoding}");
+            assert!(
+                parsed
+                    .waveforms
+                    .iter()
+                    .all(|waveform| waveform.y.is_empty())
+            );
+        }
+        parse_raw(
+            "Title: truncated\nPlotname: Transient FFT\nFlags: real double\nNo. Variables: 2\nNo. Points: 1\nVariables:\n0 frequency frequency\n1 fft_real value\nValues:\n"
+        )
+        .expect_err("a declared nonempty plot still requires its data");
     }
 
     #[test]

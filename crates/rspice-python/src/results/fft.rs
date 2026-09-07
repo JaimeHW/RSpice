@@ -420,6 +420,28 @@ impl From<&rspice_core::engine::TransientFftResult> for PyTransientFftResult {
 
 #[pymethods]
 impl PyTransientFftResult {
+    /// Whether this request produced a spectrum or lacks accepted sample history.
+    #[getter]
+    fn status(&self) -> &'static str {
+        if self.inner.status.is_complete() {
+            "complete"
+        } else {
+            "incomplete-history"
+        }
+    }
+
+    /// Accepted history range when the requested FFT record is unavailable.
+    #[getter]
+    fn incomplete_history(&self) -> Option<(f64, f64)> {
+        match self.inner.status {
+            rspice_core::engine::TransientFftStatus::Complete => None,
+            rspice_core::engine::TransientFftStatus::IncompleteHistory {
+                available_start,
+                available_stop,
+            } => Some((available_start, available_stop)),
+        }
+    }
+
     #[getter]
     fn source_kind(&self) -> &'static str {
         match self.inner.output {
@@ -621,8 +643,9 @@ impl PyTransientFftResult {
 
     fn __repr__(&self) -> String {
         format!(
-            "FftResult(source='{}', points={}, bins={}, window='{}', format='{}')",
+            "FftResult(source='{}', status='{}', points={}, bins={}, window='{}', format='{}')",
             self.inner.output_name,
+            self.status(),
             self.inner.point_count,
             self.inner.bins.len(),
             self.window(),

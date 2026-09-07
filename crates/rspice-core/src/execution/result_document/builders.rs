@@ -2335,11 +2335,35 @@ impl AnalysisResultDocument {
         result: &TransientFftResult,
     ) -> Result<AnalysisResultDocumentBuilder, ResultDocumentError> {
         const LOCATION: &str = "transient FFT result";
-        if result.bins.is_empty() {
-            return Err(source_error(
-                LOCATION,
-                "an FFT spectrum needs at least one bin",
-            ));
+        result
+            .validate_status()
+            .map_err(|detail| source_error(LOCATION, detail))?;
+        let mut payload = FftPayload {
+            status: Some(result.status),
+            source: FftSourceDocument::from(&result.output),
+            output_name: result.output_name.clone(),
+            physical_type: result.physical_type.to_owned(),
+            start_time: result.start_time,
+            stop_time: result.stop_time,
+            sample_interval: result.sample_interval,
+            sample_count: result.point_count,
+            accurate_sampling: result.accurate_sampling,
+            coefficient_format: result.format.into(),
+            compatibility_mode: result.mode.into(),
+            window: result.window.into(),
+            window_name: result.window_name.clone(),
+            alpha: result.alpha,
+            coherent_gain: result.coherent_gain,
+            frequency_resolution: result.frequency_resolution,
+            fundamental_bin: result.fundamental_bin,
+            minimum_metric_bin: result.minimum_metric_bin,
+            maximum_metric_bin: result.maximum_metric_bin,
+            metrics: None,
+        };
+        if !result.status.is_complete() {
+            return Ok(
+                Self::builder(analysis, ResultPayload::Fft(payload), 0).parent_analysis(parent)
+            );
         }
         let point_count = result.bins.len();
         let bin_axis = ResultAxis::new(
@@ -2458,27 +2482,7 @@ impl AnalysisResultDocument {
             }
         };
 
-        let payload = FftPayload {
-            source: FftSourceDocument::from(&result.output),
-            output_name: result.output_name.clone(),
-            physical_type: result.physical_type.to_owned(),
-            start_time: result.start_time,
-            stop_time: result.stop_time,
-            sample_interval: result.sample_interval,
-            sample_count: result.point_count,
-            accurate_sampling: result.accurate_sampling,
-            coefficient_format: result.format.into(),
-            compatibility_mode: result.mode.into(),
-            window: result.window.into(),
-            window_name: result.window_name.clone(),
-            alpha: result.alpha,
-            coherent_gain: result.coherent_gain,
-            frequency_resolution: result.frequency_resolution,
-            fundamental_bin: result.fundamental_bin,
-            minimum_metric_bin: result.minimum_metric_bin,
-            maximum_metric_bin: result.maximum_metric_bin,
-            metrics,
-        };
+        payload.metrics = metrics;
 
         Ok(
             Self::builder(analysis, ResultPayload::Fft(payload), point_count)

@@ -289,6 +289,14 @@ repaired. Transient FFT state is explicitly versioned and is identical in full
 and compressed transient pickles. Legacy transient pickles from bindings that
 discarded FFT products are rejected because they cannot prove whether an empty
 FFT list is genuine; rerun and repickle those analyses with the current schema.
+FFT state version 2 adds completion status; earlier FFT pickle states are also
+rejected. `FftResult.status` is `"complete"` for a computed spectrum or
+`"incomplete-history"` when the requested sample record extends beyond the
+retained trajectory, including checkpoint resume without earlier samples.
+`incomplete_history` gives the available `(start, stop)` times for the latter.
+These requests retain their configured window and transform length, with empty
+bin arrays and no metrics. Their shared result document uses schema version 4,
+with the same status and zero spectral points.
 
 ## Error handling
 

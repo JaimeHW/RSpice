@@ -16,7 +16,7 @@ reads nothing outside the request's own manifested artifacts.
 | Request digest version | `1` |
 | Revision content digest version | `2` |
 | Result manifest format | `rspice-result-v3` |
-| Typed result document | `rspice-analysis-result` v2 (`rspice-core`) |
+| Typed result document | `rspice-analysis-result` v4 (`rspice-core`) |
 | Run-axis orchestration record | `rspice-axis-execution` v1 |
 
 A request whose `protocol_version` is anything other than `4` is refused as
@@ -66,7 +66,9 @@ own namespace component:
 * one `fft` document per authored `.FFT` card beside its parent transient,
   under the `fft-NNN` identity the canonical plan minted for that card, at
   `results/tran-001.fft-001.result.json`. The transient's own document lists
-  every one of them by identity and probed column;
+  every one of them by identity and probed column. A child whose requested
+  samples are unavailable retains its identity and configuration with
+  `incomplete-history` status and no spectral data;
 * one Fourier document per authored `.FOUR` operand beside its parent
   transient, under the `four-NNN` identity the canonical plan minted for that
   operand, at `results/tran-001.four-001.result.json`;

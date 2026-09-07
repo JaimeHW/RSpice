@@ -138,10 +138,10 @@ pub(crate) use result::canonical_event_name;
 pub use result::{
     DigitalBusDeclaration, DigitalBusError, DigitalBusSource, DigitalTrace, DigitalTracePoint,
     MAX_DIGITAL_BUS_WIDTH, RealTrace, RealTracePoint, TransientDeviceOpTrace, TransientFftBin,
-    TransientFftHarmonic, TransientFftMetrics, TransientFftResult, TransientFourierResult,
-    TransientOutputProjection, TransientPostResults, TransientResult, TransientStoreTrace,
-    digital_state_from_tag, digital_state_tag, digital_strength_from_tag, digital_strength_tag,
-    validate_digital_bus_table,
+    TransientFftHarmonic, TransientFftMetrics, TransientFftResult, TransientFftStatus,
+    TransientFourierResult, TransientOutputProjection, TransientPostResults, TransientResult,
+    TransientStoreTrace, digital_state_from_tag, digital_state_tag, digital_strength_from_tag,
+    digital_strength_tag, validate_digital_bus_table,
 };
 pub use stb::StbAnalysisResult;
 pub use step::{MaterializedStepRun, StepPlan, StepPlanLimits};

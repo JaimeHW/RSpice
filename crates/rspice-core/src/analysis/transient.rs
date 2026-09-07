@@ -560,26 +560,86 @@ pub struct TransientFftMetrics {
     pub largest_harmonics: Vec<TransientFftHarmonic>,
 }
 
+/// Whether an authored FFT has enough accepted history to compute its spectrum.
+#[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum TransientFftStatus {
+    #[default]
+    Complete,
+    IncompleteHistory {
+        available_start: Value,
+        available_stop: Value,
+    },
+}
+
+impl TransientFftStatus {
+    pub fn is_complete(self) -> bool {
+        matches!(self, Self::Complete)
+    }
+
+    /// Validate the retained-history evidence against the requested sample grid.
+    pub fn validate_history(self, start: Value, stop: Value, points: usize) -> Result<(), String> {
+        if let Self::IncompleteHistory {
+            available_start,
+            available_stop,
+        } = self
+        {
+            if !available_start.is_finite()
+                || !available_stop.is_finite()
+                || available_start < 0.0
+                || available_stop < available_start
+                || !start.is_finite()
+                || !stop.is_finite()
+                || start < 0.0
+                || stop <= start
+                || points < 4
+                || !points.is_power_of_two()
+            {
+                return Err(
+                    "FFT incomplete-history evidence has an invalid time range or sample count"
+                        .into(),
+                );
+            }
+            let last = start + (points - 1) as Value * ((stop - start) / points as Value);
+            if start >= available_start && last <= available_stop {
+                return Err(
+                    "FFT marked incomplete has its entire requested sample record available".into(),
+                );
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Typed result of one source-authored transient `.FFT` directive.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TransientFftResult {
+    /// Incomplete requests retain their identity and transform configuration,
+    /// with no computed bins or metrics.
+    pub status: TransientFftStatus,
     /// Authored probe or braced expression.
     pub output: FftOutput,
     /// Display spelling of the resolved scalar column.
     pub output_name: String,
     /// Physical quantity class: `voltage`, `current`, or `parameter`.
     pub physical_type: &'static str,
-    /// Inclusive beginning of the sampled record.
+    /// Inclusive beginning of the requested sample record.
     pub start_time: Value,
-    /// Exclusive end of the sampled record.
+    /// Exclusive end of the requested sample record, even when history is incomplete.
     pub stop_time: Value,
     /// Uniform sample spacing `(stop_time - start_time) / point_count`.
     pub sample_interval: Value,
-    /// Number of uniformly resampled real input points.
+    /// Requested transform length in uniformly spaced real input points.
     pub point_count: usize,
-    /// Whether the transient solver was forced to land on every sample time.
-    /// This is normally true and becomes false for `FFT_ACCURATE=0` or an
-    /// incompatible `.OPTIONS OUTPUT INITIAL_INTERVAL` schedule.
+    /// Whether the solver was configured to land on each requested sample time.
+    /// An incomplete result may end before those stops are reached. This policy
+    /// becomes false for `FFT_ACCURATE=0` or an incompatible
+    /// `.OPTIONS OUTPUT INITIAL_INTERVAL` schedule.
     pub accurate_sampling: bool,
     /// Effective coefficient format. `Normalized` divides every complex bin
     /// by the largest calibrated one-sided magnitude.
@@ -603,12 +663,30 @@ pub struct TransientFftResult {
     pub minimum_metric_bin: usize,
     /// Rounded upper metric bin selected by `FMAX`.
     pub maximum_metric_bin: usize,
-    /// DC through Nyquist, inclusive. `FMIN`/`FMAX` select metric bounds and
-    /// intentionally do not truncate this source spectrum.
+    /// DC through Nyquist for a complete result; empty for incomplete history.
+    /// `FMIN`/`FMAX` select metric bounds and do not truncate a complete spectrum.
     pub bins: Vec<TransientFftBin>,
     /// Additional Xyce-compatible figures and ranked bins requested by
     /// `.OPTIONS FFT FFTOUT=1`.
     pub metrics: Option<TransientFftMetrics>,
+}
+
+impl TransientFftResult {
+    pub fn validate_status(&self) -> Result<(), String> {
+        self.status
+            .validate_history(self.start_time, self.stop_time, self.point_count)?;
+        if self.status.is_complete() {
+            if self.point_count < 4
+                || !self.point_count.is_power_of_two()
+                || self.bins.len() != self.point_count / 2 + 1
+            {
+                return Err("complete FFT bin count does not match its transform length".into());
+            }
+        } else if !self.bins.is_empty() || self.metrics.is_some() {
+            return Err("incomplete FFT must not contain computed bins or metrics".into());
+        }
+        Ok(())
+    }
 }
 
 /// Typed result of one source-authored `.FOUR` operand.

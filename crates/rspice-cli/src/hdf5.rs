@@ -22,7 +22,7 @@ use std::path::Path;
 /// The document version this build reads. The writer's half of the same
 /// number lives with the layout, so a reader and a writer cannot drift.
 const SCHEMA_VERSION: &str = rspice_core::io::HDF5_SCHEMA_VERSION;
-const FFT_SECTION_SCHEMA_VERSION: &str = "2";
+const FFT_SECTION_SCHEMA_VERSION: &str = "3";
 
 #[derive(Debug, Error)]
 pub enum Hdf5Error {
@@ -303,6 +303,7 @@ pub struct Hdf5FftMetrics {
 /// Complete typed representation of one source-authored transient `.FFT`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Hdf5FftResult {
+    pub status: rspice_core::engine::TransientFftStatus,
     pub analysis_id: String,
     pub ordinal: usize,
     pub source_kind: String,
@@ -531,6 +532,14 @@ impl Hdf5FftSection {
 
 impl Hdf5FftResult {
     fn validate(&self, expected_ordinal: usize, expected_analysis_id: &str) -> Result<()> {
+        self.status
+            .validate_history(self.start_time_s, self.stop_time_s, self.point_count)
+            .map_err(Hdf5Error::InvalidSchema)?;
+        if !self.status.is_complete() && self.metrics.is_some() {
+            return Err(Hdf5Error::InvalidSchema(
+                "incomplete FFT contains computed metrics".into(),
+            ));
+        }
         if self.ordinal != expected_ordinal || self.analysis_id != expected_analysis_id {
             return Err(Hdf5Error::InvalidSchema(format!(
                 "FFT result {} does not match source-order identity {expected_analysis_id}",
@@ -609,18 +618,25 @@ impl Hdf5FftResult {
                 )));
             }
         }
-        if self.point_count == 0 || bin_count != self.point_count / 2 + 1 {
+        let configured_bin_count = self.point_count / 2 + 1;
+        let expected_bins = if self.status.is_complete() {
+            configured_bin_count
+        } else {
+            0
+        };
+        if self.point_count < 4 || !self.point_count.is_power_of_two() || bin_count != expected_bins
+        {
             return Err(Hdf5Error::InvalidSchema(format!(
                 "FFT result '{}' has {bin_count} bins for {} input points",
                 self.analysis_id, self.point_count
             )));
         }
-        if self.fundamental_bin >= bin_count
+        if self.fundamental_bin >= configured_bin_count
             || self.fundamental_bin == 0
-            || self.minimum_metric_bin >= bin_count
-            || self.maximum_metric_bin >= bin_count
+            || self.minimum_metric_bin >= configured_bin_count
+            || self.maximum_metric_bin >= configured_bin_count
             || self.minimum_metric_bin > self.maximum_metric_bin
-            || self.sfdr_search_minimum_bin >= bin_count
+            || self.sfdr_search_minimum_bin >= configured_bin_count
             || self.sfdr_search_minimum_bin > self.maximum_metric_bin
             || !matches!(
                 self.sfdr_search_minimum_bin,
@@ -1499,6 +1515,13 @@ fn add_fft_section(
 
     for (index, result) in section.results.iter().enumerate() {
         let prefix = format!("result_{index:04}");
+        group.set_attr(
+            &format!("{prefix}_status"),
+            Hdf5Attribute::Text(
+                serde_json::to_string(&result.status)
+                    .map_err(|error| Hdf5Error::InvalidSchema(error.to_string()))?,
+            ),
+        );
         for (suffix, value) in [
             ("analysis_id", result.analysis_id.as_str()),
             ("source_kind", result.source_kind.as_str()),
@@ -1785,6 +1808,11 @@ fn read_fft_section(file: &Hdf5File, group_name: &str) -> Result<Hdf5FftSection>
         };
         let has_value_unit = read_binary_flag(&attrs, &format!("{prefix}_has_value_unit"))?;
         results.push(Hdf5FftResult {
+            status: serde_json::from_str(&read_required_string_attr(
+                &attrs,
+                &format!("{prefix}_status"),
+            )?)
+            .map_err(|error| Hdf5Error::InvalidSchema(format!("invalid FFT status: {error}")))?,
             analysis_id: read_required_string_attr(&attrs, &format!("{prefix}_analysis_id"))?,
             ordinal: non_negative_count(
                 read_required_i64_attr(&attrs, &format!("{prefix}_ordinal"))?,
@@ -2216,6 +2244,7 @@ mod tests {
             })
             .collect();
         Hdf5FftResult {
+            status: rspice_core::engine::TransientFftStatus::Complete,
             analysis_id: crate::commands::run::canonical_analysis_identities(
                 rspice_core::execution::AnalysisKind::Fft,
                 ordinal,
@@ -2507,7 +2536,7 @@ mod tests {
         let root_error = read_hdf5(&future_root).expect_err("reject future root schema");
         assert!(matches!(root_error, Hdf5Error::InvalidSchema(_)));
 
-        for (label, version) in [("old", "1"), ("future", "3")] {
+        for (label, version) in [("old", "1"), ("previous", "2"), ("future", "4")] {
             let fft_path = directory.0.join(format!("{label}-fft.h5"));
             let mut fft_builder = rustyhdf5::FileBuilder::new();
             fft_builder.set_attr(

@@ -1714,7 +1714,9 @@ impl Engine {
                                         .saturating_mul(fft::FFT_RETAINED_VALUES_PER_HARMONIC),
                                 )
                         });
-                        bin_values.saturating_add(metric_values)
+                        bin_values
+                            .saturating_add(metric_values)
+                            .saturating_add(if spectrum.status.is_complete() { 0 } else { 2 })
                     })
                     .fold(0usize, usize::saturating_add),
             )
@@ -3477,6 +3479,7 @@ impl Engine {
             max_step,
             startup_mode,
         } = window;
+        let requested_stop = tstop;
         let TransientResumePlan {
             resume,
             resume_validation,
@@ -9871,7 +9874,7 @@ impl Engine {
         } else {
             None
         };
-        result.fft_results = fft::evaluate(self, netlist, &result, tstop, abort)?;
+        result.fft_results = fft::evaluate(self, netlist, &result, requested_stop, abort)?;
         retained_result_values = Self::transient_result_value_count(&result);
         self.ensure_result_values(
             retained_result_values

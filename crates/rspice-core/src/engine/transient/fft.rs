@@ -2,7 +2,7 @@
 
 use super::super::{
     Engine, SimulationError, TransientFftBin, TransientFftHarmonic, TransientFftMetrics,
-    TransientFftResult, TransientResult,
+    TransientFftResult, TransientFftStatus, TransientResult,
 };
 use crate::abort_signal::AbortSignal;
 use crate::netlist::{FftAnalysis, FftFormat, FftWindow, Netlist, XyceFftMode};
@@ -222,18 +222,18 @@ fn evaluate_one(
     let last_target = sample_time(analysis, transient_stop, point_count - 1);
     let history_start = time[0];
     let history_stop = *time.last().expect("validated non-empty history");
-    if first_target < history_start || last_target > history_stop {
-        return Err(request_error(
-            index,
-            format!(
-                "sample record [{first_target}, {last_target}] lies outside retained transient history [{history_start}, {history_stop}]"
-            ),
-        ));
-    }
+    let status = if first_target < history_start || last_target > history_stop {
+        TransientFftStatus::IncompleteHistory {
+            available_start: history_start,
+            available_stop: history_stop,
+        }
+    } else {
+        TransientFftStatus::Complete
+    };
 
     let mut input = Vec::new();
     input
-        .try_reserve_exact(point_count)
+        .try_reserve_exact(if status.is_complete() { point_count } else { 0 })
         .map_err(|_| allocation_error("uniform input record"))?;
     let mut interval = 0usize;
     let denominator = if mode.uses_periodic_windows() {
@@ -245,6 +245,11 @@ fn evaluate_one(
     for sample in 0..point_count {
         if sample.is_multiple_of(64) && abort.is_aborted() {
             return Err(SimulationError::Aborted);
+        }
+        let window = window_coefficient(analysis.window, sample, point_count, denominator);
+        window_sum += window;
+        if !status.is_complete() {
+            continue;
         }
         let target = sample_time(analysis, transient_stop, sample);
         while interval + 1 < time.len() && time[interval + 1] < target {
@@ -262,8 +267,6 @@ fn evaluate_one(
                 format!("resolved output is non-finite at uniform sample {sample} (time {target})"),
             ));
         }
-        let window = window_coefficient(analysis.window, sample, point_count, denominator);
-        window_sum += window;
         input.push(Complex::new(value * window, 0.0));
     }
     let coherent_gain = window_sum / point_count as Value;
@@ -276,44 +279,46 @@ fn evaluate_one(
     if abort.is_aborted() {
         return Err(SimulationError::Aborted);
     }
-    qualify_rustfft_forward_length(point_count).map_err(|error| {
-        request_error(
-            index,
-            format!("transform planning is not qualified: {error}"),
-        )
-    })?;
-    let fft = planner.plan_fft_forward(point_count);
-    let scratch_len = fft.get_inplace_scratch_len();
-    let mut scratch = Vec::new();
-    scratch
-        .try_reserve_exact(scratch_len)
-        .map_err(|_| allocation_error("transform scratch"))?;
-    scratch.resize(scratch_len, Complex::new(0.0, 0.0));
-    fft.process_with_scratch(&mut input, &mut scratch);
-    if abort.is_aborted() {
-        return Err(SimulationError::Aborted);
-    }
-
     let bin_count = point_count / 2 + 1;
-    input.truncate(bin_count);
-    let base_scale = 1.0 / (point_count as Value * coherent_gain);
-    for (bin, coefficient) in input.iter_mut().enumerate() {
-        let one_sided_scale = if bin == 0 || bin == point_count / 2 {
-            base_scale
-        } else {
-            2.0 * base_scale
-        };
-        *coefficient *= one_sided_scale;
-    }
     let format = analysis.format.unwrap_or_else(|| mode.default_format());
-    if format == FftFormat::Normalized {
-        let largest = input
-            .iter()
-            .map(|coefficient| coefficient.norm())
-            .fold(0.0, Value::max);
-        if largest > 0.0 {
-            for coefficient in &mut input {
-                *coefficient /= largest;
+    if status.is_complete() {
+        qualify_rustfft_forward_length(point_count).map_err(|error| {
+            request_error(
+                index,
+                format!("transform planning is not qualified: {error}"),
+            )
+        })?;
+        let fft = planner.plan_fft_forward(point_count);
+        let scratch_len = fft.get_inplace_scratch_len();
+        let mut scratch = Vec::new();
+        scratch
+            .try_reserve_exact(scratch_len)
+            .map_err(|_| allocation_error("transform scratch"))?;
+        scratch.resize(scratch_len, Complex::new(0.0, 0.0));
+        fft.process_with_scratch(&mut input, &mut scratch);
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+
+        input.truncate(bin_count);
+        let base_scale = 1.0 / (point_count as Value * coherent_gain);
+        for (bin, coefficient) in input.iter_mut().enumerate() {
+            let one_sided_scale = if bin == 0 || bin == point_count / 2 {
+                base_scale
+            } else {
+                2.0 * base_scale
+            };
+            *coefficient *= one_sided_scale;
+        }
+        if format == FftFormat::Normalized {
+            let largest = input
+                .iter()
+                .map(|coefficient| coefficient.norm())
+                .fold(0.0, Value::max);
+            if largest > 0.0 {
+                for coefficient in &mut input {
+                    *coefficient /= largest;
+                }
             }
         }
     }
@@ -356,7 +361,7 @@ fn evaluate_one(
     }
 
     let mut bins = Vec::new();
-    bins.try_reserve_exact(bin_count)
+    bins.try_reserve_exact(if status.is_complete() { bin_count } else { 0 })
         .map_err(|_| allocation_error("one-sided spectrum"))?;
     for (bin, coefficient) in input.into_iter().enumerate() {
         if bin.is_multiple_of(256) && abort.is_aborted() {
@@ -383,7 +388,7 @@ fn evaluate_one(
             phase_degrees,
         });
     }
-    let metrics = emit_metrics
+    let metrics = (emit_metrics && status.is_complete())
         .then(|| {
             calculate_metrics(
                 index,
@@ -397,6 +402,7 @@ fn evaluate_one(
         })
         .transpose()?;
     Ok(TransientFftResult {
+        status,
         output: analysis.output.clone(),
         output_name,
         physical_type,

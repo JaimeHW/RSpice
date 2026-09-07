@@ -1089,6 +1089,7 @@ mod tests {
             parent_analysis_id: "tran-001".to_string(),
             coordinate: None,
             results: vec![crate::hdf5::Hdf5FftResult {
+                status: rspice_core::engine::TransientFftStatus::Complete,
                 analysis_id: "fft-001".to_string(),
                 ordinal: 1,
                 source_kind: "probe".to_string(),

@@ -530,6 +530,7 @@ fn document(family: usize, shape: &Shape) -> AnalysisResultDocument {
             ResultAxisKind::BinIndex,
             integer_axis.clone(),
             ResultPayload::Fft(FftPayload {
+                status: Some(rspice_core::engine::TransientFftStatus::Complete),
                 source: FftSourceDocument::Probe {
                     text: "V(out)".to_owned(),
                 },
