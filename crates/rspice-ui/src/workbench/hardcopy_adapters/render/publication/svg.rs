@@ -80,7 +80,7 @@ pub(super) fn render_page_svg(
         write_svg_primitive(&mut output, plan, transform, primitive);
     }
     output.push_str("</g>");
-    write_svg_decorations(&mut output, plan, scene, page);
+    write_svg_decorations(&mut output, plan, scene, page)?;
     output.push_str("</svg>");
     Ok(output)
 }
@@ -406,7 +406,7 @@ pub(super) fn write_svg_decorations(
     plan: &HardcopyPlan,
     scene: &HardcopyScene,
     page: &PreviewPage,
-) {
+) -> Result<(), HardcopyRenderError> {
     let geometry = page.geometry();
     let printable = geometry.printable_rect();
     let content = geometry.content_rect();
@@ -450,27 +450,14 @@ pub(super) fn write_svg_decorations(
             output.push_str("</text>");
         }
     }
-    if plan.setup().decorations().includes_provenance() {
-        let baseline = printable.y.micrometres() + printable.height.micrometres() - 2_000;
+    for row in provenance_rows(plan, scene, page)? {
         write!(
             output,
-            "<text x=\"{}\" y=\"{baseline}\" fill=\"{secondary}\" font-family=\"{PUBLICATION_MONO}\" font-size=\"2200\">",
-            printable.x.micrometres()
+            "<text data-rspice-decoration=\"provenance\" x=\"{}\" y=\"{}\" fill=\"{secondary}\" font-family=\"{PUBLICATION_MONO}\" font-size=\"{PROVENANCE_TEXT_UM}\" xml:space=\"preserve\">",
+            row.x_um, row.baseline_um
         )
         .expect("write to string");
-        let text = scene
-            .metadata
-            .provenance_lines
-            .first()
-            .cloned()
-            .unwrap_or_else(|| {
-                format!(
-                    "source {} · plan {}",
-                    plan.source().content_digest(),
-                    plan.content_digest()
-                )
-            });
-        escape_xml_into(&text, output);
+        escape_xml_into(&row.text, output);
         output.push_str("</text>");
     }
     if plan.setup().decorations().includes_legends() && !scene.legend.is_empty() {
@@ -542,6 +529,7 @@ pub(super) fn write_svg_decorations(
     write_svg_watermark(output, plan, scene, page);
     write_svg_trim_marks(output, plan, page);
     write_svg_registration_marks(output, plan, page);
+    Ok(())
 }
 
 pub(super) fn write_svg_trim_marks(output: &mut String, plan: &HardcopyPlan, page: &PreviewPage) {

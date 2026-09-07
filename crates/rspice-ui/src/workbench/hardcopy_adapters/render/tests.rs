@@ -4,6 +4,7 @@
 //! worker transfer, and exact output parity across supported formats.
 
 mod plot_overlay;
+mod provenance;
 
 use lopdf::Document as ParsedPdf;
 use uuid::Uuid;

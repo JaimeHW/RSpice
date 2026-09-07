@@ -15,10 +15,12 @@
 //! rejected rather than trusted.
 
 mod pdf;
+mod provenance;
 mod raster;
 mod svg;
 
 use pdf::*;
+use provenance::*;
 /// The dialog asks the publisher what it can afford rather than predicting it,
 /// so this crosses the module boundary the glob import above does not.
 pub(crate) use raster::max_raster_dpi;
@@ -1777,12 +1779,8 @@ fn validate_decoration_capacity(
             maximum: 1,
         });
     }
-    if decorations.includes_provenance() && scene.metadata.provenance_lines.len() > 1 {
-        return Err(HardcopyRenderError::DecorationOverflow {
-            decoration: "provenance",
-            actual: scene.metadata.provenance_lines.len(),
-            maximum: 1,
-        });
+    for page in plan.pagination().pages() {
+        provenance_rows(plan, scene, page)?;
     }
     if decorations.includes_legends() {
         for page in plan.pagination().pages() {

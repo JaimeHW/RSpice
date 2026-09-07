@@ -139,7 +139,7 @@ pub(super) fn render_pdf(
             draw_pdf_primitive(&mut surface, &fonts, plan, transform, primitive)?;
         }
         surface.pop();
-        draw_pdf_decorations(&mut surface, &fonts, plan, scene, preview_page);
+        draw_pdf_decorations(&mut surface, &fonts, plan, scene, preview_page)?;
         draw_pdf_trim_marks(&mut surface, plan, preview_page);
         surface.finish();
         page.finish();
@@ -595,7 +595,7 @@ pub(super) fn draw_pdf_decorations(
     plan: &HardcopyPlan,
     scene: &HardcopyScene,
     page: &PreviewPage,
-) {
+) -> Result<(), HardcopyRenderError> {
     let outlined = !plan.setup().render().fonts().preserve_searchable_text();
     let geometry = page.geometry();
     let printable = geometry.printable_rect();
@@ -652,26 +652,14 @@ pub(super) fn draw_pdf_decorations(
             );
         }
     }
-    if plan.setup().decorations().includes_provenance() {
-        let text = scene
-            .metadata
-            .provenance_lines
-            .first()
-            .cloned()
-            .unwrap_or_else(|| {
-                format!(
-                    "source {} · plan {}",
-                    plan.source().content_digest(),
-                    plan.content_digest()
-                )
-            });
+    for row in provenance_rows(plan, scene, page)? {
         draw_pdf_text(
             surface,
             &fonts.mono,
-            um_to_points(printable.x.micrometres()),
-            um_to_points(printable.y.micrometres() + printable.height.micrometres() - 2_000),
-            um_to_points(2_200),
-            &text,
+            um_to_points(row.x_um),
+            um_to_points(row.baseline_um),
+            um_to_points(PROVENANCE_TEXT_UM),
+            &row.text,
             secondary,
             TextAnchor::Start,
             outlined,
@@ -785,6 +773,7 @@ pub(super) fn draw_pdf_decorations(
     }
     draw_pdf_watermark(surface, fonts, plan, page);
     draw_pdf_registration_marks(surface, fonts, plan, page);
+    Ok(())
 }
 
 pub(super) fn draw_pdf_watermark(

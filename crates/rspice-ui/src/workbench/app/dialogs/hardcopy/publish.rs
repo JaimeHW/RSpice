@@ -1057,9 +1057,8 @@ fn metadata_for(
         &resolved.authority().revision().get().to_string(),
         &resolved.authority().content_digest().to_string(),
     );
-    // The renderer reserves one physical line for each band. Keep all
-    // identity fields on those exact single lines so enabled decorations
-    // cannot overflow an otherwise valid page.
+    // Keep identity fields intact; the renderer wraps provenance to the
+    // measured capacity of the physical band before producing any output.
     metadata.set_header_lines(vec![header])?;
     metadata.set_provenance_lines(vec![provenance])?;
     Ok(metadata)
