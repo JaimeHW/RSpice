@@ -354,6 +354,157 @@ fn the_periodic_small_signal_options_round_trip_through_the_deck_reader() {
     );
 }
 
+/// Every `.PXF` and `.PSTB` control the form holds reaches the engine's own
+/// card, valued as it was authored.
+///
+/// The fourth setting the parse walk cannot see, and the widest of them. Both
+/// emitters silently dropped fields: `PstbConfig::to_spice` wrote three of its
+/// six controls, so the stability threshold, the subharmonic switch and the
+/// eigenvalue tolerance never reached the line at all and the run took the
+/// card's defaults; `PxfConfig` had no input sideband to write, and the run
+/// configuration pinned it to a literal `1`. Neither showed up anywhere,
+/// because each emitter was asserted against its own expected string — the
+/// exact blind spot this module was opened for, one layer further in: a string
+/// assertion cannot see a key that was never written.
+///
+/// So the assertion is not a string. Every field is set away from its default,
+/// the directive is written by the surface that writes it, the deck is read by
+/// the engine's real parser, and the values are recovered from the
+/// `AnalysisCommand` the engine will actually run — then again from the
+/// manual-deck reader a hand-written deck goes through, because the two are
+/// separate routes to the same run and only one of them existed before today.
+#[test]
+fn the_periodic_transfer_and_stability_controls_reach_the_engines_own_card() {
+    use crate::simulation::plan::AnalysisDraft;
+    use rspice_core::netlist::{AnalysisCommand, FreqVariation, PeriodicSourceSelector};
+
+    let mut pxf_draft = fixture_draft(AnalysisKind::Pxf);
+    let AnalysisDraft::Pxf(pxf) = &mut pxf_draft else {
+        panic!("the PXF kind carries a PXF draft");
+    };
+    pxf.initialized = true;
+    pxf.sweep_type_idx = 2; // Linear.
+    pxf.num_points = "7".to_owned();
+    pxf.start_freq = "2k".to_owned();
+    pxf.stop_freq = "20Meg".to_owned();
+    pxf.output_node = "n_out".to_owned();
+    // `FIXTURE_DECK` carries `mid`, so the differential probe names two nodes
+    // the circuit actually has.
+    pxf.output_ref = "mid".to_owned();
+    pxf.output_sideband = "-2".to_owned();
+    pxf.input_source = "VSRC".to_owned();
+    // Sideband zero on the input: the baseband drive of a down-conversion
+    // path, and the value the run configuration used to overwrite with 1.
+    pxf.input_sideband = "0".to_owned();
+    pxf.max_sideband = "3".to_owned();
+
+    let mut pstb_draft = fixture_draft(AnalysisKind::Pstb);
+    let AnalysisDraft::Pstb(pstb) = &mut pstb_draft else {
+        panic!("the PSTB kind carries a PSTB draft");
+    };
+    pstb.initialized = true;
+    pstb.probe = "LPRB".to_owned();
+    pstb.max_harmonics = "6".to_owned();
+    pstb.num_multipliers = "4".to_owned();
+    pstb.stability_threshold = "1.25".to_owned();
+    pstb.detect_subharmonics = false;
+    pstb.eigenvalue_tolerance = "1e-12".to_owned();
+
+    let controller = SimulationController::new();
+    let pxf_state = engine_facing_state(&pxf_draft);
+    let pxf_directive = controller
+        .analysis_draft_directive(&pxf_state, &pxf_draft)
+        .expect("a PXF draft emits a card");
+    let pstb_directive = controller
+        .analysis_draft_directive(&engine_facing_state(&pstb_draft), &pstb_draft)
+        .expect("a PSTB draft emits a card");
+
+    // Both are dependent cards, so the deck carries the `.PSS` they bind to,
+    // written by the same emitter rather than spelled here.
+    let pss_draft = fixture_draft(AnalysisKind::Pss);
+    let pss_directive = controller
+        .analysis_draft_directive(&engine_facing_state(&pss_draft), &pss_draft)
+        .expect("a PSS draft emits a card");
+
+    let deck = format!("{FIXTURE_DECK}{pss_directive}\n{pxf_directive}\n{pstb_directive}\n.end\n");
+    let netlist = rspice_core::netlist::parse_netlist(&deck)
+        .unwrap_or_else(|error| panic!("the engine must read the deck back: {error}\n{deck}"));
+
+    let pxf_card = netlist
+        .analyses
+        .iter()
+        .find_map(|command| match command {
+            AnalysisCommand::Pxf(card) => Some(card),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("the deck carries one .PXF card: {:?}", netlist.analyses));
+    assert_eq!(pxf_card.sweep.variation, FreqVariation::Lin);
+    assert_eq!(pxf_card.sweep.points, 7);
+    assert_eq!(pxf_card.sweep.start_freq, 2.0e3);
+    assert_eq!(pxf_card.sweep.stop_freq, 20.0e6);
+    assert_eq!(pxf_card.input_source, "VSRC");
+    assert_eq!(
+        pxf_card.input_sideband, 0,
+        "the input end of the transfer is the card's, not a constant the \
+         run-configuration builder supplies"
+    );
+    assert_eq!(pxf_card.output_node, "N_OUT");
+    assert_eq!(pxf_card.output_ref.as_deref(), Some("MID"));
+    assert_eq!(pxf_card.output_sideband, -2);
+    assert_eq!(pxf_card.max_sideband, 3);
+    // The two keys the form deliberately does not write, at the card's own
+    // defaults. If the form ever grows controls for them, this is where the
+    // omission stops being silent.
+    assert_eq!(pxf_card.reltol, 1.0e-3);
+    assert_eq!(pxf_card.abstol, 1.0e-12);
+    assert_eq!(pxf_card.source, PeriodicSourceSelector::Preceding);
+
+    let pstb_card = netlist
+        .analyses
+        .iter()
+        .find_map(|command| match command {
+            AnalysisCommand::Pstb(card) => Some(card),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("the deck carries one .PSTB card: {:?}", netlist.analyses));
+    assert_eq!(pstb_card.probe_instance, "LPRB");
+    assert_eq!(pstb_card.max_harmonics, 6);
+    assert_eq!(
+        pstb_card.num_multipliers, 4,
+        "the multiplier count is written whether or not it matches the card's default"
+    );
+    assert_eq!(pstb_card.stability_threshold, 1.25);
+    assert!(
+        !pstb_card.detect_subharmonics,
+        "subharmonic detection was switched off and the card must say so"
+    );
+    assert_eq!(pstb_card.eigenvalue_tolerance, 1.0e-12);
+
+    // The same deck through the Studio's own reader, which is the route a
+    // hand-written deck takes and the one that builds the typed run.
+    let queue = super::manual_deck::build_manual_deck_queue(&pxf_state, &deck)
+        .unwrap_or_else(|errors| panic!("the deck reader refused: {}", errors.join("; ")));
+    let pxf_run = queue
+        .iter()
+        .find_map(|queued| queued.spec_options.pxf.as_ref())
+        .expect("the deck reader recovers the PXF configuration");
+    assert_eq!(pxf_run.input_sideband, 0);
+    assert_eq!(pxf_run.output_sideband, -2);
+    assert_eq!(pxf_run.max_sideband, 3);
+    assert_eq!(pxf_run.points_per_unit, 7);
+    assert_eq!(pxf_run.output_ref.as_deref(), Some("mid"));
+
+    let pstb_run = queue
+        .iter()
+        .find_map(|queued| queued.spec_options.pstb.as_ref())
+        .expect("the deck reader recovers the PSTB configuration");
+    assert_eq!(pstb_run.max_harmonics, 6);
+    assert_eq!(pstb_run.num_multipliers, 4);
+    assert!((pstb_run.stability_threshold - 1.25).abs() <= 1.0e-15);
+    assert!(!pstb_run.detect_subharmonics);
+    assert!((pstb_run.eigenvalue_tolerance - 1.0e-12).abs() <= 1.0e-27);
+}
+
 /// An autonomous PSS reaches the deck as autonomous, and reads back that way.
 ///
 /// The second setting the parse walk cannot see. `parse_netlist` accepting a

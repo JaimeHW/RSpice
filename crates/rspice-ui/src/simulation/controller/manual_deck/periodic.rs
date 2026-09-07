@@ -1302,6 +1302,38 @@ mod tests {
             ".pnoise dec 10 1 1Meg out=out noiseref=input",
             ".pnoise dec 10 1 1Meg out=out input=V1 noiseref=output",
             ".pnoise dec 10 1 1Meg out=out noiseref=amplitude",
+            // `.PXF`: keywords the card does not carry, ends of the path it
+            // cannot default, a conversion measured outside the depth it
+            // states, a probe measured against itself, a tolerance that is not
+            // a tolerance, one quantity spelled twice, and a carrier the
+            // family has no selector for.
+            ".pxf dec 10 1k 1Meg input=V1 out=out sidebands=3",
+            ".pxf dec 10 1k 1Meg out=out",
+            ".pxf dec 10 1k 1Meg input=V1",
+            ".pxf dec 10 1k 1Meg input=V1 out=out maxsideband=1 outsideband=3",
+            ".pxf dec 10 1k 1Meg input=V1 out=out maxsideband=1 inputsideband=-4",
+            ".pxf dec 10 1k 1Meg input=V1 out=V(out,out)",
+            ".pxf dec 10 1k 1Meg input=V1 out=out maxsideband=-1",
+            ".pxf dec 10 1k 1Meg input=V1 out=out reltol=0",
+            ".pxf dec 10 1k 1Meg input=V1 out=out abstol=0",
+            ".pxf dec 10 1k 1Meg input=V1 input=VLO out=out",
+            ".pxf dec 10 1k 1Meg input=V1 out=out from=tran",
+            ".pxf lin 10 1Meg 1k input=V1 out=out",
+            // `.PSTB`: the probe it cannot default, a threshold inside the
+            // unit circle, counts of nothing, a tolerance of zero, a switch
+            // that is neither state, a keyword the card does not carry, a
+            // carrier selector it deliberately does not offer, one quantity
+            // spelled twice, and a bare positional where a key belongs.
+            ".pstb maxharm=6",
+            ".pstb probe=l1 stabilitythreshold=0.5",
+            ".pstb probe=l1 maxharm=0",
+            ".pstb probe=l1 nmults=0",
+            ".pstb probe=l1 eigentol=0",
+            ".pstb probe=l1 detectsubharmonics=sometimes",
+            ".pstb probe=l1 sweeptype=dec",
+            ".pstb probe=l1 from=hb",
+            ".pstb probe=l1 probe=l2",
+            ".pstb l1",
         ] {
             let seed = if card.starts_with(".pss") { "" } else { SEED };
             let source = format!("{CIRCUIT}{seed}{card}\n.end\n");
@@ -1319,6 +1351,80 @@ mod tests {
                 "the studio accepted `{card}`, which the engine refuses: {studio:?}"
             );
         }
+    }
+
+    /// The reader's key set is the engine's key set, key for key.
+    ///
+    /// The two tests above prove the readers agree on whole cards. This proves
+    /// they agree on the *vocabulary*, which is the half that actually
+    /// drifted: `.PXF` accepted five of the engine's eight keys and refused
+    /// `RELTOL=`, `ABSTOL=` and `FROM=` by name. Because a manual deck is
+    /// parsed by the engine before it reaches this reader, that refusal fired
+    /// on a line the engine had already read — the card was well formed, and
+    /// the Studio would not run the deck that held it.
+    ///
+    /// Each key is authored alone, so a failure names the key rather than the
+    /// card, and then all of them together, so a key accepted only in
+    /// isolation is caught as well.
+    #[test]
+    fn the_reader_and_the_engine_accept_the_same_periodic_key_set() {
+        const CIRCUIT: &str = "periodic\nV1 in 0 SIN(0 1 1Meg)\nR1 in out 1k\nC1 out 0 1n\n";
+        const SEED: &str = ".pss fund=1Meg\n";
+        const PXF_BASE: &str = ".pxf dec 10 1k 1Meg input=V1 out=out";
+        const PSTB_BASE: &str = ".pstb probe=l1";
+
+        const PXF_EVERY_KEY: &str = ".pxf dec 10 1k 1Meg input=V1 out=out inputsideband=-1 \
+             outsideband=2 maxsideband=4 reltol=1e-4 abstol=1e-14 from=pss";
+        const PSTB_EVERY_KEY: &str = ".pstb probe=l1 maxharm=8 nmults=6 stabilitythreshold=1.5 \
+             detectsubharmonics=no eigentol=1e-9";
+
+        let mut cards = vec![PXF_EVERY_KEY.to_owned(), PSTB_EVERY_KEY.to_owned()];
+        // One line per arm of `parse_pxf_command` and `parse_pstb_command`.
+        // `INPUT=`/`OUT=`/`PROBE=` are in every base above because neither
+        // card defaults them.
+        for (base, key, value) in [
+            (PXF_BASE, "inputsideband", "-1"),
+            (PXF_BASE, "outsideband", "2"),
+            (PXF_BASE, "maxsideband", "4"),
+            (PXF_BASE, "reltol", "1e-4"),
+            (PXF_BASE, "abstol", "1e-14"),
+            (PXF_BASE, "from", "pss"),
+            (PSTB_BASE, "maxharm", "8"),
+            (PSTB_BASE, "nmults", "6"),
+            (PSTB_BASE, "stabilitythreshold", "1.5"),
+            (PSTB_BASE, "detectsubharmonics", "no"),
+            (PSTB_BASE, "eigentol", "1e-9"),
+        ] {
+            cards.push(format!("{base} {key}={value}"));
+        }
+
+        for card in &cards {
+            let source = format!("{CIRCUIT}{SEED}{card}\n.end\n");
+            let netlist = Netlist::parse(&source)
+                .unwrap_or_else(|error| panic!("the engine must accept `{card}`: {error}"));
+            parse_periodic_tasks(&netlist, &source).unwrap_or_else(|errors| {
+                panic!(
+                    "the engine accepts `{card}` and the studio does not: {}",
+                    errors.join("; ")
+                )
+            });
+        }
+
+        // Accepting a key is not carrying it. The two tolerances were the
+        // reason the key set diverged at all, so they are read back rather
+        // than merely tolerated.
+        let source = format!("{CIRCUIT}{SEED}{PXF_EVERY_KEY}\n.end\n");
+        let netlist = Netlist::parse(&source).expect("the fully keyed .PXF parses");
+        let tasks = parse_periodic_tasks(&netlist, &source).expect("the deck queues");
+        let pxf = tasks
+            .iter()
+            .find_map(|task| task.spec_options.pxf.as_ref())
+            .expect("the .PXF card is queued");
+        assert!((pxf.reltol - 1.0e-4).abs() <= 1.0e-19, "reltol was {}", pxf.reltol);
+        assert!((pxf.abstol - 1.0e-14).abs() <= 1.0e-29, "abstol was {}", pxf.abstol);
+        assert_eq!(pxf.input_sideband, -1);
+        assert_eq!(pxf.output_sideband, 2);
+        assert_eq!(pxf.max_sideband, 4);
     }
 
     /// A `.PSTB` card the engine's `validate_card` refuses is refused here, in
