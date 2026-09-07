@@ -6,20 +6,12 @@
 //! history cannot recycle an identity still held by a snapshot cache.
 
 use std::ops::{Deref, DerefMut};
+#[cfg(test)]
 use std::sync::Arc;
 
 use super::SimulationRun;
 
-#[derive(Debug, Clone)]
-pub(crate) struct RunHistoryRevision(Arc<()>);
-
-impl PartialEq for RunHistoryRevision {
-    fn eq(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.0, &other.0)
-    }
-}
-
-impl Eq for RunHistoryRevision {}
+pub(crate) type RunHistoryRevision = crate::source_revision::SourceRevision;
 
 /// Retained runs with a revision that covers every mutable collection access.
 #[derive(Debug, Clone)]
@@ -44,7 +36,7 @@ impl From<Vec<SimulationRun>> for RunHistory {
     fn from(runs: Vec<SimulationRun>) -> Self {
         Self {
             runs,
-            revision: RunHistoryRevision(Arc::new(())),
+            revision: RunHistoryRevision::default(),
         }
     }
 }
@@ -67,7 +59,7 @@ impl DerefMut for RunHistory {
     fn deref_mut(&mut self) -> &mut Self::Target {
         // Only a retained revision needs a new identity. Consecutive writes
         // without an intervening reader can reuse this unobserved allocation.
-        Arc::make_mut(&mut self.revision.0);
+        self.revision.advance();
         &mut self.runs
     }
 }

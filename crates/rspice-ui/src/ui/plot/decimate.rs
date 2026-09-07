@@ -37,6 +37,8 @@ pub enum SampleInterpolation {
 #[derive(Debug, Clone)]
 pub struct DecimationCache {
     map: HashMap<CacheKey, Entry>,
+    /// Retained source identity when trace keys are scoped to a source owner.
+    source: Option<crate::source_revision::SourceRevision>,
     /// Data version the cache contents belong to.
     version: u64,
     /// Frame tick, advanced once per frame by `ensure_version` — eviction
@@ -131,6 +133,7 @@ impl Default for DecimationCache {
     fn default() -> Self {
         Self {
             map: HashMap::new(),
+            source: None,
             version: 0,
             tick: 0,
             byte_capacity: DEFAULT_BYTE_CAPACITY,
@@ -140,6 +143,16 @@ impl Default for DecimationCache {
 }
 
 impl DecimationCache {
+    /// Bind logical trace keys to their current source before reading them.
+    /// A restored source or an edited clone can reuse numeric IDs and versions;
+    /// retaining this small revision prevents either from reusing old samples.
+    pub(crate) fn ensure_source(&mut self, source: &crate::source_revision::SourceRevision) {
+        if self.source.as_ref() != Some(source) {
+            self.invalidate();
+            self.source = Some(source.clone());
+        }
+    }
+
     /// Discard derived samples while preserving the configured memory budget.
     pub(crate) fn invalidate(&mut self) {
         self.map.clear();

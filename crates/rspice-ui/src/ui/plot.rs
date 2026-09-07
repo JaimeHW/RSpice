@@ -35,6 +35,8 @@ mod spec;
 pub(crate) mod sample;
 
 pub use cursor::CursorPair;
+#[cfg(test)]
+pub(crate) use decimate::TraceView;
 pub use decimate::{
     DEFAULT_DISPLAY_CACHE_MIB, DecimationCache, DisplayDecimation, SampleInterpolation, sample_at,
     sample_at_with,

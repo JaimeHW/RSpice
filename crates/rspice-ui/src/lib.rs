@@ -176,6 +176,7 @@ pub(crate) mod quantity;
 /// model and the structured, filterable application log.
 pub(crate) mod diagnostics;
 
+pub(crate) mod source_revision;
 /// Clock shims for the browser build. `std::time::{Instant, SystemTime}` trap
 /// at runtime on wasm32-unknown-unknown, so every layer uses these instead.
 pub(crate) mod time_compat;

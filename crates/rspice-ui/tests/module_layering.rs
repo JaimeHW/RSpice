@@ -60,6 +60,8 @@ const LAYERS: &[(&str, u32)] = &[
     ("product", 0),
     ("quantity", 0),
     ("time_compat", 0),
+    // Mutation identity shared by source owners and low-level display caches.
+    ("source_revision", 0),
     // Test-only: the real on-disk identity of the temporary directory, for
     // fixtures anywhere in the crate. It reads `std::env` and `std::fs` and
     // nothing of ours, so it sits at the bottom with the other contracts.

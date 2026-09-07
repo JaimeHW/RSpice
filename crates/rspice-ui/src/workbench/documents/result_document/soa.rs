@@ -92,6 +92,7 @@ pub(super) struct SoaRuleFacts {
 /// alongside the facts keeps the row a viewport names addressable in O(1).
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct SoaPlan {
+    source: crate::state::RunHistoryRevision,
     version: u64,
     analysis: AnalysisPresentationKey,
     rules: Vec<SoaRuleFacts>,
@@ -110,6 +111,7 @@ impl SoaPlan {
 }
 
 fn build_soa_plan(
+    source: crate::state::RunHistoryRevision,
     version: u64,
     analysis_key: AnalysisPresentationKey,
     analysis: &AnalysisResult,
@@ -157,6 +159,7 @@ fn build_soa_plan(
             .collect()
     });
     SoaPlan {
+        source,
         version,
         analysis: analysis_key,
         rules,
@@ -165,32 +168,40 @@ fn build_soa_plan(
 }
 
 /// The scanned facts for the active SOA analysis, rebuilding them only when
-/// the dataset generation or the selected analysis changes.
+/// the retained source, dataset generation, or selected analysis changes.
 ///
-/// The build reads whichever analysis is active, so a key naming a different
-/// one is refused rather than stamped onto the active analysis' facts: a memo
-/// entry whose key and content disagree is a wrong number waiting for the
-/// caller that reads it. The right panel asks with the selection's key before
-/// it has checked the selection against the active analysis, and that is
-/// exactly the case this closes.
+/// Both readers enter here before borrowing evidence. A cached plan is usable
+/// only for the currently active, successful, validated analysis. The plot
+/// cache shares its source boundary so rebuilding facts also refreshes samples.
 fn soa_plan(
     state: &mut AppState,
     analysis_key: AnalysisPresentationKey,
-    evidence_is_valid: bool,
 ) -> Option<std::sync::Arc<SoaPlan>> {
+    // Eligibility and validation precede even a cache hit. Neither a stable
+    // presentation key nor a numeric version proves the evidence is current.
+    let dataset_id = state.simulation.active_run()?.dataset_id;
+    let (analysis, evaluations, _) =
+        active_soa(&state.simulation, active_evidence_is_valid(state))?;
+    if AnalysisPresentationKey::new(dataset_id, analysis) != analysis_key {
+        return None;
+    }
+    let source = state.simulation.runs.revision();
     let version = state.simulation.data_version;
+    state.ui.results.cache.ensure_source(&source);
     if let Some(plan) = state.ui.results.plans.soa.as_ref()
+        && plan.source == source
         && plan.version == version
         && plan.analysis == analysis_key
     {
         return Some(std::sync::Arc::clone(plan));
     }
-    let dataset_id = state.simulation.active_run()?.dataset_id;
-    let (analysis, evaluations, _) = active_soa(&state.simulation, evidence_is_valid)?;
-    if AnalysisPresentationKey::new(dataset_id, analysis) != analysis_key {
-        return None;
-    }
-    let built = std::sync::Arc::new(build_soa_plan(version, analysis_key, analysis, evaluations));
+    let built = std::sync::Arc::new(build_soa_plan(
+        source,
+        version,
+        analysis_key,
+        analysis,
+        evaluations,
+    ));
     state.ui.results.plans.soa = Some(std::sync::Arc::clone(&built));
     Some(built)
 }
@@ -211,7 +222,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     };
     // Built before the retained evidence is borrowed, so the scan happens at
     // most once per dataset generation rather than once per row per frame.
-    let Some(plan) = soa_plan(state, analysis_key, evidence_is_valid) else {
+    let Some(plan) = soa_plan(state, analysis_key) else {
         well_hint(ui, "Select a validated safe-operating-area analysis");
         return;
     };
@@ -478,39 +489,23 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     };
     // The panel reads the same scanned facts the table does, so opening it
     // does not re-scan the histories the sheet already walked.
-    let plan = soa_plan(state, selection.analysis, active_evidence_is_valid(state));
-    let Some(run) = state.simulation.active_run() else {
-        state.ui.results.selected_soa_rule = None;
-        section_header(ui, "SOA rule selection", None);
-        panel_note(ui, "Select a retained SOA analysis and rule.");
-        return;
-    };
-    let Some((analysis_index, analysis)) = selection.analysis.resolve(run) else {
-        state.ui.results.selected_soa_rule = None;
+    let Some(plan) = soa_plan(state, selection.analysis) else {
         section_header(ui, "SOA rule selection", None);
         panel_note(
             ui,
-            "The selected rule no longer belongs to the active retained dataset.",
+            "Select the rule's analysis with valid, successful SOA evidence to inspect it.",
         );
         return;
     };
-    if state.simulation.active_analysis_idx != Some(analysis_index) {
-        state.ui.results.selected_soa_rule = None;
-        section_header(ui, "SOA rule selection", None);
-        panel_note(ui, "Select an SOA rule in the active analysis.");
+    // The plan has checked this active analysis and its complete evidence.
+    let Some(analysis) = state.simulation.active_analysis() else {
         return;
-    }
+    };
     let Some(AnalysisResultPayload::Soa {
         evaluations,
         violations,
     }) = analysis.result_payload.as_ref()
     else {
-        state.ui.results.selected_soa_rule = None;
-        section_header(ui, "SOA rule selection", None);
-        panel_note(
-            ui,
-            "The active analysis no longer contains retained SOA evidence.",
-        );
         return;
     };
     let Some((rule, evaluation)) = evaluations.iter().enumerate().find(|(_, evaluation)| {
@@ -521,7 +516,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         panel_note(ui, "The selected SOA rule is no longer retained.");
         return;
     };
-    let facts = plan.as_ref().and_then(|plan| plan.facts(rule));
+    let facts = plan.facts(rule);
     let event_count = violations
         .iter()
         .filter(|event| {
@@ -1091,7 +1086,7 @@ mod tests {
 
     /// A retained SOA analysis with `rules` warning rules, each carrying its
     /// own verified stress history whose last sample is the worst.
-    fn soa_state(rules: usize, samples: usize, peak: f64) -> AppState {
+    pub(super) fn soa_state(rules: usize, samples: usize, peak: f64) -> AppState {
         use crate::state::{SoaViolationEvidence, SoaViolationSeverityEvidence};
 
         let time: Vec<f64> = (0..samples).map(|index| index as f64 * 1.0e-12).collect();
@@ -1150,7 +1145,7 @@ mod tests {
         state
     }
 
-    fn active_key(state: &AppState) -> AnalysisPresentationKey {
+    pub(super) fn active_key(state: &AppState) -> AnalysisPresentationKey {
         let run = state.simulation.active_run().expect("retained run");
         AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0])
     }
@@ -1161,7 +1156,7 @@ mod tests {
     fn the_plan_states_what_a_direct_scan_of_each_rule_states() {
         let mut state = soa_state(6, 32, 3.0);
         let key = active_key(&state);
-        let plan = soa_plan(&mut state, key, true).expect("a validated SOA plan");
+        let plan = soa_plan(&mut state, key).expect("a validated SOA plan");
 
         let analysis = &state.simulation.runs[0].analyses[0];
         let Some(AnalysisResultPayload::Soa { evaluations, .. }) = analysis.result_payload.as_ref()
@@ -1210,7 +1205,7 @@ mod tests {
     fn a_new_dataset_generation_rebuilds_the_stress_facts() {
         let mut state = soa_state(2, 32, 3.0);
         let key = active_key(&state);
-        let before = soa_plan(&mut state, key, true).expect("a validated SOA plan");
+        let before = soa_plan(&mut state, key).expect("a validated SOA plan");
         let before_interval = before.facts(0).expect("rule 0").interval_compact.clone();
 
         // Replace the stress history with one that never crosses the warning
@@ -1219,7 +1214,7 @@ mod tests {
         state.simulation.runs[0].analyses[0].waveforms[0].y = std::sync::Arc::new(flattened);
         state.simulation.data_version = state.simulation.data_version.wrapping_add(1);
 
-        let after = soa_plan(&mut state, key, true).expect("a validated SOA plan");
+        let after = soa_plan(&mut state, key).expect("a validated SOA plan");
         assert_ne!(
             after.facts(0).expect("rule 0").interval_compact,
             before_interval,
@@ -1258,7 +1253,7 @@ mod tests {
             "the fixture retains two distinguishable analyses"
         );
 
-        let plan = soa_plan(&mut state, inactive, true);
+        let plan = soa_plan(&mut state, inactive);
         assert!(
             plan.is_none(),
             "a plan was served for an analysis whose evidence the build never read"
@@ -1271,7 +1266,7 @@ mod tests {
         // A key check, not a shutdown: the analysis that is active still gets
         // its plan, and it is stamped with its own key.
         let active = active_key(&state);
-        let served = soa_plan(&mut state, active, true).expect("a validated SOA plan");
+        let served = soa_plan(&mut state, active).expect("a validated SOA plan");
         assert_eq!(served.analysis, active);
     }
 
@@ -1311,3 +1306,6 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod source_tests;
