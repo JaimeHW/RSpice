@@ -2495,6 +2495,16 @@ impl AnalysisResultDocument {
         result: &MonteCarloResult,
     ) -> Result<AnalysisResultDocumentBuilder, ResultDocumentError> {
         const LOCATION: &str = "Monte Carlo result";
+        let successful_runs = result
+            .num_runs
+            .checked_sub(result.num_failures)
+            .ok_or_else(|| source_error(LOCATION, "failed runs exceed attempted runs"))?;
+        if result.all_converged != (result.num_failures == 0) {
+            return Err(source_error(
+                LOCATION,
+                "convergence flag disagrees with failed run count",
+            ));
+        }
         let mut names = result.variables.keys().cloned().collect::<Vec<_>>();
         names.sort();
         let mut statistics = Vec::with_capacity(names.len());
@@ -2503,6 +2513,14 @@ impl AnalysisResultDocument {
                 .variables
                 .get(&name)
                 .ok_or_else(|| source_error(LOCATION, "a Monte Carlo variable vanished"))?;
+            if variable.name != name || variable.samples.len() != successful_runs {
+                return Err(source_error(
+                    LOCATION,
+                    format!(
+                        "variable '{name}' has an inconsistent identity or successful sample count"
+                    ),
+                ));
+            }
             let samples = finite_samples(LOCATION, &name, &variable.samples)?;
             if !variable.bin_edges.is_empty()
                 && variable.bin_edges.len() != variable.histogram.len() + 1
@@ -2527,6 +2545,7 @@ impl AnalysisResultDocument {
         let scalars = vec![
             count_scalar("completed_runs", "Completed runs", result.num_runs)?,
             count_scalar("failed_runs", "Failed runs", result.num_failures)?,
+            count_scalar("successful_runs", "Successful runs", successful_runs)?,
             boolean_scalar("all_converged", "All runs converged", result.all_converged)?,
         ];
         Ok(Self::builder(
