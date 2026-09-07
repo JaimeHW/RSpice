@@ -8,7 +8,9 @@ use std::cmp::Ordering;
 
 use egui::{Sense, Ui};
 
-use crate::state::{AnalysisResultPayload, SensitivityResultMode, SensitivityResultRow};
+use crate::state::{
+    AnalysisResultPayload, RunHistoryRevision, SensitivityResultMode, SensitivityResultRow,
+};
 use crate::ui::plot::fmt_si;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -109,7 +111,7 @@ fn ranked_rows(rows: &[SensitivityResultRow]) -> Vec<usize> {
 /// frame — twice, because the panel ranked them again beside the chart.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct SensitivityPlan {
-    version: u64,
+    source: (RunHistoryRevision, u64),
     analysis: AnalysisPresentationKey,
     order: Vec<usize>,
     /// The chart's row offsets, built once with the order they address.
@@ -133,12 +135,15 @@ impl SensitivityPlan {
 
 /// The ranking for the active analysis, sorted once per dataset generation.
 fn sensitivity_plan(state: &mut AppState) -> Option<Arc<SensitivityPlan>> {
-    let version = state.simulation.data_version;
+    let source = (
+        state.simulation.runs.revision(),
+        state.simulation.data_version,
+    );
     let run = state.simulation.active_run()?;
     let analysis_key =
         AnalysisPresentationKey::new(run.dataset_id, state.simulation.active_analysis()?);
     if let Some(plan) = state.ui.results.plans.sensitivity.as_ref()
-        && plan.version == version
+        && plan.source == source
         && plan.analysis == analysis_key
     {
         return Some(Arc::clone(plan));
@@ -152,7 +157,7 @@ fn sensitivity_plan(state: &mut AppState) -> Option<Arc<SensitivityPlan>> {
         .map(|index| view.rows[*index].normalized.abs())
         .fold(0.0_f64, f64::max);
     let built = Arc::new(SensitivityPlan {
-        version,
+        source,
         analysis: analysis_key,
         offsets: RowOffsets::from_heights(std::iter::repeat_n(ROW_HEIGHT, order.len())),
         order,
@@ -742,6 +747,42 @@ mod tests {
         let mut state = state_with_analyses(vec![sensitivity_result(1, "SENS", rows)]);
         assert!(state.simulation.select_analysis(0));
         state
+    }
+
+    #[test]
+    fn retained_view_source_sensitivity_rebuilds_shortened_rows_and_rejects_invalid_evidence() {
+        let mut state = ranked_state(64);
+        let original = sensitivity_plan(&mut state).unwrap();
+        let version = state.simulation.data_version;
+        state.simulation.runs[0].analyses[0] = sensitivity_result(
+            1,
+            "SENS",
+            vec![SensitivityResultRow {
+                parameter: "only".to_owned(),
+                raw: 1.0,
+                normalized: -2.0,
+            }],
+        );
+        let changed = sensitivity_plan(&mut state).unwrap();
+        assert_eq!(changed.analysis, original.analysis);
+        assert_eq!(changed.order(), [0]);
+        assert_eq!(changed.offsets().rows(), 1);
+        assert_eq!(changed.max_magnitude, 2.0);
+        assert_eq!(original.order().len(), 64);
+
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                show(ui, &mut state);
+                right_panel(ui, &mut state);
+            });
+        });
+        state.simulation.runs[0].analyses[0].success = false;
+        assert!(sensitivity_plan(&mut state).is_none());
+        state.simulation.runs[0].analyses[0].success = true;
+        assert_eq!(sensitivity_plan(&mut state).unwrap().order(), [0]);
+        assert_eq!(state.simulation.data_version, version);
     }
 
     /// The ranking is the sort it replaced, done once. Both the chart and the

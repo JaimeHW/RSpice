@@ -6,7 +6,8 @@ use egui::{RichText, Ui};
 use egui_extras::{Column, TableBuilder};
 
 use crate::state::{
-    AnalysisResult, AnalysisResultFamilyMetadata, AnalysisType, SimulationState, WaveformData,
+    AnalysisResult, AnalysisResultFamilyMetadata, AnalysisType, RunHistoryRevision,
+    SimulationState, WaveformData,
 };
 use crate::ui::plot::{self, Axis, PlotSpec, Trace, XScale};
 use crate::ui::theme::{self, FontWeight};
@@ -46,7 +47,7 @@ struct OptimizationIndices {
 /// The located history for one analysis, or the verdict that there is none.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct OptimizationPlan {
-    version: u64,
+    source: (RunHistoryRevision, u64),
     analysis: AnalysisPresentationKey,
     located: Option<OptimizationIndices>,
 }
@@ -57,19 +58,22 @@ pub(super) struct OptimizationPlan {
 /// holds only `&AppState`; the answer is a property of immutable evidence, so
 /// the cell hands back the same verdict rather than recomputing it.
 fn optimization_plan(state: &AppState) -> Option<Arc<OptimizationPlan>> {
-    let version = state.simulation.data_version;
+    let source = (
+        state.simulation.runs.revision(),
+        state.simulation.data_version,
+    );
     let run = state.simulation.active_run()?;
     let analysis = state.simulation.active_analysis()?;
     let analysis_key = AnalysisPresentationKey::new(run.dataset_id, analysis);
     if let Some(plan) = state.ui.results.plans.optimization.borrow().as_ref()
-        && plan.version == version
+        && plan.source == source
         && plan.analysis == analysis_key
     {
         return Some(Arc::clone(plan));
     }
     let evidence_is_valid = super::analysis_evidence_is_valid(state, run.dataset_id, analysis);
     let built = Arc::new(OptimizationPlan {
-        version,
+        source,
         analysis: analysis_key,
         located: locate_optimization(analysis, evidence_is_valid),
     });
@@ -738,6 +742,29 @@ mod tests {
         assert!(state.simulation.select_run(0));
         state.simulation.active_analysis_idx = Some(0);
         state
+    }
+
+    #[test]
+    fn retained_view_source_optimizer_gate_refreshes_without_frame_preparation() {
+        let mut state = optimization_state(64);
+        let original = optimization_plan(&state).unwrap();
+        assert_eq!(original.located.as_ref().unwrap().best_index, 63);
+        let version = state.simulation.data_version;
+        state.simulation.runs[0].analyses[0].waveforms.remove(1);
+        assert!(!active_metadata_is_valid(&state));
+        assert!(optimization_plan(&state).unwrap().located.is_none());
+
+        state.simulation.runs[0].analyses[0] =
+            optimization_state(3).simulation.runs[0].analyses[0].clone();
+        assert!(active_metadata_is_valid(&state));
+        let repaired = optimization_plan(&state).unwrap();
+        assert_eq!(repaired.analysis, original.analysis);
+        let view = active_optimization(&state.simulation, Some(&repaired)).unwrap();
+        assert_eq!(view.best_index, 2);
+        assert_eq!(view.cost.y.len(), 3);
+        assert_eq!(view.variables[0].0, "GAIN");
+        assert_eq!(original.located.as_ref().unwrap().best_index, 63);
+        assert_eq!(state.simulation.data_version, version);
     }
 
     /// Locating the history verifies every candidate series against the

@@ -8,8 +8,8 @@ use egui::{Ui, WidgetInfo, WidgetType};
 
 use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload,
-    AnalysisResultSourceDomain, AnalysisType, SavedOutputMaterializationStatus, SavedOutputReceipt,
-    SimulationRun, SimulationRunLifecycle,
+    AnalysisResultSourceDomain, AnalysisType, RunHistoryRevision, SavedOutputMaterializationStatus,
+    SavedOutputReceipt, SimulationRun, SimulationRunLifecycle,
 };
 use crate::ui::accessibility::plural_suffix;
 use crate::ui::theme::{self, FontWeight};
@@ -254,25 +254,29 @@ impl ManifestViewModel {
 /// reader looks at it, and all of it happened on every frame.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ManifestPlan {
-    version: u64,
+    source: (RunHistoryRevision, u64),
     run: u64,
     pub(crate) model: ManifestViewModel,
 }
 
 /// The active run's manifest projection, rebuilt only for a new run or a new
-/// dataset generation.
+/// dataset generation. The retained history revision also covers restored
+/// histories and nested edits that preserve the display counter.
 pub(crate) fn active_manifest(state: &mut AppState) -> Option<Arc<ManifestPlan>> {
-    let version = state.simulation.data_version;
+    let source = (
+        state.simulation.runs.revision(),
+        state.simulation.data_version,
+    );
     let run_id = state.simulation.active_run()?.id;
     if let Some(plan) = state.ui.results.plans.manifest.as_ref()
-        && plan.version == version
+        && plan.source == source
         && plan.run == run_id
     {
         return Some(Arc::clone(plan));
     }
     let model = ManifestViewModel::from_run(state.simulation.active_run()?);
     let built = Arc::new(ManifestPlan {
-        version,
+        source,
         run: run_id,
         model,
     });
@@ -1650,6 +1654,92 @@ mod tests {
         state.simulation.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
         state
+    }
+
+    #[test]
+    fn retained_view_source_manifest_tracks_restoration_and_nested_edits() {
+        use crate::io::project_io::ProjectSimulationResults;
+
+        let mut state = AppState::default();
+        let run = state.simulation.start_run();
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(vec![
+                WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 2.0], "#ffbd2e"),
+            ]),
+        );
+        run.restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
+            .unwrap();
+        run.mark_running().unwrap();
+        run.finish_lifecycle(SimulationRunLifecycle::Completed)
+            .unwrap();
+        state.simulation.complete_run();
+        let original = active_manifest(&mut state).unwrap();
+        let version = state.simulation.data_version;
+        let mut replacement = state.simulation.clone();
+        replacement.runs[0].analyses[0].waveforms[0].y = Arc::new(vec![0.0, 9.0]);
+        state.simulation = ProjectSimulationResults::from_state(&replacement)
+            .into_simulation_state()
+            .unwrap();
+        assert_eq!(state.simulation.data_version, version);
+        let restored = active_manifest(&mut state).unwrap();
+        assert_eq!(restored.model.dataset_id, original.model.dataset_id);
+        assert_ne!(restored.model.dataset_digest, original.model.dataset_digest);
+        assert_eq!(
+            restored.model,
+            ManifestViewModel::from_run(state.simulation.active_run().unwrap())
+        );
+
+        state.simulation.runs[0].analyses[0]
+            .waveforms
+            .push(WaveformData::new(
+                "I(V1)",
+                vec![0.0, 1.0],
+                vec![0.0, -0.01],
+                "#55aaff",
+            ));
+        let edited = active_manifest(&mut state).unwrap();
+        assert_eq!(
+            edited.model,
+            ManifestViewModel::from_run(state.simulation.active_run().unwrap())
+        );
+        assert_ne!(edited.model, restored.model);
+        assert_eq!(state.simulation.data_version, version);
+    }
+
+    #[test]
+    fn retained_view_source_manifest_reuses_large_unchanged_history_clones() {
+        let mut state = state_with_run("Transient");
+        state.simulation.runs[0].analyses[0].waveforms = vec![WaveformData::new(
+            "V(out)",
+            (0..100_000).map(f64::from).collect::<Vec<_>>(),
+            vec![2.0; 100_000],
+            "#ffbd2e",
+        )];
+        let original = active_manifest(&mut state).unwrap();
+        let mut other = AppState::default();
+        other.simulation = state.simulation.clone();
+        other.ui.results = state.ui.results.clone();
+        let work = frame_work::WorkCounts::reset();
+        for _ in 0..12 {
+            assert!(Arc::ptr_eq(
+                &original,
+                &active_manifest(&mut state).unwrap()
+            ));
+            assert!(Arc::ptr_eq(
+                &original,
+                &active_manifest(&mut other).unwrap()
+            ));
+        }
+        assert_eq!(work.since().total(), 0);
+        other.simulation.runs[0].analyses[0].waveforms[0].y = Arc::new(vec![3.0; 100_000]);
+        assert_ne!(
+            active_manifest(&mut other).unwrap().model.dataset_digest,
+            original.model.dataset_digest
+        );
+        assert!(Arc::ptr_eq(
+            &original,
+            &active_manifest(&mut state).unwrap()
+        ));
     }
 
     /// The memo has to be the same projection, digest included — that digest

@@ -13,7 +13,7 @@ use egui::Ui;
 use crate::simulation::netlist_gen::bus_notations;
 use crate::state::{
     AnalysisResultPayload, AnalysisType, DcOpResult, OperatingPointAnnotationEvidence,
-    OperatingPointDeviceDetailEvidence, OperatingPointProcessEvidence,
+    OperatingPointDeviceDetailEvidence, OperatingPointProcessEvidence, RunHistoryRevision,
     SchematicAnnotationVisibility,
 };
 use crate::ui::plot::fmt_si;
@@ -503,11 +503,12 @@ fn grouped_devices(
 /// Everything the row plan below was built from.
 ///
 /// The filter, sort and occurrence root are the reader's controls; the data
-/// version and analysis are the evidence. A plan whose key still matches is
-/// the same plan, so the frame reads it instead of rebuilding it.
+/// version, retained history revision and analysis are the evidence. A plan
+/// whose key still matches is the same plan, so the frame reads it instead
+/// of rebuilding it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct OpPlanKey {
-    version: u64,
+    source: (RunHistoryRevision, u64),
     analysis: AnalysisPresentationKey,
     filter: String,
     sort: Option<(String, bool)>,
@@ -665,7 +666,10 @@ fn build_op_plan(
 /// The row plan for the selected operating point under the current controls.
 fn op_plan(state: &mut AppState, analysis: AnalysisPresentationKey) -> Option<Arc<OpPlan>> {
     let key = OpPlanKey {
-        version: state.simulation.data_version,
+        source: (
+            state.simulation.runs.revision(),
+            state.simulation.data_version,
+        ),
         analysis,
         filter: state.ui.results.op_filter.clone(),
         sort: state.ui.results.op_sort.clone(),
@@ -2102,6 +2106,39 @@ mod tests {
     fn active_key(state: &AppState) -> AnalysisPresentationKey {
         let run = state.simulation.active_run().expect("retained run");
         AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0])
+    }
+
+    #[test]
+    fn retained_view_source_operating_point_rebuilds_node_and_device_indices() {
+        let mut state = op_state(40, 40);
+        let key = active_key(&state);
+        let original = op_plan(&mut state, key).unwrap();
+        let version = state.simulation.data_version;
+        state.simulation.runs[0].analyses[0] =
+            op_state(3, 2).simulation.runs[0].analyses[0].clone();
+        let changed = op_plan(&mut state, key).unwrap();
+        assert_eq!(changed.node_shown, 3);
+        assert_eq!(changed.device_shown, 2);
+        assert_eq!(changed.device_in_scope, 2);
+        assert_eq!(original.node_shown, 40);
+        assert_eq!(original.device_shown, 40);
+        assert!(changed.node_rows.iter().all(|row| match row {
+            NodePlanRow::Value(index) => *index < 3,
+            NodePlanRow::Group(_) => true,
+        }));
+        assert!(changed.device_rows.iter().all(|row| match row {
+            DevicePlanRow::Device { entry, .. } => *entry < 2,
+            _ => true,
+        }));
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                show(ui, &mut state);
+                right_panel(ui, &mut state);
+            });
+        });
+        assert_eq!(state.simulation.data_version, version);
     }
 
     /// The plan replaced a per-frame grouping, so it has to lay the rows out

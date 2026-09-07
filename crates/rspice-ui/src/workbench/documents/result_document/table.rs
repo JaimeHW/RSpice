@@ -14,7 +14,7 @@
 use egui::Ui;
 
 use crate::simulation::netlist_gen::bus_notations;
-use crate::state::{AnalysisResult, AnalysisResultPayload, AnalysisType};
+use crate::state::{AnalysisResult, AnalysisResultPayload, AnalysisType, RunHistoryRevision};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{chip, measurement_table, section_header};
@@ -321,7 +321,7 @@ fn show_operating_point_table(ui: &mut Ui, state: &mut AppState) -> bool {
 /// did both on every frame to draw the twenty lines a viewport holds.
 #[derive(Debug)]
 pub(super) struct ArtifactTextPlan {
-    version: u64,
+    source: (RunHistoryRevision, u64),
     key: super::ResultArtifactPresentationKey,
     text: Result<String, String>,
     lines: Vec<(usize, usize)>,
@@ -332,9 +332,12 @@ fn artifact_text(
     state: &mut AppState,
     key: &super::ResultArtifactPresentationKey,
 ) -> Option<std::sync::Arc<ArtifactTextPlan>> {
-    let version = state.simulation.data_version;
+    let source = (
+        state.simulation.runs.revision(),
+        state.simulation.data_version,
+    );
     if let Some(plan) = state.ui.results.plans.artifact.as_ref()
-        && plan.version == version
+        && plan.source == source
         && &plan.key == key
     {
         return Some(std::sync::Arc::clone(plan));
@@ -354,7 +357,7 @@ fn artifact_text(
         },
     );
     let built = std::sync::Arc::new(ArtifactTextPlan {
-        version,
+        source,
         key: key.clone(),
         text,
         lines,
@@ -1184,6 +1187,84 @@ mod tests {
     use crate::state::{
         AnalysisResult, AnalysisType, DcOpResult, OperatingPointValue, WaveformData,
     };
+
+    #[test]
+    fn retained_view_source_artifact_tracks_restoration_errors_and_repair() {
+        use super::super::ResultArtifactPresentationKey;
+        use crate::io::project_io::ProjectSimulationResults;
+        use crate::state::{SimulationRunLifecycle, SimulationRunProvenance};
+
+        let mut state = AppState::default();
+        let run = state.simulation.start_run();
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_result_payload(
+                AnalysisResultPayload::ScalarMeasurements {
+                    values: std::collections::BTreeMap::from([(
+                        "settling_time".to_owned(),
+                        1.0 / 3.0,
+                    )]),
+                },
+            ),
+        );
+        let key = ResultArtifactPresentationKey::new(
+            AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]),
+            "payload/scalar-measurements",
+        );
+        run.restore_provenance(SimulationRunProvenance::LegacyUnattributed)
+            .unwrap();
+        run.mark_running().unwrap();
+        run.finish_lifecycle(SimulationRunLifecycle::Completed)
+            .unwrap();
+        state.simulation.complete_run();
+        let original = artifact_text(&mut state, &key).unwrap();
+        assert!(
+            original
+                .text
+                .as_ref()
+                .unwrap()
+                .contains("0.3333333333333333")
+        );
+        let version = state.simulation.data_version;
+        let mut replacement = state.simulation.clone();
+        replacement.runs[0].analyses[0].result_payload =
+            Some(AnalysisResultPayload::ScalarMeasurements {
+                values: std::collections::BTreeMap::from([
+                    ("settling_time".to_owned(), 0.125),
+                    ("peak".to_owned(), 42.0),
+                ]),
+            });
+        state.simulation = ProjectSimulationResults::from_state(&replacement)
+            .into_simulation_state()
+            .unwrap();
+        let restored = artifact_text(&mut state, &key).unwrap();
+        assert_eq!(
+            restored.text,
+            exact_result_artifact_text(&key, &state.simulation.runs)
+        );
+        assert_ne!(restored.text, original.text);
+        let text = restored.text.as_ref().unwrap();
+        assert!(text.contains("0.125") && text.contains("42.0"));
+        assert_eq!(
+            restored
+                .lines
+                .iter()
+                .map(|(start, end)| &text[*start..*end])
+                .collect::<Vec<_>>(),
+            text.lines().collect::<Vec<_>>()
+        );
+        let payload = state.simulation.runs[0].analyses[0].result_payload.take();
+        let missing = artifact_text(&mut state, &key).unwrap();
+        assert!(missing.text.is_err());
+        assert!(missing.lines.is_empty());
+        state.simulation.runs[0].analyses[0].result_payload = payload;
+        let repaired = artifact_text(&mut state, &key).unwrap();
+        assert_eq!(repaired.text, restored.text);
+        assert!(std::sync::Arc::ptr_eq(
+            &repaired,
+            &artifact_text(&mut state, &key).unwrap()
+        ));
+        assert_eq!(state.simulation.data_version, version);
+    }
 
     #[test]
     fn typed_operating_point_rows_preserve_exact_values_without_waveforms() {
