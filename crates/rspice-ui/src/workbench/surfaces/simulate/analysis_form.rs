@@ -1945,6 +1945,11 @@ pub(super) fn form(
             input_row(ui, "Output ref", &mut setup.output_ref);
             input_row(ui, "Out sideband", &mut setup.output_sideband);
             input_row(ui, "Input src", &mut setup.input_source);
+            // Both ends of the transfer, each next to the probe it belongs to.
+            // The input sideband was pinned to 1 in the run-configuration
+            // builder, so a mixer's down-conversion path was not authorable
+            // here while its up-conversion path was.
+            input_row(ui, "In sideband", &mut setup.input_sideband);
             input_row(ui, "Max sideband", &mut setup.max_sideband);
             "Transfer functions onto a periodic steady state (needs PSS)."
         }

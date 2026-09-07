@@ -17,12 +17,27 @@
 //! + out=VOUT outsideband=1 input=VIN
 //! ```
 //!
-//! `.PXF` is not a card the engine's netlist parser owns — it has no
-//! `AnalysisCommand` for it, and reads the line as an unsupported dot-command
-//! it records and ignores. The studio runs it through its own typed pipeline.
-//! The output probe is spelled `out=` regardless, so the whole periodic family
-//! reads one way: `.PAC` and `.PNOISE`, which the engine *does* own, spell it
-//! that way because the engine does.
+//! `.PXF` is a card the engine's netlist parser owns
+//! (`rspice-core/src/netlist/parser/periodic_cards.rs`), and the grammar below
+//! is that card's grammar. Its full key set is
+//! `INPUT= OUT= [INPUTSIDEBAND=1] [OUTSIDEBAND=1] [MAXSIDEBAND=5] [RELTOL=1e-3]
+//! [ABSTOL=1e-12] [FROM=PSS|HB]`; this form writes the first five and
+//! deliberately writes none of the last three:
+//!
+//! - `RELTOL=`/`ABSTOL=` are the deck's numerical contract, and the Solver
+//!   options channel ([`super::options`]) owns it deck-wide through
+//!   `.options`. `PacConfig`, whose card carries the identical pair at the
+//!   identical defaults, does not offer them either, and the manual-deck
+//!   reader falls back to the deck's own `.options` for both — a sharper
+//!   answer than a per-card constant. Two places to set one tolerance is a
+//!   contradiction waiting to be authored.
+//! - `FROM=` selects the carrier to linearize about. No periodic form offers
+//!   it, because the Studio binds a dependent analysis to the one PSS it runs
+//!   for it; `FROM=HB` names a binding this pipeline does not have, so a
+//!   control for it would write a card the Studio's own reader refuses.
+//!
+//! The output probe is spelled `out=` because the engine spells it that way,
+//! so the whole periodic family reads one way.
 
 use super::options::parse_si_value;
 
@@ -76,6 +91,15 @@ pub struct PxfConfig {
     pub output_sideband: i32,
     /// Input source name
     pub input_source: String,
+    /// Input sideband index.
+    ///
+    /// A PXF measures a transfer between a *pair* of sidebands — H(m -> n) and
+    /// H(n -> m) are different mixer paths, not one number read two ways — and
+    /// this is the half the form used to leave unsaid. It was pinned to a
+    /// literal `1` where the run configuration was built, so a mixer's
+    /// down-conversion path H(0 -> n) was not authorable from the Studio at
+    /// all while its up-conversion path was.
+    pub input_sideband: i32,
     /// Maximum sideband index
     pub max_sideband: i32,
 }
@@ -91,6 +115,11 @@ impl Default for PxfConfig {
             output_ref: String::new(),
             output_sideband: 1,
             input_source: "VIN".to_string(),
+            // `PxfCard::DEFAULT_INPUT_SIDEBAND`, and the value the manual-deck
+            // reader has applied to a line that omits the key since it became
+            // authorable, so a form that has never been touched writes the
+            // analysis it always ran.
+            input_sideband: 1,
             max_sideband: 5,
         }
     }
@@ -121,6 +150,10 @@ impl PxfConfig {
             cmd.push_str(&format!(" input={}", self.input_source));
         }
 
+        // Beside the source it belongs to, so the line names each end of the
+        // transfer with the sideband it is measured at.
+        cmd.push_str(&format!(" inputsideband={}", self.input_sideband));
+
         cmd.push_str(&format!(" maxsideband={}", self.max_sideband));
 
         cmd
@@ -149,6 +182,21 @@ impl PxfConfig {
         if self.max_sideband < 0 {
             return Err("Maximum sideband must be non-negative".to_string());
         }
+        // The card refuses a conversion depth it then measures outside of, and
+        // so does the manual-deck reader. Without this the form could write a
+        // line the engine will not read: a transfer between two sidebands the
+        // solve it asked for does not contain.
+        for (label, sideband) in [
+            ("Input", self.input_sideband),
+            ("Output", self.output_sideband),
+        ] {
+            if sideband.saturating_abs() > self.max_sideband {
+                return Err(format!(
+                    "{label} sideband {sideband} lies outside the maximum sideband {}",
+                    self.max_sideband
+                ));
+            }
+        }
         Ok(())
     }
 }
@@ -169,9 +217,19 @@ pub struct PxfDialogState {
     pub output_ref: String,
     pub output_sideband: String,
     pub input_source: String,
+    /// Absent in every project saved before the input side of the transfer was
+    /// authorable, and absent means `1` — the value those projects ran at,
+    /// pinned in the run-configuration builder and defaulted by both readers.
+    /// Reopening one must not silently move it to sideband zero.
+    #[serde(default = "default_input_sideband_text")]
+    pub input_sideband: String,
     pub max_sideband: String,
     #[serde(skip)]
     pub initialized: bool,
+}
+
+fn default_input_sideband_text() -> String {
+    PxfConfig::default().input_sideband.to_string()
 }
 
 impl PxfDialogState {
@@ -190,6 +248,7 @@ impl PxfDialogState {
             output_ref: config.output_ref.clone(),
             output_sideband: config.output_sideband.to_string(),
             input_source: config.input_source.clone(),
+            input_sideband: config.input_sideband.to_string(),
             max_sideband: config.max_sideband.to_string(),
             initialized: true,
         }
@@ -205,7 +264,11 @@ impl PxfDialogState {
         let out_sb: i32 = self
             .output_sideband
             .parse()
-            .map_err(|_| "Invalid sideband")?;
+            .map_err(|_| "Invalid output sideband")?;
+        let in_sb: i32 = self
+            .input_sideband
+            .parse()
+            .map_err(|_| "Invalid input sideband")?;
         let max_sb: i32 = self
             .max_sideband
             .parse()
@@ -226,6 +289,7 @@ impl PxfDialogState {
             output_ref: self.output_ref.clone(),
             output_sideband: out_sb,
             input_source: self.input_source.clone(),
+            input_sideband: in_sb,
             max_sideband: max_sb,
         };
 

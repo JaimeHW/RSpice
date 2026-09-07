@@ -152,7 +152,7 @@ impl SimulationController {
             points_per_unit: pxf_cfg.num_points as usize,
             sweep,
             input_source: pxf_cfg.input_source,
-            input_sideband: 1,
+            input_sideband: pxf_cfg.input_sideband,
             output_node: pxf_cfg.output_node,
             output_ref,
             output_sideband: pxf_cfg.output_sideband,

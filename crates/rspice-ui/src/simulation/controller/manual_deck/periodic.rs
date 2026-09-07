@@ -5,8 +5,8 @@
 //! every operand, and freezes all execution options on the queued task.
 //! Nothing is borrowed from the Simulation Studio dialogs.
 //!
-//! There is one grammar, and it is the engine's. `.PSS`, `.PAC` and `.PNOISE`
-//! are cards the netlist parser owns
+//! There is one grammar, and it is the engine's. All five of `.PSS`, `.PAC`,
+//! `.PNOISE`, `.PXF` and `.PSTB` are cards the netlist parser owns
 //! (`rspice-core/src/netlist/parser/periodic_cards.rs`), so a manual deck is
 //! parsed by that parser before it reaches this one and every malformed card
 //! is refused there, in the engine's own words, with the engine's own line
@@ -22,10 +22,18 @@
 //!   field for is refused by name — [`PSS_KEYS_THE_STUDIO_CANNOT_HONOUR`] —
 //!   rather than parsed and dropped. That is the rule `periodic_cards.rs`
 //!   states for the ngspice fields RSpice cannot honour, applied one layer up.
-//! - `.PXF` and `.PSTB` are *not* engine cards: the parser records them as
-//!   unsupported dot-commands, warns that whatever they request will not run,
-//!   and ignores them, so this reader owns their whole grammar. They spell
-//!   their output probe `out=` like the rest of the family.
+//! - A key the engine's card accepts is a key this reader accepts, at the same
+//!   default. `.PXF` used to refuse `RELTOL=`, `ABSTOL=` and `FROM=` by name
+//!   while the engine's parser took all three — and since the deck is parsed
+//!   by the engine before it reaches this reader, that refusal fired on a
+//!   deck the engine had already read. The two key sets are asserted equal by
+//!   `the_reader_and_the_engine_accept_the_same_periodic_key_set`.
+//!
+//! `.PXF` and `.PSTB` were the exception until the engine gained cards for
+//! them: the parser used to record both as unsupported dot-commands, warn that
+//! whatever they requested would not run, and ignore them, so this reader
+//! owned their whole grammar. It no longer does. They spell their output probe
+//! `out=` like the rest of the family, because the engine does.
 
 use std::collections::{HashMap, HashSet};
 
@@ -609,6 +617,12 @@ fn parse_pxf(
     reltol: f64,
     abstol: f64,
 ) -> Result<PxfRunConfig, String> {
+    // `parse_pxf_command`'s key set, complete. `RELTOL=`, `ABSTOL=` and
+    // `FROM=` were missing, so a `.pxf` line the engine's parser accepts was
+    // refused here by name — and since the deck is parsed by the engine before
+    // it reaches this reader, the deck that failed was one the engine had
+    // already read. They are handled the way `.PAC` handles the same three
+    // keys, which is the card these two share their tolerance defaults with.
     reject_unsupported_keys(
         card,
         &[
@@ -617,6 +631,9 @@ fn parse_pxf(
             "outsideband",
             "input",
             "out",
+            "reltol",
+            "abstol",
+            "from",
         ],
         &[],
         ".PXF",
@@ -642,9 +659,13 @@ fn parse_pxf(
         output_ref,
         output_sideband: optional_i32(card, "outsideband", 1, params)?,
         max_sideband: optional_i32(card, "maxsideband", 5, params)?,
-        reltol,
-        abstol,
+        // As `.PAC`: the card may state the frequency-domain tolerances, and a
+        // deck that does not falls back to its own `.options` rather than to
+        // the card's constant.
+        reltol: optional_value(card, "reltol", reltol, params)?,
+        abstol: optional_value(card, "abstol", abstol, params)?,
     };
+    periodic_source_selector(card, ".PXF")?;
     validate_frequency_contract(
         ".PXF",
         config.start_freq,
@@ -652,6 +673,13 @@ fn parse_pxf(
         config.points_per_unit,
         config.max_sideband,
     )?;
+    if !config.reltol.is_finite()
+        || config.reltol <= 0.0
+        || !config.abstol.is_finite()
+        || config.abstol <= 0.0
+    {
+        return Err(".PXF reltol and abstol must be finite and positive".to_owned());
+    }
     if config.input_sideband.unsigned_abs() > config.max_sideband as u32
         || config.output_sideband.unsigned_abs() > config.max_sideband as u32
     {
