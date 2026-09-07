@@ -1548,6 +1548,7 @@ mod tests {
             error_message: None,
             failure_attribution: None,
             provenance: None,
+            import_source: None,
         }
     }
 

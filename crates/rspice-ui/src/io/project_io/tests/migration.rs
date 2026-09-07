@@ -1743,7 +1743,110 @@ fn a_results_schema_from_the_future_is_refused_by_number() {
         .migrate_to_current(ProjectId::new())
         .expect_err("a forward schema version is not migrated");
     assert!(
-        error.contains("unsupported simulation results schema version 20"),
+        error.contains(&format!(
+            "unsupported simulation results schema version {}",
+            PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION + 1
+        )),
         "{error}"
+    );
+}
+
+fn event_source_schema_v19() -> ProjectSimulationResults {
+    let mut persisted = persisted_events_at_schema_v18();
+    persisted.schema_version = DIGITAL_BUS_RESULTS_SCHEMA_VERSION;
+    for run in &mut persisted.runs {
+        let restored = run.clone().into_run().unwrap();
+        for (stored, analysis) in run.analyses.iter_mut().zip(&restored.analyses) {
+            stored.result_data_digest =
+                PersistedField::Value(analysis.legacy_v10_result_data_digest());
+        }
+        run.dataset_content_digest =
+            PersistedField::Value(restored.legacy_v10_dataset_content_digest());
+    }
+    persisted
+}
+
+#[test]
+fn event_source_schema_v19_migrates_without_inventing_import_attribution() {
+    let mut persisted = event_source_schema_v19();
+    let evidence = persisted.runs[0].analyses[0].result_payload.clone();
+    persisted.migrate_to_current(ProjectId::new()).unwrap();
+    persisted.validate().unwrap();
+    assert_eq!(
+        persisted.schema_version,
+        PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION
+    );
+    assert!(persisted.runs[0].analyses[0].import_source.is_missing());
+    assert_eq!(persisted.runs[0].analyses[0].result_payload, evidence);
+    let restored = persisted.into_simulation_state().unwrap();
+    assert!(restored.runs[0].analyses[0].import_source.is_none());
+}
+
+#[test]
+fn event_source_old_schema_rejects_changed_samples_and_smuggled_attribution() {
+    use crate::state::{ResultImportFormat, ResultImportSource};
+    let mut altered = event_source_schema_v19();
+    altered.runs[0].analyses[0].success = false;
+    assert!(
+        altered
+            .migrate_to_current(ProjectId::new())
+            .unwrap_err()
+            .contains("digest")
+    );
+    for schema in 1..IMPORT_SOURCE_RESULTS_SCHEMA_VERSION {
+        let mut altered = event_source_schema_v19();
+        altered.schema_version = schema;
+        altered.runs[0].analyses[0].import_source = PersistedField::Value(ResultImportSource {
+            source_name: "forged.vcd".to_owned(),
+            format: ResultImportFormat::Vcd,
+        });
+        assert!(
+            altered
+                .migrate_to_current(ProjectId::new())
+                .unwrap_err()
+                .contains("import-source")
+        );
+    }
+}
+
+#[test]
+fn event_source_current_schema_seals_name_format_and_presence() {
+    use crate::state::{ResultImportFormat, ResultImportSource};
+    let mut persisted = event_source_schema_v19();
+    persisted.migrate_to_current(ProjectId::new()).unwrap();
+    let mut simulation = persisted.into_simulation_state().unwrap();
+    simulation.runs[0].analyses[0].import_source = Some(ResultImportSource {
+        source_name: "capture.vcd".to_owned(),
+        format: ResultImportFormat::Vcd,
+    });
+    let persisted = ProjectSimulationResults::from_state(&simulation);
+    persisted.validate().unwrap();
+    for source in [
+        PersistedField::Missing,
+        PersistedField::Null,
+        PersistedField::Value(ResultImportSource {
+            source_name: "other.vcd".to_owned(),
+            format: ResultImportFormat::Vcd,
+        }),
+        PersistedField::Value(ResultImportSource {
+            source_name: "capture.vcd".to_owned(),
+            format: ResultImportFormat::Fst,
+        }),
+        PersistedField::Value(ResultImportSource {
+            source_name: "\n".to_owned(),
+            format: ResultImportFormat::Vcd,
+        }),
+    ] {
+        let mut altered = persisted.clone();
+        altered.runs[0].analyses[0].import_source = source;
+        assert!(altered.validate().is_err());
+    }
+    let text = serde_json::to_string(&persisted).unwrap();
+    let restored: ProjectSimulationResults = serde_json::from_str(&text).unwrap();
+    assert_eq!(restored, persisted);
+    restored.validate().unwrap();
+    assert!(
+        serde_json::from_str::<ProjectSimulationResults>(&text.replace("\"vcd\"", "\"native\""))
+            .is_err()
     );
 }

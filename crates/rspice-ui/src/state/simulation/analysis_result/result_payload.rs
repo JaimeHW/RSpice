@@ -689,6 +689,8 @@ pub struct AnalysisResult {
     /// Exact prepared-task identity. Missing only for migrated legacy result
     /// history that was written before source instance IDs existed.
     pub provenance: Option<AnalysisResultProvenance>,
+    /// External adapter attribution; absent for native and historical unknown sources.
+    pub import_source: Option<ResultImportSource>,
 }
 
 impl AnalysisResult {
@@ -777,6 +779,7 @@ impl AnalysisResult {
             error_message: None,
             failure_attribution: None,
             provenance: None,
+            import_source: None,
         }
     }
 
@@ -804,6 +807,7 @@ impl AnalysisResult {
             error_message: Some(error.into()),
             failure_attribution: None,
             provenance: None,
+            import_source: None,
         }
     }
 
@@ -886,6 +890,15 @@ impl AnalysisResult {
     /// Historical analyses may legitimately lack a newer payload; when both
     /// fields exist they must describe one coherent execution.
     pub fn validate_retained_evidence(&self) -> Result<(), String> {
+        if let Some(source) = &self.import_source {
+            source.validate()?;
+            if self.provenance.is_some() || !self.saved_output_receipts.is_empty() {
+                return Err(
+                    "imported results cannot carry native prepared-task or saved-output receipts"
+                        .to_owned(),
+                );
+            }
+        }
         let mut waveform_names = HashSet::with_capacity(self.waveforms.len());
         for waveform in &self.waveforms {
             let name = waveform.name.trim();

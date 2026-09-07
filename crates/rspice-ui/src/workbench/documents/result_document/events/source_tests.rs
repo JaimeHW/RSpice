@@ -31,6 +31,151 @@ fn paint(state: &mut AppState, panel: bool) {
     });
 }
 
+fn panel_text(state: &mut AppState) -> String {
+    fn collect(shape: &egui::Shape, text: &mut String) {
+        match shape {
+            egui::Shape::Text(value) => {
+                text.push_str(value.galley.text());
+                text.push('\n');
+            }
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| collect(shape, text)),
+            _ => {}
+        }
+    }
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let output = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1200.0, 900.0),
+            )),
+            ..Default::default()
+        },
+        |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| right_panel(ui, state));
+        },
+    );
+    let mut text = String::new();
+    for shape in output.shapes {
+        collect(&shape.shape, &mut text);
+    }
+    text
+}
+
+#[test]
+fn event_source_unattributed_codes_do_not_claim_native_drive_strength() {
+    let mut state = state_with(
+        AnalysisResult::new(1, AnalysisType::Transient, "events")
+            .with_result_payload(super::tests::committed_events(&[(0.0, 1)])),
+    );
+    pick(&mut state, EventSelectionSource::ExactDigital, "clk", 0);
+    let text = panel_text(&mut state);
+    assert!(text.contains("SELECTED EVENT"), "{text}");
+    assert!(!text.contains("Drive strength"), "{text}");
+    assert!(text.contains("Source not recorded"), "{text}");
+    assert!(!text.contains("exact committed"), "{text}");
+}
+
+#[test]
+fn event_source_import_readout_survives_restoration_and_source_changes() {
+    use crate::state::{ResultImportFormat, ResultImportSource};
+    let mut state = state_with(
+        AnalysisResult::new(1, AnalysisType::Transient, "events")
+            .with_result_payload(super::tests::committed_events(&[(0.0, 1)])),
+    );
+    pick(&mut state, EventSelectionSource::ExactDigital, "clk", 0);
+    for format in [
+        ResultImportFormat::Vcd,
+        ResultImportFormat::Fst,
+        ResultImportFormat::CsvRfc4180,
+    ] {
+        state.simulation.runs[0].analyses[0].import_source = Some(ResultImportSource {
+            source_name: "renamed.capture".to_owned(),
+            format,
+        });
+        let restored = ProjectSimulationResults::from_state(&state.simulation)
+            .into_simulation_state()
+            .unwrap();
+        state.simulation = restored;
+        let text = panel_text(&mut state);
+        assert!(text.contains(format.canonical_id()), "{text}");
+        assert!(text.contains("renamed.capture"), "{text}");
+        assert!(text.contains("Encoded strength"), "{text}");
+        assert!(!text.contains("Drive strength"), "{text}");
+        if matches!(format, ResultImportFormat::Vcd | ResultImportFormat::Fst) {
+            assert!(
+                text.contains("Source drive strength was not retained"),
+                "{text}"
+            );
+        }
+        assert!(state.ui.results.selected_digital_event.is_some());
+    }
+}
+
+#[test]
+fn event_source_native_receipt_keeps_the_retained_drive_strength() {
+    use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision, SimulationPlanId};
+    use crate::state::{
+        AnalysisResultProvenance, AnalysisResultSourceDomain, CanonicalAnalysisKind,
+        PreparedRunReceipt, PreparedRunTaskReceipt, PreparedSourceCheckReceipt,
+    };
+    let id = AnalysisInstanceId::new();
+    let digest = ContentDigest::from_bytes([0x41; 32]);
+    let revision = ObjectRevision::INITIAL;
+    let receipt = PreparedRunReceipt::new(
+        AnalysisResultSourceDomain::SimulationPlan,
+        Some(SimulationPlanId::new()),
+        revision,
+        digest,
+        digest,
+        PreparedSourceCheckReceipt::SchematicDrc(digest),
+        vec![
+            PreparedRunTaskReceipt::new(
+                id,
+                revision,
+                Vec::new(),
+                CanonicalAnalysisKind::Transient.tag(),
+                digest,
+            )
+            .unwrap(),
+        ],
+    )
+    .unwrap();
+    let mut state = AppState::default();
+    let run = state.simulation.start_run();
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "events")
+            .with_result_payload(super::tests::committed_events(&[(0.0, 4)]))
+            .with_provenance(
+                AnalysisResultProvenance::new(id, revision, digest, Vec::new()).unwrap(),
+            ),
+    );
+    run.restore_provenance(SimulationRunProvenance::Prepared(Box::new(receipt)))
+        .unwrap();
+    run.mark_running().unwrap();
+    run.finish_lifecycle(SimulationRunLifecycle::Completed)
+        .unwrap();
+    state.simulation.complete_run();
+    pick(&mut state, EventSelectionSource::ExactDigital, "clk", 0);
+    let text = panel_text(&mut state);
+    assert!(text.contains("Drive strength"), "{text}");
+    assert!(text.contains("resistive"), "{text}");
+    assert!(text.contains("RSpice prepared execution"), "{text}");
+    assert!(!text.contains("canonical strengths"), "{text}");
+    state.simulation.runs[0].analyses[0].import_source = Some(crate::state::ResultImportSource {
+        source_name: "inconsistent.vcd".to_owned(),
+        format: crate::state::ResultImportFormat::Vcd,
+    });
+    assert!(
+        state.simulation.runs[0].analyses[0]
+            .validate_retained_evidence()
+            .is_err()
+    );
+    let text = panel_text(&mut state);
+    assert!(!text.contains("Drive strength"), "{text}");
+}
+
 fn pick(
     state: &mut AppState,
     source: EventSelectionSource,

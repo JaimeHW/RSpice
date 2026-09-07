@@ -34,6 +34,7 @@ use legacy_digests::{
     validate_v8_result_digests, validate_v9_result_digests, validate_v10_result_digests,
     validate_v11_result_digests, validate_v12_result_digests, validate_v13_to_v15_result_digests,
     validate_v16_result_digests, validate_v17_result_digests, validate_v18_result_digests,
+    validate_v19_result_digests,
 };
 pub use provenance::*;
 use provenance::{
@@ -150,6 +151,27 @@ impl ProjectSimulationResultsData {
 
     fn migrate_to_current_in_place(&mut self, project_id: ProjectId) -> Result<(), String> {
         let source_schema = self.schema_version;
+        if source_schema < IMPORT_SOURCE_RESULTS_SCHEMA_VERSION
+            && self
+                .runs
+                .iter()
+                .flat_map(|run| &run.analyses)
+                .any(|analysis| analysis.import_source.is_present())
+        {
+            return Err(
+                "result schemas before v20 cannot contain import-source attribution".to_owned(),
+            );
+        }
+        if source_schema == DIGITAL_BUS_RESULTS_SCHEMA_VERSION {
+            for run in &self.runs {
+                validate_v19_result_digests(run)?;
+            }
+            for run in &mut self.runs {
+                seal_project_result_digests(run)?;
+            }
+            self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
+            return self.validate();
+        }
         reject_digital_buses_before_schema_v19(self, source_schema)?;
         if source_schema == MEASUREMENT_VERIFICATION_RESULTS_SCHEMA_VERSION {
             for run in &self.runs {
@@ -1507,6 +1529,10 @@ pub struct ProjectAnalysisResult {
     /// when loading result history written by v1/v2 projects.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provenance: Option<ProjectAnalysisResultProvenance>,
+    /// Detected external file attribution, introduced in result schema v20.
+    /// Missing means unknown; explicit null is invalid current evidence.
+    #[serde(default, skip_serializing_if = "PersistedField::is_missing")]
+    pub import_source: PersistedField<crate::state::ResultImportSource>,
 }
 
 /// Project-file representation of one frozen prepared analysis task.
@@ -1648,6 +1674,12 @@ impl ProjectAnalysisResult {
                 self.id
             ));
         }
+        if self.import_source.is_null() {
+            return Err(format!(
+                "analysis sequence {} has an explicitly null import source",
+                self.id
+            ));
+        }
         if self.result_payload.is_null() {
             return Err(format!(
                 "analysis sequence {} has an explicitly null result payload",
@@ -1687,6 +1719,7 @@ impl ProjectAnalysisResult {
             error_message: self.error_message,
             failure_attribution: self.failure_attribution,
             provenance,
+            import_source: self.import_source.into_value(),
         };
         for receipt in &analysis.saved_output_receipts {
             let SavedOutputMaterializationStatus::Materialized { waveform_name, .. } =
@@ -1936,6 +1969,10 @@ impl From<&AnalysisResult> for ProjectAnalysisResult {
             success: analysis.success,
             error_message: analysis.error_message.clone(),
             failure_attribution: analysis.failure_attribution.clone(),
+            import_source: analysis
+                .import_source
+                .clone()
+                .map_or(PersistedField::Missing, PersistedField::Value),
             provenance: analysis
                 .provenance
                 .as_ref()

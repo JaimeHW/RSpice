@@ -5,9 +5,10 @@
 //! but never claim native-solver provenance or prepared-plan authority.
 
 use crate::diagnostics::ConsoleMessage;
+pub(crate) use crate::state::ResultImportFormat;
 use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisType,
-    SimulationRunLifecycle, SimulationRunProvenance, WaveformData,
+    ResultImportSource, SimulationRunLifecycle, SimulationRunProvenance, WaveformData,
 };
 use crate::ui::tokens::Tokens;
 use crate::workbench::app_state::AppState;
@@ -142,82 +143,6 @@ pub(crate) struct ParsedResultDataset {
     /// read. An imported result carries both, and neither is derived from the
     /// other.
     pub(crate) event_payload: Option<AnalysisResultPayload>,
-}
-
-/// Every import identifier declared by the neutral result-data contract.
-///
-/// Being present here means the format can be identified and governed. It
-/// does not mean an adapter is available; `parse_result_dataset` fails closed
-/// for identified formats without a lossless implementation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ResultImportFormat {
-    RSpiceResultBundle,
-    RSpiceDatasetBundle,
-    CsvRfc4180,
-    Tsv,
-    TouchstoneV1,
-    TouchstoneV2,
-    Hdf5,
-    ArrowIpc,
-    Parquet,
-    NumpyNpy,
-    NumpyNpz,
-    MatlabV5,
-    MatlabV73,
-    SpiceRaw,
-    PsfAscii,
-    Vcd,
-    Fst,
-}
-
-impl ResultImportFormat {
-    const ALL: [Self; 17] = [
-        Self::RSpiceResultBundle,
-        Self::RSpiceDatasetBundle,
-        Self::CsvRfc4180,
-        Self::Tsv,
-        Self::TouchstoneV1,
-        Self::TouchstoneV2,
-        Self::Hdf5,
-        Self::ArrowIpc,
-        Self::Parquet,
-        Self::NumpyNpy,
-        Self::NumpyNpz,
-        Self::MatlabV5,
-        Self::MatlabV73,
-        Self::SpiceRaw,
-        Self::PsfAscii,
-        Self::Vcd,
-        Self::Fst,
-    ];
-
-    pub(crate) const fn canonical_id(self) -> &'static str {
-        match self {
-            Self::RSpiceResultBundle => "rspice-result-bundle",
-            Self::RSpiceDatasetBundle => "rspice-dataset-bundle",
-            Self::CsvRfc4180 => "csv-rfc4180",
-            Self::Tsv => "tsv",
-            Self::TouchstoneV1 => "touchstone-v1",
-            Self::TouchstoneV2 => "touchstone-v2",
-            Self::Hdf5 => "hdf5",
-            Self::ArrowIpc => "arrow-ipc",
-            Self::Parquet => "parquet",
-            Self::NumpyNpy => "numpy-npy",
-            Self::NumpyNpz => "numpy-npz",
-            Self::MatlabV5 => "matlab-v5",
-            Self::MatlabV73 => "matlab-v7.3",
-            Self::SpiceRaw => "spice-raw",
-            Self::PsfAscii => "psf-ascii",
-            Self::Vcd => "vcd",
-            Self::Fst => "fst",
-        }
-    }
-
-    fn from_canonical_id(id: &str) -> Option<Self> {
-        Self::ALL
-            .into_iter()
-            .find(|format| format.canonical_id() == id)
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -495,6 +420,10 @@ fn commit_parsed_result_dataset(
         }
         analysis = analysis.with_result_payload(payload);
     }
+    analysis.import_source = Some(ResultImportSource {
+        source_name: source_name.to_owned(),
+        format: parsed.source_format,
+    });
     analysis.validate_retained_evidence()?;
 
     let previous_simulation = state.simulation.clone();
@@ -2128,6 +2057,22 @@ mod tests {
         assert!(run.execution_target.is_none());
         assert!(run.prepared_receipt().is_none());
         assert_eq!(run.analyses[0].waveforms[0].y.as_slice(), [0.0, 1.0]);
+    }
+
+    #[test]
+    fn event_source_import_format_and_name_survive_project_publication() {
+        let mut state = loaded_project_state();
+        apply_imported_result_dataset(&mut state, "capture.vcd",
+            b"$timescale 1ns $end\n$scope module top $end\n$var wire 1 ! clk $end\n$upscope $end\n$enddefinitions $end\n#0\n0!\n#1\n1!\n")
+            .unwrap();
+        let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
+        let text = crate::io::project_io::serialize_project_file(&project).unwrap();
+        let restored = crate::io::project_io::load_project_text(&text, None).unwrap();
+        assert!(restored.simulation_results_warning.is_none());
+        let json = serde_json::to_value(&restored.simulation_results).unwrap();
+        let source = &json["runs"][0]["analyses"][0]["import_source"];
+        assert_eq!(source["format"], "vcd");
+        assert_eq!(source["source_name"], "capture.vcd");
     }
 
     #[test]

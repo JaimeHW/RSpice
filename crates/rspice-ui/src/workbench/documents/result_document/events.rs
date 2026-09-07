@@ -1,4 +1,4 @@
-//! Exact committed XSPICE digital and real-valued event history.
+//! Retained digital and real-valued event history and its source attribution.
 
 use std::sync::Arc;
 
@@ -19,14 +19,76 @@ use super::{AnalysisPresentationKey, SheetContext, panel_note, stat_table, well_
 const ROW_HEIGHT: f32 = 28.0;
 const HEADER_HEIGHT: f32 = 31.0;
 
+#[derive(Clone, Copy)]
+enum EventOrigin<'a> {
+    Native,
+    Imported(&'a crate::state::ResultImportSource),
+    Unrecorded,
+}
+
+impl<'a> EventOrigin<'a> {
+    fn active(state: &'a AppState) -> Self {
+        if let Some(source) = state
+            .simulation
+            .active_analysis()
+            .and_then(|analysis| analysis.import_source.as_ref())
+        {
+            Self::Imported(source)
+        } else if state
+            .simulation
+            .active_analysis()
+            .and_then(AnalysisResult::provenance)
+            .is_some()
+            && state
+                .simulation
+                .active_run()
+                .is_some_and(|run| run.prepared_receipt().is_some())
+        {
+            Self::Native
+        } else {
+            Self::Unrecorded
+        }
+    }
+
+    fn label(self) -> &'a str {
+        match self {
+            Self::Native => "RSpice prepared execution",
+            Self::Imported(source) => source.format.canonical_id(),
+            Self::Unrecorded => "Source not recorded",
+        }
+    }
+
+    fn note(self) -> Option<&'static str> {
+        match self {
+            Self::Native => None,
+            Self::Imported(source)
+                if matches!(
+                    source.format,
+                    crate::state::ResultImportFormat::Vcd | crate::state::ResultImportFormat::Fst
+                ) =>
+            {
+                Some(
+                    "Imported digital values use four-state logic. Source drive strength was not retained; stored event codes use canonical strengths. File attribution does not identify or authenticate the source solver.",
+                )
+            }
+            Self::Imported(_) => Some(
+                "Imported result data. An encoded strength does not establish source drive strength. File attribution does not identify or authenticate the source solver.",
+            ),
+            Self::Unrecorded => Some(
+                "Source not recorded. An encoded strength does not establish source drive strength; historical imports and native results cannot be distinguished from these records.",
+            ),
+        }
+    }
+}
+
 #[cfg(test)]
 mod source_tests;
 
 /// Where one row of the event history came from.
 ///
-/// Exact rows are the schedule the event solver committed. Projected rows are
-/// reconstructed from an older project's `D(..)`/`E(..)` waveforms, which were
-/// sampled on the analog grid — the distinction is reported, never hidden,
+/// Exact rows retain sparse timestamps from the engine or an imported file.
+/// Projected rows are reconstructed from `D(..)`/`E(..)` waveforms, which were
+/// sampled on a common grid — the distinction is reported, never hidden,
 /// because a projected time is an approximation of the real one. A `Bus` row
 /// is exact and derived: the word is reassembled from member rows that are
 /// themselves exact, so it is never available for a projection.
@@ -1087,14 +1149,11 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         return;
     };
     if !structurally_renderable {
-        well_hint(
-            ui,
-            "The active analysis has no valid retained XSPICE event traces",
-        );
+        well_hint(ui, "The active analysis has no valid retained event traces");
         return;
     }
     if !super::retained_evidence_is_valid(state, analysis_key) {
-        well_hint(ui, "The retained XSPICE event evidence is invalid");
+        well_hint(ui, "The retained event evidence is invalid");
         return;
     }
     let Some(cache) = event_order(state) else {
@@ -1114,7 +1173,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             analysis.label,
             cache.rows.len(),
             if exact {
-                "committed events"
+                "retained events"
             } else {
                 "projected changes"
             },
@@ -1123,10 +1182,13 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         &[],
     )
     .show(ui);
+    if let Some(note) = EventOrigin::active(state).note() {
+        panel_note(ui, note);
+    }
     if !exact {
         panel_note(
             ui,
-            "Legacy accepted-sample projection. Re-run this analysis to retain exact sparse event timestamps.",
+            "Sampled waveform projection. Original sparse event timestamps are unavailable.",
         );
     }
     for note in bus_notes(&cache.buses, radix) {
@@ -1479,11 +1541,24 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         ("Value", event.value.display(), true),
         ("Domain", event.value.domain().to_owned(), false),
     ];
+    let origin = EventOrigin::active(state);
+    stats.push(("Source", origin.label().to_owned(), false));
+    if let EventOrigin::Imported(source) = origin {
+        stats.push(("Import file", source.source_name.clone(), false));
+    }
     let mut bus_fallback = None;
     match &event.value {
         EventValue::Digital { code, .. } => {
             stats.push(("Retained code", code.to_string(), false));
-            stats.push(("Drive strength", event.value.strength().to_owned(), false));
+            stats.push((
+                if matches!(origin, EventOrigin::Native) {
+                    "Drive strength"
+                } else {
+                    "Encoded strength"
+                },
+                event.value.strength().to_owned(),
+                false,
+            ));
         }
         EventValue::Bus(word) => {
             stats.push(("Radix", radix.label().to_owned(), false));
@@ -1496,6 +1571,9 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         EventValue::Real(_) => {}
     }
     stat_table(ui, &stats);
+    if let Some(note) = origin.note() {
+        panel_note(ui, note);
+    }
     if let Some(reason) = bus_fallback {
         panel_note(ui, &format!("Not shown in {}: {reason}.", radix.label()));
     }
@@ -1506,10 +1584,10 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
                 "This word is reassembled from the member histories beside it, at the exact time one of them changed. Every member keeps its own retained event code; the word holds no value they do not."
             }
             _ if event.exact() => {
-                "This is an exact committed sparse event. Same-time transitions are preserved in per-trace order; cross-node delta-cycle ordering is not retained by the engine result contract."
+                "This is a retained sparse event timestamp. Same-time transitions are preserved in per-trace order; cross-node delta-cycle ordering is not retained by the result contract."
             }
             _ => {
-                "This row was reconstructed from a legacy accepted-sample projection. Its original sparse event timestamp is unavailable; re-run the analysis for exact evidence."
+                "This row was reconstructed from sampled waveform values. Its original sparse event timestamp is unavailable."
             }
         },
     );

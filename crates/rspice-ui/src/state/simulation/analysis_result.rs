@@ -151,9 +151,8 @@ impl AnalysisResultPvtPoint {
 /// Immutable identity of the prepared analysis task that produced a result.
 ///
 /// A result created by the current execution pipeline always carries this
-/// record. `AnalysisResult::provenance == None` is reserved exclusively for
-/// result history migrated from project formats that predate prepared-task
-/// identities; callers must never infer an identity from analysis kind or
+/// record. `AnalysisResult::provenance == None` is retained for imported data
+/// and result history from formats that predate prepared-task identities; callers must never infer an identity from analysis kind or
 /// display order.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AnalysisResultProvenance {

@@ -322,6 +322,61 @@ mod tests {
     }
 
     #[test]
+    fn event_source_vcd_export_reimport_keeps_levels_and_marks_canonical_strengths() {
+        use crate::state::{ResultImportFormat, SimulationRunLifecycle};
+        use crate::workbench::workflows::result_import_workflow::{
+            commit_result_import_draft, stage_imported_result_dataset,
+        };
+        let points = [0_u8, 3, 6, 9, 1, 4, 7, 10, 2, 5, 8, 11, 12]
+            .into_iter()
+            .enumerate()
+            .map(|(i, code)| (i as f64 * 1e-9, code))
+            .collect::<Vec<_>>();
+        let prepared = prepare_vcd(&analysis(Some(events(
+            vec![digital("d", &points)],
+            Vec::new(),
+        ))))
+        .unwrap();
+        let mut state = AppState::default();
+        let baseline = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
+        crate::workbench::lifecycle::project_lifecycle::accept_loaded_project(
+            &mut state, baseline, None,
+        );
+        stage_imported_result_dataset(&mut state, "roundtrip.vcd", &prepared.bytes).unwrap();
+        commit_result_import_draft(&mut state).unwrap();
+        let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
+        let text = crate::io::project_io::serialize_project_file(&project).unwrap();
+        let restored = crate::io::project_io::load_project_text(&text, None).unwrap();
+        assert!(restored.simulation_results_warning.is_none());
+        let restored = restored.simulation_results.into_simulation_state().unwrap();
+        let run = restored.active_run().unwrap();
+        assert_eq!(run.lifecycle, SimulationRunLifecycle::LegacyUnknown);
+        assert!(run.prepared_receipt().is_none());
+        let result = restored.active_analysis().unwrap();
+        assert_eq!(
+            result.import_source.as_ref().unwrap().format,
+            ResultImportFormat::Vcd
+        );
+        let Some(AnalysisResultPayload::TransientEvents { digital_traces, .. }) =
+            &result.result_payload
+        else {
+            panic!("retained event payload");
+        };
+        assert_eq!(
+            digital_traces[0]
+                .points
+                .iter()
+                .map(|point| point.value_code)
+                .collect::<Vec<_>>(),
+            [0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 12]
+        );
+        assert_eq!(digital_traces[0].points.len(), points.len());
+        for (retained, (time, _)) in digital_traces[0].points.iter().zip(&points) {
+            assert!((retained.time_s - time).abs() < 1e-23);
+        }
+    }
+
+    #[test]
     fn the_same_events_publish_the_same_bytes_twice() {
         let payload = events(
             vec![digital("d", &[(0.0, 0), (5e-9, 1)])],

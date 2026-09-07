@@ -588,6 +588,38 @@ fn generated_fst() -> Vec<u8> {
     bytes
 }
 
+#[test]
+fn event_source_fst_import_keeps_detected_format_through_project_reload() {
+    let mut state = AppState::default();
+    let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
+    crate::workbench::lifecycle::project_lifecycle::accept_loaded_project(
+        &mut state, project, None,
+    );
+    apply_imported_result_dataset(&mut state, "capture.fst", &generated_fst()).unwrap();
+    let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
+    let text = crate::io::project_io::serialize_project_file(&project).unwrap();
+    let restored = crate::io::project_io::load_project_text(&text, None).unwrap();
+    assert!(restored.simulation_results_warning.is_none());
+    let restored = restored.simulation_results.into_simulation_state().unwrap();
+    let analysis = restored.active_analysis().unwrap();
+    assert_eq!(
+        analysis.import_source.as_ref().unwrap().format,
+        ResultImportFormat::Fst
+    );
+    assert_eq!(
+        analysis.result_payload,
+        state.simulation.active_analysis().unwrap().result_payload
+    );
+    assert_eq!(
+        analysis.result_data_digest(),
+        state
+            .simulation
+            .active_analysis()
+            .unwrap()
+            .result_data_digest()
+    );
+}
+
 fn fst_test_blocks(bytes: &[u8]) -> Vec<(u8, usize, usize)> {
     let mut blocks = Vec::new();
     let mut cursor = 0_usize;
