@@ -360,7 +360,7 @@ because the positional fields already bind them.
 | `POINTS` | `psspoints` | Samples per period (≥ 16, ≥ 2·`HARMS`) | 256 |
 | `TSTAB` | `tstab` | Stabilization time (s) | 0 |
 | `TSTABPERIODS` | keyword only | Stabilization periods when `TSTAB` is 0 | 10 driven, 20 autonomous |
-| `MAXITER` | `sciter` | Maximum shooting iterations | 100 |
+| `MAXITER` | `sciter` | Maximum shooting Newton corrections per integration grid | 100 |
 | `TOL` | keyword only | Relative periodicity tolerance | 1e-6 |
 | `ABSTOL` | keyword only | Absolute tolerance | 1e-12 |
 | `DAMPING` | keyword only | Newton damping in [0.1, 1.0] | 1.0 |
@@ -389,16 +389,22 @@ Nonrepeating startup prefixes need an explicit frozen-source selection or a
 periodic source specification. Sources that prescribe winding currents also
 require a continuous waveform with finite outgoing slopes.
 
-`POINTS` controls the uniform integration grid as well as retained waveform
-sampling. It must exceed twice the number of cycles of every recognized
-authored sinusoidal clock in one PSS period, including behavioral phase
-expressions, implicit sine/FM functions and RF-port tones. Equality is the
-Nyquist limit and is refused: a sine can vanish at every grid point while
-still driving a nonzero physical response. Passing this check does not
-certify integration accuracy, pulse-edge resolution or all harmonics created
-by nonlinear expressions and devices. Refine `POINTS` until the waveforms
-and requested spectra converge; the shooting residual alone measures closure
-of the discrete period map.
+`POINTS` sets the minimum uniform integration grid. The solver first increases
+it beyond the Nyquist limit of recognized source clocks and finite behavioral
+trigonometric polynomials, including products and integer powers. It then
+solves successively doubled grids and compares the complete voltage and branch
+current waveforms at shared phases, using the engine voltage/current tolerances.
+Only a grid that agrees with its doubled grid is retained. The returned sample
+count and available harmonic capacity reflect that grid; authored source timing
+defaults still use the original `POINTS`. `MAXITER` applies to each grid solve,
+while the result reports total Newton corrections across all grids. Point and
+memory limits also apply to refinement, and cancellation remains available.
+Retained PSS operating points from earlier producer versions must be regenerated
+before dependent numerical reuse; the current producer identity is version 15.
+This convergence check supplements the shooting residual, which measures closure
+of a discrete period map. It is not a proof of resolution for arbitrary narrow
+pulses or all nonlinear expressions and devices; independent waveform and
+spectrum qualification remains necessary for the circuit being simulated.
 
 Autonomous shooting repeats the quiet source window from zero to the trial
 period. Startup kicks must lie outside that entire window, including its

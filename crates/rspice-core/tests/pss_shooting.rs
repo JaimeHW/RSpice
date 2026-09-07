@@ -15,7 +15,85 @@ const R: f64 = 1.0e3;
 const C: f64 = 159.154943091895e-12; // RC corner ~ 1 MHz (w*RC = 1)
 
 #[test]
-fn pss_rejects_source_clocks_at_or_above_the_grid_nyquist_limit() {
+fn behavioral_polynomial_harmonics_drive_an_accurate_refined_rc_orbit() {
+    for (power, dc, coefficients) in [
+        (2, 0.5, vec![-0.5]),
+        (4, 0.375, vec![-0.5, 0.125]),
+        (
+            8,
+            35.0 / 128.0,
+            vec![-7.0 / 16.0, 7.0 / 32.0, -1.0 / 16.0, 1.0 / 128.0],
+        ),
+    ] {
+        let netlist = Netlist::parse(&format!(
+            "polynomial harmonics\nB1 in 0 V=sin(2*pi*64meg*time)^{power}\nR1 in out {R}\nC1 out 0 {C}\n.end\n"
+        )).unwrap();
+        let requested = PssConfig::new(F0).with_tstab_periods(0);
+        let point = Engine::default()
+            .run_pss_operating_point_with_abort(&netlist, requested.clone(), &NoAbort)
+            .unwrap();
+        assert_eq!(
+            point.config(),
+            &requested,
+            "refinement must not rewrite source defaults"
+        );
+        let result = &point.analysis().result;
+        let steps = result.time.len() - 1;
+        assert!(steps > 2 * 64 * power);
+        assert_eq!(point.spectral_harmonic_capacity(), steps / 2);
+        let restored = rspice_core::engine::PssOperatingPoint::try_from_authenticated_parts(
+            point.producer_identity().unwrap().clone(),
+            point.config().clone(),
+            point.analysis().clone(),
+            point.shooting_state_basis().to_vec(),
+            point.shooting_state().to_vec(),
+        )
+        .unwrap();
+        assert_eq!(restored, point);
+        if power == 4 {
+            let mut malformed = point.analysis().clone();
+            malformed.result.time[1] *= 1.5;
+            let error = rspice_core::engine::PssOperatingPoint::try_from_parts(
+                requested.clone(),
+                malformed,
+                point.shooting_state().to_vec(),
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains("uniform"), "{error}");
+        }
+        let output = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("out"))
+            .unwrap();
+        let values = &result.waveforms[output].values;
+        let mean = values[..steps].iter().sum::<f64>() / steps as f64;
+        assert!(
+            (mean - dc).abs() < 1e-4,
+            "power={power}, steps={steps}: DC={mean}, expected={dc}"
+        );
+        for (&time, &actual) in result.time.iter().zip(values) {
+            let expected = dc
+                + coefficients
+                    .iter()
+                    .enumerate()
+                    .map(|(index, coefficient)| {
+                        let omega = std::f64::consts::TAU * F0 * 128.0 * (index + 1) as f64;
+                        let wrc = omega * R * C;
+                        let phase = omega * time;
+                        coefficient * (phase.cos() + wrc * phase.sin()) / (1.0 + wrc * wrc)
+                    })
+                    .sum::<f64>();
+            assert!(
+                (actual - expected).abs() < 1e-3 * dc + 1e-6,
+                "power={power}, steps={steps}, t={time:e}: actual={actual}, expected={expected}"
+            );
+        }
+    }
+}
+
+#[test]
+fn pss_refines_source_clocks_beyond_the_requested_grid_nyquist_limit() {
     use rspice_core::engine::PssDcOperatingPointSeed;
     for source in [
         "V1 in 0 SIN(0 1 128meg)",
@@ -49,41 +127,41 @@ fn pss_rejects_source_clocks_at_or_above_the_grid_nyquist_limit() {
         } else {
             vec![source.split_whitespace().next().unwrap().to_owned()]
         };
-        let errors = [
-            engine.run_pss(&netlist, config.clone()).unwrap_err(),
-            engine
-                .run_pss_with_abort(&netlist, config.clone(), &NoAbort)
-                .unwrap_err(),
-            engine
-                .run_pss_operating_point_with_abort(&netlist, config.clone(), &NoAbort)
-                .unwrap_err(),
-            engine
-                .run_pss_with_continuation_state(&netlist, config.clone())
-                .unwrap_err(),
-            engine
-                .run_pss_with_frozen_source_continuation_state(&netlist, config.clone(), &[])
-                .unwrap_err(),
-            engine
-                .run_pss_operating_point_with_dc_seed_and_abort(
-                    &netlist,
-                    config.clone(),
-                    &seed,
-                    &NoAbort,
-                )
-                .unwrap_err(),
-            engine
-                .validate_pss_source_contract_with_abort(&netlist, &selected, &config, &NoAbort)
-                .unwrap_err(),
-        ];
-        for error in errors {
-            assert!(error.to_string().contains("Nyquist"), "{source}: {error}");
-            assert!(error.to_string().contains("POINTS"), "{source}: {error}");
+        engine
+            .validate_pss_source_contract_with_abort(&netlist, &selected, &config, &NoAbort)
+            .unwrap_or_else(|error| panic!("{source}: {error}"));
+        let mut runs = vec![engine.run_pss_with_abort(&netlist, config.clone(), &NoAbort)];
+        // Exercise every entry point on one drive; the remaining cases cover
+        // distinct waveform evaluators without repeating the same solver work.
+        if source == "V1 in 0 SIN(0 1 128meg)" {
+            runs.extend([
+                engine.run_pss(&netlist, config.clone()),
+                engine
+                    .run_pss_operating_point_with_abort(&netlist, config.clone(), &NoAbort)
+                    .map(|point| point.analysis().clone()),
+                engine
+                    .run_pss_with_continuation_state(&netlist, config.clone())
+                    .map(|(analysis, _)| analysis),
+                engine
+                    .run_pss_with_frozen_source_continuation_state(&netlist, config.clone(), &[])
+                    .map(|(analysis, _)| analysis),
+                engine
+                    .run_pss_operating_point_with_dc_seed_and_abort(
+                        &netlist,
+                        config.clone(),
+                        &seed,
+                        &NoAbort,
+                    )
+                    .map(|point| point.analysis().clone()),
+            ]);
+        }
+        for run in runs {
+            let analysis = run.unwrap_or_else(|error| panic!("{source}: {error}"));
             assert!(
-                error
-                    .to_string()
-                    .contains(source.split_whitespace().next().unwrap()),
-                "{source}: {error}"
+                analysis.result.time.len() > config.points_per_period + 1,
+                "{source}"
             );
+            assert!(analysis.final_residual.is_finite());
         }
     }
 }
@@ -129,7 +207,6 @@ fn resolved_high_harmonic_rc_orbits_converge_toward_the_analytic_waveform() {
             "resolved high harmonic\n{source}\nR1 in out {R}\nC1 out 0 {C}\n.end\n"
         ))
         .unwrap();
-        let mut coarse_error = 0.0;
         for points in [4096, 8192] {
             let point = Engine::default()
                 .run_pss_operating_point_with_abort(
@@ -146,7 +223,8 @@ fn resolved_high_harmonic_rc_orbits_converge_toward_the_analytic_waveform() {
                 "the physical response must not alias to DC"
             );
             let result = &analysis.result;
-            assert_eq!(result.time.len(), points + 1);
+            let actual_steps = result.time.len() - 1;
+            assert!(actual_steps >= points);
             let output = result
                 .node_names
                 .iter()
@@ -162,23 +240,12 @@ fn resolved_high_harmonic_rc_orbits_converge_toward_the_analytic_waveform() {
                     (actual - expected).abs() / gain
                 })
                 .fold(0.0, f64::max);
-            // The fixed second-order traversal still starts with one BE
-            // interval. Bound that discretization error independently of
-            // the much smaller shooting seam, and require refinement to
-            // improve the entire orbit, not just the initial voltage.
-            let step_angle = std::f64::consts::TAU * harmonic / points as f64;
+            // Mesh qualification must bound the complete physical waveform,
+            // independently of the shooting seam and requested initial mesh.
             assert!(
-                error < step_angle * step_angle,
-                "{source}, POINTS={points}: normalized error {error:e}"
+                error < 1e-3 + 1e-6 / gain,
+                "{source}, POINTS={points}, actual={actual_steps}: normalized error {error:e}"
             );
-            if points == 4096 {
-                coarse_error = error;
-            } else {
-                assert!(
-                    error < coarse_error / 3.0,
-                    "grid refinement must reduce physical waveform error: {coarse_error:e} to {error:e}"
-                );
-            }
         }
     }
 }
@@ -784,6 +851,7 @@ fn prescribed_current_drives_mutual_flux_without_adding_a_shooting_coordinate() 
             IntegrationMethod::TrapGear,
         ] {
             let mut previous_error = f64::INFINITY;
+            let mut previous_steps = 0;
             for points in [256, 512, 1024] {
                 let mut config = PssConfig::new(F0)
                     .with_tstab_periods(if points == 512 { 2 } else { 0 })
@@ -815,11 +883,17 @@ fn prescribed_current_drives_mutual_flux_without_adding_a_shooting_coordinate() 
                         error = error.max((actual - expected).abs() / phasor.norm());
                     }
                 }
-                assert!(
-                    error < 0.6 * previous_error,
-                    "{method:?}, points={points}, error={error:e}, previous={previous_error:e}"
-                );
+                let actual_steps = analysis.result.time.len() - 1;
+                if actual_steps > previous_steps {
+                    assert!(
+                        error < 0.6 * previous_error,
+                        "{method:?}, points={points}, actual={actual_steps}, error={error:e}, previous={previous_error:e}"
+                    );
+                } else {
+                    assert!(error <= previous_error * 1.01 + 1e-9);
+                }
                 previous_error = error;
+                previous_steps = actual_steps;
                 if points == 1024 {
                     assert!(
                         error

@@ -8,6 +8,80 @@ use std::sync::atomic::{AtomicU64, Ordering};
 const F0: f64 = 1.0e6;
 
 #[test]
+fn refined_pss_preserves_default_pulse_edges_through_checkpoint_resume() {
+    use rspice_core::engine::{TransientCheckpoint, TransientCheckpointEncoding};
+    let netlist = Netlist::parse("refined source defaults\nVp pulse 0 PULSE(0 1 0 0 0 0.4u 1u)\nRp pulse 0 1k\nB1 in 0 V=sin(2*pi*64meg*time)^4\nR1 in out 1k\nC1 out 0 159.154943091895p\n.end\n").unwrap();
+    let engine = Engine::default();
+    let config = PssConfig::new(F0)
+        .with_points_per_period(32)
+        .with_tstab_periods(0);
+    let (analysis, state) = engine
+        .run_pss_with_continuation_state(&netlist, config)
+        .unwrap();
+    assert!(analysis.result.time.len() > 513);
+    let expected = |time: f64| {
+        let phase = time.rem_euclid(1e-6);
+        let edge = 1e-6 / 32.0;
+        if phase < edge {
+            phase / edge
+        } else if phase < edge + 0.4e-6 {
+            1.0
+        } else if phase < 2.0 * edge + 0.4e-6 {
+            (2.0 * edge + 0.4e-6 - phase) / edge
+        } else {
+            0.0
+        }
+    };
+    let pulse = analysis
+        .result
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("pulse"))
+        .unwrap();
+    for (&time, &voltage) in analysis
+        .result
+        .time
+        .iter()
+        .zip(&analysis.result.waveforms[pulse].values)
+    {
+        assert!(
+            (voltage - expected(time)).abs() < 1e-10,
+            "orbit t={time:e}: {voltage}"
+        );
+    }
+    let (_, checkpoint) = engine
+        .run_tran_from_pss_state(&netlist, &state, 1.2e-6, 2e-10)
+        .unwrap();
+    let (direct, _) = engine
+        .run_tran_resume(&netlist, &checkpoint, 2.1e-6, 2e-10)
+        .unwrap();
+    for encoding in [
+        TransientCheckpointEncoding::Unpacked,
+        TransientCheckpointEncoding::Packed,
+    ] {
+        let restored =
+            TransientCheckpoint::from_bytes(&checkpoint.to_bytes(encoding).unwrap()).unwrap();
+        let (resumed, _) = engine
+            .run_tran_resume(&netlist, &restored, 2.1e-6, 2e-10)
+            .unwrap();
+        assert_eq!(resumed.time, direct.time);
+        assert_eq!(resumed.voltages, direct.voltages);
+        assert_eq!(resumed.branch_currents, direct.branch_currents);
+        let pulse = resumed
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("pulse"))
+            .unwrap();
+        for (&time, &voltage) in resumed.time.iter().zip(&resumed.voltages[pulse]) {
+            assert!(
+                (voltage - expected(time)).abs() < 1e-10,
+                "{encoding:?}, t={time:e}: {voltage}"
+            );
+        }
+    }
+}
+
+#[test]
 fn autonomous_startup_kick_remains_quiet_on_the_orbit_and_reactivates_after_saved_continuation() {
     use rspice_core::engine::{TransientCheckpoint, TransientCheckpointEncoding};
     let netlist = Netlist::parse("oscillator startup continuation\nL1 osc 0 1u\nC1 osc 0 1u\nB1 osc 0 I=-0.05*v(osc)+0.025*v(osc)*v(osc)*v(osc)\nI1 0 kick PULSE(0 1 10u 10n 10n 1u 1)\nRkick kick osc 1\n.end\n").unwrap();

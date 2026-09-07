@@ -48,8 +48,9 @@ pub struct PssConfig {
     /// Default: 0.0 (no stabilization)
     pub tstab: Value,
 
-    /// Maximum number of shooting Newton iterations.
-    /// If not converged after this many iterations, analysis fails.
+    /// Maximum number of shooting Newton corrections on each integration grid.
+    /// Each refined grid must converge within this limit; the result reports
+    /// the total corrections across all grids, including accuracy qualification.
     /// Default: 100
     pub max_iterations: usize,
 
@@ -98,11 +99,13 @@ pub struct PssConfig {
     /// None uses the engine default (typically TrapGear).
     pub integration_method: Option<crate::numerics::integration::IntegrationMethod>,
 
-    /// Uniform integration intervals per period (the endpoint is also stored).
-    /// Must exceed twice every recognized authored sinusoidal cycle count.
-    /// This Nyquist check prevents carrier aliasing; integration accuracy and
-    /// generated harmonics still require convergence under grid refinement.
-    /// Higher values use more memory and computation.
+    /// Minimum uniform integration intervals per period (the endpoint is stored).
+    /// The solver increases this grid to resolve recognized source harmonics,
+    /// then compares complete solved orbits on successively doubled grids using
+    /// the engine voltage/current tolerances. Source defaults continue to use
+    /// this authored count. The returned waveform may contain more intervals.
+    /// Higher values and refinement use more memory and computation, bounded
+    /// by the engine resource limits.
     /// Default: 256
     pub points_per_period: usize,
 

@@ -1347,17 +1347,17 @@
     },
     {
       "metric": "pss.abort_polls",
-      "note": "abort polls a completed periodic steady-state solve performs",
+      "note": "abort polls for PSS, including a solved doubled grid for waveform accuracy qualification",
       "tolerance": 0.15,
       "unit": "polls",
-      "value": 6075.0
+      "value": 13038.0
     },
     {
       "metric": "pss.shooting_iterations",
-      "note": "shooting Newton iterations the PSS solve reports",
+      "note": "total shooting Newton corrections across the retained and doubled qualification grids",
       "tolerance": 0.15,
       "unit": "iterations",
-      "value": 1.0
+      "value": 2.0
     },
     {
       "metric": "compression.retained_fraction",

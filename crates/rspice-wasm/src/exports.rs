@@ -264,20 +264,32 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
-    fn pss_source_sampling_rejects_nyquist_aliases_in_wasm() {
-        for source in ["V1 in 0 SIN(0 1 128meg)", "B1 in 0 V=sin(2*pi*256meg*time)"] {
+    fn pss_source_sampling_refines_aliased_harmonics_in_wasm() {
+        for (source, dc) in [
+            ("V1 in 0 SIN(0 1 128meg)", 0.0),
+            ("B1 in 0 V=sin(2*pi*64meg*time)^4", 0.375),
+        ] {
             let netlist = rspice_core::Netlist::parse(&format!(
                 "WASM aliased forcing\n{source}\nR1 in out 1k\nC1 out 0 159.154943091895p\n.end\n"
             ))
             .unwrap();
-            let error = rspice_core::Engine::default()
+            let analysis = rspice_core::Engine::default()
                 .run_pss_with_abort(
                     &netlist,
                     rspice_core::analysis::PssConfig::new(1e6).with_tstab_periods(0),
                     &rspice_core::abort_signal::NoAbort,
                 )
-                .unwrap_err();
-            assert!(error.to_string().contains("Nyquist"), "{source}: {error}");
+                .unwrap();
+            let result = &analysis.result;
+            let steps = result.time.len() - 1;
+            assert!(steps > 256, "{source}");
+            let output = result
+                .node_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("out"))
+                .unwrap();
+            let mean = result.waveforms[output].values[..steps].iter().sum::<f64>() / steps as f64;
+            assert!((mean - dc).abs() < 1e-4, "{source}: DC {mean}");
         }
     }
 
