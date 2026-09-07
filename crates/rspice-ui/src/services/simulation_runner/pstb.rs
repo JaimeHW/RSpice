@@ -1,8 +1,16 @@
 //! Periodic stability analysis.
 //!
-//! Loop gain and phase margin about a periodic steady state, for feedback
-//! that is only meaningful over a cycle — switched-mode regulators and
-//! sampled loops.
+//! The Floquet multiplier spectrum of a periodic orbit, read through one loop
+//! probe -- for feedback that is only meaningful over a cycle, such as
+//! switched-mode regulators and sampled loops.
+//!
+//! The run itself belongs to the engine:
+//! [`rspice_core::Engine::run_pstb_card_from_pss_with_abort`] resolves the
+//! probe against the carrier's own shooting-state basis, judges the spectrum
+//! under the card's boundary, and establishes every invariant the result
+//! publishes before returning it. What is left here is the Studio's own share
+//! -- turning a dialog or a deck line into that card, and projecting the
+//! complete spectrum onto the modes the sheet is asked to display.
 
 use super::{
     ServiceRunError, ServiceRunResult, build_resolved_periodic_engine,
@@ -11,82 +19,7 @@ use super::{
 };
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
-use std::fmt;
 use std::path::Path;
-
-#[derive(Debug)]
-enum PstbRunError {
-    InvalidConfig(&'static str),
-    CircuitBuild(String),
-    Pss(String),
-    ProbeNotFound {
-        probe: String,
-        available: String,
-    },
-    ProbeNotInductor {
-        probe: String,
-        branch_ordinal: usize,
-        available: String,
-    },
-    NonSquareMonodromy,
-    ProbeStateOutOfRange {
-        probe: String,
-        state_index: usize,
-        monodromy_dim: usize,
-    },
-    InvalidResult(&'static str),
-    InvalidModeData {
-        mode: usize,
-        reason: &'static str,
-    },
-}
-
-impl fmt::Display for PstbRunError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::InvalidConfig(message) => f.write_str(message),
-            Self::CircuitBuild(err) => write!(f, "PSTB prerequisite circuit-build error: {err}"),
-            Self::Pss(err) => write!(f, "PSTB prerequisite PSS error: {err}"),
-            Self::ProbeNotFound { probe, available } => write!(
-                f,
-                "PSTB probe '{}' was not found in branch-capable elements. Available branches: {}",
-                probe, available
-            ),
-            Self::ProbeNotInductor {
-                probe,
-                branch_ordinal,
-                available,
-            } => write!(
-                f,
-                "PSTB probe '{}' resolved to branch ordinal {} but is not an inductor probe. \
-PSTB currently supports dynamic inductor-current probes only. Available inductor probes: {}",
-                probe, branch_ordinal, available
-            ),
-            Self::NonSquareMonodromy => {
-                f.write_str("PSTB prerequisite PSS returned a non-square monodromy matrix")
-            }
-            Self::ProbeStateOutOfRange {
-                probe,
-                state_index,
-                monodromy_dim,
-            } => write!(
-                f,
-                "PSTB probe '{}' maps to reactive state {} but monodromy dimension is {}",
-                probe, state_index, monodromy_dim
-            ),
-            Self::InvalidResult(reason) => write!(f, "PSTB returned an invalid result: {reason}"),
-            Self::InvalidModeData { mode, reason } => {
-                write!(f, "PSTB mode {mode} returned invalid data: {reason}")
-            }
-        }
-    }
-}
-
-impl From<PstbRunError> for ServiceRunError {
-    fn from(error: PstbRunError) -> Self {
-        Self::Failure(error.to_string())
-    }
-}
 
 /// Explicit configuration for PSTB execution.
 #[derive(Debug, Clone)]
@@ -119,48 +52,37 @@ impl Default for PstbRunConfig {
 }
 
 impl PstbRunConfig {
-    fn validate(&self) -> Result<(), PstbRunError> {
+    /// Check what the card cannot carry.
+    ///
+    /// The probe name, the harmonic and multiplier counts, the stability
+    /// boundary and the eigen-tolerance are all fields of [`PstbCard`](rspice_
+    /// core::netlist::PstbCard), and the engine refuses each of them by name
+    /// in `run_pstb_card_from_pss_with_abort`. Restating them here is how the
+    /// Studio came to hold a threshold rule its own engine did not: only the
+    /// prerequisite-PSS fields, which no card has a home for, are checked.
+    fn validate(&self) -> Result<(), String> {
         if !self.pss_fundamental_freq.is_finite() || self.pss_fundamental_freq <= 0.0 {
-            return Err(PstbRunError::InvalidConfig(
-                "PSTB requires a positive PSS fundamental frequency",
-            ));
+            return Err("PSTB requires a positive PSS fundamental frequency".to_string());
         }
         if self.pss_num_harmonics == 0 {
-            return Err(PstbRunError::InvalidConfig(
-                "PSTB requires at least one PSS harmonic",
-            ));
+            return Err("PSTB requires at least one PSS harmonic".to_string());
         }
         if !self.pss_tolerance.is_finite() || self.pss_tolerance <= 0.0 {
-            return Err(PstbRunError::InvalidConfig(
-                "PSTB requires a positive PSS tolerance",
-            ));
-        }
-        if self.probe_instance.trim().is_empty() {
-            return Err(PstbRunError::InvalidConfig(
-                "PSTB probe instance must be specified",
-            ));
-        }
-        if self.max_harmonics == 0 {
-            return Err(PstbRunError::InvalidConfig(
-                "PSTB max harmonics must be greater than zero",
-            ));
-        }
-        if self.num_multipliers == 0 {
-            return Err(PstbRunError::InvalidConfig(
-                "PSTB number of multipliers must be greater than zero",
-            ));
-        }
-        if !self.stability_threshold.is_finite() || self.stability_threshold < 1.0 {
-            return Err(PstbRunError::InvalidConfig(
-                "PSTB stability threshold must be at least one",
-            ));
-        }
-        if !self.eigenvalue_tolerance.is_finite() || self.eigenvalue_tolerance <= 0.0 {
-            return Err(PstbRunError::InvalidConfig(
-                "PSTB eigenvalue tolerance must be positive",
-            ));
+            return Err("PSTB requires a positive PSS tolerance".to_string());
         }
         Ok(())
+    }
+
+    /// The authored `.PSTB` card this configuration states.
+    fn to_card(&self) -> rspice_core::netlist::PstbCard {
+        rspice_core::netlist::PstbCard {
+            probe_instance: self.probe_instance.trim().to_owned(),
+            max_harmonics: self.max_harmonics,
+            num_multipliers: self.num_multipliers,
+            stability_threshold: self.stability_threshold,
+            detect_subharmonics: self.detect_subharmonics,
+            eigenvalue_tolerance: self.eigenvalue_tolerance,
+        }
     }
 }
 
@@ -179,7 +101,7 @@ pub struct PstbData {
     pub orbit_kind: rspice_core::analysis::FloquetOrbitKind,
     /// Exact outer stability threshold used for classification.
     pub stability_threshold: Value,
-    /// Canonical circuit identity of the configured probe.
+    /// Canonical circuit identity of the resolved probe.
     pub probe_instance: String,
     /// Whether subharmonic classification was enabled.
     pub detect_subharmonics: bool,
@@ -228,343 +150,49 @@ pub struct PstbModeData {
     pub subharmonic_order: Option<usize>,
 }
 
-#[derive(Debug, Clone)]
-struct ResolvedPstbProbe {
-    canonical_name: String,
-    state_index: usize,
-}
-
-fn normalize_branch_name_list(mut names: Vec<String>) -> Vec<String> {
-    names.sort_by_cached_key(|name| name.to_ascii_uppercase());
-    names.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
-    names
-}
-
-fn format_branch_name_list(names: &[String]) -> String {
-    if names.is_empty() {
-        return "<none>".to_string();
-    }
-    const DISPLAY_LIMIT: usize = 12;
-    if names.len() <= DISPLAY_LIMIT {
-        return names.join(", ");
-    }
-    let shown = names[..DISPLAY_LIMIT].join(", ");
-    format!("{shown}, ... (+{} more)", names.len() - DISPLAY_LIMIT)
-}
-
-fn available_branch_names(circuit: &rspice_core::circuit::CircuitData) -> Vec<String> {
-    normalize_branch_name_list(circuit.branch_probe_names())
-}
-
-fn available_inductor_probe_names(circuit: &rspice_core::circuit::CircuitData) -> Vec<String> {
-    normalize_branch_name_list(circuit.inductor_probe_names())
-}
-
-fn resolve_pstb_probe_with_abort(
-    circuit: &rspice_core::circuit::CircuitData,
-    probe_instance: &str,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<ResolvedPstbProbe> {
-    ensure_not_aborted(abort)?;
-    let probe_name = probe_instance.trim();
-    let branch_ordinal = circuit.get_branch_by_name(probe_name).ok_or_else(|| {
-        let available = format_branch_name_list(&available_branch_names(circuit));
-        ServiceRunError::from(PstbRunError::ProbeNotFound {
-            probe: probe_name.to_string(),
-            available,
-        })
-    })?;
-    ensure_not_aborted(abort)?;
-
-    let probe = circuit
-        .inductor_probe_for_branch(branch_ordinal)
-        .ok_or_else(|| {
-            let available = format_branch_name_list(&available_inductor_probe_names(circuit));
-            ServiceRunError::from(PstbRunError::ProbeNotInductor {
-                probe: probe_name.to_string(),
-                branch_ordinal,
-                available,
-            })
-        })?;
-    ensure_not_aborted(abort)?;
-
-    Ok(ResolvedPstbProbe {
-        canonical_name: probe.canonical_name,
-        state_index: probe.state_index,
-    })
-}
-
-fn normalized_probe_participation_with_abort(
-    eigenvector: Option<&[num_complex::Complex64]>,
-    state_index: usize,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<Value> {
-    ensure_not_aborted(abort)?;
-    let vector = eigenvector.ok_or_else(|| {
-        ServiceRunError::Failure("PSTB solver did not return a requested eigenvector".to_owned())
-    })?;
-    let component = vector.get(state_index).ok_or_else(|| {
-        ServiceRunError::Failure(
-            "PSTB eigenvector does not contain the configured probe state".to_owned(),
-        )
-    })?;
-    let mut denom = 0.0_f64;
-    for (index, value) in vector.iter().enumerate() {
-        poll_periodically(abort, index)?;
-        if !value.re.is_finite() || !value.im.is_finite() {
-            return Err(ServiceRunError::Failure(
-                "PSTB solver returned a non-finite eigenvector".to_owned(),
-            ));
-        }
-        denom = denom.hypot(value.norm());
-    }
-    if !denom.is_finite() || denom == 0.0 {
-        return Err(ServiceRunError::Failure(
-            "PSTB solver returned a zero-norm eigenvector".to_owned(),
-        ));
-    }
-    let ratio = component.norm() / denom;
-    if ratio.is_finite() {
-        Ok(ratio.clamp(0.0, 1.0))
-    } else {
-        Err(ServiceRunError::Failure(
-            "PSTB probe participation is non-finite".to_owned(),
-        ))
-    }
-}
-
-fn pstb_classification_matches_verdict(
-    verdict: rspice_core::analysis::FloquetStabilityVerdict,
-    classification: rspice_core::analysis::pstb::StabilityType,
-) -> bool {
-    use rspice_core::analysis::FloquetStabilityVerdict as Verdict;
-    use rspice_core::analysis::pstb::StabilityType as Classification;
-
-    match verdict {
-        Verdict::Stable => classification == Classification::Stable,
-        Verdict::Unstable => matches!(
-            classification,
-            Classification::UnstableReal | Classification::UnstableComplex
-        ),
-        Verdict::Marginal => matches!(
-            classification,
-            Classification::PeriodDoubling
-                | Classification::NeimarkSacker
-                | Classification::SaddleNode
-                | Classification::Marginal
-        ),
-        Verdict::Indeterminate => classification == Classification::Indeterminate,
-        _ => false,
-    }
-}
-
-fn pstb_modes_are_sorted(modes: &[rspice_core::analysis::pstb::FloquetMultiplier]) -> bool {
-    modes.windows(2).all(|pair| {
-        let left = &pair[0];
-        let right = &pair[1];
-        right
-            .magnitude()
-            .total_cmp(&left.magnitude())
-            .then_with(|| left.value.re.total_cmp(&right.value.re))
-            .then_with(|| left.value.im.total_cmp(&right.value.im))
-            .is_le()
-    })
-}
-
-fn build_pstb_data_from_core_result(
-    result: rspice_core::analysis::pstb::PstbResult,
-    expected_orbit_kind: rspice_core::analysis::FloquetOrbitKind,
-    probe_instance: &str,
-    probe_state_index: usize,
+/// Project one engine result onto what the Studio's sheet shows.
+///
+/// This is the whole of the Studio's remaining share. Every invariant the
+/// spectrum carries -- Floquet currency, phase-mode selection, verdict and
+/// classification agreement, canonical sort order, monodromy squareness, the
+/// four aggregates and per-mode identity -- is established by
+/// `PstbResult::validate_contract` before the analyzer returns, on both of its
+/// return paths, so nothing here re-derives them. `modes` is always the
+/// complete spectrum; only the six plotted curves honour the card's display
+/// limit, because a truncated spectrum cannot prove stability.
+fn build_pstb_data(
+    stability: rspice_core::engine::PeriodicStabilityResult,
     max_display_modes: usize,
-    stability_threshold: Value,
-    detect_subharmonics: bool,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PstbData> {
-    use rspice_core::analysis::{
-        FloquetOrbitKind, FloquetSpectrumEvidence, classify_floquet_stability,
-        select_autonomous_phase_mode,
-    };
+    let rspice_core::engine::PeriodicStabilityResult {
+        probe_instance,
+        probe_state_index: _,
+        probe_participation,
+        result,
+    } = stability;
 
     ensure_not_aborted(abort)?;
-    if !result.period.is_finite()
-        || result.period <= 0.0
-        || !result.fundamental_frequency.is_finite()
-        || result.fundamental_frequency <= 0.0
-        || result.fundamental_frequency != 1.0 / result.period
-        || !stability_threshold.is_finite()
-        || stability_threshold < 1.0
-        || !result.converged
-        || probe_instance.trim().is_empty()
-    {
-        return Err(PstbRunError::InvalidResult(
-            "period, frequency, convergence, stability boundary, or probe identity is invalid",
-        )
-        .into());
-    }
-    if result.orbit_kind != expected_orbit_kind {
-        return Err(PstbRunError::InvalidResult(
-            "orbit policy does not match the prerequisite PSS result",
-        )
-        .into());
-    }
-
-    let multiplier_values = result
-        .multipliers
-        .iter()
-        .map(|multiplier| multiplier.value)
-        .collect::<Vec<_>>();
-    let current_evidence = matches!(
-        &result.floquet_evidence,
-        FloquetSpectrumEvidence::NoDynamicModes | FloquetSpectrumEvidence::Qualified { .. }
-    );
-    if !current_evidence
-        || !result
-            .floquet_evidence
-            .is_consistent_with(&multiplier_values)
-        || (matches!(
-            &result.floquet_evidence,
-            FloquetSpectrumEvidence::NoDynamicModes
-        ) && result.orbit_kind != FloquetOrbitKind::Driven)
-    {
-        return Err(PstbRunError::InvalidResult(
-            "Floquet evidence is absent, non-current, or inconsistent with the spectrum and orbit policy",
-        )
-        .into());
-    }
-
-    let expected_trivial_index = if result.orbit_kind == FloquetOrbitKind::Autonomous
-        && matches!(
-            &result.floquet_evidence,
-            FloquetSpectrumEvidence::Qualified { .. }
-        ) {
-        select_autonomous_phase_mode(&multiplier_values)
-    } else {
-        None
-    };
-    if result.trivial_multiplier_index != expected_trivial_index {
-        return Err(PstbRunError::InvalidResult(
-            "autonomous phase-mode selection is inconsistent with the spectrum",
-        )
-        .into());
-    }
-
-    let expected_verdict = classify_floquet_stability(
-        &multiplier_values,
-        &result.floquet_evidence,
-        result.orbit_kind,
-        result.trivial_multiplier_index,
-        stability_threshold - 1.0,
-    );
-    if result.stability_verdict != expected_verdict
-        || !pstb_classification_matches_verdict(result.stability_verdict, result.stability)
-    {
-        return Err(PstbRunError::InvalidResult(
-            "stability verdict or rich classification is inconsistent with the spectrum",
-        )
-        .into());
-    }
-    if !pstb_modes_are_sorted(&result.multipliers) {
-        return Err(
-            PstbRunError::InvalidResult("Floquet modes are not in canonical sorted order").into(),
-        );
-    }
-
     let order = result.multipliers.len();
-    if result.monodromy.len() != order
-        || result
-            .monodromy
-            .iter()
-            .any(|row| row.len() != order || row.iter().any(|value| !value.is_finite()))
-    {
-        return Err(PstbRunError::InvalidResult(
-            "monodromy dimensions or values do not match the authenticated spectrum",
-        )
-        .into());
-    }
-
-    let expected_num_unstable = result
-        .multipliers
-        .iter()
-        .filter(|multiplier| multiplier.is_unstable)
-        .count();
-    let expected_max_magnitude = result.multipliers.first().map_or(
-        0.0,
-        rspice_core::analysis::pstb::FloquetMultiplier::magnitude,
-    );
-    let expected_min_margin = result
-        .multipliers
-        .iter()
-        .enumerate()
-        .filter(|(index, _)| result.trivial_multiplier_index != Some(*index))
-        .map(|(_, multiplier)| multiplier.stability_margin_db())
-        .min_by(f64::total_cmp);
-    let expected_subharmonics = if detect_subharmonics {
-        result
-            .multipliers
-            .iter()
-            .filter_map(|multiplier| multiplier.subharmonic_order)
-            .collect::<Vec<_>>()
-    } else {
-        Vec::new()
-    };
-    if result.num_unstable != expected_num_unstable
-        || !result.max_multiplier_magnitude.is_finite()
-        || result.max_multiplier_magnitude != expected_max_magnitude
-        || result
-            .min_stability_margin_db
-            .is_some_and(|margin| !margin.is_finite())
-        || result.min_stability_margin_db != expected_min_margin
-        || result.subharmonics != expected_subharmonics
-    {
-        return Err(PstbRunError::InvalidResult(
-            "aggregate counts, margins, or subharmonics do not match the complete spectrum",
-        )
-        .into());
-    }
-
     let mut modes = Vec::with_capacity(order);
-    let mut all_participation = Vec::with_capacity(order);
     for (index, multiplier) in result.multipliers.iter().enumerate() {
         poll_periodically(abort, index)?;
-        let magnitude = multiplier.magnitude();
-        let expected_unstable =
-            result.trivial_multiplier_index != Some(index) && magnitude > stability_threshold;
-        if multiplier.index != index
-            || !multiplier.value.re.is_finite()
-            || !multiplier.value.im.is_finite()
-            || !multiplier.exponent.re.is_finite()
-            || !multiplier.exponent.im.is_finite()
-            || !magnitude.is_finite()
-            || magnitude <= 0.0
-            || multiplier.is_trivial != (result.trivial_multiplier_index == Some(index))
-            || multiplier.is_unstable != expected_unstable
-            || multiplier
-                .eigenvector
-                .as_ref()
-                .is_none_or(|vector| vector.len() != order)
-        {
-            return Err(PstbRunError::InvalidModeData {
-                mode: index + 1,
-                reason: "identity, finite values, flags, or eigenvector cardinality is invalid",
-            }
-            .into());
-        }
-        let participation = normalized_probe_participation_with_abort(
-            multiplier.eigenvector.as_deref(),
-            probe_state_index,
-            abort,
-        )?;
-        all_participation.push(participation);
+        let participation = probe_participation.get(index).copied().ok_or_else(|| {
+            ServiceRunError::Failure(format!(
+                "PSTB mode {} carries no probe participation",
+                index + 1
+            ))
+        })?;
         modes.push(PstbModeData {
             multiplier: (multiplier.value.re, multiplier.value.im),
             exponent: (multiplier.exponent.re, multiplier.exponent.im),
             probe_participation: participation,
+            // The analyzer clears the per-mode order when detection is off, so
+            // the flag is already spent: an order here means one was looked for
+            // and found.
+            subharmonic_order: multiplier.subharmonic_order,
             is_unstable: multiplier.is_unstable,
             is_trivial: multiplier.is_trivial,
-            subharmonic_order: detect_subharmonics
-                .then_some(multiplier.subharmonic_order)
-                .flatten(),
         });
     }
 
@@ -578,29 +206,13 @@ fn build_pstb_data_from_core_result(
     let mut stability_margin_db = Vec::with_capacity(display_count);
     for (index, multiplier) in result.multipliers.iter().take(display_count).enumerate() {
         poll_periodically(abort, index)?;
-        let phase_degrees = multiplier.phase_degrees();
-        let damping = multiplier.damping();
-        let natural_frequency = multiplier.natural_frequency();
-        let stability_margin = multiplier.stability_margin_db();
-        if !phase_degrees.is_finite()
-            || !damping.is_finite()
-            || !natural_frequency.is_finite()
-            || natural_frequency < 0.0
-            || !stability_margin.is_finite()
-        {
-            return Err(PstbRunError::InvalidModeData {
-                mode: index + 1,
-                reason: "derived display values are non-finite or outside their domain",
-            }
-            .into());
-        }
         mode_indices.push((index + 1) as Value);
-        probe_mode_participation.push(all_participation[index]);
+        probe_mode_participation.push(modes[index].probe_participation);
         multiplier_magnitude.push(multiplier.magnitude());
-        multiplier_phase_deg.push(phase_degrees);
-        mode_damping.push(damping);
-        mode_frequency_hz.push(natural_frequency);
-        stability_margin_db.push(stability_margin);
+        multiplier_phase_deg.push(multiplier.phase_degrees());
+        mode_damping.push(multiplier.damping());
+        mode_frequency_hz.push(multiplier.natural_frequency());
+        stability_margin_db.push(multiplier.stability_margin_db());
     }
     ensure_not_aborted(abort)?;
 
@@ -610,9 +222,9 @@ fn build_pstb_data_from_core_result(
         modes,
         floquet_evidence: result.floquet_evidence,
         orbit_kind: result.orbit_kind,
-        stability_threshold,
-        probe_instance: probe_instance.to_owned(),
-        detect_subharmonics,
+        stability_threshold: result.stability_threshold,
+        probe_instance,
+        detect_subharmonics: result.detect_subharmonics,
         trivial_multiplier_index: result.trivial_multiplier_index,
         stability_verdict: result.stability_verdict,
         stability_classification: result.stability,
@@ -632,11 +244,11 @@ fn build_pstb_data_from_core_result(
     })
 }
 
-/// Run PSTB standalone -- computing its own PSS operating point rather than
-/// receiving one -- with cooperative cancellation.
+/// Run PSTB standalone -- computing its own PSS carrier rather than receiving
+/// one -- with cooperative cancellation.
 ///
 /// Test-only. PSTB ships as a dependent task: the frequency spec runs PSS
-/// first and hands the authenticated monodromy matrix to
+/// first and hands the authenticated operating point to
 /// [`run_pstb_analysis_from_pss_with_source_path_and_abort`], so nothing in the
 /// product takes this path.
 #[cfg(test)]
@@ -673,95 +285,43 @@ fn run_pstb_analysis_impl(
     operating_point: Option<&rspice_core::engine::PssOperatingPoint>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PstbData> {
-    use rspice_core::analysis::PssConfig;
-    use rspice_core::analysis::pstb::{PstbAnalyzer, PstbConfig};
-
     ensure_not_aborted(abort)?;
-    config.validate().map_err(ServiceRunError::from)?;
+    config.validate().map_err(ServiceRunError::Failure)?;
 
     let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
-
     let engine = build_resolved_periodic_engine(
         &netlist,
         config.pss_tolerance,
         "PSTB resolved producer configuration is invalid",
     )?;
-    ensure_not_aborted(abort)?;
-    let circuit = engine
-        .build_circuit(&netlist)
-        .map_err(|error| PstbRunError::CircuitBuild(error.to_string()))
-        .map_err(ServiceRunError::from)?;
-    ensure_not_aborted(abort)?;
-    let probe = resolve_pstb_probe_with_abort(&circuit, &config.probe_instance, abort)?;
+    let card = config.to_card();
 
-    let owned_pss;
-    let pss_result = if let Some(operating_point) = operating_point {
-        operating_point.analysis()
-    } else {
-        let pss_harmonics = config.pss_num_harmonics.max(config.max_harmonics);
-        let pss_config = PssConfig::new(config.pss_fundamental_freq)
-            .with_harmonics(pss_harmonics)
-            .with_tolerance(config.pss_tolerance)
-            .with_max_iterations(50)
-            .with_tstab_periods(10);
-        owned_pss = engine
-            .run_pss_with_abort(&netlist, pss_config, abort)
-            .map_err(|error| match error {
-                rspice_core::SimulationError::Aborted => ServiceRunError::Aborted,
-                other => ServiceRunError::from(PstbRunError::Pss(other.to_string())),
-            })?;
-        &owned_pss
+    let owned_carrier;
+    let carrier = match operating_point {
+        Some(operating_point) => operating_point,
+        None => {
+            // A standalone run states its own carrier. The harmonic count is
+            // the larger of the two the configuration names, because the card
+            // refuses a carrier whose spectral capacity is below its MAXHARM.
+            owned_carrier = engine
+                .run_pss_operating_point_with_abort(
+                    &netlist,
+                    rspice_core::analysis::PssConfig::new(config.pss_fundamental_freq)
+                        .with_harmonics(config.pss_num_harmonics.max(config.max_harmonics))
+                        .with_tolerance(config.pss_tolerance)
+                        .with_max_iterations(50)
+                        .with_tstab_periods(10),
+                    abort,
+                )
+                .map_err(|error| ServiceRunError::from_core("PSTB prerequisite PSS", error))?;
+            &owned_carrier
+        }
     };
-    ensure_not_aborted(abort)?;
 
-    let monodromy_dim = pss_result.monodromy.len();
-    for (index, row) in pss_result.monodromy.iter().enumerate() {
-        poll_periodically(abort, index)?;
-        if row.len() != monodromy_dim {
-            return Err(PstbRunError::NonSquareMonodromy.into());
-        }
-    }
-    if monodromy_dim > 0 && probe.state_index >= monodromy_dim {
-        return Err(PstbRunError::ProbeStateOutOfRange {
-            probe: probe.canonical_name.clone(),
-            state_index: probe.state_index,
-            monodromy_dim,
-        }
-        .into());
-    }
-
-    let pss_orbit_kind = pss_result.result.floquet_orbit_kind;
-    if !pss_result.result.has_consistent_floquet_contract()
-        || pss_result.result.period_detected
-            != (pss_orbit_kind == rspice_core::analysis::FloquetOrbitKind::Autonomous)
-    {
-        return Err(PstbRunError::InvalidResult(
-            "prerequisite PSS Floquet orbit contract is inconsistent",
-        )
-        .into());
-    }
-
-    let pstb_config = PstbConfig::new()
-        .with_num_eigenvalues(config.num_multipliers)
-        .with_orbit_kind(pss_orbit_kind)
-        .with_eigenvectors(true)
-        .with_tolerance(config.eigenvalue_tolerance)
-        .with_stability_threshold(config.stability_threshold)
-        .with_subharmonic_detection(config.detect_subharmonics);
-    let mut analyzer = PstbAnalyzer::new(pstb_config);
-    let pstb_result = analyzer
-        .analyze_monodromy_with_abort(&pss_result.monodromy, pss_result.period, abort)
-        .map_err(ServiceRunError::from)?;
-    build_pstb_data_from_core_result(
-        pstb_result,
-        pss_orbit_kind,
-        &probe.canonical_name,
-        probe.state_index,
-        config.num_multipliers,
-        config.stability_threshold,
-        config.detect_subharmonics,
-        abort,
-    )
+    let stability = engine
+        .run_pstb_card_from_pss_with_abort(&netlist, &card, carrier, abort)
+        .map_err(|error| ServiceRunError::from_core("PSTB error", error))?;
+    build_pstb_data(stability, config.num_multipliers, abort)
 }
 
 #[cfg(test)]
@@ -772,21 +332,34 @@ mod tests {
     use rspice_core::analysis::{
         FloquetOrbitKind, FloquetSpectrumEvidence, FloquetStabilityVerdict,
     };
+    use rspice_core::engine::PeriodicStabilityResult;
 
-    const STABILITY_THRESHOLD: f64 = 1.0 + 1.0e-6;
+    const STABILITY_THRESHOLD: Value = 1.0 + 1.0e-6;
 
-    fn analyze(
-        monodromy: &[Vec<f64>],
+    /// One engine result, with a participation vector whose values are chosen
+    /// so a projection that reordered or recomputed them would be visible.
+    fn stability(
+        monodromy: &[Vec<Value>],
         orbit_kind: FloquetOrbitKind,
-    ) -> rspice_core::analysis::pstb::PstbResult {
-        PstbAnalyzer::new(
+    ) -> PeriodicStabilityResult {
+        let result = PstbAnalyzer::new(
             PstbConfig::new()
                 .with_orbit_kind(orbit_kind)
                 .with_eigenvectors(true)
                 .with_stability_threshold(STABILITY_THRESHOLD),
         )
         .analyze_monodromy_with_abort(monodromy, 1.0, &NoAbort)
-        .unwrap()
+        .expect("the analyzer publishes a qualified spectrum");
+        let probe_participation = (0..result.multipliers.len())
+            .map(|index| (index + 1) as Value / 16.0)
+            .collect();
+
+        PeriodicStabilityResult {
+            probe_instance: "LPROBE".to_owned(),
+            probe_state_index: 0,
+            probe_participation,
+            result,
+        }
     }
 
     #[test]
@@ -800,73 +373,24 @@ mod tests {
         assert!(matches!(result, Err(ServiceRunError::Aborted)));
     }
 
-    #[test]
-    fn driven_zero_order_spectrum_is_authenticated_and_representable() {
-        let result = analyze(&[], FloquetOrbitKind::Driven);
-        let data = build_pstb_data_from_core_result(
-            result,
-            FloquetOrbitKind::Driven,
-            "LPROBE",
-            usize::MAX,
-            1,
-            STABILITY_THRESHOLD,
-            true,
-            &NoAbort,
-        )
-        .unwrap();
-
-        assert!(data.modes.is_empty());
-        assert!(data.mode_indices.is_empty());
-        assert!(data.probe_mode_participation.is_empty());
-        assert!(matches!(
-            data.floquet_evidence,
-            FloquetSpectrumEvidence::NoDynamicModes
-        ));
-        assert_eq!(data.stability_verdict, FloquetStabilityVerdict::Stable);
-        assert_eq!(data.min_stability_margin_db, None);
-        assert_eq!(data.num_unstable, 0);
-    }
-
-    #[test]
-    fn autonomous_zero_order_spectrum_fails_closed() {
-        let result = analyze(&[], FloquetOrbitKind::Autonomous);
-        let error = build_pstb_data_from_core_result(
-            result,
-            FloquetOrbitKind::Autonomous,
-            "LPROBE",
-            usize::MAX,
-            1,
-            STABILITY_THRESHOLD,
-            true,
-            &NoAbort,
-        )
-        .unwrap_err();
-
-        assert!(error.to_string().contains("evidence"));
-        assert!(error.to_string().contains("orbit policy"));
-    }
-
+    /// The display limit is the card's, and it governs the plotted curves
+    /// only: `modes` is the complete authenticated spectrum whatever the sheet
+    /// is asked to show, because a truncated spectrum cannot prove stability.
     #[test]
     fn presentation_limit_does_not_truncate_authenticated_spectrum() {
-        let result = analyze(
-            &[
-                vec![0.5, 0.0, 0.0],
-                vec![0.0, 0.4, 0.0],
-                vec![0.0, 0.0, 0.3],
-            ],
-            FloquetOrbitKind::Driven,
-        );
-        let data = build_pstb_data_from_core_result(
-            result,
-            FloquetOrbitKind::Driven,
-            "LPROBE",
-            0,
+        let data = build_pstb_data(
+            stability(
+                &[
+                    vec![0.5, 0.0, 0.0],
+                    vec![0.0, 0.4, 0.0],
+                    vec![0.0, 0.0, 0.3],
+                ],
+                FloquetOrbitKind::Driven,
+            ),
             1,
-            STABILITY_THRESHOLD,
-            true,
             &NoAbort,
         )
-        .unwrap();
+        .expect("the projection publishes the spectrum it was handed");
 
         assert_eq!(data.modes.len(), 3);
         assert_eq!(data.mode_indices, vec![1.0]);
@@ -881,41 +405,53 @@ mod tests {
         assert_eq!(data.stability_verdict, FloquetStabilityVerdict::Stable);
     }
 
+    /// The engine resolves the probe and normalizes its share of every mode
+    /// shape; the sheet publishes those numbers and computes none of its own.
     #[test]
-    fn malformed_current_aggregate_fails_closed() {
-        let mut result = analyze(&[vec![0.5]], FloquetOrbitKind::Driven);
-        result.num_unstable = 1;
-
-        let error = build_pstb_data_from_core_result(
-            result,
+    fn the_engines_probe_participation_reaches_the_sheet_unchanged() {
+        let engine_result = stability(
+            &[
+                vec![0.5, 0.0, 0.0],
+                vec![0.0, 0.4, 0.0],
+                vec![0.0, 0.0, 0.3],
+            ],
             FloquetOrbitKind::Driven,
-            "LPROBE",
-            0,
-            1,
-            STABILITY_THRESHOLD,
-            true,
-            &NoAbort,
-        )
-        .unwrap_err();
+        );
+        let expected = engine_result.probe_participation.clone();
+        let data = build_pstb_data(engine_result, 2, &NoAbort).expect("the projection succeeds");
 
-        assert!(error.to_string().contains("aggregate counts"));
+        assert_eq!(expected, vec![1.0 / 16.0, 2.0 / 16.0, 3.0 / 16.0]);
+        assert_eq!(
+            data.modes
+                .iter()
+                .map(|mode| mode.probe_participation)
+                .collect::<Vec<_>>(),
+            expected,
+            "every retained mode carries the engine's own participation"
+        );
+        assert_eq!(
+            data.probe_mode_participation,
+            expected[..2].to_vec(),
+            "the plotted curve is the same numbers, cut to the display limit"
+        );
     }
 
+    /// A driven orbit whose periodic map carries no dynamic state is a real,
+    /// authenticated answer -- and it has no curve to plot.
     #[test]
-    fn blank_probe_provenance_fails_closed() {
-        let result = analyze(&[vec![0.5]], FloquetOrbitKind::Driven);
-        let error = build_pstb_data_from_core_result(
-            result,
-            FloquetOrbitKind::Driven,
-            " ",
-            0,
-            1,
-            STABILITY_THRESHOLD,
-            true,
-            &NoAbort,
-        )
-        .unwrap_err();
+    fn driven_zero_order_spectrum_publishes_no_display_curves() {
+        let data = build_pstb_data(stability(&[], FloquetOrbitKind::Driven), 1, &NoAbort)
+            .expect("a state-free driven map is representable");
 
-        assert!(error.to_string().contains("probe identity"));
+        assert!(data.modes.is_empty());
+        assert!(data.mode_indices.is_empty());
+        assert!(data.probe_mode_participation.is_empty());
+        assert!(matches!(
+            data.floquet_evidence,
+            FloquetSpectrumEvidence::NoDynamicModes
+        ));
+        assert_eq!(data.stability_verdict, FloquetStabilityVerdict::Stable);
+        assert_eq!(data.min_stability_margin_db, None);
+        assert_eq!(data.num_unstable, 0);
     }
 }

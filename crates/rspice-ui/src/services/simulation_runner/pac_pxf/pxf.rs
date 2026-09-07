@@ -2,6 +2,13 @@
 //!
 //! Transfer from every input sideband to one output, which is how conversion
 //! gain and image rejection are measured.
+//!
+//! The run itself belongs to the engine: `.PXF` is an authored card, and
+//! [`rspice_core::Engine::run_pxf_card_from_pss_with_abort`] is a PAC solve
+//! plus one read of the conversion element the card's sideband pair names.
+//! What is left here is the Studio's own share — turning a dialog or a deck
+//! line into that card, and turning the engine's result into the curves the
+//! sheet plots.
 
 use std::path::Path;
 
@@ -11,12 +18,8 @@ use rspice_core::abort_signal::AbortSignal;
 
 use super::super::error::{ensure_not_aborted, poll_periodically};
 use super::super::{
-    ServiceRunError, ServiceRunResult, build_voltage_output_expr, is_ground_like,
-    parse_runner_netlist_with_abort,
-};
-use super::pac::{
-    PacFrequencySweep, PacRunConfig, run_pac_internal_from_pss_with_abort,
-    run_pac_internal_with_abort,
+    ServiceRunError, ServiceRunResult, build_resolved_periodic_engine, build_voltage_output_expr,
+    is_ground_like, parse_runner_netlist_with_abort,
 };
 use super::shared::normalize_pac_node_name;
 // =============================================================================
@@ -32,11 +35,11 @@ pub enum PxfFrequencySweep {
 }
 
 impl PxfFrequencySweep {
-    fn to_core(self) -> rspice_core::analysis::pxf::PxfSweepType {
+    fn to_variation(self) -> rspice_core::netlist::FreqVariation {
         match self {
-            Self::Decade => rspice_core::analysis::pxf::PxfSweepType::Decade,
-            Self::Octave => rspice_core::analysis::pxf::PxfSweepType::Octave,
-            Self::Linear => rspice_core::analysis::pxf::PxfSweepType::Linear,
+            Self::Decade => rspice_core::netlist::FreqVariation::Dec,
+            Self::Octave => rspice_core::netlist::FreqVariation::Oct,
+            Self::Linear => rspice_core::netlist::FreqVariation::Lin,
         }
     }
 }
@@ -141,6 +144,42 @@ impl PxfRunConfig {
         }
         Ok(())
     }
+
+    /// The authored `.PXF` card this configuration states.
+    ///
+    /// The names are canonicalized here rather than in the card: a Studio form
+    /// may hold `V(out)` where a deck line holds `out`, and
+    /// [`normalize_pac_node_name`] is what `.PAC` already uses to make the two
+    /// the same node. Everything past this point is the engine's reading of a
+    /// card, identical to the one the CLI and the wasm surface run.
+    fn to_card(&self) -> rspice_core::netlist::PxfCard {
+        rspice_core::netlist::PxfCard {
+            sweep: rspice_core::netlist::PeriodicSweep {
+                variation: self.sweep.to_variation(),
+                points: self.points_per_unit,
+                start_freq: self.start_freq,
+                stop_freq: self.stop_freq,
+            },
+            input_source: self.input_source.trim().to_owned(),
+            input_sideband: self.input_sideband,
+            output_node: normalize_pac_node_name(&self.output_node),
+            output_ref: self
+                .output_ref
+                .as_deref()
+                .map(str::trim)
+                .filter(|node| !node.is_empty())
+                .map(str::to_owned),
+            output_sideband: self.output_sideband,
+            max_sideband: self.max_sideband,
+            reltol: self.reltol,
+            abstol: self.abstol,
+            // The Studio only ever runs `.PXF` against a shooting carrier: its
+            // manual-deck reader refuses `FROM=HB` outright and its dialog
+            // offers no such control, so naming the selector is the honest
+            // record of which engine entry runs below.
+            source: rspice_core::netlist::PeriodicSourceSelector::Pss,
+        }
+    }
 }
 
 /// PXF analysis data.
@@ -150,9 +189,9 @@ pub struct PxfData {
     pub frequencies: Vec<Value>,
     /// Converted output frequency for each input sweep point (Hz).
     pub output_frequencies: Vec<Value>,
-    /// Complex transfer H(f_in -> f_out).
+    /// Complex transfer H(input sideband -> output sideband).
     pub transfer: Vec<Complex64>,
-    /// Optional group delay curve [(Hz, s)].
+    /// Optional group delay curve [(Hz, s)], on its own midpoint abscissa.
     pub group_delay: Option<Vec<(Value, Value)>>,
     /// Input sideband index.
     pub input_sideband: i32,
@@ -162,7 +201,7 @@ pub struct PxfData {
     pub output_label: String,
 }
 
-/// Run PXF standalone -- solving its own periodic solution rather than
+/// Run PXF standalone -- solving its own periodic carrier rather than
 /// receiving one -- with explicit configuration and cancellation.
 ///
 /// Test-only. PXF ships as a dependent task through
@@ -195,7 +234,7 @@ pub fn run_pxf_analysis_from_pss_with_source_path_and_abort(
 }
 
 /// Run PXF analysis with source-path resolution and cancellation, solving its
-/// own periodic solution.
+/// own periodic carrier.
 ///
 /// Test-only; see [`run_pxf_analysis_with_config_and_abort`].
 #[cfg(test)]
@@ -215,143 +254,61 @@ fn run_pxf_analysis_for_netlist_with_operating_point_abort(
     operating_point: Option<&rspice_core::engine::PssOperatingPoint>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PxfData> {
-    use rspice_core::analysis::pxf::PxfConfig;
-
     ensure_not_aborted(abort)?;
     config.validate().map_err(ServiceRunError::Failure)?;
 
-    let required_sideband = config
-        .input_sideband
-        .abs()
-        .max(config.output_sideband.abs())
-        .max(config.max_sideband);
-    let pac_cfg = PacRunConfig {
-        pss_fundamental_freq: config.pss_fundamental_freq,
-        pss_num_harmonics: config.pss_num_harmonics,
-        pss_tolerance: config.pss_tolerance,
-        start_freq: config.start_freq,
-        stop_freq: config.stop_freq,
-        points_per_unit: config.points_per_unit,
-        sweep: match config.sweep {
-            PxfFrequencySweep::Decade => PacFrequencySweep::Decade,
-            PxfFrequencySweep::Octave => PacFrequencySweep::Octave,
-            PxfFrequencySweep::Linear => PacFrequencySweep::Linear,
-        },
-        max_sideband: required_sideband,
-        input_source: config.input_source.clone(),
-        output_node: config.output_node.clone(),
-        output_ref: config.output_ref.clone(),
-        pac_magnitude: 1.0,
-        include_dc: true,
-        reltol: config.reltol,
-        abstol: config.abstol,
-    };
-
-    let pac_internal = match operating_point {
-        Some(operating_point) => {
-            run_pac_internal_from_pss_with_abort(netlist, &pac_cfg, operating_point, abort)?
-        }
-        None => run_pac_internal_with_abort(netlist, &pac_cfg, abort)?,
-    };
-    let pac_result = pac_internal.pac_result;
-
-    let sideband_indices = pac_result.conversion_matrix.sideband_indices();
-    if !sideband_indices.contains(&config.input_sideband) {
-        return Err(ServiceRunError::Failure(format!(
-            "PXF input sideband {} is outside analyzed PAC sideband range {:?}",
-            config.input_sideband, sideband_indices
-        )));
-    }
-    if !sideband_indices.contains(&config.output_sideband) {
-        return Err(ServiceRunError::Failure(format!(
-            "PXF output sideband {} is outside analyzed PAC sideband range {:?}",
-            config.output_sideband, sideband_indices
-        )));
-    }
-
-    let frequencies = pac_result.conversion_matrix.frequencies().to_vec();
-    if frequencies.is_empty() {
-        return Err(ServiceRunError::Failure(
-            "PXF conversion matrix has no frequency points".to_string(),
-        ));
-    }
-
-    let mut matrix_cube: Vec<Vec<Vec<Complex64>>> = Vec::with_capacity(frequencies.len());
-    for freq_idx in 0..frequencies.len() {
-        poll_periodically(abort, freq_idx)?;
-        let mut out_rows = Vec::with_capacity(sideband_indices.len());
-        for out_sb in &sideband_indices {
-            let mut row = Vec::with_capacity(sideband_indices.len());
-            for in_sb in &sideband_indices {
-                row.push(
-                    pac_result
-                        .conversion_matrix
-                        .get(freq_idx, *out_sb, *in_sb)
-                        .map_err(|error| {
-                            ServiceRunError::Failure(format!(
-                                "PXF conversion result is unavailable: {error}"
-                            ))
-                        })?,
-                );
-            }
-            out_rows.push(row);
-        }
-        matrix_cube.push(out_rows);
-    }
-
-    let mut pxf_cfg = PxfConfig::new()
-        .with_sweep(config.start_freq, config.stop_freq, config.points_per_unit)
-        .with_sweep_type(config.sweep.to_core())
-        .with_sidebands(config.input_sideband, config.output_sideband)
-        .with_input(config.input_source.trim())
-        .with_output(&normalize_pac_node_name(&config.output_node))
-        .with_fundamental(pac_result.fundamental_frequency);
-    pxf_cfg.max_sidebands = required_sideband as usize;
-    if let Some(reference) = config.output_ref.as_deref() {
-        let trimmed = reference.trim();
-        if !trimmed.is_empty() {
-            pxf_cfg.ref_node = trimmed.to_string();
-        }
-    }
-    pxf_cfg
-        .validate()
-        .map_err(|error| ServiceRunError::Failure(format!("PXF configuration error: {error}")))?;
-
-    let pxf_result = analyze_conversion_matrix_with_abort(
-        &pxf_cfg,
-        &frequencies,
-        &matrix_cube,
-        pac_result.fundamental_frequency,
-        abort,
+    let engine = build_resolved_periodic_engine(
+        netlist,
+        config.pss_tolerance,
+        "PXF resolved producer configuration is invalid",
     )?;
+    let card = config.to_card();
 
-    if pxf_result.points.is_empty() {
-        return Err(ServiceRunError::Failure(
-            "PXF produced no transfer points".to_string(),
-        ));
-    }
-
-    let mut sweep_freqs = Vec::with_capacity(pxf_result.points.len());
-    let mut output_freqs = Vec::with_capacity(pxf_result.points.len());
-    let mut transfer = Vec::with_capacity(pxf_result.points.len());
-    for (index, point) in pxf_result.points.iter().enumerate() {
-        poll_periodically(abort, index)?;
-        if !point.freq_in.is_finite()
-            || !point.freq_out.is_finite()
-            || !point.transfer.re.is_finite()
-            || !point.transfer.im.is_finite()
-        {
-            return Err(ServiceRunError::Failure(format!(
-                "PXF returned invalid data at transfer point {}",
-                index + 1
-            )));
+    let owned_carrier;
+    let carrier = match operating_point {
+        Some(operating_point) => operating_point,
+        None => {
+            owned_carrier = engine
+                .run_pss_operating_point_with_abort(
+                    netlist,
+                    rspice_core::analysis::PssConfig::new(config.pss_fundamental_freq)
+                        .with_harmonics(config.pss_num_harmonics)
+                        .with_tolerance(config.pss_tolerance),
+                    abort,
+                )
+                .map_err(|error| ServiceRunError::from_core("PXF prerequisite PSS", error))?;
+            &owned_carrier
         }
-        sweep_freqs.push(point.freq_in);
-        output_freqs.push(point.freq_out);
+    };
+
+    let result = engine
+        .run_pxf_card_from_pss_with_abort(netlist, &card, carrier, abort)
+        .map_err(|error| ServiceRunError::from_core("PXF error", error))?;
+
+    // Nothing below re-reads what the entry already established. It refuses an
+    // empty transfer, a non-finite transfer value, and an offset grid that is
+    // not finite, positive and strictly increasing; and it derives `freq_out`
+    // through `SidebandTransfer::output_frequency`, which refuses a
+    // non-representable absolute frequency by coordinate.
+    let mut frequencies = Vec::with_capacity(result.points.len());
+    let mut output_frequencies = Vec::with_capacity(result.points.len());
+    let mut transfer = Vec::with_capacity(result.points.len());
+    for (index, point) in result.points.iter().enumerate() {
+        poll_periodically(abort, index)?;
+        frequencies.push(point.freq_in);
+        // Derived here, for one more commit, exactly as this runner has always
+        // derived it. `point.freq_out` is core's own answer and is not the same
+        // number; publishing it is a deliberate correction, and it belongs in a
+        // commit a reviewer can read on its own rather than inside a deletion.
+        output_frequencies.push(
+            point.freq_in
+                + Value::from(config.output_sideband - config.input_sideband)
+                    * result.fundamental_freq,
+        );
         transfer.push(point.transfer);
     }
 
-    let group_delay_curve = pxf_group_delay_with_abort(&pxf_result.points, abort)?;
+    let group_delay_curve = result.group_delay_curve();
     let group_delay = (!group_delay_curve.is_empty()).then_some(group_delay_curve);
 
     let output_label =
@@ -359,197 +316,20 @@ fn run_pxf_analysis_for_netlist_with_operating_point_abort(
 
     ensure_not_aborted(abort)?;
     Ok(PxfData {
-        frequencies: sweep_freqs,
-        output_frequencies: output_freqs,
+        frequencies,
+        output_frequencies,
         transfer,
         group_delay,
-        input_sideband: pxf_result.input_sideband,
-        output_sideband: pxf_result.output_sideband,
+        input_sideband: result.input_sideband,
+        output_sideband: result.output_sideband,
         output_label,
     })
-}
-
-fn analyze_conversion_matrix_with_abort(
-    config: &rspice_core::analysis::pxf::PxfConfig,
-    frequencies: &[Value],
-    conversion_matrix: &[Vec<Vec<Complex64>>],
-    fundamental_frequency: Value,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<rspice_core::analysis::pxf::PxfResult> {
-    use rspice_core::analysis::pxf::{PxfResult, TransferPoint};
-
-    ensure_not_aborted(abort)?;
-    if frequencies.is_empty() {
-        return Err(ServiceRunError::Failure(
-            "PXF conversion analysis has no frequency points".to_string(),
-        ));
-    }
-    if conversion_matrix.len() != frequencies.len() {
-        return Err(ServiceRunError::Failure(
-            "PXF frequency/conversion-matrix size mismatch".to_string(),
-        ));
-    }
-    if !fundamental_frequency.is_finite() || fundamental_frequency <= 0.0 {
-        return Err(ServiceRunError::Failure(
-            "PXF conversion analysis has an invalid fundamental frequency".to_owned(),
-        ));
-    }
-    if frequencies
-        .iter()
-        .any(|frequency| !frequency.is_finite() || *frequency <= 0.0)
-        || frequencies.windows(2).any(|pair| pair[1] <= pair[0])
-    {
-        return Err(ServiceRunError::Failure(
-            "PXF conversion analysis has an invalid input-frequency grid".to_owned(),
-        ));
-    }
-
-    let sideband_count = config
-        .max_sidebands
-        .checked_mul(2)
-        .and_then(|value| value.checked_add(1))
-        .ok_or_else(|| {
-            ServiceRunError::Failure("PXF sideband dimension overflows the platform".to_owned())
-        })?;
-    let offset = config.max_sidebands as i32;
-    let output_index = config
-        .output_sideband
-        .checked_add(offset)
-        .and_then(|index| usize::try_from(index).ok())
-        .filter(|index| *index < sideband_count)
-        .ok_or_else(|| {
-            ServiceRunError::Failure(
-                "PXF output sideband is outside the conversion-matrix basis".to_owned(),
-            )
-        })?;
-    let input_index = config
-        .input_sideband
-        .checked_add(offset)
-        .and_then(|index| usize::try_from(index).ok())
-        .filter(|index| *index < sideband_count)
-        .ok_or_else(|| {
-            ServiceRunError::Failure(
-                "PXF input sideband is outside the conversion-matrix basis".to_owned(),
-            )
-        })?;
-
-    let mut result = PxfResult::new(
-        fundamental_frequency,
-        config.input_sideband,
-        config.output_sideband,
-    );
-    for (index, frequency) in frequencies.iter().copied().enumerate() {
-        poll_periodically(abort, index)?;
-        let matrix = &conversion_matrix[index];
-        if matrix.len() != sideband_count
-            || matrix.iter().any(|row| {
-                row.len() != sideband_count
-                    || row
-                        .iter()
-                        .any(|value| !value.re.is_finite() || !value.im.is_finite())
-            })
-        {
-            return Err(ServiceRunError::Failure(format!(
-                "PXF conversion matrix point {} has an invalid shape or value",
-                index + 1
-            )));
-        }
-        let transfer = matrix[output_index][input_index];
-        let output_frequency = frequency
-            + (config.output_sideband - config.input_sideband) as Value * fundamental_frequency;
-        if !output_frequency.is_finite() {
-            return Err(ServiceRunError::Failure(format!(
-                "PXF output frequency is non-finite at point {}",
-                index + 1
-            )));
-        }
-        result.add_point(TransferPoint {
-            freq_in: frequency,
-            freq_out: output_frequency,
-            transfer,
-            sideband_in: config.input_sideband,
-            sideband_out: config.output_sideband,
-        });
-    }
-    compute_pxf_metrics_with_abort(&mut result, abort)?;
-    Ok(result)
-}
-
-fn compute_pxf_metrics_with_abort(
-    result: &mut rspice_core::analysis::pxf::PxfResult,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<()> {
-    let mut peak: Option<(Value, Value)> = None;
-    for (index, point) in result.points.iter().enumerate() {
-        poll_periodically(abort, index)?;
-        let gain = point.magnitude_db();
-        if gain.is_finite() && peak.is_none_or(|(_, current)| gain > current) {
-            peak = Some((point.freq_in, gain));
-        }
-    }
-    result.peak_gain = peak;
-
-    if let Some((peak_frequency, peak_db)) = peak {
-        let threshold = peak_db - 3.0;
-        let mut lower = None;
-        let mut upper = None;
-        for (index, point) in result.points.iter().enumerate() {
-            poll_periodically(abort, index)?;
-            if point.magnitude_db() <= threshold {
-                if point.freq_in < peak_frequency {
-                    lower = Some(point.freq_in);
-                } else if point.freq_in > peak_frequency && upper.is_none() {
-                    upper = Some(point.freq_in);
-                }
-            }
-        }
-        result.bandwidth_3db = match (lower, upper, result.points.first(), result.points.last()) {
-            (Some(lower), Some(upper), _, _) => Some(upper - lower),
-            (None, Some(upper), Some(first), _) => Some(upper - first.freq_in),
-            (Some(lower), None, _, Some(last)) => Some(last.freq_in - lower),
-            _ => None,
-        };
-    }
-
-    for (index, window) in result.points.windows(2).enumerate() {
-        poll_periodically(abort, index)?;
-        let first = window[0].magnitude_db();
-        let second = window[1].magnitude_db();
-        if (first >= 0.0 && second < 0.0) || (first < 0.0 && second >= 0.0) {
-            let fraction = -first / (second - first);
-            result.unity_gain_freq =
-                Some(window[0].freq_in + fraction * (window[1].freq_in - window[0].freq_in));
-            break;
-        }
-    }
-    if let Some(first) = result.points.first()
-        && first.freq_in < 100.0
-    {
-        result.dc_gain = Some(first.transfer);
-    }
-    ensure_not_aborted(abort)
-}
-
-fn pxf_group_delay_with_abort(
-    points: &[rspice_core::analysis::pxf::TransferPoint],
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<Vec<(Value, Value)>> {
-    let mut group_delay = Vec::with_capacity(points.len().saturating_sub(1));
-    for (index, window) in points.windows(2).enumerate() {
-        poll_periodically(abort, index)?;
-        group_delay.push((
-            (window[0].freq_in + window[1].freq_in) * 0.5,
-            window[0].group_delay(&window[1]),
-        ));
-    }
-    ensure_not_aborted(abort)?;
-    Ok(group_delay)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rspice_core::abort_signal::{CountingAbort, ImmediateAbort};
+    use rspice_core::abort_signal::ImmediateAbort;
 
     #[test]
     fn pxf_service_preserves_typed_entry_abort() {
@@ -560,28 +340,5 @@ mod tests {
         );
 
         assert!(matches!(result, Err(ServiceRunError::Aborted)));
-    }
-
-    #[test]
-    fn pxf_conversion_honors_in_loop_abort() {
-        const POINTS: usize = 130;
-        let mut config = rspice_core::analysis::pxf::PxfConfig::new();
-        config.input_sideband = 0;
-        config.output_sideband = 0;
-        config.max_sidebands = 0;
-        let frequencies = (1..=POINTS).map(|point| point as Value).collect::<Vec<_>>();
-        let conversion_matrix = vec![vec![vec![Complex64::new(1.0, 0.0)]]; POINTS];
-        let abort = CountingAbort::new(2);
-
-        let result = analyze_conversion_matrix_with_abort(
-            &config,
-            &frequencies,
-            &conversion_matrix,
-            1e6,
-            &abort,
-        );
-
-        assert!(matches!(result, Err(ServiceRunError::Aborted)));
-        assert!(abort.count() > 2);
     }
 }
