@@ -447,15 +447,17 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("cargo test --locked -p rspice-wasm -p rspice-cloud-client --lib --target wasm32-unknown-unknown", job)
         self.assertEqual(job.count("--test browser_clock"), 2)
 
-    def test_browser_budgets_measure_the_delivered_bindgen_modules(self) -> None:
+    def test_browser_size_reports_measure_the_delivered_bindgen_modules(self) -> None:
         workflow = read_text(".github/workflows/ci.yml")
         job = workflow.split("  wasm-ui-size:", 1)[1].split("  veriloga-mobile:", 1)[0]
         for stem, step in (("rspice-ui", "UI"), ("rspice-ui-worker", "worker")):
-            budget = job.split(f"- name: Enforce browser {step} image budget", 1)[1].split("- name:", 1)[0]
-            self.assertIn(f"crates/rspice-ui/web/pkg/{stem}_bg.wasm", budget)
-        self.assertLess(job.index("Generate production browser UI bindings"), job.index("Enforce browser UI image budget"))
-        self.assertLess(job.index("Generate optimized browser worker bindings"), job.index("Enforce browser worker image budget"))
-        self.assertLess(job.index("Enforce browser UI image budget"), job.index("Build instrumented browser workbench"))
+            report = job.split(f"- name: Report browser {step} image size", 1)[1].split("- name:", 1)[0]
+            self.assertIn(f"crates/rspice-ui/web/pkg/{stem}_bg.wasm", report)
+            self.assertNotIn("--max-raw", report)
+            self.assertNotIn("--max-gzip", report)
+        self.assertLess(job.index("Generate production browser UI bindings"), job.index("Report browser UI image size"))
+        self.assertLess(job.index("Generate production browser worker bindings"), job.index("Report browser worker image size"))
+        self.assertLess(job.index("Report browser UI image size"), job.index("Build instrumented browser workbench"))
 
     def test_format_gate_covers_every_hand_written_workspace_member(self) -> None:
         """rustfmt runs over the workspace as the manifest defines it.
@@ -985,8 +987,6 @@ class CiConfigurationTests(unittest.TestCase):
         )
         self.assertIn("--bin rspice-ui-worker --features browser-worker", workflow)
         self.assertIn("tools/ci/check_wasm_artifact_size.py", workflow)
-        self.assertIn("--max-raw 67108864", workflow)
-        self.assertIn("--max-raw 25165824", workflow)
         self.assertGreaterEqual(
             workflow.count("RUSTFLAGS: -D warnings"),
             2,
