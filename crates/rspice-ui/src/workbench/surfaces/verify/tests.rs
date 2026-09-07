@@ -1981,15 +1981,12 @@ fn the_reliability_panes_validate_retained_evidence_once_per_dataset_generation(
     );
 }
 
-/// The verdict the panes read is the memo's, not a fresh walk.
-///
-/// Corrupting a retained waveform without declaring a new dataset generation
-/// is a change only a re-walk could see. The gate must not see it — and must
-/// see it the moment the generation moves, or the memo would be answering a
-/// question about a dataset that is no longer on screen.
+/// A retained-source edit invalidates the verdict before the next frame or
+/// display-version bump. Idle reads still reuse the memo, as checked above.
 #[test]
-fn the_reliability_evidence_gate_answers_from_the_memoized_verdict() {
+fn the_reliability_evidence_gate_rejects_source_edits_before_a_version_bump() {
     let mut app = app_retaining_reliability_evidence();
+    let version = app.state.simulation.data_version;
     assert!(
         latest_validated_analysis(&app, AnalysisType::Soa).is_some(),
         "the fixture retains validated SOA evidence"
@@ -2007,9 +2004,10 @@ fn the_reliability_evidence_gate_answers_from_the_memoized_verdict() {
     analysis.waveforms[0].y = std::sync::Arc::new(shortened);
 
     assert!(
-        latest_validated_analysis(&app, AnalysisType::Soa).is_some(),
-        "the gate re-walked the dataset instead of reading the memoized verdict"
+        latest_validated_analysis(&app, AnalysisType::Soa).is_none(),
+        "the gate kept a valid verdict after its retained source was corrupted"
     );
+    assert_eq!(app.state.simulation.data_version, version);
 
     app.state.simulation.data_version = app.state.simulation.data_version.wrapping_add(1);
 

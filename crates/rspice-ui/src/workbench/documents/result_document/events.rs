@@ -1811,13 +1811,6 @@ mod availability_tests {
         let mut state = AppState::default();
         state.simulation.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
-        state
-            .ui
-            .results
-            .retained_evidence_validity
-            .borrow_mut()
-            .clear();
-
         assert!(
             !active_analysis_is_renderable(&state),
             "an unvalidated, invalid analysis was offered its sheet"

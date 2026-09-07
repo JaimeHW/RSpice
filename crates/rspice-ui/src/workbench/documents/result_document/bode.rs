@@ -94,31 +94,21 @@ fn resolve_noise_spectrum_shape(analysis: &AnalysisResult) -> Option<NoiseSpectr
 
 /// The same answer, resolved once per dataset generation.
 ///
-/// Memoized rather than threaded through because it is a property of an
-/// immutable dataset: it can only change when the datasets do, and the data
-/// version is part of the key so a generation the memo has not seen misses
-/// by construction. The cell is what lets the tab strip's gate keep its
-/// `&AppState` signature.
+/// Its memo checks the retained history revision on every read. A tab-strip
+/// query before frame preparation cannot reuse the shape of an older source.
 pub(super) fn noise_spectrum_shape(
     state: &AppState,
     dataset_id: crate::product::DatasetId,
     analysis: &AnalysisResult,
 ) -> Option<NoiseSpectrumShape> {
-    let key = (
-        state.simulation.data_version,
-        super::AnalysisPresentationKey::new(dataset_id, analysis),
-    );
-    if let Some(known) = state.ui.results.noise_spectrum_shapes.borrow().get(&key) {
-        return *known;
-    }
-    let shape = resolve_noise_spectrum_shape(analysis);
+    let key = super::AnalysisPresentationKey::new(dataset_id, analysis);
     state
         .ui
         .results
         .noise_spectrum_shapes
-        .borrow_mut()
-        .insert(key, shape);
-    shape
+        .get_or_insert_with(&state.simulation, key, || {
+            resolve_noise_spectrum_shape(analysis)
+        })
 }
 
 /// Whether one analysis holds an ordinary-noise spectrum this workspace can

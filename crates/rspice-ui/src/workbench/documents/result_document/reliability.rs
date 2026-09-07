@@ -752,27 +752,24 @@ mod tests {
     /// memo that owns the question; this one called the validator directly,
     /// so a reader who was touching nothing paid for the walk every frame.
     ///
-    /// A memo seeded with the opposite answer is the discriminator: a gate
-    /// that reads it must follow it, and a gate that walks the evidence
-    /// itself cannot see it at all.
+    /// One counted validation establishes that the gate uses the shared
+    /// owner; unchanged follow-up queries must add no dataset-sized work.
     #[test]
     fn the_reliability_gate_reads_the_one_memo_that_owns_evidence_validity() {
         let state = reliability_state();
+        let work = super::super::frame_work::WorkCounts::reset();
         assert!(active_payload_is_valid(&state));
-
-        let run = state.simulation.active_run().expect("retained run");
-        let key = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]);
-        state
-            .ui
-            .results
-            .retained_evidence_validity
-            .borrow_mut()
-            .insert((state.simulation.data_version, key), false);
-
-        assert!(
-            !active_payload_is_valid(&state),
-            "the gate walked the evidence itself instead of resolving the workspace memo"
+        assert_eq!(
+            work.since()
+                .get(super::super::frame_work::DatasetWalk::EvidenceValidation),
+            1,
+            "the gate must validate through the shared evidence owner"
         );
+        let work = super::super::frame_work::WorkCounts::reset();
+        for _ in 0..10 {
+            assert!(active_payload_is_valid(&state));
+        }
+        assert_eq!(work.since().total(), 0);
     }
 
     /// And the memo it resolves is the one every other gate reads, so a new

@@ -26,6 +26,7 @@ mod polar;
 mod population;
 mod pz;
 mod reliability;
+mod retained_memo;
 mod scatter;
 mod sensitivity;
 mod smith;
@@ -221,7 +222,7 @@ pub(crate) use waves::{
 
 pub(crate) use waves::toggle_visibility;
 
-use std::cell::RefCell;
+use retained_memo::RetainedMemo;
 use std::collections::{HashMap, HashSet};
 
 use egui::{Ui, WidgetInfo, WidgetType};
@@ -2070,43 +2071,28 @@ pub(crate) struct OptimizationSelection {
 /// frame — so the same million-sample walk happened several times a frame for
 /// a reader who was not touching anything.
 ///
-/// Memoized rather than threaded through because the answer is a property of
-/// an immutable dataset: it can only change when the datasets do, and
-/// `prepare_viewer_state` clears the memo on a new data version. The cell is
-/// what lets the gates keep their `&AppState` signatures — a memo whose price
-/// of admission was `&mut` everywhere would not have been adopted by them.
+/// The memo checks the retained history revision on every read, including
+/// queries before frame preparation. Both successful and failed verdicts are
+/// invalidated when the source changes, even if its display version repeats.
 pub(crate) fn retained_evidence_is_valid(
     state: &AppState,
     analysis: AnalysisPresentationKey,
 ) -> bool {
-    // The data version is part of the key, so a generation the memo has not
-    // seen misses by construction rather than by remembering to be cleared.
-    let key = (state.simulation.data_version, analysis);
-    if let Some(known) = state
-        .ui
-        .results
-        .retained_evidence_validity
-        .borrow()
-        .get(&key)
-    {
-        return *known;
-    }
-    let valid = state
-        .simulation
-        .runs
-        .iter()
-        .find_map(|run| analysis.resolve(run))
-        .is_some_and(|(_, resolved)| {
-            frame_work::note(frame_work::DatasetWalk::EvidenceValidation);
-            resolved.validate_retained_evidence().is_ok()
-        });
     state
         .ui
         .results
         .retained_evidence_validity
-        .borrow_mut()
-        .insert(key, valid);
-    valid
+        .get_or_insert_with(&state.simulation, analysis, || {
+            state
+                .simulation
+                .runs
+                .iter()
+                .find_map(|run| analysis.resolve(run))
+                .is_some_and(|(_, resolved)| {
+                    frame_work::note(frame_work::DatasetWalk::EvidenceValidation);
+                    resolved.validate_retained_evidence().is_ok()
+                })
+        })
 }
 
 /// A structural question a tab strip asks about a retained analysis whose
@@ -2158,11 +2144,9 @@ pub(crate) fn structural_gate_is_answered_directly(
 /// Whether one retained analysis answers a structural gate, resolved once per
 /// dataset generation.
 ///
-/// Memoized for the same reason [`retained_evidence_is_valid`] is: the answer
-/// is a property of an immutable dataset, so it can only change when the
-/// datasets do, and the data version is part of the key so a generation the
-/// memo has not seen misses by construction. The cell is what lets the gates
-/// keep their `&AppState` signatures.
+/// Like [`retained_evidence_is_valid`], this reader checks the retained source
+/// revision itself. Tab availability cannot reuse an older structural answer
+/// while waiting for a painted frame to invalidate the cache.
 pub(crate) fn analysis_answers_structural_gate(
     state: &AppState,
     dataset_id: DatasetId,
@@ -2176,22 +2160,14 @@ pub(crate) fn analysis_answers_structural_gate(
     if gate == StructuralGate::OrdinaryNoiseSpectrum {
         return bode::ordinary_noise_spectrum_is_renderable_in(state, dataset_id, analysis);
     }
-    let key = (
-        state.simulation.data_version,
-        AnalysisPresentationKey::new(dataset_id, analysis),
-        gate,
-    );
-    if let Some(known) = state.ui.results.structural_gates.borrow().get(&key) {
-        return *known;
-    }
-    let answer = structural_gate_is_answered_directly(gate, analysis);
+    let key = (AnalysisPresentationKey::new(dataset_id, analysis), gate);
     state
         .ui
         .results
         .structural_gates
-        .borrow_mut()
-        .insert(key, answer);
-    answer
+        .get_or_insert_with(&state.simulation, key, || {
+            structural_gate_is_answered_directly(gate, analysis)
+        })
 }
 
 /// The content digest of one retained dataset.
@@ -2202,26 +2178,21 @@ pub(crate) fn analysis_answers_structural_gate(
 /// view calls `run()` to re-check it, several times per frame, for a reader
 /// who is not touching anything.
 ///
-/// Keyed by data version like the validity memo beside it, so a generation
-/// the memo has not seen misses by construction rather than by remembering
-/// to be cleared.
+/// The retained history revision participates in every memo lookup. Restoring
+/// changed content with the same dataset identity and display version cannot
+/// make an older view's immutable binding appear valid.
 pub(crate) fn retained_dataset_digest(
     state: &AppState,
     run: &SimulationRun,
 ) -> crate::product::ContentDigest {
-    let key = (state.simulation.data_version, run.dataset_id);
-    if let Some(known) = state.ui.results.dataset_digests.borrow().get(&key) {
-        return *known;
-    }
-    frame_work::note(frame_work::DatasetWalk::DatasetDigest);
-    let digest = run.dataset_content_digest();
     state
         .ui
         .results
         .dataset_digests
-        .borrow_mut()
-        .insert(key, digest);
-    digest
+        .get_or_insert_with(&state.simulation, run.dataset_id, || {
+            frame_work::note(frame_work::DatasetWalk::DatasetDigest);
+            run.dataset_content_digest()
+        })
 }
 
 /// The two halves of a pinned view: the abscissa window, then the ordinate
@@ -2618,19 +2589,18 @@ pub struct ResultsState {
     pub(super) selected_digital_event: Option<DigitalEventSelection>,
     /// Merged event order for the analysis the EVENTS sheet last drew.
     pub(super) event_order_cache: Option<EventOrderCache>,
-    /// Memoized retained-evidence verdict per (data version, analysis); see
+    /// Source-aware retained-evidence verdict per analysis; see
     /// [`retained_evidence_is_valid`].
-    pub(super) retained_evidence_validity: RefCell<HashMap<(u64, AnalysisPresentationKey), bool>>,
-    /// Memoized dataset content digest per (data version, dataset); see
+    retained_evidence_validity: RetainedMemo<AnalysisPresentationKey, bool>,
+    /// Source-aware content digest per dataset; see
     /// [`retained_dataset_digest`].
-    pub(super) dataset_digests: RefCell<HashMap<(u64, DatasetId), crate::product::ContentDigest>>,
-    /// Memoized ordinary-noise spectrum structure per (data version,
-    /// analysis); see [`bode::noise_spectrum_shape`].
-    noise_spectrum_shapes:
-        RefCell<HashMap<(u64, AnalysisPresentationKey), Option<bode::NoiseSpectrumShape>>>,
-    /// Memoized structural sheet-availability verdicts per (data version,
-    /// analysis, question); see [`analysis_answers_structural_gate`].
-    structural_gates: RefCell<HashMap<(u64, AnalysisPresentationKey, StructuralGate), bool>>,
+    dataset_digests: RetainedMemo<DatasetId, crate::product::ContentDigest>,
+    /// Source-aware ordinary-noise structure per analysis;
+    /// see [`bode::noise_spectrum_shape`].
+    noise_spectrum_shapes: RetainedMemo<AnalysisPresentationKey, Option<bode::NoiseSpectrumShape>>,
+    /// Source-aware structural verdicts per analysis and question;
+    /// see [`analysis_answers_structural_gate`].
+    structural_gates: RetainedMemo<(AnalysisPresentationKey, StructuralGate), bool>,
     /// Memoized viewer projections; see [`view_plans::ViewPlans`].
     plans: view_plans::ViewPlans,
     /// Row/column selection for the TABLE viewer.
@@ -3337,17 +3307,13 @@ impl ResultsState {
         self.hidden_strips.retain(|analysis| live(*analysis));
         self.maximized_strip = self.maximized_strip.filter(|analysis| live(*analysis));
         self.retained_evidence_validity
-            .get_mut()
-            .retain(|(_, analysis), _| live(*analysis));
+            .retain(|analysis, _| live(*analysis));
         self.dataset_digests
-            .get_mut()
-            .retain(|(_, dataset), _| retained.contains(dataset));
+            .retain(|dataset, _| retained.contains(dataset));
         self.noise_spectrum_shapes
-            .get_mut()
-            .retain(|(_, analysis), _| live(*analysis));
+            .retain(|analysis, _| live(*analysis));
         self.structural_gates
-            .get_mut()
-            .retain(|(_, analysis, _), _| live(*analysis));
+            .retain(|(analysis, _), _| live(*analysis));
         self.favorite_signals.retain(|key| live(key.analysis()));
         self.recent_signals.retain(|key| live(key.analysis()));
         self.favorite_result_artifacts
@@ -4740,12 +4706,7 @@ pub(crate) fn prepare_viewer_state(app: &mut RSpiceApp) {
         // Pinned XY readouts index into the old run's point arrays;
         // a same-shape new run would silently relabel them.
         results.rf_pin.clear();
-        // Both are derived from the retained datasets, so a new version makes
-        // them answers to an old question.
-        results.retained_evidence_validity.get_mut().clear();
-        results.dataset_digests.get_mut().clear();
-        results.noise_spectrum_shapes.get_mut().clear();
-        results.structural_gates.get_mut().clear();
+        // The merged event order belongs to the retained dataset version.
         results.event_order_cache = None;
         // Runtime operation failures and recovery notices belong to the
         // dataset generation that reported them.
