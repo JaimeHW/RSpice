@@ -331,21 +331,16 @@ impl PssCurrentBasis {
     /// restore the exact prescribed derivative q'(t). Differentiating the
     /// sampled forcing itself would create parasitic trapezoidal voltage
     /// oscillations in a current-source cutset, despite exact current KCL.
-    pub(super) fn source_derivative_correction(
+    pub(super) fn source_companion(
         &self,
         sources: &crate::circuit::CurrentSources,
         balance: &mut [Value],
-        correction: &mut [Value],
+        rates: &mut [Value],
+        offsets: &mut [Vec<Value>; 3],
         times: [Value; 2],
         step: PssCompanionStep<'_>,
     ) -> Result<(), SimulationError> {
         self.source_balance_with(sources, balance, "current-constraint companion", |index| {
-            let latest = sources.value_at_time(index, times[0]);
-            let older = if step.coeff.needs_two_history {
-                sources.value_at_time(index, times[1])
-            } else {
-                latest
-            };
             let derivative = sources.right_derivative_at_time(index, step.t_next);
             let previous_derivative = if step.coeff.coeff_i_n == 0.0 {
                 0.0
@@ -353,33 +348,45 @@ impl PssCurrentBasis {
                 sources.right_derivative_at_time(index, times[0])
             };
             derivative + step.coeff.coeff_i_n * previous_derivative
-                - step.coeff.inductor_charge_derivative_correction(
-                    1.0,
-                    step.dt,
-                    sources.value_at_time(index, step.t_next),
-                    latest,
-                    older,
-                )
         })?;
-        self.set_state(&[], correction, balance);
+        self.set_state(&[], rates, balance);
+        for (offset, time) in offsets.iter_mut().zip([step.t_next, times[0], times[1]]) {
+            self.source_balance_with(sources, balance, "current-constraint value", |index| {
+                sources.value_at_time(index, time)
+            })?;
+            self.set_state(&[], offset, balance);
+        }
         Ok(())
+    }
+
+    /// Remove q(t) from each physical I = P*x + q(t) sample before flux
+    /// multiplication. Subtracting separately differentiated L*I and q loses
+    /// the small ripple voltage when the prescribed current has a large bias.
+    pub(super) fn free_current_samples(
+        &self,
+        branch: usize,
+        samples: [Value; 3],
+        offsets: &[Vec<Value>; 3],
+    ) -> [Value; 3] {
+        let winding = self.winding_by_branch[branch];
+        std::array::from_fn(|history| samples[history] - offsets[history][winding])
     }
 
     pub(super) fn add_flux_rhs(
         &self,
         circuit: &CircuitData,
-        rates: &[Value],
+        rate: impl Fn(usize) -> Value,
         rhs: &mut [Value],
     ) -> Result<(), SimulationError> {
-        for (index, &rate) in rates.iter().enumerate() {
+        for index in 0..circuit.inductors.len() {
             let row = circuit.num_nodes() + circuit.inductors.branch_indices[index] - 1;
-            rhs[row] += circuit.inductors.inductances[index] * rate;
+            rhs[row] += circuit.inductors.inductances[index] * rate(index);
         }
         for pair in &circuit.coupled_inductor_pairs {
             let first = self.winding_by_branch[pair.branch1_ordinal];
             let second = self.winding_by_branch[pair.branch2_ordinal];
-            rhs[circuit.num_nodes() + pair.branch1_ordinal - 1] += pair.device.m * rates[second];
-            rhs[circuit.num_nodes() + pair.branch2_ordinal - 1] += pair.device.m * rates[first];
+            rhs[circuit.num_nodes() + pair.branch1_ordinal - 1] += pair.device.m * rate(second);
+            rhs[circuit.num_nodes() + pair.branch2_ordinal - 1] += pair.device.m * rate(first);
         }
         if circuit
             .inductors

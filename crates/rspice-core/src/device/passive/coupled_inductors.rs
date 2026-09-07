@@ -246,25 +246,44 @@ impl CoupledInductorPair {
         dt: Value,
         coeff: &CompanionCoefficients,
     ) {
+        self.add_transient_mutual_correction_rhs_with_current_map(
+            [branch1, branch2],
+            correction_rhs,
+            iterate,
+            dt,
+            coeff,
+            |_, currents| currents,
+        );
+    }
+
+    /// Use the same current-coordinate map as the standalone flux residual.
+    pub(crate) fn add_transient_mutual_correction_rhs_with_current_map(
+        &self,
+        branches: [NodeId; 2],
+        correction_rhs: &mut [Value],
+        iterate: &[Value],
+        dt: Value,
+        coeff: &CompanionCoefficients,
+        current_map: impl Fn(usize, [Value; 3]) -> [Value; 3],
+    ) {
+        let [branch1, branch2] = branches;
         let (Some(&current1), Some(&current2)) =
             (iterate.get(branch1 - 1), iterate.get(branch2 - 1))
         else {
             return;
         };
-        let derivative1 = coeff.inductor_charge_derivative_correction(
-            self.m,
-            dt,
-            current1,
-            self.current1_prev,
-            self.current1_prev_prev,
+        let [current1, previous1, older1] = current_map(
+            branch1,
+            [current1, self.current1_prev, self.current1_prev_prev],
         );
-        let derivative2 = coeff.inductor_charge_derivative_correction(
-            self.m,
-            dt,
-            current2,
-            self.current2_prev,
-            self.current2_prev_prev,
+        let [current2, previous2, older2] = current_map(
+            branch2,
+            [current2, self.current2_prev, self.current2_prev_prev],
         );
+        let derivative1 =
+            coeff.inductor_charge_derivative_correction(self.m, dt, current1, previous1, older1);
+        let derivative2 =
+            coeff.inductor_charge_derivative_correction(self.m, dt, current2, previous2, older2);
         if let Some(row1) = correction_rhs.get_mut(branch1 - 1) {
             *row1 += derivative2;
         }

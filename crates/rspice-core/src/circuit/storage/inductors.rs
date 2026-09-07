@@ -427,11 +427,30 @@ impl Inductors {
         num_nodes: usize,
         excluded_indices: &[usize],
     ) {
+        self.overwrite_transient_correction_rhs_with_current_map(
+            correction_rhs,
+            iterate,
+            dt,
+            coeff,
+            num_nodes,
+            |index, currents| (!excluded_indices.contains(&index)).then_some(currents),
+        );
+    }
+
+    /// Transform each winding's three current samples before forming flux,
+    /// or return `None` to leave a device-owned row intact. The map uses the
+    /// storage index; accepted histories stay intact.
+    pub(crate) fn overwrite_transient_correction_rhs_with_current_map(
+        &self,
+        correction_rhs: &mut [Value],
+        iterate: &[Value],
+        dt: Value,
+        coeff: &CompanionCoefficients,
+        num_nodes: usize,
+        current_map: impl Fn(usize, [Value; 3]) -> Option<[Value; 3]>,
+    ) {
         debug_assert!(dt.is_finite() && dt > 0.0);
         for index in 0..self.names.len() {
-            if excluded_indices.contains(&index) {
-                continue;
-            }
             let np = self.node_pos[index];
             let nn = self.node_neg[index];
             let branch = num_nodes + self.branch_indices[index];
@@ -451,12 +470,18 @@ impl Inductors {
                 iterate.get(nn - 1).copied().unwrap_or(0.0)
             };
 
+            let Some([current, previous, older]) = current_map(
+                index,
+                [current, self.i_prev[index], self.i_prev_prev[index]],
+            ) else {
+                continue;
+            };
             let derivative = coeff.inductor_charge_derivative_correction(
                 self.inductances[index],
                 dt,
                 current,
-                self.i_prev[index],
-                self.i_prev_prev[index],
+                previous,
+                older,
             );
             let history_voltage = if coeff.coeff_i_n != 0.0 {
                 coeff.coeff_i_n * self.v_prev[index]

@@ -1716,6 +1716,26 @@ impl CircuitData {
         dt: Value,
         coeff: &CompanionCoefficients,
     ) {
+        self.stabilize_inductor_transient_correction_rhs_with_current_map(
+            correction_rhs,
+            iterate,
+            dt,
+            coeff,
+            |_, currents| currents,
+        );
+    }
+
+    /// Apply a current-coordinate map to the native linear windings before
+    /// forming self and mutual flux. Other magnetic device rows retain their
+    /// device-owned residuals; the caller must not map those device states.
+    pub(crate) fn stabilize_inductor_transient_correction_rhs_with_current_map(
+        &self,
+        correction_rhs: &mut [Value],
+        iterate: &[Value],
+        dt: Value,
+        coeff: &CompanionCoefficients,
+        current_map: impl Fn(usize, [Value; 3]) -> [Value; 3],
+    ) {
         let core_indices = self
             .jiles_atherton_inductors
             .iter()
@@ -1728,25 +1748,35 @@ impl CircuitData {
                 .iter()
                 .flat_map(|group| group.windings.iter().map(|winding| winding.inductor_index)),
         );
-        self.inductors.overwrite_transient_correction_rhs_excluding(
-            correction_rhs,
-            iterate,
-            dt,
-            coeff,
-            self.num_nodes,
-            &core_indices,
-        );
-        for binding in &self.coupled_inductor_pairs {
-            let branch1 = self.num_nodes + binding.branch1_ordinal;
-            let branch2 = self.num_nodes + binding.branch2_ordinal;
-            binding.device.add_transient_mutual_correction_rhs(
-                branch1,
-                branch2,
+        self.inductors
+            .overwrite_transient_correction_rhs_with_current_map(
                 correction_rhs,
                 iterate,
                 dt,
                 coeff,
+                self.num_nodes,
+                |index, currents| {
+                    (!core_indices.contains(&index)).then(|| {
+                        current_map(
+                            self.num_nodes + self.inductors.branch_indices[index],
+                            currents,
+                        )
+                    })
+                },
             );
+        for binding in &self.coupled_inductor_pairs {
+            let branch1 = self.num_nodes + binding.branch1_ordinal;
+            let branch2 = self.num_nodes + binding.branch2_ordinal;
+            binding
+                .device
+                .add_transient_mutual_correction_rhs_with_current_map(
+                    [branch1, branch2],
+                    correction_rhs,
+                    iterate,
+                    dt,
+                    coeff,
+                    &current_map,
+                );
         }
         for binding in &self.multi_winding_transformers {
             binding

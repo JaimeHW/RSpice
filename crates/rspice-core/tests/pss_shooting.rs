@@ -60,6 +60,70 @@ fn prescribed_dc_current_voltages_do_not_depend_on_the_companion_scale() {
 }
 
 #[test]
+fn prescribed_current_ripple_voltage_is_independent_of_dc_bias() {
+    use rspice_core::numerics::integration::IntegrationMethod;
+    let omega = std::f64::consts::TAU * F0;
+    for coupled in [false, true] {
+        for bias in [1e-3, 1.0, 1e3, 1e6] {
+            let secondary = if coupled {
+                format!(
+                    "I2 0 c SIN({} 2m 1meg 0 0 -23)\nL2 c d 200u\nR2 d 0 0.0001\nK1 L1 L2 0.6\n",
+                    -0.5 * bias
+                )
+            } else {
+                String::new()
+            };
+            let netlist = Netlist::parse(&format!(
+                "prescribed ripple precision\nI1 0 a SIN({bias} 1m 1meg 0 0 37)\nL1 a b 100u\nR1 b 0 0.0001\n{secondary}.options reltol=1e-12 vntol=1e-12 abstol=1e-15\n.end\n"
+            )).unwrap();
+            for method in [
+                IntegrationMethod::BackwardEuler,
+                IntegrationMethod::Trapezoidal,
+                IntegrationMethod::Gear2,
+                IntegrationMethod::TrapGear,
+            ] {
+                let mut config = PssConfig::new(F0)
+                    .with_tstab_periods(0)
+                    .with_points_per_period(256);
+                config.integration_method = Some(method);
+                let analysis = Engine::default().run_pss(&netlist, config).unwrap();
+                let result = &analysis.result;
+                let node = |name: &str| {
+                    result
+                        .node_names
+                        .iter()
+                        .position(|n| n.eq_ignore_ascii_case(name))
+                        .unwrap()
+                };
+                let mutual = if coupled {
+                    0.6 * (100e-6_f64 * 200e-6).sqrt()
+                } else {
+                    0.0
+                };
+                for (sample, &time) in result.time.iter().enumerate() {
+                    let rate1 = 1e-3 * omega * (omega * time + 37.0_f64.to_radians()).cos();
+                    let rate2 = 2e-3 * omega * (omega * time - 23.0_f64.to_radians()).cos();
+                    for (pos, neg, expected) in [
+                        ("a", "b", 100e-6 * rate1 + mutual * rate2),
+                        ("c", "d", 200e-6 * rate2 + mutual * rate1),
+                    ]
+                    .into_iter()
+                    .take(if coupled { 2 } else { 1 })
+                    {
+                        let actual = result.waveforms[node(pos)].values[sample]
+                            - result.waveforms[node(neg)].values[sample];
+                        assert!(
+                            (actual - expected).abs() < 1e-10,
+                            "coupled={coupled}, bias={bias:e}, {method:?}, {pos}-{neg}, t={time:e}: {actual:e} vs {expected:e}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn a_source_prescribes_its_series_winding_current() {
     use rspice_core::numerics::integration::IntegrationMethod;
     let engine = Engine::default();

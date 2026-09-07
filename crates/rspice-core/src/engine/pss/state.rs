@@ -180,7 +180,8 @@ pub(in crate::engine) struct PssCircuit {
     solution_scratch: Vec<Value>,
     current_balance: Vec<Value>,
     initial_flux_rates: Option<usize>,
-    current_source_correction: Vec<Value>,
+    current_source_rates: Vec<Value>,
+    current_source_offsets: [Vec<Value>; 3],
     current_source_times: [Value; 2],
 }
 
@@ -202,11 +203,12 @@ impl PssCircuit {
         let basis = PssStateBasis::new(&circuit);
         let solution_scratch = vec![0.0; circuit.matrix_size() + 1];
         let current_balance = vec![0.0; basis.currents.workspace_size()];
-        let current_source_correction = if basis.currents.has_prescribed_currents() {
+        let current_source_rates = if basis.currents.has_prescribed_currents() {
             vec![0.0; circuit.inductors.len()]
         } else {
             Vec::new()
         };
+        let current_source_offsets = std::array::from_fn(|_| vec![0.0; current_source_rates.len()]);
         let diode_history = TwoTerminalChargeHistory::from_biases(
             circuit
                 .diodes
@@ -221,7 +223,8 @@ impl PssCircuit {
             solution_scratch,
             current_balance,
             initial_flux_rates: None,
-            current_source_correction,
+            current_source_rates,
+            current_source_offsets,
             current_source_times: [0.0; 2],
         }
     }
@@ -398,7 +401,7 @@ impl PssCircuit {
     }
 
     pub(super) fn initialize_prescribed_currents(&mut self) -> Result<(), SimulationError> {
-        if !self.current_source_correction.is_empty() {
+        if !self.current_source_rates.is_empty() {
             self.set_state(&self.extract_state())?;
         }
         Ok(())
@@ -418,17 +421,27 @@ impl PssCircuit {
         rhs: &mut [Value],
         step: PssCompanionStep<'_>,
     ) -> Result<(), SimulationError> {
-        if !self.current_source_correction.is_empty() {
-            self.basis.currents.source_derivative_correction(
+        if !self.current_source_rates.is_empty() {
+            self.basis.currents.source_companion(
                 &self.circuit.current_sources,
                 &mut self.current_balance,
-                &mut self.current_source_correction,
+                &mut self.current_source_rates,
+                &mut self.current_source_offsets,
                 self.current_source_times,
                 step,
             )?;
             self.basis.currents.add_flux_rhs(
                 &self.circuit,
-                &self.current_source_correction,
+                |index| {
+                    self.current_source_rates[index]
+                        - step.coeff.inductor_charge_derivative_correction(
+                            1.0,
+                            step.dt,
+                            self.current_source_offsets[0][index],
+                            self.current_source_offsets[1][index],
+                            self.current_source_offsets[2][index],
+                        )
+                },
                 rhs,
             )?;
         }
@@ -442,19 +455,34 @@ impl PssCircuit {
     /// Evaluate winding equations from flux differences, sharing TRAN's
     /// cancellation-resistant residual and the affine forcing stamped by PSS.
     /// The caller has just stamped this same trial, so the forcing workspace
-    /// contains its current analytic source correction.
+    /// contains its prescribed current samples and analytic rates.
     pub(super) fn stabilize_inductor_correction_rhs(
         &self,
         rhs: &mut [Value],
         iterate: &[Value],
         step: PssCompanionStep<'_>,
     ) -> Result<(), SimulationError> {
-        self.circuit
-            .stabilize_inductor_transient_correction_rhs(rhs, iterate, step.dt, step.coeff);
-        if !self.current_source_correction.is_empty() {
+        if self.current_source_rates.is_empty() {
+            self.circuit
+                .stabilize_inductor_transient_correction_rhs(rhs, iterate, step.dt, step.coeff);
+        } else {
+            self.circuit
+                .stabilize_inductor_transient_correction_rhs_with_current_map(
+                    rhs,
+                    iterate,
+                    step.dt,
+                    step.coeff,
+                    |branch, samples| {
+                        self.basis.currents.free_current_samples(
+                            branch - self.circuit.num_nodes(),
+                            samples,
+                            &self.current_source_offsets,
+                        )
+                    },
+                );
             self.basis.currents.add_flux_rhs(
                 &self.circuit,
-                &self.current_source_correction,
+                |index| self.current_source_rates[index],
                 rhs,
             )?;
         }

@@ -82,7 +82,7 @@ impl PssAcceptedStepHistory {
 
 const PSS_KRYLOV_STATE_THRESHOLD: usize = 12;
 const PSS_KRYLOV_REL_TOL: Value = 1e-9;
-const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 8;
+const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 9;
 
 fn pss_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -4092,6 +4092,90 @@ mod tests {
             None,
             "the exact consistency solve must not leak its rejected expression cache"
         );
+    }
+
+    #[test]
+    fn rejected_prescribed_current_trials_do_not_change_the_retry_flux() {
+        let netlist = Netlist::parse(
+            "prescribed-current retry\nI1 0 a SIN(1000 1m 1meg 0 0 37)\nL1 a b 100u\nR1 b 0 0.0001\nI2 0 c SIN(-500 2m 1meg 0 0 -23)\nL2 c d 200u\nR2 d 0 0.0001\nK1 L1 L2 0.6\n.end\n"
+        ).unwrap();
+        let engine = Engine::default();
+        for method in [IntegrationMethod::Trapezoidal, IntegrationMethod::Gear2] {
+            let mut circuit = PssCircuit::new(engine.build_circuit(&netlist).unwrap());
+            circuit.set_state(&[]).unwrap();
+            let initial = engine
+                .pss_initial_node_solution(&mut circuit, &NoAbort)
+                .unwrap();
+            let mut matrix = engine.build_matrix(&circuit).unwrap();
+            circuit.link_indices(&matrix);
+            let mut trace = PssStateTrace::default();
+            engine
+                .pss_run_tran_internal(
+                    &mut circuit,
+                    &mut matrix,
+                    initial,
+                    PssTraversal {
+                        tstop: 2e-9,
+                        max_step: 1e-9,
+                        fixed_grid: true,
+                        integration_method: Some(method),
+                    },
+                    Some(&mut trace),
+                    &NoAbort,
+                )
+                .unwrap();
+            let start = trace.solutions.last().unwrap();
+            let accepted = circuit.clone();
+            let coeff = CompanionCoefficients::for_method(method);
+            for cancelled in [false, true] {
+                let limited = Engine::new(SimulationConfig {
+                    max_iterations: 1,
+                    ..SimulationConfig::default()
+                });
+                let abort = crate::abort_signal::CountingAbort::new(1);
+                let rejected = if cancelled { &engine } else { &limited }.pss_newton_trial(
+                    &mut circuit,
+                    &mut matrix,
+                    PssCompanionStep {
+                        coeff: &coeff,
+                        t_next: 10e-9,
+                        dt: 8e-9,
+                        initialization: false,
+                    },
+                    start,
+                    if cancelled { &abort } else { &NoAbort },
+                );
+                if cancelled {
+                    assert!(matches!(rejected, Err(SimulationError::Aborted)));
+                } else {
+                    assert!(rejected.unwrap().is_none());
+                }
+                assert_eq!(circuit.inductors.i_prev, accepted.inductors.i_prev);
+                assert_eq!(
+                    circuit.inductors.i_prev_prev,
+                    accepted.inductors.i_prev_prev
+                );
+                assert_eq!(circuit.inductors.v_prev, accepted.inductors.v_prev);
+                let retry = PssCompanionStep {
+                    coeff: &coeff,
+                    t_next: 3e-9,
+                    dt: 1e-9,
+                    initialization: false,
+                };
+                let actual = engine
+                    .pss_newton_trial(&mut circuit, &mut matrix, retry, start, &NoAbort)
+                    .unwrap()
+                    .unwrap();
+                let mut fresh = accepted.clone();
+                let mut fresh_matrix = engine.build_matrix(&fresh).unwrap();
+                fresh.link_indices(&fresh_matrix);
+                let expected = engine
+                    .pss_newton_trial(&mut fresh, &mut fresh_matrix, retry, start, &NoAbort)
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(actual, expected, "{method:?}, cancelled={cancelled}");
+            }
+        }
     }
 
     #[test]
