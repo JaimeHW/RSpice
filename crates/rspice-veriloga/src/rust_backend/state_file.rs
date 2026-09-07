@@ -591,6 +591,13 @@ pub(super) fn generate_state_file_with_extensions(
         out.push_str("        if self.analog_effects.as_ref().is_some_and(|journal| journal.has_candidate() || !journal.accepted().is_empty()) {\n            return Err(\"generated Verilog-A checkpoint requires accepted system tasks to be delivered and no candidate evaluation\".to_string());\n        }\n");
     }
     out.push_str("        Ok(())\n    }\n\n");
+    out.push_str(&format!("    pub fn candidate_analog_tasks(&self) -> Result<&[{}::AnalogTaskInvocation], String> {{\n", options.runtime_path));
+    if extensions.uses_analog_tasks {
+        out.push_str("        match &self.analog_effects { Some(journal) => journal.candidate().map_err(|error| error.to_string()), None => Ok(&[]) }\n");
+    } else {
+        out.push_str("        Ok(&[])\n");
+    }
+    out.push_str("    }\n\n");
     out.push_str(&format!("    pub fn drain_analog_tasks(&mut self) -> impl Iterator<Item = {}::AnalogTaskInvocation> + '_ {{\n", options.runtime_path));
     if extensions.uses_analog_tasks {
         out.push_str("        self.analog_effects.as_mut().map(|journal| journal.drain_accepted()).into_iter().flatten()\n");

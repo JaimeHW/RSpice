@@ -288,6 +288,14 @@ impl AnalogEffectJournal {
         &self.accepted
     }
 
+    /// Inspect a completed candidate without publishing or consuming effects.
+    /// The solver may use an accepted candidate's control requests to prepare
+    /// its final solution before committing any model history.
+    pub fn candidate(&self) -> Result<&[AnalogTaskInvocation], AnalogEffectError> {
+        self.validate_candidate()?;
+        Ok(&self.candidate)
+    }
+
     pub fn has_candidate(&self) -> bool {
         !self.candidate.is_empty() || self.failure.is_some() || self.evaluation_in_progress
     }
@@ -304,6 +312,27 @@ impl AnalogEffectJournal {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn candidate_inspection_is_validated_and_does_not_publish_or_consume_calls() {
+        let mut journal = AnalogEffectJournal::default();
+        journal.begin_evaluation();
+        journal.record_finish(7, 1.0, 0.0).unwrap();
+        assert_eq!(
+            journal.candidate(),
+            Err(AnalogEffectError::EvaluationFailed)
+        );
+        journal.complete_evaluation();
+        assert_eq!(journal.candidate().unwrap()[0].site, 7);
+        assert!(journal.accepted().is_empty());
+        assert_eq!(journal.candidate().unwrap().len(), 1);
+        journal.discard_candidate();
+        assert!(journal.candidate().unwrap().is_empty());
+        journal.record_finish(8, 2.0, 1.0).unwrap();
+        journal.accept_candidate().unwrap();
+        assert!(journal.candidate().unwrap().is_empty());
+        assert_eq!(journal.accepted()[0].site, 8);
+    }
 
     #[test]
     fn incomplete_evaluation_cannot_be_accepted_or_lost_during_rollback() {

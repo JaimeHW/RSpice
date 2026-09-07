@@ -49,6 +49,202 @@ module va_dc_rebuild_lifecycle(p, n);
 endmodule
 "#;
 
+const EARLY_SWEEP_FINISH_MODEL: &str = r#"
+module early_sweep_finish(sense,out);
+inout sense,out; electrical sense,out;
+parameter real threshold=2;
+real count;
+analog begin
+  @(initial_step("dc")) count=count+1;
+  @(final_step("dc")) count=count+10;
+  if (V(sense)>=threshold && count<10) $finish(1);
+  V(out)<+count;
+end
+endmodule
+"#;
+
+#[test]
+fn early_sweep_finish_solves_final_step_before_committing_the_endpoint() {
+    use rspice_core::{ModelFinishPoint, SimulationOutcome};
+    for route in ["source", "parameter", "temperature", "nested"] {
+        let source = match route {
+            "temperature" => {
+                EARLY_SWEEP_FINISH_MODEL.replace("V(sense)>=threshold", "$temperature>=303.0")
+            }
+            "nested" => EARLY_SWEEP_FINISH_MODEL.replace(
+                "V(sense)>=threshold",
+                "$temperature>300.5 && V(sense)>=threshold",
+            ),
+            _ => EARLY_SWEEP_FINISH_MODEL.into(),
+        };
+        let model = write_model(&format!("early_finish_{route}"), &source);
+        let deck = format!(
+            "* early sweep finish\n.param GAIN=4\nVSW sense 0 2\nX1 sense out early_sweep_finish {}\n.va \"{}\" early_sweep_finish\n.end\n",
+            if route == "parameter" {
+                "threshold={GAIN}"
+            } else {
+                ""
+            },
+            deck_path(&model)
+        );
+        let netlist = Netlist::parse(&deck).unwrap();
+        let outcome = Engine::default()
+            .run_with_outcome(&NoAbort, |engine, signal| match route {
+                "parameter" => {
+                    engine.run_dc_sweep_with_abort(&netlist, "GAIN", 4.0, 0.0, -1.0, signal)
+                }
+                "temperature" => {
+                    engine.run_dc_sweep_with_abort(&netlist, "TEMP", 27.0, 32.0, 1.0, signal)
+                }
+                "nested" => engine.run_dc_sweep2_with_abort(
+                    &netlist,
+                    "VSW",
+                    DcSweepRange {
+                        start: 0.0,
+                        stop: 4.0,
+                        step: 1.0,
+                    },
+                    Some(&rspice_core::netlist::DcSecondSweep::linear(
+                        "TEMP".into(),
+                        27.0,
+                        28.0,
+                        1.0,
+                    )),
+                    signal,
+                ),
+                _ => engine.run_dc_sweep_with_abort(&netlist, "VSW", 0.0, 4.0, 1.0, signal),
+            })
+            .unwrap();
+        let SimulationOutcome::Finished {
+            result: Some(points),
+            finish,
+        } = outcome
+        else {
+            panic!("{route}: an early finish must retain the accepted partial sweep");
+        };
+        let expected_count = match route {
+            "temperature" => 4,
+            "nested" => 8,
+            _ => 3,
+        };
+        assert_eq!(points.len(), expected_count, "{route}");
+        let (value, last) = points.last().unwrap();
+        assert_eq!(finish.point, ModelFinishPoint::DcSweep { value: *value });
+        assert_eq!(finish.instance, "X1");
+        assert_eq!(finish.diagnostic_level, 1);
+        assert_eq!(
+            node_voltage(last, "out"),
+            11.0,
+            "{route}: the final_step equation must be solved, with each event assignment accepted once"
+        );
+        for (_, point) in &points[..points.len() - 1] {
+            assert_eq!(node_voltage(point, "out"), 1.0, "{route}");
+        }
+        let _ = std::fs::remove_file(model);
+    }
+}
+
+#[test]
+fn branch_unknowns_must_be_solved_before_an_ordinary_model_can_finish() {
+    let model = write_model(
+        "branch_only_finish",
+        "module branch_only_finish; analog $finish(0); endmodule",
+    );
+    let netlist = Netlist::parse(&format!("* branch unknown with no non-ground nodes\nVbad 0 0 1\nX1 branch_only_finish\n.va \"{}\" branch_only_finish\n.end\n", deck_path(&model))).unwrap();
+    for sweep in [false, true] {
+        let error = Engine::default().run_with_outcome(&NoAbort, |engine, signal| {
+            if sweep {
+                engine.run_dc_sweep_with_abort(&netlist, "Vbad", 1.0, 2.0, 1.0, signal).map(|_| ())
+            } else {
+                engine.run_dc_op_with_abort(&netlist, signal).map(|_| ())
+            }
+        }).expect_err("zero node voltages do not eliminate the unsatisfied voltage-source branch equation");
+        assert!(
+            !matches!(error, rspice_core::SimulationError::ModelFinished(_)),
+            "{error}"
+        );
+    }
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
+fn a_portless_model_can_finish_an_accepted_sweep_point() {
+    use rspice_core::{ModelFinishPoint, SimulationOutcome};
+    let model = write_model(
+        "portless_sweep_finish",
+        r#"module portless_sweep_finish;
+parameter real gain=0;
+analog begin if (gain>=0) $finish(0); @(final_step("dc")) $finish(2); end
+endmodule"#,
+    );
+    let netlist = Netlist::parse(&format!("* portless accepted control\n.param GAIN=0\nX1 portless_sweep_finish gain={{GAIN}}\n.va \"{}\" portless_sweep_finish\n.end\n", deck_path(&model))).unwrap();
+    let operating_point = Engine::default()
+        .run_with_outcome(&NoAbort, |engine, signal| {
+            engine.run_dc_op_with_abort(&netlist, signal)
+        })
+        .unwrap();
+    assert!(
+        matches!(operating_point, SimulationOutcome::Finished { result: Some(_), finish } if finish.point == ModelFinishPoint::OperatingPoint)
+    );
+    let outcome = Engine::default()
+        .run_with_outcome(&NoAbort, |engine, signal| {
+            engine.run_dc_sweep_with_abort(&netlist, "GAIN", 0.0, 4.0, 1.0, signal)
+        })
+        .unwrap();
+    let SimulationOutcome::Finished {
+        result: Some(points),
+        finish,
+    } = outcome
+    else {
+        panic!("a portless ordinary analog body must execute at the public sweep point");
+    };
+    assert_eq!(points.len(), 1);
+    assert_eq!(finish.point, ModelFinishPoint::DcSweep { value: 0.0 });
+    assert_eq!(finish.diagnostic_level, 0);
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
+fn rebuilding_a_sweep_point_does_not_replay_analog_initial_control() {
+    use rspice_core::SimulationOutcome;
+    let source = EARLY_SWEEP_FINISH_MODEL
+        .replace("V(sense)>=threshold", "0")
+        .replace(
+            "analog begin",
+            "analog initial if ($temperature>301.0) $finish(2);\nanalog begin",
+        );
+    let model = write_model("initial_control_rebuild", &source);
+    let netlist = Netlist::parse(&format!("* one initialization for a rebuilt sweep\nVSW sense 0 0\nX1 sense out early_sweep_finish\n.va \"{}\" early_sweep_finish\n.end\n", deck_path(&model))).unwrap();
+    let outcome = Engine::default()
+        .run_with_outcome(&NoAbort, |engine, signal| {
+            engine.run_dc_sweep_with_abort(&netlist, "TEMP", 27.0, 29.0, 1.0, signal)
+        })
+        .unwrap();
+    let SimulationOutcome::Completed(points) = outcome else {
+        panic!("reconstruction must not deliver an analog initializer again: {outcome:?}");
+    };
+    assert_eq!(points.len(), 3);
+    assert_eq!(node_voltage(&points[2].1, "out"), 11.0);
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
+fn a_failed_early_sweep_final_solution_is_not_reported_as_normal_completion() {
+    let source = EARLY_SWEEP_FINISH_MODEL.replace("V(out)<+count", "V(out)<+1.0/(11.0-count)");
+    let model = write_model("finish_final_failure", &source);
+    let netlist = Netlist::parse(&format!("* invalid final solution\nVSW sense 0 0\nX1 sense out early_sweep_finish\n.va \"{}\" early_sweep_finish\n.end\n", deck_path(&model))).unwrap();
+    let error = Engine::default()
+        .run_with_outcome(&NoAbort, |engine, signal| {
+            engine.run_dc_sweep_with_abort(&netlist, "VSW", 0.0, 4.0, 1.0, signal)
+        })
+        .unwrap_err();
+    assert!(
+        !matches!(error, rspice_core::SimulationError::ModelFinished(_)),
+        "{error}"
+    );
+    let _ = std::fs::remove_file(model);
+}
+
 #[test]
 fn analog_initial_is_not_replayed_by_dc_newton_or_final_step_evaluations() {
     let model = write_model(

@@ -449,6 +449,27 @@ impl BuiltinVerilogADevices {
         }
     }
 
+    pub(crate) fn first_candidate_analog_task(
+        &self,
+        kind: AnalogTaskKind,
+    ) -> Result<Option<AnalogTaskEvent<'_>>, String> {
+        for device in &self.devices {
+            if let Some(call) = device
+                .kind
+                .candidate_analog_tasks()?
+                .iter()
+                .find(|call| call.kind == kind)
+            {
+                return Ok(Some(AnalogTaskEvent {
+                    instance: &device.instance_name,
+                    model: device.model_name,
+                    call: call.clone(),
+                }));
+            }
+        }
+        Ok(None)
+    }
+
     /// Exact current entering the first external module terminal from the
     /// most recent complete device evaluation.
     ///
@@ -513,10 +534,25 @@ impl BuiltinVerilogADevices {
         &mut self,
         states: &[GeneratedVerilogAInstanceCheckpoint],
     ) -> Result<(), String> {
+        self.restore_checkpoint_states_impl(states, false)
+    }
+
+    pub(crate) fn restore_analysis_continuation_states(
+        &mut self,
+        states: &[GeneratedVerilogAInstanceCheckpoint],
+    ) -> Result<(), String> {
+        self.restore_checkpoint_states_impl(states, true)
+    }
+
+    fn restore_checkpoint_states_impl(
+        &mut self,
+        states: &[GeneratedVerilogAInstanceCheckpoint],
+        continue_analysis: bool,
+    ) -> Result<(), String> {
         self.validate_checkpoint_states(states)?;
         let rollback = self.capture_rollback_state();
         for (index, (device, state)) in self.devices.iter_mut().zip(states).enumerate() {
-            if let Err(error) = device.restore_checkpoint_state(state) {
+            if let Err(error) = device.restore_checkpoint_state(state, continue_analysis) {
                 self.restore_rollback_state(rollback);
                 return Err(format!(
                     "generated Verilog-A checkpoint instance {index} restore failed: {error}"
@@ -937,9 +973,15 @@ impl BuiltinVerilogAInstance {
     fn restore_checkpoint_state(
         &mut self,
         checkpoint: &GeneratedVerilogAInstanceCheckpoint,
+        continue_analysis: bool,
     ) -> Result<(), String> {
         self.validate_checkpoint_state(checkpoint)?;
-        self.kind.restore_persistent_state(&checkpoint.state)?;
+        if continue_analysis {
+            self.kind
+                .restore_analysis_continuation_state(&checkpoint.state)?;
+        } else {
+            self.kind.restore_persistent_state(&checkpoint.state)?;
+        }
         self.terminal_currents
             .copy_from_slice(&checkpoint.terminal_currents);
         Ok(())
@@ -2692,6 +2734,17 @@ mod tests {
         }
         devices.capture_rollback_state_into(&mut reused);
         assert_eq!(reused, devices.capture_rollback_state());
+        let candidate = devices
+            .first_candidate_analog_task(super::AnalogTaskKind::Finish)
+            .unwrap()
+            .unwrap();
+        assert_eq!(candidate.instance, "r1");
+        assert_eq!(candidate.call.site, 1);
+        assert_eq!(
+            reused,
+            devices.capture_rollback_state(),
+            "inspection must not advance or drain the candidate"
+        );
         let valid = devices.devices[1].kind.capture_rollback_state();
         let mut invalid = valid.clone();
         invalid

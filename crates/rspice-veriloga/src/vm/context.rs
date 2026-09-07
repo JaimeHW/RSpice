@@ -533,6 +533,18 @@ impl VmContext {
             .map_err(|error| VmError::AnalogTask(error.to_string()))
     }
 
+    /// Inspect a completed candidate without accepting or consuming its calls.
+    pub fn candidate_analog_tasks(
+        &self,
+    ) -> Result<&[rspice_veriloga_runtime::AnalogTaskInvocation], VmError> {
+        match &self.analog_effects {
+            Some(journal) => journal
+                .candidate()
+                .map_err(|error| VmError::AnalogTask(error.to_string())),
+            None => Ok(&[]),
+        }
+    }
+
     /// Whether a host has accepted calls waiting for delivery.
     pub fn has_accepted_analog_tasks(&self) -> bool {
         self.analog_effects

@@ -2,11 +2,11 @@
 {
   "schema_version": 7,
   "source_tree_digest": "8df45ec06360bbd151ebdbbc41ef5fc08a914156e6d696ae626f667246bea520",
-  "generator_digest": "aca9fb7b47c898d8f7357147dd2bf30305a51370317c80b046be4df89cc54e6f",
-  "bundle_digest": "2b2d3e9c270ec50ce8bbf7bc30416ded314dbd48d426a58e9124c5607c233720",
+  "generator_digest": "1dfc2984816c1c1f997173cc79dcb0e459b41996183762f78a0ce11403dc1f0a",
+  "bundle_digest": "055d3400217ce0eaf0f9302207d53e0f0b3dfdcc0e069a8306ec59fe7d86f537",
   "device_count": 43,
   "file_count": 347,
-  "source_bytes": 32961321,
+  "source_bytes": 32990061,
   "devices": [
     {
       "module_name": "DIODE_CMC",
@@ -15,7 +15,7 @@
       "feature_name": "veriloga-model-diode-cmc",
       "package_name": "rspice-veriloga-model-diode-cmc",
       "file_count": 5,
-      "source_bytes": 477377,
+      "source_bytes": 477748,
       "workspace": {
         "abi_version": 3,
         "variable_count": 962,
@@ -42,7 +42,7 @@
       "feature_name": "veriloga-model-epfl-hemt-10a",
       "package_name": "rspice-veriloga-model-epfl-hemt-10a",
       "file_count": 5,
-      "source_bytes": 76596,
+      "source_bytes": 76967,
       "workspace": {
         "abi_version": 3,
         "variable_count": 199,
@@ -69,7 +69,7 @@
       "feature_name": "veriloga-model-juncap200",
       "package_name": "rspice-veriloga-model-juncap200",
       "file_count": 5,
-      "source_bytes": 301739,
+      "source_bytes": 302110,
       "workspace": {
         "abi_version": 3,
         "variable_count": 668,
@@ -96,7 +96,7 @@
       "feature_name": "veriloga-model-psp104tva",
       "package_name": "rspice-veriloga-model-psp104tva",
       "file_count": 5,
-      "source_bytes": 1168940,
+      "source_bytes": 1169311,
       "workspace": {
         "abi_version": 3,
         "variable_count": 2932,
@@ -123,7 +123,7 @@
       "feature_name": "veriloga-model-psp104va",
       "package_name": "rspice-veriloga-model-psp104va",
       "file_count": 5,
-      "source_bytes": 1149198,
+      "source_bytes": 1149569,
       "workspace": {
         "abi_version": 3,
         "variable_count": 2913,
@@ -150,7 +150,7 @@
       "feature_name": "veriloga-model-pspnqs104va",
       "package_name": "rspice-veriloga-model-pspnqs104va",
       "file_count": 5,
-      "source_bytes": 1480046,
+      "source_bytes": 1480417,
       "workspace": {
         "abi_version": 3,
         "variable_count": 3438,
@@ -177,7 +177,7 @@
       "feature_name": "veriloga-model-angelov",
       "package_name": "rspice-veriloga-model-angelov",
       "file_count": 5,
-      "source_bytes": 194164,
+      "source_bytes": 194535,
       "workspace": {
         "abi_version": 3,
         "variable_count": 136,
@@ -204,7 +204,7 @@
       "feature_name": "veriloga-model-angelov-gan",
       "package_name": "rspice-veriloga-model-angelov-gan",
       "file_count": 5,
-      "source_bytes": 209704,
+      "source_bytes": 210075,
       "workspace": {
         "abi_version": 3,
         "variable_count": 156,
@@ -231,7 +231,7 @@
       "feature_name": "veriloga-model-asmesd",
       "package_name": "rspice-veriloga-model-asmesd",
       "file_count": 5,
-      "source_bytes": 138652,
+      "source_bytes": 139023,
       "workspace": {
         "abi_version": 3,
         "variable_count": 160,
@@ -258,7 +258,7 @@
       "feature_name": "veriloga-model-asmesd-dio",
       "package_name": "rspice-veriloga-model-asmesd-dio",
       "file_count": 5,
-      "source_bytes": 103447,
+      "source_bytes": 103818,
       "workspace": {
         "abi_version": 3,
         "variable_count": 83,
@@ -285,7 +285,7 @@
       "feature_name": "veriloga-model-asmhemt",
       "package_name": "rspice-veriloga-model-asmhemt",
       "file_count": 5,
-      "source_bytes": 828128,
+      "source_bytes": 828499,
       "workspace": {
         "abi_version": 3,
         "variable_count": 1158,
@@ -312,7 +312,7 @@
       "feature_name": "veriloga-model-bjt505-va",
       "package_name": "rspice-veriloga-model-bjt505-va",
       "file_count": 5,
-      "source_bytes": 299436,
+      "source_bytes": 299807,
       "workspace": {
         "abi_version": 3,
         "variable_count": 616,
@@ -339,7 +339,7 @@
       "feature_name": "veriloga-model-bjt505t-va",
       "package_name": "rspice-veriloga-model-bjt505t-va",
       "file_count": 5,
-      "source_bytes": 322266,
+      "source_bytes": 322637,
       "workspace": {
         "abi_version": 3,
         "variable_count": 630,
@@ -366,7 +366,7 @@
       "feature_name": "veriloga-model-bjtd505-va",
       "package_name": "rspice-veriloga-model-bjtd505-va",
       "file_count": 5,
-      "source_bytes": 274776,
+      "source_bytes": 275147,
       "workspace": {
         "abi_version": 3,
         "variable_count": 571,
@@ -393,7 +393,7 @@
       "feature_name": "veriloga-model-bjtd505t-va",
       "package_name": "rspice-veriloga-model-bjtd505t-va",
       "file_count": 5,
-      "source_bytes": 294613,
+      "source_bytes": 294984,
       "workspace": {
         "abi_version": 3,
         "variable_count": 585,
@@ -420,7 +420,7 @@
       "feature_name": "veriloga-model-bsimbulk",
       "package_name": "rspice-veriloga-model-bsimbulk",
       "file_count": 5,
-      "source_bytes": 916969,
+      "source_bytes": 917340,
       "workspace": {
         "abi_version": 3,
         "variable_count": 1891,
@@ -447,7 +447,7 @@
       "feature_name": "veriloga-model-bsimcmg-va",
       "package_name": "rspice-veriloga-model-bsimcmg-va",
       "file_count": 5,
-      "source_bytes": 1427854,
+      "source_bytes": 1428225,
       "workspace": {
         "abi_version": 3,
         "variable_count": 2672,
@@ -474,7 +474,7 @@
       "feature_name": "veriloga-model-bsimimg",
       "package_name": "rspice-veriloga-model-bsimimg",
       "file_count": 5,
-      "source_bytes": 454159,
+      "source_bytes": 454642,
       "workspace": {
         "abi_version": 3,
         "variable_count": 676,
@@ -501,7 +501,7 @@
       "feature_name": "veriloga-model-bsimsoi-18c250bc",
       "package_name": "rspice-veriloga-model-bsimsoi-18c250bc",
       "file_count": 5,
-      "source_bytes": 855192,
+      "source_bytes": 855563,
       "workspace": {
         "abi_version": 3,
         "variable_count": 1584,
@@ -528,7 +528,7 @@
       "feature_name": "veriloga-model-bsimsoi-e2aff994",
       "package_name": "rspice-veriloga-model-bsimsoi-e2aff994",
       "file_count": 5,
-      "source_bytes": 1503307,
+      "source_bytes": 1503678,
       "workspace": {
         "abi_version": 3,
         "variable_count": 2277,
@@ -555,7 +555,7 @@
       "feature_name": "veriloga-model-bsimsoi-va",
       "package_name": "rspice-veriloga-model-bsimsoi-va",
       "file_count": 5,
-      "source_bytes": 774718,
+      "source_bytes": 775201,
       "workspace": {
         "abi_version": 3,
         "variable_count": 1885,
@@ -582,7 +582,7 @@
       "feature_name": "veriloga-model-ekv3-rf",
       "package_name": "rspice-veriloga-model-ekv3-rf",
       "file_count": 5,
-      "source_bytes": 257115,
+      "source_bytes": 257486,
       "workspace": {
         "abi_version": 3,
         "variable_count": 654,
@@ -609,7 +609,7 @@
       "feature_name": "veriloga-model-ekv-va",
       "package_name": "rspice-veriloga-model-ekv-va",
       "file_count": 5,
-      "source_bytes": 116564,
+      "source_bytes": 116935,
       "workspace": {
         "abi_version": 3,
         "variable_count": 272,
@@ -636,7 +636,7 @@
       "feature_name": "veriloga-model-hicuml0va",
       "package_name": "rspice-veriloga-model-hicuml0va",
       "file_count": 5,
-      "source_bytes": 196913,
+      "source_bytes": 197284,
       "workspace": {
         "abi_version": 3,
         "variable_count": 386,
@@ -663,7 +663,7 @@
       "feature_name": "veriloga-model-hicuml2va",
       "package_name": "rspice-veriloga-model-hicuml2va",
       "file_count": 5,
-      "source_bytes": 346011,
+      "source_bytes": 346382,
       "workspace": {
         "abi_version": 3,
         "variable_count": 572,
@@ -690,7 +690,7 @@
       "feature_name": "veriloga-model-hisimhv-n4-va",
       "package_name": "rspice-veriloga-model-hisimhv-n4-va",
       "file_count": 5,
-      "source_bytes": 3306162,
+      "source_bytes": 3306533,
       "workspace": {
         "abi_version": 3,
         "variable_count": 3486,
@@ -717,7 +717,7 @@
       "feature_name": "veriloga-model-hisimhv-n5-va",
       "package_name": "rspice-veriloga-model-hisimhv-n5-va",
       "file_count": 5,
-      "source_bytes": 3340383,
+      "source_bytes": 3340754,
       "workspace": {
         "abi_version": 3,
         "variable_count": 3488,
@@ -744,7 +744,7 @@
       "feature_name": "veriloga-model-hisimhv-va",
       "package_name": "rspice-veriloga-model-hisimhv-va",
       "file_count": 5,
-      "source_bytes": 3340542,
+      "source_bytes": 3340913,
       "workspace": {
         "abi_version": 3,
         "variable_count": 3490,
@@ -771,7 +771,7 @@
       "feature_name": "veriloga-model-hisimsoi-va-5be18005",
       "package_name": "rspice-veriloga-model-hisimsoi-va-5be18005",
       "file_count": 5,
-      "source_bytes": 1308545,
+      "source_bytes": 1308916,
       "workspace": {
         "abi_version": 3,
         "variable_count": 1894,
@@ -798,7 +798,7 @@
       "feature_name": "veriloga-model-hisimsoi-va-242bc21d",
       "package_name": "rspice-veriloga-model-hisimsoi-va-242bc21d",
       "file_count": 5,
-      "source_bytes": 1307412,
+      "source_bytes": 1307783,
       "workspace": {
         "abi_version": 3,
         "variable_count": 1890,
@@ -825,7 +825,7 @@
       "feature_name": "veriloga-model-hisimsoi-va-38074d06",
       "package_name": "rspice-veriloga-model-hisimsoi-va-38074d06",
       "file_count": 5,
-      "source_bytes": 1307704,
+      "source_bytes": 1308075,
       "workspace": {
         "abi_version": 3,
         "variable_count": 1892,
@@ -852,7 +852,7 @@
       "feature_name": "veriloga-model-hisimsotb-va",
       "package_name": "rspice-veriloga-model-hisimsotb-va",
       "file_count": 5,
-      "source_bytes": 812955,
+      "source_bytes": 813326,
       "workspace": {
         "abi_version": 3,
         "variable_count": 1130,
@@ -879,7 +879,7 @@
       "feature_name": "veriloga-model-l-utsoi-832ce87d",
       "package_name": "rspice-veriloga-model-l-utsoi-832ce87d",
       "file_count": 5,
-      "source_bytes": 825314,
+      "source_bytes": 825685,
       "workspace": {
         "abi_version": 3,
         "variable_count": 1901,
@@ -906,7 +906,7 @@
       "feature_name": "veriloga-model-l-utsoi-485e0ac9",
       "package_name": "rspice-veriloga-model-l-utsoi-485e0ac9",
       "file_count": 5,
-      "source_bytes": 836801,
+      "source_bytes": 837172,
       "workspace": {
         "abi_version": 3,
         "variable_count": 1911,
@@ -933,7 +933,7 @@
       "feature_name": "veriloga-model-mosvar",
       "package_name": "rspice-veriloga-model-mosvar",
       "file_count": 5,
-      "source_bytes": 244812,
+      "source_bytes": 245183,
       "workspace": {
         "abi_version": 3,
         "variable_count": 439,
@@ -960,7 +960,7 @@
       "feature_name": "veriloga-model-mvsg-cmc",
       "package_name": "rspice-veriloga-model-mvsg-cmc",
       "file_count": 5,
-      "source_bytes": 704415,
+      "source_bytes": 704786,
       "workspace": {
         "abi_version": 3,
         "variable_count": 3990,
@@ -987,7 +987,7 @@
       "feature_name": "veriloga-model-r2-cmc",
       "package_name": "rspice-veriloga-model-r2-cmc",
       "file_count": 5,
-      "source_bytes": 80301,
+      "source_bytes": 80784,
       "workspace": {
         "abi_version": 3,
         "variable_count": 87,
@@ -1014,7 +1014,7 @@
       "feature_name": "veriloga-model-r2-et-cmc",
       "package_name": "rspice-veriloga-model-r2-et-cmc",
       "file_count": 5,
-      "source_bytes": 87120,
+      "source_bytes": 87603,
       "workspace": {
         "abi_version": 3,
         "variable_count": 105,
@@ -1041,7 +1041,7 @@
       "feature_name": "veriloga-model-r3-cmc",
       "package_name": "rspice-veriloga-model-r3-cmc",
       "file_count": 5,
-      "source_bytes": 172436,
+      "source_bytes": 172807,
       "workspace": {
         "abi_version": 3,
         "variable_count": 340,
@@ -1068,7 +1068,7 @@
       "feature_name": "veriloga-model-vbic13",
       "package_name": "rspice-veriloga-model-vbic13",
       "file_count": 5,
-      "source_bytes": 217674,
+      "source_bytes": 218045,
       "workspace": {
         "abi_version": 3,
         "variable_count": 342,
@@ -1095,7 +1095,7 @@
       "feature_name": "veriloga-model-vbic13-3t-et",
       "package_name": "rspice-veriloga-model-vbic13-3t-et",
       "file_count": 5,
-      "source_bytes": 217824,
+      "source_bytes": 218195,
       "workspace": {
         "abi_version": 3,
         "variable_count": 342,
@@ -1122,7 +1122,7 @@
       "feature_name": "veriloga-model-vbic13-4t",
       "package_name": "rspice-veriloga-model-vbic13-4t",
       "file_count": 5,
-      "source_bytes": 236269,
+      "source_bytes": 236640,
       "workspace": {
         "abi_version": 3,
         "variable_count": 360,
@@ -1149,7 +1149,7 @@
       "feature_name": "veriloga-model-vbic-4t-et-cf",
       "package_name": "rspice-veriloga-model-vbic-4t-et-cf",
       "file_count": 5,
-      "source_bytes": 110676,
+      "source_bytes": 111047,
       "workspace": {
         "abi_version": 3,
         "variable_count": 171,
@@ -1208,8 +1208,8 @@
     },
     {
       "relative_path": "models/angelov-gan/src/angelov_gan__angelov_gan__98687686/state.rs",
-      "bytes": 51194,
-      "blake3": "0551d8f07f1bf3f67e91e4100241d9085f523091bc39d926a26c23aee94bd781"
+      "bytes": 51565,
+      "blake3": "63806c4c13a6481412f96949726b1c617225e62130d5d362d564fa758ee69d7e"
     },
     {
       "relative_path": "models/angelov-gan/src/lib.rs",
@@ -1248,8 +1248,8 @@
     },
     {
       "relative_path": "models/angelov/src/angelov__angelov__98b92059/state.rs",
-      "bytes": 48169,
-      "blake3": "e74f7f9de14778a652d43b9298317ac5a7d2048b11148e104e374cbca55ac5ce"
+      "bytes": 48540,
+      "blake3": "abe9ee1c544b7439081d990f15361fa013820c37514d7166375bf0b3068e2f13"
     },
     {
       "relative_path": "models/angelov/src/lib.rs",
@@ -1288,8 +1288,8 @@
     },
     {
       "relative_path": "models/asmesd-dio/src/asmesd_dio__asmesd_dio__b913dc15/state.rs",
-      "bytes": 44563,
-      "blake3": "84a680bea438d6f5dd4d57d22e774bbad7ff3494dd9ce2368564c03feb0a5c4a"
+      "bytes": 44934,
+      "blake3": "b062e6af16725600158c861e5d9db4693a9e86147c1cea824d1c1004fdf5cbd7"
     },
     {
       "relative_path": "models/asmesd-dio/src/lib.rs",
@@ -1328,8 +1328,8 @@
     },
     {
       "relative_path": "models/asmesd/src/asmesd__asmesd__fbe2f3a4/state.rs",
-      "bytes": 48347,
-      "blake3": "52dafada5b779a4619c6889965e3d18c9ab2aab7ccf3c2c788127d94d5862b90"
+      "bytes": 48718,
+      "blake3": "c496eaf190566427b9be7881f4ccf67b4297c67e40eb5b712607da7b81ba9ebf"
     },
     {
       "relative_path": "models/asmesd/src/lib.rs",
@@ -1368,8 +1368,8 @@
     },
     {
       "relative_path": "models/asmhemt/src/asmhemt__asmhemt__9d86ed5b/state.rs",
-      "bytes": 76874,
-      "blake3": "f4b721443687e675421384b81e0eee85ba415321a6c876752f3f3e1ba3f6c302"
+      "bytes": 77245,
+      "blake3": "00a7e74887dc4dda45f6a772212140ed97a55bff403327faebaab56569fbe19d"
     },
     {
       "relative_path": "models/asmhemt/src/lib.rs",
@@ -1408,8 +1408,8 @@
     },
     {
       "relative_path": "models/bjt505-va/src/bjt505__bjt505_va__6ac090e2/state.rs",
-      "bytes": 60351,
-      "blake3": "3650a496dd485a29bb7fe284456db9106cf903f993f380e07d16598209241cd6"
+      "bytes": 60722,
+      "blake3": "8769f6f0cebad1bab6e0ea880d41376cc3570a6b35be0bd952d865465111c236"
     },
     {
       "relative_path": "models/bjt505-va/src/lib.rs",
@@ -1448,8 +1448,8 @@
     },
     {
       "relative_path": "models/bjt505t-va/src/bjt505t__bjt505t_va__48d754e7/state.rs",
-      "bytes": 59837,
-      "blake3": "7cef152b1c3ea6087c6b1492aeff1d15b0fbca3f012ee83310a8a95bbcc52e73"
+      "bytes": 60208,
+      "blake3": "12b5637ada9955aab92d49ffabcc6964817e6ec013f5b669e3d5239746bc5987"
     },
     {
       "relative_path": "models/bjt505t-va/src/lib.rs",
@@ -1488,8 +1488,8 @@
     },
     {
       "relative_path": "models/bjtd505-va/src/bjtd505__bjtd505_va__3cb9ae22/state.rs",
-      "bytes": 58259,
-      "blake3": "c5a4fc623241d391001a7fc3519a5f63c05da4f853f10b4d900fec2277bffc33"
+      "bytes": 58630,
+      "blake3": "5015fbbe93a72061002211f14c79e70cb0fe1b865ddc3a6bb793ec36469bb8b8"
     },
     {
       "relative_path": "models/bjtd505-va/src/lib.rs",
@@ -1528,8 +1528,8 @@
     },
     {
       "relative_path": "models/bjtd505t-va/src/bjtd505t__bjtd505t_va__06e24760/state.rs",
-      "bytes": 57752,
-      "blake3": "7dbbe7fa639cd81a68600473f50c97ed469388aa78580a3c2dcb60370ea28a4f"
+      "bytes": 58123,
+      "blake3": "ec568a82cf039fa96a3796065e9c9f6238f5a903a38dec787855e59366cabd9b"
     },
     {
       "relative_path": "models/bjtd505t-va/src/lib.rs",
@@ -1568,8 +1568,8 @@
     },
     {
       "relative_path": "models/bsimbulk/src/bsimbulk__bsimbulk__0f953aae/state.rs",
-      "bytes": 259270,
-      "blake3": "551214aa173fc8c63e1ce352769f12857edb8b59f410ea3269a2482c2f8a088a"
+      "bytes": 259641,
+      "blake3": "c1b43694bed3a77699989eb5c520cf626c017875bbd338266a1265491551c184"
     },
     {
       "relative_path": "models/bsimbulk/src/lib.rs",
@@ -1608,8 +1608,8 @@
     },
     {
       "relative_path": "models/bsimcmg-va/src/bsimcmg__bsimcmg_va__f3a4082f/state.rs",
-      "bytes": 469956,
-      "blake3": "375a51006ecedc39abe01d211aead129994558906ff69032d1ea695ae0bcb676"
+      "bytes": 470327,
+      "blake3": "766909bbafeb2542b0bfb75d97b55372e22d555eb9ce34ad18e0642e17341e37"
     },
     {
       "relative_path": "models/bsimcmg-va/src/lib.rs",
@@ -1648,8 +1648,8 @@
     },
     {
       "relative_path": "models/bsimimg/src/bsimimg__bsimimg__25eb6a31/state.rs",
-      "bytes": 162794,
-      "blake3": "663c7eec9eb0736aafb18c1b8447672edf6adbd44feba60557ef192a22396e2c"
+      "bytes": 163277,
+      "blake3": "ef7c314f3066c7d6e461c9ce847c28adac76fd099cfa6e23dc98cf4a7938c5ec"
     },
     {
       "relative_path": "models/bsimimg/src/lib.rs",
@@ -1688,8 +1688,8 @@
     },
     {
       "relative_path": "models/bsimsoi-18c250bc/src/bsimsoi__bsimsoi__18c250bc/state.rs",
-      "bytes": 235383,
-      "blake3": "3430b3349aa9c2f008b4e547b46dc4216d334e0a584db2ed5fd36d1e84a3a2a6"
+      "bytes": 235754,
+      "blake3": "8b5ba939874a855ad5f036ea8fdfd12e1d856a544964c32ca0305d4f4cedec13"
     },
     {
       "relative_path": "models/bsimsoi-18c250bc/src/lib.rs",
@@ -1728,8 +1728,8 @@
     },
     {
       "relative_path": "models/bsimsoi-e2aff994/src/bsimsoi__bsimsoi__e2aff994/state.rs",
-      "bytes": 295766,
-      "blake3": "38dd448f427f7215132763fe1a60775954ca2c4ffcd34f79888d3da21328e41b"
+      "bytes": 296137,
+      "blake3": "196a36219af122189c629070cafd2642297d96efee0b46c346d55a04e877db32"
     },
     {
       "relative_path": "models/bsimsoi-e2aff994/src/lib.rs",
@@ -1768,8 +1768,8 @@
     },
     {
       "relative_path": "models/bsimsoi-va/src/bsimsoi__bsimsoi_va__3b1f6b5e/state.rs",
-      "bytes": 228236,
-      "blake3": "0e23448e24e97dcf925f575f582af16fcba1bf63bf0a40d18b7fa3da8b774b1c"
+      "bytes": 228719,
+      "blake3": "18a870999d16eff828e59e5dfb2bb3e9d287c4ecc2e7f4a1f1ab87d1c9f0e445"
     },
     {
       "relative_path": "models/bsimsoi-va/src/lib.rs",
@@ -1808,8 +1808,8 @@
     },
     {
       "relative_path": "models/diode-cmc/src/diode_cmc__diode_cmc__cdfab304/state.rs",
-      "bytes": 52611,
-      "blake3": "281ee73de504ac2a43dfd85d6c8569546a1be5a68d4404108c8fe6b8f6aefd47"
+      "bytes": 52982,
+      "blake3": "709102acc2921688c953bd48830a02f614f3831c957c53c08b93e76c6efcb55d"
     },
     {
       "relative_path": "models/diode-cmc/src/lib.rs",
@@ -1848,8 +1848,8 @@
     },
     {
       "relative_path": "models/ekv-va/src/ekv26_sdext_verilog_a__ekv_va__0f1ec77e/state.rs",
-      "bytes": 46055,
-      "blake3": "27607ed185fec0aaed65abf9ce1b275f5138e5e0a548d0ae63b183be837fe893"
+      "bytes": 46426,
+      "blake3": "0ec8254366181c65845afc3505114ce447bb14efd3c6841b8c9217682a55d9f9"
     },
     {
       "relative_path": "models/ekv-va/src/lib.rs",
@@ -1888,8 +1888,8 @@
     },
     {
       "relative_path": "models/ekv3-rf/src/ekv3__ekv3_rf__958cd2b2/state.rs",
-      "bytes": 72262,
-      "blake3": "861715466bf1e0bc762a4e43d737d3517a9b5b0f2c4d09d0f836718df478b995"
+      "bytes": 72633,
+      "blake3": "25cc6232f8a836f0cab26dc2cf934fffc99ef0d84a3fb89f0e89acbbcad37f6e"
     },
     {
       "relative_path": "models/ekv3-rf/src/lib.rs",
@@ -1928,8 +1928,8 @@
     },
     {
       "relative_path": "models/epfl-hemt-10a/src/epfl_hemt__epfl_hemt_10a__671606cd/state.rs",
-      "bytes": 41216,
-      "blake3": "1c4668ee76a12aee53627307f3c0056e73a5c44b7477b6c2ec07983b4b81d64a"
+      "bytes": 41587,
+      "blake3": "783c1c7ceb76f74c8b2ea0de0323af208a9587377161a2e40ef2e737ee7e4dc8"
     },
     {
       "relative_path": "models/epfl-hemt-10a/src/lib.rs",
@@ -1968,8 +1968,8 @@
     },
     {
       "relative_path": "models/hicuml0va/src/hicuml0_v2p1p0__hicuml0va__91cb3377/state.rs",
-      "bytes": 56641,
-      "blake3": "82edec81f8214a1c68290494bcd09e5ba388f7b8e27c0424d6f35f0e7e3a8c6f"
+      "bytes": 57012,
+      "blake3": "9780386c3396984cd6d648956ceca54dec2c08355b1bf321802426bc909b6fe2"
     },
     {
       "relative_path": "models/hicuml0va/src/lib.rs",
@@ -2008,8 +2008,8 @@
     },
     {
       "relative_path": "models/hicuml2va/src/hicuml2_v320__hicuml2va__25e676cf/state.rs",
-      "bytes": 60284,
-      "blake3": "23ac4495e1c5cfdf47ff0944faadaaf183a9f157ec583703094b017eef3ddc19"
+      "bytes": 60655,
+      "blake3": "73dac2b9988ac0d95c8045f67e93ce5a7dd37e59ad84f8c74d1b570db9b70ef7"
     },
     {
       "relative_path": "models/hicuml2va/src/lib.rs",
@@ -2048,8 +2048,8 @@
     },
     {
       "relative_path": "models/hisimhv-n4-va/src/hisimhv_n4__hisimhv_n4_va__69344dcf/state.rs",
-      "bytes": 203648,
-      "blake3": "6c06ed3fc7c0a2b5f3c8dbbe0d057485362ff43d380e37e8c1e878c199b34abc"
+      "bytes": 204019,
+      "blake3": "7a68b51de1acfb84200e334b417e9127d6451a397d1f262e3438c4a16cba4d29"
     },
     {
       "relative_path": "models/hisimhv-n4-va/src/lib.rs",
@@ -2088,8 +2088,8 @@
     },
     {
       "relative_path": "models/hisimhv-n5-va/src/hisimhv_n5__hisimhv_n5_va__89bf8539/state.rs",
-      "bytes": 203807,
-      "blake3": "22b43361d1ae637a4ea4c32fee8fc7c9f49225dad3ffda387b675c0994b465f5"
+      "bytes": 204178,
+      "blake3": "c1293fb03ed87461c13298dd9c0a74936a1063038fa2c4cc22ec057922f2eeda"
     },
     {
       "relative_path": "models/hisimhv-n5-va/src/lib.rs",
@@ -2128,8 +2128,8 @@
     },
     {
       "relative_path": "models/hisimhv-va/src/hisimhv__hisimhv_va__57d0ff0e/state.rs",
-      "bytes": 203966,
-      "blake3": "2447d58e6e9cee3bd9f97a57e01666a16b5350936bf4dfd455ad57f0d1d14de8"
+      "bytes": 204337,
+      "blake3": "f504df0debbb2318b19ef674d7dec6f7d5048d6e155ec7e5b8b3323a862c3af9"
     },
     {
       "relative_path": "models/hisimhv-va/src/lib.rs",
@@ -2168,8 +2168,8 @@
     },
     {
       "relative_path": "models/hisimsoi-va-242bc21d/src/hisimsoi_n4__hisimsoi_va__242bc21d/state.rs",
-      "bytes": 77052,
-      "blake3": "98e1f02fb25dac6f4e29ce833607481cb3e83e00a275ef3b0fa705d32a7b82aa"
+      "bytes": 77423,
+      "blake3": "07492f827f0b8099834b0246b497bae442b9742eb00d615071d25dd09225374d"
     },
     {
       "relative_path": "models/hisimsoi-va-242bc21d/src/lib.rs",
@@ -2208,8 +2208,8 @@
     },
     {
       "relative_path": "models/hisimsoi-va-38074d06/src/hisimsoi_n5__hisimsoi_va__38074d06/state.rs",
-      "bytes": 77198,
-      "blake3": "eb48d98f3fd2309273a5aa575d3af554da9f07ff111946c658a03d9c8157b4c0"
+      "bytes": 77569,
+      "blake3": "e02065f745fb64a7fb57cd13414d3672b3d5df760e4187e2541d2fcb7310c4dc"
     },
     {
       "relative_path": "models/hisimsoi-va-38074d06/src/lib.rs",
@@ -2248,8 +2248,8 @@
     },
     {
       "relative_path": "models/hisimsoi-va-5be18005/src/hisimsoi__hisimsoi_va__5be18005/state.rs",
-      "bytes": 77347,
-      "blake3": "ab1fbdacc6b996b99d2178c4b29527d5015e32abf07aa5d15c1ce55f8e2e84ab"
+      "bytes": 77718,
+      "blake3": "37d96f4d7419a14e0444897aefd5925480512593a8f52689f31a1e7a43359896"
     },
     {
       "relative_path": "models/hisimsoi-va-5be18005/src/lib.rs",
@@ -2288,8 +2288,8 @@
     },
     {
       "relative_path": "models/hisimsotb-va/src/hisimsotb__hisimsotb_va__41200697/state.rs",
-      "bytes": 86825,
-      "blake3": "bf07fa6e7e6654c6e7f2e8c395f55de7fefbef31e3e717c25da47b0791ff7a26"
+      "bytes": 87196,
+      "blake3": "9430c81a52803b3d76079d8b42bc7956b51810ea2934b0a625fdcf5d7079ed83"
     },
     {
       "relative_path": "models/hisimsotb-va/src/lib.rs",
@@ -2328,8 +2328,8 @@
     },
     {
       "relative_path": "models/juncap200/src/juncap200__juncap200__94ba75b4/state.rs",
-      "bytes": 45752,
-      "blake3": "0815c06e7ee73bb0eca9439b8efd8e2c521873559a5ecacc6a6f99d85f1c179a"
+      "bytes": 46123,
+      "blake3": "49354f25820ee2cba538c4b0fb79edc6ae5c90c08187170dbd6d51aa1225cf5c"
     },
     {
       "relative_path": "models/juncap200/src/lib.rs",
@@ -2368,8 +2368,8 @@
     },
     {
       "relative_path": "models/l-utsoi-485e0ac9/src/l_utsoi_102_nqs__l_utsoi__485e0ac9/state.rs",
-      "bytes": 105765,
-      "blake3": "980a7691bddf2f0c72ea22cdd7df36cd3111dec64c3e8125ba8116bd32f88256"
+      "bytes": 106136,
+      "blake3": "6cb646a6d8f88fd466f3eba77908b89fb38beac51effc654e2bbe8276ff56a93"
     },
     {
       "relative_path": "models/l-utsoi-485e0ac9/src/lib.rs",
@@ -2408,8 +2408,8 @@
     },
     {
       "relative_path": "models/l-utsoi-832ce87d/src/l_utsoi_102__l_utsoi__832ce87d/state.rs",
-      "bytes": 104160,
-      "blake3": "ae8c1108c436272f75e609b37d67502174acffa1305855568f163af2a8812170"
+      "bytes": 104531,
+      "blake3": "7fdd0a358af81550ae2a17d0cc6093ffcd7a5243fa9c0f0e6a8c55c907a158bc"
     },
     {
       "relative_path": "models/l-utsoi-832ce87d/src/lib.rs",
@@ -2453,8 +2453,8 @@
     },
     {
       "relative_path": "models/mosvar/src/mosvar__mosvar__0a88ed4a/state.rs",
-      "bytes": 46538,
-      "blake3": "90ee28041da2b68d7ae23cf4420c35d2cd25399b11dbe8153c9697bb3744343b"
+      "bytes": 46909,
+      "blake3": "4b7dc8fbb0bc35957e0c2dea4358d75728c765d7b4aaf13be6ed22f444860711"
     },
     {
       "relative_path": "models/mvsg-cmc/.rspice-veriloga-model-package",
@@ -2493,8 +2493,8 @@
     },
     {
       "relative_path": "models/mvsg-cmc/src/mvsg_cmc_4__mvsg_cmc__7d7f784b/state.rs",
-      "bytes": 87823,
-      "blake3": "bd92e3854de9b7e15d525058ba30cdece4b007533c7dc1b475a6c3a1c29afecd"
+      "bytes": 88194,
+      "blake3": "3801c0cec5a7271a1e1e35371b320e344d1c477f49ff9436cf9ea190c0604746"
     },
     {
       "relative_path": "models/psp104tva/.rspice-veriloga-model-package",
@@ -2533,8 +2533,8 @@
     },
     {
       "relative_path": "models/psp104tva/src/psp104t__psp104tva__0878692d/state.rs",
-      "bytes": 161976,
-      "blake3": "18c3f3318bb52575408c61f2f36154bf7568783dd6b1b8d6235ff10b0f3fb1cc"
+      "bytes": 162347,
+      "blake3": "b6ac2fa4c66d0e153cd4100eee41a55cc6f727e6ee2397988b763efe592f0e44"
     },
     {
       "relative_path": "models/psp104va/.rspice-veriloga-model-package",
@@ -2573,8 +2573,8 @@
     },
     {
       "relative_path": "models/psp104va/src/psp104__psp104va__75652357/state.rs",
-      "bytes": 159047,
-      "blake3": "f52ab2a47cdc9d75df38e11e69efbbc94ad5d27a1e73286f4c2a6bcbad3faf8e"
+      "bytes": 159418,
+      "blake3": "32a9d5cf386da10f4435f4b70aad1f2856a087d4f8a1934aa5d3a19df2f7bc18"
     },
     {
       "relative_path": "models/pspnqs104va/.rspice-veriloga-model-package",
@@ -2613,8 +2613,8 @@
     },
     {
       "relative_path": "models/pspnqs104va/src/psp104_nqs__pspnqs104va__1d25ee14/state.rs",
-      "bytes": 160496,
-      "blake3": "349c714f71162d4576e75ed846d99cc9a69d9cc66ab376547f406151c4b22ff3"
+      "bytes": 160867,
+      "blake3": "c0893e306976c07d26dd37494aea4d4a23c9b403fba830584113f2d8aa44361a"
     },
     {
       "relative_path": "models/r2-cmc/.rspice-veriloga-model-package",
@@ -2653,8 +2653,8 @@
     },
     {
       "relative_path": "models/r2-cmc/src/r2_cmc__r2_cmc__bc71a915/state.rs",
-      "bytes": 42130,
-      "blake3": "d5257833bfc902190cd1f6c22990c2d0b543f947676a7ab07fecae12565b3452"
+      "bytes": 42613,
+      "blake3": "3059c3cadb196d1a29ef03cfeadf88c86d268809973166e0f8ee435d3d79d5ed"
     },
     {
       "relative_path": "models/r2-et-cmc/.rspice-veriloga-model-package",
@@ -2693,8 +2693,8 @@
     },
     {
       "relative_path": "models/r2-et-cmc/src/r2_et_cmc__r2_et_cmc__a8425039/state.rs",
-      "bytes": 43804,
-      "blake3": "9e76b905a3dc6d13efb10bd2a0c5706fb0b7c9879d3787311aae6b4a0cae7e1f"
+      "bytes": 44287,
+      "blake3": "381e5ebb336f835cf3326c1dba6cba983e8736f124db4ff255c566ad3027acc6"
     },
     {
       "relative_path": "models/r3-cmc/.rspice-veriloga-model-package",
@@ -2733,8 +2733,8 @@
     },
     {
       "relative_path": "models/r3-cmc/src/r3_cmc__r3_cmc__2e3554ae/state.rs",
-      "bytes": 56346,
-      "blake3": "10b3e98396987e864b87b29c376f0d034bd0eb1d44f00510c021f8777b7ee9c7"
+      "bytes": 56717,
+      "blake3": "a51a51b6752bb8520b6e61a47cb252295a54bfb569054118f3dc1213f7dbeba8"
     },
     {
       "relative_path": "models/vbic-4t-et-cf/.rspice-veriloga-model-package",
@@ -2773,8 +2773,8 @@
     },
     {
       "relative_path": "models/vbic-4t-et-cf/src/vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1/state.rs",
-      "bytes": 48605,
-      "blake3": "a015a9c1a48c004fb97a9c38e0cd1902dfd6a4e56e215f7e64ebd64b0555e33c"
+      "bytes": 48976,
+      "blake3": "236a6e7544051bf6a5183d82070b1718dbbcc92cfb992720ca57f40baa00d088"
     },
     {
       "relative_path": "models/vbic13-3t-et/.rspice-veriloga-model-package",
@@ -2813,8 +2813,8 @@
     },
     {
       "relative_path": "models/vbic13-3t-et/src/vbic_3t_et__vbic13_3t_et__bd2f63d4/state.rs",
-      "bytes": 53832,
-      "blake3": "e06f3f398f3c278e0340edeaf0f32444bce8865bc16fad70f3ef5dcc00b1f155"
+      "bytes": 54203,
+      "blake3": "02150bfa864ee6a96c069c8562aa52b70a50718c95811b2c5970eeb8da2488cb"
     },
     {
       "relative_path": "models/vbic13-4t/.rspice-veriloga-model-package",
@@ -2853,8 +2853,8 @@
     },
     {
       "relative_path": "models/vbic13-4t/src/vbic_1p3__vbic13_4t__132cb4e0/state.rs",
-      "bytes": 53848,
-      "blake3": "ddb62ab528fb6be90da320561530459540c4391e209e7b09d6bdf3c1006df6da"
+      "bytes": 54219,
+      "blake3": "fa7b45278f2d65353d386653aa8bbea70d862b7f0d438c9a72f7f2c2538d4e15"
     },
     {
       "relative_path": "models/vbic13/.rspice-veriloga-model-package",
@@ -2893,8 +2893,8 @@
     },
     {
       "relative_path": "models/vbic13/src/vbic_3t__vbic13__aa00e2e7/state.rs",
-      "bytes": 53682,
-      "blake3": "3abd5e9cc6243e2c5249c8398534bdfce7c9a9d7898499ad9a14cef948a77afe"
+      "bytes": 54053,
+      "blake3": "7fc1efb583d568810ba7451750aa7b2768d1fd93cd7b1cc8a145ba1d3893960f"
     },
     {
       "relative_path": "src/lib.rs",
@@ -2903,8 +2903,8 @@
     },
     {
       "relative_path": "src/registry.rs",
-      "bytes": 284837,
-      "blake3": "08058ccfb5e4609869cff3b61bd0babde50ffbf030cae4dc6676caeb9997fb75"
+      "bytes": 297176,
+      "blake3": "7c047d401deb9908a8f5113b6cfa6a8597a3455e6febae4037359bb81bf1c70b"
     }
   ]
 }

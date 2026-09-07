@@ -3864,6 +3864,24 @@ impl VerilogADevice {
         self.context.drain_accepted_analog_tasks()
     }
 
+    /// Snapshot the first requested candidate task without accepting or
+    /// consuming it. Empty journals allocate nothing.
+    pub fn first_candidate_analog_task(
+        &self,
+        kind: rspice_veriloga_runtime::AnalogTaskKind,
+    ) -> Result<Option<rspice_veriloga_runtime::AnalogTaskEvent<'_>>, VmError> {
+        Ok(self
+            .context
+            .candidate_analog_tasks()?
+            .iter()
+            .find(|call| call.kind == kind)
+            .map(|call| rspice_veriloga_runtime::AnalogTaskEvent {
+                instance: &self.name,
+                model: &self.model.name,
+                call: call.clone(),
+            }))
+    }
+
     /// Whether accepted calls remain to be delivered by the analysis host.
     pub fn has_accepted_analog_tasks(&self) -> bool {
         self.context.has_accepted_analog_tasks()
@@ -3953,6 +3971,18 @@ impl VerilogADevice {
         self.context
             .restore_accepted_checkpoint(&checkpoint.accepted);
         self.prev_discontinuity = checkpoint.prev_discontinuity;
+    }
+
+    /// Continue one analysis in a rebuilt instance whose configuration is
+    /// already resolved. Keep its physical analysis identity: the transient
+    /// checkpoint default must not make the next DC preparation reinitialize it.
+    pub fn apply_validated_analysis_continuation_state(
+        &mut self,
+        checkpoint: &VerilogADeviceCheckpoint,
+    ) {
+        let analysis = self.context.analysis_type;
+        self.apply_validated_checkpoint_state(checkpoint);
+        self.context.analysis_type = analysis;
     }
 
     fn checkpoint_shape_identity(&self) -> SmolStr {

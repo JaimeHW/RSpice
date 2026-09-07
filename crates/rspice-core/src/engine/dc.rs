@@ -58,6 +58,9 @@ struct DcSweepLifecycle {
     next_public_point: usize,
     total_public_points: usize,
     accepted_state: Option<crate::circuit::VerilogADcAcceptedStateCarrier>,
+    sweep_value: Value,
+    pending_finish: Option<crate::ModelFinish>,
+    finished: bool,
 }
 
 impl DcSweepLifecycle {
@@ -71,6 +74,9 @@ impl DcSweepLifecycle {
             next_public_point: 0,
             total_public_points,
             accepted_state: None,
+            sweep_value: 0.0,
+            pending_finish: None,
+            finished: false,
         })
     }
 
@@ -83,7 +89,7 @@ impl DcSweepLifecycle {
         }
         Ok((
             self.next_public_point == 0,
-            self.next_public_point + 1 == self.total_public_points,
+            self.pending_finish.is_some() || self.next_public_point + 1 == self.total_public_points,
         ))
     }
 
@@ -99,20 +105,63 @@ impl DcSweepLifecycle {
         }
     }
 
-    fn accept_public_point(&mut self, circuit: &mut CircuitData) -> Result<(), SimulationError> {
+    fn restore_rebuilt_point_start(
+        &self,
+        circuit: &mut CircuitData,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), SimulationError> {
+        if self.next_public_point == 0 {
+            Engine::deliver_initial_analog_tasks(circuit, abort)?;
+        } else {
+            // Rebuilding a parameter/temperature point is an implementation
+            // detail within the same analysis. Retire construction's initial
+            // effects before installing the previous accepted trajectory.
+            circuit
+                .visit_accepted_analog_tasks(&mut |_| {})
+                .map_err(SimulationError::Circuit)?;
+        }
+        self.restore_accepted_state(circuit)
+    }
+
+    fn accept_public_point(
+        &mut self,
+        circuit: &mut CircuitData,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), SimulationError> {
         circuit
             .accept_veriloga_analysis_point()
             .map_err(SimulationError::Circuit)?;
-        let accepted_state = circuit
-            .capture_veriloga_dc_accepted_state()
-            .map_err(SimulationError::Circuit)?;
-        self.accepted_state = Some(accepted_state);
+        if let Some(finish) = self.pending_finish.take() {
+            abort
+                .model_control()
+                .ok_or_else(|| {
+                    SimulationError::Circuit("DC finish has no simulation run scope".into())
+                })?
+                .request_finish(finish);
+        }
+        self.finished = Engine::deliver_accepted_analog_tasks(
+            circuit,
+            abort,
+            crate::ModelFinishPoint::DcSweep {
+                value: self.sweep_value,
+            },
+        )?;
         self.next_public_point += 1;
+        self.accepted_state = if !self.finished && self.next_public_point < self.total_public_points
+        {
+            Some(
+                circuit
+                    .capture_veriloga_dc_accepted_state()
+                    .map_err(SimulationError::Circuit)?,
+            )
+        } else {
+            None
+        };
         Ok(())
     }
 
     fn ensure_complete(&self) -> Result<(), SimulationError> {
-        if self.next_public_point != self.total_public_points {
+        if !self.finished && self.next_public_point != self.total_public_points {
             return Err(SimulationError::Circuit(format!(
                 "DC sweep lifecycle accepted {} public point(s), expected {}",
                 self.next_public_point, self.total_public_points
@@ -359,6 +408,86 @@ struct DcSubstepPolicy {
 }
 
 impl Engine {
+    fn dc_model_observation_matrix() -> Result<StaticMatrix, SimulationError> {
+        // The generated stamp adapter requires a nonempty sparse workspace.
+        // A circuit with no unknowns uses one unused row only to execute model
+        // bodies; it is never solved or included in the returned result.
+        StaticMatrix::from_triplets(1, 1, &[]).map_err(SimulationError::Solver)
+    }
+
+    fn evaluate_dc_task_candidate(
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        solution: &[Value],
+    ) -> Result<(), SimulationError> {
+        #[cfg(feature = "veriloga")]
+        circuit
+            .evaluate_veriloga_timepoint(solution)
+            .map_err(SimulationError::Circuit)?;
+        #[cfg(feature = "veriloga-builtins-base")]
+        circuit
+            .evaluate_generated_veriloga_timepoint(matrix, solution)
+            .map_err(SimulationError::Circuit)?;
+        let _ = (circuit, matrix, solution);
+        Ok(())
+    }
+
+    /// Finalize the retained endpoint before advancing model state. Re-solving
+    /// from the same accepted predecessor lets final_step change the equations
+    /// without running event assignments or stateful operators twice.
+    fn finalize_dc_sweep_candidate(
+        &self,
+        netlist: &Netlist,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        mut solution: Vec<Value>,
+        lifecycle: &mut DcSweepLifecycle,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, SimulationError> {
+        // Nonempty circuits have just been observed at this exact solution.
+        // Portless models still need an evaluation to execute their tasks.
+        if solution.is_empty() {
+            Self::evaluate_dc_task_candidate(circuit, matrix, &solution)?;
+        }
+        let was_final = lifecycle.flags()?.1;
+        lifecycle.pending_finish = Self::candidate_equilibrium_finish(
+            circuit,
+            crate::ModelFinishPoint::DcSweep {
+                value: lifecycle.sweep_value,
+            },
+        )?;
+        if lifecycle.pending_finish.is_some() && !was_final {
+            let (initial_step, final_step) = lifecycle.flags()?;
+            circuit
+                .prepare_veriloga_dc_analysis_point(initial_step, final_step)
+                .map_err(SimulationError::Circuit)?;
+            if !solution.is_empty() {
+                solution = self.solve_dc_operating_point_with_startup_and_abort(
+                    netlist,
+                    circuit,
+                    matrix,
+                    DcOpStartup::PreviousSolution(&solution),
+                    abort,
+                )?;
+                if circuit.has_nonlinear_devices() || !circuit.generic_switches.is_empty() {
+                    self.try_observe_dc_operating_point(circuit, matrix, &solution)?;
+                }
+            }
+            if solution.is_empty() {
+                Self::evaluate_dc_task_candidate(circuit, matrix, &solution)?;
+            }
+            // Validate the final candidate even when final_step removes the
+            // expression that requested the original accepted-point finish.
+            Self::candidate_equilibrium_finish(
+                circuit,
+                crate::ModelFinishPoint::DcSweep {
+                    value: lifecycle.sweep_value,
+                },
+            )?;
+        }
+        Ok(solution)
+    }
+
     /// Resolve a Xyce device-parameter `.DC` source to the canonical AST
     /// override spelling used by the engine and regression wrapper.
     pub fn canonical_device_parameter_sweep_source(
@@ -790,11 +919,11 @@ impl Engine {
         circuit
             .begin_veriloga_equilibrium_analysis(veriloga_analysis)
             .map_err(SimulationError::Circuit)?;
-        Self::deliver_initial_analog_tasks(&mut circuit, abort)?;
         let (analysis_initial_step, analysis_final_step) = if let Some(state) = &lifecycle {
-            state.restore_accepted_state(&mut circuit)?;
+            state.restore_rebuilt_point_start(&mut circuit, abort)?;
             state.flags()?
         } else {
+            Self::deliver_initial_analog_tasks(&mut circuit, abort)?;
             (true, true)
         };
         circuit
@@ -805,7 +934,8 @@ impl Engine {
             )
             .map_err(SimulationError::Circuit)?;
 
-        if circuit.num_nodes() == 0 {
+        Self::ensure_no_mixed_signal_analysis(&circuit, "DC operating point")?;
+        if circuit.matrix_size() == 0 {
             if force_initial_conditions {
                 return Err(SimulationError::Circuit(
                     "forced .IC operating point requires at least one valid .IC node voltage"
@@ -815,8 +945,24 @@ impl Engine {
             let result = Self::build_empty_dc_result();
             let report = crate::circuit::DeviceOpReport::default();
             engine.ensure_result_values(dc_result_value_count(&result, &report))?;
+            if circuit.has_any_veriloga_devices() {
+                let mut matrix = Self::dc_model_observation_matrix()?;
+                circuit.link_indices(&matrix);
+                if let Some(state) = lifecycle.as_mut() {
+                    engine.finalize_dc_sweep_candidate(
+                        netlist,
+                        &mut circuit,
+                        &mut matrix,
+                        Vec::new(),
+                        state,
+                        abort,
+                    )?;
+                } else {
+                    Self::evaluate_dc_task_candidate(&mut circuit, &mut matrix, &[])?;
+                }
+            }
             if let Some(state) = lifecycle.as_mut() {
-                state.accept_public_point(&mut circuit)?;
+                state.accept_public_point(&mut circuit, abort)?;
             } else {
                 circuit
                     .accept_veriloga_analysis_point()
@@ -872,6 +1018,19 @@ impl Engine {
             )));
         }
 
+        let solution = if let Some(state) = lifecycle.as_mut() {
+            engine.finalize_dc_sweep_candidate(
+                netlist,
+                &mut circuit,
+                &mut matrix,
+                solution,
+                state,
+                abort,
+            )?
+        } else {
+            solution
+        };
+
         // Build result
         let mut result = SimulationResult::new(circuit.num_nodes(), circuit.num_branches());
 
@@ -888,7 +1047,7 @@ impl Engine {
         let device_op_report = circuit.device_op_report();
         engine.ensure_result_values(dc_result_value_count(&result, &device_op_report))?;
         if let Some(state) = lifecycle.as_mut() {
-            state.accept_public_point(&mut circuit)?;
+            state.accept_public_point(&mut circuit, abort)?;
         } else {
             circuit
                 .accept_veriloga_analysis_point()
@@ -1064,6 +1223,9 @@ impl Engine {
             });
             engine.ensure_result_values(retained_values)?;
             results.extend(inner);
+            if lifecycle.finished {
+                break;
+            }
         }
         if (outer_is_parameter || outer_device_parameter.is_some())
             && netlist.source_text.is_some()
@@ -1197,6 +1359,7 @@ impl Engine {
                         sweep_value,
                     )),
                 );
+                lifecycle.sweep_value = sweep_value;
                 let (result, device_op_report) = self
                     .run_dc_op_with_startup_and_lifecycle_report_and_abort(
                         &swept,
@@ -1213,6 +1376,9 @@ impl Engine {
                     retained_values.saturating_add(dc_sweep_point_value_count(&point));
                 engine.ensure_result_values(retained_values)?;
                 results.push(point);
+                if lifecycle.finished {
+                    break;
+                }
             }
             return Ok(results);
         }
@@ -1245,23 +1411,37 @@ impl Engine {
         circuit
             .begin_veriloga_dc_analysis()
             .map_err(SimulationError::Circuit)?;
-        Self::deliver_initial_analog_tasks(&mut circuit, abort)?;
-        lifecycle.restore_accepted_state(&mut circuit)?;
+        lifecycle.restore_rebuilt_point_start(&mut circuit, abort)?;
 
-        if circuit.num_nodes() == 0 {
+        Self::ensure_no_mixed_signal_analysis(&circuit, "DC sweep")?;
+        if circuit.matrix_size() == 0 {
             engine.ensure_result_shape(sweep_points.len(), 2)?;
             let mut results = Vec::with_capacity(sweep_points.len());
+            let mut matrix = Self::dc_model_observation_matrix()?;
+            circuit.link_indices(&matrix);
             for &value in sweep_points {
+                lifecycle.sweep_value = value;
                 let (initial_step, final_step) = lifecycle.flags()?;
                 circuit
                     .prepare_veriloga_dc_analysis_point(initial_step, final_step)
                     .map_err(SimulationError::Circuit)?;
-                lifecycle.accept_public_point(&mut circuit)?;
+                engine.finalize_dc_sweep_candidate(
+                    netlist,
+                    &mut circuit,
+                    &mut matrix,
+                    Vec::new(),
+                    lifecycle,
+                    abort,
+                )?;
+                lifecycle.accept_public_point(&mut circuit, abort)?;
                 results.push(DcSweepPointResult {
                     sweep_value: value,
                     result: Self::build_empty_dc_result(),
                     device_op_report: crate::circuit::DeviceOpReport::default(),
                 });
+                if lifecycle.finished {
+                    break;
+                }
             }
             return Ok(results);
         }
@@ -1323,6 +1503,7 @@ impl Engine {
                 if abort.is_aborted() {
                     return Err(SimulationError::Aborted);
                 }
+                lifecycle.sweep_value = sweep_value;
                 let (analysis_initial_step, analysis_final_step) = lifecycle.flags()?;
                 circuit
                     .prepare_veriloga_dc_analysis_point(analysis_initial_step, analysis_final_step)
@@ -1443,6 +1624,15 @@ impl Engine {
                     )));
                 }
 
+                let solution = engine.finalize_dc_sweep_candidate(
+                    netlist,
+                    &mut circuit,
+                    &mut matrix,
+                    solution,
+                    lifecycle,
+                    abort,
+                )?;
+
                 // Build result
                 let mut result = SimulationResult::new(circuit.num_nodes(), circuit.num_branches());
                 result.node_names = std::iter::once("0".to_string())
@@ -1463,8 +1653,11 @@ impl Engine {
                 if abort.is_aborted() {
                     return Err(SimulationError::Aborted);
                 }
-                lifecycle.accept_public_point(&mut circuit)?;
+                lifecycle.accept_public_point(&mut circuit, abort)?;
                 results.push(point);
+                if lifecycle.finished {
+                    break;
+                }
                 prev_solution = Some(solution);
                 prev_sweep_value = Some(sweep_value);
             }
@@ -1502,6 +1695,7 @@ impl Engine {
                 abort,
             )?;
             any_binding |= bindings > 0;
+            lifecycle.sweep_value = sweep_value;
             let (result, device_op_report) = self
                 .run_dc_op_with_startup_and_lifecycle_report_and_abort(
                     &swept,
@@ -1510,7 +1704,8 @@ impl Engine {
                     abort,
                 )
                 .map_err(|error| match error {
-                    error @ SimulationError::Aborted
+                    error @ SimulationError::ModelFinished(_)
+                    | error @ SimulationError::Aborted
                     | error @ SimulationError::ResourceLimit(_)
                     | error @ SimulationError::Configuration(_) => error,
                     error => SimulationError::Circuit(format!(
@@ -1525,6 +1720,9 @@ impl Engine {
             retained_values = retained_values.saturating_add(dc_sweep_point_value_count(&point));
             self.ensure_result_values(retained_values)?;
             results.push(point);
+            if lifecycle.finished {
+                break;
+            }
         }
 
         if netlist.source_text.is_some() && !any_binding {

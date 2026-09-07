@@ -1,9 +1,54 @@
 //! Accepted analog task delivery across every Verilog-A instance route.
 
 use super::CircuitData;
-use rspice_veriloga_runtime::AnalogTaskEvent;
+use rspice_veriloga_runtime::{AnalogTaskEvent, AnalogTaskKind};
 
 impl CircuitData {
+    /// Inspect a solved equilibrium point before advancing any model history.
+    /// Mixed transient candidates belong to the host's committable trial and
+    /// must not be inferred from its last rejected numerical probe.
+    pub(crate) fn first_equilibrium_candidate_analog_task(
+        &self,
+        kind: AnalogTaskKind,
+    ) -> Result<Option<AnalogTaskEvent<'_>>, String> {
+        #[cfg(feature = "veriloga")]
+        {
+            self.ensure_no_mixed_signal_hosts("equilibrium task acceptance")
+                .map_err(|error| error.to_string())?;
+        }
+        // Ordinary points are validated by acceptance itself. Validate early
+        // only when a control request would cause another finalization solve.
+        #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+        let validate = || -> Result<(), String> {
+            #[cfg(feature = "veriloga")]
+            self.veriloga_devices.validate_timestep_acceptance()?;
+            #[cfg(feature = "veriloga-builtins-base")]
+            self.generated_veriloga_devices
+                .validate_state_acceptance()?;
+            Ok(())
+        };
+        #[cfg(feature = "veriloga")]
+        for device in self.veriloga_devices.iter() {
+            if let Some(event) = device
+                .first_candidate_analog_task(kind)
+                .map_err(|error| error.to_string())?
+            {
+                validate()?;
+                return Ok(Some(event));
+            }
+        }
+        #[cfg(feature = "veriloga-builtins-base")]
+        if let Some(event) = self
+            .generated_veriloga_devices
+            .first_candidate_analog_task(kind)?
+        {
+            validate()?;
+            return Ok(Some(event));
+        }
+        let _ = kind;
+        Ok(None)
+    }
+
     /// Deliver accepted analog calls exactly once, in runtime, generated, then
     /// mixed-signal instance order and each instance's source execution order.
     /// Rejected candidates are never delivered.

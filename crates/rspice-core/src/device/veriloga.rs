@@ -227,6 +227,17 @@ impl VerilogADevices {
         Ok(())
     }
 
+    pub(crate) fn restore_analysis_continuation_states(
+        &mut self,
+        states: &[VerilogADeviceCheckpoint],
+    ) -> Result<(), String> {
+        self.validate_checkpoint_states(states)?;
+        for (device, state) in self.devices.iter_mut().zip(states) {
+            device.apply_validated_analysis_continuation_state(state);
+        }
+        Ok(())
+    }
+
     pub(crate) fn apply_validated_timestep_acceptance(&mut self) {
         for device in &mut self.devices {
             device.apply_validated_advance_state();

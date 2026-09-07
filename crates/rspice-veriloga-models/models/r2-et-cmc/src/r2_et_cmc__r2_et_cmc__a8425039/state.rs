@@ -548,6 +548,10 @@ impl Instance {
 		Ok(())
 	}
 
+	pub fn candidate_analog_tasks(&self) -> Result<&[rspice_veriloga_runtime::AnalogTaskInvocation], String> {
+		match &self.analog_effects { Some(journal) => journal.candidate().map_err(|error| error.to_string()), None => Ok(&[]) }
+	}
+
 	pub fn drain_analog_tasks(&mut self) -> impl Iterator<Item = rspice_veriloga_runtime::AnalogTaskInvocation> + '_ {
 		self.analog_effects.as_mut().map(|journal| journal.drain_accepted()).into_iter().flatten()
 	}
@@ -935,4 +939,10 @@ pub fn transient_event_refinement_time(&self) -> Option<f64> { None }
 pub fn transient_timer_event_time(&self) -> Option<f64> { None }
 #[inline]
 pub fn transient_timer_step_bound(&self) -> Option<f64> { None }
+	/// Continue a rebuilt analysis with its resolved initialization inputs.
+	pub fn restore_analysis_continuation_state(&mut self, state: &GeneratedVerilogAPersistentState) -> Result<(), String> {
+		self.restore_persistent_state(state)?;
+		Ok(())
+	}
+
 }

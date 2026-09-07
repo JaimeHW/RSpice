@@ -2384,10 +2384,11 @@ impl CircuitData {
         };
 
         #[cfg(feature = "veriloga")]
-        self.veriloga_devices.restore_checkpoint_states(&runtime)?;
+        self.veriloga_devices
+            .restore_analysis_continuation_states(&runtime)?;
         #[cfg(feature = "veriloga-builtins-base")]
         self.generated_veriloga_devices
-            .restore_checkpoint_states(&generated)?;
+            .restore_analysis_continuation_states(&generated)?;
         Ok(())
     }
 

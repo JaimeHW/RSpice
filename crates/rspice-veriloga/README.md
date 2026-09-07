@@ -235,12 +235,15 @@ include transitive function calls and branches removed by constant folding.
 transactional journal. Runtime, generated, and mixed-signal device hosts can
 consume accepted calls through `CircuitData::visit_accepted_analog_tasks`.
 `Engine::run_with_outcome` reports initialization `$finish` as normal completion
-without a numerical result, and an accepted standalone DC operating-point
-`$finish` with its solution. The run's completion state is separate from caller
+without a numerical result. Accepted DC operating-point and sweep `$finish`
+retain the final solution and the accepted prefix of a sweep. Early sweep
+termination solves `final_step` before committing model history, and a failed
+final solve remains an error. Rebuilt parameter/temperature sweep points preserve
+the analysis's initialized state. The run's completion state is separate from caller
 cancellation and is not reused by later analyses. Mixed digital processes start
 only after the circuit-wide analog initialization barrier. Result-only engine
 APIs cannot represent an initialization finish and return `ModelFinished`.
-Accepted transient/sweep termination, final-step delivery on early termination,
+Accepted transient/frequency-domain termination, their early `final_step` delivery,
 source-located diagnostic formatting, and frontend outcome handling remain
 incomplete; this does not establish full `$finish` support.
 

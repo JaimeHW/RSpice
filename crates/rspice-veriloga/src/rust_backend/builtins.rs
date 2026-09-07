@@ -2845,24 +2845,32 @@ fn write_registry(
         out.push_str("        }\n");
     }
     out.push_str("    }\n\n");
-    out.push_str("    pub fn restore_persistent_state(&mut self, state: &super::GeneratedVerilogAPersistentState) -> Result<(), String> {\n");
-    out.push_str("        let _ = state;\n");
-    if devices.is_empty() {
-        out.push_str("        let _ = (self, state);\n");
-        out.push_str("        Err(\"empty generated Verilog-A registry has no persistent state\".to_string())\n");
-    } else {
-        out.push_str("        match self {\n");
-        for (index, feature) in feature_names.iter().enumerate() {
-            writeln!(
-                out,
-                "            #[cfg(feature = {feature:?})]\n            Self::Device{index}(device) => device.restore_persistent_state(state),"
-            )?;
+    for method in [
+        "restore_persistent_state",
+        "restore_analysis_continuation_state",
+    ] {
+        writeln!(
+            out,
+            "    pub fn {method}(&mut self, state: &super::GeneratedVerilogAPersistentState) -> Result<(), String> {{"
+        )?;
+        out.push_str("        let _ = state;\n");
+        if devices.is_empty() {
+            out.push_str("        let _ = (self, state);\n");
+            out.push_str("        Err(\"empty generated Verilog-A registry has no persistent state\".to_string())\n");
+        } else {
+            out.push_str("        match self {\n");
+            for (index, feature) in feature_names.iter().enumerate() {
+                writeln!(
+                    out,
+                    "            #[cfg(feature = {feature:?})]\n            Self::Device{index}(device) => device.{method}(state),"
+                )?;
+            }
+            out.push_str("            Self::__NonExhaustive(value) => match *value {},\n");
+            out.push_str("        }\n");
         }
-        out.push_str("            Self::__NonExhaustive(value) => match *value {},\n");
-        out.push_str("        }\n");
+        out.push_str("    }\n");
+        out.push('\n');
     }
-    out.push_str("    }\n");
-    out.push('\n');
     out.push_str("    pub fn limiter_converged(&self) -> bool {\n");
     if devices.is_empty() {
         out.push_str("        let _ = self;\n");
@@ -3113,6 +3121,20 @@ fn write_registry(
         }
         out.push_str("    }\n\n");
     }
+    out.push_str("    pub fn candidate_analog_tasks(&self) -> Result<&[super::AnalogTaskInvocation], String> {\n");
+    if devices.is_empty() {
+        out.push_str("        let _ = self;\n        Ok(&[])\n");
+    } else {
+        out.push_str("        match self {\n");
+        for (index, feature) in feature_names.iter().enumerate() {
+            writeln!(
+                out,
+                "            #[cfg(feature = {feature:?})]\n            Self::Device{index}(device) => device.candidate_analog_tasks(),"
+            )?;
+        }
+        out.push_str("            Self::__NonExhaustive(value) => match *value {},\n        }\n");
+    }
+    out.push_str("    }\n\n");
     out.push_str("    pub fn validate_advance_state(&self) -> Result<(), String> {\n");
     if devices.is_empty() {
         out.push_str("        let _ = self;\n");
