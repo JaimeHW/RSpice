@@ -71,9 +71,9 @@ fn model_finish_preserves_the_waveform_and_each_authored_fft_identity() {
     let directory = test_dir("model_finish");
     let model = directory.join("finish.va");
     // Compile on the executable's default stack, including function
-    // materialization and both semantic and bytecode operator traversals.
-    let factors = "1.0*".repeat(64);
-    std::fs::write(&model, format!("module fft_finish(out);\ninout out; electrical out;\nanalog function real identity;\ninput x; real x; begin identity=x; end\nendfunction\nanalog begin\n@(timer(2e-6)) $finish(1);\nV(out)<+sin({factors}2*3.141592653589793*1e6*identity($abstime));\nend\nendmodule\n")).unwrap();
+    // materialization, result-type inference, and bytecode operator traversal.
+    let factors = "*1.0".repeat(64);
+    std::fs::write(&model, format!("module fft_finish(out);\ninout out; electrical out;\nanalog function real identity;\ninput x; real x; begin identity=x; end\nendfunction\nanalog begin\n@(timer(2e-6)) $finish(1);\nV(out)<+sin(2*3.141592653589793*1e6*identity($abstime)){factors};\nend\nendmodule\n")).unwrap();
     let deck = write_deck(
         &directory,
         "finish.cir",
