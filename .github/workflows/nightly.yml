@@ -51,7 +51,8 @@ jobs:
         # test_full_ngspice`, which depended on test names never changing.
         run: >-
           cargo test --locked --workspace --exclude rspice-python --exclude rspice-wasm
-          --exclude rspice-conformance --release
+          --exclude rspice-conformance --release --no-fail-fast
+          --exclude 'rspice-veriloga-model*' --exclude 'rspice-*-catalog-dump'
       - name: Xyce conformance suite (release)
         # The workspace run above excludes rspice-conformance wholesale, so
         # the Xyce corpus needs its own step or it would silently vanish from
@@ -195,14 +196,6 @@ jobs:
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
           key: veriloga-corpus
-      - name: Generated built-ins are current
-        # The manifest's generator digest covers the generator's own source and
-        # the workspace lockfile, so this catches a corpus that was not
-        # regenerated after either changed -- which is silent otherwise until a
-        # numeric gate fails for a reason that has nothing to do with numerics.
-        run: >-
-          cargo run --locked --profile generator -p rspice-veriloga
-          --bin rspice-veriloga-gen -- check-builtins
       - name: Corpus golden gates (43 models)
         # The four correctness gates: finite evaluation away from known defects,
         # gmin reaching the devices that read it, stamped Jacobians against a

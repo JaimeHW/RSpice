@@ -437,6 +437,25 @@ fn check(deck: &GoldenDeck) {
         .zip(&captured)
         .position(|(&want, &got)| !steps_match(want, got));
     if let Some(index) = first_divergence {
+        // Report the whole sequence, not just its first differing bit, so a
+        // cross-platform failure can be investigated without re-blessing it.
+        let maximum_ulps = |field: fn(AcceptedStep) -> u64| {
+            expected
+                .iter()
+                .zip(&captured)
+                .filter_map(|(&want, &got)| {
+                    nonnegative_finite_ulp_distance(field(want), field(got))
+                })
+                .max()
+        };
+        eprintln!(
+            "sequence diagnostics: expected {} points, captured {}; maximum ULP distances: \
+             time {:?}, step {:?}",
+            expected.len(),
+            captured.len(),
+            maximum_ulps(|point| point.time_bits),
+            maximum_ulps(|point| point.step_bits),
+        );
         let want = expected[index];
         let got = captured[index];
         let time_ulps = nonnegative_finite_ulp_distance(want.time_bits, got.time_bits);

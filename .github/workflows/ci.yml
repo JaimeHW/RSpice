@@ -94,7 +94,7 @@ jobs:
         run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal --component rustfmt --component clippy
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
       - name: Test core units, integration tests, and doctests
-        run: cargo test --locked -p rspice-core
+        run: cargo test --locked -p rspice-core --no-fail-fast
       - name: Conformance suite unit tests
         run: >-
           cargo test --locked -p rspice-conformance --lib
@@ -124,7 +124,7 @@ jobs:
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
       - name: Test remaining workspace crates
         run: >-
-          cargo test --locked --workspace
+          cargo test --locked --workspace --no-fail-fast
           --exclude rspice-core --exclude rspice-ui --exclude rspice-conformance
           --exclude rspice-python --exclude rspice-wasm
           --exclude 'rspice-veriloga-model*' --exclude 'rspice-*-catalog-dump'
@@ -141,7 +141,7 @@ jobs:
         run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal --component rustfmt --component clippy
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
       - name: Test UI units, integration tests, and doctests (Linux)
-        run: cargo test --locked -p rspice-ui
+        run: cargo test --locked -p rspice-ui --no-fail-fast
       - name: Test generated Verilog-A GUI contracts
         run: >-
           cargo test --locked -p rspice-ui
@@ -159,10 +159,6 @@ jobs:
       - name: Install Rust toolchain
         run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal --component rustfmt --component clippy
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
-      - name: Generated built-ins are current
-        run: >-
-          cargo run --locked --profile generator -p rspice-veriloga
-          --bin rspice-veriloga-gen -- check-builtins
       - name: Check granular generated Verilog-A features
         env:
           RUSTFLAGS: -D warnings

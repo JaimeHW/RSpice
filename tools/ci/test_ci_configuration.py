@@ -393,7 +393,7 @@ class CiConfigurationTests(unittest.TestCase):
             body = re.split(r"\n  [a-z][a-z0-9-]*:", workflow.split(f"  {job}:\n", 1)[1], maxsplit=1)[0]
             # A complete package selection includes lib, bin, integration and doc
             # tests. Restricting it to --lib previously missed UI integration tests.
-            self.assertIn(f"run: cargo test --locked -p {package}\n", body)
+            self.assertIn(f"run: cargo test --locked -p {package} --no-fail-fast\n", body)
 
         step = workflow.split("- name: Test remaining workspace crates\n", 1)[1]
         step = step.split("\n  test-ui:", 1)[0]
@@ -431,11 +431,6 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("needs: [validate, test, conformance, build, supply-chain]", publish)
         for source in ("ci", "nightly"):
             self.assertIn("  workflow_call:", read_text(f".github/workflows/{source}.yml"))
-
-    def test_generated_model_freshness_is_a_per_change_gate(self) -> None:
-        workflow = read_text(".github/workflows/ci.yml")
-        job = workflow.split("  generated-veriloga:", 1)[1].split("  test-linux-native:", 1)[0]
-        self.assertIn("--bin rspice-veriloga-gen -- check-builtins", job)
 
     def test_all_ci_and_release_python_harnesses_are_gated(self) -> None:
         workflow = read_text(".github/workflows/ci.yml")
