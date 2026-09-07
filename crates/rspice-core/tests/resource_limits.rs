@@ -49,27 +49,78 @@ fn pss_refinement_enforces_point_and_waveform_workspace_limits() {
             "{error}"
         );
     }
-    let aliased = Netlist::parse("PSS source mesh limits\nB1 in 0 V=sin(2*pi*64meg*time)^8\nR1 in out 1k\nC1 out 0 159.154943091895p\n.end\n").unwrap();
     let engine = Engine::new(SimulationConfig {
         resource_limits: limits_with(|limits| limits.max_analysis_points = 256),
         ..Default::default()
     });
-    for error in [
+    for source in [
+        "B1 in 0 V=sin(2*pi*64meg*time)^8",
+        "V1 in 0 PULSE(0 1 400p 10p 10p 100p 1u)",
+        "B1 in 0 V=table(time%1u,0,0,400p,0,410p,1,510p,1,520p,0,1u,0)",
+    ] {
+        let aliased = Netlist::parse(&format!(
+            "PSS source mesh limits\n{source}\nR1 in out 1k\nC1 out 0 159.154943091895p\n.end\n"
+        ))
+        .unwrap();
+        let selected = if source.starts_with('V') {
+            vec!["V1".to_owned()]
+        } else {
+            Vec::new()
+        };
+        for error in [
+            engine
+                .validate_pss_source_contract_with_abort(
+                    &aliased,
+                    &selected,
+                    &PssConfig::new(1e6),
+                    &NoAbort,
+                )
+                .unwrap_err(),
+            engine
+                .run_pss_with_abort(
+                    &aliased,
+                    PssConfig::new(1e6).with_tstab_periods(0),
+                    &NoAbort,
+                )
+                .unwrap_err(),
+        ] {
+            assert!(
+                matches!(error, SimulationError::ResourceLimit(ResourceLimitError { resource: ResourceKind::AnalysisPoints, requested, limit: 256 }) if requested > 1024),
+                "{error}"
+            );
+        }
+    }
+}
+
+#[test]
+fn redundant_flat_knots_do_not_consume_the_pss_source_mesh_budget() {
+    use rspice_core::abort_signal::NoAbort;
+    use rspice_core::analysis::PssConfig;
+    let engine = Engine::new(SimulationConfig {
+        resource_limits: limits_with(|limits| limits.max_analysis_points = 256),
+        ..Default::default()
+    });
+    for source in [
+        "V1 in 0 PWL(0 0 1e-300 0 0.25u 0 0.5u 1 1u 0) R=0",
+        "B1 in 0 V=table(time%1u,0,0,1e-300,0,0.25u,0,0.5u,1,1u,0)",
+    ] {
+        let netlist = Netlist::parse(&format!(
+            "redundant PWL hold\n{source}\nR1 in out 1k\nC1 out 0 160p\n.end\n"
+        ))
+        .unwrap();
+        let selected = if source.starts_with('V') {
+            vec!["V1".to_owned()]
+        } else {
+            Vec::new()
+        };
         engine
-            .validate_pss_source_contract_with_abort(&aliased, &[], &PssConfig::new(1e6), &NoAbort)
-            .unwrap_err(),
-        engine
-            .run_pss_with_abort(
-                &aliased,
-                PssConfig::new(1e6).with_tstab_periods(0),
+            .validate_pss_source_contract_with_abort(
+                &netlist,
+                &selected,
+                &PssConfig::new(1e6),
                 &NoAbort,
             )
-            .unwrap_err(),
-    ] {
-        assert!(
-            matches!(error, SimulationError::ResourceLimit(ResourceLimitError { resource: ResourceKind::AnalysisPoints, requested, limit: 256 }) if requested > 1024),
-            "{error}"
-        );
+            .unwrap_or_else(|error| panic!("{source}: {error}"));
     }
 }
 

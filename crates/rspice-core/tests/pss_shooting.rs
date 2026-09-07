@@ -15,6 +15,93 @@ const R: f64 = 1.0e3;
 const C: f64 = 159.154943091895e-12; // RC corner ~ 1 MHz (w*RC = 1)
 
 #[test]
+fn source_intervals_reveal_pulses_between_both_initial_pss_grids() {
+    let knots = [
+        (0.0, 0.0),
+        (4e-10, 0.0),
+        (5e-10, 1.0),
+        (1.5e-9, 1.0),
+        (1.6e-9, 0.0),
+        (1e-6, 0.0),
+    ];
+    let advance = |initial: f64, voltage: f64, slope: f64, dt: f64| {
+        let exponent = -dt / (R * C);
+        initial * exponent.exp() - voltage * exponent.exp_m1()
+            + slope * (dt + R * C * exponent.exp_m1())
+    };
+    let traverse = |initial: f64, stop: f64| {
+        let mut state = initial;
+        for pair in knots.windows(2) {
+            let duration: f64 = pair[1].0 - pair[0].0;
+            let elapsed = (stop - pair[0].0).clamp(0.0, duration);
+            state = advance(
+                state,
+                pair[0].1,
+                (pair[1].1 - pair[0].1) / duration,
+                elapsed,
+            );
+            if stop <= pair[1].0 {
+                break;
+            }
+        }
+        state
+    };
+    let initial = traverse(0.0, 1e-6) / -(-1e-6 / (R * C)).exp_m1();
+    for (source, current_drive) in [
+        ("V1 in 0 PULSE(0 1 400p 100p 100p 1n 1u)", false),
+        (
+            "V1 in 0 PWL(0 0 400p 0 500p 1 1.5n 1 1.6n 0 1u 0) R=0",
+            false,
+        ),
+        (
+            "B1 in 0 V=table(time%1u,0,0,400p,0,500p,1,1.5n,1,1.6n,0,1u,0)",
+            false,
+        ),
+        ("B1 in 0 V=spice_pulse(0,1,400p,100p,100p,1n,1u)", false),
+        ("I1 0 out PULSE(0 1m 400p 100p 100p 1n 1u)", true),
+        (
+            "B1 0 out I=1m*table(mod(time,1u),0,0,400p,0,500p,1,1.5n,1,1.6n,0,1u,0)",
+            true,
+        ),
+    ] {
+        let resistor = if current_drive {
+            "R1 out 0 1k"
+        } else {
+            "R1 in out 1k"
+        };
+        let netlist = Netlist::parse(&format!(
+            "narrow periodic pulse\n{source}\n{resistor}\nC1 out 0 {C}\n.end\n"
+        ))
+        .unwrap();
+        let analysis = Engine::default()
+            .run_pss(&netlist, PssConfig::new(F0).with_tstab_periods(0))
+            .unwrap_or_else(|error| panic!("{source}: {error}"));
+        let result = &analysis.result;
+        let steps = result.time.len() - 1;
+        assert!(steps >= 20_000, "{source}: {steps}");
+        let output = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("out"))
+            .unwrap();
+        let values = &result.waveforms[output].values;
+        let mean = values[..steps].iter().sum::<f64>() / steps as f64;
+        assert!(
+            (mean - 0.0011).abs() < 2e-6,
+            "{source}, steps={steps}: DC {mean}"
+        );
+        let peak = traverse(initial, 1.6e-9);
+        for (&time, &actual) in result.time.iter().zip(values) {
+            let expected = traverse(initial, time);
+            assert!(
+                (actual - expected).abs() < 1e-6 + 1e-3 * peak,
+                "{source}, steps={steps}, t={time:e}: {actual:e} vs {expected:e}"
+            );
+        }
+    }
+}
+
+#[test]
 fn behavioral_polynomial_harmonics_drive_an_accurate_refined_rc_orbit() {
     for (power, dc, coefficients) in [
         (2, 0.5, vec![-0.5]),

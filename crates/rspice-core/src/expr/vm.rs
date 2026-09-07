@@ -1017,6 +1017,24 @@ pub(crate) fn spice_waveform_max_tone_cycles(
     }
 }
 
+/// Resolve implicit PULSE feature widths with the evaluator's own defaults.
+pub(crate) fn spice_waveform_minimum_interval(
+    function: super::Function,
+    args: &[Value],
+) -> Option<Value> {
+    if function != super::Function::SpicePulse {
+        return None;
+    }
+    let [v1, v2, _, rise, fall, width, period] = spice_waveform_parameters(args);
+    if v1 == v2 || (rise <= 0.0 && fall <= 0.0 && width <= 0.0) {
+        return None;
+    }
+    [rise, fall, width, period - rise - width - fall]
+        .into_iter()
+        .filter(|value| *value > 0.0 && value.is_finite())
+        .reduce(Value::min)
+}
+
 /// Certify implicit-time functions using the same resolved parameters as
 /// their evaluator. Their defaults differ from independent source cards.
 pub(crate) fn spice_waveform_is_periodic(

@@ -145,7 +145,7 @@ impl crate::circuit::CircuitData {
         &self,
         period: Value,
         autonomous: bool,
-    ) -> impl Iterator<Item = (&str, bool, Value)> {
+    ) -> impl Iterator<Item = (&str, bool, Value, Option<Value>)> {
         self.voltage_sources
             .transient_specs_named_with_pwl()
             .map(|(name, spec, pwl)| (name, spec, pwl, self.voltage_sources.transient_context))
@@ -168,6 +168,11 @@ impl crate::circuit::CircuitData {
                         0.0
                     } else {
                         VoltageSources::max_authored_tone_cycles(spec, period, context)
+                    },
+                    if autonomous {
+                        None
+                    } else {
+                        VoltageSources::minimum_pss_interval(spec, context, pwl)
                     },
                 )
             })

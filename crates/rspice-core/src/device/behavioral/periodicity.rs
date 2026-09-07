@@ -6,6 +6,10 @@ use super::*;
 use crate::numerics::is_integral_cycle_count;
 
 impl BehavioralVoltageSource {
+    pub(crate) fn minimum_pss_interval(&self) -> Option<Value> {
+        minimum_pss_interval(&self.ast, &self.periodicity_context())
+    }
+
     pub(crate) fn has_periodic_time_dependence(&self, period: Value, autonomous: bool) -> bool {
         time_increment(&self.ast, period, &self.periodicity_context(), autonomous) == Some(0.0)
     }
@@ -26,6 +30,10 @@ impl BehavioralVoltageSource {
 }
 
 impl BehavioralCurrentSource {
+    pub(crate) fn minimum_pss_interval(&self) -> Option<Value> {
+        minimum_pss_interval(&self.ast, &self.periodicity_context())
+    }
+
     pub(crate) fn has_periodic_time_dependence(&self, period: Value, autonomous: bool) -> bool {
         time_increment(&self.ast, period, &self.periodicity_context(), autonomous) == Some(0.0)
     }
@@ -86,6 +94,95 @@ fn multiply_increment(increment: Value, scale: Value) -> Option<Value> {
     // Underflow is not proof of a zero time increment. Such a ramp can be
     // invisible over the shooting grid and still change on a longer run.
     (increment == 0.0 || scale == 0.0 || result != 0.0).then_some(result)
+}
+
+/// Upper bound on a table coordinate's time slope between modulo resets.
+/// Unknown circuit-dependent coordinates do not provide a timing certificate.
+fn time_coordinate_rate(expr: &Expr, context: &Context<'_>) -> Option<Value> {
+    if let Some(increment) = affine_time_increment(expr, 1.0, context) {
+        return increment.is_finite().then_some(increment.abs());
+    }
+    let rate = |expr: &Expr| time_coordinate_rate(expr, context);
+    match expr {
+        Expr::Unary {
+            op: UnaryOp::Neg,
+            operand,
+        } => rate(operand),
+        Expr::Binary { op, left, right } => match op {
+            BinaryOp::Mod if constant_value(right, context).is_some_and(|value| value != 0.0) => {
+                rate(left)
+            }
+            BinaryOp::Add | BinaryOp::Sub => Some(rate(left)? + rate(right)?),
+            BinaryOp::Mul => {
+                if let Some(scale) = constant_value(left, context) {
+                    Some(scale.abs() * rate(right)?)
+                } else {
+                    Some(rate(left)? * constant_value(right, context)?.abs())
+                }
+            }
+            BinaryOp::Div if constant_value(right, context).is_some_and(|value| value != 0.0) => {
+                Some(rate(left)? / constant_value(right, context)?.abs())
+            }
+            _ => None,
+        },
+        Expr::Function { func, args } => match (func, args.as_slice()) {
+            (Function::Mod, [input, divisor])
+                if constant_value(divisor, context).is_some_and(|value| value != 0.0) =>
+            {
+                rate(input)
+            }
+            (Function::Sin | Function::Cos, [phase]) => rate(phase),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn minimum_pss_interval(expr: &Expr, context: &Context<'_>) -> Option<Value> {
+    let interval = |expr: &Expr| minimum_pss_interval(expr, context);
+    let shortest = |a: Option<Value>, b: Option<Value>| a.into_iter().chain(b).reduce(Value::min);
+    let table_interval = |input: &Expr, points: &[(Value, Value)]| {
+        let distance = crate::numerics::minimum_pwl_interval(points.iter().copied())?;
+        let rate = time_coordinate_rate(input, context)?;
+        if rate == 0.0 {
+            return None;
+        }
+        Some(distance / rate)
+    };
+    match expr {
+        Expr::Unary { operand, .. } => interval(operand),
+        Expr::Binary { left, right, .. } => shortest(interval(left), interval(right)),
+        Expr::LookupTable { input, table } => {
+            shortest(interval(input), table_interval(input, &table.points))
+        }
+        Expr::Function { func, args } => {
+            let nested = args.iter().filter_map(interval).reduce(Value::min);
+            let own = match (func, args.as_slice()) {
+                (Function::Table | Function::Pwl, [input, points @ ..]) => {
+                    let points = points
+                        .chunks_exact(2)
+                        .map(|pair| {
+                            Some((
+                                constant_value(&pair[0], context)?,
+                                constant_value(&pair[1], context)?,
+                            ))
+                        })
+                        .collect::<Option<Vec<_>>>();
+                    points.and_then(|points| table_interval(input, &points))
+                }
+                (Function::SpicePulse, _) => args
+                    .iter()
+                    .map(|arg| constant_value(arg, context))
+                    .collect::<Option<Vec<_>>>()
+                    .and_then(|values| {
+                        crate::expr::spice_waveform_minimum_interval(*func, &values)
+                    }),
+                _ => None,
+            };
+            shortest(own, nested)
+        }
+        _ => None,
+    }
 }
 
 /// Constant phase increment for an affine function of time. Circuit variables
@@ -322,6 +419,40 @@ fn time_increment(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn table_source_intervals_follow_physical_time_coordinates() {
+        for (expression, expected) in [
+            (
+                "table(time%1u,0,0,400p,0,410p,1,510p,1,520p,0,1u,0)",
+                Some(1e-11),
+            ),
+            (
+                "table(mod(time,1u)*1meg,0,0,0.0004,0,0.00041,1,0.00051,1,0.00052,0,1,0)",
+                Some(1e-11),
+            ),
+            (
+                "table((time%1u)/1n,0,0,0.4,0,0.41,1,0.51,1,0.52,0,1000,0)",
+                Some(1e-11),
+            ),
+            ("table(time%1u,0,1,1e-300,1,1u,1)", None),
+            ("table(v(out),0,0,1e-9,1,1,0)", None),
+            ("spice_pulse(0,1,400p,10p,10p,100p,1u)", Some(1e-11)),
+            ("spice_pulse(1,1,0,1e-300,1e-300,1e-300,1u)", None),
+            ("spice_pulse(0,1,0,0,0,0,1e-300)", None),
+        ] {
+            let source =
+                BehavioralVoltageSource::new("B1".to_owned(), 1, 0, 1, expression).unwrap();
+            match (source.minimum_pss_interval(), expected) {
+                (Some(actual), Some(expected)) => assert!(
+                    (actual / expected - 1.0).abs() < 1e-12,
+                    "{expression}: {actual:e}"
+                ),
+                (None, None) => {}
+                (actual, expected) => panic!("{expression}: {actual:?}, expected {expected:?}"),
+            }
+        }
+    }
 
     #[test]
     fn harmonic_degree_preserves_dialect_power_semantics_and_unknown_bands() {

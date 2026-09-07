@@ -268,6 +268,10 @@ mod wasm_tests {
         for (source, dc) in [
             ("V1 in 0 SIN(0 1 128meg)", 0.0),
             ("B1 in 0 V=sin(2*pi*64meg*time)^4", 0.375),
+            (
+                "B1 in 0 V=table(time%1u,0,0,400p,0,500p,1,1.5n,1,1.6n,0,1u,0)",
+                0.0011,
+            ),
         ] {
             let netlist = rspice_core::Netlist::parse(&format!(
                 "WASM aliased forcing\n{source}\nR1 in out 1k\nC1 out 0 159.154943091895p\n.end\n"

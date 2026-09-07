@@ -27,5 +27,5 @@ pub(crate) use power::{
 pub use vm::{CompiledExpr, Context, Instruction, Vm};
 pub(crate) use vm::{
     lookup_table_interpolate_with_derivative, spice_waveform_is_periodic,
-    spice_waveform_max_tone_cycles,
+    spice_waveform_max_tone_cycles, spice_waveform_minimum_interval,
 };

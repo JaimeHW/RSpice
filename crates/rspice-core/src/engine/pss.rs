@@ -92,7 +92,7 @@ impl PssAcceptedStepHistory {
 const PSS_FD_STEP: Value = 1e-8;
 const PSS_KRYLOV_STATE_THRESHOLD: usize = 12;
 const PSS_KRYLOV_REL_TOL: Value = 1e-9;
-const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 15;
+const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 16;
 
 fn pss_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -1473,22 +1473,29 @@ impl Engine {
             ));
         }
         let mut required_steps = points_per_period;
-        let mut ensure_sampling = |name: &str, cycles: Value| -> Result<(), SimulationError> {
+        let mut ensure_sampling = |name: &str,
+                                   cycles: Value,
+                                   interval: Option<Value>|
+         -> Result<(), SimulationError> {
             // Periodicity was certified before this check, so a nonzero
             // authored clock has an integral cycle count. Round within that
             // certificate's tolerance to avoid admitting an exact Nyquist
             // clock just because its phase arithmetic rounded downward.
             let nyquist_points = 2.0 * cycles.round();
-            while !autonomous && nyquist_points >= required_steps as Value {
+            let feature_points = interval.map_or(0.0, |interval| 2.0 * (period / interval));
+            while !autonomous
+                && (nyquist_points >= required_steps as Value
+                    || feature_points > required_steps as Value)
+            {
                 required_steps = required_steps.checked_mul(2).filter(|steps| *steps > 0).ok_or_else(|| {
                     PssError::InvalidConfig(format!(
-                        "PSS source '{name}' requires an unrepresentable integration grid for its authored harmonic degree {cycles:e}"
+                        "PSS source '{name}' requires an unrepresentable integration grid for its authored harmonic degree {cycles:e} or waveform interval {interval:?}"
                     ))
                 })?;
             }
             Ok(())
         };
-        for (index, (name, periodic, cycles)) in circuit
+        for (index, (name, periodic, cycles, interval)) in circuit
             .independent_source_pss_properties(period, autonomous)
             .enumerate()
         {
@@ -1511,7 +1518,7 @@ impl Engine {
                     ),
                 ));
             }
-            ensure_sampling(name, cycles)?;
+            ensure_sampling(name, cycles, interval)?;
         }
         let behavioral = circuit
             .behavioral_sources
@@ -1522,6 +1529,7 @@ impl Engine {
                     source.name.as_str(),
                     source.has_periodic_time_dependence(period, autonomous),
                     source.max_authored_tone_cycles(period),
+                    source.minimum_pss_interval(),
                 )
             })
             .chain(
@@ -1534,10 +1542,11 @@ impl Engine {
                             source.name.as_str(),
                             source.has_periodic_time_dependence(period, autonomous),
                             source.max_authored_tone_cycles(period),
+                            source.minimum_pss_interval(),
                         )
                     }),
             );
-        for (index, (name, periodic, cycles)) in behavioral.enumerate() {
+        for (index, (name, periodic, cycles, interval)) in behavioral.enumerate() {
             if index & 0x1f == 0 && abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
@@ -1558,7 +1567,7 @@ impl Engine {
                     ),
                 ));
             }
-            ensure_sampling(name, cycles)?;
+            ensure_sampling(name, cycles, interval)?;
         }
         Ok(required_steps)
     }
