@@ -729,9 +729,16 @@ fn the_pstb_line_the_studio_writes_runs_and_judges_the_orbit_stable() {
     let (output, requested) = run_deck(
         &dir,
         RLC_CARRIER,
-        // Byte-for-byte the shape of `PstbConfig::to_spice`, whose `maxharm=`
-        // is written on every line it emits.
-        ".PSS FUND=1meg HARMS=8 POINTS=64 TSTABPERIODS=2\n.pstb probe=L1 maxharm=4\n",
+        // Byte-for-byte the shape of `PstbConfig::to_spice`, which states
+        // every one of its six controls on every line it emits. It used to
+        // write only `probe=`, `maxharm=` and a non-default `nmults=`, and the
+        // other three were dropped: a Studio session that moved the stability
+        // threshold exported a deck the engine judged at the default. The
+        // three keys here carry the form's own defaults, so this run is the
+        // same run it was — what changed is that the line now says so.
+        ".PSS FUND=1meg HARMS=8 POINTS=64 TSTABPERIODS=2\n\
+         .pstb probe=L1 maxharm=4 nmults=10 stabilitythreshold=1.000001 \
+         detectsubharmonics=yes eigentol=0.0000000001\n",
         &[],
     );
     assert_ran(&output);

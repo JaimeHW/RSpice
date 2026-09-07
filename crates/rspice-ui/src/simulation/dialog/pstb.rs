@@ -12,8 +12,8 @@
 //! # Example SPICE Output
 //!
 //! ```text
-//! .pstb probe=LPROBE
-//! + maxharm=10 nmults=10
+//! .pstb probe=LPROBE maxharm=10 nmults=10
+//! + stabilitythreshold=1.000001 detectsubharmonics=yes eigentol=0.0000000001
 //! ```
 
 use super::options::parse_si_value;
@@ -63,17 +63,37 @@ impl Default for PstbConfig {
 }
 
 impl PstbConfig {
-    /// Generate SPICE directive
+    /// Generate SPICE directive.
+    ///
+    /// Every field this struct holds is written, at the value it holds, on
+    /// every line. The engine's `.PSTB` card defaults each of these keys
+    /// (`PstbCard::DEFAULT_*`), so a key this writer omits is not absent from
+    /// the run — it is present at the card's constant. Three of the six
+    /// controls were dropped that way: an operator who moved the stability
+    /// threshold, turned subharmonic detection off, or tightened the
+    /// eigenvalue tolerance got a line the engine ran at the default, and
+    /// nothing anywhere reported the difference.
+    ///
+    /// `nmults=` used to be written only when it differed from ten. That was
+    /// not wrong — the card's default is ten as well — but it made the line's
+    /// shape depend on a constant owned by another crate, which is exactly the
+    /// coupling that lost the other three. A card states what it runs.
     pub fn to_spice(&self) -> String {
-        let mut cmd = format!(".pstb probe={}", self.probe);
-
-        cmd.push_str(&format!(" maxharm={}", self.max_harmonics));
-
-        if self.num_multipliers != 10 {
-            cmd.push_str(&format!(" nmults={}", self.num_multipliers));
-        }
-
-        cmd
+        format!(
+            ".pstb probe={} maxharm={} nmults={} stabilitythreshold={} \
+             detectsubharmonics={} eigentol={}",
+            self.probe,
+            self.max_harmonics,
+            self.num_multipliers,
+            // The same spelling the dialog shows in its own box, so the line
+            // and the form say one thing rather than two.
+            format_tolerance(self.stability_threshold),
+            // `yes`/`no` is what `.PSS` already writes for `autonomous=`, and
+            // one of the four spellings the engine's `card_bool` and this
+            // crate's manual-deck reader both read back.
+            if self.detect_subharmonics { "yes" } else { "no" },
+            format_tolerance(self.eigenvalue_tolerance),
+        )
     }
 
     /// Refuse a configuration that still refers to a loop probe the drawing
@@ -93,8 +113,17 @@ impl PstbConfig {
         if self.num_multipliers == 0 {
             return Err("Number of multipliers must be at least 1".to_string());
         }
-        if !self.stability_threshold.is_finite() || self.stability_threshold <= 0.0 {
-            return Err("Stability threshold must be a positive magnitude".to_string());
+        // The engine's bound, not a looser one of the editor's own. The
+        // physical boundary is |lambda| = 1: the parser refuses
+        // `STABILITYTHRESHOLD` below one where it is written, and both the
+        // engine entry and the in-studio runner refuse such a configuration
+        // outright. While the key stayed off the line this only misled the
+        // operator; now that the line carries it, a form that admitted 0.5
+        // would write a deck the engine cannot read.
+        if !self.stability_threshold.is_finite() || self.stability_threshold < 1.0 {
+            return Err(
+                "Stability threshold must be a finite magnitude of at least one".to_string(),
+            );
         }
         if !self.eigenvalue_tolerance.is_finite() || self.eigenvalue_tolerance <= 0.0 {
             return Err("Eigenvalue tolerance must be positive".to_string());
@@ -269,6 +298,73 @@ mod tests {
         assert!((restored.stability_threshold - 1.05).abs() < 1e-15);
         assert!((restored.eigenvalue_tolerance - 1e-12).abs() < 1e-24);
         assert!(!restored.detect_subharmonics);
+    }
+
+    /// Every control the form holds appears on the line it writes.
+    ///
+    /// Asserted as a key set rather than one expected string: the point is not
+    /// the order of the keys, it is that none of them can go missing. Three
+    /// did, and a string assertion over the old shape passed the whole time
+    /// because it was written against what the emitter emitted.
+    #[test]
+    fn the_directive_states_every_control_the_form_holds() {
+        let config = PstbConfig {
+            probe: "LP1".to_owned(),
+            max_harmonics: 7,
+            num_multipliers: 4,
+            stability_threshold: 1.25,
+            detect_subharmonics: false,
+            eigenvalue_tolerance: 1e-12,
+            ..PstbConfig::default()
+        };
+
+        let directive = config.to_spice();
+
+        for expected in [
+            "probe=LP1",
+            "maxharm=7",
+            "nmults=4",
+            "stabilitythreshold=1.25",
+            "detectsubharmonics=no",
+            "eigentol=",
+        ] {
+            assert!(
+                directive.contains(expected),
+                "`{expected}` is missing from `{directive}`"
+            );
+        }
+        // The default multiplier count is written too. It used to be omitted
+        // whenever it matched the card's constant, which made this line's
+        // shape depend on a number owned by another crate.
+        assert!(
+            PstbConfig::default().to_spice().contains("nmults=10"),
+            "the default draft states its multiplier count: {}",
+            PstbConfig::default().to_spice()
+        );
+    }
+
+    /// A threshold below unity is refused by the form, as the card, the engine
+    /// entry and the in-studio runner all refuse it.
+    #[test]
+    fn a_stability_threshold_below_the_unit_circle_is_refused_by_the_form() {
+        let error = PstbConfig {
+            stability_threshold: 0.5,
+            ..PstbConfig::default()
+        }
+        .validate()
+        .expect_err("|lambda| = 1 is the boundary; a threshold under it is not a contract");
+        assert!(error.contains("at least one"), "unexpected refusal: {error}");
+
+        // Unity itself is admissible: it is the boundary, not a value beyond
+        // it, and the engine's own bound is `>= 1.0`.
+        assert!(
+            PstbConfig {
+                stability_threshold: 1.0,
+                ..PstbConfig::default()
+            }
+            .validate()
+            .is_ok()
+        );
     }
 
     #[test]
