@@ -211,12 +211,9 @@ fn validate_native_coverage(model: &CompiledModel) -> JitResult<()> {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(target_arch = "aarch64")]
     use super::{EvalContext, NativeStampKernelIo, compile_native_with_canonical_ir};
-    #[cfg(target_arch = "aarch64")]
     use crate::{CompilerOptions, VerilogACompiler};
 
-    #[cfg(target_arch = "aarch64")]
     #[test]
     fn public_canonical_dispatch_compiles_and_executes_real_verilog_a() {
         let source = r#"
@@ -240,7 +237,10 @@ endmodule
             .compile_canonical_ir(source)
             .expect("compile canonical Verilog-A IR");
         let native = compile_native_with_canonical_ir(&model, &artifact)
-            .expect("compile public canonical ARM64 native model");
+            .expect("compile public canonical host-native model");
+        // Mirror the device's evaluation storage: CFG entries consume the
+        // prelude's published slots even when there are no model variables.
+        let mut prelude_slots = vec![f64::NAN; native.required_storage().prelude_slots];
 
         let params = [2.0_f64];
         let voltages = [4.0_f64, 0.0];
@@ -248,6 +248,8 @@ endmodule
         let mut branch_currents =
             vec![0.0_f64; (model.num_terminals + 1) * (model.num_terminals + 1)];
         let mut context = EvalContext::empty_for_test();
+        context.prelude_slots = prelude_slots.as_mut_ptr();
+        context.prelude_slots_len = prelude_slots.len();
         context.params = params.as_ptr();
         context.voltages = voltages.as_ptr();
         context.num_terminals = model.num_terminals;
@@ -262,6 +264,7 @@ endmodule
             None
         );
         native.run_assignments(&context, variables.as_mut_ptr());
+        native.run_prelude(&context, variables.as_ptr());
         let value = native
             .run_stamp_value(0, &context, variables.as_ptr())
             .expect("compiled stamp value");
@@ -278,7 +281,6 @@ endmodule
         assert!(context.take_runtime_error().is_none());
     }
 
-    #[cfg(target_arch = "aarch64")]
     #[test]
     fn public_canonical_dispatch_compiles_stateful_and_reactive_model() {
         let source = r#"
@@ -302,7 +304,7 @@ endmodule
             .compile_canonical_ir(source)
             .expect("compile stateful canonical Verilog-A IR");
         let native = compile_native_with_canonical_ir(&model, &artifact)
-            .expect("compile stateful public ARM64 native model");
+            .expect("compile stateful public host-native model");
         let required = native.required_storage();
         assert!(required.state_values > 0);
         assert!(
@@ -315,7 +317,10 @@ endmodule
         let mut states = vec![0.0_f64; required.state_values];
         let mut initialized = vec![0_u8; required.state_initialized];
         let mut candidate_valid = vec![0_u8; required.state_candidate_valid];
+        let mut prelude_slots = vec![f64::NAN; required.prelude_slots];
         let mut context = EvalContext::empty_for_test();
+        context.prelude_slots = prelude_slots.as_mut_ptr();
+        context.prelude_slots_len = prelude_slots.len();
         context.params = params.as_ptr();
         context.voltages = voltages.as_ptr();
         context.state_values = states.as_mut_ptr();
@@ -326,6 +331,7 @@ endmodule
         context.state_candidate_valid_len = candidate_valid.len();
         let mut variables = vec![0.0_f64; model.num_variables];
         native.run_assignments(&context, variables.as_mut_ptr());
+        native.run_prelude(&context, variables.as_ptr());
         assert!(variables.iter().all(|value| value.is_finite()));
         assert!(context.take_runtime_error().is_none());
 
