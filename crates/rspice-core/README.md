@@ -248,6 +248,15 @@ targets and retain the seed and sampling-policy version in the shared result
 document. Callback sampling now uses the engine's distribution arithmetic,
 including the magnitude of negative nominal parameters; its policy is version 2.
 
+`MonteCarloConfig::confidence_pct` controls a two-sided confidence interval
+for each output mean. `confidence_method` selects Student-t (exact for
+independent normal observations) or a deterministic percentile bootstrap with
+an explicit seed and resampling count. Failed trials make the interval
+conditional on successful trials. The shared result document includes the
+method, level, assumptions, and each interval's availability; fewer than two
+samples have no estimated interval. Bootstrap work and storage use the existing
+analysis-point and result-value limits.
+
 | Analysis | Module |
 | :--- | :--- |
 | DC operating point and DC sweep | `analysis/dc.rs`, `engine/dc.rs` |

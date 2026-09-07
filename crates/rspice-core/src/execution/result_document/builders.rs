@@ -44,7 +44,9 @@ use crate::analysis::ac::AcResult;
 use crate::analysis::distortion::{DistortionAnalysisResult, DistortionPointResult};
 use crate::analysis::fourier::FourierResult;
 use crate::analysis::harmonic_balance::HbResult;
-use crate::analysis::monte_carlo::MonteCarloResult;
+use crate::analysis::monte_carlo::{
+    MeanConfidenceInterval, MeanConfidenceMethod, MonteCarloResult,
+};
 use crate::analysis::noise::NoiseResult;
 use crate::analysis::pac::PacResult;
 use crate::analysis::pnoise::{PhaseNoisePoint, PnoiseResult};
@@ -2508,6 +2510,74 @@ impl AnalysisResultDocument {
         let mut names = result.variables.keys().cloned().collect::<Vec<_>>();
         names.sort();
         let mut statistics = Vec::with_capacity(names.len());
+        let mut confidence_scalars = Vec::new();
+        if let Some(confidence) = result.confidence {
+            if confidence.successful_samples != successful_runs
+                || confidence.conditional_on_successful_trials != (result.num_failures != 0)
+                || !confidence.level_pct.is_finite()
+                || confidence.level_pct <= 0.0
+                || confidence.level_pct >= 100.0
+            {
+                return Err(source_error(
+                    LOCATION,
+                    "mean confidence population is inconsistent",
+                ));
+            }
+            confidence_scalars.push(ResultScalar::new(
+                "mean_confidence_level_pct",
+                "Mean confidence level",
+                Some(percent()),
+                ScalarValue::Real {
+                    value: Some(confidence.level_pct),
+                },
+            )?);
+            confidence_scalars.push(ResultScalar::new(
+                "mean_confidence_method",
+                "Mean confidence method",
+                None,
+                ScalarValue::Text {
+                    value: confidence.method.tag().to_owned(),
+                },
+            )?);
+            confidence_scalars.push(boolean_scalar(
+                "mean_confidence_conditional_on_success",
+                "Confidence conditional on successful trials",
+                confidence.conditional_on_successful_trials,
+            )?);
+            let assumptions = match confidence.method {
+                MeanConfidenceMethod::StudentT => {
+                    "Independent normal observations; otherwise Student-t coverage is approximate."
+                }
+                MeanConfidenceMethod::PercentileBootstrap { resamples, seed } => {
+                    if resamples < 2 {
+                        return Err(source_error(
+                            LOCATION,
+                            "bootstrap needs at least two resamples",
+                        ));
+                    }
+                    confidence_scalars.push(count_scalar(
+                        "mean_confidence_bootstrap_resamples",
+                        "Bootstrap resamples",
+                        resamples,
+                    )?);
+                    confidence_scalars.push(ResultScalar::new(
+                        "mean_confidence_bootstrap_seed",
+                        "Bootstrap seed",
+                        None,
+                        ScalarValue::Count { value: seed },
+                    )?);
+                    "Independent observations; empirical bootstrap coverage depends on sample size and resampling resolution."
+                }
+            };
+            confidence_scalars.push(ResultScalar::new(
+                "mean_confidence_assumptions",
+                "Mean confidence assumptions",
+                None,
+                ScalarValue::Text {
+                    value: assumptions.to_owned(),
+                },
+            )?);
+        }
         for name in names {
             let variable = result
                 .variables
@@ -2530,6 +2600,56 @@ impl AnalysisResultDocument {
                     format!("variable '{name}' has an inconsistent histogram"),
                 ));
             }
+            match (result.confidence, variable.mean_confidence) {
+                (None, None) => {}
+                (Some(_), Some(interval)) => {
+                    // Scalar IDs normalize ASCII case; statistical variable
+                    // names do not. An injective UTF-8 encoding preserves
+                    // distinct names such as Gain/gain in the shared document.
+                    let variable_id = super::wire::encode_hex(name.as_bytes());
+                    let (lower, upper, state) = match interval {
+                        MeanConfidenceInterval::Available { lower, upper }
+                            if successful_runs >= 2
+                                && lower.is_finite()
+                                && upper.is_finite()
+                                && lower <= upper =>
+                        {
+                            (Some(lower), Some(upper), "available")
+                        }
+                        MeanConfidenceInterval::InsufficientSamples if successful_runs < 2 => {
+                            (None, None, "insufficient_samples")
+                        }
+                        MeanConfidenceInterval::Unrepresentable if successful_runs >= 2 => {
+                            (None, None, "unrepresentable")
+                        }
+                        _ => {
+                            return Err(source_error(LOCATION, "invalid mean confidence interval"));
+                        }
+                    };
+                    for (bound, value) in [("lower", lower), ("upper", upper)] {
+                        confidence_scalars.push(ResultScalar::new(
+                            format!("mean_confidence_{bound}:{variable_id}"),
+                            format!("{name} mean confidence {bound}"),
+                            None,
+                            ScalarValue::Real { value },
+                        )?);
+                    }
+                    confidence_scalars.push(ResultScalar::new(
+                        format!("mean_confidence_state:{variable_id}"),
+                        format!("{name} mean confidence availability"),
+                        None,
+                        ScalarValue::Text {
+                            value: state.to_owned(),
+                        },
+                    )?);
+                }
+                _ => {
+                    return Err(source_error(
+                        LOCATION,
+                        "mean confidence method and intervals disagree",
+                    ));
+                }
+            }
             statistics.push(MonteCarloVariableStatistics {
                 name: variable.name.clone(),
                 samples,
@@ -2548,6 +2668,7 @@ impl AnalysisResultDocument {
             count_scalar("successful_runs", "Successful runs", successful_runs)?,
             boolean_scalar("all_converged", "All runs converged", result.all_converged)?,
         ];
+        scalars.extend(confidence_scalars);
         if let Some(sampling) = result.sampling {
             scalars.push(ResultScalar::new(
                 "sampling_seed",

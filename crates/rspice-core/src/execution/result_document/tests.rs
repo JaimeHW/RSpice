@@ -330,6 +330,61 @@ fn monte_carlo_documents_retain_exact_seed_and_sampling_policy() {
     );
 }
 
+#[test]
+fn monte_carlo_documents_retain_mean_confidence_and_reject_unqualified_intervals() {
+    use crate::analysis::monte_carlo::{MeanConfidenceInterval, MeanConfidenceMethod};
+    let mut result = monte_carlo_result();
+    result.variables.insert(
+        "v(out)".to_owned(),
+        VariableStatistics::from_samples("v(out)", vec![5.9, 6.0, 6.1], 2),
+    );
+    result
+        .compute_mean_confidence(
+            95.0,
+            MeanConfidenceMethod::StudentT,
+            crate::resource::ResourceLimits::default(),
+            &NoAbort,
+        )
+        .unwrap();
+    let document =
+        AnalysisResultDocument::from_monte_carlo(instance(AnalysisKind::MonteCarlo), &result)
+            .unwrap()
+            .build()
+            .unwrap();
+    let restored = AnalysisResultDocument::from_json(&document.to_json().unwrap()).unwrap();
+    assert_eq!(
+        scalar_of(&restored, "mean_confidence_level_pct").value(),
+        &ScalarValue::Real { value: Some(95.0) }
+    );
+    assert_eq!(
+        scalar_of(&restored, "mean_confidence_state:56286f757429").value(),
+        &ScalarValue::Text {
+            value: "available".to_owned()
+        }
+    );
+    let MeanConfidenceInterval::Available { lower, .. } =
+        result.variables["V(out)"].mean_confidence.unwrap()
+    else {
+        panic!("fixture needs a finite interval")
+    };
+    assert_eq!(
+        scalar_of(&restored, "mean_confidence_lower:56286f757429").value(),
+        &ScalarValue::Real { value: Some(lower) }
+    );
+    assert!(
+        matches!(
+            scalar_of(&restored, "mean_confidence_lower:76286f757429").value(),
+            ScalarValue::Real { value: Some(value) } if *value > 5.0
+        ),
+        "case-distinct variable names keep separate confidence scalars"
+    );
+    result.confidence = None;
+    assert!(
+        AnalysisResultDocument::from_monte_carlo(instance(AnalysisKind::MonteCarlo), &result,)
+            .is_err()
+    );
+}
+
 fn pss_result() -> PssResult {
     let mut result = PssResult::new(1.0e-6, 1, 3);
     result.time = vec![0.0, 5.0e-7, 1.0e-6];

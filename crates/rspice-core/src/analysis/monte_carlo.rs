@@ -29,6 +29,43 @@ use crate::config::SimulationConfigError;
 use crate::resource::{ResourceKind, ResourceLimitError, ResourceLimits};
 use std::collections::{BTreeMap, HashMap};
 
+mod confidence;
+pub use confidence::{MeanConfidenceInterval, MeanConfidenceMethod, MonteCarloConfidence};
+
+#[derive(Default)]
+struct CompensatedSum {
+    sum: Value,
+    correction: Value,
+}
+
+impl CompensatedSum {
+    fn add(&mut self, value: Value) {
+        let next = self.sum + value;
+        self.correction += if self.sum.abs() >= value.abs() {
+            (self.sum - next) + value
+        } else {
+            (value - next) + self.sum
+        };
+        self.sum = next;
+    }
+
+    fn total(self) -> Value {
+        self.sum + self.correction
+    }
+}
+
+fn statistical_location_scale(samples: &[Value], min: Value, max: Value) -> (Value, Value) {
+    // Center only a tightly clustered, single-sign population. Those
+    // differences are exact by Sterbenz's lemma; centering a population that
+    // spans zero can erase small values before compensation can recover them.
+    let anchor = if (min > 0.0 && min >= max * 0.5) || (max < 0.0 && max <= min * 0.5) {
+        samples[0]
+    } else {
+        0.0
+    };
+    (anchor, (min - anchor).abs().max((max - anchor).abs()))
+}
+
 //=============================================================================
 // Distribution Types
 //=============================================================================
@@ -169,6 +206,9 @@ pub struct MonteCarloConfig {
 
     /// Confidence interval percentage (95 = 95%)
     pub confidence_pct: Value,
+    /// Mean-uncertainty estimator. Each method has explicit distributional
+    /// assumptions; see `MeanConfidenceMethod`.
+    pub confidence_method: MeanConfidenceMethod,
     /// Limits enforced before simulation and before retaining outputs.
     pub resource_limits: ResourceLimits,
 }
@@ -181,6 +221,7 @@ impl MonteCarloConfig {
             seed: None,
             histogram_bins: 50,
             confidence_pct: 95.0,
+            confidence_method: MeanConfidenceMethod::StudentT,
             resource_limits: ResourceLimits::default(),
         }
     }
@@ -221,6 +262,9 @@ pub struct VariableStatistics {
     pub histogram: Vec<usize>,
     /// Histogram bin edges
     pub bin_edges: Vec<Value>,
+    /// None when no estimator was requested; otherwise finite limits or an
+    /// explicit reason they are unavailable.
+    pub mean_confidence: Option<MeanConfidenceInterval>,
 }
 
 impl VariableStatistics {
@@ -236,6 +280,7 @@ impl VariableStatistics {
                 max: Value::NAN,
                 histogram: Vec::new(),
                 bin_edges: Vec::new(),
+                mean_confidence: None,
             };
         }
 
@@ -247,25 +292,20 @@ impl VariableStatistics {
 
         // Center before scaling so tightly clustered large values retain
         // their low bits; scale before squaring to protect extreme moments.
-        let anchor = if (min - samples[0]).is_finite() && (max - samples[0]).is_finite() {
-            samples[0]
-        } else {
-            0.0
-        };
-        let scale = (min - anchor).abs().max((max - anchor).abs());
+        let (anchor, scale) = statistical_location_scale(&samples, min, max);
         let (mean, std_dev) = if scale == 0.0 {
             (anchor, 0.0)
         } else {
-            let normalized_mean = samples
-                .iter()
-                .map(|value| (value - anchor) / scale)
-                .sum::<Value>()
-                / n;
-            let normalized_variance = samples
-                .iter()
-                .map(|value| ((value - anchor) / scale - normalized_mean).powi(2))
-                .sum::<Value>()
-                / (n - 1.0).max(1.0);
+            let mut sum = CompensatedSum::default();
+            for value in &samples {
+                sum.add((value - anchor) / scale);
+            }
+            let normalized_mean = sum.total() / n;
+            let mut sum = CompensatedSum::default();
+            for value in &samples {
+                sum.add(((value - anchor) / scale - normalized_mean).powi(2));
+            }
+            let normalized_variance = sum.total() / (n - 1.0).max(1.0);
             (
                 anchor + normalized_mean * scale,
                 normalized_variance.sqrt() * scale,
@@ -284,6 +324,7 @@ impl VariableStatistics {
             max,
             histogram,
             bin_edges,
+            mean_confidence: None,
         }
     }
 
@@ -371,6 +412,8 @@ pub struct MonteCarloResult {
     pub num_failures: usize,
     /// Absent only for externally aggregated trials with no supplied provenance.
     pub sampling: Option<MonteCarloSampling>,
+    /// Method, sample population, and assumptions for the mean intervals.
+    pub confidence: Option<MonteCarloConfidence>,
 }
 
 impl MonteCarloResult {
@@ -381,6 +424,7 @@ impl MonteCarloResult {
             all_converged: true,
             num_failures: 0,
             sampling: None,
+            confidence: None,
         }
     }
 
@@ -629,17 +673,13 @@ impl MonteCarloRunner {
             histogram_values,
             self.config.resource_limits.max_result_values,
         )?;
-        if !self.config.confidence_pct.is_finite()
-            || self.config.confidence_pct <= 0.0
-            || self.config.confidence_pct >= 100.0
-        {
-            return Err(SimulationConfigError::InvalidValue {
-                field: "monte_carlo.confidence_pct",
-                value: self.config.confidence_pct,
-                requirement: "finite and strictly between 0 and 100",
-            }
-            .into());
-        }
+        confidence::validate_request(
+            self.config.confidence_pct,
+            self.config.confidence_method,
+            self.config.num_runs,
+            1,
+            self.config.resource_limits,
+        )?;
         for (name, (nominal, tolerance)) in &self.tolerances {
             if name.trim().is_empty() || !nominal.is_finite() {
                 return Err(SimulationError::Circuit(format!(
@@ -701,13 +741,22 @@ impl MonteCarloRunner {
                         num_failures += 1;
                         continue;
                     }
+                    if output_schema.is_none() {
+                        confidence::validate_request(
+                            self.config.confidence_pct,
+                            self.config.confidence_method,
+                            self.config.num_runs,
+                            names.len(),
+                            self.config.resource_limits,
+                        )?;
+                    }
                     sample_values = sample_values.saturating_add(names.len());
                     ResourceLimitError::ensure(
                         ResourceKind::ResultValues,
                         sample_values.saturating_add(
                             names
                                 .len()
-                                .saturating_mul(histogram_values.saturating_add(4)),
+                                .saturating_mul(histogram_values.saturating_add(7)),
                         ),
                         self.config.resource_limits.max_result_values,
                     )?;
@@ -732,16 +781,19 @@ impl MonteCarloRunner {
         let variables: HashMap<String, VariableStatistics> = all_outputs
             .into_iter()
             .map(|(name, samples)| {
+                if abort.is_aborted() {
+                    return Err(SimulationError::from_abort(abort));
+                }
                 let stats =
                     VariableStatistics::from_samples(&name, samples, self.config.histogram_bins);
-                (name, stats)
+                Ok((name, stats))
             })
-            .collect();
+            .collect::<Result<_, SimulationError>>()?;
 
         if abort.is_aborted() {
             return Err(SimulationError::from_abort(abort));
         }
-        Ok(MonteCarloResult {
+        let mut result = MonteCarloResult {
             num_runs: self.config.num_runs,
             variables,
             all_converged: num_failures == 0,
@@ -750,7 +802,15 @@ impl MonteCarloRunner {
                 seed,
                 policy: "component-xoroshiro128plus-2018-v2",
             }),
-        })
+            confidence: None,
+        };
+        result.compute_mean_confidence(
+            self.config.confidence_pct,
+            self.config.confidence_method,
+            self.config.resource_limits,
+            abort,
+        )?;
+        Ok(result)
     }
 }
 
@@ -773,6 +833,9 @@ mod tests {
 
     #[test]
     fn statistics_preserve_representable_moments_at_extreme_scales() {
+        let cancellation =
+            VariableStatistics::from_samples("cancellation", vec![1e16, 1.0, -1e16], 10);
+        assert!((cancellation.mean - 1.0 / 3.0).abs() < 1e-15);
         let constant = VariableStatistics::from_samples("constant", vec![f64::MAX; 4], 10);
         assert_eq!(constant.mean, f64::MAX);
         assert_eq!(constant.std_dev, 0.0);

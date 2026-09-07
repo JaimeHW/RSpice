@@ -1,7 +1,8 @@
 use super::{Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::monte_carlo::{
-    Distribution, MonteCarloResult, MonteCarloSampling, VariableStatistics, Xorshift128Plus,
+    Distribution, MeanConfidenceMethod, MonteCarloResult, MonteCarloSampling, VariableStatistics,
+    Xorshift128Plus,
 };
 use crate::netlist::{ElementKind, SourceSpec};
 use crate::{Netlist, Value};
@@ -496,6 +497,12 @@ impl Engine {
                 "parameter-xoroshiro128plus-2018-v1"
             },
         });
+        result.compute_mean_confidence(
+            95.0,
+            MeanConfidenceMethod::StudentT,
+            self.config.resource_limits,
+            abort,
+        )?;
         Ok(result)
     }
 
@@ -665,6 +672,7 @@ impl Engine {
             all_converged: results.len() == requested_runs,
             num_failures: requested_runs - results.len(),
             sampling: None,
+            confidence: None,
         })
     }
 }

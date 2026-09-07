@@ -671,7 +671,7 @@ pub(super) mod optional_step_axis_target {
 // Hexadecimal digests
 //=============================================================================
 
-fn encode_hex(bytes: &[u8]) -> String {
+pub(super) fn encode_hex(bytes: &[u8]) -> String {
     use std::fmt::Write as _;
 
     bytes.iter().fold(
