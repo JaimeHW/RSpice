@@ -50,11 +50,46 @@ impl PssIntegrationMesh {
         }
     }
 
-    pub(super) fn refined(&self, abort: &dyn AbortSignal) -> Result<Self, SimulationError> {
+    pub(super) fn refinement_midpoint(left: Value, right: Value) -> Option<Value> {
+        let midpoint = left + 0.5 * (right - left);
+        (midpoint > left && midpoint < right).then_some(midpoint)
+    }
+
+    pub(super) fn refinement_steps(
+        &self,
+        abort: &dyn AbortSignal,
+    ) -> Result<usize, SimulationError> {
+        let mut count = self.steps();
+        for (index, pair) in self.times.windows(2).enumerate() {
+            if index & 0xff == 0 && abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            if Self::refinement_midpoint(pair[0], pair[1]).is_some() {
+                count = count.checked_add(1).ok_or_else(|| {
+                    PssError::InvalidConfig("integration mesh size overflowed".to_owned())
+                })?;
+            } else if index == 0 {
+                // The startup interval must use BE without derivative history.
+                // It cannot be qualified by the alternate-method floor probe.
+                return Err(PssError::InvalidConfig(
+                    "first integration interval has no representable refinement point".to_owned(),
+                )
+                .into());
+            }
+        }
+        Ok(count)
+    }
+
+    /// Preserve every authored time, including adjacent representable clocks.
+    /// The caller separately qualifies those intervals with a solved orbit
+    /// using the alternate integration method before accepting the mesh.
+    pub(super) fn refined(
+        &self,
+        abort: &dyn AbortSignal,
+    ) -> Result<(Self, Vec<usize>), SimulationError> {
         let count = self
-            .steps()
-            .checked_mul(2)
-            .and_then(|steps| steps.checked_add(1))
+            .refinement_steps(abort)?
+            .checked_add(1)
             .ok_or_else(|| {
                 PssError::InvalidConfig("integration mesh size overflowed".to_owned())
             })?;
@@ -62,30 +97,29 @@ impl PssIntegrationMesh {
         times.try_reserve_exact(count).map_err(|_| {
             PssError::InvalidConfig("integration mesh allocation failed".to_owned())
         })?;
+        let mut retained = Vec::new();
+        retained.try_reserve_exact(self.times.len()).map_err(|_| {
+            PssError::InvalidConfig("integration mesh index allocation failed".to_owned())
+        })?;
         for (index, pair) in self.times.windows(2).enumerate() {
             if index & 0xff == 0 && abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
-            let midpoint = pair[0] + 0.5 * (pair[1] - pair[0]);
-            if midpoint <= pair[0] || midpoint >= pair[1] {
-                return Err(PssError::InvalidConfig(format!(
-                    "integration interval [{:.17e}, {:.17e}] has no representable refinement point",
-                    pair[0], pair[1],
-                ))
-                .into());
-            }
+            retained.push(times.len());
             times.push(pair[0]);
-            times.push(midpoint);
+            if let Some(midpoint) = Self::refinement_midpoint(pair[0], pair[1]) {
+                times.push(midpoint);
+            }
         }
+        retained.push(times.len());
         times.push(self.period);
-        Self::from_times(self.period, times)
+        Ok((Self::from_times(self.period, times)?, retained))
     }
 }
 
 impl Engine {
-    /// Add authored independent-source corners to a bounded uniform base.
-    /// Behavioral interval bounds remain active until their event schedule
-    /// can provide the same complete timing contract.
+    /// Add resolved source corners to a bounded uniform base. Behavioral
+    /// coordinates without an exact event schedule retain interval bounds.
     pub(in crate::engine) fn pss_source_mesh(
         &self,
         circuit: &CircuitData,
@@ -103,9 +137,6 @@ impl Engine {
             .filter(|(_, _, _, interval)| interval.is_some())
             .map(|(name, _, _, _)| name.to_ascii_lowercase())
             .collect::<std::collections::HashSet<_>>();
-        if selected.is_empty() {
-            return Ok(None);
-        }
         let mut events = BreakpointManager::new_with_tolerance(Value::from_bits(1));
         Self::collect_independent_source_breakpoints(
             circuit,
@@ -119,6 +150,13 @@ impl Engine {
             abort,
             self.config.resource_limits.max_analysis_points,
             crate::engine::transient::SourceBreakpointGeometry::PhysicalCorners,
+        )?;
+        circuit.behavioral_sources.collect_transient_breakpoints(
+            period,
+            &mut events,
+            abort,
+            self.config.resource_limits.max_analysis_points,
+            true,
         )?;
         let events = events.times();
         if events.is_empty() {
@@ -204,8 +242,9 @@ mod tests {
         for period in [1e-300, 1e-6, 1e300] {
             let times = vec![0.0, period * 0.013, period * 0.25, period * 0.731, period];
             let mesh = PssIntegrationMesh::from_times(period, times.clone()).unwrap();
-            let refined = mesh.refined(&NoAbort).unwrap();
+            let (refined, retained) = mesh.refined(&NoAbort).unwrap();
             for (index, &time) in times.iter().enumerate() {
+                assert_eq!(retained[index], 2 * index);
                 assert_eq!(refined.time(2 * index, period).to_bits(), time.to_bits());
                 assert_eq!(mesh.time(index, period).to_bits(), time.to_bits());
             }
@@ -215,18 +254,27 @@ mod tests {
     }
 
     #[test]
-    fn mesh_refinement_refuses_unrepresentable_intervals_and_obeys_cancellation() {
+    fn mesh_refinement_preserves_adjacent_clocks_and_obeys_cancellation() {
         let mesh =
             PssIntegrationMesh::from_times(1.0, vec![0.0, 0.5, 0.5_f64.next_up(), 1.0]).unwrap();
-        assert!(
-            mesh.refined(&NoAbort)
-                .unwrap_err()
-                .to_string()
-                .contains("no representable refinement point")
-        );
+        let (refined, retained) = mesh.refined(&NoAbort).unwrap();
+        assert_eq!(retained, [0, 2, 3, 5]);
+        assert_eq!(refined.steps(), mesh.refinement_steps(&NoAbort).unwrap());
+        for (index, &time) in mesh.times.iter().enumerate() {
+            assert_eq!(refined.times[retained[index]].to_bits(), time.to_bits());
+        }
         assert!(matches!(
             mesh.refined(&crate::abort_signal::CountingAbort::new(0)),
             Err(SimulationError::Aborted)
         ));
+        let startup =
+            PssIntegrationMesh::from_times(1.0, vec![0.0, Value::from_bits(1), 1.0]).unwrap();
+        assert!(
+            startup
+                .refined(&NoAbort)
+                .unwrap_err()
+                .to_string()
+                .contains("first integration interval has no representable refinement point")
+        );
     }
 }

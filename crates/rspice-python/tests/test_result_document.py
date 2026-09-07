@@ -282,9 +282,14 @@ def test_a_convenience_call_publishes_the_single_analysis_identity():
     assert [descriptor.kind for descriptor in result.signals()] != []
 
 
-def test_pss_local_source_mesh_survives_python_and_pickle():
+@pytest.mark.parametrize("source", [
+    "V1 in 0 PULSE(0 1 400p 10p 10p 100p 1u)",
+    "B1 in 0 V=spice_pulse(0,1,400p,10p,10p,100p,1u)",
+    "B1 in 0 V=table(mod(time*1e12,1e6),0,0,400,0,410,1,510,1,520,0,1e6,0)",
+])
+def test_pss_local_source_mesh_survives_python_and_pickle(source):
     result = rspice.Engine().run_pss(
-        parse("* Narrow periodic pulse\nV1 in 0 PULSE(0 1 400p 10p 10p 100p 1u)\n"
+        parse(f"* Narrow periodic pulse\n{source}\n"
               "R1 in out 1k\nC1 out 0 159.154943091895p\n"),
         1e6, tstab_periods=0, points_per_period=256,
     )

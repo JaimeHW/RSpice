@@ -6,8 +6,8 @@ use super::*;
 use crate::numerics::is_integral_cycle_count;
 
 impl BehavioralVoltageSource {
-    pub(crate) fn minimum_pss_interval(&self) -> Option<Value> {
-        minimum_pss_interval(&self.ast, &self.periodicity_context())
+    pub(crate) fn minimum_pss_interval(&self, events_resolved: bool) -> Option<Value> {
+        minimum_pss_interval(&self.ast, &self.periodicity_context(), events_resolved)
     }
 
     pub(crate) fn has_periodic_time_dependence(&self, period: Value, autonomous: bool) -> bool {
@@ -20,7 +20,7 @@ impl BehavioralVoltageSource {
             .max(finite_fourier_degree(&self.ast, period, &context).unwrap_or(0.0))
     }
 
-    fn periodicity_context(&self) -> Context<'_> {
+    pub(super) fn periodicity_context(&self) -> Context<'_> {
         Context::transient(&[], &[], 0.0)
             .with_temperature(self.temperature)
             .with_frequency(self.frequency)
@@ -30,8 +30,8 @@ impl BehavioralVoltageSource {
 }
 
 impl BehavioralCurrentSource {
-    pub(crate) fn minimum_pss_interval(&self) -> Option<Value> {
-        minimum_pss_interval(&self.ast, &self.periodicity_context())
+    pub(crate) fn minimum_pss_interval(&self, events_resolved: bool) -> Option<Value> {
+        minimum_pss_interval(&self.ast, &self.periodicity_context(), events_resolved)
     }
 
     pub(crate) fn has_periodic_time_dependence(&self, period: Value, autonomous: bool) -> bool {
@@ -44,7 +44,7 @@ impl BehavioralCurrentSource {
             .max(finite_fourier_degree(&self.ast, period, &context).unwrap_or(0.0))
     }
 
-    fn periodicity_context(&self) -> Context<'_> {
+    pub(super) fn periodicity_context(&self) -> Context<'_> {
         Context::transient(&[], &[], 0.0)
             .with_temperature(self.temperature)
             .with_frequency(self.frequency)
@@ -79,7 +79,7 @@ fn constant_over_time(expr: &Expr) -> bool {
     }
 }
 
-fn constant_value(expr: &Expr, context: &Context<'_>) -> Option<Value> {
+pub(super) fn constant_value(expr: &Expr, context: &Context<'_>) -> Option<Value> {
     if !constant_over_time(expr) {
         return None;
     }
@@ -138,23 +138,37 @@ fn time_coordinate_rate(expr: &Expr, context: &Context<'_>) -> Option<Value> {
     }
 }
 
-fn minimum_pss_interval(expr: &Expr, context: &Context<'_>) -> Option<Value> {
-    let interval = |expr: &Expr| minimum_pss_interval(expr, context);
+fn minimum_pss_interval(
+    expr: &Expr,
+    context: &Context<'_>,
+    events_resolved: bool,
+) -> Option<Value> {
+    let interval = |expr: &Expr| minimum_pss_interval(expr, context, events_resolved);
     let shortest = |a: Option<Value>, b: Option<Value>| a.into_iter().chain(b).reduce(Value::min);
-    let table_interval = |input: &Expr, points: &[(Value, Value)]| {
+    let table_interval = |input: &Expr, points: &[(Value, Value)], has_events: bool| {
         let distance = crate::numerics::minimum_pwl_interval(points.iter().copied())?;
         let rate = time_coordinate_rate(input, context)?;
         if rate == 0.0 {
             return None;
         }
-        Some(distance / rate)
+        let interval = distance / rate;
+        if interval != 0.0
+            && events_resolved
+            && has_events
+            && super::breakpoints::has_exact_table_clock(input, context)
+        {
+            None
+        } else {
+            Some(interval)
+        }
     };
     match expr {
         Expr::Unary { operand, .. } => interval(operand),
         Expr::Binary { left, right, .. } => shortest(interval(left), interval(right)),
-        Expr::LookupTable { input, table } => {
-            shortest(interval(input), table_interval(input, &table.points))
-        }
+        Expr::LookupTable { input, table } => shortest(
+            interval(input),
+            table_interval(input, &table.points, table.transient_breakpoints),
+        ),
         Expr::Function { func, args } => {
             let nested = args.iter().filter_map(interval).reduce(Value::min);
             let own = match (func, args.as_slice()) {
@@ -168,14 +182,18 @@ fn minimum_pss_interval(expr: &Expr, context: &Context<'_>) -> Option<Value> {
                             ))
                         })
                         .collect::<Option<Vec<_>>>();
-                    points.and_then(|points| table_interval(input, &points))
+                    points.and_then(|points| table_interval(input, &points, true))
                 }
                 (Function::SpicePulse, _) => args
                     .iter()
                     .map(|arg| constant_value(arg, context))
                     .collect::<Option<Vec<_>>>()
                     .and_then(|values| {
-                        crate::expr::spice_waveform_minimum_interval(*func, &values)
+                        if events_resolved {
+                            None
+                        } else {
+                            crate::expr::spice_waveform_minimum_interval(*func, &values)
+                        }
                     }),
                 _ => None,
             };
@@ -187,7 +205,11 @@ fn minimum_pss_interval(expr: &Expr, context: &Context<'_>) -> Option<Value> {
 
 /// Constant phase increment for an affine function of time. Circuit variables
 /// and nonlinear phase modulation cannot establish a finite Fourier degree.
-fn affine_time_increment(expr: &Expr, period: Value, context: &Context<'_>) -> Option<Value> {
+pub(super) fn affine_time_increment(
+    expr: &Expr,
+    period: Value,
+    context: &Context<'_>,
+) -> Option<Value> {
     if constant_value(expr, context).is_some() {
         return Some(0.0);
     }
@@ -287,6 +309,31 @@ fn finite_fourier_degree(expr: &Expr, period: Value, context: &Context<'_>) -> O
     }
 }
 
+/// Shared affine clock geometry for source events and time-shift proofs.
+pub(super) fn affine_time_coordinate(expr: &Expr, context: &Context<'_>) -> Option<(Value, Value)> {
+    let rate = affine_time_increment(expr, 1.0, context)?;
+    let offset = Vm::new().execute(&compile(expr), context);
+    (rate.is_finite() && offset.is_finite()).then_some((rate, offset))
+}
+
+fn periodic_remainder(input: &Expr, divisor: &Expr, period: Value, context: &Context<'_>) -> bool {
+    let Some((rate, offset)) = affine_time_coordinate(input, context) else {
+        return false;
+    };
+    // A shifted affine clock that crosses zero changes the sign of `%`, so
+    // its initial waveform need not repeat on later periods.
+    if (rate > 0.0 && offset < 0.0) || (rate < 0.0 && offset > 0.0) {
+        return false;
+    }
+    let Some(divisor) = constant_value(divisor, context) else {
+        return false;
+    };
+    let Some(increment) = affine_time_increment(input, period, context) else {
+        return false;
+    };
+    divisor != 0.0 && is_integral_cycle_count((increment / divisor).abs())
+}
+
 /// Inspect authored phase increments rather than sampled values, which can
 /// all vanish when a clock aliases. Nested phase modulation retains its inner
 /// clock. This is not a bound on harmonics generated by arbitrary expressions.
@@ -365,13 +412,8 @@ fn time_increment(
                     let result = dl / constant_value(right, context)?;
                     (result != 0.0).then_some(result)
                 }
-                // Rust/SPICE remainder changes sign across zero. A bare time
-                // numerator is nonnegative throughout the analysis domain.
-                BinaryOp::Mod
-                    if !autonomous && matches!(left.as_ref(), Expr::Time) && dr == 0.0 =>
-                {
-                    let divisor = constant_value(right, context)?;
-                    (divisor > 0.0 && is_integral_cycle_count(period / divisor)).then_some(0.0)
+                BinaryOp::Mod if !autonomous && dr == 0.0 => {
+                    periodic_remainder(left, right, period, context).then_some(0.0)
                 }
                 _ => None,
             }
@@ -402,10 +444,10 @@ fn time_increment(
                     (delta == 0.0 || (!autonomous && is_integral_cycle_count(delta.abs())))
                         .then_some(delta.round())
                 }
-                (Function::Mod, [Expr::Time, divisor]) if !autonomous => {
-                    let divisor = constant_value(divisor, context)?;
-                    (divisor > 0.0 && is_integral_cycle_count(period / divisor)).then_some(0.0)
-                }
+                (Function::Mod, [input, divisor]) => ((shift(input) == Some(0.0)
+                    && shift(divisor) == Some(0.0))
+                    || (!autonomous && periodic_remainder(input, divisor, period, context)))
+                .then_some(0.0),
                 _ => args
                     .iter()
                     .all(|arg| shift(arg) == Some(0.0))
@@ -443,7 +485,7 @@ mod tests {
         ] {
             let source =
                 BehavioralVoltageSource::new("B1".to_owned(), 1, 0, 1, expression).unwrap();
-            match (source.minimum_pss_interval(), expected) {
+            match (source.minimum_pss_interval(false), expected) {
                 (Some(actual), Some(expected)) => assert!(
                     (actual / expected - 1.0).abs() < 1e-12,
                     "{expression}: {actual:e}"

@@ -17,7 +17,11 @@ use crate::solver::StaticMatrix;
 use std::path::Path;
 use thiserror::Error;
 
+mod breakpoints;
 mod periodicity;
+pub(crate) use breakpoints::BehavioralBreakpointError;
+#[cfg(test)]
+use breakpoints::expression_transient_breakpoints;
 
 const DERIVATIVE_REL_STEP: Value = 1e-6;
 const DERIVATIVE_ABS_STEP: Value = 1e-9;
@@ -458,10 +462,6 @@ impl BehavioralVoltageSource {
     #[inline]
     pub(crate) fn excludes_output_from_transient_voltage_lte(&self) -> bool {
         self.transient_voltage_lte_excluded
-    }
-
-    pub(crate) fn transient_breakpoints(&self, tstop: Value, _tstep_hint: Value) -> Vec<Value> {
-        expression_transient_breakpoints(&self.ast, tstop)
     }
 
     pub(crate) fn is_solution_dependent(&self) -> bool {
@@ -946,231 +946,6 @@ fn expression_excludes_voltage_output_from_transient_lte(expr: &Expr) -> bool {
     }
 }
 
-fn expression_transient_breakpoints(expr: &Expr, tstop: Value) -> Vec<Value> {
-    let mut breakpoints = Vec::new();
-    collect_expression_transient_breakpoints(expr, tstop, &mut breakpoints);
-    breakpoints.retain(|time| time.is_finite() && *time >= 0.0 && *time <= tstop);
-    breakpoints.sort_by(Value::total_cmp);
-    breakpoints.dedup_by(|a, b| {
-        let scale = a.abs().max(b.abs()).max(1.0);
-        (*a - *b).abs() <= 64.0 * Value::EPSILON * scale
-    });
-    breakpoints
-}
-
-fn collect_expression_transient_breakpoints(
-    expr: &Expr,
-    tstop: Value,
-    breakpoints: &mut Vec<Value>,
-) {
-    match expr {
-        Expr::Function { func, args } => {
-            match func {
-                Function::Table | Function::Pwl => {
-                    collect_time_table_breakpoints(args, tstop, breakpoints);
-                }
-                Function::SpicePulse => {
-                    collect_spice_pulse_breakpoints(args, tstop, breakpoints);
-                }
-                Function::SpiceSin => {
-                    collect_spice_delay_breakpoint(args, 3, tstop, breakpoints);
-                }
-                Function::SpiceExp => {
-                    collect_spice_delay_breakpoint(args, 2, tstop, breakpoints);
-                    collect_spice_delay_breakpoint(args, 4, tstop, breakpoints);
-                }
-                _ => {}
-            }
-            for arg in args {
-                collect_expression_transient_breakpoints(arg, tstop, breakpoints);
-            }
-        }
-        Expr::Unary { operand, .. } => {
-            collect_expression_transient_breakpoints(operand, tstop, breakpoints);
-        }
-        Expr::Binary { left, right, .. } => {
-            collect_expression_transient_breakpoints(left, tstop, breakpoints);
-            collect_expression_transient_breakpoints(right, tstop, breakpoints);
-        }
-        Expr::Const(_)
-        | Expr::NodeVoltage(_)
-        | Expr::BranchCurrent(_)
-        | Expr::StringLiteral(_)
-        | Expr::Time
-        | Expr::Frequency
-        | Expr::Temperature
-        | Expr::ThermalVoltage
-        | Expr::Gmin => {}
-        Expr::LookupTable { input, table } => {
-            if table.transient_breakpoints {
-                collect_time_lookup_breakpoints(
-                    input,
-                    table.points.iter().map(|(knot, _)| *knot),
-                    tstop,
-                    breakpoints,
-                );
-            }
-            collect_expression_transient_breakpoints(input, tstop, breakpoints);
-        }
-    }
-}
-
-fn collect_time_table_breakpoints(args: &[Expr], tstop: Value, breakpoints: &mut Vec<Value>) {
-    let Some(input) = args.first() else {
-        return;
-    };
-
-    let mut knots = Vec::new();
-    for pair in args[1..].chunks(2) {
-        let Some(x_expr) = pair.first() else {
-            continue;
-        };
-        if let Some(time) = constant_expression_value(x_expr) {
-            knots.push(time);
-        }
-    }
-
-    collect_time_lookup_breakpoints(input, knots, tstop, breakpoints);
-}
-
-fn collect_time_lookup_breakpoints(
-    input: &Expr,
-    knots: impl IntoIterator<Item = Value>,
-    tstop: Value,
-    breakpoints: &mut Vec<Value>,
-) {
-    let knots = knots.into_iter().collect::<Vec<_>>();
-    match input {
-        Expr::Time => breakpoints.extend(knots),
-        Expr::Binary {
-            op: BinaryOp::Mod,
-            left,
-            right,
-        } if matches!(left.as_ref(), Expr::Time) => {
-            let Some(period) = constant_expression_value(right) else {
-                return;
-            };
-            if !period.is_finite() || period <= 0.0 {
-                return;
-            }
-
-            let cycle_count = ((tstop.max(0.0) / period).ceil() as usize)
-                .saturating_add(1)
-                .min(1_000_000);
-            for cycle in 0..cycle_count {
-                let cycle_start = period * cycle as Value;
-                if cycle_start > tstop {
-                    break;
-                }
-                breakpoints.push(cycle_start);
-                breakpoints.push(cycle_start + period);
-                for knot in knots.iter().copied() {
-                    if knot.is_finite() && knot >= 0.0 && knot <= period {
-                        breakpoints.push(cycle_start + knot);
-                    }
-                }
-            }
-        }
-        _ => {}
-    }
-}
-
-fn collect_spice_pulse_breakpoints(args: &[Expr], tstop: Value, breakpoints: &mut Vec<Value>) {
-    if args.len() < 6 {
-        return;
-    }
-
-    let Some(delay) = constant_expression_value(&args[2]) else {
-        return;
-    };
-    let Some(rise) = constant_expression_value(&args[3]) else {
-        return;
-    };
-    let Some(fall) = constant_expression_value(&args[4]) else {
-        return;
-    };
-    let Some(width) = constant_expression_value(&args[5]) else {
-        return;
-    };
-
-    let delay = finite_nonnegative(delay, 0.0);
-    let rise = finite_nonnegative(rise, 0.0);
-    let fall = finite_nonnegative(fall, 0.0);
-    let width = finite_nonnegative(width, 0.0);
-    let period = args
-        .get(6)
-        .and_then(constant_expression_value)
-        .filter(|period| period.is_finite() && *period > 0.0);
-
-    let cycle_count = period
-        .map(|period| {
-            (((tstop - delay).max(0.0) / period).ceil() as usize)
-                .saturating_add(1)
-                .min(1_000_000)
-        })
-        .unwrap_or(1);
-
-    for cycle in 0..cycle_count {
-        let cycle_start = delay + period.unwrap_or(0.0) * cycle as Value;
-        if cycle_start > tstop {
-            break;
-        }
-        breakpoints.push(cycle_start);
-        breakpoints.push(cycle_start + rise);
-        breakpoints.push(cycle_start + rise + width);
-        breakpoints.push(cycle_start + rise + width + fall);
-    }
-}
-
-fn collect_spice_delay_breakpoint(
-    args: &[Expr],
-    delay_arg_index: usize,
-    tstop: Value,
-    breakpoints: &mut Vec<Value>,
-) {
-    let Some(delay_expr) = args.get(delay_arg_index) else {
-        return;
-    };
-    let Some(delay) = constant_expression_value(delay_expr) else {
-        return;
-    };
-    let delay = finite_nonnegative(delay, 0.0);
-    if delay <= tstop {
-        breakpoints.push(delay);
-    }
-}
-
-fn constant_expression_value(expr: &Expr) -> Option<Value> {
-    if expression_depends_on_runtime_quantity(expr) {
-        return None;
-    }
-    let program = compile(expr);
-    let mut vm = Vm::new();
-    let value = vm.execute(&program, &Context::dc(&[], &[]));
-    value.is_finite().then_some(value)
-}
-
-fn expression_depends_on_runtime_quantity(expr: &Expr) -> bool {
-    match expr {
-        Expr::Const(_) => false,
-        Expr::NodeVoltage(_)
-        | Expr::BranchCurrent(_)
-        | Expr::StringLiteral(_)
-        | Expr::Time
-        | Expr::Frequency
-        | Expr::Temperature
-        | Expr::ThermalVoltage
-        | Expr::Gmin => true,
-        Expr::LookupTable { input, .. } => expression_depends_on_runtime_quantity(input),
-        Expr::Unary { operand, .. } => expression_depends_on_runtime_quantity(operand),
-        Expr::Binary { left, right, .. } => {
-            expression_depends_on_runtime_quantity(left)
-                || expression_depends_on_runtime_quantity(right)
-        }
-        Expr::Function { args, .. } => args.iter().any(expression_depends_on_runtime_quantity),
-    }
-}
-
 /// Detect the live frequency after parameter/function expansion has produced
 /// the canonical behavioral AST. Probe names remain ordinary strings in
 /// `NodeVoltage`/`BranchCurrent`, so a node named `FREQ` is not misclassified.
@@ -1191,15 +966,6 @@ fn expression_depends_on_frequency(expr: &Expr) -> bool {
         | Expr::ThermalVoltage
         | Expr::Gmin => false,
         Expr::LookupTable { input, .. } => expression_depends_on_frequency(input),
-    }
-}
-
-#[inline]
-fn finite_nonnegative(value: Value, default: Value) -> Value {
-    if value.is_finite() && value >= 0.0 {
-        value
-    } else {
-        default
     }
 }
 
@@ -2310,10 +2076,6 @@ impl BehavioralCurrentSource {
             .filter_map(|binding| *binding)
     }
 
-    pub(crate) fn transient_breakpoints(&self, tstop: Value, _tstep_hint: Value) -> Vec<Value> {
-        expression_transient_breakpoints(&self.ast, tstop)
-    }
-
     pub(crate) fn is_solution_dependent(&self) -> bool {
         !self.program.node_map.is_empty() || !self.program.branch_map.is_empty()
     }
@@ -2805,22 +2567,6 @@ impl BehavioralSources {
             }
         }
         Ok(true)
-    }
-
-    pub(crate) fn transient_breakpoints(&self, tstop: Value, tstep_hint: Value) -> Vec<Value> {
-        let mut breakpoints = Vec::new();
-        for source in &self.voltage_sources {
-            breakpoints.extend(source.transient_breakpoints(tstop, tstep_hint));
-        }
-        for source in &self.current_sources {
-            breakpoints.extend(source.transient_breakpoints(tstop, tstep_hint));
-        }
-        breakpoints.sort_by(Value::total_cmp);
-        breakpoints.dedup_by(|a, b| {
-            let scale = a.abs().max(b.abs()).max(1.0);
-            (*a - *b).abs() <= 64.0 * Value::EPSILON * scale
-        });
-        breakpoints
     }
 
     /// Commit stateful expression operators once at a successful timestep.

@@ -706,6 +706,17 @@ impl From<RequestedSignalUnavailableError> for SimulationError {
     }
 }
 
+impl From<crate::device::behavioral::BehavioralBreakpointError> for SimulationError {
+    fn from(error: crate::device::behavioral::BehavioralBreakpointError) -> Self {
+        use crate::device::behavioral::BehavioralBreakpointError;
+        match error {
+            BehavioralBreakpointError::Aborted => Self::Aborted,
+            BehavioralBreakpointError::Resource(error) => Self::ResourceLimit(error),
+            other => Self::Circuit(other.to_string()),
+        }
+    }
+}
+
 impl From<ResultSchemaMismatchError> for SimulationError {
     fn from(error: ResultSchemaMismatchError) -> Self {
         Self::ResultSchemaMismatch(Box::new(error))
