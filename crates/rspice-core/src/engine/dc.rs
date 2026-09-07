@@ -4,7 +4,7 @@
 //! - Operating point (DC OP) calculation
 //! - DC sweep for I-V curve generation
 
-use super::core::DcOpStartup;
+use super::core::{DcOpStartup, StartupVoltageHints};
 use super::{Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::resource::{ResourceKind, ResourceLimitError};
@@ -834,7 +834,11 @@ impl Engine {
         netlist: &Netlist,
         abort: &dyn AbortSignal,
     ) -> Result<(SimulationResult, crate::circuit::DeviceOpReport), SimulationError> {
-        self.run_dc_op_with_startup_report_and_abort(netlist, DcOpStartup::Automatic, abort)
+        self.run_dc_op_with_startup_report_and_abort(
+            netlist,
+            DcOpStartup::Automatic { use_hints: true },
+            abort,
+        )
     }
 
     /// Run an exact DC operating point with `.IC` node values held as hard
@@ -1362,7 +1366,9 @@ impl Engine {
                 let (result, device_op_report) = self
                     .run_dc_op_with_startup_and_lifecycle_report_and_abort(
                         &swept,
-                        DcOpStartup::Automatic,
+                        DcOpStartup::Automatic {
+                            use_hints: lifecycle.next_public_point == 0,
+                        },
                         Some(&mut *lifecycle),
                         abort,
                     )?;
@@ -1488,7 +1494,11 @@ impl Engine {
         let sorted_node_names = circuit.node_names_sorted();
         let branch_names = circuit.branch_names_sorted();
 
-        let node_hints = self.collect_node_voltage_hints(netlist, &circuit);
+        let node_hints = if lifecycle.next_public_point == 0 {
+            self.collect_node_voltage_hints(netlist, &circuit)
+        } else {
+            StartupVoltageHints::default()
+        };
 
         let sweep_result = (|| -> Result<Vec<DcSweepPointResult>, SimulationError> {
             let mut results =
@@ -1561,21 +1571,16 @@ impl Engine {
 
                                             circuit.restore_nonlinear_state(start_state);
                                             sweep_source.set_value(&mut circuit, sweep_value);
-                                            let fresh_attempt = if node_hints.is_empty() {
-                                                engine.solve_nonlinear_with_node_hints_and_abort(
+                                            // Startup hints belong only to the first public
+                                            // point, including when continuation recovery
+                                            // needs a fresh numerical guess later in the sweep.
+                                            let fresh_attempt = engine
+                                                .solve_nonlinear_with_node_hints_and_abort(
                                                     &mut circuit,
                                                     &mut matrix,
-                                                    &[],
+                                                    &StartupVoltageHints::default(),
                                                     abort,
-                                                )
-                                            } else {
-                                                engine.solve_nonlinear_with_node_hints_and_abort(
-                                                    &mut circuit,
-                                                    &mut matrix,
-                                                    &node_hints,
-                                                    abort,
-                                                )
-                                            };
+                                                );
                                             if let Ok(solution) = fresh_attempt {
                                                 dc_sweep_subdivisions = 2;
                                                 solution
@@ -1586,13 +1591,6 @@ impl Engine {
                                     }
                                 }
                             }
-                        } else if node_hints.is_empty() {
-                            engine.solve_nonlinear_with_node_hints_and_abort(
-                                &mut circuit,
-                                &mut matrix,
-                                &[],
-                                abort,
-                            )?
                         } else {
                             engine.solve_nonlinear_with_node_hints_and_abort(
                                 &mut circuit,
@@ -1701,7 +1699,9 @@ impl Engine {
             let (result, device_op_report) = self
                 .run_dc_op_with_startup_and_lifecycle_report_and_abort(
                     &swept,
-                    DcOpStartup::Automatic,
+                    DcOpStartup::Automatic {
+                        use_hints: lifecycle.next_public_point == 0,
+                    },
                     Some(&mut *lifecycle),
                     abort,
                 )

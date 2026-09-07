@@ -2589,7 +2589,12 @@ impl CircuitData {
         let _ = phase;
         #[cfg(feature = "veriloga")]
         {
-            for device in self.veriloga_devices.iter_mut() {
+            // A guard refresh can fail. Publish the phase for all instances
+            // together so the caller can recover without a partly switched
+            // circuit, including mixed hosts' solver-input copies.
+            let mut devices = self.veriloga_devices.clone();
+            let mut hosts = self.mixed_signal_hosts.clone();
+            for device in devices.iter_mut() {
                 device.try_set_analysis_phase(phase).map_err(|error| {
                     format!(
                         "Verilog-A device '{}' analysis phase setup failed: {error}",
@@ -2597,7 +2602,7 @@ impl CircuitData {
                     )
                 })?;
             }
-            for host in &mut self.mixed_signal_hosts {
+            for host in &mut hosts {
                 host.set_analog_analysis_phase(phase).map_err(|error| {
                     format!(
                         "mixed Verilog-AMS instance '{}' analysis phase setup failed: {error}",
@@ -2605,6 +2610,8 @@ impl CircuitData {
                     )
                 })?;
             }
+            self.veriloga_devices = devices;
+            self.mixed_signal_hosts = hosts;
         }
         #[cfg(feature = "veriloga-builtins-base")]
         self.generated_veriloga_devices.set_analysis_phase(phase);
@@ -3123,6 +3130,46 @@ mod tests {
     };
     use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::sync::{Arc, Mutex};
+
+    #[cfg(feature = "veriloga")]
+    #[test]
+    fn failed_analysis_phase_guard_preserves_every_runtime_instance() {
+        use crate::device::veriloga::{Compiler, VerilogADevice};
+        use rspice_veriloga_runtime::AnalogAnalysisPhase;
+        let source = r#"module atomic_phase(p,n);
+inout p,n; electrical p,n;
+parameter integer fail=0;
+analog if (sqrt(1-2*fail*analysis("nodeset")))
+  I(p,n)<+(1+analysis("nodeset"))*V(p,n);
+endmodule"#;
+        let compiler = Compiler::default();
+        let model = compiler.compile(source).unwrap();
+        let canonical = compiler.compile_canonical_ir(source).unwrap();
+        let mut circuit = CircuitData::new();
+        let node = circuit.get_or_create_node("p");
+        for name in ["first", "second"] {
+            let mut device = VerilogADevice::try_new_with_canonical_ir(
+                name,
+                model.clone(),
+                &canonical,
+                &[node, 0],
+            )
+            .unwrap();
+            if name == "second" {
+                device.try_set_parameter("fail", 1.0).unwrap();
+            }
+            circuit.add_veriloga_device(device);
+        }
+        circuit.begin_veriloga_equilibrium_analysis(0).unwrap();
+        let error = circuit
+            .set_veriloga_analysis_phase(AnalogAnalysisPhase::Nodeset)
+            .unwrap_err();
+        assert!(error.contains("second"), "{error}");
+        for device in circuit.veriloga_devices.iter_mut() {
+            device.try_stamp(&[3.0], |_, _, _| {}, |_, _| {}).unwrap();
+            assert_eq!(device.try_evaluate().unwrap()[0], 3.0, "{}", device.name);
+        }
+    }
 
     #[cfg(feature = "veriloga")]
     #[test]

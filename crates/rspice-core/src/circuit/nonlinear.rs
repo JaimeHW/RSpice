@@ -268,7 +268,7 @@ impl CircuitData {
         #[cfg(not(feature = "veriloga-builtins-base"))]
         let has_generated_veriloga = false;
         #[cfg(feature = "veriloga")]
-        let has_dynamic_veriloga = self.has_veriloga_devices();
+        let has_dynamic_veriloga = self.has_veriloga_devices() || self.has_mixed_signal_hosts();
         #[cfg(not(feature = "veriloga"))]
         let has_dynamic_veriloga = false;
 
@@ -327,7 +327,7 @@ impl CircuitData {
         #[cfg(not(feature = "veriloga-builtins-base"))]
         let has_generated_veriloga = false;
         #[cfg(feature = "veriloga")]
-        let has_dynamic_veriloga = self.has_veriloga_devices();
+        let has_dynamic_veriloga = self.has_veriloga_devices() || self.has_mixed_signal_hosts();
         #[cfg(not(feature = "veriloga"))]
         let has_dynamic_veriloga = false;
 
@@ -403,7 +403,7 @@ impl CircuitData {
             || {
                 #[cfg(feature = "veriloga")]
                 {
-                    self.has_veriloga_devices()
+                    self.has_veriloga_devices() || self.has_mixed_signal_hosts()
                 }
                 #[cfg(not(feature = "veriloga"))]
                 {

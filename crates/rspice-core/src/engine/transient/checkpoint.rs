@@ -11731,7 +11731,7 @@ mod tests {
     /// asserting current-format behaviour after two renumberings moved it into
     /// the legacy ladder.
     #[cfg(feature = "veriloga")]
-    const RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS: [(u32, u32); 18] = [
+    const RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS: [(u32, u32); 19] = [
         (17, 1),
         (18, 1),
         (19, 1),
@@ -11750,6 +11750,7 @@ mod tests {
         (32, 7),
         (33, 7),
         (34, 8),
+        (35, 8),
     ];
 
     #[cfg(feature = "veriloga")]
@@ -11784,11 +11785,12 @@ mod tests {
         let checkpoint = sample_without_generated_veriloga_state();
         for (outer_version, required_version) in contracts {
             for inner_version in [required_version - 1, required_version + 1] {
-                // The current format has no legacy contract to disagree with,
-                // so the refusal comes from the decoder's own version gate;
-                // every older format is refused by the ladder that maps it to
-                // the one legacy shape it can hold.
-                let expected = if outer_version == FORMAT_VERSION {
+                // Outer formats that share today's runtime state encoding
+                // use the current decoder's version gate. Only formats with
+                // older runtime encodings enter the legacy validation ladder.
+                let expected = if required_version
+                    == rspice_veriloga::device::RUNTIME_CHECKPOINT_STATE_VERSION
+                {
                     format!(
                         "unsupported runtime Verilog-A state version {inner_version}; \
                          expected version {required_version}"

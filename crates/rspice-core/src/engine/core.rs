@@ -7,7 +7,7 @@ use super::{
 
 #[derive(Clone, Copy)]
 pub(in crate::engine) enum DcOpStartup<'a> {
-    Automatic,
+    Automatic { use_hints: bool },
     ForceInitialConditions,
     PreviousSolution(&'a [Value]),
     Zero,
@@ -22,6 +22,15 @@ pub(crate) struct StartupVoltageConstraint {
     pub positive: usize,
     pub negative: usize,
     pub voltage: Value,
+}
+
+/// Reduced startup equations and whether any effective authored `.NODESET`
+/// remains after `.IC` precedence. Hard IC clamps and internal solver seeds
+/// must not activate Verilog-AMS `analysis("nodeset")`.
+#[derive(Default)]
+pub(crate) struct StartupVoltageHints {
+    pub constraints: Vec<StartupVoltageConstraint>,
+    pub has_nodesets: bool,
 }
 use crate::diagnostics::{
     ConvergenceDiagnostic, ConvergenceFailureClass, ConvergenceQuality, ConvergenceSite,
@@ -1100,7 +1109,7 @@ R2 b out 1
 
         let voltage_hints = engine.collect_node_voltage_hints(&netlist, &circuit);
         assert_eq!(
-            voltage_hints,
+            voltage_hints.constraints,
             vec![StartupVoltageConstraint {
                 positive: flattened_node,
                 negative: 0,
@@ -1238,6 +1247,7 @@ C1 mid b 1u
         assert!(
             engine
                 .collect_node_voltage_hints(&netlist, &circuit)
+                .constraints
                 .is_empty()
         );
     }
@@ -1373,10 +1383,10 @@ impl Engine {
         &self,
         netlist: &Netlist,
         circuit: &crate::CircuitData,
-    ) -> Vec<StartupVoltageConstraint> {
+    ) -> StartupVoltageHints {
         let entry = self.startup_directives(netlist);
         let Some(directives) = entry.hints(netlist) else {
-            return Vec::new();
+            return StartupVoltageHints::default();
         };
         let StartupDirectives {
             netlist,
@@ -1402,8 +1412,14 @@ impl Engine {
             !ic_nodes.contains(&constraint.positive)
                 && (constraint.negative == 0 || !ic_nodes.contains(&constraint.negative))
         });
+        let has_nodesets = combined
+            .iter()
+            .any(|constraint| constraint.positive != constraint.negative);
         combined.extend(initial_conditions);
-        Self::reduce_startup_constraints(&combined)
+        StartupVoltageHints {
+            constraints: Self::reduce_startup_constraints(&combined),
+            has_nodesets,
+        }
     }
 
     /// Collect node-voltage initial conditions from .IC directives only.
@@ -1484,7 +1500,7 @@ impl Engine {
             netlist,
             circuit,
             matrix,
-            DcOpStartup::Automatic,
+            DcOpStartup::Automatic { use_hints: true },
             abort,
         )
     }
@@ -1514,7 +1530,7 @@ impl Engine {
                     ));
                 }
                 let seed = vec![0.0; circuit.matrix_size()];
-                self.solve_nonlinear_nodeset_dc_startup_with_abort(
+                self.solve_nonlinear_dc_startup_with_constraints_and_abort(
                     circuit, matrix, &seed, &hints, abort,
                 )
             }
@@ -1546,16 +1562,14 @@ impl Engine {
                     self.solve_linear(circuit, matrix)
                 }
             }
-            DcOpStartup::Automatic => {
+            DcOpStartup::Automatic { use_hints } => {
                 if circuit.has_nonlinear_devices() || !circuit.generic_switches.is_empty() {
-                    let hints = self.collect_node_voltage_hints(netlist, circuit);
-                    if hints.is_empty() {
-                        self.solve_nonlinear_with_node_hints_and_abort(circuit, matrix, &[], abort)
+                    let hints = if use_hints {
+                        self.collect_node_voltage_hints(netlist, circuit)
                     } else {
-                        self.solve_nonlinear_with_node_hints_and_abort(
-                            circuit, matrix, &hints, abort,
-                        )
-                    }
+                        StartupVoltageHints::default()
+                    };
+                    self.solve_nonlinear_with_node_hints_and_abort(circuit, matrix, &hints, abort)
                 } else {
                     if abort.is_aborted() {
                         return Err(SimulationError::Aborted);

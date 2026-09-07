@@ -64,6 +64,151 @@ endmodule
 "#;
 
 #[test]
+fn nodeset_phase_guides_dc_and_transient_without_turning_ic_into_nodesets() {
+    // The unconstrained model has two equilibria, at -1 V and +1 V.
+    // Only the nodeset phase selects +1 V; the authored hint constrains a
+    // different node. This observes the actual intermediate solve through
+    // its final equilibrium, without relying on speculative event state.
+    for mixed in [false, true] {
+        let source = format!(
+            r#"module nodeset_choice(out);
+inout out; electrical out;
+{}
+analog I(out)<+V(out)-(analysis("nodeset") || V(out)>0.5 ? 1 : -1);
+endmodule"#,
+            if mixed {
+                "initial begin integer digital; digital=1; end"
+            } else {
+                ""
+            }
+        );
+        let model = write_model("nodeset_choice", &source);
+        for (directives, expected) in [
+            (".nodeset V(hint)=0.25", 1.0),
+            (".ic V(hint)=0.25", -1.0),
+            (".nodeset V(hint)=0.25\n.ic V(hint)=0.5", -1.0),
+            (".nodeset V(hint,hint)=0", -1.0),
+        ] {
+            let netlist = Netlist::parse(&format!(
+                "* nodeset phase selection\nR1 hint 0 1k\nX1 out nodeset_choice\n{directives}\n.va \"{}\" nodeset_choice\n.end\n",
+                deck_path(&model)
+            ))
+            .unwrap();
+            let engine = Engine::default();
+            if !mixed {
+                let dc = engine.run_dc_op(&netlist).unwrap();
+                assert!(
+                    (node_voltage(&dc, "out") - expected).abs() < 1e-8,
+                    "{directives}: {:?}",
+                    dc.node_voltages
+                );
+                if directives.contains(".ic") {
+                    let (forced, _) = engine
+                        .run_dc_op_forced_ic_with_report_and_abort(&netlist, &NoAbort)
+                        .unwrap();
+                    assert!((node_voltage(&forced, "out") + 1.0).abs() < 1e-8);
+                }
+            }
+            let tran = engine.run_tran(&netlist, 1e-5, 1e-6).unwrap();
+            let output = tran
+                .node_names
+                .iter()
+                .position(|node| node.eq_ignore_ascii_case("out"))
+                .unwrap();
+            assert!(
+                tran.voltages[output]
+                    .iter()
+                    .all(|v| (v - expected).abs() < 1e-8),
+                "mixed={mixed}, {directives}: {:?}",
+                tran.voltages[output]
+            );
+        }
+        let _ = std::fs::remove_file(model);
+    }
+}
+
+#[test]
+fn nodeset_model_evaluation_errors_are_not_discarded_as_startup_nonconvergence() {
+    let model = write_model(
+        "nodeset_error",
+        r#"module nodeset_error(out);
+inout out; electrical out;
+analog begin
+  if (analysis("nodeset")) I(out)<+V(out)+sqrt(-1-abs(V(out)));
+  else I(out)<+V(out);
+end
+endmodule"#,
+    );
+    let netlist = Netlist::parse(&format!(
+        "* nodeset error\nR1 hint 0 1k\nX1 out nodeset_error\n.nodeset V(hint)=0.25\n.va \"{}\" nodeset_error\n.end\n",
+        deck_path(&model)
+    ))
+    .unwrap();
+    let error = Engine::default().run_dc_op(&netlist).unwrap_err();
+    assert!(
+        matches!(error, rspice_core::SimulationError::Circuit(_)),
+        "{error}"
+    );
+    let error = Engine::default()
+        .run_tran(&netlist, 1e-5, 1e-6)
+        .unwrap_err();
+    assert!(
+        matches!(error, rspice_core::SimulationError::Circuit(_)),
+        "{error}"
+    );
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
+fn nodesets_only_apply_to_the_first_point_of_rebuilt_and_nested_dc_sweeps() {
+    let model = write_model(
+        "nodeset_sweep",
+        r#"module nodeset_sweep(sense,gate,out);
+inout sense,gate,out; electrical sense,gate,out;
+parameter real gain=0;
+analog begin
+  if (analysis("nodeset") && (gain>0.5 || V(sense)>0.5 || V(gate)>0.5 || $temperature>300.5))
+    I(out)<+sqrt(-1-abs(V(out)));
+  else I(out)<+V(out)-1;
+end
+endmodule"#,
+    );
+    let netlist = Netlist::parse(&format!(
+        "* first sweep point only\n.param GAIN=0\n.temp 27\nVS sense 0 0\nVG gate 0 0\nR1 hint 0 1k\nX1 sense gate out nodeset_sweep gain={{GAIN}}\n.nodeset V(hint)=0.25\n.va \"{}\" nodeset_sweep\n.end\n",
+        deck_path(&model)
+    )).unwrap();
+    for route in ["VS", "GAIN", "TEMP", "nested"] {
+        let engine = Engine::default();
+        let points = match route {
+            "TEMP" => engine.run_dc_sweep(&netlist, "TEMP", 27.0, 28.0, 1.0),
+            "nested" => engine.run_dc_sweep2_with_abort(
+                &netlist,
+                "VS",
+                DcSweepRange {
+                    start: 0.0,
+                    stop: 1.0,
+                    step: 1.0,
+                },
+                Some(&rspice_core::netlist::DcSecondSweep::linear(
+                    "VG".into(),
+                    0.0,
+                    1.0,
+                    1.0,
+                )),
+                &NoAbort,
+            ),
+            _ => engine.run_dc_sweep(&netlist, route, 0.0, 1.0, 1.0),
+        }
+        .unwrap_or_else(|error| panic!("{route}: {error}"));
+        assert_eq!(points.len(), if route == "nested" { 4 } else { 2 });
+        for (_, result) in points {
+            assert!((node_voltage(&result, "out") - 1.0).abs() < 1e-8, "{route}");
+        }
+    }
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
 fn early_sweep_finish_solves_final_step_before_committing_the_endpoint() {
     use rspice_core::{ModelFinishPoint, SimulationOutcome};
     for route in ["source", "parameter", "temperature", "nested"] {

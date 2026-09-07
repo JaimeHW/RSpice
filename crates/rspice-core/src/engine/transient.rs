@@ -3866,6 +3866,7 @@ impl Engine {
         let startup_voltage_hints_active = resume.is_none()
             && !self
                 .collect_node_voltage_hints(netlist, &circuit)
+                .constraints
                 .is_empty();
         // Xyce applies its GMIN continuation only while solving the DC
         // operating point.  It does not carry the final continuation shunt

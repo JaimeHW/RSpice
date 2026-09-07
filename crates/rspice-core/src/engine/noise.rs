@@ -4554,9 +4554,7 @@ mod tests {
     use super::super::super::Engine;
     use super::ComplexBinAccumulator;
     #[cfg(feature = "veriloga-builtins-base")]
-    use super::{
-        CollectedNoiseSources, EvaluatedGeneratedNoiseInjection, EvaluatedGeneratedNoiseProcess,
-    };
+    use super::{EvaluatedGeneratedNoiseInjection, EvaluatedGeneratedNoiseProcess};
     use crate::Netlist;
     #[cfg(feature = "veriloga-builtins-base")]
     use crate::analysis::NoiseSourceType;
@@ -5533,7 +5531,7 @@ R2 out 0 1k
         );
     }
 
-    #[cfg(feature = "veriloga-builtins-base")]
+    #[cfg(all(feature = "veriloga-model-r2-cmc", feature = "veriloga-builtins-noise"))]
     #[test]
     fn generated_r2_noise_catalog_retains_canonical_mechanisms() {
         let netlist = Netlist::parse(
@@ -5553,43 +5551,61 @@ r1 a 0 rmod
         // has to be built in the dialect that admits it.
         let engine = xyce_engine().resolved_for_netlist(&netlist);
         let mut circuit = engine.build_circuit(&netlist).expect("R2 circuit builds");
+        circuit.begin_veriloga_equilibrium_analysis(3).unwrap();
+        circuit
+            .prepare_veriloga_equilibrium_analysis_point(3, true, false)
+            .unwrap();
         let mut matrix = engine.build_matrix(&circuit).expect("R2 matrix builds");
         circuit.link_indices(&matrix);
         let solution = engine
             .solve_dc_operating_point(&netlist, &mut circuit, &mut matrix)
             .expect("R2 operating point converges");
-        if circuit.has_nonlinear_devices() {
-            circuit.update_nonlinear(&solution);
-        }
+        engine
+            .try_observe_dc_operating_point(&mut circuit, &mut matrix, &solution)
+            .unwrap();
+        circuit.accept_veriloga_analysis_point().unwrap();
+        circuit
+            .finish_veriloga_equilibrium_operating_point(3)
+            .unwrap();
 
-        let (sources, correlated) = Engine::collect_noise_sources(&circuit, &solution);
-        assert!(correlated.is_empty());
+        let sources = Engine::try_collect_generated_veriloga_noise_processes_at_frequency(
+            &circuit, &solution, 1.0e3,
+        )
+        .expect("R2 generated noise state initializes");
         let r2_sources = sources
             .iter()
-            .filter(|source| source.identity.device.eq_ignore_ascii_case("r1"))
+            .filter(|(instance, _)| instance.eq_ignore_ascii_case("r1"))
+            .map(|(_, process)| process)
             .collect::<Vec<_>>();
         assert_eq!(r2_sources.len(), 2, "R2 exports two canonical mechanisms");
         let mechanisms = r2_sources
             .iter()
-            .filter_map(|source| source.identity.mechanism.as_deref())
+            .map(|source| source.name.as_str())
             .collect::<std::collections::HashSet<_>>();
-        assert!(mechanisms.contains("WHITE_N1_N2_THERMAL"));
-        assert!(mechanisms.contains("FLICKER_N1_N2_FLICKER"));
-        assert!(r2_sources.iter().all(|source| source.node_neg == 0));
-        assert!(r2_sources.iter().all(|source| source.node_pos > 0));
+        assert!(mechanisms.contains("thermal"));
+        assert!(mechanisms.contains("flicker"));
+        for source in &r2_sources {
+            assert_eq!(source.injections.len(), 1);
+            assert_eq!(source.injections[0].node_neg, 0);
+            assert!(source.injections[0].node_pos > 0);
+        }
         assert!(
             r2_sources
                 .iter()
-                .find(|source| {
-                    source.identity.mechanism.as_deref() == Some("WHITE_N1_N2_THERMAL")
-                })
+                .find(|source| source.name == "thermal")
                 .expect("thermal mechanism")
-                .parameter
+                .psd
                 > 0.0
         );
     }
 
-    #[cfg(feature = "veriloga-builtins-base")]
+    #[cfg(all(
+        feature = "veriloga-builtins-noise",
+        any(
+            feature = "veriloga-model-vbic13",
+            feature = "veriloga-model-vbic13-4t"
+        )
+    ))]
     fn assert_generated_vbic13_noise_initializes(deck: &str, expected_mechanisms: usize) {
         let netlist = Netlist::parse(deck).expect("VBIC13 oracle deck parses");
         // `Q ... LEVEL=11/12` is Xyce's VBIC 1.3 numbering, and RSpice reads it
@@ -5601,49 +5617,52 @@ r1 a 0 rmod
         let mut circuit = engine
             .build_circuit(&netlist)
             .expect("VBIC13 circuit builds");
+        circuit.begin_veriloga_equilibrium_analysis(3).unwrap();
+        circuit
+            .prepare_veriloga_equilibrium_analysis_point(3, true, false)
+            .unwrap();
         let mut matrix = engine.build_matrix(&circuit).expect("VBIC13 matrix builds");
         circuit.link_indices(&matrix);
         let solution = engine
             .solve_dc_operating_point(&netlist, &mut circuit, &mut matrix)
             .expect("VBIC13 operating point converges");
-        if circuit.has_nonlinear_devices() {
-            circuit.update_nonlinear(&solution);
-        }
+        engine
+            .try_observe_dc_operating_point(&mut circuit, &mut matrix, &solution)
+            .unwrap();
+        circuit.accept_veriloga_analysis_point().unwrap();
+        circuit
+            .finish_veriloga_equilibrium_operating_point(3)
+            .unwrap();
 
-        let CollectedNoiseSources {
-            elementary: sources,
-            correlated,
-            ..
-        } = Engine::try_collect_noise_sources(&circuit, &solution)
-            .expect("VBIC13 generated noise state initializes");
-        assert!(correlated.is_empty());
+        let sources = Engine::try_collect_generated_veriloga_noise_processes_at_frequency(
+            &circuit, &solution, 1.0e3,
+        )
+        .expect("VBIC13 generated noise state initializes");
         let vbic = sources
             .iter()
-            .filter(|source| source.identity.device.eq_ignore_ascii_case("q1"))
+            .filter(|(instance, _)| instance.eq_ignore_ascii_case("q1"))
+            .map(|(_, process)| process)
             .collect::<Vec<_>>();
         assert_eq!(
             vbic.len(),
             expected_mechanisms,
             "Q1 exports one source per canonical mechanism; got {:?}",
             vbic.iter()
-                .map(|source| source.identity.mechanism.as_deref())
+                .map(|source| source.name.as_str())
                 .collect::<Vec<_>>()
         );
-        assert!(vbic.iter().all(|source| source.parameter.is_finite()));
-        assert!(vbic.iter().all(|source| source.af.is_finite()));
-        assert!(vbic.iter().all(|source| source.ef.is_finite()));
-        // A `DNO(q1,white_bi_ei_ibei_shot_noise)` probe — which is what these
-        // decks print — resolves a device and a mechanism, so every source has
-        // to carry both, and the mechanisms have to be distinct.
-        let mechanisms = vbic
+        assert!(vbic.iter().all(|source| source.psd.is_finite()));
+        assert!(
+            vbic.iter()
+                .all(|source| source.exponent.is_none_or(|value| value.is_finite()))
+        );
+        // The grouped catalog names logical noise processes independently of
+        // their injection equations. Retain every public mechanism identity.
+        let catalog = Engine::grouped_generated_noise_contribution_catalog(&circuit);
+        let mechanisms = catalog
             .iter()
-            .map(|source| {
-                source
-                    .identity
-                    .mechanism
-                    .as_deref()
-                    .expect("every generated VBIC13 noise source names its mechanism")
-            })
+            .filter(|identity| identity.device.eq_ignore_ascii_case("q1"))
+            .map(|identity| identity.mechanism.as_deref().expect("named mechanism"))
             .collect::<std::collections::HashSet<_>>();
         assert_eq!(
             mechanisms.len(),
@@ -5652,7 +5671,7 @@ r1 a 0 rmod
         );
     }
 
-    #[cfg(feature = "veriloga-builtins-base")]
+    #[cfg(all(feature = "veriloga-model-vbic13", feature = "veriloga-builtins-noise"))]
     #[test]
     fn generated_vbic13_3t_noise_initializes_for_the_new_analysis() {
         assert_generated_vbic13_noise_initializes(
@@ -5664,7 +5683,10 @@ r1 a 0 rmod
         );
     }
 
-    #[cfg(feature = "veriloga-builtins-base")]
+    #[cfg(all(
+        feature = "veriloga-model-vbic13-4t",
+        feature = "veriloga-builtins-noise"
+    ))]
     #[test]
     fn generated_vbic13_4t_noise_initializes_for_the_new_analysis() {
         assert_generated_vbic13_noise_initializes(

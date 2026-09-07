@@ -3,7 +3,7 @@
 use super::continuation::explicit_source_continuation_policy;
 use super::*;
 use crate::SpiceDialect;
-use crate::engine::core::StartupVoltageConstraint;
+use crate::engine::core::{StartupVoltageConstraint, StartupVoltageHints};
 
 /// How many deficient rows the prose names before it summarizes the rest.
 pub(in crate::engine::convergence) const SINGULAR_ROWS_SHOWN: usize = 8;
@@ -228,9 +228,10 @@ impl Engine {
         &self,
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
-        node_hints: &[StartupVoltageConstraint],
+        hints: &StartupVoltageHints,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
+        let node_hints = &hints.constraints;
         let size = circuit.matrix_size();
         let xyce_zero_start = self.config.spice_dialect == crate::engine::SpiceDialect::Xyce;
         let entry_state = xyce_zero_start.then(|| circuit.nonlinear_state_snapshot());
@@ -252,15 +253,14 @@ impl Engine {
             circuit,
             matrix,
             initial_guess,
-            node_hints,
+            hints,
             abort,
         );
         match primary {
             Ok(solution) => Ok(solution),
             Err(SimulationError::Aborted) => Err(SimulationError::Aborted),
             Err(primary_error)
-                if xyce_zero_start
-                    && Self::is_recoverable_xyce_zero_start_error(&primary_error) =>
+                if xyce_zero_start && Self::is_recoverable_startup_error(&primary_error) =>
             {
                 if abort.is_aborted() {
                     return Err(SimulationError::Aborted);
@@ -274,14 +274,14 @@ impl Engine {
                     "Xyce-compatible zero-start DC solve failed ({primary_error}); retrying from the robust linear operating-point seed."
                 );
                 self.solve_nonlinear_from_seed_with_node_hints(
-                    circuit, matrix, recovery, node_hints, abort,
+                    circuit, matrix, recovery, hints, abort,
                 )
             }
             Err(error) => Err(error),
         }
     }
 
-    fn is_recoverable_xyce_zero_start_error(error: &SimulationError) -> bool {
+    pub(in crate::engine) fn is_recoverable_startup_error(error: &SimulationError) -> bool {
         match error {
             SimulationError::ConvergenceFailed(_) => true,
             SimulationError::Solver(crate::solver::SolverError::InvalidCircuit(_)) => false,
@@ -311,30 +311,56 @@ impl Engine {
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
         mut initial_guess: Vec<Value>,
-        node_hints: &[StartupVoltageConstraint],
+        hints: &StartupVoltageHints,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
+        let node_hints = &hints.constraints;
         if !node_hints.is_empty() {
-            match self.solve_nonlinear_nodeset_dc_startup_with_abort(
-                circuit,
-                matrix,
-                &initial_guess,
-                node_hints,
-                abort,
-            ) {
+            match Self::with_nodeset_phase(circuit, hints.has_nodesets, |circuit| {
+                self.solve_nonlinear_dc_startup_with_constraints_and_abort(
+                    circuit,
+                    matrix,
+                    &initial_guess,
+                    node_hints,
+                    abort,
+                )
+            }) {
                 Ok(nodeset_solution) => {
                     initial_guess = nodeset_solution;
                 }
-                Err(SimulationError::Aborted) => return Err(SimulationError::Aborted),
-                Err(err) => {
+                Err(err) if Self::is_recoverable_startup_error(&err) => {
                     log::debug!(
                         "NODESET-constrained DC startup did not converge: {err}; continuing from hinted seed."
                     );
                 }
+                Err(err) => return Err(err),
             }
         }
 
         self.solve_nonlinear_with_guess_and_abort(circuit, matrix, Some(&initial_guess), abort)
+    }
+
+    /// The nodeset qualifier belongs to the temporary authored-constraint
+    /// interval, not the generic constrained Newton solver (also used for
+    /// hard `.IC` clamps and heuristic seeds). Restore equilibrium after
+    /// either outcome; a restoration error must also reach the caller.
+    fn with_nodeset_phase<T>(
+        circuit: &mut CircuitData,
+        active: bool,
+        solve: impl FnOnce(&mut CircuitData) -> Result<T, SimulationError>,
+    ) -> Result<T, SimulationError> {
+        use rspice_veriloga_runtime::AnalogAnalysisPhase;
+        if !active {
+            return solve(circuit);
+        }
+        let result = circuit
+            .set_veriloga_analysis_phase(AnalogAnalysisPhase::Nodeset)
+            .map_err(SimulationError::Circuit)
+            .and_then(|()| solve(circuit));
+        circuit
+            .set_veriloga_analysis_phase(AnalogAnalysisPhase::Equilibrium)
+            .map_err(SimulationError::Circuit)?;
+        result
     }
 
     /// Conductance ngspice's `cktload.c` clamps a constrained node with when
@@ -557,7 +583,7 @@ impl Engine {
         result
     }
 
-    pub(in crate::engine) fn solve_nonlinear_nodeset_dc_startup_with_abort(
+    pub(in crate::engine) fn solve_nonlinear_dc_startup_with_constraints_and_abort(
         &self,
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
@@ -1028,7 +1054,7 @@ impl Engine {
             if !hints.is_empty() {
                 let startup_state = circuit.nonlinear_state_snapshot();
                 circuit.reset_legacy_bjt_operating_point_history();
-                match self.solve_nonlinear_nodeset_dc_startup_with_abort(
+                match self.solve_nonlinear_dc_startup_with_constraints_and_abort(
                     circuit,
                     matrix,
                     &startup_seed,
@@ -1822,10 +1848,11 @@ impl Engine {
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
         time: Value,
-        node_hints: &[StartupVoltageConstraint],
+        hints: &StartupVoltageHints,
         node_constraints: &[StartupVoltageConstraint],
         abort: &dyn AbortSignal,
     ) -> Result<TransientOperatingPointSolution, SimulationError> {
+        let node_hints = &hints.constraints;
         let size = circuit.matrix_size();
         let gmin_floor =
             if self.config.spice_dialect == SpiceDialect::Xyce && !node_hints.is_empty() {
@@ -1879,19 +1906,21 @@ impl Engine {
             Self::sanitize_initial_guess(circuit, &solution, size, circuit.num_nodes().min(size));
         let mut nodeset_startup_solution = None;
         if !node_hints.is_empty() {
-            match self.solve_nonlinear_transient_op_startup_with_guess_and_hints_abort(
-                circuit, matrix, time, &solution, node_hints, abort,
-            ) {
+            match Self::with_nodeset_phase(circuit, hints.has_nodesets, |circuit| {
+                self.solve_nonlinear_transient_op_startup_with_guess_and_hints_abort(
+                    circuit, matrix, time, &solution, node_hints, abort,
+                )
+            }) {
                 Ok(nodeset_solution) => {
                     solution = nodeset_solution;
                     nodeset_startup_solution = Some(solution.clone());
                 }
-                Err(SimulationError::Aborted) => return Err(SimulationError::Aborted),
-                Err(err) => {
+                Err(err) if Self::is_recoverable_startup_error(&err) => {
                     log::debug!(
                         "NODESET-constrained transient operating-point startup did not converge: {err}; continuing from hinted seed."
                     );
                 }
+                Err(err) => return Err(err),
             }
         }
         self.prime_operating_point_seed(
@@ -2117,5 +2146,125 @@ impl Engine {
         }
 
         Err(SimulationError::ConvergenceFailed(tranop_max_iterations))
+    }
+}
+
+#[cfg(all(test, feature = "veriloga"))]
+mod nodeset_phase_tests {
+    use super::*;
+    use crate::NoAbort;
+    use crate::device::veriloga::{Compiler, VerilogADevice};
+
+    fn circuit(analysis: u8) -> (Engine, CircuitData, StaticMatrix, usize, usize) {
+        let source = r#"module nodeset_probe(hint,out);
+inout hint,out; electrical hint,out;
+real starts;
+analog initial starts=starts+1;
+analog begin
+  I(hint)<+V(hint);
+  I(out)<+V(out)-(starts+analysis("nodeset")+0.1*analysis("static")
+      +0.01*analysis("dc")+0.001*analysis("ic")+0.0001*analysis("ac")
+      +0.00001*analysis("noise")+0.000001*analysis("tran"));
+end
+endmodule"#;
+        let compiler = Compiler::default();
+        let model = compiler.compile(source).unwrap();
+        let canonical = compiler.compile_canonical_ir(source).unwrap();
+        let mut circuit = CircuitData::new();
+        let hint = circuit.get_or_create_node("hint");
+        let out = circuit.get_or_create_node("out");
+        circuit.add_veriloga_device(
+            VerilogADevice::try_new_with_canonical_ir("x1", model, &canonical, &[hint, out])
+                .unwrap(),
+        );
+        circuit
+            .begin_veriloga_analysis_in_phase(
+                analysis,
+                rspice_veriloga_runtime::AnalogAnalysisPhase::Equilibrium,
+            )
+            .unwrap();
+        let engine = Engine::default();
+        let matrix = engine.build_matrix(&circuit).unwrap();
+        circuit.link_indices(&matrix);
+        (engine, circuit, matrix, hint, out)
+    }
+
+    #[test]
+    fn nodeset_interval_restores_physical_analysis_and_initializer_state() {
+        for (analysis, expected) in [
+            (0, 1.11),
+            (1, 1.1001),
+            (2, 1.101001),
+            (3, 1.10001),
+            (4, 1.101),
+        ] {
+            let (engine, mut circuit, mut matrix, hint, out) = circuit(analysis);
+            let constraints = [StartupVoltageConstraint {
+                positive: hint,
+                negative: 0,
+                voltage: 0.25,
+            }];
+            let seed = vec![0.0; circuit.matrix_size()];
+            let constrained = Engine::with_nodeset_phase(&mut circuit, true, |circuit| {
+                if analysis == 2 {
+                    engine.solve_nonlinear_transient_op_startup_with_guess_and_hints_abort(
+                        circuit,
+                        &mut matrix,
+                        0.0,
+                        &seed,
+                        &constraints,
+                        &NoAbort,
+                    )
+                } else {
+                    engine.solve_nonlinear_dc_startup_with_constraints_and_abort(
+                        circuit,
+                        &mut matrix,
+                        &seed,
+                        &constraints,
+                        &NoAbort,
+                    )
+                }
+            })
+            .unwrap();
+            assert!(
+                (constrained[out - 1] - (expected + 1.0)).abs() < 1e-8,
+                "analysis={analysis}: {constrained:?}"
+            );
+            let final_point = engine
+                .solve_nonlinear_dc_startup_with_constraints_and_abort(
+                    &mut circuit,
+                    &mut matrix,
+                    &constrained,
+                    &[],
+                    &NoAbort,
+                )
+                .unwrap();
+            assert!(
+                (final_point[out - 1] - expected).abs() < 1e-8,
+                "analysis={analysis}: {final_point:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejected_nodeset_interval_restores_phase() {
+        let (engine, mut circuit, mut matrix, _, out) = circuit(2);
+        let error = Engine::with_nodeset_phase(&mut circuit, true, |_| {
+            Err::<(), _>(SimulationError::Aborted)
+        })
+        .unwrap_err();
+        assert!(matches!(error, SimulationError::Aborted));
+        let seed = vec![0.0; circuit.matrix_size()];
+        let solution = engine
+            .solve_nonlinear_transient_op_startup_with_guess_and_hints_abort(
+                &mut circuit,
+                &mut matrix,
+                0.0,
+                &seed,
+                &[],
+                &NoAbort,
+            )
+            .unwrap();
+        assert!((solution[out - 1] - 1.101001).abs() < 1e-8, "{solution:?}");
     }
 }

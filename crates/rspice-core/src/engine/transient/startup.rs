@@ -642,7 +642,10 @@ impl Engine {
                 };
                 return Ok((solution.values, mode, solution.accepted_contract));
             }
-            Err(SimulationError::Aborted) => return Err(SimulationError::Aborted),
+            // Only numerical failure admits a different startup seed. Model
+            // evaluation and phase-setup errors must survive this outer
+            // recovery layer, including errors during a nodeset interval.
+            Err(error) if !Self::is_recoverable_startup_error(&error) => return Err(error),
             Err(transient_err) => {
                 if !transient_ic_constraints.is_empty() {
                     // ngspice keeps the `.IC` clamps installed through every
