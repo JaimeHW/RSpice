@@ -3079,22 +3079,27 @@ fn write_registry(
     }
     out.push_str("    }\n");
     out.push('\n');
-    for (signature, expression, empty) in [
+    for (signature, expression, inputs) in [
+        (
+            "begin_analysis(&mut self, ctx: &super::GeneratedEvalContext<'_>)",
+            "device.begin_analysis(ctx)",
+            "let _ = (&self, &ctx);",
+        ),
         (
             "reset_analog_tasks(&mut self)",
             "device.reset_analog_tasks()",
-            "let _ = self;",
+            "let _ = &self;",
         ),
         (
             "drain_analog_tasks(&mut self, consume: &mut dyn FnMut(super::AnalogTaskInvocation))",
             "device.drain_analog_tasks().for_each(consume)",
-            "let _ = (self, consume);",
+            "let _ = (&self, &consume);",
         ),
     ] {
         writeln!(out, "    pub fn {signature} {{")?;
-        if devices.is_empty() {
-            writeln!(out, "        {empty}")?;
-        } else {
+        // Every model arm can be compiled out even for a nonempty catalog.
+        writeln!(out, "        {inputs}")?;
+        if !devices.is_empty() {
             out.push_str("        match self {\n");
             for (index, feature) in feature_names.iter().enumerate() {
                 writeln!(

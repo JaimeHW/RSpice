@@ -136,6 +136,14 @@ impl Default for EmitBindings {
     }
 }
 
+pub(super) fn analysis_expression(binding: &str, name: &str) -> String {
+    match name {
+        "__rspice_initial_step" => "ctx.analysis_initial_step()".into(),
+        "__rspice_final_step" => "ctx.analysis_final_step()".into(),
+        _ => format!("{binding}({name:?})"),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EmitError {
     /// A shape the structured emitter does not recognise. Always an earlier
@@ -1623,13 +1631,9 @@ impl Emitter<'_> {
             CfgValueKind::ThermalVoltage => bindings.thermal_voltage.clone(),
             CfgValueKind::Multiplicity => bindings.multiplicity.clone(),
             CfgValueKind::Time => bindings.time.clone(),
-            CfgValueKind::Analysis(name) => match name.as_str() {
-                "__rspice_initial_step" => "ctx.analysis_initial_step()".to_string(),
-                "__rspice_final_step" => "ctx.analysis_final_step()".to_string(),
-                _ => format!("{}(\"{name}\")", bindings.analysis),
-            },
+            CfgValueKind::Analysis(name) => analysis_expression(&bindings.analysis, name),
             CfgValueKind::SimParam { name, fallback } => format!(
-                "{}(\"{name}\", {})",
+                "{}({name:?}, {})",
                 bindings.simparam,
                 self.numeric_operand(*fallback)
             ),

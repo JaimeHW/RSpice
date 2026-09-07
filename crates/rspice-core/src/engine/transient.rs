@@ -3729,7 +3729,6 @@ impl Engine {
         // Establish transient lifecycle state before the t=0 operating point.
         // UIC has no t=0 solve, so its first candidate carries the initial flag
         // below instead.
-        #[cfg(feature = "veriloga")]
         if resume.is_none() {
             circuit
                 .begin_veriloga_analysis(2)

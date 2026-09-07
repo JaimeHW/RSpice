@@ -788,8 +788,44 @@ struct InitializationPlan {
     state_count: usize,
 }
 
+/// Context inputs that can change independently of instance parameter setters.
+/// Presence and value are separate keys so an absent simulator parameter keeps
+/// the authored fallback, including when an explicit override is zero.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+enum InitializationInput {
+    Temperature,
+    Analysis(smol_str::SmolStr),
+    SimParamPresent(smol_str::SmolStr),
+    SimParamValue(smol_str::SmolStr),
+}
+
+impl InitializationInput {
+    fn expression(&self) -> String {
+        match self {
+            Self::Temperature => "ctx.temperature()".into(),
+            Self::Analysis(name) => format!(
+                "({}) as u8 as f64",
+                super::emit::analysis_expression("ctx.analysis", name)
+            ),
+            Self::SimParamPresent(name) => format!("ctx.has_simparam({name:?}) as u8 as f64"),
+            Self::SimParamValue(name) => format!("ctx.simparam_or({name:?}, 0.0)"),
+        }
+    }
+
+    fn invalid(&self, value: &str) -> String {
+        match self {
+            Self::Temperature => format!("!({value}).is_finite() || ({value}) <= 0.0"),
+            Self::Analysis(_) | Self::SimParamPresent(_) => {
+                format!("({value}) != 0.0 && ({value}) != 1.0")
+            }
+            Self::SimParamValue(_) => format!("!({value}).is_finite()"),
+        }
+    }
+}
+
 struct ModelPlan {
     initialization: Vec<InitializationPlan>,
+    initialization_inputs: Vec<InitializationInput>,
     /// One body computing both matrices' worth of values.
     ///
     /// Not two, and the corpus is what settled it: separate simplifications and
@@ -1354,8 +1390,29 @@ impl ModelPlan {
             });
         }
 
+        let mut initialization_inputs = std::collections::BTreeSet::new();
+        for plan in &initialization {
+            for value in &plan.function.values {
+                match &value.kind {
+                    CfgValueKind::Temperature | CfgValueKind::ThermalVoltage => {
+                        initialization_inputs.insert(InitializationInput::Temperature);
+                    }
+                    CfgValueKind::Analysis(name) => {
+                        initialization_inputs.insert(InitializationInput::Analysis(name.clone()));
+                    }
+                    CfgValueKind::SimParam { name, .. } => {
+                        initialization_inputs
+                            .insert(InitializationInput::SimParamPresent(name.clone()));
+                        initialization_inputs
+                            .insert(InitializationInput::SimParamValue(name.clone()));
+                    }
+                    _ => {}
+                }
+            }
+        }
         Ok(Self {
             initialization,
+            initialization_inputs: initialization_inputs.into_iter().collect(),
             function,
             outputs,
             conduction,
@@ -1520,9 +1577,11 @@ impl ModelPlan {
             shape.field(b"accepted:f64:positive-or-infinity");
         }
 
-        if self.initialization_uses_temperature() {
-            shape.section("initialization_temperature", 1);
-            shape.field(b"temperature:f64:finite");
+        if !self.initialization_inputs.is_empty() {
+            shape.section("initialization_context", self.initialization_inputs.len());
+            for input in &self.initialization_inputs {
+                shape.field(format!("{input:?}").as_bytes());
+            }
         }
         shape.section("terminal_currents", artifact.hir.ports.len());
         for (slot, port) in artifact.hir.ports.iter().enumerate() {
@@ -2642,16 +2701,29 @@ impl ModelPlan {
         out.push_str(
             "    pub(crate) fn initialization_is_ready(&self, ctx: &GeneratedEvalContext<'_>) -> bool {\n",
         );
-        if self.initialization_uses_temperature() {
-            out.push_str("        self.canonical_initialization_valid && self.canonical_initialization_temperature == ctx.temperature()\n");
-        } else {
-            out.push_str("        self.canonical_initialization_valid\n");
+        out.push_str("        self.canonical_initialization_valid\n");
+        for (slot, input) in self.initialization_inputs.iter().enumerate() {
+            let _ = writeln!(
+                out,
+                "            && self.canonical_initialization_context[{slot}] == ({})",
+                input.expression()
+            );
         }
         out.push_str("    }\n\n");
         out.push_str(
             "    pub fn initialize_analysis(&mut self, ctx: &GeneratedEvalContext<'_>) {\n",
         );
-        out.push_str("        if self.initialization_is_ready(ctx) { return; }\n        let rollback = self.capture_rollback_state();\n");
+        out.push_str(
+            "        if ctx.evaluation_failed() || self.initialization_is_ready(ctx) { return; }\n",
+        );
+        for (slot, input) in self.initialization_inputs.iter().enumerate() {
+            let invalid = input.invalid(&input.expression());
+            let _ = writeln!(
+                out,
+                "        if {invalid} {{ self.canonical_initialization_valid = false; ctx.report_initialization_error({slot}); return; }}"
+            );
+        }
+        out.push_str("        let rollback = self.capture_rollback_state();\n");
         if self.has_analog_tasks() {
             out.push_str("        self.analog_effects.get_or_insert_with(Default::default).begin_evaluation();\n");
         }
@@ -2666,9 +2738,11 @@ impl ModelPlan {
         if self.has_analog_tasks() {
             out.push_str("        let journal = self.analog_effects.as_mut().expect(\"initialization journal\");\n        journal.complete_evaluation();\n        if let Err(source) = journal.validate_candidate() { ctx.report_analog_task_error(0, source); self.restore_rollback_state(&rollback); self.canonical_initialization_valid = false; return; }\n        journal.apply_validated_acceptance();\n");
         }
-        if self.initialization_uses_temperature() {
-            out.push_str(
-                "        self.canonical_initialization_temperature = ctx.temperature();\n",
+        for (slot, input) in self.initialization_inputs.iter().enumerate() {
+            let _ = writeln!(
+                out,
+                "        self.canonical_initialization_context[{slot}] = {};",
+                input.expression()
             );
         }
         out.push_str("        self.canonical_initialization_valid = true;\n    }\n\n");
@@ -3696,17 +3770,6 @@ impl ModelPlan {
             .any(|value| matches!(value.kind, CfgValueKind::AnalogTask(_)))
     }
 
-    fn initialization_uses_temperature(&self) -> bool {
-        self.initialization.iter().any(|plan| {
-            plan.function.values.iter().any(|value| {
-                matches!(
-                    value.kind,
-                    CfgValueKind::Temperature | CfgValueKind::ThermalVoltage
-                )
-            })
-        })
-    }
-
     fn has_analog_tasks(&self) -> bool {
         self.has_newton_tasks()
             || self.initialization.iter().any(|plan| {
@@ -3724,6 +3787,7 @@ impl ModelPlan {
     ) -> state_file::StateFileExtensions {
         let mut extensions = state_file::StateFileExtensions {
             uses_analog_tasks: self.has_analog_tasks(),
+            uses_initialization: !self.initialization.is_empty(),
             ..Default::default()
         };
         if extensions.uses_analog_tasks {
@@ -3742,6 +3806,9 @@ impl ModelPlan {
         self.push_limit_state_fields(&mut extensions);
         self.push_event_control_state_fields(&mut extensions);
         if !self.initialization.is_empty() {
+            extensions
+                .reset_analysis_state
+                .push_str("        self.canonical_initialization_valid = false;\n");
             extensions
                 .instance_fields
                 .push_str("    pub(crate) canonical_initialization_valid: bool,\n");
@@ -3767,41 +3834,51 @@ impl ModelPlan {
             extensions.validate_checkpoint_ready.push_str("        if !self.canonical_initialization_valid { return Err(\"generated analog initialization has not completed\".to_string()); }\n");
         }
 
-        if self.initialization_uses_temperature() {
-            extensions
-                .instance_fields
-                .push_str("    pub(crate) canonical_initialization_temperature: f64,\n");
-            extensions.clone_fields.push_str("            canonical_initialization_temperature: self.canonical_initialization_temperature,\n");
-            extensions
-                .new_initializers
-                .push_str("            canonical_initialization_temperature: 0.0,\n");
-            extensions.rollback_value_count += 1;
-            extensions
-                .rollback_capture_values
-                .push_str("        values.push(self.canonical_initialization_temperature);\n");
-            extensions.rollback_restore_fields.push_str("        let (temperature, remaining) = rollback_values.split_first().expect(\"initialization temperature\");\n        self.canonical_initialization_temperature = *temperature;\n        rollback_values = remaining;\n");
-            let slot = artifact
+        let input_count = self.initialization_inputs.len();
+        if input_count != 0 {
+            let _ = writeln!(
+                extensions.instance_fields,
+                "    pub(crate) canonical_initialization_context: Box<[f64; {input_count}]>,"
+            );
+            extensions.clone_fields.push_str("            canonical_initialization_context: self.canonical_initialization_context.clone(),\n");
+            extensions.new_initializers.push_str(
+                "            canonical_initialization_context: boxed_zero_f64_array(),\n",
+            );
+            extensions.rollback_value_count += input_count;
+            extensions.rollback_capture_values.push_str(
+                "        values.extend_from_slice(&*self.canonical_initialization_context);\n",
+            );
+            let _ = writeln!(
+                extensions.rollback_restore_fields,
+                "        let (context, remaining) = rollback_values.split_at({input_count});\n        self.canonical_initialization_context.copy_from_slice(context);\n        rollback_values = remaining;"
+            );
+            let start = artifact
                 .hir
                 .variables
                 .iter()
                 .filter(|variable| variable.is_state)
                 .count()
                 + extensions.persistent_event_lane_count;
-            extensions.persistent_event_lane_count += 1;
-            extensions.checkpoint_event_capture.push_str(
-                "        event_variables.push(self.canonical_initialization_temperature);\n",
-            );
-            let _ = writeln!(
-                extensions.checkpoint_event_validate,
-                "        if !state.event_variables[{slot}].is_finite() {{ return Err(\"invalid initialization temperature\".into()); }}"
-            );
+            extensions.persistent_event_lane_count += input_count;
+            extensions.checkpoint_event_capture.push_str("        event_variables.extend_from_slice(&*self.canonical_initialization_context);\n");
+            for (slot, input) in self.initialization_inputs.iter().enumerate() {
+                let invalid = input.invalid(&format!("state.event_variables[{}]", start + slot));
+                let _ = writeln!(
+                    extensions.checkpoint_event_validate,
+                    "        if {invalid} {{ return Err(\"invalid initialization context\".into()); }}"
+                );
+            }
+            let end = start + input_count;
             let _ = writeln!(
                 extensions.checkpoint_event_restore,
-                "        self.canonical_initialization_temperature = state.event_variables[{slot}];"
+                "        self.canonical_initialization_context.copy_from_slice(&state.event_variables[{start}..{end}]);"
             );
         }
         let reactive = self.reactive.width();
         if reactive > 0 {
+            extensions
+                .after_begin_analysis
+                .push_str("        self.canonical_reactive.fill(0.0);\n");
             let _ = writeln!(
                 extensions.instance_fields,
                 "    pub(crate) canonical_reactive: Box<[f64; {reactive}]>,"
@@ -3920,6 +3997,7 @@ impl ModelPlan {
             .new_initializers
             .push_str("            canonical_limit: CanonicalLimitState::new_box(),\n");
         extensions.limiter_converged_expr = "!self.canonical_limit.active".to_string();
+        extensions.reset_analysis_state.push_str("        self.canonical_limit.previous.fill(0.0);\n        self.canonical_limit.initialized.fill(false);\n        self.canonical_limit.active = false;\n");
         extensions.rollback_value_count = count;
         extensions.rollback_flag_count = count + 1;
         extensions
@@ -3965,6 +4043,7 @@ impl ModelPlan {
         let has_timer = !self.timer_slots.is_empty();
 
         if cross_count > 0 {
+            extensions.reset_analysis_state.push_str("        self.cross_event_accepted.fill(GeneratedCrossState::INITIAL);\n        self.cross_event_candidate.fill(GeneratedCrossState::INITIAL);\n        self.event_refinement_time = f64::INFINITY;\n");
             extensions.uses_cross_event_state = true;
             let _ = write!(
                 extensions.instance_fields,
@@ -4060,6 +4139,7 @@ impl ModelPlan {
         }
 
         if has_timer {
+            extensions.reset_analysis_state.push_str("        self.timer_event_bound_accepted = f64::INFINITY;\n        self.timer_event_bound_candidate = f64::INFINITY;\n");
             extensions.instance_fields.push_str(
                 "    pub(crate) timer_event_bound_accepted: f64,\n\
                      pub(crate) timer_event_bound_candidate: f64,\n",

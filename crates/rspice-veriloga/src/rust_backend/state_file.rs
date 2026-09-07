@@ -10,6 +10,7 @@
 //! nothing else.
 
 use std::collections::HashMap;
+use std::fmt::Write as _;
 
 use smol_str::SmolStr;
 
@@ -54,6 +55,7 @@ pub(super) struct StateFileExtensions {
     /// detector records and therefore needs their runtime helpers imported.
     pub uses_cross_event_state: bool,
     pub uses_analog_tasks: bool,
+    pub uses_initialization: bool,
     pub params_visibility: &'static str,
     pub support_types: String,
     pub instance_fields: String,
@@ -81,6 +83,8 @@ pub(super) struct StateFileExtensions {
     pub checkpoint_event_validate: String,
     pub checkpoint_event_restore: String,
     pub begin_event_state_evaluation: String,
+    pub reset_analysis_state: String,
+    pub after_begin_analysis: String,
     pub validate_advance_state: String,
     pub apply_advance_state: String,
 }
@@ -90,6 +94,7 @@ impl Default for StateFileExtensions {
         Self {
             uses_cross_event_state: false,
             uses_analog_tasks: false,
+            uses_initialization: false,
             params_visibility: "pub",
             support_types: String::new(),
             instance_fields: String::new(),
@@ -116,6 +121,8 @@ impl Default for StateFileExtensions {
             checkpoint_event_validate: String::new(),
             checkpoint_event_restore: String::new(),
             begin_event_state_evaluation: String::new(),
+            reset_analysis_state: String::new(),
+            after_begin_analysis: String::new(),
             validate_advance_state: String::new(),
             apply_advance_state: String::new(),
         }
@@ -153,7 +160,7 @@ pub(super) fn generate_state_file_with_extensions(
         ""
     };
     out.push_str(&format!(
-        "use {}::{{{cross_event_imports}GeneratedDdtCoefficients, GeneratedParameterAssignment, GeneratedParameterOrigin, GeneratedVerilogAAcceptedStateShapeIdentity, GeneratedVerilogAParameterBound as B, GeneratedVerilogAParameterDescriptor as P, GeneratedVerilogAPersistentState, GeneratedVerilogARollbackState, GeneratedVerilogATerminalDescriptor, GeneratedVerilogATerminalDirection, boxed_zero_bool_array, boxed_zero_f64_array{parameter_alias_installer}}};\n",
+        "use {}::{{{cross_event_imports}GeneratedEvalContext, GeneratedDdtCoefficients, GeneratedParameterAssignment, GeneratedParameterOrigin, GeneratedVerilogAAcceptedStateShapeIdentity, GeneratedVerilogAParameterBound as B, GeneratedVerilogAParameterDescriptor as P, GeneratedVerilogAPersistentState, GeneratedVerilogARollbackState, GeneratedVerilogATerminalDescriptor, GeneratedVerilogATerminalDirection, boxed_zero_bool_array, boxed_zero_f64_array{parameter_alias_installer}}};\n",
         options.runtime_path,
     ));
     if !artifact.mir.parameters.is_empty() {
@@ -597,6 +604,57 @@ pub(super) fn generate_state_file_with_extensions(
     }
     out.push_str("    }\n\n");
 
+    out.push_str("    /// Begin a fresh trajectory while retaining parameters and connectivity.\n");
+    out.push_str("    pub fn begin_analysis(&mut self, ctx: &GeneratedEvalContext<'_>) {\n");
+    out.push_str("        if ctx.evaluation_failed() { return; }\n");
+    if extensions.uses_initialization {
+        out.push_str("        let rollback = self.capture_rollback_state();\n");
+    }
+    for (count, fields, flags) in [
+        (
+            ddt_state_count,
+            &[
+                "ddt_current",
+                "ddt_previous",
+                "ddt_older",
+                "ddt_derivative_current",
+                "ddt_derivative_previous",
+            ][..],
+            &["ddt_initialized", "ddt_candidate_valid"][..],
+        ),
+        (
+            idt_state_count,
+            &[
+                "idt_current",
+                "idt_candidate_previous",
+                "idt_input_current",
+                "idt_previous",
+                "idt_older",
+                "idt_input_previous",
+            ][..],
+            &["idt_initialized", "idt_candidate_valid"][..],
+        ),
+    ] {
+        if count != 0 {
+            for field in fields {
+                let _ = writeln!(out, "        self.stamp_state.{field}.fill(0.0);");
+            }
+            for field in flags {
+                let _ = writeln!(out, "        self.stamp_state.{field}.fill(false);");
+            }
+        }
+    }
+    if event_state_count != 0 {
+        out.push_str("        self.event_state_accepted.fill(0.0);\n        self.event_state_candidate.fill(0.0);\n");
+    }
+    out.push_str("        self.reset_analog_tasks();\n");
+    out.push_str(&extensions.reset_analysis_state);
+    if extensions.uses_initialization {
+        out.push_str("        self.initialize_analysis(ctx);\n        if ctx.evaluation_failed() { self.restore_rollback_state(&rollback); return; }\n");
+    }
+    out.push_str("        self.time = 0.0;\n        self.timestep = 0.0;\n        self.ddt_coefficients = GeneratedDdtCoefficients::inactive();\n");
+    out.push_str(&extensions.after_begin_analysis);
+    out.push_str("    }\n\n");
     out.push_str(
         "    #[doc(hidden)]\n    pub fn capture_persistent_state(&self) -> GeneratedVerilogAPersistentState {\n",
     );

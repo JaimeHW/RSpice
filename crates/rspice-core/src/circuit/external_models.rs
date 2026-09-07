@@ -2502,24 +2502,53 @@ impl CircuitData {
         }
     }
 
-    /// Prepare Verilog-A devices for a transient timepoint evaluation
-    ///
-    /// Sets the simulation time, integration timestep, and analysis type so
-    /// ddt/idt and event operators see transient semantics.
-    #[cfg(feature = "veriloga")]
+    /// Start a fresh analysis across both Verilog-A implementations. Publish
+    /// the staged collections only after every instance initializes, keeping
+    /// the previous trajectory intact if any initializer fails.
     pub(crate) fn begin_veriloga_analysis(&mut self, analysis: u8) -> Result<(), String> {
-        for device in self.veriloga_devices.iter_mut() {
+        if analysis > 4 {
+            return Err(format!(
+                "Verilog-A analysis must be 0=dc, 1=ac, 2=tran, 3=noise, or 4=ic, got {analysis}"
+            ));
+        }
+        #[cfg(feature = "veriloga")]
+        let mut runtime = self.veriloga_devices.clone();
+        #[cfg(feature = "veriloga")]
+        for device in runtime.iter_mut() {
             let instance = device.name.clone();
             device.try_begin_analysis(analysis).map_err(|error| {
                 format!("Verilog-A device '{instance}' analysis begin failed: {error}")
             })?;
         }
+        #[cfg(feature = "veriloga-builtins-base")]
+        let generated = {
+            use crate::device::veriloga_builtins::GeneratedAnalysisKind;
+            let kind = match analysis {
+                0 => GeneratedAnalysisKind::Dc,
+                1 => GeneratedAnalysisKind::Ac,
+                2 => GeneratedAnalysisKind::Tran,
+                3 => GeneratedAnalysisKind::Noise,
+                4 => GeneratedAnalysisKind::Ic,
+                _ => unreachable!("validated Verilog-A analysis"),
+            };
+            let mut generated = self.generated_veriloga_devices.clone();
+            generated
+                .begin_analysis(kind, self.generated_simulation_parameters, self.num_nodes)
+                .map_err(|error| format!("generated Verilog-A analysis begin failed: {error}"))?;
+            generated
+        };
+        #[cfg(feature = "veriloga")]
+        {
+            self.veriloga_devices = runtime;
+        }
+        #[cfg(feature = "veriloga-builtins-base")]
+        {
+            self.generated_veriloga_devices = generated;
+        }
         Ok(())
     }
 
-    /// Begin a fresh DC analysis for every runtime-compiled Verilog-A
-    /// instance. Generated instances are newly constructed with the circuit;
-    /// their DC analysis kind is supplied by the ordinary DC stamp path.
+    /// Begin a fresh DC analysis for every Verilog-A instance.
     pub(crate) fn begin_veriloga_dc_analysis(&mut self) -> Result<(), String> {
         self.begin_veriloga_equilibrium_analysis(0)
     }
@@ -2536,7 +2565,6 @@ impl CircuitData {
                 "equilibrium Verilog-A analysis must be 0=dc, 1=ac, 3=noise, or 4=ic, got {analysis}"
             ));
         }
-        #[cfg(feature = "veriloga")]
         self.begin_veriloga_analysis(analysis)?;
         #[cfg(feature = "veriloga-builtins-base")]
         {
@@ -2989,6 +3017,59 @@ mod tests {
     };
     use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::sync::{Arc, Mutex};
+
+    #[cfg(feature = "veriloga")]
+    #[test]
+    fn failed_analysis_initialization_preserves_every_runtime_instance() {
+        use crate::device::veriloga::{Compiler, VerilogADevice};
+        let source = r#"module atomic_initial(p,n);
+inout p,n; electrical p,n;
+parameter integer fail=0;
+real scale;
+analog initial if (fail && analysis("tran")) scale=sqrt(-1); else scale=2;
+analog I(p,n)<+scale*V(p,n)+ddt(V(p,n));
+endmodule"#;
+        let compiler = Compiler::default();
+        let model = compiler.compile(source).unwrap();
+        let canonical = compiler.compile_canonical_ir(source).unwrap();
+        let mut circuit = CircuitData::new();
+        let node = circuit.get_or_create_node("p");
+        for name in ["first", "second"] {
+            let mut device = VerilogADevice::try_new_with_canonical_ir(
+                name,
+                model.clone(),
+                &canonical,
+                &[node, 0],
+            )
+            .unwrap();
+            if name == "second" {
+                device.try_set_parameter("fail", 1.0).unwrap();
+            }
+            circuit.add_veriloga_device(device);
+        }
+        circuit.begin_veriloga_analysis(0).unwrap();
+        for device in circuit.veriloga_devices.iter_mut() {
+            device.try_stamp(&[3.0], |_, _, _| {}, |_, _| {}).unwrap();
+            device.try_advance_state().unwrap();
+        }
+        let previous = circuit.veriloga_devices.checkpoint_states().unwrap();
+        let error = circuit.begin_veriloga_analysis(2).unwrap_err();
+        assert!(error.contains("second"), "{error}");
+        assert_eq!(
+            circuit.veriloga_devices.checkpoint_states().unwrap(),
+            previous
+        );
+        circuit
+            .veriloga_devices
+            .get_mut(1)
+            .unwrap()
+            .try_set_parameter("fail", 0.0)
+            .unwrap();
+        circuit.begin_veriloga_analysis(2).unwrap();
+        for device in circuit.veriloga_devices.iter_mut() {
+            assert_eq!(device.try_evaluate().unwrap()[0], 6.0);
+        }
+    }
 
     #[cfg(feature = "veriloga-model-vbic13")]
     fn generated_dc_carrier_circuit(

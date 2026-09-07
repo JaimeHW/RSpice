@@ -22,6 +22,136 @@ use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 #[test]
+fn generated_analysis_restart_is_atomic_and_clears_operator_history() {
+    let (state, stamp, noise) = generated_parts(
+        r#"module restart(p,n);
+inout p,n; electrical p,n;
+parameter real gain=2;
+integer starts; real scale;
+analog initial begin starts=starts+1; scale=gain*$temperature; $finish(0); end
+analog I(p,n)<+scale*V(p,n)+ddt(V(p,n))+idt(V(p,n));
+endmodule"#,
+        "analysis restart",
+    );
+    run_generated_main("analysis restart", &state, &stamp, &noise, r#"
+let ctx = runtime::GeneratedEvalContext { voltages: &[1.0,0.0], temperature: 300.0 };
+let invalid = runtime::GeneratedEvalContext { voltages: &[1.0,0.0], temperature: f64::NAN };
+let mut instance = device::state::Instance::new(&[0,1]);
+instance.set_parameter("gain", 4.0).unwrap();
+instance.set_multiplicity(3.0).unwrap();
+instance.begin_analysis(&ctx);
+assert_eq!(&*instance.event_state_accepted, &[1.0,1200.0]);
+assert_eq!(instance.drain_analog_tasks().count(), 1);
+instance.stamp_state.ddt_previous.fill(7.0);
+instance.stamp_state.idt_previous.fill(8.0);
+instance.stamp_state.ddt_initialized.fill(true);
+instance.stamp_state.idt_initialized.fill(true);
+instance.time = 2.0;
+instance.timestep = 0.25;
+instance.analog_effects.as_mut().unwrap().record_finish(0,2.0,1.0).unwrap();
+let before = instance.capture_rollback_state();
+instance.begin_analysis(&invalid);
+assert!(invalid.evaluation_failed());
+assert_eq!(instance.capture_rollback_state(), before);
+assert_eq!((instance.time,instance.timestep), (2.0,0.25));
+runtime::clear_evaluation_error();
+instance.begin_analysis(&ctx);
+assert_eq!(&*instance.event_state_accepted, &[1.0,1200.0]);
+assert_eq!(instance.multiplicity, 3.0);
+assert_eq!((instance.time,instance.timestep), (0.0,0.0));
+assert!(instance.stamp_state.ddt_previous.iter().chain(&instance.stamp_state.idt_previous).all(|value| *value == 0.0));
+assert!(instance.stamp_state.ddt_initialized.iter().chain(&instance.stamp_state.idt_initialized).all(|value| !value));
+let calls = instance.drain_analog_tasks().collect::<Vec<_>>();
+assert_eq!(calls.len(),1);
+assert_eq!(&*calls[0].arguments, &[runtime::AnalogTaskArgument::Integer(0)]);
+assert_eq!(calls[0].time,0.0);
+"#).unwrap();
+}
+
+#[test]
+fn generated_initialization_tracks_analysis_and_simparam_presence() {
+    let (state, stamp, noise) = generated_parts(
+        r#"module initialized_context(p,n);
+inout p,n; electrical p,n;
+integer starts; real scale;
+analog initial begin starts=starts+1; scale=analysis("tran") ? $simparam("pnjmaxi",4) : 2; end
+analog I(p,n)<+scale*V(p,n)+white_noise(scale,"context");
+endmodule"#,
+        "initialization context",
+    );
+    run_generated_main(
+        "initialization context",
+        &state,
+        &stamp,
+        &noise,
+        r#"
+struct Noise;
+impl runtime::GeneratedNoiseVisitor for Noise {
+    fn visit(&mut self, _: usize, _: runtime::GeneratedNoiseEvaluationRef<'_>) -> bool { true }
+}
+let ctx = runtime::GeneratedEvalContext { voltages: &[1.0,0.0], temperature: 300.15 };
+let mut instance = device::state::Instance::new(&[0,1]);
+instance.initialize_analysis(&ctx);
+assert_eq!(&*instance.event_state_accepted, &[1.0,2.0]);
+runtime::set_event_analysis(true, false);
+assert!(instance.evaluate_noise_sources(&ctx, &mut Noise).is_err());
+instance.initialize_analysis(&ctx);
+assert_eq!(&*instance.event_state_accepted, &[2.0,4.0]);
+let checkpoint = instance.capture_persistent_state();
+assert_eq!(checkpoint.event_variables.len(), 5);
+for (slot, value) in [(2, 2.0), (3, -1.0), (4, f64::NAN)] {
+    let mut invalid = checkpoint.clone();
+    invalid.event_variables[slot] = value;
+    let before = instance.capture_rollback_state();
+    assert!(instance.restore_persistent_state(&invalid).is_err());
+    assert_eq!(instance.capture_rollback_state(), before);
+}
+runtime::set_simparam_override(Some(0.0));
+assert!(instance.evaluate_noise_sources(&ctx, &mut Noise).is_err());
+instance.initialize_analysis(&ctx);
+assert_eq!(&*instance.event_state_accepted, &[3.0,0.0]);
+runtime::set_simparam_override(None);
+instance.initialize_analysis(&ctx);
+assert_eq!(&*instance.event_state_accepted, &[4.0,4.0]);
+instance.restore_persistent_state(&checkpoint).unwrap();
+instance.initialize_analysis(&ctx);
+assert_eq!(&*instance.event_state_accepted, &[2.0,4.0]);
+instance.begin_analysis(&ctx);
+assert_eq!(&*instance.event_state_accepted, &[1.0,4.0]);
+"#,
+    )
+    .unwrap();
+}
+
+#[test]
+fn generated_simparam_names_preserve_string_escaping() {
+    let (state, stamp, noise) = generated_parts(
+        r#"module escaped_context(p,n);
+inout p,n; electrical p,n;
+real scale;
+analog initial scale=$simparam("key\"quoted",3);
+analog I(p,n)<+scale*V(p,n)+$simparam("key\\slash",4);
+endmodule"#,
+        "escaped context names",
+    );
+    run_generated_main(
+        "escaped context names",
+        &state,
+        &stamp,
+        &noise,
+        r#"
+let ctx = runtime::GeneratedEvalContext { voltages: &[1.0,0.0], temperature: 300.15 };
+let mut instance = device::state::Instance::new(&[0,1]);
+let mut values = [0.0; 10];
+instance.stamp(&ctx, &mut runtime::GeneratedStamper { sink: Some(&mut values) });
+assert!(!ctx.evaluation_failed());
+assert_eq!(values[9], 7.0);
+"#,
+    )
+    .unwrap();
+}
+
+#[test]
 fn generated_localparams_reach_residual_derivatives_and_noise() {
     let (state, stamp, noise) = generated_parts(
         r#"module localparam_device(p,n);
@@ -4312,6 +4442,8 @@ pub mod runtime {
     }
 
     static TASKS_ENABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+    static SIMPARAM_OVERRIDE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(f64::NAN.to_bits());
+    pub fn set_simparam_override(value: Option<f64>) { SIMPARAM_OVERRIDE.store(value.unwrap_or(f64::NAN).to_bits(), std::sync::atomic::Ordering::SeqCst); }
     static EVALUATION_FAILED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     pub fn set_tasks_enabled(enabled: bool) { TASKS_ENABLED.store(enabled, std::sync::atomic::Ordering::SeqCst); }
     pub fn clear_evaluation_error() { EVALUATION_FAILED.store(false, std::sync::atomic::Ordering::SeqCst); }
@@ -4376,8 +4508,12 @@ pub mod runtime {
         pub fn analysis_static(&self) -> bool {
             ANALYSIS_STATIC.load(std::sync::atomic::Ordering::SeqCst)
         }
-        pub fn simparam_or(&self, _name: &str, fallback: Value) -> Value {
-            fallback
+        pub fn simparam_or(&self, name: &str, fallback: Value) -> Value {
+            let value = f64::from_bits(SIMPARAM_OVERRIDE.load(std::sync::atomic::Ordering::SeqCst));
+            if name == "pnjmaxi" && !value.is_nan() { value } else { fallback }
+        }
+        pub fn has_simparam(&self, name: &str) -> bool {
+            name == "pnjmaxi" && !f64::from_bits(SIMPARAM_OVERRIDE.load(std::sync::atomic::Ordering::SeqCst)).is_nan()
         }
         pub fn dynamic_operators_enabled(&self) -> bool {
             DYNAMIC_OPERATORS_ENABLED.load(std::sync::atomic::Ordering::SeqCst)

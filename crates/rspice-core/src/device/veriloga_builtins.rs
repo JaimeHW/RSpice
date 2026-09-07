@@ -652,6 +652,27 @@ impl BuiltinVerilogADevices {
         }
     }
 
+    /// Initialize a staged collection before the circuit publishes any new
+    /// analysis state. The caller retains the original collection on failure.
+    pub(crate) fn begin_analysis(
+        &mut self,
+        analysis: GeneratedAnalysisKind,
+        simparams: GeneratedSimulationParameters,
+        num_nodes: usize,
+    ) -> Result<(), GeneratedVerilogAEvaluationError> {
+        for device in &mut self.devices {
+            device
+                .begin_analysis(analysis, simparams, num_nodes)
+                .map_err(|source| GeneratedVerilogAEvaluationError {
+                    instance_name: device.instance_name.clone(),
+                    model_name: device.model_name,
+                    source,
+                })?;
+        }
+        self.operating_point_analysis_override = None;
+        Ok(())
+    }
+
     #[cfg(all(test, feature = "veriloga-model-diode-cmc"))]
     #[inline]
     pub(crate) fn advance_state(&mut self) -> Result<(), String> {
@@ -1665,6 +1686,38 @@ impl BuiltinVerilogAInstance {
         }
     }
 
+    /// Start a fresh analysis without changing the model's configuration.
+    pub fn begin_analysis(
+        &mut self,
+        analysis: GeneratedAnalysisKind,
+        simparams: GeneratedSimulationParameters,
+        num_nodes: usize,
+    ) -> Result<(), GeneratedEvaluationError> {
+        // Access functions are forbidden in pre-simulation initialization,
+        // so initialization requires no solution-sized voltage buffer.
+        let ctx = GeneratedEvalContext::with_analysis_step_and_simparams(
+            &[],
+            self.temperature,
+            num_nodes,
+            analysis,
+            false,
+            false,
+            simparams,
+        );
+        self.kind.begin_analysis(&ctx);
+        if let Some(error) = ctx.take_evaluation_error() {
+            return Err(error);
+        }
+        self.analysis_initial_step = false;
+        self.analysis_final_step = false;
+        self.terminal_currents.fill(0.0);
+        self.dynamic_charge_third_back.fill(0.0);
+        self.initial_off_seed_pending = true;
+        self.initial_off_seed_evaluations = 0;
+        self.initial_off_seed_anchor = None;
+        Ok(())
+    }
+
     #[inline]
     pub fn set_timepoint(
         &mut self,
@@ -2444,6 +2497,54 @@ mod tests {
             loose.0, packed.0,
             "the matrix is unaffected either way; only the equivalent source differs"
         );
+    }
+
+    #[cfg(feature = "veriloga-model-diode-cmc")]
+    #[test]
+    fn circuit_analysis_start_resets_generated_history_and_adapter_state() {
+        let mut devices = checkpoint_test_devices();
+        let fresh = devices.capture_rollback_state();
+        for device in &mut devices.devices {
+            let mut state = device.kind.capture_persistent_state();
+            state.ddt_previous.fill(3.0);
+            state.ddt_older.fill(2.0);
+            state.ddt_derivative_previous.fill(1.0);
+            state.ddt_initialized.fill(true);
+            device.kind.restore_persistent_state(&state).unwrap();
+            device.dynamic_charge_third_back.fill(4.0);
+            device.terminal_currents.fill(5.0);
+            device.set_timepoint(2.0, 0.25, super::GeneratedDdtCoefficients::inactive());
+            device.set_analysis_step(true, true);
+            device.initial_off_seed_pending = false;
+            device.initial_off_seed_evaluations = 2;
+            device.initial_off_seed_anchor = Some(vec![0.0]);
+        }
+        devices.set_operating_point_analysis_override(Some(GeneratedAnalysisKind::Ac));
+        let mut circuit = crate::CircuitData::new();
+        *circuit.generated_veriloga_devices_mut() = devices;
+        circuit.begin_veriloga_analysis(2).unwrap();
+        let devices = circuit.generated_veriloga_devices();
+        assert_eq!(devices.capture_rollback_state(), fresh);
+        assert!(devices.operating_point_analysis_override.is_none());
+        for device in &devices.devices {
+            assert!(
+                device
+                    .dynamic_charge_third_back
+                    .iter()
+                    .all(|value| *value == 0.0)
+            );
+            assert!(!device.analysis_initial_step && !device.analysis_final_step);
+            assert!(device.initial_off_seed_pending);
+            assert_eq!(device.initial_off_seed_evaluations, 0);
+            assert!(device.initial_off_seed_anchor.is_none());
+        }
+        circuit.begin_veriloga_equilibrium_analysis(3).unwrap();
+        assert!(matches!(
+            circuit
+                .generated_veriloga_devices()
+                .operating_point_analysis_override,
+            Some(GeneratedAnalysisKind::Noise)
+        ));
     }
 
     #[cfg(feature = "veriloga-model-diode-cmc")]

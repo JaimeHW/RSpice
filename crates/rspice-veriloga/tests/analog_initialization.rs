@@ -4,6 +4,28 @@ mod support;
 use support::DeviceFixture;
 
 #[test]
+fn failed_analysis_initialization_preserves_the_previous_accepted_analysis() {
+    let fixture = DeviceFixture::compile(
+        r#"module failing_restart(p,n);
+inout p,n; electrical p,n;
+real scale;
+analog initial if (analysis("tran")) scale=sqrt(-1); else scale=2;
+analog I(p,n)<+scale*V(p,n)+ddt(V(p,n));
+endmodule"#,
+    );
+    let mut device = fixture.device("X", &[1, 0]);
+    device.try_begin_analysis(0).unwrap();
+    device.update_voltages(&[1.0]);
+    assert_eq!(device.try_evaluate().unwrap(), vec![2.0]);
+    device.try_advance_state().unwrap();
+    let before = device.checkpoint_state().unwrap();
+    assert!(device.try_begin_analysis(2).is_err());
+    assert_eq!(device.checkpoint_state().unwrap(), before);
+    device.update_voltages(&[2.0]);
+    assert_eq!(device.try_evaluate().unwrap(), vec![4.0]);
+}
+
+#[test]
 fn reinitialization_discards_newton_tasks_and_publishes_only_initial_tasks() {
     use rspice_veriloga_runtime::AnalogTaskArgument;
     let fixture = DeviceFixture::compile(

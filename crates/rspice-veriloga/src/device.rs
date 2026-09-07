@@ -3692,10 +3692,25 @@ impl VerilogADevice {
     /// filter realizations survive, while each logical Zi site freezes its
     /// analysis-specific constant arguments lazily on first ordered execution.
     pub fn try_begin_analysis(&mut self, analysis: u8) -> Result<(), VmError> {
-        self.try_set_analysis_type(analysis)?;
-        self.context.reset_analysis_state();
-        self.try_initialize_analysis()?;
-        self.try_refresh_static_conditions()
+        let previous = self.context.clone();
+        let previous_program_active = self.program_active.clone();
+        let previous_branch_active = self.branch_active.clone();
+        let result = (|| {
+            self.try_set_analysis_type(analysis)?;
+            self.context.reset_analysis_state();
+            self.try_initialize_analysis()?;
+            self.try_refresh_static_conditions()
+        })();
+        if result.is_err() {
+            self.context = previous;
+            self.program_active = previous_program_active;
+            self.branch_active = previous_branch_active;
+            #[cfg(any(feature = "native", all(feature = "wasm-jit", target_arch = "wasm32")))]
+            self.sync_fused_program_active();
+        } else {
+            self.prev_discontinuity = false;
+        }
+        result
     }
 
     fn has_initialization(&self) -> bool {

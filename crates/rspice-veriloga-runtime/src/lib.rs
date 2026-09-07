@@ -1956,7 +1956,7 @@ impl std::fmt::Display for GeneratedEvaluationError {
         match self {
             Self::Initialization { slot } => write!(
                 f,
-                "generated Verilog-A initializer produced a non-finite value in variable slot {slot}"
+                "generated Verilog-A initialization has an invalid numeric value at slot {slot}"
             ),
             Self::AnalogTask { site, source } => {
                 write!(
