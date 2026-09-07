@@ -12,7 +12,7 @@ pinned. Actionlint checks workflow syntax. Configuration tests guard coverage.
 | Remaining workspace, Linux | Every other member's default tests, including output, design, automation, cloud, engine adapter, publishers and viewers; new members are selected automatically |
 | Generated models | Portable feature shards, full catalog validation, XSPICE registry, resource and numerical checks, representative performance qualification |
 | Desktop | Windows/macOS UI and CLI tests; OS-specific output and managed-runtime tests; native JIT execution on six OS/architecture combinations; macOS hardened-runtime checks |
-| Browser | wasm32 compilation, optimized UI/worker size budgets, clocks in a window and worker, Chromium solver/JIT execution, real workbench review and recovery |
+| Browser | wasm32 compilation, optimized UI/worker size budgets, Firefox Rust binding/cloud/clock tests, Chromium solver/JIT execution and workbench review/recovery |
 | Mobile | ARM64 Android and iOS portable solver/catalog compilation |
 | Feature shards | Clippy for configurations hidden by workspace feature unification; executable tests for host configurations |
 | Python | Supported CPython versions including free threading; Rust binding invariants, stub validation, wheels on six native platforms, offline source-distribution installation |
@@ -37,6 +37,11 @@ It installs Icarus Verilog and Verilator and requires both for independent
 digital conformance; a missing reference simulator fails the qualification.
 A failed test process fails the job even if it printed a successful subtotal.
 Performance thresholds remain enforced alongside numerical checks.
+KLU's hosted-runner gate compares refactor and solve medians with full
+factorization on the same runner (at most 50% and 25%, respectively), while
+retaining zero-fallback, backward-error and fill checks. The benchmark's absolute
+nanosecond options remain available for qualification on controlled hardware.
+Absolute latency is still reported in the CI artifact.
 
 Coverage is a weekly or manually dispatched report, split into core, UI and
 remaining-library artifacts. All of those tests also run in per-change CI.
@@ -51,8 +56,9 @@ workflows must not be dispatched merely to test CI.
 Native publication also requires the reusable CI and nightly qualification
 workflows to pass for the release commit; building an archive is insufficient.
 
-Browser automation currently uses Chromium. Mobile rows prove portable solver
-compilation, not a native tablet application. WebKit/Safari, Firefox, physical
+Workbench automation currently uses Chromium; Rust boundary tests use Firefox.
+Mobile rows prove portable solver compilation, not a native tablet application.
+WebKit/Safari, full Firefox workbench interaction, physical
 tablet interaction, assistive technology, installer signing/notarization and
 sustained performance on controlled hardware still need product qualification.
 A green workflow alone does not establish production readiness.

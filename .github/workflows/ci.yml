@@ -172,16 +172,19 @@ jobs:
         run: cargo run --locked -p rspice-veriloga-catalog-dump -- --validate-only
       - name: Audit built-in XSPICE registry
         run: cargo run --locked -p rspice-xspice-catalog-dump -- --validate-only
-      - name: Gate KLU correctness, fill, and kernel latency
+      - name: Gate KLU correctness, fill, and relative kernel cost
         id: klu-qualification
+        # Hosted CPUs differ from the desktop used for absolute qualification.
+        # A cached refactor must beat full numeric factorization on this CPU;
+        # a solve must remain cheaper still. Numerical and fill gates also apply.
         run: >-
           cargo run --locked --release -p rspice-bench -- klu
           --samples 7
           --refactors 300
           --expander-size 500
           --expander-refactors 10
-          --max-refactor-ns-per-lu-nnz 4.0
-          --max-solve-ns-per-lu-nnz 2.5
+          --max-refactor-factor-ratio 0.50
+          --max-solve-factor-ratio 0.25
           --max-fill-ratio 1.60
           --out target/klu-ci-qualification.json
       - name: Upload KLU qualification
@@ -489,12 +492,13 @@ jobs:
           --features veriloga-model-diode-cmc,veriloga-builtins-noise
 
   wasm-tests:
-    name: Rust tests in Chromium
+    name: Rust tests in Firefox
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
       CARGO_BUILD_JOBS: "2"
       CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: wasm-bindgen-test-runner
+      GECKODRIVER: geckodriver
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Rust toolchain
