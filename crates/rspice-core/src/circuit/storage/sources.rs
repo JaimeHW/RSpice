@@ -141,11 +141,11 @@ impl SourceTimeBasis {
 impl crate::circuit::CircuitData {
     /// Check the same resolved waveforms that stamping uses. Continuity is
     /// qualified separately for topology constraints that require it.
-    pub(crate) fn independent_source_periodicities(
+    pub(crate) fn independent_source_pss_properties(
         &self,
         period: Value,
         autonomous: bool,
-    ) -> impl Iterator<Item = (&str, bool)> {
+    ) -> impl Iterator<Item = (&str, bool, Value)> {
         self.voltage_sources
             .transient_specs_named_with_pwl()
             .map(|(name, spec, pwl)| (name, spec, pwl, self.voltage_sources.transient_context))
@@ -163,6 +163,11 @@ impl crate::circuit::CircuitData {
                         VoltageSources::constant_waveform_over_orbit(spec, period, context, pwl)
                     } else {
                         VoltageSources::periodic_waveform(spec, period, context, pwl, false)
+                    },
+                    if autonomous {
+                        0.0
+                    } else {
+                        VoltageSources::max_authored_tone_cycles(spec, period, context)
                     },
                 )
             })

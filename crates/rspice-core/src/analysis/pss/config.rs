@@ -98,8 +98,11 @@ pub struct PssConfig {
     /// None uses the engine default (typically TrapGear).
     pub integration_method: Option<crate::numerics::integration::IntegrationMethod>,
 
-    /// Points per period for internal waveform storage.
-    /// Higher values give better accuracy but use more memory.
+    /// Uniform integration intervals per period (the endpoint is also stored).
+    /// Must exceed twice every recognized authored sinusoidal cycle count.
+    /// This Nyquist check prevents carrier aliasing; integration accuracy and
+    /// generated harmonics still require convergence under grid refinement.
+    /// Higher values use more memory and computation.
     /// Default: 256
     pub points_per_period: usize,
 

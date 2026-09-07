@@ -15,6 +15,175 @@ const R: f64 = 1.0e3;
 const C: f64 = 159.154943091895e-12; // RC corner ~ 1 MHz (w*RC = 1)
 
 #[test]
+fn pss_rejects_source_clocks_at_or_above_the_grid_nyquist_limit() {
+    use rspice_core::engine::PssDcOperatingPointSeed;
+    for source in [
+        "V1 in 0 SIN(0 1 128meg)",
+        "V1 in 0 SIN(0 1 256meg)",
+        "I1 0 in SIN(0 1m 128meg)",
+        "B1 in 0 V=sin(2*pi*256meg*time)",
+        "B1 0 in I=1m*cos(-2*pi*128meg*time+0.3)",
+        "B1 in 0 V=spice_sin(0,1,128meg)",
+        "V1 in 0 SFFM(0 1 256meg 0.3 1meg)",
+        "V1 in 0 SFFM(0 1 1meg 0.3 128meg)",
+        "V1 in 0 AM(0 1 1 64meg 64meg)",
+        "B1 in 0 V=spice_sffm(0,1,1meg,0.3,128meg)",
+        "B1 in 0 V=sin(2*pi*1meg*time+0.3*sin(2*pi*128meg*time))",
+        "V1 in 0 DC 0 AC 1 portnum=1 z0=50 pwr=0.001 freq=128meg",
+    ] {
+        let netlist = Netlist::parse(&format!(
+            "aliased PSS forcing\n{source}\nR1 in out {R}\nR2 in 0 1meg\nC1 out 0 {C}\n.end\n"
+        ))
+        .unwrap();
+        let engine = Engine::default();
+        let config = PssConfig::new(F0).with_tstab_periods(0);
+        let circuit = engine.build_circuit(&netlist).unwrap();
+        let seed = PssDcOperatingPointSeed::try_new(
+            circuit.node_names_sorted(),
+            circuit.branch_names_sorted(),
+            vec![0.0; circuit.matrix_size()],
+        )
+        .unwrap();
+        let selected = if source.starts_with('B') {
+            Vec::new()
+        } else {
+            vec![source.split_whitespace().next().unwrap().to_owned()]
+        };
+        let errors = [
+            engine.run_pss(&netlist, config.clone()).unwrap_err(),
+            engine
+                .run_pss_with_abort(&netlist, config.clone(), &NoAbort)
+                .unwrap_err(),
+            engine
+                .run_pss_operating_point_with_abort(&netlist, config.clone(), &NoAbort)
+                .unwrap_err(),
+            engine
+                .run_pss_with_continuation_state(&netlist, config.clone())
+                .unwrap_err(),
+            engine
+                .run_pss_with_frozen_source_continuation_state(&netlist, config.clone(), &[])
+                .unwrap_err(),
+            engine
+                .run_pss_operating_point_with_dc_seed_and_abort(
+                    &netlist,
+                    config.clone(),
+                    &seed,
+                    &NoAbort,
+                )
+                .unwrap_err(),
+            engine
+                .validate_pss_source_contract_with_abort(&netlist, &selected, &config, &NoAbort)
+                .unwrap_err(),
+        ];
+        for error in errors {
+            assert!(error.to_string().contains("Nyquist"), "{source}: {error}");
+            assert!(error.to_string().contains("POINTS"), "{source}: {error}");
+            assert!(
+                error
+                    .to_string()
+                    .contains(source.split_whitespace().next().unwrap()),
+                "{source}: {error}"
+            );
+        }
+    }
+}
+
+#[test]
+fn pss_sampling_preflight_preserves_sub_nyquist_and_inactive_tones() {
+    for source in [
+        "V1 in 0 SIN(0 1 127meg)",
+        "V1 in 0 SIN(0 0 256meg)",
+        "B1 in 0 V=sin(2*pi*127meg*time)",
+        "B1 in 0 V=spice_sin(0,0,256meg)",
+        "V1 in 0 SFFM(0 1 1meg 0 256meg)",
+        "B1 in 0 V=spice_sffm(0,1,1meg,0,256meg)",
+    ] {
+        let netlist = Netlist::parse(&format!(
+            "sampling boundary\n{source}\nR1 in out {R}\nC1 out 0 {C}\n.end\n"
+        ))
+        .unwrap();
+        let selected = if source.starts_with('B') {
+            vec![]
+        } else {
+            vec!["V1".to_owned()]
+        };
+        Engine::default()
+            .validate_pss_source_contract_with_abort(
+                &netlist,
+                &selected,
+                &PssConfig::new(F0),
+                &NoAbort,
+            )
+            .unwrap_or_else(|error| panic!("{source}: {error}"));
+    }
+}
+
+#[test]
+fn resolved_high_harmonic_rc_orbits_converge_toward_the_analytic_waveform() {
+    let harmonic = 128.0;
+    let omega = std::f64::consts::TAU * F0 * harmonic;
+    let wrc = omega * R * C;
+    let gain = 1.0 / (1.0 + wrc * wrc).sqrt();
+    for source in ["V1 in 0 SIN(0 1 128meg)", "B1 in 0 V=sin(2*pi*128meg*time)"] {
+        let netlist = Netlist::parse(&format!(
+            "resolved high harmonic\n{source}\nR1 in out {R}\nC1 out 0 {C}\n.end\n"
+        ))
+        .unwrap();
+        let mut coarse_error = 0.0;
+        for points in [4096, 8192] {
+            let point = Engine::default()
+                .run_pss_operating_point_with_abort(
+                    &netlist,
+                    PssConfig::new(F0)
+                        .with_tstab_periods(0)
+                        .with_points_per_period(points),
+                    &NoAbort,
+                )
+                .unwrap();
+            let analysis = point.analysis();
+            assert!(
+                analysis.iterations > 0,
+                "the physical response must not alias to DC"
+            );
+            let result = &analysis.result;
+            assert_eq!(result.time.len(), points + 1);
+            let output = result
+                .node_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("out"))
+                .unwrap();
+            let error = result
+                .time
+                .iter()
+                .zip(&result.waveforms[output].values)
+                .map(|(&time, &actual)| {
+                    let phase = omega * time;
+                    let expected = (phase.sin() - wrc * phase.cos()) / (1.0 + wrc * wrc);
+                    (actual - expected).abs() / gain
+                })
+                .fold(0.0, f64::max);
+            // The fixed second-order traversal still starts with one BE
+            // interval. Bound that discretization error independently of
+            // the much smaller shooting seam, and require refinement to
+            // improve the entire orbit, not just the initial voltage.
+            let step_angle = std::f64::consts::TAU * harmonic / points as f64;
+            assert!(
+                error < step_angle * step_angle,
+                "{source}, POINTS={points}: normalized error {error:e}"
+            );
+            if points == 4096 {
+                coarse_error = error;
+            } else {
+                assert!(
+                    error < coarse_error / 3.0,
+                    "grid refinement must reduce physical waveform error: {coarse_error:e} to {error:e}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn every_pss_entry_point_rejects_nonperiodic_forcing_even_when_endpoints_alias() {
     use rspice_core::engine::PssDcOperatingPointSeed;
     for source in [

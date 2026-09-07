@@ -986,6 +986,37 @@ fn spice_exp_parameters(args: &[Value]) -> [Value; 6] {
     parameters
 }
 
+/// Authored sinusoidal clocks of implicit-time functions, using their actual
+/// evaluator defaults. This does not bound all modulation sidebands.
+pub(crate) fn spice_waveform_max_tone_cycles(
+    function: super::Function,
+    args: &[Value],
+    period: Value,
+) -> Value {
+    match function {
+        super::Function::SpiceSin => {
+            let [_, amplitude, frequency, _, _, _] = spice_waveform_parameters(args);
+            if amplitude == 0.0 {
+                0.0
+            } else {
+                frequency.abs() * period
+            }
+        }
+        super::Function::SpiceSffm => {
+            let [_, amplitude, carrier, modulation, signal] = spice_waveform_parameters(args);
+            if amplitude == 0.0 {
+                0.0
+            } else {
+                carrier
+                    .abs()
+                    .max(if modulation == 0.0 { 0.0 } else { signal.abs() })
+                    * period
+            }
+        }
+        _ => 0.0,
+    }
+}
+
 /// Certify implicit-time functions using the same resolved parameters as
 /// their evaluator. Their defaults differ from independent source cards.
 pub(crate) fn spice_waveform_is_periodic(

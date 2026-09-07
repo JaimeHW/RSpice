@@ -41,6 +41,96 @@ fn periodic_linear_points(
 }
 
 impl VoltageSources {
+    /// Fastest authored sinusoidal clock, measured in cycles per PSS period.
+    /// This is a necessary sampling bound, not a bandwidth or integration-error
+    /// certificate: modulation and nonlinear devices can generate more harmonics.
+    pub(super) fn max_authored_tone_cycles(
+        spec: &crate::netlist::SourceSpec,
+        period: Value,
+        context: Option<TransientSourceContext>,
+    ) -> Value {
+        use crate::netlist::SourceSpec;
+        match spec {
+            SourceSpec::Distortion { inner, .. }
+            | SourceSpec::DcTransient {
+                transient: inner, ..
+            }
+            | SourceSpec::DcAcTransient {
+                transient: inner, ..
+            } => Self::max_authored_tone_cycles(inner, period, context),
+            SourceSpec::RfPort { inner, port } => {
+                let tone = port.drive_tone().map_or(0.0, |(amplitude, frequency, _)| {
+                    if amplitude == 0.0 {
+                        0.0
+                    } else {
+                        frequency.abs() * period
+                    }
+                });
+                tone.max(Self::max_authored_tone_cycles(inner, period, context))
+            }
+            SourceSpec::Sin {
+                amplitude,
+                frequency,
+                ..
+            } => {
+                if *amplitude == 0.0 {
+                    0.0
+                } else {
+                    Self::resolve_sin_frequency(*frequency, context).abs() * period
+                }
+            }
+            SourceSpec::Sffm {
+                amplitude,
+                carrier_freq,
+                signal_freq,
+                modulation_index,
+                ..
+            } => {
+                if *amplitude == 0.0 {
+                    return 0.0;
+                }
+                let (carrier, signal, modulation) =
+                    Self::sffm_parameters(*carrier_freq, *modulation_index, *signal_freq, context);
+                carrier
+                    .abs()
+                    .max(if modulation == 0.0 { 0.0 } else { signal.abs() })
+                    * period
+            }
+            SourceSpec::Am {
+                modulation_offset,
+                modulation_amplitude,
+                modulating_freq,
+                carrier_freq,
+                ..
+            } => {
+                if *modulation_offset == 0.0 && *modulation_amplitude == 0.0 {
+                    return 0.0;
+                }
+                let (signal, carrier) =
+                    Self::am_frequencies(*modulating_freq, *carrier_freq, context);
+                // AM multiplies two sinusoids, so its highest authored tone
+                // is the sum sideband, not merely the faster constituent.
+                (carrier.abs()
+                    + if *modulation_amplitude == 0.0 {
+                        0.0
+                    } else {
+                        signal.abs()
+                    })
+                    * period
+            }
+            SourceSpec::Dc(_)
+            | SourceSpec::Ac { .. }
+            | SourceSpec::DcAc { .. }
+            | SourceSpec::Pulse { .. }
+            | SourceSpec::Exp { .. }
+            | SourceSpec::Pwl { .. }
+            | SourceSpec::PwlFile { .. }
+            | SourceSpec::Pat { .. }
+            | SourceSpec::TrNoise { .. }
+            | SourceSpec::TrRandom { .. } => 0.0,
+        }
+    }
+
     /// Autonomous shooting repeats the authored [0, T] quiet window. A
     /// startup kick later than T still acts during stabilization, and is
     /// restored at its authored time by subsequent transient continuation.

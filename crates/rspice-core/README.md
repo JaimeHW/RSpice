@@ -381,6 +381,17 @@ Nonrepeating startup prefixes need an explicit frozen-source selection or a
 periodic source specification. Sources that prescribe winding currents also
 require a continuous waveform with finite outgoing slopes.
 
+`POINTS` controls the uniform integration grid as well as retained waveform
+sampling. It must exceed twice the number of cycles of every recognized
+authored sinusoidal clock in one PSS period, including behavioral phase
+expressions, implicit sine/FM functions and RF-port tones. Equality is the
+Nyquist limit and is refused: a sine can vanish at every grid point while
+still driving a nonzero physical response. Passing this check does not
+certify integration accuracy, pulse-edge resolution or all harmonics created
+by nonlinear expressions and devices. Refine `POINTS` until the waveforms
+and requested spectra converge; the shooting residual alone measures closure
+of the discrete period map.
+
 Autonomous shooting repeats the quiet source window from zero to the trial
 period. Startup kicks must lie outside that entire window, including its
 outgoing endpoint; they still excite the circuit during stabilization. A

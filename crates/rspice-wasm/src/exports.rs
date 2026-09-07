@@ -264,6 +264,24 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn pss_source_sampling_rejects_nyquist_aliases_in_wasm() {
+        for source in ["V1 in 0 SIN(0 1 128meg)", "B1 in 0 V=sin(2*pi*256meg*time)"] {
+            let netlist = rspice_core::Netlist::parse(&format!(
+                "WASM aliased forcing\n{source}\nR1 in out 1k\nC1 out 0 159.154943091895p\n.end\n"
+            ))
+            .unwrap();
+            let error = rspice_core::Engine::default()
+                .run_pss_with_abort(
+                    &netlist,
+                    rspice_core::analysis::PssConfig::new(1e6).with_tstab_periods(0),
+                    &rspice_core::abort_signal::NoAbort,
+                )
+                .unwrap_err();
+            assert!(error.to_string().contains("Nyquist"), "{source}: {error}");
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn monte_carlo_host_entropy_is_available_and_replayable_in_wasm() {
         use rspice_core::analysis::{MonteCarloConfig, MonteCarloRunner, Tolerance};
         let run = |config| {

@@ -2240,7 +2240,13 @@ impl Engine {
             engine.config.spice_dialect,
             engine.config.resource_limits,
         );
-        Self::ensure_pss_source_periodicity(&circuit, config.period(), false, abort)
+        Self::ensure_pss_source_contract(
+            &circuit,
+            config.period(),
+            config.points_per_period,
+            false,
+            abort,
+        )
     }
 
     fn validated_transient_source_selection(
