@@ -1512,7 +1512,17 @@ fn logarithmic_sweep_points_controlled(
     let mut points = Vec::with_capacity(count);
     for index in 0..count {
         poll_sweep_abort(abort, index)?;
-        points.push(start * multiplier.powi(index as i32));
+        let factor = i32::try_from(index)
+            .map(|index| multiplier.powi(index))
+            .unwrap_or_else(|_| multiplier.powf(index as Value));
+        let value = start * factor;
+        // The ratio can overflow even though both endpoints and the final
+        // point are representable (for example 1e-300 through 1e300).
+        points.push(if value.is_finite() && value > 0.0 {
+            value
+        } else {
+            base.powf(start.log(base) + index as Value / points_per_interval as Value)
+        });
     }
     Ok(points)
 }
@@ -2926,6 +2936,32 @@ impl StepSweep {
 #[cfg(test)]
 mod controlled_step_sweep_tests {
     use super::*;
+
+    #[test]
+    fn logarithmic_sweeps_do_not_overflow_the_intermediate_ratio() {
+        for sweep in [
+            DcSweepSpec::decade(1e-300, 1e300, 1),
+            DcSweepSpec::octave(2.0_f64.powi(-1000), 2.0_f64.powi(1000), 1),
+        ] {
+            let values = sweep.points_bounded_with_abort(2001, &NoAbort).unwrap();
+            assert_eq!(values[0], sweep.start);
+            assert!(values.iter().all(|value| value.is_finite() && *value > 0.0));
+            assert!(values.windows(2).all(|pair| pair[1] > pair[0]));
+            assert!((values.last().unwrap() / sweep.stop - 1.0).abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn linear_sweeps_never_overshoot_a_nonintegral_endpoint() {
+        let values = StepSweep::Linear {
+            start: 0.0,
+            stop: 1.0,
+            step: 0.6,
+        }
+        .values_bounded(3)
+        .unwrap();
+        assert_eq!(values, vec![0.0, 0.6]);
+    }
 
     #[test]
     fn bounded_step_grids_exactly_match_compatibility_generation() {

@@ -230,6 +230,12 @@ instantiated by model name when the feature is enabled).
 
 Core analyses, driven from `engine/`:
 
+Parameter sweeps use `Engine::plan_step_commands`, `StepPlan`, and
+`StepPlanLimits`; axis specifications live in `netlist::StepSweep`.
+The unused `analysis::parametric` API has been removed. SDK callers should
+migrate to the engine planner, which validates dimensions and total run counts
+before executing the same sweep path used by the frontends.
+
 | Analysis | Module |
 | :--- | :--- |
 | DC operating point and DC sweep | `analysis/dc.rs`, `engine/dc.rs` |
