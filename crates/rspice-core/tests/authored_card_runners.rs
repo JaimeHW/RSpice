@@ -825,7 +825,7 @@ fn a_periodic_map_with_no_dynamic_state_cannot_reach_a_pstb_card() {
             .expect_err("a circuit with no reactive element has no periodic state to shoot")
             .to_string();
         assert!(
-            error.contains("no capacitors or inductors"),
+            error.contains("no charge or flux storage"),
             "the {label} refusal must name the missing dynamic state: {error}"
         );
     }

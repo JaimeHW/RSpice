@@ -17,6 +17,28 @@ pub struct Diodes {
 }
 
 impl Diodes {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn stamp_charge_companions(
+        &self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        voltages: &[Value],
+        coeff: &CompanionCoefficients,
+        dt: Value,
+        history: &crate::numerics::integration::TwoTerminalChargeHistory,
+        physical_probe: bool,
+    ) {
+        for (index, diode) in self.devices.iter().enumerate() {
+            let voltage = diode.terminal_voltage(voltages);
+            let voltage = if physical_probe {
+                voltage
+            } else {
+                diode.transient_charge_voltage(voltage)
+            };
+            diode.stamp_charge_companion(matrix, rhs, voltage, coeff, dt, history.branch(index));
+        }
+    }
+
     pub(crate) fn new() -> Self {
         Self::default()
     }

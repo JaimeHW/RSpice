@@ -55,7 +55,6 @@ pub(super) struct TransientSystemContext<'a> {
     pub(super) bjt_history: &'a BjtTransientHistory,
     pub(super) jfet_history: &'a JfetTransientHistory,
     pub(super) diode_history: &'a DiodeTransientHistory,
-    pub(super) diode_companion_slots: &'a [TwoTerminalStampSlots],
     pub(super) diode_attempt_cache: Option<&'a DiodeTransientStampCache>,
     pub(super) mosfet_history: &'a MosfetTransientHistory,
     pub(super) mosfet_companion_slots: &'a [[TwoTerminalStampSlots; 5]],
@@ -431,17 +430,14 @@ impl Engine {
         if refresh_nonlinear {
             circuit.diodes.update_all(solution);
         }
-        Self::stamp_diode_transient_companions(
-            TransientCompanionStamp {
-                circuit,
-                matrix,
-                rhs,
-                voltages: solution,
-                coeff: companion_coeff,
-                dt,
-            },
+        circuit.diodes.stamp_charge_companions(
+            matrix,
+            rhs,
+            solution,
+            companion_coeff,
+            dt,
             ctx.diode_history,
-            ctx.diode_companion_slots,
+            false,
         );
         match evaluation_mode {
             crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe => {
@@ -1553,17 +1549,14 @@ impl Engine {
             ctx.jfet_history,
             ctx.suppress_gate_charge,
         );
-        Self::stamp_diode_transient_companions(
-            TransientCompanionStamp {
-                circuit,
-                matrix,
-                rhs,
-                voltages: solution,
-                coeff: &companion_coeff,
-                dt,
-            },
+        circuit.diodes.stamp_charge_companions(
+            matrix,
+            rhs,
+            solution,
+            &companion_coeff,
+            dt,
             ctx.diode_history,
-            ctx.diode_companion_slots,
+            false,
         );
         let relinked_mosfet_companion_slots;
         let mosfet_companion_slots = if ctx.mosfet_companion_slots.len()
@@ -2666,7 +2659,6 @@ D2 in out DMOD
         let bsim3_history = Engine::initialize_bsim3_history(&circuit, &solution);
         let bsim4_history = Engine::initialize_bsim4_history(&circuit, &solution);
         let ekv26_history = Engine::initialize_ekv26_history(&circuit, &solution);
-        let diode_companion_slots = Engine::link_diode_companion_slots(&circuit, &matrix);
         let mosfet_companion_slots = Engine::link_mosfet_companion_slots(&circuit, &matrix);
         let vdmos_companion_slots = Engine::link_vdmos_companion_slots(&circuit, &matrix);
         let coeff = CompanionCoefficients::backward_euler();
@@ -2680,7 +2672,6 @@ D2 in out DMOD
             bjt_history: &bjt_history,
             jfet_history: &jfet_history,
             diode_history: &diode_history,
-            diode_companion_slots: &diode_companion_slots,
             diode_attempt_cache: None,
             mosfet_history: &mosfet_history,
             mosfet_companion_slots: &mosfet_companion_slots,
@@ -2812,7 +2803,6 @@ M1 d g 0 0 NM W=10u L=1u
         let bsim3_history = Engine::initialize_bsim3_history(&circuit, &solution);
         let bsim4_history = Engine::initialize_bsim4_history(&circuit, &solution);
         let ekv26_history = Engine::initialize_ekv26_history(&circuit, &solution);
-        let diode_companion_slots = Engine::link_diode_companion_slots(&circuit, &matrix);
         let mosfet_companion_slots = Engine::link_mosfet_companion_slots(&circuit, &matrix);
         let vdmos_companion_slots = Engine::link_vdmos_companion_slots(&circuit, &matrix);
         let coeff = CompanionCoefficients::backward_euler();
@@ -2826,7 +2816,6 @@ M1 d g 0 0 NM W=10u L=1u
             bjt_history: &bjt_history,
             jfet_history: &jfet_history,
             diode_history: &diode_history,
-            diode_companion_slots: &diode_companion_slots,
             diode_attempt_cache: None,
             mosfet_history: &mosfet_history,
             mosfet_companion_slots: &mosfet_companion_slots,
@@ -3347,7 +3336,6 @@ Q1 C B E 0 QN
         let coeff = CompanionCoefficients::for_method(Engine::effective_companion_method(
             method, trap_order,
         ));
-        let diode_companion_slots = Engine::link_diode_companion_slots(&circuit, &matrix);
         let mosfet_companion_slots = Engine::link_mosfet_companion_slots(&circuit, &matrix);
         let vdmos_companion_slots = Engine::link_vdmos_companion_slots(&circuit, &matrix);
         let ctx = TransientSystemContext {
@@ -3359,7 +3347,6 @@ Q1 C B E 0 QN
             bjt_history: &bjt_history,
             jfet_history: &jfet_history,
             diode_history: &diode_history,
-            diode_companion_slots: &diode_companion_slots,
             diode_attempt_cache: None,
             mosfet_history: &mosfet_history,
             mosfet_companion_slots: &mosfet_companion_slots,
@@ -3791,7 +3778,6 @@ Q1 C B E 0 QN
                 engine.effective_device_junction_gmin(engine.config.convergence_config.gmin_target),
             );
             let coeff = CompanionCoefficients::for_method(IntegrationMethod::BackwardEuler);
-            let diode_companion_slots = Engine::link_diode_companion_slots(&circuit, &matrix);
             let mosfet_companion_slots = Engine::link_mosfet_companion_slots(&circuit, &matrix);
             let vdmos_companion_slots = Engine::link_vdmos_companion_slots(&circuit, &matrix);
             let ctx = TransientSystemContext {
@@ -3803,7 +3789,6 @@ Q1 C B E 0 QN
                 bjt_history: &bjt_history,
                 jfet_history: &jfet_history,
                 diode_history: &diode_history,
-                diode_companion_slots: &diode_companion_slots,
                 diode_attempt_cache: None,
                 mosfet_history: &mosfet_history,
                 mosfet_companion_slots: &mosfet_companion_slots,

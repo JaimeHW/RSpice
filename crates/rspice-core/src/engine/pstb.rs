@@ -158,13 +158,11 @@ impl Engine {
     /// Resolve an authored loop-probe name to its coordinate in the carrier's
     /// shooting-state basis.
     ///
-    /// The basis is `["C:<capacitor>"..., "L:<inductor>"...]`, so the position
-    /// of `L:<probe>` in it *is* `capacitors.len() + inductor_index`, which is
-    /// bit-identically what
-    /// [`CircuitData::inductor_probe_for_branch`](crate::circuit::CircuitData::
-    /// inductor_probe_for_branch) computes from a built circuit. Resolving
-    /// here needs no circuit at all; one is built only to say what the deck
-    /// does offer when the name misses.
+    /// The retained basis contains independent charge-voltage coordinates
+    /// followed by inductor currents. Resolving `L:<probe>` by name remains
+    /// correct when charge branches share a voltage or add diode coordinates.
+    /// A circuit is built only to explain which probes the deck offers when
+    /// the name misses.
     fn resolve_pstb_probe(
         &self,
         netlist: &Netlist,

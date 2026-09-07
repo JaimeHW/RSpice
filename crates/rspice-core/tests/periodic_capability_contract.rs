@@ -223,21 +223,14 @@ c1 out 0 100p
         "an R/L/C deck",
     );
 
-    let cases = [
-        (
-            "\
-* diode charge history is outside the shooting state
-vin in 0 sin(0 0.4 1meg)
-r1 in out 1k
-c1 out 0 100p
-d1 out 0 dmod
-.model dmod d(cjo=1p)
-.end
-",
-            "diode junction/diffusion charge history",
-        ),
-        (
-            "\
+    let diode = "charged diode continuation\nvin in 0 sin(0 0.4 1meg)\nr1 in out 1k\nc1 out 0 100p\nd1 out 0 dmod\n.model dmod d(cjo=1p)\n.end\n";
+    assert_admitted(
+        engine().run_pss_with_continuation_state(&parse(diode), config.clone()),
+        "a diode charge deck",
+    );
+
+    let cases = [(
+        "\
 * a Xyce LEVEL=2 resistor carries an accepted temperature state
 vin in 0 sin(0 1 1meg)
 r1 in out rmod l=1u a=1u
@@ -245,9 +238,8 @@ c1 out 0 100p
 .model rmod R (LEVEL=2 RESISTIVITY=1 HEATCAPACITY=1)
 .end
 ",
-            "thermal resistor accepted temperature state",
-        ),
-    ];
+        "thermal resistor accepted temperature state",
+    )];
     for (deck, expected) in cases {
         let message = engine()
             .run_pss_with_continuation_state(&parse(deck), config.clone())

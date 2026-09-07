@@ -5,6 +5,7 @@
 //! state, so the converged orbit, the periodicity residual, and the Floquet
 //! multiplier are all checkable without any reference simulator.
 
+use rspice_core::abort_signal::NoAbort;
 use rspice_core::analysis::PssConfig;
 use rspice_core::engine::{Engine, SimulationConfig, SimulationError};
 use rspice_core::netlist::Netlist;
@@ -12,6 +13,247 @@ use rspice_core::netlist::Netlist;
 const F0: f64 = 1.0e6; // 1 MHz drive
 const R: f64 = 1.0e3;
 const C: f64 = 159.154943091895e-12; // RC corner ~ 1 MHz (w*RC = 1)
+
+#[test]
+fn independent_charge_initialization_preserves_xyce_ic_branches_and_parallel_constraints() {
+    use rspice_core::config::SpiceDialect;
+    use rspice_core::engine::PssDcOperatingPointSeed;
+
+    let engine = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+    for capacitors in [
+        "C1 out 0 1n IC=0.2",
+        "C1 out 0 0.4n IC=0.2\nC2 0 out 0.6n IC=-0.2",
+        "C1 out 0 0.4n\nC2 0 out 0.6n IC=-0.2",
+    ] {
+        let netlist = Netlist::parse(&format!(
+            "IC charge basis\nV1 in 0 SIN(0 1 1meg)\nR1 in out 1k\n{capacitors}\n.end\n"
+        ))
+        .unwrap();
+        // Supply the initial state explicitly to isolate period-map
+        // initialization from the ordinary DC IC-constraint solver.
+        let circuit = engine.build_circuit(&netlist).unwrap();
+        let seed = PssDcOperatingPointSeed::try_new(
+            circuit.node_names_sorted(),
+            circuit.branch_names_sorted(),
+            vec![0.0; circuit.matrix_size()],
+        )
+        .unwrap();
+        let point = engine
+            .run_pss_operating_point_with_dc_seed_and_abort(
+                &netlist,
+                PssConfig::new(F0)
+                    .with_tstab_periods(0)
+                    .with_points_per_period(512)
+                    .with_tolerance(1e-9),
+                &seed,
+                &NoAbort,
+            )
+            .unwrap_or_else(|error| panic!("{capacitors}: {error}"));
+        assert_eq!(point.shooting_state().len(), 1);
+        let result = &point.analysis().result;
+        let output = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("out"))
+            .unwrap();
+        let ratio = std::f64::consts::TAU;
+        let amplitude = 1.0 / (1.0 + ratio * ratio).sqrt();
+        for (&time, &voltage) in result.time.iter().zip(&result.waveforms[output].values) {
+            let expected = amplitude * (std::f64::consts::TAU * F0 * time - ratio.atan()).sin();
+            assert!(
+                (voltage - expected).abs() < 0.002 * amplitude,
+                "{capacitors}, t={time:e}: got {voltage:e}, expected {expected:e}"
+            );
+        }
+    }
+}
+
+#[test]
+fn charged_diode_pss_matches_ac_transient_and_rc_theory_under_grid_refinement() {
+    for (cjo, explicit_c, reverse) in [(1e-9, 1e-12, false), (2e-9, 0.0, true)] {
+        let bias = if reverse { 1.0 } else { -1.0 };
+        let terminals = if reverse { "0 out" } else { "out 0" };
+        let netlist = Netlist::parse(&format!(
+            "audited diode PSS charge\nV1 in 0 SIN({bias} 0.01 1meg) AC 1\n\
+             R1 in out 1k\nCkeep out 0 {explicit_c:e}\nD1 {terminals} dm\n\
+             .model dm D(IS=1e-30 CJO={cjo:e} M=0 TT=0)\n.end\n"
+        ))
+        .unwrap();
+        let engine = Engine::default();
+        let tau = R * (cjo + explicit_c);
+        let ratio = std::f64::consts::TAU * F0 * tau;
+        let expected_amplitude = 0.01 / (1.0 + ratio * ratio).sqrt();
+        let expected_phase = -ratio.atan().to_degrees();
+        let mut previous_amplitude_error = f64::INFINITY;
+        let mut previous_phase_error = f64::INFINITY;
+        for points in [256, 512, 1024] {
+            let point = engine
+                .run_pss_operating_point_with_abort(
+                    &netlist,
+                    PssConfig::new(F0)
+                        .with_points_per_period(points)
+                        .with_tstab_periods(0)
+                        .with_tolerance(1e-10),
+                    &NoAbort,
+                )
+                .expect("charged diode PSS must converge");
+            assert_eq!(
+                point.shooting_state().len(),
+                1,
+                "parallel charge branches share one voltage state"
+            );
+            let result = &point.analysis().result;
+            let node = |name: &str| {
+                result
+                    .node_names
+                    .iter()
+                    .position(|n| n.eq_ignore_ascii_case(name))
+                    .unwrap()
+                    + 1
+            };
+            let input = &result.harmonics(node("in"), 1)[1];
+            let output = &result.harmonics(node("out"), 1)[1];
+            let amplitude_error = (output.magnitude / expected_amplitude - 1.0).abs();
+            let phase = (output.phase - input.phase + 180.0).rem_euclid(360.0) - 180.0;
+            let phase_error = (phase - expected_phase).abs();
+            eprintln!(
+                "CJO={cjo:e}, C={explicit_c:e}, N={points}: amplitude={:.12e}, relative error={amplitude_error:e}, phase error={phase_error:e} deg",
+                output.magnitude
+            );
+            assert!(
+                amplitude_error < previous_amplitude_error,
+                "amplitude must converge under refinement"
+            );
+            assert!(
+                phase_error < previous_phase_error,
+                "phase must converge under refinement"
+            );
+            previous_amplitude_error = amplitude_error;
+            previous_phase_error = phase_error;
+            if points == 1024 {
+                assert!(amplitude_error <= 0.002);
+                assert!(phase_error <= 0.02);
+                let expected_multiplier = (-(1.0 / F0) / tau).exp();
+                assert_eq!(point.analysis().floquet_multipliers.len(), 1);
+                assert!(
+                    (point.analysis().floquet_multipliers[0].re / expected_multiplier - 1.0).abs()
+                        < 0.001
+                );
+            }
+        }
+        let ac = engine.run_ac(&netlist, &[F0]).unwrap().remove(0);
+        let out = ac
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("out"))
+            .unwrap();
+        assert!((0.01 * ac.voltages[out].norm() / expected_amplitude - 1.0).abs() < 1e-6);
+        let transient = engine.run_tran(&netlist, 20e-6, 1e-6 / 1024.0).unwrap();
+        let output = transient.try_voltage_waveform_named("OUT").unwrap();
+        for (&time, &voltage) in transient
+            .time
+            .iter()
+            .zip(output)
+            .filter(|(time, _)| **time >= 19e-6)
+        {
+            let expected = bias
+                + expected_amplitude * (std::f64::consts::TAU * F0 * time - ratio.atan()).sin();
+            assert!((voltage - expected).abs() <= 0.002 * expected_amplitude);
+        }
+    }
+}
+
+#[test]
+fn prescribed_diode_voltage_is_a_constraint_not_a_spurious_shooting_state() {
+    let netlist = Netlist::parse("prescribed diode charge\nV1 out 0 SIN(-1 0.01 1meg)\nD1 out 0 dm\n.model dm D(IS=1e-30 CJO=1n M=0)\n.end\n").unwrap();
+    let point = Engine::default()
+        .run_pss_operating_point_with_abort(
+            &netlist,
+            PssConfig::new(F0)
+                .with_points_per_period(64)
+                .with_tstab_periods(0),
+            &NoAbort,
+        )
+        .expect("a prescribed reactive voltage needs no free shooting coordinate");
+    assert!(point.shooting_state().is_empty());
+    let result = &point.analysis().result;
+    for (&time, &voltage) in result.time.iter().zip(&result.waveforms[0].values) {
+        assert!((voltage - (-1.0 + 0.01 * (std::f64::consts::TAU * F0 * time).sin())).abs() < 1e-9);
+    }
+}
+
+#[test]
+fn nonlinear_diode_charge_pss_matches_settled_ngspice46() {
+    let netlist = Netlist::parse(
+        "nonlinear charged diode PSS oracle\nV1 in 0 SIN(0.7 0.5 1meg)\n\
+         R1 in out 100\nCkeep out 0 1n\nD1 out 0 dm\n\
+         .model dm D(IS=1e-14 N=1.6 RS=1 CJO=100p VJ=0.7 M=0.5 TT=5n)\n.end\n",
+    )
+    .unwrap();
+    // Live ngspice 46, 2026-09-07: the identical deck with .tran 0.5n 20u.
+    // Linear interpolation at 1/16-period intervals in the settled 19–20 us
+    // cycle. This covers depletion, diffusion and an internal series-R node.
+    let reference = [
+        4.628_742_814_191_617e-1,
+        6.037_671_134_394_52e-1,
+        7.568_202_648_753_487e-1,
+        8.993_142_649_246_983e-1,
+        1.005_292_659_521_489,
+        1.046_226_789_508_697,
+        1.036_616_990_752_226,
+        9.933_852_452_288_828e-1,
+        9.097_133_113_610_002e-1,
+        7.848_911_278_674_935e-1,
+        6.368_145_176_295_715e-1,
+        4.913_580_983_703_467e-1,
+        3.744_209_501_360_043e-1,
+        3.069_170_541_699_974e-1,
+        3.005_752_587_035_279e-1,
+        3.558_969_590_533_483e-1,
+        4.628_740_361_311_73e-1,
+    ];
+    let mut previous_error = f64::INFINITY;
+    for points in [256, 512, 1024] {
+        let point = Engine::default()
+            .run_pss_operating_point_with_abort(
+                &netlist,
+                PssConfig::new(F0)
+                    .with_points_per_period(points)
+                    .with_tstab_periods(0)
+                    .with_tolerance(1e-9),
+                &NoAbort,
+            )
+            .expect("nonlinear charged diode PSS converges");
+        assert_eq!(
+            point.shooting_state().len(),
+            2,
+            "the series-R junction voltage is an independent state"
+        );
+        let result = &point.analysis().result;
+        let output = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("out"))
+            .unwrap()
+            + 1;
+        let error = reference
+            .iter()
+            .enumerate()
+            .map(|(index, &voltage)| {
+                (result.voltage_at(output, index as f64 / 16.0 / F0) - voltage).abs()
+            })
+            .fold(0.0_f64, f64::max);
+        eprintln!("nonlinear diode N={points}: maximum ngspice waveform error={error:e} V");
+        assert!(
+            error < previous_error,
+            "nonlinear waveform must converge under refinement"
+        );
+        previous_error = error;
+        if points == 1024 {
+            assert!(error < 2e-4);
+        }
+    }
+}
 
 fn run_rc_pss() -> rspice_core::engine::PssAnalysisResult {
     let deck = format!(

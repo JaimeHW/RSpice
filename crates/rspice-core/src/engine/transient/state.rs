@@ -1172,20 +1172,6 @@ impl Engine {
         }
     }
 
-    /// Resolve the matrix slots every diode junction-charge companion will
-    /// stamp into; the pattern is frozen for the whole transient run.
-    pub(super) fn link_diode_companion_slots(
-        circuit: &crate::circuit::CircuitData,
-        matrix: &crate::solver::StaticMatrix,
-    ) -> Vec<TwoTerminalStampSlots> {
-        circuit
-            .diodes
-            .devices
-            .iter()
-            .map(|diode| TwoTerminalStampSlots::link(matrix, diode.node_anode, diode.node_cathode))
-            .collect()
-    }
-
     /// Resolve the matrix slots for the five MOSFET charge companions
     /// (gate-source, gate-drain, gate-bulk, body-source, body-drain).
     pub(super) fn link_mosfet_companion_slots(
@@ -1259,38 +1245,6 @@ impl Engine {
                 ]
             })
             .collect()
-    }
-
-    /// Stamp the diode junction-charge companions (ngspice dioload.c's
-    /// `DIOcapCharge` integration). The charge is evaluated from the raw
-    /// junction voltage: the conduction stamp's pnjlim limiting is a Newton
-    /// iteration aid that leaves converged points untouched, and the
-    /// charge-form companion (`nonlinear_charge_companion_terms`) needs the
-    /// charge history tracked against one consistent voltage.
-    pub(super) fn stamp_diode_transient_companions(
-        stamp: TransientCompanionStamp<'_, '_>,
-        history: &DiodeTransientHistory,
-        slots: &[TwoTerminalStampSlots],
-    ) {
-        let TransientCompanionStamp {
-            circuit,
-            matrix,
-            rhs,
-            voltages,
-            coeff,
-            dt,
-        } = stamp;
-        for (idx, diode) in circuit.diodes.devices.iter().enumerate() {
-            if !diode.has_charge_storage() {
-                continue;
-            }
-            let vd_raw = Self::differential_voltage(voltages, diode.node_anode, diode.node_cathode);
-            let vd = diode.transient_charge_voltage(vd_raw);
-            let (qd, capd) = diode.junction_charge_and_capacitance(vd);
-            let (geq, ieq, _q_curr, _cq_curr) =
-                nonlinear_charge_companion_terms(coeff, dt, capd, vd, qd, history.branch(idx));
-            Self::stamp_two_terminal_companion_direct(matrix, rhs, &slots[idx], geq, ieq);
-        }
     }
 
     #[inline]
@@ -1838,7 +1792,7 @@ mod tests {
         diode.tt = 0.0;
         let (pos, neg) = (diode.node_anode - 1, diode.node_cathode - 1);
         let mut matrix = engine.build_matrix(&circuit).unwrap();
-        let slots = Engine::link_diode_companion_slots(&circuit, &matrix);
+        circuit.link_indices(&matrix);
         let mut voltage = vec![0.0; circuit.matrix_size()];
         voltage[pos] = 0.5;
         let initial =
@@ -1850,17 +1804,14 @@ mod tests {
             let mut rhs = vec![0.0; circuit.matrix_size()];
             voltage[pos] = vd;
             matrix.clear_values();
-            Engine::stamp_diode_transient_companions(
-                TransientCompanionStamp {
-                    circuit: &circuit,
-                    matrix: &mut matrix,
-                    rhs: &mut rhs,
-                    voltages: &voltage,
-                    coeff: &coeff,
-                    dt: 0.25,
-                },
+            circuit.diodes.stamp_charge_companions(
+                &mut matrix,
+                &mut rhs,
+                &voltage,
+                &coeff,
+                0.25,
                 &history,
-                &slots,
+                false,
             );
             let charge = vd - 0.5 * vd * vd;
             let current = (charge - 0.375) / 0.25;

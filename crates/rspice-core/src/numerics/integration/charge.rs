@@ -43,18 +43,22 @@ impl TwoTerminalChargeHistory {
     /// Initialize a quiescent accepted state from physical (voltage, charge)
     /// pairs. The device adapter resolves operating-point versus UIC policy.
     pub(crate) fn from_biases(biases: impl ExactSizeIterator<Item = (Value, Value)>) -> Self {
-        let count = biases.len();
-        let mut state = Self {
-            vd_prev: Vec::with_capacity(count),
-            qd_prev: Vec::with_capacity(count),
-            ..Self::default()
-        };
-        for (voltage, charge) in biases {
-            state.vd_prev.push(voltage);
-            state.qd_prev.push(charge);
-        }
-        state.restart(0.0);
+        let mut state = Self::default();
+        state.reset_biases(biases);
         state
+    }
+
+    /// Reuse the allocated SoA buffers when installing another shooting state.
+    pub(crate) fn reset_biases(&mut self, biases: impl ExactSizeIterator<Item = (Value, Value)>) {
+        self.vd_prev.clear();
+        self.qd_prev.clear();
+        self.vd_prev.reserve(biases.len());
+        self.qd_prev.reserve(biases.len());
+        for (voltage, charge) in biases {
+            self.vd_prev.push(voltage);
+            self.qd_prev.push(charge);
+        }
+        self.restart(0.0);
     }
 
     #[inline]

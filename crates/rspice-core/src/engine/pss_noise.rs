@@ -413,7 +413,8 @@ impl Engine {
             circuit.link_indices(&matrix);
             operating_point.authenticate_for_reuse(netlist, &self.config, &config)?;
             operating_point.validate_shooting_basis_for_circuit(&circuit)?;
-            let state_dimension = circuit.capacitors.len() + circuit.inductors.len();
+            let circuit = super::pss::PssCircuit::new(circuit);
+            let state_dimension = circuit.state_dimension();
             if operating_point.shooting_state().len() != state_dimension {
                 return Err(SimulationError::Circuit(format!(
                     "retained PSS reactive-state dimension {} does not match dependent circuit dimension {state_dimension}",
@@ -437,9 +438,9 @@ impl Engine {
         // Base trajectory on the fixed grid, with state and node solutions.
         // ------------------------------------------------------------------
         let mut base = super::pss::PssStateTrace::default();
-        self.pss_set_reactive_state(&mut circuit, &x0);
+        self.pss_set_reactive_state(&mut circuit, &x0)?;
         let max_step = period / config.points_per_period as f64;
-        let seed = self.pss_initial_node_solution(&mut circuit, &mut matrix, period, abort)?;
+        let seed = self.pss_initial_node_solution(&mut circuit, abort)?;
         self.pss_run_tran_internal(
             &mut circuit,
             &mut matrix,
@@ -489,9 +490,8 @@ impl Engine {
             let mut x_plus = x0.clone();
             x_plus[j] += h;
             let mut tr_plus = super::pss::PssStateTrace::default();
-            self.pss_set_reactive_state(&mut circuit, &x_plus);
-            let seed_p =
-                self.pss_initial_node_solution(&mut circuit, &mut matrix, period, abort)?;
+            self.pss_set_reactive_state(&mut circuit, &x_plus)?;
+            let seed_p = self.pss_initial_node_solution(&mut circuit, abort)?;
             self.pss_run_tran_internal(
                 &mut circuit,
                 &mut matrix,
@@ -509,9 +509,8 @@ impl Engine {
             let mut x_minus = x0.clone();
             x_minus[j] -= h;
             let mut tr_minus = super::pss::PssStateTrace::default();
-            self.pss_set_reactive_state(&mut circuit, &x_minus);
-            let seed_m =
-                self.pss_initial_node_solution(&mut circuit, &mut matrix, period, abort)?;
+            self.pss_set_reactive_state(&mut circuit, &x_minus)?;
+            let seed_m = self.pss_initial_node_solution(&mut circuit, abort)?;
             self.pss_run_tran_internal(
                 &mut circuit,
                 &mut matrix,
@@ -628,7 +627,6 @@ impl Engine {
         evaluation_frequencies.push(0.0);
         evaluation_frequencies.extend_from_slice(offsets);
 
-        let n_caps = circuit.capacitors.len();
         let size = circuit.matrix_size();
         let mut white_integrals = vec![0.0; evaluation_frequencies.len()];
         let mut previous_white = vec![0.0; evaluation_frequencies.len()];
@@ -641,7 +639,7 @@ impl Engine {
             }
             // Restore the traced reactive state and linearize at the traced
             // node solution: pss_stamp_system reads cap/inductor history.
-            self.pss_set_reactive_state(&mut circuit, &base.states[k]);
+            self.pss_set_reactive_state(&mut circuit, &base.states[k])?;
             let solution = base.solutions[k].clone();
             let mut rhs_scratch = vec![0.0; size];
             self.pss_stamp_system(
@@ -652,8 +650,10 @@ impl Engine {
                     coeff: &coeff,
                     t_next: base.times[k] + dt_freeze,
                     dt: dt_freeze,
+                    initialization: false,
                 },
                 &solution,
+                true,
             )?;
 
             let mut projection = |node_pos: usize,
@@ -673,24 +673,11 @@ impl Engine {
                 }
                 let delta = matrix.solve(&injection).map_err(SimulationError::Solver)?;
 
-                // b entries: capacitor states first, then inductor branch
-                // states. The frozen companion step maps a unit source into
-                // the state derivative used by the PPV projection.
-                let mut value = 0.0;
-                for (alpha, cap) in circuit.capacitors.stamps.iter().enumerate() {
-                    let np = cap.pp.row;
-                    let nn = cap.nn.row;
-                    let dv = if np == 0 { 0.0 } else { delta[np - 1] }
-                        - if nn == 0 { 0.0 } else { delta[nn - 1] };
-                    value += v1_k[alpha] * dv / dt_freeze;
-                }
-                for l_idx in 0..circuit.inductors.names.len() {
-                    let branch = circuit.inductors.branch_indices[l_idx];
-                    if branch > 0 {
-                        let branch_index = circuit.num_nodes() + branch - 1;
-                        value += v1_k[n_caps + l_idx] * delta[branch_index] / dt_freeze;
-                    }
-                }
+                let value = v1_k
+                    .iter()
+                    .zip(circuit.project_perturbation(&delta))
+                    .map(|(adjoint, perturbation)| adjoint * perturbation / dt_freeze)
+                    .sum();
                 Ok(value)
             };
 

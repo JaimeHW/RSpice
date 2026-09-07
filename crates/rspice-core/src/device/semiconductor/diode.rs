@@ -1,6 +1,9 @@
 //! Diode device model
 
 use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
+use crate::numerics::integration::{
+    BranchChargeHistory, CompanionCoefficients, nonlinear_charge_companion_terms,
+};
 use crate::solver::{CscIndex, StaticMatrix};
 use crate::{NodeId, Value};
 
@@ -1771,6 +1774,27 @@ impl Diode {
         self.stamp_linearized_direct(matrix, rhs, vd, id, gd);
     }
 
+    /// Discretized Q contribution shared by ordinary TRAN and shooting PSS.
+    /// Accepted history is borrowed; Newton loads never commit it. Reuse the
+    /// device's linked matrix indices instead of allocating a second stamp map.
+    pub(crate) fn stamp_charge_companion(
+        &self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        vd: Value,
+        coeff: &CompanionCoefficients,
+        dt: Value,
+        history: BranchChargeHistory,
+    ) {
+        if !self.has_charge_storage() {
+            return;
+        }
+        let (charge, slope) = self.junction_charge_and_capacitance(vd);
+        let (conductance, _, _, current) =
+            nonlinear_charge_companion_terms(coeff, dt, slope, vd, charge, history);
+        self.stamp_linearized_direct(matrix, rhs, vd, current, conductance);
+    }
+
     /// Stamp a static residual probe at the candidate voltage itself.
     ///
     /// Newton iteration uses `limited_linearization` to protect live steps.
@@ -1790,7 +1814,7 @@ impl Diode {
         self.stamp_linearized_direct(matrix, rhs, vd, stamped_id, stamped_gd);
     }
 
-    fn terminal_voltage(&self, voltages: &[Value]) -> Value {
+    pub(crate) fn terminal_voltage(&self, voltages: &[Value]) -> Value {
         let va = if self.node_anode == 0 {
             0.0
         } else {

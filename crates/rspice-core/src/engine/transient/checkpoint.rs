@@ -5571,13 +5571,46 @@ impl TransientCheckpoint {
         state: CheckpointState<'_>,
         lte_estimator: Option<&LteEstimator>,
     ) -> Result<Self, String> {
+        Self::capture_with_diode_history(
+            fingerprint,
+            netlist_identity,
+            simulation_identity,
+            state,
+            lte_estimator,
+            None,
+        )
+    }
+
+    /// A periodic traversal can supply its accepted diode charge at a new
+    /// time origin. The caller normalizes history for the order-one restart;
+    /// capture still validates its device identities and every numeric lane.
+    pub(crate) fn capture_with_diode_history(
+        fingerprint: u64,
+        netlist_identity: Option<String>,
+        simulation_identity: String,
+        state: CheckpointState<'_>,
+        lte_estimator: Option<&LteEstimator>,
+        diode_history: Option<&crate::numerics::integration::TwoTerminalChargeHistory>,
+    ) -> Result<Self, String> {
         let CheckpointState {
             time,
             solution,
             circuit,
             startup_mode,
         } = state;
-        let accepted_junction_history = if circuit.bjts.is_empty() && circuit.diodes.is_empty() {
+        let accepted_junction_history = if let Some(diode_history) = diode_history {
+            if !circuit.bjts.is_empty() {
+                return Err(
+                    "diode-only checkpoint capture cannot omit accepted BJT state".to_string(),
+                );
+            }
+            Engine::capture_accepted_junction_transient_history_checkpoint(
+                circuit,
+                &BjtTransientHistory::default(),
+                diode_history,
+                &[],
+            )
+        } else if circuit.bjts.is_empty() && circuit.diodes.is_empty() {
             AcceptedJunctionTransientHistoryCheckpoint {
                 available: true,
                 ..AcceptedJunctionTransientHistoryCheckpoint::default()

@@ -872,21 +872,21 @@ impl VoltageSources {
         time: Value,
         get_branch_idx: impl Fn(usize) -> usize,
     ) {
-        let context = self.transient_context;
         for i in 0..self.names.len() {
             let br = get_branch_idx(self.branch_indices[i]);
+            rhs[br - 1] = self.transient_value_at(i, time);
+        }
+    }
 
-            let v = match &self.source_specs[i] {
-                Some(spec) => Self::evaluate_source_at_time_with_context_and_pwl(
-                    spec,
-                    time,
-                    context,
-                    self.pwl_waveforms[i].as_deref(),
-                ),
-                None => self.dc_values[i], // DC only
-            };
-
-            rhs[br - 1] = v;
+    pub(crate) fn transient_value_at(&self, index: usize, time: Value) -> Value {
+        match &self.source_specs[index] {
+            Some(spec) => Self::evaluate_source_at_time_with_context_and_pwl(
+                spec,
+                time,
+                self.transient_context,
+                self.pwl_waveforms[index].as_deref(),
+            ),
+            None => self.dc_values[index],
         }
     }
 

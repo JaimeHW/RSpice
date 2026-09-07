@@ -46,7 +46,7 @@ fn dc_seed(engine: &Engine, netlist: &Netlist) -> PssDcOperatingPointSeed {
 }
 
 #[test]
-fn every_pss_entry_point_rejects_unadvanced_diode_charge() {
+fn every_pss_entry_point_preserves_the_audited_diode_charge() {
     // The omitted junction charge changes this circuit's AC and transient
     // amplitude by a factor of six. A converged memoryless orbit is invalid.
     let netlist = Netlist::parse(
@@ -56,40 +56,40 @@ fn every_pss_entry_point_rejects_unadvanced_diode_charge() {
     .unwrap();
     let engine = Engine::default();
     let seed = dc_seed(&engine, &netlist);
+    let config = compact_config()
+        .with_tolerance(1e-10)
+        .with_points_per_period(256);
     let routes = [
-        engine.run_pss(&netlist, compact_config()).map(|_| ()),
+        engine.run_pss(&netlist, config.clone()),
         engine
             .run_pss_operating_point_with_abort(
                 &netlist,
-                compact_config(),
+                config.clone(),
                 &rspice_core::abort_signal::NoAbort,
             )
-            .map(|_| ()),
+            .map(|point| point.analysis().clone()),
+        engine.run_pss_with_dc_seed(&netlist, config.clone(), &seed),
         engine
-            .run_pss_with_dc_seed(&netlist, compact_config(), &seed)
-            .map(|_| ()),
+            .run_pss_operating_point_with_dc_seed(&netlist, config.clone(), &seed)
+            .map(|point| point.analysis().clone()),
         engine
-            .run_pss_operating_point_with_dc_seed(&netlist, compact_config(), &seed)
-            .map(|_| ()),
+            .run_pss_with_continuation_state(&netlist, config.clone())
+            .map(|(analysis, _)| analysis),
         engine
-            .run_pss_with_continuation_state(&netlist, compact_config())
-            .map(|_| ()),
-        engine
-            .run_pss_with_frozen_source_continuation_state(&netlist, compact_config(), &[])
-            .map(|_| ()),
+            .run_pss_with_frozen_source_continuation_state(&netlist, config.clone(), &[])
+            .map(|(analysis, _)| analysis),
     ];
     for result in routes {
-        let message = result
-            .expect_err("unadvanced charge cannot produce a valid orbit")
-            .to_string();
-        assert!(
-            message.contains("PSS state evolution is unavailable"),
-            "{message}"
-        );
-        assert!(
-            message.contains("diode junction/diffusion charge history"),
-            "{message}"
-        );
+        let analysis = result.expect("every entry point must advance diode charge");
+        let output = analysis
+            .result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("out"))
+            .unwrap()
+            + 1;
+        let amplitude = analysis.result.harmonics(output, 1)[1].magnitude;
+        assert!((amplitude / 1.570_235_792_017e-3 - 1.0).abs() < 0.002);
     }
 }
 

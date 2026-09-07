@@ -4990,7 +4990,6 @@ impl Engine {
         // Companion stamp slots resolved once against the frozen pattern:
         // the per-iteration charge companions then stamp through direct CSC
         // indices instead of a hash lookup per matrix entry.
-        let diode_companion_slots = Self::link_diode_companion_slots(&circuit, &matrix);
         let mut mosfet_companion_slots = Self::link_mosfet_companion_slots(&circuit, &matrix);
         let vdmos_companion_slots = Self::link_vdmos_companion_slots(&circuit, &matrix);
         let mut mosfet_history =
@@ -6216,7 +6215,6 @@ impl Engine {
                     bjt_history: &bjt_history,
                     jfet_history: &jfet_history,
                     diode_history: &diode_history,
-                    diode_companion_slots: &diode_companion_slots,
                     diode_attempt_cache: diode_stamp_cache.as_ref(),
                     mosfet_history: &mosfet_history,
                     mosfet_companion_slots: &mosfet_companion_slots,
@@ -7107,7 +7105,6 @@ impl Engine {
                                         bjt_history: &bjt_history,
                                         jfet_history: &jfet_history,
                                         diode_history: &diode_history,
-                                        diode_companion_slots: &diode_companion_slots,
                                         diode_attempt_cache: diode_stamp_cache.as_ref(),
                                         mosfet_history: &mosfet_history,
                                         mosfet_companion_slots: &mosfet_companion_slots,
@@ -7317,7 +7314,6 @@ impl Engine {
                             bjt_history: &bjt_history,
                             jfet_history: &jfet_history,
                             diode_history: &diode_history,
-                            diode_companion_slots: &diode_companion_slots,
                             diode_attempt_cache: diode_stamp_cache.as_ref(),
                             mosfet_history: &mosfet_history,
                             mosfet_companion_slots: &mosfet_companion_slots,

@@ -231,28 +231,42 @@ fn memoryless_diode_supports_periodic_transient_continuation() {
 }
 
 #[test]
+fn charged_diode_continuation_preserves_the_periodic_orbit_from_time_zero() {
+    let netlist = Netlist::parse(
+        "charged diode continuation\nV1 in 0 SIN(-1 0.01 1meg)\nR1 in out 1k\n\
+         D1 out 0 DMOD\n.model DMOD D(IS=1e-30 CJO=1n M=0 TT=0)\n.end\n",
+    )
+    .unwrap();
+    let engine = Engine::default();
+    let (_, state) = engine
+        .run_pss_with_continuation_state(
+            &netlist,
+            compact_pss_config()
+                .with_points_per_period(512)
+                .with_tolerance(1e-10),
+        )
+        .expect("PSS captures the charged diode's accepted state");
+    let (transient, _) = engine
+        .run_tran_from_pss_state(&netlist, &state, 2e-6, 1e-6 / 1024.0)
+        .expect("charged periodic history resumes through the ordinary transient engine");
+    let ratio = std::f64::consts::TAU;
+    let amplitude = 0.01 / (1.0 + ratio * ratio).sqrt();
+    for (&time, &voltage) in transient
+        .time
+        .iter()
+        .zip(transient.try_voltage_waveform_named("OUT").unwrap())
+    {
+        let expected = -1.0 + amplitude * (std::f64::consts::TAU * F0 * time - ratio.atan()).sin();
+        assert!(
+            (voltage - expected).abs() < 0.002 * amplitude,
+            "charge continuation drift at {time:e}: {voltage:e} versus {expected:e}"
+        );
+    }
+}
+
+#[test]
 fn continuation_fails_closed_for_unadvanced_dynamic_state_families() {
     let engine = Engine::new(SimulationConfig::default());
-
-    let diode = Netlist::parse(
-        "* diode charge history is outside the shooting state\n\
-         V1 in 0 SIN(0 1 1meg)\n\
-         R1 in out 1k\n\
-         C1 out 0 100p\n\
-         D1 out 0 DMOD\n\
-         .model DMOD D(CJO=1p)\n\
-         .end\n",
-    )
-    .expect("diode deck parses");
-    let diode_error = engine
-        .run_pss_with_continuation_state(&diode, compact_pss_config())
-        .expect_err("diode charge state must fail before the periodic solve");
-    assert!(
-        diode_error
-            .to_string()
-            .contains("diode junction/diffusion charge history"),
-        "unexpected diode-state diagnostic: {diode_error}"
-    );
 
     let coupled = Netlist::parse(
         "* coupled inductor mutual history is not an ordinary L state\n\

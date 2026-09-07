@@ -37,6 +37,9 @@ use crate::numerics::integration::{
 use crate::solver::{SolverError, StaticMatrix};
 use crate::{Netlist, Value};
 
+mod state;
+pub(in crate::engine) use state::PssCircuit;
+
 type AutonomousNewtonStep = (Vec<Value>, Value, Vec<Vec<Value>>);
 
 /// Accepted-step timing state for the adaptive PSS trajectory.
@@ -79,7 +82,7 @@ impl PssAcceptedStepHistory {
 
 const PSS_KRYLOV_STATE_THRESHOLD: usize = 12;
 const PSS_KRYLOV_REL_TOL: Value = 1e-9;
-const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 2;
+const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 3;
 
 fn pss_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -618,18 +621,6 @@ fn pss_gmres(
     Ok(None)
 }
 
-/// Recover the monodromy matrix from a converged shooting Jacobian:
-/// the shooting residual is F(x0) = x(T) - x0, so J = dF/dx0 = M - I and
-/// M = J + I. Reusing the Jacobian saves N+1 full period integrations.
-fn monodromy_from_newton_jacobian(mut jacobian: Vec<Vec<Value>>) -> Vec<Vec<Value>> {
-    for (i, row) in jacobian.iter_mut().enumerate() {
-        if i < row.len() {
-            row[i] += 1.0;
-        }
-    }
-    jacobian
-}
-
 /// Select the PSS integration formula without making the fixed shooting grid
 /// depend on state-sensitive TrapGear switching decisions.
 fn pss_integration_method(
@@ -676,6 +667,7 @@ pub(in crate::engine) struct PssCompanionStep<'a> {
     pub coeff: &'a CompanionCoefficients,
     pub t_next: Value,
     pub dt: Value,
+    pub initialization: bool,
 }
 
 /// What one period traversal is asked to walk: how far, how large a step it
@@ -749,7 +741,7 @@ impl std::fmt::Display for PssError {
                 )
             }
             Self::PeriodDetectionFailed(msg) => write!(f, "Period detection failed: {}", msg),
-            Self::NoReactiveElements => write!(f, "Circuit has no capacitors or inductors"),
+            Self::NoReactiveElements => write!(f, "Circuit has no charge or flux storage"),
             Self::InvalidConfig(msg) => write!(f, "Invalid PSS config: {}", msg),
         }
     }
@@ -1443,19 +1435,7 @@ impl PssContinuationState {
 
 impl Engine {
     fn pss_shooting_state_basis(circuit: &CircuitData) -> Vec<String> {
-        circuit
-            .capacitors
-            .names
-            .iter()
-            .map(|name| format!("C:{name}"))
-            .chain(
-                circuit
-                    .inductors
-                    .names
-                    .iter()
-                    .map(|name| format!("L:{name}")),
-            )
-            .collect()
+        state::PssStateBasis::new(circuit).names(circuit)
     }
 
     /// Run Periodic Steady-State analysis
@@ -1741,8 +1721,8 @@ impl Engine {
 
         let period = analysis.period;
         let max_step = period / continuation_config.points_per_period as Value;
-        self.pss_set_reactive_state(&mut circuit, &shooting_state);
-        let seed = self.pss_initial_node_solution(&mut circuit, &mut matrix, period, abort)?;
+        self.pss_set_reactive_state(&mut circuit, &shooting_state)?;
+        let seed = self.pss_initial_node_solution(&mut circuit, abort)?;
         let mut trace = PssStateTrace::default();
         self.pss_run_tran_internal(
             &mut circuit,
@@ -1779,7 +1759,9 @@ impl Engine {
         for solution in &trace.solutions {
             lte_estimator.record(solution, max_step);
         }
-        let checkpoint = TransientCheckpoint::capture(
+        let mut diode_history = circuit.diode_history.clone();
+        diode_history.restart(max_step);
+        let checkpoint = TransientCheckpoint::capture_with_diode_history(
             authenticated_fingerprint,
             Some(authenticated_netlist_identity),
             super::transient::simulation_checkpoint_identity(&self.config),
@@ -1790,6 +1772,7 @@ impl Engine {
                 startup_mode: crate::engine::TransientStartupMode::OperatingPoint,
             },
             Some(&lte_estimator),
+            Some(&diode_history),
         )
         .map_err(SimulationError::Circuit)?;
 
@@ -1858,7 +1841,7 @@ impl Engine {
         match periodic_capability::summarize(&periodic_capability::pss_state_gaps(circuit)) {
             None => Ok(()),
             Some(blockers) => Err(SimulationError::Circuit(format!(
-                "PSS state evolution is unavailable because the circuit contains {blockers}; the shooting period map advances only ordinary capacitor and inductor companion history exactly"
+                "PSS state evolution is unavailable because the circuit contains {blockers}; the shooting period map requires a complete accepted-state adapter for every device"
             ))),
         }
     }
@@ -1942,7 +1925,7 @@ impl Engine {
         netlist: &Netlist,
         config: PssConfig,
         abort: &dyn AbortSignal,
-    ) -> Result<(PssAnalysisResult, CircuitData, StaticMatrix, Vec<Value>), SimulationError> {
+    ) -> Result<(PssAnalysisResult, PssCircuit, StaticMatrix, Vec<Value>), SimulationError> {
         self.run_pss_with_state_and_frozen_sources_abort(
             netlist,
             config,
@@ -1959,7 +1942,7 @@ impl Engine {
         frozen_sources: &std::collections::BTreeSet<String>,
         dc_seed: Option<&PssDcOperatingPointSeed>,
         abort: &dyn AbortSignal,
-    ) -> Result<(PssAnalysisResult, CircuitData, StaticMatrix, Vec<Value>), SimulationError> {
+    ) -> Result<(PssAnalysisResult, PssCircuit, StaticMatrix, Vec<Value>), SimulationError> {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
@@ -1975,9 +1958,22 @@ impl Engine {
         let mut matrix = self.build_matrix(&circuit)?;
         circuit.link_indices(&matrix);
 
+        let mut circuit = PssCircuit::new(circuit);
+
         // Validate circuit has reactive elements
-        let state_dimension = circuit.capacitors.len() + circuit.inductors.len();
-        if state_dimension == 0 {
+        let state_dimension = circuit.state_dimension();
+        if circuit
+            .capacitors
+            .capacitances
+            .iter()
+            .all(|&value| value == 0.0)
+            && circuit.inductors.is_empty()
+            && circuit
+                .diodes
+                .devices
+                .iter()
+                .all(|diode| !diode.has_charge_storage())
+        {
             return Err(PssError::NoReactiveElements.into());
         }
         self.ensure_result_values(
@@ -2049,11 +2045,7 @@ impl Engine {
             .with_fd_step(FD_STEP);
 
         let mut shooting_state = ShootingState::new(current_state.clone(), detected_period);
-        let mut final_waveform: Option<TransientResult> = None;
         let mut iteration = 0;
-        // The most recent shooting Jacobian (J = M - I). At convergence it
-        // doubles as the monodromy source, saving N+1 period integrations.
-        let mut last_jacobian: Option<Vec<Vec<Value>>> = None;
         // A previously materialized Jacobian remains useful as a right
         // preconditioner even after a matrix-free step makes it too stale for
         // Floquet reporting.
@@ -2064,9 +2056,9 @@ impl Engine {
                 return Err(SimulationError::Aborted);
             }
             // Simulate one period
-            self.pss_set_reactive_state(&mut circuit, &shooting_state.x0);
+            self.pss_set_reactive_state(&mut circuit, &shooting_state.x0)?;
 
-            let (x_t, waveform) = self.pss_simulate_one_period(
+            let (x_t, _) = self.pss_simulate_one_period(
                 &mut circuit,
                 &mut matrix,
                 detected_period,
@@ -2087,7 +2079,6 @@ impl Engine {
 
             // Check convergence
             if solver.check_convergence(&shooting_state) {
-                final_waveform = Some(waveform);
                 break;
             }
 
@@ -2117,9 +2108,6 @@ impl Engine {
                     None
                 };
                 let (delta, delta_t) = if let Some(step) = krylov_step {
-                    // The materialized Jacobian predates this step and cannot
-                    // be recycled as the converged monodromy.
-                    last_jacobian = None;
                     if config.verbose {
                         log::debug!("PSS autonomous Newton-Krylov step accepted");
                     }
@@ -2135,8 +2123,7 @@ impl Engine {
                         },
                         abort,
                     )?;
-                    preconditioner_jacobian = Some(jacobian.clone());
-                    last_jacobian = Some(jacobian);
+                    preconditioner_jacobian = Some(jacobian);
                     (delta, delta_t)
                 };
                 shooting_state.update_x0(&delta, solver.damping);
@@ -2164,7 +2151,6 @@ impl Engine {
                     None
                 };
                 let delta = if let Some(delta) = krylov_step {
-                    last_jacobian = None;
                     if config.verbose {
                         log::debug!("PSS driven Newton-Krylov step accepted");
                     }
@@ -2180,13 +2166,11 @@ impl Engine {
                         },
                         abort,
                     )?;
-                    preconditioner_jacobian = Some(jacobian.clone());
-                    last_jacobian = Some(jacobian);
+                    preconditioner_jacobian = Some(jacobian);
                     delta
                 };
                 shooting_state.update_x0(&delta, solver.damping);
             }
-            final_waveform = Some(waveform);
 
             iteration += 1;
         }
@@ -2203,19 +2187,39 @@ impl Engine {
         // ==================================================================
         // Phase 4: Build Result
         // ==================================================================
-        let waveform = final_waveform.unwrap();
-
-        // Compute Floquet multipliers for stability analysis. The converged
-        // shooting Jacobian already contains the monodromy (J = M - I), so
-        // reuse it instead of re-integrating N+1 periods; the fresh-FD path
-        // remains for the zero-iteration case (initial state was already
-        // periodic, so no Jacobian was ever built).
-        // Autonomous orbits get a FRESH monodromy at the converged (x0, T):
-        // the structural unity Floquet multiplier exists only on the closed
-        // orbit, so the recycled pre-convergence Jacobian (off-orbit, stale
-        // period) is not accurate enough for stability classification there.
-        let monodromy = if config.is_autonomous() {
-            self.pss_set_reactive_state(&mut circuit, &shooting_state.x0);
+        // Verify a fresh traversal from the reported initial state. Newton's
+        // convergence flag alone cannot authenticate an orbit whose cached
+        // state or accepted history leaks between shooting evaluations.
+        self.pss_set_reactive_state(&mut circuit, &shooting_state.x0)?;
+        let (verified_final, waveform) = self.pss_simulate_one_period(
+            &mut circuit,
+            &mut matrix,
+            detected_period,
+            &config,
+            abort,
+        )?;
+        shooting_state.x_t = verified_final;
+        shooting_state.compute_residual();
+        if !solver.check_convergence(&shooting_state) {
+            return Err(SimulationError::Circuit(format!(
+                "PSS orbit verification failed on a fresh traversal: residual {:.6e}",
+                shooting_state.residual_norm(),
+            )));
+        }
+        // A nonlinear Newton Jacobian belongs to the state before its
+        // correction, so qualify it again at the reported state and period.
+        // For a driven linear circuit the period map is affine in x0: its
+        // Jacobian is independent of bias and already describes this orbit.
+        self.pss_set_reactive_state(&mut circuit, &shooting_state.x0)?;
+        let linear_jacobian = (!config.is_autonomous() && !circuit.has_nonlinear_devices())
+            .then_some(preconditioner_jacobian)
+            .flatten();
+        let monodromy = if let Some(mut jacobian) = linear_jacobian {
+            for (index, row) in jacobian.iter_mut().enumerate() {
+                row[index] += 1.0;
+            }
+            jacobian
+        } else {
             self.pss_compute_monodromy(
                 &circuit,
                 &shooting_state,
@@ -2226,20 +2230,6 @@ impl Engine {
                 },
                 abort,
             )?
-        } else {
-            match last_jacobian {
-                Some(jacobian) => monodromy_from_newton_jacobian(jacobian),
-                None => self.pss_compute_monodromy(
-                    &circuit,
-                    &shooting_state,
-                    PssJacobianProbe {
-                        period: detected_period,
-                        config: &config,
-                        fd_step: FD_STEP,
-                    },
-                    abort,
-                )?,
-            }
         };
         let orbit_kind = if config.is_autonomous() {
             FloquetOrbitKind::Autonomous
@@ -2286,7 +2276,16 @@ impl Engine {
     }
 
     /// Initialize reactive element state from DC solution
-    fn pss_initialize_reactive_state(&self, circuit: &mut CircuitData, dc_solution: &[Value]) {
+    fn pss_initialize_reactive_state(&self, circuit: &mut PssCircuit, dc_solution: &[Value]) {
+        let PssCircuit {
+            circuit,
+            diode_history,
+            ..
+        } = circuit;
+        diode_history.reset_biases(circuit.diodes.devices.iter().map(|diode| {
+            let voltage = diode.terminal_voltage(dc_solution);
+            (voltage, diode.junction_charge_and_capacitance(voltage).0)
+        }));
         // Initialize capacitor voltages
         for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
             let np = cap.pp.row;
@@ -2335,59 +2334,24 @@ impl Engine {
     }
 
     /// Extract state vector (capacitor voltages + inductor currents)
-    fn pss_extract_reactive_state(&self, circuit: &CircuitData) -> Vec<Value> {
-        let mut state = Vec::with_capacity(circuit.capacitors.len() + circuit.inductors.len());
-
-        // Capacitor voltages
-        for v in &circuit.capacitors.v_prev {
-            state.push(*v);
-        }
-
-        // Inductor currents
-        for i in &circuit.inductors.i_prev {
-            state.push(*i);
-        }
-
-        state
+    fn pss_extract_reactive_state(&self, circuit: &PssCircuit) -> Vec<Value> {
+        circuit.extract_state()
     }
 
-    /// Set reactive element state from state vector
-    ///
-    /// Clears every other piece of companion history (capacitor currents,
-    /// inductor voltages): the first step of each period integration runs
-    /// backward Euler, which reads neither, so the period map becomes a pure
-    /// function of the shooting state. Leaving stale history in place would
-    /// leak the previous trajectory into the next one and corrupt both the
-    /// shooting residual and the finite-difference Jacobian columns.
+    /// Install independent shooting coordinates and reset all conjugate
+    /// history for the first backward-Euler interval of a pure period map.
     pub(in crate::engine) fn pss_set_reactive_state(
         &self,
-        circuit: &mut CircuitData,
+        circuit: &mut PssCircuit,
         state: &[Value],
-    ) {
-        let n_caps = circuit.capacitors.len();
-
-        // Set capacitor voltages
-        for (i, v) in state.iter().take(n_caps).enumerate() {
-            circuit.capacitors.v_prev[i] = *v;
-            circuit.capacitors.v_prev_prev[i] = *v;
-            circuit.capacitors.v_prev_prev_prev[i] = *v;
-            circuit.capacitors.i_prev[i] = 0.0;
-            circuit.capacitors.i_eq[i] = 0.0;
-        }
-
-        // Set inductor currents
-        for (i, current) in state.iter().skip(n_caps).enumerate() {
-            circuit.inductors.i_prev[i] = *current;
-            circuit.inductors.i_prev_prev[i] = *current;
-            circuit.inductors.i_prev_prev_prev[i] = *current;
-            circuit.inductors.v_prev[i] = 0.0;
-        }
+    ) -> Result<(), SimulationError> {
+        circuit.set_state(state)
     }
 
     /// Run stabilization phase (`tstab`)
     fn pss_run_stabilization(
         &self,
-        circuit: &mut CircuitData,
+        circuit: &mut PssCircuit,
         matrix: &mut StaticMatrix,
         dc_solution: &[Value],
         config: &PssConfig,
@@ -2496,7 +2460,7 @@ impl Engine {
     /// Simulate one complete period
     fn pss_simulate_one_period(
         &self,
-        circuit: &mut CircuitData,
+        circuit: &mut PssCircuit,
         matrix: &mut StaticMatrix,
         period: Value,
         config: &PssConfig,
@@ -2506,7 +2470,7 @@ impl Engine {
 
         // Node voltages consistent with the frozen reactive state: they seed
         // the first Newton solve and become the genuine t=0 waveform sample.
-        let solution = self.pss_initial_node_solution(circuit, matrix, period, abort)?;
+        let solution = self.pss_initial_node_solution(circuit, abort)?;
 
         // The period map must vary smoothly with the shooting state: run on
         // the fixed grid (see pss_run_tran_internal).
@@ -2530,37 +2494,43 @@ impl Engine {
 
     /// Solve the network at t = 0 with the reactive state held frozen.
     ///
-    /// A backward-Euler companion step of `period * 1e-9` pins each capacitor
-    /// to its state voltage and each inductor to its state current (the
-    /// resulting error equals the state drift over that tiny interval), while
-    /// the nonlinear devices settle to node voltages consistent with that
-    /// state. Without this, the waveform's first sample and the Newton seed
-    /// were all zeros.
+    /// Independent charge voltages are imposed by auxiliary branch equations;
+    /// inductor equations impose their accepted currents. Their reactions
+    /// supply the instantaneous displacement currents and flux derivatives.
+    /// No artificial timestep, stiffness or state drift enters this solve.
+    /// The private clone keeps rejected evaluator state and auxiliary matrix
+    /// indices out of the live traversal.
     pub(in crate::engine) fn pss_initial_node_solution(
         &self,
-        circuit: &mut CircuitData,
-        matrix: &mut StaticMatrix,
-        period: Value,
+        circuit: &mut PssCircuit,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
-        let dt_freeze = period * 1e-9;
+        let size = circuit.matrix_size();
+        let mut initial = circuit.clone();
+        initial.add_initial_voltage_constraints();
+        let mut matrix = self.build_matrix(&initial)?;
+        initial.link_indices(&matrix);
         let coeff = CompanionCoefficients::for_method(
             crate::numerics::integration::IntegrationMethod::BackwardEuler,
         );
-        let start = vec![0.0; circuit.matrix_size()];
+        let start = vec![0.0; initial.matrix_size()];
 
         match self.pss_newton_trial(
-            circuit,
-            matrix,
+            &mut initial,
+            &mut matrix,
             PssCompanionStep {
                 coeff: &coeff,
-                t_next: dt_freeze,
-                dt: dt_freeze,
+                t_next: 0.0,
+                dt: 1.0,
+                initialization: true,
             },
             &start,
             abort,
         )? {
-            Some(solution) => Ok(solution),
+            Some(mut solution) => {
+                solution.truncate(size);
+                Ok(solution)
+            }
             None => Err(SimulationError::ConvergenceFailed(
                 self.config.max_iterations,
             )),
@@ -2576,14 +2546,14 @@ impl Engine {
     /// adaptive-grid forward difference never could.
     ///
     /// Columns are pure functions of `(x0, j)`, so they parallelize across
-    /// per-worker circuit clones with deterministic results. `CircuitData`
+    /// per-worker circuit clones with deterministic results. `PssCircuit`
     /// is Send-but-not-Sync (Cell-based device caches), so the work is
     /// chunked AC-sweep-style: one owned clone per worker chunk, matrix
     /// rebuilt per worker (StaticMatrix holds factorization workspaces and
     /// is intentionally not Clone).
     fn pss_sensitivity_columns(
         &self,
-        circuit: &CircuitData,
+        circuit: &PssCircuit,
         x0: &[Value],
         probe: PssJacobianProbe<'_>,
         subtract_identity: bool,
@@ -2602,7 +2572,7 @@ impl Engine {
             return Ok(Vec::new());
         }
 
-        let column = |worker_circuit: &mut CircuitData,
+        let column = |worker_circuit: &mut PssCircuit,
                       worker_matrix: &mut StaticMatrix,
                       j: usize|
          -> Result<Vec<Value>, SimulationError> {
@@ -2613,13 +2583,13 @@ impl Engine {
 
             let mut x_plus = x0.to_vec();
             x_plus[j] += h;
-            self.pss_set_reactive_state(worker_circuit, &x_plus);
+            self.pss_set_reactive_state(worker_circuit, &x_plus)?;
             let (x_t_plus, _) =
                 self.pss_simulate_one_period(worker_circuit, worker_matrix, period, config, abort)?;
 
             let mut x_minus = x0.to_vec();
             x_minus[j] -= h;
-            self.pss_set_reactive_state(worker_circuit, &x_minus);
+            self.pss_set_reactive_state(worker_circuit, &x_minus)?;
             let (x_t_minus, _) =
                 self.pss_simulate_one_period(worker_circuit, worker_matrix, period, config, abort)?;
 
@@ -2647,7 +2617,7 @@ impl Engine {
             let workers = self.parallel_worker_count(n);
             let chunk_len = n.div_ceil(workers);
             let indices: Vec<usize> = (0..n).collect();
-            let work: Vec<(CircuitData, Vec<usize>)> = indices
+            let work: Vec<(PssCircuit, Vec<usize>)> = indices
                 .chunks(chunk_len)
                 .map(|chunk| (circuit.clone(), chunk.to_vec()))
                 .collect();
@@ -2683,7 +2653,7 @@ impl Engine {
     /// matches the same central-difference step used by explicit columns.
     fn pss_directional_jacobian_product(
         &self,
-        worker_circuit: &mut CircuitData,
+        worker_circuit: &mut PssCircuit,
         worker_matrix: &mut StaticMatrix,
         x0: &[Value],
         probe: PssJacobianProbe<'_>,
@@ -2715,7 +2685,7 @@ impl Engine {
             .zip(direction)
             .map(|(state, vector)| state + epsilon * vector)
             .collect::<Vec<_>>();
-        self.pss_set_reactive_state(worker_circuit, &x_plus);
+        self.pss_set_reactive_state(worker_circuit, &x_plus)?;
         let (phi_plus, _) =
             self.pss_simulate_one_period(worker_circuit, worker_matrix, period, config, abort)?;
 
@@ -2724,7 +2694,7 @@ impl Engine {
             .zip(direction)
             .map(|(state, vector)| state - epsilon * vector)
             .collect::<Vec<_>>();
-        self.pss_set_reactive_state(worker_circuit, &x_minus);
+        self.pss_set_reactive_state(worker_circuit, &x_minus)?;
         let (phi_minus, _) =
             self.pss_simulate_one_period(worker_circuit, worker_matrix, period, config, abort)?;
 
@@ -2742,7 +2712,7 @@ impl Engine {
     /// central-column rebuild and direct solve.
     fn pss_compute_newton_step_krylov(
         &self,
-        circuit: &CircuitData,
+        circuit: &PssCircuit,
         state: &ShootingState,
         probe: PssJacobianProbe<'_>,
         preconditioner_jacobian: &[Vec<Value>],
@@ -2793,7 +2763,7 @@ impl Engine {
     /// evaluated through directional period-map products.
     fn pss_compute_autonomous_newton_step_krylov(
         &self,
-        circuit: &CircuitData,
+        circuit: &PssCircuit,
         state: &ShootingState,
         probe: PssJacobianProbe<'_>,
         preconditioner_jacobian: &[Vec<Value>],
@@ -2810,7 +2780,7 @@ impl Engine {
         let worker_matrix = self.build_matrix(&worker)?;
         worker.link_indices(&worker_matrix);
         let mut worker_matrix = worker_matrix;
-        self.pss_set_reactive_state(&mut worker, &state.x0);
+        self.pss_set_reactive_state(&mut worker, &state.x0)?;
         let (phi_plus_t, _) = self.pss_simulate_one_period(
             &mut worker,
             &mut worker_matrix,
@@ -2873,7 +2843,7 @@ impl Engine {
     /// caller can recycle it as the monodromy at convergence (J = M - I).
     fn pss_compute_newton_step(
         &self,
-        circuit: &CircuitData,
+        circuit: &PssCircuit,
         state: &ShootingState,
         probe: PssJacobianProbe<'_>,
         abort: &dyn AbortSignal,
@@ -2924,7 +2894,7 @@ impl Engine {
     /// the orbit tangent at the endpoint.
     fn pss_compute_autonomous_newton_step(
         &self,
-        circuit: &CircuitData,
+        circuit: &PssCircuit,
         state: &ShootingState,
         probe: PssJacobianProbe<'_>,
         abort: &dyn AbortSignal,
@@ -2953,7 +2923,7 @@ impl Engine {
         let m = self.build_matrix(&worker)?;
         worker.link_indices(&m);
         let mut worker_matrix = m;
-        self.pss_set_reactive_state(&mut worker, &state.x0);
+        self.pss_set_reactive_state(&mut worker, &state.x0)?;
         let (x_t_plus, _) = self.pss_simulate_one_period(
             &mut worker,
             &mut worker_matrix,
@@ -2999,7 +2969,7 @@ impl Engine {
     /// circuit clones.
     fn pss_compute_monodromy(
         &self,
-        circuit: &CircuitData,
+        circuit: &PssCircuit,
         state: &ShootingState,
         probe: PssJacobianProbe<'_>,
         abort: &dyn AbortSignal,
@@ -3111,13 +3081,12 @@ impl Engine {
     /// at this step size.
     fn pss_newton_solve(
         &self,
-        circuit: &mut CircuitData,
+        circuit: &mut PssCircuit,
         matrix: &mut StaticMatrix,
         step: PssCompanionStep<'_>,
         start: &[Value],
         abort: &dyn AbortSignal,
     ) -> Result<Option<Vec<Value>>, SimulationError> {
-        let PssCompanionStep { coeff, t_next, dt } = step;
         let size = circuit.matrix_size();
         let mut new_solution = start.to_vec();
         let mut rhs = vec![0.0; size];
@@ -3127,13 +3096,7 @@ impl Engine {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
-            self.pss_stamp_system(
-                circuit,
-                matrix,
-                &mut rhs,
-                PssCompanionStep { coeff, t_next, dt },
-                &new_solution,
-            )?;
+            self.pss_stamp_system(circuit, matrix, &mut rhs, step, &new_solution, false)?;
 
             match matrix.solve_into(&rhs, &mut proposal) {
                 Ok(()) => {
@@ -3143,7 +3106,7 @@ impl Engine {
                         circuit.num_nodes(),
                     );
                     let linearized_residual_converged =
-                        self.residual_convergence_met(circuit, matrix, &proposal, &rhs);
+                        self.pss_residual_convergence_met(circuit, matrix, &proposal, &rhs, step);
 
                     std::mem::swap(&mut new_solution, &mut proposal);
 
@@ -3155,7 +3118,26 @@ impl Engine {
                         || circuit.nonlinear_converged(self.device_convergence_criteria());
 
                     if voltage_converged && device_converged && linearized_residual_converged {
-                        return Ok(Some(new_solution));
+                        // A solved Newton linearization is not a proof of the
+                        // physical DAE. Restamp F and Q at the candidate bias,
+                        // bypassing limiter companions, before accepting it.
+                        self.pss_stamp_system(
+                            circuit,
+                            matrix,
+                            &mut rhs,
+                            step,
+                            &new_solution,
+                            true,
+                        )?;
+                        if self.pss_residual_convergence_met(
+                            circuit,
+                            matrix,
+                            &new_solution,
+                            &rhs,
+                            step,
+                        ) {
+                            return Ok(Some(new_solution));
+                        }
                     }
                 }
                 Err(_) => return Ok(None),
@@ -3163,6 +3145,37 @@ impl Engine {
         }
 
         Ok(None)
+    }
+
+    fn pss_residual_convergence_met(
+        &self,
+        circuit: &PssCircuit,
+        matrix: &mut StaticMatrix,
+        solution: &[Value],
+        rhs: &[Value],
+        step: PssCompanionStep<'_>,
+    ) -> bool {
+        if !step.initialization {
+            return self.residual_convergence_met(circuit, matrix, solution, rhs);
+        }
+        let nodes = circuit.num_nodes();
+        matrix
+            .scaled_residual_inf_norm_by_row(solution, rhs, self.residual_reltol(), |row| {
+                // Initialization changes an inductor's voltage equation into
+                // a current constraint, so its absolute tolerance has amps.
+                if row < nodes
+                    || circuit
+                        .inductors
+                        .branch_indices
+                        .iter()
+                        .any(|&branch| row == nodes + branch - 1)
+                {
+                    self.current_abstol()
+                } else {
+                    self.voltage_abstol()
+                }
+            })
+            .is_ok_and(|norm| norm.is_finite() && norm <= 1.0)
     }
 
     /// Run one PSS Newton trial transactionally.
@@ -3174,21 +3187,14 @@ impl Engine {
     #[allow(clippy::too_many_arguments)]
     fn pss_newton_trial(
         &self,
-        circuit: &mut CircuitData,
+        circuit: &mut PssCircuit,
         matrix: &mut StaticMatrix,
         step: PssCompanionStep<'_>,
         start: &[Value],
         abort: &dyn AbortSignal,
     ) -> Result<Option<Vec<Value>>, SimulationError> {
-        let PssCompanionStep { coeff, t_next, dt } = step;
         let accepted_state = circuit.transient_trial_state_snapshot();
-        match self.pss_newton_solve(
-            circuit,
-            matrix,
-            PssCompanionStep { coeff, t_next, dt },
-            start,
-            abort,
-        ) {
+        match self.pss_newton_solve(circuit, matrix, step, start, abort) {
             Ok(Some(solution)) => Ok(Some(solution)),
             Ok(None) => {
                 circuit.restore_nonlinear_state(accepted_state);
@@ -3211,13 +3217,24 @@ impl Engine {
     #[allow(clippy::too_many_arguments)]
     pub(in crate::engine) fn pss_stamp_system(
         &self,
-        circuit: &mut CircuitData,
+        circuit: &mut PssCircuit,
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],
         step: PssCompanionStep<'_>,
         linearize_at: &[Value],
+        physical_probe: bool,
     ) -> Result<(), SimulationError> {
-        let PssCompanionStep { coeff, t_next, dt } = step;
+        let PssCircuit {
+            circuit,
+            diode_history,
+            ..
+        } = circuit;
+        let PssCompanionStep {
+            coeff,
+            t_next,
+            dt,
+            initialization,
+        } = step;
         matrix.clear_values();
         rhs.fill(0.0);
 
@@ -3248,9 +3265,22 @@ impl Engine {
 
         // Reuse the transient capacitor companion so shooting PSS has exactly
         // the same branch-current convention and numerical scaling as TRAN.
-        circuit
-            .capacitors
-            .stamp_transient_companion(matrix, rhs, dt, coeff, num_nodes);
+        if !initialization {
+            circuit
+                .capacitors
+                .stamp_transient_companion(matrix, rhs, dt, coeff, num_nodes);
+        } else {
+            // Only independent voltage constraints carry reactions in this
+            // initialization solve. Dependent IC-capacitor current slots are
+            // provisional Newton seeds; real steps stamp every physical
+            // capacitor-current equation, including these dependent branches.
+            for branch in circuit.capacitors.ic_branch_indices.iter().flatten() {
+                if !circuit.voltage_sources.branch_indices.contains(branch) {
+                    let row = num_nodes + branch - 1;
+                    matrix.add(row, row, 1.0);
+                }
+            }
+        }
 
         // Stamp inductors
         for l_idx in 0..circuit.inductors.names.len() {
@@ -3267,45 +3297,74 @@ impl Engine {
 
             if np > 0 && br > 0 {
                 let br_idx = circuit.num_nodes() + br - 1;
-                matrix.add(br_idx, np - 1, 1.0);
+                if !initialization {
+                    matrix.add(br_idx, np - 1, 1.0);
+                }
                 matrix.add(np - 1, br_idx, 1.0);
             }
             if nn > 0 && br > 0 {
                 let br_idx = circuit.num_nodes() + br - 1;
-                matrix.add(br_idx, nn - 1, -1.0);
+                if !initialization {
+                    matrix.add(br_idx, nn - 1, -1.0);
+                }
                 matrix.add(nn - 1, br_idx, -1.0);
             }
             if br > 0 {
                 let br_idx = circuit.num_nodes() + br - 1;
-                matrix.add(br_idx, br_idx, -req);
+                matrix.add(br_idx, br_idx, if initialization { 1.0 } else { -req });
                 // Branch row sign convention: v - r_eq*i = -v_eq (see
                 // Inductors::stamp_transient_companion).
-                rhs[br_idx] = -veq;
+                rhs[br_idx] = if initialization { i_n } else { -veq };
             }
         }
 
         // Mutual coupling overlays on top of the standalone inductors.
-        circuit.stamp_coupled_inductor_pairs_transient(matrix, rhs, dt, coeff);
+        if !initialization {
+            circuit.stamp_coupled_inductor_pairs_transient(matrix, rhs, dt, coeff);
+        }
 
         if circuit.has_nonlinear_devices() {
             circuit.update_nonlinear(linearize_at);
-            circuit
-                .stamp_nonlinear(matrix, rhs, linearize_at)
-                .map_err(SimulationError::Circuit)?;
+            if physical_probe {
+                circuit.try_stamp_static_probe_nonlinear(matrix, rhs, linearize_at)
+            } else {
+                circuit.stamp_nonlinear(matrix, rhs, linearize_at)
+            }
+            .map_err(SimulationError::Circuit)?;
+        }
+        if !initialization {
+            circuit.diodes.stamp_charge_companions(
+                matrix,
+                rhs,
+                linearize_at,
+                coeff,
+                dt,
+                diode_history,
+                physical_probe,
+            );
         }
         // B sources remain part of the physical transient equation even when
         // they are solution-independent and therefore do not make the circuit
         // nonlinear. Keep their fallible evaluation on the PSS shooting path
         // instead of omitting time-only sources from the periodic orbit.
-        circuit
-            .stamp_behavioral(
+        if physical_probe {
+            circuit.stamp_behavioral_static_probe(
                 matrix,
                 rhs,
                 linearize_at,
                 t_next,
                 crate::xspice::AnalysisType::Transient,
             )
-            .map_err(SimulationError::Circuit)?;
+        } else {
+            circuit.stamp_behavioral(
+                matrix,
+                rhs,
+                linearize_at,
+                t_next,
+                crate::xspice::AnalysisType::Transient,
+            )
+        }
+        .map_err(SimulationError::Circuit)?;
         Ok(())
     }
 
@@ -3320,7 +3379,7 @@ impl Engine {
     /// derivative accuracy.
     pub(in crate::engine) fn pss_run_tran_internal(
         &self,
-        circuit: &mut CircuitData,
+        circuit: &mut PssCircuit,
         matrix: &mut StaticMatrix,
         mut solution: Vec<Value>,
         traversal: PssTraversal,
@@ -3458,6 +3517,7 @@ impl Engine {
                     coeff: &coeff,
                     t_next,
                     dt,
+                    initialization: false,
                 },
                 &solution,
                 abort,
@@ -3482,32 +3542,36 @@ impl Engine {
             // Update capacitor history with the same companion that built this
             // step. IC capacitors own a solved physical-current branch;
             // ordinary capacitors retain the Norton reconstruction.
-            for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
-                let np = cap.pp.row;
-                let nn = cap.nn.row;
-                let v_new = if np == 0 { 0.0 } else { new_solution[np - 1] }
-                    - if nn == 0 { 0.0 } else { new_solution[nn - 1] };
+            {
+                let circuit = &mut circuit.circuit;
+                for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
+                    let np = cap.pp.row;
+                    let nn = cap.nn.row;
+                    let v_new = if np == 0 { 0.0 } else { new_solution[np - 1] }
+                        - if nn == 0 { 0.0 } else { new_solution[nn - 1] };
 
-                let i_eq = coeff.capacitor_ieq(
-                    circuit.capacitors.capacitances[cap_idx],
-                    dt,
-                    circuit.capacitors.v_prev[cap_idx],
-                    circuit.capacitors.v_prev_prev[cap_idx],
-                    circuit.capacitors.i_prev[cap_idx],
-                );
-                circuit.capacitors.i_prev[cap_idx] =
-                    if let Some(branch_ordinal) = circuit.capacitors.ic_branch_indices[cap_idx] {
+                    let i_eq = coeff.capacitor_ieq(
+                        circuit.capacitors.capacitances[cap_idx],
+                        dt,
+                        circuit.capacitors.v_prev[cap_idx],
+                        circuit.capacitors.v_prev_prev[cap_idx],
+                        circuit.capacitors.i_prev[cap_idx],
+                    );
+                    circuit.capacitors.i_prev[cap_idx] = if let Some(branch_ordinal) =
+                        circuit.capacitors.ic_branch_indices[cap_idx]
+                    {
                         new_solution[num_nodes + branch_ordinal - 1]
                     } else {
                         let capacitance = circuit.capacitors.capacitances[cap_idx];
                         let geq = coeff.capacitor_geq(capacitance, dt);
                         geq * v_new - i_eq
                     };
-                circuit.capacitors.i_eq[cap_idx] = i_eq;
-                circuit.capacitors.v_prev_prev_prev[cap_idx] =
-                    circuit.capacitors.v_prev_prev[cap_idx];
-                circuit.capacitors.v_prev_prev[cap_idx] = circuit.capacitors.v_prev[cap_idx];
-                circuit.capacitors.v_prev[cap_idx] = v_new;
+                    circuit.capacitors.i_eq[cap_idx] = i_eq;
+                    circuit.capacitors.v_prev_prev_prev[cap_idx] =
+                        circuit.capacitors.v_prev_prev[cap_idx];
+                    circuit.capacitors.v_prev_prev[cap_idx] = circuit.capacitors.v_prev[cap_idx];
+                    circuit.capacitors.v_prev[cap_idx] = v_new;
+                }
             }
 
             // Evaluate the candidate against history from previously accepted
@@ -3544,6 +3608,20 @@ impl Engine {
                         - if nn == 0 { 0.0 } else { new_solution[nn - 1] };
                     circuit.inductors.v_prev[l_idx] = v_new;
                 }
+            }
+
+            {
+                let PssCircuit {
+                    circuit,
+                    diode_history,
+                    ..
+                } = circuit;
+                for (index, diode) in circuit.diodes.devices.iter().enumerate() {
+                    let voltage = diode.terminal_voltage(&new_solution);
+                    let (charge, _) = diode.junction_charge_and_capacitance(voltage);
+                    diode_history.accept_branch(index, voltage, charge, &coeff, dt);
+                }
+                diode_history.finish_step(dt);
             }
 
             solution = new_solution;
@@ -3811,8 +3889,8 @@ mod tests {
     #[test]
     fn pss_reactive_state_reset_initializes_complete_capacitor_history() {
         let engine = Engine::new(SimulationConfig::default());
-        let mut circuit = CircuitData::new();
-        circuit.capacitors.add("C1".to_string(), 1, 0, 1.0e-9);
+        let netlist = Netlist::parse("PSS history\nR1 out 0 1k\nC1 out 0 1n\n.end\n").unwrap();
+        let mut circuit = PssCircuit::new(engine.build_circuit(&netlist).unwrap());
         circuit.capacitors.v_prev = vec![11.0];
         circuit.capacitors.v_prev_prev = vec![12.0];
         circuit.capacitors.v_prev_prev_prev = vec![13.0];
@@ -3826,7 +3904,9 @@ mod tests {
         assert_eq!(circuit.capacitors.i_prev, vec![0.0]);
         assert_eq!(circuit.capacitors.i_eq, vec![0.0]);
 
-        engine.pss_set_reactive_state(&mut circuit, &[-0.75]);
+        engine
+            .pss_set_reactive_state(&mut circuit, &[-0.75])
+            .unwrap();
         assert_eq!(circuit.capacitors.v_prev, vec![-0.75]);
         assert_eq!(circuit.capacitors.v_prev_prev, vec![-0.75]);
         assert_eq!(circuit.capacitors.v_prev_prev_prev, vec![-0.75]);
@@ -3845,7 +3925,8 @@ mod tests {
         )
         .expect("history fixture parses");
         let engine = Engine::new(SimulationConfig::default());
-        let mut circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        let circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        let mut circuit = PssCircuit::new(circuit);
         let mut matrix = engine.build_matrix(&circuit).expect("matrix builds");
         circuit.link_indices(&matrix);
         circuit.capacitors.v_prev[0] = 3.0;
@@ -3897,11 +3978,11 @@ mod tests {
         )
         .expect("rollback fixture parses");
         let engine = Engine::new(SimulationConfig::default());
-        let mut circuit = engine.build_circuit(&netlist).expect("circuit builds");
-        let mut matrix = engine.build_matrix(&circuit).expect("matrix builds");
+        let circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        let mut circuit = PssCircuit::new(circuit);
+        let matrix = engine.build_matrix(&circuit).expect("matrix builds");
         circuit.link_indices(&matrix);
-        let period = 1.0;
-        let freeze_time = period * 1.0e-9;
+        let freeze_time = 0.0;
         assert_eq!(
             circuit.behavioral_sources.voltage_sources[0].cached_exact_constraint_at(freeze_time),
             None
@@ -3909,13 +3990,13 @@ mod tests {
 
         let abort = crate::abort_signal::CountingAbort::new(1);
         let error = engine
-            .pss_initial_node_solution(&mut circuit, &mut matrix, period, &abort)
+            .pss_initial_node_solution(&mut circuit, &abort)
             .expect_err("the second Newton iteration is cancelled");
         assert!(matches!(error, SimulationError::Aborted));
         assert_eq!(
             circuit.behavioral_sources.voltage_sources[0].cached_exact_constraint_at(freeze_time),
             None,
-            "the artificial consistency solve must not leak its rejected expression cache"
+            "the exact consistency solve must not leak its rejected expression cache"
         );
     }
 
@@ -3930,22 +4011,21 @@ mod tests {
         )
         .expect("nonconvergence fixture parses");
         let builder = Engine::new(SimulationConfig::default());
-        let mut circuit = builder.build_circuit(&netlist).expect("circuit builds");
-        let mut matrix = builder.build_matrix(&circuit).expect("matrix builds");
+        let mut circuit = PssCircuit::new(builder.build_circuit(&netlist).expect("circuit builds"));
+        let matrix = builder.build_matrix(&circuit).expect("matrix builds");
         circuit.link_indices(&matrix);
         let engine = Engine::new(SimulationConfig {
             max_iterations: 1,
             ..SimulationConfig::default()
         });
-        let period = 1.0e-6;
-        let freeze_time = period * 1.0e-9;
+        let freeze_time = 0.0;
         assert_eq!(
             circuit.behavioral_sources.voltage_sources[0].cached_exact_constraint_at(freeze_time),
             None
         );
 
         let error = engine
-            .pss_initial_node_solution(&mut circuit, &mut matrix, period, &NoAbort)
+            .pss_initial_node_solution(&mut circuit, &NoAbort)
             .expect_err("a nonconverged frozen-state solve cannot fabricate an all-zero seed");
         assert!(matches!(error, SimulationError::ConvergenceFailed(1)));
         assert_eq!(
@@ -4050,7 +4130,7 @@ mod tests {
 
     #[test]
     fn continuation_state_rejects_unadvanced_delay_history() {
-        let mut circuit = CircuitData::new();
+        let mut circuit = PssCircuit::new(CircuitData::new());
         circuit.tlines.push(crate::device::TransmissionLine::new(
             "T1".to_string(),
             1,
