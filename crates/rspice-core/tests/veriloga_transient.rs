@@ -67,6 +67,63 @@ fn node_series<'a>(names: &[String], voltages: &'a [Vec<f64>], want: &str) -> &'
     &voltages[idx]
 }
 
+#[test]
+fn model_nodeset_cannot_replace_a_failed_transient_equilibrium() {
+    let model = write_model(
+        "nodeset_without_equilibrium",
+        r#"
+module nodeset_without_equilibrium(out);
+    inout out; electrical out;
+    analog begin
+        if (analysis("nodeset")) V(out)<+1;
+        else I(out)<+V(out)*V(out)+1;
+        I(out)<+ddt(V(out));
+    end
+endmodule
+"#,
+    );
+    let deck = format!(
+        "* no real equilibrium exists\nX1 out nodeset_without_equilibrium\n.va \"{}\" nodeset_without_equilibrium\n.end\n",
+        deck_path(&model)
+    );
+    let netlist = Netlist::parse(&deck).unwrap();
+    // The temporary model-defined nodeset is solvable. The subsequent
+    // equilibrium requires V(out)^2 + 1 = 0, which has no real solution.
+    // A capacitor can still advance from the invalid seed, hiding a startup
+    // failure behind a plausible-looking transient waveform.
+    let result = Engine::default().run_tran(&netlist, 1e-5, 1e-6);
+    assert!(
+        matches!(
+            result,
+            Err(rspice_core::SimulationError::ConvergenceFailed(_))
+        ),
+        "an unconverged nodeset must not become t=0: {:?}",
+        result.as_ref().map(|_| ())
+    );
+
+    // Explicit initial conditions still provide a valid non-equilibrium
+    // startup, either as hard t=0 clamps or with the operating point skipped.
+    let netlist = Netlist::parse(&deck.replace(".end\n", ".ic V(out)=1\n.end\n")).unwrap();
+    for startup in [
+        rspice_core::engine::TransientStartupMode::OperatingPoint,
+        rspice_core::engine::TransientStartupMode::Uic,
+    ] {
+        let result = Engine::default()
+            .run_tran_with_startup_mode(&netlist, 1e-5, 1e-6, startup)
+            .unwrap();
+        let output = node_series(&result.node_names, &result.voltages, "out");
+        assert!((output[0] - 1.0).abs() < 1e-10, "{startup:?}");
+        for (&time, &voltage) in result.time.iter().zip(output) {
+            let expected = (std::f64::consts::FRAC_PI_4 - time).tan();
+            assert!(
+                (voltage - expected).abs() < 1e-6,
+                "{startup:?}, t={time}: {voltage}"
+            );
+        }
+    }
+    let _ = std::fs::remove_file(model);
+}
+
 /// DC voltage divider: native 1k on top, Verilog-A 2k resistor on the
 /// bottom. v(out) = 1 V * 2/(1+2) = 2/3 V.
 #[test]

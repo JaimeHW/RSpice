@@ -1904,7 +1904,6 @@ impl Engine {
 
         solution =
             Self::sanitize_initial_guess(circuit, &solution, size, circuit.num_nodes().min(size));
-        let mut nodeset_startup_solution = None;
         if hints.has_nodesets || !node_hints.is_empty() {
             match Self::with_nodeset_phase(circuit, hints.has_nodesets, |circuit| {
                 self.solve_nonlinear_transient_op_startup_with_guess_and_hints_abort(
@@ -1913,7 +1912,6 @@ impl Engine {
             }) {
                 Ok(nodeset_solution) => {
                     solution = nodeset_solution;
-                    nodeset_startup_solution = Some(solution.clone());
                 }
                 Err(err) if Self::is_recoverable_startup_error(&err) => {
                     log::debug!(
@@ -2003,15 +2001,6 @@ impl Engine {
                     continue;
                 }
                 Err(err) => {
-                    if let Some(startup_solution) = nodeset_startup_solution.as_ref() {
-                        log::debug!(
-                            "Unconstrained transient operating-point solve failed after NODESET startup ({err}); using the NODESET startup state."
-                        );
-                        return Ok(TransientOperatingPointSolution {
-                            values: startup_solution.clone(),
-                            accepted_contract: None,
-                        });
-                    }
                     return Err(SimulationError::Solver(err));
                 }
             }
@@ -2135,16 +2124,6 @@ impl Engine {
             }
         }
 
-        if let Some(startup_solution) = nodeset_startup_solution {
-            log::debug!(
-                "Unconstrained transient operating-point solve did not converge after NODESET startup; using the NODESET startup state."
-            );
-            return Ok(TransientOperatingPointSolution {
-                values: startup_solution,
-                accepted_contract: None,
-            });
-        }
-
         Err(SimulationError::ConvergenceFailed(tranop_max_iterations))
     }
 }
@@ -2167,6 +2146,13 @@ analog begin
       +0.00001*analysis("noise")+0.000001*analysis("tran"));
 end
 endmodule"#;
+        circuit_from_source(source, analysis)
+    }
+
+    fn circuit_from_source(
+        source: &str,
+        analysis: u8,
+    ) -> (Engine, CircuitData, StaticMatrix, usize, usize) {
         let compiler = Compiler::default();
         let model = compiler.compile(source).unwrap();
         let canonical = compiler.compile_canonical_ir(source).unwrap();
@@ -2187,6 +2173,33 @@ endmodule"#;
         let matrix = engine.build_matrix(&circuit).unwrap();
         circuit.link_indices(&matrix);
         (engine, circuit, matrix, hint, out)
+    }
+
+    #[test]
+    fn exhausted_equilibrium_iterations_do_not_accept_the_nodeset_solution() {
+        let source = r#"module nodeset_no_equilibrium(hint,out);
+inout hint,out; electrical hint,out;
+analog begin
+    I(hint)<+V(hint);
+    if (analysis("nodeset")) I(out)<+V(out)-1;
+    else I(out)<+(V(out)>=0 ? V(out)+1 : V(out)-1);
+end
+endmodule"#;
+        let (engine, mut circuit, mut matrix, _, _) = circuit_from_source(source, 2);
+        let result = engine.solve_nonlinear_transient_op_with_node_hints_and_abort(
+            &mut circuit,
+            &mut matrix,
+            0.0,
+            &StartupVoltageHints {
+                constraints: Vec::new(),
+                has_nodesets: true,
+            },
+            &[],
+            &NoAbort,
+        );
+        // The final equation has unit slope in both branches, so Newton
+        // exhausts its budget rather than failing a singular linear solve.
+        assert!(matches!(result, Err(SimulationError::ConvergenceFailed(_))));
     }
 
     #[test]
